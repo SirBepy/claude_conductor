@@ -7,11 +7,13 @@
 
 import type { ChatEvent, HistoryPage } from "../../types/ipc.generated";
 import { invoke } from "../ipc";
+import { isRemote } from "../transport";
 import { CHAIN_DIVIDER_KIND } from "./chat-classifiers";
 import { visibleEventSigs } from "./chat-transcript-sig";
 import type { CacheEntry, TailListener } from "./event-store";
 import { touchAccess } from "./event-store-eviction";
 import type { DeliveryPolicy } from "./event-store-delivery";
+import { loadCachedPage, saveCachedPage } from "./history-page-cache";
 
 // Page size counts AssistantMessage events only, plus every user/tool/turn
 // event between them, capped at MAX_PAGE_EVENTS - see read_page in
@@ -60,6 +62,20 @@ export class PaginationPolicy {
     }
     touchAccess(entry);
     await this.ensureListener(sessionId);
+    // Phone: paint the persisted page at once and revalidate behind it. Not on
+    // `force` - that caller (chat-resync) distrusts the cache by definition.
+    const cached = !opts?.force && isRemote() ? loadCachedPage(sessionId) : null;
+    if (cached) {
+      entry.events = [...cached.events, ...entry.events];
+      entry.oldestSeq = cached.oldestSeq;
+      entry.pageSessionId = sessionId;
+      entry.pageHasMore = cached.hasMore;
+      entry.chainNextId = cached.continuesFrom;
+      entry.hasMore = entry.pageHasMore || entry.chainNextId !== null;
+      entry.initialLoaded = true;
+      void this.revalidateCached(sessionId, entry, cwd);
+      return entry.events;
+    }
     try {
       const args: { sessionId: string; cwd?: string; messageLimit: number } = {
         sessionId,
@@ -80,6 +96,7 @@ export class PaginationPolicy {
       // copy, duplicating + reordering messages on chat reload (ai_todo 65).
       const liveBefore = new Set(entry.events);
       const page = await invoke<HistoryPage>("load_history_page", args);
+      if (isRemote()) saveCachedPage(sessionId, page);
       const liveAfterPage = entry.events.filter((ev) => !liveBefore.has(ev));
       entry.events = [...page.events, ...liveAfterPage];
       entry.oldestSeq = Number(page.oldest_seq);
@@ -134,6 +151,56 @@ export class PaginationPolicy {
       console.warn(`[event-store] reconcileLatest(${sessionId}) failed`, err);
       return;
     }
+    if (isRemote()) saveCachedPage(sessionId, page);
+    this.applyTailPage(entry, page);
+  }
+
+  /** Background half of a cache-painted loadInitial. A page overlapping the
+   * cached one only appends what is new, through the same diff as
+   * reconcileLatest, so nothing on screen moves. A page sharing no event with
+   * it means more happened than one page holds: the cache is replaced and the
+   * tail watchers see messages the renderer never painted, which sends it
+   * through chat-resync's full rebuild. */
+  private async revalidateCached(sessionId: string, entry: CacheEntry, cwd?: string): Promise<void> {
+    const liveBefore = new Set(entry.events);
+    let page: HistoryPage;
+    try {
+      const args: { sessionId: string; cwd?: string; messageLimit: number } = {
+        sessionId,
+        messageLimit: INITIAL_PAGE_SIZE,
+      };
+      if (cwd) args.cwd = cwd;
+      page = await invoke<HistoryPage>("load_history_page", args);
+    } catch {
+      return; // Offline: the cached page stays up, the heartbeat retries.
+    }
+    saveCachedPage(sessionId, page);
+    if (this.cache.get(sessionId) !== entry) return;
+    const cachedSigs = new Set<string>();
+    for (const ev of liveBefore) {
+      const s = this.delivery.sigOf(ev);
+      if (s !== null) cachedSigs.add(s);
+    }
+    const pageSigs = page.events.map((ev) => this.delivery.sigOf(ev)).filter((s): s is string => s !== null);
+    if (pageSigs.length === 0 || pageSigs.some((s) => cachedSigs.has(s))) {
+      this.applyTailPage(entry, page);
+      return;
+    }
+    const liveAfterPage = entry.events.filter((ev) => !liveBefore.has(ev));
+    entry.events = [...page.events, ...liveAfterPage];
+    entry.oldestSeq = Number(page.oldest_seq);
+    entry.pageSessionId = sessionId;
+    entry.pageHasMore = page.has_more;
+    entry.chainNextId = page.continues_from ?? null;
+    entry.hasMore = entry.pageHasMore || entry.chainNextId !== null;
+    const tailSigs = visibleEventSigs(page.events);
+    entry.tailWatchers.forEach((fn) => {
+      try { fn(tailSigs); } catch { /* ignore */ }
+    });
+  }
+
+  /** Append the page events the cache lacks and feed the tail watchers. */
+  private applyTailPage(entry: CacheEntry, page: HistoryPage): void {
     const have = new Set<string>();
     for (const ev of entry.events) {
       const s = this.delivery.sigOf(ev);
