@@ -48,6 +48,11 @@ export interface ComposerAttachmentsCallbacks {
   /** Active session id, or null. Attachment metadata is persisted/read keyed
    * on this. */
   getSessionId: () => string | null;
+  /** The paired machine a not-yet-started chat is aimed at, or null for a chat
+   * on this machine. A pending pane's `pending-*` placeholder id is in no
+   * machine's chat list, so the id alone cannot route an upload to the host
+   * whose `claude` will Read the file; this does. */
+  getMachineId?: () => string | null;
   /** Fired whenever the attachment/pasted-block set (re)renders, so the
    * composer can react (mirrors the old renderAttachments() ->
    * updateScheduleBtnState() call). */
@@ -131,6 +136,13 @@ export class ComposerAttachments {
     this.render();
   }
 
+  /** `{ machineId }` only when the chat is aimed at another machine, so a
+   * local composer's invoke args stay byte-identical to before. */
+  private machineArg(): { machineId?: string } {
+    const machineId = this.cb.getMachineId?.();
+    return machineId ? { machineId } : {};
+  }
+
   async attachBlob(blob: Blob, filename: string): Promise<void> {
     const data = await blobToBase64(blob);
     let path: string | null = null;
@@ -141,6 +153,7 @@ export class ComposerAttachments {
           sessionId,
           base64Data: data,
           mime: blob.type || "application/octet-stream",
+          ...this.machineArg(),
         });
       } catch (err) {
         console.warn("[Composer] paste_attachment not available:", err);
@@ -159,7 +172,7 @@ export class ComposerAttachments {
       try {
         result = await invoke<{ path: string; mime: string; base64: string }>(
           "paste_attachment_from_path",
-          { sessionId, path: srcPath },
+          { sessionId, path: srcPath, ...this.machineArg() },
         );
       } catch (err) {
         console.warn("[Composer] paste_attachment_from_path failed:", err);
@@ -285,7 +298,10 @@ export class ComposerAttachments {
     for (const m of metas) {
       if (existingPaths.has(m.path)) continue;
       try {
-        const r = await invoke<{ mime: string; base64: string }>("read_attachment", { path: m.path });
+        const r = await invoke<{ mime: string; base64: string }>("read_attachment", {
+          path: m.path,
+          ...this.machineArg(),
+        });
         restored.push({ mime: m.mime || r.mime, data: r.base64, path: m.path, filename: m.filename });
       } catch {
         // Backing file gone (GC'd or deleted). Drop silently.

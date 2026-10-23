@@ -109,6 +109,13 @@ class StallTimer {
   }
 }
 
+/** `machine_id` only when the caller named a machine, so a call about a chat on
+ *  the daemon's own machine keeps the exact wire shape it always had. */
+function machineParam(args: Record<string, any>): { machine_id?: string } {
+  const id = args.machineId ?? args.machine_id;
+  return id ? { machine_id: id } : {};
+}
+
 function linkError(what: string, cause: unknown, stall: StallTimer): LinkError {
   reportRequestFailure();
   if (stall.fired) {
@@ -572,18 +579,25 @@ export class HttpTransport implements Transport {
         // chat-attachments dir, so a malicious path can't read arbitrary files.
         // session_id lets forward.rs::extract_session_id route a mirrored
         // chat's attachment read to the owning peer's own validated dir.
+        // machine_id: a new chat aimed at a paired machine has only a
+        // `pending-*` id, so the machine names where its attachments live.
         return this.rpc<T>("read_attachment", {
           path: args.path,
           session_id: args.sessionId ?? args.session_id ?? null,
+          ...machineParam(args),
         });
       case "paste_attachment":
         // Composer paperclip upload from the phone: the daemon writes the bytes
         // into <app-data>/chat-attachments/<session>/ and returns the PC-side
         // path, which the composer turns into a <file:...> mention on send.
+        // machine_id: a new chat aimed at another machine has only a
+        // `pending-*` id, so the Mac forwards the upload to that machine
+        // (forward.rs) instead of saving a path its `claude` cannot read.
         return this.rpc<T>("paste_attachment", {
           session_id: args.sessionId ?? args.session_id,
           base64_data: args.base64Data ?? args.base64_data,
           mime: args.mime,
+          ...machineParam(args),
         });
       case "resolve_whitelist_characters":
         return this.rpc<T>("resolve_whitelist_characters", {

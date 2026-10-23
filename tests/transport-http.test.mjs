@@ -250,6 +250,30 @@ describe("HttpTransport.call mapping", () => {
     expect(body().params.session_id).toBeNull();
   });
 
+  // A new chat the phone aims at another machine has only a `pending-*` id, so
+  // the Mac needs the machine id to forward the upload and the re-read.
+  it("forwards machine_id on paste_attachment and read_attachment for a pending chat", async () => {
+    await new HttpTransport().call("paste_attachment", {
+      sessionId: "pending-1-ab",
+      base64Data: "QQ==",
+      mime: "image/png",
+      machineId: "mach-win",
+    });
+    expect(body()).toEqual({
+      method: "paste_attachment",
+      params: { session_id: "pending-1-ab", base64_data: "QQ==", mime: "image/png", machine_id: "mach-win" },
+    });
+    await new HttpTransport().call("read_attachment", { path: "/p.png", machineId: "mach-win" });
+    expect(body(1).params).toEqual({ path: "/p.png", session_id: null, machine_id: "mach-win" });
+  });
+
+  it("leaves machine_id off attachment calls that name no machine", async () => {
+    await new HttpTransport().call("paste_attachment", { sessionId: "s", base64Data: "QQ==", mime: "image/png" });
+    expect(body().params).not.toHaveProperty("machine_id");
+    await new HttpTransport().call("read_attachment", { path: "/p.png", machineId: null });
+    expect(body(1).params).not.toHaveProperty("machine_id");
+  });
+
   // Multi-machine federation: the phone's new-chat machine picker, mirroring
   // desktop's list_machines/list_machine_projects Tauri commands.
   it("forwards list_machines to the rpc with a null param", async () => {

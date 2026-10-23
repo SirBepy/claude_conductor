@@ -58,6 +58,51 @@ const ID_PARAM_METHODS: &[&str] = &[];
 /// succeeds, rather than waiting, closes that window.
 const PROMPT_RESOLVING_METHODS: &[&str] = &["respond_permission", "respond_question"];
 
+/// Attachment methods that can name a target machine directly via
+/// `params.machine_id`. A new chat aimed at a paired machine uploads before it
+/// has a session: its `pending-*` placeholder id is in no mirror, so
+/// `extract_session_id` + `mirrored_owner` find no host, and the bytes would
+/// land on THIS disk while the peer's `claude` is handed that path.
+const MACHINE_TARGETED_METHODS: &[&str] = &["paste_attachment", "read_attachment"];
+
+/// The peer a [`MACHINE_TARGETED_METHODS`] call names via `params.machine_id`,
+/// or `None` when the param is absent/empty, the method is not one of them, or
+/// it names this machine (that stays a local call).
+fn machine_target(state: &DaemonState, method: &str, params: &Value) -> Option<String> {
+    if !MACHINE_TARGETED_METHODS.contains(&method) {
+        return None;
+    }
+    let target = params.get("machine_id").and_then(Value::as_str).filter(|m| !m.is_empty())?;
+    let self_id = state.machines.get().and_then(|r| r.self_machine()).map(|m| m.machine_id);
+    (self_id.as_deref() != Some(target)).then(|| target.to_string())
+}
+
+/// The first `<file:PATH>` / `<file:PATH::NAME>` path in `text` that lies under
+/// `attachments_root`. Compared on `/`-normalised, lower-cased strings so a
+/// Windows path matches however its separators or drive letter were written.
+pub(crate) fn local_attachment_path(text: &str, attachments_root: &std::path::Path) -> Option<String> {
+    let norm = |p: &str| p.replace('\\', "/").to_lowercase();
+    let root = format!("{}/", norm(&attachments_root.to_string_lossy()).trim_end_matches('/'));
+    text.match_indices("<file:").find_map(|(at, tag)| {
+        let rest = &text[at + tag.len()..];
+        let path = rest[..rest.find('>')?].split("::").next()?;
+        norm(path).starts_with(&root).then(|| path.to_string())
+    })
+}
+
+/// A refusal message when `text` mentions a file in THIS machine's
+/// chat-attachments dir but is about to go to `label`'s `claude`, which cannot
+/// read this disk. Refusing beats sending a path that does not exist there;
+/// paths are not rewritten because the bytes were never uploaded.
+pub(crate) fn local_attachment_refusal(text: &str, label: &str) -> Option<String> {
+    if !text.contains("<file:") {
+        return None;
+    }
+    let root = crate::settings::paths::data_dir().ok()?.join("chat-attachments");
+    local_attachment_path(text, &root)
+        .map(|_| format!("attachment was saved on this machine, not on {label}; re-attach"))
+}
+
 /// Extracts the session id a request targets, if any: `params.session_id`,
 /// or `params.id` for the small allowlist above. Any other shape (no
 /// identifying param, e.g. `start_session`'s `cwd`, or `respond_permission`'s
@@ -150,9 +195,25 @@ async fn forward_one(
     if matches!(method, "attach_session" | "detach_session") {
         return None;
     }
-    let params_value = params.unwrap_or(Value::Null);
-    let session_id = extract_session_id(method, &params_value)?;
-    let machine_id = super::mirrored_owner(state, &session_id)?;
+    let mut params_value = params.unwrap_or(Value::Null);
+    // A mirrored session id wins; only without one does a named machine route
+    // an attachment call (a pending new chat has no session to look up).
+    let machine_id = match extract_session_id(method, &params_value).and_then(|sid| super::mirrored_owner(state, &sid)) {
+        Some(owner) => owner,
+        None => machine_target(state, method, &params_value)?,
+    };
+    if MACHINE_TARGETED_METHODS.contains(&method) {
+        // The peer always acts locally and has no use for the routing hint.
+        if let Some(obj) = params_value.as_object_mut() {
+            obj.remove("machine_id");
+        }
+    }
+    if method == "send_message" {
+        let text = params_value.get("text").and_then(Value::as_str).unwrap_or("");
+        if let Some(msg) = local_attachment_refusal(text, &peer_label(state, &machine_id)) {
+            return Some(Err(RpcError::invalid_params(msg)));
+        }
+    }
 
     if !allowed(method, &Transport::PeerMachine(machine_id.clone())) {
         return Some(Err(RpcError {
@@ -482,6 +543,138 @@ mod tests {
                 assert!(e.message.contains("B is offline"), "{}", e.message);
             }
             other => panic!("expected an offline refusal from the peer route, got {other:?}"),
+        }
+    }
+
+    /// A peer's stub `paste_attachment` that records the params it received
+    /// and answers with a path only that peer would have.
+    fn recording_paste_router(seen: Arc<std::sync::Mutex<Option<Value>>>) -> Router {
+        let mut r = Router::new();
+        r.register("paste_attachment", move |params, _ctx| {
+            let seen = seen.clone();
+            async move {
+                *seen.lock().unwrap() = params;
+                Ok::<Value, RpcError>(json!("/peer/chat-attachments/pending-1-ab/x.png"))
+            }
+        });
+        r
+    }
+
+    /// The new-chat-on-a-paired-machine bug: the pane's `pending-*` id is in no
+    /// mirror, so only `machine_id` can route the upload to the host, and the
+    /// host must get the call with the routing hint stripped.
+    #[tokio::test]
+    async fn paste_attachment_for_a_pending_chat_forwards_to_the_named_peer() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let seen = Arc::new(std::sync::Mutex::new(None));
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (_stt, b_port, b_serve) = crate::daemon::remote_server::spawn_on(
+            b_state.clone(),
+            peer_dir.path().to_path_buf(),
+            recording_paste_router(seen.clone()),
+            0,
+        );
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), b_port, true).await;
+
+        let result = forward_one(
+            &state,
+            "paste_attachment",
+            Some(json!({"session_id": "pending-1-ab", "base64_data": "QQ==", "mime": "image/png", "machine_id": "mach-b"})),
+            &Transport::Local,
+        )
+        .await;
+        match result {
+            Some(Ok(v)) => assert_eq!(v, json!("/peer/chat-attachments/pending-1-ab/x.png")),
+            other => panic!("expected the peer's path back, got {other:?}"),
+        }
+        let received = seen.lock().unwrap().clone().expect("peer must have been called");
+        assert_eq!(received["session_id"], json!("pending-1-ab"));
+        assert_eq!(received["base64_data"], json!("QQ=="));
+        assert!(received.get("machine_id").is_none(), "routing hint must not reach the peer: {received}");
+        b_serve.kill();
+    }
+
+    /// `machine_id` naming this very machine, no `machine_id`, and a peer's own
+    /// request (loop guard) all reach the local handler; only a DIFFERENT
+    /// machine from a non-peer caller forwards.
+    #[tokio::test]
+    async fn attachment_machine_id_naming_self_or_arriving_from_a_peer_stays_local() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), 0, true).await;
+        let self_id = state.machines.get().unwrap().self_machine().unwrap().machine_id;
+
+        for method in ["paste_attachment", "read_attachment"] {
+            let to_self = json!({"session_id": "pending-1-ab", "path": "/x.png", "machine_id": self_id});
+            assert!(forward_one(&state, method, Some(to_self), &Transport::Local).await.is_none(), "{method} naming self");
+
+            let none_named = json!({"session_id": "pending-1-ab", "path": "/x.png"});
+            assert!(forward_one(&state, method, Some(none_named), &Transport::Local).await.is_none(), "{method} unnamed");
+
+            let from_peer = json!({"session_id": "pending-1-ab", "path": "/x.png", "machine_id": "mach-b"});
+            let transport = Transport::PeerMachine("mach-b".into());
+            assert!(forward_one(&state, method, Some(from_peer), &transport).await.is_none(), "{method} from a peer");
+        }
+        // Only the two attachment methods honour the hint.
+        let other = json!({"session_id": "pending-1-ab", "machine_id": "mach-b"});
+        assert!(forward_one(&state, "get_git_info", Some(other), &Transport::Local).await.is_none());
+    }
+
+    /// A named machine that is not paired is a caller error that names it, not
+    /// a silent local write of a path the target cannot read.
+    #[tokio::test]
+    async fn attachment_for_an_unknown_machine_is_refused_not_written_locally() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), 0, true).await;
+        let params = json!({"path": "/x.png", "machine_id": "mach-nobody"});
+        match forward_one(&state, "read_attachment", Some(params), &Transport::Local).await {
+            Some(Err(e)) => assert!(e.message.contains("mach-nobody"), "{}", e.message),
+            other => panic!("expected an unknown-machine refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn local_attachment_path_matches_only_files_under_the_root() {
+        let root = std::path::Path::new("/Users/me/Library/Application Support/claude-conductor/chat-attachments");
+        let mine = "see <file:/Users/me/Library/Application Support/claude-conductor/chat-attachments/pending-1/a.png::image.png> ok";
+        assert_eq!(
+            local_attachment_path(mine, root).as_deref(),
+            Some("/Users/me/Library/Application Support/claude-conductor/chat-attachments/pending-1/a.png")
+        );
+        // Windows separators and case.
+        let win_root = std::path::Path::new("C:\\Users\\me\\AppData\\claude-conductor\\chat-attachments");
+        assert!(local_attachment_path("<file:c:/users/me/appdata/claude-conductor/chat-attachments/s/a.png>", win_root).is_some());
+        // A peer's own path, a sibling dir sharing the prefix, a plain-text mention, no file token.
+        assert!(local_attachment_path("<file:/home/w/chat-attachments/s/a.png>", root).is_none());
+        let sibling = "<file:/Users/me/Library/Application Support/claude-conductor/chat-attachments-old/a.png>";
+        assert!(local_attachment_path(sibling, root).is_none());
+        let bare = "/Users/me/Library/Application Support/claude-conductor/chat-attachments/a.png";
+        assert!(local_attachment_path(bare, root).is_none());
+        // A later token still counts when an earlier one is foreign.
+        let two = "<file:/elsewhere/a.png> <file:/Users/me/Library/Application Support/claude-conductor/chat-attachments/b.png>";
+        assert!(local_attachment_path(two, root).is_some());
+    }
+
+    /// The safety net: a message for a mirrored chat that still carries a path
+    /// under THIS machine's chat-attachments is refused with the host's label
+    /// instead of sending a path the host cannot read.
+    #[tokio::test]
+    async fn send_message_with_a_local_attachment_path_is_refused_for_a_mirrored_chat() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), 0, true).await;
+        mirror_owned_session(&state, "s1");
+        let local = crate::settings::paths::data_dir().unwrap().join("chat-attachments").join("pending-1-ab").join("u.png");
+        let text = format!("look <file:{}::image.png>", local.display());
+
+        let result = forward_one(&state, "send_message", Some(json!({"session_id": "s1", "text": text})), &Transport::Local).await;
+        match result {
+            Some(Err(e)) => {
+                assert_eq!(e.message, "attachment was saved on this machine, not on B; re-attach");
+            }
+            other => panic!("expected the local-attachment refusal, got {other:?}"),
         }
     }
 

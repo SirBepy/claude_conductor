@@ -85,6 +85,16 @@ pub(crate) fn write_attachment(
     Ok(path)
 }
 
+/// Whether an attachment must be stored on another machine's disk instead of
+/// this one's. A mirrored `session_id` says so for a chat that already exists;
+/// a `pending-*` placeholder (a new chat aimed at a paired machine, not yet
+/// started) is in no chat list, so only the pane's `machine_id` carries it.
+/// The daemon owns machine identity, so a `machine_id` naming this machine is
+/// settled there (it writes locally), not by a second registry read here.
+fn stored_off_machine(mirrored: bool, machine_id: Option<&str>) -> bool {
+    mirrored || machine_id.is_some_and(|m| !m.is_empty())
+}
+
 /// Persist a clipboard-pasted image and return its absolute path. The
 /// composer surfaces this path to claude as a `<file:...>` mention so
 /// claude reads it via its Read tool.
@@ -98,11 +108,16 @@ pub async fn paste_image(
     session_id: String,
     base64_data: String,
     mime: String,
+    machine_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    if is_mirrored(&state.cached_instances.lock().unwrap(), &session_id) {
+    let mirrored = is_mirrored(&state.cached_instances.lock().unwrap(), &session_id);
+    if stored_off_machine(mirrored, machine_id.as_deref()) {
         let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
-        return client.paste_attachment(&session_id, &base64_data, &mime).await.map_err(|e| e.to_string());
+        return client
+            .paste_attachment(&session_id, &base64_data, &mime, machine_id.as_deref())
+            .await
+            .map_err(|e| e.to_string());
     }
     let root = crate::settings::paths::data_dir().map_err(|e| e.to_string())?;
     let path = write_attachment(&root, &session_id, &base64_data, &mime)?;
@@ -116,11 +131,16 @@ pub async fn paste_attachment(
     session_id: String,
     base64_data: String,
     mime: String,
+    machine_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    if is_mirrored(&state.cached_instances.lock().unwrap(), &session_id) {
+    let mirrored = is_mirrored(&state.cached_instances.lock().unwrap(), &session_id);
+    if stored_off_machine(mirrored, machine_id.as_deref()) {
         let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
-        return client.paste_attachment(&session_id, &base64_data, &mime).await.map_err(|e| e.to_string());
+        return client
+            .paste_attachment(&session_id, &base64_data, &mime, machine_id.as_deref())
+            .await
+            .map_err(|e| e.to_string());
     }
     let root = crate::settings::paths::data_dir().map_err(|e| e.to_string())?;
     let path = write_attachment(&root, &session_id, &base64_data, &mime)?;
@@ -161,7 +181,7 @@ pub(crate) fn mime_for_ext(ext: &str) -> Option<&'static str> {
 /// not File blobs, so the standard paste_attachment flow doesn't apply).
 ///
 /// The dropped file always lives on THIS machine's disk regardless of where
-/// `session_id` is hosted, so the source read is unconditional. For a
+/// `session_id` (or the pending pane's `machine_id`) is hosted, so the source read is unconditional. For a
 /// mirrored session the bytes are then uploaded to the owning peer via the
 /// `paste_attachment` RPC instead of being copied into this machine's own
 /// `chat-attachments` dir (which the remote `claude` cannot read); the
@@ -171,6 +191,7 @@ pub(crate) fn mime_for_ext(ext: &str) -> Option<&'static str> {
 pub async fn paste_attachment_from_path(
     session_id: String,
     path: String,
+    machine_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<AttachmentFromPathResult, String> {
     use base64::Engine;
@@ -185,10 +206,11 @@ pub async fn paste_attachment_from_path(
     let bytes = std::fs::read(&src).map_err(|e| format!("cannot read file: {e}"))?;
     let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
-    if is_mirrored(&state.cached_instances.lock().unwrap(), &session_id) {
+    let mirrored = is_mirrored(&state.cached_instances.lock().unwrap(), &session_id);
+    if stored_off_machine(mirrored, machine_id.as_deref()) {
         let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
         let remote_path = client
-            .paste_attachment(&session_id, &base64, &mime)
+            .paste_attachment(&session_id, &base64, &mime, machine_id.as_deref())
             .await
             .map_err(|e| e.to_string())?;
         return Ok(AttachmentFromPathResult { path: remote_path, mime, base64 });
@@ -272,6 +294,16 @@ pub(crate) async fn read_attachment(path: String) -> Result<AttachmentData, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_machine_id_or_a_mirrored_session_stores_off_machine() {
+        // A pending pane's placeholder id is never mirrored, so the machine id
+        // alone must route the upload away from this disk.
+        assert!(stored_off_machine(false, Some("mach-w")));
+        assert!(stored_off_machine(true, None));
+        assert!(!stored_off_machine(false, None));
+        assert!(!stored_off_machine(false, Some("")));
+    }
 
     #[test]
     fn write_attachment_decodes_png() {
