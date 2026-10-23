@@ -79,6 +79,17 @@ pub(super) async fn run_uncached(card: &CardConfig, groups: &[GroupDef]) -> Card
     run_card(card, &ctx, &env_secret).await
 }
 
+/// The card a manual refresh may run. A disabled card is refused, same as the
+/// scheduled refresh and the first run skip it: `dashboard_card_refresh` is
+/// phone-reachable, and disabling a card is how the dev stops it running.
+pub(super) fn refreshable_card<'a>(cards: &'a [CardConfig], id: &str) -> Result<&'a CardConfig, String> {
+    let card = cards.iter().find(|c| c.id == id).ok_or_else(|| format!("no such card: {id}"))?;
+    if !card.enabled {
+        return Err(format!("card is disabled: {id}"));
+    }
+    Ok(card)
+}
+
 /// Runs a card and stores the result, so the dashboard paints it after a restart.
 pub(super) async fn run_and_cache(card: &CardConfig, groups: &[GroupDef]) -> CardResult {
     run_and_save(card, groups, store::save_result).await
@@ -286,6 +297,16 @@ mod tests {
 
     fn proj(cwd: &str) -> Scope {
         Scope::Project { cwd: cwd.into() }
+    }
+
+    #[test]
+    fn a_manual_refresh_refuses_a_disabled_card() {
+        let mut off = card("off", proj(ME));
+        off.enabled = false;
+        let cards = vec![card("on", proj(ME)), off];
+        assert_eq!(refreshable_card(&cards, "on").map(|c| c.id.as_str()), Ok("on"));
+        assert_eq!(refreshable_card(&cards, "off").map(|c| c.id.as_str()), Err("card is disabled: off".to_string()));
+        assert_eq!(refreshable_card(&cards, "nope").map(|c| c.id.as_str()), Err("no such card: nope".to_string()));
     }
 
     #[test]

@@ -100,11 +100,7 @@ pub fn register_project_dashboard(router: &mut Router, state: Arc<DaemonState>) 
             async move {
                 let p: IdOnly = parse(params)?;
                 let st = store::load();
-                let card = st
-                    .cards
-                    .iter()
-                    .find(|c| c.id == p.id)
-                    .ok_or_else(|| RpcError::invalid_params(format!("no such card: {}", p.id)))?;
+                let card = cards::refreshable_card(&st.cards, &p.id).map_err(RpcError::invalid_params)?;
                 let result: CardResult = cards::run_and_cache(card, &st.groups).await;
                 publish_changed(&state);
                 to_json(&result)

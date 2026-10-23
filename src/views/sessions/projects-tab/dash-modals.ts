@@ -50,9 +50,9 @@ export function openCardsModal(host: ActionHost): void {
       ${c.snap.target.kind === "project" && v.config.scope.kind === "group"
         ? html`<span class="pd-fetched" title="Added on the group's dashboard; changes here apply to every repo in it">group card</span>` : nothing}
       <span class="pd-fetched">${v.result ? fetchedLabel(v.result.fetched_at_ms) : "not fetched"}</span>
-      <button type="button" class="pd-ib sm" title="Refresh" @click=${() => {
+      ${v.config.enabled ? html`<button type="button" class="pd-ib sm" title="Refresh" @click=${() => {
         void invoke("dashboard_card_refresh", { id: v.config.id }).then(reloadCards, (e) => fail("refresh", e));
-      }}><i class="ph ph-arrows-clockwise"></i></button>
+      }}><i class="ph ph-arrows-clockwise"></i></button>` : nothing}
       <button type="button" class="pd-ib sm" title="Delete" @click=${() => {
         void askConfirm(`Delete the card "${v.config.title}"?`, { confirmLabel: "Delete" }).then(async (ok) => {
           if (!ok) return;
@@ -63,6 +63,7 @@ export function openCardsModal(host: ActionHost): void {
       ${toggle(v.config.enabled, (next) => {
         v.config.enabled = next;
         void invoke("dashboard_card_set_enabled", { id: v.config.id, enabled: next }).catch((e) => fail("save", e));
+        draw();
       })}
     </div>`;
 
