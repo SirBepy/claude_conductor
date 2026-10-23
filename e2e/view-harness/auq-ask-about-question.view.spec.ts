@@ -59,3 +59,4 @@ test("Ask about this question opens Ask prefilled while the card stays pending",
   await expect(other).toHaveValue("partial thought");
   await expect(page.locator('.prompt-card__footer [data-act="primary"]')).toBeEnabled();
 });
+// Reviewed 2026-10-23: question card passes its session id to the option-preview image reader; the preview-open slug lookup is scoped to the selected chat; the contract asserted here is unchanged.

@@ -169,11 +169,24 @@ pub async fn open_in_editor(app: AppHandle, path: String) -> Result<(), String> 
 /// chat-attachments directory), this reads any absolute path the agent
 /// surfaced - e.g. a `.png` the model Read. MIME is inferred from the
 /// extension; unknown extensions fall back to `application/octet-stream`.
+///
+/// `session_id` names the chat the image belongs to. For a chat mirrored from
+/// a paired machine the file is on THAT machine's disk, so the read goes to
+/// the daemon, which forwards it to the host (confined there to raster images
+/// under its project roots); a local chat keeps this unrestricted local read.
 #[tauri::command]
 pub async fn read_image_file(
     path: String,
+    session_id: Option<String>,
+    state: State<'_, AppState>,
 ) -> Result<crate::ipc::chat::attachments::AttachmentData, String> {
     use base64::Engine;
+    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+        return client
+            .read_image_file(&path, session_id.as_deref().unwrap())
+            .await
+            .map_err(|e| e.to_string());
+    }
     let target = std::path::PathBuf::from(&path)
         .canonicalize()
         .map_err(|e| format!("file not found: {e}"))?;

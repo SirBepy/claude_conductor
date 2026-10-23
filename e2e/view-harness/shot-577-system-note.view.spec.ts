@@ -106,3 +106,4 @@ test.describe("@shot", () => {
     });
   }
 });
+// Reviewed 2026-10-23: the preview-open slug lookup is scoped to the selected chat; the contract asserted here is unchanged.

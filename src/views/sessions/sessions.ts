@@ -141,10 +141,17 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     void (async () => {
       let id: string | undefined;
       try {
-        const all = await invoke<PreviewMeta[]>("list_previews");
-        // Newest match wins: a same-slug re-push replaces in place, but a
-        // stale entry can still be listed while the fresh one is written.
-        id = (Array.isArray(all) ? all : []).filter((m) => m.slug === slug).pop()?.id;
+        // Scoped to the chat in view so a mirrored chat's card resolves against
+        // its host's store (the local one holds none of its previews).
+        const newest = (list: PreviewMeta[]): string | undefined =>
+          // Newest match wins: a same-slug re-push replaces in place, but a
+          // stale entry can still be listed while the fresh one is written.
+          (Array.isArray(list) ? list : []).filter((m) => m.slug === slug).pop()?.id;
+        const sid = getSelectedSessionId();
+        id = newest(await invoke<PreviewMeta[]>("list_previews", { sessionId: sid }));
+        // A card shown in a pane that is not the selected chat resolves
+        // against this machine's whole store instead.
+        if (!id && sid) id = newest(await invoke<PreviewMeta[]>("list_previews"));
       } catch (err) {
         console.error("[sessions] could not resolve preview slug", err);
       }

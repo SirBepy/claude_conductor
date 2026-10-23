@@ -50,3 +50,4 @@ test("the answer bar follows a live 768px crossing and keeps the typed text", as
   await expect(bar.locator(".pv-composer")).toHaveCount(1);
   await expect(bar.locator("textarea")).toHaveValue("half-typed answer");
 });
+// Reviewed 2026-10-23: question card now passes its session id to the option-preview image reader; the contract asserted here is unchanged.

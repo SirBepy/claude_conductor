@@ -73,6 +73,7 @@ export function optsRowsHtml(
   selections: Map<number, Selection>,
   noneLabel: string,
   layout: PreviewLayout | null = null,
+  sessionId?: string,
 ): string {
   return (q.options ?? []).map((opt) => {
     const selected = q.multiSelect
@@ -85,7 +86,7 @@ export function optsRowsHtml(
     const isNone = q.multiSelect && opt.label === noneLabel;
     return `
       <label class="prompt-opt${selected ? " is-selected" : ""}${isNone ? " prompt-opt--none" : ""}">
-        ${layout === "tiles" ? tilePictureHtml(opt) : ""}
+        ${layout === "tiles" ? tilePictureHtml(opt, sessionId) : ""}
         <input type="${inputType}" name="q-${qi}" data-label="${escapeHtml(opt.label)}" ${selected ? "checked" : ""} />
         <span class="prompt-opt__body">
           <span class="prompt-opt__top"><span class="prompt-opt__label">${escapeHtml(opt.label)}</span>${badgesHtml(opt.badges)}</span>
@@ -168,8 +169,8 @@ export function panelHtml(
   const optsStyle = layout === "tiles" ? ` style="--tile-cols:${previewedOptions(q).length}"` : "";
   const pickSect = q.options?.length
     ? `<div class="prompt-sect"><i class="ph ph-list-checks"></i><span class="prompt-sect__label">${q.multiSelect ? "Select all that apply" : "Pick one"}</span><span class="prompt-sect__rule"></span></div>
-       ${layout === "stage" ? stageHtml(q, qi) : ""}
-       <div class="prompt-q__opts"${optsStyle}>${optsRowsHtml(q, qi, selections, noneLabel, layout)}</div>`
+       ${layout === "stage" ? stageHtml(q, qi, opts.sessionId) : ""}
+       <div class="prompt-q__opts"${optsStyle}>${optsRowsHtml(q, qi, selections, noneLabel, layout, opts.sessionId)}</div>`
     : "";
   // Emitted even while empty (`.composer-attachments:empty` hides it) - the
   // paste path patches this node in place instead of re-rendering.

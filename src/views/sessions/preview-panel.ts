@@ -126,7 +126,7 @@ class PreviewTab implements RailTabHandle {
     if (!this.currentSessionId) return;
     let all: PreviewMeta[];
     try {
-      all = await invoke<PreviewMeta[]>("list_previews");
+      all = await invoke<PreviewMeta[]>("list_previews", { sessionId: this.currentSessionId });
     } catch (err) {
       console.error("[preview-panel] checkForUnseen failed", err);
       return;
@@ -144,13 +144,17 @@ class PreviewTab implements RailTabHandle {
 
   private async refreshList(opts: { selectId?: string } = {}): Promise<void> {
     try {
-      const list = await invoke<PreviewMeta[]>("list_previews");
+      // The session id routes the read: a chat mirrored from a paired machine
+      // keeps its previews on that machine, and the daemon forwards there.
+      const list = await invoke<PreviewMeta[]>("list_previews", { sessionId: this.currentSessionId });
       const all = Array.isArray(list) ? list : [];
       this.snapshots = all.filter((m) => m.session_id === this.currentSessionId);
       this.snapshots.forEach((s) => this.seenIds.add(s.id));
+      // The list now covers only this chat, so only this chat's cached
+      // snapshots can be judged gone; another chat's stay until it is revisited.
       const validIds = new Set(all.map((m) => m.id));
-      for (const id of this.snapshotCache.keys()) {
-        if (!validIds.has(id)) this.snapshotCache.delete(id);
+      for (const [id, cached] of this.snapshotCache) {
+        if (cached.session_id === this.currentSessionId && !validIds.has(id)) this.snapshotCache.delete(id);
       }
     } catch (err) {
       console.error("[preview-panel] list_previews failed", err);
@@ -181,7 +185,7 @@ class PreviewTab implements RailTabHandle {
       this.selected = cached;
     } else {
       try {
-        this.selected = await invoke<PreviewSnapshot>("get_preview", { id });
+        this.selected = await invoke<PreviewSnapshot>("get_preview", { id, sessionId: this.currentSessionId });
       } catch (err) {
         console.error("[preview-panel] get_preview failed", err);
         return;

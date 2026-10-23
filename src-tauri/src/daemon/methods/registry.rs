@@ -5,6 +5,7 @@
 
 mod attachments;
 mod characters;
+mod image_read;
 pub(super) mod lifecycle;
 mod listings;
 pub(super) mod new_session_bundle;
@@ -19,6 +20,7 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
     lifecycle::register_lifecycle(router, state.clone());
     characters::register_characters(router, state.clone());
     attachments::register_attachments(router, state.clone());
+    image_read::register_image_read(router, state.clone());
     project_meta::register_project_meta(router, state.clone());
     waiting_tail::register_waiting_tail(router, state.clone());
     new_session_bundle::register_new_session_bundle(router, state.clone());

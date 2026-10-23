@@ -76,6 +76,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   // "Choose this" on a preview stage picks exactly like tapping the row.
   const previews = attachOptionPreviews({
     host, questions, selections, choose: (qi, label) => applyPick(qi, label, true, true),
+    sessionId: opts.sessionId,
   });
   const { showPasteHint, paintAttachmentStrips, syncMessagesPadding, positionTrack } =
     createQuestionCardLayout(host, state, messagesEl, auqAttachments);

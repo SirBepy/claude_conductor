@@ -203,9 +203,10 @@ async fn refresh_prompts(state: &Arc<DaemonState>, peer: &PeerMachine) {
     }
 }
 
-/// Ignores every method except `instances_changed` (a later chunk forwards
-/// chat streams over this same link). Malformed frames are dropped, not
-/// fatal to the link - a peer's own bug shouldn't tear down our reconnect.
+/// Handles `instances_changed` and relays `preview`; ignores every other
+/// method (chat streams are forwarded over a separate relay). Malformed
+/// frames are dropped, not fatal to the link - a peer's own bug shouldn't
+/// tear down our reconnect.
 ///
 /// Returns whether the frame actually changed our cached view of the peer
 /// (per `MirrorState::set_instances`), and only re-publishes
@@ -217,8 +218,13 @@ async fn refresh_prompts(state: &Arc<DaemonState>, peer: &PeerMachine) {
 /// against.
 fn handle_frame(state: &Arc<DaemonState>, machine_id: &str, label: &str, txt: &str) -> bool {
     let Ok(frame) = serde_json::from_str::<serde_json::Value>(txt) else { return false };
-    if frame.get("method").and_then(serde_json::Value::as_str) != Some("instances_changed") {
-        return false;
+    match frame.get("method").and_then(serde_json::Value::as_str) {
+        Some("instances_changed") => {}
+        Some("preview") => {
+            relay_preview(state, machine_id, &frame);
+            return false;
+        }
+        _ => return false,
     }
     let Some(arr) = frame.pointer("/params/instances") else { return false };
     let Ok(rows) = serde_json::from_value::<Vec<Instance>>(arr.clone()) else { return false };
@@ -231,6 +237,25 @@ fn handle_frame(state: &Arc<DaemonState>, machine_id: &str, label: &str, txt: &s
         publish_instances_changed(state);
     }
     changed
+}
+
+/// Re-publishes a peer's `preview` notifier frame locally, so a panel open on
+/// a chat mirrored from that peer updates live (the store itself stays on the
+/// host; the panel re-reads it through `list_previews`/`get_preview`, which
+/// forward). Only a snapshot filed under a session this peer owns is relayed:
+/// a peer cannot make our panel refresh for a local chat, nor for one a
+/// different machine owns. The echo that would follow (our global stream
+/// carries the republished frame back to the peer's own link) dies at the
+/// peer for the same reason - the id is local to it. Rebuilt from the typed
+/// metadata so only the fields the panel reads cross over.
+fn relay_preview(state: &Arc<DaemonState>, machine_id: &str, frame: &serde_json::Value) {
+    let Some(snapshot) = frame.pointer("/params/snapshot") else { return };
+    let Ok(meta) = serde_json::from_value::<crate::daemon::preview::PreviewMeta>(snapshot.clone()) else { return };
+    let Some(sid) = meta.session_id.as_deref() else { return };
+    if super::mirrored_owner(state, sid).as_deref() != Some(machine_id) {
+        return;
+    }
+    state.notifier.publish("preview", serde_json::json!({ "snapshot": meta }));
 }
 
 /// Drops every row or prompt a peer reports under one of OUR session ids,
@@ -524,5 +549,60 @@ mod tests {
         }
 
         a_serve.kill();
+    }
+
+    fn preview_frame(session_id: Option<&str>) -> String {
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "preview",
+            "params": {"snapshot": {
+                "id": "p1", "slug": "mock", "title": "Mock", "source": "chat_card",
+                "session_id": session_id, "version": 1, "created_at": "2026-10-23T00:00:00.000Z",
+            }},
+        })
+        .to_string()
+    }
+
+    fn state_mirroring_s1_from_b() -> Arc<DaemonState> {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::types::Settings;
+
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let rows = serde_json::json!([{
+            "session_id": "s1", "pid": 1, "cwd": "C:/x", "project_id": "p",
+            "kind": "interactive", "started_at": "2026-09-05T00:00:00Z",
+        }]);
+        let rows: Vec<Instance> = serde_json::from_value(rows).unwrap();
+        state.mirror.set_instances("mach-b", "Mac Mini", rows);
+        state
+    }
+
+    /// The panel on this machine only learns of a push to a mirrored chat if
+    /// the peer's `preview` frame is re-published on the local notifier.
+    #[test]
+    fn handle_frame_relays_a_preview_for_a_chat_the_peer_owns() {
+        let state = state_mirroring_s1_from_b();
+        let mut rx = state.notifier.subscribe();
+        assert!(!handle_frame(&state, "mach-b", "Mac Mini", &preview_frame(Some("s1"))));
+        let got = rx.try_recv().expect("the preview must be re-published locally");
+        assert_eq!(got["method"], "preview");
+        assert_eq!(got["params"]["snapshot"]["id"], "p1");
+        assert_eq!(got["params"]["snapshot"]["session_id"], "s1");
+    }
+
+    /// A peer must not refresh our panel for a chat it does not own: a local
+    /// chat, one mirrored from a different machine, or a session-less push.
+    #[test]
+    fn handle_frame_drops_a_preview_the_peer_does_not_own() {
+        let state = state_mirroring_s1_from_b();
+        state.registry.upsert_interactive("ours", std::path::Path::new("C:/x"), "p", "2026-10-18T00:00:00Z");
+        let mut rx = state.notifier.subscribe();
+
+        handle_frame(&state, "mach-b", "Mac Mini", &preview_frame(Some("ours")));
+        handle_frame(&state, "mach-c", "Other", &preview_frame(Some("s1")));
+        handle_frame(&state, "mach-b", "Mac Mini", &preview_frame(None));
+        handle_frame(&state, "mach-b", "Mac Mini", &preview_frame(Some("unknown")));
+        assert!(rx.try_recv().is_err(), "none of these may reach the local notifier");
     }
 }

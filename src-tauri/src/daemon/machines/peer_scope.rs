@@ -26,6 +26,11 @@ const SEE_ONLY: &[&str] = &[
     "load_history",
     "transcript_stats",
     "read_attachment",
+    // Read-only views of a chat's previews and images; a view-only peer still
+    // sees what a mirrored chat shows.
+    "list_previews",
+    "get_preview",
+    "read_image_file",
     "list_projects",
     // The new-chat picker's project list and its row icons: a view-only peer
     // still starts chats here, so it must be able to choose a project.

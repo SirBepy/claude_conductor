@@ -75,6 +75,19 @@ describe("option preview local images", () => {
     expect(mod.inlineLocalImages(frag)).toContain("data:image/png;base64,QUJD");
   });
 
+  it("reads through the question's chat and keeps each chat's pictures apart", async () => {
+    // The same path names different files on different machines, so a hit for
+    // one chat must never paint another chat's frame.
+    const frag = `<img src="file:///C:/x/same.png">`;
+    expect(await mod.prefetchLocalImages([frag], "chat-win")).toBe(true);
+    expect(calls).toEqual([{ cmd: "read_image_file", args: { path: "C:/x/same.png", sessionId: "chat-win" } }]);
+    expect(mod.inlineLocalImages(frag, "chat-win")).toContain("data:image/png;base64,QUJD");
+    expect(mod.inlineLocalImages(frag, "chat-mac")).toBe(frag);
+    expect(mod.inlineLocalImages(frag)).toBe(frag);
+    expect(await mod.prefetchLocalImages([frag], "chat-mac")).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
   it("leaves HTML-only previews byte-identical with no invoke", async () => {
     const frag = `<div class="btn">Go</div><img src="/icons/a.png">`;
     expect(await mod.prefetchLocalImages([frag])).toBe(false);

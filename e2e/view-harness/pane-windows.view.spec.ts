@@ -387,3 +387,4 @@ test("Revise opens its preset menu over the draft editor", async ({ page }) => {
   await expect(page.locator(".dr-rv-scope")).toHaveText("Whole draft");
   await page.screenshot({ path: `${SCREENSHOT_DIR}/pane-windows-revise.png` });
 });
+// Reviewed 2026-10-23: the preview panel's list_previews/get_preview calls now carry the chat's sessionId; this spec's mocks ignore args; the contract asserted here is unchanged.

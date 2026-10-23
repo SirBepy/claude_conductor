@@ -272,8 +272,20 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // (`push_preview`) is deliberately NOT here: pushes go through the
     // unauthenticated `/hooks/preview` hook-server endpoint instead, mirroring
     // the existing push(hook server)/read(remote RPC) split for this feature.
-    ("list_previews", P),
-    ("get_preview", P),
+    // PM: a paired peer reads the previews of a chat IT mirrors from this
+    // machine (the store lives on the host). The handler narrows a peer to
+    // one named chat hosted here and never serves session-less previews, so
+    // a peer gets strictly less than the phone's whole-timeline read.
+    ("list_previews", PM),
+    ("get_preview", PM),
+    // Read-only: one raster image (png/jpg/gif/webp/bmp, size-capped) under a
+    // registered project root, a session cwd or the chat-attachments dir.
+    // The ask_user_question option previews and the status bar's
+    // agent-surfaced images need it for a mirrored chat. PM because the same
+    // path guard (`registry/image_read.rs`) applies to the phone and a peer
+    // alike; a peer must also name a chat hosted here. The desktop's own
+    // unrestricted `read_image_file` Tauri command is NOT this method.
+    ("read_image_file", PM),
     // Close-chat (ai_todo: phone's "clear_session" had no remote path at all,
     // so the button silently no-op'd). Strictly weaker than the remote surface
     // already granted: a paired client can already `start_session` +
@@ -515,7 +527,7 @@ mod tests {
             "get_usage_map", "get_auth_state_map", "context_status",
             "list_accounts", "list_slash_commands", "ensure_session_character",
             "schedule_list", "schedule_create", "schedule_update",
-            "schedule_delete", "schedule_fire_now", "list_previews", "get_preview",
+            "schedule_delete", "schedule_fire_now", "list_previews", "get_preview", "read_image_file",
             "end_session", "mark_session_ended",
             "list_worktree_details", "create_worktree", "remove_worktree", "get_recent_branches",
             "get_range_files", "get_file_diff", "resolve_commit_refs", "get_ticket_tracker", "get_file_at_rev",
@@ -687,6 +699,20 @@ mod tests {
     fn new_session_bundle_is_machine_callable_for_the_project_picker() {
         assert!(allowed("new_session_bundle", &Transport::PeerMachine("x".into())));
         assert!(allowed("new_session_bundle", &Transport::Phone));
+    }
+
+    /// A mirrored chat's previews and option-preview images live on its host,
+    /// so the host must answer a peer for them. `push_preview` (the write) and
+    /// the desktop-only unrestricted image read stay off both remote transports.
+    #[test]
+    fn preview_and_image_reads_are_machine_callable_but_the_write_is_not() {
+        let peer = Transport::PeerMachine("x".into());
+        for m in ["list_previews", "get_preview", "read_image_file"] {
+            assert!(allowed(m, &peer), "{m} must be callable by a peer machine");
+            assert!(allowed(m, &Transport::Phone), "{m} must stay callable by a phone");
+        }
+        assert!(!allowed("push_preview", &peer));
+        assert!(!allowed("push_preview", &Transport::Phone));
     }
 
     /// The write/mutating counterparts stay phone-only: this follow-up proxies
