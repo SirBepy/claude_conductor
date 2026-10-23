@@ -1,7 +1,7 @@
 // Pure wording and path helpers for the Projects tab (no DOM, no IPC), so the
 // list line and the dashboard rows can be unit-tested directly.
 import { formatTimeAgo } from "../../../shared/formatters";
-import type { DashboardListRow, DashboardTarget, DashboardTargetRef, Scope } from "./types";
+import type { CardView, DashboardListRow, DashboardTarget, DashboardTargetRef, Scope } from "./types";
 
 export type ReportsTab = "outcomes" | "gallery" | "files";
 
@@ -157,4 +157,17 @@ export function chatGroupOf(status: "question" | "working" | "your_turn" | "wait
 /** Slash chips, minus the ones a dashboard must never offer: closing a chat is not a quick action. */
 export function offerableCommands(cmds: string[]): string[] {
   return cmds.filter((c) => !/^\/close(\s|$)/i.test(c));
+}
+
+/** How long a custom card's result counts as fresh when its config names no refresh_secs. */
+export const DEFAULT_CARD_REFRESH_SECS = 900;
+
+/** Enabled cards with no result yet, or one older than their refresh interval. */
+export function staleCardIds(cards: CardView[], nowMs: number = Date.now()): string[] {
+  return cards.filter((v) => {
+    if (!v.config.enabled) return false;
+    if (!v.result) return true;
+    const secs = v.config.refresh_secs ?? DEFAULT_CARD_REFRESH_SECS;
+    return nowMs - v.result.fetched_at_ms >= secs * 1000;
+  }).map((v) => v.config.id);
 }

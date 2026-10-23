@@ -41,6 +41,7 @@ vi.mock("../src/shared/modal.ts", async (importOriginal) => {
 const { mountDashboard } = await import("../src/views/sessions/projects-tab/dashboard.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 const { openModelEffortModal } = await import("../src/views/sessions/model-effort-modal.ts");
+const { invoke } = await import("../src/shared/ipc.ts");
 
 async function mount(ref) {
   const h = mountDashboard(ref, { pane: document.body, flipToChats: vi.fn(), reloadList: vi.fn(), deselect: vi.fn() });
@@ -293,5 +294,23 @@ describe("custom card extras", () => {
     expect(rows()).toEqual(["row 1", "row 2", "row 3", "row 4"]);
     root.querySelector('[data-pd-pager="card:c8"] button[title="Next"]').click();
     await vi.waitFor(() => expect(rows()).toEqual(["row 5", "row 6"]));
+  });
+});
+
+describe("custom card auto-refresh", () => {
+  const refreshed = () => invoke.mock.calls.filter(([cmd]) => cmd === "dashboard_card_refresh").map(([, a]) => a.id);
+  const result = (agoMin) => ({ fetched_at_ms: Date.now() - agoMin * 60_000, stats: [], rows: [], error: null });
+
+  it("fetches a card that was never fetched or is past its interval, and leaves fresh and disabled ones alone", async () => {
+    snapshot = projectSnapshot({ cards: [
+      cardView("never", "Never", { kind: "stats", items: [] }, null),
+      cardView("stale", "Stale", { kind: "stats", items: [] }, result(20)),
+      cardView("fresh", "Fresh", { kind: "stats", items: [] }, result(2)),
+      cardView("short", "Short interval", { kind: "stats", items: [] }, result(2), true, { refresh_secs: 60 }),
+      cardView("off", "Disabled", { kind: "stats", items: [] }, null, false),
+    ] });
+    invoke.mockClear();
+    await mount({ kind: "project", id: "p1" });
+    await vi.waitFor(() => expect(refreshed()).toEqual(["never", "stale", "short"]));
   });
 });
