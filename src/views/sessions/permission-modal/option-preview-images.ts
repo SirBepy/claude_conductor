@@ -104,7 +104,9 @@ function startRead(p: string, key: string, sessionId?: string): Promise<boolean>
       cache.delete(key);
       return false;
     } finally {
-      inflight.delete(key);
+      // A read started before clearLocalImageCache() can finish after a newer
+      // read for the same key took its slot; only the owner may clear it.
+      if (inflight.get(key) === read) inflight.delete(key);
     }
   })();
   inflight.set(key, read);

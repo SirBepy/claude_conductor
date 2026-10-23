@@ -75,6 +75,22 @@ describe("option preview local images", () => {
     expect(mod.inlineLocalImages(frag)).toContain("data:image/png;base64,QUJD");
   });
 
+  it("a read from before a cache clear never drops the newer read's in-flight slot", async () => {
+    const frag = `<img src="file:///C:/x/raced.png">`;
+    const releases = [];
+    impl = () => new Promise((r) => { releases.push(() => r({ mime: "image/png", base64: "QUJD" })); });
+    const old = mod.prefetchLocalImages([frag]);
+    mod.clearLocalImageCache();
+    const fresh = mod.prefetchLocalImages([frag]);
+    releases[0]();
+    await old;
+    // A third caller must still share the fresh read, not start another one.
+    const third = mod.prefetchLocalImages([frag]);
+    expect(calls).toHaveLength(2);
+    releases[1]();
+    expect([await fresh, await third]).toEqual([true, true]);
+  });
+
   it("reads through the question's chat and keeps each chat's pictures apart", async () => {
     // The same path names different files on different machines, so a hit for
     // one chat must never paint another chat's frame.
