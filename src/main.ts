@@ -18,6 +18,7 @@ import "./styles/misc-widgets.css";
 import "./styles/hook-modal.css";
 import "./styles/session-table.css";
 import "./styles/motion.css";
+import "./styles/dividers.css";
 
 import { mountRouter, registerView } from "./router";
 import { initBoot, applySettingsToDocument } from "./shared/boot";

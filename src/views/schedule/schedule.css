@@ -35,7 +35,8 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
 .cal-nav:hover, .cal-today:hover { border-color: var(--color-primary); }
 
 /* ── Month grid ── */
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+/* Dividers look: weeks split by hairlines, no per-day boxes. */
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); column-gap: 3px; }
 .cal-dow {
   text-align: center;
   font-size: 0.64rem;
@@ -47,9 +48,7 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
 }
 .cal-cell {
   aspect-ratio: 1 / 1;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: var(--color-surface);
+  border-top: var(--dv-line);
   padding: 4px 5px;
   cursor: pointer;
   display: flex;
@@ -59,8 +58,9 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
 }
 .cal-cell:hover { background: var(--color-surface-alt); }
 .cal-cell.other { background: transparent; opacity: 0.32; cursor: default; }
-.cal-cell.today { border-color: var(--color-primary); }
-.cal-cell.selected { background: color-mix(in srgb, var(--color-primary) 22%, var(--color-surface)); border-color: var(--color-primary); }
+/* Today carries its accent on its own hairline (and its number, below). */
+.cal-cell.today { border-top-color: var(--color-primary); }
+.cal-cell.selected { background: color-mix(in srgb, var(--color-primary) 22%, transparent); }
 .cal-daynum { font-size: 0.72rem; font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
 .cal-cell.today .cal-daynum { color: var(--color-primary); font-weight: 700; }
 .cal-dots { display: flex; flex-wrap: wrap; gap: 3px; margin-top: auto; }
@@ -109,28 +109,22 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
 .view-toggle button.active { background: var(--color-primary); color: var(--color-background); }
 
 /* ── Week view: 7 collapsible day-row-groups (reuses .agenda-row) ── */
-.week-list { display: flex; flex-direction: column; gap: 8px; }
-.week-day {
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--color-surface-alt);
-}
+.week-list { display: flex; flex-direction: column; }
+/* Dividers look: each day is a hairline-topped group, no box. */
+.week-day { border-top: var(--dv-line); }
+.week-day:first-child { border-top: 0; }
 .week-day-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 12px;
+  padding: 9px 0 7px;
   font-size: 0.74rem;
   font-weight: 600;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
   cursor: pointer;
 }
 .week-day-head.is-today { color: var(--color-primary); }
 .week-day-head .wd-date { color: var(--color-text-muted); font-weight: 500; }
 .week-day-head .schedule-count-chip { margin-left: auto; }
-.week-day.collapsed .week-day-head { border-bottom: none; }
 .week-day.collapsed .week-day-rows { display: none; }
 .week-day-rows { list-style: none; margin: 0; padding: 0; }
 .week-day-rows li.agenda-row:last-child { border-bottom: none; }
@@ -144,22 +138,19 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--color-surface-alt);
+  border-top: var(--dv-line);
 }
 .agenda-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--color-border);
+  padding: 10px 8px;
+  border-bottom: var(--dv-line);
   flex-wrap: wrap;
 }
 .agenda-list li.agenda-row:last-child { border-bottom: none; }
 .agenda-row--nav { cursor: pointer; }
-.agenda-row--nav:hover { background: var(--color-surface); }
+.agenda-row--nav:hover { background: var(--color-surface-alt); }
 .agenda-time {
   font-size: 0.74rem;
   color: var(--color-text-muted);
@@ -179,9 +170,7 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
   color: var(--color-text-muted);
   font-style: italic;
   font-size: 0.82rem;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: var(--color-surface-alt);
+  border-top: var(--dv-line);
 }
 .schedule-status-pill--external { background: var(--color-border); color: var(--color-text-muted); }
 
@@ -251,10 +240,7 @@ details.schedule-section[open] > summary.schedule-section-title::before {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--color-surface-alt);
+  border-top: var(--dv-line);
 }
 
 .schedule-day-sep {
@@ -267,8 +253,7 @@ details.schedule-section[open] > summary.schedule-section-title::before {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-text-muted);
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: var(--dv-line);
 }
 
 .schedule-count-chip {

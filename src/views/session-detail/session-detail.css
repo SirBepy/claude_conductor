@@ -24,18 +24,16 @@
 }
 
 /* ── Detail cards ──────────────────────────────────────────────────────── */
-.sd-cards { display: flex; flex-direction: column; gap: 10px; padding: 6px 0; }
+/* Dividers look (dividers.css): sections split by hairlines, no box. */
+.sd-cards { display: flex; flex-direction: column; padding: 6px 0; }
 .sd-card {
-  background: var(--color-surface, #1f1d2e);
-  border: 1px solid var(--color-border, #2d2c44);
-  border-radius: 8px;
-  padding: 12px 14px;
+  border-top: var(--dv-line);
+  padding: 18px 0 20px;
 }
+.sd-card:first-child { border-top: 0; padding-top: 6px; }
 .sd-card-title {
-  font-size: 0.66rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted, #8a8aa0);
+  font-size: 13px;
+  color: var(--color-text);
   font-weight: 600;
   margin-bottom: 10px;
 }

@@ -1,21 +1,4 @@
-/* ── Settings sections ── */
-.section {
-  background: var(--color-surface);
-  border-radius: 10px;
-  padding: 16px;
-  margin-bottom: 16px;
-  border: 1px solid var(--color-border);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-}
-
-.section-title {
-  font-size: var(--fs-micro);
-  font-weight: 700;
-  color: var(--color-text-muted);
-  margin-bottom: 14px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
+/* ── Settings sections: the look (.section, .section-title) is in dividers.css ── */
 
 .option {
   display: flex;

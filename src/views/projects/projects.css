@@ -47,7 +47,6 @@
 .projects-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
 /* Loading placeholder: same footprint as a real card so the list doesn't jump. */

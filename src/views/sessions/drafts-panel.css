@@ -49,22 +49,24 @@
   color: var(--sb-muted);
 }
 
+/* Dividers look: drafts split by hairlines, no box; hover fills the row. */
 .dr-card {
   display: flex;
   flex-direction: column;
   width: calc(100% - 16px);
-  margin: 0 8px 6px;
+  margin: 0 8px;
   padding: 8px 10px;
   text-align: left;
   font: inherit;
   color: var(--color-text);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 9px;
+  background: none;
+  border: 0;
+  border-bottom: var(--dv-line);
   cursor: pointer;
 }
+.dr-card:last-of-type { border-bottom: 0; }
 
-.dr-card:hover { border-color: var(--color-primary); }
+.dr-card:hover { background: var(--color-surface-alt); border-radius: 7px; }
 
 .dr-card-top { display: flex; align-items: center; gap: 7px; }
 
