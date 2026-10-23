@@ -864,7 +864,38 @@ export class HttpTransport implements Transport {
   }
 
   private async rpc<T>(method: string, params: unknown): Promise<T> {
-    if (!isReadOnlyMethod(method)) return this.rpcOnce<T>(method, params, MUTATION_TIMEOUT_MS);
+    if (!isReadOnlyMethod(method)) {
+      this.writes++;
+      return this.rpcOnce<T>(method, params, MUTATION_TIMEOUT_MS);
+    }
+    // Identical reads fired together share one request: the tunnel queues
+    // past 6 concurrent requests, and boot fires list_pending_prompts six
+    // times at once. A read joins only if no write went out since it started,
+    // so it never hands back a snapshot from before this client's own change.
+    // A shared result is copied per caller, so one mutating it can't leak;
+    // an unshared one (the common case, big history pages included) is not.
+    const key = `${method}\u0000${JSON.stringify(params ?? null)}`;
+    const running = this.inflightReads.get(key);
+    if (running && running.writes === this.writes) {
+      running.joiners++;
+      return structuredClone(await running.result) as T;
+    }
+    const result = this.readWithRetry<T>(method, params);
+    const entry = { result: result as Promise<unknown>, writes: this.writes, joiners: 0 };
+    this.inflightReads.set(key, entry);
+    try {
+      const value = await result;
+      return entry.joiners > 0 ? structuredClone(value) : value;
+    } finally {
+      if (this.inflightReads.get(key) === entry) this.inflightReads.delete(key);
+    }
+  }
+
+  private inflightReads = new Map<string, { result: Promise<unknown>; writes: number; joiners: number }>();
+  /** Writes sent so far; an in-flight read started before the latest one is stale. */
+  private writes = 0;
+
+  private async readWithRetry<T>(method: string, params: unknown): Promise<T> {
     try {
       return await this.rpcOnce<T>(method, params, READ_TIMEOUT_MS);
     } catch (e) {
