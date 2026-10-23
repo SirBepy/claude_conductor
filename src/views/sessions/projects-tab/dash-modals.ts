@@ -1,7 +1,7 @@
 // The two dashboard modals, rendered into the shared #modal-host card slot:
 // "Dashboard cards" (builtin switches + custom card management) and "Edit
 // repos" (a group's name and member repos).
-import { html, render, type TemplateResult } from "lit-html";
+import { html, nothing, render, type TemplateResult } from "lit-html";
 import { invoke } from "../../../shared/ipc";
 import { api } from "../../../shared/api";
 import { askConfirm } from "../../../shared/confirm";
@@ -10,7 +10,7 @@ import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from
 import { fetchedLabel, scopeOf, sameCwd, BUILTIN_CARDS } from "./format";
 import type { ActionHost } from "./dash-actions";
 import { pinsEditor } from "./dash-pins";
-import type { CardView, GroupDef } from "./types";
+import type { CardView, DashSnapshot, GroupDef } from "./types";
 
 const toggle = (on: boolean, onChange: (next: boolean) => void): TemplateResult => html`
   <label class="switch"><input type="checkbox" .checked=${on}
@@ -29,8 +29,11 @@ export function openCardsModal(host: ActionHost): void {
   const close = (): void => { setBackdropCancel(null); closeHostCard(); host.reload(); };
   const pins = pinsEditor(c.snap.pinned_actions ?? [], scope, () => draw());
 
+  // The snapshot's card list, not the scope's own: a project dashboard also
+  // paints its group's cards, and every card it paints must be manageable here.
   const reloadCards = async (): Promise<void> => {
-    try { cards = await invoke<CardView[]>("dashboard_cards_list", { scope }); }
+    const t = c.snap.target;
+    try { cards = (await invoke<DashSnapshot>("dashboard_snapshot", { target: { kind: t.kind, id: t.id } })).cards; }
     catch (err) { fail("load the cards", err); }
     draw();
   };
@@ -44,6 +47,8 @@ export function openCardsModal(host: ActionHost): void {
   const customRow = (v: CardView): TemplateResult => html`
     <div class="pd-mrow">
       <span class="pd-mt">${v.config.title}</span>
+      ${c.snap.target.kind === "project" && v.config.scope.kind === "group"
+        ? html`<span class="pd-fetched" title="Added on the group's dashboard; changes here apply to every repo in it">group card</span>` : nothing}
       <span class="pd-fetched">${v.result ? fetchedLabel(v.result.fetched_at_ms) : "not fetched"}</span>
       <button type="button" class="pd-ib sm" title="Refresh" @click=${() => {
         void invoke("dashboard_card_refresh", { id: v.config.id }).then(reloadCards, (e) => fail("refresh", e));

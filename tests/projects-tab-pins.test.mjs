@@ -5,14 +5,15 @@
 // refused before any call, and a backend refusal shows its line.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { groupSnapshot, projectSnapshot } from "./helpers/projects-tab-fixtures.mjs";
+import { card as cardView, groupSnapshot, projectSnapshot } from "./helpers/projects-tab-fixtures.mjs";
 
 const calls = [];
 let setPinnedImpl = async (_args) => null;
+let modalCards = [];
 vi.mock("../src/shared/ipc.ts", () => ({
   invoke: vi.fn(async (cmd, args) => {
     calls.push({ cmd, args });
-    if (cmd === "dashboard_cards_list") return [];
+    if (cmd === "dashboard_snapshot") return { cards: modalCards };
     if (cmd === "dashboard_set_pinned_actions") return setPinnedImpl(args);
     return null;
   }),
@@ -144,5 +145,19 @@ describe("Quick actions in the cards modal", () => {
     await vi.waitFor(() => expect(slot().querySelector(".pd-err")?.textContent).toBe("at most 20 pinned actions"));
     expect(pinNames()).toEqual(["/a"]);
     expect(input().value).toBe("/b");
+  });
+});
+
+describe("custom cards in the cards modal", () => {
+  it("a project's modal lists the group cards its dashboard paints, marked as group cards", async () => {
+    const own = cardView("own", "Own card", { kind: "stats", items: [] }, null);
+    own.config.scope = { kind: "project", cwd: "C:/Projects/conductor" };
+    const shared = cardView("shared", "Clockify", { kind: "stats", items: [] }, null);
+    modalCards = [own, shared];
+    await open(projectSnapshot({ cards: [own, shared] }));
+    await vi.waitFor(() => expect([...slot().querySelectorAll(".pd-mrow .pd-mt")].map((n) => n.textContent)).toContain("Clockify"));
+    const rowOf = (title) => [...slot().querySelectorAll(".pd-mrow")].find((r) => r.querySelector(".pd-mt")?.textContent === title);
+    expect(rowOf("Clockify").textContent).toContain("group card");
+    expect(rowOf("Own card").textContent).not.toContain("group card");
   });
 });
