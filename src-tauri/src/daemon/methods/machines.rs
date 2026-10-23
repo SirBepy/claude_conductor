@@ -127,8 +127,7 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
             async move {
                 let req: MachineProjectsParams = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                let self_id = state.machines.get().and_then(|r| r.self_machine()).map(|m| m.machine_id);
-                if self_id.as_deref() == Some(req.machine_id.as_str()) {
+                if crate::daemon::machines::is_self_machine(&state, &req.machine_id) {
                     return super::registry::new_session_bundle::project_list(&state).await;
                 }
                 let client = crate::daemon::machines::forward::resolve_peer_client(&state, &req.machine_id).await?;

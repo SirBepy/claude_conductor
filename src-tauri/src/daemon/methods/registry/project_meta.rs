@@ -28,8 +28,7 @@ async fn forward_project_read_if_peer(
     root: &str,
 ) -> Result<Option<Value>, RpcError> {
     let Some(machine_id) = machine_id else { return Ok(None) };
-    let self_id = state.machines.get().and_then(|r| r.self_machine()).map(|m| m.machine_id);
-    if self_id.as_deref() == Some(machine_id) {
+    if crate::daemon::machines::is_self_machine(state, machine_id) {
         return Ok(None);
     }
     let client = crate::daemon::machines::forward::resolve_peer_client(state, machine_id).await?;

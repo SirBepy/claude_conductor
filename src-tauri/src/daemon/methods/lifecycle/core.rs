@@ -72,12 +72,7 @@ async fn forward_start_session(
 fn refuse_peer_hosted(state: &DaemonState, p: &StartSessionParams) -> Option<RpcError> {
     for id in [p.resume_id.as_deref(), p.new_session_id.as_deref()].into_iter().flatten() {
         let Some(machine_id) = crate::daemon::machines::mirrored_owner(state, id) else { continue };
-        let label = state
-            .machines
-            .get()
-            .and_then(|r| r.peer(&machine_id))
-            .map(|peer| peer.label)
-            .unwrap_or(machine_id);
+        let label = crate::daemon::machines::forward::peer_label(state, &machine_id);
         return Some(RpcError {
             code: crate::daemon::machines::forward::ERR_NOT_FORWARDABLE,
             message: format!("chat {id} is hosted on {label}; it cannot be started on this machine"),
@@ -111,8 +106,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 let requested_machine =
                     params_value.get("machine_id").and_then(Value::as_str).map(str::to_string);
                 if let Some(target) = requested_machine {
-                    let self_id = state.machines.get().and_then(|r| r.self_machine()).map(|m| m.machine_id);
-                    if self_id.as_deref() != Some(target.as_str()) {
+                    if !crate::daemon::machines::is_self_machine(&state, &target) {
                         return forward_start_session(&state, &target, params_value).await;
                     }
                 }

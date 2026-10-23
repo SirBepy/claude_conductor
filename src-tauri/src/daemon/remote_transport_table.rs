@@ -173,11 +173,9 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Only mutates `session_characters` for the given session_id via
     // whitelist pick_random; cannot touch any other settings field.
     ("ensure_session_character", P),
-    // Read-only project list. PM since `list_machine_projects` used to forward
-    // this exact method to a peer; it now forwards `new_session_bundle`
-    // instead, so nothing in the tree calls this from a peer any more. Left PM
-    // (not narrowed here) so a paired machine on the previous build keeps its
-    // picker working until both sides are updated; narrow to P afterwards.
+    // Read-only project list. PM only for a paired machine still on a build
+    // whose `list_machine_projects` forwards this method (current builds
+    // forward `new_session_bundle`); nothing in this tree calls it from a peer.
     ("list_projects", PM),
     // Read-only self+peers view for the phone's new-chat machine picker
     // (parity with desktop's own picker). P, never M: a peer machine already
