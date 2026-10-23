@@ -157,16 +157,9 @@ impl IrohDialer {
     /// `127.0.0.1:0` listener and spawns its accept loop; every later call
     /// for the same id returns the same port. A bare `EndpointId` (no direct
     /// addrs) means `connect` falls back to the endpoint's address lookup
-    /// service, matching the android dialer's own bare-id ticket. Does not
-    /// dial: the QUIC connection is made on first use.
-    pub async fn proxy_port(&self, iroh_id: &str) -> Result<u16, String> {
-        let remote: EndpointId = iroh_id.parse().map_err(|e| format!("bad iroh id: {e}"))?;
-        Ok(self.dial_and_proxy(iroh_id, EndpointAddr::from(remote)).await?.port)
-    }
-
-    /// `proxy_port`, but returns only once the QUIC connection to the peer is
-    /// up (bounded by `DIAL_TIMEOUT`), so the caller's first request on that
-    /// port no longer pays for the cold dial.
+    /// service, matching the android dialer's own bare-id ticket. Returns only
+    /// once the QUIC connection to the peer is up (bounded by `DIAL_TIMEOUT`),
+    /// so the caller's first request on that port never pays for the cold dial.
     pub async fn connected_proxy_port(&self, iroh_id: &str) -> Result<u16, String> {
         let remote: EndpointId = iroh_id.parse().map_err(|e| format!("bad iroh id: {e}"))?;
         let link = self.dial_and_proxy(iroh_id, EndpointAddr::from(remote)).await?;
@@ -549,7 +542,7 @@ mod tests {
             return;
         };
         let dialer = IrohDialer::new().await.expect("dialer bind");
-        let port = dialer.proxy_port(&id).await.expect("proxy port");
+        let port = dialer.connected_proxy_port(&id).await.expect("proxy port");
         let started = std::time::Instant::now();
         let health = super::super::peer_client::PeerClient::new(&format!("http://127.0.0.1:{port}"), "")
             .health()

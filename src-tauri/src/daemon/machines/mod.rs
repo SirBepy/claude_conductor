@@ -69,6 +69,12 @@ pub fn mirrored_owner(state: &DaemonState, session_id: &str) -> Option<String> {
     state.mirror.owner_of(session_id).or_else(|| state.mirror.recorded_owner(session_id))
 }
 
+/// Whether `machine_id` names this daemon. False before the machine registry
+/// exists, so a caller treats the id as a peer and fails on the lookup there.
+pub fn is_self_machine(state: &DaemonState, machine_id: &str) -> bool {
+    state.machines.get().and_then(|r| r.self_machine()).is_some_and(|m| m.machine_id == machine_id)
+}
+
 /// Every cached mirrored prompt, minus any whose session id names a local
 /// chat: a peer could otherwise plant a card that renders as one of ours.
 pub fn mirrored_prompts(state: &DaemonState) -> Vec<serde_json::Value> {

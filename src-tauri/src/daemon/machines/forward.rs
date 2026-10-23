@@ -73,8 +73,7 @@ fn machine_target(state: &DaemonState, method: &str, params: &Value) -> Option<S
         return None;
     }
     let target = params.get("machine_id").and_then(Value::as_str).filter(|m| !m.is_empty())?;
-    let self_id = state.machines.get().and_then(|r| r.self_machine()).map(|m| m.machine_id);
-    (self_id.as_deref() != Some(target)).then(|| target.to_string())
+    (!super::is_self_machine(state, target)).then(|| target.to_string())
 }
 
 /// The first `<file:PATH>` / `<file:PATH::NAME>` path in `text` that lies under
@@ -150,7 +149,7 @@ pub(crate) fn map_peer_session_err(e: PeerError, host_label: &str) -> RpcError {
 }
 
 /// The label to show for `machine_id` in an error, falling back to its id.
-fn peer_label(state: &DaemonState, machine_id: &str) -> String {
+pub(crate) fn peer_label(state: &DaemonState, machine_id: &str) -> String {
     state
         .machines
         .get()
@@ -296,11 +295,16 @@ pub(crate) async fn forward_send_message(
     session_id: &str,
     text: &str,
 ) -> Result<(), RpcError> {
+    let label = peer_label(state, machine_id);
+    // Same guard as `forward_one`'s send_message branch: the phone's REST send
+    // reaches the peer through here, not through the RPC forwarder.
+    if let Some(msg) = local_attachment_refusal(text, &label) {
+        return Err(RpcError::invalid_params(msg));
+    }
     let client = resolve_peer_client(state, machine_id).await?;
     // The host revives its own idle chat for a peer-transport `send_message`
     // (`methods/lifecycle/core.rs`), reading cwd/model/effort/account from its
     // registry; nothing about the chat's folder is sent from here.
-    let label = peer_label(state, machine_id);
     client
         .call("send_message", serde_json::json!({"session_id": session_id, "text": text}))
         .await
@@ -694,6 +698,20 @@ mod tests {
             }
             other => panic!("expected the local-attachment refusal, got {other:?}"),
         }
+    }
+
+    /// The phone's REST send reaches a peer through `forward_send_message`, not
+    /// the RPC forwarder, so it carries the same refusal.
+    #[tokio::test]
+    async fn rest_send_with_a_local_attachment_path_is_refused_for_a_mirrored_chat() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), 0, true).await;
+        let local = crate::settings::paths::data_dir().unwrap().join("chat-attachments").join("pending-1-ab").join("u.png");
+        let text = format!("look <file:{}::image.png>", local.display());
+
+        let err = forward_send_message(&state, "mach-b", "s1", &text).await.expect_err("refused");
+        assert_eq!(err.message, "attachment was saved on this machine, not on B; re-attach");
     }
 
     #[tokio::test]

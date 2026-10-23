@@ -109,11 +109,6 @@ fn bind_account(
     Ok(())
 }
 
-fn is_self(state: &DaemonState, machine_id: &str) -> bool {
-    let self_id = state.machines.get().and_then(|r| r.self_machine()).map(|m| m.machine_id);
-    self_id.as_deref() == Some(machine_id)
-}
-
 #[derive(Debug, Deserialize)]
 struct ListParams {
     machine_id: String,
@@ -151,7 +146,7 @@ pub(super) fn register(router: &mut Router, state: Arc<DaemonState>) {
             async move {
                 let req: ListParams = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                if is_self(&state, &req.machine_id) {
+                if crate::daemon::machines::is_self_machine(&state, &req.machine_id) {
                     return Ok(picker_data(&state, &crate::accounts::load_registry(), req.cwd.as_deref()));
                 }
                 let client = resolve_peer_client(&state, &req.machine_id).await?;
@@ -188,7 +183,7 @@ pub(super) fn register(router: &mut Router, state: Arc<DaemonState>) {
             async move {
                 let req: SetParams = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                if is_self(&state, &req.machine_id) {
+                if crate::daemon::machines::is_self_machine(&state, &req.machine_id) {
                     return Err(RpcError::invalid_params("machine_id must name a paired machine"));
                 }
                 let client = resolve_peer_client(&state, &req.machine_id).await?;
