@@ -41,7 +41,8 @@ export function refreshWrapUpIndicator(selectedId: string | null, sessionId: str
 }
 
 /**
- * The session pane header - avatar, title/meta and the discard button (drafts).
+ * The session pane header - avatar and title/meta. A draft is deleted from the
+ * view-more menu's "Delete draft", not from here (Joe, 2026-10-23: no quick X).
  * Code mode lives in the chat FAB menu. The per-session more-btn moved to the top-right
  * view-more menu ("This chat" section).
  */
@@ -60,8 +61,6 @@ export class SessionHeader {
   private readonly _cfgEffortEl: HTMLElement;
   private readonly _wrapUpBtn: HTMLButtonElement;
 
-  private readonly _onDiscard: (() => void) | undefined;
-
   /** The flag button: toggle "Wrap up when done" for this chat. */
   onWrapUpToggleClick: (() => void) | null = null;
   onCharClick: (() => void) | null = null;
@@ -70,9 +69,7 @@ export class SessionHeader {
    *  only hands it which one and where to anchor. */
   onConfigClick: ((which: "model" | "effort", anchor: HTMLElement) => void) | null = null;
 
-  constructor(opts: { title: string; meta: string; onDiscard?: () => void }) {
-    this._onDiscard = opts.onDiscard;
-
+  constructor(opts: { title: string; meta: string }) {
     const el = document.createElement("header");
     el.className = "session-header";
     // The two slots stay empty on desktop; mobile-header-merge.ts relocates the
@@ -96,9 +93,6 @@ export class SessionHeader {
       `</div>`,
       `<button class="wrap-up-btn" title="${escapeHtml(wrapUpTooltip(false))}" aria-label="Wrap up when done">`,
       `  <i class="ph-bold ph-flag-checkered"></i>`,
-      `</button>`,
-      `<button class="icon-btn discard-btn" title="Discard draft">`,
-      `  <i class="ph ph-x-circle"></i>`,
       `</button>`,
       `<span class="session-header-trail"></span>`,
     ].join("");
@@ -126,10 +120,6 @@ export class SessionHeader {
     this._wrapUpBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       this.onWrapUpToggleClick?.();
-    });
-
-    el.querySelector<HTMLButtonElement>(".discard-btn")?.addEventListener("click", () => {
-      this._onDiscard?.();
     });
 
     // Char-click delegate on the header element so it survives avatar swaps.
@@ -215,12 +205,10 @@ export class SessionHeader {
   }
 
   /**
-   * Upgrade from draft to live session. Removes the discard button.
+   * Upgrade from draft to live session.
    * More-btn and changes-btn are in the view-more-menu; nothing to show here.
    */
   bindSession(opts: SessionHeaderBindOpts): void {
-    this.el.querySelector(".discard-btn")?.remove();
-
     if (opts.charId !== undefined && opts.charStatus !== undefined) {
       this.setAvatar(opts.charId ?? null, opts.charUrl ?? null, opts.charStatus, opts.cwd, opts.machineId);
     }

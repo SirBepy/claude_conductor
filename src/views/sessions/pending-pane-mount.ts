@@ -27,20 +27,17 @@ export function rebuildSidebar(): void {
 }
 
 /** Build the pane's markup, mount the SessionHeader, and wire the pieces that
- *  don't depend on the statusbar or the renderer (discard, cancel button,
- *  avatar). Returns the header so the caller can keep it (pending-pane.ts's
+ *  don't depend on the statusbar or the renderer (cancel button, avatar). Returns the header so the caller can keep it (pending-pane.ts's
  *  module-level `_pendingHeader`, which rebindPaneHeader also reads). */
 export function mountPendingChrome(
   pane: HTMLElement,
   placeholderId: string,
   project: { path: string; name: string },
   config: SessionConfig,
-  onDiscard?: (pane: HTMLElement) => void,
 ): SessionHeader {
   const header = new SessionHeader({
     title: "New chat",
     meta: project.name,
-    onDiscard: onDiscard ? () => onDiscard(pane) : undefined,
   });
   pane.innerHTML = [
     // Skeleton placeholders, not the real statusbar/hint - both get wiped and

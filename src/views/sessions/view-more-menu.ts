@@ -297,8 +297,12 @@ const viewMenu = createMoreMenu<[]>({
     }
 
     // ── "This chat" section: only when a session or draft is active ─────────
-    const hasLive = !!state.selectedId;
-    const hasDraft = !!state.pendingNewSession;
+    // A focused draft is also state.selectedId (its placeholder id), so it has
+    // to win here or the draft gets the live "Close session" item instead of
+    // "Delete draft".
+    const pendingDraft = state.pendingNewSession;
+    const hasDraft = !!pendingDraft && (!state.selectedId || state.selectedId === pendingDraft.placeholderId);
+    const hasLive = !!state.selectedId && !hasDraft;
 
     if (hasLive || hasDraft) {
       const sep = document.createElement("div");
