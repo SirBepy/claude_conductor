@@ -31,13 +31,7 @@ async fn forward_start_session(
     let peer = registry
         .peer(machine_id)
         .ok_or_else(|| RpcError::invalid_params(format!("unknown machine: {machine_id}")))?;
-    if !state.mirror.is_online(machine_id) {
-        return Err(RpcError {
-            code: crate::daemon::machines::forward::ERR_MACHINE_OFFLINE,
-            message: format!("{} is offline", peer.label),
-            data: None,
-        });
-    }
+    crate::daemon::machines::forward::require_online(state, &peer).await?;
     if let Some(obj) = params_value.as_object_mut() {
         obj.remove("machine_id");
         obj.remove("account_id");
@@ -507,6 +501,43 @@ mod machine_target_tests {
         // peer could possibly have reported it.
         assert_eq!(state.mirror.owner_of("peer-spawned-1").as_deref(), Some("mach-b"));
 
+        b_serve.kill();
+    }
+
+    /// The first chat started on a machine after both sat idle: the mirror
+    /// still says offline (the link backs off after its socket dropped), but
+    /// the peer answers, so the spawn is forwarded instead of refused.
+    #[tokio::test]
+    async fn start_session_on_an_offline_marked_but_reachable_machine_still_forwards() {
+        use crate::daemon::rpc::RpcError as RE;
+
+        let (dir, peer_dir) = (tempdir().unwrap(), tempdir().unwrap());
+        let mut b_router = Router::new();
+        b_router.register("start_session", |_params, _ctx| async move {
+            Ok::<Value, RE>(json!({"session_id": "peer-spawned-2"}))
+        });
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
+        let (_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+        let state = state_paired_to_b(dir.path(), peer_dir.path(), b_port, vec![]);
+        state.mirror.set_online("mach-b", false);
+
+        let mut router = Router::new();
+        register_core(&mut router, state.clone());
+        let resp = router
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "start_session".into(),
+                    params: Some(start_session_params(json!({"machine_id": "mach-b"}))),
+                },
+                dummy_ctx(),
+            )
+            .await;
+        assert!(resp.error.is_none(), "a reachable peer must not be refused as offline: {:?}", resp.error);
+        assert_eq!(resp.result.unwrap()["session_id"], json!("peer-spawned-2"));
+        assert!(state.mirror.is_online("mach-b"));
         b_serve.kill();
     }
 

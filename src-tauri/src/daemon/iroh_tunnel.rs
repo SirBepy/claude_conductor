@@ -184,8 +184,30 @@ pub fn spawn(app_data: PathBuf) -> Arc<IrohTunnel> {
     tunnel
 }
 
+/// How often an otherwise silent QUIC connection sends a PING. This is iroh's
+/// own default (`socket::HEARTBEAT_INTERVAL`); it is pinned here because a
+/// paired machine keeps ONE cached connection open across hours of idleness
+/// (`machines::iroh_dial`), so a future iroh default change must not silently
+/// stop the connection surviving NAT-binding and relay expiry.
+const KEEP_ALIVE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// A connection with no packet from the peer for this long is dead. Six
+/// keep-alive periods: one lost PING never kills a healthy link, while a peer
+/// that went to sleep is noticed (and the dialer redials) within half a minute.
+/// The dialer's reqwest pool drops idle loopback sockets sooner than this
+/// (`peer_client::POOL_IDLE_TIMEOUT`) so a pooled socket never outlives its tunnel.
+pub(crate) const QUIC_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Shared by this accept side and `machines::iroh_dial`'s dial side: keep-alive
+/// only works when both ends run an idle timeout above the PING period.
+pub(crate) fn quic_transport_config() -> iroh::endpoint::QuicTransportConfig {
+    let idle = iroh::endpoint::IdleTimeout::try_from(QUIC_IDLE_TIMEOUT).expect("30s fits a QUIC idle timeout");
+    iroh::endpoint::QuicTransportConfig::builder().keep_alive_interval(KEEP_ALIVE).max_idle_timeout(Some(idle)).build()
+}
+
 async fn bind(secret: SecretKey) -> Result<Endpoint, String> {
     Endpoint::builder(presets::N0)
+        .transport_config(quic_transport_config())
         .secret_key(secret)
         .alpns(vec![ALPN.to_vec()])
         .bind()
