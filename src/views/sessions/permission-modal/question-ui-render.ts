@@ -54,6 +54,8 @@ export interface QuestionCardRenderer {
   /** Collapses the card to its bar. Returns false when it already was one,
    *  so a back press can fall through to the next handler. */
   minimize: () => boolean;
+  /** Rebuilds the answer bar for the other side of the 768px breakpoint. */
+  onViewportCrossing: () => void;
 }
 
 export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCardRenderer {
@@ -328,5 +330,25 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     return true;
   }
 
-  return { render, goToTab, togglePick, refreshAttachments, minimize };
+  // The answer bar's markup is picked from the viewport when it is built, so a
+  // 768px crossing with the card open rebuilds it. The typed text survives in
+  // freeText / state.additionalMessage; focus and caret are carried by hand.
+  const onViewportCrossing = (): void => {
+    const bar = host.querySelector<HTMLElement>(".prompt-card__answer-bar");
+    if (!bar) return;
+    const focused = document.activeElement;
+    const caret = focused instanceof HTMLTextAreaElement && bar.contains(focused)
+      ? [focused.selectionStart, focused.selectionEnd] as const
+      : null;
+    syncAnswerBar();
+    paintAttachmentStrips();
+    syncMessagesPadding();
+    if (!caret) return;
+    const field = bar.querySelector<HTMLTextAreaElement>("textarea");
+    if (!field) return;
+    field.focus();
+    field.setSelectionRange(caret[0], caret[1]);
+  };
+
+  return { render, goToTab, togglePick, refreshAttachments, minimize, onViewportCrossing };
 }

@@ -19,6 +19,7 @@ import { flushAuqPush, cancelAuqPush, pollRemoteAuqChange } from "./auq-draft-sy
 import { invoke } from "../../../shared/ipc";
 import { isTextEntryElement } from "../../../shared/text-entry";
 import { visibleInterval } from "../../../shared/visible-interval";
+import { onMobileViewportChange } from "../../../shared/mobile-viewport";
 
 // Cadence for the live cross-device reconcile poll below - matches the order
 // of magnitude of the phone's 700ms poll and the Rust adaptive poll (500-2000ms).
@@ -219,6 +220,9 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     }, LIVE_DRAFT_POLL_MS);
   }
 
+  // Set once the renderer exists (bottom of this function).
+  let disposeViewportWatch: (() => void) | null = null;
+
   // Idempotent: a swap-triggered teardown races the normal dismiss one, and a
   // second pass would cancel the NEXT card's debounced push and restore this
   // card's saved scroll/padding over the live one.
@@ -234,6 +238,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     document.removeEventListener("keydown", keydownHandler);
     document.removeEventListener("visibilitychange", visibilityHandler);
     if (disposeLivePoll !== null) disposeLivePoll();
+    disposeViewportWatch?.();
     cancelAuqPush();
     if (state.resizeObs) { try { state.resizeObs.disconnect(); } catch { /* ignore */ } state.resizeObs = null; }
     if (state.panelResizeObs) { try { state.panelResizeObs.disconnect(); } catch { /* ignore */ } state.panelResizeObs = null; }
@@ -358,5 +363,6 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   };
 
   renderer.render();
+  disposeViewportWatch = onMobileViewportChange(() => renderer.onViewportCrossing());
   confirmQuestionRendered(opts.id, opts.sessionId);
 }
