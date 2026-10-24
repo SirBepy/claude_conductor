@@ -387,7 +387,7 @@ function renderShell(container: HTMLElement): void {
   mountWidgets(container);
   const grid = container.querySelector<HTMLElement>(".dash-widgets");
   disposeWidgetLayout?.();
-  disposeWidgetLayout = grid ? observeWidgetLayout(grid) : null;
+  disposeWidgetLayout = grid ? observeWidgetLayout(grid, (id) => remountWidget(container, id)) : null;
   if (grid) rebalanceWidgets(grid);
 }
 

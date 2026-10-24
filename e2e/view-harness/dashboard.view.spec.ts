@@ -182,6 +182,45 @@ test.describe("view-harness / dashboard", () => {
     expect(ids).toEqual(["session-chart", "session-bars", "weekly-chart"]);
   });
 
+  test("a chart redraws at its new width when its pair drops to one column", async ({ page }) => {
+    await page.setViewportSize({ width: 1032, height: 900 });
+    const now = Date.now();
+    const resets = new Date(now + 2 * 3_600_000).toISOString();
+    const weekly = new Date(now + 3 * 86_400_000).toISOString();
+    const history = [5, 4, 3, 2, 1].map((h, i) => ({
+      captured_at: new Date(now - h * 3_600_000).toISOString(),
+      five_hour: { utilization: 10 + i * 8, resets_at: resets },
+      seven_day: { utilization: 5 + i * 3, resets_at: weekly },
+    }));
+    await mountView(page, {
+      view: "dashboard",
+      invoke: {
+        get_settings: { theme: "void", dashboardWidgets: ["session-chart", "weekly-chart"].map((id) => ({ id, enabled: true })) },
+        get_accounts_setup_prompt_state: { shouldShow: false },
+        list_accounts: [],
+        get_usage_map: {},
+        get_auth_state_map: {},
+        get_skill_usage_week: { entries: [], total_sessions: 0 },
+        list_instances: [],
+        get_history: history,
+        poll_now: null,
+      },
+    });
+    const chart = page.locator(".dash-widget[data-widget-id='session-chart']");
+    const drift = (): Promise<number> => chart.evaluate((w) => {
+      const body = w.querySelector<HTMLElement>(".dash-widget-body")!;
+      const svg = body.querySelector<SVGElement>("svg[data-w]");
+      return svg ? Math.abs(body.clientWidth - Number(svg.dataset["w"])) : Infinity;
+    });
+    await expect.poll(drift).toBeLessThanOrEqual(4);
+    const halfWidth = await chart.evaluate((w) => w.querySelector<HTMLElement>(".dash-widget-body")!.clientWidth);
+
+    await page.setViewportSize({ width: 560, height: 900 });
+    await expect(page.locator(".dash-pair")).toHaveClass(/is-single/);
+    expect(await chart.evaluate((w) => w.querySelector<HTMLElement>(".dash-widget-body")!.clientWidth)).toBeGreaterThan(halfWidth + 4);
+    await expect.poll(drift).toBeLessThanOrEqual(4);
+  });
+
   // P0-2: listAccounts/getUsageMap/getAuthStateMap self-catch in shared/api.ts
   // and never reach fullRefresh's own catch - the genuinely reachable
   // failure is the crossover auto-poll's pollNow() call, which does not.
