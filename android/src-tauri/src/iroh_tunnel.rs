@@ -1,4 +1,4 @@
-//! Iroh client half of the remote-access tunnel, serving a fixed loopback port.
+//! Iroh client half of the remote-access tunnel, serving a per-PC loopback port.
 //! Inverts `src-tauri/src/daemon/iroh_tunnel.rs::forward`: the daemon splices a
 //! QUIC bi-stream onto a fresh TCP connection, here it is the other way round.
 //!
@@ -35,7 +35,10 @@ const PORT_PROBES: u16 = 8;
 /// `rc_token` survives the upgrade without a re-pair.
 pub const LEGACY_LOOPBACK_PORT: u16 = 27184;
 
-/// The first port tried for `id`.
+/// The first port tried for `id`. Only two bytes feed it, but hashing every
+/// byte would move each already-paired PC to a new origin and drop its
+/// rc_token (a forced re-pair), while the 1000-port span leaves collision
+/// grinding cheap either way.
 pub fn derived_port(id: &EndpointId) -> u16 {
     let b = id.as_bytes();
     DERIVED_PORT_BASE + u16::from_le_bytes([b[0], b[1]]) % DERIVED_PORT_SPAN
@@ -44,13 +47,14 @@ pub fn derived_port(id: &EndpointId) -> u16 {
 /// Ports to try, in order: a collision moves to the next port in the range,
 /// so a given id lands on the same port whenever the same ports are free.
 fn port_candidates(id: &EndpointId, legacy: bool) -> Vec<u16> {
-    let first = derived_port(id) - DERIVED_PORT_BASE;
-    let derived = (0..PORT_PROBES).map(move |i| DERIVED_PORT_BASE + (first + i) % DERIVED_PORT_SPAN);
+    // The legacy PC's rc_token lives only in the 27184 origin, so a failed
+    // bind there must surface as an error: a derived port would silently
+    // present a fresh origin with no token.
     if legacy {
-        std::iter::once(LEGACY_LOOPBACK_PORT).chain(derived).collect()
-    } else {
-        derived.collect()
+        return vec![LEGACY_LOOPBACK_PORT];
     }
+    let first = derived_port(id) - DERIVED_PORT_BASE;
+    (0..PORT_PROBES).map(|i| DERIVED_PORT_BASE + (first + i) % DERIVED_PORT_SPAN).collect()
 }
 
 /// Loopback ports with a live tunnel behind them, read by the shell's
@@ -83,10 +87,41 @@ const WATCHDOG_TICK: Duration = Duration::from_secs(2);
 /// stops during device suspend, so only the wall clock shows the gap.
 const RESUME_GAP: Duration = Duration::from_secs(20);
 
+/// A running tunnel plus what is needed to stop it.
+struct RunningTunnel {
+    port: u16,
+    tunnel: Arc<Tunnel>,
+    tasks: [tokio::task::AbortHandle; 2],
+}
+
+impl RunningTunnel {
+    fn spawn(listener: TcpListener, port: u16, tunnel: Arc<Tunnel>) -> Self {
+        let watchdog = tokio::spawn(resume_watchdog(tunnel.clone())).abort_handle();
+        let accept = tokio::spawn(accept_loop(listener, tunnel.clone())).abort_handle();
+        if let Ok(mut ports) = LIVE_PORTS.write() {
+            ports.insert(port);
+        }
+        Self { port, tunnel, tasks: [watchdog, accept] }
+    }
+
+    /// Aborting the accept task drops the listener, freeing the port; removing
+    /// it from `LIVE_PORTS` makes the navigation guard refuse the old origin.
+    async fn shutdown(self) {
+        if let Ok(mut ports) = LIVE_PORTS.write() {
+            ports.remove(&self.port);
+        }
+        for task in &self.tasks {
+            task.abort();
+        }
+        self.tunnel.endpoint.close().await;
+    }
+}
+
 /// One running tunnel per endpoint id, keyed by id so a call for a second PC
-/// never gets the first PC's port back.
+/// never gets the first PC's port back. Only the PC currently being connected
+/// keeps a tunnel: switching PCs shuts the others down.
 #[derive(Default)]
-pub struct IrohTunnelState(Mutex<std::collections::HashMap<EndpointId, u16>>);
+pub struct IrohTunnelState(Mutex<std::collections::HashMap<EndpointId, RunningTunnel>>);
 
 #[tauri::command]
 pub async fn start_iroh_tunnel(
@@ -100,8 +135,12 @@ pub async fn start_iroh_tunnel(
         msg
     })?;
     let mut running = state.0.lock().await;
-    if let Some(port) = running.get(&remote_id) {
-        return Ok(*port);
+    if let Some(live) = running.get(&remote_id) {
+        return Ok(live.port);
+    }
+    for (old_id, old) in running.drain() {
+        info!("shutting down tunnel to {old_id} on port {}", old.port);
+        old.shutdown().await;
     }
 
     let endpoint = Endpoint::builder(presets::N0)
@@ -119,12 +158,7 @@ pub async fn start_iroh_tunnel(
     // A bare EndpointAddr (id only, no direct addrs) makes each connect() go
     // through the N0 preset's pkarr lookup, matching the desktop's ticket.
     let tunnel = Arc::new(Tunnel::new(endpoint, remote_id.into()));
-    tokio::spawn(resume_watchdog(tunnel.clone()));
-    tokio::spawn(accept_loop(listener, tunnel));
-    if let Ok(mut ports) = LIVE_PORTS.write() {
-        ports.insert(port);
-    }
-    running.insert(remote_id, port);
+    running.insert(remote_id, RunningTunnel::spawn(listener, port, tunnel));
     Ok(port)
 }
 
@@ -305,16 +339,36 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn shutdown_frees_the_port_and_revokes_navigation() {
+        let (server, _) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let running = RunningTunnel::spawn(listener, port, Arc::new(Tunnel::new(client, server)));
+        assert!(is_tunnel_port(port));
+        running.shutdown().await;
+        assert!(!is_tunnel_port(port));
+        let mut rebound = false;
+        for _ in 0..50 {
+            if TcpListener::bind(("127.0.0.1", port)).await.is_ok() {
+                rebound = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(rebound, "old listener still holds the port");
+    }
+
     #[test]
-    fn collisions_probe_forward_deterministically_and_legacy_tries_the_old_port_first() {
+    fn collisions_probe_forward_deterministically_and_legacy_binds_only_the_old_port() {
         let a = id(3);
         let c = port_candidates(&a, false);
         assert_eq!(c.len(), PORT_PROBES as usize);
         assert_eq!(c[0], derived_port(&a));
         assert_eq!(c, port_candidates(&a, false));
-        let legacy = port_candidates(&a, true);
-        assert_eq!(legacy[0], LEGACY_LOOPBACK_PORT);
-        assert_eq!(&legacy[1..], &c[..]);
+        // No derived fallback: it would be a fresh origin without the token.
+        assert_eq!(port_candidates(&a, true), vec![LEGACY_LOOPBACK_PORT]);
     }
 
     #[tokio::test]
