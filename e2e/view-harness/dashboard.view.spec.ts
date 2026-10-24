@@ -163,6 +163,22 @@ test.describe("view-harness / dashboard", () => {
     }
   });
 
+  // Widgets are boxed cards (the hairline dividers look was tried and
+  // reverted), and paired cards keep a gap between their columns.
+  test("widgets render as cards, with a gap between paired columns", async ({ page }) => {
+    await mountWithWidgets(page, ["session-chart", "session-bars"]);
+    const widget = page.locator(".dash-widget[data-widget-id='session-chart']");
+    const style = await widget.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, radius: cs.borderTopLeftRadius, border: cs.borderLeftWidth };
+    });
+    expect(style.bg).not.toBe("rgba(0, 0, 0, 0)");
+    expect(style.radius).toBe("10px");
+    expect(style.border).toBe("1px");
+    const gap = await page.locator(".dash-pair").evaluate((el) => getComputedStyle(el).columnGap);
+    expect(gap).toBe("12px");
+  });
+
   test("a half-width widget with no half-width neighbour spans the full width", async ({ page }) => {
     await mountWithWidgets(page, ["session-chart", "token-source", "session-bars"]);
     await expect(page.locator(".dash-widget[data-widget-id='session-bars']")).toBeAttached();

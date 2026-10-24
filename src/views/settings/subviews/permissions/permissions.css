@@ -1,8 +1,10 @@
 .view-settings-permissions .perm-project {
-  padding: 14px 0;
-  border-top: var(--dv-line);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--color-surface);
 }
-.view-settings-permissions .perm-project:first-child { border-top: 0; padding-top: 0; }
 
 .view-settings-permissions .perm-project__cwd {
   display: block;

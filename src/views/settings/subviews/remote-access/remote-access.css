@@ -58,16 +58,17 @@
 .ra-device-list {
   display: flex;
   flex-direction: column;
+  gap: 4px;
 }
 
 .ra-device-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: var(--dv-line);
+  padding: 8px 10px;
+  background: var(--color-surface-alt, #1a1d27);
+  border-radius: 6px;
 }
-.ra-device-row:last-child { border-bottom: 0; }
 
 .ra-device-info {
   display: flex;
@@ -144,8 +145,8 @@
   display: none;
 }
 
-/* A just-linked peer's row glows once in the accent and fades back to no
-   fill, so the eye lands on it without a lasting badge. */
+/* A just-linked peer's row glows once in the accent and settles back to the
+   normal row background, so the eye lands on it without a lasting badge. */
 .ra-device-row.ra-row-new {
   animation: ra-row-arrive 2.4s ease-out;
 }
@@ -156,8 +157,8 @@
 }
 
 @keyframes ra-row-arrive {
-  0%, 30% { background: color-mix(in srgb, var(--color-primary) 22%, transparent); }
-  100% { background: transparent; }
+  0%, 30% { background: color-mix(in srgb, var(--color-primary) 22%, var(--color-surface-alt, #1a1d27)); }
+  100% { background: var(--color-surface-alt, #1a1d27); }
 }
 
 .btn-danger-sm {
