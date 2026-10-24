@@ -130,6 +130,37 @@ where
     Ok((target, started))
 }
 
+/// Which chat's Playwright child holds each of Joe's browser profiles. The
+/// extension serves one connection at a time, so a second chat's child would
+/// make the first one's tab reset to about:blank; the second is refused instead.
+#[derive(Default)]
+struct ExtensionHolders(HashMap<String, String>);
+
+impl ExtensionHolders {
+    fn key(mine: &target::Mine) -> String {
+        format!("{:?}/{}", mine.app, mine.profile.as_deref().unwrap_or(""))
+    }
+
+    /// Ok when `session_id` now holds the profile (or already did); Err names
+    /// the chat that holds it.
+    fn try_acquire(&mut self, mine: &target::Mine, session_id: &str) -> Result<(), String> {
+        let holder = self.0.entry(Self::key(mine)).or_insert_with(|| session_id.to_string());
+        if holder == session_id { Ok(()) } else { Err(holder.clone()) }
+    }
+
+    fn release_session(&mut self, session_id: &str) {
+        self.0.retain(|_, holder| holder != session_id);
+    }
+
+    fn retain_sessions(&mut self, live: impl Fn(&str) -> bool) {
+        self.0.retain(|_, holder| live(holder));
+    }
+}
+
+const PROFILE_BUSY: &str = "Another chat is using Joe's browser (this app and profile), and its extension connection serves one chat at a time: \
+sharing it would reset that chat's tab. Switch this chat to Claude's own browser with browser_target (target own), or wait until \
+the other chat's browser goes idle (about ten minutes without a browser call) and try again.";
+
 pub struct ClaudeBrowser {
     root: PathBuf,
     chrome: Chrome,
@@ -142,6 +173,9 @@ pub struct ClaudeBrowser {
     /// Kept apart from `sessions`, whose entries the idle sweep drops: a chat
     /// that goes quiet for ten minutes must not slide back to the default.
     targets: Mutex<HashMap<String, Target>>,
+    /// Released whenever the holder's child ends: a stale replace, the idle
+    /// sweep, a target switch, the chat leaving the registry, or shutdown.
+    holders: Mutex<ExtensionHolders>,
 }
 
 /// The daemon's one browser. Rooted under the data dir, so a `CC_DATA_DIR`
@@ -164,6 +198,7 @@ impl ClaudeBrowser {
             install: Mutex::new(()),
             sessions: Mutex::new(HashMap::new()),
             targets: Mutex::new(HashMap::new()),
+            holders: Mutex::new(ExtensionHolders::default()),
         }
     }
 
@@ -182,9 +217,11 @@ impl ClaudeBrowser {
             Request::Report => {}
             Request::Default => {
                 targets.remove(session_id);
+                self.drop_extension_child(session_id).await;
             }
             Request::Set(target) => {
                 targets.insert(session_id.to_string(), target);
+                self.drop_extension_child(session_id).await;
             }
         }
         let current = targets.get(session_id).unwrap_or(&start);
@@ -193,6 +230,40 @@ impl ClaudeBrowser {
             text.push_str(" A connect page opens in that browser on the next browser call, and Joe has to approve it.");
         }
         Ok(json!({ "content": [{ "type": "text", "text": text }] }))
+    }
+
+    /// Ends `session_id`'s child and frees its hold on Joe's browser, so a
+    /// chat that switched away does not keep the extension connection busy
+    /// until its next call. A child mid-call is left; its next call retires it.
+    async fn drop_extension_child(&self, session_id: &str) {
+        let slot = self.sessions.lock().await.get(session_id).cloned();
+        if let Some(slot) = slot {
+            let Ok(mut client) = slot.try_lock() else { return };
+            if let Some(mut c) = client.take() {
+                c.retire().await;
+            }
+        }
+        self.holders.lock().await.release_session(session_id);
+    }
+
+    /// Takes Joe's browser profile for `session_id`, or says why not. A holder
+    /// whose child is already dead or gone is evicted instead of blocking.
+    async fn claim_extension(&self, mine: &target::Mine, session_id: &str) -> Result<(), String> {
+        mine.check_extension_installed()?;
+        for _ in 0..2 {
+            let Err(holder) = self.holders.lock().await.try_acquire(mine, session_id) else { return Ok(()) };
+            let slot = self.sessions.lock().await.get(&holder).cloned();
+            let gone = match slot.as_ref().map(|s| s.try_lock()) {
+                None => true,
+                Some(Ok(mut c)) => c.as_mut().is_none_or(|c| !c.is_alive()),
+                Some(Err(_)) => false,
+            };
+            if !gone {
+                break;
+            }
+            self.holders.lock().await.release_session(&holder);
+        }
+        Err(PROFILE_BUSY.to_string())
     }
 
     /// Runs one Playwright MCP tool for `session_id`'s chat against the
@@ -229,9 +300,19 @@ impl ClaudeBrowser {
             if let Some(mut old) = client.take() {
                 old.retire().await;
             }
+            self.holders.lock().await.release_session(session_id);
+            if let Attach::Extension(mine) = &attach {
+                self.claim_extension(mine, session_id).await?;
+            }
             let node = runtime::node_bin()?;
             let started =
-                PlaywrightClient::start(&node, &runtime::cli_path(&runtime_dir), &attach, &self.root.join("output")).await?;
+                match PlaywrightClient::start(&node, &runtime::cli_path(&runtime_dir), &attach, &self.root.join("output")).await {
+                    Ok(started) => started,
+                    Err(e) => {
+                        self.holders.lock().await.release_session(session_id);
+                        return Err(e);
+                    }
+                };
             *client = Some(started);
         }
         let c = client.as_mut().expect("client set above");
@@ -242,6 +323,7 @@ impl ClaudeBrowser {
         if result.is_err() && !c.is_alive() {
             // Next call starts a fresh one rather than reusing a dead pipe.
             *client = None;
+            self.holders.lock().await.release_session(session_id);
         }
         result
     }
@@ -251,6 +333,7 @@ impl ClaudeBrowser {
     /// gone from the session registry loses it.
     pub async fn prune_targets(&self, live_ids: &std::collections::HashSet<String>) {
         self.targets.lock().await.retain(|id, _| live_ids.contains(id));
+        self.holders.lock().await.retain_sessions(|id| live_ids.contains(id));
     }
 
     /// Ends chats' Playwright children unused for `SESSION_IDLE`, then lets
@@ -266,6 +349,7 @@ impl ClaudeBrowser {
                 }
                 drop(client);
                 self.sessions.lock().await.remove(&id);
+                self.holders.lock().await.release_session(&id);
             }
         }
         if self.sessions.lock().await.is_empty() {
@@ -274,6 +358,7 @@ impl ClaudeBrowser {
     }
 
     pub async fn shutdown(&self) {
+        self.holders.lock().await.0.clear();
         let slots: Vec<_> = self.sessions.lock().await.drain().map(|(_, v)| v).collect();
         for slot in slots {
             if let Some(mut c) = slot.lock().await.take() {
@@ -329,6 +414,64 @@ mod tests {
         .await;
         assert!(failed.is_err());
         assert_eq!(targets.lock().await.get("c"), Some(&Target::Own));
+    }
+
+    fn mine_of(app: target::App, profile: Option<&str>) -> target::Mine {
+        target::Mine { app, profile: profile.map(str::to_string) }
+    }
+
+    #[test]
+    fn a_second_chat_cannot_take_a_profile_another_chat_holds() {
+        let mut h = ExtensionHolders::default();
+        let brave = mine_of(target::App::Brave, Some("Profile 1"));
+        assert!(h.try_acquire(&brave, "a").is_ok());
+        assert!(h.try_acquire(&brave, "a").is_ok(), "the holder itself may restart its child");
+        assert_eq!(h.try_acquire(&brave, "b"), Err("a".to_string()));
+        assert!(h.try_acquire(&mine_of(target::App::Brave, Some("Profile 2")), "b").is_ok(), "another profile is free");
+        assert!(h.try_acquire(&mine_of(target::App::Chrome, Some("Profile 1")), "b").is_ok(), "another app is free");
+    }
+
+    #[test]
+    fn releasing_a_chat_frees_its_profile() {
+        let mut h = ExtensionHolders::default();
+        let edge = mine_of(target::App::Edge, None);
+        h.try_acquire(&edge, "a").unwrap();
+        h.release_session("a");
+        assert!(h.try_acquire(&edge, "b").is_ok());
+        h.retain_sessions(|id| id != "b");
+        assert!(h.try_acquire(&edge, "c").is_ok(), "a chat gone from the registry frees its hold");
+    }
+
+    #[tokio::test]
+    async fn the_busy_refusal_names_the_other_chat_and_the_way_out() {
+        let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        let mine = mine_of(target::App::Chrome, Some("Nonexistent Profile"));
+        b.holders.lock().await.try_acquire(&mine, "a").unwrap();
+        // "a" has a slot that is mid-call, so it counts as live.
+        let slot = Arc::new(Mutex::new(None));
+        let _busy = slot.clone().try_lock_owned().unwrap();
+        b.sessions.lock().await.insert("a".into(), slot);
+        let err = b.claim_extension(&mine, "b").await.unwrap_err();
+        assert!(err.contains("Another chat") && err.contains("browser_target") && err.contains("idle"), "{err}");
+        assert!(b.claim_extension(&mine, "a").await.is_ok(), "the holder is not refused");
+    }
+
+    #[tokio::test]
+    async fn a_holder_whose_child_is_gone_is_evicted() {
+        let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        let mine = mine_of(target::App::Chrome, Some("Nonexistent Profile"));
+        b.holders.lock().await.try_acquire(&mine, "a").unwrap();
+        b.sessions.lock().await.insert("a".into(), Arc::new(Mutex::new(None)));
+        assert!(b.claim_extension(&mine, "b").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn pruning_frees_the_hold_of_a_chat_gone_from_the_registry() {
+        let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        let mine = mine_of(target::App::Edge, None);
+        b.holders.lock().await.try_acquire(&mine, "gone").unwrap();
+        b.prune_targets(&std::collections::HashSet::new()).await;
+        assert!(b.holders.lock().await.try_acquire(&mine, "b").is_ok());
     }
 
     #[tokio::test]
