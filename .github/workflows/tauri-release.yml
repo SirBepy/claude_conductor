@@ -526,8 +526,11 @@ jobs:
 
       # Off until PLAY_SERVICE_ACCOUNT_JSON exists, so adding that secret is the
       # switch that turns on publishing to Play's internal testing track.
+      # A Play refusal (version clash, draft app) must not hold back the GitHub
+      # release of the APK this job already built, which needs this job green.
       - name: Upload to Google Play internal testing
         if: steps.signing.outputs.signed == 'true'
+        continue-on-error: true
         shell: bash
         env:
           PLAY_SA_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
