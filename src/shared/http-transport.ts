@@ -330,6 +330,9 @@ export class HttpTransport implements Transport {
       // Android shell's FCM relay handle (shared/native-push.ts).
       case "register_fcm_handle":
         return this.rpc<T>("register_fcm_handle", { handle: args.handle, secret: args.secret });
+      // The phone's one settings write (it is refused save_settings).
+      case "set_push_show_chat_name":
+        return this.rpc<T>("set_push_show_chat_name", { value: args.value });
       // Ask panel (todo 1007): same fab-dial reachability as Todos above.
       case "ask_list_threads":
         return this.rpc<T>("ask_list_threads", { session_id: args.sessionId ?? args.session_id });

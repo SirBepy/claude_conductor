@@ -445,6 +445,7 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "session_characters_changed" => { let _ = app.emit("session-characters-changed", params); }
         "characters_changed" => { let _ = app.emit("characters-changed", params); }
         "jarvis_session_created" => handlers::handle_jarvis_session_created(app, params),
+        "push_show_chat_name_set" => handlers::handle_push_show_chat_name_set(app, params),
         other => {
             log::debug!("daemon notif ignored: {other}");
         }

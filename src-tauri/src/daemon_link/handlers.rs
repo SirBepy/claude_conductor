@@ -226,6 +226,24 @@ pub(super) fn handle_jarvis_session_created(app: &tauri::AppHandle, params: serd
     }
 }
 
+/// The phone flipped "Show chat name in notifications" (`set_push_show_chat_name`)
+/// and the daemon updated its own cache; merge the same value here and persist.
+pub(super) fn handle_push_show_chat_name_set(app: &tauri::AppHandle, params: serde_json::Value) {
+    use tauri::Manager;
+    if let Some(value) = params.get("value").and_then(|v| v.as_bool()) {
+        let state = app.state::<crate::state::AppState>();
+        let mut settings_guard = state.settings.lock().unwrap();
+        settings_guard.extra.insert(
+            crate::daemon::methods::PUSH_SHOW_CHAT_NAME_KEY.to_string(),
+            serde_json::Value::Bool(value),
+        );
+        settings_guard.bump_generation();
+        let snapshot = settings_guard.clone();
+        drop(settings_guard);
+        crate::settings::persist(app, &snapshot);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{respawned_attached_sessions, stale_attached_sessions};

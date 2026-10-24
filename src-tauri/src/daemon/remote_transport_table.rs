@@ -467,6 +467,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // subscription through /api/push/subscribe. P, never M: a peer machine has
     // no phone of its own to enrol on this daemon.
     ("register_fcm_handle", P),
+    // Write: flips the single privacy boolean `pushShowChatName` in
+    // Settings.extra and nothing else (the value is bool-validated, no key
+    // comes from params), so the phone gets this one setting without being
+    // allowed `save_settings`. P, never M: a peer has no phone UI here.
+    ("set_push_show_chat_name", P),
     // Machine-only: `unpair_machine`'s outbound half. Removes ctx.transport's
     // own entry, never a params-supplied id (see methods/machines.rs).
     ("peer_unpaired", M),
@@ -777,6 +782,13 @@ mod tests {
     fn register_fcm_handle_is_phone_only() {
         assert!(allowed("register_fcm_handle", &Transport::Phone));
         assert!(!allowed("register_fcm_handle", &Transport::PeerMachine("x".into())));
+    }
+
+    /// The phone's one settings write; a peer machine has no such toggle.
+    #[test]
+    fn set_push_show_chat_name_is_phone_only() {
+        assert!(allowed("set_push_show_chat_name", &Transport::Phone));
+        assert!(!allowed("set_push_show_chat_name", &Transport::PeerMachine("x".into())));
     }
 
     /// The host halves of the cross-machine account picker are machine-only:

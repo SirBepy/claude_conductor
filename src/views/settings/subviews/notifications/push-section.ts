@@ -4,12 +4,21 @@ import { pushSupported, pushEnabledLocally, enablePush, disablePush } from "../.
 // Phone-only Web Push enrolment (ai_todo 119). The desktop drives OS notifs via
 // the notif cards; the phone instead subscribes to daemon-sent pushes for "Claude
 // is blocked on you" while the PC is idle. Hidden entirely on desktop and on
-// browsers without Push support.
+// browsers without Push support, except inside the Android app (see below).
 export function wirePushSection(root: HTMLElement): void {
   const section = root.querySelector<HTMLElement>("#push-section");
   if (!section) return;
-  if (!isRemote() || !pushSupported()) {
+  if (!isRemote()) {
     section.style.display = "none";
+    return;
+  }
+  // The Android app's WebView has no PushManager; it gets native FCM pushes
+  // instead, so only the chat-name toggle applies there.
+  const nativeApp = !!(window as { ConductorPush?: unknown }).ConductorPush;
+  if (!pushSupported()) {
+    section.style.display = nativeApp ? "" : "none";
+    const webRows = root.querySelector<HTMLElement>("#push-web-rows");
+    if (webRows) webRows.style.display = "none";
     return;
   }
   section.style.display = "";

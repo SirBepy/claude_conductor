@@ -121,6 +121,15 @@ impl SettingsCache {
         let mut g = self.inner.lock().unwrap();
         g.jarvis_session_id = Some(session_id.to_string());
     }
+
+    /// Sets one boolean `Settings.extra` key and nothing else, for an instant
+    /// in-memory read. The caller publishes a notification so the app process
+    /// persists the same value (this module's header: the daemon never writes
+    /// settings.json itself).
+    pub fn set_extra_bool(&self, key: &str, value: bool) {
+        let mut g = self.inner.lock().unwrap();
+        g.extra.insert(key.to_string(), serde_json::Value::Bool(value));
+    }
 }
 
 #[cfg(test)]

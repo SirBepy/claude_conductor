@@ -2,6 +2,7 @@ import { html, render } from "lit-html";
 import { saveSettings, NOTIF_TYPES } from "../../../../shared/settings-save";
 import { getSettings } from "../../../../shared/state";
 import { isRemote } from "../../../../shared/transport";
+import { invoke } from "../../../../shared/ipc";
 import { settingsHeader, toggleRow } from "../../ui";
 import {
   buildNotifCards,
@@ -94,6 +95,22 @@ async function hydrateNotifications(): Promise<void> {
     }
   }
 
+  // Phone: same toggle as the desktop one, but saveSettings is refused there,
+  // so it goes through the dedicated single-key RPC instead.
+  if (isRemote()) {
+    const phoneShowName = $("pushShowChatNamePhoneSwitch") as HTMLInputElement | null;
+    if (phoneShowName) {
+      phoneShowName.checked = s.pushShowChatName !== false;
+      phoneShowName.addEventListener("change", () => {
+        const wanted = phoneShowName.checked;
+        invoke("set_push_show_chat_name", { value: wanted }).catch((e) => {
+          console.error("[notifications] set_push_show_chat_name failed", e);
+          phoneShowName.checked = !wanted;
+        });
+      });
+    }
+  }
+
   await populateMicPicker();
   wirePttCapture();
 }
@@ -135,6 +152,7 @@ function template() {
       <div class="view-body">
         <div class="kit-section" id="push-section" style="display:none">
           <div class="kit-section-title">Push to this phone</div>
+          <div id="push-web-rows">
           <div class="kit-row">
             <span class="kit-row-label">Notify me when Claude is blocked (PC idle)</span>
             <label class="kit-toggle">
@@ -145,6 +163,9 @@ function template() {
           <p class="ra-caption push-status-caption" id="push-status">
             Get a push on this phone when a chat needs a permission or a question answered and you've stepped away from the PC.
           </p>
+          </div>
+          ${toggleRow({ label: "Show chat name in notifications", inputId: "pushShowChatNamePhoneSwitch", checked: true })}
+          <div class="settings-caption">Off sends a generic "A chat is waiting on you", so no chat title shows on a lock screen.</div>
         </div>
         ${isRemote() ? "" : html`
         <div class="kit-section" id="phonePushSection">

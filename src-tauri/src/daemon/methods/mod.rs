@@ -99,7 +99,7 @@ pub use machines::register_machines;
 pub use ask::register_ask;
 pub use permission::register_responders;
 pub use pr_review::register_pr_review;
-pub use push::register_push;
+pub use push::{register_push, PUSH_SHOW_CHAT_NAME_KEY};
 pub use preview::register_preview;
 pub use project_dashboard::register_project_dashboard;
 pub use registry::register_chat_registry;
