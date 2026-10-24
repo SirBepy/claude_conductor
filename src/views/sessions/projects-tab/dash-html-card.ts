@@ -4,7 +4,10 @@
 // `sandbox="allow-scripts"` and no `allow-same-origin`: an opaque origin that
 // cannot touch the app. A srcdoc frame also inherits the app's CSP, and the
 // meta below can only narrow it, so the card has no network at all; its data
-// arrives inline as window.CARD_DATA.
+// arrives inline as window.CARD_DATA. Not blocked: the frame navigating
+// itself, which the app's frame-src limits to loopback. Accepted, since the
+// chat writing a template is already trusted to run commands on this PC and
+// every card write asks for permission.
 import { html, type TemplateResult } from "lit-html";
 
 const CARD_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:";
@@ -15,15 +18,32 @@ const MAX_H = 900;
 const LINE_SEP = new RegExp(String.fromCharCode(0x2028), "g");
 const PARA_SEP = new RegExp(String.fromCharCode(0x2029), "g");
 
-/** The app's colour and font tokens, so a card matches whichever theme is on. */
+const isToken = (name: string): boolean => name.startsWith("--color-") || name.startsWith("--font-");
+
+/** The app's colour and font tokens, so a card matches whichever theme is on.
+ *  Names come from the stylesheets as well as the computed style: Chromium
+ *  lists custom properties when a computed style is iterated, WebKit (the Mac
+ *  build) does not. */
 function themeVars(): string {
+  const names = new Set<string>();
   const cs = getComputedStyle(document.documentElement);
-  const out: string[] = [];
-  for (let i = 0; i < cs.length; i++) {
-    const name = cs[i]!;
-    if (name.startsWith("--color-") || name.startsWith("--font-")) {
-      out.push(`${name}:${cs.getPropertyValue(name).trim()}`);
+  for (let i = 0; i < cs.length; i++) if (isToken(cs[i]!)) names.add(cs[i]!);
+  const walk = (rules: CSSRuleList): void => {
+    for (const rule of Array.from(rules)) {
+      if (rule instanceof CSSStyleRule) {
+        for (let i = 0; i < rule.style.length; i++) if (isToken(rule.style[i]!)) names.add(rule.style[i]!);
+      } else if ("cssRules" in rule) {
+        walk((rule as CSSGroupingRule).cssRules);
+      }
     }
+  };
+  for (const sheet of Array.from(document.styleSheets)) {
+    try { walk(sheet.cssRules); } catch { /* a cross-origin sheet (fonts) cannot be read */ }
+  }
+  const out: string[] = [];
+  for (const name of names) {
+    const value = cs.getPropertyValue(name).trim();
+    if (value) out.push(`${name}:${value}`);
   }
   return out.join(";");
 }
@@ -43,7 +63,7 @@ export function buildCardDoc(template: string, data: unknown, theme: string): st
     + `<style>:root{${theme}}html,body{margin:0;background:transparent;color:var(--color-text);`
     + `font:13px/1.45 'DM Sans',system-ui,sans-serif;overflow:hidden}</style>`
     + `<script>window.CARD_DATA=${inlineJson(data)};</script></head><body>${template}`
-    + `<script>(function(){var last=-1;function send(){var h=document.documentElement.scrollHeight;`
+    + `<script>(function(){var last=-1;function send(){var h=Math.ceil(document.documentElement.getBoundingClientRect().height);`
     + `if(h!==last){last=h;parent.postMessage({type:"${HEIGHT_MSG}",h:h},"*");}}`
     + `new ResizeObserver(send).observe(document.documentElement);send();})();</script></body></html>`;
 }
