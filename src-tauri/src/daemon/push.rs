@@ -66,6 +66,11 @@ const GENERIC_BODY: &str = "A chat is waiting on you";
 pub struct FcmHandle {
     pub handle: String,
     pub secret: String,
+    /// The paired phone (device registry id) that enrolled this handle, so revoking
+    /// that device can drop it. Never read from RPC params: only
+    /// `register_fcm_handle_for_device` sets it, from the authenticated connection.
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 /// What the relay said about one handle.
@@ -177,7 +182,8 @@ impl PushManager {
 
     /// Register an Android relay handle (dedup by handle, newest last) and
     /// persist. `false` when empty or oversized and refused.
-    pub fn register_fcm_handle(&self, h: FcmHandle) -> bool {
+    pub fn register_fcm_handle(&self, mut h: FcmHandle) -> bool {
+        h.device_id = None; // params are untrusted; see `register_fcm_handle_for_device`
         if h.handle.is_empty()
             || h.secret.is_empty()
             || h.handle.len() > MAX_HANDLE_LEN
@@ -199,6 +205,39 @@ impl PushManager {
         };
         self.persist_fcm(&snapshot);
         true
+    }
+
+    /// Register a handle on behalf of an authenticated paired device, so
+    /// `unregister_fcm_handles_for_device` can find it when that device is revoked.
+    pub fn register_fcm_handle_for_device(&self, h: FcmHandle, device_id: &str) -> bool {
+        let handle = h.handle.clone();
+        if !self.register_fcm_handle(h) {
+            return false;
+        }
+        let snapshot = {
+            let mut hs = self.fcm_handles.lock().unwrap();
+            if let Some(x) = hs.iter_mut().find(|x| x.handle == handle) {
+                x.device_id = Some(device_id.to_string());
+            }
+            hs.clone()
+        };
+        self.persist_fcm(&snapshot);
+        true
+    }
+
+    /// Drop every handle a revoked/unpaired device enrolled and persist. Legacy
+    /// handles with no recorded device stay until a relay 404 prunes them.
+    pub fn unregister_fcm_handles_for_device(&self, device_id: &str) -> usize {
+        let (removed, snapshot) = {
+            let mut hs = self.fcm_handles.lock().unwrap();
+            let before = hs.len();
+            hs.retain(|x| x.device_id.as_deref() != Some(device_id));
+            (before - hs.len(), hs.clone())
+        };
+        if removed > 0 {
+            self.persist_fcm(&snapshot);
+        }
+        removed
     }
 
     /// Drop an FCM handle by value and persist.
@@ -540,7 +579,7 @@ mod tests {
     }
 
     fn handle(h: &str) -> FcmHandle {
-        FcmHandle { handle: h.into(), secret: "dummy-secret".into() }
+        FcmHandle { handle: h.into(), secret: "dummy-secret".into(), device_id: None }
     }
 
     #[test]
@@ -565,6 +604,25 @@ mod tests {
     }
 
     #[test]
+    fn revoking_a_device_drops_only_its_handles() {
+        let dir = tempfile::tempdir().unwrap();
+        let pm = PushManager::load(dir.path().to_path_buf());
+        assert!(pm.register_fcm_handle_for_device(handle("a1"), "dev-a"));
+        assert!(pm.register_fcm_handle_for_device(handle("a2"), "dev-a"));
+        assert!(pm.register_fcm_handle_for_device(handle("b1"), "dev-b"));
+        // A client-claimed device id in params must not survive plain registration.
+        let mut forged = handle("f1");
+        forged.device_id = Some("dev-b".into());
+        assert!(pm.register_fcm_handle(forged));
+        assert_eq!(pm.unregister_fcm_handles_for_device("dev-a"), 2);
+        let left: Vec<String> = pm.fcm_handles.lock().unwrap().iter().map(|x| x.handle.clone()).collect();
+        assert_eq!(left, vec!["b1".to_string(), "f1".to_string()]);
+        assert_eq!(load_fcm_handles(dir.path()).len(), 2, "removal persisted");
+        assert_eq!(pm.unregister_fcm_handles_for_device("dev-b"), 1, "forged id was not kept");
+        assert_eq!(pm.unregister_fcm_handles_for_device("nobody"), 0);
+    }
+
+    #[test]
     fn fcm_handles_refuse_oversized_or_empty_and_unregister() {
         let dir = tempfile::tempdir().unwrap();
         let pm = PushManager::load(dir.path().to_path_buf());
@@ -572,6 +630,7 @@ mod tests {
         assert!(!pm.register_fcm_handle(FcmHandle {
             handle: "a".into(),
             secret: "s".repeat(MAX_SECRET_LEN + 1),
+            device_id: None,
         }));
         assert!(!pm.register_fcm_handle(handle("")));
         assert!(pm.fcm_handles.lock().unwrap().is_empty());

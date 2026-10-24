@@ -19,10 +19,18 @@ object PushPolicy {
     else -> AfterUpdate.RETRY_LATER
   }
 
-  // App start syncs when nothing is registered yet, or when the last /update or
-  // /register did not go through (a "dirty" token), so one network blip never
-  // leaves the relay holding a stale token until FCM happens to rotate it.
-  fun needsSyncAtStart(hasHandle: Boolean, tokenDirty: Boolean): Boolean = !hasHandle || tokenDirty
+  // App start always syncs. The daemon drops a handle once the relay says it is
+  // gone, and nothing tells the phone; an /update at start finds that out (404 or
+  // 401 -> REGISTER_FRESH) and enrols a fresh handle, instead of the shell
+  // re-enrolling the same dead one on every launch. It also refreshes a token
+  // whose last /update or /register failed.
+  @Suppress("UNUSED_PARAMETER")
+  fun needsSyncAtStart(hasHandle: Boolean, tokenDirty: Boolean): Boolean = true
+
+  // Each pending-chat delivery chain counts its own attempts, so overlapping chains
+  // (unlock, WebView ready, onNewIntent) each keep the full window.
+  const val OPEN_CHAT_MAX_ATTEMPTS = 15
+  fun shouldRetryOpenChat(attemptsSoFar: Int): Boolean = attemptsSoFar < OPEN_CHAT_MAX_ATTEMPTS
 
   // Only a confirmed /update clears the dirty mark; REGISTER_FRESH clears it
   // once the new registration lands.

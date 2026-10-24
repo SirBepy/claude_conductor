@@ -32,10 +32,17 @@ class PushPolicyTest {
   }
 
   @Test
-  fun appStartSyncsWhenUnregisteredOrTheLastSyncFailed() {
+  fun appStartAlwaysSyncsSoAPrunedHandleIsReplaced() {
     assertEquals(true, PushPolicy.needsSyncAtStart(hasHandle = false, tokenDirty = false))
     assertEquals(true, PushPolicy.needsSyncAtStart(hasHandle = true, tokenDirty = true))
-    assertEquals(false, PushPolicy.needsSyncAtStart(hasHandle = true, tokenDirty = false))
+    assertEquals(true, PushPolicy.needsSyncAtStart(hasHandle = true, tokenDirty = false))
+  }
+
+  @Test
+  fun openChatRetriesStopAtTheCapPerChain() {
+    assertEquals(true, PushPolicy.shouldRetryOpenChat(1))
+    assertEquals(true, PushPolicy.shouldRetryOpenChat(PushPolicy.OPEN_CHAT_MAX_ATTEMPTS - 1))
+    assertEquals(false, PushPolicy.shouldRetryOpenChat(PushPolicy.OPEN_CHAT_MAX_ATTEMPTS))
   }
 
   @Test
