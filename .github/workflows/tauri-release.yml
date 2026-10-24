@@ -444,17 +444,19 @@ jobs:
           fi
 
       # google-services.json is gitignored (it ties the APK to one Firebase
-      # project), so CI writes it from a secret.
+      # project), so CI writes it from a secret. The app module applies the
+      # google-services plugin unconditionally, so a build without it cannot
+      # succeed: fail here, where the reason is readable.
       - name: Write google-services.json
         shell: bash
         env:
           GOOGLE_SERVICES_B64: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
           if [ -z "$GOOGLE_SERVICES_B64" ]; then
-            echo "::warning::ANDROID_GOOGLE_SERVICES_JSON_BASE64 is unset, so the APK has no Firebase config."
-          else
-            echo "$GOOGLE_SERVICES_B64" | base64 -d > android/src-tauri/gen/android/app/google-services.json
+            echo "::error::ANDROID_GOOGLE_SERVICES_JSON_BASE64 is unset. The Android build needs google-services.json (Firebase project claude-conductor-62582); set the secret to the base64 of that file."
+            exit 1
           fi
+          echo "$GOOGLE_SERVICES_B64" | base64 -d > android/src-tauri/gen/android/app/google-services.json
 
       - name: Build APK
         shell: bash
