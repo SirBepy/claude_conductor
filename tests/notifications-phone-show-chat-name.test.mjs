@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 let settings = {};
-vi.mock("../src/shared/state.ts", () => ({ getSettings: () => settings }));
+vi.mock("../src/shared/state.ts", () => ({ getSettings: () => settings, setSettings: (s) => { settings = s; } }));
 vi.mock("../src/shared/transport.ts", async (importOriginal) => {
   const actual = await importOriginal();
   return { ...actual, isRemote: () => true };
@@ -51,6 +51,15 @@ describe("phone Show chat name toggle", () => {
     sw.dispatchEvent(new Event("change"));
     expect(invoke).toHaveBeenCalledWith("set_push_show_chat_name", { value: false });
     expect(saveSettings).not.toHaveBeenCalled();
+  });
+
+  it("keeps the cached settings in step, so a remount shows what the daemon holds", async () => {
+    const sw = await mount();
+    sw.checked = false;
+    sw.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(settings.pushShowChatName).toBe(false));
+    document.body.innerHTML = "";
+    expect((await mount()).checked).toBe(false);
   });
 
   // jsdom has no PushManager, the same as the Android app's WebView.

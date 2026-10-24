@@ -1,6 +1,6 @@
 import { html, render } from "lit-html";
 import { saveSettings, NOTIF_TYPES } from "../../../../shared/settings-save";
-import { getSettings } from "../../../../shared/state";
+import { getSettings, setSettings } from "../../../../shared/state";
 import { isRemote } from "../../../../shared/transport";
 import { invoke } from "../../../../shared/ipc";
 import { settingsHeader, toggleRow } from "../../ui";
@@ -103,7 +103,10 @@ async function hydrateNotifications(): Promise<void> {
       phoneShowName.checked = s.pushShowChatName !== false;
       phoneShowName.addEventListener("change", () => {
         const wanted = phoneShowName.checked;
-        invoke("set_push_show_chat_name", { value: wanted }).catch((e) => {
+        invoke("set_push_show_chat_name", { value: wanted }).then(() => {
+          // The view hydrates from this cache on its next mount.
+          setSettings({ ...getSettings(), pushShowChatName: wanted });
+        }).catch((e) => {
           console.error("[notifications] set_push_show_chat_name failed", e);
           phoneShowName.checked = !wanted;
         });
