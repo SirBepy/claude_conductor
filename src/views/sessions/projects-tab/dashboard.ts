@@ -79,7 +79,7 @@ const ONE_COLUMN = "(max-width: 900px)";
 
 /** Re-places the half-width sections by measured height. True when the
  *  placement changed and the dashboard needs another paint. */
-export function rebalance(root: HTMLElement, c: DashCtx): boolean {
+function rebalance(root: HTMLElement, c: DashCtx): boolean {
   const cols = root.querySelector<HTMLElement>(".pd-cols");
   if (!cols) return false;
   const secs = [...cols.querySelectorAll<HTMLElement>(".pd-col > [data-pd-card]")];

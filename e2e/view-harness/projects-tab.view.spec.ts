@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 // asserts: src/views/sessions/projects-tab/projects-tab.ts, src/views/sessions/projects-tab/projects-list.ts, src/views/sessions/projects-tab/dashboard.ts, src/views/sessions/projects-tab/dash-sections.ts, src/views/sessions/projects-tab/dash-cards.ts, src/views/sessions/projects-tab/dash-reports.ts, src/views/sessions/projects-tab/dash-header.ts, src/views/sessions/projects-tab/dash-modals.ts, src/views/sessions/projects-tab/dash-kebab.ts, src/views/sessions/projects-tab/dash-chats.ts, src/views/sessions/projects-tab/quick-track.ts, src/views/sessions/projects-tab/open-picker.ts, src/views/sessions/projects-tab/paging.ts, src/views/sessions/state.ts, src/views/sessions/session-controls.ts
 // Reviewed 2026-10-24: dash-cards.ts gained the html display kind (a sandboxed frame, dashboard-html-card.view.spec.ts); stats and list cards render as before, so this spec's contract is unaffected.
-import { capture, mountSessionsList, sessionInstance } from "./harness";
+import { capture, fireEvent, mountSessionsList, sessionInstance } from "./harness";
 import {
   CONDUCTOR_CWD, LIST_ROWS, ZIRTUE_CWDS, conductorHistory, conductorSnapshot, fakeShot, zirtueHistory, zirtueSnapshot,
 } from "./projects-tab-fixtures";
@@ -29,6 +29,8 @@ interface Backend {
 async function fakeDashboardBackend(page: Page, backend: Backend): Promise<void> {
   await page.addInitScript((b) => {
     let tauri: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } | undefined;
+    // Exposed so a test can change what the next fetch answers.
+    (window as unknown as { __ccDashBackend: unknown }).__ccDashBackend = b;
     Object.defineProperty(window, "__TAURI__", {
       configurable: true,
       get: () => tauri,
@@ -224,6 +226,45 @@ test.describe("view-harness / Projects tab", () => {
     await expect(modal.locator("[data-pd-pin]").nth(8)).toHaveAttribute("data-pd-pin", "/recap");
     await modal.locator('[data-pd-pin="/recap"] button[title="Remove"]').click();
     await expect(modal.locator("[data-pd-pin]")).toHaveCount(9);
+  });
+
+  test("a refetch painted while the pane was hidden re-balances the columns once the pane is shown", async ({ page }) => {
+    await mountWithDashboard(page);
+    await page.locator('[data-pd-tab="projects"]').click();
+    await projectRow(page, "Zirtue").click();
+    const root = page.locator('.pd-root[data-pd-target="group:g-zirtue"]');
+    await expect(card(page, "card:c-ck")).toBeVisible();
+    const placement = (): Promise<string[][]> => root.evaluate((el) => [...el.querySelectorAll(".pd-col")].map((col) =>
+      [...col.querySelectorAll<HTMLElement>(":scope > [data-pd-card]")].map((s) => s.dataset.pdCard!)));
+    const before = await placement();
+
+    // While hidden, Ship state drops to one repo, which moves the balance point.
+    // That paint measures every section as 0 and keeps the old placement; only
+    // the root's ResizeObserver re-balances once the pane has a size again.
+    await page.locator("#session-pane").evaluate((el) => { el.style.display = "none"; });
+    await page.evaluate(() => {
+      const b = (window as unknown as { __ccDashBackend: { snapshots: Record<string, { ship: unknown[] }> } }).__ccDashBackend;
+      b.snapshots["g-zirtue"]!.ship = b.snapshots["g-zirtue"]!.ship.slice(0, 1);
+    });
+    await fireEvent(page, "dashboard-changed", [null]);
+    await expect(card(page, "ship")).not.toContainText("zng-admin");
+    expect(await placement()).toEqual(before);
+
+    await page.locator("#session-pane").evaluate((el) => { el.style.display = ""; });
+    // The placement a fresh greedy pass would pick from the shown heights.
+    const expected = async (): Promise<string[][]> => root.evaluate((el) => {
+      const ids = ["next_up", "ship", "card:c-sc", "card:c-ck"];
+      const height = (id: string): number => {
+        const sec = el.querySelector<HTMLElement>(`.pd-col > [data-pd-card="${id}"]`)!;
+        return sec.lastElementChild!.getBoundingClientRect().bottom - sec.getBoundingClientRect().top;
+      };
+      const total = [0, 0];
+      const cols: string[][] = [[], []];
+      for (const id of ids) { const c = total[0]! <= total[1]! ? 0 : 1; total[c]! += height(id); cols[c]!.push(id); }
+      return cols;
+    });
+    await expect.poll(async () => JSON.stringify(await placement()) === JSON.stringify(await expected())).toBe(true);
+    expect(await placement()).not.toEqual(before);
   });
 
   test("clicking a running chat flips to Chats and selects it", async ({ page }) => {
