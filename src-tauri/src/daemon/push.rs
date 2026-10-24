@@ -231,17 +231,29 @@ impl PushManager {
             lf.insert(sid.clone(), prompt_id.clone());
         }
 
-        self.notify_fcm(session_id.as_deref(), &session_name, show_chat_name).await;
+        self.notify_all(session_id.as_deref(), &session_name, show_chat_name).await;
+    }
 
+    /// The relay and Web Push go out side by side: a relay that is slow or
+    /// down (10s timeout per handle) must never hold back the Web Push.
+    async fn notify_all(&self, session_id: Option<&str>, name: &str, show_chat_name: bool) {
+        tokio::join!(
+            self.notify_fcm(session_id, name, show_chat_name),
+            self.notify_web_push(session_id, name, show_chat_name),
+        );
+    }
+
+    async fn notify_web_push(&self, session_id: Option<&str>, name: &str, show_chat_name: bool) {
         let subs = self.subs.lock().unwrap().clone();
         if subs.is_empty() {
             return;
         }
-        let payload = web_push_payload(session_id.as_deref(), &session_name, show_chat_name);
+        let payload = web_push_payload(session_id, name, show_chat_name);
+        let results = futures_util::future::join_all(subs.iter().map(|sub| self.send_one(sub, &payload))).await;
 
         let mut dead: Vec<String> = Vec::new();
-        for sub in &subs {
-            match self.send_one(sub, &payload).await {
+        for (sub, result) in subs.iter().zip(results) {
+            match result {
                 Ok(true) => {}
                 Ok(false) => dead.push(sub.endpoint.clone()), // expired -> prune
                 Err(e) => log::debug!("[push] send to {} failed: {e}", sub.endpoint),
@@ -258,19 +270,20 @@ impl PushManager {
         }
     }
 
-    /// POST one relay request per stored handle, pruning the ones the relay
-    /// rejects for good. Transient failures keep the handle. Skipped without a
-    /// session id: the notification tap needs a chat to open.
+    /// POST one relay request per stored handle, all at once, pruning the ones
+    /// the relay rejects for good. Transient failures keep the handle. Skipped
+    /// without a session id: the notification tap needs a chat to open.
     async fn notify_fcm(&self, session_id: Option<&str>, name: &str, show_chat_name: bool) {
         let Some(chat_id) = session_id else { return };
         let handles = self.fcm_handles.lock().unwrap().clone();
         if handles.is_empty() {
             return;
         }
+        let bodies: Vec<_> = handles.iter().map(|h| fcm_payload(h, chat_id, name, show_chat_name)).collect();
+        let results = futures_util::future::join_all(bodies.iter().map(|b| self.send_relay(b))).await;
         let mut dead: Vec<String> = Vec::new();
-        for h in &handles {
-            let body = fcm_payload(h, chat_id, name, show_chat_name);
-            match self.send_relay(&body).await {
+        for (h, result) in handles.iter().zip(results) {
+            match result {
                 Ok(RelayOutcome::Prune) => dead.push(h.handle.clone()),
                 Ok(RelayOutcome::Delivered | RelayOutcome::Keep) => {}
                 Err(e) => log::debug!("[push] relay send failed: {e}"),
@@ -602,6 +615,45 @@ mod tests {
         for s in [204, 429, 500] {
             assert_eq!(handles_left_after(s).await, 1, "status {s}");
         }
+    }
+
+    /// A relay that accepts and never answers (until the client's 10s timeout)
+    /// must not hold back the Web Push.
+    #[tokio::test]
+    async fn web_push_goes_out_while_the_relay_hangs() {
+        let hung = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let relay = format!("http://{}", hung.local_addr().unwrap());
+        let holder = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = hung.accept().await {
+                held.push(sock);
+            }
+        });
+        let mut wp = mockito::Server::new_async().await;
+        let web_push = wp.mock("POST", "/wp").with_status(201).expect(1).create_async().await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let pm = PushManager::load_with_relay(dir.path().to_path_buf(), &relay);
+        pm.register_fcm_handle(handle("a"));
+        pm.subscribe(PushSubscription {
+            endpoint: format!("{}/wp", wp.url()),
+            keys: SubKeys {
+                p256dh: vapid_public_key_b64(&ES256KeyPair::generate()),
+                auth: Base64UrlUnpadded::encode_string(&[7u8; 16]),
+            },
+        });
+        let sending = {
+            let pm = pm.clone();
+            tokio::spawn(async move { pm.notify_all(Some("sid"), "My chat", true).await })
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !web_push.matched_async().await {
+            assert!(std::time::Instant::now() < deadline, "Web Push waited on the hung relay");
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(!sending.is_finished(), "the relay request is still hanging");
+        sending.abort();
+        holder.abort();
     }
 
     #[tokio::test]
