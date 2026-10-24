@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 // asserts: src/views/sessions/projects-tab/projects-tab.ts, src/views/sessions/projects-tab/projects-list.ts, src/views/sessions/projects-tab/dashboard.ts, src/views/sessions/projects-tab/dash-sections.ts, src/views/sessions/projects-tab/dash-cards.ts, src/views/sessions/projects-tab/dash-reports.ts, src/views/sessions/projects-tab/dash-header.ts, src/views/sessions/projects-tab/dash-modals.ts, src/views/sessions/projects-tab/dash-kebab.ts, src/views/sessions/projects-tab/dash-chats.ts, src/views/sessions/projects-tab/quick-track.ts, src/views/sessions/projects-tab/open-picker.ts, src/views/sessions/projects-tab/paging.ts, src/views/sessions/state.ts, src/views/sessions/session-controls.ts
+// Reviewed 2026-10-24: dash-cards.ts gained the html display kind (a sandboxed frame, dashboard-html-card.view.spec.ts); stats and list cards render as before, so this spec's contract is unaffected.
 import { capture, mountSessionsList, sessionInstance } from "./harness";
 import {
   CONDUCTOR_CWD, LIST_ROWS, ZIRTUE_CWDS, conductorHistory, conductorSnapshot, fakeShot, zirtueHistory, zirtueSnapshot,

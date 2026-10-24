@@ -144,6 +144,12 @@ pub enum CardDisplay {
         #[serde(default)]
         limit: Option<u32>,
     },
+    /// The card's own look: an HTML document rendered in a script-only
+    /// sandboxed iframe with no network, fed the response as `window.CARD_DATA`.
+    Html {
+        #[serde(default)]
+        template: String,
+    },
 }
 
 impl Default for CardDisplay {
@@ -241,6 +247,11 @@ pub struct CardResult {
     pub headline_tone: Option<String>,
     #[serde(default)]
     pub progress: Option<CardProgress>,
+    /// The scrubbed response, kept only for an html display (its template
+    /// reads it); every other display keeps just the values it extracted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "unknown")]
+    pub data: Option<serde_json::Value>,
 }
 
 /// A card's stored config next to its last cached result, so one call paints

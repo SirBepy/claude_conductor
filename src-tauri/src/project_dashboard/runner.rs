@@ -5,7 +5,7 @@
 use super::card_extras::apply_card_extras;
 use super::extract::apply_display;
 use super::template::{redact, render_collect, SecretLookup, TemplateCtx};
-use super::types::{CardConfig, CardResult, CardSource};
+use super::types::{CardConfig, CardDisplay, CardResult, CardSource};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::process::Stdio;
@@ -54,9 +54,29 @@ async fn run_card_with(
             let (stats, rows) = apply_display(&json, &card.display);
             let mut result = CardResult { fetched_at_ms, stats, rows, ..Default::default() };
             apply_card_extras(&json, &mut result);
+            if matches!(card.display, CardDisplay::Html { .. }) {
+                attach_html_data(&mut result, json);
+            }
             result
         }
         Err(e) => CardResult { fetched_at_ms, error: Some(redact(&e, &used)), ..Default::default() },
+    }
+}
+
+/// Cap on the response an html card carries to the frontend; it is cached on
+/// disk and sent with every dashboard snapshot, unlike the extracted values.
+const MAX_HTML_DATA_BYTES: usize = 200 * 1024;
+
+fn attach_html_data(result: &mut CardResult, json: Value) {
+    let size = serde_json::to_vec(&json).map(|b| b.len()).unwrap_or(usize::MAX);
+    if size > MAX_HTML_DATA_BYTES {
+        result.error = Some(format!(
+            "response is {} KB, over the {} KB an html card can carry; trim it in the source",
+            size / 1024,
+            MAX_HTML_DATA_BYTES / 1024
+        ));
+    } else {
+        result.data = Some(json);
     }
 }
 
@@ -303,6 +323,19 @@ mod tests {
 
     fn ctx() -> TemplateCtx {
         TemplateCtx::for_cwd(&std::env::temp_dir().to_string_lossy())
+    }
+
+    #[test]
+    fn an_html_card_carries_its_response_and_refuses_an_oversized_one() {
+        let mut small = CardResult::default();
+        attach_html_data(&mut small, serde_json::json!({"hours": [1, 2]}));
+        assert_eq!(small.data, Some(serde_json::json!({"hours": [1, 2]})));
+        assert!(small.error.is_none());
+
+        let mut big = CardResult::default();
+        attach_html_data(&mut big, serde_json::json!({"blob": "x".repeat(MAX_HTML_DATA_BYTES)}));
+        assert!(big.data.is_none());
+        assert!(big.error.unwrap().contains("over the 200 KB"));
     }
 
     fn secrets(name: &str) -> Option<String> {

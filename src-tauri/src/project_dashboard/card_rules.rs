@@ -2,9 +2,11 @@
 //! quick actions. Pure, so they are tested without a store.
 
 use super::store::DashboardStore;
-use super::types::{CardAction, CardConfig};
+use super::types::{CardAction, CardConfig, CardDisplay};
 
 pub const ACTION_LABEL_MAX_CHARS: usize = 60;
+/// Re-sent inside every dashboard snapshot, so it stays a card, not an app.
+pub const HTML_TEMPLATE_MAX_BYTES: usize = 64 * 1024;
 pub const PINNED_MAX: usize = 20;
 /// A slash command line, not a document: longer is a paste gone wrong.
 const COMMAND_MAX_CHARS: usize = 200;
@@ -12,6 +14,14 @@ const COMMAND_MAX_CHARS: usize = 200;
 /// Trims and checks a card's button in place: a label to show, and a command
 /// that is a slash command (the button starts a chat with it as the first message).
 pub fn validate_card(card: &mut CardConfig) -> Result<(), String> {
+    if let CardDisplay::Html { template } = &card.display {
+        if template.trim().is_empty() {
+            return Err("display.template is required for an html card".to_string());
+        }
+        if template.len() > HTML_TEMPLATE_MAX_BYTES {
+            return Err(format!("display.template is longer than {} KB", HTML_TEMPLATE_MAX_BYTES / 1024));
+        }
+    }
     let Some(CardAction { label, command }) = card.action.as_mut() else { return Ok(()) };
     *label = label.trim().to_string();
     *command = command.trim().to_string();
@@ -78,6 +88,14 @@ mod tests {
 
     fn with_action(label: &str, command: &str) -> CardConfig {
         CardConfig { action: Some(CardAction { label: label.into(), command: command.into() }), ..Default::default() }
+    }
+
+    #[test]
+    fn an_html_card_needs_a_template_within_the_cap() {
+        let html = |t: String| CardConfig { display: CardDisplay::Html { template: t }, ..Default::default() };
+        assert!(validate_card(&mut html("<b>hi</b>".into())).is_ok());
+        assert!(validate_card(&mut html("  ".into())).unwrap_err().contains("template is required"));
+        assert!(validate_card(&mut html("x".repeat(HTML_TEMPLATE_MAX_BYTES + 1))).unwrap_err().contains("longer than"));
     }
 
     #[test]

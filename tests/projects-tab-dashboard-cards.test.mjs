@@ -236,6 +236,26 @@ describe("custom card extras", () => {
     expect(root.querySelector('[data-pd-card="card:c7"] .pd-prog').classList.contains("is-behind")).toBe(false);
   });
 
+  it("an html card draws its own look in a sandboxed frame instead of the bar and headline, keeping its button", async () => {
+    snapshot = groupSnapshot();
+    const data = { _card: { headline: "All logged", progress: { value: 12, max: 20, label: "12h of 20h" } } };
+    snapshot.cards.push({
+      ...cardView("c9", "Clockify pie", { kind: "html", template: "<svg id=pie></svg>" },
+        { fetched_at_ms: Date.now(), stats: [], rows: [], error: null, headline: "All logged", headline_tone: "good",
+          progress: data._card.progress, data }),
+    });
+    snapshot.cards.at(-1).config.action = { label: "Log time", command: "/clockify-log" };
+    const root = await mount({ kind: "group", id: "g1" });
+    const ck = root.querySelector('[data-pd-card="card:c9"]');
+    const frame = ck.querySelector("iframe.pd-html-frame");
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame.srcdoc).toContain("<svg id=pie></svg>");
+    expect(frame.srcdoc).toContain('"label":"12h of 20h"');
+    expect(ck.querySelector(".pd-prog")).toBeNull();
+    expect(ck.querySelector(".pd-hl-t").textContent).toBe("");
+    expect(ck.querySelector("[data-pd-action]").textContent).toBe("Log time");
+  });
+
   it("the action button asks which repo, then starts a chat there with its command", async () => {
     snapshot = groupSnapshot();
     const root = await mount({ kind: "group", id: "g1" });
