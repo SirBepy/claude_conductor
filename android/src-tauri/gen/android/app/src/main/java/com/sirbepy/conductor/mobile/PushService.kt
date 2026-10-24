@@ -39,7 +39,9 @@ class PushService : FirebaseMessagingService() {
     // The request code is the id so two chats' PendingIntents do not share extras.
     val tap = PendingIntent.getActivity(this, id, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     val notification = NotificationCompat.Builder(this, CHAT_BLOCKED_CHANNEL)
-      .setSmallIcon(R.mipmap.ic_launcher_foreground)
+      // A white-on-transparent glyph: the status bar keeps only alpha, so the
+      // coloured launcher layer would show as a solid blob.
+      .setSmallIcon(R.drawable.ic_stat_conductor)
       .setContentTitle("Claude needs your input")
       .setContentText(PushPolicy.bodyFor(data["chatName"]))
       .setPriority(NotificationCompat.PRIORITY_HIGH)
