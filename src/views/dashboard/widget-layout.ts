@@ -13,6 +13,8 @@ import { debounce } from "../../shared/debounce";
  *  stacks in reading order instead. */
 const ONE_COLUMN_PX = 640;
 const RESIZE_DEBOUNCE_MS = 100;
+/** A chart drawn within this many px of its body's width is left alone. */
+const CHART_WIDTH_SLACK_PX = 4;
 
 /** Shell markup for the enabled widgets, half-width runs wrapped in a pair
  *  block. Until a paint measures them, a run's widgets alternate columns. */
@@ -54,12 +56,31 @@ export function rebalanceWidgets(container: HTMLElement): void {
   }
 }
 
+/** Ids of the widgets whose chart was drawn at a width its body no longer has.
+ *  A chart's viewBox is fixed at draw time, so after a column change the SVG
+ *  (width 100%) scales and its axis text with it. A hidden body (width 0) is
+ *  skipped: it gets its real width when it shows. */
+export function chartsDrawnAtStaleWidth(container: HTMLElement): string[] {
+  const ids: string[] = [];
+  for (const svg of container.querySelectorAll<SVGElement>(".dash-widget-body svg[data-w]")) {
+    const body = svg.closest<HTMLElement>(".dash-widget-body");
+    const id = svg.closest<HTMLElement>(".dash-widget")?.dataset["widgetId"];
+    if (!body || !id || body.clientWidth === 0) continue;
+    if (Math.abs(body.clientWidth - Number(svg.dataset["w"])) > CHART_WIDTH_SLACK_PX && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
 /** Rebalances whenever the widget area changes width or a widget body changes
- *  height (its data arriving after mount). Bodies, not widgets, are watched:
- *  a widget is stretched to fill its column, so its own box hides the change. */
-export function observeWidgetLayout(container: HTMLElement): () => void {
+ *  height (its data arriving after mount), then has `redraw` re-draw every
+ *  chart whose width changed. Bodies, not widgets, are watched: a widget is
+ *  stretched to fill its column, so its own box hides the change. */
+export function observeWidgetLayout(container: HTMLElement, redraw: (widgetId: string) => void): () => void {
   if (typeof ResizeObserver === "undefined") return () => {};
-  const run = debounce(() => rebalanceWidgets(container), RESIZE_DEBOUNCE_MS);
+  const run = debounce(() => {
+    rebalanceWidgets(container);
+    for (const id of chartsDrawnAtStaleWidth(container)) redraw(id);
+  }, RESIZE_DEBOUNCE_MS);
   const obs = new ResizeObserver(() => run());
   obs.observe(container);
   container.querySelectorAll(".dash-pair .dash-widget-body").forEach((b) => obs.observe(b));
