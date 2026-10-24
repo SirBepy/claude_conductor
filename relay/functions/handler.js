@@ -13,7 +13,8 @@ function makeHandler({ db, messaging, now = Date.now }) {
       const d = snap.exists ? snap.data() : {};
       const w = core.nextWindow(d.windowStart, d.count, now(), core.REGISTER_LIMIT);
       if (!w.allowed) return false;
-      tx.set(limitRef, { windowStart: w.start, count: w.count });
+      // expireAt drives a Firestore TTL policy on ipLimits: a row is useless once its window ends.
+      tx.set(limitRef, { windowStart: w.start, count: w.count, expireAt: new Date(w.start + core.WINDOW_MS) });
       return true;
     });
     if (!allowed) return { status: 429, body: { error: "rate limit exceeded" } };
