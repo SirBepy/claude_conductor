@@ -191,6 +191,9 @@ export interface RemoteDevice {
   name: string;
   created_at: number; // unix timestamp seconds
   last_used?: number | null; // unix seconds; null until the first auth after upgrade
+  /** "machine" = a paired Conductor's reverse entry; its name follows the
+   *  Paired machines nickname, so it is renamed there, not here. */
+  kind?: "phone" | "machine";
 }
 
 // Machine federation (Settings > Remote access > Paired machines). Loose local

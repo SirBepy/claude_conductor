@@ -60,7 +60,7 @@ async function renderDeviceList(root: HTMLElement): Promise<void> {
       (d) => `
         <div class="ra-device-row" data-id="${escapeHtml(d.id)}">
           <div class="ra-device-info">
-            ${isRemote() ? `<span class="ra-device-name">${escapeHtml(d.name)}</span>` : renameFieldHtml(d.id, d.name, escapeHtml)}
+            ${isRemote() || d.kind === "machine" ? `<span class="ra-device-name">${escapeHtml(d.name)}</span>` : renameFieldHtml(d.id, d.name, escapeHtml)}
             <span class="ra-device-date">Paired ${new Date(d.created_at * 1000).toLocaleDateString()} - last used ${lastUsedLabel(d.last_used)}</span>
           </div>
           <button class="btn-danger-sm ra-revoke-btn" data-id="${escapeHtml(d.id)}">Revoke</button>
