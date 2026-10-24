@@ -122,8 +122,3 @@ export function saveCachedPage(sessionId: string, page: HistoryPage): void {
     // Quota or private mode: the next open just waits for the network.
   }
 }
-
-/** Test-only: forget which pages were written this run. */
-export function resetHistoryPageCacheForTests(): void {
-  lastWritten.clear();
-}

@@ -378,7 +378,6 @@ impl PushManager {
     }
 }
 
-/// The Web Push payload; a generic body when the user hides chat names.
 /// A 401/404 prunes a handle only when the relay itself says the handle is
 /// gone. A bare 404 from a moved or misrouted relay URL must not wipe every
 /// phone's enrolment.
@@ -392,6 +391,7 @@ fn relay_rejection(status: u16, error: Option<&str>) -> RelayOutcome {
     }
 }
 
+/// The Web Push payload; a generic body when the user hides chat names.
 fn web_push_payload(session_id: Option<&str>, name: &str, show_chat_name: bool) -> Vec<u8> {
     serde_json::to_vec(&json!({
         "title": "Claude needs your input",
