@@ -3,6 +3,8 @@ import { api } from "../../../../shared/api";
 import type { DatasetInfo, DatasetId, RetentionPolicy } from "../../../../types/ipc.generated";
 import { isRemote } from "../../../../shared/transport";
 import { askConfirm } from "../../../../shared/confirm";
+import { showToast } from "../../../../shared/toast";
+import { setTokenHistory } from "../../../../shared/state";
 import { settingsHeader, selectHtml, escapeHtml } from "../../ui";
 import "./data.css";
 
@@ -129,8 +131,31 @@ async function refreshDataSection(): Promise<void> {
   }
 }
 
+/** Re-reads every Claude Code transcript on disk into the token-history store,
+ *  for chats the live recorder missed. Slow on a big history, hence the status line. */
+async function rebuildTokenHistory(btn: HTMLButtonElement, status: HTMLElement): Promise<void> {
+  btn.disabled = true;
+  status.textContent = "Scanning... this may take a while";
+  let message: string;
+  try {
+    const result = await api.backfillTranscripts();
+    message = result ? `Done - ${result.processed} new, ${result.skipped} skipped` : "Done";
+    setTokenHistory((await api.getTokenHistory()) ?? null);
+  } catch (e) {
+    message = "Error: " + (e as Error).message;
+  } finally {
+    btn.disabled = false;
+  }
+  status.textContent = message;
+  showToast(message);
+}
+
 export async function renderDataView(root: HTMLElement): Promise<() => void> {
   render(template(), root);
+
+  const rebuildBtn = root.querySelector<HTMLButtonElement>("#dataRebuildHistory");
+  const rebuildStatus = root.querySelector<HTMLElement>("#dataRebuildStatus");
+  if (rebuildBtn && rebuildStatus) rebuildBtn.onclick = () => void rebuildTokenHistory(rebuildBtn, rebuildStatus);
 
   if (!isRemote()) {
     // Fresh container each render -> rebind the delegated listeners.
@@ -156,6 +181,14 @@ function template() {
                  containing a <select>. See project memory. -->
             <div id="dataCards" class="data-cards"></div>
             <div id="dataTotal" class="data-total"></div>
+          </div>
+          <div class="kit-section">
+            <div class="kit-section-title">Token history</div>
+            <div class="kit-row">
+              <span class="kit-row-label">Re-read every transcript on disk for chats the usage charts are missing</span>
+              <button class="btn-secondary" id="dataRebuildHistory">Rebuild</button>
+            </div>
+            <div id="dataRebuildStatus" class="data-card-sub" aria-live="polite"></div>
           </div>
         `}
 

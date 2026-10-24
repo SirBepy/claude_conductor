@@ -234,8 +234,9 @@ export async function startNewSessionWithFavorite(pane: HTMLElement, slot: numbe
 export async function launchNewSession(
   pane: HTMLElement,
   project: { path: string; name: string },
-  config: SessionConfig,
+  launchConfig: SessionConfig,
 ): Promise<void> {
+  const { draftText, ...config } = launchConfig;
   // If there's an unsent draft, park it as a sidebar row the user can return
   // to or dismiss manually. If it already sent its first message ("starting...")
   // just drop the frontend tracking — the backend process keeps running and
@@ -279,7 +280,7 @@ export async function launchNewSession(
   const root = document.querySelector<HTMLElement>(".view-sessions");
   root?.setAttribute("data-mobile-pane", "chat");
 
-  await renderPendingPane(pane, placeholderId, project, config);
+  await renderPendingPane(pane, placeholderId, project, config, draftText);
 
   // Re-render sidebar to show the pending row.
   if (root) {

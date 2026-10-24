@@ -1,7 +1,7 @@
 // Audit finding: api.backfillTranscripts() swallowed a failed backfill_transcripts
 // call and returned {processed: 0, skipped: 0, ...} - indistinguishable from a
-// real run that had nothing to do. The one caller (src/views/projects/projects.ts
-// runBackfill) already has its own try/catch that shows a distinct "Error: ..."
+// real run that had nothing to do. The one caller (src/views/settings/subviews/data/
+// data.ts rebuildTokenHistory) already has its own try/catch that shows a distinct "Error: ..."
 // toast, so the fix is to stop swallowing here and let that catch do its job.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

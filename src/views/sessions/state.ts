@@ -106,18 +106,15 @@ export interface SessionsState {
    *  global instances-changed listener (sessions-wiring.ts) skips ids in
    *  this set so the two don't race to both rebuild the pane. */
   takeoverInFlightIds: Set<string>;
-  /** True while the Projects tab's dashboard owns the pane. `selectedId` stays
-   *  null then, so the chat restore paths (loadLastSelectedSession) must stand
+  /** True while the standalone project dashboard page owns the pane. `selectedId`
+   *  stays null then, so the chat restore paths (loadLastSelectedSession) must stand
    *  down or the next instances-changed would drag the user back into a chat. */
   dashboardOpen: boolean;
-  /** Registered by the Projects tab. setActiveSession calls it when a chat is
-   *  activated while the dashboard is open, so every entry point (row click,
-   *  Ctrl+1..9, notification, new chat) flips the tab back without each caller
-   *  knowing the tab exists. */
+  /** Registered by the dashboard page. setActiveSession calls it when a chat is
+   *  activated while the page is open, so every entry point (row click,
+   *  Ctrl+1..9, notification, new chat) leaves the page without each caller
+   *  knowing it exists. */
   onChatActivated: (() => void) | null;
-  /** Registered by the Projects tab while it is showing: Ctrl+W hides the selected
-   *  project instead of closing a chat (a project close is just a list filter, so no confirm). */
-  onCloseProject: (() => void) | null;
 }
 
 export function createInitialState(mountId: number): SessionsState {
@@ -148,7 +145,6 @@ export function createInitialState(mountId: number): SessionsState {
     takeoverInFlightIds: new Set(),
     dashboardOpen: false,
     onChatActivated: null,
-    onCloseProject: null,
   };
 }
 

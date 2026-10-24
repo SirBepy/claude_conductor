@@ -82,7 +82,8 @@ pub struct AppState {
     /// A pending "open this session in the chats window" request, set when the
     /// chats window is created fresh from the main window's "Open in chats" CTA.
     /// The chats window drains it on boot via `take_pending_chat_open`. Holds
-    /// `(session_id, mode)` where mode is "live" or "history".
+    /// `(session_id, mode)` where mode is "live" or "history", or `(cwd, "project")`
+    /// for a project's dashboard page.
     pub pending_chat_open: Mutex<Option<(String, String)>>,
     /// A pending "start a new chat in the chats window" request, set when the
     /// chats window is created fresh from the project-detail "+" button.

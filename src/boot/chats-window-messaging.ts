@@ -26,12 +26,17 @@ interface PendingNewChatPayload {
 
 /**
  * Surface a session in the chats window. "live" selects the running session in
- * the Sessions view; "history" opens it read-only in the History view. Both
- * route through the same select-on-mount queues the in-window flows use.
+ * the Sessions view; "history" opens it read-only in the History view; "project"
+ * opens a project folder's dashboard page. All route through the same
+ * select-on-mount queues the in-window flows use.
  */
 async function applyChatOpenRequest(sessionId: string | undefined, mode: string | undefined): Promise<void> {
   if (!sessionId) return;
-  if (mode === "history") {
+  if (mode === "project") {
+    // `sessionId` carries a project folder here (open_dashboard_project).
+    const { openProjectDashboard } = await import("../views/sessions/sessions");
+    openProjectDashboard(sessionId);
+  } else if (mode === "history") {
     const { queueHistorySelect } = await import("../views/history/history");
     queueHistorySelect(sessionId);
     showView("history");

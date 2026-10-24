@@ -54,7 +54,8 @@ pub fn open_chats_window(app: AppHandle) -> Result<(), String> {
 
 /// Open (or focus) the chats window and tell it to surface a specific session.
 /// `mode` is "live" (select the running session) or "history" (open it
-/// read-only in the History view). When the window already exists we emit
+/// read-only in the History view); "project" makes `session_id` a project
+/// folder whose dashboard page opens instead (`open_dashboard_project`). When the window already exists we emit
 /// `chats-open-session` for its live listener; when it must be created fresh we
 /// stash the request in `AppState.pending_chat_open` for the window to drain on
 /// boot (the freshly-built webview can't reliably catch an event emitted before

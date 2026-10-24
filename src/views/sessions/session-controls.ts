@@ -15,6 +15,7 @@ import { askConfirm } from "../../shared/confirm";
 import type { SessionConfig } from "./model-effort-modal";
 import { isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
 import { refreshWrapUpIndicator } from "./session-header";
+import { openDashboardPage } from "./project-dashboard/dashboard-page";
 
 // ── Shared pane + pending state ───────────────────────────────────────────────
 // Written by sessions.ts via the setters below; read by the control functions.
@@ -24,6 +25,7 @@ let _pendingOpenPicker = false;
 let _pendingFavoriteSlot: number | null = null;
 let _pendingHistoryResume: string | null = null;
 let _pendingNewChat: { project: { path: string; name: string }; config: SessionConfig } | null = null;
+let _pendingDashboard: { cwd: string; projectId: string | null } | null = null;
 
 export function setPaneRef(pane: HTMLElement | null): void { _pane = pane; }
 
@@ -42,6 +44,12 @@ export function consumePendingFavoriteSlot(): number | null {
 export function consumePendingHistoryResume(): string | null {
   const v = _pendingHistoryResume;
   _pendingHistoryResume = null;
+  return v;
+}
+
+export function consumePendingDashboard(): { cwd: string; projectId: string | null } | null {
+  const v = _pendingDashboard;
+  _pendingDashboard = null;
   return v;
 }
 
@@ -87,6 +95,23 @@ export function openChatById(sessionId: string): void {
  */
 export function queueNewChat(project: { path: string; name: string }, config: SessionConfig): void {
   _pendingNewChat = { project, config };
+}
+
+/** Show a repo's dashboard page (its group's, when it has one): from the chat
+ *  header's project name, the chat menu, Ctrl+Shift+D, or the Home screen via
+ *  the Chats window's cross-window request. Not mounted: queued for the next mount. */
+export function openProjectDashboard(cwd: string, projectId: string | null = null): void {
+  showView("sessions");
+  if (_pane) void openDashboardPage(cwd, projectId);
+  else _pendingDashboard = { cwd, projectId };
+}
+
+/** Ctrl+Shift+D: the open chat's project. A draft already shows its dashboard, so it is left alone. */
+export function openFocusedChatDashboard(): void {
+  const id = state.selectedId;
+  if (!id || state.pendingNewSession?.placeholderId === id) return;
+  const s = state.sessions.find((x) => x.session_id === id);
+  if (s?.cwd) openProjectDashboard(String(s.cwd), s.project_id || null);
 }
 
 // ── Global triggers ───────────────────────────────────────────────────────────
@@ -168,8 +193,6 @@ function closeFocusedDraft(): void {
 }
 
 export function closeFocusedChat(): void {
-  // The Projects tab keeps selectedId null, so without this Ctrl+W would do nothing there.
-  if (state.dashboardOpen && state.onCloseProject) { state.onCloseProject(); return; }
   const id = state.selectedId;
   if (!id) return;
   if (state.pendingNewSession?.placeholderId === id) {

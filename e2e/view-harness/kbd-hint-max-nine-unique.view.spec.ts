@@ -1,3 +1,4 @@
+// Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 import { test, expect } from "@playwright/test";
 import { mountSessionsList, sessionInstance, fireEvent } from "./harness";
 

@@ -74,6 +74,19 @@
 /* Both are editable mid-run, so each is its own hit target. The affordance stays
    at hover-only: a permanent underline on two always-present labels would read
    as noise on every chat header. */
+.session-header .meta-proj.is-link {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 1px 3px;
+  margin: -1px -3px;
+  transition: background 0.12s ease;
+}
+
+.session-header .meta-proj.is-link:hover,
+.session-header .meta-proj.is-link:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .session-header .meta-cfg-btn {
   cursor: pointer;
   border-radius: 3px;

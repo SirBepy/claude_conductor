@@ -89,16 +89,9 @@ registerView("dashboard", lazyView(() => import("./views/dashboard/dashboard"), 
 registerView("sessions", lazyView(() => import("./views/sessions/sessions"), "renderSessionsView"));
 registerView("history", lazyView(() => import("./views/history/history"), "renderHistoryView"));
 registerView("schedule", lazyView(() => import("./views/schedule/schedule"), "renderScheduleView"));
-registerView("projects", lazyView(() => import("./views/projects/projects"), "renderProjectsView"));
 registerView("characters", lazyView(() => import("./views/characters/characters"), "renderCharactersView"));
 registerView("character-detail", lazyView(() => import("./views/characters/character-detail"), "renderCharacterDetailView"));
 registerView("news", lazyView(() => import("./views/news/news"), "renderNewsView"));
-registerView("project-detail", lazyView(() => import("./views/project-detail/project-detail"), "renderProjectDetailView"));
-registerView("project-character-pick", lazyView(() => import("./views/project-detail/subviews/character-pick/character-pick"), "renderCharacterPickView"));
-registerView("project-automation", lazyView(() => import("./views/project-detail/subviews/automation/automation"), "renderAutomationView"));
-registerView("project-folder-mapping", lazyView(() => import("./views/project-detail/subviews/folder-mapping/folder-mapping"), "renderFolderMappingView"));
-registerView("project-sessions", lazyView(() => import("./views/project-detail/subviews/sessions-list/sessions-list"), "renderSessionsListView"));
-registerView("session-detail", lazyView(() => import("./views/session-detail/session-detail"), "renderSessionDetailView"));
 registerView("settings", lazyView(() => import("./views/settings/settings"), "renderSettingsView"));
 registerView("skill-detail", lazyView(() => import("./views/skill-detail/skill-detail"), "renderSkillDetailView"));
 registerView("skills", lazyView(() => import("./views/skills/skills"), "renderSkillsView"));
@@ -298,18 +291,9 @@ if (detachedSessionId) {
 
     // Cross-window jump from the chats window's "Add account" link: navigate
     // to the accounts settings page in the dashboard window instead of the
-    // chats window's own router (see navigate-to-project comment below).
+    // chats window's own router.
     void window.__TAURI__?.event?.listen?.("navigate-to-settings-accounts", () => {
       void (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo("settings-accounts");
-    });
-
-    // Cross-window jump from the chats window's per-chat menu: navigate to
-    // a specific project's detail page in the main dashboard.
-    void window.__TAURI__?.event?.listen?.("navigate-to-project", async (e: { payload: string }) => {
-      const cwd = e.payload;
-      if (!cwd) return;
-      const { openProjectDetail } = await import("./shared/navigation");
-      openProjectDetail(cwd);
     });
 
     // Cross-window jump from a floating-overlay card click: show the dashboard

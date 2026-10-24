@@ -7,7 +7,8 @@
 import { formatTokens } from "../../../shared/tokens";
 import { timeAgo } from "../../../shared/time";
 import { projectLabel, isBlacklisted } from "../../../shared/projects";
-import { openProjectDetail } from "../../../shared/navigation";
+import { invoke } from "../../../shared/ipc";
+import { showToast } from "../../../shared/toast";
 import { getSettings } from "../../../shared/state";
 import type { SettingsShape } from "../../../shared/state";
 import type { AliasMap } from "../../../shared/tokens";
@@ -126,7 +127,7 @@ export function buildProjectListHTML(opts: BuildListOpts): string {
   </div>`;
 }
 
-/** Wires row-click (open project detail) and sortable-header clicks for every
+/** Wires row-click (open the project's dashboard in the Chats window) and sortable-header clicks for every
  * project-list table under `container`. `onSort` re-renders the caller's
  * content after a sort-column change; `onShowMore` (only relevant to capped
  * lists, e.g. the chart widgets' "worked on" lists) opens the full list. */
@@ -143,7 +144,8 @@ export function wireProjectListClicks(
       row.onclick = () => {
         const cwd = row.dataset["cwd"];
         if (!cwd) return;
-        openProjectDetail(cwd);
+        // The project's dashboard is a page of the Chats window.
+        void invoke<void>("open_dashboard_project", { cwd }).catch((err) => showToast(`Could not open the project: ${String(err)}`));
       };
       row.onkeydown = (e: KeyboardEvent) => {
         if (e.key !== "Enter" && e.key !== " ") return;

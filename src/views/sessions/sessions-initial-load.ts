@@ -15,7 +15,8 @@ import { updateThinkingBar } from "./session-thinking-bar";
 import { rateLimitBanner } from "../../shared/chat/rate-limit-banner";
 import { selectSession } from "./active-session";
 import { launchNewSession } from "./pending-flow";
-import { consumePendingHistoryResume, consumePendingNewChat } from "./session-controls";
+import { consumePendingDashboard, consumePendingHistoryResume, consumePendingNewChat } from "./session-controls";
+import { openDashboardPage } from "./project-dashboard/dashboard-page";
 import { loadCachedInstances } from "./instances-cache";
 
 // If the daemon hasn't connected within this window, the sidebar's
@@ -91,7 +92,10 @@ export async function initialLoadAndRestore(pane: HTMLElement, listEl: HTMLEleme
     // If a new chat was queued (e.g. project-detail "+"), launch it now. Takes
     // precedence over history-resume / last-selected restore.
     const pendingNew = consumePendingNewChat();
-    if (pendingNew) {
+    const pendingDashboard = consumePendingDashboard();
+    if (pendingDashboard) {
+      await openDashboardPage(pendingDashboard.cwd, pendingDashboard.projectId);
+    } else if (pendingNew) {
       const { project, config } = pendingNew;
       await launchNewSession(pane, project, config);
       updateThinkingBar();

@@ -18,6 +18,7 @@ import { HeldMessages } from "../../shared/chat/held-messages";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { refreshSessions } from "./sidebar";
 import { rebuildSidebar } from "./pending-pane-mount";
+import { unmountDraftDashboard } from "./project-dashboard/draft-dashboard";
 
 export interface PendingComposerDeps {
   /** Promote the pane's chrome from draft to real-session once start_session
@@ -148,7 +149,7 @@ export function wirePendingComposer(
           state.pendingNewSession.firstMessageSentAt = Date.now();
           savePendingSession(state.pendingNewSession);
         }
-        pane.querySelector(".session-pending-hint")?.remove();
+        unmountDraftDashboard(pane);
         rebuildSidebar();
         try {
           const sessionId = await invoke<string>("start_session", {

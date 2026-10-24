@@ -1,0 +1,21 @@
+.view-project-character-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.view-project-character-pick label {
+  font-weight: 600;
+  font-size: var(--fs-title);
+}
+
+.view-project-character-pick select {
+  width: 100%;
+  padding: 8px;
+  font-size: var(--fs-body);
+}
+
+.view-project-character-pick .muted {
+  color: var(--sb-muted);
+  font-size: var(--fs-title);
+}

@@ -20,13 +20,16 @@ describe("sidemenu markup", () => {
     expect(html).toMatch(/<aside[^>]*id="sidemenu"/);
   });
 
-  it("has all four top-level nav items with data-view attributes", () => {
+  it("has the top-level nav items with data-view attributes", () => {
     // Statistics was absorbed into the dashboard's widget registry and its
     // nav entry deleted (multi-account milestone 05) - see
     // src/views/dashboard/widget-registry.ts.
-    for (const view of ["dashboard", "skills", "projects", "settings"]) {
+    for (const view of ["dashboard", "skills", "settings"]) {
       expect(html).toMatch(new RegExp(`data-view="${view}"`));
     }
+    // Projects moved into the Chats window (a project's dashboard opens from a
+    // chat header), so the main window has no Projects page to navigate to.
+    expect(html).not.toMatch(/data-view="projects"/);
   });
 
   it("home view template declares a burger button", () => {
