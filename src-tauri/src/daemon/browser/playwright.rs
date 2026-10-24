@@ -34,6 +34,57 @@ pub enum Attach {
     Extension(Mine),
 }
 
+/// The Playwright extension's token. With it the connect page skips its
+/// tab picker, and a connection that never comes fails after 30s with a
+/// reason instead of waiting out the whole call timeout.
+const EXTENSION_TOKEN_VAR: &str = "PLAYWRIGHT_MCP_EXTENSION_TOKEN";
+
+/// The token for a new extension child, read fresh each time: Joe sets it as
+/// a user environment variable, which a daemon started before he set it never
+/// inherits, so the user-scope value is the fallback.
+fn extension_token() -> Option<String> {
+    pick_token(std::env::var(EXTENSION_TOKEN_VAR).ok(), user_env_var(EXTENSION_TOKEN_VAR))
+}
+
+fn pick_token(process: Option<String>, user: Option<String>) -> Option<String> {
+    [process, user].into_iter().flatten().map(|t| t.trim().to_string()).find(|t| !t.is_empty())
+}
+
+/// A REG_SZ value under HKCU\Environment, where Windows keeps user-scope
+/// environment variables.
+#[cfg(windows)]
+fn user_env_var(name: &str) -> Option<String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let (key, value) = (wide("Environment"), wide(name));
+    let mut buf = vec![0u16; 1024];
+    let mut size = (buf.len() * 2) as u32;
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(key.as_ptr()),
+            PCWSTR(value.as_ptr()),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr().cast()),
+            Some(&mut size),
+        )
+    };
+    if rc != ERROR_SUCCESS {
+        return None;
+    }
+    let len = (size as usize / 2).saturating_sub(1);
+    Some(String::from_utf16_lossy(&buf[..len.min(buf.len())]))
+}
+
+#[cfg(not(windows))]
+fn user_env_var(_name: &str) -> Option<String> {
+    None
+}
+
 fn attach_args(attach: &Attach) -> Result<Vec<String>, String> {
     match attach {
         Attach::Cdp(port) => Ok(vec!["--cdp-endpoint".to_string(), format!("http://127.0.0.1:{port}")]),
@@ -70,6 +121,11 @@ impl PlaywrightClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if let Attach::Extension(_) = attach {
+            if let Some(token) = extension_token() {
+                cmd.env(EXTENSION_TOKEN_VAR, token);
+            }
+        }
         crate::util::process::hide_console_tokio(&mut cmd);
         let mut child = cmd.spawn().map_err(|e| format!("start playwright-mcp: {e}"))?;
         crate::util::process::guard_orphan_tree(&child);
@@ -222,6 +278,24 @@ mod tests {
         let args = attach_args(&Attach::Extension(Mine { app: App::Chrome, profile: None })).unwrap();
         assert!(args.contains(&"--extension".to_string()));
         assert!(!args.iter().any(|a| a == "--cdp-endpoint"), "{args:?}");
+    }
+
+    #[test]
+    fn the_extension_token_prefers_the_process_env_and_falls_back_to_the_user_scope() {
+        assert_eq!(pick_token(Some("p".into()), Some("u".into())).as_deref(), Some("p"));
+        assert_eq!(pick_token(None, Some(" u ".into())).as_deref(), Some("u"));
+        assert_eq!(pick_token(Some("  ".into()), Some("u".into())).as_deref(), Some("u"));
+        assert_eq!(pick_token(None, None), None);
+    }
+
+    /// A value this test writes itself would land in Joe's real registry, so
+    /// it reads one Windows always sets for a user instead.
+    #[cfg(windows)]
+    #[test]
+    fn a_user_scope_variable_is_read_from_the_registry() {
+        let temp = user_env_var("TEMP").expect(r"HKCU\Environment\TEMP is always set");
+        assert!(temp.to_lowercase().contains("temp"), "{temp}");
+        assert_eq!(user_env_var("CC_SURELY_NOT_A_VARIABLE_1334"), None);
     }
 
     #[test]
