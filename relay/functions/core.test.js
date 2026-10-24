@@ -45,7 +45,7 @@ function setup(sendImpl) {
       json: (b) => ((res.json = b), r),
       end: () => r,
     };
-    await handler({ method: opts.method || "POST", path, body, ip: opts.ip || "1.2.3.4", rawBody: opts.rawBody }, r);
+    await handler({ method: opts.method || "POST", path, body, ip: opts.ip || "1.2.3.4", headers: opts.headers || {}, rawBody: opts.rawBody }, r);
     return res;
   }
   return { db, sent, call, clock };
@@ -81,6 +81,25 @@ test("a rate-limit row carries an expireAt at the end of its window, for the TTL
   const row = s.db.store.get(`ipLimits/${core.sha256Hex("1.2.3.4")}`);
   assert.ok(row.expireAt instanceof Date);
   assert.equal(row.expireAt.getTime(), row.windowStart + core.WINDOW_MS);
+});
+
+test("clientIp takes the address Google appends last, not a caller-supplied one", () => {
+  assert.equal(core.clientIp({ ip: "203.0.113.7", headers: { "x-forwarded-for": "203.0.113.7, 78.1.216.163" } }), "78.1.216.163");
+  assert.equal(core.clientIp({ ip: "1.2.3.4", headers: { "x-forwarded-for": "1.2.3.4" } }), "1.2.3.4");
+  assert.equal(core.clientIp({ ip: "1.2.3.4", headers: {} }), "1.2.3.4");
+  assert.equal(core.clientIp({ ip: "1.2.3.4" }), "1.2.3.4");
+});
+
+test("a faked X-Forwarded-For does not get around the register limit", async () => {
+  const s = setup();
+  // req.ip mirrors what a trusting Express reports: the leftmost, caller-chosen entry.
+  const faked = (fake) => ({ ip: fake, headers: { "x-forwarded-for": `${fake}, 5.5.5.5` } });
+  for (let i = 0; i < 20; i++) {
+    const r = await s.call("/register", { token: "t" }, faked(`10.0.0.${i}`));
+    assert.equal(r.code, 200);
+  }
+  const r = await s.call("/register", { token: "t" }, faked("10.0.0.99"));
+  assert.equal(r.code, 429);
 });
 
 test("send with a bad secret gives 401 and sends nothing", async () => {

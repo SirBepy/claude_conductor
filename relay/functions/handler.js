@@ -89,7 +89,7 @@ function makeHandler({ db, messaging, now = Date.now }) {
   }
 
   const routes = {
-    "/register": (b, req) => register(b, req.ip),
+    "/register": (b, req) => register(b, core.clientIp(req)),
     "/update": update,
     "/unregister": unregister,
     "/send": send,
@@ -116,7 +116,7 @@ function makeHandler({ db, messaging, now = Date.now }) {
       // Never include the error text: Firestore/FCM messages can echo tokens.
       result = { status: 500, body: { error: "internal error" } };
     }
-    const prefix = result.handle || (req.body && typeof req.body.handle === "string" ? req.body.handle : "");
+    const prefix = result.handle ||(req.body && typeof req.body.handle === "string" ? req.body.handle : "");
     console.log(JSON.stringify({ route, status: result.status, handle: prefix.slice(0, 6) }));
     if (result.body === undefined) res.status(result.status).end();
     else res.status(result.status).json(result.body);
