@@ -1,4 +1,4 @@
-// User-defined cards (stats or a list of rows), configured from a chat's MCP
+// User-defined cards (stats, a list of rows, or their own HTML), configured from a chat's MCP
 // tool or the cards modal. A card never throws: its error renders as a line.
 // Optional extras: a progress bar, a headline stat line and a run-a-command
 // button, all driven by the card's own data so no card is special-cased.
@@ -6,6 +6,7 @@ import { html, nothing, type TemplateResult } from "lit-html";
 import { fetchedLabel } from "./format";
 import { card, kv, quiet, row, icon, type DashCtx } from "./dash-parts";
 import { pageSlice } from "./paging";
+import { htmlCardFrame } from "./dash-html-card";
 import type { CardConfigX, CardProgress, CardResultX, CardView } from "./types";
 
 function progressBar(p: CardProgress): TemplateResult {
@@ -28,13 +29,19 @@ function cardBody(c: DashCtx, v: CardView): { body: TemplateResult[], pager: Tem
   const r = v.result as CardResultX | null;
   if (!r) return { body: [quiet("Not fetched yet")], pager: nothing };
   const parts: TemplateResult[] = [];
-  if (r.progress) parts.push(progressBar(r.progress));
-  const line = headlineLine(c, r, (v.config as CardConfigX).action);
+  const display = v.config.display;
+  // An html card draws its own progress and headline (a pie instead of the
+  // bar, say); only its action button stays the dashboard's.
+  const own = display.kind === "html";
+  if (r.progress && !own) parts.push(progressBar(r.progress));
+  const line = headlineLine(c, own ? { ...r, headline: null } : r, (v.config as CardConfigX).action);
   if (line !== nothing) parts.push(line);
   if (r.error) parts.push(html`<div class="pd-err">${r.error}</div>`);
   const extras = !!(r.progress || r.headline);
   let pager: TemplateResult | typeof nothing = nothing;
-  if (v.config.display.kind === "stats") {
+  if (display.kind === "html") {
+    if (!r.error) parts.push(htmlCardFrame(v.config.title, display.template, r.data));
+  } else if (display.kind === "stats") {
     const page = pageSlice(c, `card:${v.config.id}`, r.stats);
     pager = page.pager;
     for (const s of page.slice) parts.push(kv(s.label, s.value));

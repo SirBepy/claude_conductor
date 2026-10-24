@@ -263,6 +263,7 @@ fn text_of(v: &Value) -> String {
 pub fn apply_display(json: &Value, display: &CardDisplay) -> (Vec<LabelValue>, Vec<RowValue>) {
     match display {
         CardDisplay::Stats { items } => (items.iter().map(|s| stat(json, s)).collect(), Vec::new()),
+        CardDisplay::Html { .. } => (Vec::new(), Vec::new()),
         CardDisplay::List { items_path, label_path, value_path, link_path, limit } => {
             let items = match eval_path(json, items_path) {
                 Some(Value::Array(a)) => a,

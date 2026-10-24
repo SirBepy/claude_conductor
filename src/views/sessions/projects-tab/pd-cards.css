@@ -103,3 +103,6 @@
 .pd-pick { cursor: pointer; padding: 5px 6px; margin: 0 -6px; border-radius: 7px; }
 .pd-pick:hover { background: var(--color-surface-alt); }
 .pd-pick .ph { color: var(--color-text-muted); font-size: 16px; }
+
+/* An html card's sandboxed frame; its height comes from the frame itself. */
+.pd-html-frame { display: block; width: 100%; height: 60px; border: 0; background: transparent; color-scheme: normal; }
