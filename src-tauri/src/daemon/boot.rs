@@ -205,12 +205,15 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
 
     // Claude's own browser: registered after the remote server took its
     // router clone, so these window controls stay desktop-pipe only. Same 60s
-    // tick ends idle per-chat drivers, then Chrome itself.
+    // tick ends idle per-chat drivers, then Chrome itself, and forgets the
+    // pinned browser of chats gone from the registry.
     browser::rpc::register(&mut router);
-    tokio::spawn(async {
+    let browser_registry = state.registry.clone();
+    tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             browser::get().sweep_idle().await;
+            browser::get().prune_targets(&browser_registry.known_session_ids().into_iter().collect()).await;
         }
     });
 

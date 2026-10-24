@@ -98,8 +98,36 @@ pub fn is_browser_tool(name: &str) -> bool {
 }
 
 /// `session_id`'s browser, pinning Settings' starting one on first use.
+#[cfg(test)]
 fn pinned_target(targets: &mut HashMap<String, Target>, session_id: &str, settings: &Settings) -> Target {
     targets.entry(session_id.to_string()).or_insert_with(|| Target::from_settings(settings)).clone()
+}
+
+/// Runs `start` against `session_id`'s browser and pins Settings' starting one
+/// only once `start` succeeded. A chat whose first call fails (npm install,
+/// Chrome launch) stays unpinned, so fixing Settings applies to its next call.
+/// A pin already in `targets` (a `browser_target` choice, or an earlier
+/// successful call) is used as-is and never cleared by a failure here.
+async fn with_target_pinned_on_success<T, F, Fut>(
+    targets: &Mutex<HashMap<String, Target>>,
+    session_id: &str,
+    settings: &Settings,
+    start: F,
+) -> Result<(Target, T), String>
+where
+    F: FnOnce(Target) -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let existing = targets.lock().await.get(session_id).cloned();
+    let target = existing.clone().unwrap_or_else(|| Target::from_settings(settings));
+    let started = start(target.clone()).await?;
+    if existing.is_none() {
+        // or_insert: a `browser_target` call that ran during the start wins.
+        let mut guard = targets.lock().await;
+        let pinned = guard.entry(session_id.to_string()).or_insert(target).clone();
+        return Ok((pinned, started));
+    }
+    Ok((target, started))
 }
 
 pub struct ClaudeBrowser {
@@ -177,17 +205,20 @@ impl ClaudeBrowser {
         if name == TARGET_TOOL {
             return self.choose_target(session_id, &args, settings).await;
         }
-        let target = pinned_target(&mut *self.targets.lock().await, session_id, settings);
         let runtime_dir = self.root.join("runtime");
-        {
-            let _guard = self.install.lock().await;
-            runtime::ensure_installed(&runtime_dir).await?;
-        }
-        // Joe's own browser is never launched or kept alive from here.
-        let attach = match &target {
-            Target::Own => Attach::Cdp(self.chrome.ensure_running().await?),
-            Target::Mine(mine) => Attach::Extension(mine.clone()),
-        };
+        let runtime_ref = &runtime_dir;
+        let (target, attach) = with_target_pinned_on_success(&self.targets, session_id, settings, |target| async move {
+            {
+                let _guard = self.install.lock().await;
+                runtime::ensure_installed(runtime_ref).await?;
+            }
+            // Joe's own browser is never launched or kept alive from here.
+            Ok(match &target {
+                Target::Own => Attach::Cdp(self.chrome.ensure_running().await?),
+                Target::Mine(mine) => Attach::Extension(mine.clone()),
+            })
+        })
+        .await?;
         let slot = self.sessions.lock().await.entry(session_id.to_string()).or_default().clone();
         let mut client = slot.lock().await;
         let stale = match client.as_mut() {
@@ -213,6 +244,13 @@ impl ClaudeBrowser {
             *client = None;
         }
         result
+    }
+
+    /// Drops the pinned browser of every chat not in `live_ids`. Separate from
+    /// the idle sweep of `sessions`: an idle chat keeps its pin, only a chat
+    /// gone from the session registry loses it.
+    pub async fn prune_targets(&self, live_ids: &std::collections::HashSet<String>) {
+        self.targets.lock().await.retain(|id, _| live_ids.contains(id));
     }
 
     /// Ends chats' Playwright children unused for `SESSION_IDLE`, then lets
@@ -260,6 +298,47 @@ mod tests {
         assert_eq!(pinned_target(&mut targets, "chat", &own), Target::Own);
         assert_eq!(pinned_target(&mut targets, "chat", &mine), Target::Own, "pinned at its first call");
         assert!(matches!(pinned_target(&mut targets, "new-chat", &mine), Target::Mine(_)), "a new chat starts on the new setting");
+    }
+
+    fn mine_mode() -> Settings {
+        let mut s = Settings::default();
+        s.extra.insert("claudeBrowserMode".into(), json!("mine"));
+        s
+    }
+
+    #[tokio::test]
+    async fn a_failed_first_start_leaves_the_chat_unpinned() {
+        let targets = Mutex::new(HashMap::new());
+        let failed = with_target_pinned_on_success(&targets, "c", &Settings::default(), |_| async { Err::<(), _>("no node".to_string()) }).await;
+        assert!(failed.is_err());
+        assert!(targets.lock().await.is_empty(), "a failed start must not pin");
+        // Settings fixed, next call follows them.
+        let (t, ()) = with_target_pinned_on_success(&targets, "c", &mine_mode(), |_| async { Ok(()) }).await.unwrap();
+        assert!(matches!(t, Target::Mine(_)));
+        assert!(matches!(targets.lock().await.get("c"), Some(Target::Mine(_))), "success pins");
+    }
+
+    #[tokio::test]
+    async fn a_failed_start_keeps_an_explicit_pin() {
+        let targets = Mutex::new(HashMap::new());
+        targets.lock().await.insert("c".to_string(), Target::Own);
+        let failed = with_target_pinned_on_success(&targets, "c", &mine_mode(), |t| async move {
+            assert_eq!(t, Target::Own);
+            Err::<(), _>("boom".to_string())
+        })
+        .await;
+        assert!(failed.is_err());
+        assert_eq!(targets.lock().await.get("c"), Some(&Target::Own));
+    }
+
+    #[tokio::test]
+    async fn pruning_drops_only_chats_gone_from_the_registry() {
+        let b = ClaudeBrowser::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        b.targets.lock().await.insert("live".into(), Target::Own);
+        b.targets.lock().await.insert("gone".into(), Target::Own);
+        b.prune_targets(&["live".to_string()].into_iter().collect()).await;
+        let t = b.targets.lock().await;
+        assert!(t.contains_key("live") && !t.contains_key("gone"));
     }
 
     #[test]
