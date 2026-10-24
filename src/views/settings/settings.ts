@@ -24,7 +24,8 @@ export async function renderSettingsView(
 function template() {
   const nav = (name: string) => void g().navigateTo(name);
   // Usage meter, Claude's browser and Data & storage gate every control behind
-  // !isRemote(), so on the phone their rows would open an empty page.
+  // !isRemote(), so on the phone their rows would open an empty page. Shortcuts
+  // are keyboard bindings, which a phone has no use for.
   const desktop = !isRemote();
   return html`
     <div class="view view-settings">
@@ -56,7 +57,7 @@ function template() {
         <div class="kit-section">
           <div class="kit-section-title">System</div>
           ${navRow("Power & startup", "ph-power", () => nav("settings-power"))}
-          ${navRow("Shortcuts", "ph-keyboard", () => nav("settings-shortcuts"))}
+          ${desktop ? navRow("Shortcuts", "ph-keyboard", () => nav("settings-shortcuts")) : ""}
           ${desktop ? navRow("Data & storage", "ph-database", () => nav("settings-data")) : ""}
           ${navRow("About & updates", "ph-info", () => nav("settings-about"))}
         </div>

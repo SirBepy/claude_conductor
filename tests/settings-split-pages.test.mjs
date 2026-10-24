@@ -56,10 +56,10 @@ describe("Voice & dictation page", () => {
     expect(root.querySelector("#audioOutputDevice")).toBeNull();
   });
 
-  it("keeps only mic and push-to-talk on the phone", async () => {
+  it("keeps only the microphone on the phone (push-to-talk binds a keyboard key or mouse button)", async () => {
     remote = true;
     const root = await mount(renderVoiceView);
-    expect(has(root, "#voiceDictationSwitch", "#audioInputDevice", "#pttCaptureBtn")).toEqual([false, true, true]);
+    expect(has(root, "#voiceDictationSwitch", "#audioInputDevice", "#pttCaptureBtn")).toEqual([false, true, false]);
   });
 });
 

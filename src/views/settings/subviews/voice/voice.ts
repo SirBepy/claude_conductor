@@ -50,6 +50,7 @@ function template() {
             </select>
           </div>
           <div class="settings-caption">Microphone used for voice input. Device labels appear after granting microphone permission.</div>
+          ${isRemote() ? "" : html`
           <div class="kit-row">
             <span class="kit-row-label">Push-to-talk</span>
             <div class="ptt-controls">
@@ -58,6 +59,7 @@ function template() {
             </div>
           </div>
           <div class="settings-caption">Hold this button (while Conductor is focused) to record voice, release to stop. Click Set, then press a key or mouse side-button. Tip: pick a mouse side-button or a non-printing key so it doesn't type into the box.</div>
+          `}
         </div>
       </div>
     </div>
