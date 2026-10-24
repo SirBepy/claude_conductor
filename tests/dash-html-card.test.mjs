@@ -5,7 +5,7 @@ import { render } from "lit-html";
 // A chat-written html card renders in a sandboxed frame that cannot reach the
 // app: scripts run, but with an opaque origin and no network.
 
-const { buildCardDoc, htmlCardFrame } = await import("../src/views/sessions/projects-tab/dash-html-card.ts");
+const { buildCardDoc, htmlCardFrame } = await import("../src/views/sessions/project-dashboard/dash-html-card.ts");
 
 describe("dashboard html card", () => {
   it("renders an iframe sandboxed to scripts only, never same-origin", () => {

@@ -23,8 +23,6 @@ vi.mock("../src/shared/transport.ts", () => ({
 // shortcuts, etc.) is irrelevant to maybeShowHookModal - stub it out so this
 // test doesn't drag in the whole app's chat/render stack.
 vi.mock("../src/views/dashboard/dashboard.ts", () => ({ refreshDashboardView: () => {} }));
-vi.mock("../src/views/projects/projects.ts", () => ({ renderProjectsList: () => {} }));
-vi.mock("../src/views/project-detail/project-detail.ts", () => ({ renderProjectDetailContent: () => {} }));
 vi.mock("../src/shared/shortcuts.ts", () => ({ register: () => {} }));
 vi.mock("../src/views/sessions/sessions.ts", () => ({ triggerNewSessionGlobal: () => {} }));
 vi.mock("../src/shared/navigation.ts", () => ({ showView: () => {} }));

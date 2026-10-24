@@ -29,6 +29,7 @@ import {
   closeFocusedChat,
   toggleWrapUpOnDoneForFocusedChat,
   triggerNewSessionFavoriteGlobal,
+  openFocusedChatDashboard,
 } from "./session-controls";
 
 function discardStuckPending(pane: HTMLElement): void {
@@ -132,6 +133,7 @@ export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): (
   }
   shortcuts.register("close-chat", closeFocusedChat);
   shortcuts.register("toggle-wrap-up-on-done", toggleWrapUpOnDoneForFocusedChat);
+  shortcuts.register("project-dashboard", openFocusedChatDashboard);
 
   let enterTimer: ReturnType<typeof setTimeout> | undefined;
   const unlistenModifierHint = shortcuts.onModifierHint((hint) => {
@@ -161,6 +163,7 @@ export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): (
       shortcuts.unregister(`open-chat-${i}`);
     }
     shortcuts.unregister("close-chat");
+    shortcuts.unregister("project-dashboard");
     clearTimeout(enterTimer);
     unlistenModifierHint();
     hideFavoritesStrip(pane);

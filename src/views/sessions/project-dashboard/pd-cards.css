@@ -1,0 +1,104 @@
+/* Custom cards, the dashboard modals and the image overlay. */
+
+.pd-fetched { font-size: 12px; font-weight: 400; color: var(--sb-muted, var(--color-text-muted)); }
+.pd-err { color: var(--color-danger); opacity: 0.85; font-size: 12px; padding: 4px 0; overflow-wrap: anywhere; }
+
+/* Past results modal tabs (and the Usage card's ranges): words, the chosen
+   one underlined, never a filled pill. */
+.pd-rtabs { display: flex; gap: 12px; }
+.pd-rtab {
+  border: 0; border-bottom: 1px solid transparent; border-radius: 0; padding: 2px 0 1px; background: transparent; cursor: pointer;
+  color: var(--sb-muted, var(--color-text-muted)); font-family: inherit; font-size: 12.5px; font-weight: 500;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.pd-rtab:hover { color: var(--color-text); }
+.pd-rtab.on { color: var(--color-text); border-bottom-color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+
+.pd-outs, .pd-gal { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 900px) { .pd-outs, .pd-gal { grid-template-columns: 1fr 1fr; } }
+/* An outcome is a column of text, not a box: title, when, then the message. */
+.pd-outs { column-gap: 16px; margin: 0 -10px; }
+.pd-out {
+  display: flex; flex-direction: column; min-width: 0; padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.pd-out:hover { background: var(--color-surface-alt); }
+.pd-out b { order: -2; display: block; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-out .when { order: -1; margin: 2px 0 6px; font-size: 12px; color: var(--sb-muted, var(--color-text-muted)); display: flex; gap: 6px; align-items: center; }
+.pd-out p {
+  margin: 0; color: var(--sb-muted, var(--color-text-muted)); font-size: 12.5px; line-height: 1.5; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+}
+.pd-shot:hover { border-color: color-mix(in srgb, var(--color-text) 35%, var(--color-border)); }
+
+.pd-shot { border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: var(--color-background); cursor: pointer; min-width: 0; }
+.pd-shot img { display: block; width: 100%; height: 120px; object-fit: cover; object-position: top left; }
+.pd-shot-ph { height: 120px; display: grid; place-items: center; color: var(--color-text-muted); font-size: 12px; }
+.pd-shot-ph .ph-spinner { animation: icon-btn-spin 0.8s linear infinite; font-size: 16px; }
+.pd-shot-t { padding: 5px 8px; font-size: 12px; color: var(--sb-muted, var(--color-text-muted)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Modals (shared #modal-host card slot) */
+#modal-host .modal-card.pd-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2501;
+  width: min(520px, 92vw); max-height: 80vh; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--color-surface); color: var(--color-text);
+  border: 1px solid var(--color-border); border-radius: 10px; box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+}
+.pd-modal .modal-header { padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
+.pd-modal .modal-header h3 { margin: 0; font-size: 0.95rem; }
+/* Past results: the kind tabs sit in the header, right of the title. */
+.pd-modal .pd-mhead { display: flex; align-items: center; gap: 20px; }
+.pd-modal .modal-footer { padding: 10px 16px; border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end; gap: 8px; }
+.pd-mbody { padding: 8px 16px 14px; overflow-y: auto; font-size: 13px; }
+.pd-msec { margin: 12px 0 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-muted); }
+.pd-mrow { display: flex; align-items: center; gap: 8px; padding: 5px 0; min-width: 0; }
+.pd-mrow .pd-mt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-mrow.pd-check { cursor: pointer; }
+.pd-mrow.pd-check input { accent-color: var(--color-primary); }
+.pd-mrow.pd-check .pd-fetched { max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-hint { margin: 12px 0 0; font-size: 12px; color: var(--color-text-muted); }
+/* The fill, border and focus ring come from inputs.css's input[type="text"]; the two-class selector only trims its padding to the modal's compact rows. */
+.pd-mrow.pd-pin-add { padding-top: 8px; align-items: stretch; }
+.pd-mrow .pd-pin-input { flex: 1; min-width: 0; padding: 6px 10px; border-radius: 8px; font-size: 13px; }
+.pd-field { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12px; color: var(--color-text-muted); }
+.pd-field input {
+  padding: 6px 8px; border-radius: 6px; border: 1px solid var(--color-border);
+  background: var(--color-background); color: var(--color-text); font: inherit; font-size: 13px;
+}
+.pd-field input:focus { outline: none; border-color: var(--color-primary); }
+
+/* Kebab */
+.smore-item.is-danger, .smore-item.is-danger i { color: var(--color-danger); }
+
+/* Full-size image: the app's lightbox chrome, one image only. */
+.pd-lightbox { z-index: 3000; }
+
+/* Custom-card extras: progress bar, headline stat line, run button */
+.pd-prog { padding: 2px 0 6px; }
+.pd-prog-label { font-size: 12.5px; margin-bottom: 4px; }
+.pd-prog-bar { height: 4px; border-radius: 2px; background: var(--color-background); overflow: hidden; }
+.pd-prog-bar span { display: block; height: 100%; border-radius: 2px; background: var(--color-primary); }
+.pd-prog.is-behind .pd-prog-bar span { background: var(--color-warning); }
+/* The stat text keeps its full words; the button drops to its own line when they do not share one. */
+.pd-headline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 2px 0 4px; font-size: 12.5px; }
+.pd-hl-t { flex: 1 1 auto; min-width: 0; }
+.pd-hl-t.warn { color: var(--color-warning); }
+.pd-hl-t.good { color: var(--color-success, var(--st-done)); opacity: 0.75; }
+/* A card's run-a-command action: a quiet text link with an arrow, not a button. */
+.pd-act {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 0; border: 0; background: transparent;
+  color: var(--sb-muted, var(--color-text-muted)); font-family: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
+}
+.pd-act:hover { color: var(--color-text); }
+
+/* The Past results modal is wider than the settings-style modals. */
+#modal-host .modal-card.pd-modal.wide { width: min(900px, 94vw); }
+
+/* Project config popups (project-config.ts): the project name trails the title. */
+.pd-modal-sub { margin-left: 8px; font-weight: 400; color: var(--sb-muted, var(--color-text-muted)); }
+.pd-config-body { padding: 12px 16px 16px; overflow-y: auto; }
+.pd-rename-input { width: 100%; box-sizing: border-box; }
+.pd-modal .modal-body:has(.pd-rename-input) { padding: 14px 16px; }
+
+/* An html card's sandboxed frame; its height comes from the frame itself. */
+.pd-html-frame { display: block; width: 100%; height: 60px; border: 0; background: transparent; color-scheme: normal; }

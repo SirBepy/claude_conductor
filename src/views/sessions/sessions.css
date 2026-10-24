@@ -221,34 +221,6 @@
   background: color-mix(in srgb, var(--chat-state-needs-input) 15%, transparent);
 }
 
-.session-pending-hint {
-  margin: auto;
-  text-align: center;
-  color: var(--color-text-muted);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 32px;
-}
-
-.session-pending-hint i {
-  font-size: 2.4rem;
-  color: var(--color-primary);
-  opacity: 0.7;
-}
-
-.session-pending-hint p {
-  font-size: 0.92rem;
-  margin: 0;
-  max-width: 380px;
-  line-height: 1.5;
-}
-
-.session-pending-hint strong {
-  color: var(--color-text);
-}
-
 /* .session-header rules moved to session-header.css (todo 1083). */
 
 /* View-header "more options" button indicator: when-done armed. */

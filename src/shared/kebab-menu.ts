@@ -1,5 +1,5 @@
 // Wires the .menu-anchor/.menu-popover/.menu-item click-toggle + dismiss-on-
-// outside-click idiom shared by project-detail/session-detail/characters
+// outside-click idiom shared by characters and the settings accounts row
 // (todo 204). Toggles the `.hidden` class - accounts.ts's per-row popovers
 // use a `hidden` attribute + close-others-on-open instead, so they keep
 // their own wiring and only share the CSS.

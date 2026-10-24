@@ -2,7 +2,6 @@
 // pane chrome (header + markup), statusbar mount, and renderer attach +
 // session-started watcher. Composer wiring lives in pending-pane-composer.ts.
 
-import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { api } from "../../shared/api";
 import { ChatRenderer } from "../../shared/chat/chat-renderer";
@@ -40,11 +39,11 @@ export function mountPendingChrome(
     meta: project.name,
   });
   pane.innerHTML = [
-    // Skeleton placeholders, not the real statusbar/hint - both get wiped and
+    // Skeleton placeholders, not the real statusbar/dashboard - both get wiped and
     // replaced once their own async mount step resolves (mountPendingStatusbar's
     // two awaits; attachPendingRenderer's renderer.attach(), which does
     // `container.innerHTML = ""` on this same .session-messages element, see
-    // mountPendingHint's own comment below). Seeding them here is what keeps
+    // draft-dashboard.ts). Seeding them here is what keeps
     // the pane from going visibly blank between the mobile-pane attribute
     // flip (instant) and those awaits resolving.
     `<div class="session-statusbar-host"><div class="session-statusbar-skeleton v-skeleton" aria-hidden="true"></div></div>`,
@@ -83,30 +82,6 @@ export function mountPendingChrome(
   void hydrateProjectTechIcons(pane);
 
   return header;
-}
-
-/** Paint the "type a message to start" hint into `.session-messages`. Must run
- *  AFTER attachPendingRenderer()'s `renderer.attach()` - see the comment on
- *  mountPendingChrome's template above for why this can't be seeded earlier.
- *  No-op if a newer mount superseded this one, or if the pane already moved
- *  past the draft stage (same bail-out shape as the rest of this module). */
-export function mountPendingHint(
-  pane: HTMLElement,
-  project: { name: string },
-  myMount: number,
-): void {
-  if (state.mountId !== myMount) return;
-  const messagesEl = pane.querySelector<HTMLElement>(".session-messages");
-  if (!messagesEl || messagesEl.querySelector(".session-pending-hint")) return;
-  // .v-empty (motion.css) is the shared empty-state idiom, the same one
-  // sidebar-entries.ts's empty row uses.
-  messagesEl.insertAdjacentHTML("afterbegin", [
-    `<div class="session-pending-hint v-empty">`,
-    `  <i class="ph ph-paper-plane-tilt v-empty-icon"></i>`,
-    `  <div class="v-empty-title">New chat</div>`,
-    `  <div class="v-empty-hint">Type a message below to start a session in <strong>${escapeHtml(project.name)}</strong>.</div>`,
-    `</div>`,
-  ].join("\n"));
 }
 
 /** Mount the statusbar for the pending pane. No-op if the host slot isn't in

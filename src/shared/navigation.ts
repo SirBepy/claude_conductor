@@ -1,7 +1,6 @@
 /**
  * View-navigation helpers. Ported from the legacy src/dashboard.js + the stats
- * module helpers (openProjectDetail, openSessionDetail, openAllSessions,
- * showMergeModal).
+ * module helpers (showMergeModal).
  *
  * Every top-level view is migrated — the router owns DOM swapping. For the
  * remaining legacy `.view` divs in index.html (graph-detail, settings-sync)
@@ -11,11 +10,6 @@
  * back-compat with any lingering legacy callers.
  */
 
-import {
-  getProjectDetailState,
-  getProjectSubviewStack,
-  setCurrentSessionRecord,
-} from "./state";
 import { updateSidemenuActive } from "./sidemenu";
 import { askConfirm } from "./confirm";
 
@@ -24,13 +18,7 @@ const LEGACY_VIEWS = [
   "settings-notifications",
   "settings-permissions",
   "settings-sync",
-  "project-detail",
   "graph-detail",
-  "project-character-pick",
-  "project-automation",
-  "project-folder-mapping",
-  "project-sessions",
-  "session-detail",
 ];
 
 interface RouterWindow {
@@ -65,39 +53,6 @@ export function setActiveView(name: string): void {
   activeView = name;
 }
 
-export function backFromSubview(): void {
-  const origin = getProjectSubviewStack().pop() || "project-detail";
-  showView(origin);
-}
-
-export function openProjectSubview(subview: string): void {
-  getProjectSubviewStack().push("project-detail");
-  showView(subview);
-}
-
-export function openSessionDetailView(originView: string): void {
-  getProjectSubviewStack().push(originView);
-  showView("session-detail");
-}
-
-export function openProjectDetail(cwd: string): void {
-  const state = getProjectDetailState();
-  state.cwd = cwd;
-  state.offset = 0;
-  showView("project-detail");
-}
-
-export function openSessionDetail(record: unknown, originView?: string): void {
-  if (!record) return;
-  setCurrentSessionRecord(record);
-  openSessionDetailView(originView || "project-detail");
-}
-
-export function openAllSessions(cwd: string): void {
-  getProjectDetailState().cwd = cwd;
-  openProjectSubview("project-sessions");
-}
-
 export function showMergeModal(
   text: string,
   onConfirm: () => void,
@@ -113,20 +68,8 @@ export function showMergeModal(
 // ── Back-compat window bindings ────────────────────────────────────────────
 interface NavWindow {
   showView?: typeof showView;
-  backFromSubview?: typeof backFromSubview;
-  openProjectSubview?: typeof openProjectSubview;
-  openSessionDetailView?: typeof openSessionDetailView;
-  openProjectDetail?: typeof openProjectDetail;
-  openSessionDetail?: typeof openSessionDetail;
-  openAllSessions?: typeof openAllSessions;
   showMergeModal?: typeof showMergeModal;
 }
 const w = window as unknown as NavWindow;
 w.showView = showView;
-w.backFromSubview = backFromSubview;
-w.openProjectSubview = openProjectSubview;
-w.openSessionDetailView = openSessionDetailView;
-w.openProjectDetail = openProjectDetail;
-w.openSessionDetail = openSessionDetail;
-w.openAllSessions = openAllSessions;
 w.showMergeModal = showMergeModal;

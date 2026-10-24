@@ -1,7 +1,7 @@
 // Reviewed 2026-10-25 (in-place statusline editing): pending-pane-mount.ts now passes layoutEditable: true to the statusbar; this spec asserts empty-state copy only, so its contract is unaffected.
 // Reviewed 2026-10-23 (peer account picker): pending-flow.ts now passes the picker's machine id on to the model/effort modal; this spec asserts empty-state copy only and starts no chat on a peer, so its contract is unaffected.
 // Reviewed 2026-10-22: pending-pane-mount.ts no longer wires a header Code button (it moved to the FAB menu); this spec asserts empty-state copy only, so its contract is unaffected.
-// asserts: src/views/sessions/sidebar-entries.ts, src/views/sessions/pending-pane-mount.ts
+// asserts: src/views/sessions/sidebar-entries.ts, src/views/sessions/pending-pane-mount.ts, src/views/sessions/project-dashboard/draft-dashboard.ts
 //
 // Reviewed against pending-pane-mount.ts's new skeleton placeholders
 // (statusbar + .session-messages, seeded to kill the blank-flash gap before
@@ -16,6 +16,7 @@
 // that gate. Ran this file after that change - still passes.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, mountSessionsList, SESSIONS_BASE_INVOKE, capture } from "./harness";
+import { conductorHistory, conductorSnapshot } from "./project-dashboard-fixtures";
 
 // Todo 1078: the phone's two empty states ("No active sessions" in the
 // sidebar list, and the new-chat draft's "Type a message below..." hint)
@@ -49,15 +50,21 @@ test("the empty chats list centers a v-empty card on phone, pointing at +", asyn
 async function mountNewChatDraft(page: Page): Promise<void> {
   await mountView(page, {
     view: "sessions",
-    invoke: { ...SESSIONS_BASE_INVOKE, list_instances: [], get_active_sessions: [] },
+    invoke: {
+      ...SESSIONS_BASE_INVOKE, list_instances: [], get_active_sessions: [],
+      dashboard_list_targets: [], dashboard_snapshot: conductorSnapshot(), dashboard_history: conductorHistory(),
+    },
   });
   // Phone shows one pane at a time (sessions-mobile.css); the chat pane
   // starts hidden until `data-mobile-pane="chat"` is set, same as the real
   // app's launch-new-session flow does via the FAB before mounting.
-  await page.evaluate(() => {
+  // Re-applied until the pane shows: the view's own initial load can still be
+  // settling and put the phone back on the list right after a one-shot set.
+  await page.waitForFunction(() => {
     document.querySelector(".view-sessions")?.setAttribute("data-mobile-pane", "chat");
+    const pane = document.querySelector<HTMLElement>("#session-pane");
+    return !!pane && pane.offsetParent !== null;
   });
-  await page.locator("#session-pane").waitFor();
 
   await page.evaluate(async () => {
     const flow = await import("/views/sessions/pending-flow.ts");
@@ -70,24 +77,20 @@ async function mountNewChatDraft(page: Page): Promise<void> {
   });
 }
 
-test("the new-chat draft's pending hint is visible on phone and uses the v-empty card", async ({ page }) => {
+test("the new-chat draft shows its project's dashboard on phone, one column, chips above the message box", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await mountNewChatDraft(page);
 
-  const hint = page.locator(".session-pending-hint");
   // ChatRenderer.attach() clears .session-messages, so only a real browser
-  // driving the real renderer proves the hint survives to paint.
-  await expect(hint).toBeVisible();
-  const box = await hint.boundingBox();
-  expect(box).not.toBeNull();
-  expect(box!.width).toBeGreaterThan(0);
-  expect(box!.height).toBeGreaterThan(0);
-
-  // The hint card IS a .v-empty (not a wrapper around one) - same idiom as
-  // the sidebar's empty row, applied directly to the existing hint element.
-  await expect(hint).toHaveClass(/\bv-empty\b/);
-  await expect(hint.locator(".v-empty-icon")).toBeVisible();
-  await expect(hint.locator(".v-empty-hint")).toContainText("Alpha");
+  // driving the real renderer proves the dashboard survives to paint.
+  const root = page.locator(".session-messages .pd-root.is-draft");
+  await expect(root.locator(".pd-reports")).toBeVisible();
+  await expect(root.locator('[data-pd-card="chats"]')).toBeVisible();
+  // The 900px rule stacks the half-width cards into the first column.
+  await expect(root.locator(".pd-col").nth(1).locator("[data-pd-card]")).toHaveCount(0);
+  await expect(page.locator(".pd-qa-host.is-draft .pd-chip").first()).toBeVisible();
+  // The phone has no PC to open a project's config on, so the draft has no menu button either.
+  await expect(root.locator("[data-pd-kebab]")).toHaveCount(0);
 
   await capture(page.locator(".session-pane"), "phone-empty-states-pending-pane");
 });

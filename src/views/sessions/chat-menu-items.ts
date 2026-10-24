@@ -122,11 +122,12 @@ export function buildOpenProjectItems(ctx: ChatMenuCtx): ItemDesc[] {
     {
       icon: "squares-four",
       label: "Dashboard",
-      run: cwd ? async () => {
-        try { await invoke<void>("open_dashboard_project", { cwd }); }
-        catch (e) { console.error("[chat-menu] open_dashboard_project failed", e); }
+      // A mirrored chat's folder is on the peer, which this daemon's dashboard cannot read.
+      run: cwd && !mirrored ? async () => {
+        const { openDashboardPage } = await import("./project-dashboard/dashboard-page");
+        await openDashboardPage(cwd);
       } : undefined,
-      disabledReason: cwd ? undefined : "No project directory",
+      disabledReason: !cwd ? "No project directory" : (mirrored ? NOT_ON_THIS_MACHINE : undefined),
     },
   ];
 }

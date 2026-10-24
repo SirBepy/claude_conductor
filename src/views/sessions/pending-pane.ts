@@ -4,10 +4,11 @@ import { characterForSession, characterIconUrl } from "./session-characters";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import type { SessionConfig } from "./model-effort-modal";
 import { isAutoAccept, isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
-import { SessionHeader } from "./session-header";
+import { SessionHeader, projectDashboardOpener } from "./session-header";
 import { wireRenderer } from "./active-session-mount";
 import { retainChat } from "./chat-pane-cache";
-import { mountPendingChrome, mountPendingHint, mountPendingStatusbar, attachPendingRenderer } from "./pending-pane-mount";
+import { mountPendingChrome, mountPendingStatusbar, attachPendingRenderer } from "./pending-pane-mount";
+import { mountDraftDashboard, unmountDraftDashboard } from "./project-dashboard/draft-dashboard";
 import { wirePendingComposer } from "./pending-pane-composer";
 
 let _pendingHeader: SessionHeader | null = null;
@@ -23,6 +24,7 @@ export async function renderPendingPane(
   placeholderId: string,
   project: { path: string; name: string },
   config: SessionConfig,
+  draftText?: string,
 ): Promise<void> {
   const myMount = state.mountId;
 
@@ -30,12 +32,13 @@ export async function renderPendingPane(
   await mountPendingStatusbar(pane, project, config, placeholderId, _pendingHeader);
   await attachPendingRenderer(pane, placeholderId, project, config, _pendingHeader, myMount);
   // Must come after attachPendingRenderer: ChatRenderer.attach() clears
-  // .session-messages, which would wipe a hint seeded any earlier.
-  mountPendingHint(pane, project, myMount);
+  // .session-messages, which would wipe a dashboard mounted any earlier.
+  mountDraftDashboard(pane, project, myMount);
   wirePendingComposer(pane, placeholderId, project, config, myMount, { rebindPaneHeader });
 
   const ta = pane.querySelector<HTMLTextAreaElement>(".composer-textarea");
-  if (ta) ta.focus();
+  if (draftText && state.mountId === myMount) state.composer?.setDraftText(draftText, false);
+  else if (ta) ta.focus();
 
   if (config.initialMessage) {
     const msg = config.initialMessage;
@@ -54,13 +57,14 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
     // (e.g. the picked account vanished mid-flow and it fell back to default).
     state.statusbar.setAccountId(sess?.account_id ?? null);
   }
-  pane.querySelector(".session-pending-hint")?.remove();
+  unmountDraftDashboard(pane);
 
   const h = _pendingHeader;
   if (!h) return;
   if (sess) {
     h.setTitle(sessionSubtitle(sess));
     h.setMeta(projectName(sess));
+    h.onProjectClick = projectDashboardOpener(sess);
   }
   // Refresh the avatar from the now-assigned session character: covers the case
   // where the user didn't pick one in the modal and the backend rolled one on

@@ -1,3 +1,4 @@
+// Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 // Reviewed 2026-10-20: index.ts gained a `hydrateWrapUpOnDone()` call at install time and re-exports isWrapUpOnDone/setWrapUpOnDone - additive, no change to this spec's AUQ contract.
 import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";

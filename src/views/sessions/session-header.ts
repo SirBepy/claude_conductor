@@ -46,6 +46,18 @@ export function refreshWrapUpIndicator(selectedId: string | null, sessionId: str
  * Code mode lives in the chat FAB menu. The per-session more-btn moved to the top-right
  * view-more menu ("This chat" section).
  */
+/** The header's project-name click for a started chat. None for a chat
+ *  mirrored from a paired machine: its folder is on that machine, which this
+ *  daemon's dashboard cannot read. Loaded lazily: the dashboard page imports
+ *  the chat-pane modules that build this header. */
+export function projectDashboardOpener(sess: { cwd: unknown, project_id?: string | null, machine?: unknown }): (() => void) | null {
+  const cwd = sess.cwd ? String(sess.cwd) : "";
+  if (!cwd || sess.machine) return null;
+  return () => {
+    void import("./project-dashboard/dashboard-page").then((m) => m.openDashboardPage(cwd, sess.project_id || null));
+  };
+}
+
 export class SessionHeader {
   readonly el: HTMLElement;
 
@@ -64,6 +76,7 @@ export class SessionHeader {
   /** The flag button: toggle "Wrap up when done" for this chat. */
   onWrapUpToggleClick: (() => void) | null = null;
   onCharClick: (() => void) | null = null;
+  private _onProjectClick: (() => void) | null = null;
   /** Opens the statusbar's model / effort slider popover on the header's own
    *  text. The statusbar owns both popovers and the commit path, so the header
    *  only hands it which one and where to anchor. */
@@ -124,6 +137,10 @@ export class SessionHeader {
 
     // Char-click delegate on the header element so it survives avatar swaps.
     el.addEventListener("click", (e) => {
+      if (this._onProjectClick && (e.target as Element).closest(".meta-proj")) {
+        this._onProjectClick();
+        return;
+      }
       const cfg = (e.target as Element).closest<HTMLElement>(".meta-cfg-btn");
       if (cfg) {
         // Same stop as the statusline chips: the popover shell closes on a
@@ -138,6 +155,11 @@ export class SessionHeader {
 
     el.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
+      if (this._onProjectClick && (e.target as Element).closest(".meta-proj")) {
+        e.preventDefault();
+        this._onProjectClick();
+        return;
+      }
       const cfg = (e.target as Element).closest<HTMLElement>(".meta-cfg-btn");
       if (!cfg) return;
       e.preventDefault();
@@ -147,6 +169,22 @@ export class SessionHeader {
 
   setTitle(text: string): void { this._titleEl.textContent = text; }
   setMeta(text: string): void { this._projEl.textContent = text; }
+
+  /** Makes the project name a button (opens the project's dashboard page). A
+   *  draft leaves it plain: its pane already shows that dashboard. */
+  set onProjectClick(fn: (() => void) | null) {
+    this._onProjectClick = fn;
+    this._projEl.classList.toggle("is-link", !!fn);
+    if (fn) {
+      this._projEl.setAttribute("role", "button");
+      this._projEl.tabIndex = 0;
+      this._projEl.title = "Project dashboard (Ctrl+Shift+D)";
+    } else {
+      this._projEl.removeAttribute("role");
+      this._projEl.removeAttribute("tabindex");
+      this._projEl.removeAttribute("title");
+    }
+  }
 
   /** Model and effort at the far right of the meta line, each its own hit
    *  target opening the statusbar's slider popover. Desktop shows both as words;

@@ -1,4 +1,5 @@
-// asserts: src/views/sessions/projects-tab/dash-html-card.ts
+// Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
+// asserts: src/views/sessions/project-dashboard/dash-html-card.ts
 import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
 
@@ -20,7 +21,7 @@ test("an html card's script cannot reach the app or the network, and sees its da
     // The bare package is served under /@id/; a variable keeps tsc from resolving it.
     const litId = "/@id/lit-html";
     const { render } = await import(/* @vite-ignore */ litId);
-    const { htmlCardFrame } = await import("/views/sessions/projects-tab/dash-html-card.ts");
+    const { htmlCardFrame } = await import("/views/sessions/project-dashboard/dash-html-card.ts");
     const host = document.createElement("div");
     document.body.appendChild(host);
     render(htmlCardFrame("Probe", template, { hours: 7.5 }), host);
@@ -41,7 +42,7 @@ test("the frame sizes itself to its content", async ({ page }) => {
     // The bare package is served under /@id/; a variable keeps tsc from resolving it.
     const litId = "/@id/lit-html";
     const { render } = await import(/* @vite-ignore */ litId);
-    const { htmlCardFrame } = await import("/views/sessions/projects-tab/dash-html-card.ts");
+    const { htmlCardFrame } = await import("/views/sessions/project-dashboard/dash-html-card.ts");
     const host = document.createElement("div");
     host.style.width = "400px";
     document.body.appendChild(host);
@@ -56,7 +57,7 @@ test("a card shorter than the frame's starting height shrinks to its content", a
     // The bare package is served under /@id/; a variable keeps tsc from resolving it.
     const litId = "/@id/lit-html";
     const { render } = await import(/* @vite-ignore */ litId);
-    const { htmlCardFrame } = await import("/views/sessions/projects-tab/dash-html-card.ts");
+    const { htmlCardFrame } = await import("/views/sessions/project-dashboard/dash-html-card.ts");
     const host = document.createElement("div");
     document.body.appendChild(host);
     render(htmlCardFrame("Short", `<div style="height:30px"></div>`, null), host);

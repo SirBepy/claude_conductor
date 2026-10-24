@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-// Gaming mode's per-project allowlist (Project detail > Automation >
+// Gaming mode's per-project allowlist (the dashboard's Project settings popup >
 // "Keep running in gaming mode"). Pins: the checkbox reflects the project's
 // stored `keep_running_in_gaming_mode` flag, and flipping it calls
 // update_project with that single field via api.updateProject - the same
@@ -22,12 +22,8 @@ vi.mock("../src/shared/api.ts", () => ({
   },
 }));
 vi.mock("../src/shared/toast.ts", () => ({ showToast: vi.fn() }));
-vi.mock("../src/shared/state.ts", () => ({
-  getProjectDetailState: () => ({ cwd: "C:/proj/alpha" }),
-}));
-
 const { renderGamingModeRow } = await import(
-  "../src/views/project-detail/subviews/automation/automation.ts"
+  "../src/views/sessions/project-dashboard/project-config/automation.ts"
 );
 
 const PROJECT = { id: "proj-alpha", path: "C:/proj/alpha", keep_running_in_gaming_mode: false };
@@ -46,18 +42,18 @@ function mount() {
   return root;
 }
 
-describe("Project detail > Automation > Keep running in gaming mode", () => {
+describe("Project settings > Keep running in gaming mode", () => {
   it("reflects the project's stored flag", async () => {
     listProjects.mockResolvedValue([{ ...PROJECT, keep_running_in_gaming_mode: true }]);
     const root = mount();
-    await renderGamingModeRow();
+    await renderGamingModeRow("C:/proj/alpha");
     expect(root.querySelector("#gamingModeKeepRunning").checked).toBe(true);
   });
 
   it("defaults unchecked for a project with no flag set", async () => {
     listProjects.mockResolvedValue([PROJECT]);
     const root = mount();
-    await renderGamingModeRow();
+    await renderGamingModeRow("C:/proj/alpha");
     expect(root.querySelector("#gamingModeKeepRunning").checked).toBe(false);
   });
 
@@ -65,7 +61,7 @@ describe("Project detail > Automation > Keep running in gaming mode", () => {
     listProjects.mockResolvedValue([PROJECT]);
     updateProject.mockResolvedValue(undefined);
     const root = mount();
-    await renderGamingModeRow();
+    await renderGamingModeRow("C:/proj/alpha");
 
     const toggle = root.querySelector("#gamingModeKeepRunning");
     toggle.checked = true;
@@ -75,11 +71,11 @@ describe("Project detail > Automation > Keep running in gaming mode", () => {
   });
 
   it("registers the project first via ensure_project when it has no ProjectConfig yet", async () => {
-    listProjects.mockResolvedValue([]); // unregistered cwd, matches project-detail.ts's own fallback
+    listProjects.mockResolvedValue([]); // unregistered cwd, matches renameProject's own fallback
     ensureProject.mockResolvedValue({ id: "proj-fresh", path: "C:/proj/alpha" });
     updateProject.mockResolvedValue(undefined);
     const root = mount();
-    await renderGamingModeRow();
+    await renderGamingModeRow("C:/proj/alpha");
 
     const toggle = root.querySelector("#gamingModeKeepRunning");
     toggle.checked = true;

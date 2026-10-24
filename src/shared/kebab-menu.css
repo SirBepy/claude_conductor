@@ -1,6 +1,5 @@
-/* Kebab/context menu (todo 204). Shared by project-detail, session-detail,
- * characters, and the settings accounts row - moved out of project-detail.css
- * where the other three views relied on it loading globally. */
+/* Kebab/context menu. Shared by characters and the settings
+ * accounts row. */
 .menu-anchor { position: relative; display: inline-block; }
 .menu-popover {
   position: absolute;

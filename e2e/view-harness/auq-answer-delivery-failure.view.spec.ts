@@ -1,3 +1,4 @@
+// Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 // Reviewed 2026-10-08: index.ts's confirmQuestionRendered calls now also thread the prompt's sessionId (multi-machine prompt routing, docs/multi-machine.md) - additive, no UI-behavior change for this spec's contract.
 // Reviewed 2026-10-08: index.ts gained a `secret-requested` prompt route and queue (the request_secret MCP tool's masked-value card) alongside the existing permission/question routes - additive, no change to this spec's AUQ contract.
 // Reviewed 2026-10-20: index.ts gained a `hydrateWrapUpOnDone()` call at install time and re-exports isWrapUpOnDone/setWrapUpOnDone - additive, no change to this spec's AUQ contract.

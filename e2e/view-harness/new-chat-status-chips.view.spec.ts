@@ -1,3 +1,4 @@
+// Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 // Reviewed 2026-10-23 (peer account picker): pending-flow.ts now hands the picker's machine id to the model/effort modal so a paired machine's accounts are listed. This spec bypasses the picker and modal and launches with no machine, so the pane it drives is unchanged.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, fireEvent, capture } from "./harness";

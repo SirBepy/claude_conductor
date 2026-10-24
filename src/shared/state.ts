@@ -48,19 +48,10 @@ export interface SettingsShape {
   [k: string]: unknown;
 }
 
-export interface ProjectDetailState {
-  cwd: string | null;
-  range: string;
-  offset: number;
-}
-
 interface WindowWithState {
   currentSettings?: SettingsShape;
   lastTokenHistory?: TokenRecord[] | null;
   lastHistory?: unknown;
-  projectDetailState?: ProjectDetailState;
-  projectSubviewStack?: string[];
-  currentSessionRecord?: unknown;
 }
 
 function win(): WindowWithState {
@@ -92,33 +83,4 @@ export function getUsageHistory(): unknown {
 
 export function setUsageHistory(h: unknown): void {
   win().lastHistory = h;
-}
-
-// ── Project detail navigation state ───────────────────────────────────────
-export function getProjectDetailState(): ProjectDetailState {
-  let s = win().projectDetailState;
-  if (!s) {
-    s = { cwd: null, range: "30d", offset: 0 };
-    win().projectDetailState = s;
-  }
-  return s;
-}
-
-// ── Project subview stack (sub-route history) ─────────────────────────────
-export function getProjectSubviewStack(): string[] {
-  let s = win().projectSubviewStack;
-  if (!s) {
-    s = [];
-    win().projectSubviewStack = s;
-  }
-  return s;
-}
-
-// ── Current session record (session-detail view) ──────────────────────────
-export function getCurrentSessionRecord(): unknown {
-  return win().currentSessionRecord ?? null;
-}
-
-export function setCurrentSessionRecord(r: unknown): void {
-  win().currentSessionRecord = r;
 }

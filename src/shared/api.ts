@@ -366,7 +366,7 @@ export const api = {
   },
   // Throws on failure rather than swallowing to a zeroed result - a real
   // no-op run and a failed run both look like {processed: 0, skipped: 0},
-  // so the caller (src/views/projects/projects.ts::runBackfill) needs the
+  // so the caller (src/views/settings/subviews/data/data.ts::rebuildTokenHistory) needs the
   // rejection to tell them apart; it already has its own try/catch.
   backfillTranscripts: (): Promise<BackfillResult> => invoke<BackfillResult>("backfill_transcripts"),
 

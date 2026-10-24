@@ -13,6 +13,10 @@ export interface SessionConfig {
   characterId?: string | null;
   /** When set, the pending pane auto-sends this text as the first message on mount. */
   initialMessage?: string;
+  /** When set, the pending pane types this into the message box on mount, unsent.
+   *  launchNewSession takes it off before the config is saved with the draft, so
+   *  reopening the draft never types it over what the user wrote since. */
+  draftText?: string;
   /** Registry account the modal resolved/picked (multi-account milestone 04).
    * `null`/undefined means no accounts are registered yet or the resolver
    * found none - the spawn falls back to daemon-side default resolution. */

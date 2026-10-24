@@ -28,8 +28,6 @@ import { updateSettings } from "./settings-update";
 import type { HookRegistrationState } from "./api";
 import { curateLatestPerFamily, setApiModels } from "./effort-presets";
 import { refreshDashboardView } from "../views/dashboard/dashboard";
-import { renderProjectsList } from "../views/projects/projects";
-import { renderProjectDetailContent } from "../views/project-detail/project-detail";
 import * as shortcuts from "./shortcuts";
 import { triggerNewSessionGlobal, triggerNewSessionFavoriteGlobal } from "../views/sessions/sessions";
 import { showView } from "./navigation";
@@ -41,10 +39,6 @@ import { applyAppearance, followAppearanceChanges } from "./theme-sync";
 import { warmNewSessionCache } from "../views/sessions/new-session-cache";
 import { loadTokenHistory, mergeLiveSessions } from "./token-history";
 
-function activeViewName(): string {
-  return window.location.hash.replace(/^#/, "") || "dashboard";
-}
-
 // ── Live token history merge ───────────────────────────────────────────────
 /** Only the Dashboard reads this, and the phone lands on Chats, so it is not
  *  fetched there at boot - `renderDashboard` loads it on mount instead. */
@@ -54,7 +48,6 @@ async function fetchTokenHistoryWithLive(): Promise<TokenRecord[]> {
 }
 
 // ── Dead-path reconciliation ──────────────────────────────────────────────
-const deadPaths = new Set<string>();
 
 async function runDeadPathCheck(): Promise<void> {
   const tokenHistory = getTokenHistory();
@@ -97,8 +90,6 @@ async function runDeadPathCheck(): Promise<void> {
     if (matches.length === 1 && matches[0]) {
       doMerge(aliases, deadCwd, matches[0]);
       anyMerged = true;
-    } else {
-      deadPaths.add(deadCwd);
     }
   }
   if (anyMerged) {
@@ -111,10 +102,7 @@ async function runDeadPathCheck(): Promise<void> {
     } catch (e) {
       console.error("[boot] failed to persist merged project aliases", e);
     }
-    void renderProjectsList();
     refreshDashboardView();
-  } else if (deadPaths.size) {
-    void renderProjectsList();
   }
 }
 
@@ -289,7 +277,6 @@ export function initBoot(): void {
   api.onHistoryUpdated((h) => {
     setUsageHistory(h);
     refreshDashboardView();
-    if (activeViewName() === "projects") void renderProjectsList();
   });
   api.onTokenHistoryUpdated(async (th) => {
     let active: TokenRecord[] = [];
@@ -301,12 +288,6 @@ export function initBoot(): void {
     const merged = mergeLiveSessions(th, active);
     setTokenHistory(merged);
     refreshDashboardView();
-    const view = activeViewName();
-    if (view === "projects") void renderProjectsList();
-    if (view === "project-detail") renderProjectDetailContent();
-  });
-  api.onInstancesChanged(() => {
-    if (activeViewName() === "projects") void renderProjectsList();
   });
   let _daemonWasConnected = true;
   // daemon-status-changed is an app-wide event: every window that runs initBoot

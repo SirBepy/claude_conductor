@@ -164,15 +164,13 @@ pub fn open_dashboard(app: AppHandle) {
     surface_main_with_nav(&app, "navigate-to-dashboard", (), "dashboard".to_string());
 }
 
-/// Surfaces the main dashboard window and tells it to navigate to a specific
-/// project's detail page. Called from the chats window's per-chat menu so the
-/// user can jump to a project's dashboard view without leaving the chat
-/// window's process (it stays open in the background).
-// `(async)`: lazily builds `main` - see the module doc's deadlock rule.
+/// Surfaces the chats window on a project's dashboard page. Called from the
+/// main window's Home project rows; the page itself lives in the chats window
+/// (`src/views/sessions/project-dashboard/dashboard-page.ts`).
+// `(async)`: can build `session-chats` - see the module doc's deadlock rule.
 #[tauri::command(async)]
-pub fn open_dashboard_project(app: AppHandle, cwd: String) {
-    let pending = format!("project:{cwd}");
-    surface_main_with_nav(&app, "navigate-to-project", cwd, pending);
+pub fn open_dashboard_project(app: AppHandle, cwd: String) -> Result<(), String> {
+    chats::open_chats_for_session(app, cwd, "project".to_string())
 }
 
 /// Surfaces the main dashboard window and tells it to navigate to the
@@ -193,9 +191,9 @@ pub fn open_dashboard_settings_accounts(app: AppHandle) {
 
 /// Surfaces the main dashboard window and focuses it on a specific account.
 /// Called from an overlay card click (overlay.ts) so tapping an account in the
-/// floating overlay jumps straight to that account's dashboard view. Mirrors
-/// `open_dashboard_project`: emit `navigate-to-account` if the webview is live,
-/// else queue `account:<id>` for `frontend_ready` to drain on cold boot.
+/// floating overlay jumps straight to that account's dashboard view. Emits
+/// `navigate-to-account` if the webview is live, else queues `account:<id>`
+/// for `frontend_ready` to drain on cold boot.
 // `(async)`: lazily builds `main` - see the module doc's deadlock rule. Called
 // from the overlay webview, so this one is a live deadlock path whenever the
 // dashboard window hasn't been built yet.

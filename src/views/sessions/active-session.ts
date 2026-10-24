@@ -22,7 +22,7 @@ import { changeCharacterForSession, changeAccountForSession } from "./active-ses
 import { isAutoAccept, isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar, replayPendingPrompt, rehydrateAndReplay, pendingPromptSessionIds, dismissQuestionCard } from "./permission-modal";
 import { snapshotActiveCardDraft } from "./permission-modal/question-ui";
 import { savePendingPromptDraft } from "./permission-modal/gating";
-import { SessionHeader } from "./session-header";
+import { SessionHeader, projectDashboardOpener } from "./session-header";
 import { closeCodeMode } from "./code-mode/code-mode";
 import { setCodeModeChatProvider } from "./code-mode/entry";
 import { applyHeaderMerge } from "./mobile-header-merge";
@@ -211,6 +211,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
 
   const header = new SessionHeader({ title: sessionSubtitle(sess), meta: projectName(sess) });
   header.onCharClick = () => { void changeCharacterForSession(sess.session_id, headerStatusClass); };
+  header.onProjectClick = projectDashboardOpener(sess);
   header.onWrapUpToggleClick = () => {
     const next = !isWrapUpOnDone(sess.session_id);
     setWrapUpOnDone(sess.session_id, next);

@@ -123,7 +123,7 @@ async function bootDashboard(history) {
   return { dom, window };
 }
 
-describe("dashboard project-list wiring (sort + row click reach openProjectDetail)", () => {
+describe("dashboard project-list wiring (sort)", () => {
   // Seed: 3 days of usage history (so the session window clamps cleanly)
   // AND matching token history so buildWindowProjectsHTML produces rows.
   const now = Date.now();
@@ -238,23 +238,6 @@ describe("dashboard project-list wiring (sort + row click reach openProjectDetai
     );
     expect(afterActive).not.toBeNull();
     expect(afterActive.classList.contains("sort-active")).toBe(true);
-  });
-
-  // TODO(phase-3 task 14): home view migrated to src/views/dashboard; rewire
-  // this test to bootstrap the TS module through Vite's dev transform.
-  it.skip("clicking a project row calls openProjectDetail and switches to the project-detail view", async () => {
-    const window = await boot();
-    const row = window.document.querySelector("#statistics-content .proj-row[data-cwd]");
-    expect(row, "expected a project row inside the dashboard window card").not.toBeNull();
-    row.click();
-    await new Promise((r) => setTimeout(r, 30));
-    const projectView = window.document.getElementById("view-project-detail");
-    const dashView = window.document.getElementById("view-dashboard");
-    expect(projectView.classList.contains("hidden")).toBe(false);
-    expect(dashView.classList.contains("hidden")).toBe(true);
-    // Title should reflect the clicked cwd.
-    const title = window.document.getElementById("projectDetailTitle");
-    expect(title.textContent.length).toBeGreaterThan(0);
   });
 });
 
