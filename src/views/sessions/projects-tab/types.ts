@@ -12,7 +12,6 @@ export type DashboardTargetRef = { kind: "project" | "group", id: string }
 export type RepoRef = { cwd: string, name: string, project_id: string | null }
 export type DashboardTarget = { kind: "project" | "group", id: string, name: string, repos: RepoRef[] }
 export type DashboardListRow = { target: DashboardTarget, last_active_ms: number, live_count: number, question_count: number, working_count: number, open: boolean }
-export type NeedsYouItem = { kind: "question" | "draft", title: string, detail: string, session_id: string | null, draft_id: string | null, repo_cwd: string, at_ms: number }
 export type DashTodo = { id: string, project_id: string, text: string, origin_session_id: string | null, repo_cwd: string, by_ai: boolean }
 export type DashChatRow = { session_id: string, title: string, status: "question" | "working" | "your_turn" | "waiting" | "ended", repo_cwd: string, at_ms: number }
 export type PlanItem = { id: string | null, text: string, section: string, priority: boolean, repo_cwd: string }
@@ -20,7 +19,7 @@ export type ScheduledRow = { id: string, label: string, fire_at_ms: number, repo
 export type CommitRow = { short_sha: string, message: string, timestamp_ms: number, pushed: boolean }
 export type RepoShip = { cwd: string, name: string, branch: string, ahead: number, behind: number, has_upstream: boolean, dirty_count: number, recent_commits: CommitRow[] }
 export type ServerRow = { name: string, port: number, repo_cwd: string }
-export type DashboardSnapshot = { target: DashboardTarget, needs_you: NeedsYouItem[], your_todos: DashTodo[], chats_running: DashChatRow[], chats_recent: DashChatRow[], plan: PlanItem[], scheduled: ScheduledRow[], ship: RepoShip[], servers: ServerRow[], cards: CardView[], hidden_builtins: string[], pinned_actions: string[] }
+export type DashboardSnapshot = { target: DashboardTarget, your_todos: DashTodo[], chats_running: DashChatRow[], chats_recent: DashChatRow[], plan: PlanItem[], scheduled: ScheduledRow[], ship: RepoShip[], servers: ServerRow[], cards: CardView[], hidden_builtins: string[], pinned_actions: string[] }
 export type QuickAction = { command: string, count: number }
 export type OutcomeRow = { session_id: string, title: string, text: string, at_ms: number, repo_cwd: string }
 export type GalleryItem = { id: string, session_id: string, title: string, at_ms: number, repo_cwd: string }
@@ -52,7 +51,6 @@ export type _ContractChecks = [
   Assert<Fits<RepoRef, Gen.RepoRef>>,
   Assert<Fits<DashboardTarget, Gen.DashboardTarget>>,
   Assert<Fits<DashboardListRow, Gen.DashboardListRow>>,
-  Assert<Fits<NeedsYouItem, Gen.NeedsYouItem>>,
   Assert<Fits<DashTodo, Gen.DashTodo>>,
   Assert<Fits<DashChatRow, Gen.DashChatRow>>,
   Assert<Fits<PlanItem, Gen.PlanItem>>,

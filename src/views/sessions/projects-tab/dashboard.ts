@@ -39,7 +39,7 @@ export interface DashboardHandle {
 
 // Everything that can change what a dashboard shows. instances-changed covers
 // chat status, the other three are the dashboard's own stores.
-const LIVE_EVENTS = ["instances-changed", "user-todos-changed", "message-drafts-changed", "dashboard-changed"];
+const LIVE_EVENTS = ["instances-changed", "user-todos-changed", "dashboard-changed"];
 const REFETCH_DEBOUNCE_MS = 400;
 const RESIZE_DEBOUNCE_MS = 100;
 // History mining is the expensive call, so a burst of events never repeats it inside this window.

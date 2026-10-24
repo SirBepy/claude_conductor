@@ -115,13 +115,6 @@ describe("single project", () => {
     expect(again.root.querySelector('[data-pd-card="running"] .pd-count')).toBeNull();
   });
 
-  it("the wire's questions and drafts list paints nothing: a waiting chat shows only in Chats", async () => {
-    const { root } = await mount({ kind: "project", id: "p1" });
-    expect(root.querySelector('[data-pd-card="needs_you"]')).toBeNull();
-    expect(root.textContent).not.toContain("Draft not sent yet");
-    expect(root.textContent).not.toContain("reply to the release thread");
-  });
-
   it("drops a card whose builtin id is hidden", async () => {
     snapshot = projectSnapshot({ hidden_builtins: ["ship", "reports"] });
     const { root } = await mount({ kind: "project", id: "p1" });

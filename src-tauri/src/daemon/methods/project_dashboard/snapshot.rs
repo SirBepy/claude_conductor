@@ -9,16 +9,14 @@ use crate::daemon::rpc::RpcError;
 use crate::daemon::state::DaemonState;
 use crate::project_dashboard::history_scan::project_dir_slug;
 use crate::project_dashboard::plan::{rank, read_plan};
-use crate::project_dashboard::snapshot_parts::{
-    draft_is_open, draft_item, scheduled_row, soonest_scheduled,
-};
+use crate::project_dashboard::snapshot_parts::{scheduled_row, soonest_scheduled};
 use crate::project_dashboard::targets::{chat_in_repo, resolve_target};
 use crate::project_dashboard::{
-    store, CommitRow, DashChatRow, DashTodo, DashboardSnapshot, DashboardTarget, DashboardTargetRef, NeedsYouItem,
+    store, CommitRow, DashChatRow, DashTodo, DashboardSnapshot, DashboardTarget, DashboardTargetRef,
     PlanItem, RepoRef, RepoShip, Scope, ScheduledRow, ServerRow,
 };
 use crate::sessions::user_todos::TodoState;
-use crate::sessions::{message_drafts, scheduled_items, user_todos};
+use crate::sessions::{scheduled_items, user_todos};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -40,49 +38,36 @@ fn repo_of<'a>(chat: &LiveChat, repos: &'a [RepoRef]) -> Option<&'a RepoRef> {
     repos.iter().find(|r| chat_in_repo(&chat.inst.project_id, &chat.inst.cwd.to_string_lossy(), r))
 }
 
-/// Running chats and the questions among them, in one pass over the registry.
-fn live_rows(repos: &[RepoRef], live: &[LiveChat]) -> (Vec<DashChatRow>, Vec<NeedsYouItem>) {
-    let mut running = Vec::new();
-    let mut questions = Vec::new();
-    for chat in live {
-        let Some(repo) = repo_of(chat, repos) else { continue };
-        running.push(DashChatRow {
-            session_id: chat.inst.session_id.clone(),
-            title: chat.title(),
-            status: chat.status.to_string(),
-            repo_cwd: repo.cwd.clone(),
-            at_ms: chat.at_ms(),
-        });
-        if chat.status == "question" {
-            questions.push(NeedsYouItem {
-                kind: "question".into(),
+/// The target's running chats, what needs the dev first.
+fn live_rows(repos: &[RepoRef], live: &[LiveChat]) -> Vec<DashChatRow> {
+    let mut running: Vec<DashChatRow> = live
+        .iter()
+        .filter_map(|chat| {
+            let repo = repo_of(chat, repos)?;
+            Some(DashChatRow {
+                session_id: chat.inst.session_id.clone(),
                 title: chat.title(),
-                detail: chat.prompt_detail.clone().unwrap_or_else(|| "Asked you a question".to_string()),
-                session_id: Some(chat.inst.session_id.clone()),
-                draft_id: None,
+                status: chat.status.to_string(),
                 repo_cwd: repo.cwd.clone(),
                 at_ms: chat.at_ms(),
-            });
-        }
-    }
+            })
+        })
+        .collect();
     running.sort_by(|a, b| status_rank(&a.status).cmp(&status_rank(&b.status)).then(b.at_ms.cmp(&a.at_ms)));
-    questions.sort_by(|a, b| b.at_ms.cmp(&a.at_ms));
-    (running, questions)
+    running
 }
 
 /// The stored, file-backed rows. Plain blocking reads, so the caller runs this
 /// on the blocking pool.
 struct StoredRows {
     todos: Vec<DashTodo>,
-    drafts: Vec<NeedsYouItem>,
     plan: Vec<PlanItem>,
     scheduled: Vec<ScheduledRow>,
     recent: Vec<DashChatRow>,
 }
 
-fn read_stored(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: usize, now_ms: i64) -> StoredRows {
+fn read_stored(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: usize) -> StoredRows {
     let mut todos = Vec::new();
-    let mut drafts = Vec::new();
     let mut plan = Vec::new();
     for repo in repos {
         plan.extend(read_plan(&repo.cwd));
@@ -97,21 +82,13 @@ fn read_stored(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: us
                 by_ai: t.by_ai,
             });
         }
-        drafts.extend(
-            message_drafts::list(pid)
-                .iter()
-                .filter(|d| draft_is_open(d, now_ms))
-                .map(|d| draft_item(d, &repo.cwd)),
-        );
     }
-    drafts.sort_by(|a, b| b.at_ms.cmp(&a.at_ms));
     rank(&mut plan);
     let scheduled = soonest_scheduled(
         scheduled_items::list().iter().filter_map(|i| scheduled_row(i, repos)).collect(),
     );
     StoredRows {
         todos,
-        drafts,
         plan,
         scheduled,
         recent: recent_chats(repos, live_ids, live_in_target),
@@ -216,17 +193,17 @@ fn cards_for_target(target: &DashboardTarget, st: &store::DashboardStore) -> Vec
 }
 
 pub(super) async fn snapshot(state: &Arc<DaemonState>, target_ref: DashboardTargetRef) -> Result<DashboardSnapshot, RpcError> {
-    let Gathered { groups, projects, live, now_ms } = gather(state).await;
+    let Gathered { groups, projects, live, .. } = gather(state).await;
     let target = resolve_target(&target_ref, &groups, &projects)
         .ok_or_else(|| RpcError::invalid_params(format!("unknown {} dashboard: {}", target_ref.kind, target_ref.id)))?;
 
-    let (chats_running, questions) = live_rows(&target.repos, &live);
+    let chats_running = live_rows(&target.repos, &live);
     let live_ids: HashSet<String> = live.iter().map(|c| c.inst.session_id.clone()).collect();
 
     let stored = {
         let repos = target.repos.clone();
         let live_in_target = chats_running.len();
-        tokio::task::spawn_blocking(move || read_stored(&repos, &live_ids, live_in_target, now_ms))
+        tokio::task::spawn_blocking(move || read_stored(&repos, &live_ids, live_in_target))
     };
     let ship = futures_util::future::join_all(target.repos.iter().cloned().map(ship_for_repo));
     let servers = futures_util::future::join_all(target.repos.iter().cloned().map(servers_for_repo));
@@ -234,10 +211,7 @@ pub(super) async fn snapshot(state: &Arc<DaemonState>, target_ref: DashboardTarg
     let stored = stored.map_err(|e| RpcError::internal(format!("join: {e}")))?;
 
     let st = store::load();
-    let mut needs_you = questions;
-    needs_you.extend(stored.drafts);
     Ok(DashboardSnapshot {
-        needs_you,
         your_todos: stored.todos,
         chats_running,
         chats_recent: stored.recent,
@@ -269,7 +243,7 @@ mod tests {
         inst.awaiting = awaiting.map(str::to_string);
         inst.busy = busy;
         let status = crate::project_dashboard::snapshot_parts::chat_status(awaiting, busy, prompt.is_some());
-        LiveChat { inst, status, prompt_detail: prompt.map(str::to_string) }
+        LiveChat { inst, status }
     }
 
     fn blank_instance(sid: &str, project_id: &str, cwd: &str) -> crate::types::Instance {
@@ -279,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn running_chats_sort_questions_first_and_questions_feed_needs_you() {
+    fn running_chats_sort_questions_first() {
         let a = uuid::Uuid::new_v4().to_string();
         let b = uuid::Uuid::new_v4().to_string();
         let c = uuid::Uuid::new_v4().to_string();
@@ -288,28 +262,17 @@ mod tests {
             chat(&b, "p1", "C:/w/app", None, true, None),
             chat(&c, "p1", "C:/w/app", Some("question"), false, Some("Ship it?")),
         ];
-        let (running, questions) = live_rows(&[repo("C:/w/app")], &live);
+        let running = live_rows(&[repo("C:/w/app")], &live);
         let order: Vec<&str> = running.iter().map(|r| r.status.as_str()).collect();
         assert_eq!(order, ["question", "working", "your_turn"]);
-        assert_eq!(questions.len(), 1);
-        assert_eq!(questions[0].detail, "Ship it?");
-        assert_eq!(questions[0].session_id.as_deref(), Some(c.as_str()));
+        assert_eq!(running[0].session_id, c);
     }
 
     #[test]
     fn chats_outside_the_target_are_left_out() {
         let a = uuid::Uuid::new_v4().to_string();
         let live = vec![chat(&a, "p9", "C:/elsewhere", None, true, None)];
-        let (running, questions) = live_rows(&[repo("C:/w/app")], &live);
-        assert!(running.is_empty() && questions.is_empty());
-    }
-
-    #[test]
-    fn a_question_without_a_prompt_still_gets_a_generic_detail() {
-        let a = uuid::Uuid::new_v4().to_string();
-        let live = vec![chat(&a, "p1", "C:/w/app", Some("question"), false, None)];
-        let (_, questions) = live_rows(&[repo("C:/w/app")], &live);
-        assert_eq!(questions[0].detail, "Asked you a question");
+        assert!(live_rows(&[repo("C:/w/app")], &live).is_empty());
     }
 
     #[test]
