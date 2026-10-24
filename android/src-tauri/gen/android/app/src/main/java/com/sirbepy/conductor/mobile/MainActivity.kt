@@ -1,6 +1,10 @@
 package com.sirbepy.conductor.mobile
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -10,6 +14,8 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import org.json.JSONObject
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
@@ -38,6 +44,14 @@ class MainActivity : TauriActivity() {
   private var promptShowing = false
   private var backgroundedAt: Long? = null
   private lateinit var lockScreen: View
+  private var webView: WebView? = null
+  private var pendingChatId: String? = null
+  private var openChatAttempts = 0
+
+  // The result is ignored: a denial just means no banners, and Android stops
+  // re-showing the dialog on its own after repeated denials.
+  private val notificationPermission =
+    registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     // App always renders dark (frontend forces color-scheme: dark via CSS); lock
@@ -48,6 +62,35 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
     lockScreen = buildLockScreen()
     attachLockScreen()
+    PushRelay.ensureRegistered(this)
+    pendingChatId = intent?.getStringExtra(EXTRA_CHAT_ID)
+  }
+
+  // singleTask: a notification tap while the app is open arrives here, not onCreate.
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    pendingChatId = intent.getStringExtra(EXTRA_CHAT_ID)
+    openChatAttempts = 0
+    deliverPendingChat()
+  }
+
+  // Held while locked so a tap never shows a chat behind the lock screen. The SPA
+  // may not have installed __ccOpenChat yet right after launch, so a miss retries.
+  private fun deliverPendingChat() {
+    val id = pendingChatId ?: return
+    val view = webView ?: return
+    if (locked) return
+    val js = "(function(id){if(window.__ccOpenChat){window.__ccOpenChat(id);return true}return false})(${JSONObject.quote(id)})"
+    view.evaluateJavascript(js) { result ->
+      if (result == "true") {
+        pendingChatId = null
+      } else if (++openChatAttempts < 15) {
+        view.postDelayed({ deliverPendingChat() }, 1000)
+      } else {
+        pendingChatId = null
+      }
+    }
   }
 
   // Wry hands the WebView over with setContentView, which drops every view
@@ -98,6 +141,18 @@ class MainActivity : TauriActivity() {
   private fun unlock() {
     locked = false
     lockScreen.visibility = View.GONE
+    askNotificationPermissionOnce()
+    deliverPendingChat()
+  }
+
+  // After unlock, so the dialog never covers the app-lock prompt.
+  private fun askNotificationPermissionOnce() {
+    if (Build.VERSION.SDK_INT < 33) return
+    val prefs = getSharedPreferences("conductor_push", MODE_PRIVATE)
+    if (prefs.getBoolean("asked_notifications", false)) return
+    if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+    prefs.edit().putBoolean("asked_notifications", true).apply()
+    notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
   }
 
   private fun promptUnlock() {
@@ -150,6 +205,12 @@ class MainActivity : TauriActivity() {
       WebSettingsCompat.setAlgorithmicDarkeningAllowed(webView.settings, false)
     }
     installBackHook(webView)
+    this.webView = webView
+    webView.addJavascriptInterface(PushBridge(this), "ConductorPush")
+    PushRelay.onHandleReady = {
+      webView.evaluateJavascript("window.__ccPushHandleReady && window.__ccPushHandleReady()", null)
+    }
+    deliverPendingChat()
   }
 
   // Tauri's AppPlugin answers back with WebView.goBack(), which only works if the
