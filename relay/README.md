@@ -29,7 +29,7 @@ npm test
 firebase deploy --only functions --project claude-conductor-62582
 ```
 
-run from `relay/`.
+run from `relay/`. If it stops at "User code failed to load. Cannot determine backend specification. Timeout after 10000", set `FUNCTIONS_DISCOVERY_TIMEOUT=60` first (needed on Joe's PC, 2026-10-24): the CLI's 10s default is too short to load firebase-admin there.
 
 The per-IP limit keys on the last `X-Forwarded-For` entry, the one Google's front end appends: the framework trusts the proxy, so `req.ip` is the first entry, which the caller can set to anything.
 
