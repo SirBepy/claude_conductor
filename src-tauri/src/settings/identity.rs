@@ -197,6 +197,16 @@ pub fn is_ephemeral_root_path(p: &std::path::Path) -> bool {
     if key.is_empty() {
         return false;
     }
+    // Tests register their own checkout as a project; a scratch `git worktree`
+    // for an isolated verify run lives under the temp dir, which would
+    // otherwise make every such test see an unknown cwd.
+    #[cfg(test)]
+    {
+        let checkout = normalize_cwd_key(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new("")));
+        if !checkout.is_empty() && (key == checkout || key.starts_with(&format!("{checkout}\\"))) {
+            return false;
+        }
+    }
     let roots = [normalize_cwd_key(&std::env::temp_dir()), normalize_cwd_key(std::path::Path::new(r"C:\tmp"))];
     roots.iter().any(|root| !root.is_empty() && (key == *root || key.starts_with(&format!("{root}\\"))))
 }
@@ -587,5 +597,13 @@ mod tests {
         // A sibling that merely starts with the same prefix as `C:\tmp`
         // (e.g. `C:\tmpfoo`) must not false-match.
         assert!(!is_ephemeral_root_path(std::path::Path::new(r"C:\tmpfoo\work")));
+    }
+
+    /// Holds even from a scratch worktree under the temp dir, where it is the
+    /// only thing keeping the tests that register their own cwd green.
+    #[test]
+    fn the_checkout_the_tests_run_from_is_never_ephemeral() {
+        assert!(!is_ephemeral_root_path(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))));
+        assert!(is_ephemeral_root_path(&std::env::temp_dir().join("elsewhere")));
     }
 }
