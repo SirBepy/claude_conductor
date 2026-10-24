@@ -469,8 +469,9 @@ jobs:
           export CXX_aarch64_linux_android="$BIN/aarch64-linux-android28-clang++"
           export AR_aarch64_linux_android="$BIN/llvm-ar"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android28-clang"
+          # The .aab is what Google Play takes; the .apk stays for the GitHub release.
           if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
-            cargo-tauri android build --target aarch64 --apk
+            cargo-tauri android build --target aarch64 --apk --aab
           else
             cargo-tauri android build --target aarch64 --apk --debug
           fi
@@ -498,6 +499,45 @@ jobs:
         with:
           name: release-android-arm64
           path: release-staging/
+
+      # Not release-*: Play takes the .aab, the GitHub release page does not need
+      # it. Kept as an artifact because Play only accepts a brand-new app's FIRST
+      # bundle through Play Console by hand, never through the API.
+      - name: Find the release AAB
+        id: aab
+        if: steps.signing.outputs.signed == 'true'
+        shell: bash
+        run: |
+          AAB=$(find android/src-tauri/gen/android/app/build/outputs/bundle -name '*-release.aab' | head -n 1)
+          if [ -z "$AAB" ]; then
+            echo "No release AAB found under app/build/outputs/bundle" >&2
+            exit 1
+          fi
+          echo "path=$AAB" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the AAB
+        if: steps.signing.outputs.signed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-aab
+          path: ${{ steps.aab.outputs.path }}
+
+      # Off until PLAY_SERVICE_ACCOUNT_JSON exists, so adding that secret is the
+      # switch that turns on publishing to Play's internal testing track.
+      - name: Upload to Google Play internal testing
+        if: steps.signing.outputs.signed == 'true'
+        shell: bash
+        env:
+          PLAY_SA_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$PLAY_SA_JSON" ]; then
+            echo "::notice::PLAY_SERVICE_ACCOUNT_JSON is unset, so this release is not uploaded to Google Play."
+            exit 0
+          fi
+          bash scripts/play-upload.test.sh
+          printf '%s' "$PLAY_SA_JSON" > "$RUNNER_TEMP/play-sa.json"
+          bash scripts/play-upload.sh "$RUNNER_TEMP/play-sa.json" com.sirbepy.conductor.mobile \
+            "${{ steps.aab.outputs.path }}" internal completed
 
       # Deliberately NOT release-*: an unsigned debug build must never reach the
       # release page, but it is still worth keeping for inspection.
