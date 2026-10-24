@@ -23,7 +23,6 @@ const LEGACY_VIEWS = [
   "settings",
   "settings-notifications",
   "settings-permissions",
-  "settings-statusline",
   "settings-sync",
   "project-detail",
   "graph-detail",

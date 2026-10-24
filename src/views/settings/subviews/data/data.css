@@ -1,0 +1,58 @@
+/* Data & storage subview. Shared rules (.kit-section, .btn-danger) live in the kit. */
+
+.data-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.data-card {
+  /* nested kit-section inside the Data section: trim the default chrome so the
+   * cards read as rows, not full sections. */
+  margin: 0;
+}
+
+.data-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 6px;
+}
+
+.data-card-sub {
+  font-size: var(--fs-body);
+  color: var(--sb-muted);
+}
+
+.data-card-controls {
+  gap: 8px;
+}
+
+.data-control-label {
+  font-size: var(--fs-body);
+  color: var(--sb-muted);
+}
+
+.data-control-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.data-retention {
+  min-width: 110px;
+}
+
+.data-card .btn-danger.data-clear {
+  padding: 4px 12px;
+  font-size: var(--fs-body);
+  width: auto;
+}
+
+.data-total {
+  font-size: var(--fs-body);
+  color: var(--sb-muted);
+  padding: 8px 2px 2px;
+}

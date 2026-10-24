@@ -16,6 +16,8 @@ import { wireKebabMenu, closeKebabMenu } from "../../../../shared/kebab-menu";
 import { buildIdentitySurface, LOGIN_POLL_INTERVAL_MS } from "./wizard-logic";
 import { visibleInterval } from "../../../../shared/visible-interval";
 import { settingsHeader } from "../../ui";
+import { isRemote } from "../../../../shared/transport";
+import type { ApiKeyStatus } from "../../../../types/ipc.generated";
 import "../../../../shared/account-chip.css";
 import "../../../../shared/kebab-menu.css";
 import "./accounts.css";
@@ -310,6 +312,46 @@ async function refreshTerminalIdentity(root: HTMLElement): Promise<void> {
   `;
 }
 
+// ── API keys ──────────────────────────────────────────────────────────────
+// Lists the registry (src-tauri/src/api_keys.rs) with set/not-set status;
+// Add/Replace opens the shared api-key-modal.ts, which does the actual write.
+// Desktop-only - hidden on the phone transport in template() below, matching
+// the modal itself (set_api_key is never called over the phone transport).
+
+function apiKeyRowHtml(k: ApiKeyStatus): string {
+  return `
+    <div class="kit-row api-key-row" data-env="${escapeHtml(k.env_name)}">
+      <span class="kit-row-label">${escapeHtml(k.label)}</span>
+      <span class="api-key-status${k.is_set ? " is-set" : ""}"><i class="ph ${k.is_set ? "ph-check-circle" : "ph-circle-dashed"}"></i>${k.is_set ? "Set" : "Not set"}</span>
+      <button type="button" class="btn-secondary api-key-btn" data-env="${escapeHtml(k.env_name)}">${k.is_set ? "Replace" : "Add"}</button>
+    </div>`;
+}
+
+let apiKeysWired = false;
+
+async function refreshApiKeysSection(): Promise<void> {
+  const list = document.getElementById("apiKeysList");
+  if (!list) return;
+  const keys = await api.listApiKeys();
+  list.innerHTML = keys.map(apiKeyRowHtml).join("");
+
+  // Delegated listener bound once to the stable container, same pattern as
+  // refreshList().
+  if (!apiKeysWired) {
+    apiKeysWired = true;
+    list.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement)?.closest<HTMLButtonElement>("button.api-key-btn");
+      const env = btn?.dataset.env;
+      if (!env) return;
+      void (async () => {
+        const { openApiKeyModal } = await import("../../../../shared/api-key-modal");
+        const saved = await openApiKeyModal(env);
+        if (saved) await refreshApiKeysSection();
+      })();
+    });
+  }
+}
+
 export async function renderAccountsSettingsView(root: HTMLElement): Promise<() => void> {
   render(template(), root);
 
@@ -348,6 +390,12 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
   catch (e) { console.error("[settings-accounts] initial render failed", e); }
   try { await refreshTerminalIdentity(root); }
   catch (e) { console.error("[settings-accounts] terminal identity failed", e); }
+
+  if (!isRemote()) {
+    apiKeysWired = false;
+    try { await refreshApiKeysSection(); }
+    catch (e) { console.error("[settings-accounts api-keys] render failed", e); }
+  }
 
   return () => {
     list?.removeEventListener("click", onKebabClickCapture, true);
@@ -388,6 +436,13 @@ function template() {
             </span>
           </div>
         </div>
+
+        ${isRemote() ? "" : html`
+          <div class="kit-section" id="apiKeysSection">
+            <div class="kit-section-title">API keys</div>
+            <div id="apiKeysList" class="api-keys-list"></div>
+          </div>
+        `}
 
       </div>
     </div>

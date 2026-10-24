@@ -1,0 +1,19 @@
+/* Claude's browser subview. Shared .kit-* rules live in the kit. */
+
+.view-settings-browser .cd-hint {
+  font-size: var(--fs-body);
+  color: var(--sb-muted);
+  margin: 0 0 12px;
+}
+
+.view-settings-browser .cd-profile-input {
+  width: 150px;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: var(--fs-body);
+  font-family: inherit;
+}

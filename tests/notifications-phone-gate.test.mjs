@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// todo 1023: Mute, notif cards, Voice dictation/Output device, and Character
-// sounds all persist via saveSettings(), which the daemon refuses from the
-// phone - hidden there. Microphone and push-to-talk are localStorage-only and
-// stay reachable; push-to-phone is the opposite case (phone-only already).
+// Mute, notif cards and Output device persist via saveSettings(),
+// which the daemon refuses from the phone - hidden there. The "This phone"
+// sounds toggle is localStorage-only and phone-only. Voice dictation, mic and
+// push-to-talk moved to the Voice page, character sounds to Characters.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -22,19 +22,15 @@ const { NOTIF_TYPES } = await import("../src/shared/settings-save.ts");
 beforeEach(() => { remote = false; document.body.innerHTML = ""; });
 
 describe("notifications settings screen on the phone", () => {
-  it("hides desktop-only sound/voice controls, keeps mic/ptt, when remote", async () => {
+  it("hides desktop-only controls, shows the This phone toggle, when remote", async () => {
     remote = true;
     const root = document.createElement("div");
     document.body.appendChild(root);
     const dispose = await renderNotificationsView(root);
     expect(root.querySelector("#muteAllSwitch")).toBeNull();
     expect(root.querySelector("#notifCards")).toBeNull();
-    expect(root.querySelector("#voiceDictationSwitch")).toBeNull();
     expect(root.querySelector("#audioOutputDevice")).toBeNull();
-    expect(root.querySelector("#characterSoundsSection")).toBeNull();
-    // Local-only controls stay reachable.
-    expect(root.querySelector("#audioInputDevice")).not.toBeNull();
-    expect(root.querySelector("#pttCaptureBtn")).not.toBeNull();
+    expect(root.querySelector("#phoneSoundsSwitch")).not.toBeNull();
     dispose();
   });
 
@@ -46,11 +42,13 @@ describe("notifications settings screen on the phone", () => {
     expect(root.querySelector("#notifCards")).not.toBeNull();
     // Hydration cloned one card per notification type into #notifCards.
     expect(root.querySelectorAll("#notifCards .notif-card").length).toBe(NOTIF_TYPES.length);
-    expect(root.querySelector("#voiceDictationSwitch")).not.toBeNull();
     expect(root.querySelector("#audioOutputDevice")).not.toBeNull();
-    expect(root.querySelector("#characterSoundsSection")).not.toBeNull();
-    expect(root.querySelector("#audioInputDevice")).not.toBeNull();
-    expect(root.querySelector("#pttCaptureBtn")).not.toBeNull();
+    expect(root.querySelector("#phoneSoundsSwitch")).toBeNull();
+    // Moved to the Voice and Characters pages.
+    for (const id of ["#voiceDictationSwitch", "#audioInputDevice", "#pttCaptureBtn", "#characterSoundsSection", "#selectOnSessionClickSwitch", "#muteSystemSwitch"]) {
+      expect(root.querySelector(id)).toBeNull();
+    }
+    expect(root.querySelector("h2").textContent).toBe("Notifications");
     dispose();
   });
 });

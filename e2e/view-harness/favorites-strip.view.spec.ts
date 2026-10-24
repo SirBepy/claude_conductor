@@ -12,6 +12,7 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, capture } from "./har
 //
 // asserts: src/shared/shortcuts.ts, src/shared/modifier-hint.ts, src/views/sessions/sessions-dom-wiring.ts, src/views/sessions/favorites-strip.ts, src/views/sessions/project-favorites.ts
 // (ctrl+w's label/description changed in shortcuts.ts for todo-driven close-chat confirm work; unrelated to the favourites strip this spec covers)
+// Reviewed 2026-10-25: shortcuts.ts gained range helpers (setRangeFromCombo etc.) for the Settings > Shortcuts page; the default ctrl+shift+1-9 bindings this spec covers are unchanged.
 // Reviewed 2026-10-20: shortcuts.ts gained a new "toggle-wrap-up-on-done" entry (ctrl+shift+w) and sessions-dom-wiring.ts registers its handler alongside the existing ones - both additive, no change to the ctrl+shift+1-9 favourites behavior this spec covers.
 // (new-chat's suppressInInput flipped to false so Ctrl+N fires from inside an
 // input/textarea too; unrelated to the Ctrl+Shift favourites strip this spec covers)

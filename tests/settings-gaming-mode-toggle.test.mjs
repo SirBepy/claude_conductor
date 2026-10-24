@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-// Gaming mode's Settings toggle (Settings > Chats > "Gaming mode"). Pins:
+// Gaming mode's Settings toggle (Settings > Power & startup > "Gaming mode"). Pins:
 // the toggle reflects get_gaming_mode's current state on open, flipping it
 // calls set_gaming_mode with the opposite value, and the daemon's
 // gaming_mode_changed broadcast (forwarded as the "gaming-mode-changed"
@@ -26,10 +26,10 @@ vi.mock("../src/shared/api.ts", () => ({
   },
 }));
 
-vi.mock("../src/shared/sidemenu.ts", () => ({ openSidemenu: vi.fn() }));
+vi.mock("../src/shared/state.ts", () => ({ getSettings: () => ({}), setSettings: vi.fn() }));
 vi.mock("../src/shared/toast.ts", () => ({ showToast: vi.fn() }));
 
-const { renderSettingsView } = await import("../src/views/settings/settings.ts");
+const { renderPowerView } = await import("../src/views/settings/subviews/power/power.ts");
 
 afterEach(() => {
   getGamingMode.mockReset();
@@ -48,11 +48,11 @@ function toggle(root) {
   return root.querySelector("#gamingModeToggle");
 }
 
-describe("Settings > Gaming mode toggle", () => {
+describe("Power & startup > Gaming mode toggle", () => {
   it("reflects the daemon's current state on open", async () => {
     getGamingMode.mockResolvedValue({ on: true, paused_sessions: 2, stopped_procs: 1, stopped_containers: 0, docker_desktop_stopped: false });
     const root = mount();
-    await renderSettingsView(root);
+    await renderPowerView(root);
     expect(toggle(root).checked).toBe(true);
   });
 
@@ -60,7 +60,7 @@ describe("Settings > Gaming mode toggle", () => {
     getGamingMode.mockResolvedValue({ on: true, paused_sessions: 0, stopped_procs: 0, stopped_containers: 0, docker_desktop_stopped: false });
     setGamingMode.mockResolvedValue({ on: false, paused_sessions: 0, stopped_procs: 0, stopped_containers: 0, docker_desktop_stopped: false });
     const root = mount();
-    await renderSettingsView(root);
+    await renderPowerView(root);
     expect(toggle(root).checked).toBe(true);
 
     toggle(root).dispatchEvent(new Event("change"));
@@ -72,7 +72,7 @@ describe("Settings > Gaming mode toggle", () => {
     getGamingMode.mockResolvedValue({ on: false, paused_sessions: 0, stopped_procs: 0, stopped_containers: 0, docker_desktop_stopped: false });
     setGamingMode.mockResolvedValue({ on: true, paused_sessions: 3, stopped_procs: 2, stopped_containers: 1, docker_desktop_stopped: true });
     const root = mount();
-    await renderSettingsView(root);
+    await renderPowerView(root);
     expect(toggle(root).checked).toBe(false);
 
     toggle(root).dispatchEvent(new Event("change"));
@@ -83,7 +83,7 @@ describe("Settings > Gaming mode toggle", () => {
   it("a gaming-mode-changed event from another client re-syncs the checkbox without a click", async () => {
     getGamingMode.mockResolvedValue({ on: false, paused_sessions: 0, stopped_procs: 0, stopped_containers: 0, docker_desktop_stopped: false });
     const root = mount();
-    await renderSettingsView(root);
+    await renderPowerView(root);
     expect(toggle(root).checked).toBe(false);
 
     expect(changedCb).toBeTypeOf("function");
