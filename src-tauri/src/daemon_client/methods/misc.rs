@@ -1,7 +1,14 @@
 use super::super::{ClientError, PersistentClient};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 impl PersistentClient {
+    /// Revokes a paired device and drops the push handles it enrolled; answers
+    /// whether the device existed.
+    pub async fn revoke_remote_device(&self, id: &str) -> Result<bool, ClientError> {
+        let v = self.call("revoke_remote_device", json!({ "id": id })).await?;
+        Ok(v.as_bool().unwrap_or(false))
+    }
+
     pub async fn health(&self) -> Result<Value, ClientError> {
         self.call("health", Value::Null).await
     }

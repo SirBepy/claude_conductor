@@ -44,6 +44,12 @@ tokio::task_local! {
     pub static TRANSPORT: Transport;
 }
 
+tokio::task_local! {
+    /// The authenticated paired device's registry id, scoped beside `TRANSPORT`
+    /// by the same middleware. Absent for the desktop pipe.
+    pub static DEVICE_ID: Option<String>;
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Request {
     pub jsonrpc: String,
@@ -200,12 +206,17 @@ pub struct ConnectionContext {
     /// existing call site meaning "phone" (its only prior meaning) needs no
     /// edit now that a third transport exists.
     pub remote: bool,
+    /// Registry id of the paired phone that authenticated this connection;
+    /// `None` for every other transport. Taken from the auth token, never from
+    /// params, so a handler can attribute state to the device safely.
+    pub device_id: Option<String>,
 }
 
 impl ConnectionContext {
     pub fn new(outbound: tokio::sync::mpsc::Sender<Value>) -> Self {
         let transport = TRANSPORT.try_with(|t| t.clone()).unwrap_or(Transport::Local);
         let remote = matches!(transport, Transport::Phone);
+        let device_id = if remote { DEVICE_ID.try_with(|d| d.clone()).ok().flatten() } else { None };
         Self {
             outbound,
             outbound_depth: Arc::new(AtomicUsize::new(0)),
@@ -214,6 +225,7 @@ impl ConnectionContext {
             global_sub: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
             transport,
             remote,
+            device_id,
         }
     }
 

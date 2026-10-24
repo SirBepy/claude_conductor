@@ -264,7 +264,7 @@ pub(super) async fn stream_ws(
     Query(q): Query<StreamQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let (kind, _machine_id) = match super::remote_server::authenticate_token(&ctx, q.token).await {
+    let (kind, _machine_id, _device_id) = match super::remote_server::authenticate_token(&ctx, q.token).await {
         Ok(v) => v,
         Err(resp) => return resp,
     };
@@ -331,7 +331,7 @@ pub(super) async fn global_stream_ws(
 ) -> Response {
     // The upgraded socket runs outside auth_mw's TRANSPORT scope, so the
     // device kind is resolved here from the query token instead.
-    let (kind, _machine_id) = match super::remote_server::authenticate_token(&ctx, q.token).await {
+    let (kind, _machine_id, _device_id) = match super::remote_server::authenticate_token(&ctx, q.token).await {
         Ok(v) => v,
         Err(resp) => return resp,
     };

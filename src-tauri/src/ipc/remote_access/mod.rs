@@ -19,6 +19,9 @@
 //! plain helpers move out).
 
 use serde::Serialize;
+use tauri::State;
+
+use crate::state::AppState;
 
 use crate::daemon::device_registry::DeviceRegistry;
 use crate::settings::paths;
@@ -94,7 +97,17 @@ pub async fn list_remote_devices() -> Result<Vec<crate::daemon::device_registry:
 
 /// Revoke a device by id. Returns true if the device existed and was removed.
 #[tauri::command]
-pub async fn revoke_remote_device(id: String) -> Result<bool, String> {
+pub async fn revoke_remote_device(id: String, state: State<'_, AppState>) -> Result<bool, String> {
+    // The daemon owns the push handle list, so its revoke path also drops this
+    // device's handles. With no daemon reachable the registry write still
+    // happens here (the revoke must never be lost); its handles then linger
+    // until the relay reports them dead.
+    if let Some(client) = state.client().await {
+        match client.revoke_remote_device(&id).await {
+            Ok(revoked) => return Ok(revoked),
+            Err(e) => log::warn!("daemon revoke_remote_device failed, revoking locally: {e}"),
+        }
+    }
     let app_data = paths::data_dir().map_err(|e| e.to_string())?;
     DeviceRegistry::revoke_device(&id, &app_data)
 }

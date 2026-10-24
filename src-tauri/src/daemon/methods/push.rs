@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 pub fn register_push(router: &mut Router, state: Arc<DaemonState>) {
     let show_name_state = state.clone();
-    router.register("register_fcm_handle", move |params, _ctx| {
+    let revoke_state = state.clone();
+    router.register("register_fcm_handle", move |params, ctx| {
         let state = state.clone();
         async move {
             let h: FcmHandle = serde_json::from_value(params.unwrap_or(Value::Null))
@@ -18,10 +19,31 @@ pub fn register_push(router: &mut Router, state: Arc<DaemonState>) {
             let Some(pm) = state.push.get() else {
                 return Err(RpcError::invalid_params("push is not initialised".to_string()));
             };
-            if !pm.register_fcm_handle(h) {
+            // The device id comes from the authenticated connection: params are
+            // untrusted, so a phone must not be able to file its handle under
+            // another device (which would let that device's revoke drop it).
+            let ok = match ctx.device_id.as_deref() {
+                Some(device_id) => pm.register_fcm_handle_for_device(h, device_id),
+                None => pm.register_fcm_handle(h),
+            };
+            if !ok {
                 return Err(RpcError::invalid_params("handle or secret is empty or too long".to_string()));
             }
             Ok(json!({ "ok": true }))
+        }
+    });
+
+    // Revoke runs here, not in the app process, because only the daemon owns
+    // the FCM handle list. Desktop-pipe only: absent from `TRANSPORT_TABLE`.
+    router.register("revoke_remote_device", move |params, _ctx| {
+        let state = revoke_state.clone();
+        async move {
+            let Some(id) = params.as_ref().and_then(|p| p.get("id")).and_then(Value::as_str) else {
+                return Err(RpcError::invalid_params("id must be a string".to_string()));
+            };
+            let app_data = crate::settings::paths::data_dir().map_err(|e| RpcError::internal(e.to_string()))?;
+            let revoked = revoke_device_and_handles(&state, id, &app_data).map_err(RpcError::internal)?;
+            Ok(json!(revoked))
         }
     });
 
@@ -40,6 +62,17 @@ pub fn register_push(router: &mut Router, state: Arc<DaemonState>) {
             Ok(json!({ "ok": true }))
         }
     });
+}
+
+/// Removes the device from the registry and drops the push handles it enrolled.
+/// Handles are pruned even when the device was already gone, so a retry after a
+/// partial failure still cleans up.
+fn revoke_device_and_handles(state: &DaemonState, id: &str, app_data: &std::path::Path) -> Result<bool, String> {
+    let revoked = crate::daemon::device_registry::DeviceRegistry::revoke_device(id, app_data)?;
+    if let Some(pm) = state.push.get() {
+        pm.unregister_fcm_handles_for_device(id);
+    }
+    Ok(revoked)
 }
 
 /// The `Settings.extra` key read by `Settings::push_show_chat_name`.
@@ -79,6 +112,71 @@ mod tests {
         assert_eq!(snap.hook_port, Some(4242));
         assert_eq!(snap.extra.get("pauseInMeeting"), Some(&json!(false)));
         assert_eq!(snap.extra.len(), 2);
+    }
+
+    async fn register_over(transport: crate::daemon::rpc::Transport, device: Option<&str>, router: &Router) -> crate::daemon::rpc::Response {
+        use crate::daemon::rpc::{DEVICE_ID, TRANSPORT};
+        let req = Request {
+            jsonrpc: "2.0".into(),
+            id: json!(1),
+            method: "register_fcm_handle".into(),
+            // The params lie about which device this is.
+            params: Some(json!({ "handle": "h1", "secret": "s1", "device_id": "forged-dev" })),
+        };
+        let device = device.map(str::to_string);
+        DEVICE_ID
+            .scope(device, TRANSPORT.scope(transport, async {
+                let (tx, _rx) = tokio::sync::mpsc::channel(16);
+                router.dispatch(req, ConnectionContext::new(tx)).await
+            }))
+            .await
+    }
+
+    fn push_state(dir: &std::path::Path) -> Arc<DaemonState> {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.init_push(dir.to_path_buf());
+        state
+    }
+
+    #[tokio::test]
+    async fn register_fcm_handle_records_the_connections_device_not_the_params() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = push_state(dir.path());
+        let mut r = Router::new();
+        register_push(&mut r, state.clone());
+
+        let resp = register_over(crate::daemon::rpc::Transport::Phone, Some("real-dev"), &r).await;
+        assert!(resp.error.is_none(), "{:?}", resp.error);
+        let pm = state.push.get().unwrap();
+        assert_eq!(pm.unregister_fcm_handles_for_device("forged-dev"), 0);
+        assert_eq!(pm.unregister_fcm_handles_for_device("real-dev"), 1);
+    }
+
+    #[tokio::test]
+    async fn register_fcm_handle_without_a_device_keeps_no_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = push_state(dir.path());
+        let mut r = Router::new();
+        register_push(&mut r, state.clone());
+
+        let resp = register_over(crate::daemon::rpc::Transport::Local, None, &r).await;
+        assert!(resp.error.is_none(), "{:?}", resp.error);
+        assert_eq!(state.push.get().unwrap().unregister_fcm_handles_for_device("forged-dev"), 0);
+    }
+
+    #[test]
+    fn revoking_a_device_drops_its_push_handles() {
+        use crate::daemon::device_registry::DeviceRegistry;
+        let dir = tempfile::tempdir().unwrap();
+        let state = push_state(dir.path());
+        DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        let id = DeviceRegistry::list_devices(dir.path()).into_iter().find(|d| d.name == "Phone").unwrap().id;
+        let pm = state.push.get().unwrap();
+        assert!(pm.register_fcm_handle_for_device(FcmHandle { handle: "h1".into(), secret: "s".into(), device_id: None }, &id));
+
+        assert!(revoke_device_and_handles(&state, &id, dir.path()).unwrap());
+        assert!(!DeviceRegistry::list_devices(dir.path()).iter().any(|d| d.id == id));
+        assert_eq!(pm.unregister_fcm_handles_for_device(&id), 0, "handle already dropped by the revoke");
     }
 
     #[tokio::test]
