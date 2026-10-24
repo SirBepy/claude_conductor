@@ -49,3 +49,17 @@ test("the frame sizes itself to its content", async ({ page }) => {
   });
   await expect.poll(async () => (await page.locator("iframe.pd-html-frame").boundingBox())?.height).toBe(240);
 });
+
+test("a card shorter than the frame's starting height shrinks to its content", async ({ page }) => {
+  await mountView(page, { invoke: { list_previews: [] } });
+  await page.evaluate(async () => {
+    // The bare package is served under /@id/; a variable keeps tsc from resolving it.
+    const litId = "/@id/lit-html";
+    const { render } = await import(/* @vite-ignore */ litId);
+    const { htmlCardFrame } = await import("/views/sessions/projects-tab/dash-html-card.ts");
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    render(htmlCardFrame("Short", `<div style="height:30px"></div>`, null), host);
+  });
+  await expect.poll(async () => (await page.locator("iframe.pd-html-frame").boundingBox())?.height).toBe(30);
+});
