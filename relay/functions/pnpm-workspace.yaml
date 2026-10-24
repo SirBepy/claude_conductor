@@ -1,0 +1,17 @@
+# Cloud Build installs with pnpm and enforces a release-age supply-chain check,
+# so local resolution uses the same floor (minutes) to keep the lockfile deployable.
+minimumReleaseAge: 1440
+
+# Both postinstall scripts are optional (a version notice and a generated
+# defaults file); Cloud Build's pnpm fails the install on any unlisted one.
+ignoredBuiltDependencies:
+  - '@firebase/util'
+  - protobufjs
+# cloudevents (under functions-framework) pins a uuid with GHSA-w5hq-g745-h8pq.
+overrides:
+  uuid: ^11.1.1
+
+# pnpm 11 (what Cloud Build runs) reads this map instead of the list above.
+allowBuilds:
+  '@firebase/util': false
+  protobufjs: false
