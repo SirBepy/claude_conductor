@@ -27,6 +27,8 @@ export interface DashActions {
 export interface DashCtx {
   snap: DashSnapshot;
   history: DashboardHistory | null;
+  /** The last dashboard_history call failed while none had landed yet. */
+  historyFailed?: boolean;
   tab: ReportsTab;
   /** Gallery data URLs by image id; "failed" once a load errored. */
   images: Map<string, string>;

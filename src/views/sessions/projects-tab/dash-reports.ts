@@ -82,7 +82,7 @@ export function openReportsModal(host: ActionHost): void {
 
   function draw(): void {
     // The footer links render before dashboard_history lands; an empty state then would be a lie.
-    const body = !c.history ? quiet("Loading...")
+    const body = !c.history ? quiet(c.historyFailed ? "Could not load past results" : "Loading...")
       : c.tab === "outcomes" ? outcomesFull(c) : c.tab === "gallery" ? galleryFull(c) : filesFull(c);
     render(html`
       <div class="modal-card pd-modal wide" role="dialog" aria-modal="true" aria-label="Past results">
