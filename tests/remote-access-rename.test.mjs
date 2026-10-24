@@ -101,6 +101,15 @@ describe("Remote access: inline rename", () => {
     dispose?.();
   });
 
+  it("leaves a machine's device entry read-only, since its name follows the machine nickname", async () => {
+    api.listRemoteDevices.mockResolvedValueOnce([PHONE, { id: "dev-m", name: "mac", created_at: 0, kind: "machine", last_used: null }]);
+    const { root, dispose } = await mount();
+    expect(field(root, "#ra-device-list", "dev-1")).not.toBeNull();
+    expect(field(root, "#ra-device-list", "dev-m")).toBeNull();
+    expect(root.querySelector('#ra-device-list .ra-device-row[data-id="dev-m"] .ra-device-name').textContent).toBe("mac");
+    dispose?.();
+  });
+
   it("shows plain names on the phone", async () => {
     remote = true;
     const root = document.createElement("div");

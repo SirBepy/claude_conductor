@@ -99,16 +99,29 @@ pub async fn revoke_remote_device(id: String) -> Result<bool, String> {
     DeviceRegistry::revoke_device(&id, &app_data)
 }
 
-/// Rename a paired device. Same 1..=40 character rule as a machine label.
+/// Rename a paired phone. Same 1..=40 character rule as a machine label.
 /// Returns true if the device existed.
 #[tauri::command]
 pub async fn rename_remote_device(id: String, name: String) -> Result<bool, String> {
+    let app_data = paths::data_dir().map_err(|e| e.to_string())?;
+    rename_phone(&id, &name, &app_data)
+}
+
+/// A machine's entry is refused: its name follows the machine's nickname
+/// (`rename_machine`), which also restamps the chat list, and renaming only
+/// this copy would leave the two disagreeing.
+fn rename_phone(id: &str, name: &str, app_data: &std::path::Path) -> Result<bool, String> {
     let trimmed = name.trim();
     if trimmed.is_empty() || trimmed.chars().count() > 40 {
         return Err("name must be 1..=40 characters".to_string());
     }
-    let app_data = paths::data_dir().map_err(|e| e.to_string())?;
-    DeviceRegistry::rename_device(&id, trimmed, &app_data)
+    let is_machine = DeviceRegistry::list_devices(app_data)
+        .iter()
+        .any(|d| d.id == id && d.kind == crate::daemon::device_registry::DeviceKind::Machine);
+    if is_machine {
+        return Err("a paired machine is renamed under Paired machines".to_string());
+    }
+    DeviceRegistry::rename_device(id, trimmed, app_data)
 }
 
 /// Return the plaintext remote-access token so the desktop webview can open the
@@ -124,6 +137,17 @@ pub async fn get_remote_access_token() -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
+
+    #[test]
+    fn rename_phone_refuses_a_machine_entry() {
+        let dir = tempdir().unwrap();
+        let (_, machine_id) = super::DeviceRegistry::add_machine_device("Mac", "mach-1", dir.path()).unwrap();
+        assert!(super::rename_phone(&machine_id, "Other", dir.path()).is_err());
+        super::DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        let phone = super::DeviceRegistry::list_devices(dir.path()).into_iter().find(|d| d.name == "Phone").unwrap();
+        assert_eq!(super::rename_phone(&phone.id, " Pixel ", dir.path()), Ok(true));
+        assert!(super::rename_phone(&phone.id, "  ", dir.path()).is_err());
+    }
 
     #[test]
     fn list_remote_devices_returns_empty_without_registry() {
