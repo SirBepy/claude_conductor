@@ -154,6 +154,78 @@ impl Mine {
     }
 }
 
+/// The Playwright extension's id; it is the same in every Chromium browser.
+const EXTENSION_ID: &str = "mmlmfjhmonkocbjadbfplnigmagldckm";
+
+impl Mine {
+    /// Fails at once when the Playwright extension is not installed in this
+    /// browser profile. Without it playwright-mcp waits for a connection that
+    /// can never arrive (Brave hung 300s; Chrome fails fast on its own). An
+    /// unresolvable profile directory never blocks: the child then behaves as
+    /// it did before this check.
+    pub fn check_extension_installed(&self) -> Result<(), String> {
+        self.check_extension_in(user_data_dir(self.app))
+    }
+
+    fn check_extension_in(&self, user_data: Option<PathBuf>) -> Result<(), String> {
+        let Some(user_data) = user_data.filter(|d| d.is_dir()) else { return Ok(()) };
+        // No profile named means the browser's last-used one, recorded in Local State.
+        let profile = match &self.profile {
+            Some(p) => p.clone(),
+            None => match last_used_profile(&user_data) {
+                Some(p) => p,
+                None => return Ok(()),
+            },
+        };
+        let profile_dir = user_data.join(&profile);
+        if !profile_dir.is_dir() || profile_dir.join("Extensions").join(EXTENSION_ID).is_dir() {
+            return Ok(());
+        }
+        Err(format!(
+            "The Playwright extension is not installed in {} (profile folder \"{profile}\"), so Joe's browser cannot be driven there. \
+Tell Joe with send_message to install \"Playwright MCP Bridge\" (extension id {EXTENSION_ID}) from the Chrome Web Store in that profile, \
+or use browser_target to switch to Claude's own browser.",
+            self.app.label()
+        ))
+    }
+}
+
+fn last_used_profile(user_data: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(user_data.join("Local State")).ok()?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    v["profile"]["last_used"].as_str().map(str::to_string).filter(|p| !p.is_empty())
+}
+
+fn user_data_dir(app: App) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let base = PathBuf::from(std::env::var_os("LOCALAPPDATA")?);
+        Some(match app {
+            App::Chrome => base.join(r"Google\Chrome\User Data"),
+            App::Edge => base.join(r"Microsoft\Edge\User Data"),
+            App::Brave => base.join(r"BraveSoftware\Brave-Browser\User Data"),
+        })
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let base = PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support");
+        Some(match app {
+            App::Chrome => base.join("Google/Chrome"),
+            App::Edge => base.join("Microsoft Edge"),
+            App::Brave => base.join("BraveSoftware/Brave-Browser"),
+        })
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let base = PathBuf::from(std::env::var_os("HOME")?).join(".config");
+        Some(match app {
+            App::Chrome => base.join("google-chrome"),
+            App::Edge => base.join("microsoft-edge"),
+            App::Brave => base.join("BraveSoftware/Brave-Browser"),
+        })
+    }
+}
+
 fn brave_candidates() -> Vec<PathBuf> {
     #[cfg(windows)]
     {
@@ -224,6 +296,45 @@ mod tests {
         assert_eq!(args, ["--extension", "--executable-path", exe.to_str().unwrap()]);
         let err = mine(App::Brave, None).playwright_args_with(|| None).unwrap_err();
         assert!(err.contains("Brave is not installed"), "{err}");
+    }
+
+    fn user_data_with(profile: &str, extension: bool) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let profile_dir = dir.path().join(profile);
+        std::fs::create_dir_all(&profile_dir).unwrap();
+        if extension {
+            std::fs::create_dir_all(profile_dir.join("Extensions").join(EXTENSION_ID)).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn a_profile_without_the_extension_fails_at_once() {
+        let dir = user_data_with("Profile 1", false);
+        let err = mine(App::Brave, Some("Profile 1")).check_extension_in(Some(dir.path().to_path_buf())).unwrap_err();
+        assert!(err.contains("not installed") && err.contains("Brave") && err.contains("Profile 1"), "{err}");
+    }
+
+    #[test]
+    fn a_profile_with_the_extension_passes() {
+        let dir = user_data_with("Profile 1", true);
+        assert!(mine(App::Brave, Some("Profile 1")).check_extension_in(Some(dir.path().to_path_buf())).is_ok());
+    }
+
+    #[test]
+    fn an_unresolvable_profile_never_blocks() {
+        let dir = user_data_with("Default", false);
+        assert!(mine(App::Chrome, Some("Profile 9")).check_extension_in(Some(dir.path().to_path_buf())).is_ok(), "profile folder absent");
+        assert!(mine(App::Chrome, Some("Default")).check_extension_in(None).is_ok(), "no user-data dir");
+        assert!(mine(App::Chrome, None).check_extension_in(Some(dir.path().to_path_buf())).is_ok(), "no Local State");
+    }
+
+    #[test]
+    fn no_profile_named_checks_the_last_used_one() {
+        let dir = user_data_with("Profile 2", false);
+        std::fs::write(dir.path().join("Local State"), r#"{"profile":{"last_used":"Profile 2"}}"#).unwrap();
+        let err = mine(App::Edge, None).check_extension_in(Some(dir.path().to_path_buf())).unwrap_err();
+        assert!(err.contains("Profile 2"), "{err}");
     }
 
     #[test]
