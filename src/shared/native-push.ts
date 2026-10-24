@@ -63,13 +63,23 @@ export function installNativePush(deps: NativePushDeps = defaultDeps()): void {
   const win = window as unknown as PushWindow;
   if (!win.ConductorPush) return;
 
+  // A failed registration (daemon unreachable at boot) is retried the next
+  // time the app comes back to the foreground, until one succeeds.
+  let failed = false;
   const registerNow = (): void => {
     const h = readHandle(win);
     if (!h) return;
+    failed = false;
     void deps.register(h.handle, h.secret).catch((e) => {
+      failed = true;
       console.warn("[native-push] register_fcm_handle failed", e);
     });
   };
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (failed && document.visibilityState === "visible") registerNow();
+    });
+  }
 
   win.__ccPushHandleReady = registerNow;
   win.__ccOpenChat = (chatId: string) => {

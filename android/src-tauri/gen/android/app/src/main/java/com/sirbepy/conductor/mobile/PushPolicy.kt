@@ -19,6 +19,15 @@ object PushPolicy {
     else -> AfterUpdate.RETRY_LATER
   }
 
+  // App start syncs when nothing is registered yet, or when the last /update or
+  // /register did not go through (a "dirty" token), so one network blip never
+  // leaves the relay holding a stale token until FCM happens to rotate it.
+  fun needsSyncAtStart(hasHandle: Boolean, tokenDirty: Boolean): Boolean = !hasHandle || tokenDirty
+
+  // Only a confirmed /update clears the dirty mark; REGISTER_FRESH clears it
+  // once the new registration lands.
+  fun updateLeavesTokenClean(outcome: AfterUpdate): Boolean = outcome == AfterUpdate.DONE
+
   // The SPA reads this string verbatim; "" means nothing registered yet.
   fun handleJson(handle: String?, secret: String?): String {
     if (handle.isNullOrEmpty() || secret.isNullOrEmpty()) return ""
