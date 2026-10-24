@@ -307,9 +307,13 @@ impl PushManager {
             .json(body)
             .send()
             .await?;
-        Ok(match resp.status().as_u16() {
+        let status = resp.status().as_u16();
+        if status == 401 || status == 404 {
+            let error = resp.json::<serde_json::Value>().await.ok().and_then(|b| b["error"].as_str().map(str::to_string));
+            return Ok(relay_rejection(status, error.as_deref()));
+        }
+        Ok(match status {
             204 => RelayOutcome::Delivered,
-            401 | 404 => RelayOutcome::Prune,
             429 => {
                 log::debug!("[push] relay rate limited this handle");
                 RelayOutcome::Keep
@@ -375,6 +379,19 @@ impl PushManager {
 }
 
 /// The Web Push payload; a generic body when the user hides chat names.
+/// A 401/404 prunes a handle only when the relay itself says the handle is
+/// gone. A bare 404 from a moved or misrouted relay URL must not wipe every
+/// phone's enrolment.
+fn relay_rejection(status: u16, error: Option<&str>) -> RelayOutcome {
+    match (status, error) {
+        (404, Some("unknown handle" | "token no longer valid")) | (401, Some("bad secret")) => RelayOutcome::Prune,
+        _ => {
+            log::debug!("[push] relay answered {status} {error:?}");
+            RelayOutcome::Keep
+        }
+    }
+}
+
 fn web_push_payload(session_id: Option<&str>, name: &str, show_chat_name: bool) -> Vec<u8> {
     serde_json::to_vec(&json!({
         "title": "Claude needs your input",
@@ -583,7 +600,7 @@ mod tests {
     }
 
     /// Handle count after one relay call answered with `status`.
-    async fn handles_left_after(status: usize) -> usize {
+    async fn handles_left_after(status: usize, error: &str) -> usize {
         let mut server = mockito::Server::new_async().await;
         let mock = server
             .mock("POST", "/send")
@@ -591,6 +608,7 @@ mod tests {
                 json!({"handle": "a", "secret": "dummy-secret", "chatId": "sid"}),
             ))
             .with_status(status)
+            .with_body(if error.is_empty() { String::new() } else { json!({ "error": error }).to_string() })
             .expect(1)
             .create_async()
             .await;
@@ -605,15 +623,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn relay_prunes_on_404_and_401() {
-        assert_eq!(handles_left_after(404).await, 0);
-        assert_eq!(handles_left_after(401).await, 0);
+    async fn relay_prunes_on_its_own_handle_gone_replies() {
+        assert_eq!(handles_left_after(404, "unknown handle").await, 0);
+        assert_eq!(handles_left_after(404, "token no longer valid").await, 0);
+        assert_eq!(handles_left_after(401, "bad secret").await, 0);
+    }
+
+    #[tokio::test]
+    async fn a_404_that_is_not_the_relay_saying_so_keeps_the_handle() {
+        assert_eq!(handles_left_after(404, "").await, 1);
+        assert_eq!(handles_left_after(404, "not found").await, 1);
     }
 
     #[tokio::test]
     async fn relay_keeps_on_204_429_and_500() {
         for s in [204, 429, 500] {
-            assert_eq!(handles_left_after(s).await, 1, "status {s}");
+            assert_eq!(handles_left_after(s, "").await, 1, "status {s}");
         }
     }
 
