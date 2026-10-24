@@ -8,6 +8,7 @@ import { getChatRendererSnapshot } from "../../shared/chat/chat-renderer-bridge"
 import { sessionEvents } from "../../shared/chat/event-store";
 import { isPendingSessionId } from "../../shared/chat/pending-session-id";
 import {
+  activeProfile,
   tickTimer,
   updateRowFades,
   stopRowFades,
@@ -52,6 +53,8 @@ import { OverflowPopover, type OverflowPanelData } from "./overflow-popover";
 import { loadStatuslineRows as loadRowsForActiveProfile } from "./session-statusbar-helpers";
 import { onMobileViewportChange } from "../../shared/mobile-viewport";
 import { visibleInterval } from "../../shared/visible-interval";
+import { isRemote } from "../../shared/transport";
+import { StatusbarEditor } from "./statusbar-edit";
 export {
   loadStatuslineRows,
   saveStatuslineRows,
@@ -129,6 +132,16 @@ export class SessionStatusbar {
   private commitsPopover = new CommitsPopover();
   private overflowPopover = new OverflowPopover();
   private mobileUnsub: (() => void) | null = null;
+  // In-place layout editing (right-click the bar, or the chat menu). Desktop
+  // only: the phone cannot save a layout.
+  private layoutEditable: boolean;
+  private editor: StatusbarEditor;
+  private onContextMenu = (e: MouseEvent) => {
+    if (!this.canEditLayout()) return;
+    if ((e.target as HTMLElement).closest("input, textarea, select, [contenteditable]")) return;
+    e.preventDefault();
+    void this.editor.enter();
+  };
 
   constructor(container: HTMLElement, startedAt: string | null, rows: ChipType[][], opts: StatusbarOptions = {}) {
     this.container = container;
@@ -150,6 +163,24 @@ export class SessionStatusbar {
     this.onAccountClick = opts.onAccountClick ?? null;
     this.onConfig = opts.onConfig ?? null;
     this.hideZero = opts.hideZero ?? true;
+    this.layoutEditable = opts.layoutEditable ?? false;
+    this.editor = new StatusbarEditor({
+      container,
+      hideZero: () => this.hideZero,
+      repaint: () => this.render(),
+      chipRenderer: () => {
+        const ctx = this.chipRenderCtx();
+        return (type) => renderChipHtml(type, ctx);
+      },
+      closePopovers: () => this.closeChipPopovers(),
+      onLayout: (rows, profile, hideZero) => {
+        this.hideZero = hideZero;
+        // Only the profile this window renders feeds the live bar; editing the
+        // other one is invisible here until a window of that kind mounts.
+        if (profile === activeProfile()) { this.rows = rows; this.startRowData(rows); }
+      },
+    });
+    this.container.addEventListener("contextmenu", this.onContextMenu);
     this.container.className = "session-statusbar";
     this.tally = new ToolTallyRow(this.container, () => this.sessionId);
     // Opening a tool-chip popover dismisses the statusbar-owned popovers, so at
@@ -170,19 +201,35 @@ export class SessionStatusbar {
     }
 
     this.render();
-    if (wantsTimer(this.rows)) this.startTimer();
-    if (wantsCounts(this.rows)) void this.refreshCounts();
-    if (wantsContext(this.rows)) void this.refreshContextStatus();
+    this.startRowData(this.rows);
+  }
+
+  /** Start the fetches/timers behind whichever chips `rows` carries. Also runs
+   *  when the layout editor adds a chip, so it fills in without a remount. */
+  private startRowData(rows: ChipType[][]): void {
+    if (wantsTimer(rows) && !this.durationTimer) this.startTimer();
+    if (wantsCounts(rows)) void this.refreshCounts();
+    if (wantsContext(rows)) void this.refreshContextStatus();
     // Resolve the live git cwd (may follow the AI into a worktree), then fetch
     // git info + dirty against it. Owns all git fetching for live sessions.
     // Also runs for a mirrored chat (G10 in docs/multi-machine.md):
     // `resolveGitCwd`/`refreshGitInfo`/`refreshDirty` all send `this.sessionId`
     // alongside `cwd`, which the daemon forwards one hop to the owning peer -
     // `cwd` itself is never read locally for a mirrored chat.
-    if (wantsGit(this.rows)) void this.resolveGitCwd();
-    if (hasChip(this.rows, "ai_todos") && this.cwd) void this.aiTodosPopover.refresh(this.cwd, () => this.render());
-    if (wantsDrain(this.rows)) void this.refreshDrain();
-    if (hasChip(this.rows, "servers") && this.cwd) this.startServersPoll();
+    if (wantsGit(rows)) void this.resolveGitCwd();
+    if (hasChip(rows, "ai_todos") && this.cwd) void this.aiTodosPopover.refresh(this.cwd, () => this.render());
+    if (wantsDrain(rows)) void this.refreshDrain();
+    if (hasChip(rows, "servers") && this.cwd && !this.serversTimer) this.startServersPoll();
+  }
+
+  /** True when this bar offers in-place layout editing right now. */
+  canEditLayout(): boolean {
+    return this.layoutEditable && !isRemote();
+  }
+
+  /** Enter edit mode (chat menu entry point; right-click is wired above). */
+  beginLayoutEdit(): void {
+    if (this.canEditLayout()) void this.editor.enter();
   }
 
   /** Seed counts/ctxStatus/drain from cache for `id`. Meta is constructor-only
@@ -422,6 +469,8 @@ export class SessionStatusbar {
     if (this.durationTimer) { this.durationTimer(); this.durationTimer = null; }
     if (this.serversTimer) { this.serversTimer(); this.serversTimer = null; }
     if (this.mobileUnsub) { this.mobileUnsub(); this.mobileUnsub = null; }
+    this.container.removeEventListener("contextmenu", this.onContextMenu);
+    this.editor.exit();
     this.tally.destroy();
     this.closeChipPopovers();
     stopRowFades(this.container);
@@ -499,6 +548,7 @@ export class SessionStatusbar {
   }
 
   private render(): void {
+    if (this.editor.active) { this.renderEditing(); return; }
     this.refreshImages();
     // .sb-row is overflow-x: auto; innerHTML rebuild below destroys the nodes
     // and resets scrollLeft, so snapshot by row index and restore after.
@@ -538,6 +588,14 @@ export class SessionStatusbar {
     wireChipPopovers(this.container, this.popoverWireCtx());
 
     updateRowFades(this.container);
+    this.onConfig?.(this.modelEffort.sessionModel ?? this.meta.model, this.modelEffort.effort, !this.modelEffort.readOnlyEffort);
+  }
+
+  /** Edit mode paints the editor's markup instead and wires NO chip popovers or
+   *  click handlers, so a click on a chip can never open one while editing. */
+  private renderEditing(): void {
+    this.container.innerHTML = this.editor.html();
+    this.editor.afterPaint();
     this.onConfig?.(this.modelEffort.sessionModel ?? this.meta.model, this.modelEffort.effort, !this.modelEffort.readOnlyEffort);
   }
 

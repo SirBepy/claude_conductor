@@ -279,6 +279,14 @@ export function buildConfigureItems(ctx: ChatMenuCtx): ItemDesc[] {
           },
       disabledReason: isDraft ? "Available once the chat starts" : (!sessionId ? "No session" : undefined),
     },
+    // Edits the bar of the chat on screen, so a sidebar menu for another row
+    // can't offer it. Hidden on the phone, which can't save a layout.
+    ...(isRemote() ? [] : [{
+      icon: "pencil-simple",
+      label: "Edit statusline",
+      run: () => { state.statusbar?.beginLayoutEdit(); },
+      disabledReason: !state.statusbar || (!isDraft && sessionId !== state.selectedId) ? "Open the chat first" : undefined,
+    }]),
   ];
 }
 

@@ -132,6 +132,7 @@ export async function mountPendingStatusbar(
     onEffortChange: (e) => { config.effort = e; },
     onModelChange: (m) => { config.model = m; },
     onConfig: (model, effort, effortEditable) => header?.setConfig(model, effort, effortEditable),
+    layoutEditable: true,
   });
   state.statusbar = sb;
   if (header) {
