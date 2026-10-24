@@ -82,27 +82,32 @@
   color: var(--color-text);
 }
 
-/* Reads as the plain name until hovered; the border is always there but
-   transparent, so focusing it never shifts the row. */
-.ra-name-input {
+/* Reads as the plain name until hovered. Qualified with the ancestor and
+   element because inputs.css styles input[type="text"] by element, which
+   outranks a single class. The border stays, transparent, so hovering or
+   focusing never shifts the row; the negative margin keeps the text in line
+   with the date under it. */
+.ra-device-info input.ra-name-input {
   padding: 2px 6px;
   margin-left: -7px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 5px;
-  font-family: inherit;
+  border-radius: 6px;
+  box-shadow: none;
+  font-size: var(--fs-title);
+  font-weight: 500;
   width: 240px;
   max-width: 100%;
 }
 
-.ra-name-input:hover {
+.ra-device-info input.ra-name-input:hover {
   border-color: var(--color-border);
 }
 
-.ra-name-input:focus {
-  outline: none;
-  background: var(--color-surface);
-  border-color: var(--color-accent);
+.ra-device-info input.ra-name-input:focus {
+  background: var(--color-surface-alt);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.15);
 }
 
 .ra-device-date {
