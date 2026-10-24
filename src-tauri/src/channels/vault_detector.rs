@@ -85,6 +85,12 @@ mod tests {
     }
 
     #[test]
+    fn entries_without_a_path_are_skipped() {
+        let raw = r#"{"vaults":{"abc":{"path":"C:/x"},"def":"garbage","ghi":{}}}"#;
+        assert_eq!(parse_entries(raw).unwrap().len(), 1);
+    }
+
+    #[test]
     fn entries_carry_the_open_flag_and_recency() {
         let raw = r#"{"vaults":{"a":{"path":"/a","ts":9},"b":{"path":"/b","ts":1,"open":true}}}"#;
         let mut out = parse_entries(raw).unwrap();
