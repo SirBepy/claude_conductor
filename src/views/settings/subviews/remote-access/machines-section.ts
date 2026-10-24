@@ -6,7 +6,7 @@
 import { html } from "lit-html";
 import { api } from "../../../../shared/api";
 import { isRemote } from "../../../../shared/transport";
-import { renderEntityList } from "./entity-list";
+import { renderEntityList, renameFieldHtml, wireRenameFields } from "./entity-list";
 
 function $(root: HTMLElement, sel: string): HTMLElement | null {
   return root.querySelector<HTMLElement>(sel);
@@ -82,7 +82,7 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
       (p) => `
         <div class="ra-device-row" data-id="${escapeHtml(p.machine_id)}">
           <div class="ra-device-info">
-            <span class="ra-device-name">${escapeHtml(p.label)}</span>
+            ${isRemote() ? `<span class="ra-device-name">${escapeHtml(p.label)}</span>` : renameFieldHtml(p.machine_id, p.label, escapeHtml)}
             <span class="ra-device-date">${escapeHtml(p.os)}${p.reach ? ` &middot; ${escapeHtml(p.reach)}` : ""}</span>
           </div>
           ${isRemote() ? "" : `<label class="ra-machine-drive" title="Off: ${escapeHtml(p.label)} still sees every chat here, but can only drive the chats it started">
@@ -113,6 +113,7 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
     );
 
     wireDriveToggles(root);
+    wireRenameFields(root, "#ra-machine-list", (id, name) => api.renameMachine(id, name), "rename_machine");
 
     const freshIds = new Set(fresh.map((p) => p.machine_id));
     root.querySelectorAll<HTMLElement>("#ra-machine-list .ra-device-row").forEach((row) => {

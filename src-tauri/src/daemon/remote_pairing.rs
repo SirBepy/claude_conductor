@@ -68,7 +68,7 @@ async fn pair_machine_peer(ctx: &Arc<RemoteCtx>, peer: PairPeer) -> Response {
     let Some(machines) = ctx.state.machines.get() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "machine registry not initialised").into_response();
     };
-    let (device_token, device_id) = match DeviceRegistry::add_machine_device(&peer.label, &peer.machine_id, &ctx.app_data) {
+    let (device_token, device_id) = match DeviceRegistry::add_machine_device(&machines.display_label(&peer.machine_id, &peer.label), &peer.machine_id, &ctx.app_data) {
         Ok(v) => v,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     };

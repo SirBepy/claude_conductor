@@ -549,6 +549,8 @@ export const api = {
   listRemoteDevices: (): Promise<RemoteDevice[]> => invoke("list_remote_devices"),
   revokeRemoteDevice: (id: string): Promise<boolean> =>
     invoke("revoke_remote_device", { id }),
+  renameRemoteDevice: (id: string, name: string): Promise<boolean> =>
+    invoke("rename_remote_device", { id, name }),
 
   // --- Machines (multi-machine federation, Settings > Remote access) ---
   // The mutators are desktop-pipe only; HttpTransport (phone) rejects them
@@ -563,6 +565,9 @@ export const api = {
     invoke("set_machine_label", { label }),
   setMachineCanDrive: (machineId: string, value: boolean): Promise<{ ok: boolean }> =>
     invoke("set_machine_can_drive", { machineId, value }),
+  /** A name for a paired peer on this machine only, overriding its own label. */
+  renameMachine: (machineId: string, label: string): Promise<{ ok: boolean }> =>
+    invoke("rename_machine", { machineId, label }),
 
   // --- Claude's own browser (Settings > Chat defaults). Desktop-pipe only. ---
   browserStatus: (): Promise<{ running: boolean; shown: boolean }> => invoke("browser_status"),

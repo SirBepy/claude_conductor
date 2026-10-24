@@ -658,7 +658,7 @@ mod tests {
     /// absent from `TRANSPORT_TABLE`, so neither remote transport can call them.
     #[test]
     fn machine_identity_mutators_are_desktop_pipe_only() {
-        for m in ["pair_machine", "unpair_machine", "set_machine_label", "set_machine_can_drive"] {
+        for m in ["pair_machine", "unpair_machine", "set_machine_label", "set_machine_can_drive", "rename_machine"] {
             assert!(!allowed(m, &Transport::Phone), "{m} must not be callable by a phone");
             assert!(
                 !allowed(m, &Transport::PeerMachine("x".into())),

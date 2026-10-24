@@ -101,6 +101,12 @@ pub struct MachinesFile {
     /// means the default (on), and a re-pair keeps the owner's choice.
     #[serde(default)]
     pub view_only_peers: Vec<String>,
+    /// Owner-set names for peers, keyed by machine id, overriding the label
+    /// each peer gives itself. Kept apart from `PeerMachine` for the same
+    /// reason as `view_only_peers`: a re-pair rewrites the peer entry with
+    /// the peer's own label, and must not lose the owner's name for it.
+    #[serde(default)]
+    pub peer_nicknames: std::collections::BTreeMap<String, String>,
 }
 
 fn registry_path(app_data: &Path) -> PathBuf {
@@ -241,8 +247,11 @@ impl MachineRegistry {
         Some(first.clone())
     }
 
-    pub fn upsert_peer(&self, peer: PeerMachine) {
+    pub fn upsert_peer(&self, mut peer: PeerMachine) {
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(nickname) = guard.peer_nicknames.get(&peer.machine_id) {
+            peer.label = nickname.clone();
+        }
         if let Some(existing) = guard.peers.iter_mut().find(|p| p.machine_id == peer.machine_id) {
             *existing = peer;
         } else {
@@ -256,8 +265,31 @@ impl MachineRegistry {
         let idx = guard.peers.iter().position(|p| p.machine_id == machine_id)?;
         let removed = guard.peers.remove(idx);
         guard.view_only_peers.retain(|id| id != machine_id);
+        guard.peer_nicknames.remove(machine_id);
         self.save(&guard);
         Some(removed)
+    }
+
+    /// What this machine calls `machine_id`: the owner-set name if there is
+    /// one, else `own_label` (the name the peer gave itself). For a re-pair,
+    /// whose device-registry entry is minted before `upsert_peer` runs.
+    pub fn display_label(&self, machine_id: &str, own_label: &str) -> String {
+        let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        guard.peer_nicknames.get(machine_id).cloned().unwrap_or_else(|| own_label.to_string())
+    }
+
+    /// Gives a paired peer an owner-set name on this machine only; the peer
+    /// keeps calling itself whatever it likes. Returns false (and stores
+    /// nothing) for an id that isn't a paired peer.
+    pub fn rename_peer(&self, machine_id: &str, label: &str) -> bool {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(peer) = guard.peers.iter_mut().find(|p| p.machine_id == machine_id) else {
+            return false;
+        };
+        peer.label = label.to_string();
+        guard.peer_nicknames.insert(machine_id.to_string(), label.to_string());
+        self.save(&guard);
+        true
     }
 
     /// `peer` as the token-free view list/pair responses carry.
@@ -344,6 +376,28 @@ mod tests {
         assert_eq!(reg.peer("p1").unwrap().token, broken, "kept verbatim so a later save cannot destroy it");
         reg.set_can_drive("p1", false);
         assert!(raw_file(dir.path()).contains(&broken));
+    }
+
+    #[test]
+    fn peer_nickname_survives_repair_and_reload_but_not_unpair() {
+        let dir = tempdir().unwrap();
+        let reg = MachineRegistry::load(dir.path());
+        reg.upsert_peer(mk_peer("p1", "DESKTOP-ABC"));
+        assert!(reg.rename_peer("p1", "Office PC"));
+        reg.upsert_peer(mk_peer("p1", "DESKTOP-ABC"));
+        assert_eq!(reg.peer("p1").unwrap().label, "Office PC");
+        assert_eq!(MachineRegistry::load(dir.path()).peer("p1").unwrap().label, "Office PC");
+
+        reg.remove_peer("p1");
+        reg.upsert_peer(mk_peer("p1", "DESKTOP-ABC"));
+        assert_eq!(reg.peer("p1").unwrap().label, "DESKTOP-ABC");
+    }
+
+    #[test]
+    fn rename_peer_refuses_an_unknown_id() {
+        let dir = tempdir().unwrap();
+        let reg = MachineRegistry::load(dir.path());
+        assert!(!reg.rename_peer("nope", "X"));
     }
 
     #[test]
