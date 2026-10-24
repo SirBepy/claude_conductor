@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Chat defaults' "Claude's browser" section: the switch persists
+// The "Claude's browser" page: the switch persists
 // claudeBrowserEnabled (read daemon-side by Settings::claude_browser_enabled),
 // and the Show button drives the daemon's off-screen window.
 
@@ -12,10 +12,6 @@ vi.mock("../src/shared/state.ts", () => ({ getSettings: () => settings }));
 vi.mock("../src/shared/settings-update.ts", () => ({
   updateSettings: vi.fn(async (fn) => fn({})),
 }));
-vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({
-  loadSort: () => "status",
-  saveSort: vi.fn(),
-}));
 vi.mock("../src/shared/api.ts", () => ({
   api: {
     browserStatus: vi.fn(async () => ({ running: false, shown: false })),
@@ -27,14 +23,14 @@ vi.mock("../src/shared/api.ts", () => ({
 let remote = false;
 vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => remote }));
 
-const { renderChatDefaultsView } = await import(
-  "../src/views/settings/subviews/chat-defaults/chat-defaults.ts"
+const { renderBrowserView } = await import(
+  "../src/views/settings/subviews/browser/browser.ts"
 );
 
 async function mount() {
   const root = document.createElement("div");
   document.body.appendChild(root);
-  const dispose = await renderChatDefaultsView(root);
+  const dispose = await renderBrowserView(root);
   return { root, dispose };
 }
 
@@ -65,7 +61,7 @@ describe("Claude's browser section", () => {
     const { root, dispose } = await mount();
     const toggle = root.querySelector("#chatDefaultsBrowser");
     toggle.checked = true;
-    toggle.dispatchEvent(new Event("change"));
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
     await flush();
     expect(updateSettings).toHaveBeenCalled();
     const saved = await updateSettings.mock.results.at(-1).value;
@@ -193,9 +189,9 @@ describe("My browser mode", () => {
     settings = { claudeBrowserMode: "mine" };
     const { root, dispose } = await mount();
     root.querySelector("#chatDefaultsBrowserMode").remove();
-    const autoAllow = root.querySelector("#chatDefaultsAutoAllow");
+    const autoAllow = root.querySelector("#chatDefaultsBrowser");
     autoAllow.checked = !autoAllow.checked;
-    autoAllow.dispatchEvent(new Event("change"));
+    autoAllow.dispatchEvent(new Event("change", { bubbles: true }));
     await flush();
     const saved = await updateSettings.mock.results.at(-1).value;
     expect(saved.claudeBrowserMode).toBe("mine");
@@ -209,6 +205,26 @@ describe("My browser mode", () => {
     expect(api.openExternal).toHaveBeenCalledWith(
       "https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm",
     );
+    dispose();
+  });
+});
+
+describe("browser page ownership", () => {
+  it("lives only on the browser page, not on Chat defaults", async () => {
+    const { renderChatDefaultsView } = await import(
+      "../src/views/settings/subviews/chat-defaults/chat-defaults.ts"
+    );
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const dispose = await renderChatDefaultsView(root);
+    expect(root.querySelector("#chatDefaultsBrowser")).toBeNull();
+    expect(root.querySelector("#chatDefaultsBrowserMode")).toBeNull();
+    dispose();
+  });
+
+  it("is titled Claude's browser", async () => {
+    const { root, dispose } = await mount();
+    expect(root.textContent).toContain("Claude's browser");
     dispose();
   });
 });

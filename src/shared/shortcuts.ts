@@ -161,6 +161,70 @@ export function hasOverride(id: string): boolean {
   return Object.prototype.hasOwnProperty.call(overrides, id);
 }
 
+// ── Numbered ranges (Open chat 1-9, New chat: favorite 1-9) ────────────────
+// The Settings list shows each family as one row. Slot N is always the shared
+// modifiers plus the digit N, so a range is edited as "which modifiers".
+
+export interface ShortcutRange {
+  prefix: string;
+  label: string;
+  description: string;
+}
+
+export const SHORTCUT_RANGES: readonly ShortcutRange[] = [
+  { prefix: "open-chat-", label: "Open chat 1-9", description: "Open the Nth most recent chat" },
+  { prefix: "new-chat-favorite-", label: "New chat: favorite 1-9", description: "Start a new chat with the project pinned to favorite slot N" },
+];
+
+const RANGE_SLOTS = 9;
+
+export function rangeIds(prefix: string): string[] {
+  return Array.from({ length: RANGE_SLOTS }, (_, i) => `${prefix}${i + 1}`);
+}
+
+/** Modifiers of slot 1 ("ctrl", "ctrl+shift"); legacy per-slot overrides that
+ *  disagree are ignored, and the next rebind overwrites them. */
+export function getRangeModifiers(prefix: string): string {
+  return getBinding(`${prefix}1`).split("+").slice(0, -1).join("+");
+}
+
+export function rangeHasOverride(prefix: string): boolean {
+  return rangeIds(prefix).some(hasOverride);
+}
+
+export type RangeRebindResult =
+  | { ok: true }
+  | { ok: false; conflict: ShortcutDef }
+  | { ok: false; conflict: null };
+
+/** Takes only the modifiers of a captured combo and writes modifiers+N to all
+ *  nine slots. Nothing is written if any slot would collide with a shortcut
+ *  outside the range. A modifier-less combo is refused: bare digits would
+ *  fire while typing in the composer. */
+export function setRangeFromCombo(prefix: string, combo: string): RangeRebindResult {
+  const mods = combo.split("+").slice(0, -1);
+  if (mods.length === 0) return { ok: false, conflict: null };
+  const ids = rangeIds(prefix);
+  const overrides = loadBindings();
+  const next = ids.map((_, i) => [...mods, String(i + 1)].join("+"));
+  for (const keys of next) {
+    for (const def of SHORTCUT_DEFS) {
+      if (ids.includes(def.id)) continue;
+      if ((overrides[def.id] ?? def.defaultKeys) === keys) return { ok: false, conflict: def };
+    }
+  }
+  const updated = { ...overrides };
+  ids.forEach((id, i) => { updated[id] = [...mods, String(i + 1)].join("+"); });
+  saveBindings(updated);
+  return { ok: true };
+}
+
+export function resetRange(prefix: string): void {
+  const overrides = { ...loadBindings() };
+  for (const id of rangeIds(prefix)) delete overrides[id];
+  saveBindings(overrides);
+}
+
 // ── Dispatcher (DOM — guarded for test environments) ──────────────────────
 
 function _init(): void {

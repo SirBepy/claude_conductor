@@ -30,7 +30,7 @@ export function readNightly(s: SettingsShape): NightlyWhenDone {
 
 function saveNightly(patch: Partial<NightlyWhenDone>): void {
   void updateSettings((s) => ({ ...s, nightlyWhenDone: { ...readNightly(s), ...patch } })).catch((err) => {
-    console.error("[settings-system nightly] save failed", err);
+    console.error("[settings-power nightly] save failed", err);
     showToast("Couldn't save settings - your last change wasn't saved. Try again.");
   });
 }

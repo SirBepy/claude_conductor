@@ -3,6 +3,7 @@ import { saveSettings, NOTIF_TYPES } from "../../../../shared/settings-save";
 import { getSettings, setSettings } from "../../../../shared/state";
 import { isRemote } from "../../../../shared/transport";
 import { invoke } from "../../../../shared/ipc";
+import { PHONE_SOUNDS_KEY, phoneSoundsEnabled } from "../../../../shared/remote-voiceline";
 import { settingsHeader, toggleRow } from "../../ui";
 import {
   buildNotifCards,
@@ -11,7 +12,7 @@ import {
   primeWebVoices,
   populateVoicePreview,
 } from "./notif-cards";
-import { populateDevicePicker, populateMicPicker, wirePttCapture } from "./audio-devices";
+import { populateDevicePicker } from "./audio-devices";
 import { wirePushSection } from "./push-section";
 import "./notifications.css";
 
@@ -32,18 +33,16 @@ async function hydrateNotifications(): Promise<void> {
   // Everything in this block persists via saveSettings(), which the daemon
   // refuses from the phone (todo 1023) - the template omits these sections
   // there, so run their wiring only when the elements can actually exist.
-  // Mic picker + push-to-talk below are local-storage-only and stay live.
+  // The phone's own sounds toggle is local-storage-only and stays live.
   if (!isRemote()) {
     const muteAllSwitch = $("muteAllSwitch") as HTMLInputElement | null;
     const muteSoundsSwitch = $("muteSoundsSwitch") as HTMLInputElement | null;
-    const muteSystemSwitch = $("muteSystemSwitch") as HTMLInputElement | null;
     const pauseInMeetingSwitch = $("pauseInMeetingSwitch") as HTMLInputElement | null;
     const voicePreviewProjectRow = $("voicePreviewProjectRow");
 
-    if (muteAllSwitch && muteSoundsSwitch && muteSystemSwitch) {
+    if (muteAllSwitch && muteSoundsSwitch) {
       muteAllSwitch.checked = !!s.muteAll;
       muteSoundsSwitch.checked = !!s.muteSounds;
-      muteSystemSwitch.checked = !!s.muteSystemNotifications;
       applyMuteAllVisual();
 
       muteAllSwitch.addEventListener("change", () => { applyMuteAllVisual(); saveSettings(); });
@@ -73,31 +72,19 @@ async function hydrateNotifications(): Promise<void> {
     if (voicePreviewProjectRow) voicePreviewProjectRow.style.display = "flex";
 
     await populateDevicePicker();
-
-    // Per-slot character-sound toggles. Each defaults ON when its key is absent.
-    const slots = (s.characterSoundSlots as Record<string, boolean | undefined>) || {};
-    for (const [id, key] of CHARACTER_SLOT_SWITCHES) {
-      const el = $(id) as HTMLInputElement | null;
-      if (!el) continue;
-      el.checked = slots[key] !== false;
-      el.addEventListener("change", saveSettings);
-    }
-    const voiceSwitch = $("voiceDictationSwitch") as HTMLInputElement | null;
-    if (voiceSwitch) {
-      voiceSwitch.checked = s.voiceDictationEnabled === true;
-      voiceSwitch.addEventListener("change", saveSettings);
-    }
-    const selectOnClick = $("selectOnSessionClickSwitch") as HTMLInputElement | null;
-    if (selectOnClick) {
-      // Default off.
-      selectOnClick.checked = s.selectOnSessionClick === true;
-      selectOnClick.addEventListener("change", saveSettings);
-    }
   }
 
   // Phone: same toggle as the desktop one, but saveSettings is refused there,
   // so it goes through the dedicated single-key RPC instead.
   if (isRemote()) {
+    const phoneSounds = $("phoneSoundsSwitch") as HTMLInputElement | null;
+    if (phoneSounds) {
+      phoneSounds.checked = phoneSoundsEnabled();
+      phoneSounds.addEventListener("change", () => {
+        try { localStorage.setItem(PHONE_SOUNDS_KEY, phoneSounds.checked ? "on" : "off"); }
+        catch { /* ignore */ }
+      });
+    }
     const phoneShowName = $("pushShowChatNamePhoneSwitch") as HTMLInputElement | null;
     if (phoneShowName) {
       phoneShowName.checked = s.pushShowChatName !== false;
@@ -113,20 +100,7 @@ async function hydrateNotifications(): Promise<void> {
       });
     }
   }
-
-  await populateMicPicker();
-  wirePttCapture();
 }
-
-// [checkbox id, settings key] for the six character-sound slot toggles.
-const CHARACTER_SLOT_SWITCHES: Array<[string, string]> = [
-  ["soundSlotWorkFinished", "workFinished"],
-  ["soundSlotQuestionAsked", "questionAsked"],
-  ["soundSlotReady", "ready"],
-  ["soundSlotSelect", "select"],
-  ["soundSlotDeath", "death"],
-  ["soundSlotAnnoyed", "annoyed"],
-];
 
 // Back-compat window binding.
 (window as unknown as { renderNotificationSettings?: () => Promise<void> }).renderNotificationSettings = hydrateNotifications;
@@ -144,15 +118,18 @@ export async function renderNotificationsView(
   return () => { /* no teardown */ };
 }
 
-function characterSlotRow(id: string, label: string) {
-  return toggleRow({ label, inputId: id, checked: true });
-}
-
 function template() {
   return html`
     <div class="view view-settings-notifications">
-      ${settingsHeader("Notifications & Sound")}
+      ${settingsHeader("Notifications")}
       <div class="view-body">
+        ${isRemote() ? html`
+        <div class="kit-section" id="phoneSoundsSection">
+          <div class="kit-section-title">This phone</div>
+          ${toggleRow({ label: "Play sounds on this phone", inputId: "phoneSoundsSwitch", checked: true })}
+          <div class="settings-caption">Character voice lines play on this phone when a chat finishes or asks a question. Off keeps this phone silent; the PC still plays them.</div>
+        </div>
+        ` : ""}
         <div class="kit-section" id="push-section" style="display:none">
           <div class="kit-section-title">Push to this phone</div>
           <div id="push-web-rows">
@@ -189,13 +166,6 @@ function template() {
             <span class="kit-row-label">Mute sounds</span>
             <label class="kit-toggle">
               <input type="checkbox" id="muteSoundsSwitch">
-              <span class="kit-toggle-track"></span>
-            </label>
-          </div>
-          <div class="kit-row mute-child is-disabled" title="Coming soon - OS toasts aren't implemented yet">
-            <span class="kit-row-label">Mute system notifications <span class="coming-soon-label">(coming soon)</span></span>
-            <label class="kit-toggle">
-              <input type="checkbox" id="muteSystemSwitch" disabled>
               <span class="kit-toggle-track"></span>
             </label>
           </div>
@@ -249,11 +219,9 @@ function template() {
         </div>
         `}
 
+        ${isRemote() ? "" : html`
         <div class="kit-section">
-          <div class="kit-section-title">Audio</div>
-          ${isRemote() ? "" : html`
-          ${toggleRow({ label: "Voice dictation", inputId: "voiceDictationSwitch", checked: false })}
-          <div class="settings-caption">Shows the mic and push-to-talk in chats. While on, opening a chat loads the speech model (about 1.4 GB of RAM) so the first recording starts instantly.</div>
+          <div class="kit-section-title">Sound output</div>
           <div class="kit-row">
             <span class="kit-row-label">Output device</span>
             <select id="audioOutputDevice">
@@ -261,35 +229,6 @@ function template() {
             </select>
           </div>
           <div class="settings-caption">"System default" follows your computer's default output - if you switch the default device, sounds follow automatically.</div>
-          `}
-          <div class="kit-row">
-            <span class="kit-row-label">Microphone</span>
-            <select id="audioInputDevice">
-              <option value="">System default</option>
-            </select>
-          </div>
-          <div class="settings-caption">Microphone used for voice input. Device labels appear after granting microphone permission.</div>
-          <div class="kit-row">
-            <span class="kit-row-label">Push-to-talk</span>
-            <div class="ptt-controls">
-              <button type="button" id="pttCaptureBtn" class="btn-secondary">Click to set</button>
-              <button type="button" id="pttClearBtn" class="btn-secondary ptt-clear" title="Clear binding" aria-label="Clear binding"><i class="ph ph-x"></i></button>
-            </div>
-          </div>
-          <div class="settings-caption">Hold this button (while Conductor is focused) to record voice, release to stop. Click Set, then press a key or mouse side-button. Tip: pick a mouse side-button or a non-printing key so it doesn't type into the box.</div>
-        </div>
-
-        ${isRemote() ? "" : html`
-        <div class="kit-section" id="characterSoundsSection">
-          <div class="kit-section-title">Character sounds</div>
-          ${characterSlotRow("soundSlotWorkFinished", "Work finished")}
-          ${characterSlotRow("soundSlotQuestionAsked", "Question asked")}
-          ${characterSlotRow("soundSlotReady", "Ready (new chat)")}
-          ${characterSlotRow("soundSlotSelect", "Select (new chat / change)")}
-          ${characterSlotRow("soundSlotDeath", "Death (chat closed)")}
-          ${characterSlotRow("soundSlotAnnoyed", "Annoyed")}
-          <div class="settings-caption">Mute individual character voice-line slots. Off here silences that slot everywhere. The tray "Mute Notifications" overrides all of these.</div>
-          ${toggleRow({ label: "Play \"select\" when clicking a session", inputId: "selectOnSessionClickSwitch", checked: false })}
         </div>
         `}
       </div>

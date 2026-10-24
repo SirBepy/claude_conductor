@@ -9,7 +9,8 @@ import {
 } from "../../../sessions/permission-rules";
 import { askConfirm } from "../../../../shared/confirm";
 import { isRemote } from "../../../../shared/transport";
-import { settingsHeader } from "../../ui";
+import { readDefaultFlags } from "../../../../shared/effort-presets";
+import { settingsHeader, toggleRow } from "../../ui";
 import "./permissions.css";
 
 function projectShortName(cwd: string): string {
@@ -46,13 +47,50 @@ function projectBlock(cwd: string, rules: PermissionRule[]) {
   `;
 }
 
-function template(rulesByCwd: Record<string, PermissionRule[]>) {
+/** Both default on when absent, matching `Settings::spawned_chats_inherit_auto_accept`
+ *  and `Settings::jarvis_workers_auto_accept` on the daemon side. */
+function readSpawnFlags(settings: Record<string, unknown>): { inherit: boolean; workers: boolean } {
+  return {
+    inherit: settings["spawnedChatsInheritAutoAccept"] !== false,
+    workers: settings["jarvisWorkersAutoAccept"] !== false,
+  };
+}
+
+// Desktop-only: each toggle persists through updateSettings, which the daemon
+// refuses from the phone.
+function defaultsSection(settings: Record<string, unknown>) {
+  if (isRemote()) return "";
+  const flags = readDefaultFlags(settings);
+  const spawn = readSpawnFlags(settings);
+  return html`
+    <div class="kit-section">
+      <div class="kit-section-title">Defaults</div>
+      ${toggleRow({ label: "Auto-allow permissions by default", inputId: "chatDefaultsAutoAllow", checked: flags.autoAccept })}
+      ${toggleRow({
+        label: "Chats an agent starts inherit auto-allow",
+        inputId: "chatDefaultsInheritAutoAllow",
+        checked: spawn.inherit,
+        tooltip: "A chat started by spawn_chat or a scheduled new chat copies its parent's auto-allow. Off: it asks for permissions. Respawn always keeps the flag.",
+      })}
+      ${toggleRow({
+        label: "Jarvis workers auto-allow",
+        inputId: "chatDefaultsWorkersAutoAllow",
+        checked: spawn.workers,
+        tooltip: "Workers Jarvis spawns run with auto-allow. Off: they ask, and Jarvis can approve their permission prompts. Worker questions always come to you.",
+      })}
+    </div>
+  `;
+}
+
+function template(rulesByCwd: Record<string, PermissionRule[]>, settings: Record<string, unknown>) {
   const entries = Object.entries(rulesByCwd);
   return html`
     <div class="view view-settings-permissions">
       ${settingsHeader("Permissions")}
       <div class="view-body">
+        ${defaultsSection(settings)}
         <div class="kit-section">
+          <div class="kit-section-title">Remembered rules</div>
           <p class="perm-hint">
             Tool permissions you've marked as "Always Allow" in a chat. Rules are scoped per project (cwd). Destructive Bash patterns
             (rm -rf, git push --force, drop database, etc.) always prompt regardless of rules.
@@ -81,7 +119,7 @@ export async function renderPermissionsView(root: HTMLElement): Promise<() => vo
   }
 
   function rerender() {
-    render(template(loadAllRules(settings)), root);
+    render(template(loadAllRules(settings), settings), root);
 
     root.querySelectorAll<HTMLButtonElement>('[data-act="remove"]').forEach((btn) => {
       btn.onclick = async () => {
@@ -125,5 +163,26 @@ export async function renderPermissionsView(root: HTMLElement): Promise<() => vo
   }
 
   rerender();
-  return () => {};
+
+  // The toggles keep their own checked state across rerender() (lit updates
+  // in place), so one delegated handler on root covers every redraw.
+  const onToggle = (e: Event) => {
+    const t = e.target as HTMLInputElement | null;
+    if (!t) return;
+    const patch: Record<string, string> = {
+      chatDefaultsAutoAllow: "defaultAutoAllow",
+      chatDefaultsInheritAutoAllow: "spawnedChatsInheritAutoAccept",
+      chatDefaultsWorkersAutoAllow: "jarvisWorkersAutoAccept",
+    };
+    const key = patch[t.id];
+    if (!key) return;
+    // Fresh-read + retry: building from the frontend's own
+    // settings cache could revert a concurrent daemon-owned write.
+    void updateSettings((fresh) => ({ ...fresh, [key]: t.checked }))
+      .then((saved) => { settings = saved; })
+      .catch((err) => console.warn("[permissions] save_settings failed:", err));
+  };
+  root.addEventListener("change", onToggle);
+
+  return () => root.removeEventListener("change", onToggle);
 }

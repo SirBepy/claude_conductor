@@ -1,4 +1,5 @@
-// asserts: src/views/settings/subviews/system/nightly.ts
+// asserts: src/views/settings/subviews/power/nightly.ts
+// Reviewed 2026-10-25: nightly.ts moved from subviews/system/ to subviews/power/ unchanged; the view is now mounted as settings-power.
 
 // `.kit-row` is `justify-content: space-between` over its direct children,
 // so the "Give up waiting after [N] hours" row keeps exactly two: the label,
@@ -25,7 +26,7 @@ const INVOKE = {
 };
 
 test("the overdue-hours input and its unit sit together at the row's right edge", async ({ page }) => {
-  await mountView(page, { view: "settings-system", invoke: INVOKE });
+  await mountView(page, { view: "settings-power", invoke: INVOKE });
 
   const row = page.locator(".kit-row", { has: page.locator("#nightlyWhenDoneOverdueHours") });
   const input = row.locator("#nightlyWhenDoneOverdueHours");

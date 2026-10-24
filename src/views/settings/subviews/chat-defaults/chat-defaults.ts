@@ -4,16 +4,8 @@ import { updateSettings } from "../../../../shared/settings-update";
 import { isRemote } from "../../../../shared/transport";
 import { loadSort, saveSort } from "../../../sessions/sessions-helpers";
 import type { SessionSort } from "../../../sessions/sessions-helpers";
-import { readModels, readDefaultFlags } from "../../../../shared/effort-presets";
-import { settingsHeader, toggleRow } from "../../ui";
-import {
-  browserSectionTemplate,
-  browserSettingsPatch,
-  readBrowserChoice,
-  readBrowserFields,
-  wireBrowserSection,
-  type BrowserChoice,
-} from "./browser-section";
+import { readModels } from "../../../../shared/effort-presets";
+import { settingsHeader } from "../../ui";
 import "./chat-defaults.css";
 
 /** Parse a comma-separated models string into a trimmed, deduped, non-empty list. */
@@ -26,22 +18,7 @@ function parseModels(raw: string): string[] {
   return out;
 }
 
-/** Both default on when absent, matching `Settings::spawned_chats_inherit_auto_accept`
- *  and `Settings::jarvis_workers_auto_accept` on the daemon side. */
-function readSpawnFlags(settings: Record<string, unknown>): { inherit: boolean; workers: boolean } {
-  return {
-    inherit: settings["spawnedChatsInheritAutoAccept"] !== false,
-    workers: settings["jarvisWorkersAutoAccept"] !== false,
-  };
-}
-
-function template(
-  models: string[],
-  flags: { autoAccept: boolean },
-  spawn: { inherit: boolean; workers: boolean },
-  sort: SessionSort,
-  browser: BrowserChoice,
-) {
+function template(models: string[], sort: SessionSort) {
   return html`
     <div class="view view-settings-chat-defaults">
       ${settingsHeader("Chat defaults")}
@@ -58,19 +35,6 @@ function template(
               <option value="drain" ?selected=${sort === "drain"}>Token drain</option>
             </select>
           </div>
-          ${isRemote() ? "" : toggleRow({ label: "Auto-allow permissions by default", inputId: "chatDefaultsAutoAllow", checked: flags.autoAccept })}
-          ${isRemote() ? "" : toggleRow({
-            label: "Chats an agent starts inherit auto-allow",
-            inputId: "chatDefaultsInheritAutoAllow",
-            checked: spawn.inherit,
-            tooltip: "A chat started by spawn_chat or a scheduled new chat copies its parent's auto-allow. Off: it asks for permissions. Respawn always keeps the flag.",
-          })}
-          ${isRemote() ? "" : toggleRow({
-            label: "Jarvis workers auto-allow",
-            inputId: "chatDefaultsWorkersAutoAllow",
-            checked: spawn.workers,
-            tooltip: "Workers Jarvis spawns run with auto-allow. Off: they ask, and Jarvis can approve their permission prompts. Worker questions always come to you.",
-          })}
         </div>
 
         ${isRemote()
@@ -87,23 +51,16 @@ function template(
               <p class="cd-hint">Models offered in the New session picker, comma-separated.</p>
             </div>`}
 
-        ${isRemote() ? "" : browserSectionTemplate(browser)}
-
       </div>
     </div>
   `;
 }
 
 export async function renderChatDefaultsView(root: HTMLElement): Promise<() => void> {
-  const settings = getSettings();
-  let models = readModels(settings);
-  let flags = readDefaultFlags(settings);
-  let spawn = readSpawnFlags(settings);
-  let browser = readBrowserChoice(settings);
+  let models = readModels(getSettings());
   const sort = loadSort();
 
-  render(template(models, flags, spawn, sort, browser), root);
-  if (!isRemote()) wireBrowserSection(root);
+  render(template(models, sort), root);
 
   const sortSelect = root.querySelector<HTMLSelectElement>("#chatDefaultsSort");
   if (sortSelect) {
@@ -121,54 +78,18 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
     return parsed.length > 0 ? parsed : models;
   }
 
-  // Autosave: every control persists on its own change/input event (no Save
-  // button).
+  // Autosave: the models input persists on its own input event (no Save
+  // button). Fresh-read + retry: building from the frontend's own
+  // settings cache could revert a concurrent daemon-owned write.
   async function persist(): Promise<void> {
     models = readModelsField();
-    const autoAllow = root.querySelector<HTMLInputElement>("#chatDefaultsAutoAllow")?.checked ?? flags.autoAccept;
-    flags = { autoAccept: autoAllow };
-    spawn = {
-      inherit: root.querySelector<HTMLInputElement>("#chatDefaultsInheritAutoAllow")?.checked ?? spawn.inherit,
-      workers: root.querySelector<HTMLInputElement>("#chatDefaultsWorkersAutoAllow")?.checked ?? spawn.workers,
-    };
-    browser = readBrowserFields(root, browser);
-    // Fresh-read + retry (todo 1004): building from the frontend's own
-    // settings cache could revert a concurrent daemon-owned write.
-    await updateSettings((fresh) => ({
-      ...fresh,
-      models,
-      defaultAutoAllow: autoAllow,
-      spawnedChatsInheritAutoAccept: spawn.inherit,
-      jarvisWorkersAutoAccept: spawn.workers,
-      ...browserSettingsPatch(browser),
-    }));
+    await updateSettings((fresh) => ({ ...fresh, models }));
   }
-
-  // The app and profile rows exist only in My browser mode, so the section
-  // is delegated from root and redrawn when the mode flips.
-  root.addEventListener("change", (e) => {
-    const id = (e.target as HTMLElement | null)?.id ?? "";
-    if (!id.startsWith("chatDefaultsBrowser") || id === "chatDefaultsBrowser") return;
-    const modeChanged = id === "chatDefaultsBrowserMode";
-    void persist().then(() => {
-      if (!modeChanged || isRemote()) return;
-      render(template(models, flags, spawn, sort, browser), root);
-      wireBrowserSection(root);
-    });
-  });
 
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   function persistDebounced(): void {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => { void persist(); }, 400);
-  }
-
-  const autoAllowEl = root.querySelector<HTMLInputElement>("#chatDefaultsAutoAllow");
-  if (autoAllowEl) autoAllowEl.addEventListener("change", () => void persist());
-  const remoteEl = root.querySelector<HTMLInputElement>("#chatDefaultsRemote");
-  if (remoteEl) remoteEl.addEventListener("change", () => void persist());
-  for (const id of ["#chatDefaultsInheritAutoAllow", "#chatDefaultsWorkersAutoAllow", "#chatDefaultsBrowser"]) {
-    root.querySelector<HTMLInputElement>(id)?.addEventListener("change", () => void persist());
   }
 
   const modelsInput = root.querySelector<HTMLInputElement>("#chatDefaultsModels");

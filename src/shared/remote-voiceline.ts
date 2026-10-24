@@ -15,8 +15,20 @@ interface TurnSoundPayload {
   awaiting?: string | null;
 }
 
-async function playVoiceline(p: TurnSoundPayload): Promise<void> {
+export const PHONE_SOUNDS_KEY = "cc_phone_sounds_enabled";
+
+// localStorage, not a daemon setting: the choice is per phone, and the
+// daemon's settings are shared by every client (the desktop included).
+// Read at fire time so the Notifications toggle applies without a reload.
+export function phoneSoundsEnabled(): boolean {
+  try { return localStorage.getItem(PHONE_SOUNDS_KEY) !== "off"; }
+  catch { return true; }
+}
+
+export async function playVoiceline(p: TurnSoundPayload): Promise<void> {
   if (p.awaiting !== "done" && p.awaiting !== "question") return;
+  // Checked before resolve_voiceline so a muted phone never fetches the audio.
+  if (!phoneSoundsEnabled()) return;
   let url: string | null = null;
   try {
     url = await invoke<string | null>("resolve_voiceline", {

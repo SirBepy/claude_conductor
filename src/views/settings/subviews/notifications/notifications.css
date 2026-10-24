@@ -1,37 +1,13 @@
-/* Notifications & Sound subview (merges notifications.ts + the absorbed
- * sound.ts). .notif-card, .mute-child, .mute-all-on rules live in
+/* Notifications subview. .notif-card, .mute-child, .mute-all-on rules live in
  * src/dashboard.css. Shared .kit-* rules live in the kit.
  *
  * The rules below replace what used to be inline `style="..."` attributes on
  * the notifications.ts template (T3 of the settings rewrite). */
 
-.ptt-controls {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.ptt-controls #pttCaptureBtn {
-  min-width: 150px;
-}
-
 .push-status-caption {
   margin-top: 4px;
   font-size: var(--fs-body);
   color: var(--sb-muted);
-}
-
-.coming-soon-label {
-  color: var(--sb-muted);
-  font-size: var(--fs-micro);
-}
-
-/* Shared dim caption line used under a control row (audio device pickers,
- * character sounds, pause-in-meeting). */
-.settings-caption {
-  font-size: var(--fs-micro);
-  color: var(--sb-muted);
-  padding: 2px 0 4px;
 }
 
 .notif-dim-label {
