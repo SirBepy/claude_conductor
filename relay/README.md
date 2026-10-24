@@ -30,3 +30,11 @@ firebase deploy --only functions --project claude-conductor-62582
 ```
 
 run from `relay/`.
+
+Rate-limit rows in `ipLimits` carry an `expireAt` timestamp at the end of their window. Firestore deletes them through a TTL policy, set once per project:
+
+```
+gcloud firestore fields ttls update expireAt --collection-group=ipLimits --enable-ttl --project claude-conductor-62582
+```
+
+`handles` has no TTL: a handle whose phone reinstalled is deleted by the next send that hits its dead FCM token, and expiring a live but quiet phone's handle would stop its pushes with nothing telling the phone to register again.

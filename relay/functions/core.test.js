@@ -75,6 +75,14 @@ test("register is limited to 20 per hour per IP, other IPs unaffected, window re
   assert.equal((await s.call("/register", { token: "t" })).code, 200);
 });
 
+test("a rate-limit row carries an expireAt at the end of its window, for the TTL policy", async () => {
+  const s = setup();
+  await registered(s);
+  const row = s.db.store.get(`ipLimits/${core.sha256Hex("1.2.3.4")}`);
+  assert.ok(row.expireAt instanceof Date);
+  assert.equal(row.expireAt.getTime(), row.windowStart + core.WINDOW_MS);
+});
+
 test("send with a bad secret gives 401 and sends nothing", async () => {
   const s = setup();
   const { handle } = await registered(s);
