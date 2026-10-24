@@ -224,6 +224,13 @@ impl Settings {
         self.extra.get("pauseInMeeting").and_then(|v| v.as_bool()).unwrap_or(true)
     }
 
+    /// Whether phone pushes (Web Push and FCM) carry the chat's name. Defaults
+    /// to `true` (on) when absent; off sends a generic body so a lock screen
+    /// does not show chat titles.
+    pub fn push_show_chat_name(&self) -> bool {
+        self.extra.get("pushShowChatName").and_then(|v| v.as_bool()).unwrap_or(true)
+    }
+
     /// Exclude app windows from screen capture while a meeting is detected
     /// (`SetWindowDisplayAffinity`). Defaults to `false` (off) when absent.
     pub fn hide_in_meeting(&self) -> bool { self.bool_extra("hideInMeeting") }

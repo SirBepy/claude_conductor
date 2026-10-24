@@ -49,6 +49,7 @@ pub(crate) mod people;
 mod permission;
 mod pr_review;
 mod preview;
+mod push;
 // pub(crate): `hooks_server::dashboard_card` (the `dashboard_card` MCP tool route)
 // calls `cards::dashboard_card_tool` directly - same non-RPC shape as `channel`.
 pub(crate) mod project_dashboard;
@@ -98,6 +99,7 @@ pub use machines::register_machines;
 pub use ask::register_ask;
 pub use permission::register_responders;
 pub use pr_review::register_pr_review;
+pub use push::register_push;
 pub use preview::register_preview;
 pub use project_dashboard::register_project_dashboard;
 pub use registry::register_chat_registry;
