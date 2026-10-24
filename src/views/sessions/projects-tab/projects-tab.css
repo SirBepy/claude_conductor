@@ -38,8 +38,9 @@
 /* #projects-list only exists to be shown on the Projects tab; the chats list,
    the project rail and the new-chat FAB (it would float over the project rows)
    step aside for it. !important because #project-rail also toggles `hidden`
-   and `display` from its own script. */
-#projects-list { display: none; }
+   and `display` from its own script. Scoped to the sidebar: the Projects
+   view's card grid carries the same id and must stay shown. */
+.sessions-sidebar #projects-list { display: none; }
 .sessions-sidebar.is-projects-tab #projects-list { display: flex; margin-top: 6px; }
 .sessions-sidebar.is-projects-tab #project-rail,
 .sessions-sidebar.is-projects-tab #sessions-list,
