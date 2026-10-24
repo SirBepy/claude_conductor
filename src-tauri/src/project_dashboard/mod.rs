@@ -28,7 +28,7 @@ pub use types::{
 };
 pub use snapshot_types::{
     CommitRow, DashChatRow, DashTodo, DashboardHistory, DashboardListRow, DashboardSnapshot,
-    DashboardTarget, DashboardTargetRef, FileRow, GalleryItem, NeedsYouItem, OutcomeRow, PlanItem, QuickAction,
+    DashboardTarget, DashboardTargetRef, FileRow, GalleryItem, OutcomeRow, PlanItem, QuickAction,
     RepoRef, RepoShip, ScheduledRow, ServerRow,
 };
 pub use vault_seed::seed_groups;

@@ -14,8 +14,6 @@ use crate::types::Instance;
 pub(super) struct LiveChat {
     pub inst: Instance,
     pub status: &'static str,
-    /// What the open prompt asks, when there is one.
-    pub prompt_detail: Option<String>,
 }
 
 impl LiveChat {
@@ -76,9 +74,8 @@ pub(super) async fn gather(state: &DaemonState) -> Gathered {
         .into_iter()
         .filter(counts_as_live)
         .map(|inst| {
-            let prompt_detail = prompts.get(&inst.session_id).cloned();
-            let status = chat_status(inst.awaiting.as_deref(), inst.busy, prompt_detail.is_some());
-            LiveChat { inst, status, prompt_detail }
+            let status = chat_status(inst.awaiting.as_deref(), inst.busy, prompts.contains(&inst.session_id));
+            LiveChat { inst, status }
         })
         .collect();
     Gathered { groups, projects, live, now_ms: chrono::Utc::now().timestamp_millis() }

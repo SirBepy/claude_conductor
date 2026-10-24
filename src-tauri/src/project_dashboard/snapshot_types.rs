@@ -57,20 +57,6 @@ pub struct DashboardListRow {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
-pub struct NeedsYouItem {
-    /// `"question"` or `"draft"`.
-    pub kind: String,
-    pub title: String,
-    pub detail: String,
-    pub session_id: Option<String>,
-    pub draft_id: Option<String>,
-    pub repo_cwd: String,
-    #[ts(type = "number")]
-    pub at_ms: i64,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct DashTodo {
     pub id: String,
     pub project_id: String,
@@ -149,7 +135,6 @@ pub struct ServerRow {
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct DashboardSnapshot {
     pub target: DashboardTarget,
-    pub needs_you: Vec<NeedsYouItem>,
     pub your_todos: Vec<DashTodo>,
     pub chats_running: Vec<DashChatRow>,
     pub chats_recent: Vec<DashChatRow>,

@@ -38,7 +38,7 @@ use claude_conductor_lib::people::Person;
 use claude_conductor_lib::project_dashboard::{
     CardAction, CardConfig, CardDisplay, CardProgress, CardResult, CardSource, CardView, CommitRow, DashChatRow, DashTodo,
     DashboardHistory, DashboardListRow, DashboardSnapshot, DashboardTarget, DashboardTargetRef, FileRow, GalleryItem,
-    GroupDef, LabelValue, NeedsYouItem, OutcomeRow, PlanItem, QuickAction, RepoRef, RepoShip, RowValue, Scope,
+    GroupDef, LabelValue, OutcomeRow, PlanItem, QuickAction, RepoRef, RepoShip, RowValue, Scope,
     ScheduledRow, ServerRow, StatSpec,
 };
 use claude_conductor_lib::sessions::user_todos::{TodoState, UserTodo};
@@ -228,7 +228,6 @@ fn emit_ipc_types() {
     out.push_str(&decl::<RepoRef>());
     out.push_str(&decl::<DashboardTarget>());
     out.push_str(&decl::<DashboardListRow>());
-    out.push_str(&decl::<NeedsYouItem>());
     out.push_str(&decl::<DashTodo>());
     out.push_str(&decl::<DashChatRow>());
     out.push_str(&decl::<PlanItem>());

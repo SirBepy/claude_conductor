@@ -9,8 +9,10 @@ use std::collections::BTreeMap;
 use ts_rs::TS;
 
 /// The built-in cards every dashboard has; each can be hidden per scope.
-pub const BUILTIN_CARDS: [&str; 8] =
-    ["needs_you", "your_todos", "chats", "next_up", "ship", "running", "quick_actions", "reports"];
+/// A scope may still list a retired id (`needs_you`) as hidden; it matches no
+/// card, so it is inert.
+pub const BUILTIN_CARDS: [&str; 7] =
+    ["your_todos", "chats", "next_up", "ship", "running", "quick_actions", "reports"];
 
 /// What a card (or a hidden-builtin entry) belongs to: one project, or a
 /// multi-repo group.
@@ -307,8 +309,9 @@ mod tests {
     }
 
     #[test]
-    fn builtin_list_is_the_eight_cards() {
-        assert_eq!(BUILTIN_CARDS.len(), 8);
+    fn builtin_list_is_the_seven_cards() {
+        assert_eq!(BUILTIN_CARDS.len(), 7);
         assert!(BUILTIN_CARDS.contains(&"quick_actions"));
+        assert!(!BUILTIN_CARDS.contains(&"needs_you"));
     }
 }

@@ -35,10 +35,6 @@ const ship = (cwd, name, branch, ahead, dirty) => ({
 export function projectSnapshot(over = {}) {
   return {
     target: projectRow().target,
-    needs_you: [
-      { kind: "question", title: "Dashboard brainstorm", detail: "is waiting on your answer", session_id: "s-q", draft_id: null, repo_cwd: CONDUCTOR.cwd, at_ms: min(2) },
-      { kind: "draft", title: "reply to the release thread", detail: "", session_id: "s-q", draft_id: "d1", repo_cwd: CONDUCTOR.cwd, at_ms: min(60) },
-    ],
     your_todos: [{ id: "t1", project_id: "p1", text: "Check Console for the haiku call", origin_session_id: null, repo_cwd: CONDUCTOR.cwd, by_ai: true }],
     chats_running: [{ session_id: "s-w", title: "Loop todos cycle 3", status: "working", repo_cwd: CONDUCTOR.cwd, at_ms: min(12) }],
     chats_recent: [{ session_id: "s-old", title: "Phone question sheet peek", status: "ended", repo_cwd: CONDUCTOR.cwd, at_ms: min(40) }],
@@ -93,7 +89,6 @@ export function groupSnapshot(over = {}) {
   const [app, admin, biller, api] = ZIRTUE_REPOS;
   return {
     target: groupRow().target,
-    needs_you: [{ kind: "question", title: "Release 2.14 notes", detail: "is waiting on your answer", session_id: "z-q", draft_id: null, repo_cwd: app.cwd, at_ms: min(4) }],
     your_todos: [],
     chats_running: [
       { session_id: "z-q", title: "Release 2.14 notes", status: "your_turn", repo_cwd: app.cwd, at_ms: min(4) },

@@ -49,10 +49,6 @@ const PINNED_ZIRTUE = [
 export function conductorSnapshot(): DashSnapshot {
   return {
     target: CONDUCTOR,
-    needs_you: [
-      { kind: "question", title: "Projects dashboard brainstorm", detail: "is waiting on your answer", session_id: "s-q", draft_id: null, repo_cwd: CONDUCTOR_CWD, at_ms: min(2) },
-      { kind: "draft", title: "reply to the release thread", detail: "", session_id: "s-q", draft_id: "d-1", repo_cwd: CONDUCTOR_CWD, at_ms: min(60) },
-    ],
     your_todos: [
       { id: "t1", project_id: "p-conductor", text: "Check Console for the 21:45 UTC haiku call on key test2", origin_session_id: "s-q", repo_cwd: CONDUCTOR_CWD, by_ai: true },
     ],
@@ -100,12 +96,6 @@ export function zirtueSnapshot(): DashSnapshot {
   const withAction = (c: CardConfigX, label: string, command: string): CardConfigX => ({ ...c, action: { label, command } });
   return {
     target: ZIRTUE,
-    needs_you: [
-      { kind: "question", title: "Release 2.14 notes", detail: "is waiting on your answer", session_id: "z-q", draft_id: null, repo_cwd: app, at_ms: min(4) },
-      // 9 + 4 unsent drafts, as in the live data: each repo's drafts roll into one row.
-      ...Array.from({ length: 9 }, (_, i) => ({ kind: "draft" as const, title: `draft ${i + 1}`, detail: "", session_id: "z-q", draft_id: `d-a${i}`, repo_cwd: app, at_ms: min(240 + i) })),
-      ...Array.from({ length: 4 }, (_, i) => ({ kind: "draft" as const, title: `biller draft ${i + 1}`, detail: "", session_id: "z-w", draft_id: `d-b${i}`, repo_cwd: biller, at_ms: min(300 + i) })),
-    ],
     your_todos: [],
     chats_running: [
       { session_id: "z-q", title: "Release 2.14 notes", status: "question", repo_cwd: app, at_ms: min(4) },

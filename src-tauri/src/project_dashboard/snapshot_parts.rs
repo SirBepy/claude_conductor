@@ -1,21 +1,15 @@
 //! Pure building blocks of `dashboard_snapshot`: how a live chat's status is
-//! derived, which drafts count as open, how stored rows map onto the wire
-//! rows. The daemon method gathers state and calls these.
+//! derived and how stored rows map onto the wire rows. The daemon method
+//! gathers state and calls these.
 
-use super::snapshot_types::{NeedsYouItem, RepoRef, ScheduledRow};
+use super::snapshot_types::{RepoRef, ScheduledRow};
 use super::targets::chat_in_repo;
-use crate::sessions::message_drafts::{DraftState, MessageDraft};
 use crate::sessions::scheduled_items::{ScheduledItem, ScheduledKind, ScheduledStatus};
 use serde_json::Value;
-use std::collections::HashMap;
-
-/// Mirrors `drafts-grouping.ts`'s `STALE_MS`: a draft nobody touched for a week
-/// stops counting as open.
-const DRAFT_STALE_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+use std::collections::HashSet;
 
 pub const SCHEDULED_CAP: usize = 4;
 const LABEL_CHARS: usize = 80;
-const DETAIL_CHARS: usize = 140;
 
 pub fn parse_ms(rfc3339: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(rfc3339).ok().map(|d| d.timestamp_millis())
@@ -46,47 +40,14 @@ pub fn chat_status(awaiting: Option<&str>, busy: bool, has_prompt: bool) -> &'st
     }
 }
 
-/// Sessions with an open question or permission prompt, each mapped to a short
-/// description of the first one (prompts arrive oldest first).
-pub fn prompt_sessions(prompts: &[Value]) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    for p in prompts {
-        let event = p["event"].as_str().unwrap_or("");
-        if event != "question-requested" && event != "permission-requested" {
-            continue;
-        }
-        let Some(sid) = p["payload"]["session_id"].as_str().filter(|s| !s.is_empty()) else { continue };
-        let detail = if event == "question-requested" {
-            p["payload"]["questions"][0]["question"].as_str().map(|q| clip(q, DETAIL_CHARS))
-        } else {
-            p["payload"]["tool_name"].as_str().map(|t| format!("Wants permission to use {t}"))
-        };
-        out.entry(sid.to_string()).or_insert_with(|| detail.unwrap_or_else(|| "Asked you a question".to_string()));
-    }
-    out
-}
-
-pub fn draft_is_open(d: &MessageDraft, now_ms: i64) -> bool {
-    if d.state != DraftState::NeedsYou {
-        return false;
-    }
-    match parse_ms(&d.updated_at) {
-        Some(touched) => now_ms - touched < DRAFT_STALE_MS,
-        None => true,
-    }
-}
-
-pub fn draft_item(d: &MessageDraft, repo_cwd: &str) -> NeedsYouItem {
-    let to = d.variants.first().map(|v| v.recipient.trim()).filter(|r| !r.is_empty());
-    NeedsYouItem {
-        kind: "draft".into(),
-        title: d.topic.clone(),
-        detail: to.map(|r| format!("Draft for {r}")).unwrap_or_else(|| "Draft waiting on you".into()),
-        session_id: Some(d.origin_session_id.clone()).filter(|s| !s.is_empty()),
-        draft_id: Some(d.id.clone()),
-        repo_cwd: repo_cwd.to_string(),
-        at_ms: parse_ms(&d.updated_at).unwrap_or(0),
-    }
+/// Sessions with an open question or permission prompt.
+pub fn prompt_sessions(prompts: &[Value]) -> HashSet<String> {
+    prompts
+        .iter()
+        .filter(|p| matches!(p["event"].as_str(), Some("question-requested" | "permission-requested")))
+        .filter_map(|p| p["payload"]["session_id"].as_str().filter(|s| !s.is_empty()))
+        .map(str::to_string)
+        .collect()
 }
 
 /// A pending scheduled item as a row, if it targets one of the repos. Items
@@ -118,7 +79,6 @@ pub fn soonest_scheduled(mut rows: Vec<ScheduledRow>) -> Vec<ScheduledRow> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::message_drafts::{DraftAuthor, DraftVariant, DraftVersion};
     use serde_json::json;
 
     #[test]
@@ -133,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn prompts_map_to_their_session_with_the_first_ones_detail() {
+    fn only_question_and_permission_prompts_mark_their_session() {
         let prompts = vec![
             json!({"event": "question-requested", "payload": {"session_id": "s1", "questions": [{"question": "Ship it?"}]}}),
             json!({"event": "question-requested", "payload": {"session_id": "s1", "questions": [{"question": "Second?"}]}}),
@@ -142,65 +102,7 @@ mod tests {
             json!({"event": "question-requested", "payload": {"questions": []}}),
         ];
         let m = prompt_sessions(&prompts);
-        assert_eq!(m.len(), 2);
-        assert_eq!(m["s1"], "Ship it?");
-        assert_eq!(m["s2"], "Wants permission to use Bash");
-    }
-
-    #[test]
-    fn a_question_prompt_without_text_still_has_a_detail() {
-        let m = prompt_sessions(&[json!({"event": "question-requested", "payload": {"session_id": "s1"}})]);
-        assert_eq!(m["s1"], "Asked you a question");
-    }
-
-    fn draft(state: DraftState, updated_at: &str) -> MessageDraft {
-        MessageDraft {
-            id: "d1".into(),
-            topic: "Reply to Bruno".into(),
-            brief: String::new(),
-            receipts: vec![],
-            variants: vec![DraftVariant {
-                recipient: "Bruno".into(),
-                handle_n: 1,
-                versions: vec![DraftVersion {
-                    n: 1,
-                    body: "hi".into(),
-                    author: DraftAuthor::Ai,
-                    note: String::new(),
-                    created_at: updated_at.into(),
-                }],
-                current: 1,
-                person: None,
-                platform: None,
-            }],
-            state,
-            origin_session_id: "sess-1".into(),
-            origin_label: "chat".into(),
-            created_at: updated_at.into(),
-            updated_at: updated_at.into(),
-            seen_by_origin: true,
-        }
-    }
-
-    #[test]
-    fn only_a_fresh_needs_you_draft_is_open() {
-        let now = parse_ms("2026-10-22T12:00:00Z").unwrap();
-        assert!(draft_is_open(&draft(DraftState::NeedsYou, "2026-10-21T12:00:00Z"), now));
-        assert!(!draft_is_open(&draft(DraftState::NeedsYou, "2026-10-10T12:00:00Z"), now));
-        assert!(!draft_is_open(&draft(DraftState::Copied, "2026-10-22T11:00:00Z"), now));
-        assert!(!draft_is_open(&draft(DraftState::Archived, "2026-10-22T11:00:00Z"), now));
-        assert!(draft_is_open(&draft(DraftState::NeedsYou, "not a date"), now));
-    }
-
-    #[test]
-    fn a_draft_item_names_its_recipient_and_origin_chat() {
-        let item = draft_item(&draft(DraftState::NeedsYou, "2026-10-22T11:00:00Z"), "C:/w/app");
-        assert_eq!(item.kind, "draft");
-        assert_eq!(item.title, "Reply to Bruno");
-        assert_eq!(item.detail, "Draft for Bruno");
-        assert_eq!(item.session_id.as_deref(), Some("sess-1"));
-        assert_eq!(item.draft_id.as_deref(), Some("d1"));
-        assert!(item.at_ms > 0);
+        assert_eq!(m, HashSet::from(["s1".to_string(), "s2".to_string()]));
     }
 
     fn item(status: ScheduledStatus, kind: ScheduledKind, fire_at: &str) -> ScheduledItem {

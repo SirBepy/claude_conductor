@@ -102,7 +102,6 @@ test.describe("view-harness / Projects tab", () => {
     for (const id of ["your_todos", "chats", "next_up", "ship", "running", "reports"]) {
       await expect(card(page, id)).toBeVisible();
     }
-    await expect(card(page, "needs_you")).toHaveCount(0);
     await expect(page.locator(".pd-qa .pd-chip").first()).toHaveText("+ New chat");
     await expect(page.locator(".pd-qa .pd-chip").nth(1)).toContainText("/pickup");
     // Past results are only the footer's links; nothing of them sits on the page.
