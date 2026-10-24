@@ -3,10 +3,12 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 0;
-  border-bottom: var(--dv-line);
+  background: var(--color-surface, #1f1f2c);
+  border: 1px solid var(--color-border, #2e2e40);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
 }
-.instance-row:last-child { border-bottom: 0; }
 .instance-row .status-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--color-success);

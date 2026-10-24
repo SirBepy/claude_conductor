@@ -16,19 +16,19 @@
 .acc-list {
   display: flex;
   flex-direction: column;
+  gap: 6px;
   margin-bottom: 10px;
 }
 
-/* Dividers look: rows split by hairlines, no box. The icon badge carries the
-   account's colour. */
 .acc-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 0;
-  border-bottom: var(--dv-line);
+  padding: 9px 10px;
+  background: var(--color-surface-alt, #1a1d27);
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--acc, var(--color-primary, #6e8fff)) 30%, var(--color-border, #2d2c44));
 }
-.acc-row:last-child { border-bottom: 0; }
 
 /* Size override for the shared icon badge (src/shared/account-chip.css) in
  * the account row context - default badge is smaller (used in compact chips
@@ -108,7 +108,7 @@
   margin: 4px 2px;
 }
 
-/* Terminal row reuses .acc-row's look (its badge tints to the matched
+/* Terminal row reuses .acc-row's card look (border tints to the matched
  * account's colour via --acc), just without the kebab actions - it's
  * read-only, never spawnable. */
 .acc-terminal-row {

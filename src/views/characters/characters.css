@@ -53,8 +53,9 @@
   align-items: center;
   gap: 6px;
   padding: 12px 8px 10px;
-  /* No box: the portrait is the tile. Hover fills it, as rows do elsewhere. */
   border-radius: 8px;
+  background: var(--color-surface, #1f1f2c);
+  border: 1px solid var(--color-border);
   cursor: pointer;
   transition: background-color var(--motion-fast) var(--motion-ease);
   text-align: center;

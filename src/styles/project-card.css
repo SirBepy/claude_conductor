@@ -24,26 +24,27 @@
 .projects-list {
   display: flex;
   flex-direction: column;
+  gap: 8px;
 }
 
-/* Dividers look: rows split by hairlines, no box; hover fills the row the way
-   the Projects dashboard's rows do. */
 .project-card {
-  border-bottom: var(--dv-line);
-  padding: 10px 8px;
+  background: var(--color-surface, #1f1f2c);
+  border: 1px solid var(--color-border, #2e2e40);
+  border-radius: 7px;
+  padding: 10px 12px;
   display: flex;
   gap: 10px;
   cursor: pointer;
-  transition: background-color var(--motion-fast, 120ms) var(--motion-ease, ease-out),
+  transition: border-color var(--motion-fast, 120ms) var(--motion-ease, ease-out),
+    box-shadow var(--motion-fast, 120ms) var(--motion-ease, ease-out),
     transform var(--motion-fast, 120ms) var(--motion-ease, ease-out);
 }
-.project-card:last-child { border-bottom: 0; }
 .project-card:hover {
-  background: var(--color-surface-alt);
-  border-radius: 7px;
+  border-color: var(--color-primary, #4c9eff);
 }
 .project-card:active {
   transform: scale(0.99);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
 }
 .project-card:focus-visible {
   outline: 2px solid var(--color-primary, #4c9eff);

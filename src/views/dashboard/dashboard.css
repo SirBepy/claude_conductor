@@ -1,11 +1,4 @@
-.view-dashboard {
-  /* Dividers look: no card boxes, 1px hairlines (--dv-line, dividers.css)
-     between sections and columns. */
-  --dv-meta: var(--sb-muted, var(--color-text-muted));
-  --dv-pad-y: 26px;
-  --dv-pad-x: 28px;
-}
-.view-dashboard .view-body { padding: 8px 20px 28px; }
+.view-dashboard .view-body { padding: 20px 16px; }
 .view-dashboard .home-card {
   background: var(--color-surface, #1f1f2c);
   border: 1px solid var(--color-border, #2e2e40);
@@ -68,8 +61,11 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  border-bottom: var(--dv-line);
-  padding: 12px 0;
+  background: var(--color-surface, #1f1f2c);
+  border: 1px solid var(--color-primary, #6e8fff);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
   font-size: var(--fs-body);
 }
 .view-dashboard .dash-setup-banner > i.ph {
@@ -82,13 +78,16 @@
 .view-dashboard .dash-setup-banner-dismiss { width: 26px; height: 26px; flex-shrink: 0; }
 
 /* ── Fetch-failure banner (P0-2) - same shape as the setup banner, warning
-   tone instead of primary (the icon carries it now that the box is gone). ────────────────────────────────────────────── */
+   tone instead of primary. ────────────────────────────────────────────── */
 .view-dashboard .dash-refresh-error-banner {
   display: flex;
   align-items: center;
   gap: 10px;
-  border-bottom: var(--dv-line);
-  padding: 12px 0;
+  background: color-mix(in srgb, var(--color-warning) 12%, var(--color-surface, #1f1f2c));
+  border: 1px solid var(--color-warning);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
   font-size: var(--fs-body);
 }
 .view-dashboard .dash-refresh-error-banner > i.ph {
@@ -101,35 +100,32 @@
 
 /* ── Loading skeleton (P1-3) - shaped like the shell it replaces. ───────── */
 .view-dashboard .dash-skeleton { display: flex; flex-direction: column; gap: 12px; }
-.view-dashboard .dash-acard-skeleton { height: 150px; }
-.view-dashboard .dash-widget-skeleton { height: 120px; }
+.view-dashboard .dash-acard-skeleton { height: 150px; border-radius: 10px; }
+.view-dashboard .dash-widget-skeleton { height: 120px; border-radius: 10px; }
 
 /* ── Account-selector cards (multi-account milestone 05) ─────────────────── */
 .view-dashboard .dash-sel-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  padding: 14px 0 var(--dv-pad-y);
+  gap: 12px;
+  margin-bottom: 16px;
 }
-/* Columns split by a vertical hairline; the avatar/ring carry account identity. */
 .view-dashboard .dash-acard {
-  padding: 2px var(--dv-pad-x);
+  background: var(--color-surface, #1f1f2c);
+  /* Account identity via a 1px border in the account color (not a fat accent
+     bar) - the avatar/ring already carry identity, this just ties it together. */
+  border: 1px solid var(--acc, var(--color-primary, #6e8fff));
+  border-radius: 10px;
+  padding: 12px 13px;
   cursor: pointer;
 }
-.view-dashboard .dash-acard:first-child { padding-left: 0; }
-.view-dashboard .dash-acard:last-child { padding-right: 0; }
-.view-dashboard .dash-acard + .dash-acard { border-left: var(--dv-line); }
-.view-dashboard .dash-ah { display: flex; align-items: center; justify-content: flex-start; gap: 8px; margin-bottom: 14px; }
-/* Selection: no ring or tint. The selected account's name is full strength and
-   underlined in its own colour; unselected names read quieter. */
-.view-dashboard .dash-who { font-weight: 600; font-size: 13px; color: var(--color-text); opacity: 0.6; }
-.view-dashboard .dash-acard.active .dash-who {
-  opacity: 1;
-  text-decoration: underline;
-  text-decoration-color: var(--acc, var(--color-primary));
-  text-decoration-thickness: 2px;
-  text-underline-offset: 6px;
+.view-dashboard .dash-acard:hover { background: var(--color-surface-alt, #262637); }
+.view-dashboard .dash-acard.active {
+  box-shadow: 0 0 0 2px var(--acc, var(--color-primary, #6e8fff));
+  background: color-mix(in srgb, var(--acc, var(--color-primary, #6e8fff)) 10%, var(--color-surface, #1f1f2c));
 }
-.view-dashboard .dash-acard:hover:not(.active) .dash-who { opacity: 0.85; }
+.view-dashboard .dash-ah { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.view-dashboard .dash-who { font-weight: 700; font-size: var(--fs-title); }
 
 /* ── Ring duo (pace-brightness rings, replacing the old bar rows) ────────── */
 .view-dashboard .dash-ring-row { display: flex; justify-content: center; gap: 18px; }
@@ -147,8 +143,7 @@
   position: absolute;
   inset: 9px;
   border-radius: 50%;
-  /* Punches through to the page: there is no card fill behind the ring. */
-  background: var(--color-background);
+  background: var(--color-surface, #1f1f2c);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -167,18 +162,18 @@
 .view-dashboard .dash-ring-time .dash-ring-time-big { font-size: var(--fs-body); font-weight: 700; line-height: 1.2; }
 .view-dashboard .dash-ring-time .dash-ring-time-near { color: var(--color-warning); }
 .view-dashboard .dash-ring-time .dash-ring-time-hot { color: var(--color-danger); }
-.view-dashboard .dash-ring-time .dash-ring-time-dim { font-size: 12px; color: var(--sb-muted); opacity: 0.65; }
-.view-dashboard .dash-ring-empty { font-size: 12px; color: var(--sb-muted); margin-top: 8px; min-height: 1.1em; text-align: center; }
+.view-dashboard .dash-ring-time .dash-ring-time-dim { font-size: var(--fs-micro); color: var(--sb-muted); opacity: 0.65; }
+.view-dashboard .dash-ring-empty { font-size: var(--fs-micro); color: var(--sb-muted); margin-top: 8px; min-height: 1.1em; text-align: center; }
 /* Always-visible "5h"/"7d" unit label under each ring (P0-1) - the tooltip
    alone never told anyone which ring was which. */
-.view-dashboard .dash-ring-label { font-size: 12px; color: var(--sb-muted); }
+.view-dashboard .dash-ring-label { font-size: var(--fs-micro); color: var(--sb-muted); }
 /* Same red/icon language as accounts.css's .acc-drift-warning, but a real
    button (P1-5) - style-reset since the markup is a <button>, not a <div>. */
 .view-dashboard .dash-acard-warning {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--color-danger, #f87171);
   margin-top: 6px;
@@ -190,55 +185,56 @@
 }
 .view-dashboard .dash-acard-warning:hover { text-decoration: underline; }
 
-/* ── Widget shell: stacked sections split by hairlines ─────────────────── */
+/* ── Widget shell ──────────────────────────────────────────────────────── */
+.view-dashboard .dash-widgets { display: flex; flex-direction: column; gap: 12px; }
 .view-dashboard .dash-widget {
-  border-top: var(--dv-line);
-  padding: var(--dv-pad-y) 0;
+  background: var(--color-surface, #1f1f2c);
+  border: 1px solid var(--color-border, #2e2e40);
+  border-radius: 10px;
+  overflow: hidden;
 }
-/* A run of half-width widgets (widget-layout.ts) sits in two columns split by
-   a hairline, filled shortest-first. The pair draws one top hairline across
-   both columns; a column's widgets share out whatever height the other column
-   has over it, so no one widget holds the whole gap. */
+/* A run of half-width widgets (widget-layout.ts) sits in two columns, filled
+   shortest-first. A column's cards share out whatever height the other column
+   has over it, so no one card holds the whole gap. */
 .view-dashboard .dash-pair {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  border-top: var(--dv-line);
+  gap: 12px;
 }
-.view-dashboard .dash-col { min-width: 0; display: flex; flex-direction: column; }
-.view-dashboard .dash-col:first-child { padding-right: var(--dv-pad-x); border-right: var(--dv-line); }
-.view-dashboard .dash-col:last-child { padding-left: var(--dv-pad-x); }
+.view-dashboard .dash-col { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .view-dashboard .dash-col > .dash-widget { flex: 1 1 auto; }
-.view-dashboard .dash-col > .dash-widget:first-child { border-top: 0; }
 /* Too narrow for two columns: one, in reading order (the second is empty). */
-.view-dashboard .dash-pair.is-single { display: block; }
-.view-dashboard .dash-pair.is-single .dash-col { padding: 0; border: 0; }
+.view-dashboard .dash-pair.is-single { display: flex; flex-direction: column; }
 .view-dashboard .dash-widget-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 0 14px;
+  gap: 9px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--color-border, #2e2e40);
 }
-.view-dashboard .dash-widget-icon { font-size: 14px; color: var(--color-text-muted, #8a8aa0); flex-shrink: 0; }
-.view-dashboard .dash-widget-title { font-weight: 600; font-size: 13px; color: var(--color-text); }
+.view-dashboard .dash-widget-icon { font-size: 15px; color: var(--color-text-muted, #8a8aa0); flex-shrink: 0; }
+.view-dashboard .dash-widget-title { font-weight: 700; font-size: var(--fs-body); }
 .view-dashboard .dash-widget-header .grow { flex: 1; }
 /* Edit controls live in the DOM always; only shown in edit mode so toggling
  * editing never re-renders (and blanks) the widget bodies. */
 .view-dashboard .dash-widget-edit { display: none; align-items: center; gap: 4px; }
 .view-dashboard #stats-content.editing .dash-widget-edit { display: inline-flex; }
 .view-dashboard .dash-tag {
-  font-size: 12px;
-  font-weight: 400;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
 }
-/* Meta text, not a pill. The account tag keeps its account colour since it is
-   the only cue for which account the widget follows. */
-.view-dashboard .dash-tag-global { color: var(--dv-meta); }
-.view-dashboard .dash-tag-scoped { color: var(--acc, var(--color-primary, #6e8fff)); }
-.view-dashboard .dash-widget-body { padding: 0; }
+.view-dashboard .dash-tag-global { color: var(--color-secondary, #6e8fff); background: color-mix(in srgb, var(--color-secondary, #6e8fff) 14%, transparent); }
+.view-dashboard .dash-tag-scoped { color: var(--acc, var(--color-primary, #6e8fff)); background: color-mix(in srgb, var(--acc, var(--color-primary, #6e8fff)) 14%, transparent); }
+.view-dashboard .dash-widget-body { padding: 12px; }
 .view-dashboard .dash-widget-header .icon-btn { width: 26px; height: 26px; }
 
-/* The chart/bars widgets reuse the shared .chart-container (which is a
- * standalone card on the graph-detail page), so strip its card chrome when it
- * sits inside a widget body. */
+/* No card-in-card: the widget shell IS the card. The chart/bars widgets reuse
+ * the shared .chart-container (which is a standalone card on the graph-detail
+ * page), so strip its card chrome when it sits inside a widget body. */
 .view-dashboard .dash-widget-body .chart-container {
   background: none;
   border: 0;
@@ -248,51 +244,7 @@
   margin-bottom: 0 !important;
 }
 
-
-/* ── Tables, charts and the "Worked on" sub-section ──────────────────────
- * .today-section, .stats-table and the .chart-* rules are shared with the
- * graph-detail and project-detail views (src/styles/), so the dividers look is
- * scoped under .view-dashboard instead of edited at the base. */
-.view-dashboard .today-section {
-  background: none;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  padding: 0;
-  margin-bottom: 0;
-}
-.view-dashboard .stats-table th {
-  font-size: 12px;
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--dv-meta);
-  padding: 0 8px 10px 0;
-  border-bottom: var(--dv-line);
-}
-.view-dashboard .stats-table th.sort-active { color: var(--color-primary); }
-.view-dashboard .stats-table td { padding: 9px 8px 9px 0; font-size: 13px; }
-.view-dashboard .stats-table .mono { font-size: 12px; }
-.view-dashboard .chart-pagination { padding: 0; margin-bottom: 12px; }
-.view-dashboard .chart-container .chart-pagination { padding-left: 0; padding-right: 0; }
-.view-dashboard .chart-pagination-label { font-size: 12px; color: var(--dv-meta); }
-.view-dashboard .chart-pagination .nav-arrow {
-  background: none;
-  border: var(--dv-line);
-  color: var(--dv-meta);
-}
-.view-dashboard .chart-legend { font-size: 12px; color: var(--dv-meta); }
-/* "Worked on" under a chart is its own sub-section: hairline above it. */
-.view-dashboard .chart-container .today-section.worked-on {
-  border-top: var(--dv-line);
-  padding-top: 18px;
-  margin-top: 18px;
-  margin-bottom: 0;
-}
-/* The graph-detail page renders the same list outside .view-dashboard and keeps
-   the tight margins the old inline style gave it. */
+/* The project list is shared by the Dashboard, the Today widget and the
+   usage-chart view; "Worked on" under a chart keeps tight margins. */
 .today-section.worked-on { margin-top: 2px; margin-bottom: 8px; }
-/* The list is shared with the Today widget and the usage-chart view, which keep
-   the title size it always had; only the Dashboard uses the quieter one. */
 .project-list-title { font-size: var(--fs-title); font-weight: 700; margin-bottom: 10px; }
-.view-dashboard .project-list-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
