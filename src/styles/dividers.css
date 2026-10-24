@@ -27,9 +27,11 @@ body .chart-container {
    opens a view's body skips its own. Only at the top of the body: a section
    opening a nested list (Notifications' event cards) still needs its rule. A
    section hidden by an inline display:none (phone-only push settings) hands
-   the exemption to the one after it. */
+   the exemption to the one after it; a script that sets style.display writes
+   it back as "display: none", so both spellings count. */
 :is(.view-body, .view-body-inner) > :is(.kit-section, .section, .chart-container):first-child,
-:is(.view-body, .view-body-inner) > [style*="display:none"]:first-child + :is(.kit-section, .section, .chart-container) {
+:is(.view-body, .view-body-inner) > [style*="display:none"]:first-child + :is(.kit-section, .section, .chart-container),
+:is(.view-body, .view-body-inner) > [style*="display: none"]:first-child + :is(.kit-section, .section, .chart-container) {
   border-top: 0;
   padding-top: 6px;
 }

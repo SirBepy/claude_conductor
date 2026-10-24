@@ -29,6 +29,21 @@ test.describe("view-harness / dividers look", () => {
     for (const s of secs.slice(1)) expect(s.top).toBe("1px");
   });
 
+  test("a first section hidden by script hands its top exemption to the next one", async ({ page }) => {
+    await mountView(page, { view: "settings-notifications" });
+    const push = page.locator("#push-section");
+    await expect(push).toBeAttached();
+    // Shown then hidden again from script, the style attribute reads "display: none;".
+    await push.evaluate((el) => { (el as HTMLElement).style.display = ""; (el as HTMLElement).style.display = "none"; });
+    expect(await push.getAttribute("style")).toContain("display: none");
+    const next = await push.evaluate((el) => {
+      const sib = el.nextElementSibling as HTMLElement;
+      return { first: el.parentElement!.firstElementChild === el, top: getComputedStyle(sib).borderTopWidth };
+    });
+    expect(next.first).toBe(true);
+    expect(next.top).toBe("0px");
+  });
+
   test("a section opening a nested list keeps its hairline", async ({ page }) => {
     await mountView(page, { view: "settings-notifications" });
     await expect(page.locator(".notif-card").first()).toBeVisible();
