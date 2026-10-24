@@ -181,7 +181,8 @@ fn record_use(reg: &RegistryFile, id: &str, now: u64, app_data: &Path) {
 /// remote-access switch.
 #[derive(Debug, PartialEq, Clone)]
 pub enum AuthOutcome {
-    Ok(DeviceKind, Option<String>),
+    /// Kind, machine id (Machine devices only), and the matched device's own id.
+    Ok(DeviceKind, Option<String>, String),
     /// Remote access is switched off: refuse everything, even a valid token.
     Disabled,
     Invalid,
@@ -241,7 +242,7 @@ impl DeviceRegistry {
     /// (query-token WS, preview GET) cannot forget it.
     pub fn resolve_token(token: &str, app_data: &Path) -> Option<(DeviceKind, Option<String>)> {
         match Self::authenticate(token, app_data) {
-            AuthOutcome::Ok(kind, machine_id) => Some((kind, machine_id)),
+            AuthOutcome::Ok(kind, machine_id, _) => Some((kind, machine_id)),
             AuthOutcome::Disabled | AuthOutcome::Invalid => None,
         }
     }
@@ -290,7 +291,7 @@ impl DeviceRegistry {
         if last.map_or(true, |l| now.saturating_sub(l) >= LAST_USED_WRITE_INTERVAL_SECS) {
             record_use(&reg, &d.id, now, app_data);
         }
-        AuthOutcome::Ok(d.kind, d.machine_id.clone())
+        AuthOutcome::Ok(d.kind, d.machine_id.clone(), d.id.clone())
     }
 
     /// `authenticate` on the blocking pool. The registry is re-read from disk
@@ -544,7 +545,7 @@ mod tests {
         assert!(DeviceRegistry::resolve_token(&token, dir.path()).is_none());
         assert!(!DeviceRegistry::validate_token(&token, dir.path()));
         DeviceRegistry::set_enabled(true, dir.path()).unwrap();
-        assert!(matches!(DeviceRegistry::authenticate(&token, dir.path()), AuthOutcome::Ok(DeviceKind::Phone, None)));
+        assert!(matches!(DeviceRegistry::authenticate(&token, dir.path()), AuthOutcome::Ok(DeviceKind::Phone, None, _)));
         assert_eq!(DeviceRegistry::authenticate("wrong", dir.path()), AuthOutcome::Invalid);
     }
 

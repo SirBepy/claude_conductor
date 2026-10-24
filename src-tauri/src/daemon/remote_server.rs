@@ -314,13 +314,13 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
 pub(super) async fn authenticate_token(
     ctx: &RemoteCtx,
     token: String,
-) -> Result<(DeviceKind, Option<String>), Response> {
+) -> Result<(DeviceKind, Option<String>, String), Response> {
     auth_result(DeviceRegistry::authenticate_blocking_safe(token, ctx.app_data.clone()).await)
 }
 
-fn auth_result(outcome: AuthOutcome) -> Result<(DeviceKind, Option<String>), Response> {
+fn auth_result(outcome: AuthOutcome) -> Result<(DeviceKind, Option<String>, String), Response> {
     match outcome {
-        AuthOutcome::Ok(kind, machine_id) => Ok((kind, machine_id)),
+        AuthOutcome::Ok(kind, machine_id, device_id) => Ok((kind, machine_id, device_id)),
         AuthOutcome::Disabled => Err(StatusCode::SERVICE_UNAVAILABLE.into_response()),
         AuthOutcome::Invalid => Err(StatusCode::UNAUTHORIZED.into_response()),
     }
@@ -332,7 +332,7 @@ fn auth_result(outcome: AuthOutcome) -> Result<(DeviceKind, Option<String>), Res
 pub(super) async fn authenticate_voice_token(
     ctx: &RemoteCtx,
     token: String,
-) -> Result<(DeviceKind, Option<String>), Response> {
+) -> Result<(DeviceKind, Option<String>, String), Response> {
     auth_result(DeviceRegistry::authenticate_desktop_voice_blocking_safe(token, ctx.app_data.clone()).await)
 }
 
@@ -341,7 +341,7 @@ async fn auth_mw(State(ctx): State<Arc<RemoteCtx>>, req: Request, next: Next) ->
     // A request with no bearer header still reads the registry so a switched-off
     // daemon answers 503 rather than 401 regardless of the header.
     let token = bearer_token(req.headers()).unwrap_or_default();
-    let (kind, machine_id) = match authenticate_token(&ctx, token).await {
+    let (kind, machine_id, device_id) = match authenticate_token(&ctx, token).await {
         Ok(v) => v,
         Err(resp) => return resp,
     };
@@ -352,7 +352,11 @@ async fn auth_mw(State(ctx): State<Arc<RemoteCtx>>, req: Request, next: Next) ->
     // Scopes TRANSPORT so any ConnectionContext built while handling this
     // request (e.g. rpc_dispatch's start_session) tags is_remote correctly -
     // see `sessions::registry`.
-    crate::daemon::rpc::TRANSPORT.scope(transport, next.run(req)).await
+    // Same scoping for the device id, so handlers read who authenticated from
+    // the connection and never from request params.
+    crate::daemon::rpc::DEVICE_ID
+        .scope(Some(device_id), crate::daemon::rpc::TRANSPORT.scope(transport, next.run(req)))
+        .await
 }
 
 fn pairing_file(app_data: &Path) -> PathBuf {
