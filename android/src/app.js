@@ -130,11 +130,20 @@
   // Before per-endpoint ports every PC shared 127.0.0.1:27184. The PC paired
   // then keeps that origin (`legacy`), so its rc_token survives the upgrade;
   // any other PC gets the port src-tauri derives from its endpoint id.
+  //
+  // Older builds stored the id before any connect succeeded, so a stored id
+  // may be a stranger's QR that never worked. Only a well-formed id is
+  // adopted (the id init() is about to connect to is this same stored value),
+  // and tunnelArgs re-checks the shape before asking for the legacy port.
+  function isEndpointId(value) {
+    return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value);
+  }
+
   function migratePortScheme() {
     try {
       if (localStorage.getItem(PORT_SCHEME_KEY)) return;
       const prior = localStorage.getItem(IROH_STORAGE_KEY);
-      if (prior) localStorage.setItem(LEGACY_IROH_KEY, prior);
+      if (isEndpointId(prior)) localStorage.setItem(LEGACY_IROH_KEY, prior);
       localStorage.setItem(PORT_SCHEME_KEY, "per-endpoint");
     } catch {
       // Ignore: without storage there is no stored PC to carry over anyway.
@@ -144,7 +153,7 @@
   function tunnelArgs(endpointId) {
     let legacy = false;
     try {
-      legacy = localStorage.getItem(LEGACY_IROH_KEY) === endpointId;
+      legacy = isEndpointId(endpointId) && localStorage.getItem(LEGACY_IROH_KEY) === endpointId;
     } catch {
       // Ignore: falls back to the derived port.
     }
