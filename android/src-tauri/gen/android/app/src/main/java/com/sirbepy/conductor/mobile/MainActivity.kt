@@ -70,7 +70,8 @@ class MainActivity : TauriActivity() {
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     setIntent(intent)
-    pendingChatId = intent.getStringExtra(EXTRA_CHAT_ID)
+    // A launcher re-open carries no chat; it must not drop a tap held while locked.
+    intent.getStringExtra(EXTRA_CHAT_ID)?.let { pendingChatId = it }
     openChatAttempts = 0
     deliverPendingChat()
   }

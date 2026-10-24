@@ -20,6 +20,7 @@ describe("installNativePush", () => {
 
   afterEach(() => {
     delete globalThis.window;
+    delete globalThis.document;
   });
 
   it("registers the handle the bridge returns", () => {
@@ -55,6 +56,26 @@ describe("installNativePush", () => {
     current = JSON.stringify({ handle: "late", secret: "s" });
     win.__ccPushHandleReady();
     expect(register).toHaveBeenCalledWith("late", "s");
+  });
+
+  it("retries a failed registration when the app comes back to the foreground, until it succeeds", async () => {
+    const doc = Object.assign(new EventTarget(), { visibilityState: "hidden" });
+    globalThis.document = doc;
+    setWindow({ ConductorPush: { getHandle: () => JSON.stringify({ handle: "h1", secret: "s1" }) } });
+    register.mockRejectedValueOnce(new Error("daemon unreachable"));
+    installNativePush({ register, openChat });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    doc.dispatchEvent(new Event("visibilitychange"));
+    expect(register).toHaveBeenCalledTimes(1);
+    doc.visibilityState = "visible";
+    doc.dispatchEvent(new Event("visibilitychange"));
+    expect(register).toHaveBeenCalledTimes(2);
+    await Promise.resolve();
+    await Promise.resolve();
+    doc.dispatchEvent(new Event("visibilitychange"));
+    expect(register).toHaveBeenCalledTimes(2);
   });
 
   it("__ccOpenChat opens the tapped chat", () => {

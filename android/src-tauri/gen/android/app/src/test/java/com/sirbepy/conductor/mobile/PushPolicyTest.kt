@@ -32,6 +32,20 @@ class PushPolicyTest {
   }
 
   @Test
+  fun appStartSyncsWhenUnregisteredOrTheLastSyncFailed() {
+    assertEquals(true, PushPolicy.needsSyncAtStart(hasHandle = false, tokenDirty = false))
+    assertEquals(true, PushPolicy.needsSyncAtStart(hasHandle = true, tokenDirty = true))
+    assertEquals(false, PushPolicy.needsSyncAtStart(hasHandle = true, tokenDirty = false))
+  }
+
+  @Test
+  fun onlyAConfirmedUpdateCleansTheToken() {
+    assertEquals(true, PushPolicy.updateLeavesTokenClean(PushPolicy.AfterUpdate.DONE))
+    assertEquals(false, PushPolicy.updateLeavesTokenClean(PushPolicy.AfterUpdate.RETRY_LATER))
+    assertEquals(false, PushPolicy.updateLeavesTokenClean(PushPolicy.AfterUpdate.REGISTER_FRESH))
+  }
+
+  @Test
   fun handleJsonIsEmptyUntilRegistered() {
     assertEquals("", PushPolicy.handleJson(null, null))
     assertEquals("", PushPolicy.handleJson("h", ""))
