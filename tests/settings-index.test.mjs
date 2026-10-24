@@ -42,6 +42,7 @@ describe("Settings index", () => {
     expect(labels).not.toContain("Usage meter");
     expect(labels).not.toContain("Claude's browser");
     expect(labels).not.toContain("Data & storage");
+    expect(labels).not.toContain("Shortcuts");
     expect(labels).toContain("Notifications");
   });
 });

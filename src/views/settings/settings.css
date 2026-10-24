@@ -14,11 +14,3 @@
 .kit-nav-arrow {
   color: var(--sb-muted);
 }
-
-/* Dim caption line under a control row; shared by the Notifications, Voice
- * and Characters pages, so it lives with the index stylesheet that always loads. */
-.settings-caption {
-  font-size: var(--fs-micro);
-  color: var(--sb-muted);
-  padding: 2px 0 4px;
-}

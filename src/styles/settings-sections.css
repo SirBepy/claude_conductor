@@ -69,3 +69,35 @@
   cursor: pointer;
 }
 
+/* One row height on every Settings subpage, whatever the row holds. The kit's
+   36px baseline left toggle rows 36px tall next to 45px dropdown rows; 45px is
+   a 32px control plus the row's 6px padding each side plus its 1px divider.
+   Every field, dropdown and button inside a row is pinned to that 32px so a
+   time picker or number box can't stretch its row either. The index (plain
+   .view-settings, no suffix) holds only same-height nav rows, so it keeps the
+   compact baseline and stays one screen tall. */
+[class*="view-settings-"] {
+  --kit-row-min-h: 45px;
+}
+[class*="view-settings-"] .kit-row :is(
+  select,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  .btn-secondary
+) {
+  height: 32px;
+  box-sizing: border-box;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+[class*="view-settings-"] .kit-row input[type="color"] {
+  height: 28px;
+  box-sizing: border-box;
+}
+
+/* Dim caption line under a control row. Global (main.ts imports this file)
+   because a subpage can open without the Settings index ever loading. */
+.settings-caption {
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+  padding: 2px 0 4px;
+}
