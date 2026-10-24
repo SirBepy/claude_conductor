@@ -164,6 +164,17 @@ describe("Past results footer", () => {
     await vi.waitFor(() => expect(modal().querySelectorAll(".pd-out")).toHaveLength(1));
   });
 
+  it("says it could not load when history fails, instead of Loading forever", async () => {
+    let fail;
+    historyResult = new Promise((_, reject) => { fail = () => reject(new Error("history down")); });
+    const root = await mount({ kind: "project", id: "p1" });
+    link(root, "outcomes").click();
+    expect(modal().querySelector(".pd-mbody").textContent).toContain("Loading...");
+
+    fail();
+    await vi.waitFor(() => expect(modal().querySelector(".pd-mbody").textContent).toContain("Could not load past results"));
+  });
+
   it("the Gallery link loads every image into the open modal, and its Files tab dims a missing file", async () => {
     historyResult = history({
       gallery: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: `img${n}`, session_id: "s", title: `Shot ${n}`, at_ms: Date.now(), repo_cwd: "C:/Projects/conductor" })),

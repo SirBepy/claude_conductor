@@ -193,9 +193,15 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
       const h = await invoke<DashboardHistory>("dashboard_history", { target: ref });
       if (destroyed || !ctx) return;
       ctx.history = h;
+      ctx.historyFailed = false;
       paint();
       if (ctx.tab === "gallery") void loadGallery();
-    } catch (err) { console.warn("[projects-tab] dashboard_history failed", err); }
+    } catch (err) {
+      console.warn("[projects-tab] dashboard_history failed", err);
+      if (destroyed || !ctx || ctx.history) return;
+      ctx.historyFailed = true;
+      paint();
+    }
   };
 
   const host: ActionHost = {
