@@ -189,6 +189,19 @@ describe("My browser mode", () => {
     dispose();
   });
 
+  it("a save with the mode select absent keeps the saved mode", async () => {
+    settings = { claudeBrowserMode: "mine" };
+    const { root, dispose } = await mount();
+    root.querySelector("#chatDefaultsBrowserMode").remove();
+    const autoAllow = root.querySelector("#chatDefaultsAutoAllow");
+    autoAllow.checked = !autoAllow.checked;
+    autoAllow.dispatchEvent(new Event("change"));
+    await flush();
+    const saved = await updateSettings.mock.results.at(-1).value;
+    expect(saved.claudeBrowserMode).toBe("mine");
+    dispose();
+  });
+
   it("the install button opens the Playwright extension's store page", async () => {
     settings = { claudeBrowserMode: "mine" };
     const { root, dispose } = await mount();

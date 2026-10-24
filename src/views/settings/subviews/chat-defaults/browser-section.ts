@@ -42,9 +42,10 @@ export function readBrowserChoice(settings: Record<string, unknown>): BrowserCho
  *  current mode does not render (the app and profile rows exist only in My browser). */
 export function readBrowserFields(root: HTMLElement, prev: BrowserChoice): BrowserChoice {
   const app = root.querySelector<HTMLSelectElement>("#chatDefaultsBrowserApp")?.value;
+  const mode = root.querySelector<HTMLSelectElement>("#chatDefaultsBrowserMode")?.value;
   return {
     enabled: root.querySelector<HTMLInputElement>("#chatDefaultsBrowser")?.checked ?? prev.enabled,
-    mode: root.querySelector<HTMLSelectElement>("#chatDefaultsBrowserMode")?.value === "mine" ? "mine" : "own",
+    mode: mode === undefined ? prev.mode : mode === "mine" ? "mine" : "own",
     app: app === "edge" || app === "brave" || app === "chrome" ? app : prev.app,
     profile: root.querySelector<HTMLInputElement>("#chatDefaultsBrowserProfile")?.value.trim() ?? prev.profile,
   };
