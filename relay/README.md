@@ -31,6 +31,8 @@ firebase deploy --only functions --project claude-conductor-62582
 
 run from `relay/`.
 
+The per-IP limit keys on the last `X-Forwarded-For` entry, the one Google's front end appends: the framework trusts the proxy, so `req.ip` is the first entry, which the caller can set to anything.
+
 Rate-limit rows in `ipLimits` carry an `expireAt` timestamp at the end of their window. Firestore deletes them through a TTL policy, set once per project:
 
 ```

@@ -50,6 +50,16 @@ function nextWindow(start, count, now, limit) {
   return { allowed: true, start: base.start, count: base.count + 1 };
 }
 
+// The functions framework trusts the proxy, so req.ip is the LEFTMOST
+// X-Forwarded-For entry, which the caller controls. Google's front end appends
+// the real address last (checked live 2026-10-24: a faked "203.0.113.7" came
+// through as "203.0.113.7,<caller>"), so the rate limit keys on that one.
+function clientIp(req) {
+  const xff = req.headers && req.headers["x-forwarded-for"];
+  const last = typeof xff === "string" ? xff.split(",").pop().trim() : "";
+  return last || req.ip;
+}
+
 function buildMessage(token, chatId, chatName) {
   return {
     token,
@@ -74,5 +84,6 @@ module.exports = {
   secretMatches,
   validate,
   nextWindow,
+  clientIp,
   buildMessage,
 };
