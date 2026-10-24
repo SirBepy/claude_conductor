@@ -504,10 +504,12 @@ jobs:
 
       # Not release-*: Play takes the .aab, the GitHub release page does not need
       # it. Kept as an artifact because Play only accepts a brand-new app's FIRST
-      # bundle through Play Console by hand, never through the API.
+      # bundle through Play Console by hand, never through the API. Like the
+      # upload below, a missing AAB must not hold back the APK's GitHub release.
       - name: Find the release AAB
         id: aab
         if: steps.signing.outputs.signed == 'true'
+        continue-on-error: true
         shell: bash
         run: |
           AAB=$(find android/src-tauri/gen/android/app/build/outputs/bundle -name '*-release.aab' | head -n 1)
@@ -518,7 +520,7 @@ jobs:
           echo "path=$AAB" >> "$GITHUB_OUTPUT"
 
       - name: Keep the AAB
-        if: steps.signing.outputs.signed == 'true'
+        if: steps.signing.outputs.signed == 'true' && steps.aab.outputs.path != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: android-aab
@@ -529,7 +531,7 @@ jobs:
       # A Play refusal (version clash, draft app) must not hold back the GitHub
       # release of the APK this job already built, which needs this job green.
       - name: Upload to Google Play internal testing
-        if: steps.signing.outputs.signed == 'true'
+        if: steps.signing.outputs.signed == 'true' && steps.aab.outputs.path != ''
         continue-on-error: true
         shell: bash
         env:
