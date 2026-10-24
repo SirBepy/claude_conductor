@@ -148,6 +148,22 @@ describe("Past results footer", () => {
     expect(modal().querySelector(".pd-modal")).toBeNull();
   });
 
+  it("says Loading in the modal while history is still on its way, never a false empty state", async () => {
+    let release;
+    historyResult = new Promise((resolve) => {
+      release = () => resolve(history({
+        outcomes: [{ session_id: "o1", title: "Outcome 1", text: "Done.", at_ms: Date.now(), repo_cwd: "C:/Projects/conductor" }],
+      }));
+    });
+    const root = await mount({ kind: "project", id: "p1" });
+    link(root, "outcomes").click();
+    expect(modal().querySelector(".pd-mbody").textContent).toContain("Loading...");
+    expect(modal().querySelector(".pd-mbody").textContent).not.toContain("No finished chats yet");
+
+    release();
+    await vi.waitFor(() => expect(modal().querySelectorAll(".pd-out")).toHaveLength(1));
+  });
+
   it("the Gallery link loads every image into the open modal, and its Files tab dims a missing file", async () => {
     historyResult = history({
       gallery: [1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: `img${n}`, session_id: "s", title: `Shot ${n}`, at_ms: Date.now(), repo_cwd: "C:/Projects/conductor" })),
