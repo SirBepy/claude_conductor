@@ -1,9 +1,9 @@
-import { type ChipType, MAX_ROWS } from "../../../sessions/statusline-catalog";
+import { type ChipType, MAX_ROWS } from "./statusline-catalog";
 
 // Pure operations on a ChipType[][] layout model. The DOM/pointer wiring (the
-// builder view) calls these and re-renders from the returned array - never
-// mutating DOM positions imperatively. Keeping the fragile reorder/remove logic
-// pure makes it fully unit-testable.
+// in-place statusbar editor) calls these and re-renders from the returned array
+// - never mutating DOM positions imperatively. Keeping the fragile
+// reorder/remove logic pure makes it fully unit-testable.
 
 export interface Pos { row: number; index: number; }
 
@@ -38,7 +38,7 @@ export function addRow(rows: ChipType[][], max: number = MAX_ROWS): ChipType[][]
 }
 
 /** Drop empty rows; always keep at least one (possibly-empty) row so the
- *  builder always has a drop target. */
+ *  editor always has a drop target. */
 export function trimRows(rows: ChipType[][]): ChipType[][] {
   const kept = rows.filter((r) => r.length > 0);
   return kept.length ? kept : [[]];
@@ -54,4 +54,12 @@ export function moveRow(rows: ChipType[][], fromIdx: number, toIdx: number): Chi
   const [row] = next.splice(fromIdx, 1);
   next.splice(toIdx, 0, row!);
   return next;
+}
+
+/** Remove a whole row (and its chips). Always leaves at least one row. */
+export function removeRow(rows: ChipType[][], idx: number): ChipType[][] {
+  if (idx < 0 || idx >= rows.length) return clone(rows);
+  const next = clone(rows);
+  next.splice(idx, 1);
+  return next.length ? next : [[]];
 }

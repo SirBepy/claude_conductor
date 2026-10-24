@@ -1,0 +1,265 @@
+/* ── In-place statusline editing (statusbar-edit.ts) ─────────────────────── */
+
+/* The only signal that the bar is editable: a quiet dashed accent outline.
+   Inset so the bar's own box does not grow or shift the pane below it. */
+.session-statusbar.sb-editing {
+  outline: 1px dashed var(--color-primary);
+  outline-offset: -3px;
+}
+
+/* Rows wrap instead of scrolling while editing: the remove buttons and drop
+   targets must all be reachable without a horizontal swipe. */
+.session-statusbar.sb-editing .sb-row {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.sb-edit-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sb-edit-row-wrap .sb-edit-row {
+  flex: 1;
+  min-height: 26px;
+  border-radius: 5px;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+.sb-edit-row-empty {
+  border: 1px dashed var(--color-border);
+}
+.sb-edit-row-empty::before {
+  content: "drop chips here";
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+  opacity: 0.5;
+  font-style: italic;
+  padding: 0 6px;
+}
+.sb-edit-row.sb-edit-drop {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 40%, transparent);
+}
+
+/* Row controls: tiny, low-contrast until hovered. */
+.sb-edit-rowctl {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 1px;
+}
+.sb-edit-rowbtn,
+.sb-edit-rowbtn-ph {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sb-edit-rowbtn {
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.4;
+}
+.sb-edit-rowbtn:hover {
+  opacity: 1;
+  background: var(--color-surface);
+}
+
+/* One editable chip: the real chip plus its x. Chip internals stay inert so a
+   press anywhere on it starts a drag instead of a popover. */
+.sb-edit-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.sb-edit-chip > .sb-chip,
+.sb-edit-chip > .sb-separator,
+.sb-edit-chip > .sb-flex-sep {
+  pointer-events: none;
+}
+.sb-edit-chip:hover > .sb-chip {
+  border-color: var(--color-primary);
+}
+/* Would be hidden on the live bar right now (zero count, nothing to show). */
+.sb-edit-dim {
+  opacity: 0.45;
+}
+.sb-edit-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 0.6rem;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.sb-edit-x:hover {
+  opacity: 1;
+  color: var(--color-danger);
+}
+
+/* "+ row", "+" and Done, together on one right-aligned strip under the rows. */
+.sb-edit-tools {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+.sb-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  border-radius: 5px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.sb-edit-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-primary);
+}
+.sb-edit-done {
+  border-style: solid;
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+/* ── Palette popover (rides the shared .sb-popover shell) ─────────────────── */
+.sb-popover.sb-edit-palette {
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  /* The shell caps max-height to the window; only the chip list scrolls, so
+     the footer controls (profile, hide-zero, clear, reset) stay reachable. */
+  overflow: hidden;
+}
+.sb-edit-pal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.sb-edit-pal-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sb-edit-pal-label {
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sb-muted);
+  opacity: 0.7;
+}
+.sb-edit-pal-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sb-edit-source {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.sb-edit-source:hover {
+  border-color: var(--color-primary);
+}
+.sb-edit-pal-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.sb-edit-pal-btns {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sb-edit-seg {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 3px;
+  padding: 3px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+}
+.sb-edit-segbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--sb-muted);
+  font: inherit;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.sb-edit-segbtn:hover { color: var(--color-text); }
+.sb-edit-segbtn.on {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+.sb-edit-hz {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-micro);
+  color: var(--color-text);
+  cursor: pointer;
+  user-select: none;
+}
+.sb-edit-hz input[type=checkbox] {
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+/* Floating clone that follows the pointer during a drag. */
+.sb-drag-clone {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  opacity: 0.9;
+  transform: scale(1.04);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  background: var(--color-surface);
+  border-color: var(--color-primary);
+  color: var(--color-text);
+}
+.sb-drag-clone.sb-removing {
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 15%, transparent);
+}
+.sb-drag-clone.sb-removing::after {
+  content: "release to remove";
+  margin-left: 6px;
+  color: var(--color-danger);
+}

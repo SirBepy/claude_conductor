@@ -320,4 +320,7 @@ export interface StatusbarOptions {
    *  federation): git/dirty/folder-explorer all read THIS machine's disk at
    *  `cwd`, the wrong disk for a mirrored chat (G10, docs/multi-machine.md). */
   mirrored?: boolean;
+  /** Offer in-place layout editing (right-click / chat menu). Off for the
+   *  history viewer, whose fixed rows are not the user's layout. */
+  layoutEditable?: boolean;
 }
