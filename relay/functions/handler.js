@@ -80,7 +80,12 @@ function makeHandler({ db, messaging, now = Date.now }) {
       await messaging.send(core.buildMessage(out.token, body.chatId, body.chatName));
     } catch (e) {
       if (core.DEAD_TOKEN_CODES.has(e && e.code)) {
-        await ref.delete();
+        // A concurrent /update may have stored a fresh token while FCM rejected the old one;
+        // deleting blind would drop that handle. Re-read inside a transaction and delete only if unchanged.
+        await db.runTransaction(async (tx) => {
+          const cur = await tx.get(ref);
+          if (cur.exists && cur.data().token === out.token) tx.delete(ref);
+        });
         return { status: 404, body: { error: "token no longer valid" } };
       }
       return { status: 502, body: { error: "push delivery failed" } };

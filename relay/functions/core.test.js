@@ -17,6 +17,7 @@ function fakeDb() {
     get: (r) => r.get(),
     set: (r, v) => r.set(v),
     update: (r, v) => r.update(v),
+    delete: (r) => r.delete(),
   };
   return {
     store,
@@ -158,6 +159,20 @@ test("a dead FCM token deletes the handle and gives 404", async () => {
     assert.equal(r.code, 404);
     assert.equal(s.db.store.has(`handles/${handle}`), false);
   }
+});
+
+test("a dead-token delete keeps the handle when /update stored a fresh token meanwhile", async () => {
+  let s;
+  let ids;
+  s = setup(async () => {
+    // The phone's /update lands between the transaction read and the FCM failure.
+    await s.call("/update", { ...ids, token: "fresh" });
+    throw Object.assign(new Error("x"), { code: "messaging/registration-token-not-registered" });
+  });
+  ids = await registered(s);
+  const r = await s.call("/send", { ...ids, chatId: "c" });
+  assert.equal(r.code, 404);
+  assert.equal(s.db.store.get(`handles/${ids.handle}`).token, "fresh");
 });
 
 test("other FCM errors give 502 and keep the handle", async () => {

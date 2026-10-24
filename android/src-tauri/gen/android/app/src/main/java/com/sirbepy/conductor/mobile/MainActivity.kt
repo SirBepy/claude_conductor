@@ -46,7 +46,6 @@ class MainActivity : TauriActivity() {
   private lateinit var lockScreen: View
   private var webView: WebView? = null
   private var pendingChatId: String? = null
-  private var openChatAttempts = 0
 
   // The result is ignored: a denial just means no banners, and Android stops
   // re-showing the dialog on its own after repeated denials.
@@ -72,13 +71,13 @@ class MainActivity : TauriActivity() {
     setIntent(intent)
     // A launcher re-open carries no chat; it must not drop a tap held while locked.
     intent.getStringExtra(EXTRA_CHAT_ID)?.let { pendingChatId = it }
-    openChatAttempts = 0
     deliverPendingChat()
   }
 
   // Held while locked so a tap never shows a chat behind the lock screen. The SPA
-  // may not have installed __ccOpenChat yet right after launch, so a miss retries.
-  private fun deliverPendingChat() {
+  // may not have installed __ccOpenChat yet right after launch, so a miss retries;
+  // `attempt` is per call chain so overlapping chains do not eat each other's budget.
+  private fun deliverPendingChat(attempt: Int = 0) {
     val id = pendingChatId ?: return
     val view = webView ?: return
     if (locked) return
@@ -86,8 +85,8 @@ class MainActivity : TauriActivity() {
     view.evaluateJavascript(js) { result ->
       if (result == "true") {
         pendingChatId = null
-      } else if (++openChatAttempts < 15) {
-        view.postDelayed({ deliverPendingChat() }, 1000)
+      } else if (PushPolicy.shouldRetryOpenChat(attempt + 1)) {
+        view.postDelayed({ deliverPendingChat(attempt + 1) }, 1000)
       } else {
         pendingChatId = null
       }
