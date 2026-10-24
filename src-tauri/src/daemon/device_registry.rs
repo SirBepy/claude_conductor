@@ -366,6 +366,15 @@ impl DeviceRegistry {
         }
     }
 
+    /// Rename a device by id. Returns true if found.
+    pub fn rename_device(id: &str, name: &str, app_data: &Path) -> Result<bool, String> {
+        let mut reg = load(app_data);
+        let Some(device) = reg.devices.iter_mut().find(|d| d.id == id) else { return Ok(false) };
+        device.name = name.to_string();
+        save(&reg, app_data)?;
+        Ok(true)
+    }
+
     /// Flip the remote-access switch. When false, auth_mw and pairing return
     /// 503 and `iroh_tunnel` closes its endpoint on its next poll.
     pub fn set_enabled(enabled: bool, app_data: &Path) -> Result<(), String> {
@@ -645,6 +654,20 @@ mod tests {
         assert_eq!(std::fs::read(registry_path(dir.path())).unwrap(), before, "registry bytes changed on auth");
         assert_eq!(last_used_of(dir.path()), Some(t0 + 2 * DAY), "the stamp must land in the activity file");
         assert!(activity_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn rename_device_changes_only_that_name_and_keeps_the_token_valid() {
+        let dir = tempdir().unwrap();
+        DeviceRegistry::set_enabled(true, dir.path()).unwrap();
+        let token = DeviceRegistry::add_device("Phone", dir.path()).unwrap();
+        DeviceRegistry::add_device("Other", dir.path()).unwrap();
+        let id = DeviceRegistry::list_devices(dir.path()).into_iter().find(|d| d.name == "Phone").unwrap().id;
+        assert!(DeviceRegistry::rename_device(&id, "Pixel", dir.path()).unwrap());
+        let names: Vec<String> = DeviceRegistry::list_devices(dir.path()).into_iter().map(|d| d.name).collect();
+        assert_eq!(names, vec!["Pixel".to_string(), "Other".to_string()]);
+        assert!(DeviceRegistry::validate_token(&token, dir.path()));
+        assert!(!DeviceRegistry::rename_device("missing", "X", dir.path()).unwrap());
     }
 
     /// Revokes and switch-offs racing a stream of authenticating requests must

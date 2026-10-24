@@ -222,6 +222,20 @@ impl MirrorState {
         changed
     }
 
+    /// Restamps a peer's cached rows with a new name (an owner rename), so
+    /// the chat list shows it before the peer's next snapshot. Returns
+    /// whether anything changed.
+    pub fn set_label(&self, machine_id: &str, label: &str) -> bool {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        match guard.get_mut(machine_id) {
+            Some(peer) if peer.label != label => {
+                peer.label = label.to_string();
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Flips the online flag without touching the cached rows - a dropped
     /// link keeps showing its last-known state, just grayed as offline,
     /// same contract session status elsewhere in this codebase already uses.
@@ -480,6 +494,16 @@ mod tests {
         assert_eq!(stamp.id, "mach-b");
         assert_eq!(stamp.label, "Mac Mini");
         assert!(stamp.online);
+    }
+
+    #[test]
+    fn set_label_restamps_cached_rows() {
+        let m = MirrorState::new();
+        m.set_instances("mach-b", "Mac Mini", vec![fixture("s1", None)]);
+        assert!(m.set_label("mach-b", "Studio"));
+        assert!(!m.set_label("mach-b", "Studio"), "unchanged name is not a change");
+        assert!(!m.set_label("mach-x", "Studio"), "unknown peer");
+        assert_eq!(m.instances()[0].machine.as_ref().unwrap().label, "Studio");
     }
 
     #[test]

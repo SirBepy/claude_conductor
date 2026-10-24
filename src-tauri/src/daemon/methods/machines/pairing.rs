@@ -66,8 +66,9 @@ pub(super) async fn pair_machine(state: &Arc<DaemonState>, req: PairMachineParam
     let their_label = their.get("label").and_then(Value::as_str).unwrap_or("Unnamed machine").to_string();
     let their_os = their.get("os").and_then(Value::as_str).unwrap_or_default().to_string();
 
+    let device_name = registry.display_label(&their_machine_id, &their_label);
     let (reverse_token, minted_device_id) =
-        DeviceRegistry::add_machine_device(&their_label, &their_machine_id, &app_data).map_err(RpcError::internal)?;
+        DeviceRegistry::add_machine_device(&device_name, &their_machine_id, &app_data).map_err(RpcError::internal)?;
 
     let body = json!({
         "pairing_code": parsed.code,
@@ -157,6 +158,29 @@ pub(super) fn set_machine_label(state: &Arc<DaemonState>, label: &str) -> Result
     serde_json::to_value(mine).map_err(|e| RpcError::internal(e.to_string()))
 }
 
+/// Owner-set name for a paired peer, on this machine only. Also renames the
+/// peer's reverse entry in the device registry, so the Paired devices list
+/// and the chat list call it the same thing, and restamps its mirrored rows
+/// at once instead of waiting for the peer's next snapshot.
+pub(super) fn rename_machine(state: &Arc<DaemonState>, machine_id: &str, label: &str) -> Result<Value, RpcError> {
+    let trimmed = label.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 40 {
+        return Err(RpcError::invalid_params("label must be 1..=40 characters"));
+    }
+    let registry = state.machines.get().ok_or_else(|| RpcError::internal("machine registry not initialised"))?;
+    if !registry.rename_peer(machine_id, trimmed) {
+        return Err(RpcError::invalid_params(format!("unknown machine: {machine_id}")));
+    }
+    if let Some(device_id) = registry.peer(machine_id).and_then(|p| p.reverse_device_id) {
+        let _ = DeviceRegistry::rename_device(&device_id, trimmed, registry.app_data());
+    }
+    if state.mirror.set_label(machine_id, trimmed) {
+        crate::daemon::machines::publish_instances_changed(state);
+    }
+    state.notifier.publish("machines_changed", json!({}));
+    Ok(json!({ "ok": true }))
+}
+
 /// Removes the CALLER's own entry (`ctx.transport`), never a params-supplied
 /// id - a peer can only ever unpair itself this way. Unknown ids are a no-op,
 /// not an error (the peer may have already unpaired locally).
@@ -233,6 +257,59 @@ mod tests {
                     id: json!(1),
                     method: "set_machine_label".into(),
                     params: Some(json!({"label": "   "})),
+                },
+                dummy_ctx(),
+            )
+            .await;
+        assert_eq!(resp.error.unwrap().code, -32602);
+    }
+
+    #[tokio::test]
+    async fn rename_machine_names_the_peer_and_its_device_entry() {
+        let dir = tempdir().unwrap();
+        let state = state_with_machines(dir.path());
+        let device_id = DeviceRegistry::add_machine_device("DESKTOP-ABC", "mach-b", dir.path()).unwrap().1;
+        state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: "mach-b".into(),
+            label: "DESKTOP-ABC".into(),
+            os: "windows".into(),
+            iroh_id: None,
+            direct_url: None,
+            token: "dummy-tok".into(),
+            reverse_device_id: Some(device_id.clone()),
+            added_at: 0,
+        });
+        let mut r = Router::new();
+        super::super::register_machines(&mut r, state.clone());
+        let resp = r
+            .dispatch(
+                crate::daemon::rpc::Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "rename_machine".into(),
+                    params: Some(json!({"machine_id": "mach-b", "label": " Office PC "})),
+                },
+                dummy_ctx(),
+            )
+            .await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+        assert_eq!(state.machines.get().unwrap().peer("mach-b").unwrap().label, "Office PC");
+        let device = DeviceRegistry::list_devices(dir.path()).into_iter().find(|d| d.id == device_id).unwrap();
+        assert_eq!(device.name, "Office PC");
+    }
+
+    #[tokio::test]
+    async fn rename_machine_rejects_an_unknown_peer() {
+        let dir = tempdir().unwrap();
+        let mut r = Router::new();
+        super::super::register_machines(&mut r, state_with_machines(dir.path()));
+        let resp = r
+            .dispatch(
+                crate::daemon::rpc::Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "rename_machine".into(),
+                    params: Some(json!({"machine_id": "nope", "label": "X"})),
                 },
                 dummy_ctx(),
             )

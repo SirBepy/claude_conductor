@@ -49,3 +49,38 @@ export function renderEntityList<T>(
     };
   });
 }
+
+/** A row's name as an inline-rename field: reads as plain text until hovered
+ *  or focused. `escape` is the caller's own HTML escaper. */
+export function renameFieldHtml(id: string, name: string, escape: (s: string) => string): string {
+  return `<input type="text" class="ra-device-name ra-name-input" data-id="${escape(id)}" value="${escape(name)}" maxlength="40" aria-label="Rename" title="Click to rename" spellcheck="false">`;
+}
+
+/** Commits each rename field on blur/Enter; Escape or an empty name puts the
+ *  old name back. A failed save also puts it back, since the old name is
+ *  still what is stored. */
+export function wireRenameFields(
+  root: HTMLElement,
+  listSelector: string,
+  rename: (id: string, name: string) => Promise<unknown>,
+  errorLabel: string,
+): void {
+  root.querySelectorAll<HTMLInputElement>(`${listSelector} .ra-name-input`).forEach((input) => {
+    let saved = input.value;
+    input.onkeydown = (e) => {
+      if (e.key === "Enter") input.blur();
+      if (e.key === "Escape") { input.value = saved; input.blur(); }
+    };
+    input.onblur = () => {
+      const name = input.value.trim();
+      if (!name || name === saved) { input.value = saved; return; }
+      input.value = name;
+      void rename(input.dataset.id ?? "", name)
+        .then(() => { saved = name; })
+        .catch((e) => {
+          console.error(`[remote-access] ${errorLabel} failed`, e);
+          input.value = saved;
+        });
+    };
+  });
+}

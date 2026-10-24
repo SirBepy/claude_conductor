@@ -99,6 +99,18 @@ pub async fn revoke_remote_device(id: String) -> Result<bool, String> {
     DeviceRegistry::revoke_device(&id, &app_data)
 }
 
+/// Rename a paired device. Same 1..=40 character rule as a machine label.
+/// Returns true if the device existed.
+#[tauri::command]
+pub async fn rename_remote_device(id: String, name: String) -> Result<bool, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 40 {
+        return Err("name must be 1..=40 characters".to_string());
+    }
+    let app_data = paths::data_dir().map_err(|e| e.to_string())?;
+    DeviceRegistry::rename_device(&id, trimmed, &app_data)
+}
+
 /// Return the plaintext remote-access token so the desktop webview can open the
 /// daemon's authed `/ws/transcribe` (voice) WebSocket on localhost. Same token
 /// the phone carries; desktop has no `rc_token` in localStorage, so it reads it

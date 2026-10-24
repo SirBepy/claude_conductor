@@ -35,6 +35,16 @@ pub async fn set_machine_label(label: String, state: State<'_, AppState>) -> Res
         .map_err(|e| e.to_string())
 }
 
+/// Desktop-only: names a paired peer on this machine only (`rename_machine`).
+#[tauri::command]
+pub async fn rename_machine(machine_id: String, label: String, state: State<'_, AppState>) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .call("rename_machine", serde_json::json!({ "machine_id": machine_id, "label": label }))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Desktop-only: limits (or restores) what `machine_id` may do to this
 /// machine's chats - see `daemon::machines::peer_scope`.
 #[tauri::command]

@@ -83,6 +83,20 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
         }
     });
 
+    // Desktop-pipe only (absent from the transport table), like the rest of
+    // the pairing mutators.
+    router.register("rename_machine", {
+        let state = state.clone();
+        move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let req: RenameMachineParams = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                pairing::rename_machine(&state, &req.machine_id, &req.label)
+            }
+        }
+    });
+
     // Desktop-pipe only (absent from the transport table): the switch that
     // limits a paired machine is never flippable by that machine, or by the
     // phone.
@@ -160,6 +174,12 @@ struct UnpairMachineParams {
 
 #[derive(Debug, Deserialize)]
 struct SetLabelParams {
+    label: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RenameMachineParams {
+    machine_id: String,
     label: String,
 }
 

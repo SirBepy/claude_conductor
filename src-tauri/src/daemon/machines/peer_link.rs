@@ -149,7 +149,14 @@ async fn read_until_dead(state: &Arc<DaemonState>, peer: &PeerMachine, mut strea
                         // round trip that amplified the hot loop.
                         let hidden_before = state.mirror.hidden_sessions();
                         super::hidden::apply_peer_frame(state, &peer.machine_id, &txt);
-                        let changed = handle_frame(state, &peer.machine_id, &peer.label, &txt);
+                        // The registry, not this link's spawn-time copy, so
+                        // an owner rename made while the link is up sticks.
+                        let label = state
+                            .machines
+                            .get()
+                            .and_then(|r| r.peer(&peer.machine_id))
+                            .map_or_else(|| peer.label.clone(), |p| p.label);
+                        let changed = handle_frame(state, &peer.machine_id, &label, &txt);
                         // After the rows: a hidden id only counts once the
                         // peer's row for that chat is known, so an
                         // instances frame can be what makes it appear.

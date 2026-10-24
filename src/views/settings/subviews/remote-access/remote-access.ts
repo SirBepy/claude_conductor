@@ -1,11 +1,11 @@
 import { html, render } from "lit-html";
 import { api } from "../../../../shared/api";
 import { settingsHeader } from "../../ui";
-import { getTransport } from "../../../../shared/transport";
+import { getTransport, isRemote } from "../../../../shared/transport";
 import {
   renderMachinesSection, resetMachinesSection, wireMachinePairForm, machinesSectionTemplate,
 } from "./machines-section";
-import { renderEntityList } from "./entity-list";
+import { renderEntityList, renameFieldHtml, wireRenameFields } from "./entity-list";
 import "./remote-access.css";
 
 function $(root: HTMLElement, sel: string): HTMLElement | null {
@@ -60,7 +60,7 @@ async function renderDeviceList(root: HTMLElement): Promise<void> {
       (d) => `
         <div class="ra-device-row" data-id="${escapeHtml(d.id)}">
           <div class="ra-device-info">
-            <span class="ra-device-name">${escapeHtml(d.name)}</span>
+            ${isRemote() ? `<span class="ra-device-name">${escapeHtml(d.name)}</span>` : renameFieldHtml(d.id, d.name, escapeHtml)}
             <span class="ra-device-date">Paired ${new Date(d.created_at * 1000).toLocaleDateString()} - last used ${lastUsedLabel(d.last_used)}</span>
           </div>
           <button class="btn-danger-sm ra-revoke-btn" data-id="${escapeHtml(d.id)}">Revoke</button>
@@ -73,6 +73,7 @@ async function renderDeviceList(root: HTMLElement): Promise<void> {
       },
       { errorLabel: "revoke" },
     );
+    wireRenameFields(root, "#ra-device-list", (id, name) => api.renameRemoteDevice(id, name), "rename_remote_device");
   } catch (e) {
     console.error("[remote-access] listRemoteDevices failed", e);
   }
