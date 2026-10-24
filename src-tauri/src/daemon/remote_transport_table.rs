@@ -460,6 +460,13 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // a project closed on the PC (or by the idle sweep) is unreachable here.
     ("dashboard_open_target", P),
     ("dashboard_close_target", P),
+    // Write: stores the Android shell's relay handle + secret (length-capped,
+    // deduped, at most 20 kept) so blocked-prompt pushes reach that phone. The
+    // handle is only a send address into the relay, not a credential for this
+    // daemon, and the same pairing token can already enrol a Web Push
+    // subscription through /api/push/subscribe. P, never M: a peer machine has
+    // no phone of its own to enrol on this daemon.
+    ("register_fcm_handle", P),
     // Machine-only: `unpair_machine`'s outbound half. Removes ctx.transport's
     // own entry, never a params-supplied id (see methods/machines.rs).
     ("peer_unpaired", M),
@@ -763,6 +770,13 @@ mod tests {
             assert!(allowed(m, &Transport::Phone), "{m} must be callable by the phone");
             assert!(!allowed(m, &peer), "{m} must not be callable by a peer machine");
         }
+    }
+
+    /// The Android push handle is enrolled by the phone only.
+    #[test]
+    fn register_fcm_handle_is_phone_only() {
+        assert!(allowed("register_fcm_handle", &Transport::Phone));
+        assert!(!allowed("register_fcm_handle", &Transport::PeerMachine("x".into())));
     }
 
     /// The host halves of the cross-machine account picker are machine-only:

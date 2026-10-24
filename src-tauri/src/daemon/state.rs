@@ -272,8 +272,9 @@ impl DaemonState {
             .unwrap_or_else(|| "a chat".into());
         let sid = session_id.map(|s| s.to_string());
         let pid = prompt_id.to_string();
+        let show_name = self.settings.snapshot().push_show_chat_name();
         tokio::spawn(async move {
-            pm.maybe_notify_blocked(sid, name, pid).await;
+            pm.maybe_notify_blocked(sid, name, pid, show_name).await;
         });
     }
 }

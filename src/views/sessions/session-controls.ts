@@ -67,6 +67,20 @@ export function queueSessionSelect(sessionId: string): void {
 }
 
 /**
+ * Open a live chat by session id from outside the Sessions view (the Android
+ * shell's notification tap). Mounted: select it in the existing pane. Not
+ * mounted: queue it for the next mount, which the view switch triggers.
+ */
+export function openChatById(sessionId: string): void {
+  showView("sessions");
+  if (_pane) {
+    void selectSession(sessionId, _pane).then(updateThinkingBar);
+  } else {
+    queueSessionSelect(sessionId);
+  }
+}
+
+/**
  * Launch a brand-new chat for a known project on the next Sessions-view mount.
  * The project + model/effort config are resolved by the caller (e.g. the
  * project-detail "+" button) so no project-picker is shown here.

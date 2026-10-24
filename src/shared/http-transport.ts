@@ -327,6 +327,9 @@ export class HttpTransport implements Transport {
           add_projects: args.addProjects ?? [],
           remove_projects: args.removeProjects ?? [],
         });
+      // Android shell's FCM relay handle (shared/native-push.ts).
+      case "register_fcm_handle":
+        return this.rpc<T>("register_fcm_handle", { handle: args.handle, secret: args.secret });
       // Ask panel (todo 1007): same fab-dial reachability as Todos above.
       case "ask_list_threads":
         return this.rpc<T>("ask_list_threads", { session_id: args.sessionId ?? args.session_id });

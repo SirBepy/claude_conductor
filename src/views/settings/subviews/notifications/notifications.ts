@@ -55,6 +55,13 @@ async function hydrateNotifications(): Promise<void> {
       }
     }
 
+    const showNameSwitch = $("pushShowChatNameSwitch") as HTMLInputElement | null;
+    if (showNameSwitch) {
+      // Default on when the key is absent.
+      showNameSwitch.checked = s.pushShowChatName !== false;
+      showNameSwitch.addEventListener("change", saveSettings);
+    }
+
     buildNotifCards();
     const notifs = (s.notifications as Record<string, Record<string, unknown>>) || {};
     await Promise.all(NOTIF_TYPES.map((t) => renderNotifCard(t.key, notifs[t.key] || {})));
@@ -140,6 +147,11 @@ function template() {
           </p>
         </div>
         ${isRemote() ? "" : html`
+        <div class="kit-section" id="phonePushSection">
+          <div class="kit-section-title">Phone notifications</div>
+          ${toggleRow({ label: "Show chat name in notifications", inputId: "pushShowChatNameSwitch", checked: true })}
+          <div class="settings-caption">Off sends a generic "A chat is waiting on you" to the phone's web push and the Android app, so no chat title shows on a lock screen.</div>
+        </div>
         <div class="kit-section" id="muteSection">
           <div class="kit-section-title">Mute</div>
           <div class="kit-row">

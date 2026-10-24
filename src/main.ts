@@ -276,6 +276,8 @@ if (detachedSessionId) {
   // open chat returns to the session list before back starts stepping views.
   if (isRemote()) {
     initBackButton();
+    // After the token gate above: registering the push handle is an authed RPC.
+    void import("./shared/native-push").then((m) => m.installNativePush());
     registerOverlayBack(() => {
       const el = document.querySelector(".view-sessions");
       if (el?.getAttribute("data-mobile-pane") === "chat") {
