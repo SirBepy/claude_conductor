@@ -10,6 +10,7 @@ import { createMoreMenu } from "../more-menu-base";
 import { closeChatWithConfirm } from "../close-chat";
 import { state } from "../state";
 import { OPEN_COMMANDS, pickRepo, type ActionHost } from "./dash-actions";
+import { forgetTargets } from "./draft-dashboard";
 import { openCardsModal, openEditReposModal } from "./dash-modals";
 import { openCharacterModal, openFolderMappingModal, openProjectSettingsModal, openRenameModal } from "./project-config";
 import type { CtxItem } from "./dash-parts";
@@ -63,6 +64,7 @@ async function deleteGroup(host: ActionHost): Promise<void> {
   if (!ok) return;
   try {
     await invoke<void>("dashboard_group_delete", { id: t.id });
+    forgetTargets();
     host.deselect();
   } catch (err) {
     showToast(`Could not delete the group: ${String(err)}`);
@@ -95,7 +97,7 @@ export function projectItems(host: ActionHost, anchor: HTMLElement): MenuItem[] 
   items.push(
     { icon: "user-circle", label: "Character...", run: forRepo(host, anchor, (cwd) => openCharacterModal(cwd)) },
     { icon: "gear", label: "Project settings...", run: forRepo(host, anchor, (cwd) => openProjectSettingsModal(cwd)) },
-    { icon: "folder-simple-dashed", label: "Folder mapping...", run: forRepo(host, anchor, (cwd) => openFolderMappingModal(cwd, reload)) },
+    { icon: "folder-simple-dashed", label: "Folder mapping...", run: forRepo(host, anchor, (cwd) => openFolderMappingModal(cwd, host)) },
     { icon: "squares-four", label: "Dashboard cards...", run: () => openCardsModal(host) },
   );
   if (t.kind === "group") {

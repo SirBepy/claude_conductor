@@ -23,6 +23,12 @@ function listTargets(): Promise<DashboardListRow[]> {
   return rows;
 }
 
+/** Drops the cached list after anything that changes which dashboard a repo
+ *  resolves to (a group edited or deleted, a folder repointed or hidden). */
+export function forgetTargets(): void {
+  targetsCache = null;
+}
+
 /** The dashboard a repo opens (its group's when it has one). */
 export async function resolveTarget(cwd: string, projectId: string | null = null): Promise<DashboardTargetRef> {
   return targetForRepo(await listTargets(), cwd, projectId);

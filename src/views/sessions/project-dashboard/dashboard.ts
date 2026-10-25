@@ -8,6 +8,7 @@ import { getTransport, type Unlisten } from "../../../shared/transport";
 import { debounce } from "../../../shared/debounce";
 import { hydrateProjectTechIcons } from "../../../shared/projects";
 import { getSettings } from "../../../shared/state";
+import { showToast } from "../../../shared/toast";
 import { loadTokenHistory } from "../../../shared/token-history";
 import type { AliasMap } from "../../../shared/tokens";
 import { makeActions, type ActionHost } from "./dash-actions";
@@ -274,7 +275,13 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
       if (first) loadUsage(ctx.usage.range);
     } catch (err) {
       console.error("[project-dashboard] dashboard_snapshot failed", err);
-      if (!destroyed && !ctx && deps.mode === "page") render(html`<div class="pd-quiet pd-loading">Could not load this dashboard.</div>`, root);
+      if (destroyed || mine !== snapSeq) return;
+      if (!ctx) {
+        if (deps.mode === "page") render(html`<div class="pd-quiet pd-loading">Could not load this dashboard.</div>`, root);
+      } else {
+        // The old snapshot stays on screen, so say it is no longer current.
+        showToast(`Could not refresh the dashboard: ${String(err)}`);
+      }
     }
   }
 
