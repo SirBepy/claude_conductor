@@ -29,16 +29,14 @@ function panes(): { view: HTMLElement, pane: HTMLElement, listEl: HTMLElement | 
   return { view, pane, listEl: view.querySelector<HTMLElement>("#sessions-list") };
 }
 
-export function isDashboardPageOpen(): boolean {
-  return state.dashboardOpen;
-}
-
 /** `restore` false means a chat is already taking the pane, so select nothing here. */
 export function leaveDashboardPage(restore: boolean): void {
+  // The bump sits ahead of the early return so a chat picked while an open is
+  // still awaiting its target cancels that open too.
+  openSeq++;
+  state.onChatActivated = null;
   if (!state.dashboardOpen) return;
   state.dashboardOpen = false;
-  state.onChatActivated = null;
-  openSeq++;
   handle?.destroy();
   handle = null;
   const id = resumeId;
@@ -64,6 +62,9 @@ export async function openDashboardPage(cwd: string, projectId: string | null = 
   if (!p) return;
   const { view, pane } = p;
   const mine = ++openSeq;
+  // Armed before the await: setActiveSession fires it for a chat picked while
+  // the target is still resolving, which cancels this open via openSeq.
+  state.onChatActivated = () => leaveDashboardPage(false);
   const ref = await resolveTarget(cwd, projectId);
   if (mine !== openSeq) return;
 
@@ -78,8 +79,6 @@ export async function openDashboardPage(cwd: string, projectId: string | null = 
     }
     dismissQuestionCard();
     state.dashboardOpen = true;
-    // A chat picked from the sidebar takes the pane itself: just let go of it.
-    state.onChatActivated = () => leaveDashboardPage(false);
     dismountActivePane({ rerenderSidebar: true });
   }
 
