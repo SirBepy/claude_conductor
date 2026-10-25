@@ -204,7 +204,7 @@ export class ReviseMenuController {
 
   /** Dispatch for a keydown inside the editor root. Returns true when it
    *  owned the key (Escape on the free-text box; its Enter/send is wired by
-   *  the shared composer field, which calls sendFree). */
+   *  the shared composer field, which calls send). */
   handleKeydown(ev: KeyboardEvent): boolean {
     if (!(ev.target as HTMLElement).closest("[data-revise-free]")) return false;
     if (ev.key === "Escape") {
@@ -212,11 +212,6 @@ export class ReviseMenuController {
       this.setOpen(false);
     }
     return true;
-  }
-
-  /** Sends what was typed in the footer box. */
-  sendFree(text: string): void {
-    this.send(text);
   }
 
   destroy(): void {
@@ -241,7 +236,7 @@ export class ReviseMenuController {
 
   /** Saves the open edit first so the chat revises what is on screen, not
    *  the last autosave. */
-  private send(instruction: string): void {
+  send(instruction: string): void {
     const body = this.deps.bodyEl();
     const variant = this.deps.variant();
     if (!body || !variant) return;

@@ -183,9 +183,9 @@ function toggleCommentEditor(entry: TodoStepRow, label: string, tc: TodoChecklis
   field.textarea.focus();
 }
 
-/** Submit (or, on an empty box, just cancel) the open editor. Optimistic: the
- *  row updates immediately, and the daemon write happens best-effort in the
- *  background - an offline/failed write only warns (same degrade as
+/** Submit the open editor (the shared field never sends a blank box; Escape
+ *  cancels). Optimistic: the row updates immediately, and the daemon write
+ *  happens best-effort in the background - an offline/failed write only warns (same degrade as
  *  held-draft-sync.ts's add_held_message), since the note stays visible on
  *  the row either way (todo 898's "not silently lost" rule). */
 function submitStepComment(tc: TodoChecklistState, entry: TodoStepRow, label: string): void {
