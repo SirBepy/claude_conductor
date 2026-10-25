@@ -10,9 +10,13 @@ pub const HTML_TEMPLATE_MAX_BYTES: usize = 64 * 1024;
 pub const PINNED_MAX: usize = 20;
 /// A slash command line, not a document: longer is a paste gone wrong.
 const COMMAND_MAX_CHARS: usize = 200;
+/// A card button's prompt is a quick ask, not a spec; the card's own data is
+/// appended to it at click time, so it never has to carry any.
+pub const ACTION_PROMPT_MAX_CHARS: usize = 1000;
 
-/// Trims and checks a card's button in place: a label to show, and a command
-/// that is a slash command (the button starts a chat with it as the first message).
+/// Trims and checks a card's button in place: a label to show, and a prompt
+/// (a slash command or plain text) that the button sends as a new chat's
+/// first message, followed by the card's current data.
 pub fn validate_card(card: &mut CardConfig) -> Result<(), String> {
     if let CardDisplay::Html { template } = &card.display {
         if template.trim().is_empty() {
@@ -31,8 +35,11 @@ pub fn validate_card(card: &mut CardConfig) -> Result<(), String> {
     if label.chars().count() > ACTION_LABEL_MAX_CHARS {
         return Err(format!("action.label is longer than {ACTION_LABEL_MAX_CHARS} characters"));
     }
-    if !command.starts_with('/') || command.len() < 2 {
-        return Err("action.command must be a slash command like /sync".to_string());
+    if command.is_empty() || command == "/" {
+        return Err("action.command is required: a slash command like /sync or a short prompt".to_string());
+    }
+    if command.chars().count() > ACTION_PROMPT_MAX_CHARS {
+        return Err(format!("action.command is longer than {ACTION_PROMPT_MAX_CHARS} characters"));
     }
     Ok(())
 }
@@ -111,12 +118,21 @@ mod tests {
     }
 
     #[test]
+    fn a_plain_prompt_is_a_valid_action() {
+        let mut c = with_action("Triage", " Which of these need me today? ");
+        validate_card(&mut c).unwrap();
+        assert_eq!(c.action.unwrap().command, "Which of these need me today?");
+        assert!(validate_card(&mut with_action("ok", &"p".repeat(ACTION_PROMPT_MAX_CHARS))).is_ok());
+    }
+
+    #[test]
     fn bad_actions_are_refused() {
         assert!(validate_card(&mut with_action("", "/x")).is_err());
         assert!(validate_card(&mut with_action("   ", "/x")).is_err());
-        assert!(validate_card(&mut with_action("ok", "sync")).is_err());
         assert!(validate_card(&mut with_action("ok", "/")).is_err());
         assert!(validate_card(&mut with_action("ok", "")).is_err());
+        assert!(validate_card(&mut with_action("ok", "  ")).is_err());
+        assert!(validate_card(&mut with_action("ok", &"p".repeat(ACTION_PROMPT_MAX_CHARS + 1))).is_err());
         assert!(validate_card(&mut with_action(&"l".repeat(61), "/x")).is_err());
         assert!(validate_card(&mut with_action(&"l".repeat(60), "/x")).is_ok());
     }

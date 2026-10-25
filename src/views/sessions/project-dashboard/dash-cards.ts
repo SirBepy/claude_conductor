@@ -17,10 +17,41 @@ function progressBar(p: CardProgress): TemplateResult {
   </div>`;
 }
 
-function headlineLine(c: DashCtx, r: CardResultX, action: CardConfigX["action"]): TemplateResult | typeof nothing {
+/** An html card's raw data can be large; the chat gets enough to start from. */
+const DATA_JSON_MAX_CHARS = 8000;
+
+/** A card button's first message: its prompt, then what the card shows right
+ *  now, so the chat starts from the same numbers Joe is looking at. The prompt
+ *  leads because the CLI only expands a slash command at the very start; the
+ *  data after it is labelled as context so a skill does not read it as its
+ *  arguments. */
+export function cardMessage(v: CardView): string {
+  const prompt = v.config.action?.command ?? "";
+  const r = v.result as CardResultX | null;
+  if (!r) return `${prompt}\n\n(The dashboard card "${v.config.title}" has not been fetched yet, so there is no data from it.)`;
+  const lines: string[] = [];
+  if (r.headline) lines.push(r.headline);
+  if (r.progress) {
+    const p = r.progress;
+    lines.push(`${p.label || "Progress"}: ${p.value} of ${p.max}${p.behind ? " (behind)" : ""}`);
+  }
+  for (const s of r.stats) lines.push(`- ${s.label}: ${s.value}`);
+  for (const x of r.rows) lines.push(`- ${x.label}${x.value ? `: ${x.value}` : ""}${x.link ? ` (${x.link})` : ""}`);
+  if (v.config.display.kind === "html" && r.data !== undefined && r.data !== null) {
+    const json = JSON.stringify(r.data);
+    lines.push(json.length > DATA_JSON_MAX_CHARS ? `${json.slice(0, DATA_JSON_MAX_CHARS)}... (cut)` : json);
+  }
+  if (r.error) lines.push(`The card's last fetch failed: ${r.error}`);
+  if (!lines.length) lines.push("(The card shows nothing right now.)");
+  const when = new Date(r.fetched_at_ms).toLocaleString();
+  return `${prompt}\n\nContext, not arguments: the dashboard card "${v.config.title}" (fetched ${when}) shows:\n${lines.join("\n")}`;
+}
+
+function headlineLine(c: DashCtx, r: CardResultX, v: CardView): TemplateResult | typeof nothing {
+  const action = (v.config as CardConfigX).action;
   if (!r.headline && !action) return nothing;
   const button = action ? html`<button type="button" class="pd-act" data-pd-action
-    @click=${(e: Event) => c.act.runCommand(e.currentTarget as HTMLElement, action.command)}>${action.label}<i class="ph ph-arrow-right"></i></button>` : nothing;
+    @click=${(e: Event) => c.act.runCardAction(e.currentTarget as HTMLElement, cardMessage(v))}>${action.label}<i class="ph ph-arrow-right"></i></button>` : nothing;
   return html`<div class="pd-headline">
     <span class="pd-hl-t ${r.headline_tone ?? ""}">${r.headline ?? ""}</span>${button}</div>`;
 }
@@ -34,7 +65,7 @@ function cardBody(c: DashCtx, v: CardView): { body: TemplateResult[], pager: Tem
   // bar, say); only its action button stays the dashboard's.
   const own = display.kind === "html";
   if (r.progress && !own) parts.push(progressBar(r.progress));
-  const line = headlineLine(c, own ? { ...r, headline: null } : r, (v.config as CardConfigX).action);
+  const line = headlineLine(c, own ? { ...r, headline: null } : r, v);
   if (line !== nothing) parts.push(line);
   if (r.error) parts.push(html`<div class="pd-err">${r.error}</div>`);
   const extras = !!(r.progress || r.headline);

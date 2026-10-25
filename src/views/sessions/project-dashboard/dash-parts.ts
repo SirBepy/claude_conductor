@@ -12,6 +12,11 @@ export interface DashActions {
    *  into the draft's message box; on the standalone page it starts a draft
    *  with the command already typed. Never sent on its own. */
   runCommand(anchor: HTMLElement, command?: string): void;
+  /** A card's button: SENDS `message` (its prompt plus the card's data) at
+   *  once. Inside a draft it sends from the draft; on the standalone page it
+   *  starts a chat on the project's usual model, asking only what it must
+   *  (which repo of a group, an account when none is the default). */
+  runCardAction(anchor: HTMLElement, message: string): void;
   /** Leave the standalone page for the chat that was open before it. */
   back(): void;
   openIn(anchor: HTMLElement, kind: "vscode" | "terminal" | "explorer"): void;

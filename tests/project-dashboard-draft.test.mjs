@@ -106,6 +106,20 @@ describe("draft dashboard", () => {
     expect(launch).not.toHaveBeenCalled();
   });
 
+  it("a card's button sends its command and the card's data from this draft at once", async () => {
+    snapshot = groupSnapshot();
+    const composer = { getDraftText: vi.fn(() => ""), setDraftText: vi.fn(), sendText: vi.fn(), focus: vi.fn() };
+    state.composer = composer;
+    const launch = vi.fn();
+    state.launchNewChatCallback = launch;
+    const pane = await mountDraft(ZIRTUE_REPOS[0].cwd);
+    await vi.waitFor(() => expect(pane.querySelector('[data-pd-card="card:c5"] [data-pd-action]')).not.toBeNull());
+    pane.querySelector('[data-pd-card="card:c5"] [data-pd-action]').click();
+    expect(composer.sendText).toHaveBeenCalledTimes(1);
+    expect(composer.sendText.mock.calls[0][0]).toMatch(/^\/shortcut-priorities\n\nContext, not arguments:[\s\S]*sc-4821 Retry ACH/);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
   it("comes down with its chips on unmount", async () => {
     const pane = await mountDraft("C:/Projects/conductor");
     unmountDraftDashboard(pane);
