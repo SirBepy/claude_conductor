@@ -79,7 +79,24 @@ describe("click", () => {
     const root = mount(String.raw`<p>C:\Users\x\a.ts:9</p>`);
     linkifyFilePaths(root);
     click(root);
-    expect(invokeMock).toHaveBeenCalledWith("open_in_editor", { path: String.raw`C:\Users\x\a.ts` });
+    expect(invokeMock).toHaveBeenCalledWith("open_in_editor", { path: String.raw`C:\Users\x\a.ts`, line: 9 });
+  });
+
+  it("forwards the chip's line and column", () => {
+    const root = mount("<p>/home/joe/project/a.rs:42:7</p>");
+    linkifyFilePaths(root);
+    click(root);
+    expect(invokeMock.mock.calls[0][1]).toMatchObject({ path: "/home/joe/project/a.rs", line: 42, col: 7 });
+  });
+
+  it("passes no line for a chip without one", () => {
+    const root = mount("<p>/home/joe/project/a.rs</p>");
+    linkifyFilePaths(root);
+    click(root);
+    const args = invokeMock.mock.calls[0][1];
+    expect(args.path).toBe("/home/joe/project/a.rs");
+    expect(args.line).toBeUndefined();
+    expect(args.col).toBeUndefined();
   });
 
   it("only copies the path on the phone", () => {
