@@ -131,12 +131,15 @@ describe("draft dashboard", () => {
 describe("right-click menu", () => {
   const rightClick = (el) => el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
   const items = () => [...document.querySelectorAll(".session-more-menu .smore-item")].map((b) => b.textContent.trim());
+  // The menu opens once the automation-flag read (channelFor) settles.
+  const opened = () => vi.waitFor(() => expect(items().length).toBeGreaterThan(0));
 
   it("puts a live chat's own actions above the project's, split by a divider", async () => {
     state.sessions = [{ session_id: "s-w" }];
     const pane = await mountDraft("C:/Projects/conductor");
     const row = [...pane.querySelectorAll(".pd-row")].find((r) => r.textContent.includes("Loop todos cycle 3"));
     rightClick(row);
+    await opened();
     expect(items().slice(0, 3)).toEqual(["Open chat", "Close chat...", "Rename project..."]);
     expect(document.querySelector(".session-more-menu .smore-sep")).not.toBeNull();
     expect(items()).toContain("Folder mapping...");
@@ -145,12 +148,14 @@ describe("right-click menu", () => {
   it("offers copying a commit's hash", async () => {
     const pane = await mountDraft("C:/Projects/conductor");
     rightClick(pane.querySelector(".pd-sha").closest(".pd-row"));
+    await opened();
     expect(items()[0]).toBe("Copy commit hash");
   });
 
   it("on empty space shows just the project actions", async () => {
     const pane = await mountDraft("C:/Projects/conductor");
     rightClick(pane.querySelector(".pd-root"));
+    await opened();
     expect(items()[0]).toBe("Rename project...");
     expect(document.querySelector(".session-more-menu .smore-sep")).toBeNull();
   });

@@ -150,6 +150,16 @@ export function initMachineProfileSync(onChange: () => void): () => void {
   };
 }
 
+let profileSyncRerender: (() => void) | null = null;
+
+/** Once per page: the Chats view re-mounts on every navigation, so the latest
+ *  mount's re-render replaces the old one instead of stacking listeners. */
+export function startMachineProfileSync(onChange: () => void): void {
+  const first = profileSyncRerender === null;
+  profileSyncRerender = onChange;
+  if (first) initMachineProfileSync(() => profileSyncRerender?.());
+}
+
 /** Icon for a machine id; `null` means this daemon. `null` result = not known yet. */
 export function machineIcon(machineId: string | null): string | null {
   const id = machineId ?? selfId;
