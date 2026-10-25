@@ -42,15 +42,23 @@ function resolve(id: string, msg: Element, container: ParentNode): ChatDetail | 
 }
 
 /** Turns `<a href="#d:id">` in assistant bubbles into drill chips. An id with
- *  no definition degrades to its plain label, never a dead link. */
+ *  no definition degrades to a plain-looking span that keeps its id, so a later
+ *  run (history paging loads the defining message) can upgrade it to a chip. */
 export function linkifyDrillRefs(root: HTMLElement, container: ParentNode = root): void {
   const scope = root.matches(".msg.assistant") ? [root] : Array.from(root.querySelectorAll<HTMLElement>(".msg.assistant"));
   for (const msg of scope) {
-    for (const a of Array.from(msg.querySelectorAll<HTMLAnchorElement>('a[href^="#d:"]'))) {
-      const id = (a.getAttribute("href") ?? "").slice(3);
+    const pending = Array.from(msg.querySelectorAll<HTMLElement>("span.drill-pending[data-d]"));
+    for (const el of [...Array.from(msg.querySelectorAll<HTMLAnchorElement>('a[href^="#d:"]')), ...pending]) {
+      const id = el instanceof HTMLAnchorElement ? (el.getAttribute("href") ?? "").slice(3) : (el.dataset.d ?? "");
       const detail = resolve(id, msg, container);
       if (!detail) {
-        a.replaceWith(document.createTextNode(a.textContent ?? ""));
+        if (el instanceof HTMLAnchorElement) {
+          const span = document.createElement("span");
+          span.className = "drill-pending";
+          span.dataset.d = id;
+          span.textContent = el.textContent;
+          el.replaceWith(span);
+        }
         continue;
       }
       const chip = document.createElement("button");
@@ -58,9 +66,9 @@ export function linkifyDrillRefs(root: HTMLElement, container: ParentNode = root
       chip.className = "drill-chip";
       chip.dataset.d = id;
       chip.setAttribute("aria-expanded", "false");
-      chip.textContent = a.textContent;
+      chip.textContent = el.textContent;
       chipDetail.set(chip, detail);
-      a.replaceWith(chip);
+      el.replaceWith(chip);
     }
   }
 }
