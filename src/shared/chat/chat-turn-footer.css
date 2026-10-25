@@ -241,7 +241,11 @@
   font-size: 12px;
   background: var(--color-background);
 }
+/* Grows from 0, not its text width: under the row's flex-wrap a label wider
+   than the line would otherwise drop below the icon, onto the connector. */
 .todo-step-label {
+  flex: 1 1 0;
+  min-width: 0;
   font-size: 0.76rem;
   color: var(--color-text-muted);
   padding-top: 1px;
