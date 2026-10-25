@@ -188,6 +188,20 @@ pub enum AuthOutcome {
     Invalid,
 }
 
+/// Longest device or machine name, in characters, that fits the Paired
+/// devices rows and the chat-list machine chip without truncating.
+pub const MAX_LABEL_CHARS: usize = 40;
+
+/// The one trim-and-bound rule for a device or machine name. Counts chars,
+/// not bytes, so a multi-byte name gets the same 40 as an ASCII one.
+pub fn normalize_label(raw: &str) -> Result<&str, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > MAX_LABEL_CHARS {
+        return Err(format!("must be 1..={MAX_LABEL_CHARS} characters"));
+    }
+    Ok(trimmed)
+}
+
 pub struct DeviceRegistry;
 
 impl DeviceRegistry {
@@ -401,6 +415,16 @@ impl DeviceRegistry {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn normalize_label_rules() {
+        assert!(normalize_label("").is_err());
+        assert!(normalize_label("   \t").is_err());
+        assert_eq!(normalize_label("  Desk  "), Ok("Desk"));
+        assert!(normalize_label(&"a".repeat(40)).is_ok());
+        assert!(normalize_label(&"a".repeat(41)).is_err());
+        assert!(normalize_label(&"é".repeat(40)).is_ok());
+    }
 
     #[test]
     fn validate_token_fail_closed_without_registry() {

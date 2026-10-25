@@ -124,10 +124,7 @@ pub async fn rename_remote_device(id: String, name: String) -> Result<bool, Stri
 /// (`rename_machine`), which also restamps the chat list, and renaming only
 /// this copy would leave the two disagreeing.
 fn rename_phone(id: &str, name: &str, app_data: &std::path::Path) -> Result<bool, String> {
-    let trimmed = name.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > 40 {
-        return Err("name must be 1..=40 characters".to_string());
-    }
+    let trimmed = crate::daemon::device_registry::normalize_label(name).map_err(|e| format!("name {e}"))?;
     let is_machine = DeviceRegistry::list_devices(app_data)
         .iter()
         .any(|d| d.id == id && d.kind == crate::daemon::device_registry::DeviceKind::Machine);
