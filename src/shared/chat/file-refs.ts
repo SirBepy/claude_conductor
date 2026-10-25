@@ -10,9 +10,14 @@ import { createMoreMenu } from "../../views/sessions/more-menu-base";
 // lookbehinds keep a URL (`https://a/b/c`, `://` and `m/a/b/c`) and a path glued
 // to a word from matching; `:` is excluded from the body so the optional
 // `:line[:col]` suffix is explicit and a trailing sentence colon is not eaten.
-const WIN = String.raw`(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s"'<>|*?:` + "`" + String.raw`()\[\]{},;]+`;
+// `& ^ % !` join the excluded set because the path can reach `cmd /C code` on
+// Windows, where they are command syntax (the Rust side refuses them too).
+const WIN = String.raw`(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s"'<>|&^%!*?:` + "`" + String.raw`()\[\]{},;]+`;
 const UNIX = String.raw`(?<![\w./:~@-])\/(?:[\w.@+~-]+\/){2,}[\w.@+~-]+`;
-const SUFFIX = String.raw`(?::\d+(?::\d+)?)?`;
+// 9 digits max so the value fits the backend's u32; an overlong number drops
+// the whole suffix (the trailing lookahead forces the backtrack) rather than
+// carrying a truncated line.
+const SUFFIX = String.raw`(?::\d{1,9}(?::\d{1,9})?)?(?!\d)`;
 const PATH_RE = new RegExp(`(?:${WIN}|${UNIX})${SUFFIX}`, "g");
 
 export interface FileRef {

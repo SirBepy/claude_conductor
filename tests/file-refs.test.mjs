@@ -25,6 +25,23 @@ beforeEach(() => {
   document.body.innerHTML = "";
 });
 
+describe("shell metacharacters and overlong line numbers", () => {
+  it("never carries & ^ % ! into a chip path", () => {
+    for (const bad of String.raw`C:\x&calc.exe|C:\x^y\a.ts|C:\%TEMP%\a.ts|C:\x!y\a.ts`.split("|")) {
+      const paths = findFileRefs(`open ${bad} now`).map((r) => r.path);
+      expect(paths.some((p) => /[&^%!]/.test(p))).toBe(false);
+    }
+  });
+
+  it("drops a suffix whose number does not fit a u32 instead of carrying it", () => {
+    const [ref] = findFileRefs("see /home/joe/project/a.rs:99999999999 here");
+    expect(ref.path).toBe("/home/joe/project/a.rs");
+    expect(ref.line).toBeNull();
+    const [ok] = findFileRefs("see /home/joe/project/a.rs:123456789:7 here");
+    expect([ok.line, ok.col]).toEqual([123456789, 7]);
+  });
+});
+
 describe("linkifyFilePaths", () => {
   it("chips Windows and Unix paths, keeping a line suffix", () => {
     const root = mount(String.raw`<p>See C:\Users\x\proj\src\a.ts:12 and C:/Users/x/b.ts and /home/joe/project/a.rs:3:4.</p>`);
