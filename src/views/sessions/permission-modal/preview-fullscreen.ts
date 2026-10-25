@@ -24,7 +24,7 @@ import { previewedOptions } from "./option-previews";
 import type { Question, Selection } from "./types";
 import "../permission-modal-preview-fullscreen.css";
 
-export const PREVIEW_FULLSCREEN_CLASS = "auq-fs";
+const PREVIEW_FULLSCREEN_CLASS = "auq-fs";
 
 // Px of sideways travel, at fit zoom, before a drag counts as paging.
 const SWIPE_PX = 50;
