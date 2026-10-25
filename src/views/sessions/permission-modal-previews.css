@@ -32,8 +32,9 @@
 .prompt-opt.is-selected .prompt-opt__pic {
   border-color: var(--dom, var(--color-primary));
 }
-/* An iframe eats the click, so a layer over it hands the click back to the
- * row's <label> - clicking the picture picks the option like the text does. */
+/* An iframe eats the click, so a layer over it takes the click for the card:
+ * option-previews.ts opens the picture fullscreen from it, and stops the
+ * row's <label> from also picking the option. */
 .prompt-opt__pic::after {
   content: "";
   position: absolute;

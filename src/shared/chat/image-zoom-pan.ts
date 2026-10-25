@@ -1,7 +1,8 @@
 // Cursor-anchored zoom (scroll wheel, continuous; or a plain click, toggling
 // between fit and a fixed zoomed-in level) + drag-to-pan for an <img> inside
-// a fixed-size container. Shared by lightbox.ts (single-image view) and
-// chat-image-gallery.ts (multi-image view) - same interaction on both.
+// a fixed-size container. Shared by lightbox.ts (single-image view),
+// chat-image-gallery.ts (multi-image view) and the AUQ fullscreen preview
+// (a div wrapping a pointer-events:none iframe) - same interaction on all.
 //
 // The container must be sized to the actual viewing area (not shrunk to the
 // image's own pre-transform size) and have `overflow: hidden` - otherwise a
@@ -26,7 +27,13 @@ const OVERPAN_FRACTION = 0.35;
  *  navigation instead of getting recreated per image like the lightbox's
  *  `inner` does) - otherwise each new image stacks another wheel listener on
  *  top of the container instead of replacing it. */
-export function setupImageZoomPan(img: HTMLImageElement, container: HTMLElement): () => void {
+export function setupImageZoomPan(
+  img: HTMLElement,
+  container: HTMLElement,
+  /** Fires on every transform change. The AUQ fullscreen preview reads it so a
+   *  sideways drag pages options only while the view is not zoomed in. */
+  onScale?: (scale: number) => void,
+): () => void {
   let scale = 1;
   let tx = 0;
   let ty = 0;
@@ -38,6 +45,7 @@ export function setupImageZoomPan(img: HTMLImageElement, container: HTMLElement)
     img.style.transition = animated ? `transform ${ZOOM_ANIM_MS}ms ease` : "none";
     img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
     img.style.cursor = scale > MIN_SCALE ? "grab" : "zoom-in";
+    onScale?.(scale);
   }
 
   function clampPan(): void {
