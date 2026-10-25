@@ -157,7 +157,7 @@ export async function renderRemoteAccessView(
 
 function template() {
   return html`
-    <div class="view view-settings">
+    <div class="view view-settings-remote-access">
       ${settingsHeader("Remote access")}
       <div class="view-body">
 
