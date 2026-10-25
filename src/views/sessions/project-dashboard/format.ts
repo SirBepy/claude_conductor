@@ -41,10 +41,6 @@ export function targetForRepo(rows: DashboardListRow[], cwd: string, projectId: 
   return project ? { kind: "project", id: project.target.id } : { kind: "project", id: cwd };
 }
 
-export function sameRef(a: DashboardTargetRef | null, b: DashboardTargetRef | null): boolean {
-  return !!a && !!b && a.kind === b.kind && a.id === b.id;
-}
-
 /** Slash/case-insensitive path equality: a repo_cwd and a project path can differ only in separators. */
 export function sameCwd(a: string, b: string): boolean {
   const norm = (p: string): string => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();

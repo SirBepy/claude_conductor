@@ -55,7 +55,8 @@ let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Open a specific past session read-only on the next History-view mount. Used
- * by the session-detail "Open in chats" CTA when the chat is already closed.
+ * by the chats-window cross-window open request and the project dashboard's
+ * closed-chat rows.
  */
 export function queueHistorySelect(sessionId: string): void {
   _pendingSelect = sessionId;
@@ -255,7 +256,7 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
   renderList(listEl, state.entries, state.filters, state.selectedId);
   if (projectSelect) renderProjectFilterOptions(projectSelect, state.projectOptions, state.filters.projectId);
 
-  // If session-detail asked us to open a specific closed chat, select it now.
+  // If a caller queued a specific closed chat (queueHistorySelect), select it now.
   // Otherwise auto-select the most recent session - except on the phone,
   // which should land on the filterable list first (matches Sessions'
   // isRemote() gate) rather than jumping straight into a chat.

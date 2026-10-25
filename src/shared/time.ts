@@ -34,12 +34,3 @@ export function timeAgo(dateStr: string | null | undefined): string {
   if (months < 12) return `${months}mo`;
   return `${Math.floor(months / 12)}y`;
 }
-
-export function uptimeFrom(iso: string): string {
-  const start = new Date(iso).getTime();
-  const delta = Math.max(0, Date.now() - start);
-  const s = Math.floor(delta / 1000);
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
-}

@@ -22,12 +22,6 @@ export function formatTokens(n: number): string {
   return String(Math.round(n));
 }
 
-/** Always render in millions (one decimal), e.g. 245_443 -> "0.2M", 0 -> "0M". */
-export function formatMillions(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return "0M";
-  return (n / 1_000_000).toFixed(1) + "M";
-}
-
 export function formatTimeAgo(iso: string | Date): string {
   const ts = typeof iso === "string" ? new Date(iso).getTime() : iso.getTime();
   const diff = Math.max(0, Date.now() - ts);
