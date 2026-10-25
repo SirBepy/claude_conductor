@@ -19,6 +19,7 @@
 
 import type { TurnFooterState } from "./turn-chips";
 import { addStepComment } from "./step-comment-sync";
+import { composerFieldHtml, wireComposerField, type ComposerFieldWiring } from "./composer-field";
 
 export type TodoStepStatus = "pending" | "active" | "done" | "skipped" | "interrupted";
 
@@ -31,6 +32,7 @@ interface TodoStepCommentState {
   /** Present only while the inline editor is open. */
   editor: HTMLElement | null;
   textarea: HTMLTextAreaElement | null;
+  field?: ComposerFieldWiring | null;
   /** Last submitted comment text, or null before any submit. A non-null
    *  value is also the signal that keeps this affordance alive once the step
    *  leaves `pending` - see applyTodoStepStatus. */
@@ -145,6 +147,8 @@ function createCommentAffordance(row: HTMLElement): TodoStepCommentState {
 }
 
 function closeCommentEditor(c: TodoStepCommentState): void {
+  c.field?.destroy();
+  c.field = null;
   c.editor?.remove();
   c.editor = null;
   c.textarea = null;
@@ -160,28 +164,23 @@ function toggleCommentEditor(entry: TodoStepRow, label: string, tc: TodoChecklis
   }
   const editor = document.createElement("div");
   editor.className = "todo-step-comment-editor";
-  const textarea = document.createElement("textarea");
-  textarea.className = "todo-step-comment-textarea";
-  textarea.placeholder = "Note for this step (e.g. \"skip this\")...";
-  textarea.rows = 2;
-  textarea.value = c.text ?? "";
-  textarea.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      submitStepComment(tc, entry, label);
-    } else if (e.key === "Escape") {
-      closeCommentEditor(c);
-    }
+  editor.innerHTML = composerFieldHtml({
+    inputClass: "todo-step-comment-textarea",
+    sendClass: "todo-step-comment-send",
+    placeholder: "Note for this step (e.g. \"skip this\")...",
+    value: c.text ?? "",
   });
-  const send = document.createElement("i");
-  send.className = "ph ph-paper-plane-right todo-step-comment-send";
-  send.title = "Send";
-  editor.appendChild(textarea);
-  editor.appendChild(send);
   entry.row.appendChild(editor);
+  const field = wireComposerField(editor.querySelector<HTMLElement>(".composer-field")!, {
+    onSend: () => submitStepComment(tc, entry, label),
+  })!;
+  field.textarea.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeCommentEditor(c);
+  });
   c.editor = editor;
-  c.textarea = textarea;
-  textarea.focus();
+  c.textarea = field.textarea;
+  c.field = field;
+  field.textarea.focus();
 }
 
 /** Submit (or, on an empty box, just cancel) the open editor. Optimistic: the
@@ -222,13 +221,10 @@ export function ensureTodoChecklist(st: TurnFooterState | undefined): void {
     const tc = st.todoChecklist;
     if (!tc) return;
     const target = e.target as HTMLElement | null;
-    const sendBtn = target?.closest?.(".todo-step-comment-send") as HTMLElement | null;
-    if (sendBtn) {
+    // The note editor wires its own send (composer-field.ts); a click in it
+    // must not also fold/unfold the row it sits in.
+    if (target?.closest?.(".todo-step-comment-editor")) {
       e.stopPropagation();
-      const rowEl = sendBtn.closest(".todo-step") as HTMLElement | null;
-      const label = rowEl?.dataset.stepLabel;
-      const entry = label ? tc.rows.get(label) : undefined;
-      if (entry && label) submitStepComment(tc, entry, label);
       return;
     }
     const commentBtn = target?.closest?.(".todo-step-comment-btn") as HTMLElement | null;

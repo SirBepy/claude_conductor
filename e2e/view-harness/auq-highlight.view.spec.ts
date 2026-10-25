@@ -34,7 +34,7 @@ test("typing a known /skill in the AUQ free-text field renders a purple cm-slash
   const input = card.locator(".prompt-q__other-input");
   await input.fill("/close");
 
-  const highlight = card.locator(".prompt-q__other .cc-typing-highlight");
+  const highlight = card.locator(".prompt-card__answer-bar .composer-highlight");
   const span = highlight.locator(".cm-slash-user-skill");
   await expect(span).toHaveCount(1);
   await expect(span).toHaveText("/close");

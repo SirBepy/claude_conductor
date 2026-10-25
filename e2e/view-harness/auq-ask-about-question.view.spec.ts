@@ -77,3 +77,4 @@ test("on a phone, the Ask window covers the fullscreen question card", async ({ 
   await expect(page.locator(".fab-dial-fab")).toBeHidden();
 });
 // Reviewed 2026-10-23: question card passes its session id to the option-preview image reader; the preview-open slug lookup is scoped to the selected chat; the contract asserted here is unchanged.
+// Reviewed 2026-10-25: the Ask panel box became the shared composer field (a textarea, seeded via seed()); this spec's question-to-Ask hand-off contract is unchanged and it passes.

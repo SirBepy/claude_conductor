@@ -67,6 +67,13 @@ function makeTodoWriteToolUse(todos, id = "tw1", tsMs = 0) {
   };
 }
 
+// Types like a user would, so the shared field's send button enables.
+function typeNote(container, text) {
+  const ta = container.querySelector(".todo-step-comment-textarea");
+  ta.value = text;
+  ta.dispatchEvent(new ta.ownerDocument.defaultView.Event("input", { bubbles: true }));
+}
+
 describe("write_plan step comments (todo 898)", () => {
   let dom;
   let document;
@@ -140,6 +147,7 @@ describe("write_plan step comments (todo 898)", () => {
     const textarea = container.querySelector(".todo-step-comment-textarea");
     expect(textarea).toBeTruthy();
     textarea.value = "skip this one";
+    textarea.dispatchEvent(new window.Event("input", { bubbles: true }));
     const send = container.querySelector(".todo-step-comment-send");
     send.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 
@@ -154,16 +162,20 @@ describe("write_plan step comments (todo 898)", () => {
     );
   });
 
-  it("submitting an empty box cancels instead of queuing a blank note", async () => {
+  it("a blank box cannot send, and Escape closes it without queuing a note", async () => {
     const { renderer, container } = await createRenderer("s1");
     renderer.handleEvent(makeUserMessage("Do the thing"));
     renderer.handleEvent(makeWritePlanToolUse([{ text: "Read the spec", status: "pending" }]));
 
     container.querySelector(".todo-step-comment-btn")
       .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    container.querySelector(".todo-step-comment-textarea").value = "   ";
-    container.querySelector(".todo-step-comment-send")
-      .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    typeNote(container, "   ");
+    expect(container.querySelector(".todo-step-comment-send").disabled).toBe(true);
+    container.querySelector(".todo-step-comment-textarea")
+      .dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(container.querySelector(".todo-step-comment-textarea")).toBeTruthy();
+    container.querySelector(".todo-step-comment-textarea")
+      .dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 
     expect(container.querySelector(".todo-step-comment-textarea")).toBeNull();
     expect(container.querySelector(".todo-step-comment-btn--noted")).toBeNull();
@@ -189,7 +201,7 @@ describe("write_plan step comments (todo 898)", () => {
     renderer.handleEvent(makeWritePlanToolUse([{ text: "Read the spec", status: "pending" }], "wp1", 1));
     container.querySelector(".todo-step-comment-btn")
       .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    container.querySelector(".todo-step-comment-textarea").value = "skip this one";
+    typeNote(container, "skip this one");
     container.querySelector(".todo-step-comment-send")
       .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 
@@ -217,7 +229,7 @@ describe("write_plan step comments (todo 898)", () => {
     expect(container.querySelectorAll(".todo-step-comment-btn").length).toBe(1);
     container.querySelector(".todo-step-comment-btn")
       .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    container.querySelector(".todo-step-comment-textarea").value = "do we need this?";
+    typeNote(container, "do we need this?");
     container.querySelector(".todo-step-comment-send")
       .dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 

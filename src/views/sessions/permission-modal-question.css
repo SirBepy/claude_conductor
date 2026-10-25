@@ -163,59 +163,9 @@
   line-height: 1.4;
 }
 
-/* Free-text fallback below the options. Lives on every question so the user
- * can always write their own answer when the offered options don't fit. */
-.prompt-q__other {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 4px;
-}
-.prompt-q__other-label {
-  font-size: 0.72rem;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-/* .prompt-extra-input is the review step's "add a message" box - same widget,
- * different class, so it must be listed here or it renders browser-default. */
-/* :not(.composer-textarea): the phone question page renders these hooks on
- * the Preview composer's own field (question-ui-templates.ts), which keeps
- * composer.css's look untouched. */
-.prompt-q__other-input:not(.composer-textarea),
-.prompt-extra-input:not(.composer-textarea) {
-  resize: none;
-  min-height: 32px;
-  max-height: 160px;
-  padding: 8px 10px;
-  background: var(--color-surface-alt);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  color: var(--color-text);
-  font: inherit;
-  font-size: 0.88rem;
-  line-height: 1.4;
-  outline: none;
-  transition: border-color 0.12s, background 0.12s;
-}
-.prompt-q__other-input:not(.composer-textarea):focus,
-.prompt-extra-input:not(.composer-textarea):focus {
-  border-color: var(--color-primary);
-  background: var(--color-surface);
-}
-.prompt-q__other-input:not(.composer-textarea)::placeholder,
-.prompt-extra-input:not(.composer-textarea)::placeholder {
-  color: var(--color-text-muted);
-}
-
-/* Review-step extra message + pasted-image attachments (question-ui.ts,
- * gated on supportsExtras). Attachment chip styles (.attachment/.rm/etc.)
- * come from composer.css's .composer-attachments rules, already global. No
- * padding of its own - the footer's own padding + gap already space it from
- * the card edge and from Skip/Next, now that it sits inline in that row. */
-.prompt-extra-message {
-  margin: 0;
-}
+/* Pasted-image attachments (question-ui.ts, gated on supportsExtras).
+ * Attachment chip styles (.attachment/.rm/etc.) come from composer.css's
+ * .composer-attachments rules, already global. */
 .prompt-attachments {
   margin-top: 4px;
 }
@@ -249,10 +199,6 @@
 .prompt-sect i {
   font-size: 0.9rem;
   color: var(--color-text-muted);
-}
-
-.prompt-own {
-  padding: 0;
 }
 
 /* Header icon buttons (nav arrows + minimize). */

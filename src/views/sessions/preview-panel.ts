@@ -21,6 +21,7 @@ import { isMirrored } from "./sessions-helpers";
 import { state } from "./state";
 import "../../shared/chat/caret-popup/popup.css";
 import "../../shared/chat/composer.css";
+import { composerFieldHtml } from "../../shared/chat/composer-field";
 
 /** What callers drive Preview through, in a pane window or the pop-out. */
 export type PreviewController = RailController;
@@ -329,15 +330,12 @@ class PreviewTab implements RailTabHandle {
       <div class="pv-body">
         <div class="pv-canvas"></div>
       </div>
-      <div class="pv-composer">
-        <div class="composer-input-wrap">
-          <div class="composer-highlight" aria-hidden="true"></div>
-          <textarea class="composer-textarea pv-composer-input" rows="1" placeholder="Message the session that pushed this preview..."></textarea>
-        </div>
-        <button type="button" class="pv-composer-send icon-btn" title="Send" disabled>
-          <i class="ph ph-paper-plane-right"></i>
-        </button>
-      </div>
+      ${composerFieldHtml({
+        rowClass: "composer-field--docked pv-composer",
+        inputClass: "pv-composer-input",
+        sendClass: "pv-composer-send",
+        placeholder: "Message the session that pushed this preview...",
+      })}
     `;
     this.renderCanvasEmpty();
   }

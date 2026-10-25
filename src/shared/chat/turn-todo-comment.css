@@ -28,41 +28,10 @@
   color: var(--color-primary);
 }
 
+/* The box itself is the shared composer field (composer-field.ts). */
 .todo-step-comment-editor {
   flex-basis: 100%;
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
   margin: 3px 0 2px 24px;
-}
-.todo-step-comment-textarea {
-  flex: 1;
-  min-width: 0;
-  resize: none;
-  font: inherit;
-  font-size: 0.74rem;
-  line-height: 1.4;
-  padding: 4px 6px;
-  color: var(--color-text);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-}
-.todo-step-comment-textarea:focus {
-  outline: none;
-  border-color: var(--color-primary);
-}
-.todo-step-comment-send {
-  flex-shrink: 0;
-  padding: 3px;
-  font-size: 0.82rem;
-  color: var(--color-primary);
-  cursor: pointer;
-  opacity: 0.75;
-  transition: opacity 0.15s ease;
-}
-.todo-step-comment-send:hover {
-  opacity: 1;
 }
 
 /* Collapsed-checklist chip fallback (settleTodoChecklist): once the turn

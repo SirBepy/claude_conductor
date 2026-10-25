@@ -29,7 +29,7 @@
   align-items: center;
   gap: 6px;
   font: inherit;
-  font-size: 0.77rem;
+  font-size: 0.85rem;
   text-align: left;
   cursor: pointer;
   background: none;
@@ -55,7 +55,7 @@
 .ask-panel .ask-n {
   flex: none;
   font-family: var(--font-mono), monospace;
-  font-size: 0.67rem;
+  font-size: 0.75rem;
   color: var(--color-text-muted);
   background: var(--color-surface-alt);
   border-radius: 3px;
@@ -84,7 +84,7 @@
   padding: 6px 7px;
   border-radius: 5px;
   cursor: pointer;
-  font-size: 0.77rem;
+  font-size: 0.85rem;
 }
 
 .ask-panel .ask-menu-row:hover {
@@ -133,7 +133,7 @@
   width: 100%;
   padding: 6px 7px;
   font: inherit;
-  font-size: 0.77rem;
+  font-size: 0.85rem;
   cursor: pointer;
   text-align: left;
   background: none;
@@ -157,33 +157,18 @@
   gap: 9px;
 }
 
-.ask-panel .ask-q {
-  align-self: flex-end;
-  max-width: 90%;
-  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-background));
-  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
-  border-radius: 6px;
-  padding: 6px 9px;
-  font-size: 0.81rem;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.ask-panel .ask-a {
-  align-self: flex-start;
-  max-width: 98%;
-  font-size: 0.81rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+/* Questions and answers are the chat's own .msg.user/.msg.assistant bubbles
+   (chat-messages-*.css). Only the chat's side gutters and bottom margin go:
+   the card is narrow, and .ask-body's gap already spaces them. */
+.ask-panel .ask-body .msg {
+  margin: 0;
 }
 
 .ask-panel .ask-empty {
   margin: auto;
   text-align: center;
   color: var(--color-text-muted);
-  font-size: 0.79rem;
+  font-size: 0.88rem;
   line-height: 1.6;
   padding: 12px 10px;
   display: flex;
@@ -197,7 +182,7 @@
 }
 
 .ask-panel .ask-ro {
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   opacity: 0.75;
 }
 
@@ -206,7 +191,7 @@
   align-items: center;
   gap: 8px;
   color: var(--color-text-muted);
-  font-size: 0.79rem;
+  font-size: 0.88rem;
 }
 
 .ask-panel .ask-spin {
@@ -224,7 +209,7 @@
 }
 
 .ask-panel .ask-error {
-  font-size: 0.76rem;
+  font-size: 0.88rem;
   line-height: 1.45;
   color: var(--color-danger);
   border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
@@ -245,7 +230,7 @@
 }
 
 .ask-panel .ask-handoff-hl {
-  font-size: 0.64rem;
+  font-size: 0.7rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--color-primary);
@@ -253,7 +238,7 @@
 }
 
 .ask-panel .ask-handoff-txt {
-  font-size: 0.78rem;
+  font-size: 0.88rem;
   line-height: 1.45;
   margin-bottom: 7px;
   overflow-wrap: anywhere;
@@ -261,7 +246,7 @@
 
 .ask-panel .ask-handoff button {
   font: inherit;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   cursor: pointer;
   background: none;
   color: var(--color-primary);
@@ -275,47 +260,4 @@
 
 .ask-panel .ask-handoff button:hover {
   background: color-mix(in srgb, var(--color-primary) 18%, transparent);
-}
-
-/* ── Composer ────────────────────────────────────────────────────────────── */
-.ask-panel .ask-input {
-  flex: none;
-  border-top: 1px solid var(--color-border);
-  padding: 7px 8px;
-  display: flex;
-  gap: 6px;
-}
-
-.ask-panel .ask-input input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-size: 0.8rem;
-  background: var(--color-background);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  padding: 5px 8px;
-}
-
-.ask-panel .ask-input input::placeholder {
-  color: var(--color-text-muted);
-}
-
-.ask-panel .ask-input button {
-  font: inherit;
-  font-size: 0.78rem;
-  cursor: pointer;
-  padding: 0 10px;
-  background: var(--color-secondary);
-  color: #12111c;
-  border: none;
-  border-radius: 4px;
-  font-weight: 600;
-}
-
-.ask-panel .ask-input input:disabled,
-.ask-panel .ask-input button:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
