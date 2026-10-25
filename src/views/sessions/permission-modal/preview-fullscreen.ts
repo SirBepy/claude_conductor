@@ -8,7 +8,10 @@
 // and moves to the next question, which opens here again if it has previews
 // and drops back to the normal card if it does not. A multi-select question
 // toggles with Select and moves on with Next. Back (top-left) is the previous
-// question, the X (top-right) returns to the card on the same question.
+// question, the X (top-right) returns to the card on the same question. A
+// strip of every option's thumbnail along the bottom jumps straight to one,
+// and the top bar's text toggle floats the option's description over the
+// bottom of the preview.
 //
 // The overlay lives on <body>, not in the card host, because every card
 // render() rebuilds the host's innerHTML and would wipe it.
@@ -25,6 +28,19 @@ export const PREVIEW_FULLSCREEN_CLASS = "auq-fs";
 
 // Px of sideways travel, at fit zoom, before a drag counts as paging.
 const SWIPE_PX = 50;
+
+// The option-text toggle is remembered per device across cards (Joe,
+// 2026-10-25): it is a reading preference, and the phone and the desktop can
+// want it differently. Shown until first turned off.
+const TEXT_PREF_KEY = "cc.auqFullscreen.optionText";
+
+function readTextPref(): boolean {
+  try { return localStorage.getItem(TEXT_PREF_KEY) !== "off"; } catch { return true; }
+}
+
+function writeTextPref(on: boolean): void {
+  try { localStorage.setItem(TEXT_PREF_KEY, on ? "on" : "off"); } catch { /* private mode: in-memory only */ }
+}
 
 export interface PreviewFullscreenDeps {
   questions: Question[];
@@ -66,6 +82,8 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
   let disposeZoom: (() => void) | null = null;
   let shownKey = "";
   let returnFocus: Element | null = null;
+  let stripFor = -1;
+  let textOn = readTextPref();
 
   const options = () => previewedOptions(questions[qi]!);
 
@@ -78,24 +96,29 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
       <div class="auq-fs__top">
         <button type="button" class="auq-fs__icon" data-fs="back" title="Previous question" aria-label="Previous question"><i class="ph ph-arrow-left"></i></button>
         <div class="auq-fs__title"><span class="auq-fs__qcount"></span><span class="auq-fs__qtext"></span></div>
+        <button type="button" class="auq-fs__icon auq-fs__text-toggle" data-fs="text"><i class="ph ph-text-align-left"></i></button>
         <button type="button" class="auq-fs__icon" data-fs="close" title="Back to the card" aria-label="Close fullscreen"><i class="ph ph-x"></i></button>
       </div>
-      <div class="auq-fs__view"></div>
+      <div class="auq-fs__view"><div class="auq-fs__desc" hidden></div></div>
       <div class="auq-fs__bar">
         <div class="auq-fs__nav">
-          <button type="button" class="auq-fs__icon" data-fs="prev" title="Previous option" aria-label="Previous option"><i class="ph ph-caret-left"></i></button>
-          <div class="auq-fs__opt"><span class="auq-fs__label"></span><span class="auq-fs__count"></span></div>
-          <button type="button" class="auq-fs__icon" data-fs="next" title="Next option" aria-label="Next option"><i class="ph ph-caret-right"></i></button>
+          <button type="button" class="auq-fs__icon auq-fs__arrow" data-fs="prev" title="Previous option" aria-label="Previous option"><i class="ph ph-caret-left"></i></button>
+          <div class="auq-fs__strip"></div>
+          <button type="button" class="auq-fs__icon auq-fs__arrow" data-fs="next" title="Next option" aria-label="Next option"><i class="ph ph-caret-right"></i></button>
         </div>
         <div class="auq-fs__actions">
+          <div class="auq-fs__opt"><span class="auq-fs__label"></span><span class="auq-fs__count"></span></div>
           <button type="button" class="btn auq-fs__select" data-fs="select"></button>
           <button type="button" class="btn btn-primary auq-fs__advance" data-fs="advance" hidden><i class="ph ph-caret-right"></i> Next</button>
         </div>
       </div>
     `;
     el.addEventListener("click", (e) => {
+      const thumb = (e.target as HTMLElement).closest<HTMLElement>("[data-fs-thumb]");
+      if (thumb) { idx = Number(thumb.dataset.fsThumb); sync(); return; }
       const act = (e.target as HTMLElement).closest<HTMLElement>("[data-fs]")?.dataset.fs;
-      if (act === "back") back();
+      if (act === "text") { textOn = !textOn; writeTextPref(textOn); sync(); }
+      else if (act === "back") back();
       else if (act === "close") close();
       else if (act === "prev") step(-1);
       else if (act === "next") step(1);
@@ -139,10 +162,26 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
     shownKey = key;
     disposeZoom?.();
     const view = root.querySelector<HTMLElement>(".auq-fs__view")!;
-    view.innerHTML = `<div class="auq-fs__canvas"><iframe class="auq-fs__frame" sandbox="" tabindex="-1" aria-hidden="true"></iframe></div>`;
-    view.querySelector<HTMLIFrameElement>(".auq-fs__frame")!.srcdoc = previewDocument(inlineLocalImages(opt.preview!, sessionId));
+    // Only the canvas is swapped: the description overlay is its sibling.
+    view.querySelector(".auq-fs__canvas")?.remove();
+    const canvas = document.createElement("div");
+    canvas.className = "auq-fs__canvas";
+    canvas.innerHTML = `<iframe class="auq-fs__frame" sandbox="" tabindex="-1" aria-hidden="true"></iframe>`;
+    canvas.querySelector<HTMLIFrameElement>(".auq-fs__frame")!.srcdoc = previewDocument(inlineLocalImages(opt.preview!, sessionId));
+    view.prepend(canvas);
     scale = 1;
-    disposeZoom = setupImageZoomPan(view.querySelector<HTMLElement>(".auq-fs__canvas")!, view, (s) => { scale = s; });
+    disposeZoom = setupImageZoomPan(canvas, view, (s) => { scale = s; });
+  }
+
+  // Built once per question; sync() only moves the highlight and the checks.
+  // Each thumbnail lays the preview out at 5x its box and scales it to 0.2,
+  // like the card's filmstrip, so it reads as a shrunken page, not a reflow.
+  function paintStrip(): void {
+    if (!root || stripFor === qi) return;
+    stripFor = qi;
+    root.querySelector<HTMLElement>(".auq-fs__strip")!.innerHTML = options().map((o, i) =>
+      `<button type="button" class="auq-fs__thumb" data-fs-thumb="${i}" title="${escapeHtml(o.label)}" aria-label="${escapeHtml(o.label)}"><iframe class="auq-fs__thumb-frame" sandbox="" tabindex="-1" aria-hidden="true" srcdoc="${escapeHtml(previewDocument(inlineLocalImages(o.preview!, sessionId)))}"></iframe><i class="ph-fill ph-check-circle auq-fs__thumb-pick" hidden></i></button>`,
+    ).join("");
   }
 
   function sync(): void {
@@ -152,9 +191,26 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
     if (!q || !opts.length) { close(); return; }
     idx = Math.min(Math.max(idx, 0), opts.length - 1);
     paintFrame();
+    paintStrip();
     const opt = opts[idx]!;
     const sel = selections.get(qi);
     const picked = isPicked(sel, opt.label);
+    root.querySelectorAll<HTMLElement>(".auq-fs__thumb").forEach((t) => {
+      const i = Number(t.dataset.fsThumb);
+      t.classList.toggle("is-current", i === idx);
+      const o = opts[i];
+      t.querySelector<HTMLElement>(".auq-fs__thumb-pick")!.hidden = !o || !isPicked(sel, o.label);
+    });
+    root.querySelector(".auq-fs__thumb.is-current")?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    const toggleBtn = root.querySelector<HTMLButtonElement>('[data-fs="text"]')!;
+    toggleBtn.classList.toggle("is-on", textOn);
+    toggleBtn.setAttribute("aria-pressed", String(textOn));
+    toggleBtn.title = textOn ? "Hide option text" : "Show option text";
+    toggleBtn.setAttribute("aria-label", toggleBtn.title);
+    const desc = root.querySelector<HTMLElement>(".auq-fs__desc")!;
+    const descText = opt.description?.trim() ?? "";
+    desc.hidden = !textOn || !descText;
+    if (desc.textContent !== descText) desc.textContent = descText;
     const text = (sel: string, value: string) => {
       const el = root!.querySelector<HTMLElement>(sel);
       if (el && el.textContent !== value) el.textContent = value;
@@ -276,6 +332,7 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
     root.remove();
     root = null;
     shownKey = "";
+    stripFor = -1;
     if (returnFocus instanceof HTMLElement && returnFocus.isConnected) returnFocus.focus();
     returnFocus = null;
   }

@@ -24,8 +24,10 @@
   background: var(--color-surface);
 }
 .auq-fs__top { border-bottom: 1px solid var(--color-border); }
+/* Two rows: the thumbnail strip, then the option label with the buttons. */
 .auq-fs__bar {
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
   border-top: 1px solid var(--color-border);
 }
 
@@ -45,6 +47,10 @@
 }
 .auq-fs__icon:hover:not(:disabled) { background: var(--color-background); }
 .auq-fs__icon:disabled { opacity: 0.3; cursor: default; }
+.auq-fs__text-toggle.is-on {
+  background: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  color: var(--color-primary);
+}
 
 .auq-fs__title {
   flex: 1;
@@ -92,20 +98,81 @@
   border: 0;
   pointer-events: none;
 }
+/* The option's description floats over the preview's bottom edge rather than
+ * taking height from it, so toggling it never resizes or re-zooms the page.
+ * pointer-events none: a drag that starts on it still pans/pages. */
+.auq-fs__desc {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 1;
+  max-height: 40%;
+  overflow: hidden;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  white-space: pre-line;
+  pointer-events: none;
+}
 
 .auq-fs__nav {
-  flex: 1 1 260px;
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.auq-fs__strip {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  padding: 2px;
+  overflow-x: auto;
+  justify-content: safe center;
+}
+.auq-fs__thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 110px;
+  height: 70px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 7px;
+  border: 2px solid var(--color-border);
+  background: var(--color-background);
+  cursor: pointer;
+}
+.auq-fs__thumb.is-current { border-color: var(--color-primary); }
+/* 5x the box, scaled 0.2 (the card filmstrip's trick): the preview lays out
+ * at a readable size and shrinks instead of reflowing into a 110px column. */
+.auq-fs__thumb-frame {
+  width: 500%;
+  height: 500%;
+  border: 0;
+  transform: scale(0.2);
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.auq-fs__thumb-pick {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  font-size: 15px;
+  color: var(--color-primary);
+  background: var(--color-background);
+  border-radius: 50%;
 }
 .auq-fs__opt {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: baseline;
-  justify-content: center;
   gap: 8px;
   font-size: 0.9rem;
 }
@@ -122,16 +189,19 @@
   vertical-align: -2px;
 }
 .auq-fs__actions {
-  flex: 0 0 auto;
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 .auq-fs__actions .btn { min-height: 36px; }
 
-/* Phone: the buttons take their own full-width row under the pager, so the
- * thumb lands on them and the option label keeps the whole first row. */
+/* Phone: no arrows (swipe and the strip page instead), smaller thumbnails,
+ * and the label takes its own row so the buttons span the width under it. */
 @media (max-width: 768px) {
-  .auq-fs__actions { flex: 1 1 100%; }
+  .auq-fs__arrow { display: none; }
+  .auq-fs__thumb { width: 72px; height: 50px; }
+  .auq-fs__actions { flex-wrap: wrap; }
+  .auq-fs__opt { flex: 1 1 100%; }
   .auq-fs__actions .btn { flex: 1; min-height: 44px; }
 }
 
