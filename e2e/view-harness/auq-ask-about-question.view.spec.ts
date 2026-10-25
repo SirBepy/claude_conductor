@@ -60,4 +60,20 @@ test("Ask about this question opens Ask prefilled while the card stays pending",
   await expect(other).toHaveValue("partial thought");
   await expect(page.locator('.prompt-card__footer [data-act="primary"]')).toBeEnabled();
 });
+
+test("on a phone, the Ask window covers the fullscreen question card", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openCard(page);
+  await page.locator('.prompt-card [data-act="ask"]').click();
+
+  const input = page.locator("[data-ask-input]");
+  await expect(input).toBeVisible();
+  // Visible is not enough: the card must not be what a tap at the input lands on.
+  const hit = await input.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+  });
+  expect(hit).toBe(true);
+  await expect(page.locator(".fab-dial-fab")).toBeHidden();
+});
 // Reviewed 2026-10-23: question card passes its session id to the option-preview image reader; the preview-open slug lookup is scoped to the selected chat; the contract asserted here is unchanged.
