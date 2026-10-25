@@ -273,19 +273,26 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             Some(ctx.relay("/turn/report-status", body, Some("invalid status"), None))
         }
         TOOL_SEND_MESSAGE => {
-            let body = json!({
+            let mut body = json!({
                 "session_id": ctx.session_id,
                 "text": ctx.args["text"],
             });
+            // Omit when absent: the receiver's serde default covers a missing key, not null.
+            if let Some(d) = ctx.args.get("details") {
+                body["details"] = d.clone();
+            }
             Some(ctx.relay("/messages/send", body, Some("invalid message"), None))
         }
         TOOL_UPDATE_MESSAGE => {
-            let body = json!({
+            let mut body = json!({
                 "session_id": ctx.session_id,
                 "message": ctx.args["message"],
                 "text": ctx.args.get("text"),
                 "retract": ctx.args.get("retract").and_then(|v| v.as_bool()).unwrap_or(false),
             });
+            if let Some(d) = ctx.args.get("details") {
+                body["details"] = d.clone();
+            }
             Some(ctx.relay("/messages/update", body, Some("invalid update"), None))
         }
         TOOL_WRITE_USER_TODO => {

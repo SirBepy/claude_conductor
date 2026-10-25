@@ -347,6 +347,26 @@ mod tests {
         assert!(names.contains(&"dashboard_card"));
     }
 
+    #[test]
+    fn send_and_update_message_schemas_offer_optional_details() {
+        let resp = dispatch(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+            27182,
+            "",
+        );
+        for name in ["send_message", "update_message"] {
+            let tool = resp["result"]["tools"].as_array().unwrap().iter()
+                .find(|t| t["name"] == name).unwrap();
+            let d = &tool["inputSchema"]["properties"]["details"];
+            assert_eq!(d["maxItems"], 6, "{name}");
+            assert_eq!(d["items"]["properties"]["id"]["pattern"], "^[a-z0-9-]{1,32}$");
+            assert_eq!(d["items"]["properties"]["body_md"]["maxLength"], 4096);
+            assert_eq!(d["items"]["required"], json!(["id", "label", "body_md"]));
+            let required = tool["inputSchema"]["required"].as_array().unwrap();
+            assert!(!required.iter().any(|r| r == "details"), "{name}: details is optional");
+        }
+    }
+
     /// todo 963: `TodoWrite` is not in a spawned session's tool list (measured
     /// 2026-09-26 against CLI 2.1.278: `claude -p --input-format=stream-json`
     /// registers `TaskCreate`/`TaskList`/`TaskUpdate` but no `TodoWrite`, and

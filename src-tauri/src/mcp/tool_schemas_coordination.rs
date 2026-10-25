@@ -22,6 +22,25 @@ pub const TOOL_SEND_MESSAGE: &str = "send_message";
 // near-duplicate underneath it. Unconditional, same as send_message.
 pub const TOOL_UPDATE_MESSAGE: &str = "update_message";
 
+/// Shared by send_message and update_message. The limits mirror
+/// `hooks_server/messages.rs::validate_details`, which enforces them.
+fn details_schema() -> Value {
+    json!({
+        "type": "array",
+        "maxItems": 6,
+        "description": "Optional click-to-open details for links in the text.",
+        "items": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "pattern": "^[a-z0-9-]{1,32}$"},
+                "label": {"type": "string"},
+                "body_md": {"type": "string", "maxLength": 4096}
+            },
+            "required": ["id", "label", "body_md"]
+        }
+    })
+}
+
 pub fn coordination_schemas() -> Vec<Value> {
     vec![
         json!({
@@ -72,24 +91,26 @@ pub fn coordination_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_SEND_MESSAGE,
-            "description": "Send Joe a message in the chat window. This is the ONLY way your text reaches him - regular assistant text and tool-call narration are hidden from the chat view entirely.\n\nSEND for: the final result of a turn; a blocker or failure (lead with why); a discovery that changes the plan; a verification outcome (tests/typecheck/build); a commit or deploy landing; a short plan before starting a long task.\n\nDO NOT SEND for: peer-session coordination. A clean `list_peers`/`post_message` exchange is invisible plumbing - Joe does not want to hear that another session acked or that there was no overlap. Message him about peers ONLY when it changes what you do (you are holding off a commit, another session owns files you need).\n\nDO NOT SEND for: step-by-step progress. Use `write_plan` instead - it renders a live step-checklist in the turn footer, which is where in-progress work belongs. Never narrate milestones as chat bubbles.\n\nA turn may end with NO message at all when there is genuinely nothing worth saying - but the turn that finishes the work must always report.\n\nFormat: short. Bullets are encouraged over long sentences; break things up with blank lines rather than writing a dense paragraph. If it is long, Joe will not read it.\n\nReturns the message's ordinal (always 1 - it is now your newest), which update_message uses to revise or retract it later.",
+            "description": "Send Joe a message in the chat window. This is the ONLY way your text reaches him - regular assistant text and tool-call narration are hidden from the chat view entirely.\n\nSEND for: the final result of a turn; a blocker or failure (lead with why); a discovery that changes the plan; a verification outcome (tests/typecheck/build); a commit or deploy landing; a short plan before starting a long task.\n\nDO NOT SEND for: peer-session coordination. A clean `list_peers`/`post_message` exchange is invisible plumbing - Joe does not want to hear that another session acked or that there was no overlap. Message him about peers ONLY when it changes what you do (you are holding off a commit, another session owns files you need).\n\nDO NOT SEND for: step-by-step progress. Use `write_plan` instead - it renders a live step-checklist in the turn footer, which is where in-progress work belongs. Never narrate milestones as chat bubbles.\n\nA turn may end with NO message at all when there is genuinely nothing worth saying - but the turn that finishes the work must always report.\n\nFormat: short. Bullets are encouraged over long sentences; break things up with blank lines rather than writing a dense paragraph. If it is long, Joe will not read it. Keep the text short. Put supporting detail (lists, ids, reasons) in `details` instead of the text. Each detail has an id, a label and a markdown body. Link to it in the text as [label](#d:id). Joe clicks the link to see the body. To point at a detail from an earlier message, use the same #d:id link and do not repeat the body.\n\nReturns the message's ordinal (always 1 - it is now your newest), which update_message uses to revise or retract it later.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "description": "The message to show Joe."}
+                    "text": {"type": "string", "description": "The message to show Joe."},
+                    "details": details_schema()
                 },
                 "required": ["text"]
             }
         }),
         json!({
             "name": TOOL_UPDATE_MESSAGE,
-            "description": "Revise or retract a message you already sent Joe, instead of sending a second near-identical one. If you catch yourself about to re-send the same point reworded, call this instead.\n\nAddressing: `message` counts BACKWARDS through your own send_message bubbles - 1 is your newest, 2 the one before it. Sending a new message shifts every ordinal up by one.\n\nWindow: you can only reach messages sent since Joe's second-most-recent message. Anything older is out of reach and the call is ignored.\n\nEdit (pass `text`) swaps the bubble silently in place, no trace. Retract (pass `retract: true`) replaces it with a thin struck 'Retracted' line.\n\nAfter Joe interrupts you, every bubble from the cancelled turn is dimmed automatically. Retract the ones that are now false, and re-state the ones that are still true via `text` - either clears the dim.",
+            "description": "Revise or retract a message you already sent Joe, instead of sending a second near-identical one. If you catch yourself about to re-send the same point reworded, call this instead.\n\nAddressing: `message` counts BACKWARDS through your own send_message bubbles - 1 is your newest, 2 the one before it. Sending a new message shifts every ordinal up by one.\n\nWindow: you can only reach messages sent since Joe's second-most-recent message. Anything older is out of reach and the call is ignored.\n\n`details` replaces the message's details when given.\n\nEdit (pass `text`) swaps the bubble silently in place, no trace. Retract (pass `retract: true`) replaces it with a thin struck 'Retracted' line.\n\nAfter Joe interrupts you, every bubble from the cancelled turn is dimmed automatically. Retract the ones that are now false, and re-state the ones that are still true via `text` - either clears the dim.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "message": {"type": "integer", "description": "Which message, counting back from your newest (1 = newest)."},
                     "text": {"type": "string", "description": "Replacement text. Required unless retract is true."},
-                    "retract": {"type": "boolean", "description": "Strike the message out instead of replacing its text."}
+                    "retract": {"type": "boolean", "description": "Strike the message out instead of replacing its text."},
+                    "details": details_schema()
                 },
                 "required": ["message"]
             }
