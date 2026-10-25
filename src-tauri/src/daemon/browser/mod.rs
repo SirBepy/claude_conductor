@@ -137,8 +137,10 @@ where
 struct ExtensionHolders(HashMap<String, String>);
 
 impl ExtensionHolders {
+    /// Keyed by the resolved profile, so "no profile" (the last-used one) and
+    /// that same profile named explicitly share one holder.
     fn key(mine: &target::Mine) -> String {
-        format!("{:?}/{}", mine.app, mine.profile.as_deref().unwrap_or(""))
+        format!("{:?}/{}", mine.app, mine.resolved_profile().unwrap_or_default())
     }
 
     /// Ok when `session_id` now holds the profile (or already did); Err names
