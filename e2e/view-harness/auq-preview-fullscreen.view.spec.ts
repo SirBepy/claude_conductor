@@ -140,6 +140,54 @@ test.describe("view-harness / AUQ fullscreen preview", () => {
     await expect.poll(() => activePanel(page)).toBe(1);
   });
 
+  test("the thumbnail strip jumps to an option and marks the picked one", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await openCard(page, [visual("First", ["A", "B", "C"], true)]);
+    await page.locator(".prompt-panel.is-active .prompt-opt__pic").first().click();
+
+    const thumbs = page.locator(`${fs} .auq-fs__thumb`);
+    await expect(thumbs).toHaveCount(3);
+    await expect(page.frameLocator(`${fs} [data-fs-thumb="2"] .auq-fs__thumb-frame`).locator(".probe")).toHaveText("C");
+
+    await thumbs.nth(2).click();
+    await expect.poll(() => fsLabel(page)).toBe("C");
+    await expect(fsProbe(page)).toHaveText("C");
+    await expect(thumbs.nth(2)).toHaveClass(/is-current/);
+
+    await expect(thumbs.nth(2).locator(".auq-fs__thumb-pick")).toBeHidden();
+    await page.locator(`${fs} [data-fs="select"]`).click();
+    await expect(thumbs.nth(2).locator(".auq-fs__thumb-pick")).toBeVisible();
+    await expect(thumbs.nth(0).locator(".auq-fs__thumb-pick")).toBeHidden();
+  });
+
+  test("option text floats over the preview, and hiding it is remembered across cards", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await openCard(page, [visual("First", ["A", "B"])]);
+    await page.evaluate(() => localStorage.removeItem("cc.auqFullscreen.optionText"));
+    await page.locator(".prompt-panel.is-active .prompt-opt__pic").first().click();
+
+    const desc = page.locator(`${fs} .auq-fs__desc`);
+    await expect(desc).toBeVisible();
+    await expect(desc).toHaveText("A desc");
+    // Over the preview, not taking height from it.
+    const view = await page.locator(`${fs} .auq-fs__view`).boundingBox();
+    const box = await desc.boundingBox();
+    expect(box!.y + box!.height).toBeLessThanOrEqual(view!.y + view!.height);
+
+    await page.locator(`${fs} [data-fs="text"]`).click();
+    await expect(desc).toBeHidden();
+    await expect(page.locator(`${fs} [data-fs="text"]`)).toHaveAttribute("aria-pressed", "false");
+
+    // A new card starts with the text hidden.
+    await page.locator(`${fs} [data-fs="close"]`).click();
+    await openCard(page, [visual("Again", ["X", "Y"])]);
+    await page.locator(".prompt-panel.is-active .prompt-opt__pic").first().click();
+    await expect(page.locator(`${fs} .auq-fs__desc`)).toBeHidden();
+    await page.locator(`${fs} [data-fs="text"]`).click();
+    await expect(page.locator(`${fs} .auq-fs__desc`)).toHaveText("X desc");
+    await page.screenshot({ path: ".for_bepy/screenshots/_specs/auq-preview-fullscreen-text.png" });
+  });
+
   test("wheel zooms the preview in", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [visual("First", ["A", "B"])]);
@@ -170,6 +218,10 @@ test.describe("view-harness / AUQ fullscreen preview", () => {
       await page.mouse.move(view!.x + 60, y, { steps: 5 });
       await page.mouse.up();
       await expect.poll(() => fsLabel(page)).toBe("B");
+      // Only the shown option's thumbnail is outlined (polled: buttons
+      // transition their border colour).
+      const borders = () => page.locator(`${fs} .auq-fs__thumb`).evaluateAll((els) => els.map((el) => getComputedStyle(el).borderTopColor));
+      await expect.poll(async () => { const b = await borders(); return b[0] === b[2] && b[1] !== b[0]; }).toBe(true);
 
       // The action buttons get their own full-width row on a phone.
       const select = await page.locator(`${fs} [data-fs="select"]`).boundingBox();
