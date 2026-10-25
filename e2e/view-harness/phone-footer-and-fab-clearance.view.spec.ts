@@ -50,42 +50,29 @@ async function openQuestionCard(page: Page): Promise<void> {
 }
 
 test.describe("view-harness / phone footer + FAB clearance", () => {
-  // Joe, 2026-10-22: the question page puts Skip/Submit on row one and the
-  // Preview-style answer box on its own row under them.
-  test("both buttons share row one and the answer bar owns the row below", async ({ page }) => {
+  // Joe, 2026-10-25: the question page's footer is only the Preview-style
+  // answer box; Skip moved to the header and the box's arrow is Next/Submit.
+  test("the answer bar is the whole footer, with no button row above it", async ({ page }) => {
     await mountPhoneSession(page);
     await openQuestionCard(page);
 
     const footer = page.locator(".prompt-card__footer");
+    await expect(footer.locator('[data-act="cancel"]')).toBeHidden();
+    await expect(footer.locator('[data-act="primary"]')).toBeHidden();
+    const footerBox = (await footer.boundingBox())!;
     const bar = (await footer.locator(".prompt-card__answer-bar").boundingBox())!;
-    const skip = (await footer.locator('[data-act="cancel"]').boundingBox())!;
-    const submit = (await footer.locator('[data-act="primary"]').boundingBox())!;
-
-    // The bar starts only after both buttons end.
-    expect(bar.y).toBeGreaterThanOrEqual(skip.y + skip.height - 1);
-    expect(bar.y).toBeGreaterThanOrEqual(submit.y + submit.height - 1);
-    // Row one holds both, level with each other.
-    expect(Math.abs(skip.y - submit.y)).toBeLessThanOrEqual(1);
-    // 1:2, Joe's pick over 50/50: a chosen proportion rather than the rendered
-    // width of the word "Skip", with Submit still visibly the primary.
-    expect(submit.width / skip.width).toBeGreaterThan(1.9);
-    expect(submit.width / skip.width).toBeLessThan(2.1);
+    // Flush with the footer's top edge: no empty padding strip left behind.
+    expect(Math.abs(bar.y - footerBox.y)).toBeLessThanOrEqual(1);
   });
 
-  test("the bar spans the footer's full inner width", async ({ page }) => {
+  test("the bar spans the footer's full width", async ({ page }) => {
     await mountPhoneSession(page);
     await openQuestionCard(page);
 
     const footer = (await page.locator(".prompt-card__footer").boundingBox())!;
     const bar = (await page.locator(".prompt-card__answer-bar").boundingBox())!;
-    const skip = (await page.locator('.prompt-card__footer [data-act="cancel"]').boundingBox())!;
-    const submit = (await page.locator('.prompt-card__footer [data-act="primary"]').boundingBox())!;
-
-    // 8px of footer padding each side, so the bar is the row, not a column of it.
-    expect(bar.width).toBeGreaterThan(footer.width - 32);
-    // The button row fills the same span, which is what stops Submit floating
-    // in an otherwise empty line.
-    expect(submit.x + submit.width - skip.x).toBeGreaterThan(footer.width - 32);
+    expect(bar.x).toBe(footer.x);
+    expect(bar.width).toBe(footer.width);
   });
 
   // The fullscreen card is z-index 20 against this host's 30, so the FAB

@@ -103,7 +103,8 @@ export function optsRowsHtml(
 // AUQ hook classes (.prompt-q__other-input/.prompt-extra-input) ride along on
 // the textarea for the wiring that looks them up. The send arrow mirrors the
 // footer's primary button (question-ui-answer-bar.ts). On the phone's
-// fullscreen page it is docked edge to edge below Skip/Next, like Preview's.
+// fullscreen page it is docked edge to edge, like Preview's, and its arrow
+// stands in for the hidden Skip/Next row.
 function answerFieldHtml(hookClass: string, placeholder: string, value: string, page: boolean): string {
   return composerFieldHtml({
     rowClass: page ? "composer-field--docked pv-composer" : undefined,

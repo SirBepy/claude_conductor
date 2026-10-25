@@ -53,18 +53,21 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
     bar.innerHTML = isSummary
       ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage, page) : "")
       : ownZoneHtml(state.activeTab, freeText, page);
-    // The answer field's send arrow: a shortcut for the footer's primary
-    // button once something is typed. It mirrors that button's label (Next
-    // or Submit) and its disabled state, so it never looks live while the
-    // click it forwards would do nothing.
+    // The answer field's send arrow forwards to the footer's primary button
+    // (Next or Submit), mirroring its label and disabled state so it never
+    // looks live while the click would do nothing. On desktop it is a
+    // shortcut that wakes once something is typed. On the phone page the
+    // footer buttons are hidden (permission-modal-shell.css), so the arrow IS
+    // Next/Submit: live whenever the primary is, typed text or not.
     const sendBtn = bar.querySelector<HTMLButtonElement>(".prompt-answer-send");
     const primary = (): HTMLButtonElement | null =>
       host.querySelector<HTMLButtonElement>('.prompt-card__footer [data-act="primary"]');
     sendBtn?.addEventListener("click", () => primary()?.click());
+    sendBtn?.classList.toggle("is-submit", isSummary || !hasSummary);
     const syncSend = (el: HTMLTextAreaElement): void => {
       if (!sendBtn) return;
       const p = primary();
-      sendBtn.disabled = el.value.trim() === "" || !!p?.disabled;
+      sendBtn.disabled = (!page && el.value.trim() === "") || !!p?.disabled;
       const label = p?.textContent?.trim();
       if (label) sendBtn.title = label;
     };

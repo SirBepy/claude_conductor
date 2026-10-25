@@ -1,4 +1,4 @@
-// Phone: swipe left/right over the question card's track to page between
+// Phone: swipe left/right anywhere on the question card to page between
 // questions - same destination as the pager arrows/dots, ungated like them
 // (keyboard/dot paging already skips the "must answer first" rule the
 // footer's Next button enforces - see question-keyboard.ts's page()).
@@ -19,9 +19,11 @@ export function attachQuestionSwipe(
     startsOn: (target) => {
       if (!isMobileViewport()) return false;
       // Lets the free-text box keep its native cursor/selection dragging -
-      // paging is for the panel/options area, not the typed answer.
+      // paging is for the rest of the card, not the typed answer.
       if (target.closest("textarea, input")) return false;
-      return !!target.closest(".prompt-track-viewport");
+      // The whole card (header and footer too), not just the panel area, so
+      // a thumb never has to aim. The collapsed bar is not a .prompt-card.
+      return !!target.closest(".prompt-card");
     },
     onSwipe: (direction) => goToTab(state.activeTab + direction),
   });

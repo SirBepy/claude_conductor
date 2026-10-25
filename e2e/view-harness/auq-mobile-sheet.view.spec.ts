@@ -97,7 +97,8 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await openQuestionCard(page, TALL_QUESTIONS);
     await page.waitForTimeout(200); // settle the card's entrance animation
 
-    const btnBox = (await page.locator('.prompt-card__footer [data-act="primary"]').boundingBox())!;
+    // The send arrow is the phone page's Next/Submit (the button row is hidden).
+    const btnBox = (await page.locator('.prompt-card__footer .prompt-answer-send').boundingBox())!;
     expect(btnBox.y + btnBox.height).toBeLessThanOrEqual(PHONE.height - 100);
   });
 
@@ -107,7 +108,8 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await openQuestionCard(page, TALL_QUESTIONS);
     await page.waitForTimeout(200);
 
-    const btnBox = (await page.locator('.prompt-card__footer [data-act="primary"]').boundingBox())!;
+    // The send arrow is the phone page's Next/Submit (the button row is hidden).
+    const btnBox = (await page.locator('.prompt-card__footer .prompt-answer-send').boundingBox())!;
     expect(PHONE.height - (btnBox.y + btnBox.height)).toBeGreaterThan(0);
   });
 
@@ -163,20 +165,19 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     expect(lastBox.y + lastBox.height).toBeLessThanOrEqual(barBox.y);
   });
 
-  // Joe, 2026-10-22: raised header/footer bars around the content, Skip +
-  // Submit above an answer box styled exactly like the Preview composer.
-  test("phone page: Skip/Submit sit above the Preview panel's own reply bar, input and send arrow on one row", async ({ page }) => {
+  // Joe, 2026-10-22: raised header/footer bars around the content, an answer
+  // box styled exactly like the Preview composer. Joe, 2026-10-25: the
+  // Skip/Next row is gone, the box's send arrow is Next/Submit.
+  test("phone page: the Preview panel's own reply bar is the footer, input and send arrow on one row", async ({ page }) => {
     await mountPhoneSession(page);
     await openQuestionCard(page, SHORT_QUESTIONS);
 
-    const primary = await settledBox(page.locator('.prompt-card__footer [data-act="primary"]'));
     // The Preview reply bar's own markup, not a restyled AUQ field.
     const bar = page.locator(".prompt-card__answer-bar > .pv-composer");
     const field = bar.locator(".composer-input-wrap > textarea.composer-textarea.prompt-q__other-input");
     const send = bar.locator(".pv-composer-send");
     await expect(field).toBeVisible();
-    const barBox = (await bar.boundingBox())!;
-    expect(barBox.y).toBeGreaterThanOrEqual(primary.y + primary.height);
+    const barBox = await settledBox(bar);
 
     // Inline: the arrow sits beside the field, inside its vertical span.
     const fieldBox = (await field.boundingBox())!;
@@ -187,10 +188,59 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     // Full-bleed like the Preview panel's, edge to edge of the screen.
     expect(barBox.x).toBe(0);
     expect(barBox.width).toBe(PHONE.width);
+  });
 
-    await expect(send).toBeDisabled();
-    await field.fill("my own answer");
+  test("phone page: no Skip/Next row; Skip sits in the header and dismisses the card", async ({ page }) => {
+    await mountPhoneSession(page);
+    await openQuestionCard(page, SHORT_QUESTIONS);
+    await expect(page.locator('.prompt-card__footer [data-act="cancel"]')).toBeHidden();
+    await expect(page.locator('.prompt-card__footer [data-act="primary"]')).toBeHidden();
+
+    const skip = page.locator('.prompt-card__header [data-act="skip"]');
+    await expect(skip).toBeVisible();
+    await expect(skip).toHaveText("Skip");
+    await skip.click();
+    await expect(page.locator(".prompt-card")).toHaveCount(0);
+  });
+
+  test("phone page: on the last page the send arrow submits with no text typed, in the primary color", async ({ page }) => {
+    await mountPhoneSession(page);
+    await openQuestionCard(page, SHORT_QUESTIONS);
+    const send = page.locator(".prompt-card__answer-bar .prompt-answer-send");
     await expect(send).toBeEnabled();
+    await expect(send).toHaveClass(/is-submit/);
+    const colors = await send.evaluate((el) => ({
+      bg: getComputedStyle(el).backgroundColor,
+      primary: getComputedStyle(document.querySelector('.prompt-card__footer [data-act="primary"]')!).backgroundColor,
+    }));
+    expect(colors.bg).toBe(colors.primary);
+  });
+
+  test("phone page: before the last page the send arrow is Next, live once the question is answered", async ({ page }) => {
+    await mountPhoneSession(page);
+    await openQuestionCard(page, [
+      { question: "Multi first?", multiSelect: true, options: [{ label: "Alpha" }, { label: "Beta" }] },
+      { question: "Second?", options: [{ label: "Yes" }, { label: "No" }] },
+    ]);
+    const send = page.locator(".prompt-card__answer-bar .prompt-answer-send");
+    await expect(send).toBeDisabled();
+    await expect(send).not.toHaveClass(/is-submit/);
+
+    await page.locator('.prompt-panel.is-active .prompt-opt', { hasText: "Alpha" }).click();
+    await expect(send).toBeEnabled();
+    await send.click();
+    await expect(page.locator(".prompt-panel.is-active")).toHaveAttribute("data-panel", "1");
+  });
+
+  test("phone page: no full-height line at the left edge on a later question", async ({ page }) => {
+    await mountPhoneSession(page);
+    await openQuestionCard(page, [
+      { question: "First?", options: [{ label: "A" }, { label: "B" }] },
+      { question: "Second?", options: [{ label: "C" }, { label: "D" }] },
+    ]);
+    const width = await page.locator('.prompt-panel[data-panel="1"]')
+      .evaluate((el) => getComputedStyle(el).borderLeftWidth);
+    expect(width).toBe("0px");
   });
 
   test("phone page: header and footer bars are a different color from the content", async ({ page }) => {

@@ -303,9 +303,10 @@
 }
 
 /* Phone-only pieces of the fullscreen question page, hidden everywhere else:
- * the back arrow and the "Question" label. */
+ * the back arrow, the "Question" label and the header's Skip. */
 .prompt-card__back,
-.prompt-card__title-text {
+.prompt-card__title-text,
+.prompt-card__skip {
   display: none;
 }
 
@@ -356,12 +357,47 @@
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) > .prompt-icon-btn i {
     font-size: 1.25rem;
   }
+  /* Skip dismisses the whole card, so it lives up here with back rather than
+     beside the answer box, where it read as "skip this question" (Joe,
+     2026-10-25). Plain text over an icon: an X reads as close/back. */
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__skip {
+    display: inline-flex;
+    align-items: center;
+    height: 44px;
+    padding: 0 12px;
+    border: none;
+    background: none;
+    color: var(--color-text-muted);
+    font: inherit;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  /* Each panel's left border sat at the screen's left edge once the track
+     slid to it, a full-height line beside the question. The page never
+     shows two panels at once outside a swipe, so there is nothing to divide. */
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-panel + .prompt-panel {
+    border-left: none;
+  }
 
-  /* Footer: Skip + Next/Submit on top, then the Preview panel's own reply
-     bar (.pv-composer, question-ui-templates.ts) edge to edge below them,
-     with its own padding and top divider. */
+  /* Footer: the Preview panel's own reply bar (.pv-composer,
+     question-ui-templates.ts) edge to edge, with its own padding and top
+     divider. Its send arrow is the page's Next and Submit (question-ui-
+     answer-bar.ts), so the Skip/Next row is hidden whenever the bar is up;
+     review without supportsExtras has no bar and keeps the buttons. */
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer {
     padding: 8px 8px var(--keyboard-inset, 0px);
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer:has(.prompt-card__answer-bar:not(:empty)) {
+    padding-top: 0;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer:has(.prompt-card__answer-bar:not(:empty)) > .btn {
+    display: none;
+  }
+  /* On the last page the arrow submits, so it takes .btn-primary's colors. */
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-answer-send.is-submit:not(:disabled) {
+    background: var(--color-primary);
+    color: var(--color-background);
   }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer:has(.prompt-card__answer-bar:empty) {
     padding-bottom: max(8px, var(--keyboard-inset, 0px));
