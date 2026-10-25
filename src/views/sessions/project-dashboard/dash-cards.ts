@@ -22,9 +22,9 @@ const DATA_JSON_MAX_CHARS = 8000;
 
 /** A card button's first message: its prompt, then what the card shows right
  *  now, so the chat starts from the same numbers Joe is looking at. The prompt
- *  leads because the CLI only expands a slash command at the very start; the
- *  data after it is labelled as context so a skill does not read it as its
- *  arguments. */
+ *  leads because the CLI only expands a slash command at the very start, so
+ *  the data after it still reaches a skill as its arguments; the label tells
+ *  the model to treat it as background, not as the skill's options. */
 export function cardMessage(v: CardView): string {
   const prompt = v.config.action?.command ?? "";
   const r = v.result as CardResultX | null;
