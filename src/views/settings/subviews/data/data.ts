@@ -140,7 +140,9 @@ async function rebuildTokenHistory(btn: HTMLButtonElement, status: HTMLElement):
   try {
     const result = await api.backfillTranscripts();
     message = result ? `Done - ${result.processed} new, ${result.skipped} skipped` : "Done";
-    setTokenHistory((await api.getTokenHistory()) ?? null);
+    // The backfill already succeeded, so a failed reload is a note on it, not the headline.
+    try { setTokenHistory((await api.getTokenHistory()) ?? null); }
+    catch (e) { message += `; could not refresh the charts (${(e as Error).message})`; }
   } catch (e) {
     message = "Error: " + (e as Error).message;
   } finally {

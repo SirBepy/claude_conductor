@@ -10,6 +10,10 @@ import { askConfirm } from "../../../shared/confirm";
 import { saveSettings } from "../../../shared/settings-save";
 import { showToast } from "../../../shared/toast";
 import { api } from "../../../shared/api";
+import { state } from "../state";
+import type { DashMode } from "./dash-parts";
+import { openDashboardPage } from "./dashboard-page";
+import { forgetTargets, mountDraftDashboard, unmountDraftDashboard } from "./draft-dashboard";
 import { renderCharacterPick } from "./project-config/character-pick";
 import { renderProjectSettings } from "./project-config/automation";
 import { renderFolderMapping } from "./project-config/folder-mapping";
@@ -41,10 +45,24 @@ export function openProjectSettingsModal(cwd: string): void {
   openPopup("Project settings", cwd, (body) => renderProjectSettings(body, cwd));
 }
 
-export function openFolderMappingModal(cwd: string, onChanged: () => void): void {
+/** What a folder-mapping change needs from the dashboard it was opened on. */
+export type FolderMappingHost = { ctx(): { mode: DashMode }, pane(): HTMLElement, deselect(): void };
+
+/** The shown dashboard's target no longer matches the folder: a repoint follows
+ *  the project to its new folder, a hide leaves the dashboard. */
+export function followFolderChange(host: FolderMappingHost, change: { repointedTo: string } | { hidden: true }): void {
+  forgetTargets();
+  if ("hidden" in change) { host.deselect(); return; }
+  if (host.ctx().mode === "page") { void openDashboardPage(change.repointedTo); return; }
+  const pane = host.pane();
+  unmountDraftDashboard(pane);
+  mountDraftDashboard(pane, { path: change.repointedTo }, state.mountId);
+}
+
+export function openFolderMappingModal(cwd: string, host: FolderMappingHost): void {
   openPopup("Folder mapping", cwd, (body, close) => renderFolderMapping(body, cwd, {
-    onRepointed: () => { close(); onChanged(); },
-    onHidden: () => { close(); onChanged(); },
+    onRepointed: (newCwd) => { close(); followFolderChange(host, { repointedTo: newCwd }); },
+    onHidden: () => { close(); followFolderChange(host, { hidden: true }); },
   }));
 }
 
@@ -73,12 +91,14 @@ export async function renameProject(cwd: string, name: string): Promise<boolean>
     saveSettings();
     return true;
   }
-  aliases[cwd] = { ...aliases[cwd], name };
-  saveSettings();
   // The new-chat picker and the dashboard read ProjectConfig.name, not the alias map.
+  // It goes first: when it fails nothing was renamed, instead of settings.json
+  // holding a name the project itself never took.
   const configured = (settings.projects || []).find((p) => p.path === cwd);
   const id = configured?.id ?? (await api.ensureProject(cwd)).id;
   await api.updateProject(id, { name });
+  aliases[cwd] = { ...aliases[cwd], name };
+  saveSettings();
   return true;
 }
 

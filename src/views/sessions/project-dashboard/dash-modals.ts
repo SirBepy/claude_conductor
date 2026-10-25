@@ -10,6 +10,7 @@ import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from
 import { fetchedLabel, scopeOf, sameCwd, BUILTIN_CARDS } from "./format";
 import type { ActionHost } from "./dash-actions";
 import { pinsEditor } from "./dash-pins";
+import { forgetTargets } from "./draft-dashboard";
 import type { CardView, DashSnapshot, GroupDef } from "./types";
 
 const toggle = (on: boolean, onChange: (next: boolean) => void): TemplateResult => html`
@@ -102,6 +103,7 @@ export function openEditReposModal(host: ActionHost): void {
   const save = async (): Promise<void> => {
     try {
       await invoke<GroupDef>("dashboard_group_upsert", { id: t.id, name: name.trim(), repos: [...picked] });
+      forgetTargets();
       close();
       host.reload();
     } catch (err) { fail("save the group", err); }
