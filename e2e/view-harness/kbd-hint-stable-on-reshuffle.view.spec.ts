@@ -1,3 +1,4 @@
+// Reviewed 2026-10-25 (desktop split): sessions-dom-wiring.ts only had wirePreviewPanel's doc comment reworded for the desktop split; nothing this spec drives changed.
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 // Reviewed 2026-10-22: sessions.css's .composer-shell field overrides now skip #prompt-card-host (the phone question page's Preview reply bar) - no change for the main composer this spec drives, and it passes.
 // Reviewed 2026-10-22: sessions-dom-wiring.ts passes the FAB a Code-mode opener; this spec asserts keyboard hints only, so its contract is unaffected.

@@ -281,22 +281,22 @@ test("a failed merge degrades to the old layout rather than losing the back butt
   await expect(page.locator("#sessionsBackBtn")).toBeAttached();
 });
 
-test("desktop keeps the side-by-side split: docking Preview shrinks the chat instead of covering it", async ({ page }) => {
+test("desktop keeps the side-by-side split: Preview shrinks the chat instead of covering it", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await mountPhone(page, { fab: true });
 
-  await expect(page.locator(PREVIEW)).toBeHidden();
+  const SPLIT = '.sp-panel[data-active="preview"]';
+  await expect(page.locator(SPLIT)).toBeHidden();
   await expect(page.locator(".view-sessions .view-header h2")).toBeVisible();
 
   await page.locator(".fab-dial-fab").click();
   await page.locator('[data-dial="preview"]').click();
-  // Preview starts docked on the right in a fresh chat; the title bar's dock
-  // button is a toggle, so pressing it here would float the window instead.
-  await expect(page.locator(PREVIEW)).toBeVisible();
-  await page.waitForTimeout(280);
+  // Desktop's split (split-panels/), not the phone's cover.
+  await expect(page.locator(SPLIT)).toBeVisible();
+  await expect(page.locator(PREVIEW)).toHaveCount(0);
 
-  const rail = (await railBox(page))!;
-  // The chat column is the pane's content box; the dock is its padding.
+  const rail = (await page.locator(SPLIT).boundingBox())!;
+  // The chat column is the pane's content box; the split is its padding.
   const chatRight = await page.evaluate(() => {
     const pane = document.querySelector<HTMLElement>(".session-pane")!;
     return pane.getBoundingClientRect().right - parseFloat(getComputedStyle(pane).paddingRight);

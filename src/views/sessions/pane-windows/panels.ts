@@ -8,6 +8,7 @@ import { mountAskPanel } from "../ask-panel";
 import { mountTodosPanel } from "../todos-panel";
 import { mountDraftsPanel, type DraftsPanelHandle } from "../drafts-panel";
 import type { RailTabDeps, RailTabHandle } from "../rail-panel";
+import type { PreviewController } from "../preview-panel";
 import type { PanelMeta } from "../../../../vendor/tauri_kit/frontend/pane-windows/layout";
 
 export type PanelKey = "ask" | "todos" | "drafts" | "preview";
@@ -34,6 +35,21 @@ export interface PanelDeps {
   /** Preview's mount, absent where this pane has no preview (detached chats). */
   mountPreview: ((root: HTMLElement, deps: RailTabDeps) => RailTabHandle) | null;
   previewDeps: RailTabDeps;
+  /** Drafts' open count after each fetch; only the split's strip shows it. */
+  onDraftsCount?(n: number): void;
+}
+
+/** What the FAB drives the panels through: the desktop split (split-panels/)
+ *  or the phone's full-screen pane windows (pane-windows/manager.ts). */
+export interface PanelHost {
+  setSessionScope(sessionId: string | null, cwd: string | null): void;
+  openPanel(panel: PanelKey): void;
+  askAbout(text: string): void;
+  openDraft(id: string): void;
+  /** Escape: closes the front-most panel. False when none was open. */
+  closeFront(): boolean;
+  previewController(): PreviewController;
+  destroy(): void;
 }
 
 export interface MountedPanels {
@@ -59,7 +75,7 @@ export function mountPanel(key: PanelKey, root: HTMLElement, deps: PanelDeps, ou
       return { setSessionScope: (sid) => todos.setSessionScope(sid), destroy: () => todos.destroy() };
     }
     case "drafts": {
-      const drafts = mountDraftsPanel(root);
+      const drafts = mountDraftsPanel(root, deps.onDraftsCount);
       out.drafts = drafts;
       return {
         setSessionScope: (sid) => drafts.setSessionScope(sid),
