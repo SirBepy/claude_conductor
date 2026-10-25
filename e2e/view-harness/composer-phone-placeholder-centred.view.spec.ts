@@ -37,3 +37,4 @@ test("phone composer: an empty input's text line is centred on the send button",
   // The backdrop paints the visible glyphs; it must move with the textarea.
   expect(geo.hlPad).toBe(geo.taPad);
 });
+// Reviewed 2026-10-25: composer.css gained the shared .composer-field row rules; the main composer's phone padding asserted here is unchanged and it passes.

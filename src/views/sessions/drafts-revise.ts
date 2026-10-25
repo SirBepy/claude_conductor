@@ -203,20 +203,20 @@ export class ReviseMenuController {
   }
 
   /** Dispatch for a keydown inside the editor root. Returns true when it
-   *  owned the key (Escape/Enter on the free-text input). */
+   *  owned the key (Escape on the free-text box; its Enter/send is wired by
+   *  the shared composer field, which calls sendFree). */
   handleKeydown(ev: KeyboardEvent): boolean {
-    const input = (ev.target as HTMLElement).closest<HTMLInputElement>("[data-revise-free]");
-    if (!input) return false;
+    if (!(ev.target as HTMLElement).closest("[data-revise-free]")) return false;
     if (ev.key === "Escape") {
       ev.stopPropagation();
       this.setOpen(false);
-    } else if (ev.key === "Enter" && input.value.trim()) {
-      ev.preventDefault();
-      const text = input.value;
-      input.value = "";
-      this.send(text);
     }
     return true;
+  }
+
+  /** Sends what was typed in the footer box. */
+  sendFree(text: string): void {
+    this.send(text);
   }
 
   destroy(): void {
@@ -260,10 +260,12 @@ export class ReviseMenuController {
     this.setOpen(false);
     void sendRevision(draft.origin_session_id, this.deps.sessionId, text).then((sent) => {
       if (!sent) return;
-      const icon = this.deps.root.querySelector("[data-revise-icon]");
+      // The send arrow briefly turns into a check: the only sign the ask went
+      // out, since the reply lands in the origin chat, not here.
+      const icon = this.deps.root.querySelector(".dr-foot .composer-field-send i");
       if (!icon) return;
-      icon.classList.replace("ph-magic-wand", "ph-check");
-      setTimeout(() => icon.classList.replace("ph-check", "ph-magic-wand"), 1500);
+      icon.classList.replace("ph-paper-plane-right", "ph-check");
+      setTimeout(() => icon.classList.replace("ph-check", "ph-paper-plane-right"), 1500);
     });
   }
 }

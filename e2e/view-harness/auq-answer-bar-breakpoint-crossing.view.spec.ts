@@ -43,7 +43,7 @@ test("the answer bar follows a live 768px crossing and keeps the typed text", as
 
   await page.setViewportSize(DESKTOP);
   await expect(bar.locator(".pv-composer")).toHaveCount(0);
-  await expect(bar.locator(".prompt-own")).toHaveCount(1);
+  await expect(bar.locator(".composer-field")).toHaveCount(1);
   await expect(bar.locator("textarea")).toHaveValue("half-typed answer");
 
   await page.setViewportSize(PHONE);

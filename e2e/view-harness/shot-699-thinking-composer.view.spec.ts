@@ -109,10 +109,10 @@ test.describe("@shot", () => {
     await card.locator('.prompt-opt input[data-label="Yes"]').click();
     await card.locator('.prompt-pager [data-nav="1"]').click();
 
-    const extra = card.locator(".prompt-extra-message");
+    const extra = card.locator(".prompt-card__answer-bar .composer-field");
     await expect(extra).toBeVisible();
-    await expect(extra).toContainText("Add a message");
     const input = extra.locator(".prompt-extra-input");
+    await expect(input).toHaveAttribute("placeholder", /Add a message/);
     await expect(input).toBeVisible();
     expect((await input.boundingBox())!.height).toBeGreaterThan(20);
 

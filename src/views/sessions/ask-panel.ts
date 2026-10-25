@@ -4,8 +4,11 @@
 
 import { invoke } from "../../shared/ipc";
 import { escapeHtml } from "../../shared/escape-html";
+import { renderMarkdown } from "../../shared/chat/chat-transforms";
+import { composerFieldHtml, wireComposerField, type ComposerFieldWiring } from "../../shared/chat/composer-field";
 import { splitSuggestion } from "./ask-suggestion";
 import type { AskThread } from "../../types/ipc.generated";
+import "../../shared/chat/chat.css";
 import "./ask-panel.css";
 
 export interface AskPanelDeps {
@@ -37,16 +40,32 @@ class AskPanel implements AskPanelHandle {
   private pendingQuestion: string | null = null;
   private error: string | null = null;
   private destroyed = false;
-  /** Text waiting to land in the input; render() rebuilds the field, so a
-   *  scope refresh landing after a seed would otherwise wipe it. */
-  private seeded: string | null = null;
+  private indexEl: HTMLElement;
+  private bodyEl: HTMLElement;
+  /** Built once, outside render(): rebuilding it would drop focus, caret and
+   *  the shared composer core with every thread refresh. */
+  private field: ComposerFieldWiring;
 
   constructor(root: HTMLElement, deps: AskPanelDeps) {
     this.root = root;
     this.deps = deps;
     this.root.classList.add("ask-panel");
+    this.root.innerHTML =
+      `<div class="ask-index"></div>` +
+      `<div class="ask-body"></div>` +
+      composerFieldHtml({
+        rowClass: "composer-field--docked",
+        inputAttrs: "data-ask-input",
+        sendTitle: "Ask",
+        placeholder: "Ask about this chat...",
+      });
+    this.indexEl = this.root.querySelector(".ask-index")!;
+    this.bodyEl = this.root.querySelector(".ask-body")!;
+    this.field = wireComposerField(this.root.querySelector(".composer-field")!, {
+      onSend: (q) => this.send(q),
+      canSend: () => !this.busy && !!this.sessionId,
+    })!;
     this.root.addEventListener("click", this.onClick);
-    this.root.addEventListener("keydown", this.onKeydown);
     this.render();
   }
 
@@ -80,12 +99,12 @@ class AskPanel implements AskPanelHandle {
 
   seed(text: string): void {
     this.indexOpen = false;
-    this.seeded = text;
     this.render();
-    const input = this.root.querySelector<HTMLInputElement>("[data-ask-input]");
-    if (!input) return;
-    input.focus();
-    input.setSelectionRange(text.length, text.length);
+    const ta = this.field.textarea;
+    ta.value = text;
+    this.field.core.handleInput();
+    ta.focus();
+    ta.setSelectionRange(text.length, text.length);
   }
 
   private active(): AskThread | null {
@@ -97,6 +116,7 @@ class AskPanel implements AskPanelHandle {
     if (!sid || this.busy) return;
     const q = question.trim();
     if (!q) return;
+    this.field.clear();
     this.busy = true;
     this.error = null;
     this.pendingQuestion = q;
@@ -176,53 +196,26 @@ class AskPanel implements AskPanelHandle {
       this.deps.onDraft(draft.dataset.askDraft!);
       return;
     }
-    if (el.closest("[data-ask-send]")) {
-      this.sendFromInput();
-    }
   };
-
-  private onKeydown = (ev: KeyboardEvent): void => {
-    if (ev.key !== "Enter" || ev.shiftKey) return;
-    if (!(ev.target as HTMLElement).matches("[data-ask-input]")) return;
-    ev.preventDefault();
-    this.sendFromInput();
-  };
-
-  private sendFromInput(): void {
-    const input = this.root.querySelector<HTMLInputElement>("[data-ask-input]");
-    if (!input) return;
-    const q = input.value;
-    input.value = "";
-    this.send(q);
-  }
 
   private focusInput(): void {
-    this.root.querySelector<HTMLInputElement>("[data-ask-input]")?.focus();
+    this.field.textarea.focus();
   }
 
   private render(): void {
-    // A refresh or thread update must not eat what the user is typing.
-    const keep = this.root.querySelector<HTMLInputElement>("[data-ask-input]")?.value ?? "";
     const t = this.active();
     const label = t?.title || "New thread";
     const count = this.threads.length;
-    this.root.innerHTML =
-      `<div class="ask-index">` +
-        `<button type="button" class="ask-index-btn" data-ask-index-toggle>` +
-          (count ? `<span class="ask-n">${count}</span>` : "") +
-          `<span class="ask-ttl">${escapeHtml(label)}</span>` +
-          `<i class="ph ph-caret-down"></i>` +
-        `</button>` +
-        (this.indexOpen ? this.indexMenuHtml() : "") +
-      `</div>` +
-      `<div class="ask-body">${this.bodyHtml(t)}</div>` +
-      `<div class="ask-input">` +
-        `<input type="text" data-ask-input placeholder="ask..."${this.busy ? " disabled" : ""}>` +
-        `<button type="button" data-ask-send${this.busy ? " disabled" : ""}>Ask</button>` +
-      `</div>`;
-    const restored = this.seeded ?? keep;
-    this.seeded = null;
-    if (restored) this.root.querySelector<HTMLInputElement>("[data-ask-input]")!.value = restored;
+    this.indexEl.innerHTML =
+      `<button type="button" class="ask-index-btn" data-ask-index-toggle>` +
+        (count ? `<span class="ask-n">${count}</span>` : "") +
+        `<span class="ask-ttl">${escapeHtml(label)}</span>` +
+        `<i class="ph ph-caret-down"></i>` +
+      `</button>` +
+      (this.indexOpen ? this.indexMenuHtml() : "");
+    this.bodyEl.innerHTML = this.bodyHtml(t);
+    // The box stays typeable while an answer is pending; only sending waits.
+    this.field.sync();
   }
 
   private indexMenuHtml(): string {
@@ -247,11 +240,11 @@ class AskPanel implements AskPanelHandle {
     const parts: string[] = [];
     for (const m of t?.messages ?? []) {
       if (m.role === "user") {
-        parts.push(`<div class="ask-q">${escapeHtml(m.text)}</div>`);
+        parts.push(this.questionHtml(m.text));
         continue;
       }
       const { body, suggestion } = splitSuggestion(m.text);
-      parts.push(`<div class="ask-a">${escapeHtml(body)}</div>`);
+      parts.push(`<div class="msg assistant ask-a">${renderMarkdown(body)}</div>`);
       if (suggestion) {
         parts.push(
           `<div class="ask-handoff">` +
@@ -264,7 +257,7 @@ class AskPanel implements AskPanelHandle {
       }
     }
     if (this.pendingQuestion) {
-      parts.push(`<div class="ask-q">${escapeHtml(this.pendingQuestion)}</div>`);
+      parts.push(this.questionHtml(this.pendingQuestion));
     }
     if (this.busy) {
       parts.push(`<div class="ask-thinking"><span class="ask-spin"></span>reading...</div>`);
@@ -282,10 +275,15 @@ class AskPanel implements AskPanelHandle {
     return parts.join("");
   }
 
+  // Same bubble and line-break rendering as a user turn in the chat.
+  private questionHtml(text: string): string {
+    return `<div class="msg user ask-q">${renderMarkdown(text, true)}</div>`;
+  }
+
   destroy(): void {
     this.destroyed = true;
+    this.field.destroy();
     this.root.removeEventListener("click", this.onClick);
-    this.root.removeEventListener("keydown", this.onKeydown);
     this.root.classList.remove("ask-panel");
     this.root.innerHTML = "";
   }

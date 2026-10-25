@@ -16,7 +16,7 @@ export interface AuqSlashPopupController {
   /** Mount the popup + highlight backdrop + auto-resize on a textarea just
    *  created by this render() cycle. Call destroyAll() first if remounting
    *  onto a rebuilt DOM (question-ui.ts's render() always does). */
-  attach(ta: HTMLTextAreaElement, highlightEl?: HTMLElement | null): void;
+  attach(ta: HTMLTextAreaElement, highlightEl?: HTMLElement | null, onEnter?: () => void): void;
   /** Tear down every core mounted since the last attach()/destroyAll(). */
   destroyAll(): void;
   /** Stop the underlying SlashProvider - call once, on card teardown. */
@@ -28,8 +28,8 @@ export function createAuqSlashPopup(cwd?: string | null): AuqSlashPopupControlle
   void slashProvider.start(cwd ?? null);
   let cores: ComposerCore[] = [];
 
-  function attach(ta: HTMLTextAreaElement, highlightEl?: HTMLElement | null): void {
-    const anchor = ta.closest<HTMLElement>(".prompt-q__other") ?? ta.parentElement;
+  function attach(ta: HTMLTextAreaElement, highlightEl?: HTMLElement | null, onEnter?: () => void): void {
+    const anchor = ta.parentElement;
     if (!anchor) return;
     cores.push(new ComposerCore({
       textarea: ta,
@@ -39,6 +39,11 @@ export function createAuqSlashPopup(cwd?: string | null): AuqSlashPopupControlle
       // The card's document-level Escape handler cancels the whole card;
       // an Escape that only closed the popup must not also bubble into it.
       stopPropagationOnPopupConsume: true,
+      onEnter,
+      // question-ui.ts's document keydown owns Ctrl/Cmd+Enter (primary, or
+      // submit from review). Without this the core would also route it to
+      // onEnter and the primary button would fire twice.
+      onCtrlEnter: onEnter ? () => {} : undefined,
     }));
   }
 

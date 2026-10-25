@@ -5,6 +5,7 @@
 
 import { escapeHtml } from "../../../shared/escape-html";
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
+import { composerFieldHtml } from "../../../shared/chat/composer-field";
 import { splitAsk } from "./question-state";
 import { previewLayout, previewedOptions, stageHtml, tilePictureHtml } from "./option-previews";
 import type { PreviewLayout } from "./option-previews";
@@ -97,58 +98,30 @@ export function optsRowsHtml(
   }).join("");
 }
 
-// The phone's fullscreen question page uses the Preview panel's reply
-// composer markup verbatim (preview-panel.ts's .pv-composer row), so the
-// answer box IS that bar rather than a restyled copy of it. The AUQ hook
-// classes (.prompt-q__other-input/.prompt-extra-input) ride along on the
-// textarea for the wiring that looks them up; permission-modal-question.css
-// skips its own field styling when .composer-textarea is present. With no
-// .prompt-q__other label around it, slash-popup.ts anchors on the wrap.
-function pageComposerHtml(hookClass: string, placeholder: string, value: string): string {
-  return `
-    <div class="pv-composer">
-      <div class="composer-input-wrap">
-        <div class="composer-highlight cc-typing-highlight" aria-hidden="true"></div>
-        <textarea class="composer-textarea ${hookClass}" rows="1" placeholder="${placeholder}">${escapeHtml(value)}</textarea>
-      </div>
-      <button type="button" class="pv-composer-send icon-btn prompt-answer-send" title="Send" disabled>
-        <i class="ph ph-paper-plane-right"></i>
-      </button>
-    </div>
-  `;
+// The answer box is the shared composer field (composer-field.ts), the same
+// box + paper-plane the chat and Preview use, on desktop and phone alike. The
+// AUQ hook classes (.prompt-q__other-input/.prompt-extra-input) ride along on
+// the textarea for the wiring that looks them up. The send arrow mirrors the
+// footer's primary button (question-ui-answer-bar.ts). On the phone's
+// fullscreen page it is docked edge to edge below Skip/Next, like Preview's.
+function answerFieldHtml(hookClass: string, placeholder: string, value: string, page: boolean): string {
+  return composerFieldHtml({
+    rowClass: page ? "composer-field--docked pv-composer" : undefined,
+    inputClass: hookClass,
+    sendClass: "pv-composer-send prompt-answer-send",
+    placeholder,
+    value,
+  });
 }
 
 export function extraMessageZoneHtml(additionalMessage: string, page = false): string {
-  if (page) return pageComposerHtml("prompt-extra-input", "Add a message (optional)...", additionalMessage);
-  return `
-    <label class="prompt-q__other prompt-extra-message">
-      <span class="prompt-q__other-label">Add a message (optional):</span>
-      <div class="cc-typing-wrap">
-        <div class="cc-typing-highlight cc-typing-highlight--auq" aria-hidden="true"></div>
-        <textarea class="prompt-extra-input cc-typing-input" rows="1" placeholder="Anything else to add...">${escapeHtml(additionalMessage)}</textarea>
-      </div>
-    </label>
-  `;
+  return answerFieldHtml("prompt-extra-input", "Add a message (optional)...", additionalMessage, page);
 }
 
-// The per-question free-text field keeps its `.prompt-q__other` wrapper
-// (unstyled by the new design) because slash-popup.ts anchors on
-// `ta.closest(".prompt-q__other")` and is not this task's file to touch.
-// Only ever rendered into `.prompt-card__answer-bar` now (via syncAnswerBar),
+// Only ever rendered into `.prompt-card__answer-bar` (via syncAnswerBar),
 // which sits inline in the footer row next to Skip/Next - see its doc comment.
 export function ownZoneHtml(qi: number, freeText: Map<number, string>, page = false): string {
-  const typedValue = freeText.get(qi) ?? "";
-  if (page) return pageComposerHtml("prompt-q__other-input", "Type your own answer...", typedValue);
-  return `
-    <div class="prompt-own">
-      <label class="prompt-q__other">
-        <div class="cc-typing-wrap">
-          <div class="cc-typing-highlight cc-typing-highlight--auq" aria-hidden="true"></div>
-          <textarea class="prompt-q__other-input cc-typing-input" rows="1" placeholder="Type your own answer...">${escapeHtml(typedValue)}</textarea>
-        </div>
-      </label>
-    </div>
-  `;
+  return answerFieldHtml("prompt-q__other-input", "Type your own answer...", freeText.get(qi) ?? "", page);
 }
 
 // Every panel renders its real content always (never virtualized) - the

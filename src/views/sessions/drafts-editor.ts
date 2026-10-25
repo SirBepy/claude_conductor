@@ -7,6 +7,7 @@ import { invoke } from "../../shared/ipc";
 import { showToast } from "../../shared/toast";
 import { escapeHtml } from "../../shared/escape-html";
 import { renderMarkdown } from "../../shared/chat/chat-transforms";
+import { composerFieldHtml, wireComposerField, type ComposerFieldWiring } from "../../shared/chat/composer-field";
 import { htmlToMarkdown } from "../../shared/chat/draft-markdown";
 import { currentVersion, copyDualPayload, handleOf } from "../../shared/message-draft-utils";
 import type { MessageDraft, DraftVariant } from "../../types/ipc.generated";
@@ -45,6 +46,8 @@ export class DraftsEditor {
    *  (the timer keeps retrying every AUTOSAVE_MS while the user keeps typing). */
   private autosaveFailures = 0;
   private reviseMenu: ReviseMenuController;
+  /** The footer's free-text box; rewired on every full render(). */
+  private reviseField: ComposerFieldWiring | null = null;
   /** The version list under the version chip. */
   private versionsOpen = false;
   /** The version Check & learn was last sent for, so a repaint keeps saying so. */
@@ -92,6 +95,7 @@ export class DraftsEditor {
     this.root.removeEventListener("keydown", this.onKeydown);
     document.removeEventListener("pointerdown", this.onOutsideVersions, true);
     this.reviseMenu.destroy();
+    this.reviseField?.destroy();
   }
 
   /** Writes any pending edit now. Called on teardown and before navigating
@@ -159,6 +163,13 @@ export class DraftsEditor {
       `</div>` +
       this.footHtml() +
       `<div class="dr-rv-host">${this.reviseMenu.menuHtml()}</div>`;
+    this.reviseField?.destroy();
+    this.reviseField = wireComposerField(this.root.querySelector<HTMLElement>(".dr-foot")!, {
+      onSend: (text) => {
+        this.reviseField?.clear();
+        this.reviseMenu.sendFree(text);
+      },
+    });
   }
 
   /** Repaints the header only, so a live update can land while the caret is
@@ -229,17 +240,17 @@ export class DraftsEditor {
     );
   }
 
-  /** Free text goes straight to Claude on Enter; the arrow opens the presets. */
+  /** Free text goes straight to Claude; the caret beside send opens the
+   *  presets, the way the chat composer's chevron sits beside its send. */
   private footHtml(): string {
-    return (
-      `<div class="dr-foot">` +
-        `<i class="ph ph-magic-wand dr-ask-icon" data-revise-icon aria-hidden="true"></i>` +
-        `<input type="text" class="dr-ask-input" data-revise-free ` +
-          `placeholder="Ask Claude to change this..." aria-label="Ask Claude to change this draft" />` +
-        `<button type="button" class="icon-btn-sq dr-icon${this.reviseMenu.isOpen ? " open" : ""}" data-revise aria-haspopup="menu" ` +
-          `title="Quick changes - the highlighted part, or the whole draft"><i class="ph ph-caret-up"></i></button>` +
-      `</div>`
-    );
+    return composerFieldHtml({
+      rowClass: "dr-foot",
+      inputAttrs: `data-revise-free aria-label="Ask Claude to change this draft"`,
+      placeholder: "Ask Claude to change this...",
+      after:
+        `<button type="button" class="icon-btn dr-presets${this.reviseMenu.isOpen ? " open" : ""}" data-revise aria-haspopup="menu" ` +
+          `title="Quick changes - the highlighted part, or the whole draft"><i class="ph ph-caret-up"></i></button>`,
+    });
   }
 
   private setVersionsOpen(open: boolean): void {

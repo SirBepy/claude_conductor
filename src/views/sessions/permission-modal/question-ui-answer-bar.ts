@@ -53,7 +53,7 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
     bar.innerHTML = isSummary
       ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage, page) : "")
       : ownZoneHtml(state.activeTab, freeText, page);
-    // The page composer's send arrow: a shortcut for the footer's primary
+    // The answer field's send arrow: a shortcut for the footer's primary
     // button once something is typed. It mirrors that button's label (Next
     // or Submit) and its disabled state, so it never looks live while the
     // click it forwards would do nothing.
@@ -71,8 +71,11 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
 
     const wireField = (el: HTMLTextAreaElement, isExtraField: boolean): void => {
       syncSend(el);
-      const highlightEl = el.parentElement?.querySelector<HTMLElement>(".cc-typing-highlight") ?? null;
-      slashPopup.attach(el, highlightEl);
+      const highlightEl = el.parentElement?.querySelector<HTMLElement>(".composer-highlight") ?? null;
+      // Enter is the arrow's keyboard twin, so it carries the same guard.
+      slashPopup.attach(el, highlightEl, () => {
+        if (sendBtn && !sendBtn.disabled) primary()?.click();
+      });
       if (isExtraField) {
         el.addEventListener("input", () => {
           state.additionalMessage = el.value;

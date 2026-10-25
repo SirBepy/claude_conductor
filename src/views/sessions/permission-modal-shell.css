@@ -237,9 +237,8 @@
 .prompt-card__footer {
   display: flex;
   flex-wrap: wrap;
-  /* flex-end, not center: the review step's answer-bar stacks a label above
-   * its textarea (two rows), so centering left the textarea's own center
-   * line above the buttons' vertical middle instead of level with them. */
+  /* flex-end, not center: a grown multi-line answer field keeps Skip/Next
+   * level with its bottom edge, where the send arrow sits. */
   align-items: flex-end;
   justify-content: flex-end;
   gap: 8px;
@@ -247,8 +246,8 @@
   border-top: 1px solid var(--color-border);
   background: var(--color-surface-alt);
 }
-/* :not(.pv-composer-send): the phone page's Preview reply bar keeps its own
- * send button exactly as the Preview panel draws it. */
+/* :not(.pv-composer-send): the answer field's send arrow keeps the shared
+ * composer-field look, not the footer's text-button sizing. */
 .prompt-card__footer button:not(.pv-composer-send):disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -256,10 +255,9 @@
   transform: none;
 }
 .prompt-card__footer button:not(.pv-composer-send) {
-  /* Matches the answer-bar textarea's rendered height (padding 8px + 1px
-   * border + 1.4 line-height at 0.88rem ≈ 38px) so Skip/Next sit level with
-   * it instead of looking squashed against a taller field. */
-  min-height: 38px;
+  /* Matches the answer field's one-line height (composer.css's 32px
+   * .composer-textarea and .icon-btn send) so Skip/Next sit level with it. */
+  min-height: 32px;
   padding: 6px 14px;
   display: inline-flex;
   align-items: center;
