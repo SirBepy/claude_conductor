@@ -22,17 +22,17 @@ export const ZIRTUE: DashboardTarget = {
 };
 
 export const LIST_ROWS: ListRow[] = [
-  { target: CONDUCTOR, last_active_ms: Date.now() - 20_000, live_count: 2, question_count: 1, working_count: 1, open: true },
-  { target: ZIRTUE, last_active_ms: min(4), live_count: 2, question_count: 1, working_count: 1, open: true },
+  { target: CONDUCTOR, last_active_ms: Date.now() - 20_000, live_count: 2, question_count: 1, working_count: 1 },
+  { target: ZIRTUE, last_active_ms: min(4), live_count: 2, question_count: 1, working_count: 1 },
   {
     target: { kind: "project", id: "p-soccer", name: "head_soccer_v_fable_oneshot", repos: [{ cwd: "C:/Projects/head_soccer", name: "head_soccer_v_fable_oneshot", project_id: "p-soccer" }] },
-    last_active_ms: min(12), live_count: 1, question_count: 0, working_count: 1, open: true,
+    last_active_ms: min(12), live_count: 1, question_count: 0, working_count: 1,
   },
-  { target: { kind: "project", id: "p-dash", name: "dashboard-a", repos: [{ cwd: "C:/Projects/dashboard-a", name: "dashboard-a", project_id: "p-dash" }] }, last_active_ms: min(65), live_count: 0, question_count: 0, working_count: 0, open: true },
-  // Projects the daemon still lists as closed (the removed sidebar list's open flag).
+  { target: { kind: "project", id: "p-dash", name: "dashboard-a", repos: [{ cwd: "C:/Projects/dashboard-a", name: "dashboard-a", project_id: "p-dash" }] }, last_active_ms: min(65), live_count: 0, question_count: 0, working_count: 0 },
+  // Idle projects with no live chats.
   ...[["p-count", "countoff"], ["p-sahur", "sahur_starting_point"], ["p-stop", "annoying_stopwatch"]].map(([id, name], i): ListRow => ({
     target: { kind: "project", id: id!, name: name!, repos: [{ cwd: `C:/Projects/${name}`, name: name!, project_id: id! }] },
-    last_active_ms: min(60 * 26 * (i + 1)), live_count: 0, question_count: 0, working_count: 0, open: false,
+    last_active_ms: min(60 * 26 * (i + 1)), live_count: 0, question_count: 0, working_count: 0,
   })),
 ];
 

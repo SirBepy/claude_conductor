@@ -446,8 +446,6 @@ pub fn run() {
             ipc::dashboard_snapshot,
             ipc::dashboard_history,
             ipc::dashboard_gallery_image,
-            ipc::dashboard_close_target,
-            ipc::dashboard_open_target,
             ipc::dashboard_set_pinned_actions,
             ipc::get_hidden_chats,
             ipc::update_hidden_chats,

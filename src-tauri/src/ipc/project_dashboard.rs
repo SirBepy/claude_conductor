@@ -116,21 +116,6 @@ pub async fn dashboard_gallery_image(id: String, state: State<'_, AppState>) -> 
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
-/// Hides a target from the Projects list until a chat starts in it.
-#[tauri::command]
-pub async fn dashboard_close_target(target: DashboardTargetRef, state: State<'_, AppState>) -> Result<(), String> {
-    let target = serde_json::to_value(target).map_err(|e| e.to_string())?;
-    client(&state).await?.dashboard_close_target(target).await.map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn dashboard_open_target(target: DashboardTargetRef, state: State<'_, AppState>) -> Result<(), String> {
-    let target = serde_json::to_value(target).map_err(|e| e.to_string())?;
-    client(&state).await?.dashboard_open_target(target).await.map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 /// Replaces a target's pinned quick-action chips. Returns the normalised list
 /// the daemon stored (trimmed, deduped), or the daemon's refusal text.
 #[tauri::command]
