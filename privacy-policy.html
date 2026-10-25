@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Conductor - Privacy Policy</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; color: #1f1f1f; }
+  h1 { font-size: 1.6rem; }
+  h2 { font-size: 1.15rem; margin-top: 1.8rem; }
+  code { background: #f2f2f2; padding: 0 .25rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>Claude Conductor - Privacy Policy</h1>
+<p>Last updated: 2026-10-25</p>
+
+<p>Claude Conductor is an open-source companion app (source: <a href="https://github.com/SirBepy/claude_conductor">github.com/SirBepy/claude_conductor</a>). The Android app is a remote control for the Conductor desktop app that you run on your own computer. This policy covers the Android app and the small push relay it uses.</p>
+
+<h2>The short version</h2>
+<ul>
+  <li>The developer runs no account system, no analytics, no ads and no tracking.</li>
+  <li>Your chats, files and voice recordings travel between your phone and your own computer. They are never sent to the developer.</li>
+  <li>The only data the developer's infrastructure holds is what push notifications need: a random device handle, a secret, and your phone's Firebase Cloud Messaging token.</li>
+</ul>
+
+<h2>Microphone (RECORD_AUDIO)</h2>
+<p>The app asks for microphone access only for voice dictation in the chat composer, and only records while you hold or toggle the dictation button. Audio is streamed directly to the Conductor app on the computer you paired with, which transcribes it there. Audio is not stored on the phone, not sent to the developer, and not shared with anyone else. You can deny or revoke the permission at any time; everything except dictation keeps working.</p>
+
+<h2>Notifications (POST_NOTIFICATIONS)</h2>
+<p>When a chat on your computer needs your attention, your computer asks the push relay to wake your phone. The relay is a Google Firebase Cloud Function operated by the developer (Google Cloud region europe-west1). It stores, per paired phone:</p>
+<ul>
+  <li>a random handle and a hashed secret that identify the phone to the relay,</li>
+  <li>the phone's Firebase Cloud Messaging (FCM) token, which Google needs to deliver the notification.</li>
+</ul>
+<p>A notification carries only a chat id and, optionally, the chat's name. Message content is never sent through the relay. For rate limiting, the relay also keeps a hash of the requesting IP address, which is deleted automatically after its one-hour window ends. Request logs record only the route, the result code and the first characters of the handle. Removing the phone in Conductor's settings deletes its handle from the relay. A handle whose phone has uninstalled or reinstalled the app is deleted the next time a notification fails to reach it. To have a handle deleted sooner, contact the developer (below). Google's handling of FCM data is described in the <a href="https://firebase.google.com/support/privacy">Firebase privacy information</a>.</p>
+
+<h2>Connection to your computer</h2>
+<p>The app connects to the computer you pair it with, either directly over your network or through an encrypted peer-to-peer tunnel (iroh). The pairing token stays on your phone and your computer. The developer cannot read this traffic.</p>
+
+<h2>Biometric lock</h2>
+<p>If you use the app lock, Android's own fingerprint or screen-lock prompt is shown. The app only receives a pass or fail result; no biometric data reaches the app or the developer.</p>
+
+<h2>Data sharing and selling</h2>
+<p>No personal data is sold or shared with third parties, except the FCM token Google needs to deliver notifications.</p>
+
+<h2>Children</h2>
+<p>The app is a developer tool and is not directed at children under 13.</p>
+
+<h2>Changes and contact</h2>
+<p>Changes to this policy are published at this address and in the project's git history. Questions: open an issue at <a href="https://github.com/SirBepy/claude_conductor/issues">github.com/SirBepy/claude_conductor/issues</a> or email tabsxlabs@gmail.com.</p>
+</body>
+</html>
