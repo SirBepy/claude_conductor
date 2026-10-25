@@ -81,6 +81,9 @@ class DraftsPanel implements DraftsPanelHandle {
     this.sessionId = sessionId;
     this.drafts = [];
     this.people = [];
+    // The previous chat's count must not linger while this one's fetch is
+    // in flight, or after it fails.
+    this.onOpenCount?.(0);
     this.view = { kind: "list" };
     this.tab = "people";
     this.showDone = false;

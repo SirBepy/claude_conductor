@@ -58,8 +58,13 @@ export function forgetActive(sessionId: string): void {
 
 /** The panel's share of the width beside the strip, 0..1. */
 export function loadFraction(): number {
-  const n = Number(localStorage.getItem(FRACTION_KEY));
-  return Number.isFinite(n) && n > 0 && n < 1 ? n : DEFAULT_FRACTION;
+  try {
+    const n = Number(localStorage.getItem(FRACTION_KEY));
+    return Number.isFinite(n) && n > 0 && n < 1 ? n : DEFAULT_FRACTION;
+  } catch {
+    // Disabled storage must not stop the split from mounting.
+    return DEFAULT_FRACTION;
+  }
 }
 
 export function saveFraction(fraction: number): void {

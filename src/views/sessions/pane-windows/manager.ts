@@ -15,15 +15,8 @@ import { PaneWindowManager } from "../../../../vendor/tauri_kit/frontend/pane-wi
 import {
   closeWindow, isShowing, openPanel, windowOf, type PaneLayout, type PaneWindow,
 } from "../../../../vendor/tauri_kit/frontend/pane-windows/layout";
-import { mountPanel, PANEL_KEYS, PANEL_META, type MountedPanels, type PanelDeps, type PanelHandle, type PanelHost, type PanelKey } from "./panels";
+import { mountPanel, PANEL_KEYS, PANEL_META, type MountedPanels, type PanelDeps, type PanelHandle, type PanelHost, type PanelHostDeps, type PanelKey } from "./panels";
 import { recallLayout, rememberLayout } from "./memory";
-
-export interface PaneWindowsDeps {
-  onDraft(text: string): void;
-  mountPreview: PanelDeps["mountPreview"];
-  /** Fired after every layout change, so the dial can repaint its state. */
-  onChange(): void;
-}
 
 export class PaneWindows implements PanelHost {
   private sessionId: string | null = null;
@@ -50,7 +43,7 @@ export class PaneWindows implements PanelHost {
   constructor(
     pane: HTMLElement,
     readonly layer: HTMLElement,
-    private deps: PaneWindowsDeps,
+    private deps: PanelHostDeps,
   ) {
     this.panels = PANEL_KEYS.filter((p) => p !== "preview" || !!deps.mountPreview);
     this.mgr = new PaneWindowManager<PanelKey>(
