@@ -19,6 +19,7 @@ import { mountPvComposer, type PvComposerDeps, type PvComposerHandle } from "./p
 import { mountPreviewWindowShell, type RailController, type RailTabDeps, type RailTabHandle } from "./rail-panel";
 import { isMirrored } from "./sessions-helpers";
 import { state } from "./state";
+import { setupImageZoomPan } from "../../shared/chat/image-zoom-pan";
 import "../../shared/chat/caret-popup/popup.css";
 import "../../shared/chat/composer.css";
 import { composerFieldHtml } from "../../shared/chat/composer-field";
@@ -54,6 +55,8 @@ class PreviewTab implements RailTabHandle {
    *  DOM is never innerHTML-rebuilt (renderIframe/renderHeader
    *  only touch their own sub-elements), so there's no per-render remount. */
   private composer: PvComposerHandle | null = null;
+  /** Tears down the current canvas's zoom/pan listeners. */
+  private disposeZoom: (() => void) | null = null;
 
   constructor(root: HTMLElement, deps: RailTabDeps) {
     this.root = root;
@@ -116,6 +119,8 @@ class PreviewTab implements RailTabHandle {
     }
     this.composer?.destroy();
     this.composer = null;
+    this.disposeZoom?.();
+    this.disposeZoom = null;
     closePvHistory();
   }
 
@@ -311,6 +316,12 @@ class PreviewTab implements RailTabHandle {
     const actBtn = (e.target as HTMLElement).closest<HTMLElement>("[data-act]");
     if (!actBtn) return;
     switch (actBtn.dataset.act) {
+      case "interact": {
+        const stage = actBtn.closest<HTMLElement>(".pv-stage");
+        const on = stage?.classList.toggle("is-interact") ?? false;
+        actBtn.setAttribute("aria-pressed", String(on));
+        return;
+      }
       case "more": togglePvMoreMenu(actBtn as HTMLButtonElement, this.pvMoreMenuDeps()); return;
       case "history": togglePvHistory(actBtn, this.pvHistoryDeps()); return;
       default: return;
@@ -369,9 +380,14 @@ class PreviewTab implements RailTabHandle {
     if (!this.selected) return;
     const canvas = this.root.querySelector<HTMLElement>(".pv-canvas");
     if (!canvas) return;
-    canvas.innerHTML = `<div class="pv-frame" data-w="${this.deviceWidth}"><iframe class="pv-iframe" sandbox="allow-scripts"></iframe></div>`;
+    this.disposeZoom?.();
+    this.disposeZoom = null;
+    canvas.innerHTML = `<div class="pv-frame" data-w="${this.deviceWidth}"><div class="pv-stage"><div class="pv-zoomee"><iframe class="pv-iframe" sandbox="allow-scripts"></iframe></div><button type="button" class="icon-btn pv-interact" data-act="interact" title="Interact with the page (pauses zoom and pan)" aria-pressed="false"><i class="ph ph-cursor-click"></i></button></div></div>`;
     const iframe = canvas.querySelector<HTMLIFrameElement>(".pv-iframe");
-    if (!iframe) return;
+    const stage = canvas.querySelector<HTMLElement>(".pv-stage");
+    const zoomee = canvas.querySelector<HTMLElement>(".pv-zoomee");
+    if (!iframe || !stage || !zoomee) return;
+    this.disposeZoom = setupImageZoomPan(zoomee, stage);
     // Staged over IPC, not a webview fetch (that was cross-origin and 405'd,
     // todo 591). `render_preview_doc` resolves per-transport: desktop stages
     // on the hook server (preview_render.rs), remote stages same-origin on
