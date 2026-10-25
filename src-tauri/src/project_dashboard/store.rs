@@ -33,12 +33,6 @@ pub struct DashboardStore {
     /// Scope key -> quick-action commands pinned for that target, in order.
     #[serde(default)]
     pub pinned_actions: BTreeMap<String, Vec<String>>,
-    /// Target key -> when the dev closed it (epoch ms). Absent = open; see `open_state`.
-    #[serde(default)]
-    pub closed_targets: BTreeMap<String, i64>,
-    /// Set once the first-run "close what has been idle a week" pass has run.
-    #[serde(default)]
-    pub open_seeded: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -166,7 +160,6 @@ impl DashboardStore {
         let key = scope.scope_key();
         self.hidden_builtins.remove(&key);
         self.pinned_actions.remove(&key);
-        self.closed_targets.remove(&key);
         true
     }
 
@@ -307,15 +300,12 @@ mod tests {
         s.set_builtin_hidden("group:vault-zirtue", "ship", true);
         s.set_pinned_actions("group:vault-zirtue", vec!["/ship".into()]).unwrap();
         s.set_pinned_actions("project:c:/x", vec!["/keep".into()]).unwrap();
-        s.closed_targets.insert("group:vault-zirtue".into(), 5);
-        s.closed_targets.insert("project:c:/x".into(), 6);
         assert!(s.delete_group("vault-zirtue"));
         assert_eq!(s.deleted_vault_slugs, vec!["zirtue"]);
         assert!(s.groups.is_empty());
         assert_eq!(s.cards.len(), 1);
         assert!(s.hidden_builtins.is_empty());
         assert_eq!(s.pinned_actions.keys().collect::<Vec<_>>(), vec!["project:c:/x"], "only the group's pins go");
-        assert_eq!(s.closed_targets.keys().collect::<Vec<_>>(), vec!["project:c:/x"], "only the group's closed flag goes");
         assert!(!s.delete_group("vault-zirtue"));
     }
 
@@ -328,9 +318,12 @@ mod tests {
     }
 
     #[test]
-    fn a_pre_existing_store_file_loads_with_the_new_fields_defaulted() {
-        let s: DashboardStore = serde_json::from_str(r#"{"cards":[{"id":"x"}],"closed_targets":{"project:a":5}}"#).unwrap();
-        assert!(!s.open_seeded && s.pinned_actions.is_empty());
-        assert_eq!(s.closed_targets["project:a"], 5);
+    fn a_store_file_with_the_retired_open_state_fields_still_loads() {
+        // The store has no deny_unknown_fields, so files written while targets
+        // could be closed keep reading after those fields were dropped.
+        let s: DashboardStore =
+            serde_json::from_str(r#"{"cards":[{"id":"x"}],"closed_targets":{"project:a":5},"open_seeded":true}"#).unwrap();
+        assert_eq!(s.cards.len(), 1);
+        assert!(s.pinned_actions.is_empty());
     }
 }

@@ -50,9 +50,6 @@ pub struct DashboardListRow {
     pub live_count: u32,
     pub question_count: u32,
     pub working_count: u32,
-    /// Whether the Projects list shows it. The list returns every target so
-    /// the UI can offer the closed ones in its picker.
-    pub open: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]

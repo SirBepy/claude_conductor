@@ -773,17 +773,14 @@ export class HttpTransport implements Transport {
         }
         return this.rpc<T>("mark_session_ended", { session_id: sessionId });
       }
-      // Projects tab dashboards: reads, a card's refresh (it runs the stored
-      // config, it cannot change it), the dashboard's own todo checkbox (the
-      // same write set_user_todo_state already allows) and opening or closing a
-      // project in the list. Every card, group and pin write stays desktop-only,
-      // so none of those are here.
+      // Project dashboards: reads, a card's refresh (it runs the stored config,
+      // it cannot change it) and the dashboard's own todo checkbox (the same
+      // write set_user_todo_state already allows). Every card, group and pin
+      // write stays desktop-only, so none of those are here.
       case "dashboard_list_targets":
         return this.rpc<T>("dashboard_list_targets", {});
       case "dashboard_snapshot":
       case "dashboard_history":
-      case "dashboard_open_target":
-      case "dashboard_close_target":
         return this.rpc<T>(command, { target: args.target });
       case "dashboard_gallery_image":
       case "dashboard_card_refresh":

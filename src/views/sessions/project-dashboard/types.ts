@@ -11,7 +11,7 @@ export type { CardConfig, CardProgress, GroupDef, Scope } from "../../../types/i
 export type DashboardTargetRef = { kind: "project" | "group", id: string }
 export type RepoRef = { cwd: string, name: string, project_id: string | null }
 export type DashboardTarget = { kind: "project" | "group", id: string, name: string, repos: RepoRef[] }
-export type DashboardListRow = { target: DashboardTarget, last_active_ms: number, live_count: number, question_count: number, working_count: number, open: boolean }
+export type DashboardListRow = { target: DashboardTarget, last_active_ms: number, live_count: number, question_count: number, working_count: number }
 export type DashTodo = { id: string, project_id: string, text: string, origin_session_id: string | null, repo_cwd: string, by_ai: boolean }
 export type DashChatRow = { session_id: string, title: string, status: "question" | "working" | "your_turn" | "waiting" | "ended", repo_cwd: string, at_ms: number }
 export type PlanItem = { id: string | null, text: string, section: string, priority: boolean, repo_cwd: string }

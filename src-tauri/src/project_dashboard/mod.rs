@@ -8,7 +8,6 @@ pub mod extract;
 pub mod history_build;
 pub mod history_scan;
 pub mod last_run;
-pub mod open_state;
 pub mod plan;
 pub mod runner;
 pub mod snapshot_parts;

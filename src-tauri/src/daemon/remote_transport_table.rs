@@ -455,11 +455,6 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // The dashboard's todo checkbox: the same user-todo write as
     // set_user_todo_state above, keyed by project instead of session.
     ("dashboard_todo_set_state", P),
-    // Which projects the Projects list shows: a per-target open flag, the
-    // same kind of list-visibility state as update_hidden_chats. Without open,
-    // a project closed on the PC (or by the idle sweep) is unreachable here.
-    ("dashboard_open_target", P),
-    ("dashboard_close_target", P),
     // Write: stores the Android shell's relay handle + secret (length-capped,
     // deduped, at most 20 kept) so blocked-prompt pushes reach that phone. The
     // handle is only a send address into the relay, not a credential for this

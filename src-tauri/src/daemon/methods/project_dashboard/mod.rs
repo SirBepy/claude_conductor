@@ -198,11 +198,9 @@ mod tests {
     ];
 
     /// The phone's Projects tab: reads, running a stored card, the todo
-    /// checkbox and opening or closing a project in the list. Never a paired
+    /// checkbox. Never a paired
     /// machine, which mirrors chats, not dashboards.
     const PHONE: &[&str] = &[
-        "dashboard_open_target",
-        "dashboard_close_target",
         "dashboard_card_refresh",
         "dashboard_todo_set_state",
         "dashboard_list_targets",
