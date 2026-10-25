@@ -5,7 +5,7 @@
 //! thin glue around these.
 
 use claude_conductor_lib::ipc::projects_test_helpers as h;
-use claude_conductor_lib::types::{Avatar, ProjectConfig, ProjectsSortBy, Settings};
+use claude_conductor_lib::types::{Avatar, ProjectConfig, Settings};
 
 fn sample_project(id: &str, path: &str) -> ProjectConfig {
     ProjectConfig {
@@ -77,17 +77,4 @@ fn delete_project_removes_entry() {
     assert!(ok);
     assert_eq!(s.projects.len(), 1);
     assert_eq!(s.projects[0].id, "b");
-}
-
-#[test]
-fn set_projects_sort_by_updates_field() {
-    let mut s = Settings::default();
-    h::set_sort_by(&mut s, ProjectsSortBy::Name);
-    assert_eq!(s.projects_sort_by, ProjectsSortBy::Name);
-    h::set_sort_by(&mut s, ProjectsSortBy::Tokens);
-    assert_eq!(s.projects_sort_by, ProjectsSortBy::Tokens);
-    h::set_sort_by(&mut s, ProjectsSortBy::Live);
-    assert_eq!(s.projects_sort_by, ProjectsSortBy::Live);
-    h::set_sort_by(&mut s, ProjectsSortBy::Recent);
-    assert_eq!(s.projects_sort_by, ProjectsSortBy::Recent);
 }

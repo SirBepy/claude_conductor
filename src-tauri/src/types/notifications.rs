@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use super::project::{CharacterWhitelist, ProjectConfig, ProjectsSortBy};
+use super::project::{CharacterWhitelist, ProjectConfig};
 use super::mute::{MuteChoice, TimedMute, now_epoch_ms};
 
 /// How the app reacts to new releases.
@@ -65,7 +65,6 @@ pub struct Settings {
     pub hook_port: Option<u16>,
     #[serde(default, deserialize_with = "deserialize_lenient_projects")]
     pub projects: Vec<ProjectConfig>,
-    pub projects_sort_by: ProjectsSortBy,
     pub hooks_registered: bool,
     pub hook_registration_declined: bool,
     /// Bumped whenever the shape of the hook entry we write into
@@ -177,7 +176,6 @@ impl Default for Settings {
             auto_update: AutoUpdateMode::default(),
             hook_port: None,
             projects: Vec::new(),
-            projects_sort_by: ProjectsSortBy::Recent,
             hooks_registered: false,
             hook_registration_declined: false,
             hook_install_version: 0,
@@ -296,7 +294,6 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::project::ProjectsSortBy;
 
     #[test]
     fn settings_defaults_roundtrip_json() {
@@ -506,10 +503,18 @@ mod tests {
     fn settings_defaults_expose_new_fields() {
         let s = Settings::default();
         assert!(s.projects.is_empty());
-        assert_eq!(s.projects_sort_by, ProjectsSortBy::Recent);
         assert!(!s.hooks_registered);
         assert!(!s.hook_registration_declined);
         assert_eq!(s.hook_install_version, 0);
+    }
+
+    #[test]
+    fn a_settings_file_still_carrying_the_retired_projects_sort_by_loads() {
+        // Files written before the sort picker was removed keep this key; it
+        // must be ignored, not fail the whole settings.json.
+        let raw = r#"{ "poll_interval_secs": 123, "projects_sort_by": "tokens" }"#;
+        let s: Settings = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.poll_interval_secs, 123);
     }
 
     #[test]

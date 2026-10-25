@@ -29,20 +29,6 @@ impl Default for Avatar {
     fn default() -> Self { Avatar::None }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, ts_rs::TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(export_to = "../../src/types/ipc.generated.ts")]
-pub enum ProjectsSortBy {
-    Recent,
-    Live,
-    Name,
-    Tokens,
-}
-
-impl Default for ProjectsSortBy {
-    fn default() -> Self { ProjectsSortBy::Recent }
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct ProjectConfig {

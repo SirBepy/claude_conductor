@@ -240,7 +240,6 @@ pub fn run() {
             ipc::ensure_project,
             ipc::update_project,
             ipc::delete_project,
-            ipc::set_projects_sort_by,
             ipc::spawn_channel,
             ipc::stop_channel,
             ipc::restart_channel,
