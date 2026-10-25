@@ -18,6 +18,7 @@ import { setAutoAccept } from "./permission-modal";
 import { SessionStatusbar, loadStatuslineRows, loadStatuslineHideZero, fetchGitInfo } from "./session-statusbar";
 import { savePendingSession } from "./pending-draft-storage";
 import { SessionHeader } from "./session-header";
+import { openChangeAccountModal } from "../../shared/change-account-modal";
 import { applyHeaderMerge } from "./mobile-header-merge";
 
 export function rebuildSidebar(): void {
@@ -107,6 +108,7 @@ export async function mountPendingStatusbar(
     onEffortChange: (e) => { config.effort = e; },
     onModelChange: (m) => { config.model = m; },
     onConfig: (model, effort, effortEditable) => header?.setConfig(model, effort, effortEditable),
+    onAccountClick: () => { void changePendingAccount(config, placeholderId, sb); },
     layoutEditable: true,
   });
   state.statusbar = sb;
@@ -122,6 +124,34 @@ export async function mountPendingStatusbar(
     // the LIVE gitCwd - a stale write would poison the new cwd's entry.
     .then((info) => { if (state.statusbar === sb && sb.isCurrentCwd(project.path)) sb.updateGitInfo(info); })
     .catch(() => {});
+}
+
+/** The draft pane's account chip. This statusbar outlives the draft (the pane
+ *  is rebound in place on promotion, not remounted), so once the renderer has
+ *  swapped to a real session id the click is a live-chat move, same as the
+ *  established pane's chip. Before that nothing is spawned yet: the pick only
+ *  re-points the draft's config, which the first send carries as account_id.
+ *  active-session imports are dynamic because active-session.ts sits above
+ *  this module in the import graph. */
+async function changePendingAccount(config: SessionConfig, placeholderId: string, sb: SessionStatusbar): Promise<void> {
+  const liveId = state.renderer?.currentSessionId();
+  if (liveId && liveId !== placeholderId) {
+    const [{ selectSession }, { changeAccountForSession }] = await Promise.all([
+      import("./active-session"),
+      import("./active-session-account"),
+    ]);
+    await changeAccountForSession(liveId, selectSession);
+    return;
+  }
+  const picked = await openChangeAccountModal({ currentId: config.accountId ?? null, title: "Change account" });
+  if (!picked || picked === config.accountId) return;
+  config.accountId = picked;
+  if (state.statusbar === sb) sb.setAccountId(picked);
+  const pending = state.pendingNewSession;
+  if (pending?.placeholderId === placeholderId) {
+    pending.config.accountId = picked;
+    savePendingSession(pending);
+  }
 }
 
 /** Attach the ChatRenderer to the pending pane and watch for the placeholder's
