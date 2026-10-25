@@ -261,6 +261,7 @@ mod tests {
             token,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         a_state.mirror.set_instances("mach-b", "B", vec![]);
         a_state.mirror.set_online("mach-b", true);

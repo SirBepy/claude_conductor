@@ -493,6 +493,7 @@ mod tests {
             token: "tok".into(),
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         }
     }
 

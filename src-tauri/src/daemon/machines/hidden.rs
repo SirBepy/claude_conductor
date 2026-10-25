@@ -188,6 +188,7 @@ mod tests {
             token,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         MachineHub::sync_links(&a_state);
         wait_until("B's chats in A's mirror", || a_state.mirror.instances().len() == 2).await;
@@ -246,6 +247,7 @@ mod tests {
             token,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         // Sorts after B's id, so a first-failure loop would already have forwarded to B.
         let offline_id = "mach-zzz-offline";
@@ -258,6 +260,7 @@ mod tests {
             token: "dummy-unused".into(),
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         MachineHub::sync_links(&a_state);
         wait_until("B's chat in A's mirror", || a_state.mirror.instances().len() == 1).await;

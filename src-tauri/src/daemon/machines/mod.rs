@@ -94,6 +94,40 @@ pub fn publish_instances_changed(state: &DaemonState) {
     state.notifier.publish("instances_changed", serde_json::json!({"instances": all_instances(state)}));
 }
 
+/// Writes a peer's own name and icon into this machine's cache of it: the
+/// registry entry (the peer's label wins over any older owner-set nickname,
+/// since the peer's own name is now the single source), its reverse device
+/// name, the mirror label, then the change events. Returns whether anything
+/// changed; nothing is published otherwise, so a link reconnect that finds
+/// nothing new stays quiet. An unusable label or icon is ignored, not stored.
+pub(crate) fn apply_peer_profile(state: &DaemonState, machine_id: &str, label: &str, icon: Option<&str>) -> bool {
+    let Some(registry) = state.machines.get() else { return false };
+    let Some(before) = registry.peer(machine_id) else { return false };
+    let new_label = crate::daemon::device_registry::normalize_label(label).ok();
+    let new_icon = registry::normalize_icon(icon).unwrap_or(None);
+    let label_changed = new_label.is_some_and(|l| l != before.label);
+    if let Some(l) = new_label {
+        // Stored even when equal so a stale nickname entry cannot mask the
+        // name the peer reports.
+        registry.rename_peer(machine_id, l);
+        if let Some(device_id) = &before.reverse_device_id {
+            let _ = crate::daemon::device_registry::DeviceRegistry::rename_device(device_id, l, registry.app_data());
+        }
+    }
+    let icon_changed = new_icon != before.icon;
+    if icon_changed {
+        registry.set_peer_icon(machine_id, new_icon);
+    }
+    if new_label.is_some_and(|l| state.mirror.set_label(machine_id, l)) {
+        publish_instances_changed(state);
+    }
+    let changed = label_changed || icon_changed;
+    if changed {
+        state.notifier.publish("machines_changed", serde_json::json!({}));
+    }
+    changed
+}
+
 #[cfg(test)]
 mod merged_tests {
     use super::*;

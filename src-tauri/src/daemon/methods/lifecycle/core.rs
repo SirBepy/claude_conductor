@@ -487,6 +487,7 @@ mod machine_target_tests {
             token,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         // set_online only flips an EXISTING entry's flag - set_instances
         // creates it first.
@@ -608,6 +609,7 @@ mod machine_target_tests {
             token,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         state.mirror.set_instances("mach-b", "B", mirrored);
         state.mirror.set_online("mach-b", true);

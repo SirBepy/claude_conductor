@@ -194,7 +194,10 @@ machine chips as the desktop.
 
 **Machine icons.** Each machine's icon is its OS logo (Windows, Apple, Linux). If two paired
 machines run the same OS, one keeps the logo and the other gets an icon of its own, the same one on
-every device. The new-chat machine chips show the same icons.
+every device. The new-chat machine chips show the same icons. To rename a machine or pick its icon
+yourself, use its row under Settings > Remote access > Paired machines, from any of your devices,
+phone included; the change lands on that machine and every paired device shows it. **Automatic**
+in the icon grid goes back to the OS logo.
 
 **Pair them.** Turn on Settings > Remote access on both machines. On machine A, that page shows the
 same pairing link/QR a phone uses - click **Copy link**. On machine B, go to Settings > Remote

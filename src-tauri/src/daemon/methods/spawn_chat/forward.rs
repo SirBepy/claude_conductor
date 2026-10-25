@@ -190,6 +190,7 @@ mod tests {
             token: "tok".into(),
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         registry
     }
@@ -291,6 +292,7 @@ mod tests {
             token: "tok".into(),
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         state.registry.upsert_interactive("sess-1", std::path::Path::new("."), "proj-x", "2026-08-18T00:00:00Z");
         let result =
@@ -316,6 +318,7 @@ mod tests {
             token: "tok".into(),
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         state.registry.upsert_interactive("sess-unreachable-peer", std::path::Path::new("."), "proj-x", "2026-08-18T00:00:00Z");
         // Twice in one turn: spawn_chat has no per-turn cap, so the second

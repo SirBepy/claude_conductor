@@ -55,6 +55,8 @@ const SEE_ONLY: &[&str] = &[
     "get_session_drafts",
     "get_hidden_chats",
     "peer_unpaired",
+    // A peer announcing its own name and icon touches no chat.
+    "peer_profile_changed",
 ];
 
 /// Methods that create a new chat here. Always allowed; `rpc_dispatch`
@@ -154,6 +156,7 @@ mod tests {
             token: "dummy-token".into(),
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         assert!(reg.set_can_drive("mac", !view_only));
         state

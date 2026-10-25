@@ -378,6 +378,7 @@ mod tests {
             token: "tok".into(),
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
         state.registry.upsert_interactive("s2", std::path::Path::new("."), "proj-2", "2026-07-30T00:00:00Z");

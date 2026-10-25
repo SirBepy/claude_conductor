@@ -631,11 +631,12 @@ export class HttpTransport implements Transport {
       case "list_machines":
         return this.rpc<T>("list_machines", null);
       case "set_machine_profile":
-        // `icon: null` (back to automatic) must survive; only an absent key is dropped.
+        // The RPC reads `icon: null` as "back to automatic"; the desktop command
+        // spells that `clearIcon: true` because Tauri cannot tell null from absent.
         return this.rpc<T>("set_machine_profile", {
           machine_id: args.machineId ?? args.machine_id ?? null,
           ...(args.label !== undefined ? { label: args.label } : {}),
-          ...(args.icon !== undefined ? { icon: args.icon } : {}),
+          ...(args.clearIcon ? { icon: null } : args.icon !== undefined ? { icon: args.icon } : {}),
         });
       case "list_machine_projects":
         return this.rpc<T>("list_machine_projects", {

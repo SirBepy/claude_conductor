@@ -314,6 +314,7 @@ mod relay_tests {
             token: token_for_a,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         a_state.mirror.set_instances(&b_id, "B", vec![mirrored_instance(sid)]);
         a_state.mirror.set_online(&b_id, true);
@@ -471,6 +472,7 @@ mod relay_tests {
             token: token_for_a,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         a_state.mirror.set_instances(&b_id, "B", vec![mirrored_instance(sid)]);
         a_state.mirror.set_online(&b_id, true);

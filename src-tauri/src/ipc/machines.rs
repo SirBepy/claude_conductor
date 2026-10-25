@@ -45,6 +45,32 @@ pub async fn rename_machine(machine_id: String, label: String, state: State<'_, 
         .map_err(|e| e.to_string())
 }
 
+/// Edits a machine's name and icon from this device. JS invokes it with
+/// `{ machineId, label, icon, clearIcon }`: `machineId` omitted or null edits
+/// this machine; an omitted `label` or `icon` is left alone; `icon` is a `ph-*`
+/// class; `clearIcon: true` resets the icon to automatic (Tauri cannot tell an
+/// omitted Option arg from null, so clearing needs its own flag).
+#[tauri::command]
+pub async fn set_machine_profile(
+    machine_id: Option<String>,
+    label: Option<String>,
+    icon: Option<String>,
+    clear_icon: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    let mut params = serde_json::json!({ "machine_id": machine_id });
+    if let Some(label) = label {
+        params["label"] = Value::String(label);
+    }
+    if let Some(icon) = icon {
+        params["icon"] = Value::String(icon);
+    } else if clear_icon == Some(true) {
+        params["icon"] = Value::Null;
+    }
+    client.call("set_machine_profile", params).await.map_err(|e| e.to_string())
+}
+
 /// Desktop-only: limits (or restores) what `machine_id` may do to this
 /// machine's chats - see `daemon::machines::peer_scope`.
 #[tauri::command]

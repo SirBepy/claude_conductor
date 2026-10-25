@@ -87,6 +87,7 @@ async fn pair_machine_peer(ctx: &Arc<RemoteCtx>, peer: PairPeer) -> Response {
         token: peer.reverse_token,
         reverse_device_id: Some(device_id),
         added_at: now_secs(),
+        icon: None,
     });
     // The initiator side (`methods/machines/pairing.rs::pair_machine`) starts
     // its own link the instant it upserts its peer entry; the receiving side

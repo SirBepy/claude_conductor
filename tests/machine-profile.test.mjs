@@ -89,11 +89,13 @@ describe("set_machine_profile routing", () => {
     resetTransportForTests();
   });
 
-  it("desktop sends camelCase args to the Tauri command", async () => {
+  it("desktop sends camelCase args, and automatic as clearIcon since Tauri reads null as absent", async () => {
     const invoke = vi.fn().mockResolvedValue({ ok: true });
     globalThis.window = { __TAURI__: { core: { invoke } } };
     await api.setMachineProfile("m1", { label: "Studio", icon: null });
-    expect(invoke).toHaveBeenCalledWith("set_machine_profile", { machineId: "m1", label: "Studio", icon: null });
+    expect(invoke).toHaveBeenCalledWith("set_machine_profile", { machineId: "m1", label: "Studio", clearIcon: true });
+    await api.setMachineProfile(null, { icon: "ph-leaf" });
+    expect(invoke).toHaveBeenLastCalledWith("set_machine_profile", { machineId: null, label: undefined, icon: "ph-leaf" });
   });
 
   it("the phone sends snake_case params and keeps icon: null", async () => {
@@ -102,7 +104,7 @@ describe("set_machine_profile routing", () => {
     globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
     globalThis.location = { protocol: "https:", host: "pc.tail.ts.net" };
     globalThis.window = {};
-    await new HttpTransport().call("set_machine_profile", { machineId: null, icon: null });
+    await new HttpTransport().call("set_machine_profile", { machineId: null, clearIcon: true });
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
       method: "set_machine_profile",
       params: { machine_id: null, icon: null },
