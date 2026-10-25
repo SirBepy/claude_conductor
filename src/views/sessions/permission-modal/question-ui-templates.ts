@@ -44,7 +44,9 @@ export function badgesHtml(badges?: OptionBadge[]): string {
 // Zones 1+2: splitAsk() already separates the leading context from the
 // final ask - zone 1 (dimmed context) is omitted entirely when there's no
 // separate ask to highlight. The domain chip rides along in whichever zone
-// survives, so a terse one-sentence question still shows it.
+// survives, so a terse one-sentence question still shows it. The ask band's
+// own Ask button is the phone page's copy of the header one
+// (permission-modal-shell.css shows one or the other).
 export function questionZonesHtml(q: Question): string {
   const { context, ask } = splitAsk(q.question);
   const ctxZone = context
@@ -64,6 +66,7 @@ export function questionZonesHtml(q: Question): string {
       <i class="ph-fill ph-question prompt-ask__icon"></i>
       <div class="prompt-ask__text prompt-q__text">${renderMarkdown(ask)}</div>
       ${context ? "" : domainChipHtml(q.domain)}
+      <button type="button" class="icon-btn-sq prompt-icon-btn prompt-ask__btn" data-act="ask-inline" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button>
     </div>
   `;
 }

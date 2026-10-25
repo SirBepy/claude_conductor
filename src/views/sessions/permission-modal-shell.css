@@ -303,10 +303,10 @@
 }
 
 /* Phone-only pieces of the fullscreen question page, hidden everywhere else:
- * the back arrow, the "Question" label and the header's Skip. */
+ * the back arrow, the header's Skip and the ask band's own Ask button. */
 .prompt-card__back,
-.prompt-card__title-text,
-.prompt-card__skip {
+.prompt-card__skip,
+.prompt-ask__btn {
   display: none;
 }
 
@@ -331,8 +331,26 @@
   }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__handle,
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) [data-act="minimize"],
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__title i {
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__title,
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) [data-act="ask"] {
     display: none;
+  }
+  /* Ask sits on the question it asks about instead of in the header. The
+     negative block margins keep its 32px box from growing the band past the
+     text's one-line height. Auto left margin pins it right; after a domain
+     chip (which already takes the auto margin) it sits flush beside it. */
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn {
+    display: inline-flex;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    margin: -5px -6px -5px auto;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-domain ~ .prompt-ask__btn {
+    margin-left: 0;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn i {
+    font-size: 1.15rem;
   }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) {
     height: 52px;
@@ -342,12 +360,6 @@
   }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__back {
     display: inline-flex;
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__title-text {
-    display: inline;
-    margin-right: 6px;
-    font-size: 1rem;
-    font-weight: 700;
   }
   /* 44px touch targets: the desktop 26px squares are too small for a thumb. */
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) > .prompt-icon-btn {
