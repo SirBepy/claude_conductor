@@ -157,6 +157,53 @@ impl Mine {
 /// The Playwright extension's id; it is the same in every Chromium browser.
 const EXTENSION_ID: &str = "mmlmfjhmonkocbjadbfplnigmagldckm";
 
+/// Settings key (in `Settings.extra`, like the keys above) of an object mapping
+/// "<app>/<profile folder>" to that profile's extension token. Every extension
+/// install generates its own token, so one global env token only ever fits one
+/// profile.
+const TOKENS_KEY: &str = "claudeBrowserExtensionTokens";
+
+/// Lookup key for a token: lowercase app name and the profile folder, which is
+/// empty when the profile cannot be resolved.
+pub fn token_key(app: App, profile: Option<&str>) -> String {
+    format!("{}/{}", app.label().to_lowercase(), profile.unwrap_or(""))
+}
+
+/// The token stored for `app` and `profile`, else the one stored for the app
+/// with a blank profile (what the settings page writes when no folder is named).
+fn lookup_token(tokens: &serde_json::Map<String, Value>, app: App, profile: Option<&str>) -> Option<String> {
+    [token_key(app, profile), token_key(app, None)]
+        .iter()
+        .filter_map(|k| tokens.get(k).and_then(Value::as_str))
+        .map(|t| t.trim().to_string())
+        .find(|t| !t.is_empty())
+}
+
+impl Mine {
+    /// The extension token Settings holds for this browser profile, resolved
+    /// the way the one-chat-per-profile guard resolves it.
+    pub fn profile_token(&self, settings: &Settings) -> Option<String> {
+        let tokens = settings.extra.get(TOKENS_KEY)?.as_object()?;
+        lookup_token(tokens, self.app, self.resolved_profile().as_deref())
+    }
+
+    /// Appends the fix for a connect failure when no per-profile token exists:
+    /// an unmatched token is the usual reason the connect page rejects a profile.
+    pub fn with_token_hint(&self, err: String, has_token: bool) -> String {
+        let lower = err.to_lowercase();
+        if has_token || !["token", "extension", "connect", "timed out", "timeout"].iter().any(|w| lower.contains(w)) {
+            return err;
+        }
+        format!(
+            "{err} If the connect page in {} said \"Invalid token provided\" or never appeared, tell Joe with send_message to copy the token \
+shown on the Playwright extension's connect page in that profile and paste it into Settings > Claude's browser > Extension token \
+(profile folder \"{}\"); each profile's extension has its own token.",
+            self.app.label(),
+            self.resolved_profile().unwrap_or_default()
+        )
+    }
+}
+
 impl Mine {
     /// The profile folder this choice really drives: the named one, else the
     /// browser's last-used one, else `None` when neither can be read.
@@ -341,6 +388,46 @@ mod tests {
         std::fs::write(dir.path().join("Local State"), r#"{"profile":{"last_used":"Profile 2"}}"#).unwrap();
         let err = mine(App::Edge, None).check_extension_in(Some(dir.path().to_path_buf())).unwrap_err();
         assert!(err.contains("Profile 2"), "{err}");
+    }
+
+    fn tokens(pairs: &[(&str, &str)]) -> serde_json::Map<String, Value> {
+        pairs.iter().map(|(k, v)| ((*k).to_string(), json!(v))).collect()
+    }
+
+    #[test]
+    fn each_profile_gets_its_own_token() {
+        let t = tokens(&[("brave/Default", "tok-a"), ("brave/Profile 1", " tok-b "), ("chrome/Default", "tok-c")]);
+        assert_eq!(lookup_token(&t, App::Brave, Some("Default")).as_deref(), Some("tok-a"));
+        assert_eq!(lookup_token(&t, App::Brave, Some("Profile 1")).as_deref(), Some("tok-b"));
+        assert_eq!(lookup_token(&t, App::Chrome, Some("Default")).as_deref(), Some("tok-c"));
+    }
+
+    #[test]
+    fn a_profile_without_a_token_falls_back() {
+        let t = tokens(&[("brave/Default", "tok-a"), ("edge/", "tok-edge"), ("chrome/Default", "  ")]);
+        assert_eq!(lookup_token(&t, App::Brave, Some("Profile 9")), None, "caller then uses the global token");
+        assert_eq!(lookup_token(&t, App::Chrome, Some("Default")), None, "blank token is no token");
+        assert_eq!(lookup_token(&t, App::Edge, Some("Profile 2")).as_deref(), Some("tok-edge"), "blank-profile entry covers the app");
+        assert_eq!(lookup_token(&tokens(&[]), App::Brave, None), None);
+    }
+
+    #[test]
+    fn profile_token_reads_settings_extra() {
+        let mut s = Settings::default();
+        s.extra.insert(TOKENS_KEY.to_string(), json!({"brave/Profile 1": "tok-b", "brave/Default": "tok-a"}));
+        assert_eq!(mine(App::Brave, Some("Profile 1")).profile_token(&s).as_deref(), Some("tok-b"));
+        assert_eq!(mine(App::Brave, Some("Default")).profile_token(&s).as_deref(), Some("tok-a"));
+        assert_eq!(mine(App::Brave, Some("Profile 2")).profile_token(&s), None);
+        assert_eq!(mine(App::Brave, Some("Default")).profile_token(&Settings::default()), None);
+    }
+
+    #[test]
+    fn a_connect_failure_without_a_profile_token_says_where_to_paste_it() {
+        let m = mine(App::Brave, Some("Profile 1"));
+        let hinted = m.with_token_hint("Invalid token provided".to_string(), false);
+        assert!(hinted.contains("Settings > Claude's browser > Extension token") && hinted.contains("Profile 1"), "{hinted}");
+        assert_eq!(m.with_token_hint("Invalid token provided".to_string(), true), "Invalid token provided");
+        assert_eq!(m.with_token_hint("page crashed".to_string(), false), "page crashed");
     }
 
     #[test]

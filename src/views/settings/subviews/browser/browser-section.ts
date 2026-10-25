@@ -13,6 +13,9 @@ export const BROWSER_MODE_KEY = "claudeBrowserMode";
 export const BROWSER_APP_KEY = "claudeBrowserMineApp";
 export const BROWSER_PROFILE_KEY = "claudeBrowserMineProfile";
 
+export const BROWSER_EXT_PAIRING_MAP_KEY = "claudeBrowserExtensionTokens";
+export const BROWSER_EXT_PAIRING_INPUT_ID = "chatDefaultsBrowserToken";
+
 export type BrowserMode = "own" | "mine";
 export type BrowserApp = "chrome" | "edge" | "brave";
 
@@ -22,6 +25,13 @@ export interface BrowserChoice {
   app: BrowserApp;
   /** Profile folder name ("Default", "Profile 1"); blank lets the browser pick its last used. */
   profile: string;
+  /** Playwright extension token per "<app>/<profile folder>"; each extension install has its own. */
+  tokens: Record<string, string>;
+}
+
+/** Same key the daemon looks up (`token_key` in browser/target.rs). */
+export function tokenKey(app: BrowserApp, profile: string): string {
+  return `${app}/${profile.trim()}`;
 }
 
 /** The Playwright extension's store page, from the pinned @playwright/mcp's own install hint. */
@@ -30,7 +40,13 @@ const EXTENSION_URL = "https://chromewebstore.google.com/detail/playwright-exten
 export function readBrowserChoice(settings: Record<string, unknown>): BrowserChoice {
   const app = settings[BROWSER_APP_KEY];
   const profile = settings[BROWSER_PROFILE_KEY];
+  const rawTokens = settings[BROWSER_EXT_PAIRING_MAP_KEY];
+  const tokens: Record<string, string> = {};
+  if (rawTokens && typeof rawTokens === "object") {
+    for (const [k, v] of Object.entries(rawTokens)) if (typeof v === "string") tokens[k] = v;
+  }
   return {
+    tokens,
     enabled: settings[BROWSER_SETTING_KEY] === true,
     mode: settings[BROWSER_MODE_KEY] === "mine" ? "mine" : "own",
     app: app === "edge" || app === "brave" ? app : "chrome",
@@ -39,11 +55,23 @@ export function readBrowserChoice(settings: Record<string, unknown>): BrowserCho
 }
 
 /** Reads the section's live controls, keeping `prev` for any control the
- *  current mode does not render (the app and profile rows exist only in My browser). */
-export function readBrowserFields(root: HTMLElement, prev: BrowserChoice): BrowserChoice {
+ *  current mode does not render (the app and profile rows exist only in My browser).
+ *  The token input shows the token of the app and profile it was drawn for, so it
+ *  is saved only when it is what changed; after an app/profile change the page is
+ *  redrawn with the new pair's token. */
+export function readBrowserFields(root: HTMLElement, prev: BrowserChoice, changedId?: string): BrowserChoice {
   const app = root.querySelector<HTMLSelectElement>("#chatDefaultsBrowserApp")?.value;
   const mode = root.querySelector<HTMLSelectElement>("#chatDefaultsBrowserMode")?.value;
+  const tokens = { ...prev.tokens };
+  const tokenInput = root.querySelector<HTMLInputElement>(`#${BROWSER_EXT_PAIRING_INPUT_ID}`);
+  if (tokenInput && changedId === BROWSER_EXT_PAIRING_INPUT_ID) {
+    const key = tokenKey(prev.app, prev.profile);
+    const value = tokenInput.value.trim();
+    if (value) tokens[key] = value;
+    else delete tokens[key];
+  }
   return {
+    tokens,
     enabled: root.querySelector<HTMLInputElement>("#chatDefaultsBrowser")?.checked ?? prev.enabled,
     mode: mode === undefined ? prev.mode : mode === "mine" ? "mine" : "own",
     app: app === "edge" || app === "brave" || app === "chrome" ? app : prev.app,
@@ -57,6 +85,7 @@ export function browserSettingsPatch(choice: BrowserChoice): Record<string, unkn
     [BROWSER_MODE_KEY]: choice.mode,
     [BROWSER_APP_KEY]: choice.app,
     [BROWSER_PROFILE_KEY]: choice.profile,
+    [BROWSER_EXT_PAIRING_MAP_KEY]: choice.tokens,
   };
 }
 
@@ -82,10 +111,22 @@ function minePart(choice: BrowserChoice): TemplateResult {
       >
     </div>
     <div class="kit-row">
+      <span class="kit-row-label">Extension token</span>
+      <input
+        type="password"
+        id="${BROWSER_EXT_PAIRING_INPUT_ID}"
+        class="cd-profile-input"
+        .value=${choice.tokens[tokenKey(choice.app, choice.profile)] ?? ""}
+        placeholder="Paste from connect page"
+        autocomplete="off"
+        spellcheck="false"
+      >
+    </div>
+    <div class="kit-row">
       <span class="kit-row-label">Playwright extension</span>
       <button type="button" class="btn-secondary" id="chatDefaultsBrowserInstall">Install page</button>
     </div>
-    <p class="cd-hint">Used when a chat starts on, or is told to switch to, your browser. Install the extension once in that browser. Each chat opens a connect page there for you to approve, so Claude acts with your real sign-ins only after you say yes. Leave the profile blank to use the one you used last, or name a folder such as Profile 1 to point Claude at a dedicated profile.</p>
+    <p class="cd-hint">Used when a chat starts on, or is told to switch to, your browser. Install the extension once in that browser. Each chat opens a connect page there for you to approve, so Claude acts with your real sign-ins only after you say yes. Leave the profile blank to use the one you used last, or name a folder such as Profile 1 to point Claude at a dedicated profile. Every profile's extension has its own token: paste the one shown on its connect page into Extension token for that browser and profile (blank profile covers the browser's last-used one).</p>
   `;
 }
 

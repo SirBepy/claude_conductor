@@ -293,14 +293,28 @@ impl ClaudeBrowser {
                 self.claim_extension(mine, session_id).await?;
             }
             let node = runtime::node_bin()?;
-            let started =
-                match PlaywrightClient::start(&node, &runtime::cli_path(&runtime_dir), &attach, &self.root.join("output")).await {
-                    Ok(started) => started,
-                    Err(e) => {
-                        self.holders.lock().await.release_session(session_id);
-                        return Err(e);
-                    }
-                };
+            let profile_token = match &attach {
+                Attach::Extension(mine) => mine.profile_token(settings),
+                Attach::Cdp(_) => None,
+            };
+            let started = match PlaywrightClient::start(
+                &node,
+                &runtime::cli_path(&runtime_dir),
+                &attach,
+                &self.root.join("output"),
+                profile_token.clone(),
+            )
+            .await
+            {
+                Ok(started) => started,
+                Err(e) => {
+                    self.holders.lock().await.release_session(session_id);
+                    return Err(match &attach {
+                        Attach::Extension(mine) => mine.with_token_hint(e, profile_token.is_some()),
+                        Attach::Cdp(_) => e,
+                    });
+                }
+            };
             *client = Some(started);
         }
         let c = client.as_mut().expect("client set above");
@@ -313,7 +327,10 @@ impl ClaudeBrowser {
             *client = None;
             self.holders.lock().await.release_session(session_id);
         }
-        result
+        match (&attach, result) {
+            (Attach::Extension(mine), Err(e)) => Err(mine.with_token_hint(e, mine.profile_token(settings).is_some())),
+            (_, result) => result,
+        }
     }
 
     /// Drops the pinned browser of every chat not in `live_ids`. Separate from
