@@ -31,6 +31,8 @@ pub(super) struct SendMessageBody {
     // the alias is cheaper than relying on every caller recalling the right name.
     #[serde(alias = "message")]
     text: String,
+    #[serde(default)]
+    details: Option<Vec<Detail>>,
 }
 
 #[derive(Deserialize)]
@@ -41,6 +43,52 @@ pub(super) struct UpdateMessageBody {
     text: Option<String>,
     #[serde(default)]
     retract: bool,
+    #[serde(default)]
+    details: Option<Vec<Detail>>,
+}
+
+/// One click-to-open detail. The daemon does not store it: the frontend reads
+/// `details` from the tool_use input in the transcript, so this only validates.
+#[derive(Deserialize)]
+pub(super) struct Detail {
+    id: String,
+    // Read by the frontend from the transcript, not here.
+    #[allow(dead_code)]
+    label: String,
+    body_md: String,
+}
+
+const MAX_DETAILS: usize = 6;
+const MAX_DETAIL_BODY: usize = 4096;
+
+fn valid_detail_id(id: &str) -> bool {
+    (1..=32).contains(&id.len())
+        && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// Mirrors the limits in the tool schema; the model may not honour a schema, so
+/// the route enforces them too.
+fn validate_details(details: &[Detail]) -> Result<(), String> {
+    if details.len() > MAX_DETAILS {
+        return Err(format!("details has more than {MAX_DETAILS} items"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for d in details {
+        if !valid_detail_id(&d.id) {
+            return Err(format!("detail id \"{}\" must match ^[a-z0-9-]{{1,32}}$", d.id));
+        }
+        if !seen.insert(d.id.as_str()) {
+            return Err(format!("detail id \"{}\" is used twice", d.id));
+        }
+        if d.body_md.chars().count() > MAX_DETAIL_BODY {
+            return Err(format!("detail \"{}\" body_md exceeds {MAX_DETAIL_BODY} chars", d.id));
+        }
+    }
+    Ok(())
+}
+
+fn details_rejection(err: String) -> (StatusCode, Json<serde_json::Value>) {
+    (StatusCode::OK, Json(json!({"ok": false, "error": err})))
 }
 
 pub(super) async fn on_send_message(
@@ -59,6 +107,9 @@ pub(super) async fn on_send_message(
             StatusCode::OK,
             Json(json!({"ok": false, "error": format!("text exceeds {MAX_MESSAGE_LEN} chars")})),
         );
+    }
+    if let Some(Err(e)) = body.details.as_deref().map(validate_details) {
+        return details_rejection(e);
     }
     let gen = ctx.state.registry.current_turn_gen(&body.session_id);
     ctx.state.registry.mark_message_sent(&body.session_id, gen);
@@ -89,6 +140,9 @@ pub(super) async fn on_update_message(
                 Json(json!({"ok": false, "error": format!("text exceeds {MAX_MESSAGE_LEN} chars")})),
             );
         }
+    }
+    if let Some(Err(e)) = body.details.as_deref().map(validate_details) {
+        return details_rejection(e);
     }
     // A revision counts as this turn having spoken, so a correction-only turn
     // doesn't trip the Stop-hook's "said nothing" enforcement.
@@ -130,9 +184,58 @@ mod tests {
         assert_eq!(body.text, "hi");
     }
 
+    fn detail(id: &str, body: &str) -> serde_json::Value {
+        json!({"id": id, "label": "L", "body_md": body})
+    }
+
+    async fn send_with(details: Vec<serde_json::Value>) -> serde_json::Value {
+        let body: SendMessageBody = serde_json::from_value(
+            json!({"session_id": "s", "text": "hi", "details": details}),
+        )
+        .unwrap();
+        body_json(on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response()).await
+    }
+
+    #[tokio::test]
+    async fn valid_details_are_accepted_on_send_and_update() {
+        let v = send_with(vec![detail("a-1", "body"), detail("b", "")]).await;
+        assert_eq!(v, json!({"ok": true, "message": 1}));
+        let upd: UpdateMessageBody = serde_json::from_value(
+            json!({"session_id": "s", "message": 1, "text": "x", "details": [detail("a", "b")]}),
+        )
+        .unwrap();
+        let resp = on_update_message(AxState(ctx()), ValidatedJson(upd)).await.into_response();
+        assert_eq!(body_json(resp).await["ok"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn bad_details_are_rejected() {
+        for bad in ["Bad", "has space", "", &"a".repeat(33)] {
+            assert_eq!(send_with(vec![detail(bad, "b")]).await["ok"], json!(false), "id {bad:?}");
+        }
+        let dup = send_with(vec![detail("a", "1"), detail("a", "2")]).await;
+        assert!(dup["error"].as_str().unwrap().contains("twice"));
+        let seven: Vec<_> = (0..7).map(|i| detail(&format!("d{i}"), "b")).collect();
+        assert_eq!(send_with(seven).await["ok"], json!(false));
+        let big = send_with(vec![detail("a", &"x".repeat(4097))]).await;
+        assert_eq!(big["ok"], json!(false));
+        assert_eq!(send_with(vec![detail("a", &"x".repeat(4096))]).await["ok"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn bad_details_on_update_do_not_record_message_sent() {
+        let c = ctx();
+        let upd: UpdateMessageBody = serde_json::from_value(
+            json!({"session_id": "s", "message": 1, "text": "x", "details": [detail("Bad", "b")]}),
+        )
+        .unwrap();
+        on_update_message(AxState(c.clone()), ValidatedJson(upd)).await;
+        assert!(c.state.registry.peek_message_sent_gen("s").is_none());
+    }
+
     #[tokio::test]
     async fn valid_text_route_returns_ok() {
-        let body = SendMessageBody { session_id: "s".into(), text: "Finished the build.".into() };
+        let body = SendMessageBody { session_id: "s".into(), text: "Finished the build.".into(), details: None };
         let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(body_json(resp).await, json!({"ok": true, "message": 1}));
@@ -140,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_accepts_text_over_the_repo_channel_cap() {
-        let body = SendMessageBody { session_id: "s".into(), text: "x".repeat(4000) };
+        let body = SendMessageBody { session_id: "s".into(), text: "x".repeat(4000), details: None };
         let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(true));
     }
@@ -148,7 +251,7 @@ mod tests {
     #[tokio::test]
     async fn retract_needs_no_text() {
         let body = UpdateMessageBody {
-            session_id: "s".into(), message: 1, text: None, retract: true,
+            session_id: "s".into(), message: 1, text: None, retract: true, details: None,
         };
         let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(true));
@@ -157,7 +260,7 @@ mod tests {
     #[tokio::test]
     async fn edit_without_text_is_rejected() {
         let body = UpdateMessageBody {
-            session_id: "s".into(), message: 1, text: None, retract: false,
+            session_id: "s".into(), message: 1, text: None, retract: false, details: None,
         };
         let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         let v = body_json(resp).await;
@@ -168,7 +271,7 @@ mod tests {
     #[tokio::test]
     async fn zero_ordinal_is_rejected() {
         let body = UpdateMessageBody {
-            session_id: "s".into(), message: 0, text: Some("x".into()), retract: false,
+            session_id: "s".into(), message: 0, text: Some("x".into()), retract: false, details: None,
         };
         let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(false));
@@ -178,7 +281,7 @@ mod tests {
     async fn update_records_message_sent_so_a_correction_only_turn_counts() {
         let c = ctx();
         let body = UpdateMessageBody {
-            session_id: "s".into(), message: 1, text: Some("fixed".into()), retract: false,
+            session_id: "s".into(), message: 1, text: Some("fixed".into()), retract: false, details: None,
         };
         on_update_message(AxState(c.clone()), ValidatedJson(body)).await;
         assert_eq!(c.state.registry.peek_message_sent_gen("s"), Some(0));
@@ -187,14 +290,14 @@ mod tests {
     #[tokio::test]
     async fn valid_text_route_records_message_sent_for_current_gen() {
         let c = ctx();
-        let body = SendMessageBody { session_id: "s".into(), text: "Finished the build.".into() };
+        let body = SendMessageBody { session_id: "s".into(), text: "Finished the build.".into(), details: None };
         on_send_message(AxState(c.clone()), ValidatedJson(body)).await;
         assert_eq!(c.state.registry.peek_message_sent_gen("s"), Some(0));
     }
 
     #[tokio::test]
     async fn empty_text_route_returns_ok_false_with_error() {
-        let body = SendMessageBody { session_id: "s".into(), text: "   ".into() };
+        let body = SendMessageBody { session_id: "s".into(), text: "   ".into(), details: None };
         let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let v = body_json(resp).await;
@@ -205,14 +308,14 @@ mod tests {
     #[tokio::test]
     async fn empty_text_route_does_not_record_message_sent() {
         let c = ctx();
-        let body = SendMessageBody { session_id: "s".into(), text: "   ".into() };
+        let body = SendMessageBody { session_id: "s".into(), text: "   ".into(), details: None };
         on_send_message(AxState(c.clone()), ValidatedJson(body)).await;
         assert!(c.state.registry.peek_message_sent_gen("s").is_none());
     }
 
     #[tokio::test]
     async fn overlong_text_route_returns_ok_false_with_error() {
-        let body = SendMessageBody { session_id: "s".into(), text: "x".repeat(MAX_MESSAGE_LEN + 1) };
+        let body = SendMessageBody { session_id: "s".into(), text: "x".repeat(MAX_MESSAGE_LEN + 1), details: None };
         let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let v = body_json(resp).await;
