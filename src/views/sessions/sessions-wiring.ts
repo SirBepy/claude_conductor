@@ -17,6 +17,7 @@ import { findSuccessorToFollow, markFollowed } from "./successor-follow";
 import { freezePane } from "./pane-freeze";
 import { visibleInterval } from "../../shared/visible-interval";
 import { startHiddenSessionsSync } from "./hidden-sessions-sync";
+import { startMachineProfileSync } from "./machine-icons";
 
 /** Ambient Tauri event API surface, as declared on `Window.__TAURI__` in
  * shared/ipc.ts. Threaded through the wiring helpers below instead of each
@@ -315,6 +316,9 @@ export async function wireInstancesChangedListener(
   // TauriTransport wraps the same desktop Tauri event used before.
   state.unlistenInstances = await getTransport().listen("instances-changed", () => { void syncInstances(); });
   startHiddenSessionsSync(() => {
+    if (state.mountId === myMount) renderSidebar(listEl);
+  });
+  startMachineProfileSync(() => {
     if (state.mountId === myMount) renderSidebar(listEl);
   });
   // Recount the sidebar's scheduled-message marker/badge the moment a

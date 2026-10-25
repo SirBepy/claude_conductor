@@ -14,14 +14,12 @@ import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/p
 import { setRerenderCallback } from "./sidebar-ctx-menu";
 import { attachRowTooltips } from "../../shared/row-tooltip";
 import { buildSidebarEntries } from "./sidebar-entries";
-import { ensureMachineIcons, initMachineProfileSync } from "./machine-icons";
+import { ensureMachineIcons } from "./machine-icons";
 import { isRemote } from "../../shared/transport";
 import { saveCachedInstances } from "./instances-cache";
 export { closeCtxMenu, openDraftCtxMenu, openCtxMenu } from "./sidebar-ctx-menu";
 
 let sidebarListEl: HTMLElement | null = null;
-let profileSyncStarted = false;
-let profileSyncList: HTMLElement | null = null;
 
 // ── Shared debounced-refresh shape ───────────────────────────────────────────
 //
@@ -284,13 +282,6 @@ export function renderSidebar(listEl: HTMLElement): void {
     state.sessions.flatMap((s) => (s.machine ? [s.machine.id] : [])),
     () => renderSidebar(listEl),
   );
-  // Once per page: a name/icon edit on any device re-renders the rows. The
-  // sidebar has no teardown, so the unlisten function is intentionally unused.
-  profileSyncList = listEl;
-  if (!profileSyncStarted) {
-    profileSyncStarted = true;
-    initMachineProfileSync(() => { if (profileSyncList) renderSidebar(profileSyncList); });
-  }
   // Delegated, so it survives every reconcile without rebinding per row.
   attachRowTooltips(listEl);
   // Resolve hero avatar images to data URLs (idempotent per character id).
