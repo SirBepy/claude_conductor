@@ -140,6 +140,31 @@ test("send builds a data-only high-priority message", async () => {
   assert.equal("notification" in s.sent[0], false);
 });
 
+test("clear sends a data-only normal-priority clear message for the chat", async () => {
+  const s = setup();
+  const { handle, secret } = await registered(s);
+  const r = await s.call("/clear", { handle, secret, chatId: "c1" });
+  assert.equal(r.code, 204);
+  assert.deepEqual(s.sent[0], {
+    token: "tok",
+    data: { type: "clear", chatId: "c1" },
+    android: { priority: "normal", ttl: 3600000 },
+  });
+});
+
+test("clear checks the secret and shares the send counter", async () => {
+  const s = setup();
+  const { handle, secret } = await registered(s);
+  assert.equal((await s.call("/clear", { handle, secret: "wrong", chatId: "c1" })).code, 401);
+  assert.equal((await s.call("/clear", { handle, secret })).code, 400);
+  for (let i = 0; i < core.SEND_LIMIT; i++) {
+    const route = i % 2 ? "/clear" : "/send";
+    assert.equal((await s.call(route, { handle, secret, chatId: "c" })).code, 204, `${route} ${i + 1}`);
+  }
+  assert.equal((await s.call("/clear", { handle, secret, chatId: "c" })).code, 429);
+  assert.equal(s.sent.length, core.SEND_LIMIT);
+});
+
 test("chatName is omitted from data when absent or empty", async () => {
   const s = setup();
   const { handle, secret } = await registered(s);

@@ -17,9 +17,19 @@ impl DaemonState {
         );
     }
 
-    /// Drop an open prompt once it has been answered or timed out.
+    /// Drop an open prompt once it has been answered or timed out. The last
+    /// one in its chat also clears the phone's banner for that chat.
     pub async fn remove_prompt(&self, id: &str) {
-        self.pending_prompts.lock().await.remove(id);
+        let resolved = {
+            let mut prompts = self.pending_prompts.lock().await;
+            prompts
+                .remove(id)
+                .and_then(|v| v["payload"]["session_id"].as_str().map(str::to_string))
+                .filter(|sid| !any_prompt_for(&prompts, sid))
+        };
+        if let Some(sid) = resolved {
+            self.fire_prompts_resolved(&sid);
+        }
     }
 
     /// True if `session_id` still has an open `"question-requested"` prompt
@@ -140,7 +150,7 @@ impl DaemonState {
         // Each turn is a fresh `claude -p` child, so this EOF-triggered sweep
         // is also where the builtin AskUserQuestion redirect budget resets.
         self.registry.reset_builtin_ask_attempts(session_id);
-        let expired: Vec<(String, bool)> = {
+        let (expired, none_left): (Vec<(String, bool)>, bool) = {
             let mut prompts = self.pending_prompts.lock().await;
             let ids: Vec<(String, bool)> = prompts
                 .iter()
@@ -157,10 +167,14 @@ impl DaemonState {
             for (id, _) in &ids {
                 prompts.remove(id);
             }
-            ids
+            (ids, !any_prompt_for(&prompts, session_id))
         };
         if expired.is_empty() {
             return 0;
+        }
+        // A durable question can outlive the sweep; then the banner still applies.
+        if none_left {
+            self.fire_prompts_resolved(session_id);
         }
         let mut pending = self.pending.lock().await;
         for (id, is_question) in &expired {
@@ -176,11 +190,57 @@ impl DaemonState {
     }
 }
 
+fn any_prompt_for(prompts: &HashMap<String, Value>, session_id: &str) -> bool {
+    prompts.values().any(|v| v["payload"]["session_id"].as_str() == Some(session_id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::daemon::session::new_session_map;
     use crate::types::Settings;
+
+    /// Waits for `mock` to be hit by a spawned send, failing after 3s.
+    async fn wait_matched(mock: &mockito::Mock) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !mock.matched_async().await {
+            assert!(std::time::Instant::now() < deadline, "the /clear never went out");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }
+
+    /// The phone's banner for a chat goes once its LAST open prompt is
+    /// answered, not while a sibling still waits.
+    #[tokio::test]
+    async fn the_last_answered_prompt_in_a_buzzed_chat_clears_the_phone_banner() {
+        let mut server = mockito::Server::new_async().await;
+        let clear = server
+            .mock("POST", "/clear")
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({"chatId": "s1"})))
+            .with_status(204)
+            .expect(1)
+            .create_async()
+            .await;
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let dir = tempfile::tempdir().unwrap();
+        let pm = crate::daemon::push::PushManager::load_with_relay(dir.path().to_path_buf(), &server.url());
+        pm.register_fcm_handle(crate::daemon::push::FcmHandle {
+            handle: "h".into(),
+            secret: "s".into(),
+            device_id: None,
+        });
+        pm.note_fired_for_test("s1", "p2");
+        let _ = st.push.set(pm);
+        st.add_prompt("p1", "permission-requested", serde_json::json!({"session_id": "s1"}), false).await;
+        st.add_prompt("p2", "question-requested", serde_json::json!({"session_id": "s1"}), true).await;
+
+        st.remove_prompt("p1").await;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(!clear.matched_async().await, "p2 still waits, the banner stays");
+
+        st.remove_prompt("p2").await;
+        wait_matched(&clear).await;
+    }
 
     /// Regression: `list_prompts()` must sort by `seq`, not by `pending_prompts`'
     /// HashMap iteration order (which carries no chronological meaning).

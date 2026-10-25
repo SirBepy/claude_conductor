@@ -15,7 +15,9 @@
 //! The Android app gets native FCM instead: its shell hands the daemon an opaque
 //! relay handle + secret (`register_fcm_handle`), persisted in
 //! `<app_data>/push-fcm-handles.json`, and the daemon POSTs `{handle, secret,
-//! chatId, chatName?}` to the relay, which holds the Firebase credentials.
+//! chatId, chatName?}` to the relay, which holds the Firebase credentials. Once
+//! every prompt in a chat it buzzed for is answered (on any screen), the daemon
+//! POSTs the relay's `/clear` so the phone drops that chat's banner.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -294,6 +296,25 @@ impl PushManager {
         self.notify_all(session_id.as_deref(), &session_name, show_chat_name).await;
     }
 
+    /// Nothing in `session_id` waits on Joe any more (answered on any screen,
+    /// or expired): tell the Android app to drop that chat's banner. Sent only
+    /// when this daemon buzzed for the chat, so an answered prompt that never
+    /// pushed costs no relay call. Best-effort, like the buzz itself.
+    pub async fn notify_resolved(self: Arc<Self>, session_id: String) {
+        if self.last_fired.lock().unwrap().remove(&session_id).is_none() {
+            return;
+        }
+        let handles = self.fcm_handles.lock().unwrap().clone();
+        let bodies: Vec<_> = handles.iter().map(|h| clear_payload(h, &session_id)).collect();
+        self.relay_fan_out("/clear", &handles, &bodies).await;
+    }
+
+    /// Records a buzz without sending one, for tests of the clear path.
+    #[cfg(test)]
+    pub(crate) fn note_fired_for_test(&self, session_id: &str, prompt_id: &str) {
+        self.last_fired.lock().unwrap().insert(session_id.to_string(), prompt_id.to_string());
+    }
+
     /// The relay and Web Push go out side by side: a relay that is slow or
     /// down (10s timeout per handle) must never hold back the Web Push.
     async fn notify_all(&self, session_id: Option<&str>, name: &str, show_chat_name: bool) {
@@ -340,7 +361,15 @@ impl PushManager {
             return;
         }
         let bodies: Vec<_> = handles.iter().map(|h| fcm_payload(h, chat_id, name, show_chat_name)).collect();
-        let results = futures_util::future::join_all(bodies.iter().map(|b| self.send_relay(b))).await;
+        self.relay_fan_out("/send", &handles, &bodies).await;
+    }
+
+    /// One relay POST per handle, all at once; `bodies[i]` belongs to `handles[i]`.
+    async fn relay_fan_out(&self, path: &str, handles: &[FcmHandle], bodies: &[serde_json::Value]) {
+        if handles.is_empty() {
+            return;
+        }
+        let results = futures_util::future::join_all(bodies.iter().map(|b| self.send_relay(path, b))).await;
         let mut dead: Vec<String> = Vec::new();
         for (h, result) in handles.iter().zip(results) {
             match result {
@@ -360,10 +389,10 @@ impl PushManager {
         }
     }
 
-    async fn send_relay(&self, body: &serde_json::Value) -> anyhow::Result<RelayOutcome> {
+    async fn send_relay(&self, path: &str, body: &serde_json::Value) -> anyhow::Result<RelayOutcome> {
         let resp = self
             .http
-            .post(format!("{}/send", self.relay_base))
+            .post(format!("{}{path}", self.relay_base))
             .json(body)
             .send()
             .await?;
@@ -475,6 +504,12 @@ fn fcm_payload(h: &FcmHandle, chat_id: &str, name: &str, show_chat_name: bool) -
         body["chatName"] = json!(name);
     }
     body
+}
+
+/// The relay's `/clear` body. A relay deployed before `/clear` existed answers
+/// 404 "not found", which `relay_rejection` keeps the handle on.
+fn clear_payload(h: &FcmHandle, chat_id: &str) -> serde_json::Value {
+    json!({ "handle": h.handle, "secret": h.secret, "chatId": chat_id })
 }
 
 fn fcm_path(app_data: &Path) -> PathBuf {
@@ -796,6 +831,56 @@ mod tests {
         assert!(!sending.is_finished(), "the relay request is still hanging");
         sending.abort();
         holder.abort();
+    }
+
+    #[tokio::test]
+    async fn resolving_a_buzzed_chat_sends_one_clear_per_handle_once() {
+        let mut server = mockito::Server::new_async().await;
+        let clear = server
+            .mock("POST", "/clear")
+            .match_body(mockito::Matcher::Json(json!({"handle": "a", "secret": "dummy-secret", "chatId": "sid"})))
+            .with_status(204)
+            .expect(1)
+            .create_async()
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let pm = PushManager::load_with_relay(dir.path().to_path_buf(), &server.url());
+        pm.register_fcm_handle(handle("a"));
+        pm.note_fired_for_test("sid", "p1");
+        pm.clone().notify_resolved("sid".into()).await;
+        // A second resolve with no buzz in between has nothing to clear.
+        pm.clone().notify_resolved("sid".into()).await;
+        clear.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn resolving_a_chat_that_never_buzzed_calls_no_relay() {
+        let mut server = mockito::Server::new_async().await;
+        let clear = server.mock("POST", "/clear").expect(0).create_async().await;
+        let dir = tempfile::tempdir().unwrap();
+        let pm = PushManager::load_with_relay(dir.path().to_path_buf(), &server.url());
+        pm.register_fcm_handle(handle("a"));
+        pm.clone().notify_resolved("sid".into()).await;
+        clear.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn a_relay_without_the_clear_route_keeps_the_handle() {
+        let mut server = mockito::Server::new_async().await;
+        let clear = server
+            .mock("POST", "/clear")
+            .with_status(404)
+            .with_body(json!({ "error": "not found" }).to_string())
+            .expect(1)
+            .create_async()
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let pm = PushManager::load_with_relay(dir.path().to_path_buf(), &server.url());
+        pm.register_fcm_handle(handle("a"));
+        pm.note_fired_for_test("sid", "p1");
+        pm.clone().notify_resolved("sid".into()).await;
+        clear.assert_async().await;
+        assert_eq!(pm.fcm_handles.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]

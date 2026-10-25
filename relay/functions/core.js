@@ -37,6 +37,8 @@ function validate(route, body) {
       if (body.chatName !== undefined && !isStr(body.chatName, 0, 200)) return "invalid chatName";
       return null;
     }
+    case "/clear":
+      return creds() || need("chatId", 1, 128);
     default:
       return "unknown route";
   }
@@ -68,6 +70,17 @@ function buildMessage(token, chatId, chatName) {
   };
 }
 
+// Tells the phone a chat stopped waiting, so it drops that chat's banner. Normal
+// priority: Android deprioritises high-priority messages that never show a
+// notification, and a stale banner can wait for the phone to wake.
+function buildClearMessage(token, chatId) {
+  return {
+    token,
+    data: { type: "clear", chatId },
+    android: { priority: "normal", ttl: 3600000 },
+  };
+}
+
 const DEAD_TOKEN_CODES = new Set([
   "messaging/registration-token-not-registered",
   "messaging/invalid-registration-token",
@@ -86,4 +99,5 @@ module.exports = {
   nextWindow,
   clientIp,
   buildMessage,
+  buildClearMessage,
 };
