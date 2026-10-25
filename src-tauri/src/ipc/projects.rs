@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use crate::types::{ProjectConfig, ProjectsSortBy};
+use crate::types::ProjectConfig;
 use crate::settings::{self, paths};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, State};
 /// Pure helpers extracted from the Tauri command wrappers so they can be
 /// unit-tested without standing up a full app handle.
 pub mod projects_test_helpers {
-    use crate::types::{ProjectConfig, ProjectsSortBy, Settings};
+    use crate::types::{ProjectConfig, Settings};
 
     pub fn list_from(s: &Settings) -> Vec<ProjectConfig> { s.projects.clone() }
 
@@ -48,9 +48,6 @@ pub mod projects_test_helpers {
         s.projects.len() < before
     }
 
-    pub fn set_sort_by(s: &mut Settings, sort_by: ProjectsSortBy) {
-        s.projects_sort_by = sort_by;
-    }
 }
 
 pub mod legacy_import_test_helpers {
@@ -176,21 +173,6 @@ pub async fn delete_project(
         } else {
             Err(format!("project_not_found: {id}"))
         }
-    })?;
-    let _ = app.emit("settings-changed", snapshot);
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn set_projects_sort_by(
-    sort_by: ProjectsSortBy,
-    state: State<'_, AppState>,
-    app: AppHandle,
-) -> Result<(), String> {
-    let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
-    let snapshot = settings::mutate_and_save(&state.settings, &settings_path, |s| {
-        projects_test_helpers::set_sort_by(s, sort_by);
-        Ok(())
     })?;
     let _ = app.emit("settings-changed", snapshot);
     Ok(())

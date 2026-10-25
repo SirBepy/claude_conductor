@@ -85,7 +85,6 @@ fn emit_ipc_types() {
     // project
     out.push_str(&decl::<CharacterWhitelist>());
     out.push_str(&decl::<Avatar>());
-    out.push_str(&decl::<ProjectsSortBy>());
     out.push_str(&decl::<ProjectConfig>());
     out.push_str(&decl::<MachineRef>());
     out.push_str(&decl::<Instance>());
