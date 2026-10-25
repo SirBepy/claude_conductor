@@ -167,7 +167,7 @@ export class DraftsEditor {
     this.reviseField = wireComposerField(this.root.querySelector<HTMLElement>(".dr-foot")!, {
       onSend: (text) => {
         this.reviseField?.clear();
-        this.reviseMenu.sendFree(text);
+        this.reviseMenu.send(text);
       },
     });
   }
