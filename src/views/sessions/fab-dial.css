@@ -157,9 +157,10 @@
   }
 
   /* A phone question card is fullscreen and outranked by this host's z-index
-   * 30, so the FAB painted on top of its Submit button. Nothing in the dial is
-   * reachable while a card is waiting for an answer anyway. */
-  .session-pane:has(#prompt-card-host .prompt-card) .fab-dial-host {
+   * 30, so the FAB painted on top of its Submit button. Only the FAB and dial
+   * hide: the window layer stays, so the card's "Ask about this" still opens
+   * Ask above the card (host z 30 > card z 20). */
+  .session-pane:has(#prompt-card-host .prompt-card) .fab-dial-chrome {
     display: none;
   }
 }
