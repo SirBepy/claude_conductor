@@ -4,7 +4,15 @@
 
 import type { Account, MachineAccountList, ProjectConfig } from "../../shared/api";
 import type { AccountLite } from "../../shared/account-chip";
-import { resolveCached, type CacheRead } from "./new-session-cache";
+import type { SessionConfig } from "../../shared/effort-presets";
+import {
+  resolveCached,
+  settingsData,
+  projectsListData,
+  accountsListData,
+  projectAccountData,
+  type CacheRead,
+} from "./new-session-cache";
 import { resolveInitialAccountId } from "./account-picker-logic";
 import {
   readLastChoice,
@@ -35,6 +43,20 @@ export type AccountSource =
       projectAccountRead: CacheRead<string | null>;
     }
   | { kind: "machine"; list: MachineAccountList };
+
+/** The choices the modal would open on, for a launch that skips it (a
+ *  dashboard card's button). Null when the modal has to ask for an account
+ *  (none registered, or several and no default), so the caller opens it. */
+export async function defaultSessionConfig(projectPath: string): Promise<SessionConfig | null> {
+  const data = await resolveModelEffortData(projectPath, settingsData(), {
+    kind: "local",
+    projectsRead: projectsListData(),
+    accountsRead: accountsListData(),
+    projectAccountRead: projectAccountData(projectPath),
+  });
+  if (data.accounts.length === 0 || data.accountId === null) return null;
+  return { model: data.model, effort: data.effort, autoAccept: data.autoAccept, accountId: data.accountId };
+}
 
 export async function resolveModelEffortData(
   projectPath: string,

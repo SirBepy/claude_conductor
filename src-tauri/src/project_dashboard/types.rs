@@ -177,7 +177,8 @@ pub struct CardConfig {
     pub display: CardDisplay,
     #[serde(default)]
     pub refresh_secs: Option<u32>,
-    /// A button on the card that starts a new chat with `command` as its first message.
+    /// A button on the card that starts a new chat and sends `command`, then
+    /// the card's current data, as its first message.
     #[serde(default)]
     pub action: Option<CardAction>,
 }
@@ -187,7 +188,8 @@ pub struct CardConfig {
 pub struct CardAction {
     #[serde(default)]
     pub label: String,
-    /// A slash command, leading slash included.
+    /// A slash command (leading slash included) or a plain prompt. Named
+    /// `command` because stored cards already carry it under that key.
     #[serde(default)]
     pub command: String,
 }

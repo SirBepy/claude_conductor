@@ -26,6 +26,10 @@ vi.mock("../src/shared/transport.ts", async (importOriginal) => {
 });
 vi.mock("../src/views/sessions/active-session.ts", () => ({ dismountActivePane: vi.fn(), selectSession: vi.fn(async () => {}) }));
 vi.mock("../src/views/sessions/model-effort-modal.ts", () => ({ openModelEffortModal: vi.fn() }));
+vi.mock("../src/views/sessions/model-effort-data.ts", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, defaultSessionConfig: vi.fn(async () => null) };
+});
 // The real host morphs between cards on timers; the tests only need the card in a slot.
 vi.mock("../src/shared/modal.ts", async (importOriginal) => {
   const actual = await importOriginal();
@@ -41,6 +45,8 @@ vi.mock("../src/shared/modal.ts", async (importOriginal) => {
 const { mountDashboard } = await import("../src/views/sessions/project-dashboard/dashboard.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 const { openModelEffortModal } = await import("../src/views/sessions/model-effort-modal.ts");
+const { defaultSessionConfig } = await import("../src/views/sessions/model-effort-data.ts");
+const { cardMessage } = await import("../src/views/sessions/project-dashboard/dash-cards.ts");
 const { invoke } = await import("../src/shared/ipc.ts");
 
 async function mount(ref) {
@@ -289,7 +295,13 @@ describe("custom card extras", () => {
     expect(ck.querySelector("[data-pd-action]").textContent).toBe("Log time");
   });
 
-  it("the action button asks which repo, then starts a draft there with its command typed in", async () => {
+  const pickBiller = async () => {
+    const pick = () => [...document.querySelectorAll(".smore-item")].find((b) => b.textContent.trim() === "zng-biller");
+    await vi.waitFor(() => expect(pick()).toBeTruthy());
+    pick().click();
+  };
+
+  it("the action button asks which repo, then starts a chat there on the usual model and sends its command with the card's data", async () => {
     snapshot = groupSnapshot();
     const root = await mount({ kind: "group", id: "g1" });
     const button = root.querySelector('[data-pd-card="card:c5"] [data-pd-action]');
@@ -297,13 +309,46 @@ describe("custom card extras", () => {
     expect(root.querySelector('[data-pd-card="card:c5"] .pd-headline').textContent).toContain("12 updates since /shortcut-priorities ran 2d ago");
 
     state.launchNewChatCallback = vi.fn();
+    defaultSessionConfig.mockResolvedValueOnce({ model: "opus", effort: "high", autoAccept: true, accountId: "a1" });
+    button.click();
+    await pickBiller();
+    await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalled());
+    expect(openModelEffortModal).not.toHaveBeenCalled();
+    const [project, config] = state.launchNewChatCallback.mock.calls[0];
+    expect(project).toEqual({ path: "C:/Projects/zng-biller", name: "zng-biller" });
+    expect(config).toMatchObject({ model: "opus", effort: "high", accountId: "a1" });
+    expect(config.draftText).toBeUndefined();
+    const msg = config.initialMessage;
+    expect(msg.startsWith("/shortcut-priorities\n\nContext, not arguments: the dashboard card \"Shortcut: updates\"")).toBe(true);
+    expect(msg).toContain("12 updates since /shortcut-priorities ran 2d ago");
+    expect(msg).toContain("- sc-4821 Retry ACH: Review");
+  });
+
+  it("falls back to the model picker when no account is the default, and still sends at once", async () => {
+    snapshot = groupSnapshot();
+    const root = await mount({ kind: "group", id: "g1" });
+    state.launchNewChatCallback = vi.fn();
+    defaultSessionConfig.mockResolvedValueOnce(null);
     openModelEffortModal.mockResolvedValueOnce({ model: "m" });
     root.querySelector('[data-pd-card="card:c5"] [data-pd-action]').click();
-    const pick = () => [...document.querySelectorAll(".smore-item")].find((b) => b.textContent.trim() === "zng-biller");
-    await vi.waitFor(() => expect(pick()).toBeTruthy());
-    pick().click();
-    await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalledWith(
-      { path: "C:/Projects/zng-biller", name: "zng-biller" }, { model: "m", draftText: "/shortcut-priorities " }));
+    await pickBiller();
+    await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalled());
+    expect(openModelEffortModal).toHaveBeenCalledWith("C:/Projects/zng-biller", "zng-biller");
+    expect(state.launchNewChatCallback.mock.calls[0][1].initialMessage).toMatch(/^\/shortcut-priorities\n/);
+  });
+
+  it("a card's message carries its progress, stats, html data and error, or says it was never fetched", () => {
+    const base = cardView("c10", "Clockify", { kind: "html", template: "<b></b>" },
+      { fetched_at_ms: Date.now(), stats: [{ label: "Today", value: "2h" }], rows: [], error: "timed out", headline: null,
+        progress: { value: 14.5, max: 20, label: "14h 30m of 20h", behind: true }, data: { hours: 14.5 } });
+    base.config.action = { label: "Recap", command: "What should I log today?" };
+    const msg = cardMessage(base);
+    expect(msg.split("\n")[0]).toBe("What should I log today?");
+    expect(msg).toContain("14h 30m of 20h: 14.5 of 20 (behind)");
+    expect(msg).toContain("- Today: 2h");
+    expect(msg).toContain('{"hours":14.5}');
+    expect(msg).toContain("The card's last fetch failed: timed out");
+    expect(cardMessage({ ...base, result: null })).toContain("has not been fetched yet");
   });
 
   it("pages a long list card instead of showing every row", async () => {

@@ -435,7 +435,7 @@ mod tests {
         assert_eq!(ok.action.unwrap().label, "Log time");
         for bad in [
             json!({"label": "", "command": "/x"}),
-            json!({"label": "ok", "command": "x"}),
+            json!({"label": "ok", "command": " "}),
             json!({"label": "l".repeat(61), "command": "/x"}),
         ] {
             assert!(parse_card(json!({"title": "x", "action": bad}), ME).is_err());

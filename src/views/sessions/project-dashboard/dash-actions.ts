@@ -8,6 +8,7 @@ import { showToast } from "../../../shared/toast";
 import { showView } from "../../../shared/navigation";
 import { createMoreMenu } from "../more-menu-base";
 import { openModelEffortModal } from "../model-effort-modal";
+import { defaultSessionConfig } from "../model-effort-data";
 import { selectSession } from "../active-session";
 import { updateThinkingBar } from "../session-thinking-bar";
 import { state } from "../state";
@@ -116,6 +117,18 @@ export function makeActions(host: ActionHost): DashActions {
         if (!config) return;
         host.leave();
         state.launchNewChatCallback?.(project, command ? { ...config, draftText: `${command} ` } : config);
+      })();
+    },
+    runCardAction: (anchor, message) => {
+      if (host.ctx().mode === "draft") { void state.composer?.sendText(message); return; }
+      void (async () => {
+        const repo = await pickRepo(host.ctx(), anchor);
+        if (!repo) return;
+        const project = { path: repo.cwd, name: repo.name };
+        const config = await defaultSessionConfig(project.path) ?? await openModelEffortModal(project.path, project.name);
+        if (!config) return;
+        host.leave();
+        state.launchNewChatCallback?.(project, { ...config, initialMessage: message });
       })();
     },
     back: () => host.back(),
