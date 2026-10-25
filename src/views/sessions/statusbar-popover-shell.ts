@@ -8,11 +8,12 @@
  * Placement contract (matches the statusbar living at the TOP of the pane, so
  * there is always room below a chip): the popover opens directly BELOW its chip,
  * is CENTERED on the chip horizontally, is pulled back inside the window on
- * either edge, and is height-capped to the remaining window so tall content
+ * either edge (on a phone it spans the full width instead), and is height-capped to the remaining window so tall content
  * scrolls inside the shell instead of spilling off-screen.
  */
 
 import { invoke } from "../../shared/ipc";
+import { isMobileViewport } from "../../shared/mobile-viewport";
 
 const MARGIN = 8;
 const GAP = 4;
@@ -21,10 +22,22 @@ const GAP = 4;
  *  clamped to the window, with a max-height so it scrolls rather than overflow. */
 export function positionPopoverShell(el: HTMLElement, anchor: HTMLElement): void {
   const rect = anchor.getBoundingClientRect();
-  const w = el.offsetWidth;
-  const centered = rect.left + rect.width / 2 - w / 2;
-  const maxLeft = window.innerWidth - w - MARGIN;
-  el.style.left = `${Math.max(MARGIN, Math.min(centered, maxLeft))}px`;
+  // Phone: every popover spans the screen edge to edge. Content classes set
+  // fixed/min widths up to 420px, which a centre-and-clamp can't fit on a
+  // ~390px screen - the clamp pins left to MARGIN and the right edge spills
+  // off. The --full class (session-statusbar.css) drops those widths.
+  const full = isMobileViewport();
+  el.classList.toggle("sb-popover--full", full);
+  if (full) {
+    el.style.left = `${MARGIN}px`;
+    el.style.right = `${MARGIN}px`;
+  } else {
+    const w = el.offsetWidth;
+    const centered = rect.left + rect.width / 2 - w / 2;
+    const maxLeft = window.innerWidth - w - MARGIN;
+    el.style.left = `${Math.max(MARGIN, Math.min(centered, maxLeft))}px`;
+    el.style.right = "";
+  }
   const top = rect.bottom + GAP;
   el.style.top = `${top}px`;
   el.style.maxHeight = `${Math.max(80, window.innerHeight - top - MARGIN)}px`;
@@ -82,11 +95,16 @@ export class PopoverShell {
         anchor.focus();
       }
     };
+    // A rotate or a window resize across the phone breakpoint changes which
+    // placement applies, so re-run it rather than leave the old geometry.
+    const onResize = () => this.reanchor();
     setTimeout(() => document.addEventListener("click", onOutside), 0);
     document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onResize);
     this.cleanup = () => {
       document.removeEventListener("click", onOutside);
       document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onResize);
     };
   }
 
