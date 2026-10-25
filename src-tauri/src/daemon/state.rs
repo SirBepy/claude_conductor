@@ -277,6 +277,16 @@ impl DaemonState {
             pm.maybe_notify_blocked(sid, name, pid, show_name).await;
         });
     }
+
+    /// `session_id` has no open prompt left: clear the phone's banner for it.
+    /// Spawned for the same reason as `fire_blocked_prompt`.
+    pub fn fire_prompts_resolved(&self, session_id: &str) {
+        let Some(pm) = self.push.get().cloned() else { return };
+        let sid = session_id.to_string();
+        tokio::spawn(async move {
+            pm.notify_resolved(sid).await;
+        });
+    }
 }
 
 #[cfg(test)]

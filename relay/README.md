@@ -12,8 +12,9 @@ All routes are POST with a JSON body of at most 4 KB (413 over). Non-POST is 405
 | `/update` | `{ handle, secret, token }` | 204; 401 bad secret; 404 unknown handle |
 | `/unregister` | `{ handle, secret }` | 204 (also if already gone); 401 bad secret |
 | `/send` | `{ handle, secret, chatId, chatName? }` | 204; 401; 404 unknown handle or dead FCM token (handle deleted); 429 over 60 sends/hour/handle; 502 other FCM error |
+| `/clear` | `{ handle, secret, chatId }` | Same results as `/send`, and counts toward the same 60/hour |
 
-`/send` pushes a data-only message `{ type: "blocked", chatId, chatName? }` with high priority and a 1 hour TTL.
+`/send` pushes a data-only message `{ type: "blocked", chatId, chatName? }` with high priority and a 1 hour TTL. `/clear` pushes `{ type: "clear", chatId }` at normal priority, which the app answers by removing that chat's notification; the daemon sends it when the chat's prompts are all answered.
 
 ## Develop
 

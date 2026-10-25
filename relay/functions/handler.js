@@ -59,7 +59,8 @@ function makeHandler({ db, messaging, now = Date.now }) {
     return { status: 204 };
   }
 
-  async function send(body) {
+  // /send and /clear share one auth check and one per-handle counter.
+  async function deliver(body, build) {
     const ref = handles().doc(body.handle);
     // Auth and the counter share one transaction so concurrent sends cannot both squeeze under the cap.
     const out = await db.runTransaction(async (tx) => {
@@ -77,7 +78,7 @@ function makeHandler({ db, messaging, now = Date.now }) {
     if (out.status) return out;
 
     try {
-      await messaging.send(core.buildMessage(out.token, body.chatId, body.chatName));
+      await messaging.send(build(out.token));
     } catch (e) {
       if (core.DEAD_TOKEN_CODES.has(e && e.code)) {
         // A concurrent /update may have stored a fresh token while FCM rejected the old one;
@@ -93,11 +94,15 @@ function makeHandler({ db, messaging, now = Date.now }) {
     return { status: 204 };
   }
 
+  const send = (body) => deliver(body, (token) => core.buildMessage(token, body.chatId, body.chatName));
+  const clear = (body) => deliver(body, (token) => core.buildClearMessage(token, body.chatId));
+
   const routes = {
     "/register": (b, req) => register(b, core.clientIp(req)),
     "/update": update,
     "/unregister": unregister,
     "/send": send,
+    "/clear": clear,
   };
 
   return async function handler(req, res) {
