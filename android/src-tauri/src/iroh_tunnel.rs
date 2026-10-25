@@ -138,11 +138,8 @@ pub async fn start_iroh_tunnel(
     if let Some(live) = running.get(&remote_id) {
         return Ok(live.port);
     }
-    for (old_id, old) in running.drain() {
-        info!("shutting down tunnel to {old_id} on port {}", old.port);
-        old.shutdown().await;
-    }
-
+    // The old PC's tunnel stays up until the new one is bound, so a failed
+    // switch leaves the phone on a working tunnel instead of none.
     let endpoint = Endpoint::builder(presets::N0)
         .alpns(vec![ALPN.to_vec()])
         .bind()
@@ -152,7 +149,14 @@ pub async fn start_iroh_tunnel(
             error!("{}", msg);
             msg
         })?;
-    let (listener, port) = bind_loopback(&port_candidates(&remote_id, legacy.unwrap_or(false))).await?;
+    let candidates = port_candidates(&remote_id, legacy.unwrap_or(false));
+    // A candidate held by an old tunnel is freed first, so the new PC still
+    // lands on its own deterministic port and keeps that origin's token.
+    if running.values().any(|old| candidates.contains(&old.port)) {
+        shut_down_all(&mut running).await;
+    }
+    let (listener, port) = bind_loopback(&candidates).await?;
+    shut_down_all(&mut running).await;
 
     info!("iroh tunnel listener successfully bound on 127.0.0.1:{}", port);
     // A bare EndpointAddr (id only, no direct addrs) makes each connect() go
@@ -160,6 +164,13 @@ pub async fn start_iroh_tunnel(
     let tunnel = Arc::new(Tunnel::new(endpoint, remote_id.into()));
     running.insert(remote_id, RunningTunnel::spawn(listener, port, tunnel));
     Ok(port)
+}
+
+async fn shut_down_all(running: &mut std::collections::HashMap<EndpointId, RunningTunnel>) {
+    for (old_id, old) in running.drain() {
+        info!("shutting down tunnel to {old_id} on port {}", old.port);
+        old.shutdown().await;
+    }
 }
 
 /// Binds the first free port of `candidates`.
