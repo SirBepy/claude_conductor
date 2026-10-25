@@ -131,15 +131,88 @@
   color: var(--sb-muted);
 }
 
-.ra-machine-label-input {
-  padding: 5px 8px;
-  background: var(--color-surface-alt);
-  border: 1px solid var(--color-border);
+/* The info block takes the row's slack so the icon button hugs the name and
+   the drive switch / Unpair sit at the right edge. */
+.ra-device-row .ra-device-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.ra-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 10px;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 6px;
   color: var(--color-text);
-  font-size: var(--fs-title);
-  width: 200px;
-  max-width: 50%;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.ra-icon-btn:hover,
+.ra-icon-btn:focus-visible {
+  border-color: var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+/* Body-appended and position:fixed by openAnchoredPopover, so it can't
+   inherit anything from the settings page. */
+.ra-icon-pop {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.ra-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 32px);
+  gap: 4px;
+}
+
+.ra-icon-cell,
+.ra-icon-auto {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.ra-icon-cell {
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+}
+
+.ra-icon-auto {
+  padding: 4px 8px;
+  font-size: var(--fs-body);
+  text-align: left;
+}
+
+.ra-icon-cell:hover,
+.ra-icon-auto:hover,
+.ra-icon-cell:focus-visible,
+.ra-icon-auto:focus-visible {
+  border-color: var(--color-border);
+}
+
+.ra-icon-cell.active,
+.ra-icon-auto.active {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .ra-machine-pair-form {

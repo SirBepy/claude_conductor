@@ -17,7 +17,7 @@ const api = {
   renameRemoteDevice: vi.fn(async () => true),
   listMachines: vi.fn(async () => ({ self: { machine_id: "pc-id", label: "PC", os: "windows" }, peers: [MAC] })),
   setMachineCanDrive: vi.fn(async () => ({ ok: true })),
-  renameMachine: vi.fn(async () => ({ ok: true })),
+  setMachineProfile: vi.fn(async () => ({ ok: true })),
 };
 vi.mock("../src/shared/api.ts", () => ({ api }));
 let remote = false;
@@ -67,7 +67,7 @@ describe("Remote access: inline rename", () => {
   it("renames a paired machine", async () => {
     const { root, dispose } = await mount();
     type(field(root, "#ra-machine-list", "mac-id"), "Studio");
-    await vi.waitFor(() => expect(api.renameMachine).toHaveBeenCalledWith("mac-id", "Studio"));
+    await vi.waitFor(() => expect(api.setMachineProfile).toHaveBeenCalledWith("mac-id", { label: "Studio" }));
     dispose?.();
   });
 
@@ -88,12 +88,12 @@ describe("Remote access: inline rename", () => {
     input.value = "Nope";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(input.value).toBe("mac");
-    expect(api.renameMachine).not.toHaveBeenCalled();
+    expect(api.setMachineProfile).not.toHaveBeenCalled();
     dispose?.();
   });
 
   it("puts the old name back when the save fails", async () => {
-    api.renameMachine.mockRejectedValueOnce(new Error("daemon down"));
+    api.setMachineProfile.mockRejectedValueOnce(new Error("daemon down"));
     const { root, dispose } = await mount();
     const input = field(root, "#ra-machine-list", "mac-id");
     type(input, "Studio");
@@ -110,14 +110,14 @@ describe("Remote access: inline rename", () => {
     dispose?.();
   });
 
-  it("shows plain names on the phone", async () => {
+  it("shows plain device names on the phone, but machine names stay editable", async () => {
     remote = true;
     const root = document.createElement("div");
     document.body.appendChild(root);
     const dispose = await renderRemoteAccessView(root);
     await vi.waitFor(() => expect(root.querySelector("#ra-machine-list .ra-device-row")).not.toBeNull());
-    expect(root.querySelector(".ra-name-input")).toBeNull();
-    expect(root.querySelector("#ra-machine-list .ra-device-name").textContent).toBe("mac");
+    expect(root.querySelector("#ra-device-list .ra-name-input")).toBeNull();
+    expect(field(root, "#ra-machine-list", "mac-id").value).toBe("mac");
     dispose?.();
   });
 });
