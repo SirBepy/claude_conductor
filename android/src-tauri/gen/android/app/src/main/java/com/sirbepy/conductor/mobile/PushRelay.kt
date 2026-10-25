@@ -28,12 +28,13 @@ object PushRelay {
     return PushPolicy.handleJson(p.getString("handle", null), p.getString("secret", null))
   }
 
-  // App start: registers when nothing is stored yet, and re-syncs a token whose
-  // last /update or /register failed; onNewToken covers rotation.
+  // App start always syncs. The daemon drops a handle once the relay says it is
+  // gone, and nothing tells the phone; the /update at start finds that out (404 or
+  // 401 -> REGISTER_FRESH) and enrols a fresh handle, instead of the shell
+  // re-enrolling the same dead one on every launch. It also refreshes a token
+  // whose last /update or /register failed; onNewToken covers rotation.
   fun ensureRegistered(context: Context) {
     val app = context.applicationContext
-    val dirty = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(DIRTY, false)
-    if (!PushPolicy.needsSyncAtStart(handleJson(app).isNotEmpty(), dirty)) return
     FirebaseMessaging.getInstance().token.addOnSuccessListener { token -> sync(app, token) }
   }
 

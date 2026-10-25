@@ -182,8 +182,21 @@ impl PushManager {
 
     /// Register an Android relay handle (dedup by handle, newest last) and
     /// persist. `false` when empty or oversized and refused.
-    pub fn register_fcm_handle(&self, mut h: FcmHandle) -> bool {
-        h.device_id = None; // params are untrusted; see `register_fcm_handle_for_device`
+    pub fn register_fcm_handle(&self, h: FcmHandle) -> bool {
+        self.register_inner(h, None)
+    }
+
+    /// Register a handle on behalf of an authenticated paired device, so
+    /// `unregister_fcm_handles_for_device` can find it when that device is revoked.
+    pub fn register_fcm_handle_for_device(&self, h: FcmHandle, device_id: &str) -> bool {
+        self.register_inner(h, Some(device_id))
+    }
+
+    /// One lock and one persist for both entry points, so a revoke can never
+    /// land between "handle stored" and "owner recorded". A device-less
+    /// re-registration keeps the owner the stored handle already had.
+    fn register_inner(&self, mut h: FcmHandle, device_id: Option<&str>) -> bool {
+        h.device_id = None; // params are untrusted; only `device_id` (the connection's) counts
         if h.handle.is_empty()
             || h.secret.is_empty()
             || h.handle.len() > MAX_HANDLE_LEN
@@ -194,6 +207,10 @@ impl PushManager {
         }
         let snapshot = {
             let mut hs = self.fcm_handles.lock().unwrap();
+            h.device_id = match device_id {
+                Some(id) => Some(id.to_string()),
+                None => hs.iter().find(|x| x.handle == h.handle).and_then(|x| x.device_id.clone()),
+            };
             hs.retain(|x| x.handle != h.handle);
             hs.push(h);
             if hs.len() > MAX_FCM_HANDLES {
@@ -207,37 +224,41 @@ impl PushManager {
         true
     }
 
-    /// Register a handle on behalf of an authenticated paired device, so
-    /// `unregister_fcm_handles_for_device` can find it when that device is revoked.
-    pub fn register_fcm_handle_for_device(&self, h: FcmHandle, device_id: &str) -> bool {
-        let handle = h.handle.clone();
-        if !self.register_fcm_handle(h) {
-            return false;
-        }
-        let snapshot = {
-            let mut hs = self.fcm_handles.lock().unwrap();
-            if let Some(x) = hs.iter_mut().find(|x| x.handle == handle) {
-                x.device_id = Some(device_id.to_string());
-            }
-            hs.clone()
-        };
-        self.persist_fcm(&snapshot);
-        true
-    }
-
     /// Drop every handle a revoked/unpaired device enrolled and persist. Legacy
     /// handles with no recorded device stay until a relay 404 prunes them.
-    pub fn unregister_fcm_handles_for_device(&self, device_id: &str) -> usize {
+    /// Returns what was dropped so the caller can `unregister_on_relay` them.
+    pub fn unregister_fcm_handles_for_device(&self, device_id: &str) -> Vec<FcmHandle> {
         let (removed, snapshot) = {
             let mut hs = self.fcm_handles.lock().unwrap();
-            let before = hs.len();
-            hs.retain(|x| x.device_id.as_deref() != Some(device_id));
-            (before - hs.len(), hs.clone())
+            let (gone, kept): (Vec<_>, Vec<_>) =
+                hs.drain(..).partition(|x| x.device_id.as_deref() == Some(device_id));
+            *hs = kept;
+            (gone, hs.clone())
         };
-        if removed > 0 {
+        if !removed.is_empty() {
             self.persist_fcm(&snapshot);
         }
         removed
+    }
+
+    /// Tells the relay to forget handles dropped locally, so a revoked phone's
+    /// FCM token does not linger there. Best-effort: the relay answers 204 for
+    /// an already-gone handle, and a failure only leaves a stale relay row.
+    pub async fn unregister_on_relay(&self, handles: Vec<FcmHandle>) {
+        let sends = handles.iter().map(|h| async move {
+            let sent = self
+                .http
+                .post(format!("{}/unregister", self.relay_base))
+                .json(&json!({ "handle": h.handle, "secret": h.secret }))
+                .send()
+                .await;
+            match sent {
+                Ok(r) if r.status().as_u16() == 204 => {}
+                Ok(r) => log::debug!("[push] relay /unregister answered {}", r.status()),
+                Err(e) => log::debug!("[push] relay /unregister failed: {e}"),
+            }
+        });
+        futures_util::future::join_all(sends).await;
     }
 
     /// Drop an FCM handle by value and persist.
@@ -614,12 +635,49 @@ mod tests {
         let mut forged = handle("f1");
         forged.device_id = Some("dev-b".into());
         assert!(pm.register_fcm_handle(forged));
-        assert_eq!(pm.unregister_fcm_handles_for_device("dev-a"), 2);
+        assert_eq!(pm.unregister_fcm_handles_for_device("dev-a").len(), 2);
         let left: Vec<String> = pm.fcm_handles.lock().unwrap().iter().map(|x| x.handle.clone()).collect();
         assert_eq!(left, vec!["b1".to_string(), "f1".to_string()]);
         assert_eq!(load_fcm_handles(dir.path()).len(), 2, "removal persisted");
-        assert_eq!(pm.unregister_fcm_handles_for_device("dev-b"), 1, "forged id was not kept");
-        assert_eq!(pm.unregister_fcm_handles_for_device("nobody"), 0);
+        assert_eq!(pm.unregister_fcm_handles_for_device("dev-b").len(), 1, "forged id was not kept");
+        assert!(pm.unregister_fcm_handles_for_device("nobody").is_empty());
+    }
+
+    #[test]
+    fn a_device_less_re_registration_keeps_the_stored_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let pm = PushManager::load(dir.path().to_path_buf());
+        assert!(pm.register_fcm_handle_for_device(handle("a"), "dev-a"));
+        assert!(pm.register_fcm_handle(handle("a")));
+        assert_eq!(pm.unregister_fcm_handles_for_device("dev-a").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn revoking_a_device_unregisters_each_of_its_handles_on_the_relay() {
+        let mut server = mockito::Server::new_async().await;
+        let a1 = server
+            .mock("POST", "/unregister")
+            .match_body(mockito::Matcher::Json(json!({"handle": "a1", "secret": "dummy-secret"})))
+            .with_status(204)
+            .expect(1)
+            .create_async()
+            .await;
+        let a2 = server
+            .mock("POST", "/unregister")
+            .match_body(mockito::Matcher::Json(json!({"handle": "a2", "secret": "dummy-secret"})))
+            .with_status(500)
+            .expect(1)
+            .create_async()
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let pm = PushManager::load_with_relay(dir.path().to_path_buf(), &server.url());
+        pm.register_fcm_handle_for_device(handle("a1"), "dev-a");
+        pm.register_fcm_handle_for_device(handle("a2"), "dev-a");
+        pm.register_fcm_handle_for_device(handle("b1"), "dev-b");
+        let dropped = pm.unregister_fcm_handles_for_device("dev-a");
+        pm.unregister_on_relay(dropped).await;
+        a1.assert_async().await;
+        a2.assert_async().await; // a failing handle does not stop the others
     }
 
     #[test]
