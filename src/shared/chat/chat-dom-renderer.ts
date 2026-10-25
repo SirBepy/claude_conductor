@@ -10,6 +10,7 @@ import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { hydrateAttachments } from "./attachment-hydrator";
 import { resolveCommitRefs } from "./commit-refs";
 import { linkifyTickets } from "./ticket-refs";
+import { linkifyFilePaths } from "./file-refs";
 import { toolSummary } from "./tool-meta";
 import { groupToolRange } from "./tool-strip";
 import { clampUserMessages } from "./turn-collapse";
@@ -104,6 +105,7 @@ export function flushRender(r: ChatRenderer): void {
     void highlightCodeBlocks(el);
     wrapBlockquotes(el);
     highlightInlineCode(el);
+    linkifyFilePaths(el);
     void resolveCommitRefs(el, r.paginator.cwdHint);
     void linkifyTickets(el, r.paginator.cwdHint);
   }
