@@ -42,7 +42,8 @@ test("remote access page: every kit-row is the shared 45px height", async ({ pag
       edge: el.matches(":first-of-type, :last-of-type"),
     })),
   );
-  expect(rows.length).toBeGreaterThanOrEqual(2);
+  // The machines card now holds rows, not a kit-row, so only the toggle rows remain.
+  expect(rows.length).toBeGreaterThanOrEqual(1);
   await page.screenshot({ path: path.join(SHOT_DIR, `remote-access-${LABEL}.png`), fullPage: true });
 
   // The kit trims the first/last row of a card on purpose; the rest are 45px.

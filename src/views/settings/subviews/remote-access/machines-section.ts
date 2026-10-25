@@ -1,5 +1,5 @@
 // Paired-machines section of the Remote access settings view (multi-machine
-// federation, H4) - self label editor + peer list + pairing form. Split out
+// federation, H4) - machine rows (this one first) + pairing form. Split out
 // of remote-access.ts (3a45b917 added this inline) to keep that file under
 // the ~300-line view rule.
 
@@ -7,9 +7,21 @@ import { html } from "lit-html";
 import { api } from "../../../../shared/api";
 import { isRemote } from "../../../../shared/transport";
 import { renderEntityList, renameFieldHtml, wireRenameFields } from "./entity-list";
+import { iconButtonHtml, isIconPickerOpen, wireIconPickers } from "./icon-picker";
+import { assignMachineIcons } from "../../../sessions/machine-icons";
 
 function $(root: HTMLElement, sel: string): HTMLElement | null {
   return root.querySelector<HTMLElement>(sel);
+}
+
+interface MachineRow {
+  machine_id: string;
+  label: string;
+  os: string;
+  icon?: string | null;
+  isSelf: boolean;
+  reach?: string | null;
+  can_drive?: boolean;
 }
 
 function escapeHtml(str: string): string {
@@ -20,17 +32,7 @@ function escapeHtml(str: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** Commits the "This machine" label field on blur/Enter - empty/whitespace
- *  is never sent (there's nothing sane to rename to), the field just
- *  reverts to the last-known label on the next renderMachinesSection call. */
-async function commitMachineLabel(root: HTMLElement, input: HTMLInputElement): Promise<void> {
-  const trimmed = input.value.trim().slice(0, 40);
-  if (!trimmed) { await renderMachinesSection(root); return; }
-  try { await api.setMachineLabel(trimmed); }
-  catch (e) { console.error("[remote-access] set_machine_label failed", e); }
-}
-
-/** Paired-machines section: self label editor + peer list + pairing form.
+/** Paired-machines section: machine rows (this one first) + pairing form.
  *  Hidden entirely when list_machines() fails - the phone (RemoteUnavailableError)
  *  and any desktop build without the federation backend yet both degrade the
  *  same way, rather than showing a form that can never do anything. */
@@ -68,31 +70,40 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
     const fresh = previous ? peers.filter((p) => !previous.has(p.machine_id)) : [];
     knownPeerIds = new Set(peers.map((p) => p.machine_id));
 
-    const labelInput = $(root, "#ra-machine-label") as HTMLInputElement | null;
-    if (labelInput && document.activeElement !== labelInput) {
-      labelInput.value = self?.label ?? "";
-      labelInput.onblur = () => { void commitMachineLabel(root, labelInput); };
-      labelInput.onkeydown = (e) => { if (e.key === "Enter") labelInput.blur(); };
-    }
+    // Typing in a name or browsing the icon grid must survive a
+    // machines-changed re-render, which rebuilds the rows (and the grid's anchor).
+    const active = document.activeElement;
+    const list = $(root, "#ra-machine-list");
+    if (isIconPickerOpen() || (active instanceof HTMLInputElement && list?.contains(active))) return;
+
+    const icons = assignMachineIcons([...(self ? [self] : []), ...peers]);
+    // One row per machine, this one first. The self row has no drive/unpair
+    // controls; its id maps to a null machine id in set_machine_profile.
+    const rows: MachineRow[] = [
+      ...(self ? [{ machine_id: self.machine_id, label: self.label, os: self.os, icon: self.icon, isSelf: true as const }] : []),
+      ...peers.map((p) => ({ ...p, isSelf: false as const })),
+    ];
+    const selfId = self?.machine_id ?? null;
 
     renderEntityList(
       root,
       "#ra-machine-list",
-      peers,
+      rows,
       (p) => `
         <div class="ra-device-row" data-id="${escapeHtml(p.machine_id)}">
+          ${iconButtonHtml(p.machine_id, icons.get(p.machine_id) ?? "ph-desktop", p.icon)}
           <div class="ra-device-info">
-            ${isRemote() ? `<span class="ra-device-name">${escapeHtml(p.label)}</span>` : renameFieldHtml(p.machine_id, p.label, escapeHtml)}
-            <span class="ra-device-date">${escapeHtml(p.os)}${p.reach ? ` &middot; ${escapeHtml(p.reach)}` : ""}</span>
+            ${renameFieldHtml(p.machine_id, p.label, escapeHtml)}
+            <span class="ra-device-date">${p.isSelf ? "This machine &middot; " : ""}${escapeHtml(p.os)}${!p.isSelf && p.reach ? ` &middot; ${escapeHtml(p.reach)}` : ""}</span>
           </div>
-          ${isRemote() ? "" : `<label class="ra-machine-drive" title="Off: ${escapeHtml(p.label)} still sees every chat here, but can only drive the chats it started">
+          ${p.isSelf ? "" : `${isRemote() ? "" : `<label class="ra-machine-drive" title="Off: ${escapeHtml(p.label)} still sees every chat here, but can only drive the chats it started">
             <span class="ra-machine-drive-label">Can drive chats</span>
             <span class="kit-toggle">
               <input type="checkbox" class="ra-machine-drive-input" data-id="${escapeHtml(p.machine_id)}" ${p.can_drive === false ? "" : "checked"}>
               <span class="kit-toggle-track"></span>
             </span>
           </label>`}
-          <button class="btn-danger-sm ra-unpair-btn" data-id="${escapeHtml(p.machine_id)}">Unpair</button>
+          <button class="btn-danger-sm ra-unpair-btn" data-id="${escapeHtml(p.machine_id)}">Unpair</button>`}
         </div>
       `,
       ".ra-unpair-btn",
@@ -100,20 +111,23 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
         await api.unpairMachine(id);
         await renderMachinesSection(root);
       },
-      {
-        emptyHtml: `
-          <div class="v-empty">
-            <i class="ph ph-devices v-empty-icon"></i>
-            <div class="v-empty-title">No paired machines yet</div>
-            <div class="v-empty-hint">Paste another machine's pairing URL below to pair it.</div>
-          </div>
-        `,
-        errorLabel: "unpair_machine",
-      },
+      { errorLabel: "unpair_machine" },
     );
+    if (peers.length === 0) {
+      list?.insertAdjacentHTML("beforeend", `
+        <div class="v-empty">
+          <i class="ph ph-devices v-empty-icon"></i>
+          <div class="v-empty-title">No paired machines yet</div>
+          <div class="v-empty-hint">Paste another machine's pairing URL below to pair it.</div>
+        </div>
+      `);
+    }
 
+    // Self targets the daemon being talked to, which the RPC spells as null.
+    const target = (id: string) => (id === selfId ? null : id);
+    wireIconPickers(root, "#ra-machine-list", (id, icon) => api.setMachineProfile(target(id), { icon }), "set_machine_profile");
     wireDriveToggles(root);
-    wireRenameFields(root, "#ra-machine-list", (id, name) => api.renameMachine(id, name), "rename_machine");
+    wireRenameFields(root, "#ra-machine-list", (id, name) => api.setMachineProfile(target(id), { label: name }), "set_machine_profile");
 
     const freshIds = new Set(fresh.map((p) => p.machine_id));
     root.querySelectorAll<HTMLElement>("#ra-machine-list .ra-device-row").forEach((row) => {
@@ -179,10 +193,6 @@ export function machinesSectionTemplate() {
   return html`
     <div class="kit-section" id="ra-machines-section" style="display:none">
       <div class="kit-section-title">Paired machines</div>
-      <div class="kit-row">
-        <span class="kit-row-label">This machine</span>
-        <input type="text" id="ra-machine-label" class="ra-machine-label-input" maxlength="40" placeholder="Label">
-      </div>
       <p id="ra-machine-linked" class="ra-machine-linked" hidden></p>
       <div id="ra-machine-list" class="ra-device-list"></div>
       <div class="ra-machine-pair-form">
