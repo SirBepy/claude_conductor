@@ -89,6 +89,20 @@ test("Drafts' open count shows quietly on its icon before it is opened", async (
   await expect(tab(page, "todos").locator(".sp-count")).toHaveCount(0);
 });
 
+test("a chat switch clears the previous chat's Drafts count until the new one's fetch lands", async ({ page }) => {
+  await mountPane(page);
+  await expect(tab(page, "drafts").locator(".sp-count")).toHaveText("1");
+  await page.evaluate(() => {
+    // The next chat's fetch never resolves, so only the switch itself can clear the count.
+    const tauri = (window as any).__TAURI__;
+    const passthrough = tauri.core.invoke;
+    tauri.core.invoke = (cmd: string, args: any) =>
+      cmd === "list_message_drafts" ? new Promise(() => {}) : passthrough(cmd, args);
+    (window as any).__fab.setSessionScope("sess-B", "/proj");
+  });
+  await expect(tab(page, "drafts").locator(".sp-count")).toHaveCount(0);
+});
+
 test("a strip icon fills the split beside the chat; the same icon or the X closes it", async ({ page }) => {
   await mountPane(page);
   await tab(page, "drafts").click();

@@ -16,7 +16,7 @@ import type { RailTabDeps } from "../rail-panel";
 import { loadPopped, savePopped, saveOpen as savePreviewOpen, loadOpen as loadPreviewOpen } from "../rail-panel";
 import type { PreviewController } from "../preview-panel";
 import {
-  mountPanel, PANEL_KEYS, PANEL_META, type MountedPanels, type PanelDeps, type PanelHandle, type PanelHost, type PanelKey,
+  mountPanel, PANEL_KEYS, PANEL_META, type MountedPanels, type PanelDeps, type PanelHandle, type PanelHost, type PanelHostDeps, type PanelKey,
 } from "../pane-windows/panels";
 import { forgetActive, recallActive, rememberActive, loadFraction, saveFraction } from "./memory";
 import "./split.css";
@@ -29,13 +29,6 @@ const DIVIDER_W = 6;
  *  the chat instead. 420px of chat keeps a message line near 60 characters. */
 const MIN_PANEL = 320;
 const MIN_CHAT = 420;
-
-export interface SplitPanelsDeps {
-  onDraft(text: string): void;
-  mountPreview: PanelDeps["mountPreview"];
-  /** Fired after every change, so the dial can repaint its state. */
-  onChange(): void;
-}
 
 export class SplitPanels implements PanelHost {
   private sessionId: string | null = null;
@@ -71,7 +64,7 @@ export class SplitPanels implements PanelHost {
   constructor(
     private readonly pane: HTMLElement,
     layer: HTMLElement,
-    private readonly deps: SplitPanelsDeps,
+    private readonly deps: PanelHostDeps,
   ) {
     this.panels = PANEL_KEYS.filter((p) => p !== "preview" || !!deps.mountPreview);
     layer.classList.add("sp-layer");
