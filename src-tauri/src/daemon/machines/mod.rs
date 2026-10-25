@@ -96,7 +96,7 @@ pub fn publish_instances_changed(state: &DaemonState) {
 
 /// Writes a peer's own name and icon into this machine's cache of it: the
 /// registry entry (the peer's label wins over any older owner-set nickname,
-/// since the peer's own name is now the single source), its reverse device
+/// since the peer's own name is the single source), its reverse device
 /// name, the mirror label, then the change events. Returns whether anything
 /// changed; nothing is published otherwise, so a link reconnect that finds
 /// nothing new stays quiet. An unusable label or icon is ignored, not stored.
