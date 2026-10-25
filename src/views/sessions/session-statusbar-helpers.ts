@@ -69,6 +69,11 @@ function sanitizeRows(raw: unknown, maxRows: number): ChipType[][] | null {
   return trimmed.length ? trimmed : null;
 }
 
+/** `[]` or `[[]]`: an array whose rows hold no entries whatsoever. */
+function isSavedEmptyLayout(raw: unknown): boolean {
+  return Array.isArray(raw) && raw.every((r) => Array.isArray(r) && r.length === 0);
+}
+
 /** Set once the saved rows have been replaced by the merged-chip layout. */
 const V2_FLAG = "statuslineRowsV2Applied";
 
@@ -106,6 +111,10 @@ export async function loadStatuslineRows(profile: StatuslineProfile = activeProf
     const s = await invoke<Record<string, unknown>>("get_settings");
     const fromRows = sanitizeRows(s[PROFILE_KEY[profile]], profileMaxRows(profile));
     if (fromRows) return fromRows;
+    // A saved layout with no chip at all is Clear all, a deliberate choice the
+    // live bar already showed. Only a missing key (never saved) or one holding
+    // nothing but unknown chips falls through to the legacy fields / defaults.
+    if (isSavedEmptyLayout(s[PROFILE_KEY[profile]])) return [[]];
     // One-time migration from the pre-builder settings. Desktop only: the
     // mobile profile postdates it, so there is nothing legacy to carry over.
     const legacyFields = profile === "desktop" && Array.isArray(s["statuslineFields"])
