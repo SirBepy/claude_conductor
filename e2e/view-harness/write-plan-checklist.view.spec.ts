@@ -1,6 +1,6 @@
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, fireEvent } from "./harness";
+import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, fireEvent, capture } from "./harness";
 
 // The `write_plan` half of the checklist seam (todo 662: a fully built renderer
 // went unseen for weeks with nothing covering event-to-DOM), so these drive the
@@ -298,3 +298,18 @@ test("a live step activating with no comment ever left drops the affordance", as
   await expect(row.locator(".todo-step-comment-btn")).toHaveCount(0);
 });
 // Reviewed 2026-10-23: the preview-open slug lookup is scoped to the selected chat; the contract asserted here is unchanged.
+
+test("a step too long for one line wraps beside its icon, not under it", async ({ page }) => {
+  // Phone width: the label runs past one line there.
+  await page.setViewportSize({ width: 390, height: 780 });
+  const long = "Dashboard-only pane: header click, Ctrl+Shift+D, chat menu, Home widget and the rest of a long step";
+  await mountPlanChat(page, [{ text: "Short step", status: "done" }, { text: long, status: "done" }, { text: "Last", status: "pending" }]);
+  const row = page.locator(ROWS).nth(1);
+  const icon = (await row.locator(".todo-step-icon").boundingBox())!;
+  const label = (await row.locator(".todo-step-label").boundingBox())!;
+  // Wrapped, and still in the column right of the icon, starting on the icon's line.
+  expect(label.height).toBeGreaterThan(icon.height * 1.5);
+  expect(label.x).toBeGreaterThanOrEqual(icon.x + icon.width);
+  expect(Math.abs(label.y - icon.y)).toBeLessThan(4);
+  await capture(page.locator("#session-pane .todo-checklist"), "plan-long-step-wrap");
+});
