@@ -125,10 +125,18 @@ export function makeActions(host: ActionHost): DashActions {
         const repo = await pickRepo(host.ctx(), anchor);
         if (!repo) return;
         const project = { path: repo.cwd, name: repo.name };
-        const config = await defaultSessionConfig(project.path) ?? await openModelEffortModal(project.path, project.name);
+        let config;
+        try {
+          config = await defaultSessionConfig(project.path) ?? await openModelEffortModal(project.path, project.name);
+        } catch (err) {
+          showToast(`Could not start the chat: ${String(err)}`);
+          return;
+        }
         if (!config) return;
         host.leave();
-        state.launchNewChatCallback?.(project, { ...config, initialMessage: message });
+        // The message embeds third-party card text, so this chat never inherits
+        // the project's auto-accept: an injected instruction must hit a prompt.
+        state.launchNewChatCallback?.(project, { ...config, autoAccept: false, initialMessage: message });
       })();
     },
     back: () => host.back(),
