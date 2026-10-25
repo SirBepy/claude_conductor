@@ -1,7 +1,7 @@
 // In-place statusline editor. While active, the REAL bar of one chat shows its
 // layout as editable chips (x to remove, drag to reorder, row controls, a "+"
-// palette popover) and every change is saved straight through the same
-// settings path the retired Settings page used. State is per-bar and in memory
+// palette popover) and every change is saved straight through
+// saveStatuslineRows / saveStatuslineHideZero. State is per-bar and in memory
 // only: leaving edit mode drops it, the saved layout is the only record.
 import { escapeHtml } from "../../shared/escape-html";
 import { askConfirm } from "../../shared/confirm";
