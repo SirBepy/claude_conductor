@@ -43,6 +43,7 @@ import { installE2eSeams } from "./boot/e2e-seams";
 import { installPrintBlock } from "./shared/print-block";
 import { detachedSessionFromHash, previewSessionFromHash, codeSessionFromHash } from "./boot/window-mode-hash";
 import { installChatsWindowMessaging } from "./boot/chats-window-messaging";
+import { setupUpdateToast } from "./shared/update-toast";
 import "./missed-panel.css";
 
 // Test-build banner: in dev (`cargo tauri dev` / the vite dev server) paint a
@@ -358,6 +359,7 @@ if (detachedSessionId) {
   setupNewsBadgeAndNotifications();
   setupScheduleMissedPopup();
   setupScheduledFireToast();
+  setupUpdateToast();
   setupRemoteVoicelines();
 }
 }
