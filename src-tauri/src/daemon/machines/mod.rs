@@ -104,7 +104,9 @@ pub(crate) fn apply_peer_profile(state: &DaemonState, machine_id: &str, label: &
     let Some(registry) = state.machines.get() else { return false };
     let Some(before) = registry.peer(machine_id) else { return false };
     let new_label = crate::daemon::device_registry::normalize_label(label).ok();
-    let new_icon = registry::normalize_icon(icon).unwrap_or(None);
+    // An unusable icon (a newer peer's format, garbage over /api/health) keeps
+    // the cached one rather than clearing it on every reconnect.
+    let new_icon = registry::normalize_icon(icon).unwrap_or_else(|_| before.icon.clone());
     let label_changed = new_label.is_some_and(|l| l != before.label);
     if let Some(l) = new_label {
         // Stored even when equal so a stale nickname entry cannot mask the
@@ -137,6 +139,29 @@ mod merged_tests {
     use crate::sessions::registry::RegisterInput;
     use crate::types::{MachineRef, Settings};
     use std::sync::Mutex;
+
+    #[test]
+    fn an_unusable_icon_from_a_peer_keeps_the_cached_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.init_machines(dir.path().to_path_buf());
+        let reg = state.machines.get().unwrap();
+        reg.upsert_peer(PeerMachine {
+            machine_id: "mac".into(),
+            label: "Mac".into(),
+            os: "macos".into(),
+            iroh_id: None,
+            direct_url: None,
+            token: "dummy-token".into(),
+            reverse_device_id: None,
+            added_at: 0,
+            icon: Some("ph-leaf".into()),
+        });
+        assert!(!apply_peer_profile(&state, "mac", "Mac", Some("Not An Icon")));
+        assert_eq!(reg.peer("mac").unwrap().icon.as_deref(), Some("ph-leaf"));
+        assert!(apply_peer_profile(&state, "mac", "Mac", None));
+        assert_eq!(reg.peer("mac").unwrap().icon, None);
+    }
 
     #[test]
     fn all_instances_merges_local_and_mirrored_rows() {
