@@ -2,6 +2,7 @@ import { html, render } from "lit-html";
 import { setActiveView } from "./shared/navigation";
 import { noteNavigation } from "./shared/back-button";
 import { isRemote } from "./shared/transport";
+import { noteView } from "./shared/on-screen-chat";
 
 type RenderFn = (
   root: HTMLElement,
@@ -58,6 +59,7 @@ function retriggerEnter(el: HTMLElement): void {
 export async function navigateTo(name: string): Promise<void> {
   if (!currentRoot) return;
   setActiveView(name);
+  noteView(name);
   // Feed the back-button view stack so the phone's hardware back can step back
   // through screens (no-op recording on desktop).
   noteNavigation(name);

@@ -169,7 +169,8 @@ While it connects, the phone shows "Reaching your PC…" and keeps retrying on i
 countdown - tap **Edit connection** to go back and change the address.
 
 **App lock.** The phone asks for its own fingerprint or screen-lock PIN every time the app
-starts, and again after five minutes in the background. The app keeps loading behind the lock
+starts, and again after ten minutes in the background (change it on the phone under Settings >
+Remote access > App lock, from every time up to an hour). The app keeps loading behind the lock
 screen, so it is ready the moment you unlock. Cancelling the prompt sends the app to the
 background, still locked, and the prompt opens again the next time you open the app. A phone with no
 screen lock set skips this, since there is nothing to check against.
