@@ -1,8 +1,7 @@
 // Todo 1017: api.phoneLink() swallowed a failed phone_link call and returned
 // null - identical to the legitimate "no phone link yet" result, so a copy-
 // link click could not tell "unavailable" from "the read failed". Fix: let it
-// reject; the caller (session-detail.ts's phone action) already has a
-// try/catch that shows a distinct "phone failed: ..." toast on rejection.
+// reject so a caller can show a distinct "phone failed" message.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 

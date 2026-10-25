@@ -1,10 +1,8 @@
 // Todo 1001: api.getSessionConfig() swallowed a failed get_session_config call
 // and returned null - identical to the legitimate "no config recorded"
-// result. That value feeds a scheduled chat's model/effort inheritance (see
-// session-detail.ts's enrichHistorical), so a failed read used to silently
-// fall back to defaults instead of surfacing as a failure. Fix: let it
-// reject; the caller already has a try/catch that falls back to the
-// transcript-derived model on rejection.
+// result. A caller inheriting model/effort from that value would silently
+// fall back to defaults on a failed read instead of seeing a failure, so it
+// rejects and the caller decides the fallback.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 

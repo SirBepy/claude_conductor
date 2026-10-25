@@ -1,13 +1,3 @@
-/* .subview-header is still used by the legacy session-detail view so
- * keep it here until Task 11 migrates session-detail. */
-.subview-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--color-border, #2d2c44);
-}
-
 /* See-all link row inside Recent sessions */
 .see-all-link {
   display: block;

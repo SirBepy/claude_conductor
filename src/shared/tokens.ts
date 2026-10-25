@@ -35,7 +35,7 @@ export interface ProjectAlias {
 
 export type AliasMap = Record<string, ProjectAlias | undefined>;
 
-export { formatTokens, formatMillions } from "./formatters";
+export { formatTokens } from "./formatters";
 
 export function tokensAllIn(t: { input: bigint; output: bigint; cache_read: bigint; cache_create: bigint }): number {
   return Number(t.input) + Number(t.output) + Number(t.cache_read) + Number(t.cache_create);

@@ -308,10 +308,6 @@ export const api = {
   openExternal: (url: string): Promise<unknown> => invoke("open_external", { url }),
 
   // --- Chats window ---
-  openChatsForSession: async (sessionId: string, mode: "live" | "history"): Promise<void> => {
-    try { await invoke("open_chats_for_session", { sessionId, mode }); }
-    catch (e) { console.error("open_chats_for_session failed", e); throw e; }
-  },
   takePendingChatOpen: async (): Promise<[string, string] | null> => {
     try { return (await invoke<[string, string] | null>("take_pending_chat_open")) ?? null; }
     catch (e) { console.error("take_pending_chat_open failed", e); return null; }
@@ -447,7 +443,6 @@ export const api = {
 
   // --- Projects ---
   listProjects: (): Promise<ProjectConfig[]> => invoke("list_projects"),
-  listProjectGroups: (): Promise<ProjectGroup[]> => invoke("list_project_groups"),
   // Project-face fallback detection (ai_todo 99): a project's own icon file, or
   // its detected tech-stack key. Both fail soft (null) so the list never breaks.
   // `machineId` names a paired peer to ask instead of this daemon's own
@@ -472,10 +467,6 @@ export const api = {
   deleteProject: async (id: string): Promise<void> => {
     try { await invoke("delete_project", { id }); }
     catch (e) { console.error("delete_project failed", e); throw e; }
-  },
-  setProjectsSortBy: async (sortBy: string): Promise<void> => {
-    try { await invoke("set_projects_sort_by", { sortBy }); }
-    catch (e) { console.error("set_projects_sort_by failed", e); throw e; }
   },
 
   // --- Channels ---
@@ -517,19 +508,11 @@ export const api = {
     try { return (await invoke<InstanceInfo[]>("list_instances")) || []; }
     catch (e) { console.error("list_instances failed", e); return []; }
   },
-  listInstancesForProject: async (projectId: string): Promise<InstanceInfo[]> => {
-    try { return (await invoke<InstanceInfo[]>("list_instances_for_project", { projectId })) || []; }
-    catch (e) { console.error("list_instances_for_project failed", e); return []; }
-  },
   // Rejects on failure: null means "no phone link yet", so a swallowed error
   // would be indistinguishable from that (the caller's try/catch already
   // shows a distinct "failed" toast instead of "not available yet").
   phoneLink: (sessionId: string): Promise<string | null> =>
     invoke<string | null>("phone_link", { sessionId }),
-  instanceTokenStats: async (sessionId: string): Promise<InstanceTokenStats> => {
-    try { return await invoke<InstanceTokenStats>("instance_token_stats", { sessionId }); }
-    catch (e) { console.error("instance_token_stats failed", e); return { tokens: 0, turns: 0 }; }
-  },
   tokenStatsBySource: async (): Promise<TokenSourceBucket[]> => {
     try {
       const r = await invoke<{ buckets: TokenSourceBucket[] }>("token_stats_by_source");
