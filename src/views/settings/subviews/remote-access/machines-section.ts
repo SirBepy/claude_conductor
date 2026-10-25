@@ -7,7 +7,7 @@ import { html } from "lit-html";
 import { api } from "../../../../shared/api";
 import { isRemote } from "../../../../shared/transport";
 import { renderEntityList, renameFieldHtml, wireRenameFields } from "./entity-list";
-import { iconButtonHtml, isIconPickerOpen, wireIconPickers } from "./icon-picker";
+import { iconButtonHtml, isIconPickerOpen, onIconPickerClosed, wireIconPickers } from "./icon-picker";
 import { assignMachineIcons } from "../../../sessions/machine-icons";
 
 function $(root: HTMLElement, sel: string): HTMLElement | null {
@@ -61,6 +61,20 @@ export function resetMachinesSection(): void {
   clearTimeout(linkedTimer);
 }
 
+let refreshDeferred = false;
+
+/** A render skipped for an open grid or a focused name field is replayed once
+ *  that ends; dropping it would leave stale names until the next event. One
+ *  pending replay at a time, since it re-reads the lists anyway. */
+function deferRefresh(root: HTMLElement, arm: (run: () => void) => void): void {
+  if (refreshDeferred) return;
+  refreshDeferred = true;
+  arm(() => {
+    refreshDeferred = false;
+    void renderMachinesSection(root);
+  });
+}
+
 export async function renderMachinesSection(root: HTMLElement): Promise<void> {
   const section = $(root, "#ra-machines-section");
   if (!section) return;
@@ -74,7 +88,14 @@ export async function renderMachinesSection(root: HTMLElement): Promise<void> {
     // machines-changed re-render, which rebuilds the rows (and the grid's anchor).
     const active = document.activeElement;
     const list = $(root, "#ra-machine-list");
-    if (isIconPickerOpen() || (active instanceof HTMLInputElement && list?.contains(active))) return;
+    if (isIconPickerOpen()) {
+      deferRefresh(root, (run) => onIconPickerClosed(run));
+      return;
+    }
+    if (active instanceof HTMLInputElement && list?.contains(active)) {
+      deferRefresh(root, (run) => active.addEventListener("focusout", () => setTimeout(run, 0), { once: true }));
+      return;
+    }
 
     const icons = assignMachineIcons([...(self ? [self] : []), ...peers]);
     // One row per machine, this one first. The self row has no drive/unpair

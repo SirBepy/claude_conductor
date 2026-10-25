@@ -21,6 +21,14 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
+/** Runs `cb` once, after the grid next closes (or now if none is open), so a
+ *  refresh skipped while it was showing is not lost. */
+export function onIconPickerClosed(cb: () => void): void {
+  if (!open) { cb(); return; }
+  closeWaiters.push(cb);
+}
+const closeWaiters: Array<() => void> = [];
+
 /** `shown` is the glyph on the button (chosen or automatic); `chosen` is only
  *  the explicit pick, so the grid can mark it (null = Automatic). */
 export function iconButtonHtml(id: string, shown: string, chosen: string | null | undefined): string {
@@ -52,7 +60,7 @@ export function wireIconPickers(
         className: "ra-icon-pop",
         bodyHtml: gridHtml(btn.dataset.chosen ?? ""),
         buttonSelector: ".ra-icon-auto, .ra-icon-cell",
-        onClose: () => { open = null; },
+        onClose: () => { open = null; closeWaiters.splice(0).forEach((cb) => cb()); },
         onPick: (cell) => {
           const icon = cell.dataset.icon || null;
           handle.close();
