@@ -1,10 +1,13 @@
-// The chat pane's FAB: tap to fan out Ask / Todos / Drafts / Preview, pick one,
-// and it opens in an in-app window over the transcript (Joe, 2026-08-24 - the
-// rail stealing layout width was the complaint). Windows float, snap to a
-// corner, dock beside the chat as a split, and trade tabs: pane-windows/.
+// The chat pane's FAB: tap to fan out Ask / Todos / Drafts / Code / Preview.
+// What a pick opens depends on the screen: on desktop a split beside the chat
+// with an icon strip on the far right (split-panels/), on the
+// phone a full-screen cover (pane-windows/).
 
+import { isRemote } from "../../shared/transport";
+import { DEFAULT_COMPACT_QUERY } from "../../../vendor/tauri_kit/frontend/pane-windows/manager";
 import { PaneWindows } from "./pane-windows/manager";
-import { PANEL_META, type PanelDeps, type PanelKey } from "./pane-windows/panels";
+import { PANEL_META, type PanelDeps, type PanelHost, type PanelKey } from "./pane-windows/panels";
+import { SplitPanels } from "./split-panels/split";
 import type { PreviewController } from "./preview-panel";
 import "./fab-dial.css";
 import "../../../vendor/tauri_kit/frontend/pane-windows/pane-windows.css";
@@ -39,7 +42,7 @@ class FabDial implements FabDialHandle {
   private pane: HTMLElement;
   private host: HTMLElement;
   private chrome: HTMLElement;
-  private windows: PaneWindows;
+  private windows: PanelHost;
   private dialOpen = false;
   private hasPreview: boolean;
   private onCode: () => void;
@@ -60,11 +63,12 @@ class FabDial implements FabDialHandle {
     this.host.append(layer, this.chrome);
     this.chrome.addEventListener("click", this.onClick);
     document.addEventListener("keydown", this.onKeydown);
-    this.windows = new PaneWindows(pane, layer, {
+    const hostDeps = {
       onDraft: deps.onDraft,
       mountPreview: deps.mountPreview,
       onChange: () => this.renderChrome(),
-    });
+    };
+    this.windows = usesSplit() ? new SplitPanels(pane, layer, hostDeps) : new PaneWindows(pane, layer, hostDeps);
     this.renderChrome();
   }
 
@@ -215,6 +219,15 @@ class FabDial implements FabDialHandle {
     document.removeEventListener("keydown", this.onKeydown);
     this.host.remove();
   }
+}
+
+/** Decided once per mount: the phone (and a window already phone-narrow when
+ *  the pane mounts) gets the pane windows' full-screen covers, with their
+ *  swipe and back-button handling; a desktop window later dragged narrow keeps
+ *  the split, which then covers the chat instead of squeezing it (split.ts). */
+function usesSplit(): boolean {
+  if (isRemote()) return false;
+  return !(typeof window.matchMedia === "function" && window.matchMedia(DEFAULT_COMPACT_QUERY).matches);
 }
 
 export function mountFabDial(pane: HTMLElement, deps: FabDialDeps): FabDialHandle {

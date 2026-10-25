@@ -12,6 +12,7 @@ import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
 import { DraftsEditor } from "./drafts-editor";
 import { listHtml, personHtml, ticketHtml, type RenderCtx } from "./drafts-panel-render";
+import { isOpen } from "./drafts-grouping";
 import type { MessageDraft, Person } from "../../types/ipc.generated";
 import "./drafts-panel.css";
 
@@ -64,7 +65,7 @@ class DraftsPanel implements DraftsPanelHandle {
     };
   })();
 
-  constructor(root: HTMLElement) {
+  constructor(root: HTMLElement, private onOpenCount?: (n: number) => void) {
     this.root = root;
     this.root.classList.add("drafts-panel");
     this.root.addEventListener("click", this.onClick);
@@ -107,6 +108,8 @@ class DraftsPanel implements DraftsPanelHandle {
         if (this.sessionId !== sid) return;
         this.drafts = Array.isArray(view?.drafts) ? view.drafts : [];
         this.people = Array.isArray(view?.people) ? view.people : [];
+        const now = Date.now();
+        this.onOpenCount?.(this.drafts.filter((d) => isOpen(d, now)).length);
         if (this.pendingOpenId) {
           const wanted = this.pendingOpenId;
           this.pendingOpenId = null;
@@ -234,6 +237,8 @@ class DraftsPanel implements DraftsPanelHandle {
   };
 }
 
-export function mountDraftsPanel(root: HTMLElement): DraftsPanelHandle {
-  return new DraftsPanel(root);
+/** `onOpenCount` hears how many drafts are still open after every fetch: the
+ *  split's strip shows it on the Drafts icon. */
+export function mountDraftsPanel(root: HTMLElement, onOpenCount?: (n: number) => void): DraftsPanelHandle {
+  return new DraftsPanel(root, onOpenCount);
 }

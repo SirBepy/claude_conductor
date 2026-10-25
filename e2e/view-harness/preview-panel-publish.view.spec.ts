@@ -37,7 +37,7 @@ test("the More options menu publishes the shown snapshot and toasts the link", a
     if (view) view.style.zIndex = "1";
   });
 
-  const root = page.locator('.pw-window[data-active="preview"]');
+  const root = page.locator('.sp-panel[data-active="preview"]');
   await expect(root.locator(".pv-head [data-publish]")).toHaveCount(0);
   await root.locator('.pv-head [data-act="more"]').click();
   const item = page.locator(".smore-item[data-publish]");

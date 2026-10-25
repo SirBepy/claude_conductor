@@ -15,7 +15,7 @@ import { PaneWindowManager } from "../../../../vendor/tauri_kit/frontend/pane-wi
 import {
   closeWindow, isShowing, openPanel, windowOf, type PaneLayout, type PaneWindow,
 } from "../../../../vendor/tauri_kit/frontend/pane-windows/layout";
-import { mountPanel, PANEL_KEYS, PANEL_META, type MountedPanels, type PanelDeps, type PanelHandle, type PanelKey } from "./panels";
+import { mountPanel, PANEL_KEYS, PANEL_META, type MountedPanels, type PanelDeps, type PanelHandle, type PanelHost, type PanelKey } from "./panels";
 import { recallLayout, rememberLayout } from "./memory";
 
 export interface PaneWindowsDeps {
@@ -25,7 +25,7 @@ export interface PaneWindowsDeps {
   onChange(): void;
 }
 
-export class PaneWindows {
+export class PaneWindows implements PanelHost {
   private sessionId: string | null = null;
   private cwd: string | null = null;
   private handles = new Map<PanelKey, PanelHandle>();

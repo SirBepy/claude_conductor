@@ -31,6 +31,6 @@ test.fixme("preview panel iframe executes a pushed snapshot's inline script", as
   await mountSessionsLayout(page);
   await page.evaluate(() => (window as unknown as { __preview: { open(id: string): void } }).__preview.open("snap-1"));
 
-  const frame = page.frameLocator('.pw-window[data-active="preview"] iframe.pv-iframe');
+  const frame = page.frameLocator('.sp-panel[data-active="preview"] iframe.pv-iframe');
   await expect(frame.locator("#stage p")).toHaveText("rendered");
 });

@@ -1,0 +1,229 @@
+/* The desktop split beside the chat (split.ts). Everything sits in the FAB
+   host, which is absolutely positioned over .session-pane and click-through
+   (fab-dial.css); the chat column gives up its width through the pane's
+   padding-right, which split.ts writes. Widths here must match split.ts's
+   STRIP_W (44px) and DIVIDER_W (6px). */
+
+/* No box of its own, so the strip, divider and panel position against the
+   host and only they take pointer events. */
+.sp-layer {
+  display: contents;
+}
+
+.sp-strip,
+.sp-divider,
+.sp-panel {
+  pointer-events: auto;
+}
+
+/* ── Strip ───────────────────────────────────────────────────────────────── */
+
+.sp-strip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 44px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.sp-tab {
+  position: relative;
+  box-sizing: border-box;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.sp-tab:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+.sp-tab.is-on {
+  background: rgba(var(--color-primary-rgb), 0.18);
+  color: var(--color-primary);
+}
+
+/* The active panel's tab joins the split: a short bar on the strip's
+   chat-side edge, 5px out past the 34px button in the 44px strip. */
+.sp-tab.is-on::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--color-primary);
+}
+
+/* Quiet marks only: no filled pill, just a small number or dot in the corner. */
+.sp-count {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-primary);
+}
+
+.sp-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+}
+
+/* ── Divider ─────────────────────────────────────────────────────────────── */
+
+.sp-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: var(--color-border);
+  transition: background 0.12s;
+  touch-action: none;
+}
+
+.sp-divider:hover,
+.sp-divider.is-dragging {
+  background: var(--color-primary);
+}
+
+.sp-divider::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  width: 2px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 1px;
+  background: var(--color-text-muted);
+  opacity: 0.5;
+}
+
+.sp-divider[hidden],
+.sp-panel[hidden] {
+  display: none;
+}
+
+/* ── Panel ───────────────────────────────────────────────────────────────── */
+
+.sp-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 44px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--color-surface);
+}
+
+/* Too narrow for a split: the panel covers the chat instead. */
+.sp-panel[data-overlay] {
+  border-left: 1px solid var(--color-border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.35);
+}
+
+/* An iframe under the pointer would take the drag's moves. */
+.sp-panel.is-resizing iframe {
+  pointer-events: none;
+}
+
+.sp-head {
+  flex: 0 0 40px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.85rem;
+}
+
+.sp-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.sp-title i {
+  color: var(--color-primary);
+}
+
+.sp-grow {
+  flex: 1;
+}
+
+.sp-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.sp-btn:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+/* Preview's own head is the panel's title row (name, version, kebab), so the
+   split's head shrinks to its two buttons at that row's end instead of
+   stacking a second header on top. 64px = two 28px buttons + gaps. */
+.sp-panel[data-active="preview"] .sp-head {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  height: 46px;
+  padding: 0 6px 0 0;
+  border-bottom: none;
+}
+
+.sp-panel[data-active="preview"] .pv-head {
+  padding-right: 70px;
+}
+
+.sp-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}

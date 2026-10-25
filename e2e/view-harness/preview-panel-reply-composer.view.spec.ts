@@ -35,7 +35,7 @@ test("typing in the preview reply composer and pressing Enter sends a tagged mes
   await mountSessionsLayout(page);
   await page.evaluate(() => (window as unknown as { __preview: { open(id: string): void } }).__preview.open("snap-1"));
 
-  const root = page.locator('.pw-window[data-active="preview"]');
+  const root = page.locator('.sp-panel[data-active="preview"]');
   const input = root.locator(".pv-composer-input");
   await expect(input).toBeVisible();
   await input.fill("looks off on mobile");

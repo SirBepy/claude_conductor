@@ -20,10 +20,10 @@ const SEEDED_THREAD = {
 };
 
 /** Mounts the real FAB into a full-bleed fake pane, with ask_* faked in-page. */
-async function mountFab(page: Page, seed: unknown[], layout?: unknown): Promise<void> {
+async function mountFab(page: Page, seed: unknown[]): Promise<void> {
   await mountView(page);
   await page.evaluate(
-    async ({ seed, viewer, layout }) => {
+    async ({ seed, viewer }) => {
       const w = window as unknown as Record<string, any>;
       const store = { threads: JSON.parse(JSON.stringify(seed)) as any[] };
       w.__askStore = store;
@@ -70,13 +70,6 @@ async function mountFab(page: Page, seed: unknown[], layout?: unknown): Promise<
         "position:fixed;inset:0;z-index:1;background:var(--color-background)";
       document.body.appendChild(pane);
 
-      if (layout) {
-        // Recalled by setSessionScope below, so a chat can start with panels
-        // already merged into one tabbed window.
-        const mem = await import("/views/sessions/pane-windows/memory.ts");
-        mem.rememberLayout(viewer, layout as never);
-      }
-
       const mod = await import("/views/sessions/fab-dial.ts");
       w.__fabHandle = mod.mountFabDial(pane, {
         onDraft: (text: string) => w.__drafts.push(text),
@@ -85,11 +78,11 @@ async function mountFab(page: Page, seed: unknown[], layout?: unknown): Promise<
       });
       w.__fabHandle.setSessionScope(viewer, "/proj");
     },
-    { seed, viewer: VIEWER, layout },
+    { seed, viewer: VIEWER },
   );
 }
 
-test("FAB rests closed, fans out to four, and opens Ask in a floating card", async ({ page }) => {
+test("FAB rests closed, fans out, and opens Ask in the split beside the chat", async ({ page }) => {
   await mountFab(page, [SEEDED_THREAD]);
 
   const fab = page.locator(".fab-dial-fab");
@@ -99,52 +92,48 @@ test("FAB rests closed, fans out to four, and opens Ask in a floating card", asy
   await expect(page.locator(".fab-dial-item")).toHaveCount(5);
   // Dial exists in the DOM but is hidden until the FAB is tapped.
   await expect(page.locator(".fab-dial-item").first()).toBeHidden();
-  await expect(page.locator(".pw-window:visible")).toHaveCount(0);
+  await expect(page.locator(".sp-panel:visible")).toHaveCount(0);
 
   await fab.click();
   await expect(page.locator(".fab-dial-item").first()).toBeVisible();
 
   await page.locator('[data-dial="ask"]').click();
-  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
+  await expect(page.locator(".sp-panel:visible")).toHaveCount(1);
   await expect(page.locator(".ask-panel")).toBeVisible();
-  // A fresh chat parks Ask in the bottom-right corner, right where the FAB
-  // rests, so the FAB yields to the window instead of sitting on its footer.
-  await expect(fab).toBeHidden();
+  // The FAB rides the chat column's corner, clear of the split.
+  await expect(fab).toBeVisible();
+  const fabBox = (await fab.boundingBox())!;
+  const panelBox = (await page.locator(".sp-panel").boundingBox())!;
+  expect(fabBox.x + fabBox.width).toBeLessThan(panelBox.x);
 });
 
-test("Preview is a toggle in the dial and opens in its own right-docked window", async ({ page }) => {
+test("Preview is a toggle in the dial and fills the split", async ({ page }) => {
   await mountFab(page, []);
   await page.locator(".fab-dial-fab").click();
 
   const preview = page.locator('[data-dial="preview"]');
   await expect(preview).toHaveClass(/is-toggle/);
   await preview.click();
-  await expect(page.locator('.pw-window[data-active="preview"]')).toBeVisible();
-  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
+  await expect(page.locator('.sp-panel[data-active="preview"]')).toBeVisible();
+  await expect(page.locator(".sp-panel:visible")).toHaveCount(1);
 
   await page.locator(".fab-dial-fab").click();
   await expect(page.locator('[data-dial="preview"]')).toHaveClass(/is-on/);
   await page.locator('[data-dial="preview"]').click();
-  await expect(page.locator('.pw-window[data-active="preview"]')).toBeHidden();
+  await expect(page.locator('.sp-panel[data-active="preview"]')).toBeHidden();
 });
 
-test("the tabs switch panels without closing the card", async ({ page }) => {
-  // Fresh chats give every panel its own window, so the shared tab strip only
-  // exists once panels were merged; start from a chat that already merged them.
-  await mountFab(page, [SEEDED_THREAD], {
-    windows: [
-      { id: "w-main", tabs: ["ask", "todos"], active: "ask", placement: { kind: "snap", corner: "se" }, open: true },
-    ],
-    dockShare: { left: null, right: null },
-  });
+test("the strip switches panels without closing the split", async ({ page }) => {
+  await mountFab(page, [SEEDED_THREAD]);
+  await page.locator('.sp-tab[data-sp-k="ask"]').click();
   await expect(page.locator(".ask-panel")).toBeVisible();
 
-  await page.locator('[data-spine="todos"]').click();
-  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
+  await page.locator('.sp-tab[data-sp-k="todos"]').click();
+  await expect(page.locator(".sp-panel:visible")).toHaveCount(1);
   await expect(page.locator(".ask-panel")).toBeHidden();
 
-  await page.locator('[data-spine="ask"]').click();
-  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
+  await page.locator('.sp-tab[data-sp-k="ask"]').click();
+  await expect(page.locator(".sp-panel:visible")).toHaveCount(1);
   await expect(page.locator(".ask-panel")).toBeVisible();
 });
 
@@ -154,7 +143,7 @@ test("asking a question renders the answer and drafts the suggestion into the co
   await page.locator('[data-dial="ask"]').click();
 
   await page.locator("[data-ask-input]").fill("what was i meant to do here");
-  await page.locator("[data-ask-send]").click();
+  await page.locator(".ask-panel .composer-field-send").click();
 
   await expect(page.locator(".ask-a").last()).toContainText("You were splitting pump.rs");
   // The SUGGESTED line is split off the answer, never shown as prose.
@@ -188,17 +177,17 @@ test("the index lists threads, deletes one, and starts a new one", async ({ page
   await expect(page.locator("[data-ask-new]")).toBeVisible();
 });
 
-test("Escape closes the card, but not while typing in it", async ({ page }) => {
+test("Escape closes the split, but not while typing in it", async ({ page }) => {
   await mountFab(page, [SEEDED_THREAD]);
   await page.locator(".fab-dial-fab").click();
   await page.locator('[data-dial="ask"]').click();
 
   await page.locator("[data-ask-input]").click();
   await page.keyboard.press("Escape");
-  await expect(page.locator(".pw-window:visible")).toHaveCount(1);
+  await expect(page.locator(".sp-panel:visible")).toHaveCount(1);
 
   await page.locator(".ask-body").click();
   await page.keyboard.press("Escape");
-  await expect(page.locator(".pw-window:visible")).toHaveCount(0);
+  await expect(page.locator(".sp-panel:visible")).toHaveCount(0);
   await expect(page.locator(".fab-dial-fab")).toBeVisible();
 });

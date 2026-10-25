@@ -1,3 +1,4 @@
+// Reviewed 2026-10-25 (desktop split): mountDraftsPanel gained an optional open-count callback for the split strip; this spec mounts without it, so its contract is unaffected.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 import { shotDir } from "./shot-dir";
