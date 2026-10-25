@@ -71,6 +71,31 @@ describe("drill chips", () => {
   });
 });
 
+describe("re-resolving and clearing", () => {
+  it("upgrades a plain-text ref to a chip once its definition is loaded above", () => {
+    const root = mount(bubble("see [tickets](#d:ign)", undefined));
+    expect(root.querySelector(".drill-chip")).toBeNull();
+    expect(root.textContent).toContain("see tickets");
+    const def = document.createElement("div");
+    def.innerHTML = renderMessage(bubble("defs", DETAILS));
+    root.insertBefore(def.firstElementChild, root.firstChild);
+    linkifyDrillRefs(root, root);
+    expect(root.querySelector("button.drill-chip").textContent).toBe("tickets");
+    expect(root.querySelector(".drill-pending")).toBeNull();
+  });
+
+  it("an empty details list on update_message clears earlier details, an absent one keeps them", () => {
+    const r = { messages: [], dirtyIndices: new Set(), _updateMsgToolUseIds: new Set() };
+    handleToolUseEvent(r, { type: "tool_use", id: "tu1", tool_name: "mcp__cc_conductor__send_message", parent_tool_use_id: null, input: { text: "x", details: DETAILS } }, 1);
+    const upd = { type: "tool_use", parent_tool_use_id: null, tool_name: "mcp__cc_conductor__update_message" };
+    handleToolUseEvent(r, { ...upd, id: "tu2", input: { message: 1, text: "y" } }, 2);
+    expect(r.messages[0].details).toEqual(DETAILS);
+    handleToolUseEvent(r, { ...upd, id: "tu3", input: { message: 1, text: "z", details: [] } }, 3);
+    expect(r.messages[0].details).toEqual([]);
+    expect(renderMessage(r.messages[0])).not.toContain("data-details");
+  });
+});
+
 describe("details mapping", () => {
   const ev = { type: "tool_use", id: "tu1", tool_name: "mcp__cc_conductor__send_message", parent_tool_use_id: null, input: { text: "x [a](#d:ign)", details: DETAILS } };
 

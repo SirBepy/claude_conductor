@@ -19,5 +19,7 @@ export function parseDetails(input: unknown): ChatDetail[] | undefined {
     if (typeof id !== "string" || id === "" || typeof body_md !== "string") continue;
     out.push({ id, label: typeof label === "string" ? label : id, body_md });
   }
-  return out.length > 0 ? out : undefined;
+  // An explicit empty list is kept (not undefined): update_message uses it to
+  // clear earlier details, while an absent key keeps them.
+  return out;
 }
