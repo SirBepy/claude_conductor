@@ -189,7 +189,11 @@ export class DeliveryPolicy {
         // blocks, so raw text differs by exactly those tokens; sig-only, doesn't
         // affect the rendered text.
         const raw = this.contentText(ev) ?? "";
-        const sig = normalizeUserMessageText(raw).replace(FILE_TOKEN_SIG_RE, "").trim();
+        // All whitespace goes too: a mid-turn held delivery is rebuilt from the
+        // transcript by splitting on "\n\n" into one block per paragraph, and
+        // contentText joins blocks with no separator, so the blank lines the
+        // live copy kept would otherwise make the two sigs differ.
+        const sig = normalizeUserMessageText(raw).replace(FILE_TOKEN_SIG_RE, "").replace(/\s+/g, "");
         return `u:${sig}`;
       }
       case "tool_use":

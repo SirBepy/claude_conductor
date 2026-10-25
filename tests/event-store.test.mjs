@@ -282,6 +282,29 @@ describe("SessionEventStore pagination", () => {
     expect(users).toHaveLength(1);
   });
 
+  it("dedups a mid-turn held delivery whose transcript copy splits the text on blank lines (doubled-bubble fix)", () => {
+    const sid = "sess-held-blank-lines";
+    // Live path: the held item arrives as ONE block holding its blank lines.
+    sessionEvents.pushSynthetic(sid, {
+      type: "user_message",
+      content: [{ type: "text", text: "A few more things\n\n1. one\n\n2. two" }],
+      timestamp: Date.now(),
+    });
+    // Transcript path: parse_mid_turn_frame splits the body on "\n\n", so the
+    // same message comes back as one block per paragraph.
+    sessionEvents.pushSynthetic(sid, {
+      type: "user_message",
+      content: [
+        { type: "text", text: "A few more things" },
+        { type: "text", text: "1. one" },
+        { type: "text", text: "2. two" },
+      ],
+      timestamp: Date.now(),
+    });
+    const users = sessionEvents.events(sid).filter((e) => e.type === "user_message");
+    expect(users).toHaveLength(1);
+  });
+
   it("reconcileLatest recovers a turn the lossy live channel dropped", async () => {
     const sid = "sess-reconcile";
     // First load: one completed turn (u1 -> a1). A later turn (u2 -> a2)
