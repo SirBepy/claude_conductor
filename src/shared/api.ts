@@ -203,12 +203,15 @@ export interface SelfMachine {
   machine_id: string;
   label: string;
   os: string;
+  /** Chosen Phosphor class; null (or absent from an older daemon) = automatic. */
+  icon: string | null;
 }
 
 export interface PeerMachineView {
   machine_id: string;
   label: string;
   os: string;
+  icon: string | null;
   iroh_id: string | null;
   direct_url: string | null;
   reverse_device_id: string | null;
@@ -554,6 +557,13 @@ export const api = {
   /** A name for a paired peer on this machine only, overriding its own label. */
   renameMachine: (machineId: string, label: string): Promise<{ ok: boolean }> =>
     invoke("rename_machine", { machineId, label }),
+  /** Sets a machine's name and/or icon; `null` machineId = this daemon. The
+   *  owner of that machine applies it and pushes it to its peers. */
+  setMachineProfile: (
+    machineId: string | null,
+    patch: { label?: string; icon?: string | null },
+  ): Promise<{ ok: boolean }> =>
+    invoke("set_machine_profile", { machineId, ...patch }),
 
   // --- Claude's own browser (Settings > Chat defaults). Desktop-pipe only. ---
   browserStatus: (): Promise<{ running: boolean; shown: boolean }> => invoke("browser_status"),
