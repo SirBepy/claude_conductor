@@ -18,6 +18,7 @@ const PATH_RE = new RegExp(`(?:${WIN}|${UNIX})${SUFFIX}`, "g");
 export interface FileRef {
   path: string;
   line: number | null;
+  col: number | null;
   /** Source text as written, including any `:line:col`. */
   text: string;
   index: number;
@@ -29,11 +30,11 @@ export function findFileRefs(text: string): FileRef[] {
   PATH_RE.lastIndex = 0;
   for (let m = PATH_RE.exec(text); m; m = PATH_RE.exec(text)) {
     const raw = m[0].replace(/[.\-+~@]+$/, "");
-    const suffix = /^(.*?)(?::(\d+)(?::\d+)?)?$/.exec(raw)!;
+    const suffix = /^(.*?)(?::(\d+)(?::(\d+))?)?$/.exec(raw)!;
     const path = suffix[1]!;
     // A Windows path needs a name after the drive and slash, not just `C:\`.
     if (/^[A-Za-z]:[\\/]*$/.test(path)) continue;
-    out.push({ path, line: suffix[2] ? Number(suffix[2]) : null, text: raw, index: m.index });
+    out.push({ path, line: suffix[2] ? Number(suffix[2]) : null, col: suffix[3] ? Number(suffix[3]) : null, text: raw, index: m.index });
   }
   return out;
 }
@@ -45,6 +46,7 @@ function chipFor(ref: FileRef): HTMLElement {
   chip.setAttribute("role", "button");
   chip.dataset.path = ref.path;
   if (ref.line !== null) chip.dataset.line = String(ref.line);
+  if (ref.col !== null) chip.dataset.col = String(ref.col);
   chip.title = ref.text;
   const icon = document.createElement("i");
   icon.className = "ph ph-file";
@@ -93,9 +95,8 @@ export function linkifyFilePaths(root: HTMLElement): void {
 // Same normalisation code-mode/context-menu.ts applies before handing a path to the OS.
 const winPath = (p: string) => (/^[a-z]:\//i.test(p) ? p.replace(/\//g, "\\") : p);
 
-// open_in_editor takes only a path, so a `:line` suffix is not forwarded.
-export function openFileRef(path: string): void {
-  void invoke<void>("open_in_editor", { path: winPath(path) }).catch((err) => console.error("[file-ref] open failed", err));
+export function openFileRef(path: string, line?: number, col?: number): void {
+  void invoke<void>("open_in_editor", { path: winPath(path), line, col }).catch((err) => console.error("[file-ref] open failed", err));
 }
 
 function copyPath(path: string): void {
@@ -108,8 +109,8 @@ function revealFileRef(path: string): void {
   );
 }
 
-const menu = createMoreMenu<[string]>({
-  build(m, close, path) {
+const menu = createMoreMenu<[string, number | undefined, number | undefined]>({
+  build(m, close, path, line, col) {
     const add = (icon: string, label: string, run: () => void) => {
       const b = document.createElement("button");
       b.type = "button";
@@ -122,7 +123,7 @@ const menu = createMoreMenu<[string]>({
       });
       m.appendChild(b);
     };
-    if (!isRemote()) add("ph-arrow-square-out", "Open", () => openFileRef(path));
+    if (!isRemote()) add("ph-arrow-square-out", "Open", () => openFileRef(path, line, col));
     add("ph-copy", "Copy path", () => copyPath(path));
     if (!isRemote()) add("ph-folder-open", "Reveal in file manager", () => revealFileRef(path));
   },
@@ -130,19 +131,21 @@ const menu = createMoreMenu<[string]>({
 
 const chipOf = (e: Event) => (e.target as Element | null)?.closest<HTMLElement>(".file-ref") ?? null;
 
+const numAttr = (v: string | undefined) => (v === undefined ? undefined : Number(v));
+
 export function handleFileRefClick(e: MouseEvent): void {
   const chip = chipOf(e);
   if (!chip?.dataset.path) return;
   e.preventDefault();
   if (isRemote()) copyPath(chip.dataset.path);
-  else openFileRef(chip.dataset.path);
+  else openFileRef(chip.dataset.path, numAttr(chip.dataset.line), numAttr(chip.dataset.col));
 }
 
 export function handleFileRefContextMenu(e: MouseEvent): void {
   const chip = chipOf(e);
   if (!chip?.dataset.path) return;
   e.preventDefault();
-  menu.open(chip, chip.dataset.path);
+  menu.open(chip, chip.dataset.path, numAttr(chip.dataset.line), numAttr(chip.dataset.col));
 }
 
 export function handleFileRefKeydown(e: KeyboardEvent): void {
@@ -151,5 +154,5 @@ export function handleFileRefKeydown(e: KeyboardEvent): void {
   if (!chip?.dataset.path) return;
   e.preventDefault();
   if (isRemote()) copyPath(chip.dataset.path);
-  else openFileRef(chip.dataset.path);
+  else openFileRef(chip.dataset.path, numAttr(chip.dataset.line), numAttr(chip.dataset.col));
 }

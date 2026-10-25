@@ -135,21 +135,29 @@ pub async fn open_external(app: AppHandle, url: String) -> Result<(), String> {
 /// source in this app). If `code` can't be spawned we fall back to the OS
 /// default handler via the same `tauri-plugin-shell` mechanism `open_external`
 /// uses to open URLs/paths.
+///
+/// A `line` (and optional `col`) opens the file at that position via
+/// `code -g`; the OS-handler fallback has no position, so it opens the file only.
 #[tauri::command]
-pub async fn open_in_editor(app: AppHandle, path: String) -> Result<(), String> {
+pub async fn open_in_editor(
+    app: AppHandle,
+    path: String,
+    line: Option<u32>,
+    col: Option<u32>,
+) -> Result<(), String> {
     use std::process::Command;
 
     let spawned = {
         #[cfg(target_os = "windows")]
         {
             let mut cmd = Command::new("cmd");
-            cmd.args(["/C", "code", &path]);
+            cmd.arg("/C").arg("code").args(editor_args(&path, line, col));
             crate::util::process::hide_console(&mut cmd);
             cmd.spawn().is_ok()
         }
         #[cfg(not(target_os = "windows"))]
         {
-            Command::new("code").arg(&path).spawn().is_ok()
+            Command::new("code").args(editor_args(&path, line, col)).spawn().is_ok()
         }
     };
 
@@ -162,6 +170,16 @@ pub async fn open_in_editor(app: AppHandle, path: String) -> Result<(), String> 
     use tauri_plugin_shell::ShellExt;
     #[allow(deprecated)]
     app.shell().open(path, None).map_err(|e| e.to_string())
+}
+
+/// Arguments after `code`: the bare path, or `-g path:line[:col]` when a line
+/// is known. A column without a line is dropped, since `-g` needs the line.
+fn editor_args(path: &str, line: Option<u32>, col: Option<u32>) -> Vec<String> {
+    match (line, col) {
+        (None, _) => vec![path.to_string()],
+        (Some(l), None) => vec!["-g".into(), format!("{path}:{l}")],
+        (Some(l), Some(c)) => vec!["-g".into(), format!("{path}:{l}:{c}")],
+    }
 }
 
 /// Read an arbitrary local image file as `{mime, base64}` for an in-app
@@ -325,6 +343,20 @@ pub async fn write_text_file(
 
 #[cfg(test)]
 mod tests {
+    use super::editor_args;
+
+    #[test]
+    fn editor_args_without_a_line_is_just_the_path() {
+        assert_eq!(editor_args(r"C:\a\b.rs", None, None), vec![r"C:\a\b.rs"]);
+        assert_eq!(editor_args("/a/b.rs", None, Some(3)), vec!["/a/b.rs"]);
+    }
+
+    #[test]
+    fn editor_args_with_a_line_uses_goto() {
+        assert_eq!(editor_args("/a/b.rs", Some(42), None), vec!["-g", "/a/b.rs:42"]);
+        assert_eq!(editor_args("/a/b.rs", Some(42), Some(7)), vec!["-g", "/a/b.rs:42:7"]);
+    }
+
     #[test]
     fn a_missing_chat_image_retries_through_the_daemon_unless_already_routed_there() {
         assert!(super::image_retry_via_daemon(true, false), "a chat not tagged mirrored yet");
