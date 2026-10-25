@@ -268,6 +268,7 @@ mod tests {
             token,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         a_state.registry.upsert_interactive("scratch", std::path::Path::new("C:/x"), "p", "2026-10-23T00:00:00Z");
         let mut row = a_state.registry.get("scratch").unwrap();

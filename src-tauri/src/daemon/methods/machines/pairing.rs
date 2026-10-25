@@ -65,6 +65,10 @@ pub(super) async fn pair_machine(state: &Arc<DaemonState>, req: PairMachineParam
         .to_string();
     let their_label = their.get("label").and_then(Value::as_str).unwrap_or("Unnamed machine").to_string();
     let their_os = their.get("os").and_then(Value::as_str).unwrap_or_default().to_string();
+    let their_icon = their
+        .get("icon")
+        .and_then(Value::as_str)
+        .and_then(|i| machines::registry::normalize_icon(Some(i)).ok().flatten());
 
     let device_name = registry.display_label(&their_machine_id, &their_label);
     let (reverse_token, minted_device_id) =
@@ -121,6 +125,7 @@ pub(super) async fn pair_machine(state: &Arc<DaemonState>, req: PairMachineParam
         token: device_token,
         reverse_device_id: Some(minted_device_id),
         added_at: machines::now_secs(),
+        icon: their_icon,
     };
     registry.upsert_peer(peer.clone());
     crate::daemon::machines::MachineHub::sync_links(state);
@@ -174,6 +179,112 @@ pub(super) fn rename_machine(state: &Arc<DaemonState>, machine_id: &str, label: 
         crate::daemon::machines::publish_instances_changed(state);
     }
     state.notifier.publish("machines_changed", json!({}));
+    Ok(json!({ "ok": true }))
+}
+
+/// Edits one machine's profile (name and icon) from any device. With no
+/// `machine_id` (or this daemon's own id) it edits THIS machine and tells every
+/// online peer. For a paired peer it forwards the edit to that peer, which owns
+/// its profile, and updates the local cache on success.
+///
+/// A call arriving over `Transport::PeerMachine` is always about this daemon:
+/// the forwarder strips `machine_id`, and a peer that names any other machine
+/// is refused, so a paired machine can never rename a third one through us.
+pub(super) async fn set_machine_profile(
+    state: &Arc<DaemonState>,
+    ctx: &ConnectionContext,
+    req: super::SetMachineProfileParams,
+) -> Result<Value, RpcError> {
+    let registry = state.machines.get().ok_or_else(|| RpcError::internal("machine registry not initialised"))?;
+    let mine = registry.self_machine().unwrap_or_else(|| registry.ensure_self());
+    let label = match req.label.as_deref() {
+        Some(raw) => Some(
+            crate::daemon::device_registry::normalize_label(raw)
+                .map_err(|e| RpcError::invalid_params(format!("label {e}")))?,
+        ),
+        None => None,
+    };
+    let icon = match &req.icon {
+        Some(raw) => Some(machines::registry::normalize_icon(raw.as_deref()).map_err(RpcError::invalid_params)?),
+        None => None,
+    };
+    if label.is_none() && icon.is_none() {
+        return Err(RpcError::invalid_params("set_machine_profile needs a label or an icon"));
+    }
+    let target_is_self = match req.machine_id.as_deref() {
+        None => true,
+        Some(id) => id == mine.machine_id,
+    };
+    if !target_is_self && matches!(ctx.transport, Transport::PeerMachine(_)) {
+        return Err(RpcError::invalid_params("a peer machine can only edit its own profile"));
+    }
+
+    if target_is_self {
+        if let Some(l) = label {
+            registry.set_label(l);
+        }
+        if let Some(i) = &icon {
+            registry.set_icon(i.clone());
+        }
+        state.notifier.publish("machines_changed", json!({}));
+        let now = registry.self_machine().unwrap_or(mine);
+        push_profile_to_peers(state, now.label, now.icon);
+        return Ok(json!({ "ok": true }));
+    }
+
+    let machine_id = req.machine_id.as_deref().unwrap_or_default();
+    let client = machines::forward::resolve_peer_client(state, machine_id).await?;
+    let mut params = serde_json::Map::new();
+    if let Some(l) = label {
+        params.insert("label".into(), json!(l));
+    }
+    if let Some(i) = &icon {
+        params.insert("icon".into(), json!(i));
+    }
+    client
+        .call("set_machine_profile", Value::Object(params))
+        .await
+        .map_err(machines::forward::map_peer_err)?;
+    if let Some(peer) = registry.peer(machine_id) {
+        let new_icon = icon.unwrap_or(peer.icon.clone());
+        machines::apply_peer_profile(state, machine_id, label.unwrap_or(&peer.label), new_icon.as_deref());
+    }
+    Ok(json!({ "ok": true }))
+}
+
+/// Best-effort, spawned: an offline or old peer just catches up from its
+/// health pull when its link next connects.
+fn push_profile_to_peers(state: &Arc<DaemonState>, label: String, icon: Option<String>) {
+    let Some(registry) = state.machines.get() else { return };
+    for peer in registry.peers() {
+        if !state.mirror.is_online(&peer.machine_id) {
+            continue;
+        }
+        let state = state.clone();
+        let (label, icon) = (label.clone(), icon.clone());
+        tokio::spawn(async move {
+            if let Ok(client) = peer_client::client_for(&state, &peer).await {
+                let _ = client.call("peer_profile_changed", json!({ "label": label, "icon": icon })).await;
+            }
+        });
+    }
+}
+
+/// A peer telling us its new name and icon. The sender is `ctx.transport`'s
+/// machine, never a params id. Never pushes anything onward: the peer already
+/// knows, and a push back would ping-pong between the two daemons.
+pub(super) fn peer_profile_changed(
+    state: &Arc<DaemonState>,
+    ctx: &ConnectionContext,
+    req: super::PeerProfileChangedParams,
+) -> Result<Value, RpcError> {
+    let Transport::PeerMachine(machine_id) = &ctx.transport else {
+        return Err(RpcError::invalid_params("peer_profile_changed is only callable by a peer machine"));
+    };
+    let label = crate::daemon::device_registry::normalize_label(&req.label)
+        .map_err(|e| RpcError::invalid_params(format!("label {e}")))?;
+    let icon = machines::registry::normalize_icon(req.icon.as_deref()).map_err(RpcError::invalid_params)?;
+    machines::apply_peer_profile(state, machine_id, label, icon.as_deref());
     Ok(json!({ "ok": true }))
 }
 
@@ -274,6 +385,7 @@ mod tests {
             token: "dummy-tok".into(),
             reverse_device_id: Some(device_id.clone()),
             added_at: 0,
+            icon: None,
         });
         let mut r = Router::new();
         super::super::register_machines(&mut r, state.clone());
@@ -368,6 +480,7 @@ mod tests {
             token: "dummy-outbound".into(),
             reverse_device_id: Some(device_id),
             added_at: 0,
+            icon: None,
         });
         assert!(DeviceRegistry::validate_token(&token, dir.path()));
 
@@ -403,6 +516,7 @@ mod tests {
             token: "tok".into(),
             reverse_device_id: Some(device_id),
             added_at: 0,
+            icon: None,
         });
 
         let mut r = Router::new();
@@ -448,5 +562,143 @@ mod tests {
             )
             .await;
         assert_eq!(resp.error.unwrap().code, -32602);
+    }
+
+    async fn dispatch_profile(
+        state: &Arc<DaemonState>,
+        method: &str,
+        params: Value,
+        transport: Option<Transport>,
+    ) -> crate::daemon::rpc::Response {
+        let mut r = Router::new();
+        super::super::register_machines(&mut r, state.clone());
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let ctx = match transport {
+            Some(t) => crate::daemon::rpc::TRANSPORT.scope(t, async { ConnectionContext::new(tx) }).await,
+            None => ConnectionContext::new(tx),
+        };
+        r.dispatch(
+            crate::daemon::rpc::Request { jsonrpc: "2.0".into(), id: json!(1), method: method.into(), params: Some(params) },
+            ctx,
+        )
+        .await
+    }
+
+    fn add_peer(state: &Arc<DaemonState>, id: &str, label: &str) {
+        state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: id.into(),
+            label: label.into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: None,
+            token: "tok".into(),
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        });
+    }
+
+    #[tokio::test]
+    async fn set_machine_profile_edits_this_machine_by_default_and_by_own_id() {
+        let dir = tempdir().unwrap();
+        let state = state_with_machines(dir.path());
+        let own = state.machines.get().unwrap().self_machine().unwrap().machine_id;
+        let resp = dispatch_profile(&state, "set_machine_profile", json!({"label": " Desk ", "icon": "ph-desktop"}), None).await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+        let me = state.machines.get().unwrap().self_machine().unwrap();
+        assert_eq!((me.label.as_str(), me.icon.as_deref()), ("Desk", Some("ph-desktop")));
+
+        // Label only leaves the icon alone; icon null clears it; own id is the same target.
+        dispatch_profile(&state, "set_machine_profile", json!({"machine_id": own, "label": "Desk 2"}), None).await;
+        assert_eq!(state.machines.get().unwrap().self_machine().unwrap().icon.as_deref(), Some("ph-desktop"));
+        dispatch_profile(&state, "set_machine_profile", json!({"icon": null}), None).await;
+        let me = state.machines.get().unwrap().self_machine().unwrap();
+        assert_eq!((me.label.as_str(), me.icon), ("Desk 2", None));
+    }
+
+    #[tokio::test]
+    async fn set_machine_profile_rejects_bad_icon_bad_label_and_empty_edit() {
+        let dir = tempdir().unwrap();
+        let state = state_with_machines(dir.path());
+        let before = state.machines.get().unwrap().self_machine().unwrap();
+        for params in [
+            json!({"icon": "desktop"}),
+            json!({"icon": "ph-<script>"}),
+            json!({"label": "   "}),
+            json!({"label": "x".repeat(41)}),
+            json!({}),
+        ] {
+            let resp = dispatch_profile(&state, "set_machine_profile", params.clone(), None).await;
+            assert_eq!(resp.error.map(|e| e.code), Some(-32602), "{params} must be refused");
+        }
+        assert_eq!(state.machines.get().unwrap().self_machine().unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn set_machine_profile_for_an_unknown_peer_errors() {
+        let dir = tempdir().unwrap();
+        let state = state_with_machines(dir.path());
+        let resp = dispatch_profile(&state, "set_machine_profile", json!({"machine_id": "ghost", "label": "X"}), None).await;
+        let err = resp.error.expect("unknown machine");
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("ghost"), "{}", err.message);
+    }
+
+    #[tokio::test]
+    async fn set_machine_profile_from_a_peer_refuses_any_other_machine() {
+        let dir = tempdir().unwrap();
+        let state = state_with_machines(dir.path());
+        add_peer(&state, "mach-b", "B");
+        add_peer(&state, "mach-c", "C");
+        let from_b = Some(Transport::PeerMachine("mach-b".into()));
+        let resp = dispatch_profile(&state, "set_machine_profile", json!({"machine_id": "mach-c", "label": "Hacked"}), from_b.clone()).await;
+        assert_eq!(resp.error.map(|e| e.code), Some(-32602));
+        assert_eq!(state.machines.get().unwrap().peer("mach-c").unwrap().label, "C");
+
+        // Without a machine_id (what the forwarder sends) it edits this daemon.
+        let resp = dispatch_profile(&state, "set_machine_profile", json!({"label": "Renamed by B"}), from_b).await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+        assert_eq!(state.machines.get().unwrap().self_machine().unwrap().label, "Renamed by B");
+    }
+
+    #[tokio::test]
+    async fn peer_profile_changed_updates_the_senders_entry_only() {
+        let dir = tempdir().unwrap();
+        let state = state_with_machines(dir.path());
+        add_peer(&state, "mach-b", "B");
+        add_peer(&state, "mach-c", "C");
+        let own_before = state.machines.get().unwrap().self_machine().unwrap();
+        let resp = dispatch_profile(
+            &state,
+            "peer_profile_changed",
+            // A params machine_id is ignored: the sender is the transport's machine.
+            json!({"machine_id": "mach-c", "label": "B new", "icon": "ph-laptop"}),
+            Some(Transport::PeerMachine("mach-b".into())),
+        )
+        .await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+        let reg = state.machines.get().unwrap();
+        let b = reg.peer("mach-b").unwrap();
+        assert_eq!((b.label.as_str(), b.icon.as_deref()), ("B new", Some("ph-laptop")));
+        assert_eq!(reg.peer("mach-c").unwrap().label, "C");
+        assert_eq!(reg.self_machine().unwrap(), own_before, "an announcement never touches our own profile");
+    }
+
+    #[tokio::test]
+    async fn peer_profile_changed_refuses_a_non_peer_caller_and_a_bad_icon() {
+        let dir = tempdir().unwrap();
+        let state = state_with_machines(dir.path());
+        add_peer(&state, "mach-b", "B");
+        let resp = dispatch_profile(&state, "peer_profile_changed", json!({"label": "X"}), None).await;
+        assert_eq!(resp.error.map(|e| e.code), Some(-32602));
+        let resp = dispatch_profile(
+            &state,
+            "peer_profile_changed",
+            json!({"label": "X", "icon": "nope"}),
+            Some(Transport::PeerMachine("mach-b".into())),
+        )
+        .await;
+        assert_eq!(resp.error.map(|e| e.code), Some(-32602));
+        assert_eq!(state.machines.get().unwrap().peer("mach-b").unwrap().label, "B");
     }
 }

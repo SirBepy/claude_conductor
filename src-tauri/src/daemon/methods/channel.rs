@@ -722,6 +722,7 @@ mod tests {
             token: "tok".into(),
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         state.mirror.set_instances("mac-id", "Mac Mini", vec![mirrored_instance("m1")]);
         state.registry.upsert_interactive("s1", std::path::Path::new("."), "proj-1", "2026-07-30T00:00:00Z");
@@ -781,6 +782,7 @@ mod tests {
             token: token_for_a,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         // The real `/api/pair` handshake (`pair_machine_peer`) registers a
         // `PeerMachine` on BOTH sides - B needs its own entry for A so
@@ -796,6 +798,7 @@ mod tests {
             token: "dummy-b-never-calls-a".into(),
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         // A's own mirror must know "b-session-1" is hosted on B for
         // `post_message_or_forward`'s `mirror.owner_of` lookup to resolve it -
@@ -844,6 +847,7 @@ mod tests {
             token: "tok".into(),
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         // A fixed id is safe: `register_channel_rpc_at`'s injected tempdir
         // below isolates this run's writes.

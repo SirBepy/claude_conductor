@@ -382,6 +382,7 @@ mod tests {
             token,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         };
         state.machines.get().unwrap().upsert_peer(peer.clone());
         state.mirror.set_instances("mach-b", "B", vec![]);
@@ -968,6 +969,7 @@ mod tests {
             token,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
 
         crate::daemon::machines::MachineHub::sync_links(&a_state);

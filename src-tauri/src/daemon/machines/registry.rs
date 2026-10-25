@@ -16,6 +16,9 @@ pub struct SelfMachine {
     pub label: String,
     #[serde(default)]
     pub os: String,
+    /// Phosphor class like `ph-desktop`; `None` means the UI picks one itself.
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -36,6 +39,9 @@ pub struct PeerMachine {
     pub reverse_device_id: Option<String>,
     #[serde(default)]
     pub added_at: u64,
+    /// The peer's own chosen icon, cached from its health/profile pushes.
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 /// `PeerMachine` with the bearer token stripped, for IPC/RPC responses.
@@ -44,6 +50,7 @@ pub struct PeerMachineView {
     pub machine_id: String,
     pub label: String,
     pub os: String,
+    pub icon: Option<String>,
     pub iroh_id: Option<String>,
     pub direct_url: Option<String>,
     pub reverse_device_id: Option<String>,
@@ -56,6 +63,23 @@ pub struct PeerMachineView {
     /// `direct_url`), `"iroh"` (no direct url but a known iroh id, so the
     /// dial-and-proxy path applies), or `"none"` (neither - unreachable).
     pub reach: &'static str,
+}
+
+/// Accepts `ph-<name>` (Phosphor class, lowercase/digits/dashes, name 1..=40
+/// chars) or nothing. The value ends up in a CSS class on every device, so
+/// anything else is refused rather than sanitised.
+pub fn normalize_icon(icon: Option<&str>) -> Result<Option<String>, String> {
+    let Some(raw) = icon.map(str::trim).filter(|v| !v.is_empty()) else {
+        return Ok(None);
+    };
+    let ok = raw.strip_prefix("ph-").is_some_and(|name| {
+        (1..=40).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    });
+    if ok {
+        Ok(Some(raw.to_string()))
+    } else {
+        Err("icon must look like ph-desktop".to_string())
+    }
 }
 
 /// Pure mirror of `peer_client::reach_url`'s branch order (direct wins,
@@ -79,6 +103,7 @@ impl PeerMachineView {
             machine_id: p.machine_id.clone(),
             label: p.label.clone(),
             os: p.os.clone(),
+            icon: p.icon.clone(),
             iroh_id: p.iroh_id.clone(),
             direct_url: p.direct_url.clone(),
             reverse_device_id: p.reverse_device_id.clone(),
@@ -193,6 +218,7 @@ impl MachineRegistry {
             machine_id: secret.public().to_string(),
             label: hostname_label(),
             os: std::env::consts::OS.to_string(),
+            icon: None,
         };
         guard.self_ = Some(mine.clone());
         self.save(&guard);
@@ -214,6 +240,14 @@ impl MachineRegistry {
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(m) = guard.self_.as_mut() {
             m.label = label.to_string();
+        }
+        self.save(&guard);
+    }
+
+    pub fn set_icon(&self, icon: Option<String>) {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(m) = guard.self_.as_mut() {
+            m.icon = icon;
         }
         self.save(&guard);
     }
@@ -292,6 +326,17 @@ impl MachineRegistry {
         true
     }
 
+    /// Caches a peer's own icon. Returns false for an id that isn't a paired peer.
+    pub fn set_peer_icon(&self, machine_id: &str, icon: Option<String>) -> bool {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(peer) = guard.peers.iter_mut().find(|p| p.machine_id == machine_id) else {
+            return false;
+        };
+        peer.icon = icon;
+        self.save(&guard);
+        true
+    }
+
     /// `peer` as the token-free view list/pair responses carry.
     pub fn view(&self, peer: &PeerMachine) -> PeerMachineView {
         PeerMachineView::new(peer, self.can_drive(&peer.machine_id))
@@ -334,6 +379,7 @@ mod tests {
             token: "tok".into(),
             reverse_device_id: None,
             added_at: now_secs(),
+            icon: None,
         }
     }
 
@@ -391,6 +437,36 @@ mod tests {
         reg.remove_peer("p1");
         reg.upsert_peer(mk_peer("p1", "DESKTOP-ABC"));
         assert_eq!(reg.peer("p1").unwrap().label, "DESKTOP-ABC");
+    }
+
+    #[test]
+    fn normalize_icon_accepts_phosphor_names_only() {
+        assert_eq!(normalize_icon(Some("ph-desktop")).unwrap().as_deref(), Some("ph-desktop"));
+        assert_eq!(normalize_icon(None).unwrap(), None);
+        assert_eq!(normalize_icon(Some("  ")).unwrap(), None);
+        for bad in ["desktop", "ph-", "ph-Desktop", "ph-a b", "ph-x\"y", &format!("ph-{}", "a".repeat(41))] {
+            assert!(normalize_icon(Some(bad)).is_err(), "{bad} must be refused");
+        }
+    }
+
+    #[test]
+    fn legacy_file_without_icon_loads_and_icons_round_trip() {
+        let dir = tempdir().unwrap();
+        let legacy = serde_json::json!({
+            "self": { "machine_id": "me", "label": "Me", "os": "windows" },
+            "peers": [{ "machine_id": "p1", "label": "Old", "token": "t" }]
+        });
+        std::fs::write(registry_path(dir.path()), legacy.to_string()).unwrap();
+        let reg = MachineRegistry::load(dir.path());
+        assert_eq!(reg.self_machine().unwrap().icon, None);
+        assert_eq!(reg.peer("p1").unwrap().icon, None);
+        reg.set_icon(Some("ph-desktop".into()));
+        assert!(reg.set_peer_icon("p1", Some("ph-laptop".into())));
+        assert!(!reg.set_peer_icon("ghost", None));
+        let reloaded = MachineRegistry::load(dir.path());
+        assert_eq!(reloaded.self_machine().unwrap().icon.as_deref(), Some("ph-desktop"));
+        assert_eq!(reloaded.peer("p1").unwrap().icon.as_deref(), Some("ph-laptop"));
+        assert_eq!(reloaded.view(&reloaded.peer("p1").unwrap()).icon.as_deref(), Some("ph-laptop"));
     }
 
     #[test]

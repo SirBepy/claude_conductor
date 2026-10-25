@@ -66,6 +66,7 @@ async fn run_link(state: Arc<DaemonState>, peer: PeerMachine) {
         match connected {
             Ok(Ok((stream, _resp))) => {
                 backoff = RECONNECT_MIN; // a clean connect resets the ladder
+                sync_profile(&state, &machine_id, &base_url).await;
                 read_until_dead(&state, &peer, stream).await;
                 mark_offline(&state, &machine_id);
                 backoff = pause(&wake, backoff).await;
@@ -81,6 +82,17 @@ async fn run_link(state: Arc<DaemonState>, peer: PeerMachine) {
             }
         }
     }
+}
+
+/// Pulls the peer's current name and icon on every (re)connect, covering a
+/// change made while this link was down (the peer's push is best-effort). A
+/// failed health call is not a link failure: the stream is what matters.
+async fn sync_profile(state: &Arc<DaemonState>, machine_id: &str, base_url: &str) {
+    let Ok(health) = peer_client::PeerClient::new(base_url, "").health().await else { return };
+    // Identity check: the base url could answer for some other machine.
+    let Some(them) = health.get("machine").filter(|m| m["machine_id"].as_str() == Some(machine_id)) else { return };
+    let Some(label) = them["label"].as_str() else { return };
+    super::apply_peer_profile(state, machine_id, label, them["icon"].as_str());
 }
 
 /// Sleeps `backoff`, or until `MachineHub::wake` says the peer was just seen
@@ -536,6 +548,7 @@ mod tests {
             token: token_for_a,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
 
         crate::daemon::machines::MachineHub::sync_links(&a_state);
@@ -571,6 +584,108 @@ mod tests {
         }
 
         a_serve.kill();
+    }
+
+    /// A profile change reaches the other daemon both ways: B changed its
+    /// profile while A had not heard (A pulls it from `/api/health` when the link
+    /// connects), then A edits its own profile and pushes it to B
+    /// (`peer_profile_changed`).
+    #[tokio::test]
+    async fn profile_changes_reach_the_other_daemon_by_pull_and_by_push() {
+        use crate::daemon::device_registry::DeviceRegistry;
+        use crate::daemon::rpc::{ConnectionContext, Request, Router};
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::types::Settings;
+        use tempfile::tempdir;
+
+        let a_dir = tempdir().unwrap();
+        let b_dir = tempdir().unwrap();
+        let a_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let mut a_serve_router = Router::new();
+        crate::daemon::methods::register_machines(&mut a_serve_router, a_state.clone());
+        let mut b_serve_router = Router::new();
+        crate::daemon::methods::register_machines(&mut b_serve_router, b_state.clone());
+        let (_a_stt, a_port, a_serve) = crate::daemon::remote_server::spawn_on(
+            a_state.clone(), a_dir.path().to_path_buf(), a_serve_router, 0,
+        );
+        let (_b_stt, b_port, b_serve) = crate::daemon::remote_server::spawn_on(
+            b_state.clone(), b_dir.path().to_path_buf(), b_serve_router, 0,
+        );
+        let a_id = a_state.machines.get().unwrap().self_machine().unwrap().machine_id;
+        let b_id = b_state.machines.get().unwrap().self_machine().unwrap().machine_id;
+
+        // B renamed itself while A was not listening.
+        b_state.machines.get().unwrap().set_label("B renamed");
+        b_state.machines.get().unwrap().set_icon(Some("ph-laptop".into()));
+
+        let (token_for_a, _) = DeviceRegistry::add_machine_device("A", &a_id, b_dir.path()).unwrap();
+        a_state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: b_id.clone(),
+            label: "B".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some(format!("http://127.0.0.1:{b_port}")),
+            token: token_for_a,
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        });
+        let (token_for_b, _) = DeviceRegistry::add_machine_device("B", &b_id, a_dir.path()).unwrap();
+        b_state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: a_id.clone(),
+            label: "A".into(),
+            os: "test".into(),
+            iroh_id: None,
+            direct_url: Some(format!("http://127.0.0.1:{a_port}")),
+            token: token_for_b,
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        });
+        crate::daemon::machines::MachineHub::sync_links(&a_state);
+
+        let wait_for = |ok: Box<dyn Fn() -> bool>| async move {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+            while !ok() {
+                assert!(tokio::time::Instant::now() < deadline, "condition not met within 8s");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        };
+        let (s, id) = (a_state.clone(), b_id.clone());
+        wait_for(Box::new(move || {
+            let p = s.machines.get().unwrap().peer(&id).unwrap();
+            p.label == "B renamed" && p.icon.as_deref() == Some("ph-laptop")
+        }))
+        .await;
+        let (s, id) = (a_state.clone(), b_id.clone());
+        wait_for(Box::new(move || s.mirror.is_online(&id))).await;
+
+        let mut a_router = Router::new();
+        crate::daemon::methods::register_machines(&mut a_router, a_state.clone());
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let resp = a_router
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: serde_json::json!(1),
+                    method: "set_machine_profile".into(),
+                    params: Some(serde_json::json!({"label": "A renamed", "icon": "ph-desktop"})),
+                },
+                ConnectionContext::new(tx),
+            )
+            .await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+        let (s, id) = (b_state.clone(), a_id.clone());
+        wait_for(Box::new(move || {
+            let p = s.machines.get().unwrap().peer(&id).unwrap();
+            p.label == "A renamed" && p.icon.as_deref() == Some("ph-desktop")
+        }))
+        .await;
+
+        a_serve.kill();
+        b_serve.kill();
     }
 
     fn preview_frame(session_id: Option<&str>) -> String {

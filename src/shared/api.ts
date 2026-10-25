@@ -563,7 +563,12 @@ export const api = {
     machineId: string | null,
     patch: { label?: string; icon?: string | null },
   ): Promise<{ ok: boolean }> =>
-    invoke("set_machine_profile", { machineId, ...patch }),
+    invoke("set_machine_profile", {
+      machineId,
+      label: patch.label,
+      // Tauri reads an omitted and a null Option the same, so "automatic" is a flag.
+      ...(patch.icon === null ? { clearIcon: true } : { icon: patch.icon }),
+    }),
 
   // --- Claude's own browser (Settings > Chat defaults). Desktop-pipe only. ---
   browserStatus: (): Promise<{ running: boolean; shown: boolean }> => invoke("browser_status"),

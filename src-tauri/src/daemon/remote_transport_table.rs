@@ -467,6 +467,17 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // comes from params), so the phone gets this one setting without being
     // allowed `save_settings`. P, never M: a peer has no phone UI here.
     ("set_push_show_chat_name", P),
+    // Edits a machine's name and icon. PM so a phone or paired peer can edit any
+    // machine. The owner only ever executes the edit on its OWN registry: the
+    // forwarding daemon strips `machine_id`, and a PeerMachine caller that names
+    // a machine other than this one is refused, so a peer cannot rename a third
+    // machine through us. Names and icons are display data, no secrets involved.
+    ("set_machine_profile", PM),
+    // Machine-only: a peer announcing its own new name and icon so this daemon
+    // refreshes its cache. The sender is ctx.transport's machine, never a params
+    // id, and the handler never pushes onward (no ping-pong). Also in peer_scope
+    // SEE_ONLY: it touches no chat.
+    ("peer_profile_changed", M),
     // Machine-only: `unpair_machine`'s outbound half. Removes ctx.transport's
     // own entry, never a params-supplied id (see methods/machines.rs).
     ("peer_unpaired", M),
@@ -577,6 +588,7 @@ mod tests {
             "set_draft_state",
             "ensure_jarvis_session",
             "list_machines", "list_machine_projects", "list_machine_accounts", "set_machine_project_account",
+            "set_machine_profile",
         ] {
             assert!(allowed(m, &Transport::Phone), "{m} should be remotely callable");
         }
@@ -593,7 +605,14 @@ mod tests {
     #[test]
     fn peer_machine_mask_is_phone_subset_or_a_named_machine_only_exception() {
         const MACHINE_ONLY_EXCEPTIONS: &[&str] =
-            &["peer_unpaired", "spawn_chat", "peer_channel_post", "peer_accounts", "peer_set_project_account"];
+            &[
+            "peer_unpaired",
+            "spawn_chat",
+            "peer_channel_post",
+            "peer_accounts",
+            "peer_set_project_account",
+            "peer_profile_changed",
+        ];
         for (m, mask) in TRANSPORT_TABLE {
             if mask.machine && !mask.phone {
                 assert!(
@@ -628,6 +647,17 @@ mod tests {
     fn peer_unpaired_is_machine_only() {
         assert!(allowed("peer_unpaired", &Transport::PeerMachine("x".into())));
         assert!(!allowed("peer_unpaired", &Transport::Phone));
+    }
+
+    /// A profile edit is open to a phone and a peer; the peer's own announcement
+    /// of it is machine-only.
+    #[test]
+    fn profile_methods_have_the_intended_reach() {
+        let peer = Transport::PeerMachine("x".into());
+        assert!(allowed("set_machine_profile", &peer));
+        assert!(allowed("set_machine_profile", &Transport::Phone));
+        assert!(allowed("peer_profile_changed", &peer));
+        assert!(!allowed("peer_profile_changed", &Transport::Phone));
     }
 
     /// The multi-machine chat-parity methods (`spawn_chat`/`peer_channel_post`

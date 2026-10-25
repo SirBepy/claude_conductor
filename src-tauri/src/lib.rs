@@ -409,6 +409,7 @@ pub fn run() {
             ipc::set_machine_label,
             ipc::set_machine_can_drive,
             ipc::rename_machine,
+            ipc::set_machine_profile,
             ipc::browser_status,
             ipc::browser_set_shown,
             ipc::list_machines,

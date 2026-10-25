@@ -3,8 +3,9 @@
 //! `remote_transport_table::TRANSPORT_TABLE` - never `M`, since a peer
 //! machine already knows its own federation state and must not learn about
 //! this daemon's OTHER peers. The pairing/unpairing/labeling mutators stay
-//! desktop-pipe-only (absent from the table) except `peer_unpaired` - the one
-//! peer-callable exception (mask `M` there), the OTHER side of an unpair.
+//! desktop-pipe-only (absent from the table) except `peer_unpaired` (the OTHER
+//! side of an unpair) and `set_machine_profile` / `peer_profile_changed`, the
+//! name-and-icon edit and its push to peers (masks `PM` / `M` there).
 //!
 //! Split by concern into `machines/` submodules (todo 914): this file wires
 //! `register_machines` and owns `list_machine_projects` (an RPC-registration
@@ -97,6 +98,33 @@ pub fn register_machines(router: &mut Router, state: Arc<DaemonState>) {
         }
     });
 
+    // PM in the transport table: any paired device may edit a machine's name
+    // and icon. Execution stays with the owner (see `pairing::set_machine_profile`).
+    router.register("set_machine_profile", {
+        let state = state.clone();
+        move |params, ctx| {
+            let state = state.clone();
+            async move {
+                let req: SetMachineProfileParams = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                pairing::set_machine_profile(&state, &ctx, req).await
+            }
+        }
+    });
+
+    // Machine-only (M): a peer announcing its own new name and icon.
+    router.register("peer_profile_changed", {
+        let state = state.clone();
+        move |params, ctx| {
+            let state = state.clone();
+            async move {
+                let req: PeerProfileChangedParams = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                pairing::peer_profile_changed(&state, &ctx, req)
+            }
+        }
+    });
+
     // Desktop-pipe only (absent from the transport table): the switch that
     // limits a paired machine is never flippable by that machine, or by the
     // phone.
@@ -181,6 +209,28 @@ struct SetLabelParams {
 struct RenameMachineParams {
     machine_id: String,
     label: String,
+}
+
+/// `icon` distinguishes absent (leave alone) from `null` (back to automatic).
+#[derive(Debug, Deserialize)]
+struct SetMachineProfileParams {
+    #[serde(default)]
+    machine_id: Option<String>,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    icon: Option<Option<String>>,
+}
+
+fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
+}
+
+#[derive(Debug, Deserialize)]
+struct PeerProfileChangedParams {
+    label: String,
+    #[serde(default)]
+    icon: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,6 +345,7 @@ mod tests {
             token,
             reverse_device_id: None,
             added_at: 0,
+            icon: None,
         });
         // set_online only flips an EXISTING entry's flag - set_instances
         // creates it first, same as every other machine-registry fixture.
