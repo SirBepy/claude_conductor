@@ -282,15 +282,60 @@
   width: 190px;
 }
 
+/* The stage clips the zoomed page; the zoomee is what image-zoom-pan.ts
+   transforms. Zoom and pan are always on, so the iframe lets pointer events
+   through to the stage unless the Interact toggle is pressed. */
+.pv-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.pv-zoomee {
+  width: 100%;
+  height: 100%;
+}
+
 .pv-iframe {
   width: 100%;
   height: 100%;
   border: 0;
   display: block;
+  pointer-events: none;
 }
 
-.pv-frame[data-w="tablet"] .pv-iframe,
-.pv-frame[data-w="phone"] .pv-iframe {
+.pv-stage.is-interact .pv-iframe {
+  pointer-events: auto;
+}
+
+.pv-stage.is-interact {
+  touch-action: auto;
+}
+
+.pv-interact {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 28px;
+  height: 28px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  opacity: 0.7;
+}
+
+.pv-interact:hover,
+.pv-interact[aria-pressed="true"] {
+  opacity: 1;
+}
+
+.pv-interact[aria-pressed="true"] {
+  color: var(--color-primary);
+}
+
+.pv-frame[data-w="tablet"] .pv-stage,
+.pv-frame[data-w="phone"] .pv-stage {
   height: 420px;
 }
 
