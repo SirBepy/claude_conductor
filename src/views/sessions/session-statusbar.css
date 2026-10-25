@@ -281,6 +281,16 @@
   overscroll-behavior: contain;
 }
 
+/* Phone placement (positionPopoverShell sets left/right to the margin). The
+   !important beats every content class's width/min-width/max-width, which
+   are all desktop sizes; box-sizing keeps padding inside the left/right span. */
+.sb-popover.sb-popover--full {
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  box-sizing: border-box;
+}
+
 .sb-popover::-webkit-scrollbar { width: 8px; }
 .sb-popover::-webkit-scrollbar-thumb {
   background: var(--color-border);
