@@ -1,6 +1,6 @@
 /**
  * Time parsing + relative formatting.
- * Ported from src/modules/formatters.js (hourToMs) and src/modules/stats.js (timeAgo, uptimeFrom).
+ * Ported from src/modules/formatters.js (hourToMs) and src/modules/stats.js (timeAgo).
  */
 
 export function hourToMs(h: string): number {
