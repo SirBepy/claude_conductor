@@ -65,7 +65,8 @@ test("Ask about this question opens Ask prefilled while the card stays pending",
 test("on a phone, the Ask window covers the fullscreen question card", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openCard(page);
-  await page.locator('.prompt-card [data-act="ask"]').click();
+  // The phone page hides the header Ask; its Ask sits on the question's own band.
+  await page.locator('.prompt-card [data-act="ask-inline"]').click();
 
   const input = page.locator("[data-ask-input]");
   await expect(input).toBeVisible();
