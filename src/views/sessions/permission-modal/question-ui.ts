@@ -234,6 +234,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     backDisposer = null;
     slashPopup.destroyAll();
     slashPopup.stop();
+    renderer.dispose();
     clearHost();
     document.removeEventListener("keydown", keydownHandler);
     document.removeEventListener("visibilitychange", visibilityHandler);

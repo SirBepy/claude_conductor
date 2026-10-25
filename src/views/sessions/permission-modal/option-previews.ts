@@ -6,6 +6,8 @@
 // hover, so "viewing" is its own state: swipe the picture up/down (sideways
 // stays question paging, question-swipe.ts) or tap a filmstrip thumbnail,
 // and "Choose this" picks what is shown. Tapping a row still picks directly.
+// Tapping a picture itself (tile or stage) opens it fullscreen instead
+// (preview-fullscreen.ts), since both crop it.
 
 import { escapeHtml } from "../../../shared/escape-html";
 import { isMobileViewport } from "../../../shared/mobile-viewport";
@@ -33,10 +35,12 @@ function frameHtml(fragment: string, cls: string, sessionId?: string): string {
   return `<iframe class="${cls}" sandbox="" tabindex="-1" aria-hidden="true" srcdoc="${escapeHtml(previewDocument(inlineLocalImages(fragment, sessionId)))}"></iframe>`;
 }
 
+const EXPAND_ICON = (cls: string) => `<i class="ph ph-arrows-out ${cls}" aria-hidden="true"></i>`;
+
 /** The picture on top of a tile row. Rows without a preview (the synthetic
  *  "None of the above") get nothing, and their CSS spans the full row. */
 export function tilePictureHtml(opt: QuestionOption, sessionId?: string): string {
-  return opt.preview ? `<span class="prompt-opt__pic">${frameHtml(opt.preview, "prompt-opt__frame", sessionId)}</span>` : "";
+  return opt.preview ? `<span class="prompt-opt__pic">${frameHtml(opt.preview, "prompt-opt__frame", sessionId)}${EXPAND_ICON("prompt-opt__expand")}</span>` : "";
 }
 
 /** The stage's picture is filled by sync(), not here, so a rebuild loads it
@@ -53,6 +57,7 @@ export function stageHtml(q: Question, qi: number, sessionId?: string): string {
       <div class="prompt-stage__view">
         <iframe class="prompt-stage__frame" sandbox="" tabindex="-1" aria-hidden="true"></iframe>
         <span class="prompt-stage__hit"></span>
+        ${EXPAND_ICON("prompt-stage__expand")}
       </div>
       <div class="prompt-stage__bar">
         <span class="prompt-stage__count"></span>
@@ -77,6 +82,8 @@ export interface OptionPreviewsDeps {
   questions: Question[];
   selections: Map<number, Selection>;
   choose: (qi: number, label: string) => void;
+  /** Opens option `label` of question `qi` fullscreen. */
+  expand: (qi: number, label: string) => void;
   /** The chat the question belongs to: routes local-image reads to the machine
    *  hosting it and keys the image cache. */
   sessionId?: string;
@@ -88,7 +95,7 @@ export interface OptionPreviews {
 }
 
 export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
-  const { host, questions, selections, choose, sessionId } = deps;
+  const { host, questions, selections, choose, expand, sessionId } = deps;
   const viewing = new Map<number, string>();
   const lastPick = new Map<number, string>();
   let hover: { qi: number; label: string } | null = null;
@@ -198,6 +205,27 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
     hover = next;
     sync();
   });
+
+  // Capture, and preventDefault: the tile picture sits inside the row's
+  // <label>, whose default action would otherwise pick the option too.
+  host.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const pic = target.closest<HTMLElement>(".prompt-opt__pic");
+    const hit = pic ? null : target.closest<HTMLElement>(".prompt-stage__hit");
+    if (!pic && !hit) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (pic) {
+      const label = pic.closest(".prompt-opt")?.querySelector<HTMLInputElement>(":scope > input")?.dataset.label;
+      const qi = Number(pic.closest<HTMLElement>(".prompt-panel")?.dataset.panel);
+      if (label && Number.isFinite(qi)) expand(qi, label);
+      return;
+    }
+    const qi = Number(hit!.closest<HTMLElement>(".prompt-stage")?.dataset.stage);
+    const q = questions[qi];
+    if (!q) return;
+    expand(qi, shownLabel(qi, previewedOptions(q)));
+  }, true);
 
   host.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;

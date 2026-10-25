@@ -69,7 +69,7 @@ async function swipe(page: Page, selector: string, dx: number, dy: number): Prom
 }
 
 test.describe("view-harness / AUQ option previews", () => {
-  test("desktop, 3 previewed options: tiles side by side, picture click picks", async ({ page }) => {
+  test("desktop, 3 previewed options: tiles side by side, picture click opens fullscreen, row click picks", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [question(3)]);
 
@@ -91,7 +91,14 @@ test.describe("view-harness / AUQ option previews", () => {
     const bg = await probe.evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(bg).not.toBe("rgba(0, 0, 0, 0)");
 
+    // The picture opens fullscreen (preview-fullscreen.ts) without picking.
     await pics.nth(1).click();
+    await expect(page.locator(".auq-fs")).toBeVisible();
+    expect(await picked(page)).toBeNull();
+    await page.locator('.auq-fs [data-fs="close"]').click();
+    await expect(page.locator(".auq-fs")).toHaveCount(0);
+
+    await panel.locator(".prompt-opt__body").nth(1).click();
     await expect.poll(() => picked(page)).toBe("Two");
     await page.locator(".prompt-card").screenshot({ path: ".for_bepy/screenshots/_specs/auq-option-previews-tiles.png" });
   });

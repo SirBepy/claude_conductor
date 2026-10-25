@@ -16,6 +16,7 @@ import { createAnswerBarSync } from "./question-ui-answer-bar";
 import { createQuestionCardLayout } from "./question-ui-layout";
 import { attachQuestionSwipe } from "./question-swipe";
 import { attachOptionPreviews } from "./option-previews";
+import { createPreviewFullscreen } from "./preview-fullscreen";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqSlashPopupController } from "./slash-popup";
 import { ASK_OPEN_EVENT, askContextText } from "../ask-open-event";
@@ -56,6 +57,8 @@ export interface QuestionCardRenderer {
   minimize: () => boolean;
   /** Rebuilds the answer bar for the other side of the 768px breakpoint. */
   onViewportCrossing: () => void;
+  /** Card teardown: drops the fullscreen preview, which lives outside the host. */
+  dispose: () => void;
 }
 
 export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCardRenderer {
@@ -73,9 +76,21 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   host.addEventListener("mouseover", handleTicketHover);
   host.addEventListener("mouseout", handleTicketHoverOut);
   attachQuestionSwipe(host, state, goToTab);
+  // Picks from fullscreen skip applyPick's auto-advance: the fullscreen view
+  // moves on itself, to the NEXT question rather than the next unanswered one.
+  const fullscreen = createPreviewFullscreen({
+    questions, selections, hasSummary, sessionId: opts.sessionId, answeredAt,
+    pick: (qi, label) => applyPick(qi, label, true, false),
+    toggle: (qi, label) => {
+      const set = selections.get(qi) as Set<string> | undefined;
+      applyPick(qi, label, !set?.has(label), false);
+    },
+    goToTab: (target) => goToTab(target),
+  });
   // "Choose this" on a preview stage picks exactly like tapping the row.
   const previews = attachOptionPreviews({
     host, questions, selections, choose: (qi, label) => applyPick(qi, label, true, true),
+    expand: (qi, label) => fullscreen.open(qi, label),
     sessionId: opts.sessionId,
   });
   const { showPasteHint, paintAttachmentStrips, syncMessagesPadding, positionTrack } =
@@ -287,6 +302,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
       paintAttachmentStrips();
       previews.sync();
+      fullscreen.sync();
 
       host.querySelector<HTMLButtonElement>('[data-act="cancel"]')
         ?.addEventListener("click", cancel);
@@ -325,6 +341,8 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   };
 
   function minimize(): boolean {
+    // The phone's back press lands here: it leaves fullscreen first.
+    if (fullscreen.isOpen()) { fullscreen.close(); return true; }
     if (minimized) return false;
     minimized = true;
     render();
@@ -351,5 +369,5 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     field.setSelectionRange(caret[0], caret[1]);
   };
 
-  return { render, goToTab, togglePick, refreshAttachments, minimize, onViewportCrossing };
+  return { render, goToTab, togglePick, refreshAttachments, minimize, onViewportCrossing, dispose: fullscreen.close };
 }

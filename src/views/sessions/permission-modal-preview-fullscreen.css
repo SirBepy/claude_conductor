@@ -1,0 +1,157 @@
+/* Fullscreen option preview (permission-modal/preview-fullscreen.ts).
+ * Three bands: question title on top, the zoomable preview filling the middle,
+ * the option pager + Select along the bottom. Above the phone's fullscreen
+ * question page, under the lightbox (9999). */
+.auq-fs {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-background);
+  color: var(--color-text);
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+
+.auq-fs__top,
+.auq-fs__bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--color-surface);
+}
+.auq-fs__top { border-bottom: 1px solid var(--color-border); }
+.auq-fs__bar {
+  flex-wrap: wrap;
+  border-top: 1px solid var(--color-border);
+}
+
+.auq-fs__icon {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 1.15rem;
+  cursor: pointer;
+}
+.auq-fs__icon:hover:not(:disabled) { background: var(--color-background); }
+.auq-fs__icon:disabled { opacity: 0.3; cursor: default; }
+
+.auq-fs__title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+.auq-fs__qcount,
+.auq-fs__count {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.auq-fs__qtext {
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The zoom container: image-zoom-pan.ts needs it sized to the viewing area
+ * with overflow hidden, or a zoomed canvas clips at its own box. touch-action
+ * none hands every touch to the pinch/pan/swipe handlers instead of the page. */
+.auq-fs__view {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+/* The frame lays out at the full view size ("screen width", Joe 2026-10-25)
+ * and the canvas around it is what zooms. pointer-events none on the frame so
+ * every pointer lands on the canvas, the element the zoom handler drives. */
+.auq-fs__canvas {
+  position: absolute;
+  inset: 0;
+}
+.auq-fs__frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  pointer-events: none;
+}
+
+.auq-fs__nav {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.auq-fs__opt {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+.auq-fs__label {
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.auq-fs__label i {
+  margin-right: 4px;
+  color: var(--color-primary);
+  vertical-align: -2px;
+}
+.auq-fs__actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+}
+.auq-fs__actions .btn { min-height: 36px; }
+
+/* Phone: the buttons take their own full-width row under the pager, so the
+ * thumb lands on them and the option label keeps the whole first row. */
+@media (max-width: 768px) {
+  .auq-fs__actions { flex: 1 1 100%; }
+  .auq-fs__actions .btn { flex: 1; min-height: 44px; }
+}
+
+/* The card's previews open this view on click. */
+.prompt-opt__pic,
+.prompt-stage__hit { cursor: zoom-in; }
+.prompt-opt__expand,
+.prompt-stage__expand {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  opacity: 0.85;
+  pointer-events: none;
+}
