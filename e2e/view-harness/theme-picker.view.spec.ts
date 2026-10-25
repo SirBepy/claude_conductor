@@ -4,8 +4,8 @@ import { capture, fireEvent, mountView } from "./harness";
 import { SIRBEPY_PALETTES } from "../../vendor/tauri_kit/frontend/settings/palettes/sirbepy-default";
 
 // asserts: src/views/settings/subviews/appearance/appearance.ts, src/views/settings/subviews/appearance/theme-picker.ts, src/shared/theme-sync.ts, src/shared/boot.ts
-// Appearance lost its usage-colour and overlay sections; this spec only drives
-// the first (theme) section, so its contract still holds.
+// This spec drives only the Theme section, so it is independent of the other
+// Appearance sections.
 
 const bgOf = (sel: string) => (page: import("@playwright/test").Page) =>
   page.locator(sel).evaluate((el) => getComputedStyle(el).backgroundColor);

@@ -1,5 +1,5 @@
 // asserts: src/views/settings/subviews/power/nightly.ts
-// Reviewed 2026-10-25: nightly.ts moved from subviews/system/ to subviews/power/ unchanged; the view is now mounted as settings-power.
+// The Nightly section renders on the Power & startup page, mounted as settings-power.
 
 // `.kit-row` is `justify-content: space-between` over its direct children,
 // so the "Give up waiting after [N] hours" row keeps exactly two: the label,
