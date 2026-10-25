@@ -7,8 +7,9 @@
 
 import { api } from "../../shared/api";
 import type { ListMachinesResult } from "../../shared/api";
+import { getTransport } from "../../shared/transport";
 
-const OS_LOGO: Record<string, string> = {
+export const OS_LOGO: Record<string, string> = {
   windows: "ph-windows-logo",
   macos: "ph-apple-logo",
   linux: "ph-linux-logo",
@@ -18,7 +19,7 @@ const OS_LOGO: Record<string, string> = {
 export const GENERIC_MACHINE_ICON = "ph-desktop";
 const UNKNOWN_ICON = GENERIC_MACHINE_ICON;
 /** Icons for a machine whose OS logo another machine already holds. */
-const CLASH_POOL = [
+export const CLASH_POOL = [
   "ph-planet", "ph-cube", "ph-lightning", "ph-leaf", "ph-moon-stars",
   "ph-mountains", "ph-rocket-launch", "ph-snowflake", "ph-cactus", "ph-flower",
 ];
@@ -40,12 +41,21 @@ function hash(s: string): number {
  * explicit, documented collision, since growing CLASH_POOL further isn't
  * worth it for a count of paired machines this far past what Joe pairs.
  */
-export function assignMachineIcons(machines: ReadonlyArray<{ machine_id: string; os: string }>): Map<string, string> {
+export function assignMachineIcons(
+  machines: ReadonlyArray<{ machine_id: string; os: string; icon?: string | null }>,
+): Map<string, string> {
   const sorted = [...machines].sort((a, b) => (a.machine_id < b.machine_id ? -1 : a.machine_id > b.machine_id ? 1 : 0));
   const out = new Map<string, string>();
   const used = new Set<string>();
   const clashed: string[] = [];
+  // A chosen icon wins outright and is reserved first, so the automatic
+  // logic below never hands the same glyph to a machine that did not pick it.
+  // Two machines may both choose the same icon; that is their call.
   for (const m of sorted) {
+    if (m.icon) { out.set(m.machine_id, m.icon); used.add(m.icon); }
+  }
+  for (const m of sorted) {
+    if (out.has(m.machine_id)) continue;
     const logo = OS_LOGO[m.os] ?? UNKNOWN_ICON;
     if (used.has(logo)) {
       clashed.push(m.machine_id);
@@ -112,6 +122,32 @@ export function ensureMachineIcons(machineIds: Iterable<string>, onChange: () =>
     .then((res) => { if (setMachines(res)) onChange(); })
     .catch(() => { loaded = true; })
     .finally(() => { inflight = false; });
+}
+
+/**
+ * Re-fetches `list_machines` whenever any daemon reports a profile change
+ * (name or icon), so the sidebar follows an edit made on another device
+ * without a reload. Returns the unlisten function.
+ */
+export function initMachineProfileSync(onChange: () => void): () => void {
+  let unlisten: (() => void) | undefined;
+  let disposed = false;
+  void getTransport()
+    .listen("machines-changed", () => {
+      void api.listMachines()
+        .then((res) => {
+          // A machine that was unseen before may be known now.
+          refetchedFor.clear();
+          if (setMachines(res)) onChange();
+        })
+        .catch(() => { /* federation backend absent: keep the cached icons */ });
+    })
+    .then((u) => { if (disposed) u(); else unlisten = u; })
+    .catch(() => { /* no event channel: icons refresh on the next render fetch */ });
+  return () => {
+    disposed = true;
+    unlisten?.();
+  };
 }
 
 /** Icon for a machine id; `null` means this daemon. `null` result = not known yet. */

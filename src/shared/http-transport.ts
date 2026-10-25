@@ -630,6 +630,13 @@ export class HttpTransport implements Transport {
       // picker code calls this transport identically.
       case "list_machines":
         return this.rpc<T>("list_machines", null);
+      case "set_machine_profile":
+        // `icon: null` (back to automatic) must survive; only an absent key is dropped.
+        return this.rpc<T>("set_machine_profile", {
+          machine_id: args.machineId ?? args.machine_id ?? null,
+          ...(args.label !== undefined ? { label: args.label } : {}),
+          ...(args.icon !== undefined ? { icon: args.icon } : {}),
+        });
       case "list_machine_projects":
         return this.rpc<T>("list_machine_projects", {
           machine_id: args.machineId ?? args.machine_id,
