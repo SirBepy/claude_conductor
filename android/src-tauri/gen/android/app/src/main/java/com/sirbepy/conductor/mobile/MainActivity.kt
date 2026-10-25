@@ -115,15 +115,23 @@ class MainActivity : TauriActivity() {
 
   override fun onStart() {
     super.onStart()
-    if (!locked && AppLockPolicy.shouldRelock(backgroundedAt, SystemClock.elapsedRealtime())) lock()
+    val relockMinutes = AppLockSettings.relockMinutes(this)
+    if (!locked && AppLockPolicy.shouldRelock(backgroundedAt, SystemClock.elapsedRealtime(), relockMinutes)) lock()
     backgroundedAt = null
     // Posted: BiometricPrompt needs the activity resumed, which onStart isn't yet.
-    if (locked) lockScreen.post { promptUnlock() }
+    if (locked) lockScreen.post { promptUnlock() } else showApp()
   }
 
   override fun onStop() {
     super.onStop()
+    OnScreen.appVisible = false
     if (!locked) backgroundedAt = SystemClock.elapsedRealtime()
+  }
+
+  // Coming back to an open chat counts as viewing it.
+  private fun showApp() {
+    OnScreen.appVisible = true
+    OnScreen.clearShownChat(this)
   }
 
   // A hardware keyboard would otherwise type into the focused composer behind
@@ -135,6 +143,7 @@ class MainActivity : TauriActivity() {
 
   private fun lock() {
     locked = true
+    OnScreen.appVisible = false
     lockScreen.visibility = View.VISIBLE
     lockScreen.bringToFront()
   }
@@ -142,6 +151,7 @@ class MainActivity : TauriActivity() {
   private fun unlock() {
     locked = false
     lockScreen.visibility = View.GONE
+    showApp()
     askNotificationPermissionOnce()
     deliverPendingChat()
   }
@@ -208,6 +218,7 @@ class MainActivity : TauriActivity() {
     installBackHook(webView)
     this.webView = webView
     webView.addJavascriptInterface(PushBridge(this), "ConductorPush")
+    webView.addJavascriptInterface(AppLockBridge(this), "ConductorLock")
     PushRelay.onHandleReady = {
       webView.evaluateJavascript("window.__ccPushHandleReady && window.__ccPushHandleReady()", null)
     }

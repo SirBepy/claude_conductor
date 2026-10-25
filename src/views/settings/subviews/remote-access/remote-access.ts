@@ -6,6 +6,7 @@ import {
   renderMachinesSection, resetMachinesSection, wireMachinePairForm, machinesSectionTemplate,
 } from "./machines-section";
 import { renderEntityList, renameFieldHtml, wireRenameFields } from "./entity-list";
+import { appLockSectionTemplate } from "./app-lock-section";
 import "./remote-access.css";
 
 function $(root: HTMLElement, sel: string): HTMLElement | null {
@@ -160,6 +161,8 @@ function template() {
     <div class="view view-settings-remote-access">
       ${settingsHeader("Remote access")}
       <div class="view-body">
+
+        ${appLockSectionTemplate()}
 
         <div class="kit-section">
           <p class="ra-explainer">

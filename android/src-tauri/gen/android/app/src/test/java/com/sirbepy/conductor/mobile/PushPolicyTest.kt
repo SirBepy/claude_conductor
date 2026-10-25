@@ -1,8 +1,10 @@
 package com.sirbepy.conductor.mobile
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PushPolicyTest {
@@ -71,6 +73,19 @@ class PushPolicyTest {
     assertEquals("abc", PushPolicy.parseField(reply, "handle"))
     assertEquals("x\\y", PushPolicy.parseField(reply, "secret"))
     assertNull(PushPolicy.parseField(reply, "token"))
+  }
+
+  @Test
+  fun aBlockedPushForTheChatOnScreenIsSkipped() {
+    assertTrue(PushPolicy.skipBlocked("c1", "c1", appVisible = true))
+  }
+
+  @Test
+  fun aBlockedPushStillShowsForAnotherChatOrWhenTheAppIsNotInFront() {
+    assertFalse(PushPolicy.skipBlocked("c1", "c2", appVisible = true))
+    assertFalse(PushPolicy.skipBlocked("c1", null, appVisible = true))
+    // Locked, backgrounded or screen off: the selected chat is not being looked at.
+    assertFalse(PushPolicy.skipBlocked("c1", "c1", appVisible = false))
   }
 
   @Test

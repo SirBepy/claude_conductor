@@ -24,8 +24,14 @@ class PushService : FirebaseMessagingService() {
 
   override fun onMessageReceived(message: RemoteMessage) {
     val data = message.data
-    if (data["type"] != "blocked") return
     val chatId = data["chatId"] ?: return
+    // The chat's prompt was answered somewhere (PC or phone): its banner is stale.
+    if (data["type"] == "clear") {
+      cancelChatNotification(this, chatId)
+      return
+    }
+    if (data["type"] != "blocked") return
+    if (PushPolicy.skipBlocked(chatId, OnScreen.chatId, OnScreen.appVisible)) return
     ensureChannel()
     // Without the runtime grant (Android 13+) notify() is dropped anyway.
     if (Build.VERSION.SDK_INT >= 33 &&

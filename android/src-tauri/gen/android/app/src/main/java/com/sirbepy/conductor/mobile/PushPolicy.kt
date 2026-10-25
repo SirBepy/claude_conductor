@@ -9,6 +9,12 @@ object PushPolicy {
   // Same id and tag per chat, so a second alert for one chat replaces its banner.
   fun notificationId(chatId: String): Int = chatId.hashCode()
 
+  // A chat already open in front of the user needs no banner. "In front" means
+  // the app is on screen and unlocked: behind the lock screen or with the phone
+  // off, the chat being selected does not mean anyone sees it.
+  fun skipBlocked(chatId: String, onScreenChat: String?, appVisible: Boolean): Boolean =
+    appVisible && onScreenChat == chatId
+
   enum class AfterUpdate { DONE, REGISTER_FRESH, RETRY_LATER }
 
   // 401/404 mean the relay forgot this handle or rejected its secret; only a new

@@ -5,6 +5,7 @@ import type { HeldMessages } from "../../shared/chat/held-messages";
 import type { ScheduledChip } from "../../shared/chat/scheduled-chip";
 import { isPendingSessionId } from "../../shared/chat/pending-session-id";
 import { setSelectedSessionId } from "./permission-modal";
+import { noteSelectedChat } from "../../shared/on-screen-chat";
 import type { SessionStatusbar } from "./session-statusbar";
 import type { SessionConfig } from "./model-effort-modal";
 import type { PreviewController } from "./preview-panel";
@@ -198,6 +199,7 @@ function cwdForSession(id: string | null): string | null {
 
 export function setActiveSession(id: string | null): void {
   state.selectedId = id;
+  noteSelectedChat(id);
   // Armed from the start of a dashboard open, not only once it is mounted.
   if (id) state.onChatActivated?.();
   setSelectedSessionId(id);
