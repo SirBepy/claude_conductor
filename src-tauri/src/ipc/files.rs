@@ -147,6 +147,14 @@ pub async fn open_in_editor(
 ) -> Result<(), String> {
     use std::process::Command;
 
+    // The path can originate in model-written chat text, and `cmd /C` re-parses
+    // its arguments, so a metacharacter would run a second command. Refused
+    // before any spawn, and before the OS-handler fallback too.
+    #[cfg(target_os = "windows")]
+    if let Some(c) = cmd_metachar(&path) {
+        return Err(format!("open_in_editor: refused path containing {c:?}"));
+    }
+
     let spawned = {
         #[cfg(target_os = "windows")]
         {
@@ -170,6 +178,17 @@ pub async fn open_in_editor(
     use tauri_plugin_shell::ShellExt;
     #[allow(deprecated)]
     app.shell().open(path, None).map_err(|e| e.to_string())
+}
+
+/// First character of `path` that `cmd.exe` treats as syntax even inside an
+/// argument Rust left unquoted (Rust only quotes on spaces/tabs). Pure so it is
+/// testable on any OS; only the Windows spawn path calls it. Parentheses and
+/// `!` stay allowed: outside an if/for block, and with delayed expansion off
+/// (the `cmd /C` default), they are literal, and real paths such as
+/// `C:\Program Files (x86)` contain them.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn cmd_metachar(path: &str) -> Option<char> {
+    path.chars().find(|c| matches!(c, '&' | '|' | '^' | '%' | '<' | '>' | '"' | '\n' | '\r'))
 }
 
 /// Arguments after `code`: the bare path, or `-g path:line[:col]` when a line
@@ -343,7 +362,21 @@ pub async fn write_text_file(
 
 #[cfg(test)]
 mod tests {
-    use super::editor_args;
+    use super::{cmd_metachar, editor_args};
+
+    #[test]
+    fn cmd_metacharacters_in_a_path_are_refused() {
+        for bad in [r"C:\x&calc.exe", r"C:\x|y", r"C:\x^y", r"C:\%PATH%\a", r"C:\x>out", r"C:\x<in", "C:\\x\"y", "C:\\x\ncalc"] {
+            assert!(cmd_metachar(bad).is_some(), "should refuse {bad:?}");
+        }
+    }
+
+    #[test]
+    fn ordinary_paths_with_spaces_and_dots_pass_the_metachar_check() {
+        for ok in [r"C:\Users\Joe Doe\my.proj\src\a.test.ts", "C:/a b/c.rs", "/home/joe/p/a-b_c.rs", r"C:\a\b@2+x~.rs", r"C:\Program Files (x86)\App\a.txt", r"C:\x!y\a.rs"] {
+            assert_eq!(cmd_metachar(ok), None, "should accept {ok:?}");
+        }
+    }
 
     #[test]
     fn editor_args_without_a_line_is_just_the_path() {
