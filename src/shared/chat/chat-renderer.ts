@@ -1,5 +1,6 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import { handleCommitRefClick, handleCommitRefKeydown } from "./commit-refs";
+import { handleFileRefClick, handleFileRefContextMenu, handleFileRefKeydown } from "./file-refs";
 import { handleTicketHover, handleTicketHoverOut } from "./ticket-refs";
 import { invoke } from "../ipc";
 import { perfPhase } from "../perf";
@@ -337,6 +338,9 @@ export class ChatRenderer {
     this.container.addEventListener("click", handlePrPreviewClick);
     this.container.addEventListener("click", handleCommitRefClick);
     this.container.addEventListener("keydown", handleCommitRefKeydown);
+    this.container.addEventListener("click", handleFileRefClick);
+    this.container.addEventListener("contextmenu", handleFileRefContextMenu);
+    this.container.addEventListener("keydown", handleFileRefKeydown);
     this.container.addEventListener("mouseover", handleTicketHover);
     this.container.addEventListener("mouseout", handleTicketHoverOut);
     this.container.addEventListener("click", createHandleToolChipClick(this));
