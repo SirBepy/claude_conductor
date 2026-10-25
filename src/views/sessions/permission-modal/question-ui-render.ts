@@ -234,10 +234,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       // Overrides the caller's icon rather than relying on that 0.45-opacity
       // badge: unplugged glyph = this card did not come from the MCP tool.
       const titleIcon = opts.degradedBuiltin ? "ph-plugs" : (opts.titleIcon || "ph-chat-circle-dots");
-      // The back arrow and the "Question" label only show on the phone's
-      // fullscreen page (permission-modal-shell.css); desktop keeps the icon.
+      // The back arrow, the "Question" label and the header Skip only show on
+      // the phone's fullscreen page (permission-modal-shell.css); desktop
+      // keeps the icon and the footer's Skip.
       const titleHtml = `<button type="button" class="icon-btn-sq prompt-icon-btn prompt-card__back" data-act="back" title="Back to chat"><i class="ph ph-arrow-left"></i></button><span class="prompt-card__title"><i class="ph ${titleIcon}"></i><span class="prompt-card__title-text">Question</span></span>`;
-      const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${olderPendingBadge}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="ask" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button><button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
+      const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${olderPendingBadge}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="ask" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button><button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button><button type="button" class="prompt-card__skip" data-act="skip">${escapeHtml(opts.cancelLabel)}</button>`;
       const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts)).join("")
         + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments) : "");
       const footerHtml = `
@@ -304,8 +305,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       previews.sync();
       fullscreen.sync();
 
-      host.querySelector<HTMLButtonElement>('[data-act="cancel"]')
-        ?.addEventListener("click", cancel);
+      // The header's copy is the phone page's Skip (permission-modal-shell.css).
+      host.querySelectorAll<HTMLButtonElement>('[data-act="cancel"], [data-act="skip"]')
+        .forEach((btn) => btn.addEventListener("click", cancel));
       host.querySelectorAll<HTMLButtonElement>('[data-summary-tab]').forEach((btn) => {
         btn.addEventListener("click", () => {
           const idx = Number(btn.dataset.summaryTab);

@@ -1,4 +1,5 @@
 // asserts: src/views/sessions/permission-modal/question-ui.ts, src/views/sessions/permission-modal/question-ui-render.ts
+// Reviewed 2026-10-25: the phone question page moved Skip into the header and its answer arrow became Next/Submit (live without typed text) - the answer bar's rebuild across the breakpoint is unchanged and this spec passes.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
 

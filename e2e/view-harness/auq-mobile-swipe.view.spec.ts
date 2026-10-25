@@ -2,7 +2,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 
-// Phone: swipe left/right over the question track to page between questions,
+// Phone: swipe left/right anywhere on the question card to page between questions,
 // same destination as the pager arrows/dots (question-swipe.ts). Ungated like
 // the dots/keyboard paging - an unanswered question can be skipped and come
 // back to later (see question-keyboard.ts's page()).
@@ -113,6 +113,34 @@ test.describe("view-harness / AUQ mobile swipe paging", () => {
 
     await swipeX(page, ".prompt-track-viewport", -80);
     expect(await activeTab(page)).toBe(2);
+  });
+
+  // Joe, 2026-10-25: anywhere on the card, not only over the panel area.
+  test("swiping on the header pages too", async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await mountView(page);
+    await openCard(page);
+
+    await swipeX(page, ".prompt-card__header", -80);
+    await expect.poll(() => activeTab(page)).toBe(1);
+  });
+
+  test("swiping on the footer's button row pages too", async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await mountView(page);
+    await openCard(page);
+
+    await swipeX(page, ".prompt-card__footer", -80);
+    await expect.poll(() => activeTab(page)).toBe(1);
+  });
+
+  test("a drag inside the answer box keeps its text selection and does not page", async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await mountView(page);
+    await openCard(page);
+
+    await swipeX(page, ".prompt-card__answer-bar textarea", -80);
+    expect(await activeTab(page)).toBe(0);
   });
 
   test("swipe does nothing at desktop width", async ({ page }) => {

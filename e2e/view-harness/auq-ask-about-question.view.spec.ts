@@ -1,3 +1,4 @@
+// Reviewed 2026-10-25: the phone question page moved Skip into the header (data-act="skip") and hides the footer's Skip/Next row, its answer arrow acting as Next/Submit - desktop-only header buttons this spec drives are unchanged and it passes.
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 // Reviewed 2026-10-22: the phone question card became a fullscreen page (header back arrow + "Question" label and an answer-box send arrow, all hidden on desktop; back collapses the card to its bar instead of falling through) - this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/permission-modal/question-ui-render.ts, src/views/sessions/ask-panel.ts, src/views/sessions/sessions.ts
