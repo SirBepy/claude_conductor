@@ -148,10 +148,8 @@ pub(super) async fn unpair_machine(state: &Arc<DaemonState>, machine_id: &str) -
 }
 
 pub(super) fn set_machine_label(state: &Arc<DaemonState>, label: &str) -> Result<Value, RpcError> {
-    let trimmed = label.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > 40 {
-        return Err(RpcError::invalid_params("label must be 1..=40 characters"));
-    }
+    let trimmed = crate::daemon::device_registry::normalize_label(label)
+        .map_err(|e| RpcError::invalid_params(format!("label {e}")))?;
     let registry = state.machines.get().ok_or_else(|| RpcError::internal("machine registry not initialised"))?;
     registry.set_label(trimmed);
     let mine = registry.self_machine().unwrap_or_else(|| registry.ensure_self());
@@ -163,10 +161,8 @@ pub(super) fn set_machine_label(state: &Arc<DaemonState>, label: &str) -> Result
 /// and the chat list call it the same thing, and restamps its mirrored rows
 /// at once instead of waiting for the peer's next snapshot.
 pub(super) fn rename_machine(state: &Arc<DaemonState>, machine_id: &str, label: &str) -> Result<Value, RpcError> {
-    let trimmed = label.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > 40 {
-        return Err(RpcError::invalid_params("label must be 1..=40 characters"));
-    }
+    let trimmed = crate::daemon::device_registry::normalize_label(label)
+        .map_err(|e| RpcError::invalid_params(format!("label {e}")))?;
     let registry = state.machines.get().ok_or_else(|| RpcError::internal("machine registry not initialised"))?;
     if !registry.rename_peer(machine_id, trimmed) {
         return Err(RpcError::invalid_params(format!("unknown machine: {machine_id}")));
