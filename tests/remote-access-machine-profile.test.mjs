@@ -3,7 +3,7 @@
 // included, each with an icon picker and a name field that save through
 // set_machine_profile (null id = this machine). Editable on the phone too.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const MAC = { machine_id: "mac-id", label: "mac", os: "macos", icon: null, reach: null, can_drive: true };
 
@@ -134,6 +134,37 @@ describe("Paired machines: icon picker", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(document.querySelector(".ra-icon-pop")).toBeNull();
     expect(api.setMachineProfile).not.toHaveBeenCalled();
+    dispose?.();
+  });
+});
+
+describe("Paired machines: refresh skipped while editing", () => {
+  const base = api.listMachines.getMockImplementation();
+  afterEach(() => api.listMachines.mockImplementation(base));
+  const renamed = () => ({ self: { machine_id: "pc-id", label: "PC", os: "windows", icon: null }, peers: [{ ...MAC, label: "mac-renamed" }] });
+
+  it("replays a machines-changed refresh once the name field blurs", async () => {
+    const { renderMachinesSection } = await import("../src/views/settings/subviews/remote-access/machines-section.ts");
+    const { root, dispose } = await mount();
+    nameOf(root, "pc-id").focus();
+    api.listMachines.mockImplementation(async () => renamed());
+    await renderMachinesSection(root);
+    expect(nameOf(root, "mac-id").value).toBe("mac");
+    nameOf(root, "pc-id").blur();
+    await vi.waitFor(() => expect(nameOf(root, "mac-id").value).toBe("mac-renamed"));
+    dispose?.();
+  });
+
+  it("replays a refresh skipped while the icon grid was open once it closes", async () => {
+    const { renderMachinesSection } = await import("../src/views/settings/subviews/remote-access/machines-section.ts");
+    const { root, dispose } = await mount();
+    btnOf(root, "mac-id").click();
+    api.listMachines.mockImplementation(async () => renamed());
+    await renderMachinesSection(root);
+    expect(nameOf(root, "mac-id").value).toBe("mac");
+    await tick();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await vi.waitFor(() => expect(nameOf(root, "mac-id").value).toBe("mac-renamed"));
     dispose?.();
   });
 });
