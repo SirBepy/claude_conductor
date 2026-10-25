@@ -232,6 +232,35 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await expect(page.locator(".prompt-panel.is-active")).toHaveAttribute("data-panel", "1");
   });
 
+  // Joe, 2026-10-25: no "Question" word in the header, and Ask sits on the
+  // question band instead of the header.
+  test("phone page: header has no title, Ask sits on the active question's band and opens Ask", async ({ page }) => {
+    await mountPhoneSession(page);
+    await openQuestionCard(page, [
+      { question: "First?", options: [{ label: "A" }, { label: "B" }] },
+      { question: "Second?", options: [{ label: "C" }, { label: "D" }] },
+    ]);
+    await expect(page.locator(".prompt-card__header")).not.toContainText("Question");
+    await expect(page.locator('.prompt-card__header [data-act="ask"]')).toBeHidden();
+
+    await page.evaluate(() => {
+      window.addEventListener("cc-ask-open", (e) => {
+        (window as unknown as { __askText?: string }).__askText = (e as CustomEvent<{ text: string }>).detail.text;
+      });
+    });
+    const inline = page.locator('.prompt-panel.is-active .prompt-zone--ask [data-act="ask-inline"]');
+    await expect(inline).toBeVisible();
+    const band = (await page.locator(".prompt-panel.is-active .prompt-zone--ask").boundingBox())!;
+    const btn = (await inline.boundingBox())!;
+    // Pinned to the band's right end, inside its height.
+    expect(band.x + band.width - (btn.x + btn.width)).toBeLessThan(16);
+    expect(btn.y).toBeGreaterThanOrEqual(band.y);
+    expect(btn.y + btn.height).toBeLessThanOrEqual(band.y + band.height);
+
+    await inline.click();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __askText?: string }).__askText ?? "")).toContain("First?");
+  });
+
   test("phone page: no full-height line at the left edge on a later question", async ({ page }) => {
     await mountPhoneSession(page);
     await openQuestionCard(page, [

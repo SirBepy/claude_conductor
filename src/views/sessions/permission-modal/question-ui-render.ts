@@ -234,10 +234,10 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       // Overrides the caller's icon rather than relying on that 0.45-opacity
       // badge: unplugged glyph = this card did not come from the MCP tool.
       const titleIcon = opts.degradedBuiltin ? "ph-plugs" : (opts.titleIcon || "ph-chat-circle-dots");
-      // The back arrow, the "Question" label and the header Skip only show on
-      // the phone's fullscreen page (permission-modal-shell.css); desktop
-      // keeps the icon and the footer's Skip.
-      const titleHtml = `<button type="button" class="icon-btn-sq prompt-icon-btn prompt-card__back" data-act="back" title="Back to chat"><i class="ph ph-arrow-left"></i></button><span class="prompt-card__title"><i class="ph ${titleIcon}"></i><span class="prompt-card__title-text">Question</span></span>`;
+      // The back arrow and the header Skip only show on the phone's
+      // fullscreen page (permission-modal-shell.css); desktop keeps the icon
+      // and the footer's Skip.
+      const titleHtml = `<button type="button" class="icon-btn-sq prompt-icon-btn prompt-card__back" data-act="back" title="Back to chat"><i class="ph ph-arrow-left"></i></button><span class="prompt-card__title"><i class="ph ${titleIcon}"></i></span>`;
       const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${olderPendingBadge}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="ask" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button><button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button><button type="button" class="prompt-card__skip" data-act="skip">${escapeHtml(opts.cancelLabel)}</button>`;
       const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts)).join("")
         + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments) : "");
@@ -271,9 +271,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         ?.addEventListener("click", advance);
       // Only announces; the card is left exactly as it is, so a half-typed
       // answer and the pending prompt survive the detour.
-      host.querySelector<HTMLButtonElement>('[data-act="ask"]')?.addEventListener("click", () => {
-        const q = questions[Math.min(state.activeTab, questions.length - 1)];
-        if (q) window.dispatchEvent(new CustomEvent(ASK_OPEN_EVENT, { detail: { text: askContextText(q) } }));
+      host.querySelectorAll<HTMLButtonElement>('[data-act="ask"], [data-act="ask-inline"]').forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const q = questions[Math.min(state.activeTab, questions.length - 1)];
+          if (q) window.dispatchEvent(new CustomEvent(ASK_OPEN_EVENT, { detail: { text: askContextText(q) } }));
+        });
       });
       host.querySelectorAll<HTMLButtonElement>('[data-act="minimize"], [data-act="back"]')
         .forEach((btn) => btn.addEventListener("click", () => { minimize(); }));
