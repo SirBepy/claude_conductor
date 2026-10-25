@@ -158,17 +158,17 @@ impl Mine {
 const EXTENSION_ID: &str = "mmlmfjhmonkocbjadbfplnigmagldckm";
 
 impl Mine {
-    /// Fails at once when the Playwright extension is not installed in this
-    /// browser profile. Without it playwright-mcp waits for a connection that
-    /// can never arrive (Brave hung 300s; Chrome fails fast on its own). An
-    /// unresolvable profile directory never blocks: the child then behaves as
-    /// it did before this check.
     /// The profile folder this choice really drives: the named one, else the
     /// browser's last-used one, else `None` when neither can be read.
     pub fn resolved_profile(&self) -> Option<String> {
         self.profile.clone().or_else(|| user_data_dir(self.app).and_then(|d| last_used_profile(&d)))
     }
 
+    /// Fails at once when the Playwright extension is not installed in this
+    /// browser profile. Without it playwright-mcp waits for a connection that
+    /// can never arrive (Brave hung 300s; Chrome fails fast on its own). An
+    /// unresolvable profile directory never blocks: the child then behaves as
+    /// it did before this check.
     pub fn check_extension_installed(&self) -> Result<(), String> {
         self.check_extension_in(user_data_dir(self.app))
     }
