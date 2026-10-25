@@ -97,7 +97,8 @@ export async function channelFor(host: ActionHost): Promise<ChannelRef | null> {
   if (!repo) return null;
   let projects;
   try { projects = await api.listProjects(); } catch { return null; }
-  const proj = projects.find((p) => (repo.project_id ? p.id === repo.project_id : p.path === repo.cwd));
+  // A failed or empty read only hides the channel block; the menu still opens.
+  const proj = (projects ?? []).find((p) => (repo.project_id ? p.id === repo.project_id : p.path === repo.cwd));
   // api.ts types a project's automation block as an open object.
   if (!proj || !(proj.automation as { enabled?: boolean } | null)?.enabled) return null;
   // A dead channel has no session; its Restart/Show terminal/Stop still work by project id.
