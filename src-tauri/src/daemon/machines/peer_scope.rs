@@ -42,6 +42,9 @@ const SEE_ONLY: &[&str] = &[
     // as the project's binding (`peer_set_project_account`) is not listed, so it
     // is refused for a view-only peer.
     "peer_accounts",
+    // A machine's name and icon are not a chat: a view-only peer may still
+    // rename this machine, the same as Joe can from any of his devices.
+    "set_machine_profile",
     "get_recent_branches",
     "get_range_files",
     "get_file_diff",
@@ -191,6 +194,14 @@ mod tests {
             let own = json!({"session_id": mine, "to_session_id": mine});
             assert_eq!(check(&state, method, &own, "mac").await, Ok(()), "{method} on its own chat");
         }
+    }
+
+    #[tokio::test]
+    async fn a_view_only_peer_may_still_rename_this_machine() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = state_with_peer(dir.path(), true);
+        let r = check(&state, "set_machine_profile", &json!({"label": "Studio"}), "mac").await;
+        assert_eq!(r, Ok(()));
     }
 
     #[tokio::test]
