@@ -70,7 +70,7 @@ const PASTED_LOG_RE = /<pasted-log id="([^"]+)" name="([^"]*)">\n?([\s\S]*?)\n?<
 // sees "this was voice" without raw markup (the model still receives the tag).
 const VOICE_INPUT_RE = /<voice-input\s*\/>/g;
 
-function renderTextBlock(rawText: string, breaks = false, fileChips = false): string {
+export function renderTextBlock(rawText: string, breaks = false, fileChips = false): string {
   const stripped = stripStatusToken(rawText);
   // Only user messages legitimately carry the composer's user-only sentinels
   // (<file:>, <pasted-log>, <voice-input>). For every other role (assistant,
@@ -310,7 +310,9 @@ export function renderMessage(m: RenderedMessage): string {
       if (m.retracted) {
         return `<div class="msg system retracted-marker"><span class="chat-pill chat-pill--retracted retracted-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-prohibit"></i>Retracted</span></div>`;
       }
-      return `<div class="msg assistant${m.dimmed ? " dimmed" : ""}"><button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button>${renderTextBlock(m.text ?? "")}</div>`;
+      // data-details carries the bodies so drill-links.ts can resolve a later
+      // message's `#d:id` against this one straight from the DOM.
+      return `<div class="msg assistant${m.dimmed ? " dimmed" : ""}"${m.details?.length ? ` data-details="${escapeHtml(JSON.stringify(m.details))}"` : ""}><button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button>${renderTextBlock(m.text ?? "")}</div>`;
     case "tool_use": {
       const view = parseFileEdit(m.tool ?? "", m.input);
       if (view) return `<div class="msg tool-use tool-use--file">${renderEditWindow(view)}</div>`;

@@ -1,4 +1,7 @@
 import type { ChatEvent } from "../../types/ipc.generated";
+import { parseDetails } from "./chat-details";
+import { linkifyDrillRefs } from "./drill-links";
+import { linkifyFilePaths } from "./file-refs";
 import type { RenderedMessage } from "./chat-transforms";
 import { eventToRenderedMessage, originSessionIdOf, isBoundaryMessage, cleanUserBlocks, extractAuqAnswerText, extractAuqAnswerCardId, stripAuqAnswerBlock, extractAuqExtraText, stripAuqExtraBlock, AUQ_SKIPPED_TEXT } from "./chat-transforms";
 import type { SkipMark } from "./skip-marks";
@@ -383,7 +386,7 @@ export class ChatPaginator {
           const prev = newMessages[idx]!;
           const updated = input.retract === true
             ? { ...prev, retracted: true, dimmed: false }
-            : { ...prev, text: typeof input.text === "string" ? input.text : prev.text, dimmed: false };
+            : { ...prev, text: typeof input.text === "string" ? input.text : prev.text, details: parseDetails(input) ?? prev.details, dimmed: false };
           newMessages[idx] = updated;
           const newEl = this.cb.buildMessageEl(updated);
           frag.replaceChild(newEl, newEls[idx]!);
@@ -544,6 +547,8 @@ export class ChatPaginator {
 
     void highlightCodeBlocks(this.container);
     highlightInlineCode(this.container);
+    linkifyFilePaths(this.container);
+    linkifyDrillRefs(this.container);
     this.cb.clampUserMessages();
   }
 

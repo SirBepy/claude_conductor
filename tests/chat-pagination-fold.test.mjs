@@ -269,3 +269,27 @@ describe("pagination folds prepended turns", () => {
     expect(withMeta.querySelector(".turn-chip--tokens").textContent).toContain("2.0k");
   });
 });
+
+describe("pagination post-passes", () => {
+  it("turns file paths in a scrolled-up assistant message into file chips", async () => {
+    invokeRouter.queueOnce("load_history_page", {
+      events: [userEvent("later question", 2_000_000), assistantEvent("later answer", 2_001_000)],
+      oldest_seq: 10,
+      newest_seq: 12,
+      has_more: true,
+    });
+    invokeRouter.queueOnce("load_history_page", {
+      events: [userEvent("old question", 1_000_000), assistantEvent("Edited C:/Users/joe/proj/src/app.ts today", 1_001_000)],
+      oldest_seq: 0,
+      newest_seq: 9,
+      has_more: false,
+    });
+
+    const { renderer, container } = await makeRenderer();
+    await renderer.fetchOlder();
+
+    const chip = container.querySelector(".file-ref");
+    expect(chip).not.toBeNull();
+    expect(chip.textContent).toContain("app.ts");
+  });
+});

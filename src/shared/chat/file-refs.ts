@@ -62,9 +62,12 @@ function chipFor(ref: FileRef): HTMLElement {
 export function linkifyFilePaths(root: HTMLElement): void {
   const scope = root.matches(".msg.assistant") ? [root] : Array.from(root.querySelectorAll<HTMLElement>(".msg.assistant"));
   for (const msg of scope) {
-    const walker = document.createTreeWalker(msg, NodeFilter.SHOW_TEXT, {
+    // The owner window's NodeFilter, not the global: jsdom test setups expose
+    // document and HTMLElement globally but not NodeFilter.
+    const NF = (msg.ownerDocument.defaultView ?? window).NodeFilter;
+    const walker = msg.ownerDocument.createTreeWalker(msg, NF.SHOW_TEXT, {
       acceptNode: (n) =>
-        n.parentElement?.closest("pre, a, button, .file-ref") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+        n.parentElement?.closest("pre, a, button, .file-ref") ? NF.FILTER_REJECT : NF.FILTER_ACCEPT,
     });
     const hits: Array<{ node: Text; refs: FileRef[] }> = [];
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {

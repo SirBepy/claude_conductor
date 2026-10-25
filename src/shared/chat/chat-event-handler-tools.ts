@@ -4,6 +4,7 @@
 // dispatches into these exactly as before; behavior is byte-identical.
 
 import type { ChatEvent } from "../../types/ipc.generated";
+import { parseDetails } from "./chat-details";
 import { eventToRenderedMessage } from "./chat-event-to-message";
 import { parseFileEdit } from "./file-edits";
 import {
@@ -64,7 +65,7 @@ export function handleToolUseEvent(
   if (ev.tool_name === "mcp__cc_conductor__send_message" && !ev.parent_tool_use_id) {
     const text = typeof (ev.input as { text?: unknown })?.text === "string"
       ? (ev.input as { text: string }).text : "";
-    r.messages.push({ kind: "message", text, id: ev.id, ts, parentToolUseId: null });
+    r.messages.push({ kind: "message", text, id: ev.id, ts, parentToolUseId: null, details: parseDetails(ev.input) });
     return { touched: true, coalesce: false };
   }
   // Pushed HTML the user is meant to LOOK at: its own centered card row, not
@@ -100,7 +101,7 @@ export function handleToolUseEvent(
       const prev = r.messages[idx]!;
       r.messages[idx] = input.retract === true
         ? { ...prev, retracted: true, dimmed: false }
-        : { ...prev, text: typeof input.text === "string" ? input.text : prev.text, dimmed: false };
+        : { ...prev, text: typeof input.text === "string" ? input.text : prev.text, details: parseDetails(input) ?? prev.details, dimmed: false };
       r.dirtyIndices.add(idx);
     }
     return { touched: true, coalesce: false };
