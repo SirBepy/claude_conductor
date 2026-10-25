@@ -92,7 +92,11 @@ export async function initialLoadAndRestore(pane: HTMLElement, listEl: HTMLEleme
     // If a new chat was queued (e.g. project-detail "+"), launch it now. Takes
     // precedence over history-resume / last-selected restore.
     const pendingNew = consumePendingNewChat();
-    const pendingDashboard = consumePendingDashboard();
+    // A queued new chat already shows its project's dashboard in the draft, so
+    // the dashboard request is dropped rather than winning and swallowing the
+    // launch (it is still consumed so it cannot resurface on a later mount).
+    const queuedDashboard = consumePendingDashboard();
+    const pendingDashboard = pendingNew ? null : queuedDashboard;
     if (pendingDashboard) {
       await openDashboardPage(pendingDashboard.cwd, pendingDashboard.projectId);
     } else if (pendingNew) {

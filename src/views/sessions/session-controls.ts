@@ -14,7 +14,7 @@ import { closeChatWithConfirm } from "./close-chat";
 import { askConfirm } from "../../shared/confirm";
 import type { SessionConfig } from "./model-effort-modal";
 import { isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
-import { refreshWrapUpIndicator } from "./session-header";
+import { refreshWrapUpIndicator, projectDashboardOpener } from "./session-header";
 import { openDashboardPage } from "./project-dashboard/dashboard-page";
 
 // ── Shared pane + pending state ───────────────────────────────────────────────
@@ -67,8 +67,9 @@ export function queueHistoryResume(sessionId: string): void {
 
 /**
  * Select an already-live session on the next Sessions-view mount. Used by the
- * session-detail "Open in chats" CTA. Functionally the same select-on-mount as
- * history-resume (both target a session that's live in the registry).
+ * chats-window cross-window open request and open-jarvis. Functionally the
+ * same select-on-mount as history-resume (both target a session that's live in
+ * the registry).
  */
 export function queueSessionSelect(sessionId: string): void {
   _pendingHistoryResume = sessionId;
@@ -111,7 +112,9 @@ export function openFocusedChatDashboard(): void {
   const id = state.selectedId;
   if (!id || state.pendingNewSession?.placeholderId === id) return;
   const s = state.sessions.find((x) => x.session_id === id);
-  if (s?.cwd) openProjectDashboard(String(s.cwd), s.project_id || null);
+  // The header's opener already refuses a mirrored chat, whose cwd is a path on another machine.
+  if (!s || !projectDashboardOpener(s)) return;
+  openProjectDashboard(String(s.cwd), s.project_id || null);
 }
 
 // ── Global triggers ───────────────────────────────────────────────────────────

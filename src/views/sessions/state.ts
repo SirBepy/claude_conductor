@@ -198,7 +198,8 @@ function cwdForSession(id: string | null): string | null {
 
 export function setActiveSession(id: string | null): void {
   state.selectedId = id;
-  if (id && state.dashboardOpen) state.onChatActivated?.();
+  // Armed from the start of a dashboard open, not only once it is mounted.
+  if (id) state.onChatActivated?.();
   setSelectedSessionId(id);
   state.previewController?.setSessionScope(id);
   state.fabDial?.setSessionScope(id, cwdForSession(id));
