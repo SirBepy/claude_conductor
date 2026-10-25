@@ -32,10 +32,12 @@ class PushPolicyTest {
   }
 
   @Test
-  fun appStartAlwaysSyncsSoAPrunedHandleIsReplaced() {
-    assertEquals(true, PushPolicy.needsSyncAtStart(hasHandle = false, tokenDirty = false))
-    assertEquals(true, PushPolicy.needsSyncAtStart(hasHandle = true, tokenDirty = true))
-    assertEquals(true, PushPolicy.needsSyncAtStart(hasHandle = true, tokenDirty = false))
+  fun aHandleThePrunedRelayForgotIsReplacedAndStaysDirtyUntilThen() {
+    for (status in listOf(401, 404)) {
+      val outcome = PushPolicy.afterUpdate(status)
+      assertEquals(PushPolicy.AfterUpdate.REGISTER_FRESH, outcome)
+      assertEquals(false, PushPolicy.updateLeavesTokenClean(outcome))
+    }
   }
 
   @Test

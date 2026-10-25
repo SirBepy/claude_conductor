@@ -19,14 +19,6 @@ object PushPolicy {
     else -> AfterUpdate.RETRY_LATER
   }
 
-  // App start always syncs. The daemon drops a handle once the relay says it is
-  // gone, and nothing tells the phone; an /update at start finds that out (404 or
-  // 401 -> REGISTER_FRESH) and enrols a fresh handle, instead of the shell
-  // re-enrolling the same dead one on every launch. It also refreshes a token
-  // whose last /update or /register failed.
-  @Suppress("UNUSED_PARAMETER")
-  fun needsSyncAtStart(hasHandle: Boolean, tokenDirty: Boolean): Boolean = true
-
   // Each pending-chat delivery chain counts its own attempts, so overlapping chains
   // (unlock, WebView ready, onNewIntent) each keep the full window.
   const val OPEN_CHAT_MAX_ATTEMPTS = 15
