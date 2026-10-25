@@ -253,6 +253,13 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // mutators are exposed - the phone can pick an account to spawn under, not
     // reconfigure the desktop's accounts.
     ("list_accounts", P),
+    // The statusbar account chip's "move this chat to another account". It
+    // re-points one existing chat at an account the daemon already holds (the
+    // handler only sets the id and restarts the child), so it reconfigures no
+    // account itself - the same trust class as start_session's account_id.
+    // P, not PM: accounts are per-machine, so a peer's account ids mean nothing
+    // to this daemon's registry.
+    ("move_session_to_account", P),
     // Visual settings (theme, colors) so the phone mirrors the desktop appearance.
     // set_settings is deliberately NOT here (phone must not mutate desktop settings).
     ("get_settings", P),
@@ -592,6 +599,12 @@ mod tests {
         ] {
             assert!(allowed(m, &Transport::Phone), "{m} should be remotely callable");
         }
+    }
+
+    #[test]
+    fn move_session_to_account_is_phone_only() {
+        assert!(allowed("move_session_to_account", &Transport::Phone));
+        assert!(!allowed("move_session_to_account", &Transport::PeerMachine("m".into())));
     }
 
     #[test]
