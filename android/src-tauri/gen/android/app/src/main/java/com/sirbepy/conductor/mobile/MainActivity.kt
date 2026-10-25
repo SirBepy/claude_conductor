@@ -77,18 +77,19 @@ class MainActivity : TauriActivity() {
   // Held while locked so a tap never shows a chat behind the lock screen. The SPA
   // may not have installed __ccOpenChat yet right after launch, so a miss retries;
   // `attempt` is per call chain so overlapping chains do not eat each other's budget.
-  private fun deliverPendingChat(attempt: Int = 0) {
+  // A chain sticks to the chat it started with: once a newer tap replaces
+  // `pendingChatId`, the old chain stops, so its give-up never clears the new one.
+  private fun deliverPendingChat(attempt: Int = 0, chainId: String? = null) {
     val id = pendingChatId ?: return
+    if (chainId != null && chainId != id) return
     val view = webView ?: return
     if (locked) return
     val js = "(function(id){if(window.__ccOpenChat){window.__ccOpenChat(id);return true}return false})(${JSONObject.quote(id)})"
     view.evaluateJavascript(js) { result ->
-      if (result == "true") {
-        pendingChatId = null
-      } else if (PushPolicy.shouldRetryOpenChat(attempt + 1)) {
-        view.postDelayed({ deliverPendingChat(attempt + 1) }, 1000)
+      if (result == "true" || !PushPolicy.shouldRetryOpenChat(attempt + 1)) {
+        if (pendingChatId == id) pendingChatId = null
       } else {
-        pendingChatId = null
+        view.postDelayed({ deliverPendingChat(attempt + 1, id) }, 1000)
       }
     }
   }
