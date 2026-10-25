@@ -132,8 +132,9 @@ Beyond tracking Claude Code usage, this app manages Claude Code channels per pro
 
 - See every running Claude Code instance on your machine, live.
 - Configure "automated channels" per project that start at boot and stay alive.
-  - **Windows:** each channel runs in a hidden terminal; click **term** on its row to bring it to the foreground and type into it directly.
+  - **Windows:** each channel runs in a hidden terminal; choose **Show terminal** to bring it to the foreground and type into it directly.
   - **macOS:** channels run headless (no visible console). Stop/Restart work as on Windows; Show/Hide is not applicable.
+  - A channel never restarts itself. Its controls (**Restart channel**, **Show terminal**, **Phone link**, **Stop channel**) sit in the project dashboard's menu (the kebab and right-click), which works even when the channel is dead, and in the live channel chat's **Agent** menu.
 - Copy a phone link for any remote-control session to open it in the Claude mobile app.
 
 Replaces the previous `obsidian_claude_remote` tray app (now discontinued and archived).
