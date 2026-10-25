@@ -425,6 +425,14 @@ export class HttpTransport implements Transport {
           session_id: args.session_id ?? args.sessionId,
           model: args.model,
         });
+      // The daemon answers {session_id}; the Tauri command returns the bare id.
+      case "move_session_to_account": {
+        const res = await this.rpc<{ session_id: string }>("move_session_to_account", {
+          session_id: args.sessionId ?? args.session_id,
+          target_account_id: args.targetAccountId ?? args.target_account_id,
+        });
+        return res.session_id as unknown as T;
+      }
       case "set_auto_accept":
         return this.rpc<T>("set_auto_accept", {
           session_id: args.session_id ?? args.sessionId,
