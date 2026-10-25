@@ -198,6 +198,43 @@ describe("My browser mode", () => {
     dispose();
   });
 
+  it("saves a pasted extension token under the selected app and profile", async () => {
+    settings = { claudeBrowserMode: "mine", claudeBrowserMineApp: "brave", claudeBrowserMineProfile: "Profile 1" };
+    const { root, dispose } = await mount();
+    const token = root.querySelector("#chatDefaultsBrowserToken");
+    expect(token.type).toBe("password");
+    token.value = "  fake-token-a ";
+    token.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    const saved = await updateSettings.mock.results.at(-1).value;
+    expect(saved.claudeBrowserExtensionTokens).toEqual({ "brave/Profile 1": "fake-token-a" });
+    dispose();
+  });
+
+  it("shows each profile's own token and clearing the field removes only that entry", async () => {
+    settings = {
+      claudeBrowserMode: "mine",
+      claudeBrowserMineApp: "brave",
+      claudeBrowserMineProfile: "Default",
+      claudeBrowserExtensionTokens: { "brave/Default": "fake-a", "brave/Profile 1": "fake-b" },
+    };
+    const { root, dispose } = await mount();
+    expect(root.querySelector("#chatDefaultsBrowserToken").value).toBe("fake-a");
+    const profile = root.querySelector("#chatDefaultsBrowserProfile");
+    profile.value = "Profile 1";
+    profile.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    await flush();
+    const token = root.querySelector("#chatDefaultsBrowserToken");
+    expect(token.value).toBe("fake-b");
+    token.value = "";
+    token.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    const saved = await updateSettings.mock.results.at(-1).value;
+    expect(saved.claudeBrowserExtensionTokens).toEqual({ "brave/Default": "fake-a" });
+    dispose();
+  });
+
   it("the install button opens the Playwright extension's store page", async () => {
     settings = { claudeBrowserMode: "mine" };
     const { root, dispose } = await mount();

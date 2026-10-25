@@ -107,7 +107,9 @@ pub struct PlaywrightClient {
 }
 
 impl PlaywrightClient {
-    pub async fn start(node: &Path, cli: &Path, attach: &Attach, output_dir: &Path) -> Result<Self, String> {
+    /// `profile_token` is the extension token Settings holds for the profile
+    /// an `Attach::Extension` child drives; it beats the global env token.
+    pub async fn start(node: &Path, cli: &Path, attach: &Attach, output_dir: &Path, profile_token: Option<String>) -> Result<Self, String> {
         std::fs::create_dir_all(output_dir).map_err(|e| format!("create {}: {e}", output_dir.display()))?;
         let mut cmd = Command::new(node);
         cmd.arg(cli)
@@ -123,7 +125,7 @@ impl PlaywrightClient {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         if let Attach::Extension(_) = attach {
-            if let Some(token) = extension_token() {
+            if let Some(token) = pick_token(profile_token, extension_token()) {
                 cmd.env(EXTENSION_TOKEN_VAR, token);
             }
         }
