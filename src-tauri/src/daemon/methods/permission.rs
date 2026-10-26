@@ -37,6 +37,39 @@ async fn settle_prompt(state: &Arc<DaemonState>, request_id: &str, clear_awaitin
     }
 }
 
+/// How long the answered-question bridge may stand before it is withdrawn.
+/// Covers the desktop's respawn-and-retry send (a dead child is revived before
+/// `send_message` ever runs), which takes seconds, not minutes.
+const FOLLOWUP_BRIDGE: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// A fire-and-forget answer reaches the model as a separate follow-up message,
+/// and `send_message` only marks the chat busy once it runs. Between the
+/// settle's awaiting clear and that send the row would read Done, so show
+/// In Progress (`working`) until the send takes over; withdrawn after
+/// `FOLLOWUP_BRIDGE` if no turn ever started (answer dropped, send failed).
+fn bridge_to_followup_turn(state: &Arc<DaemonState>, session_id: &str) {
+    let Some(inst) = state.registry.get(session_id) else { return };
+    if inst.busy || inst.awaiting.is_some() {
+        return;
+    }
+    let gen = inst.turn_gen;
+    state.registry.set_awaiting(session_id, Some("working".into()));
+    crate::daemon::machines::publish_instances_changed(state);
+    let state = state.clone();
+    let sid = session_id.to_string();
+    tokio::spawn(async move {
+        tokio::time::sleep(FOLLOWUP_BRIDGE).await;
+        let stale = state
+            .registry
+            .get(&sid)
+            .is_some_and(|i| !i.busy && i.turn_gen == gen && i.awaiting.as_deref() == Some("working"));
+        if stale {
+            state.registry.set_awaiting(&sid, None);
+            crate::daemon::machines::publish_instances_changed(&state);
+        }
+    });
+}
+
 /// Core of `respond_permission`, factored out so the Jarvis `respond_worker_prompt`
 /// route (`daemon::methods::jarvis::respond_worker_prompt`) can answer a
 /// worker's permission prompt without going through the RPC `Router` (the
@@ -116,6 +149,11 @@ pub(crate) async fn respond_question_inner(
         None => false,
     };
     settle_prompt(state, request_id, true).await;
+    if !skipped && !delivered {
+        if let Some(sid) = session_id.as_deref() {
+            bridge_to_followup_turn(state, sid);
+        }
+    }
     if skipped {
         if let Some(sid) = session_id.as_deref() {
             record_skip(state, sid, request_id);
@@ -256,6 +294,46 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
             Ok(serde_json::json!({"ok": true, "delivered": delivered}))
         }
     });
+}
+
+#[cfg(test)]
+mod answer_bridge_tests {
+    use super::*;
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::types::Settings;
+    use serde_json::json;
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    fn state_with_idle_session(sid: &str) -> Arc<DaemonState> {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = Mutex::new(Settings::default());
+        state.registry.record_interactive_session(sid, Path::new("/tmp/x"), &settings, "2026-10-26T00:00:00Z");
+        state
+    }
+
+    /// A fire-and-forget answer must never leave a Done gap before the
+    /// follow-up send_message marks the chat busy.
+    #[tokio::test]
+    async fn answering_a_card_reads_in_progress_until_the_followup_send() {
+        let state = state_with_idle_session("s");
+        state.registry.set_awaiting("s", Some("question".into()));
+        state.add_prompt("q1", "question-requested", json!({"session_id": "s"}), true).await;
+
+        assert!(!respond_question_inner(&state, "q1", json!({}), false).await);
+        assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some("working"));
+    }
+
+    #[tokio::test]
+    async fn skipping_a_card_does_not_bridge() {
+        let state = state_with_idle_session("s");
+        state.registry.set_awaiting("s", Some("question".into()));
+        state.add_prompt("q1", "question-requested", json!({"session_id": "s"}), true).await;
+
+        respond_question_inner(&state, "q1", json!({}), true).await;
+        assert_eq!(state.registry.get("s").unwrap().awaiting, None);
+    }
 }
 
 #[cfg(test)]

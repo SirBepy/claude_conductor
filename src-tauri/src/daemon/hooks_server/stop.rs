@@ -146,6 +146,21 @@ pub(super) async fn on_stop(
         // carrying it forward would make a later interrupt blame subagents that
         // stopped running turns ago. See `hooks_server::subagents`.
         ctx.state.clear_live_subagents(&session_id);
+        // Settle the row now instead of at the `result` line: the CLI emits that
+        // line only after every OTHER Stop hook finishes and has been seen
+        // trailing this hook by 5s to 7 minutes, the whole time reading In
+        // Progress. Gated on a report for THIS gen so a late Stop from a
+        // superseded turn can't clear a newer turn's busy. The pump's result
+        // handler re-applies the same values, so this stays idempotent.
+        if let Some(status) = status {
+            let settled = activity.correct(Some(status.to_string()));
+            let settled = ctx.state.drop_unbacked_question_report(&session_id, settled).await;
+            ctx.state.registry.set_awaiting_if_gen(&session_id, settled, gen);
+            if ctx.state.registry.set_busy_false_if_gen(&session_id, gen) {
+                crate::sessions::chat_state::set_busy(&session_id, false);
+            }
+            crate::daemon::machines::publish_instances_changed(&ctx.state);
+        }
         // Title: durable transcript record, mirrors /close's manual rename.
         // Best-effort - a write failure must never block the turn.
         if let Some(title) = reported.as_ref().filter(|r| r.turn_gen == gen).and_then(|r| r.title.as_deref()) {
