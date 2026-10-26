@@ -113,6 +113,30 @@ afterEach(() => {
   // singleton the app reuses across repeat opens, nothing to tear down here.
 });
 
+describe("openModelEffortModal - Enter that opened the card", () => {
+  it("ignores the keydown being dispatched when it opened, accepts a fresh one", async () => {
+    remote.value = true;
+    // Stands in for the project picker's input: its Enter opens this card
+    // from inside the keydown dispatch, so the same event then bubbles to the
+    // card's fresh document listener.
+    const input = document.createElement("input");
+    document.body.append(input);
+    let settled = false;
+    let pending;
+    input.addEventListener("keydown", () => {
+      pending = openModelEffortModal("C:/Projects/alpha", "alpha").then((r) => { settled = true; return r; });
+    });
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(settled).toBe(false);
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(await pending).not.toBeNull();
+    input.remove();
+  });
+});
+
 describe("openModelEffortModal - persistAccountBinding's isRemote guard (todo 1066)", () => {
   it("desktop: registers the project and binds the picked account", async () => {
     remote.value = false;

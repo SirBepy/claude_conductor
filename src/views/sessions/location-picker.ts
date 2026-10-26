@@ -163,7 +163,12 @@ export function openLocationModal(
     // whole step on a second press. Both branches are guarded to only act
     // while THIS step's card is the one mounted - the promise stays
     // unresolved while worktree-picker's card is on top of it (changeWorktree).
+    // The Enter that picked the project in the previous card is still
+    // bubbling when this listener attaches and would submit this step too;
+    // the event being dispatched while this step arms is not ours.
+    const armingEvent = window.event;
     const keydownHandler = (e: KeyboardEvent) => {
+      if (e === armingEvent) return;
       if (!slot.querySelector('[data-picker-step="location"]')) return;
       if (e.key === "Enter" && scopes !== null && !scopeExpanded) {
         e.preventDefault();
