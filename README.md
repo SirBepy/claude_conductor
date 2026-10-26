@@ -111,6 +111,15 @@ Windows and Apple Silicon macOS are the released platforms. Intel macOS and Linu
   </tr>
 </table>
 
+<table>
+  <tr>
+    <td width="50%" valign="top"><img src="docs/readme/overlay.png" alt="Floating usage overlay: one dial per account over the desktop" width="100%"><br><sub>🫧 The floating usage overlay: outer ring 5h, inner ring weekly</sub></td>
+    <td width="50%" valign="top"><img src="docs/readme/overlay-hover.png" alt="Hovering a dial shows its usage, safe pace and reset times" width="100%"><br><sub>🔎 Hover a dial for usage vs <a href="https://github.com/SirBepy/windows_taskbar_widgets#-claude-usage-and-safe-pace">safe pace</a> and reset times</sub></td>
+  </tr>
+</table>
+
+Right-click the tray icon > **Show overlay**. With [Taskbar Widgets](https://github.com/SirBepy/windows_taskbar_widgets) installed, the same dials sit in your taskbar instead.
+
 ## 🧭 How it fits together
 
 ```mermaid
