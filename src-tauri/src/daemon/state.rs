@@ -142,6 +142,9 @@ pub struct DaemonState {
     /// back in THAT call's own tool response and never touches the session's
     /// stdin (todo 743). See `state::step_comments` for the full lifecycle.
     pub step_comments: Arc<Mutex<HashMap<String, HashMap<String, String>>>>,
+    /// Console-derived credit figures per `ApiCredit` account, and the block
+    /// flag the send/spawn gate reads - see `daemon::api_credit`.
+    pub api_credit: crate::daemon::api_credit::ApiCreditHub,
 }
 
 impl DaemonState {
@@ -186,6 +189,7 @@ impl DaemonState {
             relays: Arc::new(Mutex::new(HashMap::new())),
             iroh_dialer: tokio::sync::OnceCell::new(),
             step_comments: Arc::new(Mutex::new(HashMap::new())),
+            api_credit: crate::daemon::api_credit::ApiCreditHub::new(),
         })
     }
 

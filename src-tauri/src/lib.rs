@@ -186,6 +186,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ipc::get_current_usage,
             ipc::get_usage_map,
+            ipc::get_api_credit_status,
+            ipc::refresh_api_credit_status,
+            ipc::set_console_session,
             ipc::get_auth_state_map,
             ipc::get_history,
             ipc::get_settings,

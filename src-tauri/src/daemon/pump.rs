@@ -438,6 +438,12 @@ pub(crate) async fn run_stdout_pump(
                                 // busy/ended/empty-queue guards when there's nothing to
                                 // deliver.
                                 crate::daemon::repo_channel_wake::spawn_drain(&state_for_pump, &pump_session.session_id);
+                                // A turn on an API-credit account just spent credit: re-read
+                                // the Console so the next turn's gate sees it. No-op for
+                                // every other account.
+                                if live_turn {
+                                    crate::daemon::api_credit::nudge_after_turn(&state_for_pump, &pump_session.account_id);
+                                }
                                 if let Some(active) = turn_autopilot_changed {
                                     state_for_pump.registry.set_autopilot(&pump_session.session_id, active);
                                 }

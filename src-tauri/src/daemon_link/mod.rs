@@ -343,6 +343,13 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
             }
         }
         "skill_usage_changed" => { let _ = app.emit("skill-usage-changed", serde_json::json!({})); }
+        // An API-credit account's Console figures or block flag changed
+        // (`daemon::api_credit::store`). Pure forward; payload is
+        // `{ account_id, status }` and the meter also reads
+        // `get_api_credit_status` on open.
+        "api_credit_status_changed" => {
+            let _ = app.emit("api-credit-status-changed", params);
+        }
         // Character turn sound: the daemon fires this when an in-app chat finishes
         // a turn (done / plain-text question) or surfaces an AskUserQuestion. We
         // map it to the existing notification path so it resolves the session

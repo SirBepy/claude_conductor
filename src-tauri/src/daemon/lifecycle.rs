@@ -20,6 +20,11 @@ const VALID_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 /// not be retried, it must be held.
 pub const SESSION_BUSY_CODE: i32 = -32006;
 
+/// RPC code for [`LifecycleError::ApiCreditBlocked`]. Like `-32006` it must not
+/// be retried or respawned: the account has no credit to spend until its cycle
+/// resets or Joe raises the Console limit.
+pub const API_CREDIT_BLOCKED_CODE: i32 = -32007;
+
 /// Is this session mid-turn right now. The one predicate every busy-refusal
 /// site shares (todo 886) - `refuse_if_busy` below and `schedule_fire.rs`'s
 /// own guard used to carry byte-identical copies of this same registry read.
@@ -42,6 +47,41 @@ pub fn refuse_if_busy(
         return Err(LifecycleError::Busy(session_id.to_string()));
     }
     Ok(())
+}
+
+/// `Err(ApiCreditBlocked)` when `account_id` is an API-credit account whose
+/// cached Console status says it is out of credit or at its spend limit. An
+/// account with no status (a subscription account, or one not polled yet)
+/// passes: unknown never blocks.
+pub fn refuse_account_if_api_credit_blocked(
+    state: &crate::daemon::state::DaemonState,
+    account_id: &str,
+) -> Result<(), LifecycleError> {
+    match state.api_credit.blocked_reason(account_id) {
+        Some(reason) => {
+            log::warn!("daemon: refused a turn on API-credit account {account_id}: {reason}");
+            Err(LifecycleError::ApiCreditBlocked(reason))
+        }
+        None => Ok(()),
+    }
+}
+
+/// [`refuse_account_if_api_credit_blocked`] for the account `session_id` runs
+/// under: the live child's, else the registry's. An unknown session passes and
+/// is left to the caller's own NotFound.
+pub fn refuse_if_api_credit_blocked(
+    state: &crate::daemon::state::DaemonState,
+    session_id: &str,
+) -> Result<(), LifecycleError> {
+    let account_id = state
+        .sessions
+        .get(session_id)
+        .map(|s| s.account_id.clone())
+        .or_else(|| state.registry.get(session_id).and_then(|i| i.account_id));
+    match account_id {
+        Some(id) => refuse_account_if_api_credit_blocked(state, &id),
+        None => Ok(()),
+    }
 }
 
 /// Accept both bare family aliases (`opus`) and full model ids
@@ -126,6 +166,12 @@ pub enum LifecycleError {
     /// Display all the way to the webview, where `isSessionBusyError` keys off it.
     #[error("SESSION_BUSY: session {0} is mid-turn - hold this message until the turn ends")]
     Busy(String),
+    /// The `API_CREDIT_BLOCKED:` prefix is load-bearing like `SESSION_BUSY:`:
+    /// it survives every transport as plain text, so a client can tell the
+    /// refusal from a failure. The payload is the human reason, e.g. "Console
+    /// spend limit $200 reached, resets 2026-11-01".
+    #[error("API_CREDIT_BLOCKED: {0}")]
+    ApiCreditBlocked(String),
 }
 
 #[cfg(test)]
@@ -135,6 +181,54 @@ mod tests {
     use crate::daemon::settings_cache::SettingsCache;
     use crate::daemon::state::DaemonState;
     use crate::types::Settings;
+
+    fn blocked_status(account_id: &str) -> crate::accounts::ApiCreditStatus {
+        crate::accounts::ApiCreditStatus {
+            account_id: account_id.into(),
+            blocked: true,
+            block_reason: Some("API credit for this cycle is used up, resets 2026-11-02".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn api_credit_gate_refuses_a_blocked_account_by_registry_binding() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        for sid in ["on-api", "on-sub", "unbound"] {
+            state.registry.record_interactive_session(sid, std::path::Path::new("/tmp/x"), &settings, "2026-10-26T00:00:00Z");
+        }
+        state.registry.set_account("on-api", "api-1");
+        state.registry.set_account("on-sub", "sub-1");
+        crate::daemon::api_credit::store(&state, blocked_status("api-1"));
+
+        let err = refuse_if_api_credit_blocked(&state, "on-api").expect_err("blocked account must refuse");
+        assert!(matches!(err, LifecycleError::ApiCreditBlocked(_)), "{err:?}");
+        assert!(err.to_string().starts_with("API_CREDIT_BLOCKED: API credit for this cycle is used up"), "{err}");
+        assert!(refuse_if_api_credit_blocked(&state, "on-sub").is_ok(), "another account is untouched");
+        assert!(refuse_if_api_credit_blocked(&state, "unbound").is_ok(), "no account bound: unknown never blocks");
+        assert!(refuse_if_api_credit_blocked(&state, "ghost").is_ok(), "unknown session is the caller's NotFound");
+
+        // Lifting the block (a new cycle, a raised limit) lets turns through again.
+        let mut ok = blocked_status("api-1");
+        ok.blocked = false;
+        ok.block_reason = None;
+        crate::daemon::api_credit::store(&state, ok);
+        assert!(refuse_if_api_credit_blocked(&state, "on-api").is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_blocked_api_credit_chat_refuses_before_any_respawn() {
+        // The session is not live, so an unguarded send would try to respawn
+        // it (and fail with CwdMissing for this bogus cwd). The gate must win.
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("blocked-sid", std::path::Path::new("Z:\\does\\not\\exist"), "p", "2026-10-26T00:00:00Z");
+        state.registry.set_account("blocked-sid", "api-1");
+        crate::daemon::api_credit::store(&state, blocked_status("api-1"));
+
+        let r = send_message_with_respawn(&state, "blocked-sid", "hi", false).await;
+        assert!(matches!(r, Err(LifecycleError::ApiCreditBlocked(_))), "{r:?}");
+    }
 
     #[test]
     fn refuse_if_busy_only_refuses_a_mid_turn_session() {

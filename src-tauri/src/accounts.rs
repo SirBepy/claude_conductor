@@ -6,6 +6,7 @@
 
 pub mod model;
 pub mod api_credit;
+pub mod api_credit_status;
 pub mod store;
 pub mod identity;
 pub mod keychain;
@@ -18,6 +19,7 @@ pub mod credentials;
 pub mod migration;
 
 pub use model::*;
+pub use api_credit_status::ApiCreditStatus;
 pub use identity::{terminal_identity, OauthAccountInfo};
 pub use wizard::WizardSession;
 
