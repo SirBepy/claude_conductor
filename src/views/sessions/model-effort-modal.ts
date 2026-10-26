@@ -285,7 +285,13 @@ export async function openModelEffortModal(
       resolve(result);
     }
 
+    // A listener added to document mid-dispatch still receives the event
+    // that is already bubbling, so the Enter that picked the project in the
+    // previous card would confirm this one too. The event being dispatched
+    // while this card arms is not ours.
+    const armingEvent = window.event;
     function onKey(e: KeyboardEvent) {
+      if (e === armingEvent) return;
       if (e.key === "Escape") {
         e.preventDefault();
         close(null);
