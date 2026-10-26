@@ -110,13 +110,13 @@ test.describe("view-harness / AUQ slash-suggestion popup", () => {
     await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("done");
     await nextArrow.click();
 
+    await card.locator('[data-act="add-note"]').click();
     const extraInput = card.locator(".prompt-extra-input");
     await expect(extraInput).toBeVisible();
     await extraInput.fill("remember to /cl");
 
-    // The popup mounts as a child of its textarea's `.prompt-q__other` anchor,
-    // which now lives in the fixed answer bar, not the (summary) panel.
-    const popup = card.locator(".prompt-card__answer-bar .caret-popup");
+    // Review's note field lives in the summary panel, under the last answer.
+    const popup = card.locator(".prompt-summary__note .caret-popup");
     await expect(popup).toBeVisible();
     await popup.locator(".row").click();
     await expect(extraInput).toHaveValue("remember to /close ");

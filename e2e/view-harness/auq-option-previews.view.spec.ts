@@ -122,7 +122,7 @@ test.describe("view-harness / AUQ option previews", () => {
 
     await panel.locator(".prompt-opt").nth(1).click();
     await expect.poll(() => picked(page)).toBe("Two");
-    await page.locator('[data-act="cancel"]').hover();
+    await page.locator('[data-act="primary"]').hover();
     await expect.poll(() => stageLabel(page)).toBe("Two");
     await page.locator(".prompt-card").screenshot({ path: ".for_bepy/screenshots/_specs/auq-option-previews-stage.png" });
   });

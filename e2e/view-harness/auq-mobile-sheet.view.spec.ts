@@ -147,14 +147,21 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await expect(page.locator(".session-composer textarea").first()).toBeHidden();
   });
 
-  test("phone page: back arrow returns to the chat, latest messages showing above the collapsed bar", async ({ page }) => {
+  // Joe, 2026-10-26: no back arrow; minimize sits at the header's right edge,
+  // where desktop has it.
+  test("phone page: minimize at the header's right returns to the chat, latest messages showing above the collapsed bar", async ({ page }) => {
     const events = Array.from({ length: 12 }, (_, i) => [userMsg(`question ${i}`), assistantMsg(`answer ${i}`)]).flat();
     await mountPhoneSession(page, events);
     await openQuestionCard(page, SHORT_QUESTIONS);
     await expect(page.locator(".prompt-card__handle")).toBeHidden();
-    await expect(page.locator('.prompt-card [data-act="minimize"]')).toBeHidden();
+    await expect(page.locator('.prompt-card [data-act="back"]')).toHaveCount(0);
+    const minimize = page.locator('.prompt-card__header [data-act="minimize"]');
+    await expect(minimize).toBeVisible();
+    const headerBox = (await page.locator(".prompt-card__header").boundingBox())!;
+    const minBox = (await minimize.boundingBox())!;
+    expect(headerBox.x + headerBox.width - (minBox.x + minBox.width)).toBeLessThan(12);
 
-    await page.locator('.prompt-card [data-act="back"]').click();
+    await minimize.click();
 
     const bar = page.locator(".prompt-collapsed");
     await expect(bar).toBeVisible();
@@ -190,17 +197,42 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     expect(barBox.width).toBe(PHONE.width);
   });
 
-  test("phone page: no Skip/Next row; Skip sits in the header and dismisses the card", async ({ page }) => {
+  // Joe, 2026-10-26: Skip throws the whole card away, so it lives on the
+  // minimized bar only, never on the open page.
+  test("phone page: no Skip/Next row; Skip sits on the minimized bar and dismisses the card", async ({ page }) => {
     await mountPhoneSession(page);
     await openQuestionCard(page, SHORT_QUESTIONS);
-    await expect(page.locator('.prompt-card__footer [data-act="cancel"]')).toBeHidden();
+    await expect(page.locator('.prompt-card [data-act="cancel"], .prompt-card [data-act="skip"]')).toHaveCount(0);
     await expect(page.locator('.prompt-card__footer [data-act="primary"]')).toBeHidden();
 
-    const skip = page.locator('.prompt-card__header [data-act="skip"]');
+    await page.locator('.prompt-card__header [data-act="minimize"]').click();
+    const skip = page.locator('.prompt-collapsed [data-act="cancel"]');
     await expect(skip).toBeVisible();
     await expect(skip).toHaveText("Skip");
     await skip.click();
-    await expect(page.locator(".prompt-card")).toHaveCount(0);
+    await expect(page.locator(".prompt-card, .prompt-collapsed")).toHaveCount(0);
+  });
+
+  test("phone page: review is a full-width Submit with no answer box", async ({ page }) => {
+    await mountPhoneSession(page);
+    await openQuestionCard(page, [
+      { question: "First?", options: [{ label: "A" }, { label: "B" }] },
+      { question: "Second?", options: [{ label: "C" }, { label: "D" }] },
+    ]);
+    await page.locator('.prompt-panel.is-active .prompt-opt', { hasText: "A" }).click();
+    await page.locator('.prompt-panel.is-active .prompt-opt', { hasText: "C" }).click();
+    await page.locator('.prompt-pager [data-nav="1"]').click();
+    await expect(page.locator(".prompt-panel.is-active .prompt-summary")).toBeVisible();
+
+    await expect(page.locator(".prompt-card__answer-bar textarea")).toHaveCount(0);
+    const submit = page.locator('.prompt-card__footer [data-act="primary"]');
+    await expect(submit).toBeVisible();
+    await expect(submit).toHaveText(/Submit/);
+    const footerBox = await settledBox(page.locator(".prompt-card__footer"));
+    const submitBox = (await submit.boundingBox())!;
+    // Full width inside the footer's 8px side padding.
+    expect(submitBox.width).toBeGreaterThan(footerBox.width - 20);
+    await expect(page.locator('.prompt-summary__note [data-act="add-note"]')).toBeVisible();
   });
 
   test("phone page: on the last page the send arrow submits with no text typed, in the primary color", async ({ page }) => {

@@ -163,6 +163,48 @@
   line-height: 1.4;
 }
 
+/* Per-option note (ticked options only). The pencil is pinned to the row's
+ * vertical centre on the right; the body grows so the note box gets the
+ * whole width beside it. */
+.prompt-opt:has(.prompt-opt__pencil) .prompt-opt__body {
+  flex: 1 1 auto;
+}
+.prompt-opt__pencil {
+  align-self: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--color-text-muted);
+}
+.prompt-opt__pencil.is-on {
+  color: var(--dom, var(--color-primary));
+}
+.prompt-opt__note {
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 2px solid var(--dom, var(--color-primary));
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.prompt-opt__note-input {
+  margin-top: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 52px;
+  resize: vertical;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--color-text);
+  background: var(--color-background);
+  border: 1px solid var(--dom, var(--color-primary));
+  border-radius: 8px;
+  outline: none;
+  cursor: text;
+}
+
 /* Pasted-image attachments (question-ui.ts, gated on supportsExtras).
  * Attachment chip styles (.attachment/.rm/etc.) come from composer.css's
  * .composer-attachments rules, already global. */
@@ -251,6 +293,22 @@
   border-radius: 999px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+.prompt-collapsed__skip {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.prompt-collapsed__skip:hover {
+  color: var(--color-text);
+  background: var(--color-surface-alt);
 }
 .prompt-collapsed__dot {
   width: 7px;

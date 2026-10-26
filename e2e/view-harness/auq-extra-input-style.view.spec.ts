@@ -6,7 +6,8 @@ import { mountView } from "./harness";
 // Regression: the review step's "add a message" textarea once rendered
 // browser-default (monospace, white border, resize grip) inside the dark card.
 // It is now the shared composer field (composer-field.ts), so it must carry
-// the chat composer's own look and its paper-plane send.
+// the chat composer's own look - minus its paper-plane, since review's one
+// Submit button is the only way forward. It sits behind an "Add a note" row.
 // Only reachable with 2+ questions - the extra field lives on the summary step.
 
 test("review step's extra-message textarea is the shared composer field", async ({ page }) => {
@@ -36,7 +37,8 @@ test("review step's extra-message textarea is the shared composer field", async 
   await card.locator(".prompt-card__answer-bar .prompt-q__other-input").fill("b");
   await nextArrow.click();
 
-  const extra = card.locator(".prompt-extra-input");
+  await card.locator('[data-act="add-note"]').click();
+  const extra = card.locator(".prompt-summary__note .prompt-extra-input");
   await expect(extra).toBeVisible();
 
   const style = await extra.evaluate((el) => {
@@ -53,8 +55,8 @@ test("review step's extra-message textarea is the shared composer field", async 
   // The textarea is transparent so the highlight backdrop shows through; the
   // surface fill lives on .composer-input-wrap, which would render
   // transparent if the stylesheet regressed.
-  const wrap = card.locator(".prompt-card__answer-bar .composer-input-wrap");
+  const wrap = card.locator(".prompt-summary__note .composer-input-wrap");
   const wrapBg = await wrap.evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(wrapBg).not.toBe("rgba(0, 0, 0, 0)");
-  await expect(card.locator(".prompt-card__answer-bar .composer-field-send .ph-paper-plane-right")).toBeVisible();
+  await expect(card.locator(".prompt-summary__note .composer-field-send")).toHaveCount(0);
 });

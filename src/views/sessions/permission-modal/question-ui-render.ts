@@ -20,7 +20,7 @@ import { createPreviewFullscreen } from "./preview-fullscreen";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqSlashPopupController } from "./slash-popup";
 import { ASK_OPEN_EVENT, askContextText } from "../ask-open-event";
-import type { Question, QuestionUIOpts, Selection } from "./types";
+import type { OptionNotes, Question, QuestionUIOpts, Selection } from "./types";
 
 export type { QuestionRenderState };
 
@@ -33,6 +33,7 @@ export interface QuestionRenderDeps {
   noneLabel: string;
   selections: Map<number, Selection>;
   freeText: Map<number, string>;
+  notes: OptionNotes;
   state: QuestionRenderState;
   auqAttachments: AuqAttachmentsController;
   slashPopup: AuqSlashPopupController;
@@ -63,7 +64,7 @@ export interface QuestionCardRenderer {
 
 export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCardRenderer {
   const {
-    host, opts, questions, hasSummary, totalPanels, noneLabel, selections, freeText,
+    host, opts, questions, hasSummary, totalPanels, noneLabel, selections, freeText, notes,
     state, auqAttachments, slashPopup, messagesEl, answeredAt, answerPreview, submit,
     cancel, notifyDraftChange,
   } = deps;
@@ -111,6 +112,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       : nextArrowDisabled(state.activeTab, totalPanels, questions, answeredAt);
     btn.innerHTML = `<i class="ph ${isSubmitMode ? opts.submitIcon : "ph-caret-right"}"></i> ${escapeHtml(isSubmitMode ? opts.submitLabel : "Next")}`;
     btn.onclick = isSubmitMode ? submit : advance;
+    // Review's Submit is the step's only control, so it grows into a CTA
+    // (permission-modal-shell.css): full width on the phone, capped on desktop.
+    btn.classList.toggle("prompt-submit-cta", isReviewTab());
   }
 
   const syncAnswerBar = createAnswerBarSync({
@@ -177,6 +181,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     } else if (checked) {
       selections.set(qi, label);
     }
+    if (state.editingNote?.qi === qi && !isPicked(qi, state.editingNote.label)) state.editingNote = null;
     // Single-select: auto-advance to next unanswered panel.
     if (autoAdvance && !q.multiSelect && questions.length > 1) {
       const next = questions.findIndex((_, i) => i !== qi && !answeredAt(i));
@@ -202,6 +207,67 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     }
   }
 
+  function isReviewTab(): boolean {
+    return hasSummary && state.activeTab === questions.length;
+  }
+
+  function isPicked(qi: number, label: string): boolean {
+    const sel = selections.get(qi);
+    return sel instanceof Set ? sel.has(label) : sel === label;
+  }
+
+  // The notes that will actually ship: only on options still ticked.
+  function tickedNotes(qi: number): [string, string][] {
+    return Array.from(notes.get(qi) ?? [])
+      .filter(([label, text]) => text.trim() && isPicked(qi, label))
+      .map(([label, text]) => [label, text.trim()]);
+  }
+
+  function openNote(qi: number, label: string | null): void {
+    state.editingNote = label === null ? null : { qi, label };
+    render();
+    if (label === null) return;
+    const field = host.querySelector<HTMLTextAreaElement>(`.prompt-panel[data-panel="${qi}"] .prompt-opt__note-input`);
+    field?.focus();
+    if (field) field.selectionStart = field.selectionEnd = field.value.length;
+  }
+
+  // Everything here sits inside the option's <label>, so each click handler
+  // preventDefaults: a click on the label's plain text would otherwise toggle
+  // the option it is annotating.
+  function wireOptionNotes(): void {
+    const panelOf = (el: Element): number => Number(el.closest<HTMLElement>(".prompt-panel")?.dataset.panel);
+    host.querySelectorAll<HTMLButtonElement>("[data-note-toggle]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        const qi = panelOf(btn);
+        const label = btn.dataset.noteToggle ?? "";
+        const open = state.editingNote?.qi === qi && state.editingNote.label === label;
+        openNote(qi, open ? null : label);
+      });
+    });
+    host.querySelectorAll<HTMLElement>(".prompt-opt__note").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        const label = el.closest(".prompt-opt")?.querySelector<HTMLInputElement>("input")?.dataset.label;
+        if (label !== undefined) openNote(panelOf(el), label);
+      });
+    });
+    host.querySelectorAll<HTMLTextAreaElement>(".prompt-opt__note-input").forEach((field) => {
+      field.addEventListener("click", (e) => e.preventDefault());
+      field.addEventListener("input", () => {
+        const qi = panelOf(field);
+        const label = field.dataset.noteFor ?? "";
+        const forQ = notes.get(qi) ?? new Map<string, string>();
+        if (field.value.trim()) forQ.set(label, field.value);
+        else forQ.delete(label);
+        notes.set(qi, forQ);
+        syncMessagesPadding();
+        notifyDraftChange();
+      });
+    });
+  }
+
   const render = () => {
     // The old textareas (and the popups anchored to them) are about to be
     // thrown away by the innerHTML rebuild below - drop the popups' own
@@ -217,8 +283,12 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       : null;
 
     if (minimized) {
-      host.innerHTML = collapsedHtml(hasSummary, state.activeTab, questions, totalPanels);
+      host.innerHTML = collapsedHtml(hasSummary, state.activeTab, questions, totalPanels, opts.cancelLabel);
       host.querySelector(".prompt-collapsed")?.addEventListener("click", () => { minimized = false; render(); });
+      host.querySelector('.prompt-collapsed [data-act="cancel"]')?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        cancel();
+      });
     } else {
       // ph-flask-round is not a Phosphor 2.1.1 name, so this painted nothing
       // until 2026-08-22 (ai_todo 737).
@@ -234,17 +304,16 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       // Overrides the caller's icon rather than relying on that 0.45-opacity
       // badge: unplugged glyph = this card did not come from the MCP tool.
       const titleIcon = opts.degradedBuiltin ? "ph-plugs" : (opts.titleIcon || "ph-chat-circle-dots");
-      // The back arrow and the header Skip only show on the phone's
-      // fullscreen page (permission-modal-shell.css); desktop keeps the icon
-      // and the footer's Skip.
-      const titleHtml = `<button type="button" class="icon-btn-sq prompt-icon-btn prompt-card__back" data-act="back" title="Back to chat"><i class="ph ph-arrow-left"></i></button><span class="prompt-card__title"><i class="ph ${titleIcon}"></i></span>`;
-      const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${olderPendingBadge}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="ask" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button><button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button><button type="button" class="prompt-card__skip" data-act="skip">${escapeHtml(opts.cancelLabel)}</button>`;
-      const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts)).join("")
-        + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments) : "");
-      const footerHtml = `
-        <button type="button" class="btn btn-secondary" data-act="cancel">${escapeHtml(opts.cancelLabel)}</button>
-        <button type="button" class="btn btn-primary" data-act="primary"></button>
-      `;
+      // Same header on phone and desktop (Joe, 2026-10-26): minimize sits far
+      // right on both, and Skip lives on the minimized bar (collapsedHtml).
+      const titleHtml = `<span class="prompt-card__title"><i class="ph ${titleIcon}"></i></span>`;
+      const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${olderPendingBadge}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="ask" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button><button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
+      const editing = (qi: number): string | null => state.editingNote?.qi === qi ? state.editingNote.label : null;
+      const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts, notes.get(qi), editing(qi))).join("")
+        + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments, tickedNotes) : "");
+      // The CTA class is baked in here, not only toggled after: .btn transitions
+      // `all`, so adding it after insertion animated the button's width.
+      const footerHtml = `<button type="button" class="btn btn-primary${isReviewTab() ? " prompt-submit-cta" : ""}" data-act="primary"></button>`;
       host.innerHTML = renderCardShell(headerHtml, `<div class="prompt-track-viewport"><div class="prompt-track">${panelsHtml}</div></div>`, footerHtml);
 
       void linkifyTickets(host, opts.cwd ?? undefined);
@@ -277,8 +346,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
           if (q) window.dispatchEvent(new CustomEvent(ASK_OPEN_EVENT, { detail: { text: askContextText(q) } }));
         });
       });
-      host.querySelectorAll<HTMLButtonElement>('[data-act="minimize"], [data-act="back"]')
-        .forEach((btn) => btn.addEventListener("click", () => { minimize(); }));
+      host.querySelector<HTMLButtonElement>('[data-act="minimize"]')
+        ?.addEventListener("click", () => { minimize(); });
+      wireOptionNotes();
 
       host.querySelectorAll<HTMLInputElement>(".prompt-q__opts input").forEach((input) => {
         input.addEventListener("change", () => {
@@ -307,9 +377,6 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       previews.sync();
       fullscreen.sync();
 
-      // The header's copy is the phone page's Skip (permission-modal-shell.css).
-      host.querySelectorAll<HTMLButtonElement>('[data-act="cancel"], [data-act="skip"]')
-        .forEach((btn) => btn.addEventListener("click", cancel));
       host.querySelectorAll<HTMLButtonElement>('[data-summary-tab]').forEach((btn) => {
         btn.addEventListener("click", () => {
           const idx = Number(btn.dataset.summaryTab);

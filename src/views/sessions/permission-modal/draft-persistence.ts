@@ -29,6 +29,8 @@ interface StoredDraft {
   activeTab: number;
   additionalMessage?: string;
   attachments?: StoredAttachment[];
+  /** Per-option notes as [questionIndex, [label, text][]][]. */
+  notes?: [number, [string, string][]][];
   /** Stamped by saveQuestionDraft, absent on a pre-migration entry (treated
    *  as older than any timestamped source - see loadQuestionDraftMeta). */
   updatedAt?: string;
@@ -46,6 +48,11 @@ export function serializeQuestionDraft(draft: QuestionDraft): unknown {
       .filter((a): a is typeof a & { path: string } => Boolean(a.path))
       .map((a) => ({ mime: a.mime, path: a.path, filename: a.filename, size: a.size, panel: a.panel })),
   };
+  const notes = Array.from(draft.notes ?? [], ([qi, m]) => [qi, Array.from(m).filter(([, t]) => t.trim())] as [number, [string, string][]])
+    .filter(([, entries]) => entries.length);
+  // Omitted when empty, so a note-free draft serializes exactly as before and
+  // auq-draft-sync's echo check still matches older clients' copies.
+  if (notes.length) stored.notes = notes;
   return stored;
 }
 
@@ -65,6 +72,11 @@ export function deserializeQuestionDraft(payload: unknown): QuestionDraft | null
     activeTab: typeof parsed.activeTab === "number" ? parsed.activeTab : 0,
     additionalMessage: typeof parsed.additionalMessage === "string" ? parsed.additionalMessage : "",
     attachments,
+    notes: new Map(
+      (Array.isArray(parsed.notes) ? parsed.notes : [])
+        .filter((e) => Array.isArray(e) && typeof e[0] === "number" && Array.isArray(e[1]))
+        .map(([qi, entries]) => [qi, new Map(entries.filter((p) => typeof p?.[0] === "string" && typeof p?.[1] === "string"))]),
+    ),
   };
 }
 

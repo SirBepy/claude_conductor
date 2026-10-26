@@ -86,11 +86,14 @@ describe("AUQ card vs the phone back button", () => {
     expect(opts.onSubmit).not.toHaveBeenCalled();
   });
 
-  it("the header's back arrow collapses the card without skipping", () => {
+  // The phone header lost its back arrow (Joe, 2026-10-26): minimize is the
+  // one header control that collapses, on phone and desktop alike.
+  it("the header's minimize collapses the card without skipping", () => {
     const opts = baseOpts();
     renderQuestionUI(opts);
+    expect(document.querySelector('[data-act="back"]')).toBeNull();
 
-    document.querySelector('[data-act="back"]').click();
+    document.querySelector('[data-act="minimize"]').click();
 
     expect(document.querySelector(".prompt-collapsed")).not.toBeNull();
     expect(opts.onCancel).not.toHaveBeenCalled();

@@ -76,7 +76,8 @@ test.describe("view-harness / reopening a transcript question card settles the D
     await expect(card).toHaveCount(1);
     await expect(card).toContainText("How should I handle the red gate?");
 
-    await card.locator('[data-act="cancel"]').click();
+    await card.locator('[data-act="minimize"]').click();
+    await page.locator('.prompt-collapsed [data-act="cancel"]').click();
 
     const calls = await respondQuestionCalls(page);
     expect(calls).toHaveLength(1);
@@ -115,7 +116,8 @@ test.describe("view-harness / reopening a transcript question card settles the D
     expect(await page.evaluate(() => window.__reopened)).toBe(true);
     await expect(page.locator(".prompt-card")).toContainText("Survived the daemon restart?");
 
-    await page.locator('.prompt-card [data-act="cancel"]').click();
+    await page.locator('.prompt-card [data-act="minimize"]').click();
+    await page.locator('.prompt-collapsed [data-act="cancel"]').click();
     const calls = await respondQuestionCalls(page);
     expect(calls[0]!.args?.id).toBe(TRANSCRIPT_CARD_ID);
   });
