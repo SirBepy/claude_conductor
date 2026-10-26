@@ -4,10 +4,10 @@
 import { html, nothing, type TemplateResult } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
 import { formatTokens, totalTok, type AliasMap, type TokenRecord } from "../../../shared/tokens";
-import { card, hidden, quiet, type DashCtx } from "./dash-parts";
+import { card, hidden, quiet, rangeTabs, type DashCtx, type DashRange } from "./dash-parts";
 import { sameCwd } from "./format";
 
-export type UsageRange = "7d" | "30d" | "all";
+export type UsageRange = DashRange;
 
 export interface UsageState {
   range: UsageRange;
@@ -18,9 +18,6 @@ export interface UsageState {
 }
 
 const BARS = 10;
-const RANGES: Array<{ id: UsageRange, label: string }> = [
-  { id: "7d", label: "7d" }, { id: "30d", label: "30d" }, { id: "all", label: "All" },
-];
 
 /** Every folder whose tokens count for a repo: itself plus whatever was merged into it. */
 function repoPaths(cwd: string, aliases: AliasMap): string[] {
@@ -78,8 +75,7 @@ export function usage(c: DashCtx, aliases: AliasMap): TemplateResult | typeof no
   const start = Math.max(0, end - BARS);
   const visible = days.slice(start, Math.max(end, 0));
   const total = visible.reduce((s, d) => s + d.tokens, 0);
-  const trailing = html`<span class="pd-usage-ranges">${RANGES.map((r) => html`
-      <button type="button" class="pd-rtab ${u.range === r.id ? "on" : ""}" data-pd-range=${r.id} @click=${() => c.act.setUsageRange(r.id)}>${r.label}</button>`)}</span>
+  const trailing = html`${rangeTabs(u.range, c.act.setUsageRange)}
     <span class="pd-pager">
       <button type="button" class="pd-pg" title="Earlier" ?disabled=${start === 0} @click=${() => c.act.setUsageOffset(u.offset + 1)}><i class="ph ph-caret-left"></i></button>
       <button type="button" class="pd-pg" title="Later" ?disabled=${u.offset === 0} @click=${() => c.act.setUsageOffset(u.offset - 1)}><i class="ph ph-caret-right"></i></button>

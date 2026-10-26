@@ -3,8 +3,20 @@ import { html, nothing, type TemplateResult } from "lit-html";
 import { ifDefined } from "lit-html/directives/if-defined.js";
 import { sameCwd, type ReportsTab } from "./format";
 import type { DashboardHistory, DashSnapshot, DashTodo, RepoRef } from "./types";
-import type { UsageRange, UsageState } from "./dash-usage";
-import type { TodoRange } from "./dash-todo-chart";
+import type { UsageState } from "./dash-usage";
+
+/** How far back a chart card looks. */
+export type DashRange = "7d" | "30d" | "all";
+
+const RANGES: Array<{ id: DashRange, label: string }> = [
+  { id: "7d", label: "7d" }, { id: "30d", label: "30d" }, { id: "all", label: "All" },
+];
+
+/** A chart card's 7d / 30d / All words, for its heading. */
+export function rangeTabs(current: DashRange, pick: (r: DashRange) => void): TemplateResult {
+  return html`<span class="pd-usage-ranges">${RANGES.map((r) => html`
+    <button type="button" class="pd-rtab ${current === r.id ? "on" : ""}" data-pd-range=${r.id} @click=${() => pick(r.id)}>${r.label}</button>`)}</span>`;
+}
 
 /** What a dashboard row can do. Implemented in dash-actions.ts, so the section
  *  templates stay pure functions of (ctx) and never import the sessions view. */
@@ -37,9 +49,9 @@ export interface DashActions {
   setPage(key: string, page: number): void;
   /** Full-size view of the Reports card's current tab. */
   openReportsModal(): void;
-  setUsageRange(range: UsageRange): void;
+  setUsageRange(range: DashRange): void;
   setUsageOffset(offset: number): void;
-  setTodoRange(range: TodoRange): void;
+  setTodoRange(range: DashRange): void;
 }
 
 /** Where a dashboard is shown: above a new-chat draft's message box, or as a
@@ -51,7 +63,7 @@ export interface DashCtx {
   snap: DashSnapshot;
   usage: UsageState;
   /** The Todos chart's range; unset reads as 30d. */
-  todoRange?: TodoRange;
+  todoRange?: DashRange;
   history: DashboardHistory | null;
   /** The last dashboard_history call failed while none had landed yet. */
   historyFailed?: boolean;

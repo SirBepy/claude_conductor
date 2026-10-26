@@ -133,10 +133,10 @@ test.describe("view-harness / project dashboard", () => {
     const pointsIn = async (): Promise<number> => Number(await todos.locator("svg[data-todo-chart]").getAttribute("data-n"));
     expect(await pointsIn()).toBe(30);
 
-    await todos.locator('[data-pd-todo-range="7d"]').click();
-    await expect(todos.locator('[data-pd-todo-range="7d"]')).toHaveClass(/\bon\b/);
+    await todos.locator('[data-pd-range="7d"]').click();
+    await expect(todos.locator('[data-pd-range="7d"]')).toHaveClass(/\bon\b/);
     expect(await pointsIn()).toBe(7);
-    await todos.locator('[data-pd-todo-range="all"]').click();
+    await todos.locator('[data-pd-range="all"]').click();
     expect(await pointsIn()).toBe(40);
 
     const chart = todos.locator(".pd-todo-chart");
