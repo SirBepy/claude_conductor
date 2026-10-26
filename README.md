@@ -1,6 +1,60 @@
-# claude-conductor
+<p align="center">
+  <a href="https://github.com/SirBepy/claude_conductor/releases/latest"><img src="docs/readme/banner.png" alt="Claude Conductor: one cockpit for every Claude Code session" width="100%"></a>
+</p>
 
-Tauri 2.x companion app for Claude Code. Combines:
+<p align="center">
+  <b>A desktop cockpit for Claude Code: usage limits, every live session, and your phone as a remote.</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/SirBepy/claude_conductor/releases/latest">Download</a> ·
+  <a href="#-features">Features</a> ·
+  <a href="#-screenshots">Screenshots</a> ·
+  <a href="#-guides">Guides</a> ·
+  <a href="https://sirbepy.github.io/claude_conductor/privacy-policy.html">Privacy</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/SirBepy/claude_conductor/releases/latest"><img src="https://img.shields.io/github/package-json/v/SirBepy/claude_conductor?style=for-the-badge&color=9d7dfc&labelColor=1e1d2b&label=version" alt="Version"></a>
+  <a href="https://github.com/SirBepy/claude_conductor/releases"><img src="https://img.shields.io/github/downloads/SirBepy/claude_conductor/total?style=for-the-badge&color=6e8fff&labelColor=1e1d2b" alt="Downloads"></a>
+  <img src="https://img.shields.io/badge/Tauri-2-24C8DB?style=for-the-badge&logo=tauri&logoColor=white&labelColor=1e1d2b" alt="Tauri 2">
+  <a href="https://github.com/SirBepy/claude_conductor/commits/master"><img src="https://img.shields.io/github/last-commit/SirBepy/claude_conductor?style=for-the-badge&color=7af0c0&labelColor=1e1d2b" alt="Last commit"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/SirBepy/claude_conductor?style=for-the-badge&color=d97757&labelColor=1e1d2b" alt="MIT licence"></a>
+</p>
+
+<p align="center">
+  <img src="https://skillicons.dev/icons?i=tauri,rust,ts,vite,androidstudio" alt="Tauri, Rust, TypeScript, Vite, Android">
+</p>
+
+<br>
+
+## ✨ Features
+
+<table>
+  <tr>
+    <td width="33%" valign="top">📊 <b>Usage at a glance</b><br>5-hour and weekly limits for every account, in the tray and a floating overlay.</td>
+    <td width="33%" valign="top">💬 <b>Chat hub</b><br>Every Claude Code session as a real chat. Sessions keep running when the app is closed.</td>
+    <td width="33%" valign="top">🧑‍💻 <b>Code mode</b><br>File tree, diffs and commits in one place to review before you push.</td>
+  </tr>
+  <tr>
+    <td valign="top">🗂️ <b>Project dashboard</b><br>Todos, chats, ship state, usage and custom cards for each project.</td>
+    <td valign="top">📱 <b>Phone remote</b><br>Android app drives your PC's chats peer-to-peer, no VPN or port forwarding.</td>
+    <td valign="top">🖥️ <b>Multi-machine</b><br>Pair a PC and a Mac: both machines' chats in one list.</td>
+  </tr>
+  <tr>
+    <td valign="top">👥 <b>Multi-account</b><br>Personal and Work side by side, each fully isolated.</td>
+    <td valign="top">🌐 <b>Claude's own browser</b><br>Chats can drive a browser of their own, or one of yours.</td>
+    <td valign="top">⏰ <b>Scheduling</b><br>Queue a message or a whole new chat for later, once or recurring.</td>
+  </tr>
+  <tr>
+    <td valign="top">😴 <b>Sleep when done</b><br>Waits for every chat to go idle, then sleeps or shuts down the PC.</td>
+    <td valign="top">🎮 <b>Gaming mode</b><br>One switch parks every chat and dev server, and brings them back after.</td>
+    <td valign="top">🔗 <b>Publish to claude.ai</b><br>Turn any preview into a private <code>claude.ai/artifact</code> link.</td>
+  </tr>
+</table>
+
+<details>
+<summary><b>Every feature in detail</b></summary>
 
 - **Usage monitoring** (5h session + 7d weekly windows) polled from the `claude.ai` usage API with your session cookie - no browser involved after the one-time Chrome login flow.
 - **Sessions** - a chat hub for live Claude Code sessions across all your projects. A background daemon runs a persistent `claude` process per session (sessions keep running when the app is closed); the app renders the streamed JSON output as a proper chat with markdown, syntax-highlighted code blocks, and clipboard image paste. Pop any session into its own window.
@@ -17,7 +71,60 @@ Tauri 2.x companion app for Claude Code. Combines:
 
 Windows and Apple Silicon macOS are the released platforms. Intel macOS and Linux builds are paused (see below); build from source to run there.
 
-## Install
+</details>
+
+## 📸 Screenshots
+
+<p align="center">
+  <img src="docs/readme/chat.png" alt="A chat session: a code fix, tool chips and a question card with recommended options" width="100%">
+  <br><sub>💬 Every Claude Code session as a real chat. Questions arrive as clickable cards.</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top"><img src="docs/readme/dashboard.png" alt="Project dashboard with chats, todos, ship state and usage charts"><br><sub>🗂️ Project dashboard</sub></td>
+    <td width="50%" valign="top"><img src="docs/readme/code-mode.png" alt="Code mode showing a side-by-side diff"><br><sub>🧑‍💻 Code mode: review before you push</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><img src="docs/readme/usage.png" alt="Usage rings for two accounts, 5-hour and weekly"><br><sub>📊 Usage for every account</sub></td>
+    <td width="50%" valign="top"><img src="docs/readme/phone.png" alt="Android app: chat list and a chat"><br><sub>📱 The same chats on your phone</sub></td>
+  </tr>
+</table>
+
+## 🧭 How it fits together
+
+```mermaid
+flowchart LR
+  Phone["📱 Android app"] -- "iroh P2P" --> D
+  Peer["🖥️ Paired machine"] <-- "iroh / URL" --> D
+  subgraph PC["Your PC"]
+    App["🪟 Desktop app"] --- D(("Conductor<br/>daemon"))
+    D --- C["⚡ claude × N"]
+  end
+  D -- "usage API" --> AI["claude.ai"]
+  classDef core fill:#9d7dfc,stroke:#9d7dfc,color:#16151f
+  classDef box fill:#1e1d2b,stroke:#2d2c44,color:#e2e0f0
+  class D core
+  class App,C,Phone,Peer,AI box
+```
+
+## 📦 Install
+
+<p>
+  <a href="https://github.com/SirBepy/claude_conductor/releases/latest"><img src="https://img.shields.io/badge/Windows-x64%20installer-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
+  <a href="https://github.com/SirBepy/claude_conductor/releases/latest"><img src="https://img.shields.io/badge/macOS-Apple%20Silicon-1e1d2b?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Apple Silicon"></a>
+  <a href="https://github.com/SirBepy/claude_conductor/releases"><img src="https://img.shields.io/badge/Android-APK-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android"></a>
+</p>
+
+| Platform | File | |
+| --- | --- | --- |
+| 🪟 Windows | `Claude-Conductor_<version>_windows_x64.exe` | Run the installer |
+| 🍎 macOS (Apple Silicon) | `Claude-Conductor_<version>_macos_arm64.dmg` | Drag to Applications, first open via right-click > **Open** |
+| 🤖 Android | `Claude-Conductor_<version>_android_arm64.apk` | Pair by scanning the QR in Settings > Remote access |
+| 🐧 Linux, Intel macOS | build from source | CI builds paused |
+
+<details>
+<summary><b>Platform notes (macOS Gatekeeper, Linux, paused builds)</b></summary>
 
 Grab the latest build from the [Releases](https://github.com/SirBepy/claude_conductor/releases) page.
 
@@ -67,23 +174,12 @@ The app needs a Chromium-based browser (Google Chrome, Chromium, or Brave) insta
 
 Note: channel automation (running Claude Code remote-control instances from the dashboard) is Windows + macOS only on v1; Intel macOS is build-from-source only, see the "Paused" note above.
 
-## Dev
+</details>
 
-```bash
-cd src-tauri
-cargo tauri dev
-```
+## 📚 Guides
 
-## Build
-
-```bash
-cd src-tauri
-cargo tauri build
-```
-
-On Windows produces an NSIS installer in `src-tauri/target/release/bundle/nsis/`; on macOS produces a DMG in `src-tauri/target/<triple>/release/bundle/dmg/`.
-
-## Multi-account
+<details>
+<summary><b>👥 Multi-account</b></summary>
 
 The app can drive more than one Claude account (e.g. Personal, Work) side by side, each fully isolated for chats and usage tracking.
 
@@ -92,7 +188,10 @@ The app can drive more than one Claude account (e.g. Personal, Work) side by sid
 - **Your terminal's `~/.claude` is never touched by app chats.** Every account the app manages gets its own private profile folder; whatever account you're logged into in a plain terminal stays completely separate and unaffected.
 - **Upgrading from a single-account install:** your existing usage history keeps working exactly as before until you add your first account. Once you add an account whose login matches the one usage was already tracking, its history carries over automatically - nothing is lost.
 
-## Claude's own browser
+</details>
+
+<details>
+<summary><b>🌐 Claude's own browser</b></summary>
 
 Chats can drive a browser of their own: a separate Chrome profile, signed in only to accounts you set up for Claude, never your own. Turn it on in Settings > Chat defaults > **Let chats use a browser**.
 
@@ -107,7 +206,10 @@ Some sites, Google sign-in among them, refuse to sign in to a browser that is dr
   - **Setup, once per browser profile:** the safest setup is a separate profile made for Claude, signed in only to the accounts you want it to use. In that profile open `chrome://extensions` (`edge://extensions`, `brave://extensions`), turn on **Developer mode**, click **Load unpacked** and pick the folder that Settings > Claude's browser > **Open folder** opens. Pairing is automatic: the app registers a native messaging host that only this extension can start, so there is no token to paste. Settings shows **Connected: Brave** once it is up. If the browser is closed when a chat needs it, the app starts it in the background without opening a window.
 - **Script tool (opt-in):** Settings > Claude's browser > **Script tool** also gives chats `browser_run_code_unsafe`, which runs a whole Playwright script in one call: fewer steps and less context for long tasks. The script runs on your PC with file access, outside the page sandbox, so it is off by default.
 
-## Project dashboard
+</details>
+
+<details>
+<summary><b>🗂️ Project dashboard</b></summary>
 
 Every project has a dashboard. **Starting a new chat shows it** above the empty message box, and you can also open it on its own: click the project name in a chat's header, press **Ctrl+Shift+D**, or pick **Dashboard** in the chat menu (the Home screen's project rows open it too).
 
@@ -121,7 +223,10 @@ Every project has a dashboard. **Starting a new chat shows it** above the empty 
 - **Custom cards refresh themselves** while their dashboard is open, once their last result is older than the card's interval (15 minutes unless the card sets its own).
 - **On the phone:** new chats show the same dashboard in one column, and long-press is the right-click. You can read every section, refresh a card and tick off a todo; editing project settings, cards, groups and pins, and the VS Code / Terminal / Explorer actions stay on the PC.
 
-## Publish to claude.ai
+</details>
+
+<details>
+<summary><b>🔗 Publish to claude.ai</b></summary>
 
 Any preview can be published to claude.ai from the preview panel's **More options** menu, which gives you a `claude.ai/artifact/...` link like the ones teammates share.
 
@@ -129,7 +234,10 @@ Any preview can be published to claude.ai from the preview panel's **More option
 - **One link per preview.** Publishing again after the preview changes updates the same page, exactly as the panel shows it; while the page is up to date the action becomes **Copy claude.ai link** instead of uploading again.
 - **Cost and limits:** each publish runs one short background Claude turn on your subscription (under a minute). Desktop only. To unpublish, open the page and delete it on claude.ai.
 
-## Channel management
+</details>
+
+<details>
+<summary><b>📡 Channel management</b></summary>
 
 Beyond tracking Claude Code usage, this app manages Claude Code channels per project:
 
@@ -142,7 +250,10 @@ Beyond tracking Claude Code usage, this app manages Claude Code channels per pro
 
 Replaces the previous `obsidian_claude_remote` tray app (now discontinued and archived).
 
-## Android companion app
+</details>
+
+<details>
+<summary><b>📱 Android companion app</b></summary>
 
 A thin native shell (`android/`) that connects to a running desktop Conductor instance over the
 network - it does not run Claude Code itself, it just renders the same remote-control web UI the
@@ -182,7 +293,10 @@ token never leaves the phone.
 
 Paired devices can be revoked any time from Settings > Remote access on the desktop.
 
-## Multi-machine
+</details>
+
+<details>
+<summary><b>🖥️ Multi-machine</b></summary>
 
 Run Conductor on two machines (say a Windows PC and a Mac), pair them once, and each app's chat
 list shows both machines' chats together. A chat hosted on the other machine gets that machine's
@@ -243,3 +357,27 @@ mirrored copies of a THIRD machine are never re-mirrored, so chats never chain t
 one hop. The other machine's project list in the picker is name/path only - no avatar, worktree, or
 CLAUDE.md-scope data. A chat started in a terminal on the other machine shows its history but does
 not stream new turns live until reopened. Developer notes: `docs/multi-machine.md`.
+
+</details>
+
+## 🛠️ Development
+
+### Dev
+
+```bash
+cd src-tauri
+cargo tauri dev
+```
+
+### Build
+
+```bash
+cd src-tauri
+cargo tauri build
+```
+
+On Windows produces an NSIS installer in `src-tauri/target/release/bundle/nsis/`; on macOS produces a DMG in `src-tauri/target/<triple>/release/bundle/dmg/`.
+
+## 📄 Licence
+
+[MIT](LICENSE) © SirBepy
