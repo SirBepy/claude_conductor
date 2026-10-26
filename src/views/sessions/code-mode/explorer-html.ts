@@ -24,7 +24,7 @@ const SCOPE_ICON: Record<BaseScope, string> = {
 export interface ExplorerModel {
   scope: ScopeRef;
   data: ScopeData | null;
-  collapsed: Set<string>;
+  expanded: Set<string>;
   activePath: string | null;
   menuOpen: boolean;
   /** Per-scope file counts for the menu; null while that one loads. */
@@ -75,13 +75,13 @@ function scopeHeaderHtml(m: ExplorerModel): string {
   const item = (k: BaseScope) => {
     const n = m.menuCounts[k];
     return `<div class="cm-mi" role="menuitemradio" tabindex="-1" aria-checked="${s.kind === k}" data-scope="${k}"><i class="ph ${SCOPE_ICON[k]}"></i>${SCOPE_LABEL[k]}`
-      + `<span class="n">${n === undefined ? "" : n === null ? "…" : n}</span><i class="ph ph-check cm-chk"></i></div>`;
+      + `<span class="n">${k === "all" || n === undefined ? "" : n === null ? "…" : n}</span><i class="ph ph-check cm-chk"></i></div>`;
   };
   const menu = m.menuOpen
     ? `<div class="cm-menu cm-scope-menu" role="menu">${item("chat")}${item("unpushed")}${item("uncommitted")}<div class="cm-sep"></div>${item("all")}</div>`
     : "";
   return `<div class="cm-files-h"><button class="cm-qtitle" data-act="menu" aria-haspopup="menu" aria-expanded="${m.menuOpen}">`
-    + `${SCOPE_LABEL[s.kind]}<span class="n">${countText(m)}</span><i class="ph ph-caret-down"></i></button></div>${menu}`;
+    + `${SCOPE_LABEL[s.kind]}${s.kind === "all" ? "" : `<span class="n">${countText(m)}</span>`}<i class="ph ph-caret-down"></i></button></div>${menu}`;
 }
 
 function treeRowsHtml(node: TreeNode, depth: number, prefix: string, m: ExplorerModel): string {
@@ -93,7 +93,7 @@ function treeRowsHtml(node: TreeNode, depth: number, prefix: string, m: Explorer
   let out = "";
   for (const [name, child] of [...node.dirs.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     const dir = prefix + name;
-    const open = !m.collapsed.has(dir);
+    const open = m.expanded.has(dir);
     const dot = !open && dirHas(dir, changed) ? `<span class="end"><span class="cm-dot" title="Has changes"></span></span>` : "";
     out += `<div class="cm-row cm-dir" role="treeitem" tabindex="0" aria-expanded="${open}" data-dir="${escapeHtml(dir)}" ${pad(depth)}>`
       + `<i class="ph ${open ? "ph-caret-down" : "ph-caret-right"}"></i><i class="ph ${open ? "ph-folder-open" : "ph-folder"}"></i>`

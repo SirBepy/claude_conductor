@@ -86,7 +86,8 @@ interface ViewState {
   prevScope: BaseScope;
   tabs: Tab[];
   active: string | null;
-  collapsed: Set<string>;
+  /** Folders start closed, so the set holds the ones the user opened. */
+  expanded: Set<string>;
   commitsOpen: boolean;
   desc: HTMLTemplateElement | null;
   /** Phone only: which stacked screen shows. */
@@ -98,7 +99,7 @@ const views = new Map<string, ViewState>();
 function viewFor(key: string): ViewState {
   let v = views.get(key);
   if (!v) {
-    v = { scope: { kind: "all" }, prevScope: "all", tabs: [], active: null, collapsed: new Set(), commitsOpen: false, desc: null, screen: "explorer" };
+    v = { scope: { kind: "all" }, prevScope: "all", tabs: [], active: null, expanded: new Set(), commitsOpen: false, desc: null, screen: "explorer" };
     views.set(key, v);
   }
   return v;
@@ -481,7 +482,7 @@ export class CodeModeInstance {
     return {
       scope: this.view.scope,
       data: this.data,
-      collapsed: this.view.collapsed,
+      expanded: this.view.expanded,
       activePath: this.view.active,
       menuOpen: this.menuOpen,
       menuCounts: this.menuCounts,
@@ -545,7 +546,7 @@ export class CodeModeInstance {
   }
 
   toggleDir(dir: string): void {
-    const c = this.view.collapsed;
+    const c = this.view.expanded;
     if (c.has(dir)) c.delete(dir);
     else c.add(dir);
     this.renderExplorer();

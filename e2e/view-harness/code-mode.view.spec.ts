@@ -7,7 +7,7 @@
 // Reviewed 2026-10-18: session-header.ts's setRemote() (the "Started from phone" badge) was removed outright - this spec never asserted that badge, so its contract is unaffected.
 // Reviewed 2026-10-20: session-header.ts gained a new `.wrap-up-btn` sibling before `.code-mode-btn` - this spec drives Code mode through the FAB menu now (the header `.code-mode-btn` is gone), never positionally, so the new sibling doesn't affect it.
 // Reviewed 2026-10-20 (Mac-mirrored project icon fix): session-header.ts's SessionHeaderBindOpts/setAvatar gained an optional `machineId` so the project-face badge can ask a peer's filesystem instead of this one's; every fixture here is a locally-hosted session, so machineId is always undefined/null and the badge markup is byte-identical to before.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
 // Code mode in a real browser at Joe's maximized Chats window size: the mode
@@ -70,14 +70,19 @@ async function mount(page: Page): Promise<void> {
     },
   });
   await page.locator(`#sessions-list li[data-session-id="s1"]`).click();
-  await page.locator("#session-pane .fab-dial-fab").waitFor();
+  await page.locator("#session-pane .sp-tab[data-sp-code]").waitFor();
   await page.mouse.move(1300, 800);
 }
 
-/** Code mode's entry is the FAB menu's Code item. */
+/** Code mode's entry is the Code button atop the panel strip. */
 async function openCodeMode(page: Page): Promise<void> {
-  await page.locator("#session-pane .fab-dial-fab").click();
-  await page.locator('#session-pane [data-dial="code"]').click();
+  await page.locator("#session-pane .sp-tab[data-sp-code]").click();
+}
+
+/** Folders start closed; open every one so a nested file's row exists. */
+async function expandAll(code: Locator): Promise<void> {
+  const closed = code.locator('.cm-dir[aria-expanded="false"]');
+  while (await closed.count()) await closed.first().click();
 }
 
 async function shot(target: Parameters<typeof capture>[0], label: string): Promise<void> {
@@ -119,6 +124,7 @@ test.describe("view-harness / Code mode", () => {
 
     await expect(code.locator(".cm-qtitle")).toContainText("Unpushed");
     await expect(code.locator(".cm-qtitle .n")).toHaveText("4");
+    await expandAll(code);
     const wt = code.locator('[data-file="src/views/sessions/git-card.ts"]');
     await expect(wt).toHaveClass(/wt/);
     await expect(wt.locator(".cm-wt")).toHaveText("WT");
@@ -176,6 +182,7 @@ test.describe("view-harness / Code mode", () => {
 
     await older.click();
     await expect(code.locator(".cm-ctitle")).toHaveText("REFACTOR: split the usage poller out of boot");
+    await expandAll(code);
     await expect(code.locator('[data-file="src/daemon/boot.rs"]')).toBeVisible();
   });
 
@@ -183,6 +190,7 @@ test.describe("view-harness / Code mode", () => {
     await mount(page);
     await page.locator("#session-pane .sb-commits-btn").click();
     const code = page.locator(".code-mode");
+    await expandAll(code);
     await code.locator('[data-file="src/shared/shortcuts.ts"]').click();
 
     await expect(code.locator(".cm-tab.on")).toContainText("shortcuts.ts");
@@ -209,6 +217,7 @@ test.describe("view-harness / Code mode", () => {
     await expect(code.locator(".cm-csha")).toContainText("80b6247");
     // Opening a commit opens its first file; inside it M badges hide.
     await expect(code.locator(".cm-tab.on")).toHaveCount(1);
+    await expandAll(code);
     await expect(code.locator('[data-file="src/shared/shortcuts.ts"] .pr-file-status')).toHaveCount(0);
     await shot(page, "code-mode-commit");
 
@@ -224,6 +233,10 @@ test.describe("view-harness / Code mode", () => {
     await expect(code.locator(".cm-scope-menu .cm-mi")).toHaveCount(4);
     await code.locator('.cm-mi[data-scope="all"]').click();
 
+    // No count beside "All files": a number nobody acts on.
+    await expect(code.locator(".cm-qtitle .n")).toHaveCount(0);
+    await expect(code.locator(".cm-dir[aria-expanded=true]")).toHaveCount(0);
+    await expandAll(code);
     await expect(code.locator('[data-file="README.md"]')).toBeVisible();
     await expect(code.locator('[data-file="README.md"]')).not.toHaveClass(/chg/);
     await expect(code.locator('[data-file="src/shared/shortcuts.ts"]')).toHaveClass(/chg/);
@@ -269,6 +282,7 @@ test.describe("view-harness / Code mode", () => {
     await code.locator('.bs-preview[data-preview="feature/preview-me"]').click();
 
     await expect(code.locator(".cm-ctitle")).toContainText("feature/preview-me");
+    await expandAll(code);
     await expect(code.locator('[data-file="src/shared/shortcuts.ts"] .pr-file-status')).toHaveText("M");
     await expect(code.locator('[data-file="src/shared/branch-only-file.ts"] .pr-file-status')).toHaveCount(0);
     await expect(code.locator('[data-act="checkout-branch"]')).toBeVisible();
@@ -311,6 +325,7 @@ test.describe("view-harness / Code mode", () => {
     await page.setViewportSize({ width: 560, height: 860 });
     await page.locator("#session-pane .sb-commits-btn").click();
     const code = page.locator(".code-mode");
+    await expandAll(code);
     await code.locator('[data-file="src/shared/shortcuts.ts"]').click();
     const explorer = (await code.locator(".cm-explorer").boundingBox())!;
     const editor = (await code.locator(".cm-editor").boundingBox())!;

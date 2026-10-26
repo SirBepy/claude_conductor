@@ -121,8 +121,8 @@ export function createHandleContextMenu(inst: CodeModeInstance): (e: MouseEvent)
         }
       : {
           kind: "space",
-          onExpandAll: () => { inst.view.collapsed = new Set(); inst.renderExplorer(); },
-          onCollapseAll: () => { inst.view.collapsed = allDirs(inst.data?.paths ?? []); inst.renderExplorer(); },
+          onExpandAll: () => { inst.view.expanded = allDirs(inst.data?.paths ?? []); inst.renderExplorer(); },
+          onCollapseAll: () => { inst.view.expanded = new Set(); inst.renderExplorer(); },
         });
   };
 }
@@ -178,7 +178,7 @@ function treeKey(inst: CodeModeInstance, e: KeyboardEvent, t: HTMLElement): void
   if (e.key === "ArrowDown" && i >= 0) { e.preventDefault(); list[i + 1]?.focus(); }
   else if (e.key === "ArrowUp" && i >= 0) { e.preventDefault(); list[i - 1]?.focus(); }
   else if (row.dataset.dir !== undefined && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
-    const open = !inst.view.collapsed.has(row.dataset.dir);
+    const open = inst.view.expanded.has(row.dataset.dir);
     if ((e.key === "ArrowRight") !== open) { e.preventDefault(); inst.toggleDir(row.dataset.dir); }
   }
 }
