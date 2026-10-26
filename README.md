@@ -83,11 +83,11 @@ Windows and Apple Silicon macOS are the released platforms. Intel macOS and Linu
 <table>
   <tr>
     <td width="50%" valign="top"><img src="docs/readme/dashboard.png" alt="Project dashboard with chats, todos, ship state and usage charts"><br><sub>🗂️ Project dashboard</sub></td>
-    <td width="50%" valign="top"><img src="docs/readme/code-mode.png" alt="Code mode showing a side-by-side diff"><br><sub>🧑‍💻 Code mode: review before you push</sub></td>
+    <td width="50%" valign="top"><img src="docs/readme/phone.png" alt="Android app: chat list and a chat"><br><sub>📱 The same chats on your phone</sub></td>
   </tr>
   <tr>
+    <td width="50%" valign="top"><img src="docs/readme/code-mode.png" alt="Code mode showing a side-by-side diff"><br><sub>🧑‍💻 Code mode: review before you push</sub></td>
     <td width="50%" valign="top"><img src="docs/readme/usage.png" alt="Usage rings for two accounts, 5-hour and weekly"><br><sub>📊 Usage for every account</sub></td>
-    <td width="50%" valign="top"><img src="docs/readme/phone.png" alt="Android app: chat list and a chat"><br><sub>📱 The same chats on your phone</sub></td>
   </tr>
 </table>
 
