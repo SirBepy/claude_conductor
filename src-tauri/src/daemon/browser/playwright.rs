@@ -3,7 +3,7 @@
 //! profile's sign-ins, but each opens its own tab on start: Playwright MCP
 //! tracks a "current tab" per connection, and two chats steering one tab
 //! would trample each other. A child can instead attach to one of Joe's own
-//! browsers through the Playwright extension (`Attach::Extension`).
+//! browsers through the bridge (`Attach::Bridge`), in a window of its own.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -30,66 +30,15 @@ const OUTPUT_MAX_BYTES: u64 = 200 * 1024 * 1024;
 pub enum Attach {
     /// The daemon's own Chrome, over its DevTools port.
     Cdp(u16),
-    /// One of Joe's browsers, through the Playwright extension.
-    Extension(Mine),
+    /// One of Joe's browsers, through the bridge's per-chat CDP endpoint.
+    Bridge(Mine),
 }
 
-/// The Playwright extension's token. With it the connect page skips its
-/// tab picker, and a connection that never comes fails after 30s with a
-/// reason instead of waiting out the whole call timeout.
-const EXTENSION_TOKEN_VAR: &str = "PLAYWRIGHT_MCP_EXTENSION_TOKEN";
-
-/// The token for a new extension child, read fresh each time: Joe sets it as
-/// a user environment variable, which a daemon started before he set (or
-/// changed) it never sees, so the user-scope value wins and the daemon's own
-/// environment is only the fallback.
-fn extension_token() -> Option<String> {
-    pick_token(user_env_var(EXTENSION_TOKEN_VAR), std::env::var(EXTENSION_TOKEN_VAR).ok())
-}
-
-fn pick_token(user: Option<String>, process: Option<String>) -> Option<String> {
-    [user, process].into_iter().flatten().map(|t| t.trim().to_string()).find(|t| !t.is_empty())
-}
-
-/// A REG_SZ value under HKCU\Environment, where Windows keeps user-scope
-/// environment variables.
-#[cfg(windows)]
-fn user_env_var(name: &str) -> Option<String> {
-    use windows::core::PCWSTR;
-    use windows::Win32::Foundation::ERROR_SUCCESS;
-    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
-
-    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-    let (key, value) = (wide("Environment"), wide(name));
-    let mut buf = vec![0u16; 1024];
-    let mut size = (buf.len() * 2) as u32;
-    let rc = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            PCWSTR(key.as_ptr()),
-            PCWSTR(value.as_ptr()),
-            RRF_RT_REG_SZ,
-            None,
-            Some(buf.as_mut_ptr().cast()),
-            Some(&mut size),
-        )
-    };
-    if rc != ERROR_SUCCESS {
-        return None;
-    }
-    let len = (size as usize / 2).saturating_sub(1);
-    Some(String::from_utf16_lossy(&buf[..len.min(buf.len())]))
-}
-
-#[cfg(not(windows))]
-fn user_env_var(_name: &str) -> Option<String> {
-    None
-}
-
-fn attach_args(attach: &Attach) -> Result<Vec<String>, String> {
-    match attach {
-        Attach::Cdp(port) => Ok(vec!["--cdp-endpoint".to_string(), format!("http://127.0.0.1:{port}")]),
-        Attach::Extension(mine) => mine.playwright_args(),
+fn attach_args(attach: &Attach, bridge_endpoint: Option<&str>) -> Result<Vec<String>, String> {
+    match (attach, bridge_endpoint) {
+        (Attach::Cdp(port), _) => Ok(vec!["--cdp-endpoint".to_string(), format!("http://127.0.0.1:{port}")]),
+        (Attach::Bridge(_), Some(endpoint)) => Ok(vec!["--cdp-endpoint".to_string(), endpoint.to_string()]),
+        (Attach::Bridge(_), None) => Err("no bridge endpoint for Joe's browser".to_string()),
     }
 }
 
@@ -104,16 +53,20 @@ pub struct PlaywrightClient {
     /// DevTools target id of the tab this driver opened, when it could be
     /// told apart from others; closed when the driver is retired.
     tab_id: Option<String>,
+    /// The bridge registration an `Attach::Bridge` child connects through,
+    /// dropped when the driver is retired.
+    bridge_key: Option<String>,
 }
 
 impl PlaywrightClient {
-    /// `profile_token` is the extension token Settings holds for the profile
-    /// an `Attach::Extension` child drives; it beats the global env token.
-    pub async fn start(node: &Path, cli: &Path, attach: &Attach, output_dir: &Path, profile_token: Option<String>) -> Result<Self, String> {
+    /// `bridge` is the registration key and endpoint an `Attach::Bridge`
+    /// child connects through.
+    pub async fn start(node: &Path, cli: &Path, attach: &Attach, output_dir: &Path, bridge: Option<(String, String)>) -> Result<Self, String> {
         std::fs::create_dir_all(output_dir).map_err(|e| format!("create {}: {e}", output_dir.display()))?;
+        let (bridge_key, endpoint) = bridge.unzip();
         let mut cmd = Command::new(node);
         cmd.arg(cli)
-            .args(attach_args(attach)?)
+            .args(attach_args(attach, endpoint.as_deref())?)
             .arg("--output-dir")
             .arg(output_dir)
             .arg("--output-max-size")
@@ -124,11 +77,6 @@ impl PlaywrightClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        if let Attach::Extension(_) = attach {
-            if let Some(token) = pick_token(profile_token, extension_token()) {
-                cmd.env(EXTENSION_TOKEN_VAR, token);
-            }
-        }
         crate::util::process::hide_console_tokio(&mut cmd);
         let mut child = cmd.spawn().map_err(|e| format!("start playwright-mcp: {e}"))?;
         crate::util::process::guard_orphan_tree(&child);
@@ -151,6 +99,7 @@ impl PlaywrightClient {
             last_used: Instant::now(),
             output_dir: output_dir.to_path_buf(),
             tab_id: None,
+            bridge_key,
         };
         client
             .request(
@@ -188,9 +137,38 @@ impl PlaywrightClient {
     /// opens its own, so leaving this one would pile a tab up per restart.
     pub async fn retire(&mut self) {
         self.kill().await;
+        // The child's exit closes its bridge socket, which closes its window.
+        if let Some(key) = self.bridge_key.take() {
+            super::bridge::get().unregister(&key);
+        }
         if let (Some(id), Attach::Cdp(port)) = (self.tab_id.take(), &self.attach) {
             tabs::close_page(&tabs::base_url(*port), &id).await;
         }
+    }
+
+    /// `call_tool`, except that a chat's own `browser_tabs new` in the daemon
+    /// Chrome replaces its previous tab instead of leaving it open: a chat
+    /// works in one tab at a time, and the old ones only piled up. (Joe's own
+    /// browser does the same in `bridge`.)
+    pub async fn call_replacing_tabs(&mut self, name: &str, args: Value, timeout: Duration) -> Result<Value, String> {
+        let port = match self.attach {
+            Attach::Cdp(port) if name == "browser_tabs" && args["action"] == "new" => port,
+            _ => return self.call_tool(name, args, timeout).await,
+        };
+        let base = tabs::base_url(port);
+        let mut out = None;
+        let found = {
+            let (me, out) = (&mut *self, &mut out);
+            tabs::open_and_find(&base, move || async move {
+                *out = Some(me.call_tool(name, args, timeout).await?);
+                Ok::<(), String>(())
+            })
+            .await?
+        };
+        if let Some(old) = found.and_then(|new| self.tab_id.replace(new)) {
+            tabs::close_page(&base, &old).await;
+        }
+        Ok(out.unwrap_or(Value::Null))
     }
 
     /// The MCP `result` object (`content` plus `isError`), with file links
@@ -272,35 +250,16 @@ mod tests {
 
     #[test]
     fn the_daemon_chrome_is_attached_over_its_devtools_port() {
-        assert_eq!(attach_args(&Attach::Cdp(9222)).unwrap(), ["--cdp-endpoint", "http://127.0.0.1:9222"]);
+        assert_eq!(attach_args(&Attach::Cdp(9222), None).unwrap(), ["--cdp-endpoint", "http://127.0.0.1:9222"]);
     }
 
     #[test]
-    fn joes_browser_is_attached_through_the_extension_not_a_port() {
+    fn joes_browser_is_attached_through_its_bridge_endpoint() {
         use super::super::target::{App, Mine};
-        let args = attach_args(&Attach::Extension(Mine { app: App::Chrome, profile: None })).unwrap();
-        assert!(args.contains(&"--extension".to_string()));
-        assert!(!args.iter().any(|a| a == "--cdp-endpoint"), "{args:?}");
-    }
-
-    #[test]
-    fn the_extension_token_prefers_the_user_scope_and_falls_back_to_the_process_env() {
-        assert_eq!(pick_token(Some("u".into()), Some("p".into())).as_deref(), Some("u"));
-        assert_eq!(pick_token(None, Some(" p ".into())).as_deref(), Some("p"));
-        assert_eq!(pick_token(Some("  ".into()), Some("p".into())).as_deref(), Some("p"));
-        assert_eq!(pick_token(None, None), None);
-    }
-
-    /// A value this test writes itself would land in Joe's real registry, so
-    /// it reads one Windows sets for a normal user profile instead. A CI
-    /// runner account may lack it, so its absence is not a failure.
-    #[cfg(windows)]
-    #[test]
-    fn a_user_scope_variable_is_read_from_the_registry() {
-        if let Some(temp) = user_env_var("TEMP") {
-            assert!(temp.to_lowercase().contains("temp"), "{temp}");
-        }
-        assert_eq!(user_env_var("CC_SURELY_NOT_A_VARIABLE_1334"), None);
+        let bridge = Attach::Bridge(Mine { app: App::Chrome, profile: None });
+        let endpoint = "ws://127.0.0.1:5/cdp/k?token=t";
+        assert_eq!(attach_args(&bridge, Some(endpoint)).unwrap(), ["--cdp-endpoint", endpoint]);
+        assert!(attach_args(&bridge, None).is_err());
     }
 
     #[test]

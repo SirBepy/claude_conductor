@@ -12,6 +12,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         claude_conductor_lib::mcp::server::run_stdio();
         return Ok(());
     }
+    // Same as main.rs: a test browser registers this bin as the bridge's host.
+    let args: Vec<String> = std::env::args().collect();
+    if claude_conductor_lib::daemon::browser::bridge::native_host::is_host_invocation(&args) {
+        claude_conductor_lib::daemon::browser::bridge::native_host::run_stdio();
+        return Ok(());
+    }
 
     // Same file logger as the app binary's `--daemon` branch (lib.rs), so a
     // wdio-spawned daemon leaves a trail instead of the stdio: "ignore" harness

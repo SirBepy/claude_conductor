@@ -36,8 +36,8 @@ export async function renderBrowserView(root: HTMLElement): Promise<() => void> 
 
   // Fresh-read + retry: building from the frontend's own settings
   // cache could revert a concurrent daemon-owned write.
-  async function persist(changedId: string): Promise<void> {
-    browser = readBrowserFields(root, browser, changedId);
+  async function persist(): Promise<void> {
+    browser = readBrowserFields(root, browser);
     await updateSettings((fresh) => ({ ...fresh, ...browserSettingsPatch(browser) }));
   }
 
@@ -46,9 +46,9 @@ export async function renderBrowserView(root: HTMLElement): Promise<() => void> 
   const onChange = (e: Event) => {
     const id = (e.target as HTMLElement | null)?.id ?? "";
     if (!id.startsWith("chatDefaultsBrowser")) return;
-    // App and profile pick which token the token row shows, so they redraw too.
-    const redraw = id === "chatDefaultsBrowserMode" || id === "chatDefaultsBrowserApp" || id === "chatDefaultsBrowserProfile";
-    void persist(id).then(() => {
+    // The app names its own extensions page in the setup hint.
+    const redraw = id === "chatDefaultsBrowserMode" || id === "chatDefaultsBrowserApp";
+    void persist().then(() => {
       if (!redraw) return;
       render(template(browser), root);
       wireBrowserSection(root);

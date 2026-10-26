@@ -271,6 +271,11 @@ impl Settings {
     /// Claude, so nothing reaches it until he turns this on.
     pub fn claude_browser_enabled(&self) -> bool { self.bool_extra("claudeBrowserEnabled") }
 
+    /// Whether chats also get `browser_run_code_unsafe`, which runs a whole
+    /// Playwright script in one call. Off when absent: the script runs in the
+    /// Playwright node process, outside the page sandbox, with file access.
+    pub fn claude_browser_script_tool(&self) -> bool { self.bool_extra("claudeBrowserScriptTool") }
+
     fn bool_extra(&self, key: &str) -> bool {
         self.extra.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
     }

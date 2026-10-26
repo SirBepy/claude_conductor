@@ -18,6 +18,8 @@ pub fn register(router: &mut Router) {
         Ok(json!({
             "running": chrome.port_if_running().await.is_some(),
             "shown": chrome.is_shown(),
+            "bridgeConnected": super::bridge::get().connected_browsers(),
+            "extensionDir": super::bridge::extension_dir(),
         }))
     });
 

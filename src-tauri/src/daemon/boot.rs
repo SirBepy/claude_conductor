@@ -208,6 +208,20 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // tick ends idle per-chat drivers, then Chrome itself, and forgets the
     // pinned browser of chats gone from the registry.
     browser::rpc::register(&mut router);
+    // The bridge listens from the start, not on first use: Joe's browser
+    // connects whenever it runs, so a chat's first call finds it ready.
+    browser::bridge::get().start().await;
+    // Only the default instance owns the browsers' native-host registration;
+    // a dev or test daemon pointing it at its own exe would break Joe's pairing.
+    if crate::daemon::instance::instance_suffix().is_empty() {
+        let registered = std::env::current_exe()
+            .map_err(|e| e.to_string())
+            .and_then(|exe| crate::settings::paths::data_dir().map_err(|e| e.to_string()).map(|dir| (exe, dir)))
+            .and_then(|(exe, dir)| browser::bridge::native_host::register(&exe, &dir));
+        if let Err(e) = registered {
+            log::warn!("browser bridge: native host registration failed: {e}");
+        }
+    }
     let browser_registry = state.registry.clone();
     tokio::spawn(async move {
         loop {

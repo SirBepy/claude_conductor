@@ -26,7 +26,7 @@
     "category": "Utility",
     "shortDescription": "Companion cockpit for Claude Code: usage, live sessions, and remote control",
     "longDescription": "Claude Conductor is a companion app for Claude Code. It monitors your Claude usage limits from the system tray, hosts a live chat hub for Claude Code sessions across all your projects, relays permission prompts, and adds a remote phone cockpit, voice mode, session history, and channel management for headless automation.",
-    "resources": ["assets/sounds/*", "assets/characters/**/*"]
+    "resources": ["assets/sounds/*", "assets/characters/**/*", "../browser-extension/*"]
   },
   "plugins": {
     "updater": {
