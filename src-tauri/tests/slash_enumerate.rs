@@ -1,4 +1,4 @@
-use claude_conductor_lib::slash::enumerate::scan_dirs;
+use claude_conductor_lib::slash::enumerate::{hide_idle_pickup, scan_dirs};
 use claude_conductor_lib::slash::SlashSource;
 use std::fs;
 
@@ -115,4 +115,27 @@ fn missing_dirs_are_swallowed() {
     let home = tempfile::tempdir().unwrap();
     let out = scan_dirs(home.path(), &[]);
     assert!(!out.is_empty(), "should at least return builtins");
+}
+
+#[test]
+fn the_menu_offers_pickup_only_while_plan_md_has_something_to_pick() {
+    let home = tempfile::tempdir().unwrap();
+    for name in ["pickup", "handoff"] {
+        fs::create_dir_all(home.path().join("skills").join(name)).unwrap();
+        let skill = format!("---\nname: {name}\ndescription: x\n---\n");
+        fs::write(home.path().join("skills").join(name).join("SKILL.md"), skill).unwrap();
+    }
+    let todos = tempfile::tempdir().unwrap();
+    let names = |todos_dir: &std::path::Path| -> Vec<String> {
+        hide_idle_pickup(scan_dirs(home.path(), &[]), todos_dir).into_iter().map(|e| e.name).collect()
+    };
+
+    fs::write(todos.path().join("PLAN.md"), "## Now\n- [x] 1 - done\n").unwrap();
+    let idle = names(todos.path());
+    assert!(!idle.contains(&"pickup".to_string()));
+    assert!(idle.contains(&"handoff".to_string()));
+
+    fs::write(todos.path().join("2-next.md"), "x").unwrap();
+    fs::write(todos.path().join("PLAN.md"), "## Now\n- [ ] 2 - next\n").unwrap();
+    assert!(names(todos.path()).contains(&"pickup".to_string()));
 }

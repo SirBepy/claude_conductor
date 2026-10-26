@@ -30,6 +30,10 @@ export class SlashProvider implements SuggestProvider<SlashEntry> {
   }
 
   query(token: string): SlashEntry[] {
+    // The list depends on the project's PLAN.md too (/pickup only shows while
+    // it has something to pick), which no watcher reports, so each fresh "/"
+    // re-reads it; the keystrokes after it see the result.
+    if (token === "/") void this.refetch();
     return match(this.cache, token.slice(1));
   }
 

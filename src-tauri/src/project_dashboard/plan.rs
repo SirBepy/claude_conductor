@@ -97,11 +97,64 @@ pub fn read_plan(repo_cwd: &str) -> Vec<PlanItem> {
     }
 }
 
+/// Whether `/pickup` would find anything in `todos_dir`: an open PLAN.md line
+/// that is not claimed, and whose todo file still exists if it names an id
+/// (`/pickup` prunes a line whose file is gone). Reads the whole plan, unlike
+/// the capped "Next up" rows.
+pub fn has_pickable(todos_dir: &std::path::Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(todos_dir.join("PLAN.md")) else { return false };
+    let files: Vec<String> = std::fs::read_dir(todos_dir)
+        .map(|it| it.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    text.lines().filter_map(open_item).any(|rest| match split_id(rest) {
+        (_, "") => false,
+        (None, _) => true,
+        (Some(id), _) => {
+            let has_file = files.iter().any(|f| f == &format!("{id}.md") || f.starts_with(&format!("{id}-")));
+            has_file && !todos_dir.join(".claims").join(format!("{id}.claim")).exists()
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const REPO: &str = "C:/work/app";
+
+    fn todos_dir(plan: &str, files: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".claims")).unwrap();
+        std::fs::write(dir.path().join("PLAN.md"), plan).unwrap();
+        for f in files {
+            std::fs::write(dir.path().join(f), "x").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn an_open_line_with_its_todo_file_is_pickable() {
+        let dir = todos_dir("## Now\n- [ ] 7 - do it\n", &["7-do-it.md"]);
+        assert!(has_pickable(dir.path()));
+    }
+
+    #[test]
+    fn claimed_checked_and_vanished_lines_are_not_pickable() {
+        let dir = todos_dir("## Now\n- [x] 1 - done\n- [ ] 2 - claimed\n- [ ] 3 - file gone\n", &["1-a.md", "2-b.md", ".claims/2.claim"]);
+        assert!(!has_pickable(dir.path()));
+    }
+
+    #[test]
+    fn a_line_with_no_id_is_pickable() {
+        let dir = todos_dir("- [ ] just a note to do\n", &[]);
+        assert!(has_pickable(dir.path()));
+    }
+
+    #[test]
+    fn no_plan_file_is_nothing_to_pick() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!has_pickable(dir.path()));
+    }
 
     #[test]
     fn id_and_text_lines_parse_with_their_section() {
