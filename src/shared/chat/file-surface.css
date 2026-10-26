@@ -399,6 +399,15 @@ table.fs-sdiff {
   border-right: 1px solid var(--color-border);
 }
 
+/* The line a chat file chip like app.ts:42 pointed at. */
+.fs-code-view .line.fs-line-target {
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+
+.fs-code-view .line.fs-line-target::before {
+  color: var(--color-text);
+}
+
 .fs-plain {
   color: var(--color-text);
 }

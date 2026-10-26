@@ -19,6 +19,7 @@ import type { SettingsShape } from "../../../shared/state";
 import { setCodeModeOpener } from "../../../shared/chat/code-mode-bridge";
 import * as shortcuts from "../../../shared/shortcuts";
 import { openQuickOpen } from "./quick-open";
+import { OUTSIDE_DIR, repoRelative } from "./tree";
 
 let provider: (() => CodeModeChat | null) | null = null;
 
@@ -103,7 +104,12 @@ export function quickOpenFile(): void {
   openQuickOpen(chat.cwd, chat.sessionId, (path) => void enterCodeMode({ kind: "file", path }));
 }
 
-setCodeModeOpener((target) => void enterCodeMode(target));
+function canOpenFile(path: string): boolean {
+  const chat = provider?.();
+  return !!chat?.cwd && !repoRelative(chat.cwd, path).startsWith(`${OUTSIDE_DIR}/`);
+}
+
+setCodeModeOpener((target) => void enterCodeMode(target), canOpenFile);
 shortcuts.register("code-mode", toggleCodeMode);
 shortcuts.register("code-mode-popout", togglePopOut);
 shortcuts.register("quick-open", quickOpenFile);

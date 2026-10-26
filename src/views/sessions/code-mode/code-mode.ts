@@ -287,6 +287,7 @@ export class CodeModeInstance {
         const rel = repoRelative(this.chat.cwd, target.path);
         if (v.scope.kind === "commit" || v.scope.kind === "pr") v.scope = { kind: v.prevScope };
         this.pendingOpen = rel;
+        this.pendingLine = target.line ?? null;
         break;
       }
       case "commit":
@@ -305,6 +306,7 @@ export class CodeModeInstance {
 
   /** A path to open once the current scope finishes loading. */
   private pendingOpen: string | null = null;
+  private pendingLine: number | null = null;
   private openFirstOnLoad = false;
 
   close(): void {
@@ -352,8 +354,10 @@ export class CodeModeInstance {
     }
     if (this.pendingOpen) {
       const p = this.pendingOpen;
+      const line = this.pendingLine;
       this.pendingOpen = null;
-      this.openPath(p);
+      this.pendingLine = null;
+      this.openPath(p, line);
     }
     this.renderExplorer();
     this.renderTabs();
@@ -396,7 +400,9 @@ export class CodeModeInstance {
     if (activate) v.active = tab.path;
   }
 
-  openPath(path: string): void {
+  /** `line` shows the File view scrolled to it, even for a changed file
+   *  that would otherwise open on its diff. */
+  openPath(path: string, line: number | null = null): void {
     const f = this.data?.changed.get(path);
     const scope = this.view.scope;
     const inCommit = scope.kind === "commit" || scope.kind === "pr";
@@ -409,7 +415,7 @@ export class CodeModeInstance {
     this.view.screen = "file";
     this.renderExplorer();
     this.renderTabs();
-    this.showActive();
+    this.showActive(line);
   }
 
   closeTab(path: string): void {
@@ -432,7 +438,7 @@ export class CodeModeInstance {
     this.showActive();
   }
 
-  showActive(): void {
+  showActive(line: number | null = null): void {
     const v = this.view;
     const tab = v.tabs.find((t) => t.path === v.active) ?? null;
     const isDesc = tab?.path === DESC_TAB;
@@ -447,7 +453,8 @@ export class CodeModeInstance {
         this.els.desc.dataset.rendered = "1";
       }
     } else if (tab) {
-      this.surface.show(tab.surface);
+      if (line === null) this.surface.show(tab.surface);
+      else this.surface.show(tab.surface, "file", line);
     }
   }
 

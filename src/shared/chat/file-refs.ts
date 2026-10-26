@@ -1,10 +1,13 @@
 // Absolute file paths in assistant messages become quiet chips: click opens the
-// file in the editor, right-click offers Open / Copy path / Reveal. The phone
-// has no access to the desktop's disk, so there a chip only copies the path.
+// file in Code mode, at the chip's line, on the desktop and the phone alike
+// (Code mode reads through the daemon, which forwards a peer machine's chat).
+// Code mode only reads inside the chat's repo, so a path outside it opens in
+// the editor instead, or on the phone, which has no editor, copies the path.
 
 import { invoke } from "../ipc";
 import { isRemote } from "../transport";
 import { createMoreMenu } from "../../views/sessions/more-menu-base";
+import { codeModeCanOpenFile, openInCodeMode } from "./code-mode-bridge";
 
 // Windows drive path or a Unix absolute path with at least 3 segments. The
 // lookbehinds keep a URL (`https://a/b/c`, `://` and `m/a/b/c`) and a path glued
@@ -100,8 +103,14 @@ export function linkifyFilePaths(root: HTMLElement): void {
 // Same normalisation code-mode/context-menu.ts applies before handing a path to the OS.
 const winPath = (p: string) => (/^[a-z]:\//i.test(p) ? p.replace(/\//g, "\\") : p);
 
-export function openFileRef(path: string, line?: number, col?: number): void {
+function openInEditor(path: string, line?: number, col?: number): void {
   void invoke<void>("open_in_editor", { path: winPath(path), line, col }).catch((err) => console.error("[file-ref] open failed", err));
+}
+
+export function openFileRef(path: string, line?: number, col?: number): void {
+  if (codeModeCanOpenFile(path)) openInCodeMode({ kind: "file", path, line });
+  else if (!isRemote()) openInEditor(path, line, col);
+  else copyPath(path);
 }
 
 function copyPath(path: string): void {
@@ -128,7 +137,8 @@ const menu = createMoreMenu<[string, number | undefined, number | undefined]>({
       });
       m.appendChild(b);
     };
-    if (!isRemote()) add("ph-arrow-square-out", "Open", () => openFileRef(path, line, col));
+    if (codeModeCanOpenFile(path)) add("ph-code", "Open", () => openInCodeMode({ kind: "file", path, line }));
+    if (!isRemote()) add("ph-arrow-square-out", "Open in VS Code", () => openInEditor(path, line, col));
     add("ph-copy", "Copy path", () => copyPath(path));
     if (!isRemote()) add("ph-folder-open", "Reveal in file manager", () => revealFileRef(path));
   },
@@ -142,8 +152,7 @@ export function handleFileRefClick(e: MouseEvent): void {
   const chip = chipOf(e);
   if (!chip?.dataset.path) return;
   e.preventDefault();
-  if (isRemote()) copyPath(chip.dataset.path);
-  else openFileRef(chip.dataset.path, numAttr(chip.dataset.line), numAttr(chip.dataset.col));
+  openFileRef(chip.dataset.path, numAttr(chip.dataset.line), numAttr(chip.dataset.col));
 }
 
 export function handleFileRefContextMenu(e: MouseEvent): void {
@@ -158,6 +167,5 @@ export function handleFileRefKeydown(e: KeyboardEvent): void {
   const chip = chipOf(e);
   if (!chip?.dataset.path) return;
   e.preventDefault();
-  if (isRemote()) copyPath(chip.dataset.path);
-  else openFileRef(chip.dataset.path, numAttr(chip.dataset.line), numAttr(chip.dataset.col));
+  openFileRef(chip.dataset.path, numAttr(chip.dataset.line), numAttr(chip.dataset.col));
 }

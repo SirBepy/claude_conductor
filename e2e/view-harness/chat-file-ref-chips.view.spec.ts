@@ -1,3 +1,4 @@
+// Reviewed 2026-10-26: a chip click now opens Code mode instead of the editor (covered in code-mode.view.spec.ts); this spec only asserts how chips render, which did not change.
 // asserts: src/shared/chat/file-refs.ts, src/shared/chat/chat-messages-blocks.css
 import { test, expect } from "@playwright/test";
 import { mountView } from "./harness";
