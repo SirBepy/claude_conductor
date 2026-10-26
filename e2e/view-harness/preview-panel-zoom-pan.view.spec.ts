@@ -75,6 +75,23 @@ test("Ctrl pressed while focus is inside the page still arms zoom", async ({ pag
   await expect(stage).not.toHaveClass(/is-zoom/);
 });
 
+test("a Ctrl+click on the stage after the page had focus keeps zoom armed", async ({ page }) => {
+  const doc = buildPreviewDocumentHtml(`<!doctype html><html><head></head><body><button id="b">page</button></body></html>`, { forwardZoomKeys: true });
+  await openPreview(page, `data:text/html;charset=utf-8,${encodeURIComponent(doc)}`);
+  const root = page.locator('.sp-panel[data-active="preview"]');
+  const stage = root.locator(".pv-stage");
+
+  await root.frameLocator("iframe.pv-iframe").locator("#b").click();
+  await page.keyboard.down("Control");
+  await expect(stage).toHaveClass(/is-zoom/);
+  // The click moves focus from the page out to the panel, blurring the page.
+  await stage.click({ position: { x: 40, y: 40 } });
+  await page.waitForTimeout(100);
+  await expect(stage).toHaveClass(/is-zoom/);
+  await page.keyboard.up("Control");
+  await expect(stage).not.toHaveClass(/is-zoom/);
+});
+
 test("the Zoom toggle arms zoom/pan for touch and disarms it again", async ({ page }) => {
   await openPreview(page);
   const root = page.locator('.sp-panel[data-active="preview"]');
