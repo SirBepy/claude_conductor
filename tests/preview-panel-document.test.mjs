@@ -31,4 +31,11 @@ describe("buildPreviewDocumentHtml", () => {
     const out = buildPreviewDocumentHtml("<!doctype html><html><body><p>hi</p></body></html>");
     expect(out).toMatch(/bodyEndRan = true\);<\/script><\/body><\/html>$/);
   });
+
+  // Only the Preview panel zooms, so only its documents report Ctrl/Cmd.
+  it("adds the zoom-key forwarder only when asked", () => {
+    const html = "<!doctype html><html><head></head><body><p>hi</p></body></html>";
+    expect(buildPreviewDocumentHtml(html, { forwardZoomKeys: true })).toContain("cc-preview-zoom-key");
+    expect(buildPreviewDocumentHtml(html)).not.toContain("cc-preview-zoom-key");
+  });
 });
