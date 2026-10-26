@@ -385,13 +385,6 @@
     font-weight: 600;
     cursor: pointer;
   }
-  /* Each panel's left border sat at the screen's left edge once the track
-     slid to it, a full-height line beside the question. The page never
-     shows two panels at once outside a swipe, so there is nothing to divide. */
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-panel + .prompt-panel {
-    border-left: none;
-  }
-
   /* Footer: the Preview panel's own reply bar (.pv-composer,
      question-ui-templates.ts) edge to edge, with its own padding and top
      divider. Its send arrow is the page's Next and Submit (question-ui-
