@@ -104,6 +104,31 @@
 .pd-usage-total { font-size: 12px; color: var(--sb-muted, var(--color-text-muted)); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
 .pd-usage-chart { min-width: 0; }
 
+/* Todos card. The three line hues are categorical slots checked for
+   colorblind separation and contrast against both modes' surfaces; the dark
+   steps are the same hues lifted for the dark surface. */
+.pd-root {
+  --pd-todo-open: #3987e5;
+  --pd-todo-created: #d95926;
+  --pd-todo-done: #199e70;
+}
+[data-mode="light"] .pd-root {
+  --pd-todo-open: #2a78d6;
+  --pd-todo-created: #eb6834;
+  --pd-todo-done: #1baf7a;
+}
+.pd-todo-legend { display: flex; gap: 14px; font-size: 11.5px; color: var(--sb-muted, var(--color-text-muted)); margin-bottom: 4px; }
+.pd-todo-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.pd-todo-sw { display: inline-block; width: 10px; height: 2px; border-radius: 1px; }
+.pd-todo-chart { position: relative; min-width: 0; }
+.pd-todo-tip {
+  position: absolute; top: 0; pointer-events: none; white-space: nowrap;
+  padding: 6px 8px; border-radius: 6px; font-size: 11.5px; font-variant-numeric: tabular-nums;
+  background: var(--color-background); border: 1px solid var(--color-border); color: var(--color-text);
+}
+.pd-todo-tip > div { display: flex; align-items: center; gap: 6px; }
+.pd-todo-tip-date { color: var(--sb-muted, var(--color-text-muted)); margin-bottom: 2px; }
+
 /* The right-click menu's anchor: a point at the cursor, never seen. */
 .pd-ctx-point { position: fixed; width: 0; height: 0; pointer-events: none; }
 @media (max-width: 900px) {

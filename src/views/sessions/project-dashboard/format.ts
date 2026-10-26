@@ -13,6 +13,7 @@ export const BUILTIN_CARDS: ReadonlyArray<{ id: string, label: string }> = [
   { id: "ship", label: "Ship state" },
   { id: "running", label: "Running" },
   { id: "usage", label: "Usage" },
+  { id: "todo_chart", label: "Todo chart" },
   { id: "quick_actions", label: "Quick action row" },
   { id: "reports", label: "Reports" },
 ];

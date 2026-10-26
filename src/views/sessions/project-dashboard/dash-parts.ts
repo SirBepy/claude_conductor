@@ -4,6 +4,7 @@ import { ifDefined } from "lit-html/directives/if-defined.js";
 import { sameCwd, type ReportsTab } from "./format";
 import type { DashboardHistory, DashSnapshot, DashTodo, RepoRef } from "./types";
 import type { UsageRange, UsageState } from "./dash-usage";
+import type { TodoRange } from "./dash-todo-chart";
 
 /** What a dashboard row can do. Implemented in dash-actions.ts, so the section
  *  templates stay pure functions of (ctx) and never import the sessions view. */
@@ -36,6 +37,7 @@ export interface DashActions {
   openReportsModal(): void;
   setUsageRange(range: UsageRange): void;
   setUsageOffset(offset: number): void;
+  setTodoRange(range: TodoRange): void;
 }
 
 /** Where a dashboard is shown: above a new-chat draft's message box, or as a
@@ -46,6 +48,8 @@ export interface DashCtx {
   mode: DashMode;
   snap: DashSnapshot;
   usage: UsageState;
+  /** The Todos chart's range; unset reads as 30d. */
+  todoRange?: TodoRange;
   history: DashboardHistory | null;
   /** The last dashboard_history call failed while none had landed yet. */
   historyFailed?: boolean;

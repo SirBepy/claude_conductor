@@ -3,7 +3,7 @@
 // Clockify-style stats card, typed against the dashboard contract so a field
 // change there fails typecheck here instead of rotting the spec.
 import type {
-  CardConfig, CardConfigX, CardResultX, DashboardHistory, DashboardTarget, DashSnapshot, ListRow, RepoShip,
+  CardConfig, CardConfigX, CardResultX, DashboardHistory, DashboardTarget, DashSnapshot, ListRow, RepoShip, TodoStats,
 } from "../../src/views/sessions/project-dashboard/types";
 
 export const CONDUCTOR_CWD = "C:/Projects/claude_usage_in_taskbar";
@@ -35,6 +35,22 @@ export const LIST_ROWS: ListRow[] = [
     last_active_ms: min(60 * 26 * (i + 1)), live_count: 0, question_count: 0, working_count: 0,
   })),
 ];
+
+/** Forty days of todo activity ending today: a steady trickle in, a busier day out now and then. */
+function todoStats(): TodoStats {
+  const days: TodoStats["days"] = [];
+  let open = 18;
+  for (let i = 39; i >= 0; i--) {
+    const date = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
+    const created = 6 + ((i * 7) % 9);
+    const done = 5 + ((i * 5) % 11);
+    open = Math.max(0, open + created - done);
+    days.push({ date, created, done, open });
+  }
+  return { days, open_now: open, claimed_now: 1 };
+}
+
+const EMPTY_TODO_STATS: TodoStats = { days: [], open_now: 0, claimed_now: 0 };
 
 const ship = (cwd: string, name: string, branch: string, ahead: number, dirty: number, commits: RepoShip["recent_commits"] = []): RepoShip => ({
   cwd, name, branch, ahead, behind: 0, has_upstream: true, dirty_count: dirty, recent_commits: commits,
@@ -69,6 +85,7 @@ export function conductorSnapshot(): DashSnapshot {
       { id: "926", text: "Turn result line sometimes never arrives", section: "Priorities", priority: true, repo_cwd: CONDUCTOR_CWD },
       { id: "506", text: "Android push via FCM", section: "Blocked", priority: false, repo_cwd: CONDUCTOR_CWD },
     ],
+    todo_stats: todoStats(),
     scheduled: [
       { id: "sc1", label: "/loop-todos cycle", fire_at_ms: Date.now() + 5 * 3_600_000, repo_cwd: CONDUCTOR_CWD },
       { id: "sc2", label: "Check release CI", fire_at_ms: Date.now() + 26 * 3_600_000, repo_cwd: CONDUCTOR_CWD },
@@ -117,6 +134,7 @@ export function zirtueSnapshot(): DashSnapshot {
       { id: "91", text: "[P] - BP Amplitude overview / insights / nav / Intercom / page-view events", section: "Phase 1 - start now", priority: false, repo_cwd: biller },
       { id: "87", text: "[P] - SC-54866 header biller logo (needs stevan's self-scoped token)", section: "Phase 2 - blocked on others", priority: false, repo_cwd: biller },
     ],
+    todo_stats: EMPTY_TODO_STATS,
     scheduled: [],
     ship: [
       ship(app, "zng-app", "release/2.14", 3, 0),

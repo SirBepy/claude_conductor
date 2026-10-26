@@ -11,8 +11,8 @@ use ts_rs::TS;
 /// The built-in cards every dashboard has; each can be hidden per scope.
 /// A scope may still list a retired id (`needs_you`) as hidden; it matches no
 /// card, so it is inert.
-pub const BUILTIN_CARDS: [&str; 8] =
-    ["your_todos", "chats", "next_up", "ship", "running", "usage", "quick_actions", "reports"];
+pub const BUILTIN_CARDS: [&str; 9] =
+    ["your_todos", "chats", "next_up", "ship", "running", "usage", "todo_chart", "quick_actions", "reports"];
 
 /// What a card (or a hidden-builtin entry) belongs to: one project, or a
 /// multi-repo group.
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn builtin_list_is_the_eight_cards() {
-        assert_eq!(BUILTIN_CARDS.len(), 8);
+        assert_eq!(BUILTIN_CARDS.len(), 9);
         assert!(BUILTIN_CARDS.contains(&"usage"));
         assert!(BUILTIN_CARDS.contains(&"quick_actions"));
         assert!(!BUILTIN_CARDS.contains(&"needs_you"));
