@@ -84,8 +84,11 @@
 [class*="view-settings-"] .kit-row :is(
   select,
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
-  .btn-secondary
-) {
+  .btn-danger
+),
+/* Buttons and the pairing-URL fields sit outside a row too (Add account, Copy
+   link, Pair); same 32px so they match the controls in the rows above them. */
+[class*="view-settings-"] :is(.btn-secondary, .ra-token-field) {
   height: 32px;
   box-sizing: border-box;
   padding-top: 0;

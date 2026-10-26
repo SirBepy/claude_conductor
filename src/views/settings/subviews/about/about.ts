@@ -98,7 +98,7 @@ export async function renderAboutView(root: HTMLElement): Promise<() => void> {
   function doRender() {
     render(
       html`
-        <div class="view view-settings">
+        <div class="view view-settings-about">
           ${settingsHeader("About & updates")}
           <div class="view-body">
             ${page.render()}
