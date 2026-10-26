@@ -17,6 +17,10 @@ pub struct SlashEntry {
     /// builtins, which have no file. `mentions` hands this to the model so it
     /// can load a mid-message command it decides to run.
     pub path: Option<String>,
+    /// Left out of the composer's slash popup but still a known command, so a
+    /// typed or rendered mention of it resolves and /help lists it (`/pickup`
+    /// while its PLAN.md has nothing to pick, see `enumerate::scan_menu`).
+    pub menu_hidden: bool,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]

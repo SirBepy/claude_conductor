@@ -126,8 +126,11 @@ fn the_menu_offers_pickup_only_while_plan_md_has_something_to_pick() {
         fs::write(home.path().join("skills").join(name).join("SKILL.md"), skill).unwrap();
     }
     let todos = tempfile::tempdir().unwrap();
+    // The names the popup offers; a hidden entry stays in the list, just marked.
     let names = |todos_dir: &std::path::Path| -> Vec<String> {
-        hide_idle_pickup(scan_dirs(home.path(), &[]), todos_dir).into_iter().map(|e| e.name).collect()
+        let all = hide_idle_pickup(scan_dirs(home.path(), &[]), todos_dir);
+        assert!(all.iter().any(|e| e.name == "pickup"), "pickup is marked, never dropped");
+        all.into_iter().filter(|e| !e.menu_hidden).map(|e| e.name).collect()
     };
 
     fs::write(todos.path().join("PLAN.md"), "## Now\n- [x] 1 - done\n").unwrap();

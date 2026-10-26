@@ -18,5 +18,6 @@ fn e(name: &str, args: Option<&str>, desc: &str) -> SlashEntry {
         description: desc.to_string(),
         source: SlashSource::Builtin,
         path: None,
+        menu_hidden: false,
     }
 }

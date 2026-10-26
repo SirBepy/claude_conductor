@@ -211,6 +211,7 @@ mod tests {
             description: format!("does {name}"),
             source: SlashSource::UserSkill,
             path: Some(format!("/home/u/.claude/skills/{name}/SKILL.md")),
+            menu_hidden: false,
         }
     }
 
