@@ -189,6 +189,8 @@ pub fn run() {
             ipc::get_api_credit_status,
             ipc::refresh_api_credit_status,
             ipc::set_console_session,
+            ipc::add_api_credit_account,
+            ipc::connect_console_login,
             ipc::get_auth_state_map,
             ipc::get_history,
             ipc::get_settings,
