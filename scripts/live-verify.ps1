@@ -70,7 +70,12 @@ param(
     [switch]$Visible,
 
     # Accepted for older callers; headless is the default now.
-    [switch]$Headless
+    [switch]$Headless,
+
+    # Points the rig's app and daemon at a scratch data dir (CC_DATA_DIR) instead of
+    # the dev's real %APPDATA%\claude-conductor, so a check that writes accounts,
+    # keys or settings never touches production data. Created if missing.
+    [string]$DataDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -390,6 +395,13 @@ switch ($Command) {
         }
 
         Write-Host "Launching isolated debug instance (label=$InstanceLabel, CDP port=$Port)..."
+        $dataEnv = ''
+        if ($DataDir) {
+            $DataDir = [System.IO.Path]::GetFullPath($DataDir)
+            if (-not (Test-Path $DataDir)) { New-Item -ItemType Directory -Path $DataDir | Out-Null }
+            $dataEnv = "`nCC_DATA_DIR=$DataDir"
+            Write-Host "scratch data dir: $DataDir"
+        }
         $supervisorId = $null
         if (-not $Visible) {
             $api = Get-SupervisorApi
@@ -397,7 +409,7 @@ switch ($Command) {
             # Bare path: the supervisor's cmd /c turns a quoted one into a literal "\"...\"".
             # $stateDir is under LOCALAPPDATA, which has no spaces for a normal user name.
             $started = Start-SupervisorHeadless $api $repoRoot $runExe "live-verify-$InstanceLabel" `
-                "CC_DAEMON_INSTANCE=$InstanceLabel`nWEBVIEW2_USER_DATA_FOLDER=$webview2Folder`nWEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=$Port"
+                "CC_DAEMON_INSTANCE=$InstanceLabel`nWEBVIEW2_USER_DATA_FOLDER=$webview2Folder`nWEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=$Port$dataEnv"
             $supervisorId = $started.id
             # The window appears a moment after the process; dock as soon as it exists so it
             # spends as little time as possible on the dev's screen.
@@ -419,11 +431,12 @@ switch ($Command) {
             $env:CC_DAEMON_INSTANCE = $InstanceLabel
             $env:WEBVIEW2_USER_DATA_FOLDER = $webview2Folder
             $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$Port"
+            if ($DataDir) { $env:CC_DATA_DIR = $DataDir }
             $appOutLog = Join-Path $logDir 'app.out.log'
             $appErrLog = Join-Path $logDir 'app.err.log'
             $appProc = Start-Process -FilePath $runExe -PassThru -WindowStyle Hidden `
                 -RedirectStandardOutput $appOutLog -RedirectStandardError $appErrLog
-            Remove-Item Env:\CC_DAEMON_INSTANCE, Env:\WEBVIEW2_USER_DATA_FOLDER, Env:\WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS -ErrorAction SilentlyContinue
+            Remove-Item Env:\CC_DAEMON_INSTANCE, Env:\WEBVIEW2_USER_DATA_FOLDER, Env:\WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, Env:\CC_DATA_DIR -ErrorAction SilentlyContinue
         }
 
         Wait-Http "http://127.0.0.1:$Port/json/list" 30 'CDP endpoint'
