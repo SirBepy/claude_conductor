@@ -4,14 +4,9 @@
 // (project_dashboard/todo_stats.rs); this file only slices and draws.
 import { html, nothing, type TemplateResult } from "lit-html";
 import { unsafeHTML } from "lit-html/directives/unsafe-html.js";
-import { card, hidden, type DashCtx } from "./dash-parts";
+import { card, hidden, rangeTabs, type DashCtx, type DashRange } from "./dash-parts";
 import type { TodoDay } from "../../../types/ipc.generated";
 
-export type TodoRange = "7d" | "30d" | "all";
-
-const RANGES: Array<{ id: TodoRange, label: string }> = [
-  { id: "7d", label: "7d" }, { id: "30d", label: "30d" }, { id: "all", label: "All" },
-];
 
 // Open is the number that matters, so it is the one line in color, drawn
 // thicker and over a faint fill. Created and done are context: both thin and
@@ -24,7 +19,7 @@ const SERIES = [
 type Series = typeof SERIES[number];
 
 /** The days the range shows, oldest first. Pure, for tests. */
-export function todoDays(days: TodoDay[], range: TodoRange): TodoDay[] {
+export function todoDays(days: TodoDay[], range: DashRange): TodoDay[] {
   if (range === "all") return days;
   return days.slice(-(range === "7d" ? 7 : 30));
 }
@@ -170,8 +165,7 @@ export function todoChart(c: DashCtx): TemplateResult | typeof nothing {
   const created = days.reduce((s, d) => s + d.created, 0);
   const done = days.reduce((s, d) => s + d.done, 0);
   const available = stats.open_now - stats.claimed_now;
-  const trailing = html`<span class="pd-usage-ranges">${RANGES.map((r) => html`
-      <button type="button" class="pd-rtab ${range === r.id ? "on" : ""}" data-pd-todo-range=${r.id} @click=${() => c.act.setTodoRange(r.id)}>${r.label}</button>`)}</span>`;
+  const trailing = rangeTabs(range, c.act.setTodoRange);
   const body = html`
     <div class="pd-usage-total">${available} available${stats.claimed_now ? html`, ${stats.claimed_now} claimed` : nothing} · ${created} created, ${done} done in this range</div>
     <div class="pd-todo-legend">${SERIES.map((s) => html`<span>${unsafeHTML(swatch(s))}${s.label}</span>`)}</div>
