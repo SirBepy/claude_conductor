@@ -9,9 +9,11 @@ pub fn scan_all(project_dir: Option<&Path>) -> Vec<SlashEntry> {
     scan_all_multi(&projects)
 }
 
-/// What the composer's slash menu offers for a project: `scan_all`, minus
-/// `/pickup` while the project's PLAN.md has nothing for it to pick up. Only
-/// the menu hides it; a typed `/pickup` still resolves through `scan_all`.
+/// What the composer's slash menu offers for a project: `scan_all`, with
+/// `/pickup` marked `menu_hidden` while the project's PLAN.md has nothing for
+/// it to pick up. It stays in the list, so the chat still highlights a
+/// `/pickup` mention and /help still lists it; only the popup leaves it out.
+/// With no project there is no PLAN.md to judge by, so nothing is marked.
 pub fn scan_menu(project_dir: Option<&Path>) -> Vec<SlashEntry> {
     let entries = scan_all(project_dir);
     match project_dir {
@@ -22,7 +24,9 @@ pub fn scan_menu(project_dir: Option<&Path>) -> Vec<SlashEntry> {
 
 pub fn hide_idle_pickup(mut entries: Vec<SlashEntry>, todos_dir: &Path) -> Vec<SlashEntry> {
     if !crate::project_dashboard::plan::has_pickable(todos_dir) {
-        entries.retain(|e| e.name != "pickup");
+        for e in entries.iter_mut().filter(|e| e.name == "pickup") {
+            e.menu_hidden = true;
+        }
     }
     entries
 }
@@ -77,6 +81,7 @@ fn scan_commands(dir: &Path, src: &SlashSource, out: &mut Vec<SlashEntry>) {
             description,
             source: src.clone(),
             path: Some(p.to_string_lossy().into_owned()),
+            menu_hidden: false,
         });
     }
 }
@@ -104,6 +109,7 @@ fn scan_skills(dir: &Path, src: &SlashSource, out: &mut Vec<SlashEntry>) {
             description: fm.description.unwrap_or_default(),
             source: src.clone(),
             path: Some(skill_file.to_string_lossy().into_owned()),
+            menu_hidden: false,
         });
     }
 }

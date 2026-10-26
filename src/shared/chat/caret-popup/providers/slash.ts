@@ -11,6 +11,7 @@ export class SlashProvider implements SuggestProvider<SlashEntry> {
   private cache: SlashEntry[] = [];
   private unlisten: (() => void) | null = null;
   private projectDir: string | null = null;
+  private fetchSeq = 0;
 
   async start(projectDir: string | null): Promise<void> {
     this.projectDir = projectDir;
@@ -34,7 +35,7 @@ export class SlashProvider implements SuggestProvider<SlashEntry> {
     // it has something to pick), which no watcher reports, so each fresh "/"
     // re-reads it; the keystrokes after it see the result.
     if (token === "/") void this.refetch();
-    return match(this.cache, token.slice(1));
+    return match(this.cache.filter((e) => !e.menu_hidden), token.slice(1));
   }
 
   renderRow(e: SlashEntry, selected: boolean): HTMLElement {
@@ -72,15 +73,22 @@ export class SlashProvider implements SuggestProvider<SlashEntry> {
     ta.focus();
   }
 
+  // A failed refetch keeps the list it had: a "/" can refetch on any
+  // keystroke, so one dropped call must not empty the menu. Only the newest
+  // call's answer is kept, since two can be in flight at once.
   private async refetch(): Promise<void> {
+    const mine = ++this.fetchSeq;
+    let entries: SlashEntry[];
     try {
-      this.cache = await invoke<SlashEntry[]>("list_slash_commands", {
+      entries = await invoke<SlashEntry[]>("list_slash_commands", {
         projectDir: this.projectDir,
       });
     } catch (e) {
       console.error("[SlashProvider] list_slash_commands failed", e);
-      this.cache = [];
+      return;
     }
+    if (mine !== this.fetchSeq) return;
+    this.cache = entries;
     setSlashEntries(this.cache);
   }
 }

@@ -391,6 +391,7 @@ mod tests {
             description: "closes the session".to_string(),
             source: SlashSource::UserSkill,
             path: Some("/home/u/.claude/skills/close/SKILL.md".to_string()),
+            menu_hidden: false,
         };
         let block = crate::slash::mentions::build_block("do /close now", std::slice::from_ref(&entry))
             .expect("the fixture entry matches the mentioned command");
