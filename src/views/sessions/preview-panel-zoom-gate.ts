@@ -33,8 +33,16 @@ export function mountZoomGate(stage: HTMLElement, iframe: HTMLIFrameElement, tog
   };
   const onMessage = (e: MessageEvent) => {
     if (e.source !== iframe.contentWindow) return;
-    const data = e.data as { type?: unknown; held?: unknown } | null;
-    if (data?.type === ZOOM_KEY_MESSAGE) setKeyHeld(data.held === true);
+    const data = e.data as { type?: unknown; held?: unknown; blur?: unknown } | null;
+    if (data?.type !== ZOOM_KEY_MESSAGE) return;
+    // The page blurs when a Ctrl+click on the stage moves focus out to the
+    // panel, with Ctrl still down; the panel's own keyup reports the release
+    // then. Only a blur to another app (panel unfocused too) is a release.
+    if (data.blur === true) {
+      setTimeout(() => { if (!document.hasFocus()) setKeyHeld(false); }, 0);
+      return;
+    }
+    setKeyHeld(data.held === true);
   };
   // A key released while another app has focus never sends a keyup, which
   // would leave the page unclickable until Ctrl is pressed again.

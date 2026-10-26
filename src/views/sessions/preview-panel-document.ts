@@ -64,11 +64,11 @@ export const ZOOM_KEY_MESSAGE = "cc-preview-zoom-key";
 // Ctrl/Cmd go down, so the page reports it. Capture phase, so a page that
 // stops propagation on its own key handlers still reports.
 const ZOOM_KEY_FORWARDER_SCRIPT = `<script>(function(){
-  function send(held){ try { parent.postMessage({ type: "${ZOOM_KEY_MESSAGE}", held: held }, "*"); } catch (e) {} }
-  function onKey(e){ if (e.key === "Control" || e.key === "Meta") send(e.type === "keydown"); }
+  function send(held, blur){ try { parent.postMessage({ type: "${ZOOM_KEY_MESSAGE}", held: held, blur: blur }, "*"); } catch (e) {} }
+  function onKey(e){ if (e.key === "Control" || e.key === "Meta") send(e.type === "keydown", false); }
   window.addEventListener("keydown", onKey, true);
   window.addEventListener("keyup", onKey, true);
-  window.addEventListener("blur", function(){ send(false); });
+  window.addEventListener("blur", function(){ send(false, true); });
 })();</script>`;
 
 /** Loaded via a `data:` URL, never `iframe.srcdoc`: a srcdoc document has no
