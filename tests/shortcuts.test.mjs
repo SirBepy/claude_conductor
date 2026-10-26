@@ -61,6 +61,14 @@ describe("findConflict", () => {
   });
 });
 
+describe("close-chat shortcut", () => {
+  // A draft's composer is auto-focused, so a suppressed Ctrl+W never closed it.
+  it("fires even while an input/textarea has focus", () => {
+    const def = getAll().find(d => d.id === "close-chat");
+    expect(def?.suppressInInput).toBe(false);
+  });
+});
+
 describe("new-chat shortcut", () => {
   it("fires even while an input/textarea has focus", () => {
     const def = getAll().find(d => d.id === "new-chat");
