@@ -45,7 +45,8 @@ function model(over = {}) {
   return {
     scope: { kind: "unpushed" },
     data: null,
-    collapsed: new Set(),
+    // The real tree starts closed; most tests want the files visible.
+    expanded: allDirs(over.data?.paths ?? []),
     activePath: null,
     menuOpen: false,
     menuCounts: {},
@@ -172,14 +173,14 @@ describe("explorer markup", () => {
   });
 
   it("a collapsed folder holding changes shows a dot", () => {
-    const el = render(model({ data: data([scopeFile("src/a.ts", "M")]), collapsed: new Set(["src"]) }));
+    const el = render(model({ data: data([scopeFile("src/a.ts", "M")]), expanded: new Set() }));
     expect(el.querySelector('[data-dir="src"] .cm-dot')).not.toBeNull();
     expect(el.querySelector('[data-file="src/a.ts"]')).toBeNull();
   });
 
   it("All files lists unchanged files too, changed ones still marked", () => {
     const el = render(model({ scope: { kind: "all" }, data: data([scopeFile("a.ts", "M")], ["a.ts", "b.ts"]) }));
-    expect(el.querySelector(".cm-qtitle .n").textContent).toBe("2");
+    expect(el.querySelector(".cm-qtitle .n")).toBeNull();
     expect(el.querySelector('[data-file="a.ts"]').classList.contains("chg")).toBe(true);
     expect(el.querySelector('[data-file="b.ts"]').classList.contains("chg")).toBe(false);
   });
@@ -286,6 +287,10 @@ describe("Code mode", () => {
   });
 
   const root = () => document.querySelector(".code-mode");
+  // Folders start closed, so a test that wants a nested file opens them first.
+  const expandAll = () => {
+    for (let d = root().querySelector('[data-dir][aria-expanded="false"]'); d; d = root().querySelector('[data-dir][aria-expanded="false"]')) d.click();
+  };
 
   it("covers the chat list and the chat, with the back pill naming the chat", async () => {
     openCodeMode(chat());
@@ -296,6 +301,8 @@ describe("Code mode", () => {
     expect(root().querySelector(".cm-live").classList.contains("on")).toBe(true);
     // The whole repo is the default scope (Joe, 2026-10-07), unchanged files included.
     expect(root().querySelector(".cm-qtitle").textContent).toContain("All files");
+    expect(root().querySelectorAll(".cm-row.cm-file").length).toBe(1);
+    expandAll();
     expect(root().querySelectorAll(".cm-row.cm-file").length).toBe(3);
     expect(root().querySelector('[data-file="README.md"]')).not.toBeNull();
   });
@@ -304,6 +311,7 @@ describe("Code mode", () => {
     const c = chat({ key: "s11" });
     openCodeMode(c);
     await settle();
+    expandAll();
     expect(root().querySelector('[data-file="src/new.ts"]')).toBeNull();
 
     // The chat writes a new file: the working-tree query the daemon answers
@@ -326,6 +334,7 @@ describe("Code mode", () => {
     // The real 1s tick, not a mocked one - this pins the actual interval path.
     await new Promise((r) => setTimeout(r, 1100));
     await settle();
+    expandAll();
     expect(root().querySelector('[data-file="src/new.ts"]')).not.toBeNull();
   });
 
@@ -374,6 +383,7 @@ describe("Code mode", () => {
   it("opens a file as a tab, and tabs survive leaving and re-entering", async () => {
     openCodeMode(chat());
     await settle();
+    expandAll();
     root().querySelector('[data-file="src/a.ts"]').click();
     await settle();
     expect(Array.from(root().querySelectorAll(".cm-tab"), (t) => t.dataset.tab)).toEqual(["src/a.ts"]);
@@ -420,6 +430,9 @@ describe("Code mode", () => {
     root().querySelector(".cm-tree").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 }));
     const items = Array.from(document.querySelectorAll(".cm-ctx .cm-mi"), (i) => i.dataset.ctx);
     expect(items).toEqual(["expand", "collapse"]);
+    document.querySelector('.cm-ctx [data-ctx="expand"]').click();
+    expect(root().querySelector('[data-dir="src"]').getAttribute("aria-expanded")).toBe("true");
+    root().querySelector(".cm-tree").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 }));
     document.querySelector('.cm-ctx [data-ctx="collapse"]').click();
     expect(root().querySelector('[data-dir="src"]').getAttribute("aria-expanded")).toBe("false");
   });
@@ -428,6 +441,7 @@ describe("Code mode", () => {
     const c = chat({ key: "s6" });
     openCodeMode(c);
     await settle();
+    expandAll();
     root().querySelector('[data-file="src/a.ts"]').dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
     const items = Array.from(document.querySelectorAll(".cm-ctx .cm-mi"), (i) => i.dataset.ctx);
     expect(items).toEqual(["mention", "vscode", "reveal", "copy", "copyrel"]);
@@ -474,6 +488,7 @@ describe("Code mode", () => {
     await settle();
 
     expect(root().querySelector(".cm-ctitle").textContent).toContain("feature");
+    expandAll();
     expect(root().querySelector('[data-file="src/a.ts"] .pr-file-status').textContent).toBe("M");
     expect(root().querySelector('[data-file="src/unchanged.ts"] .pr-file-status')).toBeNull();
     expect(root().querySelector('[data-act="checkout-branch"]')).not.toBeNull();
@@ -530,6 +545,7 @@ describe("Code mode", () => {
     // No pop-out on the phone.
     expect(root().querySelector('[data-act="popout"]')).toBeNull();
 
+    expandAll();
     root().querySelector('[data-file="src/a.ts"]').click();
     await settle();
     expect(body.dataset.screen).toBe("file");
