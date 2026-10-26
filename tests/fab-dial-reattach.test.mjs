@@ -9,9 +9,19 @@ vi.mock("../src/views/sessions/drafts-panel", () => ({ mountDraftsPanel: () => (
 const stubPreview = () => ({ setSessionScope() {}, refresh() {}, closeMenus() {}, destroy() {} });
 const { mountFabDial } = await import("../src/views/sessions/fab-dial.ts");
 
+// jsdom has no matchMedia, which fab-dial reads as "desktop": the phone path is
+// the one that owns the FAB, so these tests pose as a narrow window.
+// A desktop window is also Tauri (isRemote() is false there).
+const setNarrow = (narrow) => {
+  if (narrow) delete window.__TAURI__;
+  else window.__TAURI__ = {};
+  window.matchMedia = () => ({ matches: narrow, addEventListener() {}, removeEventListener() {} });
+};
+
 describe("fab dial survives a pane rebuild", () => {
   let pane;
   beforeEach(() => {
+    setNarrow(true);
     document.body.innerHTML = "";
     pane = document.createElement("div");
     document.body.appendChild(pane);
@@ -44,5 +54,24 @@ describe("fab dial survives a pane rebuild", () => {
     fab.setSessionScope(null, null);
     fab.reattach();
     expect(pane.querySelector(".fab-dial-host")).toBeNull();
+  });
+
+  it("draws no FAB on desktop, where the split's strip already lists the panels", () => {
+    setNarrow(false);
+    const fab = mountFabDial(pane, { onDraft() {}, onCode() {}, mountPreview: stubPreview });
+    fab.setSessionScope("sess-A", "C:/repo");
+    expect(pane.querySelector("[data-fab-toggle]")).toBeNull();
+    expect(pane.querySelector("[data-dial]")).toBeNull();
+  });
+
+  it("puts Code at the top of the desktop strip and fires onCode", () => {
+    setNarrow(false);
+    const onCode = vi.fn();
+    const fab = mountFabDial(pane, { onDraft() {}, onCode, mountPreview: stubPreview });
+    fab.setSessionScope("sess-A", "C:/repo");
+    const tabs = pane.querySelectorAll(".sp-strip .sp-tab");
+    expect(tabs[0].hasAttribute("data-sp-code")).toBe(true);
+    tabs[0].click();
+    expect(onCode).toHaveBeenCalledTimes(1);
   });
 });

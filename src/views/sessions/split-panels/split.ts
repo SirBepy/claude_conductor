@@ -313,7 +313,13 @@ export class SplitPanels implements PanelHost {
   }
 
   private renderStrip(): void {
-    this.strip.innerHTML = STRIP_ORDER.filter((k) => this.panels.includes(k))
+    // Not a panel: it hands the whole pane over to Code mode, so it sits above
+    // the panel tabs and never shows as pressed.
+    const code = this.deps.onCode
+      ? `<button type="button" class="sp-tab" data-sp-code title="Code mode (Ctrl+Shift+E)" aria-label="Code mode">` +
+        `<i class="ph ph-code"></i></button>`
+      : "";
+    this.strip.innerHTML = code + STRIP_ORDER.filter((k) => this.panels.includes(k))
       .map((k) => {
         const on = k === this.active;
         const { label, icon } = PANEL_META[k];
@@ -335,6 +341,7 @@ export class SplitPanels implements PanelHost {
   // ── Events ───────────────────────────────────────────────────────────────
 
   private onStripClick = (ev: MouseEvent): void => {
+    if ((ev.target as HTMLElement).closest("[data-sp-code]")) return this.deps.onCode?.();
     const btn = (ev.target as HTMLElement).closest<HTMLElement>("[data-sp-k]");
     if (!btn) return;
     const k = btn.dataset.spK as PanelKey;

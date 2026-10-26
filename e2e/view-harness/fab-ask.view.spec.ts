@@ -73,7 +73,7 @@ async function mountFab(page: Page, seed: unknown[]): Promise<void> {
       const mod = await import("/views/sessions/fab-dial.ts");
       w.__fabHandle = mod.mountFabDial(pane, {
         onDraft: (text: string) => w.__drafts.push(text),
-        onCode: () => {},
+        onCode: () => { w.__codeCalls = (w.__codeCalls ?? 0) + 1; },
         mountPreview: () => ({ setSessionScope() {}, refresh() {}, closeMenus() {}, destroy() {} }),
       });
       w.__fabHandle.setSessionScope(viewer, "/proj");
@@ -82,44 +82,36 @@ async function mountFab(page: Page, seed: unknown[]): Promise<void> {
   );
 }
 
-test("FAB rests closed, fans out, and opens Ask in the split beside the chat", async ({ page }) => {
+test("desktop has no FAB: the strip holds Code on top, then the panels, and Ask opens the split", async ({ page }) => {
   await mountFab(page, [SEEDED_THREAD]);
 
-  const fab = page.locator(".fab-dial-fab");
-  await expect(fab).toBeVisible();
-  // The three DIAL card panels plus the Preview toggle, which is a dial item
-  // but never a panel.
-  await expect(page.locator(".fab-dial-item")).toHaveCount(5);
-  // Dial exists in the DOM but is hidden until the FAB is tapped.
-  await expect(page.locator(".fab-dial-item").first()).toBeHidden();
+  // The strip already offers every dial entry, so the FAB would duplicate it.
+  await expect(page.locator(".fab-dial-fab")).toHaveCount(0);
+  const tabs = page.locator(".sp-strip .sp-tab");
+  await expect(tabs).toHaveCount(5);
+  await expect(tabs.first()).toHaveAttribute("data-sp-code", "");
   await expect(page.locator(".sp-panel:visible")).toHaveCount(0);
 
-  await fab.click();
-  await expect(page.locator(".fab-dial-item").first()).toBeVisible();
-
-  await page.locator('[data-dial="ask"]').click();
+  await page.locator('.sp-tab[data-sp-k="ask"]').click();
   await expect(page.locator(".sp-panel:visible")).toHaveCount(1);
   await expect(page.locator(".ask-panel")).toBeVisible();
-  // The FAB rides the chat column's corner, clear of the split.
-  await expect(fab).toBeVisible();
-  const fabBox = (await fab.boundingBox())!;
-  const panelBox = (await page.locator(".sp-panel").boundingBox())!;
-  expect(fabBox.x + fabBox.width).toBeLessThan(panelBox.x);
 });
 
-test("Preview is a toggle in the dial and fills the split", async ({ page }) => {
+test("the strip's Code button enters Code mode", async ({ page }) => {
   await mountFab(page, []);
-  await page.locator(".fab-dial-fab").click();
+  await page.locator(".sp-tab[data-sp-code]").click();
+  expect(await page.evaluate(() => (window as any).__codeCalls)).toBe(1);
+});
 
-  const preview = page.locator('[data-dial="preview"]');
-  await expect(preview).toHaveClass(/is-toggle/);
+test("Preview is a toggle in the strip and fills the split", async ({ page }) => {
+  await mountFab(page, []);
+  const preview = page.locator('.sp-tab[data-sp-k="preview"]');
   await preview.click();
   await expect(page.locator('.sp-panel[data-active="preview"]')).toBeVisible();
   await expect(page.locator(".sp-panel:visible")).toHaveCount(1);
 
-  await page.locator(".fab-dial-fab").click();
-  await expect(page.locator('[data-dial="preview"]')).toHaveClass(/is-on/);
-  await page.locator('[data-dial="preview"]').click();
+  await expect(preview).toHaveAttribute("aria-pressed", "true");
+  await preview.click();
   await expect(page.locator('.sp-panel[data-active="preview"]')).toBeHidden();
 });
 
@@ -139,8 +131,7 @@ test("the strip switches panels without closing the split", async ({ page }) => 
 
 test("asking a question renders the answer and drafts the suggestion into the composer", async ({ page }) => {
   await mountFab(page, [SEEDED_THREAD]);
-  await page.locator(".fab-dial-fab").click();
-  await page.locator('[data-dial="ask"]').click();
+  await page.locator('.sp-tab[data-sp-k="ask"]').click();
 
   await page.locator("[data-ask-input]").fill("what was i meant to do here");
   await page.locator(".ask-panel .composer-field-send").click();
@@ -160,8 +151,7 @@ test("asking a question renders the answer and drafts the suggestion into the co
 
 test("the index lists threads, deletes one, and starts a new one", async ({ page }) => {
   await mountFab(page, [SEEDED_THREAD]);
-  await page.locator(".fab-dial-fab").click();
-  await page.locator('[data-dial="ask"]').click();
+  await page.locator('.sp-tab[data-sp-k="ask"]').click();
 
   await page.locator("[data-ask-index-toggle]").click();
   await expect(page.locator(".ask-menu-row")).toHaveCount(1);
@@ -179,8 +169,7 @@ test("the index lists threads, deletes one, and starts a new one", async ({ page
 
 test("Escape closes the split, but not while typing in it", async ({ page }) => {
   await mountFab(page, [SEEDED_THREAD]);
-  await page.locator(".fab-dial-fab").click();
-  await page.locator('[data-dial="ask"]').click();
+  await page.locator('.sp-tab[data-sp-k="ask"]').click();
 
   await page.locator("[data-ask-input]").click();
   await page.keyboard.press("Escape");
@@ -189,5 +178,4 @@ test("Escape closes the split, but not while typing in it", async ({ page }) => 
   await page.locator(".ask-body").click();
   await page.keyboard.press("Escape");
   await expect(page.locator(".sp-panel:visible")).toHaveCount(0);
-  await expect(page.locator(".fab-dial-fab")).toBeVisible();
 });

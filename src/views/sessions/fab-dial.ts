@@ -48,6 +48,7 @@ class FabDial implements FabDialHandle {
   private onCode: () => void;
   private sessionId: string | null = null;
   private liftObs: ResizeObserver | null = null;
+  private split = false;
 
   constructor(pane: HTMLElement, deps: FabDialDeps) {
     this.pane = pane;
@@ -68,7 +69,10 @@ class FabDial implements FabDialHandle {
       mountPreview: deps.mountPreview,
       onChange: () => this.renderChrome(),
     };
-    this.windows = usesSplit() ? new SplitPanels(pane, layer, hostDeps) : new PaneWindows(pane, layer, hostDeps);
+    // The split's icon strip already offers every dial entry, so on desktop
+    // the FAB would only duplicate it; Code moves into the strip instead.
+    this.split = usesSplit();
+    this.windows = this.split ? new SplitPanels(pane, layer, { ...hostDeps, onCode: deps.onCode }) : new PaneWindows(pane, layer, hostDeps);
     this.renderChrome();
   }
 
@@ -183,6 +187,10 @@ class FabDial implements FabDialHandle {
   };
 
   private renderChrome(): void {
+    if (this.split) {
+      this.chrome.innerHTML = "";
+      return;
+    }
     this.host.dataset.surface = this.dialOpen ? "dial" : "rest";
     const previewOn = this.hasPreview && this.windows.previewController().isOpen();
     const items = DIAL.map(
