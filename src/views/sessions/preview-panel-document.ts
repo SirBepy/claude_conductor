@@ -56,17 +56,36 @@ const DIAGNOSTICS_HEAD_SCRIPT = `<script>(function(){
 // no-op (the documented failure mode) rather than only catching exceptions.
 const DIAGNOSTICS_BODY_END_SCRIPT = `<script>window.__previewDiag && (window.__previewDiag.bodyEndRan = true);</script>`;
 
+/** `data` tag on the zoom-key forwarder's postMessage, read by
+ *  preview-panel-zoom-gate.ts. */
+export const ZOOM_KEY_MESSAGE = "cc-preview-zoom-key";
+
+// Once the page is clicked, keys go to the iframe and the panel never sees
+// Ctrl/Cmd go down, so the page reports it. Capture phase, so a page that
+// stops propagation on its own key handlers still reports.
+const ZOOM_KEY_FORWARDER_SCRIPT = `<script>(function(){
+  function send(held){ try { parent.postMessage({ type: "${ZOOM_KEY_MESSAGE}", held: held }, "*"); } catch (e) {} }
+  function onKey(e){ if (e.key === "Control" || e.key === "Meta") send(e.type === "keydown"); }
+  window.addEventListener("keydown", onKey, true);
+  window.addEventListener("keyup", onKey, true);
+  window.addEventListener("blur", function(){ send(false); });
+})();</script>`;
+
 /** Loaded via a `data:` URL, never `iframe.srcdoc`: a srcdoc document has no
  * navigation, so it inherits the app's CSP and can only intersect this meta,
  * never loosen it. A data: URL navigates into its own opaque origin, which
- * makes this meta the sole governing policy. */
-export function buildPreviewDocumentHtml(html: string): string {
+ * makes this meta the sole governing policy.
+ *
+ * `forwardZoomKeys` adds the Ctrl/Cmd forwarder the Preview panel's zoom gate
+ * listens for; the inline chat card has no zoom, so it leaves it off. */
+export function buildPreviewDocumentHtml(html: string, opts: { forwardZoomKeys?: boolean } = {}): string {
   const wrapped = wrapFragmentIfNeeded(html);
+  const headScripts = `${INNER_CSP_META}${DIAGNOSTICS_HEAD_SCRIPT}${opts.forwardZoomKeys ? ZOOM_KEY_FORWARDER_SCRIPT : ""}`;
   const withHead = /<head[^>]*>/i.test(wrapped)
-    ? wrapped.replace(/<head[^>]*>/i, (m) => `${m}${INNER_CSP_META}${DIAGNOSTICS_HEAD_SCRIPT}`)
+    ? wrapped.replace(/<head[^>]*>/i, (m) => `${m}${headScripts}`)
     : /<html[^>]*>/i.test(wrapped)
-      ? wrapped.replace(/<html[^>]*>/i, (m) => `${m}<head>${INNER_CSP_META}${DIAGNOSTICS_HEAD_SCRIPT}</head>`)
-      : `${INNER_CSP_META}${DIAGNOSTICS_HEAD_SCRIPT}${wrapped}`;
+      ? wrapped.replace(/<html[^>]*>/i, (m) => `${m}<head>${headScripts}</head>`)
+      : `${headScripts}${wrapped}`;
   // The LAST </body>, not the first: a mockup's own inline script commonly
   // builds HTML strings containing the literal text "</body>" (e.g. an
   // AI-generated mockup that itself renders HTML), and .replace() with no

@@ -283,14 +283,14 @@
 }
 
 /* The stage clips the zoomed page; the zoomee is what image-zoom-pan.ts
-   transforms. Zoom and pan are always on, so the iframe lets pointer events
-   through to the stage unless the Interact toggle is pressed. */
+   transforms. The page takes the pointer until preview-panel-zoom-gate.ts
+   arms zoom/pan (`.is-zoom`, Ctrl held or the toggle pressed); then the
+   iframe lets pointer events through to the stage's zoom/pan listeners. */
 .pv-stage {
   position: relative;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  touch-action: none;
 }
 
 .pv-zoomee {
@@ -303,18 +303,17 @@
   height: 100%;
   border: 0;
   display: block;
+}
+
+.pv-stage.is-zoom .pv-iframe {
   pointer-events: none;
 }
 
-.pv-stage.is-interact .pv-iframe {
-  pointer-events: auto;
+.pv-stage.is-zoom {
+  touch-action: none;
 }
 
-.pv-stage.is-interact {
-  touch-action: auto;
-}
-
-.pv-interact {
+.pv-zoom-toggle {
   position: absolute;
   right: 8px;
   bottom: 8px;
@@ -325,12 +324,12 @@
   opacity: 0.7;
 }
 
-.pv-interact:hover,
-.pv-interact[aria-pressed="true"] {
+.pv-zoom-toggle:hover,
+.pv-zoom-toggle[aria-pressed="true"] {
   opacity: 1;
 }
 
-.pv-interact[aria-pressed="true"] {
+.pv-zoom-toggle[aria-pressed="true"] {
   color: var(--color-primary);
 }
 
