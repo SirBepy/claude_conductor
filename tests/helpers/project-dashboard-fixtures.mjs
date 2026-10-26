@@ -29,7 +29,10 @@ export function groupRow(over = {}) {
 
 const ship = (cwd, name, branch, ahead, dirty) => ({
   cwd, name, branch, ahead, behind: 0, has_upstream: true, dirty_count: dirty,
-  recent_commits: ahead ? [{ short_sha: "dd1af90", message: "phone question sheet", timestamp_ms: min(30), pushed: false }] : [],
+  recent_commits: ahead ? [
+    { short_sha: "dd1af90", message: "phone question sheet", timestamp_ms: min(30), pushed: false },
+    { short_sha: "1ca182f", message: "option-preview card waits on image read", timestamp_ms: min(200), pushed: true },
+  ] : [],
 });
 
 export function projectSnapshot(over = {}) {

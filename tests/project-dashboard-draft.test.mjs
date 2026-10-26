@@ -147,9 +147,22 @@ describe("right-click menu", () => {
 
   it("offers copying a commit's hash", async () => {
     const pane = await mountDraft("C:/Projects/conductor");
-    rightClick(pane.querySelector(".pd-sha").closest(".pd-row"));
+    rightClick(pane.querySelector('[data-pd-commits="unpushed"]').nextElementSibling);
     await opened();
     expect(items()[0]).toBe("Copy commit hash");
+  });
+
+  it("splits commits under Unpushed (N) and Pushed, never shows a hash, and a click copies it", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const pane = await mountDraft("C:/Projects/conductor");
+    const ship = pane.querySelector('[data-pd-card="ship"]');
+    const labels = [...ship.querySelectorAll("[data-pd-commits]")].map((e) => e.textContent);
+    expect(labels).toEqual(["Unpushed (2)", "Pushed"]);
+    expect(ship.textContent).not.toContain("dd1af90");
+    expect(ship.querySelector('[data-pd-commits="pushed"]').nextElementSibling.textContent).toContain("option-preview card");
+    ship.querySelector('[data-pd-commits="unpushed"]').nextElementSibling.click();
+    expect(writeText).toHaveBeenCalledWith("dd1af90");
   });
 
   it("on empty space shows just the project actions", async () => {

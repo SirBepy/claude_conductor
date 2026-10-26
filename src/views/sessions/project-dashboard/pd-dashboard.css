@@ -156,8 +156,6 @@
 /* Which repo a row belongs to: plain muted text, not a boxed tag. */
 .pd-repo { flex: none; color: var(--sb-muted, var(--color-text-muted)); font: 12px var(--font-mono, monospace); }
 .pd-t .pd-branch { margin-left: 6px; }
-.pd-sha { font: 12px var(--font-mono, monospace); color: var(--sb-muted, var(--color-text-muted)); flex: none; width: 52px; }
-.pd-sha.unpushed { color: var(--color-text); }
 
 .pd-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin: 0 4px; }
 .pd-dot.q { background: var(--color-danger); }

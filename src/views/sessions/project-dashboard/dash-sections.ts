@@ -6,7 +6,7 @@ import { pageSlice } from "./paging";
 import {
   card, dot, hidden, icon, isGroup, kv, quiet, repoTag, row, type DashCtx,
 } from "./dash-parts";
-import type { RepoShip } from "./types";
+import type { CommitRow, RepoShip } from "./types";
 
 export function yourTodos(c: DashCtx): TemplateResult | typeof nothing {
   if (hidden(c, "your_todos")) return nothing;
@@ -45,21 +45,35 @@ export function nextUp(c: DashCtx): TemplateResult | typeof nothing {
   return card("Next up", body, { id: "next_up", trailing: html`${pager}${link}` });
 }
 
-const COMMIT_ROWS = 3;
+const UNPUSHED_ROWS = 3;
+const PUSHED_ROWS = 2;
 
+function commitRow(m: CommitRow, c: DashCtx): TemplateResult {
+  // The hash is only ever wanted on the clipboard, so a click copies it rather than the row showing it.
+  return row(icon("git-commit"), m.message, {
+    meta: shortAgo(m.timestamp_ms, c.nowMs),
+    title: `${m.message}\nClick to copy ${m.short_sha}`,
+    onClick: () => c.act.copyText(m.short_sha, "commit hash"),
+    ctx: { kind: "commit", sha: m.short_sha },
+  });
+}
+
+/** One repo's state, then its recent commits split under Unpushed (N) and
+ *  Pushed. The count is the branch's real ahead count, which can exceed the
+ *  rows the snapshot carries. With no upstream nothing is known to be pushed,
+ *  so every commit sits under Unpushed. */
 function shipDetail(r: RepoShip, c: DashCtx): TemplateResult[] {
-  const unpushed = !r.has_upstream ? kv("Unpushed", "no upstream", "warn")
-    : r.ahead > 0 ? kv("Unpushed", `${r.ahead} commit${r.ahead === 1 ? "" : "s"}`, "warn")
-    : kv("Unpushed", "none", "good");
   const out: TemplateResult[] = [
-    unpushed,
     kv("Working tree", r.dirty_count > 0 ? `${r.dirty_count} changed` : "clean", r.dirty_count > 0 ? "warn" : "good"),
   ];
   if (r.behind > 0) out.push(kv("Behind", `${r.behind} commit${r.behind === 1 ? "" : "s"}`, "warn"));
-  out.push(...r.recent_commits.slice(0, COMMIT_ROWS).map((m, i) => row(
-    html`<code class="pd-sha ${m.pushed ? "" : "unpushed"}">${m.short_sha}</code>`, m.message,
-    { meta: shortAgo(m.timestamp_ms, c.nowMs), title: m.pushed ? undefined : "Not pushed yet", gap: i === 0, ctx: { kind: "commit", sha: m.short_sha } },
-  )));
+  const unpushed = r.recent_commits.filter((m) => !m.pushed).slice(0, UNPUSHED_ROWS);
+  const pushed = r.recent_commits.filter((m) => m.pushed).slice(0, PUSHED_ROWS);
+  if (!r.has_upstream || r.ahead > 0) {
+    const label = r.has_upstream ? `Unpushed (${r.ahead})` : "Unpushed (no upstream)";
+    out.push(html`<div class="pd-sub" data-pd-commits="unpushed">${label}</div>`, ...unpushed.map((m) => commitRow(m, c)));
+  }
+  if (pushed.length) out.push(html`<div class="pd-sub" data-pd-commits="pushed">Pushed</div>`, ...pushed.map((m) => commitRow(m, c)));
   return out;
 }
 
