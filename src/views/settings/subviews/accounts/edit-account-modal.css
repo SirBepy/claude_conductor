@@ -106,6 +106,13 @@
   font-size: 15px;
   line-height: 1;
 }
+/* The rule above ties the picker's own `.icon-tile.sel` on specificity and
+ * loads after it, so without this the selected tile keeps the dark background
+ * and its dark glyph disappears into it. */
+.aem-overlay .appearance-picker .icon-tile.sel {
+  background: var(--acc, var(--color-primary, #6e8fff));
+  border-color: var(--color-text, #e8e8ee);
+}
 .aem-overlay .appearance-picker .swatches { align-items: center; }
 .aem-overlay .appearance-picker .swatch { width: 24px; height: 24px; }
 .aem-overlay .appearance-picker .swatch.custom {
