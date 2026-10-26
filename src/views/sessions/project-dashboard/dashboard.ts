@@ -18,6 +18,7 @@ import { syncEdges } from "./quick-track";
 import type { DashCtx, DashMode } from "./dash-parts";
 import { reportsBar } from "./dash-reports";
 import { usage, type UsageRange } from "./dash-usage";
+import { todoChart } from "./dash-todo-chart";
 import { openContextMenu } from "./dash-menu";
 import { chats } from "./dash-chats";
 import { nextUp, running, shipState, yourTodos } from "./dash-sections";
@@ -66,6 +67,7 @@ function halfSections(c: DashCtx): Section[] {
     { id: "next_up", body: nextUp(c) },
     { id: "ship", body: shipState(c) },
     { id: "usage", body: usage(c, (getSettings()?.projectAliases ?? {}) as AliasMap) },
+    { id: "todo_chart", body: todoChart(c) },
     ...customCards(c),
   ];
   return all.filter((s) => s.body !== nothing);
@@ -258,7 +260,7 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
       const first = !ctx;
       if (!ctx) {
         ctx = {
-          mode: deps.mode, usage: { range: "30d", offset: 0, records: null },
+          mode: deps.mode, usage: { range: "30d", offset: 0, records: null }, todoRange: "30d",
           snap, history: null, tab: "outcomes", images: new Map(), refreshing: new Set(),
           doneTodos: new Set(), pages: new Map(), columns: new Map(), halfOrder: [], paintHooks: new Set(),
           nowMs: Date.now(), act: makeActions(host),

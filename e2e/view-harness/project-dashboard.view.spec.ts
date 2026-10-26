@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-// asserts: src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/dashboard-page.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/dash-sections.ts, src/views/sessions/project-dashboard/dash-cards.ts, src/views/sessions/project-dashboard/dash-reports.ts, src/views/sessions/project-dashboard/dash-header.ts, src/views/sessions/project-dashboard/dash-modals.ts, src/views/sessions/project-dashboard/dash-menu.ts, src/views/sessions/project-dashboard/dash-chats.ts, src/views/sessions/project-dashboard/dash-usage.ts, src/views/sessions/project-dashboard/quick-track.ts, src/views/sessions/project-dashboard/paging.ts, src/views/sessions/session-header.ts, src/views/sessions/pending-pane.ts, src/views/sessions/session-controls.ts, src/views/sessions/state.ts
+// asserts: src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/dashboard-page.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/dash-sections.ts, src/views/sessions/project-dashboard/dash-cards.ts, src/views/sessions/project-dashboard/dash-reports.ts, src/views/sessions/project-dashboard/dash-header.ts, src/views/sessions/project-dashboard/dash-modals.ts, src/views/sessions/project-dashboard/dash-menu.ts, src/views/sessions/project-dashboard/dash-chats.ts, src/views/sessions/project-dashboard/dash-usage.ts, src/views/sessions/project-dashboard/dash-todo-chart.ts, src/views/sessions/project-dashboard/quick-track.ts, src/views/sessions/project-dashboard/paging.ts, src/views/sessions/session-header.ts, src/views/sessions/pending-pane.ts, src/views/sessions/session-controls.ts, src/views/sessions/state.ts
 import { capture, fireEvent, mountSessionsList, sessionInstance } from "./harness";
 import {
   CONDUCTOR_CWD, LIST_ROWS, ZIRTUE_CWDS, conductorHistory, conductorSnapshot, fakeShot, zirtueHistory, zirtueSnapshot,
@@ -102,7 +102,7 @@ test.describe("view-harness / project dashboard", () => {
     await expect(root.locator(".pd-head h3")).toHaveText("claude_usage_in_taskbar");
     await expect(root.locator(".pd-branch")).toHaveText("master ↑2");
     await expect(root.locator(".pd-head + .pd-reports")).toBeVisible();
-    for (const id of ["your_todos", "chats", "next_up", "ship", "usage", "running", "reports"]) {
+    for (const id of ["your_todos", "chats", "next_up", "ship", "usage", "todo_chart", "running", "reports"]) {
       await expect(card(page, id)).toBeVisible();
     }
     await expect(page.locator(".pd-qa-host.is-page .pd-chip").first()).toHaveText("+ New chat");
@@ -121,6 +121,35 @@ test.describe("view-harness / project dashboard", () => {
     await expect(page.locator("#session-pane .session-header")).toBeVisible();
   });
 
+  test("the Todos card draws open, created and done per day, switches range, and reads a day on hover", async ({ page }) => {
+    await mountWithDashboard(page);
+    await openPageFrom(page, "s-q");
+    const todos = card(page, "todo_chart");
+    await expect(todos.locator(".pd-usage-total")).toContainText("claimed");
+    await expect(todos.locator(".pd-todo-legend > span")).toHaveText(["Open", "Created", "Done"]);
+    await expect(todos.locator("svg polyline")).toHaveCount(3);
+    const pointsIn = (): Promise<number> => todos.locator("svg polyline").first()
+      .evaluate((l) => (l.getAttribute("points") ?? "").trim().split(/\s+/).length);
+    expect(await pointsIn()).toBe(30);
+
+    await todos.locator('[data-pd-todo-range="7d"]').click();
+    await expect(todos.locator('[data-pd-todo-range="7d"]')).toHaveClass(/\bon\b/);
+    expect(await pointsIn()).toBe(7);
+    await todos.locator('[data-pd-todo-range="all"]').click();
+    expect(await pointsIn()).toBe(40);
+
+    const chart = todos.locator(".pd-todo-chart");
+    const box = (await chart.boundingBox())!;
+    await page.mouse.move(box.x + box.width * 0.4, box.y + box.height / 2);
+    const tip = todos.locator(".pd-todo-tip");
+    await expect(tip).toBeVisible();
+    await expect(tip.locator(".pd-todo-tip-date")).toHaveText(/^\d{4}-\d{2}-\d{2}$/);
+    await expect(tip).toContainText("Open");
+    await capture(page, "dashboard-todo-chart-hover");
+    await page.mouse.move(0, 0);
+    await expect(tip).toBeHidden();
+  });
+
   test("a group repo's chat opens the group's page: repo count, one ship row per repo, both custom cards", async ({ page }) => {
     await mountWithDashboard(page);
     await openPageFrom(page, "z-w");
@@ -134,6 +163,8 @@ test.describe("view-harness / project dashboard", () => {
     await expect(card(page, "card:c-ck").locator(".pd-prog-label")).toHaveText("14h 30m of 20h this week");
     await expect(card(page, "card:c-ck").locator(".pd-hl-t.warn")).toContainText("3 workdays not logged");
     await expect(card(page, "your_todos")).toHaveCount(0);
+    // None of the group's repos has a todos folder, so there is no chart.
+    await expect(card(page, "todo_chart")).toHaveCount(0);
     await page.waitForTimeout(250);
     await capture(page, "dashboard-page-zirtue");
   });
@@ -243,7 +274,7 @@ test.describe("view-harness / project dashboard", () => {
     await expect(modal).toBeVisible();
     await expect(modal.locator(".pd-msec")).toHaveText(["Quick actions", "Sections", "Custom cards"]);
     await expect(modal.locator("[data-pd-pin]")).toHaveCount(9);
-    await expect(modal.locator(".pd-mrow")).toHaveCount(9 + 1 + 8 + 2);
+    await expect(modal.locator(".pd-mrow")).toHaveCount(9 + 1 + 9 + 2);
     await expect(modal).toContainText("Ask Claude in a chat here to add a card");
     await expect(modal).not.toHaveClass(/modal-card-morph-hidden/);
     await page.waitForTimeout(350); // open morph

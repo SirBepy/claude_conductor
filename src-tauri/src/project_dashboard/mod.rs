@@ -16,6 +16,7 @@ pub mod store;
 pub mod store_file;
 pub mod targets;
 pub mod template;
+pub mod todo_stats;
 pub mod types;
 pub mod vault_seed;
 
@@ -28,6 +29,6 @@ pub use types::{
 pub use snapshot_types::{
     CommitRow, DashChatRow, DashTodo, DashboardHistory, DashboardListRow, DashboardSnapshot,
     DashboardTarget, DashboardTargetRef, FileRow, GalleryItem, OutcomeRow, PlanItem, QuickAction,
-    RepoRef, RepoShip, ScheduledRow, ServerRow,
+    RepoRef, RepoShip, ScheduledRow, ServerRow, TodoDay, TodoStats,
 };
 pub use vault_seed::seed_groups;

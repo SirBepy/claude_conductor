@@ -130,12 +130,35 @@ pub struct ServerRow {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct TodoDay {
+    /// Local `YYYY-MM-DD`.
+    pub date: String,
+    pub created: u32,
+    pub done: u32,
+    /// The backlog at the end of the day.
+    pub open: u32,
+}
+
+/// `.claude/todos/` activity across the target's repos (see `todo_stats.rs`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct TodoStats {
+    /// Every day from the oldest todo to today, oldest first.
+    pub days: Vec<TodoDay>,
+    pub open_now: u32,
+    /// Backlog todos a session holds a claim on right now.
+    pub claimed_now: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct DashboardSnapshot {
     pub target: DashboardTarget,
     pub your_todos: Vec<DashTodo>,
     pub chats_running: Vec<DashChatRow>,
     pub chats_recent: Vec<DashChatRow>,
     pub plan: Vec<PlanItem>,
+    pub todo_stats: TodoStats,
     pub scheduled: Vec<ScheduledRow>,
     pub ship: Vec<RepoShip>,
     pub servers: Vec<ServerRow>,

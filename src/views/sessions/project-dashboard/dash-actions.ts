@@ -188,6 +188,7 @@ export function makeActions(host: ActionHost): DashActions {
       host.loadUsage(range);
     },
     setUsageOffset: (offset) => host.patch((c) => { c.usage.offset = Math.max(0, offset); }),
+    setTodoRange: (range) => host.patch((c) => { c.todoRange = range; }),
     openImage: (id) => {
       const c = host.ctx();
       const src = c.images.get(id);
