@@ -113,8 +113,9 @@ pub async fn spawn_session(
     } else {
         Default::default()
     };
-    let browser = state.settings.snapshot().claude_browser_enabled();
-    let mcp_config_path = write_mcp_config(&turn_id, &session_id, is_jarvis, browser, connectors);
+    let settings = state.settings.snapshot();
+    let (browser, browser_script) = (settings.claude_browser_enabled(), settings.claude_browser_script_tool());
+    let mcp_config_path = write_mcp_config(&turn_id, &session_id, is_jarvis, browser, browser_script, connectors);
     let hook_settings_path = write_hook_settings(&turn_id, &session_id);
 
     let claude = crate::util::claude_bin::resolve()

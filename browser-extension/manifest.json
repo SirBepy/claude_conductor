@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Claude Conductor Browser Bridge",
+  "version": "1.0.0",
+  "description": "Lets Claude Conductor chats drive this browser profile, each in its own window.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtWrlDmKIzPy+UDOI/wUIRcrRBFK4yIgDEVRaHY39mEYOehZ+2YHThYXWfjSVjf0B+vyww/0CJtLULIJGEneliI27tMINwUs23XjC5ur8aK2wkwjZENLqtEw/Z85l8rrrJlPQ4FqaR5+ioWWMKEDdopwPS7wTbyMDed1/j8slEfMQxRhY9Lbax22UVA3v2VVWN/FYyYhYghJBLovRtPdFeKbH97pYuwptcSpnFM7EREmmwTBsk6nl/K2Xdcr83Ht7F2VCSzYvGqFEXmoyE/LM5rOgXTn5UQtZLKjA5LeMFKTJ/3zjLvNNj0BbDlu8mk1s9ZUWnJfA2MetuPsnf8/vwQIDAQAB",
+  "minimum_chrome_version": "125",
+  "background": { "service_worker": "background.js" },
+  "permissions": ["debugger", "tabs", "webNavigation", "nativeMessaging", "alarms", "storage"]
+}

@@ -1,53 +1,37 @@
 // "Claude's browser" section of Chat defaults: the switch that gives chats the
-// browser_* tools, the browser a chat starts on (Claude's own off-screen Chrome
-// or one of Joe's own, driven through the Playwright extension he approves; a
-// chat can switch itself with browser_target), and the button that brings the
-// daemon's Chrome onto this screen so Joe can sign in or clear a CAPTCHA for
-// Claude.
+// browser_* tools, the opt-in script tool, the browser a chat starts on
+// (Claude's own off-screen Chrome, or one of Joe's own driven through the
+// Claude Conductor Browser Bridge extension; a chat can switch itself with
+// browser_target), and the button that brings the daemon's Chrome onto this
+// screen so Joe can sign in or clear a CAPTCHA for Claude.
 import { html, type TemplateResult } from "lit-html";
 import { api } from "../../../../shared/api";
 import { toggleRow } from "../../ui";
 
 export const BROWSER_SETTING_KEY = "claudeBrowserEnabled";
+export const BROWSER_SCRIPT_KEY = "claudeBrowserScriptTool";
 export const BROWSER_MODE_KEY = "claudeBrowserMode";
 export const BROWSER_APP_KEY = "claudeBrowserMineApp";
 export const BROWSER_PROFILE_KEY = "claudeBrowserMineProfile";
-
-export const BROWSER_EXT_PAIRING_MAP_KEY = "claudeBrowserExtensionTokens";
-export const BROWSER_EXT_PAIRING_INPUT_ID = "chatDefaultsBrowserToken";
 
 export type BrowserMode = "own" | "mine";
 export type BrowserApp = "chrome" | "edge" | "brave";
 
 export interface BrowserChoice {
   enabled: boolean;
+  script: boolean;
   mode: BrowserMode;
   app: BrowserApp;
   /** Profile folder name ("Default", "Profile 1"); blank lets the browser pick its last used. */
   profile: string;
-  /** Playwright extension token per "<app>/<profile folder>"; each extension install has its own. */
-  tokens: Record<string, string>;
 }
-
-/** Same key the daemon looks up (`token_key` in browser/target.rs). */
-export function tokenKey(app: BrowserApp, profile: string): string {
-  return `${app}/${profile.trim()}`;
-}
-
-/** The Playwright extension's store page, from the pinned @playwright/mcp's own install hint. */
-const EXTENSION_URL = "https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm";
 
 export function readBrowserChoice(settings: Record<string, unknown>): BrowserChoice {
   const app = settings[BROWSER_APP_KEY];
   const profile = settings[BROWSER_PROFILE_KEY];
-  const rawTokens = settings[BROWSER_EXT_PAIRING_MAP_KEY];
-  const tokens: Record<string, string> = {};
-  if (rawTokens && typeof rawTokens === "object") {
-    for (const [k, v] of Object.entries(rawTokens)) if (typeof v === "string") tokens[k] = v;
-  }
   return {
-    tokens,
     enabled: settings[BROWSER_SETTING_KEY] === true,
+    script: settings[BROWSER_SCRIPT_KEY] === true,
     mode: settings[BROWSER_MODE_KEY] === "mine" ? "mine" : "own",
     app: app === "edge" || app === "brave" ? app : "chrome",
     profile: typeof profile === "string" ? profile : "",
@@ -55,24 +39,13 @@ export function readBrowserChoice(settings: Record<string, unknown>): BrowserCho
 }
 
 /** Reads the section's live controls, keeping `prev` for any control the
- *  current mode does not render (the app and profile rows exist only in My browser).
- *  The token input shows the token of the app and profile it was drawn for, so it
- *  is saved only when it is what changed; after an app/profile change the page is
- *  redrawn with the new pair's token. */
-export function readBrowserFields(root: HTMLElement, prev: BrowserChoice, changedId?: string): BrowserChoice {
+ *  current mode does not render (the app and profile rows exist only in My browser). */
+export function readBrowserFields(root: HTMLElement, prev: BrowserChoice): BrowserChoice {
   const app = root.querySelector<HTMLSelectElement>("#chatDefaultsBrowserApp")?.value;
   const mode = root.querySelector<HTMLSelectElement>("#chatDefaultsBrowserMode")?.value;
-  const tokens = { ...prev.tokens };
-  const tokenInput = root.querySelector<HTMLInputElement>(`#${BROWSER_EXT_PAIRING_INPUT_ID}`);
-  if (tokenInput && changedId === BROWSER_EXT_PAIRING_INPUT_ID) {
-    const key = tokenKey(prev.app, prev.profile);
-    const value = tokenInput.value.trim();
-    if (value) tokens[key] = value;
-    else delete tokens[key];
-  }
   return {
-    tokens,
     enabled: root.querySelector<HTMLInputElement>("#chatDefaultsBrowser")?.checked ?? prev.enabled,
+    script: root.querySelector<HTMLInputElement>("#chatDefaultsBrowserScript")?.checked ?? prev.script,
     mode: mode === undefined ? prev.mode : mode === "mine" ? "mine" : "own",
     app: app === "edge" || app === "brave" || app === "chrome" ? app : prev.app,
     profile: root.querySelector<HTMLInputElement>("#chatDefaultsBrowserProfile")?.value.trim() ?? prev.profile,
@@ -82,12 +55,18 @@ export function readBrowserFields(root: HTMLElement, prev: BrowserChoice, change
 export function browserSettingsPatch(choice: BrowserChoice): Record<string, unknown> {
   return {
     [BROWSER_SETTING_KEY]: choice.enabled,
+    [BROWSER_SCRIPT_KEY]: choice.script,
     [BROWSER_MODE_KEY]: choice.mode,
     [BROWSER_APP_KEY]: choice.app,
     [BROWSER_PROFILE_KEY]: choice.profile,
-    [BROWSER_EXT_PAIRING_MAP_KEY]: choice.tokens,
   };
 }
+
+const EXTENSIONS_PAGE: Record<BrowserApp, string> = {
+  chrome: "chrome://extensions",
+  edge: "edge://extensions",
+  brave: "brave://extensions",
+};
 
 function minePart(choice: BrowserChoice): TemplateResult {
   return html`
@@ -111,22 +90,11 @@ function minePart(choice: BrowserChoice): TemplateResult {
       >
     </div>
     <div class="kit-row">
-      <span class="kit-row-label">Extension token</span>
-      <input
-        type="password"
-        id="${BROWSER_EXT_PAIRING_INPUT_ID}"
-        class="cd-profile-input"
-        .value=${choice.tokens[tokenKey(choice.app, choice.profile)] ?? ""}
-        placeholder="Paste from connect page"
-        autocomplete="off"
-        spellcheck="false"
-      >
+      <span class="kit-row-label">Bridge extension</span>
+      <span class="cd-bridge-status" id="chatDefaultsBrowserBridge">Checking...</span>
+      <button type="button" class="btn-secondary" id="chatDefaultsBrowserExtFolder">Open folder</button>
     </div>
-    <div class="kit-row">
-      <span class="kit-row-label">Playwright extension</span>
-      <button type="button" class="btn-secondary" id="chatDefaultsBrowserInstall">Install page</button>
-    </div>
-    <p class="cd-hint">Used when a chat starts on, or is told to switch to, your browser. Install the extension once in that browser. Each chat opens a connect page there for you to approve, so Claude acts with your real sign-ins only after you say yes. Leave the profile blank to use the one you used last, or name a folder such as Profile 1 to point Claude at a dedicated profile. Every profile's extension has its own token: paste the one shown on its connect page into Extension token for that browser and profile (blank profile covers the browser's last-used one).</p>
+    <p class="cd-hint">Best set up as a separate profile made for Claude, signed in only to the accounts you want it to use. Install the bridge once in that profile: open ${EXTENSIONS_PAGE[choice.app]}, turn on Developer mode, click Load unpacked and pick the folder this button opens. Each chat then works in a minimized window of its own there, and several chats can work at once. Leave the profile blank to use the one you used last.</p>
   `;
 }
 
@@ -148,7 +116,13 @@ export function browserSectionTemplate(choice: BrowserChoice): TemplateResult {
         label: "Let chats use a browser",
         inputId: "chatDefaultsBrowser",
         checked: choice.enabled,
-        tooltip: "New chats get the browser tools; an open chat gets them after a respawn. Claude's own browser is a separate Chrome profile for accounts made for Claude, never yours, and runs off-screen. My browser drives one of yours through the Playwright extension. Tell any chat \"use my browser\" or \"use your own\" to switch just that chat.",
+        tooltip: "New chats get the browser tools; an open chat gets them after a respawn. Claude's own browser is a separate Chrome profile for accounts made for Claude, never yours, and runs off-screen. My browser drives one of yours through the Claude Conductor Browser Bridge extension. Tell any chat \"use my browser\" or \"use your own\" to switch just that chat.",
+      })}
+      ${toggleRow({
+        label: "Script tool",
+        inputId: "chatDefaultsBrowserScript",
+        checked: choice.script,
+        tooltip: "Also gives chats a tool that runs a whole Playwright script in one call: fewer steps and less context for long tasks. The script runs on this PC with file access, outside the page sandbox, so leave it off unless you want that trade.",
       })}
       <div class="kit-row">
         <span class="kit-row-label">Chats start on</span>
@@ -162,17 +136,31 @@ export function browserSectionTemplate(choice: BrowserChoice): TemplateResult {
   `;
 }
 
-/** Wires the Show/Hide button. The label follows the daemon's own view of
- *  the window, so a browser left shown from an earlier visit reads "Hide". */
+/** Wires the Show/Hide button and the bridge row. The Show label follows the
+ *  daemon's own view of the window, so a browser left shown from an earlier
+ *  visit reads "Hide". */
 export function wireBrowserSection(root: HTMLElement): void {
-  root.querySelector<HTMLButtonElement>("#chatDefaultsBrowserInstall")?.addEventListener("click", () => {
-    void api.openExternal(EXTENSION_URL).catch((e: unknown) => { console.warn("open_external failed", e); });
+  const status = api.browserStatus();
+  const bridge = root.querySelector<HTMLElement>("#chatDefaultsBrowserBridge");
+  const folder = root.querySelector<HTMLButtonElement>("#chatDefaultsBrowserExtFolder");
+  let extensionDir: string | null = null;
+  void status
+    .then((s) => {
+      extensionDir = s.extensionDir ?? null;
+      const connected = s.bridgeConnected ?? [];
+      if (bridge) bridge.textContent = connected.length ? `Connected: ${connected.join(", ")}` : "Not connected";
+      if (folder) folder.disabled = !extensionDir;
+    })
+    .catch(() => { if (bridge) bridge.textContent = ""; });
+  folder?.addEventListener("click", () => {
+    if (extensionDir) void api.openInExplorer(extensionDir);
   });
+
   const btn = root.querySelector<HTMLButtonElement>("#chatDefaultsBrowserShow");
   if (!btn) return;
   let shown = false;
   const paint = (): void => { btn.textContent = shown ? "Hide" : "Show"; };
-  void api.browserStatus().then((s) => { shown = s.shown; paint(); }).catch(() => {});
+  void status.then((s) => { shown = s.shown; paint(); }).catch(() => {});
   btn.addEventListener("click", () => {
     const next = !shown;
     btn.disabled = true;

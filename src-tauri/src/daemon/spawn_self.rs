@@ -28,6 +28,14 @@ impl std::error::Error for SpawnSelfError {}
 /// failing to spawn at all).
 #[cfg(windows)]
 pub fn spawn_detached_daemon() -> Result<u32, SpawnSelfError> {
+    let exe = std::env::current_exe().map_err(SpawnSelfError::NoExe)?;
+    spawn_detached(&exe, &["--daemon".to_string()]).map_err(SpawnSelfError::Io)
+}
+
+/// Starts `exe` so it outlives this process and its job object. Also used
+/// for Joe's own browser, which must never close because the daemon did.
+#[cfg(windows)]
+pub fn spawn_detached(exe: &std::path::Path, args: &[String]) -> Result<u32, std::io::Error> {
     // DETACHED_PROCESS: no console. NEW_PROCESS_GROUP + BREAKAWAY_FROM_JOB:
     // not reaped when the app (or its job object) exits.
     const DETACHED_PROCESS: u32 = 0x0000_0008;
@@ -36,20 +44,25 @@ pub fn spawn_detached_daemon() -> Result<u32, SpawnSelfError> {
     // HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED) as returned by the windows crate.
     const E_ACCESSDENIED: i32 = -2147024891; // 0x80070005
 
-    let exe = std::env::current_exe().map_err(SpawnSelfError::NoExe)?;
-    let cmdline = format!("\"{}\" --daemon", exe.to_string_lossy());
+    let quote = |a: &str| if a.contains(' ') { format!("\"{a}\"") } else { a.to_string() };
+    let mut cmdline = format!("\"{}\"", exe.to_string_lossy());
+    for a in args {
+        cmdline.push(' ');
+        cmdline.push_str(&quote(a));
+    }
     let base = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
 
     match create_process(&cmdline, base | CREATE_BREAKAWAY_FROM_JOB) {
         Ok(pid) => Ok(pid),
         Err(e) if e.raw_os_error() == Some(E_ACCESSDENIED) => {
             log::warn!(
-                "daemon spawn: CREATE_BREAKAWAY_FROM_JOB denied; retrying without breakaway \
-                 (daemon will share the parent job's lifetime)"
+                "detached spawn of {}: CREATE_BREAKAWAY_FROM_JOB denied; retrying without breakaway \
+                 (it will share the parent job's lifetime)",
+                exe.display()
             );
-            create_process(&cmdline, base).map_err(SpawnSelfError::Io)
+            create_process(&cmdline, base)
         }
-        Err(e) => Err(SpawnSelfError::Io(e)),
+        Err(e) => Err(e),
     }
 }
 
@@ -97,12 +110,18 @@ fn create_process(cmdline: &str, flags: u32) -> Result<u32, std::io::Error> {
 /// stdio is redirected to /dev/null so it holds no app file handles.
 #[cfg(unix)]
 pub fn spawn_detached_daemon() -> Result<u32, SpawnSelfError> {
+    let exe = std::env::current_exe().map_err(SpawnSelfError::NoExe)?;
+    spawn_detached(&exe, &["--daemon".to_string()]).map_err(SpawnSelfError::Io)
+}
+
+/// Starts `exe` in its own session so it outlives this process.
+#[cfg(unix)]
+pub fn spawn_detached(exe: &std::path::Path, args: &[String]) -> Result<u32, std::io::Error> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
 
-    let exe = std::env::current_exe().map_err(SpawnSelfError::NoExe)?;
     let mut cmd = Command::new(exe);
-    cmd.arg("--daemon")
+    cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -115,6 +134,6 @@ pub fn spawn_detached_daemon() -> Result<u32, SpawnSelfError> {
             Ok(())
         });
     }
-    let child = cmd.spawn().map_err(SpawnSelfError::Io)?;
+    let child = cmd.spawn()?;
     Ok(child.id())
 }

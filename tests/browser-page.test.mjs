@@ -16,7 +16,7 @@ vi.mock("../src/shared/api.ts", () => ({
   api: {
     browserStatus: vi.fn(async () => ({ running: false, shown: false })),
     browserSetShown: vi.fn(async (shown) => ({ ok: true, shown })),
-    openExternal: vi.fn(async () => ({})),
+    openInExplorer: vi.fn(async () => {}),
   },
 }));
 
@@ -198,50 +198,62 @@ describe("My browser mode", () => {
     dispose();
   });
 
-  it("saves a pasted extension token under the selected app and profile", async () => {
-    settings = { claudeBrowserMode: "mine", claudeBrowserMineApp: "brave", claudeBrowserMineProfile: "Profile 1" };
+  it("shows which browsers have the bridge connected", async () => {
+    settings = { claudeBrowserMode: "mine" };
+    api.browserStatus.mockResolvedValueOnce({ running: false, shown: false, bridgeConnected: ["Brave"], extensionDir: "C:/app/_up_/browser-extension" });
     const { root, dispose } = await mount();
-    const token = root.querySelector("#chatDefaultsBrowserToken");
-    expect(token.type).toBe("password");
-    token.value = "  fake-token-a ";
-    token.dispatchEvent(new Event("change", { bubbles: true }));
     await flush();
-    const saved = await updateSettings.mock.results.at(-1).value;
-    expect(saved.claudeBrowserExtensionTokens).toEqual({ "brave/Profile 1": "fake-token-a" });
+    expect(root.querySelector("#chatDefaultsBrowserBridge").textContent).toBe("Connected: Brave");
     dispose();
   });
 
-  it("shows each profile's own token and clearing the field removes only that entry", async () => {
-    settings = {
-      claudeBrowserMode: "mine",
-      claudeBrowserMineApp: "brave",
-      claudeBrowserMineProfile: "Default",
-      claudeBrowserExtensionTokens: { "brave/Default": "fake-a", "brave/Profile 1": "fake-b" },
-    };
+  it("says Not connected when no bridge is up", async () => {
+    settings = { claudeBrowserMode: "mine" };
+    api.browserStatus.mockResolvedValueOnce({ running: false, shown: false, bridgeConnected: [], extensionDir: "C:/x" });
     const { root, dispose } = await mount();
-    expect(root.querySelector("#chatDefaultsBrowserToken").value).toBe("fake-a");
-    const profile = root.querySelector("#chatDefaultsBrowserProfile");
-    profile.value = "Profile 1";
-    profile.dispatchEvent(new Event("change", { bubbles: true }));
     await flush();
-    await flush();
-    const token = root.querySelector("#chatDefaultsBrowserToken");
-    expect(token.value).toBe("fake-b");
-    token.value = "";
-    token.dispatchEvent(new Event("change", { bubbles: true }));
-    await flush();
-    const saved = await updateSettings.mock.results.at(-1).value;
-    expect(saved.claudeBrowserExtensionTokens).toEqual({ "brave/Default": "fake-a" });
+    expect(root.querySelector("#chatDefaultsBrowserBridge").textContent).toBe("Not connected");
     dispose();
   });
 
-  it("the install button opens the Playwright extension's store page", async () => {
+  it("Open folder opens the bundled extension folder for Load unpacked", async () => {
+    settings = { claudeBrowserMode: "mine", claudeBrowserMineApp: "brave" };
+    api.browserStatus.mockResolvedValueOnce({ running: false, shown: false, bridgeConnected: [], extensionDir: "C:/app/_up_/browser-extension" });
+    const { root, dispose } = await mount();
+    await flush();
+    root.querySelector("#chatDefaultsBrowserExtFolder").click();
+    expect(api.openInExplorer).toHaveBeenCalledWith("C:/app/_up_/browser-extension");
+    expect(root.textContent).toContain("brave://extensions");
+    dispose();
+  });
+
+  it("Open folder is disabled when the daemon cannot find the folder", async () => {
+    settings = { claudeBrowserMode: "mine" };
+    api.browserStatus.mockResolvedValueOnce({ running: false, shown: false, bridgeConnected: [], extensionDir: null });
+    const { root, dispose } = await mount();
+    await flush();
+    expect(root.querySelector("#chatDefaultsBrowserExtFolder").disabled).toBe(true);
+    dispose();
+  });
+
+  it("has no token field any more", async () => {
     settings = { claudeBrowserMode: "mine" };
     const { root, dispose } = await mount();
-    root.querySelector("#chatDefaultsBrowserInstall").click();
-    expect(api.openExternal).toHaveBeenCalledWith(
-      "https://chromewebstore.google.com/detail/playwright-extension/mmlmfjhmonkocbjadbfplnigmagldckm",
-    );
+    expect(root.querySelector("#chatDefaultsBrowserToken")).toBeNull();
+    dispose();
+  });
+});
+
+describe("Script tool", () => {
+  it("is off by default and persists claudeBrowserScriptTool when switched on", async () => {
+    const { root, dispose } = await mount();
+    const toggle = root.querySelector("#chatDefaultsBrowserScript");
+    expect(toggle.checked).toBe(false);
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    const saved = await updateSettings.mock.results.at(-1).value;
+    expect(saved.claudeBrowserScriptTool).toBe(true);
     dispose();
   });
 });

@@ -31,8 +31,8 @@ pub use super::tool_schemas_workflow::{
 ///
 /// `browser` gates the `browser_*` tools the same way: Playwright MCP's own
 /// schemas plus `browser_target`, listed only while Settings' "Claude's
-/// browser" switch is on.
-pub fn tool_list_response(id: &Value, is_jarvis: bool, browser: bool) -> Value {
+/// browser" switch is on, and `browser_script` adds the run-code tool.
+pub fn tool_list_response(id: &Value, is_jarvis: bool, browser: bool, browser_script: bool) -> Value {
     let mut tools = super::tool_schemas_core::core_schemas();
     tools.extend(super::tool_schemas_coordination::coordination_schemas());
     tools.extend(super::tool_schemas_workflow::workflow_schemas());
@@ -41,7 +41,7 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool, browser: bool) -> Value {
         tools.extend(super::tool_schemas_jarvis::jarvis_schemas());
     }
     if browser {
-        tools.extend(crate::daemon::browser::tool_schemas());
+        tools.extend(crate::daemon::browser::tool_schemas(browser_script));
     }
 
     json!({

@@ -126,6 +126,7 @@ pub fn run_stdio() {
     // `write_mcp_config`), so there's no need to re-read it per request.
     let is_jarvis = std::env::var("CC_JARVIS").is_ok();
     let browser = std::env::var("CC_BROWSER").is_ok();
+    let browser_script = std::env::var("CC_BROWSER_SCRIPT").is_ok();
 
     announce_attached(port, session_id.clone());
 
@@ -161,7 +162,7 @@ pub fn run_stdio() {
                 }
             }),
             "notifications/initialized" => continue,
-            "tools/list" => tool_list_response(&id, is_jarvis, browser),
+            "tools/list" => tool_list_response(&id, is_jarvis, browser, browser_script),
             "tools/call" => {
                 let name = req["params"]["name"].as_str().unwrap_or("");
                 let arguments = req["params"]["arguments"].clone();
@@ -245,7 +246,7 @@ mod tests {
                     "serverInfo": {"name": "cc_conductor", "version": "0.1.0"}
                 }
             }),
-            "tools/list" => tool_list_response(&id, is_jarvis, false),
+            "tools/list" => tool_list_response(&id, is_jarvis, false, false),
             "tools/call" => {
                 let name = req["params"]["name"].as_str().unwrap_or("");
                 let arguments = req["params"]["arguments"].clone();
@@ -423,8 +424,8 @@ mod tests {
     /// the base set gains exactly Playwright's tools, minus the withheld one.
     #[test]
     fn tools_list_browser_adds_the_playwright_tools() {
-        let base = tool_list_response(&json!(1), false, false)["result"]["tools"].as_array().unwrap().len();
-        let resp = tool_list_response(&json!(1), false, true);
+        let base = tool_list_response(&json!(1), false, false, false)["result"]["tools"].as_array().unwrap().len();
+        let resp = tool_list_response(&json!(1), false, true, false);
         let tools = resp["result"]["tools"].as_array().unwrap();
         let browser: Vec<&str> = tools
             .iter()
@@ -436,6 +437,13 @@ mod tests {
         assert!(browser.contains(&"browser_navigate"));
         assert!(browser.contains(&"browser_target"));
         assert!(browser.contains(&"browser_take_screenshot"));
+        assert!(!browser.contains(&"browser_run_code_unsafe"));
+        let scripted = tool_list_response(&json!(1), false, true, true);
+        let names: Vec<&str> = scripted["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
+        assert!(names.contains(&"browser_run_code_unsafe"), "the opt-in adds the run-code tool");
+        assert_eq!(names.len(), tools.len() + 1);
+        let off = tool_list_response(&json!(1), false, false, true);
+        assert_eq!(off["result"]["tools"].as_array().unwrap().len(), base, "the opt-in alone lists nothing");
     }
 
     #[test]
@@ -452,8 +460,12 @@ mod tests {
         assert_eq!(body["arguments"], args);
         assert_eq!(body["session_id"], json!("sess-1"));
 
-        let refused = dispatch_tool_with(&rt, &json!(2), "browser_run_code_unsafe", &json!({}), "s", 1234, fake_http_post);
-        assert_eq!(refused["error"]["code"], -32601, "a withheld tool is unknown, never relayed");
+        let refused = dispatch_tool_with(&rt, &json!(2), "browser_nonexistent", &json!({}), "s", 1234, fake_http_post);
+        assert_eq!(refused["error"]["code"], -32601, "an unknown browser tool is never relayed");
+        // The opt-in script tool relays; the daemon refuses it while Settings has it off.
+        dispatch_tool_with(&rt, &json!(3), "browser_run_code_unsafe", &json!({}), "s", 1234, fake_http_post);
+        let last = POSTED_BODIES.with(|b| b.borrow().last().cloned().unwrap());
+        assert_eq!(last["name"], json!("browser_run_code_unsafe"));
     }
 
     #[test]

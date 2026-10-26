@@ -1,6 +1,6 @@
 //! Which browser a chat's `browser_*` tools drive: the daemon's own Chrome
-//! profile, or one of Joe's real browsers reached through the Playwright
-//! extension, which opens a connect page in that browser for him to approve.
+//! profile, or one of Joe's real browsers reached through the Claude
+//! Conductor Browser Bridge extension (`bridge/`).
 
 use std::path::PathBuf;
 
@@ -23,7 +23,7 @@ pub enum App {
 }
 
 impl App {
-    fn parse(name: &str) -> Option<Self> {
+    pub fn parse(name: &str) -> Option<Self> {
         match name {
             "chrome" => Some(App::Chrome),
             "edge" => Some(App::Edge),
@@ -32,7 +32,7 @@ impl App {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             App::Chrome => "Chrome",
             App::Edge => "Edge",
@@ -108,8 +108,8 @@ impl Target {
                     None => fallback.profile.clone(),
                 };
                 let mine = Mine { app, profile };
-                // Refuse a bad profile name or a missing Brave now, not on the first page load.
-                mine.playwright_args()?;
+                // Refuse a bad profile name now, not on the first page load.
+                mine.validate()?;
                 Ok(Request::Set(Target::Mine(mine)))
             }
             other => Err(format!("target must be own, mine or default, not \"{other}\"")),
@@ -125,176 +125,61 @@ impl Mine {
         Mine { app, profile }
     }
 
-    /// Playwright MCP flags that attach to this browser through its extension.
-    pub fn playwright_args(&self) -> Result<Vec<String>, String> {
-        self.playwright_args_with(|| brave_candidates().into_iter().find(|p| p.is_file()))
-    }
-
-    fn playwright_args_with(&self, find_brave: impl Fn() -> Option<PathBuf>) -> Result<Vec<String>, String> {
-        let mut args = vec!["--extension".to_string()];
-        match self.app {
-            App::Chrome => args.extend(["--browser".to_string(), "chrome".to_string()]),
-            App::Edge => args.extend(["--browser".to_string(), "msedge".to_string()]),
-            // Playwright's channels only name Chrome and Edge; Brave is
-            // Chromium, so its executable takes the same extension connect page.
-            App::Brave => {
-                let exe = find_brave().ok_or("Brave is not installed in a standard location")?;
-                args.extend(["--executable-path".to_string(), exe.to_string_lossy().into_owned()]);
+    /// Refuses a profile name the browser would read as a path or a flag.
+    fn validate(&self) -> Result<(), String> {
+        match &self.profile {
+            Some(p) if p.contains(['/', '\\']) || p.starts_with('-') => {
+                Err(format!("\"{p}\" is not a browser profile folder name (try \"Default\" or \"Profile 1\")"))
             }
+            _ => Ok(()),
         }
-        if let Some(profile) = &self.profile {
-            // Joined onto the browser's user-data dir by Playwright, and a
-            // leading dash would be read as a flag.
-            if profile.contains(['/', '\\']) || profile.starts_with('-') {
-                return Err(format!("\"{profile}\" is not a browser profile folder name (try \"Default\" or \"Profile 1\")"));
-            }
-            args.extend(["--profile-dir-name".to_string(), profile.clone()]);
+    }
+
+    /// Flags that start the browser (or wake a running one) on this profile
+    /// without opening a window, so the bridge extension comes up and
+    /// connects without anything landing on Joe's screen.
+    fn launch_args(&self) -> Vec<String> {
+        let mut args = vec!["--no-startup-window".to_string()];
+        if let Some(p) = &self.profile {
+            args.push(format!("--profile-directory={p}"));
         }
-        Ok(args)
+        args
+    }
+
+    /// Starts the browser detached from the daemon, so it outlives it.
+    pub fn launch_in_background(&self) -> Result<(), String> {
+        self.validate()?;
+        let exe = exe_candidates(self.app).into_iter().find(|p| p.is_file()).ok_or_else(|| format!("{} is not installed in a standard location", self.app.label()))?;
+        crate::daemon::spawn_self::spawn_detached(&exe, &self.launch_args()).map(|_| ()).map_err(|e| e.to_string())
     }
 }
 
-/// The Playwright extension's id; it is the same in every Chromium browser.
-const EXTENSION_ID: &str = "mmlmfjhmonkocbjadbfplnigmagldckm";
-
-/// Settings key (in `Settings.extra`, like the keys above) of an object mapping
-/// "<app>/<profile folder>" to that profile's extension token. Every extension
-/// install generates its own token, so one global env token only ever fits one
-/// profile.
-const TOKENS_KEY: &str = "claudeBrowserExtensionTokens";
-
-/// Lookup key for a token: lowercase app name and the profile folder, which is
-/// empty when the profile cannot be resolved.
-pub fn token_key(app: App, profile: Option<&str>) -> String {
-    format!("{}/{}", app.label().to_lowercase(), profile.unwrap_or(""))
-}
-
-/// The token stored for `app` and `profile`, else the one stored for the app
-/// with a blank profile (what the settings page writes when no folder is named).
-fn lookup_token(tokens: &serde_json::Map<String, Value>, app: App, profile: Option<&str>) -> Option<String> {
-    [token_key(app, profile), token_key(app, None)]
-        .iter()
-        .filter_map(|k| tokens.get(k).and_then(Value::as_str))
-        .map(|t| t.trim().to_string())
-        .find(|t| !t.is_empty())
-}
-
-impl Mine {
-    /// The extension token Settings holds for this browser profile, resolved
-    /// the way the one-chat-per-profile guard resolves it.
-    pub fn profile_token(&self, settings: &Settings) -> Option<String> {
-        let tokens = settings.extra.get(TOKENS_KEY)?.as_object()?;
-        lookup_token(tokens, self.app, self.resolved_profile().as_deref())
-    }
-
-    /// Appends the fix for a connect failure when no per-profile token exists:
-    /// an unmatched token is the usual reason the connect page rejects a profile.
-    pub fn with_token_hint(&self, err: String, has_token: bool) -> String {
-        let lower = err.to_lowercase();
-        if has_token || !["token", "extension", "connect", "timed out", "timeout"].iter().any(|w| lower.contains(w)) {
-            return err;
-        }
-        format!(
-            "{err} If the connect page in {} said \"Invalid token provided\" or never appeared, tell Joe with send_message to copy the token \
-shown on the Playwright extension's connect page in that profile and paste it into Settings > Claude's browser > Extension token \
-(profile folder \"{}\"); each profile's extension has its own token.",
-            self.app.label(),
-            self.resolved_profile().unwrap_or_default()
-        )
-    }
-}
-
-impl Mine {
-    /// The profile folder this choice really drives: the named one, else the
-    /// browser's last-used one, else `None` when neither can be read.
-    pub fn resolved_profile(&self) -> Option<String> {
-        self.profile.clone().or_else(|| user_data_dir(self.app).and_then(|d| last_used_profile(&d)))
-    }
-
-    /// Fails at once when the Playwright extension is not installed in this
-    /// browser profile. Without it playwright-mcp waits for a connection that
-    /// can never arrive (Brave hung 300s; Chrome fails fast on its own). An
-    /// unresolvable profile directory never blocks: the child then behaves as
-    /// it did before this check.
-    pub fn check_extension_installed(&self) -> Result<(), String> {
-        self.check_extension_in(user_data_dir(self.app))
-    }
-
-    fn check_extension_in(&self, user_data: Option<PathBuf>) -> Result<(), String> {
-        let Some(user_data) = user_data.filter(|d| d.is_dir()) else { return Ok(()) };
-        // No profile named means the browser's last-used one, recorded in Local State.
-        let profile = match &self.profile {
-            Some(p) => p.clone(),
-            None => match last_used_profile(&user_data) {
-                Some(p) => p,
-                None => return Ok(()),
-            },
+fn exe_candidates(app: App) -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        let rel = match app {
+            App::Chrome => r"Google\Chrome\Application\chrome.exe",
+            App::Edge => r"Microsoft\Edge\Application\msedge.exe",
+            App::Brave => r"BraveSoftware\Brave-Browser\Application\brave.exe",
         };
-        let profile_dir = user_data.join(&profile);
-        if !profile_dir.is_dir() || profile_dir.join("Extensions").join(EXTENSION_ID).is_dir() {
-            return Ok(());
-        }
-        Err(format!(
-            "The Playwright extension is not installed in {} (profile folder \"{profile}\"), so Joe's browser cannot be driven there. \
-Tell Joe with send_message to install \"Playwright MCP Bridge\" (extension id {EXTENSION_ID}) from the Chrome Web Store in that profile, \
-or use browser_target to switch to Claude's own browser.",
-            self.app.label()
-        ))
-    }
-}
-
-fn last_used_profile(user_data: &std::path::Path) -> Option<String> {
-    let text = std::fs::read_to_string(user_data.join("Local State")).ok()?;
-    let v: Value = serde_json::from_str(&text).ok()?;
-    v["profile"]["last_used"].as_str().map(str::to_string).filter(|p| !p.is_empty())
-}
-
-fn user_data_dir(app: App) -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        let base = PathBuf::from(std::env::var_os("LOCALAPPDATA")?);
-        Some(match app {
-            App::Chrome => base.join(r"Google\Chrome\User Data"),
-            App::Edge => base.join(r"Microsoft\Edge\User Data"),
-            App::Brave => base.join(r"BraveSoftware\Brave-Browser\User Data"),
-        })
+        ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"].iter().filter_map(|var| std::env::var_os(var)).map(|base| PathBuf::from(base).join(rel)).collect()
     }
     #[cfg(target_os = "macos")]
     {
-        let base = PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support");
-        Some(match app {
-            App::Chrome => base.join("Google/Chrome"),
-            App::Edge => base.join("Microsoft Edge"),
-            App::Brave => base.join("BraveSoftware/Brave-Browser"),
-        })
+        vec![PathBuf::from(match app {
+            App::Chrome => "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            App::Edge => "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            App::Brave => "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        })]
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        let base = PathBuf::from(std::env::var_os("HOME")?).join(".config");
-        Some(match app {
-            App::Chrome => base.join("google-chrome"),
-            App::Edge => base.join("microsoft-edge"),
-            App::Brave => base.join("BraveSoftware/Brave-Browser"),
-        })
-    }
-}
-
-fn brave_candidates() -> Vec<PathBuf> {
-    #[cfg(windows)]
-    {
-        ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"]
-            .iter()
-            .filter_map(|var| std::env::var_os(var))
-            .map(|base| PathBuf::from(base).join(r"BraveSoftware\Brave-Browser\Application\brave.exe"))
-            .collect()
-    }
-    #[cfg(target_os = "macos")]
-    {
-        vec![PathBuf::from("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser")]
-    }
-    #[cfg(not(any(windows, target_os = "macos")))]
-    {
-        ["/usr/bin/brave-browser", "/usr/bin/brave", "/opt/brave.com/brave/brave-browser"].iter().map(PathBuf::from).collect()
+        let names: &[&str] = match app {
+            App::Chrome => &["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"],
+            App::Edge => &["/usr/bin/microsoft-edge", "/usr/bin/microsoft-edge-stable"],
+            App::Brave => &["/usr/bin/brave-browser", "/usr/bin/brave", "/opt/brave.com/brave/brave-browser"],
+        };
+        names.iter().map(PathBuf::from).collect()
     }
 }
 
@@ -333,108 +218,18 @@ mod tests {
     }
 
     #[test]
-    fn chrome_and_edge_attach_through_their_playwright_channels() {
-        let none = || None;
-        assert_eq!(mine(App::Chrome, None).playwright_args_with(none).unwrap(), ["--extension", "--browser", "chrome"]);
-        assert_eq!(
-            mine(App::Edge, Some("Profile 1")).playwright_args_with(none).unwrap(),
-            ["--extension", "--browser", "msedge", "--profile-dir-name", "Profile 1"]
-        );
-    }
-
-    #[test]
-    fn brave_attaches_through_its_executable() {
-        let exe = PathBuf::from("/opt/brave/brave");
-        let args = mine(App::Brave, None).playwright_args_with(|| Some(exe.clone())).unwrap();
-        assert_eq!(args, ["--extension", "--executable-path", exe.to_str().unwrap()]);
-        let err = mine(App::Brave, None).playwright_args_with(|| None).unwrap_err();
-        assert!(err.contains("Brave is not installed"), "{err}");
-    }
-
-    fn user_data_with(profile: &str, extension: bool) -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        let profile_dir = dir.path().join(profile);
-        std::fs::create_dir_all(&profile_dir).unwrap();
-        if extension {
-            std::fs::create_dir_all(profile_dir.join("Extensions").join(EXTENSION_ID)).unwrap();
-        }
-        dir
-    }
-
-    #[test]
-    fn a_profile_without_the_extension_fails_at_once() {
-        let dir = user_data_with("Profile 1", false);
-        let err = mine(App::Brave, Some("Profile 1")).check_extension_in(Some(dir.path().to_path_buf())).unwrap_err();
-        assert!(err.contains("not installed") && err.contains("Brave") && err.contains("Profile 1"), "{err}");
-    }
-
-    #[test]
-    fn a_profile_with_the_extension_passes() {
-        let dir = user_data_with("Profile 1", true);
-        assert!(mine(App::Brave, Some("Profile 1")).check_extension_in(Some(dir.path().to_path_buf())).is_ok());
-    }
-
-    #[test]
-    fn an_unresolvable_profile_never_blocks() {
-        let dir = user_data_with("Default", false);
-        assert!(mine(App::Chrome, Some("Profile 9")).check_extension_in(Some(dir.path().to_path_buf())).is_ok(), "profile folder absent");
-        assert!(mine(App::Chrome, Some("Default")).check_extension_in(None).is_ok(), "no user-data dir");
-        assert!(mine(App::Chrome, None).check_extension_in(Some(dir.path().to_path_buf())).is_ok(), "no Local State");
-    }
-
-    #[test]
-    fn no_profile_named_checks_the_last_used_one() {
-        let dir = user_data_with("Profile 2", false);
-        std::fs::write(dir.path().join("Local State"), r#"{"profile":{"last_used":"Profile 2"}}"#).unwrap();
-        let err = mine(App::Edge, None).check_extension_in(Some(dir.path().to_path_buf())).unwrap_err();
-        assert!(err.contains("Profile 2"), "{err}");
-    }
-
-    fn tokens(pairs: &[(&str, &str)]) -> serde_json::Map<String, Value> {
-        pairs.iter().map(|(k, v)| ((*k).to_string(), json!(v))).collect()
-    }
-
-    #[test]
-    fn each_profile_gets_its_own_token() {
-        let t = tokens(&[("brave/Default", "tok-a"), ("brave/Profile 1", " tok-b "), ("chrome/Default", "tok-c")]);
-        assert_eq!(lookup_token(&t, App::Brave, Some("Default")).as_deref(), Some("tok-a"));
-        assert_eq!(lookup_token(&t, App::Brave, Some("Profile 1")).as_deref(), Some("tok-b"));
-        assert_eq!(lookup_token(&t, App::Chrome, Some("Default")).as_deref(), Some("tok-c"));
-    }
-
-    #[test]
-    fn a_profile_without_a_token_falls_back() {
-        let t = tokens(&[("brave/Default", "tok-a"), ("edge/", "tok-edge"), ("chrome/Default", "  ")]);
-        assert_eq!(lookup_token(&t, App::Brave, Some("Profile 9")), None, "caller then uses the global token");
-        assert_eq!(lookup_token(&t, App::Chrome, Some("Default")), None, "blank token is no token");
-        assert_eq!(lookup_token(&t, App::Edge, Some("Profile 2")).as_deref(), Some("tok-edge"), "blank-profile entry covers the app");
-        assert_eq!(lookup_token(&tokens(&[]), App::Brave, None), None);
-    }
-
-    #[test]
-    fn profile_token_reads_settings_extra() {
-        let mut s = Settings::default();
-        s.extra.insert(TOKENS_KEY.to_string(), json!({"brave/Profile 1": "tok-b", "brave/Default": "tok-a"}));
-        assert_eq!(mine(App::Brave, Some("Profile 1")).profile_token(&s).as_deref(), Some("tok-b"));
-        assert_eq!(mine(App::Brave, Some("Default")).profile_token(&s).as_deref(), Some("tok-a"));
-        assert_eq!(mine(App::Brave, Some("Profile 2")).profile_token(&s), None);
-        assert_eq!(mine(App::Brave, Some("Default")).profile_token(&Settings::default()), None);
-    }
-
-    #[test]
-    fn a_connect_failure_without_a_profile_token_says_where_to_paste_it() {
-        let m = mine(App::Brave, Some("Profile 1"));
-        let hinted = m.with_token_hint("Invalid token provided".to_string(), false);
-        assert!(hinted.contains("Settings > Claude's browser > Extension token") && hinted.contains("Profile 1"), "{hinted}");
-        assert_eq!(m.with_token_hint("Invalid token provided".to_string(), true), "Invalid token provided");
-        assert_eq!(m.with_token_hint("page crashed".to_string(), false), "page crashed");
+    fn the_browser_starts_on_the_profile_without_a_window() {
+        assert_eq!(mine(App::Chrome, None).launch_args(), ["--no-startup-window"]);
+        assert_eq!(mine(App::Brave, Some("Profile 2")).launch_args(), ["--no-startup-window", "--profile-directory=Profile 2"]);
     }
 
     #[test]
     fn a_profile_that_is_a_path_or_a_flag_is_refused() {
         for bad in ["../Other", "a\\b", "-x"] {
-            assert!(mine(App::Chrome, Some(bad)).playwright_args_with(|| None).is_err(), "{bad}");
+            assert!(mine(App::Chrome, Some(bad)).validate().is_err(), "{bad}");
+            assert!(mine(App::Chrome, Some(bad)).launch_in_background().is_err(), "{bad}");
         }
+        assert!(mine(App::Chrome, Some("Profile 1")).validate().is_ok());
     }
 
     fn request(args: serde_json::Value, fallback: &Mine) -> Result<Request, String> {
