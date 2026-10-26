@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 //
-// The dashboard's Todos card: which days a range shows, the smoothed line
-// path, and when the card is left out entirely.
+// The dashboard's Todos card: which days a range shows, the y-axis steps, the
+// smoothed line path, and when the card is left out entirely.
 
 import { describe, it, expect, vi } from "vitest";
 import { render } from "lit-html";
 
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: vi.fn(async () => null) }));
 
-const { todoDays, smoothPath, todoChart } = await import("../src/views/sessions/project-dashboard/dash-todo-chart.ts");
+const { todoDays, smoothPath, niceScale, todoChart } = await import("../src/views/sessions/project-dashboard/dash-todo-chart.ts");
 
 const day = (date, created, done, open) => ({ date, created, done, open });
 const days = Array.from({ length: 40 }, (_, i) => day(`2026-09-${String(i + 1).padStart(2, "0")}`, i, 1, 10));
@@ -32,6 +32,19 @@ describe("todoDays", () => {
     expect(todoDays(days, "30d")).toHaveLength(30);
     expect(todoDays(days, "all")).toHaveLength(40);
     expect(todoDays(days.slice(0, 3), "30d")).toHaveLength(3);
+  });
+});
+
+describe("niceScale", () => {
+  it("steps by 1, 2 or 5 times a power of ten, into at most four bands", () => {
+    expect(niceScale(65)).toEqual({ top: 80, step: 20 });
+    expect(niceScale(70)).toEqual({ top: 80, step: 20 });
+    expect(niceScale(30)).toEqual({ top: 30, step: 10 });
+    expect(niceScale(9)).toEqual({ top: 10, step: 5 });
+    expect(niceScale(140)).toEqual({ top: 150, step: 50 });
+  });
+  it("never goes below 0 / 1 / 2 / 3 / 4", () => {
+    expect(niceScale(1)).toEqual({ top: 4, step: 1 });
   });
 });
 
