@@ -25,23 +25,25 @@
   min-height: 44px;
 }
 
-.option:not(:last-child) {
-  border-bottom: 1px solid var(--color-border);
-}
-
 .option:first-of-type {
   padding-top: 0;
 }
 
 .option:last-of-type {
-  border-bottom: none;
   padding-bottom: 0;
 }
 
 .notif-card .notif-sound-row,
 .notif-card .notif-voice-rows {
-  border-bottom: none;
   padding-bottom: 0;
+}
+
+/* No hairlines between rows inside a card: the kit draws one under every row
+   but its :last-of-type exemption misses any row followed by a caption or a
+   button, so cards ended up with lines under some rows and not others. The
+   card edge and row spacing already group the rows. */
+.kit-row {
+  border-bottom: none;
 }
 
 .option-label {
@@ -70,8 +72,8 @@
 }
 
 /* One row height on every Settings subpage, whatever the row holds. The kit's
-   36px baseline left toggle rows 36px tall next to 45px dropdown rows; 45px is
-   a 32px control plus the row's 6px padding each side plus its 1px divider.
+   36px baseline left toggle rows 36px tall next to 45px dropdown rows; 45px
+   fits a 32px control plus the row's 6px padding each side, with 1px spare.
    Every field, dropdown and button inside a row is pinned to that 32px so a
    time picker or number box can't stretch its row either. The index (plain
    .view-settings, no suffix) holds only same-height nav rows, so it keeps the
