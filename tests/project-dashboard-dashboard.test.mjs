@@ -83,7 +83,7 @@ describe("single project", () => {
     expect(root.querySelector('[data-pd-card="reports"] .pd-out')).toBeNull();
     expect(root.querySelector('[data-pd-card="next_up"] .ph-star')).not.toBeNull();
     expect(root.querySelector('[data-pd-card="next_up"]').textContent).toContain("#1264 Hyperfocus the mobile todos");
-    expect(root.querySelector('[data-pd-card="ship"]').textContent).toContain("2 commits");
+    expect(root.querySelector('[data-pd-card="ship"] [data-pd-commits="unpushed"]').textContent).toBe("Unpushed (2)");
     // Running is servers only: the repo's other live chats are already in the Chats card.
     expect(root.querySelector('[data-pd-card="running"]').textContent).not.toContain("chats active in this repo");
     expect(root.querySelector('[data-pd-card="running"]').textContent).not.toContain("holding commit on chat-renderer.ts");

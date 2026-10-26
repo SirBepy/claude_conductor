@@ -14,7 +14,7 @@ import { updateThinkingBar } from "../session-thinking-bar";
 import { state } from "../state";
 import type { DashActions, DashCtx } from "./dash-parts";
 import { openReportsModal, showImageOverlay } from "./dash-reports";
-import { openProjectMenu } from "./dash-menu";
+import { copy, openProjectMenu } from "./dash-menu";
 import type { CardResult, DashTodo, RepoRef } from "./types";
 import type { UsageRange } from "./dash-usage";
 
@@ -160,6 +160,7 @@ export function makeActions(host: ActionHost): DashActions {
     },
     openUrl: (url) => { void api.openExternal(url).catch((err) => showToast(`Could not open the link: ${String(err)}`)); },
     openAllHistory: () => showView("history"),
+    copyText: (text, what) => copy(text, what),
     toggleTodo: (todo: DashTodo) => {
       const wasDone = host.ctx().doneTodos.has(todo.id);
       host.patch((c) => { if (wasDone) c.doneTodos.delete(todo.id); else c.doneTodos.add(todo.id); });

@@ -134,7 +134,7 @@ export function projectItems(host: ActionHost, anchor: HTMLElement, channel: Cha
   return items;
 }
 
-function copy(text: string, what: string): void {
+export function copy(text: string, what: string): void {
   void navigator.clipboard.writeText(text).then(
     () => showToast(`Copied the ${what}`),
     (err) => showToast(`Could not copy: ${String(err)}`),

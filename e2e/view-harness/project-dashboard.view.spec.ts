@@ -105,6 +105,8 @@ test.describe("view-harness / project dashboard", () => {
     for (const id of ["your_todos", "chats", "next_up", "ship", "usage", "todo_chart", "running", "reports"]) {
       await expect(card(page, id)).toBeVisible();
     }
+    await expect(card(page, "ship").locator("[data-pd-commits]")).toHaveText(["Unpushed (2)", "Pushed"]);
+    await expect(card(page, "ship")).not.toContainText("dd1af90");
     await expect(page.locator(".pd-qa-host.is-page .pd-chip").first()).toHaveText("+ New chat");
     await expect(page.locator(".pd-qa-host.is-page .pd-chip").nth(1)).toContainText("/pickup");
     await expect(page.locator(".pd-root .pd-out")).toHaveCount(0);

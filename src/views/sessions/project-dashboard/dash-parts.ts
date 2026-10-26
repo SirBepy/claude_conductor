@@ -26,6 +26,8 @@ export interface DashActions {
   openFile(path: string): void;
   openUrl(url: string): void;
   openAllHistory(): void;
+  /** Clipboard, with a toast naming `what` was copied. */
+  copyText(text: string, what: string): void;
   toggleTodo(todo: DashTodo): void;
   refreshCard(id: string): void;
   /** The project menu, under a button (the page header's kebab). */
