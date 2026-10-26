@@ -2,7 +2,7 @@
 //
 // Escape must never skip an AUQ card. A skipped card sends no answer at all
 // (opts.onCancel) and the key is reflexive enough to burn a whole prompt by
-// accident - the footer's "Skip" button is the one explicit route. Escape's
+// accident - the minimized bar's "Skip" button is the one explicit route. Escape's
 // only remaining job is dropping focus out of a text field, mirroring the
 // phone back button (see auq-back-button-no-skip.test.mjs).
 //
@@ -91,7 +91,10 @@ describe("AUQ card Escape handling", () => {
     const opts = baseOpts();
     renderQuestionUI(opts);
 
-    const skipBtn = document.querySelector('button[data-act="cancel"]');
+    // Skip lives only on the minimized bar, two deliberate taps away.
+    expect(document.querySelector('button[data-act="cancel"]')).toBeNull();
+    document.querySelector('[data-act="minimize"]').click();
+    const skipBtn = document.querySelector('.prompt-collapsed button[data-act="cancel"]');
     expect(skipBtn).toBeTruthy();
     expect(skipBtn.textContent.trim()).toBe("Skip");
 

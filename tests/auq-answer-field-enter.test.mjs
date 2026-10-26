@@ -2,7 +2,7 @@
 //
 // The question card's answer box is the shared composer field, so it follows
 // the chat's Enter rule: on desktop Enter fires the footer's primary button
-// (the same thing its paper-plane does) and Shift+Enter is a newline; on a
+// and Shift+Enter is a newline; on a
 // phone Enter is always a newline. Ctrl+Enter must still fire the primary
 // only once - the card's own document handler owns that shortcut.
 
@@ -55,10 +55,14 @@ beforeEach(() => {
 });
 
 describe("AUQ answer field Enter", () => {
-  it("has the shared paper-plane send on desktop", () => {
+  // One way forward per step (Joe, 2026-10-26): the footer's Next/Submit,
+  // so the desktop answer box has no paper-plane of its own beside it.
+  it("drops the answer box's own send arrow on desktop", () => {
     setViewport(false);
     open();
-    expect(document.querySelector(".prompt-card__answer-bar .composer-field-send .ph-paper-plane-right")).toBeTruthy();
+    expect(document.querySelector(".prompt-card__answer-bar textarea")).toBeTruthy();
+    expect(document.querySelector(".prompt-card__answer-bar .composer-field-send")).toBeNull();
+    expect(document.querySelector('.prompt-card__footer [data-act="primary"]')).toBeTruthy();
   });
 
   it("desktop: Shift+Enter is a newline, Enter submits", () => {

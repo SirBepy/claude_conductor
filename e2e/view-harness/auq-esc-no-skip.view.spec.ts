@@ -7,7 +7,7 @@ import { mountView } from "./harness";
 // Escape must never skip an AUQ card. A skipped card settles as SKIPPED, with
 // no answer at all reaching the agent, and Escape is reflexive enough to burn
 // a whole prompt by accident. Its only remaining job is dropping focus out of
-// a text field; the footer's "Skip" button is the one explicit route.
+// a text field; the minimized bar's "Skip" button is the one explicit route.
 //
 // Absorbs todo 442's lightbox regression: an Escape meant for an image
 // lightbox atop the card used to cancel the card on the same keypress. Drives
@@ -95,7 +95,8 @@ test.describe("view-harness / Escape never skips an AUQ card", () => {
     await page.keyboard.press("Escape");
     await expect(card).toBeVisible();
 
-    await page.locator('.prompt-card [data-act="cancel"]').click();
+    await page.locator('.prompt-card [data-act="minimize"]').click();
+    await page.locator('.prompt-collapsed [data-act="cancel"]').click();
 
     await expect(card).toHaveCount(0);
     const result = await page.evaluate(() => window.__auqResult);

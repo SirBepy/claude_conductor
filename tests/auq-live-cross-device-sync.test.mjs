@@ -180,7 +180,8 @@ describe("live poll stops when the card closes", () => {
     const callsWhileOpen = getSessionDrafts.mock.calls.length;
     expect(callsWhileOpen).toBeGreaterThan(0);
 
-    document.querySelector('[data-act="cancel"]').click();
+    document.querySelector('[data-act="minimize"]').click();
+    document.querySelector('.prompt-collapsed [data-act="cancel"]').click();
     await vi.advanceTimersByTimeAsync(5000);
 
     expect(getSessionDrafts.mock.calls.length).toBe(callsWhileOpen);

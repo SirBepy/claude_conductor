@@ -55,6 +55,35 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.prompt-summary-row__note {
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+.prompt-summary-row__note b {
+  font-weight: 600;
+  color: var(--color-text);
+}
+/* Review's optional message, behind a quiet dashed row until tapped. */
+.prompt-summary__add-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  background: none;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+.prompt-summary__add-note:hover {
+  color: var(--color-text);
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+}
 .prompt-summary-row.is-unanswered .prompt-summary-row__answer {
   color: var(--color-text-muted);
   font-style: italic;

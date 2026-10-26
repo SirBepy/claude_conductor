@@ -32,7 +32,7 @@ export interface AnswerBarDeps {
 // render() and the no-rebuild stepTab() path.
 export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
   const {
-    host, opts, questions, hasSummary, totalPanels, freeText, state, auqAttachments,
+    host, questions, hasSummary, totalPanels, freeText, state, auqAttachments,
     slashPopup, answeredAt, notifyDraftChange, syncMessagesPadding, showPasteHint,
     updatePrimaryButton,
   } = deps;
@@ -50,34 +50,56 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
     // The phone's fullscreen question page (permission-modal-shell.css's
     // :has(.prompt-pager) scope, never the --viewport fallback host).
     const page = isMobileViewport() && !host.classList.contains("prompt-card-host--viewport");
-    bar.innerHTML = isSummary
-      ? (opts.supportsExtras ? extraMessageZoneHtml(state.additionalMessage, page) : "")
-      : ownZoneHtml(state.activeTab, freeText, page);
-    // The answer field's send arrow forwards to the footer's primary button
-    // (Next or Submit), mirroring its label and disabled state so it never
-    // looks live while the click would do nothing. On desktop it is a
-    // shortcut that wakes once something is typed. On the phone page the
-    // footer buttons are hidden (permission-modal-shell.css), so the arrow IS
-    // Next/Submit: live whenever the primary is, typed text or not.
-    const sendBtn = bar.querySelector<HTMLButtonElement>(".prompt-answer-send");
+    // Review keeps the footer to the one Submit button (Joe, 2026-10-26): its
+    // optional message lives in the panel, under the last answer, behind an
+    // "Add a note" row until tapped or already holding text.
+    const noteSlot = isSummary
+      ? host.querySelector<HTMLElement>(`.prompt-panel[data-panel="${questions.length}"] .prompt-summary__note`)
+      : null;
+    bar.innerHTML = isSummary ? "" : ownZoneHtml(state.activeTab, freeText, page);
+    if (noteSlot) {
+      const open = state.reviewNoteOpen || state.additionalMessage.trim() !== "";
+      noteSlot.innerHTML = open
+        ? extraMessageZoneHtml(state.additionalMessage, false)
+        : `<button type="button" class="prompt-summary__add-note" data-act="add-note"><i class="ph ph-plus"></i>Add a note</button>`;
+      noteSlot.querySelector('[data-act="add-note"]')?.addEventListener("click", () => {
+        state.reviewNoteOpen = true;
+        syncAnswerBar();
+        syncMessagesPadding();
+        noteSlot.querySelector<HTMLTextAreaElement>(".prompt-extra-input")?.focus();
+      });
+    }
+    const fieldHost = noteSlot ?? bar;
+    // One way forward per step: on desktop the footer's Next/Submit is it, so
+    // the answer box drops its own send arrow (Joe, 2026-10-26: an arrow AND
+    // a Next read as two different actions), and the review note never had a
+    // send of its own to offer.
+    if (!page || noteSlot) fieldHost.querySelector(".prompt-answer-send")?.remove();
+    // On the phone page the footer buttons are hidden (permission-modal-
+    // shell.css), so the arrow IS Next/Submit, mirroring the primary's label
+    // and disabled state so it never looks live while the click would do
+    // nothing.
+    const sendBtn = fieldHost.querySelector<HTMLButtonElement>(".prompt-answer-send");
     const primary = (): HTMLButtonElement | null =>
       host.querySelector<HTMLButtonElement>('.prompt-card__footer [data-act="primary"]');
     sendBtn?.addEventListener("click", () => primary()?.click());
     sendBtn?.classList.toggle("is-submit", isSummary || !hasSummary);
-    const syncSend = (el: HTMLTextAreaElement): void => {
+    const syncSend = (): void => {
       if (!sendBtn) return;
       const p = primary();
-      sendBtn.disabled = (!page && el.value.trim() === "") || !!p?.disabled;
+      sendBtn.disabled = !!p?.disabled;
       const label = p?.textContent?.trim();
       if (label) sendBtn.title = label;
     };
 
     const wireField = (el: HTMLTextAreaElement, isExtraField: boolean): void => {
-      syncSend(el);
+      syncSend();
       const highlightEl = el.parentElement?.querySelector<HTMLElement>(".composer-highlight") ?? null;
-      // Enter is the arrow's keyboard twin, so it carries the same guard.
+      // Enter is the footer button's keyboard twin. Off the phone page it
+      // waits for typed text, so a stray Enter in an empty box never advances.
       slashPopup.attach(el, highlightEl, () => {
-        if (sendBtn && !sendBtn.disabled) primary()?.click();
+        const p = primary();
+        if (p && !p.disabled && (page || el.value.trim() !== "")) p.click();
       });
       if (isExtraField) {
         el.addEventListener("input", () => {
@@ -105,17 +127,17 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
       }
       // After the handlers above, so it reads the primary button's state
       // updatePrimaryButton just set for this keystroke.
-      el.addEventListener("input", () => syncSend(el));
+      el.addEventListener("input", () => syncSend());
       // Always wired - handleAttachmentPaste itself decides and reports back.
       el.addEventListener("paste", (e) => {
         void auqAttachments.handleAttachmentPaste(e).then((msg) => {
-          if (msg) showPasteHint(bar, msg);
+          if (msg) showPasteHint(fieldHost, msg);
         });
       });
     };
 
     const ownEl = bar.querySelector<HTMLTextAreaElement>(".prompt-q__other-input");
-    const extraEl = bar.querySelector<HTMLTextAreaElement>(".prompt-extra-input");
+    const extraEl = noteSlot?.querySelector<HTMLTextAreaElement>(".prompt-extra-input") ?? null;
     if (ownEl) wireField(ownEl, false);
     if (extraEl) wireField(extraEl, true);
   };

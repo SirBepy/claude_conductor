@@ -222,7 +222,7 @@
 }
 
 /* Free-text answer / review's extra message, inline in the footer row next
- * to Skip/Next (synced to the active tab by syncAnswerBar()). flex-wrap on
+ * to Next (synced to the active tab by syncAnswerBar()). flex-wrap on
  * the footer drops it to its own line above the buttons when the row gets
  * too narrow for both. */
 .prompt-card__answer-bar {
@@ -237,8 +237,8 @@
 .prompt-card__footer {
   display: flex;
   flex-wrap: wrap;
-  /* flex-end, not center: a grown multi-line answer field keeps Skip/Next
-   * level with its bottom edge, where the send arrow sits. */
+  /* flex-end, not center: a grown multi-line answer field keeps the buttons
+   * level with its bottom edge. */
   align-items: flex-end;
   justify-content: flex-end;
   gap: 8px;
@@ -256,7 +256,7 @@
 }
 .prompt-card__footer button:not(.pv-composer-send) {
   /* Matches the answer field's one-line height (composer.css's 32px
-   * .composer-textarea and .icon-btn send) so Skip/Next sit level with it. */
+   * .composer-textarea and .icon-btn send) so the buttons sit level with it. */
   min-height: 32px;
   padding: 6px 14px;
   display: inline-flex;
@@ -281,20 +281,13 @@
  * Must sit AFTER the base .prompt-card__answer-bar rule: same specificity, so
  * source order decides, and the early mobile block above would lose. */
 @media (max-width: 768px) {
-  /* A 200px basis plus Skip plus Submit plus two gaps overruns a 384px content
-   * box, and flex-wrap resolved that by stranding Submit alone on line two
-   * (Joe, 2026-09-04). A 100% basis makes the same two rows deliberate: input
-   * owns row one, both buttons share row two. */
+  /* A 200px basis plus the footer buttons overran a 384px content box, and
+   * flex-wrap resolved that by stranding a button alone on line two (Joe,
+   * 2026-09-04). A 100% basis makes the two rows deliberate: input owns row
+   * one, the buttons share row two. */
   .prompt-card__answer-bar {
     flex: 1 1 100%;
     min-width: 0;
-  }
-  /* A third of the row after the gap, 119px here, so Skip is a chosen size
-   * and not the rendered width of its own label. Basis, not a 1:2 grow: a
-   * border-box button floors at its 30px of padding + border, which skews
-   * grow to 1.75:1. Bar-only, so Deny/Allow keeps its natural widths. */
-  .prompt-card__footer:has(.prompt-card__answer-bar:not(:empty)) [data-act="cancel"] {
-    flex: 0 0 calc((100% - 8px) / 3);
   }
   .prompt-card__footer:has(.prompt-card__answer-bar:not(:empty)) .btn-primary {
     flex: 1 1 0;
@@ -302,12 +295,20 @@
   }
 }
 
-/* Phone-only pieces of the fullscreen question page, hidden everywhere else:
- * the back arrow, the header's Skip and the ask band's own Ask button. */
-.prompt-card__back,
-.prompt-card__skip,
+/* Phone-only: the ask band's own Ask button (the header's copy is hidden there). */
 .prompt-ask__btn {
   display: none;
+}
+
+/* Review's Submit is the step's only control, so it reads as a call to action:
+ * a wide centred button capped at 280px on desktop (Joe, 2026-10-26: full
+ * width there felt like too much), full width on the phone below. */
+.prompt-card__footer .prompt-submit-cta {
+  flex: 1 1 auto;
+  max-width: 280px;
+  min-height: 38px;
+  justify-content: center;
+  font-weight: 600;
 }
 
 /* ── Phone question page (Joe, 2026-10-22) ────────────────────────────────
@@ -330,7 +331,6 @@
     animation: none;
   }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__handle,
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) [data-act="minimize"],
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__title,
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) [data-act="ask"] {
     display: none;
@@ -358,9 +358,6 @@
     gap: 4px;
     background: var(--color-surface-alt);
   }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__back {
-    display: inline-flex;
-  }
   /* 44px touch targets: the desktop 26px squares are too small for a thumb. */
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) > .prompt-icon-btn {
     width: 44px;
@@ -369,27 +366,11 @@
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) > .prompt-icon-btn i {
     font-size: 1.25rem;
   }
-  /* Skip dismisses the whole card, so it lives up here with back rather than
-     beside the answer box, where it read as "skip this question" (Joe,
-     2026-10-25). Plain text over an icon: an X reads as close/back. */
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__skip {
-    display: inline-flex;
-    align-items: center;
-    height: 44px;
-    padding: 0 12px;
-    border: none;
-    background: none;
-    color: var(--color-text-muted);
-    font: inherit;
-    font-size: 0.95rem;
-    font-weight: 600;
-    cursor: pointer;
-  }
   /* Footer: the Preview panel's own reply bar (.pv-composer,
      question-ui-templates.ts) edge to edge, with its own padding and top
      divider. Its send arrow is the page's Next and Submit (question-ui-
-     answer-bar.ts), so the Skip/Next row is hidden whenever the bar is up;
-     review without supportsExtras has no bar and keeps the buttons. */
+     answer-bar.ts), so the Next button is hidden whenever the bar is up;
+     review has no bar and shows Submit as a full-width button. */
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer {
     padding: 8px 8px var(--keyboard-inset, 0px);
   }
@@ -577,4 +558,12 @@
 @keyframes prompt-card-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+@media (max-width: 768px) {
+  .prompt-card__footer .prompt-submit-cta {
+    max-width: none;
+    min-height: 48px;
+    font-size: 1rem;
+  }
 }

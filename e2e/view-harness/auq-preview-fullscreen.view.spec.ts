@@ -1,3 +1,4 @@
+// Reviewed 2026-10-27: types.ts's QuestionDraft gained an optional per-option `notes` map (AUQ option notes) - additive, no change to this spec's contract.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 import type { Question } from "../../src/views/sessions/permission-modal/types";

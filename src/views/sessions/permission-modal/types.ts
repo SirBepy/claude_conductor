@@ -117,7 +117,14 @@ export interface QuestionDraft {
   /** Pasted-image attachments. Persisted as path+mime+filename+size only (no
    *  base64) - see draft-persistence.ts's StoredDraft. */
   attachments: AuqAttachment[];
+  /** Per-option notes, question index -> option label -> text. A note only
+   *  ships while its option is ticked, but is kept across an untick so a
+   *  re-tick brings it back. Optional: older drafts and external callers have
+   *  none. */
+  notes?: OptionNotes;
 }
+
+export type OptionNotes = Map<number, Map<string, string>>;
 
 export interface QuestionUIOpts {
   /** Prompt id, so the card can be torn down externally (expiry / resolved elsewhere). */

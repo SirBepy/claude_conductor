@@ -18,6 +18,12 @@ import type { AuqAttachment, OptionBadge, Question, QuestionDomain, QuestionUIOp
 export interface QuestionRenderState {
   activeTab: number;
   additionalMessage: string;
+  /** The ticked option whose note box is open, if any. View state only, never
+   *  part of the draft: a reload shows the saved note, not an open box. */
+  editingNote: { qi: number; label: string } | null;
+  /** Review step's "Add a note" row was tapped open. Also opens by itself
+   *  whenever additionalMessage already has text. */
+  reviewNoteOpen: boolean;
   resizeObs: ResizeObserver | null;
   panelResizeObs: ResizeObserver | null;
 }
@@ -78,6 +84,8 @@ export function optsRowsHtml(
   noneLabel: string,
   layout: PreviewLayout | null = null,
   sessionId?: string,
+  notes?: Map<string, string>,
+  editingLabel?: string | null,
 ): string {
   return (q.options ?? []).map((opt) => {
     const selected = q.multiSelect
@@ -88,6 +96,11 @@ export function optsRowsHtml(
       ? `<div class="prompt-opt__desc">${renderMarkdown(opt.description)}</div>`
       : "";
     const isNone = q.multiSelect && opt.label === noneLabel;
+    // Notes are for ticked options only (Joe, 2026-10-26: a note on an option
+    // you didn't pick has no use), and never on "None of the above".
+    const notable = selected && !isNone && layout !== "tiles";
+    const note = notable ? (notes?.get(opt.label) ?? "") : "";
+    const editing = notable && editingLabel === opt.label;
     return `
       <label class="prompt-opt${selected ? " is-selected" : ""}${isNone ? " prompt-opt--none" : ""}">
         ${layout === "tiles" ? tilePictureHtml(opt, sessionId) : ""}
@@ -95,7 +108,10 @@ export function optsRowsHtml(
         <span class="prompt-opt__body">
           <span class="prompt-opt__top"><span class="prompt-opt__label">${escapeHtml(opt.label)}</span>${badgesHtml(opt.badges)}</span>
           ${desc}
+          ${editing ? `<textarea class="prompt-opt__note-input" rows="2" placeholder="Note on this option..." data-note-for="${escapeHtml(opt.label)}">${escapeHtml(note)}</textarea>` : ""}
+          ${!editing && note.trim() ? `<span class="prompt-opt__note">${escapeHtml(note.trim())}</span>` : ""}
         </span>
+        ${notable ? `<button type="button" class="icon-btn-sq prompt-icon-btn prompt-opt__pencil${editing || note.trim() ? " is-on" : ""}" data-note-toggle="${escapeHtml(opt.label)}" title="${note.trim() ? "Edit note" : "Add a note"}"><i class="${note.trim() || editing ? "ph-fill" : "ph"} ph-pencil-simple"></i></button>` : ""}
       </label>
     `;
   }).join("");
@@ -104,10 +120,10 @@ export function optsRowsHtml(
 // The answer box is the shared composer field (composer-field.ts), the same
 // box + paper-plane the chat and Preview use, on desktop and phone alike. The
 // AUQ hook classes (.prompt-q__other-input/.prompt-extra-input) ride along on
-// the textarea for the wiring that looks them up. The send arrow mirrors the
-// footer's primary button (question-ui-answer-bar.ts). On the phone's
-// fullscreen page it is docked edge to edge, like Preview's, and its arrow
-// stands in for the hidden Skip/Next row.
+// the textarea for the wiring that looks them up. On the phone's fullscreen
+// page it is docked edge to edge, like Preview's, and its arrow stands in for
+// the hidden Next/Submit button; everywhere else syncAnswerBar drops the
+// arrow, so the footer button is the only way forward.
 function answerFieldHtml(hookClass: string, placeholder: string, value: string, page: boolean): string {
   return composerFieldHtml({
     rowClass: page ? "composer-field--docked pv-composer" : undefined,
@@ -118,12 +134,13 @@ function answerFieldHtml(hookClass: string, placeholder: string, value: string, 
   });
 }
 
+// Rendered into the review panel's `.prompt-summary__note` slot (syncAnswerBar).
 export function extraMessageZoneHtml(additionalMessage: string, page = false): string {
-  return answerFieldHtml("prompt-extra-input", "Add a message (optional)...", additionalMessage, page);
+  return answerFieldHtml("prompt-extra-input", "Anything else to add...", additionalMessage, page);
 }
 
 // Only ever rendered into `.prompt-card__answer-bar` (via syncAnswerBar),
-// which sits inline in the footer row next to Skip/Next - see its doc comment.
+// which sits inline in the footer row next to Next - see its doc comment.
 export function ownZoneHtml(qi: number, freeText: Map<number, string>, page = false): string {
   return answerFieldHtml("prompt-q__other-input", "Type your own answer...", freeText.get(qi) ?? "", page);
 }
@@ -138,6 +155,8 @@ export function panelHtml(
   selections: Map<number, Selection>,
   noneLabel: string,
   opts: QuestionUIOpts,
+  notes?: Map<string, string>,
+  editingLabel?: string | null,
 ): string {
   const isActive = qi === activeTab;
   const layout = previewLayout(q);
@@ -147,7 +166,7 @@ export function panelHtml(
   const pickSect = q.options?.length
     ? `<div class="prompt-sect"><i class="ph ph-list-checks"></i><span class="prompt-sect__label">${q.multiSelect ? "Select all that apply" : "Pick one"}</span><span class="prompt-sect__rule"></span></div>
        ${layout === "stage" ? stageHtml(q, qi, opts.sessionId) : ""}
-       <div class="prompt-q__opts"${optsStyle}>${optsRowsHtml(q, qi, selections, noneLabel, layout, opts.sessionId)}</div>`
+       <div class="prompt-q__opts"${optsStyle}>${optsRowsHtml(q, qi, selections, noneLabel, layout, opts.sessionId, notes, editingLabel)}</div>`
     : "";
   // Emitted even while empty (`.composer-attachments:empty` hides it) - the
   // paste path patches this node in place instead of re-rendering.
@@ -180,16 +199,21 @@ export function summaryPanelHtml(
   answerPreview: (qi: number) => string,
   opts: QuestionUIOpts,
   auqAttachments: AuqAttachmentsController,
+  notesFor: (qi: number) => [string, string][] = () => [],
 ): string {
   const isActive = activeTab === questions.length;
   const rows = questions.map((sq, qi) => {
     const label = sq.header?.trim() || `Question ${qi + 1}`;
     const answered = answeredAt(qi);
+    const noteLines = notesFor(qi)
+      .map(([opt, text]) => `<span class="prompt-summary-row__note"><b>${escapeHtml(opt)}:</b> ${escapeHtml(text)}</span>`)
+      .join("");
     return `
       <button type="button" class="prompt-summary-row${answered ? "" : " is-unanswered"}" data-summary-tab="${qi}">
         <span class="prompt-summary-row__main">
           <span class="prompt-summary-row__label">${escapeHtml(label)}</span>
           <span class="prompt-summary-row__answer">${escapeHtml(answerPreview(qi))}</span>
+          ${noteLines}
         </span>
         ${attachChipHtml(auqAttachments.attachmentsForPanel(qi))}
         <i class="ph ph-pencil-simple"></i>
@@ -206,6 +230,7 @@ export function summaryPanelHtml(
       <div class="prompt-summary" role="tabpanel">
         <div class="prompt-summary__intro">Review your answers before sending:</div>
         ${rows}
+        ${opts.supportsExtras ? `<div class="prompt-summary__note"></div>` : ""}
         ${attachmentsStripHtml}
       </div>
     </section>
@@ -259,16 +284,20 @@ export function collapsedHtml(
   activeTab: number,
   questions: Question[],
   totalPanels: number,
+  cancelLabel: string,
 ): string {
   const isSummary = hasSummary && activeTab === questions.length;
   const q = isSummary ? undefined : questions[activeTab];
   const dom = domainVar(q?.domain);
   const text = q ? splitAsk(q.question).ask : "Review your answers before sending";
+  // Skip lives only here (Joe, 2026-10-26): it throws the whole card away, so
+  // it sits where you go to set the card aside, two taps from an accident.
   return `
     <div class="prompt-collapsed" style="--dom:${dom}">
       <span class="prompt-collapsed__dot"></span>
       <span class="prompt-collapsed__q">${escapeHtml(text)}</span>
       <span class="prompt-collapsed__step">${activeTab + 1}/${totalPanels}</span>
+      <button type="button" class="prompt-collapsed__skip" data-act="cancel">${escapeHtml(cancelLabel)}</button>
       <button type="button" class="icon-btn-sq prompt-icon-btn" data-act="restore" title="Restore"><i class="ph ph-caret-up"></i></button>
     </div>
   `;

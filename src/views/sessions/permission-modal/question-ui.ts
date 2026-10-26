@@ -6,7 +6,7 @@ import { LIGHTBOX_OVERLAY_CLASS } from "../../../shared/chat/lightbox";
 import { createQuestionCardRenderer } from "./question-ui-render";
 import type { QuestionRenderState } from "./question-ui-render";
 import { handleQuestionCardKey } from "./question-keyboard";
-import type { Answers, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
+import type { Answers, OptionNotes, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
 import {
   isQuestionAnswered,
   computeAnswer,
@@ -68,7 +68,20 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
 
   const selections = new Map<number, Selection>();
   const freeText = new Map<number, string>();
+  const notes: OptionNotes = new Map();
+  const adoptNotes = (from: OptionNotes | undefined, skip?: { qi: number; label: string } | null): void => {
+    // A note box being typed into keeps its local text over a remote copy.
+    const kept = skip ? notes.get(skip.qi)?.get(skip.label) : undefined;
+    notes.clear();
+    from?.forEach((m, qi) => notes.set(qi, new Map(m)));
+    if (skip && kept !== undefined) {
+      const forQ = notes.get(skip.qi) ?? new Map<string, string>();
+      forQ.set(skip.label, kept);
+      notes.set(skip.qi, forQ);
+    }
+  };
   if (initialDraft) {
+    adoptNotes(initialDraft.notes);
     initialDraft.freeText.forEach((v, k) => freeText.set(k, v));
     initialDraft.selections.forEach((v, k) => {
       selections.set(k, v instanceof Set ? new Set(v) : v);
@@ -84,6 +97,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   const state: QuestionRenderState = {
     activeTab: Math.min(Math.max(initialDraft?.activeTab ?? 0, 0), totalPanels - 1),
     additionalMessage: initialDraft?.additionalMessage ?? "",
+    editingNote: null,
+    reviewNoteOpen: false,
     resizeObs: null,
     panelResizeObs: null,
   };
@@ -102,7 +117,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     onChange: () => {
       const active = document.activeElement as HTMLElement | null;
       const isTyping = Boolean(active) && host.contains(active)
-        && (active!.classList.contains("prompt-q__other-input") || active!.classList.contains("prompt-extra-input"));
+        && (active!.classList.contains("prompt-q__other-input") || active!.classList.contains("prompt-extra-input")
+          || active!.classList.contains("prompt-opt__note-input"));
       if (isTyping) renderer.refreshAttachments();
       else renderer.render();
     },
@@ -163,6 +179,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     selections: Array.from(selections.entries(), ([k, v]) => [k, v instanceof Set ? Array.from(v) : v]),
     activeTab: state.activeTab,
     additionalMessage: state.additionalMessage,
+    notes: Array.from(notes, ([qi, m]) => [qi, Array.from(m)]),
   });
 
   /** Merge another client's draft (pollRemoteAuqChange) into the live card. A full
@@ -173,7 +190,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     const active = document.activeElement as HTMLElement | null;
     const typingOther = Boolean(active) && host.contains(active) && active!.classList.contains("prompt-q__other-input");
     const typingExtra = Boolean(active) && host.contains(active) && active!.classList.contains("prompt-extra-input");
-    const isTyping = typingOther || typingExtra;
+    const typingNote = Boolean(active) && host.contains(active) && active!.classList.contains("prompt-opt__note-input");
+    const isTyping = typingOther || typingExtra || typingNote;
     const before = draftSignature();
 
     remote.freeText.forEach((v, i) => {
@@ -183,6 +201,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     remote.selections.forEach((v, i) => selections.set(i, v instanceof Set ? new Set(v) : v));
     questions.forEach((q, i) => { if (q.multiSelect && !selections.has(i)) selections.set(i, new Set<string>()); });
     if (!typingExtra) state.additionalMessage = remote.additionalMessage;
+    adoptNotes(remote.notes, typingNote ? state.editingNote : null);
     if (!isTyping) state.activeTab = Math.min(Math.max(remote.activeTab, 0), totalPanels - 1);
 
     if (!isTyping && draftSignature() !== before) renderer.render();
@@ -257,6 +276,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     activeTab: state.activeTab,
     additionalMessage: state.additionalMessage,
     attachments: [...auqAttachments.attachments],
+    notes: new Map(Array.from(notes, ([qi, m]) => [qi, new Map(m)])),
   });
   if (opts.id) {
     setActiveCard({
@@ -271,7 +291,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // always present), single-select/free-text -> string, string[] (pick +
   // typed combined), or null if unanswered. See computeAnswer for the rule.
   const answerFor = (qi: number): string | string[] | null =>
-    computeAnswer(questions[qi], freeText.get(qi) ?? "", selections.get(qi));
+    computeAnswer(questions[qi], freeText.get(qi) ?? "", selections.get(qi), notes.get(qi));
 
   const submit = () => {
     const answers: Answers = {};
@@ -324,8 +344,9 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   const answeredAt = (qi: number): boolean =>
     isQuestionAnswered(questions[qi], freeText.get(qi) ?? "", selections.get(qi));
 
+  // Bare labels: review lists each option's note on its own line instead.
   const answerPreview = (qi: number): string => {
-    const a = answerFor(qi);
+    const a = computeAnswer(questions[qi], freeText.get(qi) ?? "", selections.get(qi));
     if (Array.isArray(a)) return a.length ? a.join(", ") : "Not answered";
     return typeof a === "string" && a ? a : "Not answered";
   };
@@ -339,6 +360,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     noneLabel: NONE_LABEL,
     selections,
     freeText,
+    notes,
     state,
     auqAttachments,
     slashPopup,

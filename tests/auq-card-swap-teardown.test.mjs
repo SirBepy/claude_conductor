@@ -38,10 +38,11 @@ function baseOpts(overrides = {}) {
 
 // Escape used to be the instrument here, back when it cancelled the card. It
 // no longer skips at all (auq-escape-no-skip.test.mjs), so the observable for
-// "whose cancel path is still wired" is the footer Skip button - the live
-// card's own DOM, routing through the same closure Escape used to reach.
+// "whose cancel path is still wired" is the Skip button on the minimized bar -
+// the live card's own DOM, routing through the same closure Escape used to reach.
 function clickSkip() {
-  document.querySelector('[data-act="cancel"]').click();
+  document.querySelector('[data-act="minimize"]').click();
+  document.querySelector('.prompt-collapsed [data-act="cancel"]').click();
 }
 
 // Pairs every document.addEventListener with its removeEventListener so a
@@ -185,7 +186,7 @@ describe("every card in a run renders its answer options", () => {
       expect(visibleOptionInputs().map((i) => i.dataset.label)).toEqual(["A", "B"]);
       expect(document.querySelector(".prompt-card__answer-bar")).not.toBeNull();
       expect(document.querySelector('[data-act="primary"]')).not.toBeNull();
-      expect(document.querySelector('[data-act="cancel"]')).not.toBeNull();
+      expect(document.querySelector('[data-act="minimize"]')).not.toBeNull();
     }
   });
 

@@ -41,17 +41,27 @@ export function computeAnswer(
   q: Question | undefined,
   freeText: string,
   selection: Selection | undefined,
+  notes?: Map<string, string>,
 ): string | string[] | null {
   const typed = freeText.trim();
+  const noted = (label: string): string => withOptionNote(label, notes?.get(label));
   if (q?.multiSelect) {
-    const set = Array.from((selection instanceof Set ? selection : new Set<string>()));
+    const set = Array.from((selection instanceof Set ? selection : new Set<string>()), noted);
     if (typed) set.push(typed);
     return set;
   }
-  if (typeof selection === "string" && typed) return [selection, typed];
+  if (typeof selection === "string" && typed) return [noted(selection), typed];
   if (typed) return typed;
-  if (typeof selection === "string") return selection;
+  if (typeof selection === "string") return noted(selection);
   return null;
+}
+
+/** Wire form of a ticked option carrying a note: the note rides inside the
+ *  answer string because `Answers` (and the daemon's respond_question) only
+ *  carry strings per question, and Claude reads the result as prose anyway. */
+export function withOptionNote(label: string, note: string | undefined): string {
+  const text = note?.trim();
+  return text ? `${label} (note: ${text})` : label;
 }
 
 /** Splits a body into context + the final "?"-terminated ask (cut at the
