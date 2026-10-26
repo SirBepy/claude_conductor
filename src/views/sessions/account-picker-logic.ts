@@ -4,7 +4,7 @@
 // model-effort-modal.ts is the only caller. See
 // docs/multi-account/04-project-binding.md.
 
-import type { AccountLite } from "../../shared/account-chip";
+import { isApiCreditAccount, type AccountLite } from "../../shared/account-chip";
 
 export type { AccountLite };
 
@@ -13,10 +13,15 @@ export type { AccountLite };
  * 1. the project's bound account (`preferredAccountId`), if it still exists
  *    in the registry;
  * 2. else the global default (`defaultAccountId`), if it still exists;
- * 3. else, when exactly one account is registered, that account (so a
- *    single-account setup never needs `default_account_id` to be set);
+ * 3. else, when exactly one subscription account is registered, that account
+ *    (so a single-account setup never needs `default_account_id` to be set);
  * 4. else `null` when the registry has 0 or 2+ unresolved accounts - the
  *    caller must show the picker and force an explicit pick.
+ *
+ * An API-credit account is never returned by any step: a chat on it spends
+ * the Max plan's monthly API credit, so it only starts when the user clicks
+ * its chip. A binding or default that points at one (stale data; the backend
+ * refuses to store either) is skipped like a removed account.
  */
 export function resolveInitialAccountId(
   preferredAccountId: string | null | undefined,
@@ -24,10 +29,11 @@ export function resolveInitialAccountId(
   accounts: readonly AccountLite[],
 ): string | null {
   if (accounts.length === 0) return null;
+  const subscriptions = accounts.filter((a) => !isApiCreditAccount(a));
   const exists = (id: string | null | undefined): id is string =>
-    !!id && accounts.some((a) => a.id === id);
+    !!id && subscriptions.some((a) => a.id === id);
   if (exists(preferredAccountId)) return preferredAccountId;
   if (exists(defaultAccountId)) return defaultAccountId;
-  if (accounts.length === 1) return accounts[0]!.id;
+  if (subscriptions.length === 1) return subscriptions[0]!.id;
   return null;
 }

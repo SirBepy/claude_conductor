@@ -6,10 +6,15 @@
 
 import { escapeHtml } from "./escape-html";
 
+export type AccountKindLite = "subscription" | "api_credit";
+
 export interface AccountChipInfo {
   icon: string;
   colour: string;
   label: string;
+  /** Absent means a subscription account (older daemons and peer machines
+   * never send it). */
+  kind?: AccountKindLite;
 }
 
 /** The 4-field "lite account" shape shared by the dashboard account-selector,
@@ -21,12 +26,22 @@ export interface AccountLite {
   label: string;
   icon: string;
   colour: string;
+  kind?: AccountKindLite;
+}
+
+/** An API-credit account bills the Max plan's monthly API credit, never the
+ * subscription limits; every list that mixes the two kinds branches on this. */
+export function isApiCreditAccount(a: { kind?: AccountKindLite } | null | undefined): boolean {
+  return a?.kind === "api_credit";
 }
 
 /** Coloured circular icon badge for an account. Pair with `.account-chip-css`
  * (imported by the caller) for the `.account-icon-badge` rule. */
 export function accountIconBadgeHtml(a: AccountChipInfo): string {
-  return `<span class="account-icon-badge" style="--acc:${escapeHtml(a.colour)}"><i class="ph ph-${escapeHtml(a.icon)}"></i></span>`;
+  // The key marks the billing kind everywhere an account is drawn, whatever
+  // icon the account row stores.
+  const icon = isApiCreditAccount(a) ? "key" : a.icon;
+  return `<span class="account-icon-badge" style="--acc:${escapeHtml(a.colour)}"><i class="ph ph-${escapeHtml(icon)}"></i></span>`;
 }
 
 /** Icon badge + label, inline (a "chip"). `selected` adds the `.sel` state

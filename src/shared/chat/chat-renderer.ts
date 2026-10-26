@@ -27,6 +27,7 @@ import { flushRenderNow } from "./flush-scheduler";
 import { handleChatEvent, type HandleEventOpts } from "./chat-event-handler";
 import { bulkLoadEvents, type BulkLoadOpts } from "./chat-event-bulk-load";
 import { getCta } from "./cta-registry";
+import { sendFailureText } from "../api-credit-blocked";
 import {
   createHandleBlockImageClick,
   createHandleScreenshotThumbClick,
@@ -697,7 +698,7 @@ export class ChatRenderer {
         .catch((err) => {
           console.error("[chat-renderer] retry send failed", err);
           btn.disabled = false;
-          pill.title = String(err);
+          pill.title = sendFailureText(err);
         });
     });
 

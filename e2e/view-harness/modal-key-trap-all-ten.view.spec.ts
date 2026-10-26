@@ -33,6 +33,7 @@ const ACCOUNT = {
   id: "acc1", label: "Fleet-3", colour: "#57b894", icon: "robot",
   config_dir: "", chrome_profile_dir: "", email: "", org_uuid: "",
   subscription_tier: "", created_at: "", fleet_eligible: false,
+  kind: "subscription" as const,
 };
 
 const SESSION = sessionInstance({ busy: false, awaiting: "done" });

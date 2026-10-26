@@ -703,6 +703,13 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("get_usage_map", null);
       case "get_auth_state_map":
         return this.rpc<T>("get_auth_state_map", null);
+      // API-credit meter's reads (both `P` in remote_transport_table.rs).
+      // Adding the account, the Console login and set_console_session stay
+      // desktop-only: they take a key or open a browser on the PC.
+      case "get_api_credit_status":
+        return this.rpc<T>("get_api_credit_status", {});
+      case "refresh_api_credit_status":
+        return this.rpc<T>("refresh_api_credit_status", { account_id: args.accountId ?? args.account_id });
       // Click-to-refresh usage dials (api.refreshUsageLive on the remote
       // branch): asks the daemon to forward a live-poll request to the
       // connected desktop app and wait for a fresh snapshot - see

@@ -185,6 +185,55 @@
 }
 .view-dashboard .dash-acard-warning:hover { text-decoration: underline; }
 
+/* ── API-credit meter ──────────────────────────────────────────────────── */
+/* One line per API-credit account under the plan cards: text and a hairline
+   bar only, no card, so it reads as a footnote to the usage above it. */
+.view-dashboard .dash-credits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: -4px 0 16px;
+}
+.view-dashboard .dash-credit {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+}
+.view-dashboard .dash-credit .account-icon-badge { width: 20px; height: 20px; font-size: 11px; }
+.view-dashboard .dash-credit-name { color: var(--color-text, #e8e8ee); font-weight: 600; }
+.view-dashboard .dash-credit-bar {
+  flex: 0 0 72px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-surface-alt, #262637);
+  overflow: hidden;
+}
+.view-dashboard .dash-credit-fill {
+  display: block;
+  height: 100%;
+  background: var(--acc, var(--color-primary, #6e8fff));
+}
+.view-dashboard .dash-credit-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--color-primary, #6e8fff);
+  cursor: pointer;
+}
+.view-dashboard .dash-credit-link:hover { text-decoration: underline; }
+/* Same red/icon language as .dash-acard-warning. */
+.view-dashboard .dash-credit-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--color-danger, #f87171);
+}
+
 /* ── Widget shell ──────────────────────────────────────────────────────── */
 .view-dashboard .dash-widgets { display: flex; flex-direction: column; gap: 12px; }
 .view-dashboard .dash-widget {

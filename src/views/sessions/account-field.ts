@@ -6,7 +6,7 @@
 // state object below in its closure and passes it in/out here.
 
 import { escapeHtml } from "../../shared/escape-html";
-import { accountChipHtml, type AccountLite } from "../../shared/account-chip";
+import { accountChipHtml, isApiCreditAccount, type AccountLite } from "../../shared/account-chip";
 import "../../shared/account-chip.css";
 
 /** Mutable account-picker state, owned by the modal's closure. `accountId`
@@ -42,6 +42,7 @@ export function accountPickIncomplete(state: AccountFieldState, accounts: readon
 /** A peer's accounts carry their email so two similarly-labelled ones can be
  * told apart; the local picker shows label only, so this stays peer-only. */
 function chipTitle(a: AccountLite & { email?: string }, machine: AccountFieldMachine | null | undefined): string {
+  if (isApiCreditAccount(a)) return ` title="${escapeHtml("Bills the Max plan's monthly API credit")}"`;
   return machine && a.email ? ` title="${escapeHtml(a.email)}"` : "";
 }
 
@@ -80,8 +81,10 @@ export function renderAccountFieldHtml(state: AccountFieldState, ctx: AccountFie
   // one account there is no other answer, so naming it is a row of dead
   // vertical space above the model slider. resolveInitialAccountId() already
   // resolves the sole account, so accountPickIncomplete() stays false and
-  // "Start session" is never gated on a field nobody can see.
-  if (accounts.length === 1) return "";
+  // "Start session" is never gated on a field nobody can see. A lone
+  // API-credit account is the exception: it is never preselected, so its chip
+  // has to be on screen to be clicked.
+  if (accounts.length === 1 && !isApiCreditAccount(accounts[0])) return "";
 
   return `
     <div class="me-acc-field">

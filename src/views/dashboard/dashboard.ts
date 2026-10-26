@@ -7,8 +7,11 @@ import { getSettings, setUsageHistory, getUsageHistory } from "../../shared/stat
 import { api } from "../../shared/api";
 import { updateSettings } from "../../shared/settings-update";
 import { isRemote } from "../../shared/transport";
-import type { AuthState, UsageRecord } from "../../shared/api";
+import type { Account, AuthState, UsageRecord } from "../../shared/api";
 import { setCachedAccounts, listCachedAccounts } from "../../shared/accounts-cache";
+import { isApiCreditAccount } from "../../shared/account-chip";
+import { watchApiCreditStatus, type ApiCreditStatusMap } from "../../shared/api-credit-watch";
+import { apiCreditMeterHtml } from "./api-credit-meter";
 import { loadTokenHistory } from "../../shared/token-history";
 import { navigateTo } from "../../router";
 import { escapeHtml } from "../../shared/escape-html";
@@ -46,6 +49,8 @@ let selectedAccountId: string | null = null;
 let pendingFocusAccountId: string | null = null;
 let usageMapCache: Record<string, UsageRecord> = {};
 let authStateMapCache: Record<string, AuthState> = {};
+let creditStatusCache: ApiCreditStatusMap = {};
+let stopCreditWatch: (() => void) | null = null;
 let dashboardWidgets: DashboardWidgetEntry[] = [];
 let editMode = false;
 const widgetTeardowns = new Map<string, () => void>();
@@ -202,6 +207,9 @@ export async function renderDashboard(root: HTMLElement): Promise<() => void> {
     teardownAllWidgets();
     disposeWidgetLayout?.();
     disposeWidgetLayout = null;
+    stopCreditWatch?.();
+    stopCreditWatch = null;
+    creditStatusCache = {};
     mountedContainer = null;
   };
 }
@@ -362,9 +370,12 @@ function widgetShellHtml(entry: DashboardWidgetEntry, index: number, total: numb
 function renderShell(container: HTMLElement): void {
   const history = getHistory() || [];
   const accountsCache = listCachedAccounts();
-  const cardsHtml = accountsCache.length > 0
-    ? buildAccountCardsHTML(accountsCache, usageMapCache, selectedAccountId, getSettings(), authStateMapCache)
-    : legacyStatCardsHtml(history);
+  const planAccounts = planUsageAccounts();
+  // An API-credit account has no 5h/7d plan usage, so it gets the meter line
+  // below the cards instead of a card full of "No data yet".
+  const cardsHtml = planAccounts.length > 0
+    ? buildAccountCardsHTML(planAccounts, usageMapCache, selectedAccountId, getSettings(), authStateMapCache)
+    : accountsCache.length === 0 ? legacyStatCardsHtml(history) : "";
 
   const enabled = dashboardWidgets.filter((e) => e.enabled && getWidget(e.id));
   const widgetsHtml = widgetsGridHtml(enabled, (e, i) => widgetShellHtml(e, i, enabled.length));
@@ -373,14 +384,16 @@ function renderShell(container: HTMLElement): void {
     ${refreshErrorBannerHtml()}
     ${setupBannerHtml()}
     ${cardsHtml}
+    ${apiCreditMeterHtml(accountsCache, creditStatusCache)}
     <div class="dash-widgets">${widgetsHtml}</div>
   `;
 
   container.classList.toggle("editing", editMode);
 
-  if (accountsCache.length > 0) {
+  if (planAccounts.length > 0) {
     wireAccountCardClicks(container, (id) => onSelectAccount(container, id));
   }
+  wireCreditMeter(container);
   wireRefreshErrorBanner(container);
   wireSetupBanner(container);
   wireEditControls(container);
@@ -389,6 +402,42 @@ function renderShell(container: HTMLElement): void {
   disposeWidgetLayout?.();
   disposeWidgetLayout = grid ? observeWidgetLayout(grid, (id) => remountWidget(container, id)) : null;
   if (grid) rebalanceWidgets(grid);
+}
+
+// ── API-credit meter ────────────────────────────────────────────────────────
+// Figures come from the daemon (get_api_credit_status + a change event per
+// account) and repaint only the meter's own block, never the cards or widgets.
+
+/** The accounts that have plan usage to show: everything but API-credit ones. */
+function planUsageAccounts(): Account[] {
+  return listCachedAccounts().filter((a) => !isApiCreditAccount(a));
+}
+
+function wireCreditMeter(container: HTMLElement): void {
+  container.querySelectorAll<HTMLButtonElement>(".dash-credit-link").forEach((btn) => {
+    btn.onclick = () => { void navigateTo("settings-accounts"); };
+  });
+}
+
+function repaintCreditMeter(): void {
+  const container = mountedContainer;
+  if (!container) return;
+  const html = apiCreditMeterHtml(listCachedAccounts(), creditStatusCache);
+  const current = container.querySelector<HTMLElement>(".dash-credits");
+  if (!current) return;
+  if (html === "") { current.remove(); return; }
+  current.outerHTML = html;
+  wireCreditMeter(container);
+}
+
+/** Subscribes once an API-credit account exists; a subscription-only setup
+ * never asks the daemon for figures. */
+function ensureCreditWatch(): void {
+  if (stopCreditWatch || !listCachedAccounts().some(isApiCreditAccount)) return;
+  stopCreditWatch = watchApiCreditStatus((map) => {
+    creditStatusCache = map;
+    repaintCreditMeter();
+  });
 }
 
 // ── Fetch-failure banner (P0-2) ─────────────────────────────────────────────
@@ -564,8 +613,10 @@ async function fullRefresh(container: HTMLElement): Promise<void> {
     refreshErrorDismissed = false;
   }
 
+  ensureCreditWatch();
+
   const defaultAccountId = (getSettings()["default_account_id"] as string | null | undefined) ?? null;
-  selectedAccountId = reconcileSelectedAccountId(selectedAccountId, defaultAccountId, listCachedAccounts());
+  selectedAccountId = reconcileSelectedAccountId(selectedAccountId, defaultAccountId, planUsageAccounts());
 
   // Honour a pending overlay "focus this account" request that arrived before
   // the dashboard was mounted (main.ts navigate-to-account handler).

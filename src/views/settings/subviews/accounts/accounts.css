@@ -90,6 +90,37 @@
   white-space: normal;
 }
 
+/* API-credit rows: the status lines are repainted in place, so they sit in
+ * one wrapper that keeps the row's 2px line gap. */
+.acc-credit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The figures line is the point of the row, so it wraps instead of eliding. */
+.acc-credit .acc-sub {
+  white-space: normal;
+}
+
+/* Text-style button for the inline "Connect Console" fix beside an error. */
+.acc-link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-left: 4px;
+  font: inherit;
+  color: var(--color-primary, #6e8fff);
+  cursor: pointer;
+}
+.acc-link-btn:hover { text-decoration: underline; }
+
+.acc-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .acc-actions {
   display: flex;
   align-items: center;

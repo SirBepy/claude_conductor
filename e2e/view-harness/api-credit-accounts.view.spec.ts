@@ -1,0 +1,120 @@
+import { test, expect } from "@playwright/test";
+import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
+
+// asserts: src/views/settings/subviews/accounts/accounts.ts, src/views/dashboard/dashboard.ts, src/views/sessions/account-field.ts
+
+// The API-credit account kind in the browser harness: Settings row, dashboard
+// meter, and the new-chat picker (chip shown, never preselected).
+
+const SUB = {
+  id: "acct-sub", label: "Personal", colour: "#8b5cf6", icon: "user", config_dir: "", chrome_profile_dir: "",
+  email: "joe@example.com", org_uuid: "org-1", subscription_tier: "claude_max", created_at: "2026-01-01T00:00:00Z",
+  fleet_eligible: false, kind: "subscription",
+};
+const CREDIT = {
+  id: "acct-credit", label: "API credit", colour: "#10b981", icon: "user", config_dir: "", chrome_profile_dir: "",
+  email: "", org_uuid: "console-org", subscription_tier: "", created_at: "2026-10-26T00:00:00Z",
+  fleet_eligible: false, kind: "api_credit",
+};
+const STATUS = {
+  account_id: "acct-credit",
+  max_grant_remaining_cents: 17871, max_grant_total_cents: 20000, max_grant_expires_at: "2026-11-02T00:00:00Z",
+  purchased_remaining_cents: 0, spend_cents: 2128, limit_cents: 20000, spend_resets_at: "2026-11-01T00:00:00Z",
+  fetched_at: "2026-10-26T12:00:00Z", blocked: false, block_reason: null, error: null,
+};
+
+test.describe("view-harness / API-credit accounts", () => {
+  test("Settings row shows the live figures and offers Connect Console, not Reauth or Set as default", async ({ page }) => {
+    await mountView(page, {
+      view: "settings-accounts",
+      invoke: {
+        list_accounts: [SUB, CREDIT],
+        get_settings: { theme: "void", default_account_id: "acct-sub" },
+        get_account_identity: { oauthAccount: null, tokenExpiresAt: null, refreshTokenExpiresAt: null, hasCookie: false, drift: false, driftMessage: null },
+        get_auth_state_map: {},
+        get_terminal_identity: null,
+        list_api_keys: [],
+        get_api_credit_status: { "acct-credit": STATUS },
+      },
+    });
+
+    const row = page.locator('.acc-row[data-id="acct-credit"]');
+    await expect(row.locator(".acc-credit")).toContainText("API credit $178.71 of $200 left, resets Nov 2 · $21.28 of $200 limit");
+    await expect(row.locator(".account-icon-badge .ph-key")).toHaveCount(1);
+    await expect(row.locator(".acc-menu-connect-console")).toHaveCount(1);
+    await expect(row.locator(".acc-menu-reauth, .acc-menu-default, .acc-menu-add-cookie")).toHaveCount(0);
+    await expect(page.locator("#acc-add-credit-btn")).toBeVisible();
+  });
+
+  test("Settings row names a missing Console login and offers the fix inline", async ({ page }) => {
+    await mountView(page, {
+      view: "settings-accounts",
+      invoke: {
+        list_accounts: [CREDIT],
+        get_settings: { theme: "void" },
+        get_auth_state_map: {},
+        get_terminal_identity: null,
+        list_api_keys: [],
+        get_api_credit_status: {
+          "acct-credit": {
+            ...STATUS, max_grant_remaining_cents: null, max_grant_total_cents: null, max_grant_expires_at: null,
+            spend_cents: null, limit_cents: null, error: "Console not connected",
+          },
+        },
+      },
+    });
+    const row = page.locator('.acc-row[data-id="acct-credit"]');
+    await expect(row).toContainText("Console not connected");
+    await expect(row.locator(".acc-credit-connect")).toBeVisible();
+  });
+
+  test("dashboard keeps the credit account out of the plan cards and draws its meter line", async ({ page }) => {
+    await mountView(page, {
+      view: "dashboard",
+      invoke: {
+        get_accounts_setup_prompt_state: { shouldShow: false },
+        list_accounts: [SUB, CREDIT],
+        get_usage_map: {},
+        get_auth_state_map: {},
+        get_skill_usage_week: { entries: [], total_sessions: 0 },
+        list_instances: [],
+        poll_now: null,
+        get_api_credit_status: { "acct-credit": STATUS },
+      },
+    });
+    await expect(page.locator('.dash-acard[data-acc-id="acct-sub"]')).toBeVisible();
+    await expect(page.locator('.dash-acard[data-acc-id="acct-credit"]')).toHaveCount(0);
+    await expect(page.locator('.dash-credit[data-acc-id="acct-credit"]')).toContainText("$178.71 of $200 left, resets Nov 2");
+  });
+
+  test("new-chat picker lists the API-credit chip unselected beside the auto-picked subscription", async ({ page }) => {
+    await mountView(page, {
+      invoke: { ...SESSIONS_BASE_INVOKE, list_instances: [], list_accounts: [SUB, CREDIT] },
+    });
+    await page.evaluate(() => {
+      (window as unknown as { __openNewChatModal: () => void }).__openNewChatModal();
+    });
+    const overlay = page.locator(".model-effort-modal-card");
+    await expect(overlay).toBeVisible();
+    await expect(overlay.locator('.account-chip[data-acc-id="acct-sub"].sel')).toHaveCount(1);
+    await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"]')).toHaveCount(1);
+    await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"].sel')).toHaveCount(0);
+    await expect(overlay.locator(".me-confirm")).toBeEnabled();
+  });
+
+  test("a lone API-credit account is never preselected: its chip shows and Start stays disabled", async ({ page }) => {
+    await mountView(page, {
+      invoke: { ...SESSIONS_BASE_INVOKE, list_instances: [], list_accounts: [CREDIT] },
+    });
+    await page.evaluate(() => {
+      (window as unknown as { __openNewChatModal: () => void }).__openNewChatModal();
+    });
+    const overlay = page.locator(".model-effort-modal-card");
+    await expect(overlay).toBeVisible();
+    await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"]')).toBeVisible();
+    await expect(overlay.locator(".account-chip.sel")).toHaveCount(0);
+    await expect(overlay.locator(".me-confirm")).toBeDisabled();
+    await overlay.locator('.account-chip[data-acc-id="acct-credit"]').click();
+    await expect(overlay.locator(".me-confirm")).toBeEnabled();
+  });
+});
