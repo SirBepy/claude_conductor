@@ -36,18 +36,22 @@ export const LIST_ROWS: ListRow[] = [
   })),
 ];
 
-/** Forty days of todo activity ending today: a steady trickle in, a busier day out now and then. */
+// [created, done, open] for forty days ending today, taken from this repo's
+// own .claude/todos/ on 2026-10-26, so the screenshots show real-shaped data:
+// quiet days, and big batches in and out.
+const TODO_DAYS: Array<[number, number, number]> = [
+  [0, 0, 29], [0, 0, 29], [0, 0, 29], [0, 0, 29], [0, 0, 29], [9, 0, 38], [7, 0, 45], [10, 1, 54], [9, 15, 48], [15, 23, 40],
+  [4, 0, 44], [15, 1, 58], [18, 19, 57], [24, 21, 60], [10, 25, 45], [12, 28, 29], [6, 1, 34], [6, 0, 40], [7, 0, 47], [35, 36, 46],
+  [4, 34, 16], [14, 12, 18], [0, 0, 18], [0, 0, 18], [0, 0, 18], [0, 0, 18], [6, 8, 16], [5, 2, 19], [1, 0, 20], [11, 10, 21],
+  [13, 7, 27], [47, 9, 65], [17, 38, 44], [33, 35, 42], [17, 36, 23], [6, 10, 19], [30, 37, 12], [25, 18, 19], [31, 29, 21], [4, 0, 25],
+];
+
 function todoStats(): TodoStats {
-  const days: TodoStats["days"] = [];
-  let open = 18;
-  for (let i = 39; i >= 0; i--) {
-    const date = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
-    const created = 6 + ((i * 7) % 9);
-    const done = 5 + ((i * 5) % 11);
-    open = Math.max(0, open + created - done);
-    days.push({ date, created, done, open });
-  }
-  return { days, open_now: open, claimed_now: 1 };
+  const days = TODO_DAYS.map(([created, done, open], i) => ({
+    date: new Date(Date.now() - (TODO_DAYS.length - 1 - i) * 86_400_000).toISOString().slice(0, 10),
+    created, done, open,
+  }));
+  return { days, open_now: 25, claimed_now: 1 };
 }
 
 const EMPTY_TODO_STATS: TodoStats = { days: [], open_now: 0, claimed_now: 0 };

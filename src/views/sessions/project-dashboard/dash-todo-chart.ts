@@ -13,16 +13,15 @@ const RANGES: Array<{ id: TodoRange, label: string }> = [
   { id: "7d", label: "7d" }, { id: "30d", label: "30d" }, { id: "all", label: "All" },
 ];
 
-// Open is the level the other two move, so it leads. The hues are fixed rather
-// than theme colors: several themes' primary and secondary are near-identical
-// and fail a colorblind separation check, and these three pass it in both
-// modes (pd-dashboard.css holds the per-mode steps).
+// Open is the number that matters, so it is the one line in color, drawn
+// thicker and over a faint fill. Created and done are context: both thin and
+// muted, told apart by solid vs dashed rather than by hue.
 const SERIES = [
-  { key: "open", label: "Open", color: "var(--pd-todo-open)" },
-  { key: "created", label: "Created", color: "var(--pd-todo-created)" },
-  { key: "done", label: "Done", color: "var(--pd-todo-done)" },
+  { key: "open", label: "Open", color: "var(--color-primary)", width: 2.25, dash: "" },
+  { key: "created", label: "Created", color: "var(--color-text-muted)", width: 1.25, dash: "" },
+  { key: "done", label: "Done", color: "var(--color-text-muted)", width: 1.25, dash: "3 3" },
 ] as const;
-type SeriesKey = typeof SERIES[number]["key"];
+type Series = typeof SERIES[number];
 
 /** The days the range shows, oldest first. Pure, for tests. */
 export function todoDays(days: TodoDay[], range: TodoRange): TodoDay[] {
@@ -30,7 +29,7 @@ export function todoDays(days: TodoDay[], range: TodoRange): TodoDay[] {
   return days.slice(-(range === "7d" ? 7 : 30));
 }
 
-const W = 420, H = 170, ML = 32, MR = 52, MT = 10, MB = 26;
+const W = 420, H = 160, ML = 28, MR = 44, MT = 10, MB = 24;
 const PW = W - ML - MR, PH = H - MT - MB;
 
 /** A round number at or above `n` for the top gridline, so ticks read cleanly. */
@@ -40,15 +39,36 @@ function niceMax(n: number): number {
   return Math.ceil(n / step) * step;
 }
 
-/** End labels sit beside each line's last point, pushed apart so none overlap. Pure, for tests. */
-export function dodge(ys: number[], gap = 11): number[] {
-  const order = ys.map((y, i) => ({ y, i })).sort((a, b) => a.y - b.y);
-  for (let k = 1; k < order.length; k++) {
-    if (order[k]!.y - order[k - 1]!.y < gap) order[k]!.y = order[k - 1]!.y + gap;
+/** An SVG path through the points as a monotone cubic curve (Fritsch-Carlson):
+ *  smooth bends instead of sharp corners, and it never swings above or below
+ *  the data between two days, so a count never reads as higher than it was.
+ *  Pure, for tests. */
+export function smoothPath(pts: Array<[number, number]>): string {
+  const n = pts.length;
+  if (n === 0) return "";
+  const f = (v: number): string => v.toFixed(1);
+  if (n === 1) return `M${f(pts[0]![0])},${f(pts[0]![1])}`;
+  const dx = pts.slice(1).map((p, i) => p[0] - pts[i]![0]);
+  const slope = pts.slice(1).map((p, i) => (p[1] - pts[i]![1]) / dx[i]!);
+  const m = pts.map((_, i) => {
+    if (i === 0) return slope[0]!;
+    if (i === n - 1) return slope[n - 2]!;
+    const a = slope[i - 1]!, b = slope[i]!;
+    // A peak or valley (or a flat side) gets a flat tangent, which is what keeps the curve monotone.
+    return a * b <= 0 ? 0 : (2 * a * b) / (a + b);
+  });
+  let d = `M${f(pts[0]![0])},${f(pts[0]![1])}`;
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = pts[i]!, [x1, y1] = pts[i + 1]!;
+    const h = dx[i]! / 3;
+    d += ` C${f(x0 + h)},${f(y0 + m[i]! * h)} ${f(x1 - h)},${f(y1 - m[i + 1]! * h)} ${f(x1)},${f(y1)}`;
   }
-  const out = new Array<number>(ys.length);
-  for (const o of order) out[o.i] = o.y;
-  return out;
+  return d;
+}
+
+/** A short line sample for the legend and tooltip, styled like its series. */
+function swatch(s: Series): string {
+  return `<svg class="pd-todo-sw" viewBox="0 0 14 4" width="14" height="4"><line x1="1" x2="13" y1="2" y2="2" stroke="${s.color}" stroke-width="${Math.max(1.5, s.width)}" stroke-linecap="round"${s.dash ? ` stroke-dasharray="${s.dash}"` : ""}/></svg>`;
 }
 
 function chartSvg(days: TodoDay[]): string {
@@ -56,28 +76,32 @@ function chartSvg(days: TodoDay[]): string {
   const n = days.length;
   const x = (i: number): number => ML + (n === 1 ? PW / 2 : (i / (n - 1)) * PW);
   const y = (v: number): number => MT + (1 - v / max) * PH;
-  const grid = [0, 0.5, 1].map((f) => {
-    const gy = y(f * max).toFixed(1);
-    return `<line x1="${ML}" x2="${W - MR}" y1="${gy}" y2="${gy}" stroke="var(--color-border)" stroke-width="1"/>
-      <text x="${ML - 5}" y="${(+gy + 3.5).toFixed(1)}" text-anchor="end" fill="var(--sb-muted)" font-size="9" font-family="Fira Code,monospace">${Math.round(f * max)}</text>`;
+  const base = MT + PH;
+  const grid = [0, 0.5, 1].map((frac) => {
+    const gy = y(frac * max).toFixed(1);
+    return `<line x1="${ML}" x2="${W - MR}" y1="${gy}" y2="${gy}" stroke="var(--color-border)" stroke-width="1" opacity="0.6"/>
+      <text x="${ML - 6}" y="${(+gy + 3).toFixed(1)}" text-anchor="end" fill="var(--sb-muted)" font-size="8.5" font-family="Fira Code,monospace">${Math.round(frac * max)}</text>`;
   }).join("");
-  // At most ~6 date labels, always including the newest day.
-  const every = Math.max(1, Math.ceil(n / 6));
+  // At most ~5 date labels, always including the newest day.
+  const every = Math.max(1, Math.ceil(n / 5));
   const dates = days.map((d, i) => ((n - 1 - i) % every === 0
-    ? `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" fill="var(--sb-muted)" font-size="9" font-family="DM Sans,system-ui">${d.date.slice(5)}</text>`
+    ? `<text x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" fill="var(--sb-muted)" font-size="8.5" font-family="DM Sans,system-ui">${d.date.slice(5)}</text>`
     : "")).join("");
-  const lines = SERIES.map((s) => {
-    const pts = days.map((d, i) => `${x(i).toFixed(1)},${y(d[s.key]).toFixed(1)}`).join(" ");
-    return n === 1
-      ? `<circle cx="${x(0).toFixed(1)}" cy="${y(days[0]![s.key]).toFixed(1)}" r="4" fill="${s.color}"/>`
-      : `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  // Context lines first, so the open line is drawn over them.
+  const lines = [...SERIES].reverse().map((s) => {
+    if (n === 1) return `<circle data-todo-line="${s.key}" cx="${x(0).toFixed(1)}" cy="${y(days[0]![s.key]).toFixed(1)}" r="3.5" fill="${s.color}"/>`;
+    const path = smoothPath(days.map((d, i) => [x(i), y(d[s.key])]));
+    const fill = s.key === "open"
+      ? `<path d="${path} L${x(n - 1).toFixed(1)},${base} L${x(0).toFixed(1)},${base} Z" fill="${s.color}" opacity="0.08"/>`
+      : "";
+    return `${fill}<path data-todo-line="${s.key}" d="${path}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round"${s.dash ? ` stroke-dasharray="${s.dash}"` : ""}${s.key === "open" ? "" : ` opacity="0.7"`}/>`;
   }).join("");
+  // Only the open line is labelled at its end; the legend names the other two.
   const last = days[n - 1]!;
-  const labelYs = dodge(SERIES.map((s) => y(last[s.key])));
-  const ends = SERIES.map((s, k) => `<text x="${(x(n - 1) + 6).toFixed(1)}" y="${(labelYs[k]! + 3.5).toFixed(1)}" fill="var(--color-text-muted)" font-size="9.5" font-family="DM Sans,system-ui">${s.label} ${last[s.key]}</text>`).join("");
-  const dots = SERIES.map((s) => `<circle data-todo-dot="${s.key}" r="4" fill="${s.color}" stroke="var(--color-surface)" stroke-width="2" visibility="hidden"/>`).join("");
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible" data-todo-chart data-n="${n}">${grid}${dates}${lines}${ends}
-    <line data-todo-cross y1="${MT}" y2="${MT + PH}" stroke="var(--color-text-muted)" stroke-width="1" stroke-dasharray="3,2" visibility="hidden"/>${dots}</svg>`;
+  const end = `<text x="${(x(n - 1) + 6).toFixed(1)}" y="${(y(last.open) + 3.5).toFixed(1)}" fill="var(--color-text)" font-size="10" font-weight="600" font-family="DM Sans,system-ui">${last.open}</text>`;
+  const dots = SERIES.map((s) => `<circle data-todo-dot="${s.key}" r="${s.key === "open" ? 3.5 : 2.5}" fill="${s.color}" stroke="var(--color-surface)" stroke-width="1.5" visibility="hidden"/>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible" data-todo-chart data-n="${n}">${grid}${dates}${lines}${end}
+    <line data-todo-cross y1="${MT}" y2="${base}" stroke="var(--color-border)" stroke-width="1" visibility="hidden"/>${dots}</svg>`;
 }
 
 /** Crosshair and tooltip for the day under the pointer. Moves existing nodes
@@ -112,8 +136,8 @@ function hover(e: PointerEvent, days: TodoDay[]): void {
   tip.append(head);
   for (const s of SERIES) {
     const row = document.createElement("div");
-    row.innerHTML = `<span class="pd-todo-sw" style="background:${s.color}"></span>`;
-    row.append(`${s.label} ${d[s.key as SeriesKey]}`);
+    row.innerHTML = swatch(s);
+    row.append(`${s.label} ${d[s.key]}`);
     tip.append(row);
   }
   tip.hidden = false;
@@ -143,7 +167,7 @@ export function todoChart(c: DashCtx): TemplateResult | typeof nothing {
       <button type="button" class="pd-rtab ${range === r.id ? "on" : ""}" data-pd-todo-range=${r.id} @click=${() => c.act.setTodoRange(r.id)}>${r.label}</button>`)}</span>`;
   const body = html`
     <div class="pd-usage-total">${available} available${stats.claimed_now ? html`, ${stats.claimed_now} claimed` : nothing} · ${created} created, ${done} done in this range</div>
-    <div class="pd-todo-legend">${SERIES.map((s) => html`<span><span class="pd-todo-sw" style="background:${s.color}"></span>${s.label}</span>`)}</div>
+    <div class="pd-todo-legend">${SERIES.map((s) => html`<span>${unsafeHTML(swatch(s))}${s.label}</span>`)}</div>
     <div class="pd-todo-chart" @pointermove=${(e: PointerEvent) => hover(e, days)} @pointerleave=${unhover}>
       ${unsafeHTML(chartSvg(days))}<div class="pd-todo-tip" hidden></div>
     </div>`;
