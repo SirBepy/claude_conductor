@@ -7,11 +7,10 @@ import { html, render } from "lit-html";
 import { escapeHtml } from "../../../../shared/escape-html";
 import { api } from "../../../../shared/api";
 import type { Account, AccountIdentity, AuthState, OauthAccountInfo } from "../../../../shared/api";
-import { accountIconBadgeHtml, isApiCreditAccount } from "../../../../shared/account-chip";
+import { accountIconBadgeHtml, isApiCreditAccount, linkedToLabel } from "../../../../shared/account-chip";
 import { apiCreditLine } from "../../../../shared/api-credit-format";
 import { watchApiCreditStatus, type ApiCreditStatusMap } from "../../../../shared/api-credit-watch";
-import { openAddApiCreditModal } from "./add-api-credit-modal";
-import { openAddAccountWizard } from "./add-account-wizard";
+import { openAddAccountFlow } from "./add-account-flow";
 import { openEditAccountModal } from "./edit-account-modal";
 import { askConfirm } from "../../../../shared/confirm";
 import { showToast } from "../../../../shared/toast";
@@ -87,13 +86,15 @@ function creditStatusHtml(id: string, status: ApiCreditStatus | undefined): stri
   ].join("");
 }
 
-function apiCreditRowHtml(account: Account): string {
+function apiCreditRowHtml(account: Account, accounts: readonly Account[]): string {
   const id = escapeHtml(account.id);
+  const linked = linkedToLabel(account, accounts);
   return `
     <div class="acc-row acc-row-credit" data-id="${id}" style="--acc:${escapeHtml(account.colour)}">
       ${accountIconBadgeHtml(account)}
       <span class="acc-info">
         <span class="acc-label">${escapeHtml(account.label)}</span>
+        ${linked ? `<span class="acc-sub acc-linked">${escapeHtml(linked)}</span>` : ""}
         <span class="acc-credit" data-id="${id}">${creditStatusHtml(account.id, creditStatuses[account.id])}</span>
       </span>
       <span class="acc-actions">
@@ -247,7 +248,7 @@ async function refreshList(root: HTMLElement): Promise<void> {
   list.innerHTML = accounts.length === 0
     ? emptyStateHtml()
     : accounts
-        .map((a) => (isApiCreditAccount(a) ? apiCreditRowHtml(a) : accountRowHtml(a, defaultAccountId, lastSurfaces[a.id]!)))
+        .map((a) => (isApiCreditAccount(a) ? apiCreditRowHtml(a, accounts) : accountRowHtml(a, defaultAccountId, lastSurfaces[a.id]!)))
         .join("");
   ensureCreditWatch(root, accounts);
 
@@ -484,25 +485,10 @@ export async function renderAccountsSettingsView(root: HTMLElement): Promise<() 
         addBtn.disabled = true;
         try {
           const existing = await api.listAccounts();
-          const created = await openAddAccountWizard(existing);
+          const created = await openAddAccountFlow(existing);
           if (created) await refreshList(root);
         } finally {
           addBtn.disabled = false;
-        }
-      })();
-    };
-  }
-
-  const addCreditBtn = root.querySelector<HTMLButtonElement>("#acc-add-credit-btn");
-  if (addCreditBtn) {
-    addCreditBtn.onclick = () => {
-      void (async () => {
-        addCreditBtn.disabled = true;
-        try {
-          const created = await openAddApiCreditModal();
-          if (created) await refreshList(root);
-        } finally {
-          addCreditBtn.disabled = false;
         }
       })();
     };
@@ -572,7 +558,6 @@ function template() {
           <div id="acc-list" class="acc-list"></div>
           <div class="acc-add-row">
             <button class="btn-secondary" id="acc-add-btn"><i class="ph ph-plus"></i> Add account</button>
-            ${isRemote() ? "" : html`<button class="btn-secondary" id="acc-add-credit-btn" title="An account whose chats bill the Max plan's monthly API credit"><i class="ph ph-key"></i> Add API-credit account</button>`}
           </div>
         </div>
 

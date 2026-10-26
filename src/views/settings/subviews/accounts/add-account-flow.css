@@ -1,0 +1,9 @@
+/* The kind-choice card reuses .wt-picker-choice (sessions/worktree-picker.css);
+ * that rule ellipsises the sub line to one row, which would cut these
+ * sentences mid-word, so here it wraps. */
+.aac-kind-card .aac-kind-sub {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.35;
+}

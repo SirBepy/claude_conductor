@@ -5,11 +5,11 @@
 
 import type { Account } from "../../shared/api";
 import { escapeHtml } from "../../shared/escape-html";
-import { accountIconBadgeHtml } from "../../shared/account-chip";
+import { accountIconBadgeHtml, apiCreditLinkedName, linkedPlanAccount } from "../../shared/account-chip";
 import { apiCreditLine, grantRemainingFraction } from "../../shared/api-credit-format";
 import type { ApiCreditStatusMap } from "../../shared/api-credit-watch";
 
-function lineHtml(account: Account, statuses: ApiCreditStatusMap): string {
+function lineHtml(account: Account, statuses: ApiCreditStatusMap, all: readonly Account[]): string {
   const status = statuses[account.id];
   const line = apiCreditLine(status);
   const fraction = grantRemainingFraction(status);
@@ -29,7 +29,7 @@ function lineHtml(account: Account, statuses: ApiCreditStatusMap): string {
 
   return `<div class="dash-credit" data-acc-id="${escapeHtml(account.id)}" style="--acc:${escapeHtml(account.colour)}">
     ${accountIconBadgeHtml(account)}
-    <span class="dash-credit-name">${escapeHtml(account.label)}</span>
+    <span class="dash-credit-name">${escapeHtml(linkedPlanAccount(account, all) ? apiCreditLinkedName(account, all) : account.label)}</span>
     ${bar}
     ${text ? `<span class="dash-credit-text">${escapeHtml(text)}</span>` : ""}
     ${error}${warn}
@@ -41,5 +41,5 @@ function lineHtml(account: Account, statuses: ApiCreditStatusMap): string {
 export function apiCreditMeterHtml(accounts: readonly Account[], statuses: ApiCreditStatusMap): string {
   const credit = accounts.filter((a) => a.kind === "api_credit");
   if (credit.length === 0) return "";
-  return `<div class="dash-credits">${credit.map((a) => lineHtml(a, statuses)).join("")}</div>`;
+  return `<div class="dash-credits">${credit.map((a) => lineHtml(a, statuses, accounts)).join("")}</div>`;
 }

@@ -27,12 +27,52 @@ export interface AccountLite {
   icon: string;
   colour: string;
   kind?: AccountKindLite;
+  /** Present on a full account and on a peer's lite one; links an API-credit
+   * account to its plan account (see linkedPlanAccount). */
+  email?: string;
 }
 
 /** An API-credit account bills the Max plan's monthly API credit, never the
  * subscription limits; every list that mixes the two kinds branches on this. */
 export function isApiCreditAccount(a: { kind?: AccountKindLite } | null | undefined): boolean {
   return a?.kind === "api_credit";
+}
+
+/** The plan (subscription) account an API-credit account belongs to, or null.
+ * The link is the email: the backend stamps an API-credit account with the
+ * default subscription account's claude.ai login, so the two share it. It can
+ * be empty (no login yet), and then nothing is linked. Case-insensitive
+ * because emails are not case-sensitive in practice. */
+export function linkedPlanAccount<T extends { kind?: AccountKindLite; email?: string }>(
+  account: { email?: string } | null | undefined,
+  accounts: readonly T[],
+): T | null {
+  const email = account?.email?.trim().toLowerCase();
+  if (!email) return null;
+  return accounts.find((a) => !isApiCreditAccount(a) && a.email?.trim().toLowerCase() === email) ?? null;
+}
+
+/** "Linked to personal": the Settings row's line for an API-credit account. A
+ * login with no matching plan account shows the email itself; no email at all
+ * gives "" so the row draws nothing. */
+export function linkedToLabel(
+  account: { email?: string },
+  accounts: readonly { kind?: AccountKindLite; email?: string; label: string }[],
+): string {
+  const plan = linkedPlanAccount(account, accounts);
+  if (plan) return `Linked to ${plan.label}`;
+  const email = account.email?.trim();
+  return email ? `Linked to ${email}` : "";
+}
+
+/** "API credit · personal": how an API-credit account names itself where the
+ * plan it draws on is worth showing. Just "API credit" when nothing is linked. */
+export function apiCreditLinkedName(
+  account: { email?: string } | null | undefined,
+  accounts: readonly { kind?: AccountKindLite; email?: string; label: string }[],
+): string {
+  const plan = linkedPlanAccount(account, accounts);
+  return plan ? `API credit · ${plan.label}` : "API credit";
 }
 
 /** Coloured circular icon badge for an account. Pair with `.account-chip-css`
