@@ -38,6 +38,9 @@ pub async fn spawn_session(
         crate::accounts::AccountResolveError::NotFound(id) => LifecycleError::AccountNotFound(id),
     })?;
     let api_credit = account.is_api_credit();
+    if api_credit {
+        super::refuse_account_if_api_credit_blocked(state, &account.id)?;
+    }
     let spawn_env = if api_credit {
         // No OAuth login exists for this kind, so the drift and credentials
         // checks below (both read `.credentials.json`) are skipped; the

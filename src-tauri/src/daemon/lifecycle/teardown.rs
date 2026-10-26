@@ -188,6 +188,7 @@ pub async fn send_message_with_respawn(
     text: &str,
     is_meta: bool,
 ) -> Result<(), LifecycleError> {
+    super::refuse_if_api_credit_blocked(state, session_id)?;
     if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
         return send_message(&session, text, is_meta).await;
     }
@@ -204,6 +205,7 @@ pub async fn send_message_with_respawn_and_author(
     text: &str,
     author_session_id: &str,
 ) -> Result<(), LifecycleError> {
+    super::refuse_if_api_credit_blocked(state, session_id)?;
     if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
         return send_message_with_author(&session, text, author_session_id).await;
     }
@@ -220,6 +222,7 @@ pub async fn send_message_with_respawn_meta_and_author(
     text: &str,
     author_session_id: &str,
 ) -> Result<(), LifecycleError> {
+    super::refuse_if_api_credit_blocked(state, session_id)?;
     if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
         return send_message_meta_with_author(&session, text, author_session_id).await;
     }

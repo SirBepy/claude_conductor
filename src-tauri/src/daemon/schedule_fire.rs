@@ -113,6 +113,7 @@ async fn fire_message(
                 .to_string(),
         );
     }
+    lifecycle::refuse_if_api_credit_blocked(state, session_id).map_err(|e| e.to_string())?;
     let session = match state.sessions.get(session_id).map(|s| s.clone()) {
         Some(s) => s,
         None => respawn_for_message(state, session_id, cwd).await?,

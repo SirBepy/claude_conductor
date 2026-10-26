@@ -2,6 +2,7 @@
 //! consumes these via the `claude_conductor_lib` library crate.
 
 mod boot;
+pub mod api_credit;
 pub mod broadcast;
 pub mod browser;
 pub mod busy_watchdog;

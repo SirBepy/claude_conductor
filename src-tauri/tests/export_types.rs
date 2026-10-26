@@ -5,7 +5,7 @@
 //! file. Instead, we drop `export` from the derives and write the file
 //! ourselves by composing each type's `decl()` into a single output.
 
-use claude_conductor_lib::accounts::{Account, AccountKind, OauthAccountInfo};
+use claude_conductor_lib::accounts::{Account, AccountKind, ApiCreditStatus, OauthAccountInfo};
 use claude_conductor_lib::chat::history::TranscriptStats;
 use claude_conductor_lib::context_status::ContextStatus;
 use claude_conductor_lib::ipc::accounts::{
@@ -114,6 +114,7 @@ fn emit_ipc_types() {
     out.push_str(&decl::<OauthAccountInfo>());
     out.push_str(&decl::<AccountKind>());
     out.push_str(&decl::<Account>());
+    out.push_str(&decl::<ApiCreditStatus>());
     out.push_str(&decl::<AddAccountSession>());
     out.push_str(&decl::<LoginCheckOutcome>());
     out.push_str(&decl::<AccountIdentity>());

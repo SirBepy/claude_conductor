@@ -11,7 +11,7 @@ use crate::daemon::session::new_session_map;
 use crate::daemon::settings_cache::SettingsCache;
 use crate::daemon::state::DaemonState;
 use crate::daemon::{
-    browser, busy_watchdog, channel_adopt, channels, claude_config, detector_task, health, hooks_server,
+    api_credit, browser, busy_watchdog, channel_adopt, channels, claude_config, detector_task, health, hooks_server,
     instance, iroh_tunnel, machines, methods, remote_server, resume_interrupted, schedule,
 };
 #[cfg(unix)]
@@ -118,6 +118,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_claude_ai_publish(&mut router, state.clone());
     methods::register_voice(&mut router, state.clone());
     methods::register_machines(&mut router, state.clone());
+    methods::register_api_credit(&mut router, state.clone());
     // Peer-facing halves of `spawn_chat`'s `machine` and `post_message`'s
     // `to` (multi-machine chat parity): reached only via a paired peer's
     // forwarded call, gated `M`-only in `remote_transport_table::TRANSPORT_TABLE`.
@@ -169,6 +170,8 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // Busy-flag backstop (todo 525) - see its module doc for the threshold
     // and why a legitimate long-running turn can't trip it.
     busy_watchdog::spawn(state.clone());
+    // Keeps every API-credit account's Console balance fresh for the send gate.
+    api_credit::spawn_poller(state.clone());
 
     // Startup + periodic (every 24h) GC of leaked per-turn mcp-temp files
     // (`.mcp.json` / hook `.settings.json`) - see `claude_config::gc_temp_files`.

@@ -130,6 +130,24 @@ pub fn load_api_key(account_id: &str) -> Option<String> {
     crate::auth::session::load(&path)
 }
 
+/// Replaces the stored Console `sessionKey` (platform.claude.com) for
+/// `account_id`. Distinct from the claude.ai cookie: the Console org rejects
+/// that one with 403.
+pub fn save_console_session(account_id: &str, session_key: &str) -> Result<()> {
+    let session_key = session_key.trim();
+    if session_key.is_empty() {
+        bail!("the Console session key must not be empty");
+    }
+    crate::auth::session::save(&paths::account_console_session_file(account_id)?, session_key)
+}
+
+/// The decrypted Console `sessionKey`, or `None` when none is stored or it
+/// cannot be decrypted.
+pub fn load_console_session(account_id: &str) -> Option<String> {
+    let path = paths::account_console_session_file(account_id).ok()?;
+    crate::auth::session::load(&path)
+}
+
 /// Deletes the secrets only an ApiCredit account has (API key and Console
 /// sessionKey). Missing files are fine. Account removal calls this next to the
 /// claude.ai sessionKey clear.

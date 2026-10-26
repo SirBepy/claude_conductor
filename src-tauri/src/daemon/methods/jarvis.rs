@@ -123,6 +123,11 @@ fn err_to_rpc(e: LifecycleError) -> RpcError {
             message: e.to_string(),
             data: None,
         },
+        LifecycleError::ApiCreditBlocked(ref reason) => RpcError {
+            code: crate::daemon::lifecycle::API_CREDIT_BLOCKED_CODE,
+            data: Some(serde_json::json!({ "block_reason": reason })),
+            message: e.to_string(),
+        },
         LifecycleError::MeteredBilling(_) | LifecycleError::Io(_) => RpcError::internal(e.to_string()),
     }
 }

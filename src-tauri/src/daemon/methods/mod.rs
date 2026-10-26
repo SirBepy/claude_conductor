@@ -6,6 +6,7 @@
 // calls this module's `list_peers`/`post_message`/`read_messages` directly -
 // same non-RPC shape as `jarvis` below.
 pub(crate) mod channel;
+mod api_credit;
 mod ask;
 mod channels;
 mod claude_ai_publish;
@@ -96,6 +97,7 @@ pub use history::register_history;
 pub use jarvis::register_jarvis;
 pub use lifecycle::{register, register_notifier, register_settings};
 pub use machines::register_machines;
+pub use api_credit::register_api_credit;
 pub use ask::register_ask;
 pub use permission::register_responders;
 pub use pr_review::register_pr_review;

@@ -216,6 +216,10 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 let respawn_for_peer = live.is_none()
                     && matches!(ctx.transport, Transport::PeerMachine(_))
                     && state.registry.get(&p.session_id).is_some();
+                // Ahead of the NotFound answer: that one makes the desktop respawn
+                // and retry, which can only end in the same refusal one hop later.
+                // Also ahead of the busy bump below, so a refusal latches nothing.
+                lifecycle::refuse_if_api_credit_blocked(&state, &p.session_id).map_err(err_to_rpc)?;
                 if live.is_none() && !respawn_for_peer {
                     return Err(err_to_rpc(LifecycleError::NotFound(p.session_id.clone())));
                 }
@@ -747,6 +751,29 @@ mod machine_target_tests {
         state.registry.upsert_interactive(&sid, std::path::Path::new("Z:\\gone"), "proj", "2026-10-23T00:00:00Z");
         let resp = send_as(&state, Transport::Local, &sid).await;
         assert_eq!(resp.error.expect("no live child").code, -32004);
+    }
+
+    /// The cap gate on the desktop's send RPC: a chat on an out-of-credit
+    /// API-credit account answers API_CREDIT_BLOCKED (carrying the reason), not
+    /// the -32004 that would send the desktop into a respawn, and latches no busy.
+    #[tokio::test]
+    async fn send_on_a_blocked_api_credit_account_is_refused_with_its_reason() {
+        let state = fresh_state();
+        let sid = uuid::Uuid::new_v4().to_string();
+        state.registry.upsert_interactive(&sid, std::path::Path::new("Z:\\gone"), "proj", "2026-10-26T00:00:00Z");
+        state.registry.set_account(&sid, "api-1");
+        crate::daemon::api_credit::store(&state, crate::accounts::ApiCreditStatus {
+            account_id: "api-1".into(),
+            blocked: true,
+            block_reason: Some("Console spend limit $200 reached, resets 2026-11-01".into()),
+            ..Default::default()
+        });
+
+        let err = send_as(&state, Transport::Local, &sid).await.error.expect("blocked");
+        assert_eq!(err.code, crate::daemon::lifecycle::API_CREDIT_BLOCKED_CODE);
+        assert!(err.message.starts_with("API_CREDIT_BLOCKED: Console spend limit $200 reached"), "{}", err.message);
+        assert_eq!(err.data.unwrap()["block_reason"], "Console spend limit $200 reached, resets 2026-11-01");
+        assert!(!state.registry.get(&sid).unwrap().busy, "a refused send must not latch busy");
     }
 
     /// A peer asking this host to message an id it never registered is a plain

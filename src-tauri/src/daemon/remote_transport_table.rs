@@ -237,6 +237,19 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // besides the usage snapshot cache/DB the read-only methods above already
     // expose, and only refreshes (never adds/removes) an account.
     ("request_live_usage_refresh", P),
+    // Read-only cached API-credit figures per API-credit account (balance, spend,
+    // limit, blocked flag), the phone's counterpart of the desktop meter. Phone
+    // only: the figures describe THIS machine's accounts, which a peer has no
+    // use for (it mirrors chats, not billing), so no `PM`.
+    ("get_api_credit_status", P),
+    // Narrow write: makes the daemon re-read the Console for one account and
+    // update that cache. No input reaches the Console beyond the account id,
+    // the stored credential is untouched, and the Console read is idempotent.
+    // Phone only, for the same reason as the read above.
+    ("refresh_api_credit_status", P),
+    // `set_console_session` is deliberately ABSENT (desktop pipe only): it
+    // stores a credential, and a stolen phone token must not be able to plant
+    // one, same stance as `respond_secret` above.
     // Read-only, transcript-derived context-window status for a session
     // (mirrors desktop's `context_status` Tauri command). Without this the
     // phone had no daemon RPC for it at all - it silently fell back to a
@@ -573,6 +586,7 @@ mod tests {
             "count_ai_todos", "list_ai_todos",
             "get_history", "get_token_history", "get_active_sessions",
             "get_usage_map", "get_auth_state_map", "context_status",
+            "get_api_credit_status", "refresh_api_credit_status",
             "list_accounts", "list_slash_commands", "ensure_session_character",
             "schedule_list", "schedule_create", "schedule_update",
             "schedule_delete", "schedule_fire_now", "list_previews", "get_preview", "read_image_file",

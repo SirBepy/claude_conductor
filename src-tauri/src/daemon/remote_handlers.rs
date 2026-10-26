@@ -149,6 +149,11 @@ pub(super) async fn send_message(
             return (StatusCode::CONFLICT, e.to_string()).into_response();
         }
     }
+    // 402, not 409: the phone must not re-stage this into the held queue (a
+    // retry cannot succeed until the account's credit or limit changes).
+    if let Err(e) = crate::daemon::lifecycle::refuse_if_api_credit_blocked(&ctx.state, &id) {
+        return (StatusCode::PAYMENT_REQUIRED, e.to_string()).into_response();
+    }
     // Set busy BEFORE the write, mirroring core.rs's desktop `send_message` RPC
     // (todo 525 root cause 1: a warm child can emit its first `stream_event`
     // before this fn resumes past the write's own `.await`). Without this the

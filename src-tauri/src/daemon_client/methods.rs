@@ -5,6 +5,7 @@
 //! into `methods/` submodules - ai_todo 601. Pure code motion, no behavior
 //! change.
 
+mod api_credit;
 mod ask;
 mod attachments;
 mod claude_ai_publish;
