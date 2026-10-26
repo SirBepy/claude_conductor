@@ -289,7 +289,7 @@ mod tests {
             name: None,
             ended_at: if ended { Some("2026-10-13T01:00:00Z".to_string()) } else { None },
             end_reason: None,
-            busy: false,
+            busy: true,
             model: String::new(),
             effort: String::new(),
             awaiting: None,
