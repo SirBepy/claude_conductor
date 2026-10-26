@@ -25,3 +25,14 @@ test("the secret card shows only file and key, names the asker in the header, an
   await expect(card).not.toContainText("Re-authentication required");
   await expect(card.locator(".secret-card__input")).toBeVisible();
 });
+
+test("minimizing the secret card frees the chat behind it and restoring keeps the typed value", async ({ page }) => {
+  const card = await mount(page);
+  await card.locator(".secret-card__input").fill("sk-typed");
+  await card.locator('[data-act="minimize"]').click();
+  await expect(card).toBeHidden();
+  await expect(page.locator(".prompt-collapsed")).toContainText("ANTHROPIC_API_KEY");
+  await page.locator(".prompt-collapsed").click();
+  await expect(card).toBeVisible();
+  await expect(card.locator(".secret-card__input")).toHaveValue("sk-typed");
+});

@@ -103,6 +103,7 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
     <span class="secret-card__from"${asker.project ? ` title="${escapeHtml(asker.project)}"` : ""}>
       <i class="ph ph-chat-circle-text"></i> from <b>${escapeHtml(asker.name)}</b>
     </span>
+    <button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize to read the chat"><i class="ph ph-minus"></i></button>
   `;
 
   function bodyHtml(): string {
@@ -201,7 +202,33 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
     }
   }
 
+  // The card floats over the chat, and the message above it often says where
+  // to find the secret. Hiding (not re-rendering) keeps the typed value in the
+  // input while the bar stands in for the card.
+  function attachMinimize(): void {
+    const card = host.querySelector<HTMLElement>(".prompt-card");
+    if (!card) return;
+    host.querySelector('[data-act="minimize"]')?.addEventListener("click", () => {
+      const bar = document.createElement("div");
+      bar.className = "prompt-collapsed";
+      bar.style.setProperty("--dom", "var(--color-text-muted)");
+      bar.innerHTML = `
+        <span class="prompt-collapsed__dot"></span>
+        <span class="prompt-collapsed__q">Secret requested: ${escapeHtml(payload.key)}</span>
+        <button type="button" class="icon-btn-sq prompt-icon-btn" data-act="restore" title="Restore"><i class="ph ph-caret-up"></i></button>
+      `;
+      bar.addEventListener("click", () => {
+        bar.remove();
+        card.style.display = "";
+        host.querySelector<HTMLInputElement>(".secret-card__input")?.focus();
+      });
+      card.style.display = "none"; // .prompt-card sets display:flex, which beats [hidden]
+      host.appendChild(bar);
+    });
+  }
+
   function attach(): void {
+    attachMinimize();
     if (isRemote()) {
       host.querySelector<HTMLButtonElement>('[data-act="dismiss"]')!.addEventListener("click", teardownEsc);
       return;
