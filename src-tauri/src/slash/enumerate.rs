@@ -9,6 +9,24 @@ pub fn scan_all(project_dir: Option<&Path>) -> Vec<SlashEntry> {
     scan_all_multi(&projects)
 }
 
+/// What the composer's slash menu offers for a project: `scan_all`, minus
+/// `/pickup` while the project's PLAN.md has nothing for it to pick up. Only
+/// the menu hides it; a typed `/pickup` still resolves through `scan_all`.
+pub fn scan_menu(project_dir: Option<&Path>) -> Vec<SlashEntry> {
+    let entries = scan_all(project_dir);
+    match project_dir {
+        Some(dir) => hide_idle_pickup(entries, &dir.join(".claude").join("todos")),
+        None => entries,
+    }
+}
+
+pub fn hide_idle_pickup(mut entries: Vec<SlashEntry>, todos_dir: &Path) -> Vec<SlashEntry> {
+    if !crate::project_dashboard::plan::has_pickable(todos_dir) {
+        entries.retain(|e| e.name != "pickup");
+    }
+    entries
+}
+
 /// Variant of `scan_all` that accepts multiple project dirs. Used by the
 /// global Skills view to merge project skills from every known project.
 // multi-account audit: stays valid - `commands/`/`skills/`/`plugins/` are

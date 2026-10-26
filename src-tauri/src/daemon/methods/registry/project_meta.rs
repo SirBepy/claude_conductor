@@ -205,7 +205,7 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
                 }
                 let project = p.project_dir.map(std::path::PathBuf::from);
                 let entries = tokio::task::spawn_blocking(move || {
-                    crate::slash::enumerate::scan_all(project.as_deref())
+                    crate::slash::enumerate::scan_menu(project.as_deref())
                 })
                 .await
                 .map_err(|e| RpcError::internal(format!("join: {e}")))?;
