@@ -11,6 +11,7 @@ import { invoke } from "../../../../shared/ipc";
 import type { ProjectConfig } from "../../../../types/ipc.generated";
 import { pickProject } from "../../../sessions/project-picker";
 import { registerOverlayBack } from "../../../../shared/back-button";
+import { isApiCreditAccount } from "../../../../shared/account-chip";
 import { renderAppearancePicker, type AppearanceState } from "./appearance-picker";
 import { lockInputToHost } from "../../../../shared/modal-input-lock";
 import "./edit-account-modal.css";
@@ -32,6 +33,9 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
     // handed to renderAppearancePicker() and mutated in place - see
     // appearance-picker.ts.
     const appearance: AppearanceState = { icon: account.icon, colour: account.colour };
+    // An API-credit account is never a project binding nor fleet-eligible (the
+    // backend refuses both), so those controls are not drawn for it.
+    const apiCredit = isApiCreditAccount(account);
     let fleetEligible = account.fleet_eligible;
     let busy = false;
     let error: string | null = null;
@@ -118,13 +122,13 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
           <input class="fake-input" id="aem-label" type="text" value="${escapeHtml(label)}">
         </div>
         <div id="aem-appearance-picker"></div>
-        <div class="kit-row">
+        ${apiCredit ? "" : `<div class="kit-row">
           <span class="kit-row-label">Fleet eligible - automated background sessions may use this account</span>
           <label class="kit-toggle">
             <input type="checkbox" id="aem-fleet-eligible" ${fleetEligible ? "checked" : ""}>
             <span class="kit-toggle-track"></span>
           </label>
-        </div>
+        </div>`}
         ${error ? `<div class="aem-error"><i class="ph ph-warning-circle"></i> ${escapeHtml(error)}</div>` : ""}
       `;
     }
@@ -167,10 +171,10 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
             <span class="t">Edit ${escapeHtml(account.label)}</span>
             <button class="icon-btn-sq aem-close" id="aem-close-btn" title="Close" aria-label="Close"><i class="ph ph-x"></i></button>
           </div>
-          <div class="aem-tabs">
+          ${apiCredit ? "" : `<div class="aem-tabs">
             <button class="aem-tab${tab === "details" ? " active" : ""}" data-tab="details">Details</button>
             <button class="aem-tab${tab === "projects" ? " active" : ""}" data-tab="projects">Projects${projectsLoaded ? ` (${projects.length})` : ""}</button>
-          </div>
+          </div>`}
           <div class="aem-body">
             ${tab === "details" ? detailsTabHtml() : projectsTabHtml()}
           </div>

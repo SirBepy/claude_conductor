@@ -76,3 +76,17 @@ describe("resolveInitialAccountId - API-credit accounts are never preselected", 
     expect(resolveInitialAccountId(null, null, [work])).toBe("acct-work");
   });
 });
+
+// A paired machine's list_machine_accounts answer feeds the same resolver:
+// its api_credit accounts (the host now sends `kind`) are never preselected,
+// even as the host's own project binding or default.
+describe("resolveInitialAccountId - a peer machine's API-credit account", () => {
+  const peerSub = { id: "win-1", label: "Work", icon: "briefcase", colour: "#abc", email: "w@x.test", kind: "subscription" };
+  const peerCredit = { id: "win-2", label: "Credit", icon: "key", colour: "#10b981", email: "c@x.test", kind: "api_credit" };
+
+  it("does not preselect it as the host's binding, default or sole account", () => {
+    expect(resolveInitialAccountId("win-2", null, [peerSub, peerCredit])).toBe("win-1");
+    expect(resolveInitialAccountId(null, "win-2", [peerCredit])).toBeNull();
+    expect(resolveInitialAccountId(null, null, [peerCredit])).toBeNull();
+  });
+});

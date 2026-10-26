@@ -16,6 +16,8 @@ const { renderAccountListBodyHtml, openChangeAccountModal } = await import(
 const personal = { id: "acct-personal", label: "personal", icon: "user", colour: "#9d7dfc" };
 const work = { id: "acct-work", label: "work", icon: "briefcase", colour: "#f5a623" };
 
+const credit = { id: "acct-credit", label: "API credit", icon: "user", colour: "#10b981", kind: "api_credit" };
+
 function mount(html) {
   const el = document.createElement("div");
   el.innerHTML = html;
@@ -68,6 +70,28 @@ describe("renderAccountListBodyHtml - two or more accounts (unchanged)", () => {
   });
 });
 
+// The modal is a deliberate per-chat pick, so the API-credit account stays
+// offered, but marked: key icon (from accountIconBadgeHtml) plus an "API credit" tag.
+describe("renderAccountListBodyHtml - an API-credit account", () => {
+  it("is offered as a clickable chip with the key icon and an API credit hint", () => {
+    const el = mount(renderAccountListBodyHtml([personal, credit], personal.id));
+    const chip = el.querySelector(`[data-acc-id="${credit.id}"]`);
+    expect(chip).not.toBeNull();
+    expect(chip.querySelector(".ph-key")).not.toBeNull();
+    expect(chip.querySelector(".cam-credit-hint").textContent).toBe("API credit");
+  });
+
+  it("gives a subscription chip no hint", () => {
+    const el = mount(renderAccountListBodyHtml([personal, credit], personal.id));
+    expect(el.querySelector(`[data-acc-id="${personal.id}"] .cam-credit-hint`)).toBeNull();
+  });
+
+  it("keeps the hint on the static single-account chip too", () => {
+    const el = mount(renderAccountListBodyHtml([credit], credit.id));
+    expect(el.querySelector(".cam-acc-static .cam-credit-hint")).not.toBeNull();
+  });
+});
+
 // Red->green regression. The todo-883 static chip above is deliberately inert -
 // no data-acc-id, so no click handler, no number badge, no
 // registerSelectableOptions entry. That is right for a "Change account"
@@ -108,6 +132,14 @@ describe("openChangeAccountModal - autoPickSole (the gate callers)", () => {
     const pending = openChangeAccountModal({ currentId: null, autoPickSole: true });
     await vi.waitFor(() => expect(overlay()).not.toBeNull());
     expect(overlay().textContent).toContain("No Claude accounts configured yet");
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
+    expect(await pending).toBeNull();
+  });
+
+  it("never auto-picks a sole API-credit account: the modal opens so choosing it is a click", async () => {
+    listAccounts.mockResolvedValue([credit]);
+    const pending = openChangeAccountModal({ currentId: null, autoPickSole: true });
+    await vi.waitFor(() => expect(overlay()).not.toBeNull());
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
     expect(await pending).toBeNull();
   });

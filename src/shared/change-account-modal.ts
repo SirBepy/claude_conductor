@@ -14,8 +14,15 @@ import "./modal.css";
 import { api } from "./api";
 import type { Account } from "./api";
 import { escapeHtml } from "./escape-html";
-import { accountChipHtml, accountIconBadgeHtml, attachChipKeyboardActivation } from "./account-chip";
+import { accountChipHtml, accountIconBadgeHtml, attachChipKeyboardActivation, isApiCreditAccount } from "./account-chip";
 import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
+
+/** Trailing "API credit" tag inside a chip, so a pick that bills the Max
+ * plan's monthly API credit instead of plan usage is never a surprise. The
+ * key icon already comes from `accountIconBadgeHtml`. */
+function apiCreditHintHtml(a: Account): string {
+  return isApiCreditAccount(a) ? `<span class="cam-credit-hint">API credit</span>` : "";
+}
 
 /** The `.cc-modal-body` contents for the account list, split out so the
  * single-vs-multi-account branching is unit-testable without the modal's
@@ -27,10 +34,15 @@ export function renderAccountListBodyHtml(accounts: Account[], currentId: string
   if (accounts.length === 0) return `<div class="cc-modal-empty">No Claude accounts configured yet.</div>`;
   if (accounts.length === 1) {
     const a = accounts[0]!;
-    return `<div class="cam-account-list"><span class="account-chip sel cam-acc-static" style="--acc:${escapeHtml(a.colour)}">${accountIconBadgeHtml(a)}${escapeHtml(a.label)}</span></div>`;
+    return `<div class="cam-account-list"><span class="account-chip sel cam-acc-static" style="--acc:${escapeHtml(a.colour)}">${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}</span></div>`;
   }
   return `<div class="cam-account-list">${accounts
-    .map((a: Account) => accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"`))
+    .map((a: Account) =>
+      accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"`).replace(
+        /<\/span>$/,
+        `${apiCreditHintHtml(a)}</span>`,
+      ),
+    )
     .join("")}</div>`;
 }
 
@@ -51,7 +63,9 @@ export async function openChangeAccountModal(opts: {
   const title = opts.title ?? "Change account";
   const accounts = await api.listAccounts();
 
-  if (opts.autoPickSole && accounts.length === 1) return accounts[0]!.id;
+  // A sole API-credit account is never auto-picked: it bills the monthly API
+  // credit, so choosing it has to be an explicit click.
+  if (opts.autoPickSole && accounts.length === 1 && !isApiCreditAccount(accounts[0])) return accounts[0]!.id;
 
   return new Promise<string | null>((resolve) => {
     const overlay = document.createElement("div");

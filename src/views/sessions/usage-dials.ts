@@ -94,7 +94,7 @@ export function mountUsageDials(host: HTMLElement): () => void {
     const settings = getSettings();
     const rows: OverlayRow[] = buildOverlayRows(accounts, usageMap);
     host.innerHTML = rows.map((r) => cellHtml(r, settings, false, DIAL_SCALE, true)).join("");
-    host.hidden = false;
+    host.hidden = rows.length === 0;
   };
 
   const render = async (): Promise<void> => {
