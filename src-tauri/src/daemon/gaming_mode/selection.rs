@@ -27,6 +27,9 @@ pub fn target_sessions(instances: &[Instance], projects: &[ProjectConfig]) -> Ve
         .filter(|i| i.ended_at.is_none())
         .filter(|i| i.kind == InstanceKind::Interactive)
         .filter(|i| !i.jarvis)
+        // An idle (done / asking) chat has no work to park, and messaging it
+        // would spend a turn and flip its Done status to In Progress.
+        .filter(|i| i.busy)
         .filter(|i| !project_allowlisted(projects, &i.project_id))
         .map(|i| PausedSession { session_id: i.session_id.clone(), cwd: i.cwd.to_string_lossy().into_owned() })
         .collect()
@@ -84,7 +87,7 @@ mod tests {
             name: None,
             ended_at: if ended { Some("2026-10-13T01:00:00Z".to_string()) } else { None },
             end_reason: None,
-            busy: false,
+            busy: true,
             model: String::new(),
             effort: String::new(),
             awaiting: None,
@@ -159,6 +162,16 @@ mod tests {
         let mut ids: Vec<_> = targets.iter().map(|t| t.session_id.clone()).collect();
         ids.sort();
         assert_eq!(ids, vec!["interactive-1".to_string(), "mirrored-1".to_string()]);
+    }
+
+    #[test]
+    fn target_sessions_skips_idle_chats() {
+        let mut idle = instance("idle-1", "proj-a", InstanceKind::Interactive, false, false);
+        idle.busy = false;
+        let busy = instance("busy-1", "proj-a", InstanceKind::Interactive, false, false);
+        let targets = target_sessions(&[idle, busy], &[]);
+        let ids: Vec<_> = targets.iter().map(|t| t.session_id.as_str()).collect();
+        assert_eq!(ids, vec!["busy-1"]);
     }
 
     #[test]
