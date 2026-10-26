@@ -226,8 +226,11 @@ export function refreshDashboardView(): void {
  * the dashboard is already mounted, switch immediately; otherwise remember the
  * request so the next fullRefresh (on mount) selects it. */
 export function focusDashboardAccount(id: string): void {
+  // An API-credit account has no plan usage to focus on; the overlay never
+  // draws it, but a stale id from an older overlay window must not select it.
+  if (listCachedAccounts().some((a) => a.id === id && isApiCreditAccount(a))) return;
   pendingFocusAccountId = id;
-  if (mountedContainer && listCachedAccounts().some((a) => a.id === id)) {
+  if (mountedContainer && planUsageAccounts().some((a) => a.id === id)) {
     onSelectAccount(mountedContainer, id);
     pendingFocusAccountId = null;
   }
@@ -621,7 +624,7 @@ async function fullRefresh(container: HTMLElement): Promise<void> {
   // Honour a pending overlay "focus this account" request that arrived before
   // the dashboard was mounted (main.ts navigate-to-account handler).
   if (pendingFocusAccountId) {
-    if (listCachedAccounts().some((a) => a.id === pendingFocusAccountId)) {
+    if (planUsageAccounts().some((a) => a.id === pendingFocusAccountId)) {
       selectedAccountId = pendingFocusAccountId;
     }
     pendingFocusAccountId = null;

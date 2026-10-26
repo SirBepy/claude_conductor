@@ -149,6 +149,27 @@ describe("RateLimitBanner", () => {
     expect(btn.textContent).toContain("Continue on Personal");
   });
 
+  it("never suggests the API-credit account as the 'Continue on' target", async () => {
+    const credit = { id: "acc-credit", label: "credit", colour: "#10b981", icon: "key", kind: "api_credit" };
+    listAccounts.mockResolvedValue([credit, FIBO]);
+    const b = new RateLimitBanner();
+    b.mount(host);
+    await flush();
+    b.update([instance({ account_id: FIBO.id, rate_limited_resets_at: BigInt(NOW_SEC + 3600) })]);
+    expect(host.querySelector(".rlb-title")).not.toBeNull();
+    expect(host.querySelector(".rlb-move")).toBeNull();
+  });
+
+  it("skips the API-credit account and offers the next plan account", async () => {
+    const credit = { id: "acc-credit", label: "credit", colour: "#10b981", icon: "key", kind: "api_credit" };
+    listAccounts.mockResolvedValue([credit, FIBO, PERSONAL]);
+    const b = new RateLimitBanner();
+    b.mount(host);
+    await flush();
+    b.update([instance({ account_id: FIBO.id, rate_limited_resets_at: BigInt(NOW_SEC + 3600) })]);
+    expect(host.querySelector(".rlb-move").textContent).toContain("Continue on Personal");
+  });
+
   it("disables 'Continue on <other>' (with a title, not hidden) when both accounts are blocked", async () => {
     const b = new RateLimitBanner();
     b.mount(host);

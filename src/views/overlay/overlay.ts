@@ -112,14 +112,16 @@ export async function renderOverlay(root: HTMLElement): Promise<() => void> {
     const [accounts, usageMap] = await Promise.all([api.listAccounts(), api.getUsageMap()]);
     if (spinnerTimer != null) window.clearTimeout(spinnerTimer);
     rowsEl.classList.remove("oc-refreshing");
-    if (!accounts.length) {
+    const rows = buildOverlayRows(accounts, usageMap);
+    // Judged on the rows, not the registry: an API-credit-only registry has
+    // nothing to draw here.
+    if (!rows.length) {
       rowsEl.innerHTML = `<div class="oc-empty">No accounts yet</div>`;
       syncSize();
       return;
     }
     const cardMode = readBackgroundStyle(settings) === "card";
     rowsEl.classList.toggle("oc-card", cardMode);
-    const rows = buildOverlayRows(accounts, usageMap);
     rowsEl.innerHTML = rows.map((r) => cellHtml(r, settings, !cardMode)).join("");
     syncSize();
   }

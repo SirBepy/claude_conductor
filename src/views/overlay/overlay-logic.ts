@@ -6,7 +6,7 @@
 // HTML for their own (differently-shaped) markup.
 
 import { computeSafePacePct } from "../../shared/formatters";
-import type { AccountLite } from "../../shared/account-chip";
+import { isApiCreditAccount, type AccountLite } from "../../shared/account-chip";
 
 const SESSION_WINDOW_MS = 5 * 3_600_000;
 const WEEKLY_WINDOW_MS = 7 * 24 * 3_600_000;
@@ -73,11 +73,12 @@ export function buildOverlayRow(
   };
 }
 
-/** Maps every registered account (in registry order) to its overlay row. */
+/** Maps every plan account (in registry order) to its overlay row. An
+ * API-credit account has no claude.ai usage, so it would draw an empty dial. */
 export function buildOverlayRows(
   accounts: readonly OverlayAccountLite[],
   usageByAccount: Record<string, OverlayUsageLite>,
   now: number = Date.now(),
 ): OverlayRow[] {
-  return accounts.map((a) => buildOverlayRow(a, usageByAccount[a.id], now));
+  return accounts.filter((a) => !isApiCreditAccount(a)).map((a) => buildOverlayRow(a, usageByAccount[a.id], now));
 }

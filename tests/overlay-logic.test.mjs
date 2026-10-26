@@ -74,3 +74,24 @@ describe("buildOverlayRows", () => {
     expect(buildOverlayRows([], {}, NOW)).toEqual([]);
   });
 });
+
+// An API-credit account has no claude.ai usage: its dial would be empty, so
+// the overlay and the sessions header dials (both fed by buildOverlayRows)
+// never draw it.
+describe("buildOverlayRows - API-credit accounts", () => {
+  const credit = { id: "acct-credit", label: "API credit", colour: "#10b981", icon: "key", kind: "api_credit" };
+
+  it("leaves an API-credit account out of the rows", () => {
+    const rows = buildOverlayRows([personal, credit, work], {}, NOW);
+    expect(rows.map((r) => r.id)).toEqual(["acct-personal", "acct-work"]);
+  });
+
+  it("returns no rows when the registry holds only the API-credit account", () => {
+    expect(buildOverlayRows([credit], {}, NOW)).toEqual([]);
+  });
+
+  it("keeps an account that carries kind: subscription", () => {
+    const sub = { ...personal, kind: "subscription" };
+    expect(buildOverlayRows([sub], {}, NOW).map((r) => r.id)).toEqual(["acct-personal"]);
+  });
+});

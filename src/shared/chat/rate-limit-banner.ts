@@ -19,6 +19,7 @@ import { showView } from "../navigation";
 import type { Instance } from "../../types/ipc.generated";
 import { setCachedAccounts, listCachedAccounts, getCachedAccount, capitalize } from "../accounts-cache";
 import { formatRelativeMinutes } from "../formatters";
+import { isApiCreditAccount } from "../account-chip";
 import { openRlbMenu, type RlbMenuItem } from "./rate-limit-banner-menu";
 import { visibleInterval } from "../visible-interval";
 export { getCachedAccount, capitalize } from "../accounts-cache";
@@ -217,8 +218,10 @@ export class RateLimitBanner {
       const timeLine = `Resets ${formatClockLabel(resetsAtMs, nowMs)}${affected}`;
       const countdown = formatCountdown(resetsAtMs - nowMs);
 
-      // "Continue on <other>" only when a DIFFERENT account exists.
-      const other = listCachedAccounts().find((a) => a.id !== accountId);
+      // "Continue on <other>" only when a DIFFERENT plan account exists. A
+      // one-click suggestion must never move a chat onto the API-credit
+      // account (that is an explicit pick in the Change account modal).
+      const other = listCachedAccounts().find((a) => a.id !== accountId && !isApiCreditAccount(a));
       let moveBtn = "";
       let move: { targetId: string; label: string; disabledReason?: string } | null = null;
       if (other) {

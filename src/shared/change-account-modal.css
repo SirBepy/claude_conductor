@@ -15,6 +15,15 @@
   box-sizing: border-box;
 }
 
+/* Billing-kind tag on an API-credit chip; quiet, trails the label. */
+.cam-account-list .cam-credit-hint {
+  margin-left: auto;
+  padding-left: 8px;
+  font-weight: 500;
+  font-size: 0.72rem;
+  color: var(--color-text-muted, #9a9aa8);
+}
+
 /* Single-account display (todo 883): same chip look, but nothing to click. */
 .cam-account-list .cam-acc-static {
   cursor: default;

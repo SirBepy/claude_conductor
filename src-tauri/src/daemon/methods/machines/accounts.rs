@@ -22,6 +22,10 @@ use crate::daemon::state::DaemonState;
 /// The only keys of an account that leave a machine.
 const ACCOUNT_FIELDS: [&str; 6] = ["id", "label", "colour", "icon", "email", "subscription_tier"];
 
+/// Wire name of [`AccountKind::ApiCredit`] (its serde `snake_case` form), the
+/// only kind value a peer's picker has to tell apart from the default.
+const KIND_API_CREDIT: &str = "api_credit";
+
 fn redact_account(a: &Account) -> Value {
     json!({
         "id": a.id,
@@ -30,6 +34,9 @@ fn redact_account(a: &Account) -> Value {
         "icon": a.icon,
         "email": a.email,
         "subscription_tier": a.subscription_tier,
+        // Lets the other machine's picker mark the key account and never
+        // preselect it; an older peer omits it and reads as a subscription.
+        "kind": a.kind,
     })
 }
 
@@ -73,6 +80,11 @@ fn repick(raw: &Value) -> Value {
                     for k in ACCOUNT_FIELDS {
                         out.insert(k.to_string(), a.get(k).cloned().unwrap_or(Value::Null));
                     }
+                    // Normalised to the two known kinds: a peer built before
+                    // `kind` existed sends none, and an unknown value must not
+                    // be relayed as if it were meaningful.
+                    let api_credit = a.get("kind").and_then(Value::as_str) == Some(KIND_API_CREDIT);
+                    out.insert("kind".to_string(), json!(if api_credit { KIND_API_CREDIT } else { "subscription" }));
                     Value::Object(out)
                 })
                 .collect()
@@ -99,8 +111,16 @@ fn bind_account(
     if !is_known_cwd(state, cwd) {
         return Err(RpcError::invalid_params("unknown cwd"));
     }
-    if !registry.iter().any(|a| a.id == account_id) {
+    let Some(account) = registry.iter().find(|a| a.id == account_id) else {
         return Err(RpcError::invalid_params(format!("account {account_id} not found in the registry")));
+    };
+    // The API-credit account is only ever an explicit per-chat pick; a project
+    // binding would make it the account every new chat there resolves to.
+    if account.is_api_credit() {
+        return Err(RpcError::invalid_params(format!(
+            "\"{}\" is an API-credit account and cannot be bound to a project",
+            account.label
+        )));
     }
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     if !state.settings.bind_project_account(std::path::Path::new(cwd), account_id, &now) {
@@ -332,7 +352,7 @@ mod tests {
         let list = out["accounts"].as_array().unwrap();
         assert_eq!(list.len(), 2);
         for a in list {
-            assert_eq!(keys(a), ["colour", "email", "icon", "id", "label", "subscription_tier"]);
+            assert_eq!(keys(a), ["colour", "email", "icon", "id", "kind", "label", "subscription_tier"]);
         }
         let serialized = out.to_string();
         for leaked in ["config-dir", "chrome-profile", "dummy-org-uuid", "config_dir", "org_uuid", "chrome_profile_dir"] {
@@ -364,7 +384,7 @@ mod tests {
         });
         let out = repick(&raw);
         assert_eq!(keys(&out), ["accounts", "default_account_id", "project_account_id"]);
-        assert_eq!(keys(&out["accounts"][0]), ["colour", "email", "icon", "id", "label", "subscription_tier"]);
+        assert_eq!(keys(&out["accounts"][0]), ["colour", "email", "icon", "id", "kind", "label", "subscription_tier"]);
         assert_eq!(out["default_account_id"], json!("a"));
         assert_eq!(out["project_account_id"], Value::Null);
         assert!(!out.to_string().contains("leak"));
@@ -381,7 +401,7 @@ mod tests {
         assert_eq!(keys(&out), ["accounts", "default_account_id", "project_account_id"]);
         // Whatever accounts.json holds on this machine, none may carry a path.
         for a in out["accounts"].as_array().unwrap() {
-            assert_eq!(keys(a), ["colour", "email", "icon", "id", "label", "subscription_tier"]);
+            assert_eq!(keys(a), ["colour", "email", "icon", "id", "kind", "label", "subscription_tier"]);
         }
     }
 
@@ -446,7 +466,7 @@ mod tests {
             json!({
                 "accounts": [{
                     "id": "win-1", "label": "Work", "colour": "#abc", "icon": "briefcase",
-                    "email": "work@x.test", "subscription_tier": "max",
+                    "email": "work@x.test", "subscription_tier": "max", "kind": "subscription",
                 }],
                 "default_account_id": "win-1",
                 "project_account_id": "win-1",
@@ -525,6 +545,53 @@ mod tests {
         assert_eq!(frame["method"], json!("project_account_set"));
         assert_eq!(frame["params"]["cwd"], json!(cwd));
         assert_eq!(frame["params"]["account_id"], json!("acct-win"));
+    }
+
+    fn api_credit_account(id: &str) -> Account {
+        let mut a = account(id, "Credit");
+        a.kind = crate::accounts::AccountKind::ApiCredit;
+        a
+    }
+
+    #[test]
+    fn the_host_answer_names_each_accounts_kind() {
+        let state = state_with(Settings::default());
+        let registry = [account("sub", "Sub"), api_credit_account("credit")];
+        let out = picker_data(&state, &registry, None);
+        assert_eq!(out["accounts"][0]["kind"], json!("subscription"));
+        assert_eq!(out["accounts"][1]["kind"], json!("api_credit"));
+    }
+
+    #[test]
+    fn repick_keeps_api_credit_and_defaults_a_missing_or_unknown_kind_to_subscription() {
+        let raw = json!({
+            "accounts": [
+                {"id": "credit", "kind": "api_credit"},
+                // An older peer that predates `kind`.
+                {"id": "old"},
+                {"id": "odd", "kind": "something_new"},
+            ],
+        });
+        let out = repick(&raw);
+        let kinds: Vec<&Value> = out["accounts"].as_array().unwrap().iter().map(|a| &a["kind"]).collect();
+        assert_eq!(kinds, [&json!("api_credit"), &json!("subscription"), &json!("subscription")]);
+    }
+
+    #[test]
+    fn the_host_refuses_to_bind_a_project_to_an_api_credit_account() {
+        let proj_dir = tempdir().unwrap();
+        let mut settings = Settings::default();
+        settings.projects.push(project_at(proj_dir.path(), None));
+        let state = state_with(settings);
+        let cwd = proj_dir.path().to_string_lossy().into_owned();
+        let registry = [account("sub", "Sub"), api_credit_account("credit")];
+
+        let err = bind_account(&state, &registry, &cwd, "credit").unwrap_err();
+        assert!(err.message.contains("API-credit"), "{}", err.message);
+        assert_eq!(state.settings.snapshot().projects[0].preferred_account_id, None);
+        // A subscription account in the same registry still binds.
+        bind_account(&state, &registry, &cwd, "sub").unwrap();
+        assert_eq!(state.settings.snapshot().projects[0].preferred_account_id.as_deref(), Some("sub"));
     }
 
     #[test]

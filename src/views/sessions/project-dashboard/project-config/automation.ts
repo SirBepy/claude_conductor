@@ -3,7 +3,7 @@ import { escapeHtml } from "../../../../shared/escape-html";
 import { showToast } from "../../../../shared/toast";
 import { api } from "../../../../shared/api";
 import type { Account } from "../../../../shared/api";
-import { accountIconBadgeHtml } from "../../../../shared/account-chip";
+import { accountIconBadgeHtml, isApiCreditAccount } from "../../../../shared/account-chip";
 import { invoke } from "../../../../shared/ipc";
 import { forgetTicketTracker } from "../../../../shared/chat/ticket-refs";
 import type { TicketTracker, TrackerInfo } from "../../../../types/ipc.generated";
@@ -48,6 +48,8 @@ async function renderAccountRow(): Promise<void> {
       api.listAccounts(),
       api.listProjects() as unknown as Promise<ProjectCfg[]>,
     ]);
+    // An API-credit account is never a project binding (the backend refuses it).
+    accounts = accounts.filter((a) => !isApiCreditAccount(a));
     const settings = await api.getSettings();
     defaultAccountId = (settings?.["default_account_id"] as string | null | undefined) ?? null;
   } catch (e) {
