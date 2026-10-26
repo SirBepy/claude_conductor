@@ -41,3 +41,38 @@ describe("resolveInitialAccountId", () => {
     expect(resolveInitialAccountId("acct-deleted", "acct-also-deleted", [personal, work])).toBeNull();
   });
 });
+
+// An API-credit chat spends the Max plan's monthly API credit, so none of the
+// three automatic picks may ever land on one.
+describe("resolveInitialAccountId - API-credit accounts are never preselected", () => {
+  const credit = { id: "acct-credit", label: "API credit", icon: "key", colour: "#10b981", kind: "api_credit" };
+  const sub = { ...personal, kind: "subscription" };
+
+  it("ignores a project binding that points at an API-credit account", () => {
+    expect(resolveInitialAccountId("acct-credit", null, [sub, work, credit])).toBeNull();
+    expect(resolveInitialAccountId("acct-credit", "acct-work", [sub, work, credit])).toBe("acct-work");
+  });
+
+  it("ignores a global default that points at an API-credit account", () => {
+    expect(resolveInitialAccountId(null, "acct-credit", [sub, work, credit])).toBeNull();
+    expect(resolveInitialAccountId(null, "acct-credit", [sub, credit])).toBe("acct-personal");
+  });
+
+  it("never takes an API-credit account as the sole-account fallback", () => {
+    expect(resolveInitialAccountId(null, null, [credit])).toBeNull();
+    // A lone API-credit account still gates the picker even when it is bound AND the default.
+    expect(resolveInitialAccountId("acct-credit", "acct-credit", [credit])).toBeNull();
+  });
+
+  it("still auto-picks the one subscription account beside an API-credit one", () => {
+    expect(resolveInitialAccountId(null, null, [sub, credit])).toBe("acct-personal");
+  });
+
+  it("forces an explicit pick when two subscription accounts sit beside an API-credit one", () => {
+    expect(resolveInitialAccountId(null, null, [sub, work, credit])).toBeNull();
+  });
+
+  it("treats an account with no kind (older daemon or peer) as a subscription", () => {
+    expect(resolveInitialAccountId(null, null, [work])).toBe("acct-work");
+  });
+});

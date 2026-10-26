@@ -1,5 +1,6 @@
 import { invoke } from "../../shared/ipc";
 import { isSessionBusyError } from "../../shared/session-busy";
+import { apiCreditBlockedReason, sendFailureText } from "../../shared/api-credit-blocked";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { showToast } from "../../shared/toast";
 import type { ChatEvent, ContentBlock } from "../../types/ipc.generated";
@@ -26,18 +27,22 @@ export async function sendWithFailureRecovery(
       if (state.renderer?.currentSessionId() === sessionId) void state.renderer.loadFromStore(cwd);
       return;
     }
-    console.error("[sessions] send_message failed", err);
+    // An API-credit refusal is an expected stop, not a fault: it is never
+    // queued (nothing frees the credit by waiting for the turn to end), and it
+    // reads as the bare reason instead of "Send failed: rpc error: ...".
+    const blockedReason = apiCreditBlockedReason(err);
+    if (blockedReason === null) console.error("[sessions] send_message failed", err);
     const onScreen = state.renderer?.currentSessionId() === sessionId;
     if (onScreen) {
       // Keep the optimistic bubble and mark it: after clearComposer() it is
       // the only surviving copy of what the user typed, and Retry re-sends
       // exactly these blocks. A toast alone loses the text on dismiss.
-      state.renderer?.markLastUserSendFailed(String(err), attempt);
+      state.renderer?.markLastUserSendFailed(sendFailureText(err), attempt);
     } else {
       // Nothing on screen to mark, so the bubble would just linger looking
       // sent. Roll it back; sent-outbox.ts still holds the text for Ctrl+Z.
       sessionEvents.removeSynthetic(sessionId, optimisticEvent);
     }
-    showToast(`Send failed: ${err}`);
+    showToast(blockedReason ?? `Send failed: ${err}`);
   }
 }

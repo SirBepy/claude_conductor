@@ -6,7 +6,7 @@
 // callbacks) are kept as stubs so callers don't crash.
 
 import { invoke } from "./ipc";
-import { isTauri } from "./transport";
+import { getTransport, isTauri } from "./transport";
 import { showToast } from "./toast";
 import {
   loadUsageHistory,
@@ -30,12 +30,19 @@ import type {
   OauthAccountInfo,
   AuthState,
   ApiKeyStatus,
+  ApiCreditStatus,
   GamingModeView,
 } from "../types/ipc.generated";
 
 export type { GamingModeView };
 
-export type { Account, AccountIdentity, AddAccountSession, LoginCheckOutcome, OauthAccountInfo, AuthState, ApiKeyStatus };
+export type { Account, AccountIdentity, AddAccountSession, LoginCheckOutcome, OauthAccountInfo, AuthState, ApiKeyStatus, ApiCreditStatus };
+
+/** Payload of the `api-credit-status-changed` event. */
+export interface ApiCreditStatusChange {
+  account_id: string;
+  status: ApiCreditStatus;
+}
 
 export type { UsageRecord };
 
@@ -163,6 +170,8 @@ export interface MachineAccount {
   icon: string;
   email: string;
   subscription_tier: string;
+  /** Absent from a peer that predates API-credit accounts: a subscription. */
+  kind?: "subscription" | "api_credit";
 }
 /** `list_machine_accounts`: that machine's accounts, its default account id and
  * its own binding for the project asked about (null when it has none). */
@@ -710,6 +719,36 @@ export const api = {
     invoke("reauth_account", { accountId }),
   recaptureAccountCookie: (accountId: string): Promise<void> =>
     invoke("recapture_account_cookie", { accountId }),
+
+  // --- Accounts (API-credit kind: chats bill the Max plan's monthly API credit) ---
+  /** Rejects with a user-readable message (bad key, duplicate label, ...). */
+  addApiCreditAccount: (label: string, apiKey: string): Promise<Account> =>
+    invoke("add_api_credit_account", { label, apiKey }),
+  /** Opens a browser login on platform.claude.com and resolves with the
+   * balance read through the captured session; the figures' `error` says so
+   * when the login did not take. */
+  connectConsoleLogin: (accountId: string): Promise<ApiCreditStatus> =>
+    invoke("connect_console_login", { accountId }),
+  /** Last figures per API-credit account id; empty when none exist or the
+   * daemon is unreachable, so the meter degrades to "no figures yet". */
+  getApiCreditStatus: async (): Promise<Record<string, ApiCreditStatus>> => {
+    try { return (await invoke<Record<string, ApiCreditStatus>>("get_api_credit_status")) || {}; }
+    catch (e) { console.error("get_api_credit_status failed", e); return {}; }
+  },
+  refreshApiCreditStatus: (accountId: string): Promise<ApiCreditStatus> =>
+    invoke("refresh_api_credit_status", { accountId }),
+  /** The meter and the settings rows re-read a single account's figures from
+   * this. Goes through the transport (not the Tauri-only listenEvent) because
+   * the phone gets it over the global stream. */
+  onApiCreditStatusChanged: (cb: (change: ApiCreditStatusChange) => void): Unlisten => {
+    let stopped = false;
+    let unlisten: Unlisten | null = null;
+    getTransport()
+      .listen<ApiCreditStatusChange>("api-credit-status-changed", cb)
+      .then((u) => { if (stopped) u(); else unlisten = u; })
+      .catch((e) => console.error("api-credit-status-changed listen failed", e));
+    return () => { stopped = true; unlisten?.(); };
+  },
 
   // --- Accounts (multi-account milestone 08: legacy migration prompt) ---
   getAccountsSetupPromptState: async (): Promise<AccountsSetupPromptState> => {

@@ -5,6 +5,7 @@
 
 import { invoke } from "../../shared/ipc";
 import { isSessionBusyError } from "../../shared/session-busy";
+import { apiCreditBlockedReason } from "../../shared/api-credit-blocked";
 import type { ChatEvent, ContentBlock, PreviewSnapshot } from "../../types/ipc.generated";
 import { ComposerCore } from "../../shared/chat/composer-core/core";
 import { SlashProvider } from "../../shared/chat/caret-popup/providers/slash";
@@ -110,12 +111,13 @@ export async function sendPvReply(
         sessionEvents.removeSynthetic(sessionId, optimisticEvent);
         return;
       }
-      console.error("[preview-panel] send_message failed", err);
+      const blockedReason = apiCreditBlockedReason(err);
+      if (blockedReason === null) console.error("[preview-panel] send_message failed", err);
       sessionEvents.removeSynthetic(sessionId, optimisticEvent);
       ta.value = text;
       composerCore?.autoResize();
       composerCore?.updateHighlight();
-      showToast(`Send failed: ${err}`);
+      showToast(blockedReason ?? `Send failed: ${err}`);
     }
   });
 }
