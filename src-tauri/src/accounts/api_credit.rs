@@ -114,6 +114,74 @@ fn unique_config_dir(home_claude_dir: &Path, slug: &str, accounts: &[Account]) -
     }
 }
 
+pub const ANTHROPIC_API_BASE_URL: &str = "https://api.anthropic.com";
+
+/// Proves `api_key` works and is workspace-scoped, for free: `GET /v1/models`
+/// bills nothing. A key with no workspace answers 400 naming the
+/// `anthropic-workspace-id` header (observed live 2026-10-26), and such a key
+/// cannot bill the Max credit. The `Err` text is shown to the user as is.
+pub async fn validate_api_key(base_url: &str, api_key: &str) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("could not check the API key: {e}"))?;
+    let resp = client
+        .get(format!("{base_url}/v1/models"))
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .send()
+        .await
+        .map_err(|e| format!("could not reach Anthropic to check the API key: {e}"))?;
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    if matches!(status.as_u16(), 401 | 403) {
+        return Err("That API key was rejected".to_string());
+    }
+    let body = resp.text().await.unwrap_or_default();
+    if status.as_u16() == 400 && body.contains("anthropic-workspace-id") {
+        return Err("This key isn't scoped to a workspace. Create a key inside a workspace (Default is fine) in the Console.".to_string());
+    }
+    Err(format!("Anthropic answered HTTP {} when checking the API key", status.as_u16()))
+}
+
+/// The subscription account whose stored claude.ai login is asked for the
+/// Console org: the default account when it is a Subscription one, else the
+/// first Subscription account.
+pub fn pick_lookup_account<'a>(accounts: &'a [Account], default_id: Option<&str>) -> Option<&'a Account> {
+    let subscription = |a: &&Account| a.kind == AccountKind::Subscription;
+    default_id
+        .and_then(|id| accounts.iter().find(|a| a.id == id))
+        .filter(subscription)
+        .or_else(|| accounts.iter().find(subscription))
+}
+
+/// Fills the Console org uuid (and the email) of an existing account that was
+/// created without them. Only empty fields are written, so a later lookup can
+/// never overwrite what the user or an earlier login settled on. Returns whether
+/// anything changed.
+pub fn fill_missing_identity(accounts_file: &Path, account_id: &str, org_uuid: &str, email: &str) -> Result<bool> {
+    let mut accounts = store::load(accounts_file);
+    let account = accounts
+        .iter_mut()
+        .find(|a| a.id == account_id)
+        .ok_or_else(|| anyhow!("no account with id {account_id}"))?;
+    let mut changed = false;
+    if account.org_uuid.is_empty() && !org_uuid.trim().is_empty() {
+        account.org_uuid = org_uuid.trim().to_string();
+        changed = true;
+    }
+    if account.email.is_empty() && !email.trim().is_empty() {
+        account.email = email.trim().to_string();
+        changed = true;
+    }
+    if changed {
+        store::save(accounts_file, &accounts)?;
+    }
+    Ok(changed)
+}
+
 /// Replaces the stored API key for `account_id`.
 pub fn save_api_key(account_id: &str, api_key: &str) -> Result<()> {
     let api_key = api_key.trim();
@@ -178,6 +246,88 @@ mod tests {
             chrome_profile_dir: data.join("chrome-profiles").join("id-1"),
         };
         (root, p)
+    }
+
+    fn acct(id: &str, kind: AccountKind) -> Account {
+        Account {
+            id: id.into(),
+            label: id.into(),
+            colour: "#fff".into(),
+            icon: "key".into(),
+            config_dir: PathBuf::from(format!("C:/home/.claude-{id}")),
+            chrome_profile_dir: PathBuf::from(format!("C:/appdata/{id}")),
+            email: String::new(),
+            org_uuid: String::new(),
+            subscription_tier: String::new(),
+            created_at: "2026-10-26T00:00:00Z".into(),
+            fleet_eligible: false,
+            kind,
+        }
+    }
+
+    #[test]
+    fn fill_missing_identity_writes_only_empty_fields() {
+        let (_root, p) = setup();
+        let a = create_api_credit_account_in(&p, "id-1", "API credit", "k", "", "").unwrap();
+        assert!(fill_missing_identity(&p.accounts_file, &a.id, "ORG", "j@x.com").unwrap());
+        let got = store::load(&p.accounts_file).remove(0);
+        assert_eq!((got.org_uuid.as_str(), got.email.as_str()), ("ORG", "j@x.com"));
+        assert!(!fill_missing_identity(&p.accounts_file, &a.id, "OTHER", "o@x.com").unwrap());
+        let got = store::load(&p.accounts_file).remove(0);
+        assert_eq!((got.org_uuid.as_str(), got.email.as_str()), ("ORG", "j@x.com"));
+        assert!(fill_missing_identity(&p.accounts_file, "missing", "ORG", "").is_err());
+    }
+
+    #[test]
+    fn lookup_account_is_the_default_subscription_else_the_first_subscription() {
+        let accounts = vec![
+            acct("api", AccountKind::ApiCredit),
+            acct("sub-1", AccountKind::Subscription),
+            acct("sub-2", AccountKind::Subscription),
+        ];
+        assert_eq!(pick_lookup_account(&accounts, Some("sub-2")).unwrap().id, "sub-2");
+        assert_eq!(pick_lookup_account(&accounts, Some("api")).unwrap().id, "sub-1", "an ApiCredit default has no claude.ai login");
+        assert_eq!(pick_lookup_account(&accounts, None).unwrap().id, "sub-1");
+        assert!(pick_lookup_account(&accounts[..1], None).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_working_key_validates_and_sends_the_key_and_version_headers() {
+        let mut server = mockito::Server::new_async().await;
+        let m = server.mock("GET", "/v1/models")
+            .match_header("x-api-key", "sk-ant-dummy-good")
+            .match_header("anthropic-version", "2023-06-01")
+            .with_status(200).with_body(r#"{"data":[]}"#)
+            .create_async().await;
+        assert_eq!(validate_api_key(&server.url(), "sk-ant-dummy-good").await, Ok(()));
+        m.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn a_rejected_key_says_so() {
+        let mut server = mockito::Server::new_async().await;
+        let _m = server.mock("GET", "/v1/models").with_status(401).create_async().await;
+        assert_eq!(
+            validate_api_key(&server.url(), "sk-ant-dummy-bad").await,
+            Err("That API key was rejected".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_key_without_a_workspace_is_told_to_make_one() {
+        let mut server = mockito::Server::new_async().await;
+        let _m = server.mock("GET", "/v1/models")
+            .with_status(400)
+            .with_body(r#"{"error":{"message":"must include the anthropic-workspace-id header"}}"#)
+            .create_async().await;
+        let err = validate_api_key(&server.url(), "sk-ant-dummy-nows").await.unwrap_err();
+        assert!(err.starts_with("This key isn't scoped to a workspace."), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_network_failure_refuses_with_the_error_text() {
+        let err = validate_api_key("http://127.0.0.1:1", "sk-ant-dummy-x").await.unwrap_err();
+        assert!(err.starts_with("could not reach Anthropic"), "{err}");
     }
 
     #[test]

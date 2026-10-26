@@ -70,6 +70,17 @@ impl WebAccountIdentity {
     }
 }
 
+impl WebAccountIdentity {
+    /// The Console (API) org: first membership whose capabilities include
+    /// "api". Its uuid is what the Console credit and spend-limit routes key on.
+    pub fn api_org(&self) -> Option<&WebAccountOrg> {
+        self.memberships
+            .iter()
+            .map(|m| &m.organization)
+            .find(|o| o.capabilities.iter().any(|c| c == "api"))
+    }
+}
+
 impl WebAccountOrg {
     /// Subscription tier in the same vocabulary the CLI's `oauthAccount`
     /// uses for `organizationType` ("claude_max", "claude_pro", ...): the
@@ -705,6 +716,16 @@ mod tests {
         }"#).unwrap();
         assert_eq!(account.chat_org().unwrap().uuid, "ORG-1");
         assert_eq!(account.chat_org().unwrap().subscription_tier(), None);
+    }
+
+    #[test]
+    fn api_org_picks_the_api_capable_membership_not_the_chat_one() {
+        let account: WebAccountIdentity = serde_json::from_str(ACCOUNT_BODY).unwrap();
+        assert_eq!(account.api_org().unwrap().uuid, "ORG-API");
+        let chat_only: WebAccountIdentity = serde_json::from_str(
+            r#"{"email_address":"a@x.com","memberships":[{"organization":{"uuid":"C","capabilities":["chat"]}}]}"#,
+        ).unwrap();
+        assert!(chat_only.api_org().is_none());
     }
 
     #[test]

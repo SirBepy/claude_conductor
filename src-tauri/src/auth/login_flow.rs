@@ -15,6 +15,42 @@ use tokio::time::sleep;
 const CDP_PORT: u16 = 9242; // avoid clashes with 9222
 const LOGIN_TIMEOUT_SECS: u64 = 10 * 60;
 
+/// Which site the browser opens and whose `sessionKey` cookie it waits for.
+/// claude.ai and the Console (platform.claude.com) are separate logins with
+/// separate cookies; the Console org rejects the claude.ai one with 403.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LoginTarget {
+    pub login_url: &'static str,
+    /// Matched as a suffix of the cookie's domain, which Chrome reports with a
+    /// leading dot for host-wide cookies (`.claude.ai`).
+    pub cookie_domain: &'static str,
+}
+
+impl LoginTarget {
+    pub const CLAUDE_AI: LoginTarget = LoginTarget {
+        login_url: "https://claude.ai/login",
+        cookie_domain: "claude.ai",
+    };
+    pub const CONSOLE: LoginTarget = LoginTarget {
+        login_url: "https://platform.claude.com/login",
+        cookie_domain: "platform.claude.com",
+    };
+}
+
+/// The `sessionKey` value among CDP `Storage.getCookies` results whose domain
+/// ends with `cookie_domain`.
+fn session_key_for(cookies: &[serde_json::Value], cookie_domain: &str) -> Option<String> {
+    cookies.iter().find_map(|c| {
+        let name = c.get("name").and_then(|x| x.as_str()).unwrap_or("");
+        let domain = c.get("domain").and_then(|x| x.as_str()).unwrap_or("");
+        if name == "sessionKey" && domain.ends_with(cookie_domain) {
+            c.get("value").and_then(|x| x.as_str()).map(str::to_string)
+        } else {
+            None
+        }
+    })
+}
+
 pub(crate) fn find_browser() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
@@ -90,7 +126,7 @@ pub(crate) fn find_browser() -> Option<PathBuf> {
     None
 }
 
-fn spawn_browser(bin: &Path, profile: &Path, port: u16) -> std::io::Result<Child> {
+fn spawn_browser(bin: &Path, profile: &Path, port: u16, login_url: &str) -> std::io::Result<Child> {
     Command::new(bin)
         .arg(format!("--user-data-dir={}", profile.display()))
         .arg(format!("--remote-debugging-port={port}"))
@@ -106,7 +142,7 @@ fn spawn_browser(bin: &Path, profile: &Path, port: u16) -> std::io::Result<Child
         .arg("--no-pings")
         .arg("--password-store=basic")
         .arg("--use-mock-keychain")
-        .arg("https://claude.ai/login")
+        .arg(login_url)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -155,7 +191,7 @@ pub async fn run(app: AppHandle) -> Result<()> {
     let profile = crate::settings::paths::data_dir()
         .context("data dir")?
         .join("chrome-login-profile");
-    let session_key = run_with_profile(&app, &profile).await?;
+    let session_key = run_with_profile(&app, &profile, LoginTarget::CLAUDE_AI).await?;
     let session_path = paths::session_file()?;
     session::save(&session_path, &session_key)?;
     Ok(())
@@ -167,13 +203,23 @@ pub async fn run(app: AppHandle) -> Result<()> {
 /// (the add-account wizard keys it by account id via
 /// `paths::account_session_file`, never the legacy single-session path).
 pub async fn run_for_account(app: AppHandle, chrome_profile_dir: PathBuf) -> Result<String> {
-    run_with_profile(&app, &chrome_profile_dir).await
+    run_with_profile(&app, &chrome_profile_dir, LoginTarget::CLAUDE_AI).await
+}
+
+/// `run_for_account` against another site, for the Console login of an
+/// API-credit account.
+pub async fn run_for_account_at(
+    app: AppHandle,
+    chrome_profile_dir: PathBuf,
+    target: LoginTarget,
+) -> Result<String> {
+    run_with_profile(&app, &chrome_profile_dir, target).await
 }
 
 /// Shared CDP browser flow: spawn Chrome/Edge against `profile_dir`, wait for
-/// the user to log into claude.ai, extract the `sessionKey` cookie, kill the
+/// the user to log into `target`, extract its `sessionKey` cookie, kill the
 /// browser. Emits the same `auth-progress` events either caller relies on.
-async fn run_with_profile(app: &AppHandle, profile_dir: &Path) -> Result<String> {
+async fn run_with_profile(app: &AppHandle, profile_dir: &Path, target: LoginTarget) -> Result<String> {
     let _ = app.emit("auth-progress", json!({"stage": "waiting-for-browser"}));
 
     let bin = find_browser()
@@ -184,10 +230,10 @@ async fn run_with_profile(app: &AppHandle, profile_dir: &Path) -> Result<String>
 
     std::fs::create_dir_all(profile_dir).context("create profile dir")?;
 
-    let mut child = spawn_browser(&bin, profile_dir, CDP_PORT)
+    let mut child = spawn_browser(&bin, profile_dir, CDP_PORT, target.login_url)
         .context("spawn browser")?;
 
-    let result = run_inner(app, &mut child).await;
+    let result = run_inner(app, &mut child, target.cookie_domain).await;
     kill_browser(&mut child);
     // NOTE: do NOT delete the profile dir, we want Google/SSO cookies to persist
     // across re-logins so the user only types their password once.
@@ -207,7 +253,7 @@ async fn run_with_profile(app: &AppHandle, profile_dir: &Path) -> Result<String>
     }
 }
 
-async fn run_inner(app: &AppHandle, _child: &mut Child) -> Result<String> {
+async fn run_inner(app: &AppHandle, _child: &mut Child, cookie_domain: &str) -> Result<String> {
     // Wait for CDP HTTP to come up
     let http = format!("http://127.0.0.1:{CDP_PORT}");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
@@ -239,18 +285,37 @@ async fn run_inner(app: &AppHandle, _child: &mut Child) -> Result<String> {
         ).await;
         if let Ok(result) = cookies_result {
             if let Some(cookies) = result.get("cookies").and_then(|x| x.as_array()) {
-                for c in cookies {
-                    let name = c.get("name").and_then(|x| x.as_str()).unwrap_or("");
-                    let domain = c.get("domain").and_then(|x| x.as_str()).unwrap_or("");
-                    if name == "sessionKey" && domain.ends_with("claude.ai") {
-                        if let Some(v) = c.get("value").and_then(|x| x.as_str()) {
-                            let _ = app.emit("auth-progress", json!({"stage": "extracting"}));
-                            return Ok(v.to_string());
-                        }
-                    }
+                if let Some(v) = session_key_for(cookies, cookie_domain) {
+                    let _ = app.emit("auth-progress", json!({"stage": "extracting"}));
+                    return Ok(v);
                 }
             }
         }
         sleep(Duration::from_millis(1500)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_two_targets_open_their_own_login_page_and_cookie_domain() {
+        assert_eq!(LoginTarget::CLAUDE_AI.login_url, "https://claude.ai/login");
+        assert_eq!(LoginTarget::CLAUDE_AI.cookie_domain, "claude.ai");
+        assert_eq!(LoginTarget::CONSOLE.login_url, "https://platform.claude.com/login");
+        assert_eq!(LoginTarget::CONSOLE.cookie_domain, "platform.claude.com");
+    }
+
+    #[test]
+    fn the_cookie_is_picked_by_domain_so_one_site_never_yields_the_others_login() {
+        let cookies = vec![
+            json!({"name": "sessionKey", "domain": ".claude.ai", "value": "web-cookie"}),
+            json!({"name": "other", "domain": ".platform.claude.com", "value": "nope"}),
+            json!({"name": "sessionKey", "domain": ".platform.claude.com", "value": "console-cookie"}),
+        ];
+        assert_eq!(session_key_for(&cookies, LoginTarget::CLAUDE_AI.cookie_domain).as_deref(), Some("web-cookie"));
+        assert_eq!(session_key_for(&cookies, LoginTarget::CONSOLE.cookie_domain).as_deref(), Some("console-cookie"));
+        assert_eq!(session_key_for(&cookies[..1], LoginTarget::CONSOLE.cookie_domain), None);
     }
 }
