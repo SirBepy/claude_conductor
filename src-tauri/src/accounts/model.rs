@@ -5,6 +5,20 @@
 
 use serde::{Deserialize, Serialize};
 
+/// How an account bills. `Subscription` is the Pro/Max OAuth login every
+/// account had before this field existed, so it is the serde default: an old
+/// `accounts.json` entry loads unchanged. `ApiCredit` runs a chat on an
+/// `ANTHROPIC_API_KEY` that draws the Max plan's monthly API credit; it has no
+/// OAuth login, so everything that reads `.credentials.json` skips it.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub enum AccountKind {
+    #[default]
+    Subscription,
+    ApiCredit,
+}
+
 /// `id`, `config_dir`, `chrome_profile_dir`, `email`, `org_uuid` and
 /// `created_at` deliberately carry NO `#[serde(default)]`, mirroring
 /// `ProjectConfig`'s own id/path/name/created_at: they are identity or
@@ -50,6 +64,18 @@ pub struct Account {
     /// in.
     #[serde(default)]
     pub fleet_eligible: bool,
+    /// Billing kind. An `ApiCredit` account stores the linked Console
+    /// account's email (empty when unknown) in `email` and the Console org's
+    /// uuid (the membership with capability `api`) in `org_uuid`; both stay
+    /// required strings for the reasons above.
+    #[serde(default)]
+    pub kind: AccountKind,
+}
+
+impl Account {
+    pub fn is_api_credit(&self) -> bool {
+        self.kind == AccountKind::ApiCredit
+    }
 }
 
 /// Turns a free-typed label into a filesystem- and slug-safe identifier used
@@ -110,9 +136,27 @@ mod tests {
             subscription_tier: "claude_max".into(),
             created_at: "2026-07-07T00:00:00Z".into(),
             fleet_eligible: false,
+            kind: AccountKind::Subscription,
         };
         let raw = serde_json::to_string(&a).unwrap();
         let back: Account = serde_json::from_str(&raw).unwrap();
         assert_eq!(a, back);
+    }
+
+    #[test]
+    fn account_without_kind_loads_as_subscription() {
+        // An accounts.json entry written before `kind` existed.
+        let raw = r##"{"id":"id-1","label":"Personal","colour":"#fff","icon":"user",
+            "config_dir":"C:/home/.claude-personal","chrome_profile_dir":"C:/x/id-1",
+            "email":"a@example.com","org_uuid":"org-1","created_at":"2026-07-07T00:00:00Z"}"##;
+        let a: Account = serde_json::from_str(raw).unwrap();
+        assert_eq!(a.kind, AccountKind::Subscription);
+        assert!(!a.is_api_credit());
+    }
+
+    #[test]
+    fn account_kind_serializes_snake_case() {
+        assert_eq!(serde_json::to_string(&AccountKind::ApiCredit).unwrap(), "\"api_credit\"");
+        assert_eq!(serde_json::to_string(&AccountKind::Subscription).unwrap(), "\"subscription\"");
     }
 }

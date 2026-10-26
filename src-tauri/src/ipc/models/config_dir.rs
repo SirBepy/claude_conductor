@@ -25,6 +25,10 @@ fn config_dir_from_resolution(
 ) -> Option<PathBuf> {
     use crate::accounts::AccountResolveError;
     match resolved {
+        // The probe asks `claude auth status` / the OAuth API about this dir's
+        // login, which an API-credit account does not have. Fail open, like
+        // "no account", instead of reporting it as needing re-login.
+        Ok(account) if account.is_api_credit() => None,
         Ok(account) => Some(account.config_dir),
         Err(AccountResolveError::NoAccounts) => home_claude_dir(),
         Err(_) => None,
@@ -50,6 +54,7 @@ mod tests {
             subscription_tier: "claude_max".into(),
             created_at: "2026-07-07T00:00:00Z".into(),
             fleet_eligible: false,
+            kind: crate::accounts::AccountKind::Subscription,
         }
     }
 
@@ -61,6 +66,13 @@ mod tests {
     fn resolved_account_probes_its_own_dir() {
         let got = config_dir_from_resolution(Ok(acct()), home);
         assert_eq!(got, Some(PathBuf::from("C:/home/.claude-work")));
+    }
+
+    #[test]
+    fn api_credit_account_is_never_probed() {
+        let mut api = acct();
+        api.kind = crate::accounts::AccountKind::ApiCredit;
+        assert_eq!(config_dir_from_resolution(Ok(api), home), None);
     }
 
     #[test]

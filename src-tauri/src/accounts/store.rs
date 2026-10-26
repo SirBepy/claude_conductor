@@ -8,7 +8,7 @@
 //! itself instead of wiping the whole registry (todo 785/787's mechanism,
 //! applied to this sibling).
 
-use super::model::Account;
+use super::model::{Account, AccountKind};
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -66,21 +66,28 @@ pub fn save(path: &Path, accounts: &[Account]) -> Result<()> {
     Ok(())
 }
 
-/// Finds an existing account whose `org_uuid` or `email` (case-insensitive)
-/// matches, excluding an account whose `config_dir` equals `exclude_config_dir`
-/// (adopting a dir back into its own account is not a duplicate). Used by the
-/// wizard's dedup step: "already added as <label>".
+/// Finds an existing account of the same `kind` whose `org_uuid` or `email`
+/// (case-insensitive) matches, excluding an account whose `config_dir` equals
+/// `exclude_config_dir` (adopting a dir back into its own account is not a
+/// duplicate). Used by the wizard's dedup step: "already added as <label>".
+/// Kinds never collide: an `ApiCredit` account shares its owner's email with
+/// their Subscription account by design. An empty email matches nothing, since
+/// an `ApiCredit` account stores "" when the Console email is unknown.
 pub fn find_duplicate<'a>(
     accounts: &'a [Account],
+    kind: AccountKind,
     org_uuid: &str,
     email: &str,
     exclude_config_dir: Option<&std::path::Path>,
 ) -> Option<&'a Account> {
     accounts.iter().find(|a| {
+        if a.kind != kind {
+            return false;
+        }
         if Some(a.config_dir.as_path()) == exclude_config_dir {
             return false;
         }
-        a.org_uuid == org_uuid || a.email.eq_ignore_ascii_case(email)
+        a.org_uuid == org_uuid || (!email.is_empty() && a.email.eq_ignore_ascii_case(email))
     })
 }
 
@@ -102,6 +109,7 @@ mod tests {
             subscription_tier: "claude_pro".into(),
             created_at: "2026-07-07T00:00:00Z".into(),
             fleet_eligible: false,
+            kind: crate::accounts::AccountKind::Subscription,
         }
     }
 
@@ -178,21 +186,21 @@ mod tests {
     #[test]
     fn find_duplicate_matches_org_uuid() {
         let accounts = vec![acct("a1", "org-1", "a@x.com", "C:/a")];
-        let dup = find_duplicate(&accounts, "org-1", "different@x.com", None);
+        let dup = find_duplicate(&accounts, AccountKind::Subscription, "org-1", "different@x.com", None);
         assert_eq!(dup.unwrap().id, "a1");
     }
 
     #[test]
     fn find_duplicate_matches_email_case_insensitive() {
         let accounts = vec![acct("a1", "org-1", "a@x.com", "C:/a")];
-        let dup = find_duplicate(&accounts, "org-other", "A@X.COM", None);
+        let dup = find_duplicate(&accounts, AccountKind::Subscription, "org-other", "A@X.COM", None);
         assert_eq!(dup.unwrap().id, "a1");
     }
 
     #[test]
     fn find_duplicate_none_when_no_match() {
         let accounts = vec![acct("a1", "org-1", "a@x.com", "C:/a")];
-        assert!(find_duplicate(&accounts, "org-2", "b@x.com", None).is_none());
+        assert!(find_duplicate(&accounts, AccountKind::Subscription, "org-2", "b@x.com", None).is_none());
     }
 
     #[test]
@@ -200,10 +208,49 @@ mod tests {
         let accounts = vec![acct("a1", "org-1", "a@x.com", "C:/a")];
         let dup = find_duplicate(
             &accounts,
+            AccountKind::Subscription,
             "org-1",
             "a@x.com",
             Some(std::path::Path::new("C:/a")),
         );
         assert!(dup.is_none(), "adopting a dir back into its own account is not a duplicate");
+    }
+
+    #[test]
+    fn find_duplicate_does_not_cross_kinds() {
+        let mut api = acct("api", "console-org", "a@x.com", "C:/api");
+        api.kind = AccountKind::ApiCredit;
+        let sub = acct("sub", "org-1", "a@x.com", "C:/sub");
+        let accounts = vec![api, sub];
+        // A Subscription add with the Console owner's email is not a dupe of
+        // the ApiCredit account, only of the Subscription one.
+        let dup = find_duplicate(&accounts, AccountKind::Subscription, "org-new", "a@x.com", None);
+        assert_eq!(dup.unwrap().id, "sub");
+        let only_api = vec![accounts[0].clone()];
+        assert!(find_duplicate(&only_api, AccountKind::Subscription, "console-org", "a@x.com", None).is_none());
+        assert_eq!(
+            find_duplicate(&only_api, AccountKind::ApiCredit, "console-org", "z@x.com", None).unwrap().id,
+            "api"
+        );
+    }
+
+    #[test]
+    fn find_duplicate_empty_email_matches_nothing() {
+        let mut a = acct("api1", "console-org-1", "", "C:/api1");
+        a.kind = AccountKind::ApiCredit;
+        let accounts = vec![a];
+        assert!(find_duplicate(&accounts, AccountKind::ApiCredit, "console-org-2", "", None).is_none());
+    }
+
+    #[test]
+    fn account_without_kind_in_accounts_json_loads_as_subscription() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("accounts.json");
+        let mut v = serde_json::to_value(acct("a1", "org-1", "a@x.com", "C:/a")).unwrap();
+        v.as_object_mut().unwrap().remove("kind");
+        std::fs::write(&path, serde_json::to_string(&serde_json::json!([v])).unwrap()).unwrap();
+        let loaded = load(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].kind, AccountKind::Subscription);
     }
 }

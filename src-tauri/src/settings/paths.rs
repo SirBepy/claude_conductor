@@ -275,6 +275,19 @@ pub fn account_session_file(account_id: &str) -> Result<PathBuf> {
     Ok(data_dir()?.join(format!("session-{account_id}.txt")))
 }
 
+/// Per-account Console API key (`sk-ant-...`), DPAPI-wrapped like the
+/// sessionKey. Only an `ApiCredit` account has one.
+pub fn account_api_key_file(account_id: &str) -> Result<PathBuf> {
+    Ok(data_dir()?.join(format!("apikey-{account_id}.txt")))
+}
+
+/// Per-account platform.claude.com sessionKey. The claude.ai cookie in
+/// `account_session_file` is rejected (403) by the Console org, so an
+/// `ApiCredit` account's balance reads need their own login.
+pub fn account_console_session_file(account_id: &str) -> Result<PathBuf> {
+    Ok(data_dir()?.join(format!("console-session-{account_id}.txt")))
+}
+
 /// Per-account chrome profile dir for the web-cookie login flow (avoids
 /// cookie collisions between accounts). Keyed by account id, mirroring
 /// `account_session_file`.

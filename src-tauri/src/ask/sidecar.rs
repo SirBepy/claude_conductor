@@ -140,6 +140,7 @@ pub async fn ask(
 ) -> Result<AskAnswer> {
     let account = crate::accounts::resolve_default_account()
         .map_err(|e| anyhow!("no account configured for Ask: {e}"))?;
+    crate::accounts::refuse_api_credit(&account, "Ask").map_err(|e| anyhow!("{e}"))?;
     crate::accounts::drift::check(&account).map_err(|e| anyhow!("{e}"))?;
     crate::accounts::credentials::check_now(&account).map_err(|e| anyhow!("{e}"))?;
     let spawn_env = crate::accounts::env::SpawnEnv::for_account(&account.config_dir);

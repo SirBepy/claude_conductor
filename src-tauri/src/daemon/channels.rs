@@ -60,6 +60,7 @@ pub fn start_channel(state: Arc<DaemonState>, project_id: String) -> Result<(), 
     // No spawn path may fall back to `~/.claude`, so an unresolvable default
     // refuses the spawn instead.
     let account = crate::accounts::resolve_default_account().map_err(|e| e.to_string())?;
+    crate::accounts::refuse_api_credit(&account, "a channel")?;
     let spawn_env = crate::accounts::env::SpawnEnv::for_account(&account.config_dir);
 
     state.channels.put(ChannelSnapshot {

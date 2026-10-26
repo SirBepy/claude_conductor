@@ -5,6 +5,7 @@
 //! milestone's spec).
 
 pub mod model;
+pub mod api_credit;
 pub mod store;
 pub mod identity;
 pub mod keychain;
@@ -53,6 +54,10 @@ pub(crate) fn load_registry() -> Vec<model::Account> {
 /// Pure matching logic behind [`resolve_account`], split out so it is
 /// testable without touching disk: `account_id` if given, else
 /// `default_account_id`, looked up in an already-loaded registry slice.
+///
+/// An `ApiCredit` account is only ever returned for an explicit `account_id`.
+/// A `default_account_id` that points at one is ignored, exactly as if unset:
+/// it bills API credit, so nothing may reach it by falling through to a default.
 fn pick_account(
     accounts: &[model::Account],
     account_id: Option<&str>,
@@ -61,6 +66,7 @@ fn pick_account(
     if accounts.is_empty() {
         return Err(AccountResolveError::NoAccounts);
     }
+    let default_account_id = default_account_id.filter(|id| !is_api_credit_id(accounts, id));
     let want = account_id
         .or(default_account_id)
         .ok_or(AccountResolveError::NoDefault)?;
@@ -69,6 +75,49 @@ fn pick_account(
         .find(|a| a.id == want)
         .cloned()
         .ok_or_else(|| AccountResolveError::NotFound(want.to_string()))
+}
+
+fn is_api_credit_id(accounts: &[model::Account], id: &str) -> bool {
+    accounts.iter().any(|a| a.id == id && a.is_api_credit())
+}
+
+/// `id` unchanged unless it names an `ApiCredit` account in the registry, in
+/// which case `None`. For an id that arrives from a default or a project
+/// binding (both can be set to anything), never from an explicit pick.
+pub fn without_api_credit(id: Option<String>) -> Option<String> {
+    without_api_credit_in(&load_registry(), id)
+}
+
+/// [`without_api_credit`] against an already-loaded registry slice.
+pub fn without_api_credit_in(accounts: &[model::Account], id: Option<String>) -> Option<String> {
+    id.filter(|id| !is_api_credit_id(accounts, id))
+}
+
+/// Whether `id` may become `Settings.default_account_id`: it must exist, and
+/// must not be an `ApiCredit` account (a default is what every unattributed
+/// spawn resolves to, and those must stay on the subscription).
+pub fn validate_default_account(accounts: &[model::Account], id: &str) -> Result<(), String> {
+    match accounts.iter().find(|a| a.id == id) {
+        None => Err(format!("no account with id {id}")),
+        Some(a) if a.is_api_credit() => Err(format!(
+            "\"{}\" is an API-credit account and cannot be the default: chats only use it when picked explicitly",
+            a.label
+        )),
+        Some(_) => Ok(()),
+    }
+}
+
+/// Refuses an `ApiCredit` account for a spawn that is not a chat on it (the
+/// sidecars, channels, the model probe), which stay subscription-only. `what`
+/// names the caller in the error.
+pub fn refuse_api_credit(account: &model::Account, what: &str) -> Result<(), String> {
+    if account.is_api_credit() {
+        return Err(format!(
+            "{what} cannot run on the API-credit account \"{}\": it only runs on subscription accounts",
+            account.label
+        ));
+    }
+    Ok(())
 }
 
 /// Resolves the account a spawn should run under: `account_id` if given,
@@ -101,12 +150,17 @@ pub fn resolve_default_account() -> Result<model::Account, AccountResolveError> 
 /// account available, matching v1's spawn-under-default behavior exactly.
 /// Order is registry order with the default account appended last if it
 /// wasn't already present (order has no ranking significance; `pick_from_pool`
-/// below re-ranks by headroom).
+/// below re-ranks by headroom). An `ApiCredit` account is never in the pool,
+/// opted in or not: it must be named explicitly.
 fn eligible_pool(accounts: &[model::Account], default_account_id: Option<&str>) -> Vec<model::Account> {
-    let mut pool: Vec<model::Account> = accounts.iter().filter(|a| a.fleet_eligible).cloned().collect();
+    let mut pool: Vec<model::Account> = accounts
+        .iter()
+        .filter(|a| a.fleet_eligible && !a.is_api_credit())
+        .cloned()
+        .collect();
     if let Some(default_id) = default_account_id {
         if !pool.iter().any(|a| a.id == default_id) {
-            if let Some(default_acct) = accounts.iter().find(|a| a.id == default_id) {
+            if let Some(default_acct) = accounts.iter().find(|a| a.id == default_id && !a.is_api_credit()) {
                 pool.push(default_acct.clone());
             }
         }
@@ -185,6 +239,7 @@ mod tests {
             subscription_tier: "claude_max".into(),
             created_at: "2026-07-07T00:00:00Z".into(),
             fleet_eligible: false,
+            kind: crate::accounts::AccountKind::Subscription,
         }
     }
 
@@ -318,5 +373,65 @@ mod tests {
         let util = HashMap::new();
         let got = pick_worker_account_pure(&accounts, Some("a"), &util);
         assert_eq!(got.as_deref(), Some("a"));
+    }
+
+    // ── API-credit accounts never resolve implicitly ───────────────────────
+
+    fn api_acct(id: &str) -> model::Account {
+        let mut a = acct(id);
+        a.kind = model::AccountKind::ApiCredit;
+        a
+    }
+
+    #[test]
+    fn pick_account_ignores_an_api_credit_default() {
+        let accounts = vec![acct("a"), api_acct("api")];
+        let err = pick_account(&accounts, None, Some("api")).unwrap_err();
+        assert_eq!(err, AccountResolveError::NoDefault, "an ApiCredit default is treated as unset");
+    }
+
+    #[test]
+    fn pick_account_returns_api_credit_only_for_an_explicit_id() {
+        let accounts = vec![acct("a"), api_acct("api")];
+        let got = pick_account(&accounts, Some("api"), Some("a")).unwrap();
+        assert_eq!(got.id, "api");
+        // The explicit id wins, and the subscription default is untouched.
+        assert_eq!(pick_account(&accounts, None, Some("a")).unwrap().id, "a");
+    }
+
+    #[test]
+    fn default_account_validation_refuses_api_credit_and_unknown_ids() {
+        let accounts = vec![acct("a"), api_acct("api")];
+        assert!(validate_default_account(&accounts, "a").is_ok());
+        assert!(validate_default_account(&accounts, "api").unwrap_err().contains("API-credit"));
+        assert!(validate_default_account(&accounts, "ghost").unwrap_err().contains("no account"));
+    }
+
+    #[test]
+    fn without_api_credit_drops_only_an_api_credit_id() {
+        let accounts = vec![acct("a"), api_acct("api")];
+        assert_eq!(without_api_credit_in(&accounts, Some("a".into())).as_deref(), Some("a"));
+        assert_eq!(without_api_credit_in(&accounts, Some("api".into())), None);
+        assert_eq!(without_api_credit_in(&accounts, None), None);
+        // An id the registry does not know passes through, so the spawn's own
+        // NotFound error still names it.
+        assert_eq!(without_api_credit_in(&accounts, Some("ghost".into())).as_deref(), Some("ghost"));
+    }
+
+    #[test]
+    fn refuse_api_credit_only_refuses_that_kind() {
+        assert!(refuse_api_credit(&acct("a"), "Ask").is_ok());
+        let err = refuse_api_credit(&api_acct("api"), "Ask").unwrap_err();
+        assert!(err.contains("Ask") && err.contains("api"), "{err}");
+    }
+
+    #[test]
+    fn fleet_pool_never_contains_an_api_credit_account() {
+        let mut opted_in = api_acct("api");
+        opted_in.fleet_eligible = true;
+        let accounts = vec![opted_in, api_acct("api2")];
+        assert!(eligible_pool(&accounts, None).is_empty());
+        assert!(eligible_pool(&accounts, Some("api2")).is_empty());
+        assert!(!is_in_eligible_pool(&accounts, Some("api2"), "api"));
     }
 }

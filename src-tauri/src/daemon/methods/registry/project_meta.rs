@@ -85,9 +85,11 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 reject_unknown(&state, &p.cwd)?;
                 let projects = state.settings.snapshot().projects;
-                Ok(json!(crate::settings::identity::resolve_effective_preferred_account_id(
-                    &projects,
-                    std::path::Path::new(&p.cwd),
+                Ok(json!(crate::accounts::without_api_credit(
+                    crate::settings::identity::resolve_effective_preferred_account_id(
+                        &projects,
+                        std::path::Path::new(&p.cwd),
+                    ),
                 )))
             }
         });

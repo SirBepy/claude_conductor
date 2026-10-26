@@ -173,6 +173,33 @@ pub async fn fetch_web_account(base_url: &str, session_key: &str)
     resp.json().await.context("parsing account identity").map_err(ScrapeError::Other)
 }
 
+/// `GET /api/organizations/{org_uuid}/prepaid/credits`: the prepaid API-credit
+/// balance that claude.ai's Billing page and the Console's Credits panel both
+/// show (route found in the claude.ai web bundle, todo 1375). There is no
+/// public API for it. Returned raw until the live shape is pinned.
+pub async fn fetch_prepaid_credits(base_url: &str, session_key: &str, org_uuid: &str)
+    -> Result<serde_json::Value, ScrapeError>
+{
+    let client = http_client()?;
+    let url = format!("{base_url}/api/organizations/{org_uuid}/prepaid/credits");
+    let resp = client.get(&url)
+        .header("cookie", format!("sessionKey={session_key}"))
+        .header("accept", "application/json")
+        .header("referer", format!("{base_url}/settings/billing"))
+        .send().await
+        .context("GET prepaid/credits")
+        .map_err(ScrapeError::Other)?;
+
+    let status = resp.status();
+    if status.as_u16() == 401 { return Err(ScrapeError::Unauthorized); }
+    if status.as_u16() == 403 { return Err(ScrapeError::Forbidden); }
+    if !status.is_success() {
+        return Err(ScrapeError::Other(anyhow!("prepaid credits HTTP {}", status.as_u16())));
+    }
+
+    resp.json().await.context("parsing prepaid credits").map_err(ScrapeError::Other)
+}
+
 /// Fetches current usage, always scraping the FIRST org in the session's org
 /// list. This is the legacy single-cookie behavior (`docs/multi-account/
 /// 03-per-account-usage.md`'s migration bridge): correct only when the
@@ -249,6 +276,67 @@ pub async fn fetch_usage_for_org(base_url: &str, session_key: &str, org_uuid: Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn prepaid_credits_hits_the_org_route_and_maps_403() {
+        let mut server = mockito::Server::new_async().await;
+        let _ok = server.mock("GET", "/api/organizations/ORG-API/prepaid/credits")
+            .match_header("cookie", "sessionKey=sk-abc")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"amount": 20416, "currency": "USD"}"#)
+            .create_async().await;
+        let _denied = server.mock("GET", "/api/organizations/ORG-X/prepaid/credits")
+            .with_status(403)
+            .create_async().await;
+
+        let v = fetch_prepaid_credits(&server.url(), "sk-abc", "ORG-API").await.unwrap();
+        assert_eq!(v["amount"], 20416);
+        assert!(matches!(
+            fetch_prepaid_credits(&server.url(), "sk-abc", "ORG-X").await,
+            Err(ScrapeError::Forbidden)
+        ));
+    }
+
+    /// Live, read-only: prints every membership org's prepaid-credit response
+    /// for the stored session named by `CC_LIVE_SESSION_FILE`. Run with
+    /// `cargo test --lib -- --ignored live_prepaid_credits --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_prepaid_credits() {
+        let path = std::env::var("CC_LIVE_SESSION_FILE").expect("set CC_LIVE_SESSION_FILE");
+        let stored = std::fs::read_to_string(path).unwrap();
+        // Accepts a stored session file or a request_secret `KEY=value` file.
+        let stored = stored.trim();
+        let stored = stored.strip_prefix("CONSOLE_SESSION_KEY=").unwrap_or(stored);
+        let key = crate::util::secret_store::unprotect(stored).unwrap();
+        let account = fetch_web_account("https://claude.ai", key.trim()).await.unwrap();
+        for m in &account.memberships {
+            let org = &m.organization;
+            println!("ORG {} caps={:?}", org.uuid, org.capabilities);
+            for path in ["spend_limits", "current_spend"] {
+                let resp = http_client().unwrap()
+                    .get(format!("https://platform.claude.com/api/organizations/{}/{path}", org.uuid))
+                    .header("cookie", format!("sessionKey={}", key.trim()))
+                    .header("accept", "application/json")
+                    .send().await.unwrap();
+                println!("  {path}: {} {}", resp.status(), resp.text().await.unwrap_or_default());
+            }
+            for base in ["https://claude.ai", "https://platform.claude.com"] {
+                match fetch_prepaid_credits(base, key.trim(), &org.uuid).await {
+                    Ok(v) => println!("  {base} credits: {v}"),
+                    Err(e) => {
+                        let body = http_client().unwrap()
+                            .get(format!("{base}/api/organizations/{}/prepaid/credits", org.uuid))
+                            .header("cookie", format!("sessionKey={}", key.trim()))
+                            .header("accept", "application/json")
+                            .send().await.unwrap().text().await.unwrap_or_default();
+                        println!("  {base} credits error: {e} body={body}");
+                    }
+                }
+            }
+        }
+    }
 
     #[tokio::test]
     async fn happy_path_returns_snapshot() {

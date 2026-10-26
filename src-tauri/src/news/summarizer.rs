@@ -84,6 +84,7 @@ pub async fn generate_summary_streaming<F: FnMut(&str)>(
         log::info!("news summarizer: skipping - {e}");
         anyhow!("no account configured for news summarization: {e}")
     })?;
+    crate::accounts::refuse_api_credit(&account, "news summarization").map_err(|e| anyhow!("{e}"))?;
     // Same drift-then-credentials-then-billing order as daemon::lifecycle's
     // spawn_session: drift owns the NotLoggedIn message, so it must run first.
     crate::accounts::drift::check(&account).map_err(|e| {

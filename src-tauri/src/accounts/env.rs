@@ -21,11 +21,27 @@ pub const SCRUBBED_ENV_VARS: &[&str] = &[
 /// (`CLAUDE_CONFIG_DIR`) plus the scrub list. Built once per spawn and
 /// applied identically whether the spawn goes through `Command::env`
 /// (tokio/std) or a raw Windows `CreateProcessW` env block.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SpawnEnv {
     pub set: Vec<(String, String)>,
     pub unset: Vec<String>,
 }
+
+/// Hand-written so a `{:?}` of a spawn env (it lands in logs and assert
+/// failures) never prints an injected API key.
+impl std::fmt::Debug for SpawnEnv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let set: Vec<(&str, &str)> = self
+            .set
+            .iter()
+            .map(|(k, v)| (k.as_str(), if k == API_KEY_ENV { "<redacted>" } else { v.as_str() }))
+            .collect();
+        f.debug_struct("SpawnEnv").field("set", &set).field("unset", &self.unset).finish()
+    }
+}
+
+/// The one var an `ApiCredit` account's spawn injects instead of scrubbing.
+pub const API_KEY_ENV: &str = "ANTHROPIC_API_KEY";
 
 impl SpawnEnv {
     /// Builds the env mutation for spawning under `account_config_dir`.
@@ -45,6 +61,18 @@ impl SpawnEnv {
             ],
             unset: SCRUBBED_ENV_VARS.iter().map(|s| s.to_string()).collect(),
         }
+    }
+
+    /// The env for a chat on an `ApiCredit` account: everything
+    /// [`Self::for_account`] does, except `ANTHROPIC_API_KEY` is set to
+    /// `api_key` rather than scrubbed. `ANTHROPIC_AUTH_TOKEN` and
+    /// `CLAUDE_CODE_OAUTH_TOKEN` are still removed, so the key is the only
+    /// credential the child can see.
+    pub fn for_api_credit_account(account_config_dir: &Path, api_key: &str) -> Self {
+        let mut env = Self::for_account(account_config_dir);
+        env.unset.retain(|k| k != API_KEY_ENV);
+        env.set.push((API_KEY_ENV.to_string(), api_key.to_string()));
+        env
     }
 
     /// Applies `set`/`unset` to a `tokio::process::Command`.
@@ -159,6 +187,45 @@ mod tests {
         let ambient = vec![("CLAUDE_CONFIG_DIR".to_string(), "/home/.claude-stale".to_string())];
         let eff = env.effective_env(ambient);
         assert_eq!(eff.get("CLAUDE_CONFIG_DIR").map(String::as_str), Some("/home/.claude-work"));
+    }
+
+    #[test]
+    fn for_account_never_injects_an_api_key() {
+        // The Subscription env stays the scrub list plus the config dir: the
+        // ApiCredit variant must not leak into it.
+        let env = SpawnEnv::for_account(&PathBuf::from("C:/home/.claude-work"));
+        assert!(!env.set.iter().any(|(k, _)| k == API_KEY_ENV));
+        assert!(env.unset.iter().any(|k| k == API_KEY_ENV));
+    }
+
+    #[test]
+    fn api_credit_env_injects_the_key_and_still_scrubs_the_other_tokens() {
+        let env = SpawnEnv::for_api_credit_account(&PathBuf::from("C:/home/.claude-api"), "sk-ant-real");
+        assert!(env.set.contains(&("ANTHROPIC_API_KEY".to_string(), "sk-ant-real".to_string())));
+        assert!(env.set.contains(&("CLAUDE_CONFIG_DIR".to_string(), "C:/home/.claude-api".to_string())));
+        assert!(!env.unset.contains(&"ANTHROPIC_API_KEY".to_string()));
+        assert!(env.unset.contains(&"ANTHROPIC_AUTH_TOKEN".to_string()));
+        assert!(env.unset.contains(&"CLAUDE_CODE_OAUTH_TOKEN".to_string()));
+
+        let ambient = vec![
+            ("ANTHROPIC_API_KEY".to_string(), "sk-stray".to_string()),
+            ("ANTHROPIC_AUTH_TOKEN".to_string(), "proxy".to_string()),
+            ("CLAUDE_CODE_OAUTH_TOKEN".to_string(), "oat".to_string()),
+        ];
+        let eff = env.effective_env(ambient);
+        assert_eq!(
+            eff.get("ANTHROPIC_API_KEY").map(String::as_str),
+            Some("sk-ant-real"),
+            "the account's key beats an ambient one"
+        );
+        assert!(!eff.contains_key("ANTHROPIC_AUTH_TOKEN"));
+        assert!(!eff.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+    }
+
+    #[test]
+    fn debug_output_redacts_the_api_key() {
+        let env = SpawnEnv::for_api_credit_account(&PathBuf::from("C:/home/.claude-api"), "sk-ant-secret");
+        assert!(!format!("{env:?}").contains("sk-ant-secret"));
     }
 
     #[test]

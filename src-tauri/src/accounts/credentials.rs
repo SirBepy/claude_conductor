@@ -86,6 +86,7 @@ mod tests {
             subscription_tier: "claude_max".into(),
             created_at: "2026-07-08T00:00:00Z".into(),
             fleet_eligible: false,
+            kind: crate::accounts::AccountKind::Subscription,
         }
     }
 

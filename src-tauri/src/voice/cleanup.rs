@@ -44,6 +44,7 @@ pub async fn clean_transcript(raw: &str) -> Result<String> {
 
     let account = crate::accounts::resolve_default_account()
         .map_err(|e| anyhow!("no account configured for dictation cleanup: {e}"))?;
+    crate::accounts::refuse_api_credit(&account, "dictation cleanup").map_err(|e| anyhow!("{e}"))?;
     crate::accounts::drift::check(&account).map_err(|e| anyhow!("{e}"))?;
     crate::accounts::credentials::check_now(&account).map_err(|e| anyhow!("{e}"))?;
     let spawn_env = crate::accounts::env::SpawnEnv::for_account(&account.config_dir);
