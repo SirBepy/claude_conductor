@@ -73,6 +73,23 @@ Windows and Apple Silicon macOS are the released platforms. Intel macOS and Linu
 
 </details>
 
+## 🪄 Things a terminal can't do
+
+<table>
+  <tr>
+    <td width="50%" valign="top"><h3>🔔 Your phone buzzes</h3>When a chat needs you, your phone gets a push notification. The chat's content never goes through the relay.</td>
+    <td width="50%" valign="top"><h3>🖥️ Chats on your other PC</h3>Start a chat on a paired machine from the new-chat picker, or let a chat spawn one there. It shows up in your list like any other.</td>
+  </tr>
+  <tr>
+    <td valign="top"><h3>🤝 Chats talk to each other</h3>Chats see what other chats are doing, leave notes for them, and message a chat on another machine directly.</td>
+    <td valign="top"><h3>🗳️ Answers in one click</h3>Claude's questions arrive as cards, with the recommended, long-term and short-term picks marked.</td>
+  </tr>
+  <tr>
+    <td valign="top"><h3>🖼️ Live previews</h3>Claude renders mockups, charts and diagrams in a panel beside the chat instead of describing them.</td>
+    <td valign="top"><h3>📝 Drafts panel</h3>A Slack reply or an email Claude writes for you lands in Drafts, ready to edit and copy.</td>
+  </tr>
+</table>
+
 ## 📸 Screenshots
 
 <p align="center">
@@ -83,11 +100,14 @@ Windows and Apple Silicon macOS are the released platforms. Intel macOS and Linu
 <table>
   <tr>
     <td width="50%" valign="top"><img src="docs/readme/dashboard.png" alt="Project dashboard with chats, todos, ship state and usage charts"><br><sub>🗂️ Project dashboard</sub></td>
-    <td width="50%" valign="top"><img src="docs/readme/phone.png" alt="Android app: chat list and a chat"><br><sub>📱 The same chats on your phone</sub></td>
-  </tr>
-  <tr>
     <td width="50%" valign="top"><img src="docs/readme/code-mode.png" alt="Code mode showing a side-by-side diff"><br><sub>🧑‍💻 Code mode: review before you push</sub></td>
-    <td width="50%" valign="top"><img src="docs/readme/usage.png" alt="Usage rings for two accounts, 5-hour and weekly"><br><sub>📊 Usage for every account</sub></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="35%" valign="top"><img src="docs/readme/usage.png" alt="Home dashboard: usage rings for two accounts, 5-hour and weekly" width="100%"><br><sub>📊 Home: usage for every account</sub></td>
+    <td width="65%" valign="top"><img src="docs/readme/phone.png" alt="Android app: chat list and a chat" width="100%"><br><sub>📱 The same chats on your phone</sub></td>
   </tr>
 </table>
 
