@@ -98,9 +98,3 @@
   flex: 1;
   max-width: 220px;
 }
-
-/* The push toggle is the only .kit-row in its wrapper, so the kit's
-   last-of-type rule drops its divider; every other captioned row keeps one. */
-#push-web-rows > .kit-row {
-  border-bottom: 1px solid var(--color-border);
-}
