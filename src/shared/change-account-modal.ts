@@ -14,7 +14,7 @@ import "./modal.css";
 import { api } from "./api";
 import type { Account } from "./api";
 import { escapeHtml } from "./escape-html";
-import { accountChipHtml, accountIconBadgeHtml, attachChipKeyboardActivation, isApiCreditAccount } from "./account-chip";
+import { accountChipHtml, accountIconBadgeHtml, apiCreditLinkedName, attachChipKeyboardActivation, isApiCreditAccount, linkedPlanAccount } from "./account-chip";
 import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
 
 /** Trailing "API credit" tag inside a chip, so a pick that bills the Max
@@ -22,6 +22,13 @@ import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
  * key icon already comes from `accountIconBadgeHtml`. */
 function apiCreditHintHtml(a: Account): string {
   return isApiCreditAccount(a) ? `<span class="cam-credit-hint">API credit</span>` : "";
+}
+
+/** Tooltip naming the plan an API-credit chip draws on ("API credit · personal");
+ * nothing for a subscription chip or an unlinked credit one. */
+function creditTitleAttr(a: Account, accounts: readonly Account[]): string {
+  if (!isApiCreditAccount(a) || !linkedPlanAccount(a, accounts)) return "";
+  return ` title="${escapeHtml(apiCreditLinkedName(a, accounts))}"`;
 }
 
 /** The `.cc-modal-body` contents for the account list, split out so the
@@ -34,11 +41,11 @@ export function renderAccountListBodyHtml(accounts: Account[], currentId: string
   if (accounts.length === 0) return `<div class="cc-modal-empty">No Claude accounts configured yet.</div>`;
   if (accounts.length === 1) {
     const a = accounts[0]!;
-    return `<div class="cam-account-list"><span class="account-chip sel cam-acc-static" style="--acc:${escapeHtml(a.colour)}">${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}</span></div>`;
+    return `<div class="cam-account-list"><span class="account-chip sel cam-acc-static" style="--acc:${escapeHtml(a.colour)}"${creditTitleAttr(a, accounts)}>${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}</span></div>`;
   }
   return `<div class="cam-account-list">${accounts
     .map((a: Account) =>
-      accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"`).replace(
+      accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"${creditTitleAttr(a, accounts)}`).replace(
         /<\/span>$/,
         `${apiCreditHintHtml(a)}</span>`,
       ),

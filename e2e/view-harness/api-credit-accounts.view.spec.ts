@@ -13,7 +13,7 @@ const SUB = {
 };
 const CREDIT = {
   id: "acct-credit", label: "API credit", colour: "#10b981", icon: "user", config_dir: "", chrome_profile_dir: "",
-  email: "", org_uuid: "console-org", subscription_tier: "", created_at: "2026-10-26T00:00:00Z",
+  email: "joe@example.com", org_uuid: "console-org", subscription_tier: "", created_at: "2026-10-26T00:00:00Z",
   fleet_eligible: false, kind: "api_credit",
 };
 const STATUS = {
@@ -43,7 +43,53 @@ test.describe("view-harness / API-credit accounts", () => {
     await expect(row.locator(".account-icon-badge .ph-key")).toHaveCount(1);
     await expect(row.locator(".acc-menu-connect-console")).toHaveCount(1);
     await expect(row.locator(".acc-menu-reauth, .acc-menu-default, .acc-menu-add-cookie")).toHaveCount(0);
-    await expect(page.locator("#acc-add-credit-btn")).toBeVisible();
+    await expect(row.locator(".acc-linked")).toHaveText("Linked to Personal");
+    await expect(page.locator("#acc-add-credit-btn")).toHaveCount(0);
+    await expect(page.locator("#acc-add-btn")).toBeVisible();
+  });
+
+  test("Add account asks which kind first, then continues into the API-credit form", async ({ page }) => {
+    await mountView(page, {
+      view: "settings-accounts",
+      invoke: {
+        list_accounts: [SUB],
+        get_settings: { theme: "void" },
+        get_auth_state_map: {},
+        get_account_identity: { oauthAccount: null, tokenExpiresAt: null, refreshTokenExpiresAt: null, hasCookie: false, drift: false, driftMessage: null },
+        get_terminal_identity: null,
+        list_api_keys: [],
+        get_api_credit_status: {},
+      },
+    });
+    await expect(page.locator("#acc-add-btn")).toHaveCount(1);
+    await page.locator("#acc-add-btn").click();
+    const card = page.locator(".aac-kind-card");
+    await expect(card).toBeVisible();
+    await expect(card.locator(".aac-kind-choice")).toHaveCount(2);
+    await expect(card.locator('[data-kind="subscription"]')).toContainText("Claude plan");
+    await expect(card.locator('[data-kind="api_credit"]')).toContainText("API credit");
+    await card.locator('[data-kind="api_credit"]').click();
+    await expect(page.locator("#aacm-label")).toBeVisible();
+    await expect(page.locator("#aacm-key")).toBeVisible();
+  });
+
+  test("Add account > Claude plan continues into the existing wizard", async ({ page }) => {
+    await mountView(page, {
+      view: "settings-accounts",
+      invoke: {
+        list_accounts: [SUB],
+        get_settings: { theme: "void" },
+        get_auth_state_map: {},
+        get_account_identity: { oauthAccount: null, tokenExpiresAt: null, refreshTokenExpiresAt: null, hasCookie: false, drift: false, driftMessage: null },
+        get_terminal_identity: null,
+        list_api_keys: [],
+        get_api_credit_status: {},
+      },
+    });
+    await page.locator("#acc-add-btn").click();
+    await page.locator('.aac-kind-card [data-kind="subscription"]').click();
+    await expect(page.locator("#aaw-name")).toBeVisible();
+    await expect(page.locator(".aac-kind-card")).toHaveCount(0);
   });
 
   test("Settings row names a missing Console login and offers the fix inline", async ({ page }) => {
@@ -85,6 +131,7 @@ test.describe("view-harness / API-credit accounts", () => {
     await expect(page.locator('.dash-acard[data-acc-id="acct-sub"]')).toBeVisible();
     await expect(page.locator('.dash-acard[data-acc-id="acct-credit"]')).toHaveCount(0);
     await expect(page.locator('.dash-credit[data-acc-id="acct-credit"]')).toContainText("$178.71 of $200 left, resets Nov 2");
+    await expect(page.locator('.dash-credit[data-acc-id="acct-credit"] .dash-credit-name')).toHaveText("API credit · Personal");
   });
 
   test("new-chat picker lists the API-credit chip unselected beside the auto-picked subscription", async ({ page }) => {
@@ -98,6 +145,7 @@ test.describe("view-harness / API-credit accounts", () => {
     await expect(overlay).toBeVisible();
     await expect(overlay.locator('.account-chip[data-acc-id="acct-sub"].sel')).toHaveCount(1);
     await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"]')).toHaveCount(1);
+    await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"]')).toHaveAttribute("title", "API credit · Personal");
     await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"].sel')).toHaveCount(0);
     await expect(overlay.locator(".me-confirm")).toBeEnabled();
   });

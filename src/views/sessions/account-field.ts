@@ -6,7 +6,7 @@
 // state object below in its closure and passes it in/out here.
 
 import { escapeHtml } from "../../shared/escape-html";
-import { accountChipHtml, isApiCreditAccount, type AccountLite } from "../../shared/account-chip";
+import { accountChipHtml, apiCreditLinkedName, isApiCreditAccount, linkedPlanAccount, type AccountLite } from "../../shared/account-chip";
 import "../../shared/account-chip.css";
 
 /** Mutable account-picker state, owned by the modal's closure. `accountId`
@@ -41,8 +41,11 @@ export function accountPickIncomplete(state: AccountFieldState, accounts: readon
 
 /** A peer's accounts carry their email so two similarly-labelled ones can be
  * told apart; the local picker shows label only, so this stays peer-only. */
-function chipTitle(a: AccountLite & { email?: string }, machine: AccountFieldMachine | null | undefined): string {
-  if (isApiCreditAccount(a)) return ` title="${escapeHtml("Bills the Max plan's monthly API credit")}"`;
+function chipTitle(a: AccountLite, machine: AccountFieldMachine | null | undefined, all: readonly AccountLite[]): string {
+  if (isApiCreditAccount(a)) {
+    const text = linkedPlanAccount(a, all) ? apiCreditLinkedName(a, all) : "Bills the Max plan's monthly API credit";
+    return ` title="${escapeHtml(text)}"`;
+  }
   return machine && a.email ? ` title="${escapeHtml(a.email)}"` : "";
 }
 
@@ -90,7 +93,7 @@ export function renderAccountFieldHtml(state: AccountFieldState, ctx: AccountFie
     <div class="me-acc-field">
       <label class="me-label">Account</label>
       <div class="me-acc-edit">
-        ${accounts.map((a) => accountChipHtml(a, a.id === state.accountId, `data-acc-id="${escapeHtml(a.id)}"${chipTitle(a, machine)}`)).join("")}
+        ${accounts.map((a) => accountChipHtml(a, a.id === state.accountId, `data-acc-id="${escapeHtml(a.id)}"${chipTitle(a, machine, accounts)}`)).join("")}
       </div>
     </div>
   `;
