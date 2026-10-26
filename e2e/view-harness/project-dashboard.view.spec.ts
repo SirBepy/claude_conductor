@@ -127,9 +127,8 @@ test.describe("view-harness / project dashboard", () => {
     const todos = card(page, "todo_chart");
     await expect(todos.locator(".pd-usage-total")).toContainText("claimed");
     await expect(todos.locator(".pd-todo-legend > span")).toHaveText(["Open", "Created", "Done"]);
-    await expect(todos.locator("svg polyline")).toHaveCount(3);
-    const pointsIn = (): Promise<number> => todos.locator("svg polyline").first()
-      .evaluate((l) => (l.getAttribute("points") ?? "").trim().split(/\s+/).length);
+    await expect(todos.locator("svg[data-todo-chart] [data-todo-line]")).toHaveCount(3);
+    const pointsIn = async (): Promise<number> => Number(await todos.locator("svg[data-todo-chart]").getAttribute("data-n"));
     expect(await pointsIn()).toBe(30);
 
     await todos.locator('[data-pd-todo-range="7d"]').click();
