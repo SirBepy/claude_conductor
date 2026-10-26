@@ -12,14 +12,23 @@ export interface PrCommit {
 export type CodeModeTarget =
   | { kind: "default" }
   | { kind: "scope"; scope: CodeModeScope; commitsOpen?: boolean }
-  | { kind: "file"; path: string }
+  /** `line` opens the File view scrolled to that 1-based line. */
+  | { kind: "file"; path: string; line?: number }
   | { kind: "commit"; sha: string; title: string }
   | { kind: "pr"; title: string; commits: PrCommit[]; desc: HTMLTemplateElement | null };
 
 let opener: ((target: CodeModeTarget) => void) | null = null;
+let fileCheck: ((path: string) => boolean) | null = null;
 
-export function setCodeModeOpener(fn: ((target: CodeModeTarget) => void) | null): void {
+export function setCodeModeOpener(fn: ((target: CodeModeTarget) => void) | null, canOpenFile: ((path: string) => boolean) | null = null): void {
   opener = fn;
+  fileCheck = canOpenFile;
+}
+
+/** Whether Code mode can show `path` for the chat on screen: it reads only
+ *  inside that chat's repo, so a path anywhere else has no view there. */
+export function codeModeCanOpenFile(path: string): boolean {
+  return !!opener && !!fileCheck?.(path);
 }
 
 export function openInCodeMode(target: CodeModeTarget): void {

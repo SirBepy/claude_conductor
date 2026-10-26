@@ -329,6 +329,35 @@ describe("Code mode", () => {
     expect(root().querySelector('[data-file="src/new.ts"]')).not.toBeNull();
   });
 
+  it("a file target with a line opens the File view and marks that line", async () => {
+    const impl = ipcMock.impl;
+    ipcMock.impl = async (cmd, args) => (cmd === "get_file_at_rev" ? { content: "one\ntwo\nthree", truncated: false } : impl(cmd, args));
+    openCodeMode(chat({ key: "s12" }), { kind: "file", path: "C:\\repo\\src\\a.ts", line: 2 });
+    // Shiki loads lazily on the first File view.
+    await vi.waitFor(() => expect(root().querySelector(".fs-line-target")).not.toBeNull(), { timeout: 10000 });
+    expect(root().querySelector(".cm-tab.on").textContent).toContain("a.ts");
+    expect(root().querySelector(".fs-line-target").textContent).toBe("two");
+    expect(root().querySelectorAll(".fs-line-target").length).toBe(1);
+  });
+
+  it("offers a chat file chip only paths inside the on-screen chat's repo", async () => {
+    const { setCodeModeChatProvider } = await import("../src/views/sessions/code-mode/entry.ts");
+    const { codeModeCanOpenFile } = await import("../src/shared/chat/code-mode-bridge.ts");
+    let c = chat();
+    setCodeModeChatProvider(() => c);
+    try {
+      expect(codeModeCanOpenFile("C:\\repo\\src\\a.ts")).toBe(true);
+      expect(codeModeCanOpenFile("c:/REPO/src/a.ts")).toBe(true);
+      expect(codeModeCanOpenFile("C:\\other\\a.ts")).toBe(false);
+      expect(codeModeCanOpenFile("C:\\repository\\a.ts")).toBe(false);
+      c = chat({ cwd: "" });
+      expect(codeModeCanOpenFile("C:\\repo\\src\\a.ts")).toBe(false);
+    } finally {
+      setCodeModeChatProvider(null);
+    }
+    expect(codeModeCanOpenFile("C:\\repo\\src\\a.ts")).toBe(false);
+  });
+
   it("Esc leaves, and the back pill leaves", async () => {
     openCodeMode(chat());
     await settle();

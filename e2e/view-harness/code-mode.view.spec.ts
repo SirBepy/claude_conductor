@@ -1,5 +1,5 @@
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
-// asserts: src/views/sessions/code-mode/code-mode.ts, src/views/sessions/code-mode/events.ts, src/views/sessions/code-mode/git-fold.ts, src/views/sessions/code-mode/explorer-html.ts, src/views/sessions/code-mode/code-mode-shell.css, src/views/sessions/code-mode/code-mode-explorer.css, src/views/sessions/code-mode/code-mode-commits.css, src/views/sessions/code-mode/code-mode-tabs.css, src/shared/chat/file-surface.ts, src/views/sessions/session-header.ts, src/views/sessions/code-mode/branch-switcher.ts, src/views/sessions/code-mode/branch-switcher.css, src/views/sessions/code-mode/data.ts, src/views/sessions/session-statusbar-popovers.ts
+// asserts: src/views/sessions/code-mode/code-mode.ts, src/views/sessions/code-mode/events.ts, src/views/sessions/code-mode/git-fold.ts, src/views/sessions/code-mode/explorer-html.ts, src/views/sessions/code-mode/code-mode-shell.css, src/views/sessions/code-mode/code-mode-explorer.css, src/views/sessions/code-mode/code-mode-commits.css, src/views/sessions/code-mode/code-mode-tabs.css, src/shared/chat/file-surface.ts, src/views/sessions/session-header.ts, src/views/sessions/code-mode/branch-switcher.ts, src/views/sessions/code-mode/branch-switcher.css, src/views/sessions/code-mode/data.ts, src/views/sessions/session-statusbar-popovers.ts, src/shared/chat/file-refs.ts, src/views/sessions/code-mode/entry.ts, src/shared/chat/file-surface.css
 // Reviewed 2026-10-23: session-header.ts's model/effort markup changed (words on desktop, rank battery + short effort on the phone); this spec never touches .meta-cfg, so its contract is unaffected.
 // Reviewed 2026-10-08: code-mode/entry.ts now also refuses to open for a mirrored chat (`Instance.machine != null`), and session-header.ts gained setMirrored() to hide the `</>` button for one; every fixture here is a locally-hosted session (machine: null via sessionInstance's default), so this spec's contract is unaffected.
 // Reviewed 2026-10-08: tick() now also reloads the "all" scope on an edit-count change, not just "chat" - a timing-only addition this spec never asserted against (no test here drives the chat's edit count or waits out the 1s tick), so its contract is unaffected.
@@ -316,6 +316,41 @@ test.describe("view-harness / Code mode", () => {
     const editor = (await code.locator(".cm-editor").boundingBox())!;
     expect(explorer.width).toBeLessThanOrEqual(201);
     expect(editor.width).toBeGreaterThanOrEqual(300);
+  });
+
+  test("a file chip in Claude's reply opens that file in Code mode at its line, not the editor", async ({ page }) => {
+    await mount(page);
+    await page.evaluate(async (cwd) => {
+      const w = window as unknown as {
+        __TAURI__: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
+        __calls: string[];
+      };
+      // Five lines so the marked one is neither the first nor the last.
+      const orig = w.__TAURI__.core.invoke;
+      w.__calls = [];
+      w.__TAURI__.core.invoke = (cmd, args) => {
+        w.__calls.push(cmd);
+        return cmd === "get_file_at_rev"
+          ? Promise.resolve({ content: "a\nb\nconst main = 3;\nd\ne\n", truncated: false })
+          : orig(cmd, args);
+      };
+      const { linkifyFilePaths } = await import("/shared/chat/file-refs.ts");
+      const msg = document.createElement("div");
+      msg.className = "msg assistant";
+      msg.innerHTML = `<p>See <code>${cwd}/src/main.ts:3</code> now.</p>`;
+      document.querySelector("#session-pane .session-messages")!.appendChild(msg);
+      linkifyFilePaths(msg);
+    }, SPAWN);
+    await page.locator("#session-pane .file-ref", { hasText: "main.ts:3" }).click();
+
+    const code = page.locator(".code-mode");
+    await expect(code).toBeVisible();
+    await expect(code.locator(".cm-tab.on")).toContainText("main.ts");
+    const target = code.locator(".fs-code-view .line.fs-line-target");
+    await expect(target).toHaveCount(1);
+    await expect(target).toHaveText("const main = 3;");
+    expect(await page.evaluate(() => (window as unknown as { __calls: string[] }).__calls)).not.toContain("open_in_editor");
+    await shot(page, "code-mode-file-chip-line");
   });
 
   test("Ctrl+Shift+E enters and leaves", async ({ page }) => {

@@ -9,7 +9,8 @@ const { invokeMock, remote } = vi.hoisted(() => ({ invokeMock: vi.fn(), remote: 
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => remote.on }));
 
-const { linkifyFilePaths, findFileRefs, handleFileRefClick } = await import("../src/shared/chat/file-refs.ts");
+const { linkifyFilePaths, findFileRefs, handleFileRefClick, handleFileRefContextMenu } = await import("../src/shared/chat/file-refs.ts");
+const { setCodeModeOpener } = await import("../src/shared/chat/code-mode-bridge.ts");
 
 function mount(html, cls = "msg assistant") {
   const root = document.createElement("div");
@@ -19,9 +20,17 @@ function mount(html, cls = "msg assistant") {
 }
 const chips = (root) => [...root.querySelectorAll(".file-ref")].map((c) => [c.dataset.path, c.dataset.line ?? null, c.textContent]);
 
+// No chat repo by default: every path is outside it, the editor fallback.
+const opened = [];
+let repo = null;
+const inRepo = (p) => !!repo && p.replace(/\\/g, "/").toLowerCase().startsWith(repo);
+
 beforeEach(() => {
   invokeMock.mockReset().mockResolvedValue(undefined);
   remote.on = false;
+  repo = null;
+  opened.length = 0;
+  setCodeModeOpener((t) => opened.push(t), inRepo);
   document.body.innerHTML = "";
 });
 
@@ -92,7 +101,25 @@ describe("click", () => {
     handleFileRefClick(e);
   };
 
-  it("opens the file through open_in_editor", () => {
+  it("opens a path inside the chat's repo in Code mode at the chip's line, not the editor", () => {
+    repo = "c:/users/x/";
+    const root = mount(String.raw`<p>C:\Users\x\a.ts:9</p>`);
+    linkifyFilePaths(root);
+    click(root);
+    expect(opened).toEqual([{ kind: "file", path: String.raw`C:\Users\x\a.ts`, line: 9 }]);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("opens in Code mode on the phone too", () => {
+    remote.on = true;
+    repo = "/home/joe/project/";
+    const root = mount("<p>/home/joe/project/a.rs</p>");
+    linkifyFilePaths(root);
+    click(root);
+    expect(opened).toEqual([{ kind: "file", path: "/home/joe/project/a.rs", line: undefined }]);
+  });
+
+  it("opens a path outside the chat's repo through open_in_editor", () => {
     const root = mount(String.raw`<p>C:\Users\x\a.ts:9</p>`);
     linkifyFilePaths(root);
     click(root);
@@ -116,7 +143,7 @@ describe("click", () => {
     expect(args.col).toBeUndefined();
   });
 
-  it("only copies the path on the phone", () => {
+  it("only copies a path outside the chat's repo on the phone", () => {
     remote.on = true;
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
@@ -125,5 +152,37 @@ describe("click", () => {
     click(root);
     expect(invokeMock).not.toHaveBeenCalled();
     expect(writeText).toHaveBeenCalledWith("/home/joe/project/a.rs");
+  });
+});
+
+describe("right-click menu", () => {
+  const items = (root) => {
+    const e = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    root.querySelector(".file-ref .file-ref-name").dispatchEvent(e);
+    handleFileRefContextMenu(e);
+    const labels = [...document.querySelectorAll(".smore-item")].map((b) => b.textContent);
+    document.querySelectorAll(".session-more-menu, .smore-item").forEach((n) => n.remove());
+    return labels;
+  };
+
+  it("offers Open (Code mode) and Open in VS Code for a path in the chat's repo", () => {
+    repo = "/home/joe/project/";
+    const root = mount("<p>/home/joe/project/a.rs:3</p>");
+    linkifyFilePaths(root);
+    expect(items(root)).toEqual(["Open", "Open in VS Code", "Copy path", "Reveal in file manager"]);
+  });
+
+  it("drops Open for a path outside the chat's repo", () => {
+    const root = mount("<p>/home/joe/project/a.rs</p>");
+    linkifyFilePaths(root);
+    expect(items(root)).toEqual(["Open in VS Code", "Copy path", "Reveal in file manager"]);
+  });
+
+  it("keeps Open on the phone and drops the desktop-disk actions", () => {
+    remote.on = true;
+    repo = "/home/joe/project/";
+    const root = mount("<p>/home/joe/project/a.rs</p>");
+    linkifyFilePaths(root);
+    expect(items(root)).toEqual(["Open", "Copy path"]);
   });
 });

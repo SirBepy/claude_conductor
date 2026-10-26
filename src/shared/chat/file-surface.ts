@@ -48,7 +48,8 @@ export interface FileSurfaceOptions {
 }
 
 export interface FileSurfaceHandle {
-  show(file: SurfaceFile, view?: "diff" | "file"): void;
+  /** `line` (1-based) scrolls the File view to it and marks it. */
+  show(file: SurfaceFile, view?: "diff" | "file", line?: number): void;
   /** Ctrl+F, F7 / Shift+F7; returns true if consumed. */
   handleKey(e: KeyboardEvent): boolean;
   destroy(): void;
@@ -170,6 +171,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     diffError: null as string | null,
     diffHighlight: null as DiffHighlightMaps | null,
     diffHighlightKey: null as string | null,
+    line: null as number | null,
     token: 0,
   };
 
@@ -452,6 +454,18 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
       el.body.innerHTML = `<div class="fs-code-view"><pre class="fs-plain"><code>${lines.join("\n")}</code></pre></div>`;
     }
     appendTruncationNotice(data.truncated);
+    revealLine();
+  }
+
+  // One-shot per show(): a later Diff -> File toggle must not yank the
+  // scroll back to a line the reader has already moved away from.
+  function revealLine(): void {
+    if (state.line === null) return;
+    const row = el.body.querySelectorAll<HTMLElement>(".fs-code-view .line")[state.line - 1];
+    state.line = null;
+    if (!row) return;
+    row.classList.add("fs-line-target");
+    row.scrollIntoView({ block: "center" });
   }
 
   // ── body: diff view ──────────────────────────────────────────────────
@@ -548,8 +562,9 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
 
   // ── public API ────────────────────────────────────────────────────────
 
-  function show(file: SurfaceFile, view?: "diff" | "file"): void {
+  function show(file: SurfaceFile, view?: "diff" | "file", line?: number): void {
     state.token++;
+    state.line = line ?? null;
     // A tab reopened from another scope keeps its path but swaps its source,
     // so cached content is keyed on the file object, not the path.
     const sameFile = state.file === file;
