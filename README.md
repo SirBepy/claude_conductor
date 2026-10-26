@@ -131,7 +131,7 @@ flowchart LR
 ## 📦 Install
 
 <p>
-  <a href="https://github.com/SirBepy/claude_conductor/releases/latest"><img src="https://img.shields.io/badge/Windows-x64%20installer-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"></a>
+  <a href="https://github.com/SirBepy/claude_conductor/releases/latest"><img src="https://img.shields.io/badge/Windows-x64%20installer-0078D4?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc+PHBhdGggZmlsbD0nd2hpdGUnIGQ9J00wIDBoMTF2MTFIMHpNMTMgMGgxMXYxMUgxM3pNMCAxM2gxMXYxMUgwek0xMyAxM2gxMXYxMUgxM3onLz48L3N2Zz4=&logoColor=white" alt="Windows"></a>
   <a href="https://github.com/SirBepy/claude_conductor/releases/latest"><img src="https://img.shields.io/badge/macOS-Apple%20Silicon-1e1d2b?style=for-the-badge&logo=apple&logoColor=white" alt="macOS Apple Silicon"></a>
   <a href="https://github.com/SirBepy/claude_conductor/releases"><img src="https://img.shields.io/badge/Android-APK-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android"></a>
 </p>
