@@ -32,12 +32,19 @@ export function todoDays(days: TodoDay[], range: TodoRange): TodoDay[] {
 const W = 420, H = 160, ML = 28, MR = 44, MT = 10, MB = 24;
 const PW = W - ML - MR, PH = H - MT - MB;
 
-/** A round number at or above `n` for the top gridline, so ticks read cleanly. */
-function niceMax(n: number): number {
-  if (n <= 4) return 4;
-  const step = 10 ** Math.floor(Math.log10(n));
-  return Math.ceil(n / step) * step;
+/** The y-axis: a round step (1, 2 or 5 times a power of ten) that splits the
+ *  range into at most four bands, and the gridline at or above `max`, so the
+ *  gridlines land on round numbers (0 / 20 / 40 / 60) instead of halves of an
+ *  arbitrary top. Never below 4, so a near-empty week still gets a few lines.
+ *  Pure, for tests. */
+export function niceScale(max: number): { top: number, step: number } {
+  const rough = Math.max(4, max) / 4;
+  const pow = 10 ** Math.floor(Math.log10(rough));
+  const step = [1, 2, 5, 10].map((k) => k * pow).find((s) => s >= rough)!;
+  return { top: Math.ceil(Math.max(4, max) / step) * step, step };
 }
+
+const peak = (days: TodoDay[]): number => Math.max(1, ...days.flatMap((d) => [d.open, d.created, d.done]));
 
 /** An SVG path through the points as a monotone cubic curve (Fritsch-Carlson):
  *  smooth bends instead of sharp corners, and it never swings above or below
@@ -72,15 +79,15 @@ function swatch(s: Series): string {
 }
 
 function chartSvg(days: TodoDay[]): string {
-  const max = niceMax(Math.max(1, ...days.flatMap((d) => [d.open, d.created, d.done])));
+  const { top: max, step } = niceScale(peak(days));
   const n = days.length;
   const x = (i: number): number => ML + (n === 1 ? PW / 2 : (i / (n - 1)) * PW);
   const y = (v: number): number => MT + (1 - v / max) * PH;
   const base = MT + PH;
-  const grid = [0, 0.5, 1].map((frac) => {
-    const gy = y(frac * max).toFixed(1);
+  const grid = Array.from({ length: max / step + 1 }, (_, k) => {
+    const gy = y(k * step).toFixed(1);
     return `<line x1="${ML}" x2="${W - MR}" y1="${gy}" y2="${gy}" stroke="var(--color-border)" stroke-width="1" opacity="0.6"/>
-      <text x="${ML - 6}" y="${(+gy + 3).toFixed(1)}" text-anchor="end" fill="var(--sb-muted)" font-size="8.5" font-family="Fira Code,monospace">${Math.round(frac * max)}</text>`;
+      <text x="${ML - 6}" y="${(+gy + 3).toFixed(1)}" text-anchor="end" fill="var(--sb-muted)" font-size="8.5" font-family="Fira Code,monospace">${k * step}</text>`;
   }).join("");
   // At most ~5 date labels, always including the newest day.
   const every = Math.max(1, Math.ceil(n / 5));
@@ -117,7 +124,7 @@ function hover(e: PointerEvent, days: TodoDay[]): void {
   const n = days.length;
   const i = n === 1 ? 0 : Math.min(n - 1, Math.max(0, Math.round(((vx - ML) / PW) * (n - 1))));
   const d = days[i]!;
-  const max = niceMax(Math.max(1, ...days.flatMap((x) => [x.open, x.created, x.done])));
+  const max = niceScale(peak(days)).top;
   const cx = ML + (n === 1 ? PW / 2 : (i / (n - 1)) * PW);
   const cross = svg.querySelector("[data-todo-cross]");
   cross?.setAttribute("x1", cx.toFixed(1));
