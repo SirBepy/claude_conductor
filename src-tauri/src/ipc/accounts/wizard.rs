@@ -203,6 +203,7 @@ fn resolve_login_outcome(
 
     if let Some(dup) = accounts_store::find_duplicate(
         registered,
+        crate::accounts::AccountKind::Subscription,
         &identity.organization_uuid,
         &identity.email_address,
         Some(config_dir),
@@ -304,6 +305,7 @@ pub async fn add_account_capture_cookie(
     let registered = accounts_store::load(&accounts_path);
     if let Some(dup) = accounts_store::find_duplicate(
         &registered,
+        crate::accounts::AccountKind::Subscription,
         &identity.organization_uuid,
         &identity.email_address,
         Some(config_dir.as_path()),
@@ -404,6 +406,7 @@ pub async fn add_account_finalize(
         // New accounts default out of the Jarvis fleet pool - Joe opts each
         // one in explicitly via the accounts settings toggle (todo 272).
         fleet_eligible: false,
+        kind: crate::accounts::AccountKind::Subscription,
     };
 
     if let Some(session_key) = session.session_key {

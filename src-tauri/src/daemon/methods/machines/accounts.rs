@@ -49,9 +49,13 @@ fn picker_data(
             std::path::Path::new(c),
         )
     });
+    // An API-credit account is never preselected, so a default or project
+    // binding that points at one is reported as unset.
+    let project_account = crate::accounts::without_api_credit_in(registry, project_account);
+    let default_account = crate::accounts::without_api_credit_in(registry, settings.default_account_id.clone());
     json!({
         "accounts": registry.iter().map(redact_account).collect::<Vec<_>>(),
-        "default_account_id": settings.default_account_id,
+        "default_account_id": default_account,
         "project_account_id": project_account,
     })
 }
@@ -239,6 +243,7 @@ mod tests {
             subscription_tier: "max".into(),
             created_at: "2026-10-01T00:00:00Z".into(),
             fleet_eligible: false,
+            kind: crate::accounts::AccountKind::Subscription,
         }
     }
 

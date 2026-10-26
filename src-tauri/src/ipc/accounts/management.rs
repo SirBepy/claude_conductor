@@ -44,6 +44,7 @@ pub async fn remove_account(account_id: String, state: State<'_, AppState>, app:
     }
     let session_file = paths::account_session_file(&removed.id).map_err(|e| e.to_string())?;
     let _ = crate::auth::session::clear(&session_file);
+    crate::accounts::api_credit::clear_api_credit_secrets(&removed.id);
 
     accounts.remove(idx);
     accounts_store::save(&accounts_path, &accounts).map_err(|e| e.to_string())?;
@@ -147,9 +148,7 @@ pub async fn set_default_account(
     if let Some(id) = &account_id {
         let accounts_path = paths::accounts_file().map_err(|e| e.to_string())?;
         let accounts = accounts_store::load(&accounts_path);
-        if !accounts.iter().any(|a| &a.id == id) {
-            return Err(format!("no account with id {id}"));
-        }
+        crate::accounts::validate_default_account(&accounts, id)?;
     }
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
     let snapshot = {

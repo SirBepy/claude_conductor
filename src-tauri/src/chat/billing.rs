@@ -28,7 +28,25 @@ const METERED_ENV_VARS: &[&str] = &[
 /// subscription quota (same pool as interactive `claude` sessions); we do not
 /// support metered-billing operation. `env_get` is parameterised for testability.
 pub fn check_metered_billing(env_get: &dyn Fn(&str) -> Option<String>) -> Result<(), BillingError> {
-    for key in METERED_ENV_VARS {
+    check_excluding(env_get, &[])
+}
+
+/// The guard for a chat on an `ApiCredit` account, the one place an
+/// `ANTHROPIC_API_KEY` is deliberate: that key draws the Max plan's API credit.
+/// Allows exactly that var; `ANTHROPIC_AUTH_TOKEN`, Bedrock and Vertex still
+/// refuse, since each would bill something other than the account's own key.
+/// Chat spawns only: every other caller keeps [`check_metered_billing`].
+pub fn check_metered_billing_api_credit(
+    env_get: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), BillingError> {
+    check_excluding(env_get, &["ANTHROPIC_API_KEY"])
+}
+
+fn check_excluding(
+    env_get: &dyn Fn(&str) -> Option<String>,
+    allowed: &[&str],
+) -> Result<(), BillingError> {
+    for key in METERED_ENV_VARS.iter().filter(|k| !allowed.contains(k)) {
         if env_get(key).map(|v| !v.is_empty()).unwrap_or(false) {
             return Err(BillingError::Metered((*key).to_string()));
         }
@@ -91,6 +109,52 @@ mod tests {
         ];
         let effective = spawn_env.effective_env(ambient);
         assert!(check_metered_billing(&|k| effective.get(k).cloned()).is_ok());
+    }
+
+    // ApiCredit chats: ANTHROPIC_API_KEY is the account's own credential.
+
+    #[test]
+    fn api_credit_guard_allows_the_api_key() {
+        let env = |k: &str| if k == "ANTHROPIC_API_KEY" { Some("sk-ant-x".into()) } else { None };
+        assert!(check_metered_billing_api_credit(&env).is_ok());
+    }
+
+    #[test]
+    fn api_credit_guard_still_refuses_auth_token_bedrock_and_vertex() {
+        for key in ["ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"] {
+            // Even alongside the allowed key.
+            let env = |k: &str| if k == key || k == "ANTHROPIC_API_KEY" { Some("1".into()) } else { None };
+            let r = check_metered_billing_api_credit(&env);
+            assert!(matches!(r, Err(BillingError::Metered(ref k)) if k == key), "key {key} not refused");
+        }
+    }
+
+    #[test]
+    fn api_credit_spawn_env_passes_the_api_credit_guard_but_not_the_strict_one() {
+        let spawn_env = crate::accounts::env::SpawnEnv::for_api_credit_account(
+            std::path::Path::new("/home/.claude-api"),
+            "sk-ant-real",
+        );
+        let effective = spawn_env.effective_env(Vec::<(String, String)>::new());
+        assert!(check_metered_billing_api_credit(&|k| effective.get(k).cloned()).is_ok());
+        let strict = check_metered_billing(&|k| effective.get(k).cloned());
+        assert!(matches!(strict, Err(BillingError::Metered(ref k)) if k == "ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn api_credit_spawn_env_does_not_scrub_bedrock_or_vertex() {
+        let spawn_env = crate::accounts::env::SpawnEnv::for_api_credit_account(
+            std::path::Path::new("/home/.claude-api"),
+            "sk-ant-real",
+        );
+        let ambient = vec![
+            ("ANTHROPIC_AUTH_TOKEN".to_string(), "proxy".to_string()),
+            ("CLAUDE_CODE_USE_VERTEX".to_string(), "1".to_string()),
+        ];
+        let effective = spawn_env.effective_env(ambient);
+        // The auth token is scrubbed, Vertex survives and refuses.
+        let r = check_metered_billing_api_credit(&|k| effective.get(k).cloned());
+        assert!(matches!(r, Err(BillingError::Metered(ref k)) if k == "CLAUDE_CODE_USE_VERTEX"));
     }
 
     #[test]

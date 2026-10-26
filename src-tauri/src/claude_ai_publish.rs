@@ -309,6 +309,7 @@ pub async fn publish(
     let account = crate::accounts::resolve_account(account_id, default_account_id)
         .or_else(|_| crate::accounts::resolve_account(None, default_account_id))
         .map_err(|e| anyhow!("no account to publish under: {e}"))?;
+    crate::accounts::refuse_api_credit(&account, "publishing to claude.ai").map_err(|e| anyhow!("{e}"))?;
     crate::accounts::drift::check(&account).map_err(|e| anyhow!("{e}"))?;
     crate::accounts::credentials::check_now(&account).map_err(|e| anyhow!("{e}"))?;
     let spawn_env = crate::accounts::env::SpawnEnv::for_account(&account.config_dir);

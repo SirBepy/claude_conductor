@@ -50,13 +50,19 @@ async fn bundle(state: &Arc<DaemonState>) -> Result<Value, RpcError> {
 
     let mut stats = Map::new();
     let mut project_accounts = Map::new();
+    let registry = crate::accounts::load_registry();
     for (path, _) in &paths {
         let todo_count = crate::ipc::ai_todos::count_ai_todos(path.clone()).await;
         let mtime = stats_fs.get(path).cloned().unwrap_or(json!(0));
         stats.insert(path.clone(), json!({ "mtime": mtime, "todoCount": todo_count }));
-        let account = crate::settings::identity::resolve_effective_preferred_account_id(
-            &settings.projects,
-            Path::new(path),
+        // A binding to an API-credit account is never preselected: the picker
+        // treats it as unset, and the account is chosen explicitly per chat.
+        let account = crate::accounts::without_api_credit_in(
+            &registry,
+            crate::settings::identity::resolve_effective_preferred_account_id(
+                &settings.projects,
+                Path::new(path),
+            ),
         );
         project_accounts.insert(path.clone(), json!(account));
     }
@@ -68,7 +74,7 @@ async fn bundle(state: &Arc<DaemonState>) -> Result<Value, RpcError> {
         "projectAccounts": project_accounts,
         "projects": settings.projects,
         "settings": settings,
-        "accounts": crate::accounts::load_registry(),
+        "accounts": registry,
     }))
 }
 

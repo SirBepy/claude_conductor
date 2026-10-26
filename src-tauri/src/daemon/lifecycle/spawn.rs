@@ -1,4 +1,4 @@
-use crate::chat::billing::check_metered_billing;
+use crate::chat::billing::{check_metered_billing, check_metered_billing_api_credit};
 use crate::daemon::claude_config::{
     append_system_prompt, base_claude_args, write_hook_settings, write_mcp_config, WRAP_UP_ON_DONE_PROMPT,
 };
@@ -37,26 +37,35 @@ pub async fn spawn_session(
         crate::accounts::AccountResolveError::NoDefault => LifecycleError::NoDefault,
         crate::accounts::AccountResolveError::NotFound(id) => LifecycleError::AccountNotFound(id),
     })?;
-    // Pre-spawn drift guard (step 3b): refuse if the profile dir's CLI
-    // identity no longer matches what the registry recorded at add-account
-    // time (someone ran `/login` inside it since onboarding).
-    crate::accounts::drift::check(&account)
-        .map_err(|e| LifecycleError::AccountDrift(e.to_string()))?;
-    // Drift only asks whether credentials EXIST. A failed refresh leaves the
-    // record in place with both tokens blanked, which passes that test and
-    // then fails at the CLI with an opaque auth error - this catches it here.
-    crate::accounts::credentials::check_now(&account)
-        .map_err(|e| LifecycleError::AccountCredentials(e.to_string()))?;
-
-    let spawn_env = crate::accounts::env::SpawnEnv::for_account(&account.config_dir);
+    let api_credit = account.is_api_credit();
+    let spawn_env = if api_credit {
+        // No OAuth login exists for this kind, so the drift and credentials
+        // checks below (both read `.credentials.json`) are skipped; the
+        // stored API key is its only credential.
+        api_credit_spawn_env(&account, crate::accounts::api_credit::load_api_key)?
+    } else {
+        // Pre-spawn drift guard (step 3b): refuse if the profile dir's CLI
+        // identity no longer matches what the registry recorded at add-account
+        // time (someone ran `/login` inside it since onboarding).
+        crate::accounts::drift::check(&account)
+            .map_err(|e| LifecycleError::AccountDrift(e.to_string()))?;
+        // Drift only asks whether credentials EXIST. A failed refresh leaves the
+        // record in place with both tokens blanked, which passes that test and
+        // then fails at the CLI with an opaque auth error - this catches it here.
+        crate::accounts::credentials::check_now(&account)
+            .map_err(|e| LifecycleError::AccountCredentials(e.to_string()))?;
+        crate::accounts::env::SpawnEnv::for_account(&account.config_dir)
+    };
     // Billing gate evaluates the CHILD's effective env (parent env + this
     // spawn's overrides/removals), not the daemon's ambient env alone.
     // `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_OAUTH_TOKEN`
-    // are already guaranteed gone via `SCRUBBED_ENV_VARS` above, so what this
-    // gate can still catch is a forbidden var that SURVIVES the unsets -
-    // `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX`.
+    // are already guaranteed gone via `SCRUBBED_ENV_VARS` for a subscription
+    // account, so what this gate can still catch is a forbidden var that
+    // SURVIVES the unsets - `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX`.
+    // An ApiCredit account keeps its own `ANTHROPIC_API_KEY` and nothing else.
     let effective_env = spawn_env.effective_env(std::env::vars());
-    if let Err(e) = check_metered_billing(&|k| effective_env.get(k).cloned()) {
+    let guard = if api_credit { check_metered_billing_api_credit } else { check_metered_billing };
+    if let Err(e) = guard(&|k| effective_env.get(k).cloned()) {
         return Err(LifecycleError::MeteredBilling(e.to_string()));
     }
 
@@ -305,12 +314,66 @@ pub async fn restart_session(
     Ok(session.session_id.clone())
 }
 
+/// The child env for a chat on an `ApiCredit` account. `load_key` is injected
+/// so tests never touch the real data dir. A missing or undecryptable key
+/// refuses the spawn, naming the account, rather than starting a `claude` that
+/// would then fail with an opaque auth error.
+fn api_credit_spawn_env(
+    account: &crate::accounts::Account,
+    load_key: impl FnOnce(&str) -> Option<String>,
+) -> Result<crate::accounts::env::SpawnEnv, LifecycleError> {
+    let api_key = load_key(&account.id).ok_or_else(|| {
+        LifecycleError::AccountCredentials(format!(
+            "the API key for account \"{}\" is missing or unreadable - re-enter it in Settings > Accounts",
+            account.label
+        ))
+    })?;
+    Ok(crate::accounts::env::SpawnEnv::for_api_credit_account(&account.config_dir, &api_key))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::types::Settings;
+
+    fn api_account() -> crate::accounts::Account {
+        crate::accounts::Account {
+            id: "api-1".into(),
+            label: "API credit".into(),
+            colour: "#fff".into(),
+            icon: "key".into(),
+            config_dir: std::path::PathBuf::from("C:/home/.claude-api-credit"),
+            chrome_profile_dir: std::path::PathBuf::from("C:/appdata/chrome-profiles/api-1"),
+            email: String::new(),
+            org_uuid: "console-org".into(),
+            subscription_tier: String::new(),
+            created_at: "2026-10-26T00:00:00Z".into(),
+            fleet_eligible: false,
+            kind: crate::accounts::AccountKind::ApiCredit,
+        }
+    }
+
+    #[test]
+    fn api_credit_spawn_env_carries_the_decrypted_key() {
+        let env = api_credit_spawn_env(&api_account(), |id| {
+            assert_eq!(id, "api-1");
+            Some("sk-ant-real".to_string())
+        })
+        .unwrap();
+        assert!(env.set.contains(&("ANTHROPIC_API_KEY".to_string(), "sk-ant-real".to_string())));
+        assert!(env.set.contains(&("CLAUDE_CONFIG_DIR".to_string(), "C:/home/.claude-api-credit".to_string())));
+    }
+
+    #[test]
+    fn api_credit_spawn_without_a_readable_key_names_the_account() {
+        let err = api_credit_spawn_env(&api_account(), |_| None).unwrap_err();
+        match err {
+            LifecycleError::AccountCredentials(msg) => assert!(msg.contains("API credit"), "{msg}"),
+            other => panic!("wrong error: {other}"),
+        }
+    }
 
     fn test_state() -> Arc<DaemonState> {
         DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
