@@ -44,6 +44,9 @@ export interface PanelHostDeps {
   /** Ask's hand-off target: fills the real composer, unsent. */
   onDraft(text: string): void;
   mountPreview: PanelDeps["mountPreview"];
+  /** Enters Code mode; only the desktop split gives it a strip button, the
+   *  phone reaches it through the FAB dial. */
+  onCode?(): void;
   /** Fired after every change, so the dial can repaint its state. */
   onChange(): void;
 }
