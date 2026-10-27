@@ -7,7 +7,10 @@ import {
   hasOverride,
   rangeHasOverride,
   rangeIds,
+  resetBinding,
   resetRange,
+  resolveCombo,
+  findConflict,
   setBinding,
   setRangeFromCombo,
 } from "../src/shared/shortcuts.ts";
@@ -83,5 +86,39 @@ describe("range reset", () => {
     expect(rangeHasOverride(OPEN)).toBe(true);
     resetRange(OPEN);
     expect(rangeHasOverride(OPEN)).toBe(false);
+  });
+});
+
+describe("a default added after the user rebound a range onto it", () => {
+  it("resolves each Alt digit to exactly one action, the user's rebound slot", () => {
+    // Stored before the set-model-N defaults existed: the Open chat range on Alt.
+    rangeIds(OPEN).forEach((id, i) => setBinding(id, `alt+${i + 1}`));
+    for (let n = 1; n <= 4; n++) {
+      expect(resolveCombo(`alt+${n}`)?.id).toBe(`open-chat-${n}`);
+      expect(findConflict(`alt+${n}`)?.id).toBe(`open-chat-${n}`);
+      expect(getBinding(`set-model-${n}`)).toBe("");
+    }
+  });
+
+  it("leaves model slots the range does not claim on their defaults", () => {
+    setBinding("open-chat-1", "alt+1");
+    expect(resolveCombo("alt+1")?.id).toBe("open-chat-1");
+    expect(getBinding("set-model-1")).toBe("");
+    expect(getBinding("set-model-2")).toBe("alt+2");
+    expect(resolveCombo("alt+2")?.id).toBe("set-model-2");
+  });
+
+  it("gives the keys back to the model slot once the range is reset", () => {
+    setBinding("open-chat-1", "alt+1");
+    resetRange(OPEN);
+    expect(getBinding("set-model-1")).toBe("alt+1");
+    expect(resolveCombo("alt+1")?.id).toBe("set-model-1");
+  });
+
+  it("keeps an explicit override on the model slot itself", () => {
+    setBinding("set-model-1", "alt+9");
+    setBinding("open-chat-1", "alt+1");
+    expect(getBinding("set-model-1")).toBe("alt+9");
+    resetBinding("set-model-1");
   });
 });

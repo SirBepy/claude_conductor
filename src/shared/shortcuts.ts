@@ -114,14 +114,33 @@ export function normalizeEvent(e: {
   return parts.join("+");
 }
 
+/** A def's own override wins. Without one, its default holds unless another
+ *  def has been rebound onto those keys: the rebind predates the default (a
+ *  default added later is never checked against stored overrides), so the
+ *  user's explicit choice keeps the keys and the newer default reads unbound. */
+function effectiveBinding(def: ShortcutDef, overrides: Record<string, string>): string {
+  const own = overrides[def.id];
+  if (own !== undefined) return own;
+  const taken = SHORTCUT_DEFS.some(
+    other => other.id !== def.id && overrides[other.id] === def.defaultKeys,
+  );
+  return taken ? "" : def.defaultKeys;
+}
+
 export function findConflict(keys: string, excludeId?: string): ShortcutDef | null {
   const overrides = loadBindings();
   for (const def of SHORTCUT_DEFS) {
     if (def.id === excludeId) continue;
-    const current = overrides[def.id] ?? def.defaultKeys;
-    if (current === keys) return def;
+    if (effectiveBinding(def, overrides) === keys) return def;
   }
   return null;
+}
+
+/** The def a key combo fires, or null. At most one: see effectiveBinding. */
+export function resolveCombo(combo: string): ShortcutDef | null {
+  if (!combo) return null;
+  const overrides = loadBindings();
+  return SHORTCUT_DEFS.find(d => effectiveBinding(d, overrides) === combo) ?? null;
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -149,7 +168,7 @@ export function getBinding(id: string): string {
   const overrides = loadBindings();
   const def = SHORTCUT_DEFS.find(d => d.id === id);
   if (!def) return "";
-  return overrides[id] ?? def.defaultKeys;
+  return effectiveBinding(def, overrides);
 }
 
 export function setBinding(id: string, keys: string): void {
@@ -218,7 +237,7 @@ export function setRangeFromCombo(prefix: string, combo: string): RangeRebindRes
   for (const keys of next) {
     for (const def of SHORTCUT_DEFS) {
       if (ids.includes(def.id)) continue;
-      if ((overrides[def.id] ?? def.defaultKeys) === keys) return { ok: false, conflict: def };
+      if (effectiveBinding(def, overrides) === keys) return { ok: false, conflict: def };
     }
   }
   const updated = { ...overrides };
@@ -266,11 +285,7 @@ function _init(): void {
     const combo = normalizeEvent(e);
     if (!combo) return;
 
-    const overrides = loadBindings();
-    const def = SHORTCUT_DEFS.find(d => {
-      const binding = overrides[d.id] ?? d.defaultKeys;
-      return binding === combo;
-    });
+    const def = resolveCombo(combo);
     if (!def) return;
 
     if (def.suppressInInput && isFormControlElement(document.activeElement)) return;
