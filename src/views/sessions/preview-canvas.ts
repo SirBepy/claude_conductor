@@ -45,6 +45,8 @@ export function mountPreviewStage(canvas: HTMLElement, deviceWidth: DeviceWidth,
       console.error("[preview-panel] preview-render failed", err);
       // The stage is replaced, so its listeners would otherwise outlive it.
       dispose();
+      // A newer render already replaced this stage; its canvas is not ours to overwrite.
+      if (!stage.isConnected) return;
       canvas.innerHTML = `
         <div class="pv-empty">
           <i class="ph ph-warning-circle"></i>
