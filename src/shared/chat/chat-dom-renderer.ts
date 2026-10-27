@@ -56,6 +56,14 @@ export function describeActivity(toolName: string, input: unknown): string {
   return s.length > 60 ? s.slice(0, 59) + "…" : s;
 }
 
+/** True when `activity` is the label describeActivity gives the turn-status
+ *  report tool (bare or mcp__<server>__-prefixed). It has no verb of its own,
+ *  so the label is the raw tool name, which reads as busy work once the report
+ *  has landed and only the closing text line is left to write. */
+export function isTurnStatusActivity(activity: string | null): boolean {
+  return activity !== null && /(^|__)report_turn_status…$/.test(activity);
+}
+
 export function flushRender(r: ChatRenderer): void {
   // Elements actually added or replaced THIS call - the highlight/wrap
   // passes below only ever need to look inside these, not the whole

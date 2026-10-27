@@ -22,7 +22,7 @@ import {
   tryHandleQuestionToolUse,
   tryHandleQuestionResult,
 } from "./chat-question-card";
-import { describeActivity } from "./chat-dom-renderer";
+import { describeActivity, isTurnStatusActivity } from "./chat-dom-renderer";
 import { resolveOrdinalIn } from "./chat-pagination";
 import { descOf } from "./tool-strip-subagents";
 import type { ChatRenderer } from "./chat-renderer";
@@ -297,7 +297,12 @@ export function handleToolResultEvent(
   // fast result doesn't flash "Thinking...". keepChip only clears the
   // highlight; the chip keeps pulsing till the next tool_use or close.
   if (r.outstandingActivityToolIds.delete(ev.tool_use_id) && r.outstandingActivityToolIds.size === 0) {
-    r.setActivity(r.lastActivity, { keepChip: true, idle: true });
+    // The status report is the turn's last tool call by contract, so what
+    // follows is only the closing text line. Keeping its raw tool name as the
+    // idle label would show "<tool> - thinking..." for a turn that has already
+    // said what it came to say; plain Thinking is the honest fallback. A turn
+    // that goes on to call more tools replaces the label on its next tool_use.
+    r.setActivity(isTurnStatusActivity(r.lastActivity) ? null : r.lastActivity, { keepChip: true, idle: true });
   }
   // The tally counts didn't change, but a result can complete a custom
   // view (e.g. an AskUserQuestion answer): nudge the statusline so an open
