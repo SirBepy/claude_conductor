@@ -78,7 +78,32 @@ function anchorFor(t: TrackerInfo, id: string): HTMLAnchorElement {
 // run right before it is itself a 5-6 digit id.
 const BARE_SHORTCUT = /(?:(?<![\w/.,:=$-])|(?<=\d{5,6},))\d{5,6}(?![\w-]|[.:]\d|,\d{3}(?!\d))/g;
 
-function linkMatches(root: HTMLElement, re: RegExp, skip: string, t: TrackerInfo, idOf: (m: string) => string): void {
+// A bare number is also an Amplitude project id, a build number, an account id,
+// so it only links once the tracker confirms the story. true = exists, false =
+// the tracker said 404 (cached so a re-rendered bubble never asks again).
+// A transient failure (no token, offline) is left out so a later render retries.
+const bareStory = new Map<string, boolean>();
+const bareKey = (t: Pick<TrackerInfo, "workspace">, n: string) => `${t.workspace}/${n}`;
+
+// Lookups started per render; the rest settle on a later render so a message
+// full of numbers cannot fan out into one API call each.
+const BARE_LOOKUPS_PER_RENDER = 5;
+
+/** Forgets confirmed/missing bare-number answers (tests, tracker change). */
+export function forgetBareStories(): void {
+  bareStory.clear();
+}
+
+/** Hits whose answer is not known yet are skipped by `link`, and their numbers returned. */
+function linkMatches(
+  root: HTMLElement,
+  re: RegExp,
+  skip: string,
+  t: TrackerInfo,
+  idOf: (m: string) => string,
+  link: (m: string) => boolean = () => true,
+  pending?: Set<string>,
+): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (n) => (n.parentElement?.closest(skip) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
   });
@@ -93,6 +118,10 @@ function linkMatches(root: HTMLElement, re: RegExp, skip: string, t: TrackerInfo
     let last = 0;
     re.lastIndex = 0;
     for (let m = re.exec(text); m; m = re.exec(text)) {
+      if (!link(m[0])) {
+        pending?.add(m[0]);
+        continue;
+      }
       frag.append(text.slice(last, m.index), anchorFor(t, idOf(m[0])));
       last = m.index + m[0].length;
     }
@@ -102,21 +131,36 @@ function linkMatches(root: HTMLElement, re: RegExp, skip: string, t: TrackerInfo
 }
 
 /** Wraps ticket ids in `root`'s text in links. Skips existing links and code
- *  blocks. A bare 5-6 digit Shortcut id links in prose too (a stray count
- *  just gets a "not found" hover card), but inside inline code only as the
- *  whole span (`55411`), since code is full of ports and sizes. */
-export function applyTicketLinks(root: HTMLElement, t: TrackerInfo): void {
+ *  blocks. A bare 5-6 digit Shortcut number (in prose, or as a whole inline
+ *  `55411` span, since code is full of ports and sizes) links only when the
+ *  tracker already confirmed that story; the numbers still unconfirmed are
+ *  returned for the caller to look up. */
+export function applyTicketLinks(root: HTMLElement, t: TrackerInfo): string[] {
   const re = idPattern(t);
-  if (!re) return;
+  if (!re) return [];
   const skip = "a, pre, .ticket-ref, .commit-ref";
+  const pending = new Set<string>();
   linkMatches(root, re, skip, t, (m) => (t.kind === "shortcut" ? m.toLowerCase() : m));
   if (t.kind === "shortcut") {
-    linkMatches(root, BARE_SHORTCUT, `${skip}, code`, t, (m) => m);
+    const confirmed = (n: string) => bareStory.get(bareKey(t, n)) === true;
+    linkMatches(root, BARE_SHORTCUT, `${skip}, code`, t, (m) => m, confirmed, pending);
     root.querySelectorAll<HTMLElement>("code").forEach((code) => {
       if (code.closest("pre, a") || code.children.length > 0) return;
       const txt = code.textContent ?? "";
-      if (/^\d{5,6}$/.test(txt)) code.replaceChildren(anchorFor(t, txt));
+      if (!/^\d{5,6}$/.test(txt)) return;
+      if (confirmed(txt)) code.replaceChildren(anchorFor(t, txt));
+      else if (!bareStory.has(bareKey(t, txt))) pending.add(txt);
     });
+  }
+  return [...pending].filter((n) => !bareStory.has(bareKey(t, n)));
+}
+
+async function confirmBare(t: TrackerInfo, n: string): Promise<void> {
+  try {
+    await summaryFor(t.kind, t.workspace, `sc-${n}`);
+    bareStory.set(bareKey(t, n), true);
+  } catch (err) {
+    if (String(err instanceof Error ? err.message : err).includes("404")) bareStory.set(bareKey(t, n), false);
   }
 }
 
@@ -124,7 +168,11 @@ export async function linkifyTickets(root: HTMLElement, cwd: string | undefined)
   if (!cwd) return;
   const known = trackers.get(cwd);
   const t = known !== undefined ? known : await trackerFor(cwd);
-  if (t && root.isConnected) applyTicketLinks(root, t);
+  if (!t || !root.isConnected) return;
+  const pending = applyTicketLinks(root, t);
+  if (pending.length === 0) return;
+  await Promise.all(pending.slice(0, BARE_LOOKUPS_PER_RENDER).map((n) => confirmBare(t, n)));
+  if (root.isConnected) applyTicketLinks(root, t);
 }
 
 // ── hover card ────────────────────────────────────────────────────────
