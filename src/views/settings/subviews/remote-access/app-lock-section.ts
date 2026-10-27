@@ -12,7 +12,10 @@ interface LockBridge {
   // Absent on shells older than the opt-in lock: the switch hides then.
   getRelockChoices?(): string;
   isLockEnabled?(): boolean;
-  setLockEnabled?(enabled: boolean): void;
+  // true = saved. false = the shell is asking for the fingerprint/PIN first and
+  // answers through window.__ccLockSwitchResult. Older shells return nothing
+  // and have saved already.
+  setLockEnabled?(enabled: boolean): boolean | void;
   hasScreenLock?(): boolean;
 }
 
@@ -72,9 +75,29 @@ export function appLockSectionTemplate(): TemplateResult | string {
             disabled: !screenLock,
             onChange: (e: Event) => {
               const input = e.target as HTMLInputElement;
-              try { b.setLockEnabled!(input.checked); } catch (err) { console.error("[app-lock] save failed", err); }
               const select = input.closest("#ra-app-lock-section")?.querySelector<HTMLSelectElement>("#ra-app-lock-minutes");
-              if (select) select.disabled = !input.checked;
+              const want = input.checked;
+              const settle = (applied: boolean) => {
+                input.disabled = !screenLock;
+                // A cancelled or failed unlock leaves the lock as it was.
+                input.checked = applied ? want : !want;
+                if (select) select.disabled = !input.checked;
+              };
+              // Registered before the call so the shell's answer cannot beat it.
+              const win = window as unknown as { __ccLockSwitchResult?: (applied: boolean) => void };
+              win.__ccLockSwitchResult = (applied) => {
+                delete win.__ccLockSwitchResult;
+                settle(applied);
+              };
+              let pending = false;
+              try { pending = b.setLockEnabled!(want) === false; } catch (err) { console.error("[app-lock] save failed", err); }
+              if (pending) {
+                // Locked against a second flip while the prompt is up.
+                input.disabled = true;
+                return;
+              }
+              delete win.__ccLockSwitchResult;
+              if (select) select.disabled = !want;
             },
           })
         : ""}

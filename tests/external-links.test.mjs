@@ -26,6 +26,7 @@ function tap(href) {
 describe("external link interceptor", () => {
   let open;
   beforeEach(() => {
+    delete window.ConductorLinks;
     openExternal.mockClear();
     open = vi.spyOn(window, "open").mockImplementation(() => null);
   });
@@ -43,6 +44,28 @@ describe("external link interceptor", () => {
     const ev = tap("https://play.google.com/apps/internaltest/1");
     expect(ev.defaultPrevented).toBe(true);
     expect(open).toHaveBeenCalledWith("https://play.google.com/apps/internaltest/1", "_blank", "noopener");
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("phone: prefers the Android shell bridge over window.open when it exists", () => {
+    remote.value = true;
+    const bridge = vi.fn();
+    window.ConductorLinks = { openExternal: bridge };
+    const ev = tap("https://example.com/y");
+    expect(ev.defaultPrevented).toBe(true);
+    expect(bridge).toHaveBeenCalledWith("https://example.com/y");
+    expect(open).not.toHaveBeenCalled();
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("phone: a file: link is swallowed and opens nothing", () => {
+    remote.value = true;
+    const bridge = vi.fn();
+    window.ConductorLinks = { openExternal: bridge };
+    const ev = tap("file:///C:/Users/joe/notes.txt");
+    expect(ev.defaultPrevented).toBe(true);
+    expect(bridge).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
     expect(openExternal).not.toHaveBeenCalled();
   });
 });

@@ -16,6 +16,7 @@ function mount() {
 describe("App lock section", () => {
   afterEach(() => {
     delete window.ConductorLock;
+    delete window.__ccLockSwitchResult;
   });
 
   it("is absent without the shell's lock bridge", () => {
@@ -85,6 +86,53 @@ describe("App lock section", () => {
       sw.dispatchEvent(new Event("change"));
       expect(setLockEnabled).toHaveBeenCalledWith(false);
       expect(host.querySelector("#ra-app-lock-minutes").disabled).toBe(true);
+    });
+
+    // The shell returns false when it is asking for the fingerprint/PIN first and
+    // answers later through window.__ccLockSwitchResult.
+    function flipOffAwaitingUnlock() {
+      const setLockEnabled = vi.fn(() => false);
+      window.ConductorLock = shell({ setLockEnabled });
+      const host = mount();
+      const sw = host.querySelector("#ra-app-lock-enabled");
+      sw.checked = false;
+      sw.dispatchEvent(new Event("change"));
+      return { host, sw, setLockEnabled };
+    }
+
+    it("holds the switch still while the unlock prompt is up", () => {
+      const { sw, setLockEnabled } = flipOffAwaitingUnlock();
+      expect(setLockEnabled).toHaveBeenCalledWith(false);
+      expect(sw.disabled).toBe(true);
+    });
+
+    it("flips back on and keeps the picker usable when the unlock is cancelled", () => {
+      const { host, sw } = flipOffAwaitingUnlock();
+      window.__ccLockSwitchResult(false);
+      expect(sw.checked).toBe(true);
+      expect(sw.disabled).toBe(false);
+      expect(host.querySelector("#ra-app-lock-minutes").disabled).toBe(false);
+      expect(window.__ccLockSwitchResult).toBeUndefined();
+    });
+
+    it("stays off and disables the picker once the unlock passes", () => {
+      const { host, sw } = flipOffAwaitingUnlock();
+      window.__ccLockSwitchResult(true);
+      expect(sw.checked).toBe(false);
+      expect(sw.disabled).toBe(false);
+      expect(host.querySelector("#ra-app-lock-minutes").disabled).toBe(true);
+    });
+
+    it("turning the lock on needs no unlock", () => {
+      const setLockEnabled = vi.fn(() => true);
+      window.ConductorLock = shell({ isLockEnabled: () => false, setLockEnabled });
+      const host = mount();
+      const sw = host.querySelector("#ra-app-lock-enabled");
+      sw.checked = true;
+      sw.dispatchEvent(new Event("change"));
+      expect(sw.disabled).toBe(false);
+      expect(host.querySelector("#ra-app-lock-minutes").disabled).toBe(false);
+      expect(window.__ccLockSwitchResult).toBeUndefined();
     });
 
     it("is disabled with a caption when the phone has no screen lock", () => {

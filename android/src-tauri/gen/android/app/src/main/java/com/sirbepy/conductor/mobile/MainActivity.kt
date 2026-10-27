@@ -18,9 +18,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONObject
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
-import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.webkit.WebSettingsCompat
@@ -31,9 +28,6 @@ import androidx.webkit.WebViewFeature
 private const val BACK_HOOK_JS =
   "(function(){try{return !!(window.__ccHandleBack && window.__ccHandleBack() === true)}catch(e){return false}})()"
 
-// BIOMETRIC_WEAK, not STRONG: STRONG | DEVICE_CREDENTIAL is unsupported on
-// API 28-29 (minSdk is 28), and the PIN fallback is the point.
-private const val UNLOCK_AUTHENTICATORS = BIOMETRIC_WEAK or DEVICE_CREDENTIAL
 private const val LOCK_BACKGROUND = "#0f1117"
 
 class MainActivity : TauriActivity() {
@@ -43,10 +37,13 @@ class MainActivity : TauriActivity() {
   // nothing reaches the app until the phone's own fingerprint/PIN passes.
   private var locked = true
   private var promptShowing = false
+  private var disablePromptShowing = false
   private var backgroundedAt: Long? = null
-  // Set when the app itself starts another activity (the WebView's file or
-  // camera picker), so the stop that follows is not a trip away from the app.
-  private var ownActivityStop = false
+  // When the app itself started another activity (the WebView's file or camera
+  // picker), so a stop right after it is not a trip away from the app. A time,
+  // not a flag: a launch that never stops this activity must not leave a grace
+  // armed for a later real trip away.
+  private var ownLaunchedAt: Long? = null
   private var askShowing = false
   private lateinit var lockScreen: View
   private var webView: WebView? = null
@@ -124,14 +121,21 @@ class MainActivity : TauriActivity() {
   // trip away, so it gets no grace. The notification permission dialog is a
   // translucent overlay that pauses the app but never stops it.
   override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
-    if (requestCode >= 0) ownActivityStop = true
+    if (requestCode >= 0) ownLaunchedAt = SystemClock.elapsedRealtime()
     super.startActivityForResult(intent, requestCode, options)
+  }
+
+  // Reached without a stop (an overlay that only paused the app) or after
+  // onStart already consumed the launch: either way the launch is spent.
+  override fun onResume() {
+    super.onResume()
+    ownLaunchedAt = null
   }
 
   override fun onStart() {
     super.onStart()
-    val ownStop = ownActivityStop
-    ownActivityStop = false
+    val ownStop = AppLockPolicy.isOwnActivityStop(ownLaunchedAt, backgroundedAt)
+    ownLaunchedAt = null
     when (AppLockPolicy.startAction(AppLockSettings.lockEnabled(this), phoneHasScreenLock(this))) {
       AppLockPolicy.StartAction.ASK -> {
         backgroundedAt = null
@@ -163,6 +167,9 @@ class MainActivity : TauriActivity() {
       .setPositiveButton("Lock it (recommended)") { _, _ ->
         askShowing = false
         AppLockSettings.setLockEnabled(this, true)
+        // The app is already open when the screen lock was added after first
+        // launch, and promptUnlock does nothing unless the app is locked.
+        lock()
         promptUnlock()
       }
       .setNegativeButton("Not now") { _, _ ->
@@ -249,6 +256,36 @@ class MainActivity : TauriActivity() {
     prompt.authenticate(info)
   }
 
+  // Switching the lock off from Settings: the same prompt as the unlock, so a
+  // script that calls the bridge cannot drop the lock without the phone's owner.
+  // Declined while locked or while another prompt is up, never queued.
+  private fun confirmUnlockForDisable(onDone: (Boolean) -> Unit) {
+    runOnUiThread {
+      if (locked || promptShowing || disablePromptShowing || isFinishing) {
+        onDone(false)
+        return@runOnUiThread
+      }
+      val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
+        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+          disablePromptShowing = false
+          onDone(true)
+        }
+
+        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+          disablePromptShowing = false
+          onDone(false)
+        }
+      })
+      val info = BiometricPrompt.PromptInfo.Builder()
+        .setTitle("Turn off app lock")
+        .setSubtitle("Confirm it's you")
+        .setAllowedAuthenticators(UNLOCK_AUTHENTICATORS)
+        .build()
+      disablePromptShowing = true
+      prompt.authenticate(info)
+    }
+  }
+
   // A bare cover, nothing to press: the prompt is the only way in, and it
   // opens on its own every time the app comes to the front.
   private fun buildLockScreen(): View {
@@ -268,7 +305,11 @@ class MainActivity : TauriActivity() {
     installBackHook(webView)
     this.webView = webView
     webView.addJavascriptInterface(PushBridge(this), "ConductorPush")
-    webView.addJavascriptInterface(AppLockBridge(this), "ConductorLock")
+    webView.addJavascriptInterface(ExternalLinkBridge(this), "ConductorLinks")
+    webView.addJavascriptInterface(
+      AppLockBridge(this, ::confirmUnlockForDisable) { js -> runOnUiThread { webView.evaluateJavascript(js, null) } },
+      "ConductorLock",
+    )
     PushRelay.onHandleReady = {
       webView.evaluateJavascript("window.__ccPushHandleReady && window.__ccPushHandleReady()", null)
     }

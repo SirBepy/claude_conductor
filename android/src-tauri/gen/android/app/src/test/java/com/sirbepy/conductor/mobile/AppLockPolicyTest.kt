@@ -51,6 +51,43 @@ class AppLockPolicyTest {
   }
 
   @Test
+  fun aStopSoonAfterThePickerLaunchIsOurOwn() {
+    assertTrue(AppLockPolicy.isOwnActivityStop(1_000L, 1_000L))
+    assertTrue(AppLockPolicy.isOwnActivityStop(1_000L, 1_000L + AppLockPolicy.OWN_LAUNCH_STOP_WINDOW_MS))
+  }
+
+  @Test
+  fun aStaleLaunchTimestampGivesNoGrace() {
+    val launched = 1_000L
+    val laterStop = launched + AppLockPolicy.OWN_LAUNCH_STOP_WINDOW_MS + 1
+    assertFalse(AppLockPolicy.isOwnActivityStop(launched, laterStop))
+    assertFalse(AppLockPolicy.isOwnActivityStop(launched, launched + 30 * minute))
+    // The stale launch must not stretch an "every time" window to the 2-minute grace.
+    val ownStop = AppLockPolicy.isOwnActivityStop(launched, laterStop)
+    assertTrue(AppLockPolicy.shouldRelock(laterStop, laterStop + 1, 0, ownStop))
+  }
+
+  @Test
+  fun noLaunchOrNoStopGivesNoGrace() {
+    assertFalse(AppLockPolicy.isOwnActivityStop(null, 5_000L))
+    assertFalse(AppLockPolicy.isOwnActivityStop(1_000L, null))
+    assertFalse(AppLockPolicy.isOwnActivityStop(5_000L, 1_000L))
+  }
+
+  @Test
+  fun aFewMillisecondsBetweenInstallAndUpdateIsNotAnUpgrade() {
+    assertFalse(AppLockPolicy.isUpgrade(1_000L, 1_000L))
+    assertFalse(AppLockPolicy.isUpgrade(1_000L, 1_000L + 5))
+    assertFalse(AppLockPolicy.isUpgrade(1_000L, 1_000L + AppLockPolicy.UPGRADE_GAP_MS))
+  }
+
+  @Test
+  fun aRealGapBetweenInstallAndUpdateIsAnUpgrade() {
+    assertTrue(AppLockPolicy.isUpgrade(1_000L, 1_000L + AppLockPolicy.UPGRADE_GAP_MS + 1))
+    assertTrue(AppLockPolicy.isUpgrade(1_000L, 1_000L + 24 * 60 * minute))
+  }
+
+  @Test
   fun anOwnActivityStopNeverShortensALongerWindow() {
     val away = 1_000L
     assertFalse(AppLockPolicy.shouldRelock(away, away + 10 * minute - 1, 10, ownActivityStop = true))
@@ -101,5 +138,33 @@ class AppLockPolicyTest {
     assertEquals(30, AppLockPolicy.normalizeMinutes(30))
     val away = 1_000L
     assertTrue(AppLockPolicy.shouldRelock(away, away + 10 * minute, 100_000))
+  }
+
+  @Test
+  fun turningTheLockOffNeedsAFreshUnlock() {
+    assertEquals(AppLockPolicy.SwitchRequest.UNLOCK_FIRST, AppLockPolicy.switchRequest(false, true))
+  }
+
+  @Test
+  fun turningTheLockOnNeedsNoPrompt() {
+    assertEquals(AppLockPolicy.SwitchRequest.SAVE_NOW, AppLockPolicy.switchRequest(true, true))
+    assertEquals(AppLockPolicy.SwitchRequest.SAVE_NOW, AppLockPolicy.switchRequest(true, false))
+  }
+
+  @Test
+  fun aPhoneWithNoScreenLockHasNothingToUnlockWith() {
+    assertEquals(AppLockPolicy.SwitchRequest.SAVE_NOW, AppLockPolicy.switchRequest(false, false))
+  }
+
+  @Test
+  fun theSwitchResultCallsTheHandlerTheSpaRegisters() {
+    assertEquals(
+      "window.__ccLockSwitchResult&&window.__ccLockSwitchResult(true)",
+      AppLockPolicy.switchResultJs(true),
+    )
+    assertEquals(
+      "window.__ccLockSwitchResult&&window.__ccLockSwitchResult(false)",
+      AppLockPolicy.switchResultJs(false),
+    )
   }
 }
