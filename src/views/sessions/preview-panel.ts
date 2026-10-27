@@ -10,7 +10,6 @@
 import { invoke } from "../../shared/ipc";
 import { getTransport, type Unlisten } from "../../shared/transport";
 import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
-import { buildPreviewDocumentHtml } from "./preview-panel-document";
 import { canPublish, publishIcon, publishLabel, publishTitle, publishToClaudeAi } from "../../shared/claude-ai-publish";
 import { PREVIEW_SOURCE_CHAT_CARD } from "../../shared/chat/chat-preview-card";
 import { togglePvMoreMenu, closePvMoreMenu, type DeviceWidth, type PvMoreMenuDeps } from "./preview-panel-more-menu";
@@ -19,8 +18,7 @@ import { mountPvComposer, type PvComposerDeps, type PvComposerHandle } from "./p
 import { mountPreviewWindowShell, type RailController, type RailTabDeps, type RailTabHandle } from "./rail-panel";
 import { isMirrored } from "./sessions-helpers";
 import { state } from "./state";
-import { setupImageZoomPan } from "../../shared/chat/image-zoom-pan";
-import { mountZoomGate } from "./preview-panel-zoom-gate";
+import { mountPreviewStage } from "./preview-canvas";
 import "../../shared/chat/caret-popup/popup.css";
 import "../../shared/chat/composer.css";
 import { composerFieldHtml } from "../../shared/chat/composer-field";
@@ -377,37 +375,17 @@ class PreviewTab implements RailTabHandle {
     if (!canvas) return;
     this.disposeZoom?.();
     this.disposeZoom = null;
-    canvas.innerHTML = `<div class="pv-frame" data-w="${this.deviceWidth}"><div class="pv-stage"><div class="pv-zoomee"><iframe class="pv-iframe" sandbox="allow-scripts"></iframe></div><button type="button" class="icon-btn pv-zoom-toggle" title="Zoom and pan (or hold Ctrl)" aria-pressed="false"><i class="ph ph-magnifying-glass-plus"></i></button></div></div>`;
-    const iframe = canvas.querySelector<HTMLIFrameElement>(".pv-iframe");
-    const stage = canvas.querySelector<HTMLElement>(".pv-stage");
-    const zoomee = canvas.querySelector<HTMLElement>(".pv-zoomee");
-    const toggle = canvas.querySelector<HTMLElement>(".pv-zoom-toggle");
-    if (!iframe || !stage || !zoomee || !toggle) return;
-    const disposePan = setupImageZoomPan(zoomee, stage);
-    const disposeGate = mountZoomGate(stage, iframe, toggle);
-    this.disposeZoom = () => { disposePan(); disposeGate(); };
-    // Staged over IPC, not a webview fetch (that was cross-origin and 405'd,
-    // todo 591). `render_preview_doc` resolves per-transport: desktop stages
-    // on the hook server (preview_render.rs), remote stages same-origin on
-    // the remote-access server (remote_preview_render.rs, todo 715).
-    const doc = buildPreviewDocumentHtml(this.selected.html, { forwardZoomKeys: true });
-    try {
-      iframe.src = await invoke<string>("render_preview_doc", { html: doc });
-    } catch (err) {
-      console.error("[preview-panel] preview-render failed", err);
-      canvas.innerHTML = `
-        <div class="pv-empty">
-          <i class="ph ph-warning-circle"></i>
-          <p>Preview failed to render</p>
-          <p class="pv-empty-hint">${String(err).replace(/[<>&]/g, "")}</p>
-        </div>
-      `;
-    }
+    const stage = mountPreviewStage(canvas, this.deviceWidth, this.selected.html);
+    if (!stage) return;
+    this.disposeZoom = stage.dispose;
+    await stage.ready;
   }
 
   private renderCanvasEmpty(): void {
     const canvas = this.root.querySelector<HTMLElement>(".pv-canvas");
     if (!canvas) return;
+    this.disposeZoom?.();
+    this.disposeZoom = null;
     canvas.innerHTML = `
       <div class="pv-empty">
         <i class="ph ph-monitor-play"></i>

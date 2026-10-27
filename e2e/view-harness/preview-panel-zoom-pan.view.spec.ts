@@ -10,7 +10,11 @@ import { buildPreviewDocumentHtml } from "../../src/views/sessions/preview-panel
 // default `render_preview_doc` returns about:blank: the stage is built before
 // that IPC resolves, and those specs only drive the stage.
 
-async function openPreview(page: import("@playwright/test").Page, renderedDoc = "about:blank"): Promise<void> {
+async function openPreview(
+  page: import("@playwright/test").Page,
+  renderedDoc = "about:blank",
+  opts: { failRender?: boolean; trackStages?: boolean } = {},
+): Promise<void> {
   await mountView(page, {
     invoke: {
       list_previews: [
@@ -27,6 +31,19 @@ async function openPreview(page: import("@playwright/test").Page, renderedDoc = 
     },
   });
   await mountSessionsLayout(page);
+  if (opts.failRender || opts.trackStages) {
+    await page.evaluate((fail) => {
+      const w = window as unknown as { __stages: HTMLElement[]; __TAURI__: { core: { invoke: (c: string, a?: unknown) => Promise<unknown> } } };
+      const passthrough = w.__TAURI__.core.invoke;
+      w.__TAURI__.core.invoke = (cmd, args) => (fail && cmd === "render_preview_doc" ? Promise.reject(new Error("no stage")) : passthrough(cmd, args));
+      w.__stages = [];
+      new MutationObserver((records) => {
+        for (const r of records) r.addedNodes.forEach((n) => {
+          if (n instanceof HTMLElement) n.querySelectorAll<HTMLElement>(".pv-stage").forEach((s) => w.__stages.push(s));
+        });
+      }).observe(document.body, { childList: true, subtree: true });
+    }, !!opts.failRender);
+  }
   await page.evaluate(() => (window as unknown as { __preview: { open(id: string): void } }).__preview.open("snap-1"));
 }
 
@@ -109,4 +126,33 @@ test("the Zoom toggle arms zoom/pan for touch and disarms it again", async ({ pa
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   expect(await pointerEvents()).toBe("auto");
+});
+
+test("a failed render drops the zoom listeners instead of leaving them on the detached stage", async ({ page }) => {
+  await openPreview(page, "about:blank", { failRender: true });
+  await expect(page.locator('.sp-panel[data-active="preview"] .pv-empty')).toContainText("Preview failed to render");
+
+  await page.keyboard.down("Control");
+  // A live gate would still add .is-zoom to the stage that was just replaced.
+  const armed = await page.evaluate(() => (window as unknown as { __stages: HTMLElement[] }).__stages.some((s) => s.classList.contains("is-zoom")));
+  await page.keyboard.up("Control");
+  expect(armed).toBe(false);
+});
+
+test("a chat with no previews drops the zoom listeners when the canvas goes empty", async ({ page }) => {
+  await openPreview(page, "about:blank", { trackStages: true });
+  await expect(page.locator('.sp-panel[data-active="preview"] .pv-stage')).toBeVisible();
+
+  await page.evaluate(() => {
+    const w = window as unknown as { __TAURI__: { core: { invoke: (c: string, a?: unknown) => Promise<unknown> } } };
+    const passthrough = w.__TAURI__.core.invoke;
+    w.__TAURI__.core.invoke = (cmd, args) => (cmd === "list_previews" ? Promise.resolve([]) : passthrough(cmd, args));
+    window.dispatchEvent(new Event("focus"));
+  });
+  await expect(page.locator('.sp-panel[data-active="preview"] .pv-empty')).toContainText("No previews yet");
+
+  await page.keyboard.down("Control");
+  const armed = await page.evaluate(() => (window as unknown as { __stages: HTMLElement[] }).__stages.some((s) => s.classList.contains("is-zoom")));
+  await page.keyboard.up("Control");
+  expect(armed).toBe(false);
 });
