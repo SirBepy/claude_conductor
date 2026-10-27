@@ -68,7 +68,9 @@ pub fn create_api_credit_account_in(
         .to_string();
     let outcome = profile::create_or_adopt_profile_dir(&p.home_claude_dir, &slug)
         .map_err(|e| anyhow!("creating the profile folder: {e}"))?;
-    debug_assert!(outcome.created_new);
+    // A dir that appeared after `unique_config_dir`'s check was adopted, not
+    // created. Bail without touching it: the abort path below deletes the dir.
+    require_new_dir(&outcome)?;
 
     let account = Account {
         id: id.to_string(),
@@ -99,6 +101,14 @@ pub fn create_api_credit_account_in(
         return Err(e);
     }
     Ok(account)
+}
+
+/// Refuses an adopted dir. Never deletes anything: it belongs to someone else.
+fn require_new_dir(outcome: &profile::ProfileDirOutcome) -> Result<()> {
+    if !outcome.created_new {
+        bail!("the profile folder {:?} already exists, refusing to adopt it", outcome.config_dir);
+    }
+    Ok(())
 }
 
 /// First `~/.claude-<slug>[-N]` that is neither on disk nor already registered.
@@ -359,6 +369,19 @@ mod tests {
         assert_ne!(first.config_dir, second.config_dir);
         assert!(second.config_dir.ends_with(".claude-api-credit-2"));
         assert_eq!(store::load(&p.accounts_file).len(), 2);
+    }
+
+    /// The race `unique_config_dir` cannot close: the dir shows up between path
+    /// selection and creation, so creation adopts it.
+    #[test]
+    fn an_adopted_dir_is_refused_and_left_on_disk() {
+        let (_root, p) = setup();
+        let existing = profile::config_dir_for_slug(&p.home_claude_dir, "api-credit");
+        std::fs::create_dir_all(&existing).unwrap();
+        let outcome = profile::create_or_adopt_profile_dir(&p.home_claude_dir, "api-credit").unwrap();
+        assert!(!outcome.created_new);
+        assert!(require_new_dir(&outcome).is_err());
+        assert!(existing.exists());
     }
 
     #[test]
