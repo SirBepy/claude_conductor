@@ -117,14 +117,21 @@ pub async fn spawn_session(
     // Per-TURN name (todo 867): `run_pump_exit` deletes the previous turn's
     // path late, so a shared one lands on the new turn's live config.
     let turn_id = format!("{session_id}-{}", crate::daemon::claude_config::turn_nonce());
-    let connectors = if crate::settings::identity::resolve_claude_ai_connectors(
+    let connectors_on = crate::settings::identity::resolve_claude_ai_connectors(
         &state.settings.snapshot().projects,
         &params.cwd,
-    ) {
+    );
+    let connectors = if connectors_on {
         crate::daemon::claude_ai_connectors::servers_for(&account.config_dir).await
     } else {
         Default::default()
     };
+    // Names the side that came up empty when a chat lacks its connectors.
+    log::info!(
+        "daemon: turn {turn_id} claude.ai connectors: project flag {}, {} server(s)",
+        if connectors_on { "on" } else { "off" },
+        connectors.len()
+    );
     let settings = state.settings.snapshot();
     let (browser, browser_script) = (settings.claude_browser_enabled(), settings.claude_browser_script_tool());
     let mcp_config_path = write_mcp_config(&turn_id, &session_id, is_jarvis, browser, browser_script, connectors);

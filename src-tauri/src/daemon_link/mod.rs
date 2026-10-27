@@ -198,7 +198,8 @@ fn spawn_pending_prompt_poll(app_handle: tauri::AppHandle) {
 /// see a stale snapshot for the lifetime of an already-connected session,
 /// despite `settings_cache`'s doc comment claiming "on every change". Call
 /// this from every app-side chokepoint that persists a settings mutation the
-/// daemon cares about (currently: `save_settings`, `set_default_account`).
+/// daemon cares about (`save_settings`, `set_default_account`, character
+/// assignment, and every project mutation in `ipc::projects`).
 /// No-op (logged) if the daemon isn't connected yet - the next successful
 /// handshake will push the latest snapshot anyway.
 pub async fn push_settings_to_daemon(state: &crate::state::AppState, settings: &crate::types::Settings) {
