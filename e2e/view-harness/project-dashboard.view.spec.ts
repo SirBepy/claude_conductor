@@ -109,7 +109,8 @@ test.describe("view-harness / project dashboard", () => {
     expect(await cap(model)).toMatchObject({ opacity: 0, position: "absolute" });
 
     await page.keyboard.down("Alt");
-    await page.waitForTimeout(350);
+    // 640ms in, the effort cap starting 160ms late.
+    await page.waitForTimeout(900);
     expect(await cap(model)).toMatchObject({ opacity: 1, content: expect.stringContaining("Alt") });
     expect(await cap(header.locator(".meta-cfg-effort"))).toMatchObject({ opacity: 1 });
     // The draft header's own layout can settle by one pixel late; a keycap in
@@ -118,7 +119,7 @@ test.describe("view-harness / project dashboard", () => {
     await capture(page, "alt-hint-held");
 
     await page.keyboard.up("Alt");
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(600);
     expect(await cap(model)).toMatchObject({ opacity: 0 });
   });
 

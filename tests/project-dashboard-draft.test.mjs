@@ -161,7 +161,7 @@ describe("draft dashboard motion", () => {
     // Later sections wait longer, up to the cap.
     const delays = animations.map((a) => a.opts.delay);
     expect(Math.max(...delays)).toBeGreaterThan(0);
-    expect(Math.max(...delays)).toBeLessThanOrEqual(270);
+    expect(Math.max(...delays)).toBeLessThanOrEqual(1080);
     // The history and usage loads paint again after the first paint.
     await new Promise((r) => setTimeout(r, 50));
     expect(animations.length).toBe(played);

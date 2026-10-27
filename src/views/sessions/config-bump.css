@@ -59,7 +59,7 @@
   opacity: 0;
   transform: translate(-50%, -3px);
   /* Leaving is quicker than arriving. */
-  transition: opacity 90ms ease-in, transform 90ms ease-in;
+  transition: opacity 360ms ease-in, transform 360ms ease-in;
 }
 .session-header .meta-cfg-model.meta-cfg-btn::after { content: var(--alt-model-hint, "Alt 1-4"); }
 .session-header .meta-cfg-effort.meta-cfg-btn::after { content: "Alt \2191\2193"; }
@@ -68,10 +68,10 @@ html.alt-held .session-header .meta-cfg-model.meta-cfg-btn::after,
 html.alt-held .session-header .meta-cfg-effort.meta-cfg-btn::after {
   opacity: 1;
   transform: translate(-50%, 0);
-  transition: opacity 160ms cubic-bezier(0.16, 1, 0.3, 1), transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 640ms cubic-bezier(0.16, 1, 0.3, 1), transform 640ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 /* The effort cap trails the model cap, so the two read as a pair arriving. */
-html.alt-held .session-header .meta-cfg-effort.meta-cfg-btn::after { transition-delay: 40ms; }
+html.alt-held .session-header .meta-cfg-effort.meta-cfg-btn::after { transition-delay: 160ms; }
 
 @media (prefers-reduced-motion: reduce) {
   .session-header .meta-cfg-model.meta-cfg-btn::after,
