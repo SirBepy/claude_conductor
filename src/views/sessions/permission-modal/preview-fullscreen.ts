@@ -131,7 +131,11 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
 
   // Sideways drag pages options, but only at fit zoom: zoomed in, the same
   // drag is a pan (image-zoom-pan.ts owns it). A gesture that ever had two
-  // pointers down is a pinch, never a page turn.
+  // pointers down is a pinch, never a page turn. Not swipe-detector.ts's
+  // attachSwipe on purpose: that one listens to touch events only (this view
+  // also pages by mouse and pen), keeps tracking when a second finger lands
+  // mid-gesture, and has no gate to read the live zoom scale, so all three
+  // would need adding there.
   function wireSwipe(view: HTMLElement): void {
     let start: { x: number; y: number; id: number } | null = null;
     let multi = false;
