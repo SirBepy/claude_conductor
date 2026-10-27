@@ -47,7 +47,8 @@
 
 .PARAMETER Billed
   Adds question-card-live to the sweep (real model, ~2 haiku turns per run per
-  [[project_wdio_billed_specs_cannot_pass_mcp_permission]]). Off by default.
+  [[project_wdio_billed_specs_cannot_pass_mcp_permission]]). Off by default. Also required to run it
+  via -Spec question-card-live: naming the spec alone is refused.
 
 .PARAMETER RealClaude
   Runs chat-flow and reload-dup against the real `claude` CLI (bills real turns) instead of the
@@ -333,11 +334,50 @@ function Invoke-WdioSpec {
     [PSCustomObject]@{ Spec = $SpecName; Passing = $verdict.Passing; Failing = $verdict.Failing; FirstError = $verdict.FirstError; ExitCode = $exitCode; LogPath = $logPath; Skipped = $false; Status = $status }
 }
 
+# Pure plan builder, pulled out of the main block so the billing gate can be tested without running
+# wdio. Naming the billed spec under -Spec is not consent: it bills real claude turns, so it takes the
+# same explicit -Billed switch as the unfiltered sweep.
+function Get-SweepPlan {
+    param(
+        [string[]]$Spec,
+        [bool]$Billed,
+        [bool]$UseFakeForChat,
+        [string]$FakeClaudeBin
+    )
+    $plan = @()
+    foreach ($s in $freeSpecs) {
+        $plan += [PSCustomObject]@{ Spec = $s; Env = @{} }
+    }
+    foreach ($s in $chatSpecs) {
+        $env = if ($UseFakeForChat) { @{ CC_CLAUDE_BIN = $FakeClaudeBin } } else { @{} }
+        $plan += [PSCustomObject]@{ Spec = $s; Env = $env }
+    }
+    if ($Billed) {
+        $plan += [PSCustomObject]@{ Spec = $billedOnlySpec; Env = @{} }
+    }
+    if ($Spec) {
+        $wanted = @($Spec | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $known = @($freeSpecs) + @($chatSpecs) + $billedOnlySpec
+        $unknown = @($wanted | Where-Object { $_ -notin $known })
+        if ($unknown.Count -gt 0) { throw "Unknown spec(s) for -Spec: $($unknown -join ', '). Known: $($known -join ', ')." }
+        if ($wanted -contains $billedOnlySpec -and -not $Billed) {
+            throw "$billedOnlySpec bills real claude turns; pass -Billed"
+        }
+        $plan = @($plan | Where-Object { $_.Spec -in $wanted })
+    }
+    return $plan
+}
+
 # --- main ---
 # Guarded so the functions above (Get-WdioVerdict, Get-WdioStatus, ...) can be dot-sourced and
 # unit-tested without firing off the actual sweep - dot-sourcing sets InvocationName to '.',
 # a normal `-File` run does not. See scripts/wdio-sweep-verdict.test.ps1.
 if ($MyInvocation.InvocationName -ne '.') {
+
+    # Built before the headless hop so a refused -Spec fails here, in front of the dev, instead of
+    # inside the supervisor copy where only the verdict file would carry it back.
+    $useFakeForChat = -not $RealClaude
+    $plan = Get-SweepPlan -Spec $Spec -Billed ([bool]$Billed) -UseFakeForChat $useFakeForChat -FakeClaudeBin $FakeClaudeBin
 
     # -WhatIf stays in-process: it only prints the plan, and opens no window to hide.
     if (-not $Visible -and -not $InSupervisor -and -not $WhatIfPreference) {
@@ -351,7 +391,6 @@ if ($MyInvocation.InvocationName -ne '.') {
     Assert-WdioDriver
     Backup-WdioSessionRegistry
 
-    $useFakeForChat = -not $RealClaude
     if ($useFakeForChat -and -not (Test-Path $FakeClaudeBin)) {
         throw "Fake claude binary not found at $FakeClaudeBin. Pass -FakeClaudeBin <path> to a stream-json stub (see [[project_wdio_billed_specs_free_via_fake_claude]] for what it needs to emit), or pass -RealClaude to bill real turns for chat-flow/reload-dup instead."
     }
@@ -368,28 +407,6 @@ if ($MyInvocation.InvocationName -ne '.') {
         New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     } else {
         Write-Host "[WhatIf] would create log directory $logDir"
-    }
-
-    $plan = @()
-    foreach ($s in $freeSpecs) {
-        $plan += [PSCustomObject]@{ Spec = $s; Env = @{} }
-    }
-    foreach ($s in $chatSpecs) {
-        $env = if ($useFakeForChat) { @{ CC_CLAUDE_BIN = $FakeClaudeBin } } else { @{} }
-        $plan += [PSCustomObject]@{ Spec = $s; Env = $env }
-    }
-    if ($Billed) {
-        $plan += [PSCustomObject]@{ Spec = $billedOnlySpec; Env = @{} }
-    }
-    if ($Spec) {
-        $wanted = @($Spec | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-        $known = @($plan | ForEach-Object { $_.Spec }) + $billedOnlySpec
-        $unknown = @($wanted | Where-Object { $_ -notin $known })
-        if ($unknown.Count -gt 0) { throw "Unknown spec(s) for -Spec: $($unknown -join ', '). Known: $($known -join ', ')." }
-        $plan = @($plan | Where-Object { $_.Spec -in $wanted })
-        if ($wanted -contains $billedOnlySpec -and -not $Billed) {
-            $plan += [PSCustomObject]@{ Spec = $billedOnlySpec; Env = @{} }
-        }
     }
 
     $results = @()

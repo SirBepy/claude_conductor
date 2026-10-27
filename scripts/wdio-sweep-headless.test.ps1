@@ -99,6 +99,31 @@ $threw = $false
 try { Assert-WdioDriver } catch { $threw = $true }
 if (-not $threw) { $failures += 'missing msedgedriver: expected Assert-WdioDriver to throw' }
 
+# Naming the billed spec under -Spec is not consent to bill: it must take -Billed like the full sweep.
+$threw = $false
+$msg = ''
+try { Get-SweepPlan -Spec 'question-card-live' -Billed $false -UseFakeForChat $true -FakeClaudeBin 'C:\f.cmd' | Out-Null } catch { $threw = $true; $msg = $_.Exception.Message }
+if (-not $threw) { $failures += '-Spec question-card-live without -Billed: expected a throw' }
+elseif ($msg -ne 'question-card-live bills real claude turns; pass -Billed') { $failures += "billed refusal message: got '$msg'" }
+# The refusal also holds when the billed spec is one of several comma-separated names.
+$threw = $false
+try { Get-SweepPlan -Spec 'smoke,question-card-live' -Billed $false -UseFakeForChat $true -FakeClaudeBin 'C:\f.cmd' | Out-Null } catch { $threw = $true }
+if (-not $threw) { $failures += '-Spec smoke,question-card-live without -Billed: expected a throw' }
+# With -Billed it is allowed, and only the named spec runs.
+$plan = @(Get-SweepPlan -Spec 'question-card-live' -Billed $true -UseFakeForChat $true -FakeClaudeBin 'C:\f.cmd')
+if ($plan.Count -ne 1 -or $plan[0].Spec -ne 'question-card-live') { $failures += "-Spec question-card-live -Billed: got '$(($plan | ForEach-Object { $_.Spec }) -join ',')'" }
+# A free spec never needs -Billed, and the billed spec stays out of an unfiltered sweep without it.
+$plan = @(Get-SweepPlan -Spec 'smoke' -Billed $false -UseFakeForChat $true -FakeClaudeBin 'C:\f.cmd')
+if ($plan.Count -ne 1 -or $plan[0].Spec -ne 'smoke') { $failures += "-Spec smoke: got '$(($plan | ForEach-Object { $_.Spec }) -join ',')'" }
+$plan = @(Get-SweepPlan -Spec $null -Billed $false -UseFakeForChat $true -FakeClaudeBin 'C:\f.cmd')
+if ($plan.Count -ne 10 -or ($plan | Where-Object { $_.Spec -eq 'question-card-live' })) { $failures += "unfiltered sweep without -Billed: got $($plan.Count) specs" }
+$plan = @(Get-SweepPlan -Spec $null -Billed $true -UseFakeForChat $true -FakeClaudeBin 'C:\f.cmd')
+if ($plan.Count -ne 11 -or $plan[-1].Spec -ne 'question-card-live') { $failures += "unfiltered sweep with -Billed: got $($plan.Count) specs" }
+# An unknown name still fails on its own, ahead of the billing check.
+$threw = $false
+try { Get-SweepPlan -Spec 'nope' -Billed $false -UseFakeForChat $true -FakeClaudeBin 'C:\f.cmd' | Out-Null } catch { $threw = $true }
+if (-not $threw) { $failures += '-Spec nope: expected a throw' }
+
 if ($failures.Count -gt 0) {
     foreach ($f in $failures) { Write-Host "FAIL: $f" }
     Write-Host "`nRESULT: FAIL ($($failures.Count) check(s))"
