@@ -1,3 +1,4 @@
+// Reviewed 2026-10-27 (shortcuts.ts sets an Alt-held model hint on keydown): this spec drives the Ctrl/Ctrl+Shift hints only and passed after the change, so its contract is unaffected.
 // Reviewed 2026-10-25 (desktop split): sessions-dom-wiring.ts only had wirePreviewPanel's doc comment reworded for the desktop split; nothing this spec drives changed.
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 // Reviewed 2026-10-22: sessions-dom-wiring.ts passes the FAB a Code-mode opener; this spec asserts the favorites strip only, so its contract is unaffected.

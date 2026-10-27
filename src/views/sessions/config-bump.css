@@ -43,5 +43,5 @@ html.alt-held .session-header .meta-cfg-effort.meta-cfg-btn::after {
   font-size: 0.7rem;
   color: var(--color-text-muted);
 }
-html.alt-held .session-header .meta-cfg-model.meta-cfg-btn::after { content: "Alt 1-4"; }
+html.alt-held .session-header .meta-cfg-model.meta-cfg-btn::after { content: var(--alt-model-hint, "Alt 1-4"); }
 html.alt-held .session-header .meta-cfg-effort.meta-cfg-btn::after { content: "Alt \2191\2193"; }
