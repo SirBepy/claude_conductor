@@ -577,7 +577,12 @@
   padding: 18px max(20px, calc((100% - 900px) / 2));
   display: flex;
   flex-direction: column;
+  /* body is user-select: none, so the transcript opts back in; the prefixed
+     forms and touch-callout keep the WebView's long-press selection and
+     Copy / Copy link menu available on engines that still read them. */
   user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
 }
 
 /* Placeholder shown only while a fresh pending pane's renderer is still
