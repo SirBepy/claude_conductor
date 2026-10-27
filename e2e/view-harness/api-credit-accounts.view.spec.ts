@@ -180,8 +180,8 @@ test.describe("view-harness / API-credit accounts", () => {
     await expect(page.getByText("Pick an account for this chat first")).toBeVisible();
     const overlay = page.locator(".cam-modal-card");
     await expect(overlay).toBeVisible();
-    // A sole account renders as a static display (no data-acc-id), and the
-    // modal still opens because the sole API-credit account is never auto-picked.
-    await expect(overlay.locator(".cam-acc-static")).toContainText("API credit");
+    // The sole API-credit account is never auto-picked, so the picker opens
+    // with it as a pickable chip rather than the static one-account display.
+    await expect(overlay.locator('[data-acc-id="acct-credit"]')).toContainText("API credit");
   });
 });

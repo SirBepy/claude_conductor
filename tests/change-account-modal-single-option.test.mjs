@@ -153,3 +153,11 @@ describe("openChangeAccountModal - autoPickSole (the gate callers)", () => {
     expect(await pending).toBeNull();
   });
 });
+
+describe("renderAccountListBodyHtml - one account that is not current", () => {
+  it("stays a pickable chip, so a draft whose only account is API credit can opt in", () => {
+    const html = renderAccountListBodyHtml([credit], null);
+    expect(html).toContain('data-acc-id="acct-credit"');
+    expect(html).not.toContain("cam-acc-static");
+  });
+});
