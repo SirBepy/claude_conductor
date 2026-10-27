@@ -17,7 +17,7 @@ pub fn scan_all(project_dir: Option<&Path>) -> Vec<SlashEntry> {
 pub fn scan_menu(project_dir: Option<&Path>) -> Vec<SlashEntry> {
     let entries = scan_all(project_dir);
     match project_dir {
-        Some(dir) => hide_idle_pickup(entries, &dir.join(".claude").join("todos")),
+        Some(dir) => hide_idle_pickup(entries, &crate::project_dashboard::todo_stats::todos_dir(dir)),
         None => entries,
     }
 }

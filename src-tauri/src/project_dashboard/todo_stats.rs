@@ -8,7 +8,7 @@
 
 use super::snapshot_types::{TodoDay, TodoStats};
 use chrono::{Duration, Local, NaiveDate};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 /// One todo file's dates. `done` is `None` while it is still in the backlog.
@@ -27,9 +27,41 @@ fn created_at(meta: &std::fs::Metadata) -> Option<SystemTime> {
     meta.created().or_else(|_| meta.modified()).ok()
 }
 
-fn is_todo_file(p: &Path) -> bool {
+/// Where a repo keeps its todos. Every reader of the backlog resolves the
+/// folder through this, so a move of the folder is a one-line change.
+pub fn todos_dir(repo: &Path) -> PathBuf {
+    repo.join(".claude").join("todos")
+}
+
+/// A todo file is any `.md` except `PLAN.md`, which is the ordered pointer
+/// lane over the backlog, not a task itself.
+pub fn is_backlog_file(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()) == Some("md")
         && p.file_name().and_then(|n| n.to_str()) != Some("PLAN.md")
+}
+
+/// A claim older than this is a dead session's leftover: `/pickup` may delete
+/// and re-take it, so the dashboard and the slash menu must not count it.
+/// Only the mtime half of `/pickup`'s staleness rule is mirrored; the owner
+/// pid check lives in the claim script and is not worth duplicating here.
+const CLAIM_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(4 * 60 * 60);
+
+/// Whether todo `id` holds a live claim in `<todos_dir>/.claims/`. A colliding
+/// id is claimed as `<id>-<slug>.claim`, so both spellings count. An mtime
+/// that cannot be read, or that lies in the future (clock skew), counts as
+/// live: hiding a real claim is worse than showing a stale one.
+pub fn claim_is_live(todos_dir: &Path, id: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(todos_dir.join(".claims")) else { return false };
+    let slug_prefix = format!("{id}-");
+    let exact = format!("{id}.claim");
+    entries.flatten().any(|ent| {
+        let name = ent.file_name().to_string_lossy().into_owned();
+        if name != exact && !(name.starts_with(&slug_prefix) && name.ends_with(".claim")) {
+            return false;
+        }
+        let age = ent.metadata().and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok());
+        age.is_none_or(|a| a < CLAIM_STALE_AFTER)
+    })
 }
 
 /// The numeric id a todo file starts with (`1264-handoff-x.md` -> `1264`).
@@ -42,14 +74,14 @@ pub fn todo_id(file_name: &str) -> Option<&str> {
 /// Every todo file of one repo, backlog and `done/`, plus how many backlog
 /// todos hold a claim. A repo with no todos folder yields nothing.
 pub fn read_repo(repo_cwd: &str) -> (Vec<TodoDates>, u32) {
-    let dir = Path::new(repo_cwd).join(".claude").join("todos");
+    let dir = todos_dir(Path::new(repo_cwd));
     let mut out = Vec::new();
     let mut claimed = 0;
     for (sub, done) in [(dir.clone(), false), (dir.join("done"), true)] {
         let Ok(entries) = std::fs::read_dir(&sub) else { continue };
         for ent in entries.flatten() {
             let p = ent.path();
-            if !is_todo_file(&p) {
+            if !is_backlog_file(&p) {
                 continue;
             }
             let Ok(meta) = ent.metadata() else { continue };
@@ -57,8 +89,7 @@ pub fn read_repo(repo_cwd: &str) -> (Vec<TodoDates>, u32) {
             let finished = if done { meta.modified().ok().map(local_date) } else { None };
             if !done {
                 let name = ent.file_name();
-                let claim = todo_id(&name.to_string_lossy()).map(|id| dir.join(".claims").join(format!("{id}.claim")));
-                if claim.is_some_and(|c| c.exists()) {
+                if todo_id(&name.to_string_lossy()).is_some_and(|id| claim_is_live(&dir, id)) {
                     claimed += 1;
                 }
             }
@@ -113,6 +144,81 @@ mod tests {
 
     fn todo(created: &str, done: Option<&str>) -> TodoDates {
         TodoDates { created: d(created), done: done.map(d) }
+    }
+
+    /// Sets a file's mtime `hours` into the past.
+    fn backdate(path: &Path, hours: u64) {
+        let past = SystemTime::now() - std::time::Duration::from_secs(hours * 60 * 60);
+        std::fs::OpenOptions::new().write(true).open(path).unwrap().set_modified(past).unwrap();
+    }
+
+    fn claims_dir(files: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".claims")).unwrap();
+        for f in files {
+            std::fs::write(dir.path().join(".claims").join(f), "session: s").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn a_fresh_claim_is_live() {
+        let dir = claims_dir(&["7.claim"]);
+        assert!(claim_is_live(dir.path(), "7"));
+        assert!(!claim_is_live(dir.path(), "8"));
+    }
+
+    #[test]
+    fn a_claim_older_than_four_hours_is_not_live() {
+        let dir = claims_dir(&["7.claim"]);
+        let claim = dir.path().join(".claims").join("7.claim");
+        backdate(&claim, 3);
+        assert!(claim_is_live(dir.path(), "7"));
+        backdate(&claim, 5);
+        assert!(!claim_is_live(dir.path(), "7"));
+    }
+
+    #[test]
+    fn a_slug_suffixed_claim_counts_but_a_longer_id_does_not() {
+        let dir = claims_dir(&["7-handoff.claim", "70.claim", "71-x.claim"]);
+        assert!(claim_is_live(dir.path(), "7"));
+        assert!(!claim_is_live(dir.path(), "8"));
+        let only_longer = claims_dir(&["70.claim", "71-x.claim"]);
+        assert!(!claim_is_live(only_longer.path(), "7"));
+    }
+
+    #[test]
+    fn no_claims_folder_is_no_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!claim_is_live(dir.path(), "7"));
+    }
+
+    #[test]
+    fn read_repo_counts_a_slug_claim_and_skips_a_stale_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let todos = todos_dir(dir.path());
+        std::fs::create_dir_all(todos.join(".claims")).unwrap();
+        for f in ["1-a.md", "2-b.md", "3-c.md"] {
+            std::fs::write(todos.join(f), "x").unwrap();
+        }
+        std::fs::write(todos.join(".claims").join("1-a.claim"), "s").unwrap();
+        std::fs::write(todos.join(".claims").join("2.claim"), "s").unwrap();
+        backdate(&todos.join(".claims").join("2.claim"), 9);
+        let (_, claimed) = read_repo(&dir.path().to_string_lossy());
+        assert_eq!(claimed, 1);
+    }
+
+    #[test]
+    fn todos_live_under_dot_claude_todos() {
+        assert_eq!(todos_dir(Path::new("repo")), Path::new("repo").join(".claude").join("todos"));
+    }
+
+    #[test]
+    fn a_backlog_file_is_a_markdown_file_that_is_not_the_plan() {
+        assert!(is_backlog_file(Path::new("12-do-it.md")));
+        assert!(!is_backlog_file(Path::new("PLAN.md")));
+        assert!(!is_backlog_file(Path::new("12-do-it.txt")));
+        assert!(!is_backlog_file(Path::new("12-do-it")));
     }
 
     #[test]
