@@ -6,6 +6,36 @@
   margin: 0 0 12px;
 }
 
+.view-settings-browser .cd-steps {
+  font-size: var(--fs-body);
+  color: var(--sb-muted);
+  margin: 0 0 12px;
+}
+
+.view-settings-browser .cd-steps-title {
+  color: var(--color-text);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.view-settings-browser .cd-steps ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.view-settings-browser .cd-steps li {
+  margin-bottom: 4px;
+}
+
+.view-settings-browser .cd-steps b {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.view-settings-browser .cd-steps p {
+  margin: 0;
+}
+
 /* Sits between the row label and its button, so the button stays right-aligned. */
 .view-settings-browser .cd-bridge-status {
   margin-left: auto;

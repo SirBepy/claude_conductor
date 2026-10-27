@@ -2,6 +2,7 @@ import { html, render } from "lit-html";
 import { getSettings } from "../../../../shared/state";
 import { updateSettings } from "../../../../shared/settings-update";
 import { isRemote } from "../../../../shared/transport";
+import { attachTooltips } from "../../../../shared/row-tooltip";
 import { settingsHeader } from "../../ui";
 import {
   browserSectionTemplate,
@@ -33,6 +34,8 @@ export async function renderBrowserView(root: HTMLElement): Promise<() => void> 
   render(template(browser), root);
   if (isRemote()) return () => {};
   wireBrowserSection(root);
+  // The info icons only show their text once this is wired.
+  attachTooltips(document.getElementById("app") || document.body, { placement: "above" });
 
   // Fresh-read + retry: building from the frontend's own settings
   // cache could revert a concurrent daemon-owned write.
@@ -56,5 +59,19 @@ export async function renderBrowserView(root: HTMLElement): Promise<() => void> 
   };
   root.addEventListener("change", onChange);
 
-  return () => root.removeEventListener("change", onChange);
+  // A text field's change event waits for blur, so typing a profile and
+  // refreshing straight away lost it; save shortly after the last keystroke.
+  let typing: ReturnType<typeof setTimeout> | undefined;
+  const onInput = (e: Event) => {
+    if ((e.target as HTMLElement | null)?.id !== "chatDefaultsBrowserProfile") return;
+    clearTimeout(typing);
+    typing = setTimeout(() => { void persist(); }, 400);
+  };
+  root.addEventListener("input", onInput);
+
+  return () => {
+    clearTimeout(typing);
+    root.removeEventListener("change", onChange);
+    root.removeEventListener("input", onInput);
+  };
 }
