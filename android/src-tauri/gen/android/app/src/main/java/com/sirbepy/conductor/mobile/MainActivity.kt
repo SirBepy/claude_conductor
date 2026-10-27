@@ -16,6 +16,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONObject
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
@@ -43,6 +44,10 @@ class MainActivity : TauriActivity() {
   private var locked = true
   private var promptShowing = false
   private var backgroundedAt: Long? = null
+  // Set when the app itself starts another activity (the WebView's file or
+  // camera picker), so the stop that follows is not a trip away from the app.
+  private var ownActivityStop = false
+  private var askShowing = false
   private lateinit var lockScreen: View
   private var webView: WebView? = null
   private var pendingChatId: String? = null
@@ -113,13 +118,57 @@ class MainActivity : TauriActivity() {
     addContentView(lockScreen, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
   }
 
+  // The WebView's file and camera pickers launch through here. Only the
+  // activity-result path is hooked: the notification permission dialog is a
+  // translucent overlay that pauses the app but never stops it.
+  override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+    ownActivityStop = true
+    super.startActivityForResult(intent, requestCode, options)
+  }
+
   override fun onStart() {
     super.onStart()
-    val relockMinutes = AppLockSettings.relockMinutes(this)
-    if (!locked && AppLockPolicy.shouldRelock(backgroundedAt, SystemClock.elapsedRealtime(), relockMinutes)) lock()
-    backgroundedAt = null
-    // Posted: BiometricPrompt needs the activity resumed, which onStart isn't yet.
-    if (locked) lockScreen.post { promptUnlock() } else showApp()
+    val ownStop = ownActivityStop
+    ownActivityStop = false
+    when (AppLockPolicy.startAction(AppLockSettings.lockEnabled(this), phoneHasScreenLock(this))) {
+      AppLockPolicy.StartAction.ASK -> {
+        backgroundedAt = null
+        askToLock()
+      }
+      AppLockPolicy.StartAction.OPEN -> {
+        backgroundedAt = null
+        if (locked) unlock() else showApp()
+      }
+      AppLockPolicy.StartAction.LOCK -> {
+        val relockMinutes = AppLockSettings.relockMinutes(this)
+        if (!locked && AppLockPolicy.shouldRelock(backgroundedAt, SystemClock.elapsedRealtime(), relockMinutes, ownStop)) lock()
+        backgroundedAt = null
+        // Posted: BiometricPrompt needs the activity resumed, which onStart isn't yet.
+        if (locked) lockScreen.post { promptUnlock() } else showApp()
+      }
+    }
+  }
+
+  // Shown over the lock screen before the unlock prompt, on the first launch
+  // with a screen lock set. The answer is saved and never asked again.
+  private fun askToLock() {
+    if (askShowing || isFinishing) return
+    askShowing = true
+    AlertDialog.Builder(this)
+      .setTitle("Lock Conductor?")
+      .setMessage("This phone can control your PC's chats, so we recommend locking the app with your fingerprint or screen lock. You can change this later in Settings > Remote access > App lock.")
+      .setCancelable(false)
+      .setPositiveButton("Lock it (recommended)") { _, _ ->
+        askShowing = false
+        AppLockSettings.setLockEnabled(this, true)
+        promptUnlock()
+      }
+      .setNegativeButton("Not now") { _, _ ->
+        askShowing = false
+        AppLockSettings.setLockEnabled(this, false)
+        unlock()
+      }
+      .show()
   }
 
   override fun onStop() {
@@ -168,8 +217,7 @@ class MainActivity : TauriActivity() {
 
   private fun promptUnlock() {
     if (!locked || promptShowing || isFinishing) return
-    val canAuth = BiometricManager.from(this).canAuthenticate(UNLOCK_AUTHENTICATORS)
-    if (canAuth == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) {
+    if (!phoneHasScreenLock(this)) {
       // No fingerprint, PIN, pattern or password on the phone at all: there is
       // nothing to check against, and the phone itself is open to anyone.
       Log.w("AppLock", "no screen lock set on this phone; app lock skipped")
