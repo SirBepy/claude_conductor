@@ -146,7 +146,7 @@ export function claudeMdScopesData(worktreePath: string): CacheRead<ClaudeMdScop
     invoke<ClaudeMdScope[]>("list_claude_md_scopes", { worktreePath }));
 }
 
-// ── model-effort-modal data ─────────────────────────────────────────────────
+// ── new-chat config data (new-chat-config.ts) ───────────────────────────────
 const settingsEntry = makeEntry<Record<string, unknown>>();
 const projectsListEntry = makeEntry<ProjectConfig[]>();
 const accountsEntry = makeEntry<Account[]>();

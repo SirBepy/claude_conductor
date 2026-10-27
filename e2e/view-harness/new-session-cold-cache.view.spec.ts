@@ -1,5 +1,4 @@
-// asserts: src/views/sessions/project-picker.ts, src/views/sessions/model-effort-modal.ts
-// Reviewed 2026-10-23 (peer account picker): model-effort-modal.ts takes an optional machine id and, only when one is given, lists that machine's accounts instead of the four local reads. With no machine (every flow this spec drives) it starts the same reads in the same order and the cold-shell condition is unchanged.
+// asserts: src/views/sessions/project-picker.ts, src/views/sessions/pending-flow.ts
 // Reviewed 2026-10-20 (Mac-mirrored project icon fix): project-picker.ts's row render now passes a machineId to renderAvatar - this spec never selects a peer machine, so it stays null and the markup is unchanged.
 // Reviewed 2026-10-23 (peer project stats): project-picker.ts now reads row stats through statFor() and hides the worktree badge on peer rows - this spec only drives the local list, where both are unchanged.
 import { existsSync } from "node:fs";
@@ -11,10 +10,10 @@ import { shotDir } from "./shot-dir";
 // Todo 809: forces new-session-cache.ts's cold-cache path (boot's own
 // warmNewSessionCache() otherwise always warms it first) so each cold step's
 // own loading shell actually renders. The delay is an addInitScript ahead of
-// the boot navigation - too late post-mount. The two steps now use different
-// shells: project-picker's is its own skeleton (project-picker.ts, matches
-// the real card's size), model/effort's is still the shared
-// .modal-card-loading spinner (src/shared/modal.css).
+// the boot navigation - too late post-mount. The project picker shows its own
+// skeleton (project-picker.ts, matches the real card's size); after the pick
+// there is no second dialog, the draft chat pane opens once the cold
+// per-project reads resolve.
 
 // shotDir() resolves the running session's own id and creates the directory - never a
 // hand-rolled literal (todo 958).
@@ -31,9 +30,9 @@ const ACCOUNTS = [{ id: "acc1", label: "work", icon: "briefcase", colour: "#8b5c
 
 const DELAY_MS = 2000;
 // resolve_project_account is never boot-warmed (new-session-cache.ts only
-// warms it lazily per-project), so it alone already forces the model/effort
-// step cold; list_project_groups/list_accounts/list_projects are boot-warmed,
-// so they need the delay to reproduce the cold project-picker step too.
+// warms it lazily per-project), so it alone already makes the draft's config
+// resolve cold; list_project_groups/list_accounts/list_projects are
+// boot-warmed, so they need the delay to reproduce the cold project-picker too.
 const DELAYED_COMMANDS = ["list_project_groups", "list_accounts", "list_projects", "resolve_project_account"];
 
 async function mountColdSessions(page: Page): Promise<void> {
@@ -62,7 +61,7 @@ async function mountColdSessions(page: Page): Promise<void> {
 test.describe("view-harness / new-session cold cache", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("cold project-picker and model/effort steps each show their own loading shell", async ({ page }) => {
+  test("cold project-picker shows its skeleton shell, then the draft pane opens with no second dialog", async ({ page }) => {
     await mountColdSessions(page);
 
     await page.locator("#sessionsFab").click();
@@ -78,15 +77,11 @@ test.describe("view-harness / new-session cold cache", () => {
 
     await page.locator(".project-picker-row").click();
 
-    // model/effort's cold shell still uses the shared generic spinner.
-    const modelEffortLoading = page.locator(".modal-card-loading");
-    await expect(modelEffortLoading).toBeVisible();
-    await expect(modelEffortLoading).toContainText("Loading");
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "model-effort-cold.png") });
-
-    await expect(page.locator(".model-effort-modal-card")).toBeVisible({ timeout: DELAY_MS + 2000 });
+    // No model/effort dialog any more: the draft pane opens straight away on
+    // the resolved defaults once the delayed reads land.
+    await expect(page.locator("#session-pane .session-composer .composer-textarea")).toBeVisible({ timeout: DELAY_MS + 2000 });
+    await expect(page.locator(".modal-card")).toHaveCount(0);
     expect(existsSync(path.join(SCREENSHOT_DIR, "project-picker-cold.png"))).toBe(true);
-    expect(existsSync(path.join(SCREENSHOT_DIR, "model-effort-cold.png"))).toBe(true);
   });
 
   test("rapid double-clicks on the FAB open exactly one modal instance", async ({ page }) => {

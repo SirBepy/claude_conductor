@@ -1,6 +1,6 @@
 // Machine-picker chip row for the new-chat project picker (multi-machine
-// federation). Copies account-field.ts's chip pattern (render + attach split,
-// state owned by the caller) - project-picker.ts is the only caller; it
+// federation). Render + attach split, state owned by the caller -
+// project-picker.ts is the only caller; it
 // re-renders via lit-html, so click handlers are re-attached to the fresh
 // chip nodes after every render (see attachMachineFieldHandlers below).
 

@@ -1,7 +1,7 @@
 // UI coverage for the multi-account feature's three remaining unverified
 // surfaces (milestone 08, docs/multi-account/08-notifications-polish.md item
 // 3c): the dashboard account selector (milestone 05), the new-chat account
-// picker (milestone 04), and the floating overlay (milestone 06).
+// resolution in the draft (milestone 04), and the floating overlay (milestone 06).
 //
 // Opt-in, outside the default `test:e2e` pair:
 //
@@ -74,20 +74,18 @@ describe("Dashboard account selector (multi-account milestone 05)", () => {
   });
 });
 
-describe("New-chat account picker (multi-account milestone 04)", () => {
+describe("New-chat account resolution (multi-account milestone 04)", () => {
   // Tear down even on failure: a modal left up covers `#acc-add-btn`.
   afterEach(async () => {
     await browser.execute(() => {
-      document.querySelector(".me-cancel")?.click();
       document.querySelector(".project-picker-backdrop")?.remove();
       document.querySelector(".project-picker")?.remove();
-      document.querySelector(".model-effort-modal")?.remove();
       document.querySelector(".modal-backdrop:not([hidden])")?.setAttribute("hidden", "");
     });
     await browser.keys(["Escape"]);
   });
 
-  it("shows account chips with a populated registry, the 'no accounts yet' state with an empty one", async () => {
+  it("opens the draft straight after the project pick; the account chip shows only with 2+ accounts", async () => {
     await browser.execute(() => window.showView("sessions"));
     // New chat is only interactable once the view-more menu relocates it out
     // of the hidden `#view-more-host` (view-more-menu.ts:112-118).
@@ -103,28 +101,17 @@ describe("New-chat account picker (multi-account milestone 04)", () => {
     // assertion on which project it hit.
     await selectProjectRow(PROJECT_NAME);
 
-    // Wait for the modal body, not the account field: the field is absent by
-    // design with a single registered account, so waiting on it burns the full
-    // timeout and fails on a modal that rendered correctly.
-    await (await $(".me-columns")).waitForExist({ timeout: 15000 });
-    // Registry-aware (model-effort-modal.ts `renderAccountFieldHtml`), three
-    // cases not two: 2+ accounts show the chip picker, exactly one shows no
-    // field at all (3133a010 - there is nothing to choose), none shows the
-    // warning plus an "Add one in Settings" link.
+    // There is no dialog any more: the draft's composer is the arrival signal.
+    await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 15000 });
+    // The statusbar chip (statusbar-chips.ts "account" case) renders only when
+    // 2+ accounts exist AND one resolved (project binding > default); one
+    // account is a sole-account fallback that names nothing, none renders
+    // nothing. With 2+ accounts and no default the chip is absent and the
+    // first send asks for an account (covered by the view-harness
+    // new-chat-accounts spec, since sending here would spawn claude).
     const accounts = await browser.execute(() => window.__TAURI__.core.invoke("list_accounts"));
-    if (accounts.length > 1) {
-      // Every account is always on screen - there is no collapsed trigger
-      // and no "remember this account?" checkbox any more.
-      await expect($(".me-acc-field .account-chip")).toExist();
-      await expect($(".me-acc-empty")).not.toExist();
-      await expect($(".me-remember")).not.toExist();
-    } else if (accounts.length === 1) {
-      await expect($(".me-acc-field")).not.toExist();
-      await expect($(".me-acc-empty")).not.toExist();
-    } else {
-      await expect($(".me-acc-empty")).toExist();
-      await expect($(".me-acc-add-link")).toExist();
-      await expect($("[data-acc-id]")).not.toExist();
+    if (accounts.length <= 1) {
+      await expect($("#session-pane .sb-account")).not.toExist();
     }
   });
 });

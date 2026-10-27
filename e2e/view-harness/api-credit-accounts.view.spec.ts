@@ -1,10 +1,10 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
 
-// asserts: src/views/settings/subviews/accounts/accounts.ts, src/views/dashboard/dashboard.ts, src/views/sessions/account-field.ts
+// asserts: src/views/settings/subviews/accounts/accounts.ts, src/views/dashboard/dashboard.ts, src/shared/change-account-modal.ts, src/views/sessions/account-picker-logic.ts
 
 // The API-credit account kind in the browser harness: Settings row, dashboard
-// meter, and the new-chat picker (chip shown, never preselected).
+// meter, and the draft chat's account picker (chip shown, never preselected).
 
 const SUB = {
   id: "acct-sub", label: "Personal", colour: "#8b5cf6", icon: "user", config_dir: "", chrome_profile_dir: "",
@@ -22,6 +22,32 @@ const STATUS = {
   purchased_remaining_cents: 0, spend_cents: 2128, limit_cents: 20000, spend_resets_at: "2026-11-01T00:00:00Z",
   fetched_at: "2026-10-26T12:00:00Z", blocked: false, block_reason: null, error: null,
 };
+
+const PROJECT = {
+  id: "proj1", path: "C:/repo", name: "repo", parent_segment: null,
+  avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0,
+  any_automated: false, last_active_at: null, path_exists: true,
+  worktrees: [], last_worktree_path: null, last_start_folder_rel: null,
+};
+
+async function openDraft(page: Page, accounts: unknown[]): Promise<void> {
+  await mountView(page, {
+    view: "sessions",
+    invoke: {
+      ...SESSIONS_BASE_INVOKE,
+      list_instances: [], get_active_sessions: [],
+      list_project_groups: [PROJECT], list_projects: [], list_accounts: accounts,
+      resolve_project_account: null, project_last_activity_at: 0, count_ai_todos: 0,
+      list_claude_md_scopes: [{ rel_path: "", label: "Repo root", nested: false }],
+      get_history: [],
+      load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+    },
+  });
+  await page.locator("#viewMoreBtn").waitFor();
+  await page.keyboard.press("Control+n");
+  await page.locator(".project-picker-row").click();
+  await page.locator("#session-pane .session-composer .composer-textarea").waitFor();
+}
 
 test.describe("view-harness / API-credit accounts", () => {
   test("Settings row shows the live figures and offers Connect Console, not Reauth or Set as default", async ({ page }) => {
@@ -134,35 +160,28 @@ test.describe("view-harness / API-credit accounts", () => {
     await expect(page.locator('.dash-credit[data-acc-id="acct-credit"] .dash-credit-name')).toHaveText("API credit · Personal");
   });
 
-  test("new-chat picker lists the API-credit chip unselected beside the auto-picked subscription", async ({ page }) => {
-    await mountView(page, {
-      invoke: { ...SESSIONS_BASE_INVOKE, list_instances: [], list_accounts: [SUB, CREDIT] },
-    });
-    await page.evaluate(() => {
-      (window as unknown as { __openNewChatModal: () => void }).__openNewChatModal();
-    });
-    const overlay = page.locator(".model-effort-modal-card");
+  test("draft account picker lists the API-credit chip unselected beside the auto-picked subscription", async ({ page }) => {
+    await openDraft(page, [SUB, CREDIT]);
+    await expect(page.locator("#session-pane .sb-account")).toHaveAttribute("aria-label", "Personal");
+    await page.locator("#session-pane .sb-account-btn").click();
+    const overlay = page.locator(".cam-modal-card");
     await expect(overlay).toBeVisible();
     await expect(overlay.locator('.account-chip[data-acc-id="acct-sub"].sel')).toHaveCount(1);
     await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"]')).toHaveCount(1);
     await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"]')).toHaveAttribute("title", "API credit · Personal");
     await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"].sel')).toHaveCount(0);
-    await expect(overlay.locator(".me-confirm")).toBeEnabled();
   });
 
-  test("a lone API-credit account is never preselected: its chip shows and Start stays disabled", async ({ page }) => {
-    await mountView(page, {
-      invoke: { ...SESSIONS_BASE_INVOKE, list_instances: [], list_accounts: [CREDIT] },
-    });
-    await page.evaluate(() => {
-      (window as unknown as { __openNewChatModal: () => void }).__openNewChatModal();
-    });
-    const overlay = page.locator(".model-effort-modal-card");
+  test("a lone API-credit account is never preselected: the first send asks for an account", async ({ page }) => {
+    await openDraft(page, [CREDIT]);
+    const ta = page.locator("#session-pane .session-composer .composer-textarea");
+    await ta.fill("hello");
+    await ta.press("Enter");
+    await expect(page.getByText("Pick an account for this chat first")).toBeVisible();
+    const overlay = page.locator(".cam-modal-card");
     await expect(overlay).toBeVisible();
-    await expect(overlay.locator('.account-chip[data-acc-id="acct-credit"]')).toBeVisible();
-    await expect(overlay.locator(".account-chip.sel")).toHaveCount(0);
-    await expect(overlay.locator(".me-confirm")).toBeDisabled();
-    await overlay.locator('.account-chip[data-acc-id="acct-credit"]').click();
-    await expect(overlay.locator(".me-confirm")).toBeEnabled();
+    // A sole account renders as a static display (no data-acc-id), and the
+    // modal still opens because the sole API-credit account is never auto-picked.
+    await expect(overlay.locator(".cam-acc-static")).toContainText("API credit");
   });
 });

@@ -8,7 +8,8 @@ import { blocksToText } from "../../shared/chat/content-blocks";
 import { formatFireAt } from "../../shared/chat/schedule-picker";
 import { state, setActiveSession } from "./state";
 import { isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar";
-import type { SessionConfig } from "./model-effort-modal";
+import type { SessionConfig } from "../../shared/effort-presets";
+import { accountPickNeeded, persistNewChatChoice } from "./new-chat-config";
 import { setAutoAccept } from "./permission-modal";
 import { savePendingSession, clearPendingSession } from "./pending-draft-storage";
 import { showToast } from "../../shared/toast";
@@ -25,6 +26,8 @@ export interface PendingComposerDeps {
    *  resolves. Passed in (rather than imported) so this module doesn't need
    *  to import back into pending-pane.ts, which owns `_pendingHeader`. */
   rebindPaneHeader: (pane: HTMLElement, sessionId: string) => void;
+  /** Open the draft's account picker (the statusbar chip's own action). */
+  pickAccount: () => void;
 }
 
 /** Mount the composer, wire send/schedule/held-message routing, and attach
@@ -144,6 +147,17 @@ export function wirePendingComposer(
 
       if (!started) {
         started = true;
+        // No account resolved (none bound or default): the first send is the
+        // point that needs one, so ask here instead of spawning on a guess.
+        // Throwing puts the text back in the composer.
+        if (await accountPickNeeded(config)) {
+          started = false;
+          sessionEvents.removeSynthetic(targetSid, optimisticEvent);
+          showToast("Pick an account for this chat first");
+          deps.pickAccount();
+          throw new Error("no account picked");
+        }
+        void persistNewChatChoice(project.path, config);
         if (state.pendingNewSession) {
           state.pendingNewSession.firstMessageSent = true;
           state.pendingNewSession.firstMessageSentAt = Date.now();

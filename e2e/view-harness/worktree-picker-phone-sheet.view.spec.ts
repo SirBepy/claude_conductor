@@ -4,8 +4,7 @@ import { mountView } from "./harness";
 
 // Phone: dock the worktree/location sub-picker to the bottom, same as the
 // project picker right before it in the chain (project-picker-phone-sheet.
-// view.spec.ts) and the model/effort modal right after it
-// (model-effort-modal-phone-sheet.view.spec.ts). `.wt-picker-modal` backs
+// view.spec.ts). `.wt-picker-modal` backs
 // BOTH the worktree choice screen (exercised here, same setup as
 // popup-chain-morph.view.spec.ts) and location-picker.ts's "Open <project>"
 // card - one rule covers both.

@@ -7,8 +7,7 @@ import { api } from "../../../shared/api";
 import { showToast } from "../../../shared/toast";
 import { showView } from "../../../shared/navigation";
 import { createMoreMenu } from "../more-menu-base";
-import { openModelEffortModal } from "../model-effort-modal";
-import { defaultSessionConfig } from "../model-effort-data";
+import { resolveNewChatConfig, accountPickNeeded } from "../new-chat-config";
 import { selectSession } from "../active-session";
 import { updateThinkingBar } from "../session-thinking-bar";
 import { state } from "../state";
@@ -113,8 +112,7 @@ export function makeActions(host: ActionHost): DashActions {
         const repo = await pickRepo(host.ctx(), anchor);
         if (!repo) return;
         const project = { path: repo.cwd, name: repo.name };
-        const config = await openModelEffortModal(project.path, project.name);
-        if (!config) return;
+        const config = await resolveNewChatConfig(project.path);
         host.leave();
         state.launchNewChatCallback?.(project, command ? { ...config, draftText: `${command} ` } : config);
       })();
@@ -126,17 +124,21 @@ export function makeActions(host: ActionHost): DashActions {
         if (!repo) return;
         const project = { path: repo.cwd, name: repo.name };
         let config;
+        let needsAccount;
         try {
-          config = await defaultSessionConfig(project.path) ?? await openModelEffortModal(project.path, project.name);
+          config = await resolveNewChatConfig(project.path);
+          needsAccount = await accountPickNeeded(config);
         } catch (err) {
           showToast(`Could not start the chat: ${String(err)}`);
           return;
         }
-        if (!config) return;
         host.leave();
         // The message embeds third-party card text, so this chat never inherits
         // the project's auto-accept: an injected instruction must hit a prompt.
-        state.launchNewChatCallback?.(project, { ...config, autoAccept: false, initialMessage: message });
+        // With no account resolved it waits in the message box instead of
+        // auto-sending into the account gate.
+        const launch = needsAccount ? { draftText: message } : { initialMessage: message };
+        state.launchNewChatCallback?.(project, { ...config, autoAccept: false, ...launch });
       })();
     },
     back: () => host.back(),

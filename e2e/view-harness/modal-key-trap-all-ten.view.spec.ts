@@ -12,7 +12,9 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 // openNewCharacterModal shell), moving it into the shared-host group below
 // and bringing that group's count to five. Todo 1069 retired pr-review-modal
 // (Code mode replaced it; code-mode.view.spec.ts covers its typing guard),
-// leaving four own-backdrop modals.
+// leaving four own-backdrop modals. The model-effort modal left the shared-host
+// group when the New session dialog was removed (new chats open the draft
+// pane directly).
 
 const MARKER = "MARKER";
 
@@ -94,13 +96,6 @@ async function openWorktreePicker(page: Page): Promise<void> {
   await page.locator(".wt-picker-choice", { hasText: "Existing worktree" }).waitFor();
 }
 
-async function openModelEffortModal(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    void (window as unknown as { __openNewChatModal: () => Promise<unknown> }).__openNewChatModal();
-  });
-  await page.locator(".model-effort-modal-card").waitFor();
-}
-
 async function openApiKeyModal(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const mod = await import("/shared/api-key-modal.ts");
@@ -164,12 +159,6 @@ test.describe("view-harness / modal-open must swallow every keystroke (every cal
   test("shared-host: worktree-picker", async ({ page }) => {
     const composer = await mountWithComposer(page);
     await openWorktreePicker(page);
-    await assertKeySwallowed(page, composer);
-  });
-
-  test("shared-host: model-effort-modal", async ({ page }) => {
-    const composer = await mountWithComposer(page);
-    await openModelEffortModal(page);
     await assertKeySwallowed(page, composer);
   });
 

@@ -13,7 +13,10 @@ import { syncThinkingBar } from "./session-thinking-bar";
 import { renderSidebar, refreshSessions } from "./sidebar";
 import { characterIconUrl } from "./session-characters";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
-import type { SessionConfig } from "./model-effort-modal";
+import type { SessionConfig } from "../../shared/effort-presets";
+import { openChangeCharacterModal } from "../../shared/change-character-modal";
+import { liveTakenCharacterIds } from "./new-chat-config";
+import { projectsListData, resolveCached } from "./new-session-cache";
 import { setAutoAccept } from "./permission-modal";
 import { SessionStatusbar, loadStatuslineRows, loadStatuslineHideZero, fetchGitInfo } from "./session-statusbar";
 import { savePendingSession } from "./pending-draft-storage";
@@ -70,8 +73,8 @@ export function mountPendingChrome(
     catch (err) { console.error("[sessions] cancel_turn failed", err); }
   });
 
-  // Show the character the user picked in the new-session modal, mirroring the
-  // sidebar draft row's data path. Without this the header keeps the bare "?"
+  // Show the draft's character (rolled by new-chat-config.ts or picked from
+  // this avatar), mirroring the sidebar draft row's data path. Without this the header keeps the bare "?"
   // placeholder while the sidebar already shows the portrait. No status glow on
   // a draft (nothing is in flight). Hydrate fills the icon if it isn't cached.
   if (config.characterId) {
@@ -81,8 +84,52 @@ export function mountPendingChrome(
     header.setAvatar(null, null, "", project.path);
   }
   void hydrateProjectTechIcons(pane);
+  header.onCharClick = () => { void changePendingCharacter(pane, header, config, placeholderId, project.path); };
 
   return header;
+}
+
+/** The draft header's avatar. Before the first send it only re-points the
+ *  draft's config, which the session-started watcher applies to the real
+ *  session; once promoted it is the live chat's own character change.
+ *  active-session imports are dynamic for the same reason as
+ *  changePendingAccount's. */
+async function changePendingCharacter(
+  pane: HTMLElement,
+  header: SessionHeader,
+  config: SessionConfig,
+  placeholderId: string,
+  projectPath: string,
+): Promise<void> {
+  const liveId = state.renderer?.currentSessionId();
+  if (liveId && liveId !== placeholderId) {
+    const [{ headerStatusClass }, { changeCharacterForSession }] = await Promise.all([
+      import("./active-session"),
+      import("./active-session-account"),
+    ]);
+    await changeCharacterForSession(liveId, headerStatusClass);
+    return;
+  }
+  const projects = await resolveCached(projectsListData(), []);
+  const projectId = projects.find((p) => String(p.path) === projectPath)?.id;
+  // The picker lists the project's character pool, so an untracked folder
+  // has none to offer; the backend rolls one at spawn.
+  if (!projectId) return;
+  const picked = await openChangeCharacterModal({
+    projectId,
+    currentId: config.characterId ?? null,
+    excludeIds: [...liveTakenCharacterIds()],
+  });
+  if (!picked || picked === config.characterId) return;
+  config.characterId = picked;
+  header.setAvatar(picked, characterIconUrl(picked), "", projectPath);
+  void hydrateCharacterAvatars(pane);
+  const pending = state.pendingNewSession;
+  if (pending?.placeholderId === placeholderId) {
+    pending.config.characterId = picked;
+    savePendingSession(pending);
+  }
+  rebuildSidebar();
 }
 
 /** Mount the statusbar for the pending pane. No-op if the host slot isn't in
@@ -108,7 +155,7 @@ export async function mountPendingStatusbar(
     onEffortChange: (e) => { config.effort = e; },
     onModelChange: (m) => { config.model = m; },
     onConfig: (model, effort, effortEditable) => header?.setConfig(model, effort, effortEditable),
-    onAccountClick: () => { void changePendingAccount(config, placeholderId, sb); },
+    onAccountClick: () => { void changePendingAccount(config, placeholderId); },
     layoutEditable: true,
   });
   state.statusbar = sb;
@@ -133,7 +180,8 @@ export async function mountPendingStatusbar(
  *  re-points the draft's config, which the first send carries as account_id.
  *  active-session imports are dynamic because active-session.ts sits above
  *  this module in the import graph. */
-async function changePendingAccount(config: SessionConfig, placeholderId: string, sb: SessionStatusbar): Promise<void> {
+export async function changePendingAccount(config: SessionConfig, placeholderId: string): Promise<void> {
+  const sb = state.statusbar;
   const liveId = state.renderer?.currentSessionId();
   if (liveId && liveId !== placeholderId) {
     const [{ selectSession }, { changeAccountForSession }] = await Promise.all([
@@ -146,7 +194,7 @@ async function changePendingAccount(config: SessionConfig, placeholderId: string
   const picked = await openChangeAccountModal({ currentId: config.accountId ?? null, title: "Change account" });
   if (!picked || picked === config.accountId) return;
   config.accountId = picked;
-  if (state.statusbar === sb) sb.setAccountId(picked);
+  if (sb && state.statusbar === sb) sb.setAccountId(picked);
   const pending = state.pendingNewSession;
   if (pending?.placeholderId === placeholderId) {
     pending.config.accountId = picked;

@@ -1,4 +1,4 @@
-// The new-chat modal's account step for a chat aimed at a paired machine: that
+// A new chat's account resolution for a chat aimed at a paired machine: that
 // machine's accounts, its default and its binding for the project. Account ids
 // are per machine, so none of this can come from the local caches in
 // new-session-cache.ts, and nothing here is cached: a stale list would offer
@@ -27,7 +27,7 @@ export async function loadMachineAccounts(machineId: string, cwd: string): Promi
       ? machines.value.peers.find((p) => p.machine_id === machineId)?.label
       : undefined) ?? "the other machine";
   if (accounts.status === "fulfilled") return { label, list: accounts.value, error: null };
-  console.error("[model-effort-modal] list_machine_accounts failed", accounts.reason);
+  console.error("[new-chat] list_machine_accounts failed", accounts.reason);
   const reason = accounts.reason;
   const text = reason instanceof Error ? reason.message : String(reason);
   return { label, list: null, error: text || "request failed" };

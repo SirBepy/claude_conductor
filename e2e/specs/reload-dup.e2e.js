@@ -17,6 +17,17 @@ async function msgCounts() {
   }));
 }
 
+// 2+ accounts with no default/binding: the first send is refused and the
+// account picker opens (pending-pane-composer.ts). Pick the first chip and
+// resend; the refused text is put back in the composer.
+async function pickAccountIfAsked() {
+  const modalChip = await $(".cam-modal-card [data-acc-id]");
+  if (await modalChip.waitForExist({ timeout: 2000 }).then(() => true, () => false)) {
+    await modalChip.click();
+    await (await $(".session-composer .composer-send")).click();
+  }
+}
+
 async function startNewChatPickingFirstProject() {
   // New chat now lives in the view-header "more options" overflow menu.
   const moreBtn = await $("#viewMoreBtn");
@@ -28,21 +39,9 @@ async function startNewChatPickingFirstProject() {
   // 1. Project picker -> pick this repo by name (todo 865).
   await selectProjectRow(PROJECT_NAME);
 
-  // openModelEffortModal awaits several IPC calls (get_settings, listProjects,
-  // listAccounts) before its first render, so nothing inside it exists right
-  // after the project-row click - wait for the modal body, not for the account
-  // field. The field is absent by design when the registry holds a single
-  // account, so waiting on it hangs for the full timeout in the common case.
-  await (await $(".me-columns")).waitForExist({ timeout: 10000 });
-  // Ambiguous registry (2+ accounts, no default) leaves Start disabled until a chip is picked.
-  const accChip = await $(".me-acc-field .account-chip");
-  if (await accChip.isExisting()) {
-    await accChip.click();
-  }
-
-  const confirm = await $(".me-confirm");
-  await confirm.waitForClickable({ timeout: 10000 });
-  await confirm.click();
+  // 2. No dialog: the draft pane opens straight on the project's defaults.
+  //    With 2+ accounts and no default, the first send asks for an account
+  //    instead (see sendFirstMessage below).
   // 3. Pending pane mounts the composer.
   await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 20000 });
 }
@@ -56,6 +55,7 @@ describe("Chat reload de-duplication (ai_todo 65)", () => {
     const ta = await $(".session-composer .composer-textarea");
     await ta.setValue("reply with the literal word OK and stop.");
     await (await $(".session-composer .composer-send")).click();
+    await pickAccountIfAsked();
 
     // Wait for the assistant's finalized (non-streaming) reply.
     await browser.waitUntil(

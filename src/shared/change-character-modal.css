@@ -3,9 +3,8 @@
 .cc-modal-overlay {
   position: fixed;
   inset: 0;
-  /* Above the model-effort-modal-card / worktree-picker-card host tier
-   * (z-index 2500-2503, shared/modal.css), since this can open from inside
-   * either of those. */
+  /* Above the worktree-picker-card host tier (z-index 2500-2503,
+   * shared/modal.css), since this can open from inside it. */
   z-index: 2600;
   background: rgba(0, 0, 0, 0.6);
   display: flex;

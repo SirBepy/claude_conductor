@@ -12,7 +12,7 @@ import { updateThinkingBar } from "./session-thinking-bar";
 import { showView } from "../../shared/navigation";
 import { closeChatWithConfirm } from "./close-chat";
 import { askConfirm } from "../../shared/confirm";
-import type { SessionConfig } from "./model-effort-modal";
+import type { SessionConfig } from "../../shared/effort-presets";
 import { isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
 import { refreshWrapUpIndicator, projectDashboardOpener } from "./session-header";
 import { openDashboardPage } from "./project-dashboard/dashboard-page";

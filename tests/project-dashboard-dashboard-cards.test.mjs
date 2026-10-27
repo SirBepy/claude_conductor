@@ -25,11 +25,10 @@ vi.mock("../src/shared/transport.ts", async (importOriginal) => {
   return { ...actual, isRemote: () => false, getTransport: () => ({ listen: async () => () => {} }) };
 });
 vi.mock("../src/views/sessions/active-session.ts", () => ({ dismountActivePane: vi.fn(), selectSession: vi.fn(async () => {}) }));
-vi.mock("../src/views/sessions/model-effort-modal.ts", () => ({ openModelEffortModal: vi.fn() }));
-vi.mock("../src/views/sessions/model-effort-data.ts", async (importOriginal) => {
-  const actual = await importOriginal();
-  return { ...actual, defaultSessionConfig: vi.fn(async () => null) };
-});
+vi.mock("../src/views/sessions/new-chat-config.ts", () => ({
+  resolveNewChatConfig: vi.fn(),
+  accountPickNeeded: vi.fn(async () => false),
+}));
 // The real host morphs between cards on timers; the tests only need the card in a slot.
 vi.mock("../src/shared/modal.ts", async (importOriginal) => {
   const actual = await importOriginal();
@@ -44,8 +43,7 @@ vi.mock("../src/shared/modal.ts", async (importOriginal) => {
 
 const { mountDashboard } = await import("../src/views/sessions/project-dashboard/dashboard.ts");
 const { state } = await import("../src/views/sessions/state.ts");
-const { openModelEffortModal } = await import("../src/views/sessions/model-effort-modal.ts");
-const { defaultSessionConfig } = await import("../src/views/sessions/model-effort-data.ts");
+const { resolveNewChatConfig, accountPickNeeded } = await import("../src/views/sessions/new-chat-config.ts");
 const { cardMessage } = await import("../src/views/sessions/project-dashboard/dash-cards.ts");
 const { invoke } = await import("../src/shared/ipc.ts");
 
@@ -210,7 +208,7 @@ describe("quick-action chips", () => {
     expect(root.querySelector("[data-pd-qa-dir]")).toBeNull();
 
     state.launchNewChatCallback = vi.fn();
-    openModelEffortModal.mockResolvedValueOnce({ model: "m" });
+    resolveNewChatConfig.mockResolvedValueOnce({ model: "m" });
     root.querySelector("[data-pd-new-chat]").click();
     await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalledWith(
       { path: "C:/Projects/conductor", name: "conductor" }, { model: "m" }));
@@ -223,7 +221,7 @@ describe("quick-action chips", () => {
     await vi.waitFor(() => expect(chips(root)).toEqual(["+ New chat", "/pickup", "/audit"]));
 
     state.launchNewChatCallback = vi.fn();
-    openModelEffortModal.mockResolvedValueOnce({ model: "m" });
+    resolveNewChatConfig.mockResolvedValueOnce({ model: "m" });
     root.querySelectorAll(".pd-qa .pd-chip")[1].click();
     await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalledWith(
       { path: "C:/Projects/conductor", name: "conductor" }, { model: "m", draftText: "/pickup " }));
@@ -311,11 +309,10 @@ describe("custom card extras", () => {
     expect(root.querySelector('[data-pd-card="card:c5"] .pd-headline').textContent).toContain("12 updates since /shortcut-priorities ran 2d ago");
 
     state.launchNewChatCallback = vi.fn();
-    defaultSessionConfig.mockResolvedValueOnce({ model: "opus", effort: "high", autoAccept: true, accountId: "a1" });
+    resolveNewChatConfig.mockResolvedValueOnce({ model: "opus", effort: "high", autoAccept: true, accountId: "a1" });
     button.click();
     await pickBiller();
     await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalled());
-    expect(openModelEffortModal).not.toHaveBeenCalled();
     const [project, config] = state.launchNewChatCallback.mock.calls[0];
     expect(project).toEqual({ path: "C:/Projects/zng-biller", name: "zng-biller" });
     expect(config).toMatchObject({ model: "opus", effort: "high", accountId: "a1" });
@@ -326,24 +323,25 @@ describe("custom card extras", () => {
     expect(msg).toContain("- sc-4821 Retry ACH: Review");
   });
 
-  it("falls back to the model picker when no account is the default, and still sends at once", async () => {
+  it("with no account resolved, the message waits in the draft's message box instead of auto-sending", async () => {
     snapshot = groupSnapshot();
     const root = await mount({ kind: "group", id: "g1" });
     state.launchNewChatCallback = vi.fn();
-    defaultSessionConfig.mockResolvedValueOnce(null);
-    openModelEffortModal.mockResolvedValueOnce({ model: "m" });
+    resolveNewChatConfig.mockResolvedValueOnce({ model: "opus", effort: "high", autoAccept: true, accountId: null });
+    accountPickNeeded.mockResolvedValueOnce(true);
     root.querySelector('[data-pd-card="card:c5"] [data-pd-action]').click();
     await pickBiller();
     await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalled());
-    expect(openModelEffortModal).toHaveBeenCalledWith("C:/Projects/zng-biller", "zng-biller");
-    expect(state.launchNewChatCallback.mock.calls[0][1].initialMessage).toMatch(/^\/shortcut-priorities\n/);
+    const config = state.launchNewChatCallback.mock.calls[0][1];
+    expect(config.initialMessage).toBeUndefined();
+    expect(config.draftText).toMatch(/^\/shortcut-priorities\n/);
   });
 
   it("a card-launched chat starts with auto-accept off even when the project default has it on", async () => {
     snapshot = groupSnapshot();
     const root = await mount({ kind: "group", id: "g1" });
     state.launchNewChatCallback = vi.fn();
-    defaultSessionConfig.mockResolvedValueOnce({ model: "opus", effort: "high", autoAccept: true, accountId: "a1" });
+    resolveNewChatConfig.mockResolvedValueOnce({ model: "opus", effort: "high", autoAccept: true, accountId: "a1" });
     root.querySelector('[data-pd-card="card:c5"] [data-pd-action]').click();
     await pickBiller();
     await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalled());
@@ -360,7 +358,7 @@ describe("custom card extras", () => {
     stack.id = "toastStack";
     document.body.appendChild(stack);
     state.launchNewChatCallback = vi.fn();
-    defaultSessionConfig.mockRejectedValueOnce(new Error("ipc down"));
+    resolveNewChatConfig.mockRejectedValueOnce(new Error("ipc down"));
     root.querySelector('[data-pd-card="card:c5"] [data-pd-action]').click();
     await pickBiller();
     await vi.waitFor(() => expect(stack.textContent).toContain("ipc down"));
