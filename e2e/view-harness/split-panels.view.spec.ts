@@ -247,6 +247,36 @@ test("a push while another panel fills the split leaves that panel and dots Prev
   await expect(tab(page, "preview").locator(".sp-dot")).toHaveCount(0);
 });
 
+const scopeTo = (page: Page, sid: string) =>
+  page.evaluate((s) => (window as any).__fab.setSessionScope(s, "/proj"), sid);
+
+test("a Preview pushed behind Drafts stays pending across chat switches", async ({ page }) => {
+  await mountPane(page, PREVIEW_MOCKS);
+  await tab(page, "drafts").click();
+  await fireEvent(page, "preview", [{ snapshot: { ...PREVIEW_MOCKS.list_previews[0], id: "snap-2", version: 3 } }]);
+  await expect(tab(page, "preview").locator(".sp-dot")).toHaveCount(1);
+
+  for (let i = 0; i < 2; i++) {
+    await scopeTo(page, "sess-B");
+    await scopeTo(page, VIEWER);
+    await expect(panel(page)).toHaveAttribute("data-active", "drafts");
+    await expect(tab(page, "preview").locator(".sp-dot")).toHaveCount(1);
+  }
+});
+
+test("a Preview pushed to a background chat is still pending on the second return to it", async ({ page }) => {
+  await mountPane(page, PREVIEW_MOCKS);
+  await tab(page, "drafts").click();
+  await scopeTo(page, "sess-B");
+  await fireEvent(page, "preview", [{ snapshot: { ...PREVIEW_MOCKS.list_previews[0], id: "snap-2", version: 3 } }]);
+
+  for (let i = 0; i < 2; i++) {
+    await scopeTo(page, VIEWER);
+    await expect(tab(page, "preview").locator(".sp-dot")).toHaveCount(1);
+    await scopeTo(page, "sess-B");
+  }
+});
+
 test("a push with the split closed opens Preview in it", async ({ page }) => {
   await mountPane(page, PREVIEW_MOCKS);
   await fireEvent(page, "preview", [{ snapshot: { ...PREVIEW_MOCKS.list_previews[0], id: "snap-2", version: 3 } }]);
