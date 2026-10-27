@@ -42,6 +42,12 @@ pub struct Tab {
 
 #[derive(Debug)]
 pub struct Chat {
+    /// The browser this chat drives; a lost connection is re-picked for it.
+    pub app: App,
+    /// The chat named a profile folder. The extension's hello carries no
+    /// profile, so the bridge cannot tell two profiles of one browser apart and
+    /// refuses to pick between them for such a chat.
+    pub wants_profile: bool,
     pub ext: Option<ExtId>,
     pub window_id: Option<WindowId>,
     pub tabs: HashMap<TabId, Tab>,
@@ -99,6 +105,22 @@ impl Model {
             })
     }
 
+    /// More than one ready connection of `app` is up, so which profile a pick
+    /// would land on is a guess.
+    pub fn profile_ambiguous(&self, app: App) -> bool {
+        self.exts.values().filter(|e| e.ready && e.app == Some(app)).count() > 1
+    }
+
+    /// `pick_ext` for a chat that may have named a profile: a profile request
+    /// never picks between several connections of one browser, because the
+    /// newest one could be Joe's main signed-in profile.
+    pub fn pick_ext_for(&self, app: App, wants_profile: bool) -> Option<ExtId> {
+        if wants_profile && self.profile_ambiguous(app) {
+            return None;
+        }
+        self.pick_ext(app)
+    }
+
     pub fn tab_by_session<'a>(chat: &'a Chat, session_id: &str) -> Option<(TabId, Option<&'a str>)> {
         for (id, t) in &chat.tabs {
             if t.session_id == session_id {
@@ -122,8 +144,26 @@ impl Model {
     /// Routes one command. `events` collects messages to send to the chat
     /// before the reply (a root `setAutoAttach` replays the chat's tabs).
     pub fn route(&mut self, chat_key: &str, method: &str, params: &Value, session_id: Option<&str>, user_agent: &str, events: &mut Vec<Value>) -> Route {
+        // A chat whose browser connection dropped (browser restart, extension
+        // or MV3 worker reload) keeps its Playwright child alive, so it has to
+        // pick up the new connection here rather than fail until it is retired.
+        let adopted = match self.chats.get(chat_key) {
+            Some(c) if c.ext.is_none() => self.pick_ext_for(c.app, c.wants_profile),
+            _ => None,
+        };
+        let ambiguous = matches!(self.chats.get(chat_key), Some(c) if c.ext.is_none() && c.wants_profile && self.profile_ambiguous(c.app));
+        // The caller read the user agent from the chat's old connection, which is gone.
+        let adopted_ua = adopted.and_then(|e| self.exts.get(&e)).map(|e| e.user_agent.clone());
+        let user_agent = adopted_ua.as_deref().unwrap_or(user_agent);
         let Some(chat) = self.chats.get_mut(chat_key) else { return Route::Fail("unknown chat".into()) };
-        let Some(ext) = chat.ext else { return Route::Fail(NOT_CONNECTED.into()) };
+        if let Some(e) = adopted {
+            chat.ext = Some(e);
+            chat.window_id = None;
+            chat.tabs.clear();
+        }
+        let Some(ext) = chat.ext else {
+            return Route::Fail(if ambiguous { profile_ambiguous_message(chat.app) } else { NOT_CONNECTED.into() });
+        };
         if let Some(session_id) = session_id {
             let Some((tab, child)) = Self::tab_by_session(chat, session_id) else {
                 return Route::Fail(format!("session {session_id} does not belong to this chat"));
@@ -249,6 +289,17 @@ pub fn tab_target(tab: TabId, child: Option<&str>) -> Value {
     }
 }
 
+/// Why a chat that named a profile is refused while several profiles of its
+/// browser are connected.
+pub fn profile_ambiguous_message(app: App) -> String {
+    format!(
+        "More than one profile of {} is connected to Claude Conductor and the bridge cannot tell which is which, so it will not guess and risk driving the wrong one. Close the other profiles' {} windows, or ask for \"my {}\" without naming a profile.",
+        app.label(),
+        app.label(),
+        app.label()
+    )
+}
+
 pub const NOT_CONNECTED: &str = "Joe's browser is not connected to Claude Conductor: the Claude Conductor Browser Bridge extension \
 is not running in it. Tell Joe with send_message to open that browser and check the extension is installed (Settings > Claude's \
 browser), or use browser_target to switch to Claude's own browser.";
@@ -264,7 +315,7 @@ mod tests {
     fn model_with_chat(key: &str) -> Model {
         let mut m = Model::default();
         m.exts.insert(1, ext(Some(App::Brave), true));
-        m.chats.insert(key.into(), Chat { ext: Some(1), window_id: Some(10), tabs: HashMap::new(), auto_attach: false });
+        m.chats.insert(key.into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(10), tabs: HashMap::new(), auto_attach: false });
         m
     }
 
@@ -284,7 +335,7 @@ mod tests {
     #[test]
     fn a_chat_cannot_reach_another_chats_tab() {
         let mut m = model_with_chat("a");
-        m.chats.insert("b".into(), Chat { ext: Some(1), window_id: Some(11), tabs: HashMap::new(), auto_attach: false });
+        m.chats.insert("b".into(), Chat { app: App::Brave, wants_profile: false, ext: Some(1), window_id: Some(11), tabs: HashMap::new(), auto_attach: false });
         let b_session = add_tab(&mut m, "b", 7, "T7");
         let (r, _) = route(&mut m, "a", "Runtime.evaluate", json!({}), Some(&b_session));
         assert!(matches!(r, Route::Fail(e) if e.contains("does not belong")));
@@ -340,7 +391,8 @@ mod tests {
     #[test]
     fn a_chat_with_no_browser_gets_the_way_out() {
         let mut m = model_with_chat("a");
-        m.chats.get_mut("a").unwrap().ext = None;
+        // No connection of the chat's browser left to adopt, so the chat needs the way out.
+        m.drop_ext(1);
         assert!(matches!(route(&mut m, "a", "Browser.getVersion", json!({}), None).0, Route::Fail(e) if e.contains("browser_target")));
     }
 
@@ -385,6 +437,22 @@ mod tests {
     }
 
     #[test]
+    fn a_chat_whose_connection_dropped_adopts_the_reconnected_extension() {
+        let mut m = model_with_chat("a");
+        add_tab(&mut m, "a", 5, "T5");
+        m.drop_ext(1);
+        let (r, _) = route(&mut m, "a", "Browser.getVersion", json!({}), None);
+        assert_eq!(r, Route::Fail(NOT_CONNECTED.into()), "nothing to reconnect to yet");
+        m.exts.insert(2, ext(Some(App::Brave), true));
+        let (r, _) = route(&mut m, "a", "Browser.getVersion", json!({}), None);
+        assert!(matches!(r, Route::Reply(_)), "the next call picks up the new connection");
+        assert_eq!(m.chats["a"].ext, Some(2));
+        assert!(m.chats["a"].tabs.is_empty() && m.chats["a"].window_id.is_none());
+        let (r, _) = route(&mut m, "a", "Target.createTarget", json!({ "url": "about:blank" }), None);
+        assert_eq!(r, Route::CreateTarget { ext: 2, url: "about:blank".into() });
+    }
+
+    #[test]
     fn the_newest_matching_browser_wins_and_a_lone_unknown_one_is_used() {
         let mut m = Model::default();
         m.exts.insert(1, ext(Some(App::Chrome), true));
@@ -397,5 +465,37 @@ mod tests {
         assert_eq!(lone.pick_ext(App::Edge), Some(3));
         lone.exts.insert(4, ext(None, false));
         assert_eq!(lone.pick_ext(App::Edge), Some(3), "a connection that has not said hello does not count");
+    }
+
+    #[test]
+    fn a_profile_request_never_picks_between_two_connections_of_one_browser() {
+        let mut m = Model::default();
+        m.exts.insert(1, ext(Some(App::Brave), true));
+        assert_eq!(m.pick_ext_for(App::Brave, true), Some(1), "one connection is the only candidate");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        m.exts.insert(2, ext(Some(App::Brave), true));
+        assert_eq!(m.pick_ext_for(App::Brave, true), None, "two profiles: the newest is a guess");
+        assert_eq!(m.pick_ext_for(App::Brave, false), Some(2), "no profile named keeps the newest-wins pick");
+        m.exts.insert(3, ext(Some(App::Chrome), true));
+        assert_eq!(m.pick_ext_for(App::Chrome, true), Some(3), "another browser's connections do not count");
+        m.exts.get_mut(&2).unwrap().ready = false;
+        assert_eq!(m.pick_ext_for(App::Brave, true), Some(1), "a connection that has not said hello does not count");
+    }
+
+    #[test]
+    fn a_chat_that_named_a_profile_is_told_why_it_was_not_given_a_browser() {
+        let mut m = model_with_chat("a");
+        m.exts.insert(1, ext(Some(App::Brave), true));
+        m.exts.insert(2, ext(Some(App::Brave), true));
+        let chat = m.chats.get_mut("a").unwrap();
+        chat.ext = None;
+        chat.wants_profile = true;
+        let (r, _) = route(&mut m, "a", "Browser.getVersion", json!({}), None);
+        let Route::Fail(msg) = r else { panic!("{r:?}") };
+        assert!(msg.contains("More than one profile of Brave"), "{msg}");
+        assert_eq!(m.chats["a"].ext, None, "it adopted nothing");
+        m.chats.get_mut("a").unwrap().wants_profile = false;
+        let (r, _) = route(&mut m, "a", "Browser.getVersion", json!({}), None);
+        assert!(matches!(r, Route::Reply(_)), "without a profile request it adopts a connection");
     }
 }
