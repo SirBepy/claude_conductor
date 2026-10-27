@@ -311,9 +311,11 @@ first. While it's off, no phone or other machine can reach the desktop at all.
 While it connects, the phone shows "Reaching your PC…" and keeps retrying on its own with a visible
 countdown - tap **Edit connection** to go back and change the address.
 
-**App lock.** The phone asks for its own fingerprint or screen-lock PIN every time the app
-starts, and again after ten minutes in the background (change it on the phone under Settings >
-Remote access > App lock, from every time up to an hour). The app keeps loading behind the lock
+**App lock.** The first time the app opens on a phone that has a screen lock, it asks whether to
+lock Conductor (recommended); the answer can be changed later on the phone under Settings > Remote
+access > App lock. With the lock on, the phone asks for its own fingerprint or screen-lock PIN every
+time the app starts, and again after ten minutes in the background (the same section sets it, from
+every time up to an hour; picking a photo or file from inside the app does not count as leaving). The app keeps loading behind the lock
 screen, so it is ready the moment you unlock. Cancelling the prompt sends the app to the
 background, still locked, and the prompt opens again the next time you open the app. A phone with no
 screen lock set skips this, since there is nothing to check against.
