@@ -30,13 +30,16 @@ function creditTitleAttr(a: Account, accounts: readonly Account[]): string {
 
 /** The `.cc-modal-body` contents for the account list, split out so the
  * single-vs-multi-account branching is unit-testable without the modal's
- * DOM/IPC wiring. Exactly one account: nothing to pick (todo 883 - a
- * single-option picker is a confirmation, not a choice). Render it as a
- * static display, not a chip: no data-acc-id/role="button", so there is
- * nothing for the click handler in `openChangeAccountModal` to wire up. */
+ * DOM/IPC wiring. Exactly one account that is already the current one:
+ * nothing to pick (a single-option picker is a confirmation, not a choice).
+ * Render it as a static display, not a chip: no data-acc-id/role="button",
+ * so there is nothing for the click handler in `openChangeAccountModal` to
+ * wire up. A sole account that is NOT current stays pickable: a draft whose
+ * only account is API credit opens with none picked, and this is the only
+ * place it can opt in. */
 export function renderAccountListBodyHtml(accounts: Account[], currentId: string | null): string {
   if (accounts.length === 0) return `<div class="cc-modal-empty">No Claude accounts configured yet.</div>`;
-  if (accounts.length === 1) {
+  if (accounts.length === 1 && accounts[0]!.id === currentId) {
     const a = accounts[0]!;
     return `<div class="cam-account-list"><span class="account-chip sel cam-acc-static" style="--acc:${escapeHtml(a.colour)}"${creditTitleAttr(a, accounts)}>${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}</span></div>`;
   }
