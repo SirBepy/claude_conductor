@@ -62,15 +62,26 @@ export async function renderBrowserView(root: HTMLElement): Promise<() => void> 
   // A text field's change event waits for blur, so typing a profile and
   // refreshing straight away lost it; save shortly after the last keystroke.
   let typing: ReturnType<typeof setTimeout> | undefined;
+  let savePending = false;
   const onInput = (e: Event) => {
     if ((e.target as HTMLElement | null)?.id !== "chatDefaultsBrowserProfile") return;
     clearTimeout(typing);
-    typing = setTimeout(() => { void persist(); }, 400);
+    savePending = true;
+    typing = setTimeout(() => {
+      savePending = false;
+      void persist();
+    }, 400);
   };
   root.addEventListener("input", onInput);
 
   return () => {
     clearTimeout(typing);
+    // Leaving within the debounce window must not drop the edit; persist reads
+    // the field synchronously, so it still sees the DOM at teardown.
+    if (savePending) {
+      savePending = false;
+      void persist();
+    }
     root.removeEventListener("change", onChange);
     root.removeEventListener("input", onInput);
   };

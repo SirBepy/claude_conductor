@@ -39,6 +39,8 @@ beforeEach(() => {
   remote = false;
   settings = {};
   document.body.innerHTML = "";
+  // A failed assertion in a fake-timer test must not leave the next test on fake timers.
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
@@ -126,6 +128,30 @@ describe("My browser mode", () => {
     expect(updateSettings.mock.calls[0][0]({}).claudeBrowserMineProfile).toBe("Profile 7");
     vi.useRealTimers();
     dispose();
+  });
+
+  it("flushes a profile edit still inside the debounce window when the page is left", async () => {
+    vi.useFakeTimers();
+    settings = { claudeBrowserMode: "mine" };
+    const { root, dispose } = await mount();
+    const input = root.querySelector("#chatDefaultsBrowserProfile");
+    input.value = "Profile 9";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(updateSettings).not.toHaveBeenCalled();
+    dispose();
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings.mock.calls[0][0]({}).claudeBrowserMineProfile).toBe("Profile 9");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("leaving the page with no pending edit saves nothing", async () => {
+    settings = { claudeBrowserMode: "mine" };
+    const { dispose } = await mount();
+    dispose();
+    expect(updateSettings).not.toHaveBeenCalled();
   });
 
   it("an unknown app in the settings reads as Chrome", async () => {
