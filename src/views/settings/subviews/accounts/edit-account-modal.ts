@@ -33,8 +33,8 @@ export function openEditAccountModal(account: Account): Promise<Account | null> 
     // handed to renderAppearancePicker() and mutated in place - see
     // appearance-picker.ts.
     const appearance: AppearanceState = { icon: account.icon, colour: account.colour };
-    // An API-credit account is never a project binding nor fleet-eligible (the
-    // backend refuses both), so those controls are not drawn for it.
+    // An API-credit account is never a project binding nor fleet-eligible (update_project and
+    // update_account refuse them), so those controls are not drawn for it.
     const apiCredit = isApiCreditAccount(account);
     let fleetEligible = account.fleet_eligible;
     let busy = false;

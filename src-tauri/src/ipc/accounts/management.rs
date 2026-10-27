@@ -127,6 +127,11 @@ pub async fn update_account(
         account.icon = icon;
     }
     if let Some(fleet_eligible) = fleet_eligible {
+        // Only turning it on is refused, so a flag stuck on from before the
+        // kind check can still be switched off.
+        if fleet_eligible {
+            crate::accounts::validate_fleet_eligible(account)?;
+        }
         account.fleet_eligible = fleet_eligible;
     }
     let updated = account.clone();

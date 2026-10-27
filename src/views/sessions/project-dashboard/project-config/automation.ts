@@ -48,7 +48,7 @@ async function renderAccountRow(): Promise<void> {
       api.listAccounts(),
       api.listProjects() as unknown as Promise<ProjectCfg[]>,
     ]);
-    // An API-credit account is never a project binding (the backend refuses it).
+    // An API-credit account is never a project binding (update_project refuses to save one).
     accounts = accounts.filter((a) => !isApiCreditAccount(a));
     const settings = await api.getSettings();
     defaultAccountId = (settings?.["default_account_id"] as string | null | undefined) ?? null;
