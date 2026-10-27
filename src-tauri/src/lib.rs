@@ -416,7 +416,6 @@ pub fn run() {
             ipc::rename_machine,
             ipc::set_machine_profile,
             ipc::browser_status,
-            ipc::browser_set_shown,
             ipc::list_machines,
             ipc::list_machine_projects,
             ipc::list_machine_accounts,

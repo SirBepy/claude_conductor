@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The "Claude's browser" page: the switch persists
 // claudeBrowserEnabled (read daemon-side by Settings::claude_browser_enabled),
-// and the Show button drives the daemon's off-screen window.
+// and there is no show/hide control for the daemon's window.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { updateSettings } from "../src/shared/settings-update.ts";
@@ -14,8 +14,7 @@ vi.mock("../src/shared/settings-update.ts", () => ({
 }));
 vi.mock("../src/shared/api.ts", () => ({
   api: {
-    browserStatus: vi.fn(async () => ({ running: false, shown: false })),
-    browserSetShown: vi.fn(async (shown) => ({ ok: true, shown })),
+    browserStatus: vi.fn(async () => ({ running: false })),
     openInExplorer: vi.fn(async () => {}),
   },
 }));
@@ -69,27 +68,11 @@ describe("Claude's browser section", () => {
     dispose();
   });
 
-  it("Show asks the daemon to show the window, then offers Hide", async () => {
-    const { root, dispose } = await mount();
-    const btn = root.querySelector("#chatDefaultsBrowserShow");
-    await flush();
-    expect(btn.textContent).toBe("Show");
-    btn.click();
-    await flush();
-    expect(api.browserSetShown).toHaveBeenCalledWith(true);
-    expect(btn.textContent).toBe("Hide");
-    btn.click();
-    await flush();
-    expect(api.browserSetShown).toHaveBeenLastCalledWith(false);
-    expect(btn.textContent).toBe("Show");
-    dispose();
-  });
-
-  it("reads Hide when the window was left shown", async () => {
-    api.browserStatus.mockResolvedValueOnce({ running: true, shown: true });
+  it("has no Show/Hide control: Claude's browser is just a normal window", async () => {
     const { root, dispose } = await mount();
     await flush();
-    expect(root.querySelector("#chatDefaultsBrowserShow").textContent).toBe("Hide");
+    expect(root.querySelector("#chatDefaultsBrowserShow")).toBeNull();
+    expect(api.browserSetShown).toBeUndefined();
     dispose();
   });
 
@@ -112,16 +95,15 @@ describe("My browser mode", () => {
     dispose();
   });
 
-  it("defaults to Claude's own browser, with the Show button and no app or profile rows", async () => {
+  it("defaults to Claude's own browser, with no app or profile rows", async () => {
     const { root, dispose } = await mount();
     expect(root.querySelector("#chatDefaultsBrowserMode").value).toBe("own");
-    expect(root.querySelector("#chatDefaultsBrowserShow")).not.toBeNull();
     expect(root.querySelector("#chatDefaultsBrowserApp")).toBeNull();
     expect(root.querySelector("#chatDefaultsBrowserProfile")).toBeNull();
     dispose();
   });
 
-  it("shows the app and profile rows instead of Show when the settings say mine", async () => {
+  it("shows the app and profile rows when the settings say mine", async () => {
     settings = { claudeBrowserMode: "mine", claudeBrowserMineApp: "brave", claudeBrowserMineProfile: "Profile 2" };
     const { root, dispose } = await mount();
     expect(root.querySelector("#chatDefaultsBrowserMode").value).toBe("mine");
@@ -167,7 +149,7 @@ describe("My browser mode", () => {
     dispose();
   });
 
-  it("switching back to Claude's own brings the Show button back, wired", async () => {
+  it("switching back to Claude's own drops the app and profile rows", async () => {
     settings = { claudeBrowserMode: "mine" };
     const { root, dispose } = await mount();
     const mode = root.querySelector("#chatDefaultsBrowserMode");
@@ -175,11 +157,7 @@ describe("My browser mode", () => {
     mode.dispatchEvent(new Event("change", { bubbles: true }));
     await flush();
     await flush();
-    const btn = root.querySelector("#chatDefaultsBrowserShow");
-    expect(btn).not.toBeNull();
-    btn.click();
-    await flush();
-    expect(api.browserSetShown).toHaveBeenCalledWith(true);
+    expect(root.querySelector("#chatDefaultsBrowserApp")).toBeNull();
     dispose();
   });
 
@@ -215,7 +193,7 @@ describe("My browser mode", () => {
 
   it("shows which browsers have the bridge connected", async () => {
     settings = { claudeBrowserMode: "mine" };
-    api.browserStatus.mockResolvedValueOnce({ running: false, shown: false, bridgeConnected: ["Brave"], extensionDir: "C:/app/_up_/browser-extension" });
+    api.browserStatus.mockResolvedValueOnce({ running: false,bridgeConnected: ["Brave"], extensionDir: "C:/app/_up_/browser-extension" });
     const { root, dispose } = await mount();
     await flush();
     expect(root.querySelector("#chatDefaultsBrowserBridge").textContent).toBe("Connected: Brave");
@@ -224,7 +202,7 @@ describe("My browser mode", () => {
 
   it("says Not connected when no bridge is up", async () => {
     settings = { claudeBrowserMode: "mine" };
-    api.browserStatus.mockResolvedValueOnce({ running: false, shown: false, bridgeConnected: [], extensionDir: "C:/x" });
+    api.browserStatus.mockResolvedValueOnce({ running: false,bridgeConnected: [], extensionDir: "C:/x" });
     const { root, dispose } = await mount();
     await flush();
     expect(root.querySelector("#chatDefaultsBrowserBridge").textContent).toBe("Not connected");
@@ -233,7 +211,7 @@ describe("My browser mode", () => {
 
   it("Open folder opens the bundled extension folder for Load unpacked", async () => {
     settings = { claudeBrowserMode: "mine", claudeBrowserMineApp: "brave" };
-    api.browserStatus.mockResolvedValueOnce({ running: false, shown: false, bridgeConnected: [], extensionDir: "C:/app/_up_/browser-extension" });
+    api.browserStatus.mockResolvedValueOnce({ running: false,bridgeConnected: [], extensionDir: "C:/app/_up_/browser-extension" });
     const { root, dispose } = await mount();
     await flush();
     root.querySelector("#chatDefaultsBrowserExtFolder").click();
@@ -244,7 +222,7 @@ describe("My browser mode", () => {
 
   it("Open folder is disabled when the daemon cannot find the folder", async () => {
     settings = { claudeBrowserMode: "mine" };
-    api.browserStatus.mockResolvedValueOnce({ running: false, shown: false, bridgeConnected: [], extensionDir: null });
+    api.browserStatus.mockResolvedValueOnce({ running: false,bridgeConnected: [], extensionDir: null });
     const { root, dispose } = await mount();
     await flush();
     expect(root.querySelector("#chatDefaultsBrowserExtFolder").disabled).toBe(true);
