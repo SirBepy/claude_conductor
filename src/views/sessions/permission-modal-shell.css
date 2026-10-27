@@ -295,9 +295,40 @@
   }
 }
 
-/* Phone-only: the ask band's own Ask button (the header's copy is hidden there). */
+/* Question cards, desktop and phone alike (Joe, 2026-10-27): Ask sits on the
+ * question it asks about instead of in the header, and the footer is just the
+ * answer box whose arrow is Next/Submit (question-ui-answer-bar.ts), so the
+ * Next/Submit button is hidden while the box is up. Skip lives only in the
+ * collapsed bar. The negative block margins keep Ask's 32px box from growing
+ * the band past the text's one-line height; the auto left margin pins it
+ * right, and after a domain chip (which already takes the auto margin) it
+ * sits flush beside it. Review has no box and keeps its Submit button. */
 .prompt-ask__btn {
   display: none;
+}
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) [data-act="ask"] {
+  display: none;
+}
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  margin: -5px -6px -5px auto;
+}
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-domain ~ .prompt-ask__btn {
+  margin-left: 0;
+}
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn i {
+  font-size: 1.15rem;
+}
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer:has(.prompt-card__answer-bar:not(:empty)) > .btn {
+  display: none;
+}
+/* On the last page the arrow submits, so it takes .btn-primary's colors. */
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-answer-send.is-submit:not(:disabled) {
+  background: var(--color-primary);
+  color: var(--color-background);
 }
 
 /* Review's Submit is the step's only control, so it reads as a call to action:

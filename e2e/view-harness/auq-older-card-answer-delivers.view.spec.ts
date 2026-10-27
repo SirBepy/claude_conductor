@@ -74,7 +74,7 @@ test.describe("view-harness / answering a still-pending OLDER card still deliver
     await expect(card).toBeVisible();
     await card.locator('.prompt-opt input[data-label="Primary"]').click();
     // Card tears down synchronously on submit; onSubmit keeps running async.
-    await card.locator('[data-act="primary"]').click();
+    await card.locator(".prompt-answer-send").click();
     await expect(card).toHaveCount(0);
 
     // The newer, independently-pending sibling arrives while the older

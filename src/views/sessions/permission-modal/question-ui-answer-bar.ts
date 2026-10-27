@@ -70,13 +70,15 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
       });
     }
     const fieldHost = noteSlot ?? bar;
-    // One way forward per step: on desktop the footer's Next/Submit is it, so
-    // the answer box drops its own send arrow (Joe, 2026-10-26: an arrow AND
-    // a Next read as two different actions), and the review note never had a
-    // send of its own to offer.
-    if (!page || noteSlot) fieldHost.querySelector(".prompt-answer-send")?.remove();
-    // On the phone page the footer buttons are hidden (permission-modal-
-    // shell.css), so the arrow IS Next/Submit, mirroring the primary's label
+    // One way forward per step: the arrow is it, and the footer's Next/Submit
+    // button is hidden while the box is up (Joe, 2026-10-27, copying the phone;
+    // an arrow AND a Next read as two different actions). The --viewport
+    // fallback host keeps the button and drops the arrow, and the review note
+    // never had a send of its own to offer.
+    const arrowIsNext = !host.classList.contains("prompt-card-host--viewport");
+    if (!arrowIsNext || noteSlot) fieldHost.querySelector(".prompt-answer-send")?.remove();
+    // The footer buttons are hidden (permission-modal-shell.css) while the
+    // box is up, so the arrow IS Next/Submit, mirroring the primary's label
     // and disabled state so it never looks live while the click would do
     // nothing.
     const sendBtn = fieldHost.querySelector<HTMLButtonElement>(".prompt-answer-send");
