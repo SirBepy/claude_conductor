@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
-const { applyTicketLinks, linkifyTickets, parseTicketUrl, ticketCardHtml, forgetTicketTracker } = await import(
+const { applyTicketLinks, linkifyTickets, parseTicketUrl, ticketCardHtml, forgetTicketTracker, forgetBareStories } = await import(
   "../src/shared/chat/ticket-refs.ts"
 );
 
@@ -36,23 +36,10 @@ describe("applyTicketLinks", () => {
     expect(root.textContent).toBe("Fixed in sc-55411 and sc-12.");
   });
 
-  it("links a bare Shortcut number in prose, but in inline code only as the whole span", () => {
-    const root = mount("<p>Should 53957 move? Blocked by 51278. See <code>55412</code> and <code>port 55413</code></p>");
-    applyTicketLinks(root, SC);
-    expect(links(root)).toEqual([
-      ["53957", "https://app.shortcut.com/zirtue/story/53957"],
-      ["51278", "https://app.shortcut.com/zirtue/story/51278"],
-      ["55412", "https://app.shortcut.com/zirtue/story/55412"],
-    ]);
-  });
-
-  it("links each bare id in a comma-separated list, but not a thousands-grouped number", () => {
-    const root = mount("<p>Tickets 12345,67890 are related. Not 12,345 though.</p>");
-    applyTicketLinks(root, SC);
-    expect(links(root)).toEqual([
-      ["12345", "https://app.shortcut.com/zirtue/story/12345"],
-      ["67890", "https://app.shortcut.com/zirtue/story/67890"],
-    ]);
+  it("leaves a bare number as text until the tracker confirms the story, and returns it as pending", () => {
+    const root = mount("<p>project 740302</p>");
+    expect(applyTicketLinks(root, SC)).toEqual(["740302"]);
+    expect(links(root)).toEqual([]);
   });
 
   it("leaves numbers that are clearly not story ids alone", () => {
@@ -80,6 +67,73 @@ describe("applyTicketLinks", () => {
     const root = mount("<p>MOB-12</p>");
     applyTicketLinks(root, { ...LI, team_keys: [] });
     expect(links(root)).toEqual([]);
+  });
+});
+
+// get_ticket_tracker answers SC; get_ticket_summary answers per `missing`.
+function backend(missing = []) {
+  invokeMock.mockImplementation(async (cmd, args) => {
+    if (cmd === "get_ticket_tracker") return SC;
+    if (missing.some((n) => args.id === `sc-${n}`)) throw new Error("Shortcut returned 404 Not Found");
+    return { id: args.id, title: "t", state: "s", owner: null, ticket_type: "bug", url: "" };
+  });
+}
+const summaryCalls = () => invokeMock.mock.calls.filter((c) => c[0] === "get_ticket_summary");
+
+describe("bare Shortcut numbers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    forgetTicketTracker("C:/bare");
+    forgetBareStories();
+  });
+
+  it("links a number once its story exists, in prose and as a whole inline-code span only", async () => {
+    backend();
+    const root = mount("<p>Should 53957 move? Blocked by 51278. See <code>55412</code> and <code>port 55413</code></p>");
+    await linkifyTickets(root, "C:/bare");
+    expect(links(root)).toEqual([
+      ["53957", "https://app.shortcut.com/zirtue/story/53957"],
+      ["51278", "https://app.shortcut.com/zirtue/story/51278"],
+      ["55412", "https://app.shortcut.com/zirtue/story/55412"],
+    ]);
+  });
+
+  it("links each bare id in a comma-separated list, but not a thousands-grouped number", async () => {
+    backend();
+    const root = mount("<p>Tickets 12345,67890 are related. Not 12,345 though.</p>");
+    await linkifyTickets(root, "C:/bare");
+    expect(links(root).map((l) => l[0])).toEqual(["12345", "67890"]);
+  });
+
+  it("never links a number the tracker says does not exist, and does not ask twice", async () => {
+    backend(["740302"]);
+    const root = mount("<p>Airion's prod Amplitude link (project 740302)</p>");
+    await linkifyTickets(root, "C:/bare");
+    expect(links(root)).toEqual([]);
+    expect(root.textContent).toContain("project 740302");
+    await linkifyTickets(mount("<p>project 740302 again</p>"), "C:/bare");
+    expect(summaryCalls()).toHaveLength(1);
+  });
+
+  it("keeps a number plain when the lookup fails transiently, and retries on the next render", async () => {
+    invokeMock.mockImplementation(async (cmd) => {
+      if (cmd === "get_ticket_tracker") return SC;
+      throw new Error("SHORTCUT_API_TOKEN is not set");
+    });
+    const root = mount("<p>see 56503</p>");
+    await linkifyTickets(root, "C:/bare");
+    expect(links(root)).toEqual([]);
+    backend();
+    await linkifyTickets(root, "C:/bare");
+    expect(links(root)).toHaveLength(1);
+  });
+
+  it("starts at most 5 lookups per render", async () => {
+    backend();
+    const root = mount("<p>10001 10002 10003 10004 10005 10006 10007</p>");
+    await linkifyTickets(root, "C:/bare");
+    expect(summaryCalls()).toHaveLength(5);
+    expect(links(root)).toHaveLength(5);
   });
 });
 
