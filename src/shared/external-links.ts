@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { isRemote } from "./transport";
 
 const EXTERNAL_SCHEMES = ["http://", "https://", "mailto:", "file://"];
 
@@ -16,6 +17,12 @@ function handleClick(e: MouseEvent): void {
   if (!isExternal(href)) return;
   e.preventDefault();
   e.stopPropagation();
+  // On the phone, open_external would launch the URL on the PC running the
+  // daemon, so the phone's own browser has to open it.
+  if (isRemote()) {
+    window.open(href, "_blank", "noopener");
+    return;
+  }
   void api.openExternal(href).catch((err) => {
     console.warn("[external-links] openExternal failed", err);
   });
