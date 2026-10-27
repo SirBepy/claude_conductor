@@ -275,6 +275,28 @@ describe("custom card extras", () => {
     expect(root.querySelector('[data-pd-card="card:c7"] .pd-prog').classList.contains("is-behind")).toBe(false);
   });
 
+  it("a card with segments draws the sliced bar under its headline, with thin days as chips and the pace note", async () => {
+    snapshot = groupSnapshot();
+    const segments = {
+      items: [{ label: "Mon", value: 3.75, text: "3:45" }, { label: "Tue", value: 0.2, text: "0:12" }],
+      max: 20, marker: 8, note: "4:15 behind pace", note_tone: "warn",
+    };
+    snapshot.cards.push(cardView("c10", "Clockify bar", { kind: "stats", items: [] },
+      { fetched_at_ms: Date.now(), stats: [], rows: [], error: null, headline: "3:57 of 20:00", headline_tone: null, progress: null, segments }));
+    snapshot.cards.at(-1).config.action = { label: "Log time", command: "/clockify-log" };
+    const root = await mount({ kind: "group", id: "g1" });
+    const ck = root.querySelector('[data-pd-card="card:c10"]');
+    expect(ck.querySelector(".pd-hl-t").textContent).toBe("3:57 of 20:00");
+    expect([...ck.querySelectorAll(".pd-seg-slice")].map((s) => s.style.width)).toEqual(["18.75%", "1%"]);
+    expect(ck.querySelector(".pd-seg-slice em").textContent).toBe("Mon");
+    expect(ck.querySelector(".pd-seg-chip").textContent.replace(/\s+/g, " ").trim()).toBe("Tue 0:12");
+    expect(ck.querySelector(".pd-seg-note.warn").textContent).toBe("4:15 behind pace");
+    expect(ck.querySelector(".pd-seg-marker")).not.toBeNull();
+    expect(ck.querySelector(".pd-prog")).toBeNull();
+    expect(ck.textContent).not.toContain("No values");
+    expect(ck.querySelector("[data-pd-action]").textContent).toBe("Log time");
+  });
+
   it("an html card draws its own look in a sandboxed frame instead of the bar and headline, keeping its button", async () => {
     snapshot = groupSnapshot();
     const data = { _card: { headline: "All logged", progress: { value: 12, max: 20, label: "12h of 20h" } } };
@@ -393,6 +415,17 @@ describe("custom card extras", () => {
     expect(msg).toContain('{"hours":14.5}');
     expect(msg).toContain("The card's last fetch failed: timed out");
     expect(cardMessage({ ...base, result: null })).toContain("has not been fetched yet");
+  });
+
+  it("a card's message lists its bar's slices, total, pace marker and note", () => {
+    const v = cardView("c11", "Clockify", { kind: "stats", items: [] },
+      { fetched_at_ms: Date.now(), stats: [], rows: [], error: null, headline: "3:45 of 20:00", progress: null,
+        segments: { items: [{ label: "Mon", value: 3.75, text: "3:45" }, { label: "Tue", value: 2, text: "" }], max: 20, marker: 8, note: "4:15 behind pace", note_tone: "warn" } });
+    v.config.action = { label: "Recap", command: "/clockify-reconciliator" };
+    const msg = cardMessage(v);
+    expect(msg).toContain("- Mon: 3:45");
+    expect(msg).toContain("- Tue: 2");
+    expect(msg).toContain("Bar total: 20, pace marker at 8 (4:15 behind pace)");
   });
 
   it("pages a long list card instead of showing every row", async () => {

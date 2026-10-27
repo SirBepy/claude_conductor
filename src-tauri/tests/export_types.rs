@@ -36,10 +36,10 @@ use claude_conductor_lib::sessions::message_drafts::{
 };
 use claude_conductor_lib::people::Person;
 use claude_conductor_lib::project_dashboard::{
-    CardAction, CardConfig, CardDisplay, CardProgress, CardResult, CardSource, CardView, CommitRow, DashChatRow, DashTodo,
+    CardAction, CardConfig, CardDisplay, CardProgress, CardResult, CardSegments, CardSource, CardView, CommitRow, DashChatRow, DashTodo,
     DashboardHistory, DashboardListRow, DashboardSnapshot, DashboardTarget, DashboardTargetRef, FileRow, GalleryItem,
     GroupDef, LabelValue, OutcomeRow, PlanItem, QuickAction, RepoRef, RepoShip, RowValue, Scope,
-    ScheduledRow, ServerRow, StatSpec, TodoDay, TodoStats,
+    ScheduledRow, SegmentItem, ServerRow, StatSpec, TodoDay, TodoStats,
 };
 use claude_conductor_lib::sessions::user_todos::{TodoState, UserTodo};
 use claude_conductor_lib::sessions::scheduled_items::{
@@ -223,6 +223,8 @@ fn emit_ipc_types() {
     out.push_str(&decl::<LabelValue>());
     out.push_str(&decl::<RowValue>());
     out.push_str(&decl::<CardProgress>());
+    out.push_str(&decl::<SegmentItem>());
+    out.push_str(&decl::<CardSegments>());
     out.push_str(&decl::<CardResult>());
     out.push_str(&decl::<CardView>());
     out.push_str(&decl::<DashboardTargetRef>());

@@ -151,7 +151,7 @@ export function zirtueSnapshot(): DashSnapshot {
       {
         config: withAction(cfg("c-sc", "Shortcut · my stories", listDisplay), "Run /shortcut-priorities", "/shortcut-priorities"),
         result: {
-          fetched_at_ms: min(6), error: null, stats: [], headline_tone: null, progress: null,
+          fetched_at_ms: min(6), error: null, stats: [], headline_tone: null, progress: null, segments: null,
           headline: "12 updates since /shortcut-priorities ran 2d ago",
           rows: [
             { label: "sc-4821 Retry failed ACH payouts", value: "In progress", link: null },
@@ -163,7 +163,7 @@ export function zirtueSnapshot(): DashSnapshot {
       {
         config: withAction(cfg("c-ck", "Clockify", statsDisplay), "Run /clockify-reconciliator", "/clockify-reconciliator"),
         result: {
-          fetched_at_ms: min(60), error: null, rows: [], stats: [],
+          fetched_at_ms: min(60), error: null, rows: [], stats: [], segments: null,
           progress: { value: 14.5, max: 20, label: "14h 30m of 20h this week", behind: true },
           headline: "3 workdays not logged: Mon, Tue, Wed", headline_tone: "warn",
         } as CardResultX,

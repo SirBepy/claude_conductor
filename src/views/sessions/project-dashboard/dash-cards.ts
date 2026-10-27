@@ -7,6 +7,7 @@ import { fetchedLabel } from "./format";
 import { card, kv, quiet, row, icon, type DashCtx } from "./dash-parts";
 import { pageSlice } from "./paging";
 import { htmlCardFrame } from "./dash-html-card";
+import { segmentsBar } from "./dash-segments";
 import type { CardConfigX, CardProgress, CardResultX, CardView } from "./types";
 
 function progressBar(p: CardProgress): TemplateResult {
@@ -34,6 +35,11 @@ export function cardMessage(v: CardView): string {
   if (r.progress) {
     const p = r.progress;
     lines.push(`${p.label || "Progress"}: ${p.value} of ${p.max}${p.behind ? " (behind)" : ""}`);
+  }
+  if (r.segments) {
+    const g = r.segments;
+    for (const i of g.items) lines.push(`- ${i.label}: ${i.text || i.value}`);
+    lines.push(`Bar total: ${g.max}${g.marker != null ? `, pace marker at ${g.marker}` : ""}${g.note ? ` (${g.note})` : ""}`);
   }
   for (const s of r.stats) lines.push(`- ${s.label}: ${s.value}`);
   for (const x of r.rows) lines.push(`- ${x.label}${x.value ? `: ${x.value}` : ""}${x.link ? ` (${x.link})` : ""}`);
@@ -73,7 +79,8 @@ function cardBody(c: DashCtx, v: CardView): { body: TemplateResult[], pager: Tem
   const line = headlineLine(c, own ? { ...r, headline: null } : r, v);
   if (line !== nothing) parts.push(line);
   if (r.error) parts.push(html`<div class="pd-err">${r.error}</div>`);
-  const extras = !!(r.progress || r.headline);
+  if (r.segments && !own) parts.push(segmentsBar(r.segments));
+  const extras = !!(r.progress || r.headline || r.segments);
   let pager: TemplateResult | typeof nothing = nothing;
   if (display.kind === "html") {
     if (!r.error) parts.push(htmlCardFrame(v.config.title, display.template, r.data));

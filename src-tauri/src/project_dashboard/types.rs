@@ -209,6 +209,40 @@ pub struct CardProgress {
     pub behind: bool,
 }
 
+/// One slice of a segmented bar: `value` sizes it against the bar's `max`,
+/// `text` is the figure the slice prints (the source formats it, e.g. "3:45").
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct SegmentItem {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub value: f64,
+    #[serde(default)]
+    pub text: String,
+}
+
+/// A bar split into labelled slices (a week of logged hours, one slice per
+/// day) that a source computes itself (`_card.segments`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct CardSegments {
+    #[serde(default)]
+    pub items: Vec<SegmentItem>,
+    /// What the whole bar stands for, in the same unit as the items' `value`.
+    #[serde(default)]
+    pub max: f64,
+    /// Where the bar should be by now (a pace tick), same unit as `max`.
+    #[serde(default)]
+    pub marker: Option<f64>,
+    /// A line under the bar, for the marker's verdict ("4:15 behind pace").
+    #[serde(default)]
+    pub note: String,
+    /// `"warn"` or `"good"` colours `note`; any other value from a source is dropped.
+    #[serde(default)]
+    pub note_tone: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct LabelValue {
@@ -251,6 +285,8 @@ pub struct CardResult {
     pub headline_tone: Option<String>,
     #[serde(default)]
     pub progress: Option<CardProgress>,
+    #[serde(default)]
+    pub segments: Option<CardSegments>,
     /// The scrubbed response, kept only for an html display (its template
     /// reads it); every other display keeps just the values it extracted.
     #[serde(default, skip_serializing_if = "Option::is_none")]

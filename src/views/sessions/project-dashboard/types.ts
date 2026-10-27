@@ -4,9 +4,9 @@
 // checks at the bottom fail typecheck if a field is renamed, added or dropped
 // on either side.
 import type * as Gen from "../../../types/ipc.generated";
-import type { CardConfig, CardProgress } from "../../../types/ipc.generated";
+import type { CardConfig, CardProgress, CardSegments } from "../../../types/ipc.generated";
 
-export type { CardConfig, CardProgress, GroupDef, Scope } from "../../../types/ipc.generated";
+export type { CardConfig, CardProgress, CardSegments, SegmentItem, GroupDef, Scope } from "../../../types/ipc.generated";
 
 export type DashboardTargetRef = { kind: "project" | "group", id: string }
 export type RepoRef = { cwd: string, name: string, project_id: string | null }
@@ -29,7 +29,7 @@ export type DashboardHistory = { quick_actions: QuickAction[], outcomes: Outcome
 
 // headline_tone colours the stat line: a late-logging warning vs an all-clear.
 // Rust spells it as a plain String (the daemon drops anything but these two).
-export type CardResult = { fetched_at_ms: number, stats: Gen.LabelValue[], rows: Gen.RowValue[], error: string | null, headline: string | null, headline_tone: "warn" | "good" | null, progress: CardProgress | null, data?: unknown };
+export type CardResult = { fetched_at_ms: number, stats: Gen.LabelValue[], rows: Gen.RowValue[], error: string | null, headline: string | null, headline_tone: "warn" | "good" | null, progress: CardProgress | null, segments: CardSegments | null, data?: unknown };
 export type CardView = { config: CardConfig, result: CardResult | null };
 
 // Names the renderers and fixtures already import; the fields they stood for now
