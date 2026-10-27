@@ -64,6 +64,12 @@
   .session-header .meta { display: contents; }
   .session-header .title,
   .session-header .meta-proj { grid-column: 1; }
+  /* A grid item stretches across its column by default, which would spread the
+     project's hover chip all the way to model+effort; size it to its text. */
+  .session-header .meta-proj {
+    justify-self: start;
+    max-width: 100%;
+  }
   .session-header .meta-cfg {
     grid-column: 2;
     grid-row: 1 / span 2;
