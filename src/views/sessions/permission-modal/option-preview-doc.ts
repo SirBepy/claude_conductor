@@ -18,10 +18,12 @@ function appStyleTags(): string {
 }
 
 // Theme and palette live on <html> as data-* attributes (and inline custom
-// properties); without them every var() in the fragment falls back.
+// properties); without them every var() in the fragment falls back. The class
+// list is copied too: appStyleTags() brings in index.html's boot gate
+// (html:not(.app-ready) body hidden), so a frame without .app-ready paints blank.
 function rootAttrs(): string {
   return Array.from(document.documentElement.attributes)
-    .filter((a) => a.name.startsWith("data-") || a.name === "style")
+    .filter((a) => a.name.startsWith("data-") || a.name === "style" || a.name === "class")
     .map((a) => ` ${a.name}="${escapeHtml(a.value)}"`)
     .join("");
 }

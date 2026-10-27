@@ -183,3 +183,69 @@ test.describe("view-harness / AUQ option previews", () => {
     await expect(panel.locator("iframe")).toHaveCount(0);
   });
 });
+
+// Fragment shapes Claude actually sends on a ux card: flex rows, hex fills and
+// oklch() palettes, all via inline style attributes.
+const flexFrag = (label: string, fill: string) =>
+  `<div class="swatch-row" style="display:flex;gap:8px;align-items:center;padding:10px;border-radius:8px;background:${fill}"><div class="swatch" style="width:40px;height:16px;border-radius:4px;background:#a78bfa"></div><span style="color:oklch(0.95 0.02 290)">${label}</span></div>`;
+
+const styled = (labels: string[], fills: string[]): Question => ({
+  question: "Which direction do you want for the Clockify card?",
+  header: "Direction",
+  domain: "ux",
+  options: labels.map((label, i) => ({ label, description: `${label} desc`, preview: flexFrag(label, fills[i]!) })),
+});
+
+test.describe("view-harness / AUQ option previews / inline-styled fragments", () => {
+  test("desktop tiles: flex + hex + oklch inline styles paint inside every option frame", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await openCard(page, [styled(["Bars", "Rings", "Chips"], ["oklch(0.4 0.1 290)", "#222", "oklch(0.3 0.05 150)"])]);
+
+    const panel = page.locator(active);
+    await expect(panel).toHaveClass(/prompt-panel--preview-tiles/);
+    for (const i of [0, 1, 2]) {
+      const frame = page.frameLocator(`${active} .prompt-opt__frame`).nth(i);
+      const row = frame.locator(".swatch-row");
+      await expect(row).toBeVisible();
+      expect(await row.evaluate((el) => getComputedStyle(el).display)).toBe("flex");
+      const swatch = frame.locator(".swatch");
+      expect(await swatch.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(167, 139, 250)");
+      const box = await swatch.boundingBox();
+      expect(box!.width).toBeGreaterThan(20);
+    }
+    const oklch = await page.frameLocator(`${active} .prompt-opt__frame`).nth(0).locator(".swatch-row")
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(oklch).not.toBe("rgba(0, 0, 0, 0)");
+    await page.locator(".prompt-card").screenshot({ path: ".for_bepy/screenshots/_specs/auq-styled-tiles.png" });
+  });
+
+  test("desktop stage (4 options): the shown frame paints a flex fragment and has real size", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await openCard(page, [styled(["Bars", "Rings", "Chips", "Dots"], ["#111", "#222", "oklch(0.4 0.1 290)", "#333"])]);
+
+    const panel = page.locator(active);
+    await expect(panel).toHaveClass(/prompt-panel--preview-stage/);
+    const frameBox = await panel.locator(".prompt-stage__frame").boundingBox();
+    expect(frameBox!.height).toBeGreaterThan(100);
+    expect(frameBox!.width).toBeGreaterThan(200);
+    const row = page.frameLocator(`${active} .prompt-stage__frame`).locator(".swatch-row");
+    await expect(row).toBeVisible();
+    expect(await row.evaluate((el) => getComputedStyle(el).display)).toBe("flex");
+
+    await panel.locator(".prompt-opt").nth(2).hover();
+    await expect(page.frameLocator(`${active} .prompt-stage__frame`).locator(".swatch-row span")).toHaveText("Chips");
+    await page.locator(".prompt-card").screenshot({ path: ".for_bepy/screenshots/_specs/auq-styled-stage.png" });
+  });
+
+  test("a fragment with quotes and entities survives the srcdoc round trip", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    const tricky = `<div class="t" style="font-family:'Inter',sans-serif;background:#a78bfa" data-x='a"b'>&lt;ok&gt; &amp; “fine”</div>`;
+    await openCard(page, [{
+      question: "Quote check?", domain: "ux",
+      options: [{ label: "A", preview: tricky }, { label: "B", preview: tricky }],
+    }]);
+    const t = page.frameLocator(`${active} .prompt-opt__frame`).nth(1).locator(".t");
+    await expect(t).toHaveText("<ok> & “fine”");
+    expect(await t.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(167, 139, 250)");
+  });
+});
