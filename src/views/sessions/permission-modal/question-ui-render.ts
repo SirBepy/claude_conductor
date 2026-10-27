@@ -1,8 +1,6 @@
-// The AUQ card's innerHTML-building render loop, split out of question-ui.ts
-// (ai_todo 451) to match the directory's per-concern file split. Takes its
-// dependencies explicitly instead of closing over question-ui.ts's scope.
-// HTML builders live in question-ui-templates.ts (ai_todo 600) - this file
-// keeps only the stateful render/event-wiring orchestration.
+// The AUQ card's innerHTML-building render loop. Takes its dependencies explicitly
+// instead of closing over question-ui.ts's scope; HTML builders live in
+// question-ui-templates.ts, so this file keeps only the stateful orchestration.
 
 import { escapeHtml } from "../../../shared/escape-html";
 import { handleTicketHover, handleTicketHoverOut, linkifyTickets } from "../../../shared/chat/ticket-refs";
@@ -13,6 +11,7 @@ import {
 import type { QuestionRenderState } from "./question-ui-templates";
 import { focusActivePanel } from "./question-keyboard";
 import { createAnswerBarSync } from "./question-ui-answer-bar";
+import { createOptionNotes } from "./question-ui-option-notes";
 import { createQuestionCardLayout } from "./question-ui-layout";
 import { attachQuestionSwipe } from "./question-swipe";
 import { attachOptionPreviews } from "./option-previews";
@@ -123,6 +122,10 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     updatePrimaryButton,
   });
 
+  const { isPicked, tickedNotes, wire: wireOptionNotes } = createOptionNotes({
+    host, state, notes, selections, render: () => render(), syncMessagesPadding, notifyDraftChange,
+  });
+
   // Step-only nav: patches the track/dots/arrows/footer in place instead of
   // rebuilding host.innerHTML, so .prompt-track's transition has a real "from"
   // position to slide from. Only for moves that don't change any panel's
@@ -211,63 +214,6 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     return hasSummary && state.activeTab === questions.length;
   }
 
-  function isPicked(qi: number, label: string): boolean {
-    const sel = selections.get(qi);
-    return sel instanceof Set ? sel.has(label) : sel === label;
-  }
-
-  // The notes that will actually ship: only on options still ticked.
-  function tickedNotes(qi: number): [string, string][] {
-    return Array.from(notes.get(qi) ?? [])
-      .filter(([label, text]) => text.trim() && isPicked(qi, label))
-      .map(([label, text]) => [label, text.trim()]);
-  }
-
-  function openNote(qi: number, label: string | null): void {
-    state.editingNote = label === null ? null : { qi, label };
-    render();
-    if (label === null) return;
-    const field = host.querySelector<HTMLTextAreaElement>(`.prompt-panel[data-panel="${qi}"] .prompt-opt__note-input`);
-    field?.focus();
-    if (field) field.selectionStart = field.selectionEnd = field.value.length;
-  }
-
-  // Everything here sits inside the option's <label>, so each click handler
-  // preventDefaults: a click on the label's plain text would otherwise toggle
-  // the option it is annotating.
-  function wireOptionNotes(): void {
-    const panelOf = (el: Element): number => Number(el.closest<HTMLElement>(".prompt-panel")?.dataset.panel);
-    host.querySelectorAll<HTMLButtonElement>("[data-note-toggle]").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        const qi = panelOf(btn);
-        const label = btn.dataset.noteToggle ?? "";
-        const open = state.editingNote?.qi === qi && state.editingNote.label === label;
-        openNote(qi, open ? null : label);
-      });
-    });
-    host.querySelectorAll<HTMLElement>(".prompt-opt__note").forEach((el) => {
-      el.addEventListener("click", (e) => {
-        e.preventDefault();
-        const label = el.closest(".prompt-opt")?.querySelector<HTMLInputElement>("input")?.dataset.label;
-        if (label !== undefined) openNote(panelOf(el), label);
-      });
-    });
-    host.querySelectorAll<HTMLTextAreaElement>(".prompt-opt__note-input").forEach((field) => {
-      field.addEventListener("click", (e) => e.preventDefault());
-      field.addEventListener("input", () => {
-        const qi = panelOf(field);
-        const label = field.dataset.noteFor ?? "";
-        const forQ = notes.get(qi) ?? new Map<string, string>();
-        if (field.value.trim()) forQ.set(label, field.value);
-        else forQ.delete(label);
-        notes.set(qi, forQ);
-        syncMessagesPadding();
-        notifyDraftChange();
-      });
-    });
-  }
-
   const render = () => {
     // The old textareas (and the popups anchored to them) are about to be
     // thrown away by the innerHTML rebuild below - drop the popups' own
@@ -297,8 +243,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         cancel();
       });
     } else {
-      // ph-flask-round is not a Phosphor 2.1.1 name, so this painted nothing
-      // until 2026-08-22 (ai_todo 737).
+      // ph-flask-round is not a Phosphor 2.1.1 name and painted nothing.
       const degradedBadge = opts.degradedBuiltin
         ? `<i class="ph-fill ph-flask question-card-degraded-badge" title="Answered via the disabled legacy AskUserQuestion path"></i>`
         : "";
@@ -315,8 +260,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       // right on both, and Skip lives on the minimized bar (collapsedHtml).
       const titleHtml = `<span class="prompt-card__title"><i class="ph ${titleIcon}"></i></span>`;
       const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${olderPendingBadge}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="ask" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button><button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
-      const editing = (qi: number): string | null => state.editingNote?.qi === qi ? state.editingNote.label : null;
-      const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts, notes.get(qi), editing(qi))).join("")
+      const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts, notes.get(qi), state.editingNote?.qi === qi ? state.editingNote.label : null)).join("")
         + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments, tickedNotes) : "");
       // The CTA class is baked in here, not only toggled after: .btn transitions
       // `all`, so adding it after insertion animated the button's width.
@@ -418,10 +362,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     notifyDraftChange();
   };
 
-  const refreshAttachments = (): void => {
-    paintAttachmentStrips();
-    syncMessagesPadding();
-  };
+  const refreshAttachments = (): void => { paintAttachmentStrips(); syncMessagesPadding(); };
 
   function minimize(): boolean {
     // The phone's back press lands here: it leaves fullscreen first.
