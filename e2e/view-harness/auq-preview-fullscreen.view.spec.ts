@@ -4,8 +4,8 @@ import { mountView } from "./harness";
 import type { Question } from "../../src/views/sessions/permission-modal/types";
 
 // asserts: src/views/sessions/permission-modal/preview-fullscreen.ts, src/views/sessions/permission-modal-preview-fullscreen.css
-// Fullscreen option previews: tapping a tile or stage picture opens it at the
-// full screen size (zoomable), options page left/right along the bottom,
+// Fullscreen option previews: a tile's corner button or a tap on the stage
+// picture opens it at the full screen size (zoomable), options page left/right along the bottom,
 // Select picks and moves to the next question - fullscreen again when that one
 // has previews, the normal card when not. Back = previous question, X = card.
 
@@ -59,7 +59,7 @@ test.describe("view-harness / AUQ fullscreen preview", () => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [visual("First", ["A", "B", "C"]), visual("Second", ["D", "E"]), plain]);
 
-    await page.locator(".prompt-panel.is-active .prompt-opt__pic").nth(1).click();
+    await page.locator(".prompt-panel.is-active .prompt-opt__expand").nth(1).click();
     await expect(page.locator(fs)).toBeVisible();
     await expect.poll(() => fsLabel(page)).toBe("B");
     await expect(fsProbe(page)).toHaveText("B");
@@ -92,11 +92,26 @@ test.describe("view-harness / AUQ fullscreen preview", () => {
     expect(await page.evaluate(() => window.__auqResult?.submitted)).toBeUndefined();
   });
 
+  test("desktop: clicking a tile's picture picks the option and does not zoom; the corner button zooms", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    // Multi-select, so the pick does not auto-advance off the panel.
+    await openCard(page, [visual("First", ["A", "B", "C"], true), plain]);
+
+    await page.locator(".prompt-panel.is-active .prompt-opt__pic").nth(1).click({ position: { x: 20, y: 60 } });
+    await expect(page.locator(fs)).toHaveCount(0);
+    expect(await pickedAt(page, 0)).toEqual(["B"]);
+
+    await page.locator(".prompt-panel.is-active .prompt-opt__expand").nth(2).click();
+    await expect(page.locator(fs)).toBeVisible();
+    await expect.poll(() => fsLabel(page)).toBe("C");
+    expect(await pickedAt(page, 0)).toEqual(["B"]);
+  });
+
   test("back steps to the previous question, X returns to the card on the same one", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [visual("First", ["A", "B"]), visual("Second", ["C", "D"])]);
 
-    await page.locator(".prompt-panel.is-active .prompt-opt__pic").first().click();
+    await page.locator(".prompt-panel.is-active .prompt-opt__expand").first().click();
     await page.locator(`${fs} [data-fs="select"]`).click();
     await expect(page.locator(`${fs} .auq-fs__qcount`)).toHaveText("2/2");
 
@@ -111,7 +126,7 @@ test.describe("view-harness / AUQ fullscreen preview", () => {
     expect(await activePanel(page)).toBe(0);
 
     // Escape closes too, and never skips the question.
-    await page.locator(".prompt-panel.is-active .prompt-opt__pic").first().click();
+    await page.locator(".prompt-panel.is-active .prompt-opt__expand").first().click();
     await page.keyboard.press("Escape");
     await expect(page.locator(fs)).toHaveCount(0);
     expect(await page.evaluate(() => window.__auqResult?.cancelled)).toBeUndefined();
@@ -121,7 +136,7 @@ test.describe("view-harness / AUQ fullscreen preview", () => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [visual("Many", ["A", "B", "C"], true), plain]);
 
-    await page.locator(".prompt-panel.is-active .prompt-opt__pic").first().click();
+    await page.locator(".prompt-panel.is-active .prompt-opt__expand").first().click();
     const select = page.locator(`${fs} [data-fs="select"]`);
     const next = page.locator(`${fs} [data-fs="advance"]`);
     await expect(next).toBeVisible();
@@ -144,7 +159,7 @@ test.describe("view-harness / AUQ fullscreen preview", () => {
   test("the thumbnail strip jumps to an option and marks the picked one", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [visual("First", ["A", "B", "C"], true)]);
-    await page.locator(".prompt-panel.is-active .prompt-opt__pic").first().click();
+    await page.locator(".prompt-panel.is-active .prompt-opt__expand").first().click();
 
     const thumbs = page.locator(`${fs} .auq-fs__thumb`);
     await expect(thumbs).toHaveCount(3);
@@ -165,7 +180,7 @@ test.describe("view-harness / AUQ fullscreen preview", () => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [visual("First", ["A", "B"])]);
     await page.evaluate(() => localStorage.removeItem("cc.auqFullscreen.optionText"));
-    await page.locator(".prompt-panel.is-active .prompt-opt__pic").first().click();
+    await page.locator(".prompt-panel.is-active .prompt-opt__expand").first().click();
 
     const desc = page.locator(`${fs} .auq-fs__desc`);
     await expect(desc).toBeVisible();
@@ -182,7 +197,7 @@ test.describe("view-harness / AUQ fullscreen preview", () => {
     // A new card starts with the text hidden.
     await page.locator(`${fs} [data-fs="close"]`).click();
     await openCard(page, [visual("Again", ["X", "Y"])]);
-    await page.locator(".prompt-panel.is-active .prompt-opt__pic").first().click();
+    await page.locator(".prompt-panel.is-active .prompt-opt__expand").first().click();
     await expect(page.locator(`${fs} .auq-fs__desc`)).toBeHidden();
     await page.locator(`${fs} [data-fs="text"]`).click();
     await expect(page.locator(`${fs} .auq-fs__desc`)).toHaveText("X desc");
@@ -192,7 +207,7 @@ test.describe("view-harness / AUQ fullscreen preview", () => {
   test("wheel zooms the preview in", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [visual("First", ["A", "B"])]);
-    await page.locator(".prompt-panel.is-active .prompt-opt__pic").first().click();
+    await page.locator(".prompt-panel.is-active .prompt-opt__expand").first().click();
     const view = page.locator(`${fs} .auq-fs__view`);
     await view.hover();
     await page.mouse.wheel(0, -300);

@@ -6,8 +6,10 @@
 // hover, so "viewing" is its own state: swipe the picture up/down (sideways
 // stays question paging, question-swipe.ts) or tap a filmstrip thumbnail,
 // and "Choose this" picks what is shown. Tapping a row still picks directly.
-// Tapping a picture itself (tile or stage) opens it fullscreen instead
-// (preview-fullscreen.ts), since both crop it.
+// Both crop the picture, so both can open it fullscreen (preview-fullscreen.ts):
+// a tile only from its corner button (the picture is part of the option, a
+// click there picks it), the stage from a tap anywhere on the picture too (it
+// is not tied to one option).
 
 import { escapeHtml } from "../../../shared/escape-html";
 import { isMobileViewport } from "../../../shared/mobile-viewport";
@@ -38,9 +40,17 @@ function frameHtml(fragment: string, cls: string, sessionId?: string): string {
 const EXPAND_ICON = (cls: string) => `<i class="ph ph-arrows-out ${cls}" aria-hidden="true"></i>`;
 
 /** The picture on top of a tile row. Rows without a preview (the synthetic
- *  "None of the above") get nothing, and their CSS spans the full row. */
+ *  "None of the above") get nothing, and their CSS spans the full row. The
+ *  picture belongs to its option, so a click on it picks the option like any
+ *  other part of the row; only the corner button opens it fullscreen (Joe,
+ *  2026-10-27: zooming in mid-choice was a surprise). The button is a
+ *  role="button" span, not a <button>: a <label>'s control is its first
+ *  labelable descendant, and this sits before the <input>, so a real button
+ *  would steal every click on the row. */
 export function tilePictureHtml(opt: QuestionOption, sessionId?: string): string {
-  return opt.preview ? `<span class="prompt-opt__pic">${frameHtml(opt.preview, "prompt-opt__frame", sessionId)}${EXPAND_ICON("prompt-opt__expand")}</span>` : "";
+  return opt.preview
+    ? `<span class="prompt-opt__pic">${frameHtml(opt.preview, "prompt-opt__frame", sessionId)}<span class="prompt-opt__expand" role="button" tabindex="-1" title="View fullscreen" aria-label="View ${escapeHtml(opt.label)} fullscreen"><i class="ph ph-arrows-out" aria-hidden="true"></i></span></span>`
+    : "";
 }
 
 /** The stage's picture is filled by sync(), not here, so a rebuild loads it
@@ -206,11 +216,12 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
     sync();
   });
 
-  // Capture, and preventDefault: the tile picture sits inside the row's
-  // <label>, whose default action would otherwise pick the option too.
+  // Capture, and preventDefault: the tile's expand button sits inside the
+  // row's <label>, whose default action would otherwise pick the option too.
+  // A tile picture elsewhere is left alone so the label picks the option.
   host.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
-    const pic = target.closest<HTMLElement>(".prompt-opt__pic");
+    const pic = target.closest<HTMLElement>(".prompt-opt__expand");
     const hit = pic ? null : target.closest<HTMLElement>(".prompt-stage__hit");
     if (!pic && !hit) return;
     e.preventDefault();

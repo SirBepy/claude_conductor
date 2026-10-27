@@ -205,8 +205,8 @@
   .auq-fs__actions .btn { flex: 1; min-height: 44px; }
 }
 
-/* The card's previews open this view on click. */
-.prompt-opt__pic,
+/* The card's previews open this view on click: the stage from the picture, a
+ * tile only from its corner button. */
 .prompt-stage__hit { cursor: zoom-in; }
 .prompt-opt__expand,
 .prompt-stage__expand {
@@ -225,3 +225,8 @@
   opacity: 0.85;
   pointer-events: none;
 }
+.prompt-opt__expand {
+  cursor: zoom-in;
+  pointer-events: auto;
+}
+.prompt-opt__expand:hover { opacity: 1; color: var(--color-text); }
