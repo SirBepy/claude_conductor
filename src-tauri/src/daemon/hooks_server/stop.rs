@@ -153,13 +153,9 @@ pub(super) async fn on_stop(
         // superseded turn can't clear a newer turn's busy. The pump's result
         // handler re-applies the same values, so this stays idempotent.
         if let Some(status) = status {
-            let settled = activity.correct(Some(status.to_string()));
-            let settled = ctx.state.drop_unbacked_question_report(&session_id, settled).await;
-            ctx.state.registry.set_awaiting_if_gen(&session_id, settled, gen);
-            if ctx.state.registry.set_busy_false_if_gen(&session_id, gen) {
+            if settle_at_stop(&ctx.state, &session_id, gen, status, activity).await {
                 crate::sessions::chat_state::set_busy(&session_id, false);
             }
-            crate::daemon::machines::publish_instances_changed(&ctx.state);
         }
         // Title: durable transcript record, mirrors /close's manual rename.
         // Best-effort - a write failure must never block the turn.
@@ -225,6 +221,24 @@ pub(super) async fn on_stop(
     (StatusCode::OK, Json(json!({"ok": true})))
 }
 
+/// Registry half of the Stop-time settle. Returns whether busy was cleared, so
+/// the caller can mirror it to the on-disk chat state (kept out of here so
+/// tests never touch the real data dir).
+async fn settle_at_stop(
+    state: &crate::daemon::state::DaemonState,
+    session_id: &str,
+    gen: u64,
+    status: &str,
+    activity: crate::sessions::registry_turn::TurnActivity,
+) -> bool {
+    let settled = activity.correct(Some(status.to_string()));
+    let settled = state.drop_unbacked_question_report(session_id, settled).await;
+    state.registry.set_awaiting_if_gen(session_id, settled, gen);
+    let cleared = state.registry.set_busy_false_if_gen(session_id, gen);
+    crate::daemon::machines::publish_instances_changed(state);
+    cleared
+}
+
 /// `/mcp/announce`: `run_stdio` posts here once at startup (todo 824
 /// remaining 2). Reuses `mark_mcp_tool_used` so a live process resets the
 /// miss streak without waiting for a real tool call this turn.
@@ -254,6 +268,51 @@ mod tests {
 
     fn announce_ctx() -> Arc<HookCtx> {
         Arc::new(HookCtx { state: DaemonState::new(new_session_map(), SettingsCache::new(Settings::default())) })
+    }
+
+    use crate::sessions::registry_turn::TurnActivity;
+    use std::sync::Mutex;
+
+    /// One recorded chat with a live turn open (busy, gen 1).
+    fn state_with_busy_turn(sid: &str) -> (Arc<DaemonState>, u64) {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = Mutex::new(Settings::default());
+        state.registry.record_interactive_session(sid, std::path::Path::new("/tmp/x"), &settings, "2026-10-26T00:00:00Z");
+        state.registry.set_busy(sid, true);
+        let gen = state.registry.current_turn_gen(sid);
+        (state, gen)
+    }
+
+    #[tokio::test]
+    async fn stop_with_a_current_gen_report_clears_busy_and_sets_awaiting() {
+        let (state, gen) = state_with_busy_turn("s");
+        assert!(settle_at_stop(&state, "s", gen, "done", TurnActivity::Idle).await);
+        let row = state.registry.get("s").unwrap();
+        assert!(!row.busy);
+        assert_eq!(row.awaiting.as_deref(), Some("done"));
+    }
+
+    #[tokio::test]
+    async fn a_late_stop_leaves_a_newer_turns_busy_alone() {
+        let (state, old_gen) = state_with_busy_turn("s");
+        state.registry.set_busy("s", true); // newer turn bumps the gen
+        assert!(!settle_at_stop(&state, "s", old_gen, "done", TurnActivity::Idle).await);
+        let row = state.registry.get("s").unwrap();
+        assert!(row.busy);
+        assert_eq!(row.awaiting, None);
+    }
+
+    #[tokio::test]
+    async fn stop_maps_a_done_report_through_the_live_activity() {
+        for (activity, want) in [
+            (TurnActivity::Working, "working"),
+            (TurnActivity::WaitingOnProcess, "waiting"),
+            (TurnActivity::WaitingOnSchedule, "waiting"),
+        ] {
+            let (state, gen) = state_with_busy_turn("s");
+            settle_at_stop(&state, "s", gen, "done", activity).await;
+            assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some(want), "{activity:?}");
+        }
     }
 
     #[tokio::test]
