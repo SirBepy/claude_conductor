@@ -282,6 +282,13 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       ? { qi: Number(prevFocus.closest<HTMLElement>(".prompt-panel")?.dataset.panel), label: prevFocus.dataset.label }
       : null;
 
+    // .prompt-panel is its own scroller and the rebuild below replaces it, so
+    // without carrying scrollTop across, every pick snaps a long panel to top.
+    const panelScroll = new Map<number, number>();
+    host.querySelectorAll<HTMLElement>(".prompt-panel").forEach((p) => {
+      if (p.scrollTop > 0) panelScroll.set(Number(p.dataset.panel), p.scrollTop);
+    });
+
     if (minimized) {
       host.innerHTML = collapsedHtml(hasSummary, state.activeTab, questions, totalPanels, opts.cancelLabel);
       host.querySelector(".prompt-collapsed")?.addEventListener("click", () => { minimized = false; render(); });
@@ -392,6 +399,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         if (same) same.focus();
         else focusActivePanel(host, state.activeTab, hasSummary && state.activeTab === questions.length);
       }
+      // After the focus calls above, which can themselves scroll the panel.
+      panelScroll.forEach((top, qi) => {
+        const panel = host.querySelector<HTMLElement>(`.prompt-panel[data-panel="${qi}"]`);
+        if (panel) panel.scrollTop = top;
+      });
     }
     firstRender = false;
 
