@@ -37,6 +37,25 @@ object AppLockPolicy {
 
   const val OWN_ACTIVITY_GRACE_MINUTES = 2
 
+  // How soon after launching a picker the app's own stop has to land to count as
+  // caused by it. A launch that never stops the activity (a translucent overlay)
+  // must not leave the grace armed for a much later, real trip away.
+  const val OWN_LAUNCH_STOP_WINDOW_MS = 5_000L
+
+  // Both are SystemClock.elapsedRealtime() readings. Null: no picker launched
+  // since the last start/resume, or the app never stopped.
+  fun isOwnActivityStop(launchedAt: Long?, stoppedAt: Long?): Boolean {
+    if (launchedAt == null || stoppedAt == null) return false
+    return stoppedAt - launchedAt in 0..OWN_LAUNCH_STOP_WINDOW_MS
+  }
+
+  // PackageInfo times are epoch millis. Split-APK and Play installs can stamp
+  // lastUpdateTime a few ms after firstInstallTime, so only a real gap is an update.
+  const val UPGRADE_GAP_MS = 60_000L
+
+  fun isUpgrade(firstInstallTime: Long, lastUpdateTime: Long): Boolean =
+    lastUpdateTime - firstInstallTime > UPGRADE_GAP_MS
+
   // What the SPA's picker offers, as one JSON object so the Kotlin list stays the
   // only copy: {"default":10,"choices":[0,1,5,...]}.
   fun choicesJson(): String =
@@ -47,6 +66,19 @@ object AppLockPolicy {
   // an upgraded install without an answer starts as Yes instead of being asked.
   fun resolveEnabled(stored: Boolean?, upgradedInstall: Boolean): Boolean? =
     stored ?: if (upgradedInstall) true else null
+
+  enum class SwitchRequest { SAVE_NOW, UNLOCK_FIRST }
+
+  // Any script in the WebView can call the bridge, so turning the lock off needs
+  // a fresh unlock; turning it on can only make the phone safer. With no screen
+  // lock there is nothing to unlock with (and nothing the lock protects).
+  fun switchRequest(enable: Boolean, hasScreenLock: Boolean): SwitchRequest =
+    if (enable || !hasScreenLock) SwitchRequest.SAVE_NOW else SwitchRequest.UNLOCK_FIRST
+
+  // The SPA registers window.__ccLockSwitchResult before it asks, so the answer
+  // to a prompt can never arrive ahead of the handler.
+  fun switchResultJs(applied: Boolean): String =
+    "window.__ccLockSwitchResult&&window.__ccLockSwitchResult($applied)"
 
   enum class StartAction { ASK, LOCK, OPEN }
 

@@ -20,7 +20,16 @@ function handleClick(e: MouseEvent): void {
   // On the phone, open_external would launch the URL on the PC running the
   // daemon, so the phone's own browser has to open it.
   if (isRemote()) {
-    window.open(href, "_blank", "noopener");
+    // file: names a path on the PC, meaningless on the phone.
+    if (href.toLowerCase().startsWith("file://")) return;
+    // The Android shell has no multi-window support, so window.open would load
+    // the page inside the app; its bridge hands the URL to the system instead.
+    const bridge = (window as unknown as { ConductorLinks?: { openExternal?: (url: string) => void } }).ConductorLinks;
+    if (typeof bridge?.openExternal === "function") {
+      bridge.openExternal(href);
+    } else {
+      window.open(href, "_blank", "noopener");
+    }
     return;
   }
   void api.openExternal(href).catch((err) => {
