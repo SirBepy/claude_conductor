@@ -32,6 +32,18 @@ describe("a 3-family model list", () => {
     setApiModels(["claude-haiku-4-5", "claude-opus-4-5", "claude-fable-1"]);
     expect(modelShortcutLabel(1)).toBe("Model: Opus");
   });
+
+  it("a rebind conflict with Alt+2 names the model now on slot 2", async () => {
+    setApiModels(["claude-haiku-4-5", "claude-opus-4-5", "claude-fable-1"]);
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const dispose = await renderShortcutsView(root);
+    root.querySelector('[data-rebind="effort-up"]').click();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "2", code: "Digit2", altKey: true, bubbles: true }));
+    expect(root.querySelector(".shortcut-conflict-msg")?.textContent).toBe("Already used by: Model: Opus");
+    dispose();
+    root.remove();
+  });
 });
 
 it("the seed list keeps the four labels and Alt 1-4", () => {

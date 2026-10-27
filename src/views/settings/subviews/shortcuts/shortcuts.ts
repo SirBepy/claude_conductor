@@ -25,6 +25,13 @@ function cap(k: string): string {
   return k.charAt(0).toUpperCase() + k.slice(1);
 }
 
+// A model slot's static def label names the seed list's model, which the live
+// list can reorder, so the conflict message reads the same derived name the row shows.
+function conflictLabel(d: ShortcutDef): string {
+  const slot = modelShortcutSlot(d.id);
+  return (slot === null ? null : modelShortcutLabel(slot)) ?? d.label;
+}
+
 function rowsFor(defs: ShortcutDef[]): Row[] {
   const rows: Row[] = [];
   for (const d of defs) {
@@ -112,7 +119,7 @@ function renderShortcutsList(container: HTMLElement): () => void {
         const res = shortcuts.setRangeFromCombo(row.key, combo);
         if (!res.ok) {
           s.conflictMsg = res.conflict
-            ? `Already used by: ${res.conflict.label}`
+            ? `Already used by: ${conflictLabel(res.conflict)}`
             : "Hold at least one modifier key (Ctrl, Shift or Alt)";
           re();
           return;
@@ -120,7 +127,7 @@ function renderShortcutsList(container: HTMLElement): () => void {
       } else {
         const conflict = shortcuts.findConflict(combo, row.key);
         if (conflict) {
-          s.conflictMsg = `Already used by: ${conflict.label}`;
+          s.conflictMsg = `Already used by: ${conflictLabel(conflict)}`;
           re();
           return;
         }
