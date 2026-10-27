@@ -94,7 +94,16 @@ function minePart(choice: BrowserChoice): TemplateResult {
       <span class="cd-bridge-status" id="chatDefaultsBrowserBridge">Checking...</span>
       <button type="button" class="btn-secondary" id="chatDefaultsBrowserExtFolder">Open folder</button>
     </div>
-    <p class="cd-hint">Best set up as a separate profile made for Claude, signed in only to the accounts you want it to use. Install the bridge once in that profile: open ${EXTENSIONS_PAGE[choice.app]}, turn on Developer mode, click Load unpacked and pick the folder this button opens. Each chat then works in a minimized window of its own there, and several chats can work at once. Leave the profile blank to use the one you used last.</p>
+    <div class="cd-steps">
+      <div class="cd-steps-title">Set up the bridge (once)</div>
+      <ol>
+        <li>Use a separate browser profile made for Claude, signed in only to the accounts you want it to use.</li>
+        <li>In that profile, open <code>${EXTENSIONS_PAGE[choice.app]}</code> and turn on <b>Developer mode</b>.</li>
+        <li>Click <b>Load unpacked</b>, then pick the folder that <b>Open folder</b> above opens.</li>
+        <li>Wait for the status above to read <b>Connected</b>.</li>
+      </ol>
+      <p>Each chat then works in its own minimized window, and several chats can run at once. Leave <b>Profile folder</b> blank to use the profile you used last.</p>
+    </div>
   `;
 }
 
@@ -122,7 +131,7 @@ export function browserSectionTemplate(choice: BrowserChoice): TemplateResult {
         label: "Script tool",
         inputId: "chatDefaultsBrowserScript",
         checked: choice.script,
-        tooltip: "Also gives chats a tool that runs a whole Playwright script in one call: fewer steps and less context for long tasks. The script runs on this PC with file access, outside the page sandbox, so leave it off unless you want that trade.",
+        tooltip: "Lets a chat write one short program that does a whole task in the browser (open pages, click, read, repeat) instead of one tool call per click. Faster and cheaper for long jobs. Risk: that program runs on this PC with access to your files, not inside the web page, so keep it off unless you trust the chat with that.",
       })}
       <div class="kit-row">
         <span class="kit-row-label">Chats start on</span>
