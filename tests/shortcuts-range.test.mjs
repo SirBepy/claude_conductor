@@ -23,9 +23,9 @@ beforeEach(() => {
 
 describe("range rebind", () => {
   it("writes the captured modifiers plus each digit to all 9 slots", () => {
-    expect(setRangeFromCombo(OPEN, "alt+x")).toEqual({ ok: true });
-    rangeIds(OPEN).forEach((id, i) => expect(getBinding(id)).toBe(`alt+${i + 1}`));
-    expect(getRangeModifiers(OPEN)).toBe("alt");
+    expect(setRangeFromCombo(OPEN, "shift+alt+x")).toEqual({ ok: true });
+    rangeIds(OPEN).forEach((id, i) => expect(getBinding(id)).toBe(`shift+alt+${i + 1}`));
+    expect(getRangeModifiers(OPEN)).toBe("shift+alt");
     expect(rangeHasOverride(OPEN)).toBe(true);
   });
 
@@ -43,8 +43,8 @@ describe("range rebind", () => {
   });
 
   it("blocks a collision on a single slot, even when the other eight are free", () => {
-    setBinding("new-chat", "alt+5");
-    const res = setRangeFromCombo(OPEN, "alt+x");
+    setBinding("new-chat", "shift+alt+5");
+    const res = setRangeFromCombo(OPEN, "shift+alt+x");
     expect(res.ok).toBe(false);
     expect(res.conflict.id).toBe("new-chat");
     expect(getBinding("open-chat-1")).toBe("ctrl+1");
@@ -60,17 +60,17 @@ describe("range rebind", () => {
   });
 
   it("reads slot 1's modifiers when legacy per-slot overrides disagree, and overwrites all", () => {
-    setBinding("open-chat-3", "alt+3");
+    setBinding("open-chat-3", "shift+alt+3");
     expect(getRangeModifiers(OPEN)).toBe("ctrl");
-    setRangeFromCombo(OPEN, "alt+x");
-    expect(getBinding("open-chat-3")).toBe("alt+3");
-    expect(getBinding("open-chat-1")).toBe("alt+1");
+    setRangeFromCombo(OPEN, "shift+alt+x");
+    expect(getBinding("open-chat-3")).toBe("shift+alt+3");
+    expect(getBinding("open-chat-1")).toBe("shift+alt+1");
   });
 });
 
 describe("range reset", () => {
   it("clears all 9 overrides", () => {
-    setRangeFromCombo(OPEN, "alt+x");
+    setRangeFromCombo(OPEN, "shift+alt+x");
     resetRange(OPEN);
     rangeIds(OPEN).forEach((id, i) => {
       expect(hasOverride(id)).toBe(false);
@@ -79,7 +79,7 @@ describe("range reset", () => {
   });
 
   it("is reported as an override when only one slot differs", () => {
-    setBinding("open-chat-7", "alt+7");
+    setBinding("open-chat-7", "shift+alt+7");
     expect(rangeHasOverride(OPEN)).toBe(true);
     resetRange(OPEN);
     expect(rangeHasOverride(OPEN)).toBe(false);

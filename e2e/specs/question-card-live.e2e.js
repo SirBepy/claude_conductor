@@ -37,18 +37,24 @@ async function startHaikuChat() {
   await newBtn.waitForClickable({ timeout: 15000 });
   await newBtn.click();
   await selectProjectRow(PROJECT_NAME);
-  // Sliders are clickable stop-label buttons now, not native <input
-  // type=range> (model-effort-modal.ts, impeccable session 2026-08-23).
-  const modelHaiku = await $('.slider-stop-label[data-kind="model"][data-idx="0"]');
-  await modelHaiku.waitForExist({ timeout: 10000 });
-  await modelHaiku.click();
-  await (await $(".me-more-btn")).click();
-  const effortMedium = await $('.slider-stop-label[data-kind="effort"][data-idx="1"]');
-  await effortMedium.waitForExist({ timeout: 10000 });
-  await effortMedium.click();
-  const confirm = await $(".me-confirm");
-  await confirm.waitForClickable({ timeout: 10000 });
-  await confirm.click();
+  // No dialog after the project pick: the draft pane is already up on the
+  // project's last model/effort (Opus/high first time). Set Haiku with
+  // Alt+1; effort is clamped to the bottom with four Alt+Down presses (the
+  // start value is the project's last choice), then one Alt+Up gives medium.
+  const composer = await $(".session-composer .composer-textarea");
+  await composer.waitForExist({ timeout: 20000 });
+  await composer.click();
+  await browser.keys(["Alt", "1"]);
+  for (let i = 0; i < 4; i++) await browser.keys(["Alt", "ArrowDown"]);
+  await browser.keys(["Alt", "ArrowUp"]);
+  await browser.waitUntil(
+    async () => /haiku/i.test(await browser.execute(() => document.querySelector(".sb-model")?.textContent ?? "")),
+    { timeout: 10000, timeoutMsg: "draft model chip never switched to Haiku" }
+  );
+  await browser.waitUntil(
+    async () => /medium/i.test(await browser.execute(() => document.querySelector(".sb-effort")?.textContent ?? "")),
+    { timeout: 10000, timeoutMsg: "draft effort chip never switched to medium" }
+  );
   await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 20000 });
 }
 async function sendMessage(text) {

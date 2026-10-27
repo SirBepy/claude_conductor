@@ -32,6 +32,12 @@ const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "close-chat",  defaultKeys: "ctrl+w", label: "Close chat",  description: "Close the focused chat (always asks to confirm)", context: "sessions", suppressInInput: false },
   { id: "toggle-wrap-up-on-done", defaultKeys: "ctrl+shift+w", label: "Toggle wrap up when done", description: "Have Claude self-verify, commit, and close the focused chat on its own once nothing more is needed from you", context: "sessions", suppressInInput: false },
   { id: "project-dashboard", defaultKeys: "ctrl+shift+d", label: "Project dashboard", description: "Show the focused chat's project dashboard", context: "sessions", suppressInInput: false },
+  { id: "set-model-1", defaultKeys: "alt+1", label: "Model: Haiku",  description: "Switch the open chat or draft to the 1st model", context: "sessions", suppressInInput: false },
+  { id: "set-model-2", defaultKeys: "alt+2", label: "Model: Sonnet", description: "Switch the open chat or draft to the 2nd model", context: "sessions", suppressInInput: false },
+  { id: "set-model-3", defaultKeys: "alt+3", label: "Model: Opus",   description: "Switch the open chat or draft to the 3rd model", context: "sessions", suppressInInput: false },
+  { id: "set-model-4", defaultKeys: "alt+4", label: "Model: Fable",  description: "Switch the open chat or draft to the 4th model", context: "sessions", suppressInInput: false },
+  { id: "effort-up",   defaultKeys: "alt+arrowup",   label: "Effort up",   description: "Raise the open chat's or draft's effort one step",  context: "sessions", suppressInInput: false },
+  { id: "effort-down", defaultKeys: "alt+arrowdown", label: "Effort down", description: "Lower the open chat's or draft's effort one step", context: "sessions", suppressInInput: false },
   { id: "blur-composer", defaultKeys: "escape", label: "Unfocus message box", description: "Move keyboard focus off the message input", context: "sessions", suppressInInput: false },
 
   // Code mode (src/views/sessions/code-mode/) - no view context: it also opens
@@ -239,7 +245,12 @@ function _init(): void {
   let isAnyModalOpen: (() => boolean) | null = null;
   void import("./modal-input-lock").then(m => { isAnyModalOpen = m.isAnyModalOpen; });
 
+  // Held Alt shows the model/effort keys beside the pane header's values
+  // (config-bump.css), and keeps showing them through repeated Alt+Up/Down.
+  const setAltHeld = (on: boolean) => document.documentElement.classList.toggle("alt-held", on);
+
   document.addEventListener("keydown", (e) => {
+    setAltHeld(e.altKey && !e.ctrlKey && !e.metaKey);
     modifierHint.keydown(e);
     if (e.key === "Control" || e.key === "Meta") return;
 
@@ -266,9 +277,15 @@ function _init(): void {
     void handler();
   });
 
-  document.addEventListener("keyup", (e) => modifierHint.keyup(e));
+  document.addEventListener("keyup", (e) => {
+    if (e.key === "Alt") setAltHeld(false);
+    modifierHint.keyup(e);
+  });
 
-  window.addEventListener("blur", () => modifierHint.reset());
+  window.addEventListener("blur", () => {
+    setAltHeld(false);
+    modifierHint.reset();
+  });
 }
 
 if (typeof document !== "undefined") {

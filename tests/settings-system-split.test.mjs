@@ -109,8 +109,8 @@ describe("Shortcuts", () => {
   it("rebinding a range row takes only the captured modifiers", async () => {
     const { root, dispose } = await mount(renderShortcutsView);
     root.querySelector('[data-rebind="open-chat-"]').click();
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", altKey: true, bubbles: true, cancelable: true }));
-    expect(root.querySelector('[data-id="open-chat-"] .shortcut-kbd').textContent).toBe("Alt+1...9");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, altKey: true, bubbles: true, cancelable: true }));
+    expect(root.querySelector('[data-id="open-chat-"] .shortcut-kbd').textContent).toBe("Ctrl+Alt+1...9");
     root.querySelector('[data-reset="open-chat-"]').click();
     expect(root.querySelector('[data-id="open-chat-"] .shortcut-kbd').textContent).toBe("Ctrl+1...9");
     expect(root.querySelector('[data-reset="open-chat-"]')).toBeNull();
