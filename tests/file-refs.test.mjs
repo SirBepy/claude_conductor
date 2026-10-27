@@ -71,6 +71,14 @@ describe("linkifyFilePaths", () => {
     expect(root.textContent).toBe("Edited (a.rs), then b.rs.");
   });
 
+  it("labels a folder path by its last segment with a folder icon, never an empty chip", () => {
+    const root = mount(String.raw`<p>Filed in <code>C:\Users\x\.claude\.claude\todos\</code> done</p>`);
+    linkifyFilePaths(root);
+    const chip = root.querySelector(".file-ref");
+    expect(chip.textContent).toBe("todos");
+    expect(chip.querySelector(".ph-folder")).not.toBeNull();
+  });
+
   it("links a path inside an inline code span", () => {
     const root = mount("<p>Open <code>/home/joe/project/a.rs</code> now</p>");
     linkifyFilePaths(root);
