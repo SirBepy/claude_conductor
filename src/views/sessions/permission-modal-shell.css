@@ -331,15 +331,10 @@
   color: var(--color-background);
 }
 
-/* Review's Submit is the step's only control, so it reads as a call to action:
- * a wide centred button capped at 280px on desktop (Joe, 2026-10-26: full
- * width there felt like too much), full width on the phone below. */
+/* Review's Submit keeps the normal button width on desktop (Joe, 2026-10-27:
+ * a wide 280px CTA read as too big); the phone stretches it full width below. */
 .prompt-card__footer .prompt-submit-cta {
-  flex: 1 1 auto;
-  max-width: 280px;
-  min-height: 38px;
   justify-content: center;
-  font-weight: 600;
 }
 
 /* ── Phone question page (Joe, 2026-10-22) ────────────────────────────────
@@ -599,8 +594,9 @@
 
 @media (max-width: 768px) {
   .prompt-card__footer .prompt-submit-cta {
-    max-width: none;
+    flex: 1 1 auto;
     min-height: 48px;
+    font-weight: 600;
     font-size: 1rem;
   }
 }
