@@ -1,5 +1,5 @@
 //! What an `ApiCredit` account has left, read from the Console, and whether
-//! new turns on it must stop. Three reads feed it (`scraping::client`): the
+//! new turns on it must stop. Three reads feed it (`scraping::console_credit`): the
 //! prepaid credit tranches, the Console spend limits, and this month's spend.
 //! Everything here is pure except `fetch_status`, so the block rules are
 //! testable against the exact numbers seen live.
@@ -13,6 +13,11 @@ use serde::{Deserialize, Serialize};
 /// `program_id` of the Max plan's monthly API-credit grant (live 2026-10-26).
 /// Any other tranche is purchased credit.
 const MAX_GRANT_PROGRAM_ID: &str = "subscription_api_credit";
+
+/// Shown as the block reason when the credits read succeeded and carries
+/// purchased credit but no Max grant tranche (the grant lapsed or was never
+/// issued). Chats never draw purchased credit on purpose, so they stop.
+pub const BLOCK_NO_MAX_GRANT: &str = "No Max API credit grant this cycle";
 
 /// Shown in `ApiCreditStatus::error` when no Console cookie is stored.
 pub const ERR_NOT_CONNECTED: &str = "Console not connected";
@@ -106,6 +111,13 @@ pub fn compute_block(s: &ApiCreditStatus) -> (bool, Option<String>) {
     (false, None)
 }
 
+/// The sum of `amounts`, or `None` when any entry is unknown: a partial sum
+/// would read as a real balance, and a too-low one would block a chat that
+/// still has credit.
+fn sum_if_all_known(amounts: impl Iterator<Item = Option<i64>>) -> Option<i64> {
+    amounts.sum::<Option<i64>>()
+}
+
 /// Folds the three Console reads into a status. A 401/403 on any read means
 /// the cookie is no good, so nothing else it returned is trusted and the
 /// status is the plain "login expired" one. Any other failure only blanks its
@@ -133,6 +145,7 @@ pub fn build_status(
     }
 
     let mut errors = Vec::new();
+    let mut max_grant_missing = false;
     match credits {
         Ok(c) => {
             let (max, other): (Vec<_>, Vec<_>) = c
@@ -140,12 +153,17 @@ pub fn build_status(
                 .iter()
                 .chain(c.tranches.iter())
                 .partition(|t| t.program_id.as_deref() == Some(MAX_GRANT_PROGRAM_ID));
-            if !max.is_empty() {
-                status.max_grant_remaining_cents = Some(max.iter().map(|t| t.remaining_amount_minor_units).sum());
-                status.max_grant_total_cents = Some(max.iter().map(|t| t.granted_amount_minor_units).sum());
+            if max.is_empty() {
+                // A successful read with only purchased tranches: the grant is
+                // gone, not merely unread, so this is a block (no tranches at
+                // all stays unknown).
+                max_grant_missing = !other.is_empty();
+            } else {
+                status.max_grant_remaining_cents = sum_if_all_known(max.iter().map(|t| t.remaining_amount_minor_units));
+                status.max_grant_total_cents = sum_if_all_known(max.iter().map(|t| t.granted_amount_minor_units));
                 status.max_grant_expires_at = max.iter().filter_map(|t| t.expires_at.clone()).min();
             }
-            status.purchased_remaining_cents = Some(other.iter().map(|t| t.remaining_amount_minor_units).sum());
+            status.purchased_remaining_cents = Some(other.iter().filter_map(|t| t.remaining_amount_minor_units).sum());
         }
         Err(e) => errors.push(format!("credit balance: {e:#}")),
     }
@@ -166,7 +184,29 @@ pub fn build_status(
     let (blocked, reason) = compute_block(&status);
     status.blocked = blocked;
     status.block_reason = reason;
+    if max_grant_missing && !status.blocked {
+        status.blocked = true;
+        status.block_reason = Some(BLOCK_NO_MAX_GRANT.to_string());
+    }
     status
+}
+
+/// `next` with the previous block carried over when `next` is a partial read:
+/// a non-auth fetch error blanks the failed read's figures, so a status that
+/// was blocked would otherwise flip to unblocked on a network blip and let
+/// chats spend again. The block stays only while a figure that feeds it is
+/// still unknown, so the next clean read (or one that shows the figure
+/// recovered) decides afresh. A missing cookie or an expired login is not a
+/// transient failure: those keep their plain unblocked status.
+pub fn keep_block_across_error(prev: Option<&ApiCreditStatus>, mut next: ApiCreditStatus) -> ApiCreditStatus {
+    let Some(prev) = prev else { return next };
+    let transient_error = next.error.as_deref().is_some_and(|e| e != ERR_LOGIN_EXPIRED && e != ERR_NOT_CONNECTED);
+    let blind = next.max_grant_remaining_cents.is_none() || next.limit_cents.is_none() || next.spend_cents.is_none();
+    if prev.blocked && !next.blocked && transient_error && blind {
+        next.blocked = true;
+        next.block_reason = prev.block_reason.clone();
+    }
+    next
 }
 
 /// Reads the Console for `org_uuid` and builds the status. `session_key: None`
@@ -203,10 +243,15 @@ mod tests {
         CreditTranche {
             program_id: Some(program.into()),
             name: None,
-            granted_amount_minor_units: granted,
-            remaining_amount_minor_units: remaining,
+            granted_amount_minor_units: Some(granted),
+            remaining_amount_minor_units: Some(remaining),
             expires_at: expires.map(String::from),
         }
+    }
+
+    /// A tranche whose amounts the Console sent as null or left out.
+    fn unknown_tranche(program: &str) -> CreditTranche {
+        CreditTranche { program_id: Some(program.into()), ..Default::default() }
     }
 
     /// The live numbers of 2026-10-26: $178.71 left of the $200 grant, $21.28
@@ -324,12 +369,133 @@ mod tests {
     }
 
     #[test]
-    fn no_max_tranche_leaves_the_grant_unknown_and_unblocked() {
-        let credits = PrepaidCredits { tranches: vec![tranche("api_credits", 100, 0, None)], ..Default::default() };
+    fn purchased_credit_with_no_max_grant_blocks_so_chats_never_drain_it() {
+        for remaining in [0, 2545] {
+            let credits =
+                PrepaidCredits { tranches: vec![tranche("api_credits", 100, remaining, None)], ..Default::default() };
+            let s = build_status("a", "t", Ok(credits), Ok(ok_limits()), Ok(ok_spend()));
+            assert_eq!(s.max_grant_remaining_cents, None);
+            assert_eq!(s.purchased_remaining_cents, Some(remaining));
+            assert_eq!((s.blocked, s.block_reason.as_deref()), (true, Some(BLOCK_NO_MAX_GRANT)));
+            assert!(s.error.is_none(), "a vanished grant is not a fetch error");
+        }
+    }
+
+    #[test]
+    fn a_credits_read_with_no_tranches_at_all_stays_unknown_and_unblocked() {
+        let s = build_status("a", "t", Ok(PrepaidCredits::default()), Ok(ok_limits()), Ok(ok_spend()));
+        assert_eq!(s.max_grant_remaining_cents, None);
+        assert!(!s.blocked && s.block_reason.is_none());
+    }
+
+    #[test]
+    fn a_failed_credits_read_does_not_look_like_a_missing_grant() {
+        let s = build_status(
+            "a",
+            "t",
+            Err(ScrapeError::Other(anyhow::anyhow!("prepaid credits HTTP 500"))),
+            Ok(ok_limits()),
+            Ok(ok_spend()),
+        );
+        assert!(!s.blocked, "an unread grant is unknown, not gone");
+    }
+
+    #[test]
+    fn a_null_remaining_amount_is_unknown_and_never_blocks() {
+        let credits = PrepaidCredits {
+            promo_tranches: vec![unknown_tranche("subscription_api_credit")],
+            tranches: vec![tranche("api_credits", 5000, 2545, None)],
+            ..Default::default()
+        };
         let s = build_status("a", "t", Ok(credits), Ok(ok_limits()), Ok(ok_spend()));
         assert_eq!(s.max_grant_remaining_cents, None);
-        assert_eq!(s.purchased_remaining_cents, Some(0));
+        assert_eq!(s.max_grant_total_cents, None);
+        assert_eq!(s.purchased_remaining_cents, Some(2545));
+        assert!(!s.blocked && s.block_reason.is_none());
+    }
+
+    #[test]
+    fn one_unknown_max_tranche_makes_the_whole_grant_unknown() {
+        let credits = PrepaidCredits {
+            promo_tranches: vec![
+                tranche("subscription_api_credit", 10000, 0, None),
+                unknown_tranche("subscription_api_credit"),
+            ],
+            ..Default::default()
+        };
+        let s = build_status("a", "t", Ok(credits), Ok(ok_limits()), Ok(ok_spend()));
+        assert_eq!(s.max_grant_remaining_cents, None, "a partial sum of 0 must not read as used up");
         assert!(!s.blocked);
+    }
+
+    #[test]
+    fn an_unknown_purchased_amount_is_skipped_in_the_purchased_sum() {
+        let credits = PrepaidCredits {
+            promo_tranches: vec![tranche("subscription_api_credit", 20000, 17871, None)],
+            tranches: vec![unknown_tranche("api_credits"), tranche("api_credits", 100, 100, None)],
+            ..Default::default()
+        };
+        let s = build_status("a", "t", Ok(credits), Ok(ok_limits()), Ok(ok_spend()));
+        assert_eq!(s.purchased_remaining_cents, Some(100));
+        assert!(!s.blocked);
+    }
+
+    fn blocked_prev() -> ApiCreditStatus {
+        let mut s = live_status();
+        s.max_grant_remaining_cents = Some(0);
+        s.blocked = true;
+        s.block_reason = Some("API credit for this cycle is used up, resets 2026-11-02".into());
+        s
+    }
+
+    fn blank_after_error(err: &str) -> ApiCreditStatus {
+        ApiCreditStatus { account_id: "a".into(), fetched_at: "t2".into(), error: Some(err.into()), ..Default::default() }
+    }
+
+    #[test]
+    fn a_non_auth_fetch_error_keeps_the_previous_block() {
+        let next = keep_block_across_error(Some(&blocked_prev()), blank_after_error("credit balance: HTTP 500"));
+        assert!(next.blocked);
+        assert_eq!(next.block_reason.as_deref(), Some("API credit for this cycle is used up, resets 2026-11-02"));
+        assert_eq!(next.fetched_at, "t2", "only the block is carried, not the old figures");
+        assert_eq!(next.max_grant_remaining_cents, None);
+    }
+
+    #[test]
+    fn a_partial_read_that_lost_the_limit_keeps_a_spend_limit_block() {
+        let mut prev = live_status();
+        prev.spend_cents = Some(20000);
+        prev.blocked = true;
+        prev.block_reason = Some("Console spend limit $200 reached, resets 2026-11-01".into());
+        let mut next = live_status();
+        next.limit_cents = None;
+        next.error = Some("spend limit: HTTP 500".into());
+        let next = keep_block_across_error(Some(&prev), next);
+        assert_eq!(next.block_reason.as_deref(), Some("Console spend limit $200 reached, resets 2026-11-01"));
+        assert!(next.blocked);
+    }
+
+    #[test]
+    fn a_clean_read_replaces_the_previous_block() {
+        let mut clean = live_status();
+        clean.fetched_at = "t2".into();
+        let next = keep_block_across_error(Some(&blocked_prev()), clean);
+        assert!(!next.blocked && next.block_reason.is_none(), "a clean read that clears the block is believed");
+    }
+
+    #[test]
+    fn missing_cookie_and_expired_login_do_not_inherit_a_block() {
+        for err in [ERR_NOT_CONNECTED, ERR_LOGIN_EXPIRED] {
+            let next = keep_block_across_error(Some(&blocked_prev()), blank_after_error(err));
+            assert!(!next.blocked, "{err}: unknown never blocks");
+        }
+    }
+
+    #[test]
+    fn an_error_with_no_previous_block_or_no_previous_status_stays_unblocked() {
+        let unblocked_prev = live_status();
+        assert!(!keep_block_across_error(Some(&unblocked_prev), blank_after_error("x")).blocked);
+        assert!(!keep_block_across_error(None, blank_after_error("x")).blocked);
     }
 
     #[test]
@@ -358,7 +524,7 @@ mod tests {
 
         // The grant alone is enough to block even when the limit read failed.
         let mut spent = ok_credits();
-        spent.promo_tranches[0].remaining_amount_minor_units = 0;
+        spent.promo_tranches[0].remaining_amount_minor_units = Some(0);
         let s = build_status("a", "t", Ok(spent), Err(ScrapeError::Other(anyhow::anyhow!("x"))), Ok(ok_spend()));
         assert!(s.blocked);
         assert!(s.error.is_some());
