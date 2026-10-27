@@ -246,7 +246,7 @@ function _init(): void {
   let isAnyModalOpen: (() => boolean) | null = null;
   void import("./modal-input-lock").then(m => { isAnyModalOpen = m.isAnyModalOpen; });
 
-  // Held Alt shows the model/effort keys beside the pane header's values
+  // Held Alt shows the model/effort keys as keycaps under the pane header's values
   // (config-bump.css), and keeps showing them through repeated Alt+Up/Down.
   // The model hint's range follows the live model list (config-bump.css reads
   // the custom property), so it never promises a slot with no model behind it.

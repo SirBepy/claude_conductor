@@ -6,8 +6,8 @@
 
 const EASE_OUT = "cubic-bezier(0.16, 1, 0.3, 1)";
 const EASE_IN_OUT = "cubic-bezier(0.32, 0.72, 0, 1)";
-// Joe picked the 0.25x preview of the original 420/45/270/220ms timings
-// (2026-10-27) over the real-speed one: the wave reads as a wave.
+// Slow on purpose: at a quarter of these durations the stagger read as a
+// flicker, not as a wave moving down the page.
 const ENTER_MS = 1680;
 const STEP_MS = 180;
 // Past this the last section would still be arriving after the user has
