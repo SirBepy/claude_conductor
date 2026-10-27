@@ -29,8 +29,15 @@ export async function renderPendingPane(
   const myMount = state.mountId;
 
   _pendingHeader = mountPendingChrome(pane, placeholderId, project, config);
-  await mountPendingStatusbar(pane, project, config, placeholderId, _pendingHeader);
-  await attachPendingRenderer(pane, placeholderId, project, config, _pendingHeader, myMount);
+  const t0 = performance.now();
+  // Statusbar settings reads and the renderer attach are independent waits.
+  const statusbarReady = mountPendingStatusbar(pane, project, config, placeholderId, _pendingHeader)
+    .finally(() => console.debug(`[pending-pane] statusbar ready +${Math.round(performance.now() - t0)}ms`));
+  await Promise.all([
+    statusbarReady,
+    attachPendingRenderer(pane, placeholderId, project, config, _pendingHeader, myMount, statusbarReady)
+      .finally(() => console.debug(`[pending-pane] renderer attached +${Math.round(performance.now() - t0)}ms`)),
+  ]);
   // Must come after attachPendingRenderer: ChatRenderer.attach() clears
   // .session-messages, which would wipe a dashboard mounted any earlier.
   mountDraftDashboard(pane, project, myMount);

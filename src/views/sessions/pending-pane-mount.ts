@@ -143,8 +143,7 @@ export async function mountPendingStatusbar(
 ): Promise<void> {
   const sbHost = pane.querySelector<HTMLElement>(".session-statusbar-host");
   if (!sbHost) return;
-  const rows = await loadStatuslineRows();
-  const hideZero = await loadStatuslineHideZero();
+  const [rows, hideZero] = await Promise.all([loadStatuslineRows(), loadStatuslineHideZero()]);
   const sb = new SessionStatusbar(sbHost, null, rows, {
     cwd: project.path,
     effort: config.effort,
@@ -213,6 +212,7 @@ export async function attachPendingRenderer(
   config: SessionConfig,
   header: SessionHeader | null,
   myMount: number,
+  statusbarReady: Promise<void>,
 ): Promise<void> {
   if (state.renderer) state.renderer.detach();
   const messagesEl = pane.querySelector<HTMLElement>(".session-messages");
@@ -227,6 +227,14 @@ export async function attachPendingRenderer(
   setCodeModeChatProvider(project.path && headerEl
     ? () => sessionCodeModeChat({ pane, sessionId: renderer.sessionId, cwd: project.path, headerEl, renderer })
     : null);
+  // Must attach BEFORE the first invoke so the placeholder channel is
+  // subscribed before Rust mirrors SessionStarted onto it.
+  const attached = renderer.attach(placeholderId);
+  // The statusbar mounts concurrently with attach (two independent IPC waits),
+  // so its callbacks are wired once it exists. A draft emits no meta or tally
+  // before the first send, so nothing is missed in between.
+  await Promise.all([attached, statusbarReady]);
+  if (state.mountId !== myMount) { renderer.detach(); return; }
   const sbForRenderer = state.statusbar;
   if (sbForRenderer) {
     renderer.onMetaUpdate = (meta) => {
@@ -237,10 +245,6 @@ export async function attachPendingRenderer(
     };
     sbForRenderer.updateToolTally(renderer.toolTally);
   }
-  // Must attach BEFORE the first invoke so the placeholder channel is
-  // subscribed before Rust mirrors SessionStarted onto it.
-  await renderer.attach(placeholderId);
-  if (state.mountId !== myMount) { renderer.detach(); return; }
 
   let unsubPlaceholderWatch: (() => void) | null = null;
   unsubPlaceholderWatch = sessionEvents.subscribe(placeholderId, async (payload) => {
