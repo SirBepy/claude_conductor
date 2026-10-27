@@ -53,15 +53,14 @@ function extractTauriCsp(confJson) {
 }
 
 // Tauri adds a nonce to script-src when it may edit it, and a nonce makes the
-// browser ignore 'unsafe-inline'. A dashboard html card is a srcdoc frame that
-// inherits this policy, so its inline scripts (the chart code and the height
-// reporter) are blocked and the card stays blank at its starting height.
-describe("tauri.conf.json leaves script-src and style-src as written", () => {
-  it("opts both out of Tauri's CSP rewriting", () => {
+// browser ignore 'unsafe-inline', so an injected inline script cannot run. That
+// is why script-src stays under Tauri's control; only style-src is opted out.
+// Consequence: a dashboard html card (a srcdoc frame inheriting this policy)
+// cannot run inline scripts in the installed app, so cards use native parts.
+describe("tauri.conf.json keeps Tauri's nonce on script-src", () => {
+  it("opts only style-src out of Tauri's CSP rewriting", () => {
     const conf = JSON.parse(fs.readFileSync(tauriConfPath, "utf8"));
-    expect(conf.app.security.dangerousDisableAssetCspModification).toEqual(
-      expect.arrayContaining(["script-src", "style-src"]),
-    );
+    expect(conf.app.security.dangerousDisableAssetCspModification).toEqual(["style-src"]);
   });
 });
 
