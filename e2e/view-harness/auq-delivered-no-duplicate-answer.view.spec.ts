@@ -69,7 +69,7 @@ test.describe("view-harness / delivered answer sends no duplicate message", () =
     await card.locator('.prompt-opt input[data-label="A"]').click();
     // A one-question card submits in a single step (ai_todo 821); only two or
     // more questions get a review panel.
-    await card.locator('[data-act="primary"]').click();
+    await card.locator(".prompt-answer-send").click();
 
     await expect(card).toHaveCount(0);
     const sendCount = await page.evaluate(() => window.__sentBundles!.length);

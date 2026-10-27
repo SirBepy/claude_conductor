@@ -47,7 +47,7 @@ test("Ask about this question opens Ask prefilled while the card stays pending",
   const other = page.locator(".prompt-card__answer-bar .prompt-q__other-input");
   await other.fill("partial thought");
 
-  await page.locator('.prompt-card [data-act="ask"]').click();
+  await page.locator('.prompt-card [data-act="ask-inline"]').click();
 
   const input = page.locator("[data-ask-input]");
   await expect(input).toBeVisible();
@@ -59,7 +59,10 @@ test("Ask about this question opens Ask prefilled while the card stays pending",
 
   await expect(page.locator(".prompt-card")).toBeVisible();
   await expect(other).toHaveValue("partial thought");
-  await expect(page.locator('.prompt-card__footer [data-act="primary"]')).toBeEnabled();
+  await expect(page.locator(".prompt-card__footer .prompt-answer-send")).toBeEnabled();
+  // Desktop mirrors the phone: Ask sits on the question band, not in the header, and the arrow is the only way forward.
+  await expect(page.locator('.prompt-card__header [data-act="ask"]')).toBeHidden();
+  await expect(page.locator('.prompt-card__footer [data-act="primary"]')).toBeHidden();
 });
 
 test("on a phone, the Ask window covers the fullscreen question card", async ({ page }) => {
