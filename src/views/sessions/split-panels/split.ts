@@ -244,7 +244,10 @@ export class SplitPanels implements PanelHost {
     if (this.sessionId) {
       if (this.active) rememberActive(this.sessionId, this.active);
       else forgetActive(this.sessionId);
-      if (!this.popped && this.panels.includes("preview")) savePreviewOpen(this.sessionId, shown);
+      // Only an explicit show/close writes the flag. A chat switch lands on
+      // another panel while a Preview pushed behind it is still pending, and
+      // writing `shown=false` then would erase that pending state.
+      if (!scoping && !this.popped && this.panels.includes("preview")) savePreviewOpen(this.sessionId, shown);
     }
     this.renderStrip();
     this.deps.onChange();
@@ -427,6 +430,8 @@ export class SplitPanels implements PanelHost {
     }
     if (!explicit && this.active && this.active !== "preview") {
       this.previewUnseen = true;
+      // The flag outlives a chat switch; previewUnseen alone would not.
+      if (this.sessionId) savePreviewOpen(this.sessionId, true);
       if (snapshotId) this.pendingSnapshot = snapshotId;
       this.renderStrip();
       return;
