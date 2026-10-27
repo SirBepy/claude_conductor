@@ -27,7 +27,7 @@
 # cmd /c turns a quoted one into a literal "\"...\"" (see live-verify.ps1), so a path with a space
 # is refused here rather than mangled there.
 function Get-InSupervisorCommand {
-    param([string]$ScriptPath, [string]$VerdictFile, [switch]$Billed, [switch]$RealClaude, [string]$FakeClaudeBin)
+    param([string]$ScriptPath, [string]$VerdictFile, [switch]$Billed, [switch]$RealClaude, [string]$FakeClaudeBin, [string[]]$Spec)
     foreach ($p in @($ScriptPath, $VerdictFile, $FakeClaudeBin)) {
         if ($p -and $p.Contains(' ')) { throw "Cannot run headless with a space in '$p'; pass -Visible, or use a path without spaces." }
     }
@@ -36,6 +36,8 @@ function Get-InSupervisorCommand {
     if ($Billed) { $parts += '-Billed' }
     if ($RealClaude) { $parts += '-RealClaude' }
     if ($FakeClaudeBin) { $parts += @('-FakeClaudeBin', $FakeClaudeBin) }
+    # -File binds one argument per name, so the list travels comma-joined and is split back there.
+    if ($Spec) { $parts += @('-Spec', ($Spec -join ',')) }
     return ($parts -join ' ')
 }
 
@@ -63,7 +65,7 @@ function Invoke-SweepInSupervisor {
     # Forward -FakeClaudeBin only when the caller gave one; the copy derives the same default itself.
     $fake = if ($fakeClaudeBinGiven) { $FakeClaudeBin } else { $null }
     $verdictPath = Join-Path $env:TEMP "wdio-sweep-verdict-$([guid]::NewGuid().ToString('N')).txt"
-    $cmd = Get-InSupervisorCommand -ScriptPath $ScriptPath -VerdictFile $verdictPath -Billed:$Billed -RealClaude:$RealClaude -FakeClaudeBin $fake
+    $cmd = Get-InSupervisorCommand -ScriptPath $ScriptPath -VerdictFile $verdictPath -Billed:$Billed -RealClaude:$RealClaude -FakeClaudeBin $fake -Spec $Spec
     $started = Start-SupervisorHeadless $api $repoRoot $cmd 'wdio-sweep' $null
     Write-Host "Running headless under server_supervisor ($($started.id)); its dashboard previews the app window."
     $streamed = 0
