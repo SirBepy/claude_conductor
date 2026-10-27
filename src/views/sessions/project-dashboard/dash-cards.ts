@@ -7,7 +7,7 @@ import { fetchedLabel } from "./format";
 import { card, kv, quiet, row, icon, type DashCtx } from "./dash-parts";
 import { pageSlice } from "./paging";
 import { htmlCardFrame } from "./dash-html-card";
-import { segmentsBar } from "./dash-segments";
+import { figure, segmentsBar } from "./dash-segments";
 import type { CardConfigX, CardProgress, CardResultX, CardView } from "./types";
 
 function progressBar(p: CardProgress): TemplateResult {
@@ -38,7 +38,7 @@ export function cardMessage(v: CardView): string {
   }
   if (r.segments) {
     const g = r.segments;
-    for (const i of g.items) lines.push(`- ${i.label}: ${i.text || i.value}`);
+    for (const i of g.items) lines.push(`- ${i.label}: ${figure(i)}`);
     lines.push(`Bar total: ${g.max}${g.marker != null ? `, pace marker at ${g.marker}` : ""}${g.note ? ` (${g.note})` : ""}`);
   }
   for (const s of r.stats) lines.push(`- ${s.label}: ${s.value}`);

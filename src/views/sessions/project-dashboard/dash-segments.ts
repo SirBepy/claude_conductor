@@ -27,7 +27,8 @@ function barTotal(s: CardSegments): number {
   return Math.max(s.max, s.items.reduce((sum, i) => sum + i.value, 0));
 }
 
-const figure = (i: SegmentItem): string => i.text || String(i.value);
+/** The figure a slice prints: its own text, else the raw value. Shared with the message a card's button sends. */
+export const figure = (i: SegmentItem): string => i.text || String(i.value);
 
 export function segmentsBar(s: CardSegments): TemplateResult {
   const total = barTotal(s);
