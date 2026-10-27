@@ -118,11 +118,13 @@ class MainActivity : TauriActivity() {
     addContentView(lockScreen, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
   }
 
-  // The WebView's file and camera pickers launch through here. Only the
-  // activity-result path is hooked: the notification permission dialog is a
+  // The WebView's file and camera pickers launch through here with a real
+  // request code. A plain startActivity (an external link, the share sheet)
+  // also lands here, with requestCode -1, and leaves the app like any other
+  // trip away, so it gets no grace. The notification permission dialog is a
   // translucent overlay that pauses the app but never stops it.
   override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
-    ownActivityStop = true
+    if (requestCode >= 0) ownActivityStop = true
     super.startActivityForResult(intent, requestCode, options)
   }
 
