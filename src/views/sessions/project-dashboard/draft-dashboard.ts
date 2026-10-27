@@ -4,6 +4,7 @@
 import { invoke } from "../../../shared/ipc";
 import { state } from "../state";
 import { mountDashboard, type DashboardHandle } from "./dashboard";
+import { fadeOutAndFold } from "./dash-motion";
 import { targetForRepo } from "./format";
 import type { DashboardListRow, DashboardTargetRef } from "./types";
 
@@ -42,6 +43,24 @@ export function unmountDraftDashboard(pane: HTMLElement): void {
   current = null;
   pane.querySelector(".pd-draft")?.remove();
   pane.querySelector(".pd-qa-host.is-draft")?.remove();
+}
+
+/** The first send: the dashboard and its chips fade out and fold away instead
+ *  of vanishing, so the message that follows slides up rather than jumps. The
+ *  live dashboard comes down at once (no more events or fetches); what fades
+ *  is a copy left in its place. */
+export function leaveDraftDashboard(pane: HTMLElement): void {
+  const parts = [pane.querySelector<HTMLElement>(".pd-draft"), pane.querySelector<HTMLElement>(".pd-qa-host.is-draft")];
+  // After the original, not before: unmountDraftDashboard's selectors take the
+  // first match in document order and must find the original.
+  const ghosts = parts.flatMap((el) => {
+    if (!el || !el.firstElementChild) return [];
+    const ghost = el.cloneNode(true) as HTMLElement;
+    el.after(ghost);
+    return [ghost];
+  });
+  unmountDraftDashboard(pane);
+  for (const ghost of ghosts) fadeOutAndFold(ghost);
 }
 
 /** Mounts into a draft pane built by pending-pane-mount.ts. Must run after the

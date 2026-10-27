@@ -5,7 +5,7 @@
 // the draft's own message box instead of sending, the right-click menu, and
 // the Usage card's day totals.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { groupRow, groupSnapshot, history, projectRow, projectSnapshot, ZIRTUE_REPOS } from "./helpers/project-dashboard-fixtures.mjs";
 
 globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16);
@@ -30,7 +30,9 @@ vi.mock("../src/views/sessions/active-session.ts", () => ({ dismountActivePane: 
 vi.mock("../src/views/sessions/new-chat-config.ts", () => ({ resolveNewChatConfig: vi.fn(), accountPickNeeded: vi.fn(async () => false) }));
 vi.mock("../src/views/sessions/close-chat.ts", () => ({ closeChatWithConfirm: vi.fn(async () => {}) }));
 
-const { mountDraftDashboard, unmountDraftDashboard } = await import("../src/views/sessions/project-dashboard/draft-dashboard.ts");
+const draftModule = await import("../src/views/sessions/project-dashboard/draft-dashboard.ts");
+const { mountDraftDashboard, unmountDraftDashboard } = draftModule;
+const motionModule = await import("../src/views/sessions/project-dashboard/dash-motion.ts");
 const { withCommand } = await import("../src/views/sessions/project-dashboard/dash-actions.ts");
 const { usageByDay } = await import("../src/views/sessions/project-dashboard/dash-usage.ts");
 const { state } = await import("../src/views/sessions/state.ts");
@@ -123,6 +125,70 @@ describe("draft dashboard", () => {
   it("comes down with its chips on unmount", async () => {
     const pane = await mountDraft("C:/Projects/conductor");
     unmountDraftDashboard(pane);
+    expect(pane.querySelector(".pd-draft")).toBeNull();
+    expect(pane.querySelector(".pd-qa-host")).toBeNull();
+  });
+});
+
+describe("draft dashboard motion", () => {
+  const { leaveDraftDashboard } = draftModule;
+  const { entranceOrder } = motionModule;
+  let animations;
+  const nativeHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+
+  beforeEach(() => {
+    animations = [];
+    // jsdom has neither Web Animations nor layout.
+    HTMLElement.prototype.animate = function (frames, opts) {
+      const a = { el: this, frames, opts, onfinish: null, oncancel: null };
+      animations.push(a);
+      return a;
+    };
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get: () => 40 });
+  });
+
+  afterEach(() => {
+    delete HTMLElement.prototype.animate;
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", nativeHeight);
+  });
+
+  it("staggers each section in once, and a live repaint does not replay it", async () => {
+    const pane = await mountDraft("C:/Projects/conductor");
+    await vi.waitFor(() => expect(chips(pane)).toEqual(["/pickup", "/audit"]));
+    const played = animations.length;
+    expect(played).toBeGreaterThan(2);
+    expect(animations.every((a) => a.opts.fill === "backwards")).toBe(true);
+    // Later sections wait longer, up to the cap.
+    const delays = animations.map((a) => a.opts.delay);
+    expect(Math.max(...delays)).toBeGreaterThan(0);
+    expect(Math.max(...delays)).toBeLessThanOrEqual(270);
+    // The history and usage loads paint again after the first paint.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(animations.length).toBe(played);
+  });
+
+  it("orders sections down the page, left before right at the same height", () => {
+    const at = (name, top, left) => {
+      const el = document.createElement("div");
+      el.dataset.n = name;
+      el.getBoundingClientRect = () => ({ top, left });
+      return el;
+    };
+    const order = entranceOrder([at("right", 102, 400), at("below", 300, 0), at("left", 100, 0), at("top", 0, 0)]);
+    expect(order.map((e) => e.dataset.n)).toEqual(["top", "left", "right", "below"]);
+  });
+
+  it("the first send fades a copy out in place and takes the live dashboard down at once", async () => {
+    const pane = await mountDraft("C:/Projects/conductor");
+    await vi.waitFor(() => expect(chips(pane)).toEqual(["/pickup", "/audit"]));
+    animations.length = 0;
+    leaveDraftDashboard(pane);
+    expect(animations.map((a) => a.el.className)).toEqual(["pd-draft", "pd-qa-host is-draft"]);
+    expect(pane.querySelectorAll(".pd-draft")).toHaveLength(1);
+    expect(pane.querySelector(".pd-draft").inert).toBe(true);
+    // No live dashboard is left: a refetch cannot repaint into the copy.
+    expect(pane.querySelector(".pd-root")).toBe(pane.querySelector(".pd-draft .pd-root"));
+    for (const a of animations) a.onfinish();
     expect(pane.querySelector(".pd-draft")).toBeNull();
     expect(pane.querySelector(".pd-qa-host")).toBeNull();
   });
