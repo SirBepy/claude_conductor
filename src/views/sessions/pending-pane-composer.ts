@@ -98,13 +98,20 @@ export function wirePendingComposer(
     // item 5). A still-unstarted draft schedules a NewChat, tagged with this
     // pane's placeholderId so the sidebar can hide the draft row until it
     // fires (item 6).
-    onSchedule: (blocks: ContentBlock[], fireAtUtcIso: string, recurrence) => {
+    onSchedule: async (blocks: ContentBlock[], fireAtUtcIso: string, recurrence) => {
       const prompt = blocksToText(blocks);
       if (!prompt.trim()) return;
       const realId =
         state.pendingNewSession?.placeholderId === placeholderId
           ? state.pendingNewSession.realId
           : null;
+      // Same gate as the first send: a new chat with no account would only
+      // fail at fire time, with nobody watching.
+      if (!realId && (await accountPickNeeded(config))) {
+        showToast("Pick an account for this chat first");
+        deps.pickAccount();
+        return;
+      }
       const kind: ScheduledKind = realId
         ? { type: "message", session_id: realId, cwd: project.path }
         : {
