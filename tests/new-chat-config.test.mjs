@@ -12,13 +12,14 @@ const reads = vi.hoisted(() => ({
   accounts: [],
   projectAccount: null,
   chars: [],
+  failAccounts: null,
 }));
 const cached = (v) => ({ cached: v, ready: Promise.resolve(v) });
 
 vi.mock("../src/views/sessions/new-session-cache.ts", () => ({
   settingsData: () => cached(reads.settings),
   projectsListData: () => cached(reads.projects),
-  accountsListData: () => cached(reads.accounts),
+  accountsListData: () => reads.failAccounts ?? cached(reads.accounts),
   projectAccountData: () => cached(reads.projectAccount),
   whitelistCharsData: () => cached(reads.chars),
   resolveCached: async (read, fallback) => read.cached ?? (await read.ready.catch(() => fallback)),
@@ -39,7 +40,7 @@ const remote = vi.hoisted(() => ({ on: false }));
 vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => remote.on }));
 vi.mock("../src/shared/character-select-sound.ts", () => ({ playCharacterSelectSound: vi.fn() }));
 
-const { resolveNewChatConfig, accountPickNeeded, persistNewChatChoice, pickRandomCharacter } =
+const { resolveNewChatConfig, accountPickNeeded, noAccountsRegistered, persistNewChatChoice, pickRandomCharacter } =
   await import("../src/views/sessions/new-chat-config.ts");
 
 const personal = { id: "personal", label: "personal", kind: "subscription" };
@@ -53,6 +54,7 @@ beforeEach(() => {
   reads.accounts = [personal, work];
   reads.projectAccount = null;
   reads.chars = [];
+  reads.failAccounts = null;
   settingsWrites.length = 0;
   remote.on = false;
   vi.clearAllMocks();
@@ -93,7 +95,7 @@ describe("accountPickNeeded", () => {
     expect(await accountPickNeeded({ model: "opus", effort: "high", accountId: "work" })).toBe(false);
   });
 
-  it("lets the daemon pick when no accounts are registered at all", async () => {
+  it("asks for no pick when no accounts are registered at all (that is a different guidance)", async () => {
     reads.accounts = [];
     expect(await accountPickNeeded({ model: "opus", effort: "high", accountId: null })).toBe(false);
   });
@@ -101,6 +103,37 @@ describe("accountPickNeeded", () => {
   it("always blocks a paired machine's chat with no account", async () => {
     reads.accounts = [];
     expect(await accountPickNeeded({ model: "opus", effort: "high", accountId: null, machineId: "m1" })).toBe(true);
+  });
+});
+
+describe("noAccountsRegistered", () => {
+  const bare = { model: "opus", effort: "high", accountId: null };
+
+  it("is true when the registry is empty and the chat has no account", async () => {
+    reads.accounts = [];
+    expect(await noAccountsRegistered(bare)).toBe(true);
+  });
+
+  it("is false once any account exists", async () => {
+    expect(await noAccountsRegistered(bare)).toBe(false);
+  });
+
+  it("is false for a chat that carries an account", async () => {
+    reads.accounts = [];
+    expect(await noAccountsRegistered({ ...bare, accountId: "work" })).toBe(false);
+  });
+
+  it("is false for a paired machine's chat, whose accounts live on the peer", async () => {
+    reads.accounts = [];
+    expect(await noAccountsRegistered({ ...bare, machineId: "m1" })).toBe(false);
+  });
+
+  it("is false when the account list fails to load", async () => {
+    reads.accounts = undefined;
+    const failed = { cached: undefined, ready: Promise.reject(new Error("offline")) };
+    failed.ready.catch(() => {});
+    reads.failAccounts = failed;
+    expect(await noAccountsRegistered(bare)).toBe(false);
   });
 });
 
