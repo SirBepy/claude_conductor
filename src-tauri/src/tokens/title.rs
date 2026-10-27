@@ -110,6 +110,15 @@ pub fn last_override_title(path: &Path, max_chars: usize) -> Option<String> {
     None
 }
 
+/// The title a transcript already carries from a human or the AI, without the
+/// first-prompt fallback: a curated override wins over the AI milestone title.
+/// Callers that must tell "named" from "only has a first prompt" (the Stop
+/// hook's title enforcement, live rename detection) use this rather than
+/// `session_title`.
+pub fn curated_or_ai_title(path: &Path, max_chars: usize) -> Option<String> {
+    last_override_title(path, max_chars).or_else(|| ai_milestone_title(path, max_chars))
+}
+
 /// Resolves a session's display title. Precedence, highest first:
 /// 1. a curated override (a `custom-title`/`agent-name` line from /close's
 ///    rename or any future manual rename) — sticky, a human choice always wins;
@@ -118,9 +127,7 @@ pub fn last_override_title(path: &Path, max_chars: usize) -> Option<String> {
 /// 3. the first user prompt.
 /// This is what the sidebar / history / restore paths use.
 pub fn session_title(path: &Path, max_chars: usize) -> Option<String> {
-    last_override_title(path, max_chars)
-        .or_else(|| ai_milestone_title(path, max_chars))
-        .or_else(|| first_user_prompt(path, max_chars))
+    curated_or_ai_title(path, max_chars).or_else(|| first_user_prompt(path, max_chars))
 }
 
 /// Extracts the inner text of the LAST `<cc-title:…>` marker in `text`, if any.
@@ -754,6 +761,32 @@ mod tests {
         assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("AI Picked This"));
         // Sticky human override wins in the resolved title.
         assert_eq!(session_title(&path, 60).as_deref(), Some("Human Named It"));
+    }
+
+    #[test]
+    fn curated_or_ai_title_prefers_override_then_ai_and_skips_first_prompt() {
+        let dir = tempdir().unwrap();
+
+        let both = dir.path().join("both.jsonl");
+        std::fs::write(&both, [
+            user_line("first prompt"),
+            assistant_line("<cc-title:AI Picked This>"),
+            override_line("custom-title", "Human Named It"),
+        ].join("\n")).unwrap();
+        assert_eq!(curated_or_ai_title(&both, 60).as_deref(), Some("Human Named It"));
+
+        let ai_only = dir.path().join("ai.jsonl");
+        std::fs::write(&ai_only, [
+            user_line("first prompt"),
+            assistant_line("<cc-title:AI Picked This>"),
+        ].join("\n")).unwrap();
+        assert_eq!(curated_or_ai_title(&ai_only, 60).as_deref(), Some("AI Picked This"));
+
+        // A bare first prompt is not a title: session_title falls back to it, this does not.
+        let neither = dir.path().join("neither.jsonl");
+        std::fs::write(&neither, [user_line("just chatting"), assistant_line("hi")].join("\n")).unwrap();
+        assert_eq!(curated_or_ai_title(&neither, 60), None);
+        assert_eq!(session_title(&neither, 60).as_deref(), Some("just chatting"));
     }
 
     #[test]

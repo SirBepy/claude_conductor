@@ -78,22 +78,26 @@ pub(super) const TITLE_MISSING_REASON: &str = "This chat has no title yet. Call 
 /// after `missing_requirement_reason` said `Ok`, so the single block that
 /// `stop_hook_active` allows is not spent twice. A `working` turn is mid-chain
 /// and a later turn can carry the title; a wake-opened turn has no user topic.
+///
+/// A title already in the `transcript` (a curated rename or an earlier AI one)
+/// also satisfies it. That read is last on purpose: it opens a file, so it only
+/// happens once every cheaper gate says a title is owed.
 pub(super) fn title_missing(
     stop_hook_active: Option<bool>,
     has_current_report: bool,
     status: Option<&str>,
     report_title: Option<&str>,
-    chat_has_title: bool,
     opened_by_wake: bool,
     mcp_attached: bool,
+    transcript: &std::path::Path,
 ) -> bool {
     stop_hook_active != Some(true)
         && has_current_report
         && mcp_attached
         && !opened_by_wake
-        && !chat_has_title
         && status != Some("working")
         && report_title.map_or(true, |t| t.trim().is_empty())
+        && crate::tokens::curated_or_ai_title(transcript, 60).is_none()
 }
 
 /// `Some(true)` means a prior Stop already blocked this turn, so never block again.
@@ -221,21 +225,47 @@ mod tests {
         assert_eq!(missing_requirement_reason(None, true, false, DONE, false, true), TurnEndVerdict::Block(SEND_MISSING_REASON));
     }
 
+    /// A transcript line list written to a temp file; `title_missing` reads it
+    /// only once every cheaper gate passes.
+    fn transcript(lines: &[&str]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        (dir, path)
+    }
+
+    const FIRST_PROMPT: &str = r#"{"type":"user","message":{"role":"user","content":"just chatting"}}"#;
+
     #[test]
     fn title_is_demanded_once_a_titleless_chat_reports_without_one() {
-        assert!(title_missing(None, true, DONE, None, false, false, true));
-        assert!(title_missing(None, true, DONE, Some("  "), false, false, true));
+        // A bare first prompt is not a title, so the transcript does not satisfy the gate.
+        let (_dir, tp) = transcript(&[FIRST_PROMPT]);
+        assert!(title_missing(None, true, DONE, None, false, true, &tp));
+        assert!(title_missing(None, true, DONE, Some("  "), false, true, &tp));
+        // An unreadable transcript counts as titleless rather than silencing the gate.
+        assert!(title_missing(None, true, DONE, None, false, true, std::path::Path::new("no/such/transcript.jsonl")));
     }
 
     #[test]
-    fn title_not_demanded_when_supplied_or_already_held_or_unenforceable() {
-        assert!(!title_missing(None, true, DONE, Some("Auth setup"), false, false, true));
-        assert!(!title_missing(None, true, DONE, None, true, false, true));
-        assert!(!title_missing(Some(true), true, DONE, None, false, false, true));
-        assert!(!title_missing(None, true, Some("working"), None, false, false, true));
-        assert!(!title_missing(None, true, DONE, None, false, true, true));
-        assert!(!title_missing(None, true, DONE, None, false, false, false));
-        assert!(!title_missing(None, false, DONE, None, false, false, true));
+    fn title_not_demanded_when_supplied_or_unenforceable() {
+        let (_dir, tp) = transcript(&[FIRST_PROMPT]);
+        assert!(!title_missing(None, true, DONE, Some("Auth setup"), false, true, &tp));
+        assert!(!title_missing(Some(true), true, DONE, None, false, true, &tp));
+        assert!(!title_missing(None, true, Some("working"), None, false, true, &tp));
+        assert!(!title_missing(None, true, DONE, None, true, true, &tp));
+        assert!(!title_missing(None, true, DONE, None, false, false, &tp));
+        assert!(!title_missing(None, false, DONE, None, false, true, &tp));
+    }
+
+    #[test]
+    fn title_not_demanded_when_the_transcript_already_holds_one() {
+        let ai = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"<cc-title:Auth setup>"}]}}"#;
+        let (_d1, ai_tp) = transcript(&[FIRST_PROMPT, ai]);
+        assert!(!title_missing(None, true, DONE, None, false, true, &ai_tp));
+
+        let renamed = r#"{"type":"custom-title","customTitle":"Human Named It"}"#;
+        let (_d2, renamed_tp) = transcript(&[FIRST_PROMPT, renamed]);
+        assert!(!title_missing(None, true, DONE, None, false, true, &renamed_tp));
     }
 
     // todo 824: MCP transport not attached degrades every would-be block to

@@ -235,8 +235,7 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         let tpath = crate::tokens::transcript_for_session(&s.cwd, &s.session_id);
         let resolved_name = tpath
             .as_deref()
-            .and_then(|p| crate::tokens::last_override_title(p, 60))
-            .or_else(|| tpath.as_deref().and_then(|p| crate::tokens::ai_milestone_title(p, 60)))
+            .and_then(|p| crate::tokens::curated_or_ai_title(p, 60))
             .or(s.name)
             .or_else(|| tpath.as_deref().and_then(|p| crate::tokens::first_user_prompt(p, 60)));
         if let Some(name) = resolved_name {
