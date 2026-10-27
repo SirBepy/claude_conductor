@@ -4,7 +4,7 @@
 // chips, account chip, header avatar). This module resolves what the draft
 // starts with and remembers the choices once the first message is sent.
 
-import type { Character } from "../../shared/api";
+import type { Account, Character } from "../../shared/api";
 import { api } from "../../shared/api";
 import { updateSettings } from "../../shared/settings-update";
 import { isRemote } from "../../shared/transport";
@@ -101,6 +101,18 @@ export async function accountPickNeeded(config: SessionConfig): Promise<boolean>
   if (config.machineId) return true;
   const accounts = await resolveCached(accountsListData(), []);
   return accounts.length > 0;
+}
+
+/** True when this machine has no account registered at all, so a first send
+ *  or schedule could only fail daemon-side with NoAccounts. A list that fails
+ *  to load is NOT "none": blocking the send on a transient read error would
+ *  strand a user who does have accounts. A paired machine's chat is never
+ *  "none" here, its accounts live on the peer and `accountPickNeeded` already
+ *  gates it. */
+export async function noAccountsRegistered(config: SessionConfig): Promise<boolean> {
+  if (config.accountId || config.machineId) return false;
+  const accounts = await resolveCached(accountsListData(), null as Account[] | null);
+  return accounts !== null && accounts.length === 0;
 }
 
 /** Remember this chat's model/effort as the project's next default, and bind

@@ -9,7 +9,8 @@ import { formatFireAt } from "../../shared/chat/schedule-picker";
 import { state, setActiveSession } from "./state";
 import { isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar";
 import type { SessionConfig } from "../../shared/effort-presets";
-import { accountPickNeeded, persistNewChatChoice } from "./new-chat-config";
+import { accountPickNeeded, noAccountsRegistered, persistNewChatChoice } from "./new-chat-config";
+import { showView } from "../../shared/navigation";
 import { setAutoAccept } from "./permission-modal";
 import { savePendingSession, clearPendingSession } from "./pending-draft-storage";
 import { showToast } from "../../shared/toast";
@@ -20,6 +21,12 @@ import { sessionEvents } from "../../shared/chat/event-store";
 import { refreshSessions } from "./sidebar";
 import { rebuildSidebar } from "./pending-pane-mount";
 import { leaveDraftDashboard } from "./project-dashboard/draft-dashboard";
+
+/** With no account registered there is nothing to pick, so the picker would
+ *  open empty; point at Settings instead. The toast itself is the link. */
+function noAccountsGuidance(): void {
+  showToast("Add an account in Settings first", { onClick: () => showView("settings") });
+}
 
 export interface PendingComposerDeps {
   /** Promote the pane's chrome from draft to real-session once start_session
@@ -106,11 +113,18 @@ export function wirePendingComposer(
           ? state.pendingNewSession.realId
           : null;
       // Same gate as the first send: a new chat with no account would only
-      // fail at fire time, with nobody watching.
+      // fail at fire time, with nobody watching. Throwing (not returning)
+      // because the composer clears the draft before calling this and only
+      // puts it back on a throw; it also keeps the blocked-by-limit path from
+      // announcing "Scheduled for ..." for a schedule that never happened.
+      if (!realId && (await noAccountsRegistered(config))) {
+        noAccountsGuidance();
+        throw new Error("no account registered");
+      }
       if (!realId && (await accountPickNeeded(config))) {
         showToast("Pick an account for this chat first");
         deps.pickAccount();
-        return;
+        throw new Error("no account picked");
       }
       const kind: ScheduledKind = realId
         ? { type: "message", session_id: realId, cwd: project.path }
@@ -156,7 +170,15 @@ export function wirePendingComposer(
         started = true;
         // No account resolved (none bound or default): the first send is the
         // point that needs one, so ask here instead of spawning on a guess.
-        // Throwing puts the text back in the composer.
+        // Throwing puts the text back in the composer. `started` is already
+        // true across these awaits so a second Enter cannot start a second
+        // session while the account check is in flight.
+        if (await noAccountsRegistered(config)) {
+          started = false;
+          sessionEvents.removeSynthetic(targetSid, optimisticEvent);
+          noAccountsGuidance();
+          throw new Error("no account registered");
+        }
         if (await accountPickNeeded(config)) {
           started = false;
           sessionEvents.removeSynthetic(targetSid, optimisticEvent);

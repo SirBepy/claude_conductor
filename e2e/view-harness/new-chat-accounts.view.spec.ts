@@ -1,6 +1,6 @@
 // asserts: src/views/sessions/new-chat-config.ts, src/views/sessions/pending-pane-composer.ts, src/views/sessions/account-picker-logic.ts
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
+import { mountView, invokeCalls, SESSIONS_BASE_INVOKE } from "./harness";
 
 // There is no new-chat dialog: every entry point opens the draft chat pane
 // directly, on account = project binding > default account > none. The draft's
@@ -71,5 +71,49 @@ test.describe("view-harness / new-chat account resolution in the draft", () => {
     await expect(modal.locator(".account-chip.sel")).toHaveCount(0);
     // The refused text goes back into the composer.
     await expect(ta).toHaveValue("hello");
+  });
+
+  test("no default and two accounts: scheduling is refused, opens the picker, keeps the text and creates nothing", async ({ page }) => {
+    await openDraft(page, { list_accounts: [WORK, HOME], schedule_create: { fire_at: new Date().toISOString() } });
+
+    const ta = page.locator("#session-pane .session-composer .composer-textarea");
+    await ta.fill("hello later");
+    await page.locator("#session-pane .composer-send-chevron").click();
+    await page.getByRole("button", { name: "Schedule message" }).click();
+    await page.locator(".schedule-picker-popover [data-preset]").first().click();
+
+    await expect(page.getByText("Pick an account for this chat first")).toBeVisible();
+    await expect(page.locator(".cam-modal-card")).toBeVisible();
+    await expect(ta).toHaveValue("hello later");
+    await expect(page.locator("#session-pane .composer-notice")).toBeHidden();
+    expect((await invokeCalls(page)).filter((c) => c.cmd === "schedule_create")).toHaveLength(0);
+  });
+
+  test("no accounts registered: first send says to add one in Settings, keeps the text and spawns nothing", async ({ page }) => {
+    await openDraft(page, { list_accounts: [], start_session: "sess-1" });
+
+    const ta = page.locator("#session-pane .session-composer .composer-textarea");
+    await ta.fill("hello");
+    await ta.press("Enter");
+
+    await expect(page.getByText("Add an account in Settings first")).toBeVisible();
+    await expect(page.locator(".cam-modal-card")).toHaveCount(0);
+    await expect(ta).toHaveValue("hello");
+    expect((await invokeCalls(page)).filter((c) => c.cmd === "start_session")).toHaveLength(0);
+  });
+
+  test("no accounts registered: scheduling says to add one in Settings, keeps the text and creates nothing", async ({ page }) => {
+    await openDraft(page, { list_accounts: [], schedule_create: { fire_at: new Date().toISOString() } });
+
+    const ta = page.locator("#session-pane .session-composer .composer-textarea");
+    await ta.fill("hello later");
+    await page.locator("#session-pane .composer-send-chevron").click();
+    await page.getByRole("button", { name: "Schedule message" }).click();
+    await page.locator(".schedule-picker-popover [data-preset]").first().click();
+
+    await expect(page.getByText("Add an account in Settings first")).toBeVisible();
+    await expect(ta).toHaveValue("hello later");
+    await expect(page.locator("#session-pane .composer-notice")).toBeHidden();
+    expect((await invokeCalls(page)).filter((c) => c.cmd === "schedule_create")).toHaveLength(0);
   });
 });

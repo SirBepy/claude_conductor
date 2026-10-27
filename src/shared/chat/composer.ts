@@ -519,8 +519,19 @@ export class Composer {
       onConfirm: (result) => {
         const text = (this.textarea?.value ?? "").trim();
         const blocks = this.undo.buildBlocks(text);
+        const savedAttachments = this.att.attachments;
+        const savedPastedBlocks = this.att.pastedBlocks;
         this.clearComposer();
-        void this.opts.onSchedule?.(blocks, result.fireAtUtcIso, result.recurrence);
+        // A refused schedule (e.g. the draft has no account yet) throws so the
+        // typed message goes back instead of vanishing.
+        void (async () => {
+          try {
+            await this.opts.onSchedule?.(blocks, result.fireAtUtcIso, result.recurrence);
+          } catch (err) {
+            console.error("[Composer] schedule failed", err);
+            this.restoreDraft(text, savedAttachments, savedPastedBlocks);
+          }
+        })();
       },
     });
   }
