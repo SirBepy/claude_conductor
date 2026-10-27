@@ -87,6 +87,8 @@ export function handleQuestionCardKey(e: KeyboardEvent, deps: QuestionKeyboardDe
       return true;
     }
     if (!(target instanceof HTMLTextAreaElement)) return false;
+    // An option's note box sits inside the option list already; Tab there moves on normally.
+    if (target.classList.contains("prompt-opt__note-input")) return false;
     const inCardOrComposer = host.contains(target) || Boolean(target.closest(".session-composer"));
     if (!inCardOrComposer) return false;
     const opts = panelOptions(host, state.activeTab);

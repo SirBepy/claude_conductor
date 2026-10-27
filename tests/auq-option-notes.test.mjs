@@ -102,6 +102,18 @@ describe("AUQ per-option notes", () => {
     expect(document.querySelector(".prompt-opt__note-input")).toBeNull();
   });
 
+  it("leaves Tab in a note box alone instead of jumping to the options", () => {
+    renderQuestionUI(baseOpts());
+    tick(0, "Top strip");
+    pencil("Top strip").click();
+    const field = document.querySelector('.prompt-opt__note-input[data-note-for="Top strip"]');
+    field.focus();
+    const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    field.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(field);
+  });
+
   it("notes a single-select pick, combined with typed text", () => {
     const notes = new Map([["6 months", "plenty"]]);
     expect(computeAnswer(SINGLE, "", "6 months", notes)).toBe("6 months (note: plenty)");
