@@ -109,9 +109,7 @@ fn refresh_overrides(
         let Ok(mtime) = std::fs::metadata(path).and_then(|m| m.modified()) else { continue };
         if mtimes.get(session_id) == Some(&mtime) { continue; }
         mtimes.insert(session_id.clone(), mtime);
-        let title = crate::tokens::last_override_title(path, 60)
-            .or_else(|| crate::tokens::ai_milestone_title(path, 60));
-        if let Some(title) = title {
+        if let Some(title) = crate::tokens::curated_or_ai_title(path, 60) {
             if registry.set_name(session_id, title) {
                 changed = true;
             }
