@@ -142,3 +142,31 @@ fn the_menu_offers_pickup_only_while_plan_md_has_something_to_pick() {
     fs::write(todos.path().join("PLAN.md"), "## Now\n- [ ] 2 - next\n").unwrap();
     assert!(names(todos.path()).contains(&"pickup".to_string()));
 }
+
+#[test]
+fn a_dead_sessions_old_claim_does_not_hide_pickup_but_a_fresh_one_does() {
+    let home = tempfile::tempdir().unwrap();
+    fs::create_dir_all(home.path().join("skills").join("pickup")).unwrap();
+    fs::write(home.path().join("skills").join("pickup").join("SKILL.md"), "---
+name: pickup
+description: x
+---
+").unwrap();
+    let todos = tempfile::tempdir().unwrap();
+    fs::create_dir_all(todos.path().join(".claims")).unwrap();
+    fs::write(todos.path().join("PLAN.md"), "## Now
+- [ ] 2 - next
+").unwrap();
+    fs::write(todos.path().join("2-next.md"), "x").unwrap();
+    let claim = todos.path().join(".claims").join("2.claim");
+    fs::write(&claim, "session: s").unwrap();
+    let offered = || {
+        let all = hide_idle_pickup(scan_dirs(home.path(), &[]), todos.path());
+        all.iter().any(|e| e.name == "pickup" && !e.menu_hidden)
+    };
+    assert!(!offered(), "a fresh claim hides pickup");
+
+    let past = std::time::SystemTime::now() - std::time::Duration::from_secs(5 * 60 * 60);
+    fs::OpenOptions::new().write(true).open(&claim).unwrap().set_modified(past).unwrap();
+    assert!(offered(), "a claim older than 4h is reclaimable, so pickup is offered");
+}

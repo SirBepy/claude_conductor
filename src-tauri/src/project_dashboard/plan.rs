@@ -90,7 +90,7 @@ fn clip(s: &str) -> String {
 /// Reads `<repo>/.claude/todos/PLAN.md`; a missing or unreadable file is just
 /// an empty plan, never an error.
 pub fn read_plan(repo_cwd: &str) -> Vec<PlanItem> {
-    let path = std::path::Path::new(repo_cwd).join(".claude").join("todos").join("PLAN.md");
+    let path = super::todo_stats::todos_dir(std::path::Path::new(repo_cwd)).join("PLAN.md");
     match std::fs::read_to_string(&path) {
         Ok(text) => parse_plan(&text, repo_cwd),
         Err(_) => Vec::new(),
@@ -110,8 +110,10 @@ pub fn has_pickable(todos_dir: &std::path::Path) -> bool {
         (_, "") => false,
         (None, _) => true,
         (Some(id), _) => {
-            let has_file = files.iter().any(|f| f == &format!("{id}.md") || f.starts_with(&format!("{id}-")));
-            has_file && !todos_dir.join(".claims").join(format!("{id}.claim")).exists()
+            // `.md` is required: an id-reservation marker `<id>-.reserved` shares the
+            // `<id>-` prefix but is not a todo file.
+            let has_file = files.iter().any(|f| f == &format!("{id}.md") || (f.starts_with(&format!("{id}-")) && f.ends_with(".md")));
+            has_file && !super::todo_stats::claim_is_live(todos_dir, &id)
         }
     })
 }
@@ -141,6 +143,35 @@ mod tests {
     #[test]
     fn claimed_checked_and_vanished_lines_are_not_pickable() {
         let dir = todos_dir("## Now\n- [x] 1 - done\n- [ ] 2 - claimed\n- [ ] 3 - file gone\n", &["1-a.md", "2-b.md", ".claims/2.claim"]);
+        assert!(!has_pickable(dir.path()));
+    }
+
+    #[test]
+    fn a_stale_claim_does_not_hide_pickup() {
+        let dir = todos_dir("## Now
+- [ ] 7 - do it
+", &["7-do-it.md", ".claims/7.claim"]);
+        assert!(!has_pickable(dir.path()));
+        let past = std::time::SystemTime::now() - std::time::Duration::from_secs(5 * 60 * 60);
+        let claim = std::fs::OpenOptions::new().write(true).open(dir.path().join(".claims").join("7.claim")).unwrap();
+        claim.set_modified(past).unwrap();
+        drop(claim);
+        assert!(has_pickable(dir.path()));
+    }
+
+    #[test]
+    fn a_slug_suffixed_claim_hides_pickup() {
+        let dir = todos_dir("## Now
+- [ ] 7 - do it
+", &["7-do-it.md", ".claims/7-do-it.claim"]);
+        assert!(!has_pickable(dir.path()));
+    }
+
+    #[test]
+    fn a_lone_reservation_marker_is_not_a_pickable_todo() {
+        let dir = todos_dir("## Now
+- [ ] 7 - do it
+", &["7-.reserved"]);
         assert!(!has_pickable(dir.path()));
     }
 
