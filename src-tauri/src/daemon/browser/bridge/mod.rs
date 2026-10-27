@@ -86,7 +86,21 @@ fn random_hex(bytes: usize) -> String {
     use rand::RngCore;
     let mut buf = vec![0u8; bytes];
     rand::thread_rng().fill_bytes(&mut buf);
-    buf.iter().map(|b| format!("{b:02x}")).collect()
+    crate::util::to_hex(&buf)
+}
+
+/// Atomic so the native host (a separate process the browser launches) never
+/// reads a half-written file. The token inside gates the `/extension` and
+/// `/cdp` sockets, so on unix the temp file is created 0600 first:
+/// `write_json_atomic` truncates it in place and the rename keeps its mode.
+fn write_pairing_file(path: &std::path::Path, body: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+    }
+    crate::util::write_json_atomic(path, body)
 }
 
 pub fn pairing_file(data_dir: &std::path::Path, suffix: &str) -> std::path::PathBuf {
@@ -126,7 +140,7 @@ impl Bridge {
             Ok(dir) => {
                 let path = pairing_file(&dir, &crate::daemon::instance::instance_suffix());
                 let body = json!({ "port": port, "token": self.token }).to_string();
-                if let Err(e) = std::fs::write(&path, body) {
+                if let Err(e) = write_pairing_file(&path, &body) {
                     log::warn!("browser bridge: write {}: {e}", path.display());
                 }
             }
@@ -608,6 +622,30 @@ mod tests {
         assert!(!origin_ok(&h, Some(&ext)));
         h.insert("origin", format!("{ext}/").parse().unwrap());
         assert!(origin_ok(&h, Some(&ext)));
+    }
+
+    #[test]
+    fn random_hex_is_lowercase_hex_of_twice_the_byte_count() {
+        let h = random_hex(16);
+        assert_eq!(h.len(), 32);
+        assert!(h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+    }
+
+    #[test]
+    fn the_pairing_file_is_replaced_whole_and_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = pairing_file(dir.path(), "");
+        write_pairing_file(&path, r#"{"port":1,"token":"a"}"#).unwrap();
+        write_pairing_file(&path, r#"{"port":2,"token":"b"}"#).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"port":2,"token":"b"}"#);
+        let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 1, "the temp sibling is renamed away: {names:?}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
     }
 
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
