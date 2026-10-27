@@ -8,6 +8,7 @@ import { invoke } from "../ipc";
 import { isRemote } from "../transport";
 import { createMoreMenu } from "../../views/sessions/more-menu-base";
 import { codeModeCanOpenFile, openInCodeMode } from "./code-mode-bridge";
+import { basename } from "../path-utils";
 
 // Windows drive path or a Unix absolute path with at least 3 segments. The
 // lookbehinds keep a URL (`https://a/b/c`, `://` and `m/a/b/c`) and a path glued
@@ -57,11 +58,12 @@ function chipFor(ref: FileRef): HTMLElement {
   if (ref.col !== null) chip.dataset.col = String(ref.col);
   chip.title = ref.text;
   const icon = document.createElement("i");
-  icon.className = "ph ph-file";
+  // A trailing separator marks a folder; basename() skips the empty segment after
+  // it, where a bare split().pop() gave "" and left an icon with no label.
+  icon.className = /[\\/]$/.test(ref.path) ? "ph ph-folder" : "ph ph-file";
   const name = document.createElement("span");
   name.className = "file-ref-name";
-  const base = ref.path.split(/[\\/]/).pop() ?? ref.path;
-  name.textContent = base + ref.text.slice(ref.path.length);
+  name.textContent = basename(ref.path) + ref.text.slice(ref.path.length);
   chip.append(icon, name);
   return chip;
 }
