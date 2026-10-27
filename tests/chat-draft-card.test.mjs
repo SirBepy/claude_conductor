@@ -83,8 +83,8 @@ describe("write_draft field extraction", () => {
     expect(f.draftBody).toBe("hey **there**");
   });
 
-  it("keeps each of the four actions rather than collapsing them", () => {
-    for (const action of ["add", "revise", "variant", "drop"]) {
+  it("keeps each of the five actions rather than collapsing them", () => {
+    for (const action of ["add", "revise", "variant", "drop", "sent"]) {
       expect(draftFieldsOf({ action }).draftAction).toBe(action);
     }
   });
@@ -113,6 +113,12 @@ describe("tool_result parsing", () => {
   it("reads a drop's id off the `dropped` key", () => {
     const f = draftResultFieldsOf({ type: "text", text: JSON.stringify({ ok: true, dropped: "abcdef12-3456" }) });
     expect(f.draftId).toBe("abcdef12-3456");
+  });
+
+  it("reads a sent draft's id and topic off the `sent` key", () => {
+    const f = draftResultFieldsOf({ type: "text", text: JSON.stringify({ ok: true, sent: { ...DRAFT, state: "copied" } }) });
+    expect(f.draftId).toBe("abcdef12-3456");
+    expect(f.draftTopic).toBe("Sprint slip");
   });
 
   it("takes the LAST variant, which is the one a `variant` call just appended", () => {
@@ -171,6 +177,15 @@ describe("card markup", () => {
     const el = card(draftFieldsOf({ action: "drop", id: "abc" }));
     expect(el.querySelector("[data-draft-copy]")).toBeNull();
     expect(el.querySelector(".dc-label").textContent).toBe("Dropped draft");
+  });
+
+  it("labels a sent draft Sent and keeps it readable and copyable", () => {
+    const el = card(draftFieldsOf({ action: "sent", id: "abc" }));
+    expect(el.querySelector(".dc-label").textContent).toBe("Sent");
+    expect(el.querySelector(".dc-label").textContent).not.toMatch(/drop/i);
+    expect(el.querySelector(".ph-trash")).toBeNull();
+    expect(el.querySelector("[data-draft-copy]")).not.toBeNull();
+    expect(el.querySelector(".dc-foot-text").textContent).toBe("Claude posted this itself.");
   });
 
   it("escapes a topic rather than letting it inject markup", () => {
@@ -258,6 +273,14 @@ describe("mount", () => {
     await vi.waitFor(() => expect(el.classList.contains("gone")).toBe(true));
     expect(el.querySelector(".dc-foot-text").textContent).toContain("Deleted");
     expect(el.querySelector(".dc-body").textContent).toContain("hey");
+  });
+
+  it("keeps a sent draft's card live and painted as copied, not gone", async () => {
+    invokeMock.mockResolvedValue({ drafts: [{ ...DRAFT, state: "copied" }] });
+    const el = mounted({ ...draftFieldsOf({ action: "sent", id: DRAFT.id }), draftId: DRAFT.id });
+    await vi.waitFor(() => expect(el.classList.contains("copied")).toBe(true));
+    expect(el.classList.contains("gone")).toBe(false);
+    expect(el.querySelector(".dc-label").textContent).toBe("Sent");
   });
 
   it("reflects the copied state, which is also what drops it out of the injection", async () => {

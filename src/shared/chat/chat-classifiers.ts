@@ -219,7 +219,7 @@ export interface RenderedMessage {
    *  what makes the row LIVE (the store, not this snapshot, is what a mounted
    *  card renders). A row with no `draftId` never resolved - the call was
    *  rejected or errored - and renders as a dead stub rather than vanishing. */
-  draftAction?: "add" | "revise" | "variant" | "drop";
+  draftAction?: "add" | "revise" | "variant" | "drop" | "sent";
   draftId?: string;
   draftTopic?: string;
   draftRecipient?: string;

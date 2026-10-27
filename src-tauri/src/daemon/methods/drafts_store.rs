@@ -123,7 +123,7 @@ pub(crate) fn list_message_drafts_in(
     Ok(json!({"drafts": drafts, "people": used}))
 }
 
-/// The single `write_draft` MCP tool's four actions.
+/// The single `write_draft` MCP tool's five actions.
 pub(crate) fn write_draft(state: &Arc<DaemonState>, session_id: &str, action: &str, args: &Value) -> Result<Value, String> {
     write_draft_in(None, people::vault_dir().as_deref(), state, session_id, action, args)
 }
@@ -224,7 +224,19 @@ pub(crate) fn write_draft_in(
             publish_changed(state, &project_id);
             return Ok(json!({"ok": true, "dropped": full}));
         }
-        other => return Err(format!("unknown action: {other} (want add|revise|variant|drop)")),
+        "sent" => {
+            // Reuses `Copied`, the state the panel already draws as the paper
+            // plane: the draft stays visible as sent instead of vanishing as a
+            // drop would, and the injection skips it exactly as for a Copy click.
+            let full = resolve_id(root, &project_id, &id)?;
+            let sent = match root {
+                Some(r) => store::set_state_at(&store::draft_path(r, &project_id), &full, DraftState::Copied)?,
+                None => store::set_state(&project_id, &full, DraftState::Copied)?,
+            };
+            publish_changed(state, &project_id);
+            return Ok(json!({"ok": true, "sent": sent}));
+        }
+        other => return Err(format!("unknown action: {other} (want add|revise|variant|drop|sent)")),
     };
     publish_changed(state, &project_id);
     Ok(json!({"ok": true, "draft": draft}))
@@ -341,6 +353,30 @@ mod tests {
         assert!(err.contains("unknown action"), "got {err}");
         let err = set_draft_state(&state, "s1", "any", "sideways").unwrap_err();
         assert!(err.contains("unknown draft state"), "got {err}");
+    }
+
+    #[test]
+    fn sent_keeps_the_draft_in_the_store_as_copied() {
+        let root = tempfile::tempdir().unwrap();
+        let state = registered();
+        let added = write_draft_at(Some(root.path()), &state, "s1", "add", &json!({"topic": "t", "recipient": "Johanna", "body": "hi"})).unwrap();
+        let id = added["draft"]["id"].as_str().unwrap().to_string();
+        assert_eq!(list_at_path(root.path())[0].state, DraftState::NeedsYou);
+
+        let v = write_draft_at(Some(root.path()), &state, "s1", "sent", &json!({"id": id})).unwrap();
+        assert_eq!(v["sent"]["id"], json!(id));
+        assert_eq!(v["sent"]["state"], "copied");
+        let left = list_at_path(root.path());
+        assert_eq!(left.len(), 1, "sent must not remove the draft");
+        assert_eq!(left[0].state, DraftState::Copied);
+    }
+
+    #[test]
+    fn sent_needs_a_draft_to_point_at() {
+        let root = tempfile::tempdir().unwrap();
+        let state = registered();
+        assert!(write_draft_at(Some(root.path()), &state, "s1", "sent", &json!({})).is_err());
+        assert!(write_draft_at(Some(root.path()), &state, "s1", "sent", &json!({"id": "nope"})).is_err());
     }
 
     #[test]

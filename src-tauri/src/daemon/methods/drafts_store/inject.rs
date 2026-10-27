@@ -70,7 +70,7 @@ pub(crate) fn render_for_injection_at(root: Option<&Path>, state: &Arc<DaemonSta
          one lives in this project's Drafts panel and renders inline in this transcript, where he \
          can read, edit and copy it. Drafts from the project's other chats are deliberately not \
          listed here - the panel holds them. Never paste a draft message into your chat text - \
-         write it with the `write_draft` tool (add|revise|variant|drop) and refer to it by its \
+         write it with the `write_draft` tool (add|revise|variant|drop|sent) and refer to it by its \
          handle.\n",
     );
     if !open.is_empty() {

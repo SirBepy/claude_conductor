@@ -39,7 +39,7 @@ export function draftFieldsOf(input: unknown): Pick<
 > {
   const o = asObj(input);
   const raw = strField(o, "action");
-  const action = raw === "revise" || raw === "variant" || raw === "drop" ? raw : "add";
+  const action = raw === "revise" || raw === "variant" || raw === "drop" || raw === "sent" ? raw : "add";
   const topic = strField(o, "topic").trim();
   return {
     draftAction: action,
@@ -71,7 +71,9 @@ export function draftResultFieldsOf(
   const o = asObj(parsed);
   const dropped = strField(o, "dropped");
   if (dropped) return { draftId: dropped };
-  const draft = asObj(o.draft);
+  // `sent` answers with the draft under its own key, so the card still learns
+  // the real id and stays live instead of reading as an unresolved row.
+  const draft = asObj(o.draft ?? o.sent);
   const id = strField(draft, "id");
   if (!id) return null;
   const variants = Array.isArray(draft.variants) ? (draft.variants as DraftVariant[]) : [];
@@ -92,6 +94,7 @@ function actionLabel(m: RenderedMessage): string {
     case "revise": return "Revised draft";
     case "variant": return "New wording";
     case "drop": return "Dropped draft";
+    case "sent": return "Sent";
     default: return "Draft message";
   }
 }
@@ -102,6 +105,7 @@ export function renderDraftCardHtml(m: RenderedMessage): string {
   const isDrop = m.draftAction === "drop";
   const label = actionLabel(m);
   const who = m.draftRecipient ? `<span class="dc-to">${escapeHtml(m.draftRecipient)}</span>` : "";
+  const isSent = m.draftAction === "sent";
   const topic = m.draftTopic ? `<span class="dc-topic">${escapeHtml(m.draftTopic)}</span>` : "";
   return `<div class="dc-head">`
     + `<i class="ph ${isDrop ? "ph-trash" : "ph-paper-plane-tilt"} dc-icon"></i>`
@@ -117,7 +121,7 @@ export function renderDraftCardHtml(m: RenderedMessage): string {
     + `<i class="ph ph-caret-down dc-chevron" data-draft-toggle title="Fold"></i>`
     + `</div>`
     + `<div class="dc-body">${renderMarkdown(m.draftBody ?? "")}</div>`
-    + `<div class="dc-foot"><i class="ph ph-info"></i><span class="dc-foot-text">Not sent anywhere - copy it yourself.</span></div>`;
+    + `<div class="dc-foot"><i class="ph ph-info"></i><span class="dc-foot-text">${isSent ? "Claude posted this itself." : "Not sent anywhere - copy it yourself."}</span></div>`;
 }
 
 /** Resolves which version a row should be SHOWING. Every write_draft action
