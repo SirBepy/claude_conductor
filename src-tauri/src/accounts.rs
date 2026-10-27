@@ -109,6 +109,32 @@ pub fn validate_default_account(accounts: &[model::Account], id: &str) -> Result
     }
 }
 
+/// Whether `id` may become a project's `preferred_account_id`: an `ApiCredit`
+/// account bills real money, so a project must never resolve to one without
+/// the user picking it for that chat. An id the registry does not know passes,
+/// the same as [`without_api_credit_in`], so a stale binding stays clearable.
+pub fn validate_project_binding(accounts: &[model::Account], id: &str) -> Result<(), String> {
+    match accounts.iter().find(|a| a.id == id) {
+        Some(a) if a.is_api_credit() => Err(format!(
+            "\"{}\" is an API-credit account and cannot be a project's account: chats only use it when picked explicitly",
+            a.label
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Refuses fleet eligibility for an `ApiCredit` account: fleet workers are
+/// auto-allocated, and nothing automatic may spend API credit.
+pub fn validate_fleet_eligible(account: &model::Account) -> Result<(), String> {
+    if account.is_api_credit() {
+        return Err(format!(
+            "\"{}\" is an API-credit account and cannot be fleet-eligible: fleet workers are picked automatically",
+            account.label
+        ));
+    }
+    Ok(())
+}
+
 /// Refuses an `ApiCredit` account for a spawn that is not a chat on it (the
 /// sidecars, channels, the model probe), which stay subscription-only. `what`
 /// names the caller in the error.
@@ -418,6 +444,21 @@ mod tests {
         // An id the registry does not know passes through, so the spawn's own
         // NotFound error still names it.
         assert_eq!(without_api_credit_in(&accounts, Some("ghost".into())).as_deref(), Some("ghost"));
+    }
+
+    #[test]
+    fn project_binding_validation_refuses_only_api_credit() {
+        let accounts = vec![acct("a"), api_acct("api")];
+        assert!(validate_project_binding(&accounts, "a").is_ok());
+        assert!(validate_project_binding(&accounts, "api").unwrap_err().contains("API-credit"));
+        // A stale id stays savable so a dead binding can be overwritten.
+        assert!(validate_project_binding(&accounts, "ghost").is_ok());
+    }
+
+    #[test]
+    fn fleet_eligible_validation_refuses_api_credit() {
+        assert!(validate_fleet_eligible(&acct("a")).is_ok());
+        assert!(validate_fleet_eligible(&api_acct("api")).unwrap_err().contains("fleet-eligible"));
     }
 
     #[test]

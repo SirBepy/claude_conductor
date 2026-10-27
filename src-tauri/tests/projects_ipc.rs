@@ -5,6 +5,7 @@
 //! thin glue around these.
 
 use claude_conductor_lib::ipc::projects_test_helpers as h;
+use claude_conductor_lib::accounts::{Account, AccountKind};
 use claude_conductor_lib::types::{Avatar, ProjectConfig, Settings};
 
 fn sample_project(id: &str, path: &str) -> ProjectConfig {
@@ -77,4 +78,43 @@ fn delete_project_removes_entry() {
     assert!(ok);
     assert_eq!(s.projects.len(), 1);
     assert_eq!(s.projects[0].id, "b");
+}
+
+fn account(id: &str, kind: AccountKind) -> Account {
+    Account {
+        id: id.into(),
+        label: id.into(),
+        colour: "#fff".into(),
+        icon: "user".into(),
+        config_dir: format!("C:/home/.claude-{id}").into(),
+        chrome_profile_dir: format!("C:/appdata/chrome-profiles/{id}").into(),
+        email: format!("{id}@example.com"),
+        org_uuid: format!("org-{id}"),
+        subscription_tier: "claude_max".into(),
+        created_at: "2026-07-07T00:00:00Z".into(),
+        fleet_eligible: false,
+        kind,
+    }
+}
+
+#[test]
+fn update_project_refuses_an_api_credit_binding() {
+    let accounts = vec![account("sub", AccountKind::Subscription), account("api", AccountKind::ApiCredit)];
+    let err = h::check_binding_patch(&accounts, &serde_json::json!({ "preferred_account_id": "api" }))
+        .unwrap_err();
+    assert!(err.contains("API-credit"), "{err}");
+}
+
+#[test]
+fn update_project_allows_a_subscription_binding_and_a_cleared_one() {
+    let accounts = vec![account("sub", AccountKind::Subscription), account("api", AccountKind::ApiCredit)];
+    assert!(h::check_binding_patch(&accounts, &serde_json::json!({ "preferred_account_id": "sub" })).is_ok());
+    assert!(h::check_binding_patch(&accounts, &serde_json::json!({ "preferred_account_id": null })).is_ok());
+    assert!(h::check_binding_patch(&accounts, &serde_json::json!({ "name": "X" })).is_ok());
+}
+
+#[test]
+fn fleet_eligible_is_refused_for_an_api_credit_account() {
+    assert!(claude_conductor_lib::accounts::validate_fleet_eligible(&account("api", AccountKind::ApiCredit)).is_err());
+    assert!(claude_conductor_lib::accounts::validate_fleet_eligible(&account("sub", AccountKind::Subscription)).is_ok());
 }

@@ -3,7 +3,7 @@
  *  new-chat-config.ts's resolveNewChatConfig. */
 
 import type { Account, MachineAccountList, ProjectConfig } from "../../shared/api";
-import type { AccountLite } from "../../shared/account-chip";
+import { isApiCreditAccount, type AccountLite } from "../../shared/account-chip";
 import { resolveCached, type CacheRead } from "./new-session-cache";
 import { resolveInitialAccountId } from "./account-picker-logic";
 import {
@@ -78,6 +78,11 @@ export async function resolveModelEffortData(
       // keep raw-match fallback
     }
     accounts = await resolveCached(source.accountsRead, [] as Account[]);
+    // A stored binding to an API-credit account is ignored, not honoured: the
+    // raw match above (and a failed backend read) can still carry one.
+    if (accounts.some((a) => a.id === preferredAccountId && isApiCreditAccount(a))) {
+      preferredAccountId = null;
+    }
     defaultAccountId = (settingsRaw["default_account_id"] as string | null | undefined) ?? null;
   }
 

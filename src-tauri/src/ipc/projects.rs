@@ -42,6 +42,19 @@ pub mod projects_test_helpers {
         }
     }
 
+    /// Refuses a patch that would bind the project to an API-credit account.
+    /// A patch without a string `preferred_account_id` (absent, or `null` to
+    /// clear the binding) always passes.
+    pub fn check_binding_patch(
+        accounts: &[crate::accounts::model::Account],
+        patch: &serde_json::Value,
+    ) -> Result<(), String> {
+        match patch.get("preferred_account_id").and_then(|v| v.as_str()) {
+            Some(id) => crate::accounts::validate_project_binding(accounts, id),
+            None => Ok(()),
+        }
+    }
+
     pub fn delete_in(s: &mut Settings, id: &str) -> bool {
         let before = s.projects.len();
         s.projects.retain(|p| p.id != id);
@@ -107,11 +120,16 @@ pub async fn get_project(id: String, state: State<'_, AppState>) -> Result<Optio
 /// old raw-path `.find()` (see `settings::identity::resolve_effective_preferred_account_id`).
 #[tauri::command]
 pub async fn resolve_project_account(cwd: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
-    let guard = state.settings.lock().unwrap();
-    Ok(crate::settings::identity::resolve_effective_preferred_account_id(
-        &guard.projects,
-        std::path::Path::new(&cwd),
-    ))
+    let bound = {
+        let guard = state.settings.lock().unwrap();
+        crate::settings::identity::resolve_effective_preferred_account_id(
+            &guard.projects,
+            std::path::Path::new(&cwd),
+        )
+    };
+    // A binding stored before the write path refused API-credit accounts is
+    // ignored, so a new chat never lands on one without being picked.
+    Ok(crate::accounts::without_api_credit(bound))
 }
 
 /// Ensures a `ProjectConfig` exists for the given cwd. If one is already
@@ -154,6 +172,12 @@ pub async fn update_project(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
+    if patch.get("preferred_account_id").is_some_and(|v| v.is_string()) {
+        let accounts_path = paths::accounts_file().map_err(|e| e.to_string())?;
+        let accounts = crate::accounts::store::load(&accounts_path);
+        projects_test_helpers::check_binding_patch(&accounts, &patch)
+            .map_err(|e| format!("invalid_patch: {e}"))?;
+    }
     let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
     let snapshot = settings::mutate_and_save(&state.settings, &settings_path, |s| {
         match projects_test_helpers::update_in(s, &id, patch) {
