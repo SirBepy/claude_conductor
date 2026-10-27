@@ -69,6 +69,33 @@ pub(super) fn streak_update(stop_hook_active: Option<bool>, verdict: &TurnEndVer
     }
 }
 
+/// A chat's sidebar title is only the model's own when `report_turn_status`
+/// carried `title`; otherwise it falls back to the first prompt cut to width.
+/// Asked for once per turn end until the chat has one (it freezes after that).
+pub(super) const TITLE_MISSING_REASON: &str = "This chat has no title yet. Call report_turn_status again, this time with a 'title' argument: 2-4 words naming the chat's topic, not its outcome (e.g. \"Supabase setup\"). It is shown in the sidebar and never changes after the first one.";
+
+/// True when the turn may end but the chat still needs its title. Runs only
+/// after `missing_requirement_reason` said `Ok`, so the single block that
+/// `stop_hook_active` allows is not spent twice. A `working` turn is mid-chain
+/// and a later turn can carry the title; a wake-opened turn has no user topic.
+pub(super) fn title_missing(
+    stop_hook_active: Option<bool>,
+    has_current_report: bool,
+    status: Option<&str>,
+    report_title: Option<&str>,
+    chat_has_title: bool,
+    opened_by_wake: bool,
+    mcp_attached: bool,
+) -> bool {
+    stop_hook_active != Some(true)
+        && has_current_report
+        && mcp_attached
+        && !opened_by_wake
+        && !chat_has_title
+        && status != Some("working")
+        && report_title.map_or(true, |t| t.trim().is_empty())
+}
+
 /// `Some(true)` means a prior Stop already blocked this turn, so never block again.
 /// Pure so it stays testable without a live Session/ChildStdin.
 ///
@@ -192,6 +219,23 @@ mod tests {
         // `DONE` test above already covers, restated here for contrast with
         // the wake-opened cases.
         assert_eq!(missing_requirement_reason(None, true, false, DONE, false, true), TurnEndVerdict::Block(SEND_MISSING_REASON));
+    }
+
+    #[test]
+    fn title_is_demanded_once_a_titleless_chat_reports_without_one() {
+        assert!(title_missing(None, true, DONE, None, false, false, true));
+        assert!(title_missing(None, true, DONE, Some("  "), false, false, true));
+    }
+
+    #[test]
+    fn title_not_demanded_when_supplied_or_already_held_or_unenforceable() {
+        assert!(!title_missing(None, true, DONE, Some("Auth setup"), false, false, true));
+        assert!(!title_missing(None, true, DONE, None, true, false, true));
+        assert!(!title_missing(Some(true), true, DONE, None, false, false, true));
+        assert!(!title_missing(None, true, Some("working"), None, false, false, true));
+        assert!(!title_missing(None, true, DONE, None, false, true, true));
+        assert!(!title_missing(None, true, DONE, None, false, false, false));
+        assert!(!title_missing(None, false, DONE, None, false, false, true));
     }
 
     // todo 824: MCP transport not attached degrades every would-be block to

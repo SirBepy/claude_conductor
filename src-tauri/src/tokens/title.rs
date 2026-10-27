@@ -65,6 +65,12 @@ pub(crate) fn normalise_and_truncate(s: &str, max_chars: usize) -> Option<String
         return Some(collapsed);
     }
     let cut: String = collapsed.chars().take(max_chars).collect();
+    // Back up to a word boundary so a cut never lands mid-word ("pushnbu…"),
+    // unless that would discard more than half the budget (one long token).
+    let cut = match cut.rfind(' ') {
+        Some(i) if cut[..i].chars().count() * 2 >= max_chars => cut[..i].trim_end_matches([',', ';', ':', '-']).to_string(),
+        _ => cut,
+    };
     Some(format!("{cut}…"))
 }
 
@@ -748,6 +754,16 @@ mod tests {
         assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("AI Picked This"));
         // Sticky human override wins in the resolved title.
         assert_eq!(session_title(&path, 60).as_deref(), Some("Human Named It"));
+    }
+
+    #[test]
+    fn truncation_backs_up_to_a_word_boundary() {
+        assert_eq!(
+            normalise_and_truncate("Run /commit pushnbump on master and follow it", 20).as_deref(),
+            Some("Run /commit…"),
+        );
+        // One long token: no usable boundary, so the hard cut stands.
+        assert_eq!(normalise_and_truncate("abcdefghijklmnopqrstuvwxyz", 10).as_deref(), Some("abcdefghij…"));
     }
 
     #[test]
