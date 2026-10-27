@@ -132,6 +132,11 @@ pub fn load_with_notice(path: &Path) -> (Settings, Option<String>) {
     // Migrate: drop the legacy projectNotifOverrides map. Replaced by
     // Avatar::Character on each ProjectConfig in v2 (Characters feature).
     s.extra.remove("projectNotifOverrides");
+    // Migrate: drop the Playwright MCP Bridge extension's token map. It is
+    // credential-shaped, nothing reads it since our own bridge replaced that
+    // extension, and the unknown-key passthrough would otherwise keep it in
+    // settings.json (and in every get_settings reply) forever.
+    s.extra.remove("claudeBrowserExtensionTokens");
     dedupe_projects_by_path_key(&mut s.projects);
     (s, notice)
 }
@@ -416,6 +421,23 @@ mod tests {
         std::fs::write(&path, r#"{ "auto_update": false }"#).unwrap();
         let s = load(&path);
         assert_eq!(s.auto_update, AutoUpdateMode::Never);
+    }
+
+    #[test]
+    fn load_drops_orphaned_extension_tokens_and_keeps_other_fields() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{ "poll_interval_secs": 42, "someOtherKey": 1, "claudeBrowserExtensionTokens": { "chrome/Default": "secret" } }"#,
+        )
+        .unwrap();
+        let s = load(&path);
+        assert!(!s.extra.contains_key("claudeBrowserExtensionTokens"));
+        assert_eq!(s.poll_interval_secs, 42);
+        assert!(s.extra.contains_key("someOtherKey"));
+        save(&path, &s).unwrap();
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("claudeBrowserExtensionTokens"));
     }
 
     #[test]
