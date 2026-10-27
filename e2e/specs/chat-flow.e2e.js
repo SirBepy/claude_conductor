@@ -120,14 +120,18 @@ async function startHaikuChat() {
   await browser.keys(["Alt", "1"]);
   for (let i = 0; i < 4; i++) await browser.keys(["Alt", "ArrowDown"]);
   await browser.keys(["Alt", "ArrowUp"]);
-  await browser.waitUntil(
-    async () => /haiku/i.test(await browser.execute(() => document.querySelector(".sb-model")?.textContent ?? "")),
-    { timeout: 10000, timeoutMsg: "draft model chip never switched to Haiku" }
-  );
-  await browser.waitUntil(
-    async () => /medium/i.test(await browser.execute(() => document.querySelector(".sb-effort")?.textContent ?? "")),
-    { timeout: 10000, timeoutMsg: "draft effort chip never switched to medium" }
-  );
+  // The default statusbar layout has no model/effort chips; the pane header's
+  // config line shows both (session-header.ts meta-cfg-*).
+  const headerText = (sel) =>
+    browser.execute((s) => [...document.querySelectorAll(s)].find((el) => el.offsetParent !== null)?.textContent ?? "", sel);
+  await browser.waitUntil(async () => /haiku/i.test(await headerText(".meta-cfg-model-text")), {
+    timeout: 10000,
+    timeoutMsg: "draft header model never switched to Haiku",
+  });
+  await browser.waitUntil(async () => /medium/i.test(await headerText(".meta-cfg-effort-full")), {
+    timeout: 10000,
+    timeoutMsg: "draft header effort never switched to medium",
+  });
   await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 20000 });
   // The previous chat's composer already exists, so that wait alone can pass
   // before the new chat's pane replaces it, and the next send then lands in
