@@ -9,6 +9,10 @@
 
 import { ModelPopover } from "./model-popover";
 import { EffortPopover } from "./effort-popover";
+import { commitChoice } from "./statusbar-popover-shell";
+import { modelKeyTarget, effortStepTarget } from "./model-effort-keys";
+import { readModels } from "../../shared/effort-presets";
+import type { BumpDirection } from "./config-bump";
 
 export interface ModelEffortOptions {
   effort: string;
@@ -89,6 +93,46 @@ export class ModelEffortState {
       onEffortChange: this.onEffortChange,
       onCommit: (next) => { this.effort = next; this.effortPopover.close(); rerender(); },
     });
+  }
+
+  /** Alt+1-4: commit the model in `slot` through the same path as the
+   *  popover. Resolves the direction to animate, or null when there is
+   *  nothing to change or nowhere to commit it. */
+  async pickModelSlot(
+    slot: number,
+    sessionId: string | null,
+    fallbackModel: string | null,
+    rerender: () => void,
+  ): Promise<BumpDirection | null> {
+    if (!this.onModelChange && !sessionId) return null;
+    const target = modelKeyTarget(readModels({}), this.sessionModel ?? fallbackModel, slot);
+    if (!target) return null;
+    if (target.next === null) return target.dir;
+    const ok = await commitChoice(target.next, {
+      onChange: this.onModelChange,
+      sessionId,
+      invokeCmd: "set_session_model",
+      paramName: "model",
+      onCommit: (next) => { this.sessionModel = next; rerender(); },
+    });
+    return ok ? target.dir : null;
+  }
+
+  /** Alt+Up/Down: one effort step through the popover's commit path. A
+   *  read-only (external) session has no effort to set. */
+  async stepEffort(step: 1 | -1, sessionId: string | null, rerender: () => void): Promise<BumpDirection | null> {
+    if (this.readOnlyEffort) return null;
+    if (!this.onEffortChange && !sessionId) return null;
+    const target = effortStepTarget(this.effort, step);
+    if (target.next === null) return target.dir;
+    const ok = await commitChoice(target.next, {
+      onChange: this.onEffortChange,
+      sessionId,
+      invokeCmd: "set_session_effort",
+      paramName: "effort",
+      onCommit: (next) => { this.effort = next; rerender(); },
+    });
+    return ok ? target.dir : null;
   }
 
   /** Returns true when the value actually changed, so the caller knows

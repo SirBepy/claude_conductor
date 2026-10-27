@@ -1,0 +1,47 @@
+/* Keyboard model/effort change (config-bump.ts). The new value slides in
+   from the direction it moved and flashes the primary colour; pressing past
+   the last step shakes sideways instead. Both chips are flex items
+   (.sb-chip is inline-flex, .meta-cfg is flex), so transform applies. */
+
+.cfg-bump-up { animation: cfg-bump-up 360ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cfg-bump-down { animation: cfg-bump-down 360ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cfg-bump-edge { animation: cfg-bump-edge 280ms ease-in-out; }
+
+@keyframes cfg-bump-up {
+  0% { transform: translateY(7px); opacity: 0.2; color: var(--color-primary); }
+  55% { transform: translateY(-2px); opacity: 1; color: var(--color-primary); }
+  100% { transform: none; }
+}
+
+@keyframes cfg-bump-down {
+  0% { transform: translateY(-7px); opacity: 0.2; color: var(--color-primary); }
+  55% { transform: translateY(2px); opacity: 1; color: var(--color-primary); }
+  100% { transform: none; }
+}
+
+@keyframes cfg-bump-edge {
+  0%, 100% { transform: none; }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cfg-bump-up, .cfg-bump-down, .cfg-bump-edge { animation: cfg-bump-flash 360ms ease-out; }
+  @keyframes cfg-bump-flash {
+    0% { color: var(--color-primary); }
+    100% { color: inherit; }
+  }
+}
+
+/* Held Alt reveals the keys (shortcuts.ts toggles html.alt-held). */
+html.alt-held .session-header .meta-cfg-model.meta-cfg-btn::after,
+html.alt-held .session-header .meta-cfg-effort.meta-cfg-btn::after {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+html.alt-held .session-header .meta-cfg-model.meta-cfg-btn::after { content: "Alt 1-4"; }
+html.alt-held .session-header .meta-cfg-effort.meta-cfg-btn::after { content: "Alt \2191\2193"; }

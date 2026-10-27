@@ -126,34 +126,46 @@ export class PopoverShell {
   }
 }
 
-/** Wire a value-slider's change handler shared by the effort/model popovers:
- *  a local onChange callback wins if present, else round-trip through
- *  `invokeCmd` and call onCommit on success (logs + skips onCommit on failure). */
+export interface CommitChoiceCfg<T> {
+  onChange?: ((v: T) => void) | null;
+  sessionId: string | null;
+  invokeCmd: string;
+  paramName: string;
+  onCommit: (v: T) => void;
+}
+
+/** One model/effort commit, shared by the popover sliders and the keyboard
+ *  shortcuts: a local onChange callback (a draft) wins if present, else
+ *  round-trip through `invokeCmd` and call onCommit on success (logs + skips
+ *  onCommit on failure). Resolves whether the value was committed. */
+export async function commitChoice<T>(next: T, cfg: CommitChoiceCfg<T>): Promise<boolean> {
+  if (cfg.onChange) {
+    cfg.onChange(next);
+    cfg.onCommit(next);
+    return true;
+  }
+  if (!cfg.sessionId) return false;
+  try {
+    await invoke<void>(cfg.invokeCmd, { sessionId: cfg.sessionId, [cfg.paramName]: next });
+  } catch (err) {
+    console.error(`[statusbar] ${cfg.invokeCmd} failed`, err);
+    return false;
+  }
+  cfg.onCommit(next);
+  return true;
+}
+
+/** Wire a value-slider's change handler shared by the effort/model popovers. */
 export function wireCommitSlider<T>(
   el: HTMLElement,
   selector: string,
   options: readonly T[],
-  cfg: {
-    onChange?: ((v: T) => void) | null;
-    sessionId: string | null;
-    invokeCmd: string;
-    paramName: string;
-    onCommit: (v: T) => void;
-  },
+  cfg: CommitChoiceCfg<T>,
 ): void {
   const slider = el.querySelector<HTMLInputElement>(selector);
   slider?.addEventListener("change", () => {
     const next = options[Number(slider.value)];
     if (next === undefined) return;
-    if (cfg.onChange) {
-      cfg.onChange(next);
-      cfg.onCommit(next);
-      return;
-    }
-    if (!cfg.sessionId) return;
-    const sid = cfg.sessionId;
-    void invoke<void>(cfg.invokeCmd, { sessionId: sid, [cfg.paramName]: next })
-      .then(() => cfg.onCommit(next))
-      .catch((err) => console.error(`[statusbar] ${cfg.invokeCmd} failed`, err));
+    void commitChoice(next, cfg);
   });
 }

@@ -124,6 +124,8 @@ export async function wireOverflowMenu(
  * mounted. */
 // > kbd-hint-in's 160ms animation + its 120ms max stagger delay (sessions.css).
 const KBD_HINT_ENTER_MS = 300;
+// Haiku, Sonnet, Opus, Fable: shortcuts.ts declares set-model-1..4.
+const MODEL_SLOTS = 4;
 
 export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): () => void {
   for (let i = 0; i < 9; i++) {
@@ -133,6 +135,12 @@ export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): (
   shortcuts.register("close-chat", closeFocusedChat);
   shortcuts.register("toggle-wrap-up-on-done", toggleWrapUpOnDoneForFocusedChat);
   shortcuts.register("project-dashboard", openFocusedChatDashboard);
+  // Draft and live chat alike: the open pane's statusbar owns both values.
+  for (let i = 0; i < MODEL_SLOTS; i++) {
+    shortcuts.register(`set-model-${i + 1}`, () => state.statusbar?.pickModelSlot(i));
+  }
+  shortcuts.register("effort-up", () => state.statusbar?.stepEffort(1));
+  shortcuts.register("effort-down", () => state.statusbar?.stepEffort(-1));
 
   let enterTimer: ReturnType<typeof setTimeout> | undefined;
   const unlistenModifierHint = shortcuts.onModifierHint((hint) => {
@@ -163,6 +171,9 @@ export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): (
     }
     shortcuts.unregister("close-chat");
     shortcuts.unregister("project-dashboard");
+    for (let i = 1; i <= MODEL_SLOTS; i++) shortcuts.unregister(`set-model-${i}`);
+    shortcuts.unregister("effort-up");
+    shortcuts.unregister("effort-down");
     clearTimeout(enterTimer);
     unlistenModifierHint();
     hideFavoritesStrip(pane);

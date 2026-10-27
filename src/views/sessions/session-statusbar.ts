@@ -55,6 +55,7 @@ import { onMobileViewportChange } from "../../shared/mobile-viewport";
 import { visibleInterval } from "../../shared/visible-interval";
 import { isRemote } from "../../shared/transport";
 import { StatusbarEditor } from "./statusbar-edit";
+import { playConfigBump } from "./config-bump";
 export {
   loadStatuslineRows,
   saveStatuslineRows,
@@ -463,6 +464,19 @@ export class SessionStatusbar {
       anchor, this.sessionId,
       () => this.closeChipPopovers(), () => this.render(),
     );
+  }
+
+  /** Alt+1-4 (shortcuts registered in sessions-dom-wiring.ts). `slot` is
+   *  0-based. */
+  async pickModelSlot(slot: number): Promise<void> {
+    const dir = await this.modelEffort.pickModelSlot(slot, this.sessionId, this.meta.model, () => this.render());
+    if (dir !== null) playConfigBump("model", dir);
+  }
+
+  /** Alt+Up/Down. */
+  async stepEffort(step: 1 | -1): Promise<void> {
+    const dir = await this.modelEffort.stepEffort(step, this.sessionId, () => this.render());
+    if (dir !== null) playConfigBump("effort", dir);
   }
 
   destroy(): void {
