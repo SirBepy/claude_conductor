@@ -138,6 +138,51 @@ describe("ChatRenderer - activity idles (not blanks) once a turn's tools all res
   });
 });
 
+describe("ChatRenderer - activity after report_turn_status lands", () => {
+  const REPORT = "mcp__cc_conductor__report_turn_status";
+
+  it("drops the tool-name label to plain Thinking once the report is the last tool to resolve", () => {
+    const r = new ChatRenderer(document.createElement("div"));
+    const seen = [];
+    r.onActivityUpdate = (a, idle) => seen.push([a, !!idle]);
+
+    r.handleEvent(userEvent("go"), { silent: true });
+    r.handleEvent(toolUse("Read", { file_path: "/foo/bar.ts" }, "t1"), { silent: true });
+    r.handleEvent({ type: "tool_result", tool_use_id: "t1", output: "hi", is_error: false }, { silent: true });
+    r.handleEvent(toolUse(REPORT, { status: "done" }, "t2"), { silent: true });
+    expect(seen[seen.length - 1][0]).toContain("report_turn_status");
+    r.handleEvent({ type: "tool_result", tool_use_id: "t2", output: "ok", is_error: false }, { silent: true });
+
+    expect(seen[seen.length - 1]).toEqual([null, true]);
+    expect(r.lastActivity).toBeNull();
+  });
+
+  it("still reads busy when the turn keeps calling tools after reporting", () => {
+    const r = new ChatRenderer(document.createElement("div"));
+    const seen = [];
+    r.onActivityUpdate = (a, idle) => seen.push([a, !!idle]);
+
+    r.handleEvent(userEvent("go"), { silent: true });
+    r.handleEvent(toolUse(REPORT, { status: "done" }, "t1"), { silent: true });
+    r.handleEvent({ type: "tool_result", tool_use_id: "t1", output: "ok", is_error: false }, { silent: true });
+    r.handleEvent(toolUse("Read", { file_path: "/foo/bar.ts" }, "t2"), { silent: true });
+    expect(seen[seen.length - 1]).toEqual(["Reading bar.ts", false]);
+    r.handleEvent({ type: "tool_result", tool_use_id: "t2", output: "hi", is_error: false }, { silent: true });
+    expect(seen[seen.length - 1]).toEqual(["Reading bar.ts", true]);
+  });
+
+  it("keeps a real tool's label when a report resolved earlier but another tool is the last to finish", () => {
+    const r = new ChatRenderer(document.createElement("div"));
+    r.handleEvent(userEvent("go"), { silent: true });
+    r.handleEvent(toolUse(REPORT, { status: "done" }, "t1"), { silent: true });
+    r.handleEvent(toolUse("Read", { file_path: "/a.ts" }, "t2"), { silent: true });
+    r.handleEvent({ type: "tool_result", tool_use_id: "t1", output: "ok", is_error: false }, { silent: true });
+    r.handleEvent({ type: "tool_result", tool_use_id: "t2", output: "hi", is_error: false }, { silent: true });
+    expect(r.lastActivity).toBe("Reading a.ts");
+    expect(r.activityIdle).toBe(true);
+  });
+});
+
 describe("ChatRenderer — per-type tool chips (inline strip)", () => {
   it("folds a turn's tool call into a chip counting tool_use only", () => {
     const container = document.createElement("div");
