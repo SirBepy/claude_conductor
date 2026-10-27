@@ -2,8 +2,8 @@
 //! and records them on a background task.
 
 use super::stop_verdict::{
-    missing_requirement_reason, mcp_is_attached, streak_update, StreakUpdate, TurnEndVerdict,
-    QUESTION_UNDELIVERED_REASON,
+    missing_requirement_reason, mcp_is_attached, streak_update, title_missing, StreakUpdate, TurnEndVerdict,
+    QUESTION_UNDELIVERED_REASON, TITLE_MISSING_REASON,
 };
 use super::HookCtx;
 use crate::settings::paths;
@@ -126,7 +126,21 @@ pub(super) async fn on_stop(
             log::info!("hook /hooks/stop: MCP transport for {session_id} reconnected after a {miss_streak}-turn miss streak");
         }
         match verdict {
-            TurnEndVerdict::Ok => {}
+            TurnEndVerdict::Ok => {
+                let report_title = reported.as_ref().filter(|r| r.turn_gen == gen).and_then(|r| r.title.as_deref());
+                let tp = std::path::Path::new(&transcript_path);
+                // Only read the transcript when every cheaper gate already says a title is owed.
+                let chat_has_title = || {
+                    crate::tokens::last_override_title(tp, 60).is_some()
+                        || crate::tokens::ai_milestone_title(tp, 60).is_some()
+                };
+                if title_missing(payload.stop_hook_active, has_current_report, status, report_title, false, opened_by_wake, mcp_attached)
+                    && !chat_has_title()
+                {
+                    log::info!("hook /hooks/stop: blocking {session_id} - chat has no title yet");
+                    return (StatusCode::OK, Json(json!({"decision": "block", "reason": TITLE_MISSING_REASON})));
+                }
+            }
             TurnEndVerdict::Block(reason) => {
                 log::info!(
                     "hook /hooks/stop: blocking {session_id} - report_turn_status={has_current_report} send_message={has_current_send}"
