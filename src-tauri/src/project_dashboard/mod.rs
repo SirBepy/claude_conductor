@@ -24,7 +24,8 @@ pub use runner::run_card;
 pub use store::{CacheStore, DashboardStore};
 pub use template::{env_secret, TemplateCtx};
 pub use types::{
-    CardAction, CardConfig, CardDisplay, CardProgress, CardResult, CardSource, CardView, GroupDef, LabelValue, RowValue, Scope, StatSpec, BUILTIN_CARDS,
+    CardAction, CardConfig, CardDisplay, CardProgress, CardResult, CardSegments, CardSource, CardView, GroupDef, LabelValue, RowValue, Scope,
+    SegmentItem, StatSpec, BUILTIN_CARDS,
 };
 pub use snapshot_types::{
     CommitRow, DashChatRow, DashTodo, DashboardHistory, DashboardListRow, DashboardSnapshot,

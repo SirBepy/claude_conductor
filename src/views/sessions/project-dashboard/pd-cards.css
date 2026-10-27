@@ -79,6 +79,25 @@
 .pd-prog-bar { height: 4px; border-radius: 2px; background: var(--color-background); overflow: hidden; }
 .pd-prog-bar span { display: block; height: 100%; border-radius: 2px; background: var(--color-primary); }
 .pd-prog.is-behind .pd-prog-bar span { background: var(--color-warning); }
+/* Segmented bar (dash-segments.ts): slices carry their own inline fill and text colour. */
+.pd-seg { padding: 2px 0 6px; }
+.pd-seg-bar { position: relative; display: flex; height: 40px; border-radius: 7px; background: color-mix(in srgb, var(--color-text) 8%, transparent); }
+.pd-seg-slice {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; overflow: hidden;
+  white-space: nowrap; line-height: 1.15; font-size: 12px;
+}
+.pd-seg-slice:first-child { border-radius: 7px 0 0 7px; }
+.pd-seg-slice em { font-style: normal; font-size: 10px; font-weight: 500; opacity: 0.85; }
+.pd-seg-slice b { font-weight: 700; }
+.pd-seg-marker { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--color-text); opacity: 0.75; }
+.pd-seg-foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-top: 8px; font-size: 12px; }
+.pd-seg-chips { display: flex; flex-wrap: wrap; gap: 4px 16px; min-width: 0; }
+.pd-seg-chip { display: inline-flex; align-items: center; gap: 6px; }
+.pd-seg-chip i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.pd-seg-chip b { font-weight: 400; color: var(--sb-muted, var(--color-text-muted)); }
+.pd-seg-note { margin-left: auto; color: var(--sb-muted, var(--color-text-muted)); }
+.pd-seg-note.warn { color: var(--color-warning); }
+.pd-seg-note.good { color: var(--color-success, var(--st-done)); }
 /* The stat text keeps its full words; the button drops to its own line when they do not share one. */
 .pd-headline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 2px 0 4px; font-size: 12.5px; }
 .pd-hl-t { flex: 1 1 auto; min-width: 0; }
