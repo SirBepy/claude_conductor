@@ -6,13 +6,15 @@
 
 const EASE_OUT = "cubic-bezier(0.16, 1, 0.3, 1)";
 const EASE_IN_OUT = "cubic-bezier(0.32, 0.72, 0, 1)";
-const ENTER_MS = 420;
-const STEP_MS = 45;
+// Joe picked the 0.25x preview of the original 420/45/270/220ms timings
+// (2026-10-27) over the real-speed one: the wave reads as a wave.
+const ENTER_MS = 1680;
+const STEP_MS = 180;
 // Past this the last section would still be arriving after the user has
 // started reading the first, so deep dashboards share the tail of the wave.
-const MAX_DELAY_MS = 270;
+const MAX_DELAY_MS = 1080;
 const RISE_PX = 10;
-const LEAVE_MS = 220;
+const LEAVE_MS = 880;
 const REDUCED_MS = 140;
 
 const reducedMotion = (): boolean => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
