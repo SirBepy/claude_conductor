@@ -43,6 +43,14 @@
     <link rel="stylesheet" href="./styles/tokens.css">
     <link rel="stylesheet" href="./styles/base.css">
     <link rel="stylesheet" href="./styles/mvp-hidden.css">
+    <!-- Nothing paints until main.ts has run: every view's stylesheet is imported
+         from JS, and under the vite dev server those arrive as style tags only as
+         the modules evaluate, so the first frames would show the bare, unstyled
+         markup. main.ts adds .app-ready once its imports (and their CSS) are in;
+         the timer opens the window anyway if the bundle fails to load, so a broken
+         build shows a broken app instead of a blank one. -->
+    <style>html:not(.app-ready) body { visibility: hidden; }</style>
+    <script>setTimeout(function () { document.documentElement.classList.add("app-ready"); }, 3000);</script>
 </head>
 
 <body>

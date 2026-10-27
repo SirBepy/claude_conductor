@@ -46,6 +46,10 @@ import { installChatsWindowMessaging } from "./boot/chats-window-messaging";
 import { setupUpdateToast } from "./shared/update-toast";
 import "./missed-panel.css";
 
+// Every import above has evaluated, so every stylesheet they pull in is
+// applied; index.html keeps the body hidden until this class lands.
+document.documentElement.classList.add("app-ready");
+
 // Test-build banner: in dev (`cargo tauri dev` / the vite dev server) paint a
 // slim marker strip at the top so a test build is never mistaken for a real
 // install. `import.meta.env.DEV` is false under `vite build`, so this block is
