@@ -381,7 +381,8 @@ mod daemon_push_tests {
     /// cache, which is what spawns read.
     #[test]
     fn every_project_mutation_reaches_the_daemon_cache() {
-        let src = include_str!("projects.rs");
+        // A Windows checkout with autocrlf embeds CRLF, which "\n}\n" would never match.
+        let src = include_str!("projects.rs").replace("\r\n", "\n");
         let prod = src.split_once("#[cfg(test)]").expect("test modules follow the commands").0;
         let helper = prod
             .split_once("async fn publish_project_change(")
