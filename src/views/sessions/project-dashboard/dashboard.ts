@@ -23,6 +23,7 @@ import { openContextMenu } from "./dash-menu";
 import { chats } from "./dash-chats";
 import { nextUp, running, shipState, yourTodos } from "./dash-sections";
 import { assignColumns, naturalHeight } from "../../../shared/balance";
+import { playEntrance } from "./dash-motion";
 import { cardRefreshSecs, staleCardIds } from "./format";
 import type { CardResult, DashboardHistory, DashboardTargetRef, DashSnapshot } from "./types";
 
@@ -127,6 +128,7 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
 
   let ctx: DashCtx | null = null;
   let destroyed = false;
+  let entered = false;
   let snapSeq = 0;
   let historyAt = 0;
   let galleryRunning = false;
@@ -145,6 +147,11 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     void hydrateProjectTechIcons(chips);
     syncQuickActions();
     for (const hook of [...ctx.paintHooks]) hook();
+    // Once, on the first paint with content; later paints (live events) must not replay it.
+    if (!entered && deps.mode === "draft" && root.isConnected) {
+      entered = true;
+      playEntrance(root, chips);
+    }
   };
 
   // Whether the chip row overflows depends on measured widths, so its edge
