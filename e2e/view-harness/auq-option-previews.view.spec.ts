@@ -69,7 +69,7 @@ async function swipe(page: Page, selector: string, dx: number, dy: number): Prom
 }
 
 test.describe("view-harness / AUQ option previews", () => {
-  test("desktop, 3 previewed options: tiles side by side, picture click opens fullscreen, row click picks", async ({ page }) => {
+  test("desktop, 3 previewed options: tiles side by side, corner button opens fullscreen, picture and row click pick", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [question(3)]);
 
@@ -91,11 +91,16 @@ test.describe("view-harness / AUQ option previews", () => {
     const bg = await probe.evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(bg).not.toBe("rgba(0, 0, 0, 0)");
 
-    // The picture opens fullscreen (preview-fullscreen.ts) without picking.
-    await pics.nth(1).click();
+    // The corner button opens fullscreen (preview-fullscreen.ts) without picking.
+    await panel.locator(".prompt-opt__expand").nth(1).click();
     await expect(page.locator(".auq-fs")).toBeVisible();
     expect(await picked(page)).toBeNull();
     await page.locator('.auq-fs [data-fs="close"]').click();
+    await expect(page.locator(".auq-fs")).toHaveCount(0);
+
+    // The picture itself is part of the option: a click there picks it.
+    await pics.nth(0).click({ position: { x: 20, y: 60 } });
+    await expect.poll(() => picked(page)).toBe("One");
     await expect(page.locator(".auq-fs")).toHaveCount(0);
 
     await panel.locator(".prompt-opt__body").nth(1).click();
