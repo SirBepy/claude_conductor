@@ -75,15 +75,6 @@ export function resolveOrdinalIn(messages: RenderedMessage[], n: number): number
   return -1;
 }
 
-/** Walk up to the direct child of container. Used to find insertion point for prepend. */
-function rootChildOf(container: HTMLElement, el: HTMLElement): HTMLElement {
-  let n = el;
-  while (n.parentElement && n.parentElement !== container) {
-    n = n.parentElement as HTMLElement;
-  }
-  return n;
-}
-
 /** Back-to-back page loads allowed while the sentinel stays in view. */
 const MAX_CHAINED_PAGES = 3;
 /** scrollTop under this after a prepend = the sentinel is still on screen. */
@@ -476,12 +467,17 @@ export class ChatPaginator {
       return;
     }
 
-    // A folded row can be detached (a tool_result absorbed into its chip), and
-    // inserting before a detached node throws.
-    const firstExisting = messageEls.find((el) => this.container.contains(el)) ?? null;
-    if (firstExisting) {
-      this.container.insertBefore(frag, rootChildOf(this.container, firstExisting));
-    } else if (this.topSentinel && this.topSentinel.parentNode === this.container) {
+    // Anchor on the container's first real child, not on the first message's
+    // element: a leading partial turn folds its tool rows into a footer that
+    // sits AFTER the turn's last authored bubble (a send_message summary), so
+    // the first message's root child is that footer and the older rows would
+    // land between the bubble and its footer, above the turn's opener.
+    const sentinel = this.topSentinel && this.topSentinel.parentNode === this.container ? this.topSentinel : null;
+    let anchor: Element | null = this.container.firstElementChild;
+    if (anchor === sentinel) anchor = sentinel ? sentinel.nextElementSibling : null;
+    if (anchor) {
+      this.container.insertBefore(frag, anchor);
+    } else if (sentinel) {
       this.container.appendChild(frag);
     } else {
       this.container.prepend(frag);
