@@ -580,10 +580,8 @@ export const api = {
     }),
 
   // --- Claude's own browser (Settings > Chat defaults). Desktop-pipe only. ---
-  browserStatus: (): Promise<{ running: boolean; shown: boolean; bridgeConnected?: string[]; extensionDir?: string | null }> =>
+  browserStatus: (): Promise<{ running: boolean; bridgeConnected?: string[]; extensionDir?: string | null }> =>
     invoke("browser_status"),
-  browserSetShown: (shown: boolean): Promise<{ ok: boolean; shown: boolean }> =>
-    invoke("browser_set_shown", { shown }),
   listMachineProjects: (machineId: string): Promise<MachineProjectList> =>
     invoke("list_machine_projects", { machineId }),
   // New-chat account step for a chat aimed at a paired machine: THAT machine's

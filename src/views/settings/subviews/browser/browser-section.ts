@@ -1,9 +1,8 @@
 // "Claude's browser" section of Chat defaults: the switch that gives chats the
 // browser_* tools, the opt-in script tool, the browser a chat starts on
-// (Claude's own off-screen Chrome, or one of Joe's own driven through the
+// (Claude's own Chrome, or one of Joe's own driven through the
 // Claude Conductor Browser Bridge extension; a chat can switch itself with
-// browser_target), and the button that brings the daemon's Chrome onto this
-// screen so Joe can sign in or clear a CAPTCHA for Claude.
+// browser_target).
 import { html, type TemplateResult } from "lit-html";
 import { api } from "../../../../shared/api";
 import { toggleRow } from "../../ui";
@@ -109,11 +108,7 @@ function minePart(choice: BrowserChoice): TemplateResult {
 
 function ownPart(): TemplateResult {
   return html`
-    <div class="kit-row">
-      <span class="kit-row-label">Browser window</span>
-      <button type="button" class="btn-secondary" id="chatDefaultsBrowserShow">Show</button>
-    </div>
-    <p class="cd-hint">Sign in to Claude's accounts here, and finish any check a chat says it is stuck on.</p>
+    <p class="cd-hint">Its window opens the first time a chat needs it. Sign in to Claude's accounts there, finish any check a chat says it is stuck on, and minimize it when it is in the way.</p>
   `;
 }
 
@@ -125,7 +120,7 @@ export function browserSectionTemplate(choice: BrowserChoice): TemplateResult {
         label: "Let chats use a browser",
         inputId: "chatDefaultsBrowser",
         checked: choice.enabled,
-        tooltip: "New chats get the browser tools; an open chat gets them after a respawn. Claude's own browser is a separate Chrome profile for accounts made for Claude, never yours, and runs off-screen. My browser drives one of yours through the Claude Conductor Browser Bridge extension. Tell any chat \"use my browser\" or \"use your own\" to switch just that chat.",
+        tooltip: "New chats get the browser tools; an open chat gets them after a respawn. Claude's own browser is a separate Chrome profile for accounts made for Claude, never yours. My browser drives one of yours through the Claude Conductor Browser Bridge extension. Tell any chat \"use my browser\" or \"use your own\" to switch just that chat.",
       })}
       ${toggleRow({
         label: "Script tool",
@@ -145,9 +140,7 @@ export function browserSectionTemplate(choice: BrowserChoice): TemplateResult {
   `;
 }
 
-/** Wires the Show/Hide button and the bridge row. The Show label follows the
- *  daemon's own view of the window, so a browser left shown from an earlier
- *  visit reads "Hide". */
+/** Wires the bridge row (My browser mode). */
 export function wireBrowserSection(root: HTMLElement): void {
   const status = api.browserStatus();
   const bridge = root.querySelector<HTMLElement>("#chatDefaultsBrowserBridge");
@@ -163,20 +156,5 @@ export function wireBrowserSection(root: HTMLElement): void {
     .catch(() => { if (bridge) bridge.textContent = ""; });
   folder?.addEventListener("click", () => {
     if (extensionDir) void api.openInExplorer(extensionDir);
-  });
-
-  const btn = root.querySelector<HTMLButtonElement>("#chatDefaultsBrowserShow");
-  if (!btn) return;
-  let shown = false;
-  const paint = (): void => { btn.textContent = shown ? "Hide" : "Show"; };
-  void status.then((s) => { shown = s.shown; paint(); }).catch(() => {});
-  btn.addEventListener("click", () => {
-    const next = !shown;
-    btn.disabled = true;
-    btn.textContent = next ? "Opening..." : "Hiding...";
-    api.browserSetShown(next)
-      .then(() => { shown = next; })
-      .catch((e: unknown) => { console.warn("browser_set_shown failed", e); })
-      .finally(() => { btn.disabled = false; paint(); });
   });
 }
