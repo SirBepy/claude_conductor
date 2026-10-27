@@ -7,7 +7,7 @@
 //! to this process.
 
 use crate::accounts::api_credit::load_console_session;
-use crate::accounts::api_credit_status::fetch_status;
+use crate::accounts::api_credit_status::{fetch_status, keep_block_across_error};
 use crate::accounts::{Account, ApiCreditStatus};
 use crate::daemon::state::DaemonState;
 use crate::scraping::CONSOLE_BASE_URL;
@@ -47,9 +47,12 @@ impl ApiCreditHub {
     }
 
     /// Stores `status`; true when anything but `fetched_at` differs from what
-    /// was there, i.e. when listeners need telling.
+    /// was there, i.e. when listeners need telling. A partial read after a
+    /// non-auth fetch error keeps the previous block (see
+    /// `keep_block_across_error`), decided under the same lock as the insert.
     pub fn set(&self, status: ApiCreditStatus) -> bool {
         let mut map = self.statuses.lock().unwrap_or_else(|e| e.into_inner());
+        let status = keep_block_across_error(map.get(&status.account_id), status);
         let changed = map.get(&status.account_id).map_or(true, |old| !old.same_content(&status));
         map.insert(status.account_id.clone(), status);
         changed
@@ -203,6 +206,26 @@ mod tests {
         assert!(hub.set(status("a", true, Some("x"))));
         assert_eq!(hub.blocked_reason("a").as_deref(), Some("x"));
         assert_eq!(hub.blocked_reason("other"), None);
+    }
+
+    #[test]
+    fn a_fetch_error_after_a_blocked_status_keeps_the_gate_closed() {
+        let hub = ApiCreditHub::new();
+        hub.set(status("a", true, Some("API credit for this cycle is used up")));
+        let mut errored = status("a", false, None);
+        errored.error = Some("credit balance: prepaid credits HTTP 500".into());
+        errored.fetched_at = "t1".into();
+        hub.set(errored);
+        assert_eq!(hub.blocked_reason("a").as_deref(), Some("API credit for this cycle is used up"));
+        assert_eq!(hub.get("a").unwrap().fetched_at, "t1", "the errored read is still stored");
+
+        let mut recovered = status("a", false, None);
+        recovered.fetched_at = "t2".into();
+        recovered.max_grant_remaining_cents = Some(500);
+        recovered.limit_cents = Some(20000);
+        recovered.spend_cents = Some(10);
+        assert!(hub.set(recovered), "a clean read clears the block");
+        assert_eq!(hub.blocked_reason("a"), None);
     }
 
     #[test]
