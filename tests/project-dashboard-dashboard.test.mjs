@@ -3,7 +3,8 @@
 // A mounted dashboard rendered from fixture snapshots: every section, the
 // empty/hidden rules, group dashboards, custom cards, and the
 // snapshot-first / history-after load order. The tighter cards (tabs, paging,
-// quick-action track, card extras) are in project-dashboard-dashboard-cards.test.mjs.
+// quick-action track) are in project-dashboard-dashboard-cards.test.mjs, and
+// the card extras in project-dashboard-card-extras.test.mjs.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { groupSnapshot, history, projectSnapshot, ZIRTUE_REPOS } from "./helpers/project-dashboard-fixtures.mjs";
