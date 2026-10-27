@@ -204,8 +204,8 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   /* Same text metrics as a bubble (.msg), so a body reads like the reply it
      drills out of; long paths and commands wrap instead of widening the card. */
-  font-size: 0.85rem;
-  line-height: 1.5;
+  font-size: 0.88rem;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 /* A code span that wraps keeps its pill edges on every line. */
