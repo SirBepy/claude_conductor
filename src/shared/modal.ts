@@ -3,10 +3,9 @@ import { registerOverlayBack } from "./back-button";
 import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
 import "./modal.css";
 
-// Shared host for the project -> location -> worktree -> new-session chain.
-// One backdrop + one card slot; content morphs (shrink -> swap -> expand)
-// between steps instead of tearing the host down, so the backdrop never
-// flickers, even across the pickProject() -> openModelEffortModal() boundary.
+// Shared host for the project -> location -> worktree chain. One backdrop +
+// one card slot; content morphs (shrink -> swap -> expand) between steps
+// instead of tearing the host down, so the backdrop never flickers.
 
 const COLLAPSE_MS = 150; // must match modal.css's .modal-card-collapsing duration
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -120,8 +119,8 @@ export async function presentHostCard(renderFn: () => void): Promise<void> {
   }
 }
 
-/** Closes the whole chain. Only the outermost function (pickProject(),
- *  openModelEffortModal) calls this - nested steps just resolve. Debounced
+/** Closes the whole chain. Only the outermost function (pickProject())
+ *  calls this - nested steps just resolve. Debounced
  *  by COLLAPSE_MS so a presentHostCard() arriving first cancels the teardown.
  *
  *  The focus guard is released HERE, synchronously, not inside the COLLAPSE_MS

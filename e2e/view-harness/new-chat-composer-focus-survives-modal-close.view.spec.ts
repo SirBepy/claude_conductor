@@ -3,13 +3,13 @@ import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Todo 879: two independent, confirmed causes of the draft-chat composer
 // losing the focus pending-pane.ts's mountPendingPane already sets via its
-// trailing `ta.focus()`.
+// trailing `ta.focus()`. (The model/effort dialog it was first found through
+// is gone; the project picker is now the only modal before the draft.)
 //
 // 1. (all widths) startNewSession() (pending-flow.ts) calls
-//    lockBackgroundInput() before the project-picker/model-effort modal
-//    chain, then awaits the whole chain including renderPendingPane()'s
-//    `ta.focus()`. The modal's own close path (model-effort-modal.ts's
-//    `.me-confirm` handler: `closeHostCard(); resolve(result);`) used to
+//    lockBackgroundInput() before the project picker, then awaits the whole
+//    flow including renderPendingPane()'s `ta.focus()`. A modal's close path
+//    (`closeHostCard(); resolve(result);`) used to
 //    defer releasing the global focus guard via a real
 //    `setTimeout(..., COLLAPSE_MS)` inside modal.ts's closeHostCard, instead
 //    of releasing it synchronously with the resolved promise. Reproduced by
@@ -29,7 +29,7 @@ import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
 //    pattern in active-session.ts's selectSession().
 //
 // Both are exercised here via the REAL startNewSession() -> pickProject() ->
-// openModelEffortModal() -> launchNewSession() chain (no bypass), with every
+// launchNewSession() flow (no bypass), with every
 // backend call mocked.
 
 const PROJECT = {
@@ -61,12 +61,8 @@ async function mountSessionsEntry(page: Page): Promise<void> {
   });
 }
 
-async function confirmModelEffort(page: Page): Promise<void> {
+async function pickProjectIntoDraft(page: Page): Promise<void> {
   await page.locator(".project-picker-row").click();
-  const confirmBtn = page.locator(".me-confirm");
-  await expect(confirmBtn).toBeVisible();
-  await expect(confirmBtn).toBeEnabled();
-  await confirmBtn.click();
 }
 
 async function assertComposerHoldsFocus(page: Page): Promise<void> {
@@ -92,14 +88,14 @@ async function assertComposerHoldsFocus(page: Page): Promise<void> {
   await expect(ta).toHaveValue("pasted-if-focused");
 }
 
-test.describe("view-harness / new-chat composer focus after modal close", () => {
-  test("desktop: composer holds focus once the modal chain resolves", async ({ page }) => {
+test.describe("view-harness / new-chat composer focus after the picker closes", () => {
+  test("desktop: composer holds focus once the picker resolves", async ({ page }) => {
     await mountSessionsEntry(page);
     await page.locator("#viewMoreBtn").waitFor();
     await page.locator("#viewMoreBtn").click();
     await page.locator("#newSessionBtn").waitFor({ state: "visible" });
     await page.locator("#newSessionBtn").click();
-    await confirmModelEffort(page);
+    await pickProjectIntoDraft(page);
     await assertComposerHoldsFocus(page);
   });
 
@@ -108,10 +104,10 @@ test.describe("view-harness / new-chat composer focus after modal close", () => 
     await mountSessionsEntry(page);
     // .sessions-fab is the phone entry point to the same startNewSession()
     // the desktop kebab's "+ New session" item calls (see new-session-cold-
-    // cache.view.spec.ts) - no bypass of pickProject()/openModelEffortModal().
+    // cache.view.spec.ts) - no bypass of pickProject().
     await page.locator("#sessionsFab").waitFor();
     await page.locator("#sessionsFab").click();
-    await confirmModelEffort(page);
+    await pickProjectIntoDraft(page);
     await assertComposerHoldsFocus(page);
   });
 });

@@ -1,6 +1,5 @@
 import { sessionEvents } from "../shared/chat/event-store";
 import { setSelectedSessionId } from "../views/sessions/permission-modal";
-import { openModelEffortModal } from "../views/sessions/model-effort-modal";
 import { startNewSession } from "../views/sessions/pending-flow";
 import { state as sessionsState } from "../views/sessions/state";
 import { updateThinkingBar } from "../views/sessions/session-thinking-bar";
@@ -53,16 +52,6 @@ export function installE2eSeams(): void {
     (window as unknown as Record<string, unknown>).__injectQuestion = (payload: unknown): void => {
       void window.__TAURI__?.event?.emit?.("question-requested", payload);
     };
-
-    // New-chat modal e2e seam (ai_todo 241): open the model/effort/account modal
-    // directly so the view-harness can assert the account picker + "Start session"
-    // gating WITHOUT driving the full pickProject flow. The account list comes from
-    // the mocked list_accounts command, exactly as it would from the daemon on the
-    // phone - so this exercises the frontend half of the mobile account-sharing fix.
-    (window as unknown as Record<string, unknown>).__openNewChatModal = (
-      projectPath?: string,
-      projectName?: string,
-    ): Promise<unknown> => openModelEffortModal(projectPath ?? "C:/test/proj", projectName ?? "Test Project");
 
     // Popup-chain e2e seam: drives the real pickProject() chain without a
     // mounted sessions pane - a scratch element stands in (tests assert

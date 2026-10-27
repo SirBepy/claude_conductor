@@ -20,8 +20,6 @@ import "./session-statusbar-images.css";
 import "./overflow-panel.css";
 import "./project-picker.css";
 import "./worktree-picker.css";
-import "./model-effort-modal.css";
-import "./model-effort-slider.css";
 import "./preview-panel.css";
 import { startNewSession, startNewSessionWithFavorite, loadAndRestorePendingSession, loadAndRestoreParkedDrafts } from "./pending-flow";
 import { selectSession, updateHeaderAvatarStatus } from "./active-session";

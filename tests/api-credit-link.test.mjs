@@ -11,7 +11,6 @@ vi.mock("../src/shared/api.ts", () => ({ api: {} }));
 const { linkedPlanAccount, linkedToLabel, apiCreditLinkedName } = await import("../src/shared/account-chip.ts");
 const { runAddAccountFlow } = await import("../src/views/settings/subviews/accounts/add-account-flow.ts");
 const { apiCreditMeterHtml } = await import("../src/views/dashboard/api-credit-meter.ts");
-const { renderAccountFieldHtml } = await import("../src/views/sessions/account-field.ts");
 const { renderAccountListBodyHtml } = await import("../src/shared/change-account-modal.ts");
 
 const personal = { id: "p", label: "personal", icon: "user", colour: "#8b5cf6", kind: "subscription", email: "Joe@Example.com" };
@@ -58,11 +57,6 @@ describe("where the link is named", () => {
     expect(apiCreditMeterHtml([personal, credit], {})).toContain("API credit · personal");
     const unlinked = { ...credit, email: "", label: "Spare key" };
     expect(apiCreditMeterHtml([personal, unlinked], {})).toContain("Spare key");
-  });
-
-  it("new-chat picker chip tooltip names the plan account", () => {
-    const html = renderAccountFieldHtml({ accountId: "p" }, { accounts: [personal, credit] });
-    expect(html).toContain('title="API credit · personal"');
   });
 
   it("change-account modal chip tooltip names the plan account", () => {

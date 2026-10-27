@@ -7,7 +7,7 @@ import { isPendingSessionId } from "../../shared/chat/pending-session-id";
 import { setSelectedSessionId } from "./permission-modal";
 import { noteSelectedChat } from "../../shared/on-screen-chat";
 import type { SessionStatusbar } from "./session-statusbar";
-import type { SessionConfig } from "./model-effort-modal";
+import type { SessionConfig } from "../../shared/effort-presets";
 import type { PreviewController } from "./preview-panel";
 import type { FabDialHandle } from "./fab-dial";
 
@@ -22,8 +22,9 @@ export interface PendingNewSession {
   placeholderId: string;
   projectPath: string;
   projectName: string;
-  // Model + effort chosen via openModelEffortModal at launch. Stored so we
-  // can re-render the pending pane on resume after the user navigates away.
+  // The draft's model/effort/account/character (resolveNewChatConfig, then
+  // edited in the draft). Stored so we can re-render the pending pane on
+  // resume after the user navigates away.
   config: SessionConfig;
   // Once the real session_id is captured from the first SessionStarted event,
   // we record it here so refreshSessions/renderSidebar can suppress the real

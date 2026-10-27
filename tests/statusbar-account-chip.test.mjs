@@ -50,3 +50,18 @@ describe("account chip - single-option skip (todo 883)", () => {
     expect(renderChip("account", ctx(personal.id))).toBe("");
   });
 });
+
+describe("account chip - draft with no account picked", () => {
+  beforeEach(() => setCachedAccounts([personal, work]));
+
+  it("offers a Pick account chip when the draft has no account yet", () => {
+    const html = renderChip("account", ctx(null));
+    expect(html).toContain("sb-account-none");
+    expect(html).toContain("sb-account-btn");
+    expect(html).toContain("Pick account");
+  });
+
+  it("stays empty for a chat that cannot change account", () => {
+    expect(renderChip("account", { ...ctx(null), hasAccountClick: false })).toBe("");
+  });
+});

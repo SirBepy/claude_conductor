@@ -2,12 +2,12 @@ import { state } from "./state";
 import { sessionSubtitle, projectName } from "./sessions-helpers";
 import { characterForSession, characterIconUrl } from "./session-characters";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
-import type { SessionConfig } from "./model-effort-modal";
+import type { SessionConfig } from "../../shared/effort-presets";
 import { isAutoAccept, isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
 import { SessionHeader, projectDashboardOpener } from "./session-header";
 import { wireRenderer } from "./active-session-mount";
 import { retainChat } from "./chat-pane-cache";
-import { mountPendingChrome, mountPendingStatusbar, attachPendingRenderer } from "./pending-pane-mount";
+import { mountPendingChrome, mountPendingStatusbar, attachPendingRenderer, changePendingAccount } from "./pending-pane-mount";
 import { mountDraftDashboard, unmountDraftDashboard } from "./project-dashboard/draft-dashboard";
 import { wirePendingComposer } from "./pending-pane-composer";
 
@@ -34,7 +34,10 @@ export async function renderPendingPane(
   // Must come after attachPendingRenderer: ChatRenderer.attach() clears
   // .session-messages, which would wipe a dashboard mounted any earlier.
   mountDraftDashboard(pane, project, myMount);
-  wirePendingComposer(pane, placeholderId, project, config, myMount, { rebindPaneHeader });
+  wirePendingComposer(pane, placeholderId, project, config, myMount, {
+    rebindPaneHeader,
+    pickAccount: () => { void changePendingAccount(config, placeholderId); },
+  });
 
   const ta = pane.querySelector<HTMLTextAreaElement>(".composer-textarea");
   if (draftText && state.mountId === myMount) state.composer?.setDraftText(draftText, false);

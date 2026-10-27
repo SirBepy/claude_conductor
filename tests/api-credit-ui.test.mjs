@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 
-// The API-credit account kind in the three places the frontend draws it: the
-// new-chat account field (chip, never preselected), the dashboard meter line,
-// and the live status watcher both of them read.
+// The API-credit account kind where the frontend draws it: the account badge,
+// the dashboard meter line, and the live status watcher it reads.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -11,7 +10,6 @@ const { apiMock } = vi.hoisted(() => ({
 }));
 vi.mock("../src/shared/api.ts", () => ({ api: apiMock }));
 
-const { renderAccountFieldHtml, accountPickIncomplete } = await import("../src/views/sessions/account-field.ts");
 const { apiCreditMeterHtml } = await import("../src/views/dashboard/api-credit-meter.ts");
 const { watchApiCreditStatus } = await import("../src/shared/api-credit-watch.ts");
 const { accountIconBadgeHtml } = await import("../src/shared/account-chip.ts");
@@ -40,29 +38,6 @@ describe("account badge", () => {
     expect(accountIconBadgeHtml(credit)).toContain("ph-key");
     expect(accountIconBadgeHtml(credit)).not.toContain("ph-user");
     expect(accountIconBadgeHtml(sub)).toContain("ph-user");
-  });
-});
-
-describe("new-chat account field", () => {
-  it("shows a chip for the API-credit account beside a subscription one, unselected", () => {
-    const html = renderAccountFieldHtml({ accountId: "acct-sub" }, { accounts: [sub, credit] });
-    expect(html).toContain('data-acc-id="acct-credit"');
-    expect(html).toContain("ph-key");
-    expect(html).toContain("monthly API credit");
-    const chips = [...html.matchAll(/<span class="account-chip( sel)?"[^>]*data-acc-id="([^"]+)"/g)];
-    expect(chips.map((m) => [m[2], !!m[1]])).toEqual([["acct-sub", true], ["acct-credit", false]]);
-  });
-
-  it("renders nothing for a lone subscription account but a chip for a lone API-credit one", () => {
-    expect(renderAccountFieldHtml({ accountId: "acct-sub" }, { accounts: [sub] })).toBe("");
-    const lone = renderAccountFieldHtml({ accountId: null }, { accounts: [credit] });
-    expect(lone).toContain('data-acc-id="acct-credit"');
-    expect(lone).not.toContain(" sel");
-  });
-
-  it("keeps Start gated until the API-credit chip is clicked", () => {
-    expect(accountPickIncomplete({ accountId: null }, [credit])).toBe(true);
-    expect(accountPickIncomplete({ accountId: "acct-credit" }, [credit])).toBe(false);
   });
 });
 

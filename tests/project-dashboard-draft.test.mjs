@@ -27,7 +27,7 @@ vi.mock("../src/shared/transport.ts", async (importOriginal) => {
 });
 vi.mock("../src/shared/token-history.ts", () => ({ loadTokenHistory: vi.fn(async () => []) }));
 vi.mock("../src/views/sessions/active-session.ts", () => ({ dismountActivePane: vi.fn(), selectSession: vi.fn(async () => {}) }));
-vi.mock("../src/views/sessions/model-effort-modal.ts", () => ({ openModelEffortModal: vi.fn() }));
+vi.mock("../src/views/sessions/new-chat-config.ts", () => ({ resolveNewChatConfig: vi.fn(), accountPickNeeded: vi.fn(async () => false) }));
 vi.mock("../src/views/sessions/close-chat.ts", () => ({ closeChatWithConfirm: vi.fn(async () => {}) }));
 
 const { mountDraftDashboard, unmountDraftDashboard } = await import("../src/views/sessions/project-dashboard/draft-dashboard.ts");

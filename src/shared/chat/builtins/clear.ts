@@ -1,6 +1,6 @@
 import { invoke } from "../../ipc";
 import { launchNewSession } from "../../../views/sessions/pending-flow";
-import { openModelEffortModal } from "../../../views/sessions/model-effort-modal";
+import { resolveNewChatConfig } from "../../../views/sessions/new-chat-config";
 import type { BuiltinContext, BuiltinHandler } from "./index";
 
 let inflight = false;
@@ -21,8 +21,7 @@ export const clearSession: BuiltinHandler = async (_parsed, ctx: BuiltinContext)
       }
     }
     const projectName = deriveName(ctx.projectDir);
-    const config = await openModelEffortModal(ctx.projectDir, projectName);
-    if (!config) return;
+    const config = await resolveNewChatConfig(ctx.projectDir);
     await launchNewSession(ctx.pane, {
       path: ctx.projectDir,
       name: projectName,

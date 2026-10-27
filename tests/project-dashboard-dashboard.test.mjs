@@ -41,7 +41,7 @@ vi.mock("../src/shared/transport.ts", async (importOriginal) => {
   };
 });
 vi.mock("../src/views/sessions/active-session.ts", () => ({ dismountActivePane: vi.fn(), selectSession: vi.fn(async () => {}) }));
-vi.mock("../src/views/sessions/model-effort-modal.ts", () => ({ openModelEffortModal: vi.fn() }));
+vi.mock("../src/views/sessions/new-chat-config.ts", () => ({ resolveNewChatConfig: vi.fn(), accountPickNeeded: vi.fn(async () => false) }));
 
 const { mountDashboard } = await import("../src/views/sessions/project-dashboard/dashboard.ts");
 

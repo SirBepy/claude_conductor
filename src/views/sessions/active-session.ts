@@ -28,7 +28,7 @@ import { setCodeModeChatProvider } from "./code-mode/entry";
 import { applyHeaderMerge } from "./mobile-header-merge";
 import { setThinkingActivity } from "./session-thinking-bar";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
-import { openModelEffortModal } from "./model-effort-modal";
+import { resolveNewChatConfig } from "./new-chat-config";
 import { registerCta } from "../../shared/chat/cta-registry";
 import { mountStatusbar, mountRenderer } from "./active-session-mount";
 import { mountComposer } from "./active-session-composer";
@@ -143,8 +143,7 @@ registerCta("pickup", {
     const sess = state.sessions.find(s => s.session_id === state.selectedId);
     if (!sess) return;
     const project = { path: String(sess.cwd ?? ""), name: projectName(sess) };
-    const config = await openModelEffortModal(project.path, project.name);
-    if (!config) return;
+    const config = await resolveNewChatConfig(project.path);
     void state.composer?.sendText("/close");
     state.launchNewChatCallback?.(project, { ...config, initialMessage: "/pickup" });
   },

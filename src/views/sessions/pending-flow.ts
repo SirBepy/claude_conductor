@@ -5,7 +5,8 @@ import { lockBackgroundInput, unlockBackgroundInputIfClosed } from "../../shared
 import { state, setActiveSession, type ParkedDraft } from "./state";
 import { pickProject, type PickedProject } from "./project-picker";
 import { renderSidebar } from "./sidebar";
-import { openModelEffortModal, type SessionConfig } from "./model-effort-modal";
+import type { SessionConfig } from "../../shared/effort-presets";
+import { resolveNewChatConfig } from "./new-chat-config";
 import { pathForKey, readFavorites } from "./project-favorites";
 import { resolveRememberedLocation } from "./location-picker";
 import { projectGroupsData, resolveCached } from "./new-session-cache";
@@ -174,17 +175,14 @@ export async function resumeDraft(pane: HTMLElement): Promise<void> {
 // each open their own project-picker into the same shared modal slot.
 let inFlight = false;
 
-/** Shared tail of both new-chat entry points: model/effort modal, then
- *  launch. `project` is already resolved by the caller - via the picker
- *  (startNewSession) or a favourite slot (startNewSessionWithFavorite). */
+/** Shared tail of both new-chat entry points: straight to the draft on the
+ *  resolved defaults (new-chat-config.ts). `project` is already resolved by
+ *  the caller - via the picker (startNewSession) or a favourite slot
+ *  (startNewSessionWithFavorite). */
 async function resolveConfigAndLaunch(pane: HTMLElement, project: PickedProject): Promise<void> {
   const myMount = state.mountId;
-  const config = await openModelEffortModal(project.path, project.name, project.machineId ?? null);
-  if (!config) return;
+  const config = await resolveNewChatConfig(project.path, project.machineId ?? null);
   if (state.mountId !== myMount) return;
-  // The picker's own machine chip (H4). The modal got it too, to list that
-  // machine's accounts, but the launch reads it from the config.
-  config.machineId = project.machineId ?? null;
   await launchNewSession(pane, project, config);
 }
 
@@ -208,9 +206,7 @@ export async function startNewSession(pane: HTMLElement): Promise<void> {
 
 /** Ctrl+Shift+1..9 global shortcut: skips the project picker entirely and
  *  resolves straight from the favourite slot, same as the picker's own
- *  ctrl+1..9 fast path (project-picker.ts's openFavorite) - still goes
- *  through the model/effort modal, since that's a separate step there too.
- *  An empty or stale slot (project removed/moved) is inert, not an error,
+ *  ctrl+1..9 fast path (project-picker.ts's openFavorite). An empty or stale slot (project removed/moved) is inert, not an error,
  *  matching openFavorite's "slot already renders as unresolved" call. */
 export async function startNewSessionWithFavorite(pane: HTMLElement, slot: number): Promise<void> {
   if (inFlight) return;

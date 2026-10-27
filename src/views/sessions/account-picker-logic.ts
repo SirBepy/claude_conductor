@@ -1,7 +1,7 @@
 // Pure helpers for the new-chat account picker (multi-account milestone 04).
 // Kept free of DOM/IPC so the binding > default > fallback resolution is
 // cheaply unit-testable (see tests/account-picker-logic.test.mjs).
-// model-effort-modal.ts is the only caller. See
+// model-effort-data.ts is the only caller. See
 // docs/multi-account/04-project-binding.md.
 
 import { isApiCreditAccount, type AccountLite } from "../../shared/account-chip";

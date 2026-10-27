@@ -2,10 +2,7 @@
 // active-session.ts statusline chip) and the manual-takeover account
 // confirmation (active-session.ts). Reuses the generic cc-modal-* shell from
 // change-character-modal.css and the account-chip visuals from account-chip.css
-// rather than introducing a third picker UI (the new-chat picker in
-// account-field.ts is intentionally NOT reused here - it owns a much larger
-// "remember for this project" state machine that doesn't apply to an
-// already-running chat).
+// rather than introducing another picker UI.
 
 import "./change-character-modal.css";
 import "./account-chip.css";

@@ -102,6 +102,11 @@ export function renderChip(type: ChipType, ctx: ChipRenderCtx): string {
       // only earns its pixels once there's a second one to distinguish from.
       if (listCachedAccounts().length <= 1) return "";
       const acc = getCachedAccount(ctx.accountId);
+      // A draft with no bound or default account starts with none picked
+      // (new-chat-config.ts); the chip is how it gets one.
+      if (!acc && ctx.hasAccountClick && !ctx.accountId) {
+        return `<span class="sb-chip sb-account sb-account-btn sb-account-none${ac("account")}" role="button" tabindex="0" title="Pick the account this chat bills" aria-label="Pick account"><i class="ph ph-user-circle-dashed"></i><span class="sb-chip-label">Pick account</span></span>`;
+      }
       if (!acc) return "";
       const clickable = ctx.hasAccountClick ? " sb-account-btn" : "";
       return `<span class="sb-chip sb-account${clickable}${ac("account")}" style="--acc:${escapeHtml(acc.colour)}" role="button" tabindex="0" title="${escapeHtml(capitalize(acc.label))}${ctx.hasAccountClick ? " - click to move this chat to a different account" : ""}" aria-label="${escapeHtml(capitalize(acc.label))}"><i class="ph ph-${escapeHtml(acc.icon)}"></i><span class="sb-chip-label">${escapeHtml(capitalize(acc.label))}</span></span>`;
