@@ -80,11 +80,15 @@ impl Target {
         match self {
             Target::Own => "Claude's own Chrome profile, signed in only to accounts set up for Claude".to_string(),
             Target::Mine(mine) => {
-                let profile = match &mine.profile {
-                    Some(p) => format!("profile folder \"{p}\""),
-                    None => "the profile he used last".to_string(),
-                };
-                format!("Joe's own {}, {profile}", mine.app.label())
+                // The extension's hello carries no profile, so a requested folder
+                // only steers which profile is launched, never which one answers.
+                match &mine.profile {
+                    Some(p) => format!(
+                        "Joe's own {} (profile folder \"{p}\" was asked for; the bridge cannot verify which profile answers)",
+                        mine.app.label()
+                    ),
+                    None => format!("Joe's own {}, the profile he used last", mine.app.label()),
+                }
             }
         }
     }
@@ -279,8 +283,10 @@ mod tests {
         assert!(Target::Own.describe().contains("accounts set up for Claude"));
         assert_eq!(
             Target::Mine(mine(App::Brave, Some("Profile 1"))).describe(),
-            "Joe's own Brave, profile folder \"Profile 1\""
+            "Joe's own Brave (profile folder \"Profile 1\" was asked for; the bridge cannot verify which profile answers)"
         );
         assert_eq!(Target::Mine(mine(App::Chrome, None)).describe(), "Joe's own Chrome, the profile he used last");
+        let named = Target::Mine(mine(App::Edge, Some("Profile 3"))).describe();
+        assert!(named.contains("cannot verify"), "{named}");
     }
 }

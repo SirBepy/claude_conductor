@@ -278,7 +278,7 @@ impl ClaudeBrowser {
             }
             let node = runtime::node_bin()?;
             let registration = match &attach {
-                Attach::Bridge(mine) => Some(bridge::get().register(mine.app)?),
+                Attach::Bridge(mine) => Some(bridge::get().register(mine.app, mine.profile.is_some())?),
                 Attach::Cdp(_) => None,
             };
             let key = registration.as_ref().map(|(k, _)| k.clone());
