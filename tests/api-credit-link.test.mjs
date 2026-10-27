@@ -59,6 +59,21 @@ describe("where the link is named", () => {
     expect(apiCreditMeterHtml([personal, unlinked], {})).toContain("Spare key");
   });
 
+  it("two API-credit accounts linked to one plan read as two distinct names", () => {
+    const spare = { ...credit, id: "c2", label: "Spare key" };
+    const all = [personal, credit, spare];
+    expect(apiCreditLinkedName(credit, all)).toBe("API credit · personal");
+    expect(apiCreditLinkedName(spare, all)).toBe("Spare key · personal");
+
+    const meter = apiCreditMeterHtml(all, {});
+    const names = [...meter.matchAll(/class="dash-credit-name">([^<]*)</g)].map((m) => m[1]);
+    expect(names).toEqual(["API credit · personal", "Spare key · personal"]);
+
+    const modal = renderAccountListBodyHtml(all, "p");
+    expect(modal).toContain('title="API credit · personal"');
+    expect(modal).toContain('title="Spare key · personal"');
+  });
+
   it("change-account modal chip tooltip names the plan account", () => {
     const html = renderAccountListBodyHtml([personal, credit], "p");
     expect(html).toContain('title="API credit · personal"');

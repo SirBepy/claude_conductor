@@ -9,10 +9,16 @@ const { apiMock } = vi.hoisted(() => ({
   apiMock: { getApiCreditStatus: vi.fn(), onApiCreditStatusChanged: vi.fn() },
 }));
 vi.mock("../src/shared/api.ts", () => ({ api: apiMock }));
+const { openReplaceMock } = vi.hoisted(() => ({ openReplaceMock: vi.fn() }));
+vi.mock("../src/views/settings/subviews/accounts/add-api-credit-modal.ts", () => ({
+  openReplaceApiKeyModal: openReplaceMock,
+}));
+vi.mock("../src/shared/toast.ts", () => ({ showToast: vi.fn() }));
 
 const { apiCreditMeterHtml } = await import("../src/views/dashboard/api-credit-meter.ts");
-const { watchApiCreditStatus } = await import("../src/shared/api-credit-watch.ts");
-const { accountIconBadgeHtml } = await import("../src/shared/account-chip.ts");
+const { watchApiCreditStatus, ensureApiCreditWatch } = await import("../src/shared/api-credit-watch.ts");
+const { accountIconBadgeHtml, accountChipHtml } = await import("../src/shared/account-chip.ts");
+const rowsModule = await import("../src/views/settings/subviews/accounts/api-credit-rows.ts");
 
 const sub = { id: "acct-sub", label: "Personal", icon: "user", colour: "#9d7dfc", kind: "subscription" };
 const credit = { id: "acct-credit", label: "API credit", icon: "user", colour: "#10b981", kind: "api_credit" };
@@ -129,5 +135,69 @@ describe("watchApiCreditStatus", () => {
     await Promise.resolve();
     expect(seen).toEqual([]);
     expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ensureApiCreditWatch", () => {
+  beforeEach(() => {
+    apiMock.getApiCreditStatus.mockReset().mockResolvedValue({});
+    apiMock.onApiCreditStatusChanged.mockReset().mockReturnValue(() => {});
+  });
+
+  it("never subscribes without an API-credit account", () => {
+    expect(ensureApiCreditWatch(null, [sub], () => {})).toBeNull();
+    expect(apiMock.onApiCreditStatusChanged).not.toHaveBeenCalled();
+  });
+
+  it("subscribes once an API-credit account exists, and only once per holder", () => {
+    const first = ensureApiCreditWatch(null, [sub, credit], () => {});
+    expect(typeof first).toBe("function");
+    const second = ensureApiCreditWatch(first, [sub, credit], () => {});
+    expect(second).toBe(first);
+    expect(apiMock.onApiCreditStatusChanged).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Replace API key row action", () => {
+  const { apiCreditRowHtml, wireCreditRowMenus } = rowsModule;
+
+  function mountRow() {
+    document.body.innerHTML = `<div id="root"><div id="list">${apiCreditRowHtml(credit, [sub, credit])}</div></div>`;
+    const list = document.getElementById("list");
+    wireCreditRowMenus(list, document.getElementById("root"));
+    return list;
+  }
+
+  beforeEach(() => {
+    openReplaceMock.mockReset();
+    apiMock.refreshApiCreditStatus = vi.fn().mockResolvedValue(status());
+  });
+
+  it("is in the API-credit row's menu", () => {
+    const item = mountRow().querySelector(".acc-menu-replace-key");
+    expect(item?.textContent).toContain("Replace API key");
+    expect(item?.getAttribute("data-id")).toBe("acct-credit");
+  });
+
+  it("opens the masked-key modal for that account and refreshes the balance once the key was replaced", async () => {
+    openReplaceMock.mockResolvedValue(true);
+    mountRow().querySelector(".acc-menu-replace-key").click();
+    await vi.waitFor(() => expect(apiMock.refreshApiCreditStatus).toHaveBeenCalledWith("acct-credit"));
+    expect(openReplaceMock).toHaveBeenCalledWith({ id: "acct-credit", label: "API credit" });
+  });
+
+  it("leaves the balance alone when the modal closes without a new key", async () => {
+    openReplaceMock.mockResolvedValue(false);
+    mountRow().querySelector(".acc-menu-replace-key").click();
+    await vi.waitFor(() => expect(openReplaceMock).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(apiMock.refreshApiCreditStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("account chip", () => {
+  it("carries the API credit tag inside the chip for an API-credit account only", () => {
+    expect(accountChipHtml(credit)).toMatch(/<span class="cam-credit-hint">API credit<\/span><\/span>$/);
+    expect(accountChipHtml(sub)).not.toContain("cam-credit-hint");
   });
 });

@@ -65,14 +65,23 @@ export function linkedToLabel(
   return email ? `Linked to ${email}` : "";
 }
 
+/** The label every API-credit account starts with; a chip carrying it says
+ * nothing about which account it is, so the name leans on the plan instead. */
+const DEFAULT_API_CREDIT_LABEL = "API credit";
+
 /** "API credit · personal": how an API-credit account names itself where the
- * plan it draws on is worth showing. Just "API credit" when nothing is linked. */
+ * plan it draws on is worth showing. Just "API credit" when nothing is linked.
+ * An account the user renamed leads with its own label ("Spare key · personal")
+ * because several API-credit accounts can link to one plan, and the plan alone
+ * would make them read identically. */
 export function apiCreditLinkedName(
-  account: { email?: string } | null | undefined,
+  account: { email?: string; label?: string } | null | undefined,
   accounts: readonly { kind?: AccountKindLite; email?: string; label: string }[],
 ): string {
   const plan = linkedPlanAccount(account, accounts);
-  return plan ? `API credit · ${plan.label}` : "API credit";
+  const own = account?.label?.trim();
+  const lead = own && own !== DEFAULT_API_CREDIT_LABEL ? own : DEFAULT_API_CREDIT_LABEL;
+  return plan ? `${lead} · ${plan.label}` : lead;
 }
 
 /** Coloured circular icon badge for an account. Pair with `.account-chip-css`
@@ -84,12 +93,21 @@ export function accountIconBadgeHtml(a: AccountChipInfo): string {
   return `<span class="account-icon-badge" style="--acc:${escapeHtml(a.colour)}"><i class="ph ph-${escapeHtml(icon)}"></i></span>`;
 }
 
-/** Icon badge + label, inline (a "chip"). `selected` adds the `.sel` state
+/** Trailing "API credit" tag for an API-credit account's chip, so a pick that
+ * bills the Max plan's monthly API credit instead of plan usage is never a
+ * surprise. The key icon already comes from `accountIconBadgeHtml`. Styled by
+ * `.cam-credit-hint` in change-account-modal.css. */
+export function apiCreditHintHtml(a: { kind?: AccountKindLite }): string {
+  return isApiCreditAccount(a) ? `<span class="cam-credit-hint">API credit</span>` : "";
+}
+
+/** Icon badge + label, inline (a "chip"), plus the API-credit tag for that
+ * account kind. `selected` adds the `.sel` state
  * used by the new-chat picker's chip row. `extraAttrs` is a raw (already
  * escaped) attribute string, e.g. `data-acc-id="..."` for a clickable chip
  * option - callers own escaping any values they interpolate into it. Always keyboard-operable; pair with `attachChipKeyboardActivation`. */
 export function accountChipHtml(a: AccountChipInfo, selected = false, extraAttrs = ""): string {
-  return `<span class="account-chip${selected ? " sel" : ""}" style="--acc:${escapeHtml(a.colour)}" role="button" tabindex="0"${extraAttrs ? ` ${extraAttrs}` : ""}>${accountIconBadgeHtml(a)}${escapeHtml(a.label)}</span>`;
+  return `<span class="account-chip${selected ? " sel" : ""}" style="--acc:${escapeHtml(a.colour)}" role="button" tabindex="0"${extraAttrs ? ` ${extraAttrs}` : ""}>${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}</span>`;
 }
 
 /** Delegated Enter/Space-to-click for `.account-chip` elements, since they're

@@ -722,6 +722,12 @@ export const api = {
   /** Rejects with a user-readable message (bad key, duplicate label, ...). */
   addApiCreditAccount: (label: string, apiKey: string): Promise<Account> =>
     invoke("add_api_credit_account", { label, apiKey }),
+  /** Swaps an API-credit account's stored key for one that Anthropic accepts;
+   * rejects with a user-readable message and keeps the old key when it doesn't.
+   * Desktop-pipe only, like the other account mutators: HttpTransport (phone)
+   * rejects it with RemoteUnavailableError. */
+  replaceApiCreditKey: (accountId: string, apiKey: string): Promise<void> =>
+    invoke("replace_api_credit_key", { accountId, apiKey }),
   /** Opens a browser login on platform.claude.com and resolves with the
    * balance read through the captured session; the figures' `error` says so
    * when the login did not take. */

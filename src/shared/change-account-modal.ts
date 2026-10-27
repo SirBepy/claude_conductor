@@ -11,15 +11,8 @@ import "./modal.css";
 import { api } from "./api";
 import type { Account } from "./api";
 import { escapeHtml } from "./escape-html";
-import { accountChipHtml, accountIconBadgeHtml, apiCreditLinkedName, attachChipKeyboardActivation, isApiCreditAccount, linkedPlanAccount } from "./account-chip";
+import { accountChipHtml, accountIconBadgeHtml, apiCreditHintHtml, apiCreditLinkedName, attachChipKeyboardActivation, isApiCreditAccount, linkedPlanAccount } from "./account-chip";
 import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
-
-/** Trailing "API credit" tag inside a chip, so a pick that bills the Max
- * plan's monthly API credit instead of plan usage is never a surprise. The
- * key icon already comes from `accountIconBadgeHtml`. */
-function apiCreditHintHtml(a: Account): string {
-  return isApiCreditAccount(a) ? `<span class="cam-credit-hint">API credit</span>` : "";
-}
 
 /** Tooltip naming the plan an API-credit chip draws on ("API credit · personal");
  * nothing for a subscription chip or an unlinked credit one. */
@@ -45,10 +38,7 @@ export function renderAccountListBodyHtml(accounts: Account[], currentId: string
   }
   return `<div class="cam-account-list">${accounts
     .map((a: Account) =>
-      accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"${creditTitleAttr(a, accounts)}`).replace(
-        /<\/span>$/,
-        `${apiCreditHintHtml(a)}</span>`,
-      ),
+      accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"${creditTitleAttr(a, accounts)}`),
     )
     .join("")}</div>`;
 }
