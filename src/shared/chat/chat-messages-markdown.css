@@ -1,21 +1,24 @@
-/* Markdown element styling shared by every .msg kind: lists, tables/table
+/* Markdown element styling shared by every message kind: lists, tables/table
  * overlay, paragraphs, headings, blockquote, hr, inline code. Split out of
- * chat-messages.css. */
+ * chat-messages.css. The drill popover (drill-links.ts) renders the same
+ * markdown but is body-appended, outside any message, so every rule names
+ * both scopes; without it the popover falls back to the reset's unpadded
+ * lists and bare inline code. */
 
 /* Markdown lists default to padding-left: 40px which pushes long items past
    the bubble's right edge. Trim the indent and let list-position render the
    marker inside the padding box. */
-.msg ul,
-.msg ol {
+:is(.msg, .drill-pop) ul,
+:is(.msg, .drill-pop) ol {
   padding-left: 22px;
   margin: 6px 0;
 }
 
-.msg li {
+:is(.msg, .drill-pop) li {
   margin: 2px 0;
 }
 
-.msg li > p {
+:is(.msg, .drill-pop) li > p {
   margin: 0;
 }
 
@@ -50,23 +53,23 @@
   color: var(--color-text);
 }
 
-.msg table {
+:is(.msg, .drill-pop) table {
   border-collapse: collapse;
   font-size: 0.84rem;
   white-space: nowrap;
   min-width: max-content;
 }
 
-.msg th,
-.msg td {
+:is(.msg, .drill-pop) th,
+:is(.msg, .drill-pop) td {
   padding: 5px 12px;
   border: 1px solid var(--color-border);
   text-align: left;
   position: relative;
 }
 
-.msg th:hover .cell-copy-btn,
-.msg td:hover .cell-copy-btn {
+:is(.msg, .drill-pop) th:hover .cell-copy-btn,
+:is(.msg, .drill-pop) td:hover .cell-copy-btn {
   opacity: 1;
 }
 
@@ -79,12 +82,12 @@
   right: 3px;
 }
 
-.msg thead tr {
+:is(.msg, .drill-pop) thead tr {
   background: var(--color-surface-alt);
   font-weight: 600;
 }
 
-.msg tbody tr:nth-child(even) {
+:is(.msg, .drill-pop) tbody tr:nth-child(even) {
   background: color-mix(in srgb, var(--color-surface) 60%, transparent);
 }
 
@@ -165,44 +168,44 @@
 
 /* Paragraph spacing inside chat bubbles — breathing room between paras while
    trimming the trailing margin on the last one to keep bubble padding tight. */
-.msg p {
+:is(.msg, .drill-pop) p {
   margin: 0 0 8px 0;
 }
-.msg p:last-child {
+:is(.msg, .drill-pop) p:last-child {
   margin-bottom: 0;
 }
 
 /* Headings — scale them down from browser defaults so they fit a chat bubble. */
-.msg h1, .msg h2, .msg h3, .msg h4, .msg h5, .msg h6 {
+:is(.msg, .drill-pop) h1, :is(.msg, .drill-pop) h2, :is(.msg, .drill-pop) h3, :is(.msg, .drill-pop) h4, :is(.msg, .drill-pop) h5, :is(.msg, .drill-pop) h6 {
   margin: 10px 0 4px;
   line-height: 1.3;
   font-weight: 600;
   color: var(--color-text);
 }
-.msg h1 { font-size: 1.15rem; }
-.msg h2 { font-size: 1.05rem; }
-.msg h3 { font-size: 0.96rem; }
-.msg h4, .msg h5, .msg h6 { font-size: 0.88rem; }
+:is(.msg, .drill-pop) h1 { font-size: 1.15rem; }
+:is(.msg, .drill-pop) h2 { font-size: 1.05rem; }
+:is(.msg, .drill-pop) h3 { font-size: 0.96rem; }
+:is(.msg, .drill-pop) h4, :is(.msg, .drill-pop) h5, :is(.msg, .drill-pop) h6 { font-size: 0.88rem; }
 
 /* Blockquote — left-bar style, muted text. */
-.msg blockquote {
+:is(.msg, .drill-pop) blockquote {
   margin: 6px 0;
   padding: 4px 10px;
   border-left: 3px solid var(--color-border);
   color: var(--color-text-muted);
   font-style: italic;
 }
-.msg blockquote p { margin: 0; }
+:is(.msg, .drill-pop) blockquote p { margin: 0; }
 
 /* Horizontal rule — subtle divider. */
-.msg hr {
+:is(.msg, .drill-pop) hr {
   border: none;
   border-top: 1px solid var(--color-border);
   margin: 10px 0;
 }
 
 /* Inline code — background pill so it reads as code without the full block. */
-.msg :not(pre) > code {
+:is(.msg, .drill-pop) :not(pre) > code {
   background: var(--color-surface-alt);
   border: 1px solid var(--color-border);
   border-radius: 3px;
@@ -214,7 +217,7 @@
 /* Any <pre> inside a message that isn't wrapped in .block.code (e.g. a
  * markdown-it fenced block before Shiki processes it, or a Shiki fallback)
  * must scroll rather than overflow the chat area. */
-.msg pre {
+:is(.msg, .drill-pop) pre {
   overflow-x: auto;
   max-width: 100%;
 }
