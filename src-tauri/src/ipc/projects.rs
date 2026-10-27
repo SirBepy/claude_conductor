@@ -81,6 +81,16 @@ pub mod legacy_import_test_helpers {
     }
 }
 
+/// Every saved project mutation goes out through here. The daemon spawns chats
+/// off its own settings cache, not `settings.json`, so a change that only
+/// reaches this process (`claude_ai_connectors` switched on, every spawn
+/// still reading it as off) stays invisible to spawns until the next
+/// handshake.
+async fn publish_project_change(state: &AppState, app: &AppHandle, snapshot: crate::types::Settings) {
+    crate::daemon_link::push_settings_to_daemon(state, &snapshot).await;
+    let _ = app.emit("settings-changed", snapshot);
+}
+
 #[tauri::command]
 pub async fn list_projects(state: State<'_, AppState>) -> Result<Vec<ProjectConfig>, String> {
     Ok(projects_test_helpers::list_from(&state.settings.lock().unwrap()))
@@ -132,7 +142,7 @@ pub async fn ensure_project(
     if changed {
         let settings_path = paths::settings_file().map_err(|e| e.to_string())?;
         settings::save(&settings_path, &snapshot).map_err(|e| e.to_string())?;
-        let _ = app.emit("settings-changed", snapshot);
+        publish_project_change(&state, &app, snapshot).await;
     }
     Ok(project)
 }
@@ -156,7 +166,7 @@ pub async fn update_project(
             }
         }
     })?;
-    let _ = app.emit("settings-changed", snapshot);
+    publish_project_change(&state, &app, snapshot).await;
     Ok(())
 }
 
@@ -174,7 +184,7 @@ pub async fn delete_project(
             Err(format!("project_not_found: {id}"))
         }
     })?;
-    let _ = app.emit("settings-changed", snapshot);
+    publish_project_change(&state, &app, snapshot).await;
     Ok(())
 }
 
@@ -226,7 +236,7 @@ pub async fn confirm_legacy_obsidian_import(
         s.legacy_obsidian_import_handled = true;
         Ok(())
     })?;
-    let _ = app.emit("settings-changed", snapshot);
+    publish_project_change(&state, &app, snapshot).await;
     Ok(())
 }
 
@@ -360,6 +370,31 @@ mod mutate_and_save_tests {
         assert!(!cached.legacy_obsidian_import_handled, "cache must not claim the banner was handled");
         assert!(cached.projects.is_empty(), "cache must not carry the imported project either");
         assert_eq!(cached.settings_generation, 0, "generation must not bump on a failed save");
+    }
+}
+
+#[cfg(test)]
+mod daemon_push_tests {
+    /// The commands here take a live `AppHandle` and daemon pipe,
+    /// so the contract is asserted on the source. A bare `settings-changed`
+    /// emit in a command means that mutation never reaches the daemon's
+    /// cache, which is what spawns read.
+    #[test]
+    fn every_project_mutation_reaches_the_daemon_cache() {
+        let src = include_str!("projects.rs");
+        let prod = src.split_once("#[cfg(test)]").expect("test modules follow the commands").0;
+        let helper = prod
+            .split_once("async fn publish_project_change(")
+            .expect("publish_project_change is defined here")
+            .1
+            .split_once("\n}\n")
+            .expect("helper body ends")
+            .0;
+        assert!(helper.contains("push_settings_to_daemon"), "the helper must push to the daemon");
+        let emits = prod.matches("emit(\"settings-changed\"").count();
+        assert_eq!(emits, 1, "only publish_project_change may emit settings-changed; route the command through it");
+        let callers = prod.matches("publish_project_change(&state, &app, snapshot).await").count();
+        assert_eq!(callers, 4, "ensure/update/delete/confirm-legacy-import each publish their save");
     }
 }
 
