@@ -2,6 +2,7 @@ import { html, render } from "lit-html";
 import * as shortcuts from "../../../../shared/shortcuts";
 import { normalizeEvent, SHORTCUT_RANGES } from "../../../../shared/shortcuts";
 import type { ShortcutDef } from "../../../../shared/shortcuts";
+import { modelShortcutLabel, modelShortcutSlot } from "../../../../shared/model-shortcuts";
 import { settingsHeader } from "../../ui";
 import "./shortcuts.css";
 
@@ -29,7 +30,14 @@ function rowsFor(defs: ShortcutDef[]): Row[] {
   for (const d of defs) {
     const range = SHORTCUT_RANGES.find(r => d.id.startsWith(r.prefix));
     if (!range) {
-      rows.push({ key: d.id, label: d.label, description: d.description, range: false });
+      const slot = modelShortcutSlot(d.id);
+      if (slot === null) {
+        rows.push({ key: d.id, label: d.label, description: d.description, range: false });
+        continue;
+      }
+      // A model slot is named after what it picks now; one past the list picks nothing.
+      const label = modelShortcutLabel(slot);
+      if (label) rows.push({ key: d.id, label, description: d.description, range: false });
     } else if (d.id === `${range.prefix}1`) {
       rows.push({ key: range.prefix, label: range.label, description: range.description, range: true });
     }

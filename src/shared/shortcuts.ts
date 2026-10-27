@@ -2,6 +2,7 @@
 
 import { isFormControlElement } from "./text-entry";
 import { createModifierHintTracker, type ModifierHint } from "./modifier-hint";
+import { modelShortcutHint } from "./model-shortcuts";
 
 export interface ShortcutDef {
   id: string;
@@ -247,7 +248,13 @@ function _init(): void {
 
   // Held Alt shows the model/effort keys beside the pane header's values
   // (config-bump.css), and keeps showing them through repeated Alt+Up/Down.
-  const setAltHeld = (on: boolean) => document.documentElement.classList.toggle("alt-held", on);
+  // The model hint's range follows the live model list (config-bump.css reads
+  // the custom property), so it never promises a slot with no model behind it.
+  const setAltHeld = (on: boolean) => {
+    const root = document.documentElement;
+    if (on) root.style.setProperty("--alt-model-hint", JSON.stringify(modelShortcutHint()));
+    root.classList.toggle("alt-held", on);
+  };
 
   document.addEventListener("keydown", (e) => {
     setAltHeld(e.altKey && !e.ctrlKey && !e.metaKey);
