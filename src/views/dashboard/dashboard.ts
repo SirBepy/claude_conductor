@@ -10,7 +10,7 @@ import { isRemote } from "../../shared/transport";
 import type { Account, AuthState, UsageRecord } from "../../shared/api";
 import { setCachedAccounts, listCachedAccounts } from "../../shared/accounts-cache";
 import { isApiCreditAccount } from "../../shared/account-chip";
-import { watchApiCreditStatus, type ApiCreditStatusMap } from "../../shared/api-credit-watch";
+import { ensureApiCreditWatch, type ApiCreditStatusMap } from "../../shared/api-credit-watch";
 import { apiCreditMeterHtml } from "./api-credit-meter";
 import { loadTokenHistory } from "../../shared/token-history";
 import { navigateTo } from "../../router";
@@ -433,11 +433,8 @@ function repaintCreditMeter(): void {
   wireCreditMeter(container);
 }
 
-/** Subscribes once an API-credit account exists; a subscription-only setup
- * never asks the daemon for figures. */
 function ensureCreditWatch(): void {
-  if (stopCreditWatch || !listCachedAccounts().some(isApiCreditAccount)) return;
-  stopCreditWatch = watchApiCreditStatus((map) => {
+  stopCreditWatch = ensureApiCreditWatch(stopCreditWatch, listCachedAccounts(), (map) => {
     creditStatusCache = map;
     repaintCreditMeter();
   });

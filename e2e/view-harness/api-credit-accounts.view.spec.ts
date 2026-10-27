@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
+import { invokeCalls, mountView, SESSIONS_BASE_INVOKE } from "./harness";
 
 // asserts: src/views/settings/subviews/accounts/accounts.ts, src/views/dashboard/dashboard.ts, src/shared/change-account-modal.ts, src/views/sessions/account-picker-logic.ts
 
@@ -138,6 +138,62 @@ test.describe("view-harness / API-credit accounts", () => {
     const row = page.locator('.acc-row[data-id="acct-credit"]');
     await expect(row).toContainText("Console not connected");
     await expect(row.locator(".acc-credit-connect")).toBeVisible();
+  });
+
+  test("Replace API key opens a masked key field and sends the pasted key for that account", async ({ page }) => {
+    await mountView(page, {
+      view: "settings-accounts",
+      invoke: {
+        list_accounts: [CREDIT],
+        get_settings: { theme: "void" },
+        get_auth_state_map: {},
+        get_terminal_identity: null,
+        list_api_keys: [],
+        get_api_credit_status: { "acct-credit": STATUS },
+        replace_api_credit_key: null,
+        refresh_api_credit_status: STATUS,
+      },
+    });
+    const row = page.locator('.acc-row[data-id="acct-credit"]');
+    await row.locator(".acc-btn-kebab").click();
+    await row.locator(".acc-menu-replace-key").click();
+
+    const field = page.locator("#rapk-key");
+    await expect(field).toBeVisible();
+    await expect(field).toHaveAttribute("type", "password");
+    const save = page.locator(".rapk-save-btn");
+    await expect(save).toBeDisabled();
+    await field.fill("  sk-ant-dummy-new ");
+    await save.click();
+
+    await expect(field).toHaveCount(0);
+    const calls = await invokeCalls(page);
+    expect(calls.find((c) => c.cmd === "replace_api_credit_key")?.args).toEqual({
+      accountId: "acct-credit",
+      apiKey: "sk-ant-dummy-new",
+    });
+  });
+
+  test("Replace API key keeps the field open and shows the reason when the key is refused", async ({ page }) => {
+    // replace_api_credit_key is deliberately unmocked: the harness rejects it.
+    await mountView(page, {
+      view: "settings-accounts",
+      invoke: {
+        list_accounts: [CREDIT],
+        get_settings: { theme: "void" },
+        get_auth_state_map: {},
+        get_terminal_identity: null,
+        list_api_keys: [],
+        get_api_credit_status: { "acct-credit": STATUS },
+      },
+    });
+    const row = page.locator('.acc-row[data-id="acct-credit"]');
+    await row.locator(".acc-btn-kebab").click();
+    await row.locator(".acc-menu-replace-key").click();
+    await page.locator("#rapk-key").fill("sk-ant-bad");
+    await page.locator(".rapk-save-btn").click();
+    await expect(page.locator(".aikm-error")).toBeVisible();
+    await expect(page.locator("#rapk-key")).toBeVisible();
   });
 
   test("dashboard keeps the credit account out of the plan cards and draws its meter line", async ({ page }) => {

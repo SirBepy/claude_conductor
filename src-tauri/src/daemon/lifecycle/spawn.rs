@@ -334,7 +334,7 @@ fn api_credit_spawn_env(
 ) -> Result<crate::accounts::env::SpawnEnv, LifecycleError> {
     let api_key = load_key(&account.id).ok_or_else(|| {
         LifecycleError::AccountCredentials(format!(
-            "the API key for account \"{}\" is missing or unreadable - re-enter it in Settings > Accounts",
+            "the API key for account \"{}\" is missing or unreadable - use Replace API key in the account's menu under Settings > Accounts",
             account.label
         ))
     })?;

@@ -4,6 +4,7 @@
 // entry. In memory only: the daemon owns the figures and re-serves them on open.
 
 import { api } from "./api";
+import { isApiCreditAccount, type AccountKindLite } from "./account-chip";
 import type { ApiCreditStatus } from "../types/ipc.generated";
 
 export type ApiCreditStatusMap = Record<string, ApiCreditStatus>;
@@ -33,4 +34,18 @@ export function watchApiCreditStatus(onChange: (map: ApiCreditStatusMap) => void
     disposed = true;
     unlisten();
   };
+}
+
+/** Starts the watch only once an API-credit account exists, so a
+ * subscription-only setup never asks the daemon for figures, and only once per
+ * holder: pass back what the last call returned and it is returned untouched
+ * while a watch is live. The caller keeps the disposer (the dashboard and the
+ * Settings rows each own one, torn down with their own view). */
+export function ensureApiCreditWatch(
+  current: (() => void) | null,
+  accounts: readonly { kind?: AccountKindLite }[],
+  onChange: (map: ApiCreditStatusMap) => void,
+): (() => void) | null {
+  if (current || !accounts.some(isApiCreditAccount)) return current;
+  return watchApiCreditStatus(onChange);
 }
