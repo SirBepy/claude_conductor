@@ -115,17 +115,27 @@ describe("bare Shortcut numbers", () => {
     expect(summaryCalls()).toHaveLength(1);
   });
 
-  it("keeps a number plain when the lookup fails transiently, and retries on the next render", async () => {
-    invokeMock.mockImplementation(async (cmd) => {
-      if (cmd === "get_ticket_tracker") return SC;
-      throw new Error("SHORTCUT_API_TOKEN is not set");
-    });
-    const root = mount("<p>see 56503</p>");
-    await linkifyTickets(root, "C:/bare");
-    expect(links(root)).toEqual([]);
-    backend();
-    await linkifyTickets(root, "C:/bare");
-    expect(links(root)).toHaveLength(1);
+  it("keeps a number plain when the lookup fails transiently, and retries only after a cooldown", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      invokeMock.mockImplementation(async (cmd) => {
+        if (cmd === "get_ticket_tracker") return SC;
+        throw new Error("SHORTCUT_API_TOKEN is not set");
+      });
+      const root = mount("<p>see 56503</p>");
+      await linkifyTickets(root, "C:/bare");
+      expect(links(root)).toEqual([]);
+      // A streaming bubble re-renders on every delta; those must not re-ask.
+      await linkifyTickets(root, "C:/bare");
+      await linkifyTickets(root, "C:/bare");
+      expect(summaryCalls()).toHaveLength(1);
+      backend();
+      vi.advanceTimersByTime(61_000);
+      await linkifyTickets(root, "C:/bare");
+      expect(links(root)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("starts at most 5 lookups per render", async () => {

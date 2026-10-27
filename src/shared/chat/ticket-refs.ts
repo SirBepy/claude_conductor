@@ -81,8 +81,11 @@ const BARE_SHORTCUT = /(?:(?<![\w/.,:=$-])|(?<=\d{5,6},))\d{5,6}(?![\w-]|[.:]\d|
 // A bare number is also an Amplitude project id, a build number, an account id,
 // so it only links once the tracker confirms the story. true = exists, false =
 // the tracker said 404 (cached so a re-rendered bubble never asks again).
-// A transient failure (no token, offline) is left out so a later render retries.
+// A transient failure (no token, offline) is left out so a later render retries,
+// but only after BARE_RETRY_MS: a streaming bubble re-renders on every delta.
 const bareStory = new Map<string, boolean>();
+const bareRetryAt = new Map<string, number>();
+const BARE_RETRY_MS = 60_000;
 const bareKey = (t: Pick<TrackerInfo, "workspace">, n: string) => `${t.workspace}/${n}`;
 
 // Lookups started per render; the rest settle on a later render so a message
@@ -92,9 +95,10 @@ const BARE_LOOKUPS_PER_RENDER = 5;
 /** Forgets confirmed/missing bare-number answers (tests, tracker change). */
 export function forgetBareStories(): void {
   bareStory.clear();
+  bareRetryAt.clear();
 }
 
-/** Hits whose answer is not known yet are skipped by `link`, and their numbers returned. */
+/** Hits `link` refuses stay plain text, and their numbers are added to `pending`. */
 function linkMatches(
   root: HTMLElement,
   re: RegExp,
@@ -161,6 +165,7 @@ async function confirmBare(t: TrackerInfo, n: string): Promise<void> {
     bareStory.set(bareKey(t, n), true);
   } catch (err) {
     if (String(err instanceof Error ? err.message : err).includes("404")) bareStory.set(bareKey(t, n), false);
+    else bareRetryAt.set(bareKey(t, n), Date.now() + BARE_RETRY_MS);
   }
 }
 
@@ -169,9 +174,10 @@ export async function linkifyTickets(root: HTMLElement, cwd: string | undefined)
   const known = trackers.get(cwd);
   const t = known !== undefined ? known : await trackerFor(cwd);
   if (!t || !root.isConnected) return;
-  const pending = applyTicketLinks(root, t);
-  if (pending.length === 0) return;
-  await Promise.all(pending.slice(0, BARE_LOOKUPS_PER_RENDER).map((n) => confirmBare(t, n)));
+  const now = Date.now();
+  const due = applyTicketLinks(root, t).filter((n) => (bareRetryAt.get(bareKey(t, n)) ?? 0) <= now);
+  if (due.length === 0) return;
+  await Promise.all(due.slice(0, BARE_LOOKUPS_PER_RENDER).map((n) => confirmBare(t, n)));
   if (root.isConnected) applyTicketLinks(root, t);
 }
 
