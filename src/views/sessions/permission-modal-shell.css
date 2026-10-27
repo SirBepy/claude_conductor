@@ -427,6 +427,9 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  /* The header is space-between with three children; auto margin pushes this
+   * one against the minimize button instead of leaving it centred. */
+  margin-left: auto;
   font-size: 0.78rem;
   color: var(--color-text-muted);
 }
@@ -442,13 +445,16 @@
   display: grid;
   grid-template-columns: 74px minmax(0, 1fr);
   margin: 0;
-  border-top: 1px solid var(--color-border);
   font-size: 0.8rem;
 }
 .secret-card__ledger > * {
   padding: 8px 0;
-  border-bottom: 1px solid var(--color-border);
   min-width: 0;
+}
+/* One hairline, between the two rows: the header, input and footer already
+ * draw their own edges. */
+.secret-card__ledger > :nth-child(-n + 2) {
+  border-bottom: 1px solid var(--color-border);
 }
 .secret-card__ledger dt {
   padding-top: 10px;

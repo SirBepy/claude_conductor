@@ -26,6 +26,13 @@ test("the secret card shows only file and key, names the asker in the header, an
   await expect(card.locator(".secret-card__input")).toBeVisible();
 });
 
+test("the asker sits against the minimize button, not centred in the header", async ({ page }) => {
+  const card = await mount(page);
+  const from = await card.locator(".secret-card__from").boundingBox();
+  const min = await card.locator('[data-act="minimize"]').boundingBox();
+  expect(min!.x - (from!.x + from!.width)).toBeLessThan(16);
+});
+
 test("minimizing the secret card frees the chat behind it and restoring keeps the typed value", async ({ page }) => {
   const card = await mount(page);
   await card.locator(".secret-card__input").fill("sk-typed");
