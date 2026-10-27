@@ -125,11 +125,19 @@ describe("Add-account wizard (browser-first flow, 2026-07-08)", () => {
   // (add_account_cancel removes dirs the wizard created fresh).
   const SLUG = "wdio-wizard-e2e";
 
-  it("opens from Settings > Accounts and shows the 4-step browser-first header", async () => {
-    await browser.execute(() => window.showView("settings-accounts"));
+  // Add account first asks Claude plan or API credit; the wizard is the plan path.
+  async function openPlanWizard() {
     const addBtn = await $("#acc-add-btn");
     await addBtn.waitForClickable({ timeout: 15000 });
     await addBtn.click();
+    const plan = await $('.aac-kind-choice[data-kind="subscription"]');
+    await plan.waitForClickable({ timeout: 5000 });
+    await plan.click();
+  }
+
+  it("opens from Settings > Accounts and shows the 4-step browser-first header", async () => {
+    await browser.execute(() => window.showView("settings-accounts"));
+    await openPlanWizard();
 
     const wizard = await $(".aaw-overlay .wizard");
     await wizard.waitForExist({ timeout: 5000 });
@@ -164,9 +172,7 @@ describe("Add-account wizard (browser-first flow, 2026-07-08)", () => {
   });
 
   it("advances to the browser-login step on Create and offers both routes", async () => {
-    const addBtn = await $("#acc-add-btn");
-    await addBtn.waitForClickable({ timeout: 15000 });
-    await addBtn.click();
+    await openPlanWizard();
 
     const nameEl = await $("#aaw-name");
     await nameEl.waitForExist({ timeout: 5000 });
