@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 // asserts: src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/dashboard-page.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/dash-sections.ts, src/views/sessions/project-dashboard/dash-cards.ts, src/views/sessions/project-dashboard/dash-reports.ts, src/views/sessions/project-dashboard/dash-header.ts, src/views/sessions/project-dashboard/dash-modals.ts, src/views/sessions/project-dashboard/dash-menu.ts, src/views/sessions/project-dashboard/dash-chats.ts, src/views/sessions/project-dashboard/dash-usage.ts, src/views/sessions/project-dashboard/dash-todo-chart.ts, src/views/sessions/project-dashboard/quick-track.ts, src/views/sessions/project-dashboard/paging.ts, src/views/sessions/session-header.ts, src/views/sessions/pending-pane.ts, src/views/sessions/session-controls.ts, src/views/sessions/state.ts
-import { capture, fireEvent, mountSessionsList, sessionInstance } from "./harness";
+import { capture, fireEvent, mountSessionsList, sessionInstance, waitForStableBox } from "./harness";
 import {
   CONDUCTOR_CWD, LIST_ROWS, ZIRTUE_CWDS, conductorHistory, conductorSnapshot, fakeShot, zirtueHistory, zirtueSnapshot,
 } from "./project-dashboard-fixtures";
@@ -94,6 +94,34 @@ async function openDraft(page: Page, path: string, name: string): Promise<void> 
 }
 
 test.describe("view-harness / project dashboard", () => {
+  test("held Alt fades a keycap in under the model and effort values without moving the header, and fades it out on release", async ({ page }) => {
+    await mountWithDashboard(page);
+    await openDraft(page, CONDUCTOR_CWD, "claude_usage_in_taskbar");
+    const header = page.locator("#session-pane .session-header");
+    const model = header.locator(".meta-cfg-model");
+    const cap = (loc: typeof model) => loc.evaluate((el) => {
+      const s = getComputedStyle(el, "::after");
+      return { opacity: Number(s.opacity), content: s.content, position: s.position };
+    });
+    // The header's own height settles as the draft's chips and badges load.
+    await waitForStableBox(page, "#session-pane .session-header");
+    const before = await header.boundingBox();
+    expect(await cap(model)).toMatchObject({ opacity: 0, position: "absolute" });
+
+    await page.keyboard.down("Alt");
+    await page.waitForTimeout(350);
+    expect(await cap(model)).toMatchObject({ opacity: 1, content: expect.stringContaining("Alt") });
+    expect(await cap(header.locator(".meta-cfg-effort"))).toMatchObject({ opacity: 1 });
+    // The draft header's own layout can settle by one pixel late; a keycap in
+    // flow would add a whole line (12px+).
+    expect(Math.abs((await header.boundingBox())!.height - before!.height)).toBeLessThanOrEqual(1);
+    await capture(page, "alt-hint-held");
+
+    await page.keyboard.up("Alt");
+    await page.waitForTimeout(300);
+    expect(await cap(model)).toMatchObject({ opacity: 0 });
+  });
+
   test("the chat header's project name opens the page: back, header, past results first, chips last", async ({ page }) => {
     await mountWithDashboard(page);
     await openPageFrom(page, "s-q");
