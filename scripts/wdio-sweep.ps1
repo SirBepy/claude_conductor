@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Runs the whole wdio release-gate sweep in one call: the 7 free specs (daemon-lifecycle last),
+  Runs the whole wdio release-gate sweep in one call: the 8 free specs (daemon-lifecycle last),
   then chat-flow and reload-dup, with every spec's full output kept on disk and a one-line verdict
   printed per spec. See .claude/todos/1121-wdio-sweep-script.md.
 
@@ -12,7 +12,7 @@
   encodes the gate rules instead of re-deriving them under time pressure each release:
 
   - Free specs (no quota): smoke, held-messages, multi-account, news-redesign, question-card,
-    schedule-view, daemon-lifecycle. probe.e2e.js is a debugging harness, not a suite member, and
+    schedule-view, preview-popout, daemon-lifecycle. probe.e2e.js is a debugging harness, not a suite member, and
     is never included.
   - daemon-lifecycle runs LAST: a seeding spec run right after it can fail its own `before all`
     with a false 15s row timeout ([[project_wdio_daemon_lifecycle_poisons_next_spec]], todo 957).
@@ -74,6 +74,10 @@ param(
 
     [switch]$Visible,
 
+    # Runs only these specs (names without .e2e.js), in the sweep's own order. Comma-separated
+    # also works, which is how the headless copy receives it.
+    [string[]]$Spec,
+
     # Internal: set on the copy Invoke-SweepInSupervisor launches, which runs the sweep itself.
     [switch]$InSupervisor,
 
@@ -118,6 +122,7 @@ $freeSpecs = @(
     'news-redesign',
     'question-card',
     'schedule-view',
+    'preview-popout',
     'daemon-lifecycle'
 )
 $chatSpecs = @('chat-flow', 'reload-dup')
@@ -375,6 +380,16 @@ if ($MyInvocation.InvocationName -ne '.') {
     }
     if ($Billed) {
         $plan += [PSCustomObject]@{ Spec = $billedOnlySpec; Env = @{} }
+    }
+    if ($Spec) {
+        $wanted = @($Spec | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $known = @($plan | ForEach-Object { $_.Spec }) + $billedOnlySpec
+        $unknown = @($wanted | Where-Object { $_ -notin $known })
+        if ($unknown.Count -gt 0) { throw "Unknown spec(s) for -Spec: $($unknown -join ', '). Known: $($known -join ', ')." }
+        $plan = @($plan | Where-Object { $_.Spec -in $wanted })
+        if ($wanted -contains $billedOnlySpec -and -not $Billed) {
+            $plan += [PSCustomObject]@{ Spec = $billedOnlySpec; Env = @{} }
+        }
     }
 
     $results = @()

@@ -1,7 +1,19 @@
 //! The `session-preview` pop-out window: build/open/close. Split out of
 //! `window.rs` at ai_todo 623.
 
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
+
+/// The chat the pop-out is showing right now. The one window is reused across
+/// chats (`preview-window-set-session`), so the session it was BUILT for goes
+/// stale on the first reuse. Docking back on that stale id left the real chat
+/// believing Preview was still popped, and its next pushed preview called
+/// `open_preview_window`, which un-hid the window Joe had closed.
+static SHOWN_SESSION: Mutex<String> = Mutex::new(String::new());
+
+fn set_shown_session(session_id: &str) {
+    *SHOWN_SESSION.lock().unwrap() = session_id.to_string();
+}
 
 /// Open (or focus) the preview pop-out window (todo 290), scoped to
 /// `session_id`. Mirrors `open_chats_for_session`'s exists-vs-build split.
@@ -19,6 +31,7 @@ pub fn open_preview_window(
 ) -> Result<(), String> {
     crate::ipc::chat::attachments::validate_session_id(&session_id)?;
     let label = "session-preview";
+    set_shown_session(&session_id);
     if let Some(existing) = app.get_webview_window(label) {
         super::activation::before_show(&app, label);
         let _ = existing.show();
@@ -51,7 +64,7 @@ fn build_preview_window(app: &AppHandle, session_id: &str) -> Result<(), String>
     .background_color(tauri::window::Color(22, 21, 31, 255))
     .build()
     .map_err(|e| e.to_string())?;
-    attach_dock_back_on_close(&window, session_id);
+    attach_dock_back_on_close(&window);
     crate::ipc::ready::watch(app, "session-preview", &url);
     Ok(())
 }
@@ -62,12 +75,14 @@ fn build_preview_window(app: &AppHandle, session_id: &str) -> Result<(), String>
 /// `cc_preview_panel_popped:<id>` flag outlives the window, and the rail then
 /// refuses to show in BOTH places - preview becomes unreachable.
 ///
+/// Names `SHOWN_SESSION`, read at close time, never a session captured here.
+///
 /// Fires for `close_preview_window`'s programmatic close too. That is fine:
 /// the rail re-derives its open state from storage, which the pop-out writes
 /// before asking for the close.
-fn attach_dock_back_on_close(window: &tauri::WebviewWindow, session_id: &str) {
-    let sid = session_id.to_string();
+fn attach_dock_back_on_close(window: &tauri::WebviewWindow) {
     super::attach_hide_to_tray_with(window, move |app| {
+        let sid = SHOWN_SESSION.lock().unwrap().clone();
         let _ = app.emit(
             "preview-window-docked",
             serde_json::json!({ "sessionId": sid }),

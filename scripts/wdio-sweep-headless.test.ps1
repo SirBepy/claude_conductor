@@ -27,6 +27,8 @@ $cmd = Get-InSupervisorCommand -ScriptPath 'C:\repo\scripts\wdio-sweep.ps1' -Ver
 foreach ($want in '-InSupervisor', '-VerdictFile C:\tmp\v.txt', '-Billed', '-RealClaude', '-FakeClaudeBin C:\tmp\fake\claude.cmd') {
     if (-not $cmd.Contains($want)) { $failures += "switches: '$want' missing from '$cmd'" }
 }
+$cmd = Get-InSupervisorCommand -ScriptPath 'C:\repo\scripts\wdio-sweep.ps1' -Spec 'smoke', 'preview-popout'
+if (-not $cmd.EndsWith('-Spec smoke,preview-popout')) { $failures += "spec filter: got '$cmd'" }
 
 # A space would reach cmd /c mangled; refusing is the only safe answer.
 $threw = $false
