@@ -247,7 +247,8 @@ export class SplitPanels implements PanelHost {
       // Only an explicit show/close writes the flag. A chat switch lands on
       // another panel while a Preview pushed behind it is still pending, and
       // writing `shown=false` then would erase that pending state.
-      if (!scoping && !this.popped && this.panels.includes("preview")) savePreviewOpen(this.sessionId, shown);
+      // Switching panels in front of that pending Preview must not erase it either.
+      if (!scoping && !this.popped && this.panels.includes("preview")) savePreviewOpen(this.sessionId, shown || this.previewUnseen);
     }
     this.renderStrip();
     this.deps.onChange();

@@ -264,6 +264,18 @@ test("a Preview pushed behind Drafts stays pending across chat switches", async 
   }
 });
 
+test("a Preview pushed behind Drafts stays pending after switching to another panel and chat", async ({ page }) => {
+  await mountPane(page, PREVIEW_MOCKS);
+  await tab(page, "drafts").click();
+  await fireEvent(page, "preview", [{ snapshot: { ...PREVIEW_MOCKS.list_previews[0], id: "snap-2", version: 3 } }]);
+  await tab(page, "todos").click();
+  await expect(panel(page)).toHaveAttribute("data-active", "todos");
+
+  await scopeTo(page, "sess-B");
+  await scopeTo(page, VIEWER);
+  await expect(tab(page, "preview").locator(".sp-dot")).toHaveCount(1);
+});
+
 test("a Preview pushed to a background chat is still pending on the second return to it", async ({ page }) => {
   await mountPane(page, PREVIEW_MOCKS);
   await tab(page, "drafts").click();
