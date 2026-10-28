@@ -183,7 +183,7 @@ describe("draft dashboard motion", () => {
     await vi.waitFor(() => expect(chips(pane)).toEqual(["/pickup", "/audit"]));
     animations.length = 0;
     leaveDraftDashboard(pane);
-    expect(animations.map((a) => a.el.className)).toEqual(["pd-draft", "pd-qa-host is-draft"]);
+    expect(animations.map((a) => a.el.className)).toEqual(["pd-draft pd-ghost", "pd-qa-host is-draft pd-ghost"]);
     expect(pane.querySelectorAll(".pd-draft")).toHaveLength(1);
     expect(pane.querySelector(".pd-draft").inert).toBe(true);
     // No live dashboard is left: a refetch cannot repaint into the copy.
@@ -191,6 +191,33 @@ describe("draft dashboard motion", () => {
     for (const a of animations) a.onfinish();
     expect(pane.querySelector(".pd-draft")).toBeNull();
     expect(pane.querySelector(".pd-qa-host")).toBeNull();
+  });
+
+  it("the send's header rebind leaves the fading copy to finish its fold", async () => {
+    const pane = await mountDraft("C:/Projects/conductor");
+    await vi.waitFor(() => expect(chips(pane)).toEqual(["/pickup", "/audit"]));
+    leaveDraftDashboard(pane);
+    unmountDraftDashboard(pane);
+    expect(pane.querySelector(".pd-draft.pd-ghost")).not.toBeNull();
+    expect(pane.querySelector(".pd-qa-host.pd-ghost")).not.toBeNull();
+  });
+
+  it("a send mid-entrance keeps a section that has not arrived yet hidden in the fading copy", async () => {
+    const pane = await mountDraft("C:/Projects/conductor");
+    await vi.waitFor(() => expect(chips(pane)).toEqual(["/pickup", "/audit"]));
+    // jsdom has no Web Animations: stand in for a section still waiting out its delay.
+    const waiting = pane.querySelector(".pd-reports");
+    waiting.getAnimations = () => [{}];
+    const native = window.getComputedStyle;
+    window.getComputedStyle = (el, ...rest) => (el === waiting ? { opacity: "0", transform: "matrix(1, 0, 0, 1, 0, 10)" } : native(el, ...rest));
+    try {
+      leaveDraftDashboard(pane);
+    } finally {
+      window.getComputedStyle = native;
+    }
+    const copy = pane.querySelector(".pd-ghost .pd-reports");
+    expect(copy.style.opacity).toBe("0");
+    expect(copy.style.transform).toBe("matrix(1, 0, 0, 1, 0, 10)");
   });
 });
 

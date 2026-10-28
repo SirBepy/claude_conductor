@@ -60,6 +60,22 @@ export function playEntrance(root: HTMLElement, chips: HTMLElement): void {
   });
 }
 
+/** Copies where `live`'s still-running entrance has each section right now
+ *  onto `copy`, a deep clone of it. A clone inherits none of the original's
+ *  animations, so a section still waiting out its delay would otherwise show
+ *  at full opacity in the copy and pop in just as the copy starts to fade. */
+export function freezeEntrance(live: HTMLElement, copy: HTMLElement): void {
+  const from = [live, ...live.querySelectorAll<HTMLElement>("*")];
+  const to = [copy, ...copy.querySelectorAll<HTMLElement>("*")];
+  from.forEach((el, i) => {
+    const target = to[i];
+    if (!target || !el.getAnimations?.().length) return;
+    const cs = getComputedStyle(el);
+    target.style.opacity = cs.opacity;
+    target.style.transform = cs.transform;
+  });
+}
+
 /** Fades a detached copy of a dashboard part out and folds its height to
  *  nothing, so whatever sits below it glides up instead of jumping. Removes
  *  the copy when done. */
