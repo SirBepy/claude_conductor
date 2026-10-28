@@ -18,7 +18,7 @@
   background: var(--color-surface-alt);
 }
 
-.cm-editor {
+.cm-editor-pane {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -26,7 +26,7 @@
   background: var(--color-surface);
 }
 
-.cm-editor > [hidden] {
+.cm-editor-pane > [hidden] {
   display: none !important;
 }
 

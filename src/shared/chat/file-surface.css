@@ -55,6 +55,24 @@
   font: 12px "Fira Code", ui-monospace, monospace;
 }
 
+/* Quiet: only a reason the file can't be edited, or a failed autosave. */
+.fs-status {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.fs-status:empty {
+  display: none;
+}
+
+.fs-status.fs-status-err {
+  color: var(--color-danger);
+}
+
 .fs-search {
   display: flex;
   align-items: center;
@@ -215,6 +233,29 @@
      glyphs that are not what the diff changed. */
   font-variant-ligatures: none;
   user-select: text;
+}
+
+/* The editor scrolls itself; the body only gives it the height. */
+.fs-body:has(> .fs-editor) {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.fs-editor {
+  flex: 1;
+  min-height: 0;
+}
+
+.fs-body:has(> .fs-editor) > .fs-truncated {
+  flex-shrink: 0;
+}
+
+/* Rendered markdown reads as prose, not as the body's code font. */
+.fs-md {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-variant-ligatures: normal;
+  max-width: 880px;
 }
 
 .fs-loading,

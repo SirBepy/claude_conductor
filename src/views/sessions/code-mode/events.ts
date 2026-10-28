@@ -137,6 +137,15 @@ export function createHandleKey(inst: CodeModeInstance): (e: KeyboardEvent) => v
   return (e: KeyboardEvent): void => {
     const t = e.target instanceof HTMLElement ? e.target : null;
     const inField = t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement;
+    // The File view's editor: its keys are typing, not Code mode commands.
+    const inEditor = !!t?.closest(".fe-host");
+    if (e.key === "Escape" && inEditor && !t?.closest(".fs-search")) {
+      // First Esc leaves the editor, the next one leaves Code mode.
+      e.preventDefault();
+      e.stopPropagation();
+      t?.blur();
+      return;
+    }
     if (e.key === "Escape") {
       // Inner layers close first; the mode itself only on a bare Esc.
       if (t?.closest(".fs-search, .cm-bmenu") || inst.root.querySelector(".fs-menu:not(.fs-hidden)") || document.querySelector(".cm-ctx")) return;
@@ -153,6 +162,7 @@ export function createHandleKey(inst: CodeModeInstance): (e: KeyboardEvent) => v
       e.stopPropagation();
       return;
     }
+    if (inEditor) return;
     if (e.key === "Backspace" && (inst.view.scope.kind === "commit" || inst.view.scope.kind === "pr" || inst.view.scope.kind === "branch")) {
       e.preventDefault();
       inst.scopeBack();

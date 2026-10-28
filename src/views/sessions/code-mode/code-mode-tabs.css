@@ -136,7 +136,7 @@
   border-right: 0;
 }
 
-.cm-phone .cm-body[data-screen="explorer"] .cm-editor,
+.cm-phone .cm-body[data-screen="explorer"] .cm-editor-pane,
 .cm-phone .cm-body[data-screen="file"] .cm-explorer {
   display: none;
 }

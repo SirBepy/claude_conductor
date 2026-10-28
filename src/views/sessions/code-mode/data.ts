@@ -89,6 +89,7 @@ function gitSurface(cwd: string, f: PrFileChange, range: Range, sessionId?: stri
         cwd, from: range.from, to: range.to, path: f.path, context: full ? FULL_FILE_CONTEXT : null, sessionId,
       }),
     fileAtRev: () => invoke<TextFileData>("get_file_at_rev", { cwd, rev, path: f.path, sessionId }),
+    onDisk: rev === null,
   };
 }
 
@@ -98,6 +99,7 @@ export function plainSurface(cwd: string, path: string, sessionId?: string | nul
     path,
     absPath: absPath(cwd, path),
     fileAtRev: () => invoke<TextFileData>("get_file_at_rev", { cwd, rev: null, path, sessionId }),
+    onDisk: true,
   };
 }
 
@@ -192,6 +194,7 @@ export function chatFiles(ctx: ScopeCtx): Map<string, ScopeFile> {
         fileAtRev: outside
           ? () => Promise.reject(new Error("This file is outside the chat's repo; only its diff is available."))
           : () => invoke<TextFileData>("get_file_at_rev", { cwd: ctx.cwd, rev: null, path, sessionId: ctx.sessionId }),
+        onDisk: !outside,
       },
     });
   }

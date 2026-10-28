@@ -1,7 +1,8 @@
 // Code mode: one place to read code and review changes. A mode the chat view
 // enters and leaves (Esc, or the back pill), covering the chat list and the
 // chat with a file explorer on the left and file tabs + diff on the right.
-// It can also live in its own OS window (popout.ts). Read-only.
+// It can also live in its own OS window (popout.ts). Working-tree files are
+// editable in the File view (file-editor.ts); diffs and past revisions are not.
 
 import { escapeHtml } from "../../../shared/escape-html";
 import { basename } from "../../../shared/path-utils";
@@ -10,6 +11,7 @@ import { registerOverlayBack } from "../../../shared/back-button";
 import { state } from "../state";
 import { isMirrored } from "../sessions-helpers";
 import { createFileSurface, type FileSurfaceHandle, type SurfaceFile } from "../../../shared/chat/file-surface";
+import { openFileInApp } from "../../../shared/open-file";
 import type { FileEditView } from "../../../shared/chat/file-edits";
 import type { CodeModeTarget } from "../../../shared/chat/code-mode-bridge";
 import type { BranchSwitcher } from "./branch-switcher";
@@ -236,7 +238,7 @@ export class CodeModeInstance {
       + `<span class="grow"></span>${trail}</div>`
       + `<div class="cm-body">`
       + `<section class="cm-explorer"></section>`
-      + `<section class="cm-editor">`
+      + `<section class="cm-editor-pane">`
       + `<div class="cm-tabs"><button class="cm-ib cm-files-back" data-act="screen-explorer" aria-label="Back to files"><i class="ph ph-arrow-left"></i></button><div class="cm-tabrow" role="tablist"></div><div class="cm-tools"></div></div>`
       + `<div class="cm-desc pr-modal-body-content" hidden></div>`
       + `<div class="cm-surface"></div>`
@@ -253,7 +255,12 @@ export class CodeModeInstance {
       empty: root.querySelector(".cm-empty")!,
       body: root.querySelector(".cm-body")!,
     };
-    this.surface = createFileSurface(this.els.surfaceHost, { defaultView: "diff", toolsHost: this.els.tools });
+    this.surface = createFileSurface(this.els.surfaceHost, {
+      defaultView: "diff",
+      toolsHost: this.els.tools,
+      canEdit: () => !this.phone && !isMirroredChat(chat),
+      openPath: (p) => openFileInApp(p),
+    });
     chat.layout.appendChild(root);
     chat.layout.classList.add("code-mode-on");
     // Nothing typed while reading code should land in the hidden composer.

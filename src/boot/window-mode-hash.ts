@@ -1,6 +1,6 @@
 // Window-mode hash parsing, shared shape across main.ts's "detect before
 // mounting the normal router" window modes (detached session, preview
-// pop-out, code mode pop-out). Each backend-opened window encodes its target
+// pop-out, code mode pop-out, Files window). Each backend-opened window encodes its target
 // in the URL hash (plus a query flag for preview/code) rather than a route
 // name, since the router would otherwise treat it as an unknown view.
 
@@ -38,4 +38,19 @@ export function codeSessionFromHash(): string | null {
   const qIdx = hash.indexOf("?");
   if (qIdx < 0) return null;
   return new URLSearchParams(hash.slice(qIdx + 1)).get("session");
+}
+
+// The Files window, same detect-before-router shape: backend opens
+// `index.html?filewindow=1#file?path=<path>[&line=<n>]`.
+export function fileWindowTargetFromHash(): { path: string; line: number | null } | null {
+  if (new URLSearchParams(window.location.search).get("filewindow") !== "1") return null;
+  const hash = window.location.hash || "";
+  if (!hash.startsWith("#file")) return null;
+  const qIdx = hash.indexOf("?");
+  if (qIdx < 0) return null;
+  const params = new URLSearchParams(hash.slice(qIdx + 1));
+  const path = params.get("path");
+  if (!path) return null;
+  const line = Number(params.get("line"));
+  return { path, line: Number.isInteger(line) && line > 0 ? line : null };
 }

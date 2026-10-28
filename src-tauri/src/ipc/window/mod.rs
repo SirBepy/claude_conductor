@@ -29,6 +29,7 @@ use tauri::{AppHandle, Emitter, Manager};
 pub mod activation;
 pub mod chats;
 pub mod code;
+pub mod file;
 pub mod jarvis;
 pub mod preview;
 pub mod schedule;

@@ -35,6 +35,7 @@ export interface DashActions {
   openIn(anchor: HTMLElement, kind: "vscode" | "terminal" | "explorer"): void;
   openChat(sessionId: string): void;
   openHistory(sessionId: string): void;
+  /** In the app's own Files window. */
   openFile(path: string): void;
   openUrl(url: string): void;
   openAllHistory(): void;

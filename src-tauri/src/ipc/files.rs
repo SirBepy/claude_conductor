@@ -15,7 +15,7 @@ mod write_guard;
 
 use open_external_guard::is_allowed_external_url;
 pub use temp_files::*;
-use write_guard::{write_text_file_impl, write_text_file_roots};
+use write_guard::{stat_text_file_impl, write_text_file_impl, write_text_file_roots};
 
 /// `pub(crate)` pure local read, reused directly by the daemon's own
 /// `list_project_files` RPC handler (`daemon/methods/files.rs`) - see
@@ -343,19 +343,43 @@ pub async fn reveal_file_in_explorer(path: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Overwrite a local text file from the in-app file editor (ai_todo 95 slice 3).
+/// What the in-app editor needs besides a file's content: its mtime, to
+/// notice a change made on disk while it is open, and whether
+/// `write_text_file` would accept it.
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct TextFileStamp {
+    #[ts(type = "number")]
+    pub mtime_us: u64,
+    pub writable: bool,
+}
+
+/// The editor reads this before `read_text_file`, then polls it while the
+/// file is open: cheap enough to poll, unlike re-reading the content.
+#[tauri::command]
+pub async fn stat_text_file(path: String, state: State<'_, AppState>) -> Result<TextFileStamp, String> {
+    let roots = write_text_file_roots(&state);
+    tauri::async_runtime::spawn_blocking(move || stat_text_file_impl(&path, &roots))
+        .await
+        .map_err(|e| format!("stat_text_file join error: {e}"))?
+}
+
+/// Overwrite a local text file from the in-app file editor's autosave.
 /// The counterpart to `read_text_file`: writes an absolute path, but one
 /// confined to a registered project root or the app data dir -
 /// not any path on disk. The frontend only enables editing for files that
 /// were read whole (not truncated), so a save can never drop a capped tail.
+/// `expected_mtime_us` is the stamp the editor last loaded or wrote; the
+/// write is refused with `CHANGED_ON_DISK` if the file has moved on since.
 #[tauri::command]
 pub async fn write_text_file(
     path: String,
     content: String,
+    expected_mtime_us: Option<u64>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let roots = write_text_file_roots(&state);
-    tauri::async_runtime::spawn_blocking(move || write_text_file_impl(&path, &content, &roots))
+    tauri::async_runtime::spawn_blocking(move || write_text_file_impl(&path, &content, expected_mtime_us, &roots))
         .await
         .map_err(|e| format!("write_text_file join error: {e}"))?
 }

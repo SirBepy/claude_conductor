@@ -312,8 +312,10 @@ test.describe("view-harness / Code mode", () => {
     });
     await openCodeMode(page);
     const code = page.locator(".code-mode");
-    await code.locator('[data-file="README.md"]').click();
-    const lines = code.locator(".fs-code-view .line");
+    // Not README.md: markdown opens rendered, and this asserts source rows.
+    await expandAll(code);
+    await code.locator('[data-file="src/main.ts"]').click();
+    const lines = code.locator(".fs-body .cm-line");
     await expect(lines.first()).toBeVisible();
     const a = (await lines.nth(0).boundingBox())!;
     const b = (await lines.nth(1).boundingBox())!;
@@ -328,7 +330,7 @@ test.describe("view-harness / Code mode", () => {
     await expandAll(code);
     await code.locator('[data-file="src/shared/shortcuts.ts"]').click();
     const explorer = (await code.locator(".cm-explorer").boundingBox())!;
-    const editor = (await code.locator(".cm-editor").boundingBox())!;
+    const editor = (await code.locator(".cm-editor-pane").boundingBox())!;
     expect(explorer.width).toBeLessThanOrEqual(201);
     expect(editor.width).toBeGreaterThanOrEqual(300);
   });
@@ -361,11 +363,41 @@ test.describe("view-harness / Code mode", () => {
     const code = page.locator(".code-mode");
     await expect(code).toBeVisible();
     await expect(code.locator(".cm-tab.on")).toContainText("main.ts");
-    const target = code.locator(".fs-code-view .line.fs-line-target");
+    // The editor's cursor sits on the chip's line, which it marks.
+    const target = code.locator(".fs-body .cm-activeLine");
     await expect(target).toHaveCount(1);
     await expect(target).toHaveText("const main = 3;");
     expect(await page.evaluate(() => (window as unknown as { __calls: string[] }).__calls)).not.toContain("open_in_editor");
     await shot(page, "code-mode-file-chip-line");
+  });
+
+  test("a file chip outside the chat's repo opens the Files window, not VS Code", async ({ page }) => {
+    await mount(page);
+    await page.evaluate(async () => {
+      const w = window as unknown as {
+        __TAURI__: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
+        __calls: { cmd: string; args?: Record<string, unknown> }[];
+      };
+      const orig = w.__TAURI__.core.invoke;
+      w.__calls = [];
+      w.__TAURI__.core.invoke = (cmd, args) => {
+        w.__calls.push({ cmd, args });
+        return cmd === "open_file_window" ? Promise.resolve(null) : orig(cmd, args);
+      };
+      const { linkifyFilePaths } = await import("/shared/chat/file-refs.ts");
+      const msg = document.createElement("div");
+      msg.className = "msg assistant";
+      msg.innerHTML = `<p>See <code>C:/Elsewhere/notes/todo.md:4</code> now.</p>`;
+      document.querySelector("#session-pane .session-messages")!.appendChild(msg);
+      linkifyFilePaths(msg);
+    });
+    await page.locator("#session-pane .file-ref", { hasText: "todo.md:4" }).click();
+    const calls = () => page.evaluate(() => (window as unknown as { __calls: { cmd: string; args?: Record<string, unknown> }[] }).__calls);
+    await expect.poll(async () => (await calls()).map((c) => c.cmd)).toContain("open_file_window");
+    const open = (await calls()).find((c) => c.cmd === "open_file_window")!;
+    expect(open.args).toEqual({ path: "C:\\Elsewhere\\notes\\todo.md", line: 4 });
+    expect((await calls()).map((c) => c.cmd)).not.toContain("open_in_editor");
+    await expect(page.locator(".code-mode")).toHaveCount(0);
   });
 
   test("Ctrl+Shift+E enters and leaves", async ({ page }) => {

@@ -172,7 +172,14 @@ export function itemActions(host: ActionHost, item: CtxItem): MenuItem[] {
       return [{ icon: "copy", label: "Copy commit hash", run: () => copy(item.sha, "commit hash") }];
     case "file": {
       const out: MenuItem[] = [];
-      if (item.exists && !remote) out.push({ icon: "code", label: "Open in VS Code", run: () => c.act.openFile(item.path) });
+      if (item.exists && !remote) {
+        out.push({ icon: "file-text", label: "Open", run: () => c.act.openFile(item.path) });
+        out.push({
+          icon: "code",
+          label: "Open in VS Code",
+          run: () => void invoke<void>("open_in_editor", { path: item.path }).catch((err) => showToast(`Could not open the file: ${String(err)}`)),
+        });
+      }
       out.push({ icon: "copy", label: "Copy path", run: () => copy(item.path, "path") });
       return out;
     }

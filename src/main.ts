@@ -41,7 +41,7 @@ import { initWindowTitlebar } from "./shared/window-titlebar";
 import { initCursorAutohide } from "./shared/cursor-autohide";
 import { installE2eSeams } from "./boot/e2e-seams";
 import { installPrintBlock } from "./shared/print-block";
-import { detachedSessionFromHash, previewSessionFromHash, codeSessionFromHash } from "./boot/window-mode-hash";
+import { detachedSessionFromHash, previewSessionFromHash, codeSessionFromHash, fileWindowTargetFromHash } from "./boot/window-mode-hash";
 import { installChatsWindowMessaging } from "./boot/chats-window-messaging";
 import { setupUpdateToast } from "./shared/update-toast";
 import "./missed-panel.css";
@@ -195,6 +195,13 @@ if (codeSessionId) {
   document.getElementById("sidemenuBackdrop")?.remove();
 }
 
+const fileWindowTarget = fileWindowTargetFromHash();
+if (fileWindowTarget) {
+  document.body.classList.add("file-window-mode");
+  document.getElementById("sidemenu")?.remove();
+  document.getElementById("sidemenuBackdrop")?.remove();
+}
+
 // Opt out of the back-forward cache: bfcache-freezing this tab while
 // Android's native file picker is open on top of it drops the picker's
 // result on return with no error - the mobile "picker opens, nothing
@@ -261,6 +268,12 @@ if (detachedSessionId) {
   void api.getSettings().then((s) => { if (s) applySettingsToDocument(s); });
   followAppearanceChanges();
   void import("./views/sessions/code-mode/popout").then((m) => m.mountCodeWindow(app, codeSessionId));
+} else if (fileWindowTarget) {
+  // Solo Files window render; no router, no sidemenu, no boot.
+  document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
+  void api.getSettings().then((s) => { if (s) applySettingsToDocument(s); });
+  followAppearanceChanges();
+  void import("./views/file-window/file-window").then((m) => m.mountFileWindow(app, fileWindowTarget));
 } else if (previewSessionId) {
   // Solo preview render; no router, no sidemenu, no boot.
   document.querySelectorAll<HTMLElement>("body > .view").forEach((el) => el.classList.add("hidden"));
