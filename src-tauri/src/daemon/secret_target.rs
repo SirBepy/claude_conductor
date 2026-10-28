@@ -167,12 +167,17 @@ pub(crate) struct TempSecrets {
 }
 
 impl TempSecrets {
-    /// Re-recording the same file+key keeps the first entry: its
-    /// `created_file` is the one that knows whether the file predates us.
-    pub(crate) fn record(&self, entry: TempSecret) {
+    /// Re-recording the same file+key keeps the first entry's `created_file`:
+    /// it is the one that knows whether the file predates us. Another chat
+    /// asking for the same key becomes a second holder of the one line on
+    /// disk, which stays until the last holder closes.
+    pub(crate) fn record(&self, mut entry: TempSecret) {
         let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        if guard.iter().any(|e| e.file == entry.file && e.key == entry.key) {
-            return;
+        if let Some(first) = guard.iter().find(|e| e.file == entry.file && e.key == entry.key) {
+            if first.session_id == entry.session_id {
+                return;
+            }
+            entry.created_file = first.created_file;
         }
         guard.push(entry);
     }
@@ -191,8 +196,8 @@ impl TempSecrets {
     }
 
     /// Remove every temporary secret `session_id` holds. Returns how many were
-    /// taken off disk or found already gone. Logs file paths and key names,
-    /// never values.
+    /// taken off disk or found already gone; a line another chat still holds
+    /// stays and is not counted. Logs file paths and key names, never values.
     pub(crate) fn sweep_session(&self, session_id: &str) -> usize {
         let taken: Vec<TempSecret> = {
             let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
@@ -201,7 +206,12 @@ impl TempSecrets {
             *guard = rest;
             mine
         };
+        let mut removed = 0;
         for entry in &taken {
+            if self.held_elsewhere(entry) {
+                continue;
+            }
+            removed += 1;
             if let Err(e) = remove_entry(entry) {
                 log::warn!(
                     "[secret-relay] could not remove temporary secret {} from {}: {e}",
@@ -210,7 +220,13 @@ impl TempSecrets {
                 );
             }
         }
-        taken.len()
+        removed
+    }
+
+    /// Another chat still holds the same line, so this chat's close leaves it.
+    fn held_elsewhere(&self, entry: &TempSecret) -> bool {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.iter().any(|e| e.file == entry.file && e.key == entry.key)
     }
 }
 
@@ -372,6 +388,25 @@ mod tests {
 
         assert_eq!(reg.live_for("s1"), 1);
         reg.sweep_session("s1");
+        assert!(!file.exists());
+    }
+
+    /// Two chats sharing one temporary key: the first to close leaves the line
+    /// the other still uses, and the last one out removes it, file included
+    /// when the first chat's write created it.
+    #[test]
+    fn a_line_two_chats_hold_goes_when_the_last_one_closes() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        std::fs::write(&file, "API_KEY=sk-new\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(entry("s1", &file, "API_KEY", true));
+        reg.record(entry("s2", &file, "API_KEY", false));
+
+        assert_eq!(reg.sweep_session("s1"), 0);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "API_KEY=sk-new\n");
+
+        assert_eq!(reg.sweep_session("s2"), 1);
         assert!(!file.exists());
     }
 
