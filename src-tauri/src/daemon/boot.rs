@@ -123,6 +123,8 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // `to` (multi-machine chat parity): reached only via a paired peer's
     // forwarded call, gated `M`-only in `remote_transport_table::TRANSPORT_TABLE`.
     methods::spawn_chat::register_spawn_chat_rpc(&mut router, state.clone());
+    // Desktop-pipe-only: the Backlog panel's "Start a chat on it".
+    methods::spawn_chat::register_todo_chat_rpc(&mut router, state.clone());
     methods::channel::register_channel_rpc(&mut router, state.clone());
     // Mirrored-session forwarding seam (multi-machine federation): must run
     // after every register_* call above so it can consult the fully-built

@@ -7,7 +7,9 @@
 //! times).
 
 use super::snapshot_types::{TodoDay, TodoStats};
+use super::todo_ids::{parse_claim_name, parse_file_name, parse_wanted, TodoKey, Wanted, LEGACY_LABEL};
 use chrono::{Duration, Local, NaiveDate};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -46,29 +48,47 @@ pub fn is_backlog_file(p: &Path) -> bool {
 /// pid check lives in the claim script and is not worth duplicating here.
 const CLAIM_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(4 * 60 * 60);
 
-/// Whether todo `id` holds a live claim in `<todos_dir>/.claims/`. A colliding
-/// id is claimed as `<id>-<slug>.claim`, so both spellings count. An mtime
-/// that cannot be read, or that lies in the future (clock skew), counts as
-/// live: hiding a real claim is worse than showing a stale one.
-pub fn claim_is_live(todos_dir: &Path, id: &str) -> bool {
-    let Ok(entries) = std::fs::read_dir(todos_dir.join(".claims")) else { return false };
-    let slug_prefix = format!("{id}-");
-    let exact = format!("{id}.claim");
-    entries.flatten().any(|ent| {
-        let name = ent.file_name().to_string_lossy().into_owned();
-        if name != exact && !(name.starts_with(&slug_prefix) && name.ends_with(".claim")) {
-            return false;
-        }
-        let age = ent.metadata().and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok());
-        age.is_none_or(|a| a < CLAIM_STALE_AFTER)
-    })
+/// File names in `<todos_dir>/.claims/` that still count as a held claim. An
+/// mtime that cannot be read, or that lies in the future (clock skew), counts
+/// as live: hiding a real claim is worse than showing a stale one.
+fn live_claim_names(todos_dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(todos_dir.join(".claims")) else { return Vec::new() };
+    entries
+        .flatten()
+        .filter(|ent| {
+            let age = ent.metadata().and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok());
+            age.is_none_or(|a| a < CLAIM_STALE_AFTER)
+        })
+        .map(|ent| ent.file_name().to_string_lossy().into_owned())
+        .collect()
 }
 
-/// The numeric id a todo file starts with (`1264-handoff-x.md` -> `1264`).
-pub fn todo_id(file_name: &str) -> Option<&str> {
-    let stem = file_name.strip_suffix(".md")?;
-    let id = stem.split('-').next()?;
-    (!id.is_empty() && id.chars().all(|c| c.is_ascii_digit())).then_some(id)
+/// The todos that hold a live claim, read from the claims folder once. A claim
+/// file may be `pc-1407.claim`, `pc-1407-<slug>.claim` (a colliding id) or the
+/// legacy `1407.claim`; all three claim `pc-1407`.
+pub fn live_claim_keys(todos_dir: &Path) -> HashSet<TodoKey> {
+    live_claim_names(todos_dir).iter().filter_map(|n| parse_claim_name(n)).map(|p| p.key).collect()
+}
+
+/// Whether todo `id` (any spelling `todo_ids::parse_wanted` accepts) holds a
+/// live claim in `<todos_dir>/.claims/`. A bare number is the legacy `pc`
+/// label. An `id` that is not an id at all falls back to a literal
+/// `<id>.claim` / `<id>-<slug>.claim` match.
+pub fn claim_is_live(todos_dir: &Path, id: &str) -> bool {
+    match parse_wanted(id) {
+        Some(Wanted::Key(k)) => live_claim_keys(todos_dir).contains(&k),
+        Some(Wanted::Bare(n)) => live_claim_keys(todos_dir).contains(&TodoKey { label: LEGACY_LABEL.into(), number: n }),
+        None => {
+            let slug_prefix = format!("{id}-");
+            let exact = format!("{id}.claim");
+            live_claim_names(todos_dir).iter().any(|name| *name == exact || (name.starts_with(&slug_prefix) && name.ends_with(".claim")))
+        }
+    }
+}
+
+/// The canonical id of a todo file (`1264-handoff-x.md` -> `pc-1264`).
+pub fn todo_id(file_name: &str) -> Option<String> {
+    parse_file_name(file_name).map(|p| p.key.canonical())
 }
 
 /// Every todo file of one repo, backlog and `done/`, plus how many backlog
@@ -77,6 +97,7 @@ pub fn read_repo(repo_cwd: &str) -> (Vec<TodoDates>, u32) {
     let dir = todos_dir(Path::new(repo_cwd));
     let mut out = Vec::new();
     let mut claimed = 0;
+    let live = live_claim_keys(&dir);
     for (sub, done) in [(dir.clone(), false), (dir.join("done"), true)] {
         let Ok(entries) = std::fs::read_dir(&sub) else { continue };
         for ent in entries.flatten() {
@@ -89,7 +110,7 @@ pub fn read_repo(repo_cwd: &str) -> (Vec<TodoDates>, u32) {
             let finished = if done { meta.modified().ok().map(local_date) } else { None };
             if !done {
                 let name = ent.file_name();
-                if todo_id(&name.to_string_lossy()).is_some_and(|id| claim_is_live(&dir, id)) {
+                if parse_file_name(&name.to_string_lossy()).is_some_and(|p| live.contains(&p.key)) {
                     claimed += 1;
                 }
             }
@@ -255,11 +276,37 @@ mod tests {
     }
 
     #[test]
-    fn todo_ids_are_the_leading_number_only() {
-        assert_eq!(todo_id("1264-handoff-x.md"), Some("1264"));
-        assert_eq!(todo_id("7.md"), Some("7"));
-        assert_eq!(todo_id("notes-1.md"), None);
+    fn todo_ids_are_canonical_whatever_the_file_spelling() {
+        assert_eq!(todo_id("1264-handoff-x.md").as_deref(), Some("pc-1264"));
+        assert_eq!(todo_id("7.md").as_deref(), Some("pc-0007"));
+        assert_eq!(todo_id("pc-1407-x.md").as_deref(), Some("pc-1407"));
+        assert_eq!(todo_id("mac2-10000-x.md").as_deref(), Some("mac2-10000"));
+        assert_eq!(todo_id("notes.md"), None);
         assert_eq!(todo_id("12-x.txt"), None);
+    }
+
+    #[test]
+    fn a_device_label_claim_and_a_legacy_claim_both_hold_the_same_todo() {
+        let dir = claims_dir(&["pc-1407.claim", "88.claim", "mac-0003-x.claim"]);
+        assert!(claim_is_live(dir.path(), "pc-1407"));
+        assert!(claim_is_live(dir.path(), "pc-88"), "legacy 88.claim claims pc-0088");
+        assert!(claim_is_live(dir.path(), "88"));
+        assert!(claim_is_live(dir.path(), "mac-3"));
+        assert!(!claim_is_live(dir.path(), "pc-3"), "a claim on mac-0003 is not pc-0003");
+    }
+
+    #[test]
+    fn read_repo_counts_device_label_claims_for_device_label_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let todos = todos_dir(dir.path());
+        std::fs::create_dir_all(todos.join(".claims")).unwrap();
+        for f in ["pc-0001-a.md", "pc-0002-b.md", "3-legacy.md"] {
+            std::fs::write(todos.join(f), "x").unwrap();
+        }
+        std::fs::write(todos.join(".claims").join("pc-0001.claim"), "s").unwrap();
+        std::fs::write(todos.join(".claims").join("3.claim"), "s").unwrap();
+        let (_, claimed) = read_repo(&dir.path().to_string_lossy());
+        assert_eq!(claimed, 2);
     }
 
     #[test]

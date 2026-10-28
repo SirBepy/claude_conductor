@@ -193,6 +193,39 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+    // The Backlog panel's reads: `list_ai_backlog` (params: cwd, optional
+    // session_id) -> AiBacklog and `read_ai_todo` (cwd, id, optional
+    // session_id) -> AiTodoDoc. Same cwd trust rule as `list_ai_todos`: a
+    // session_id re-derives the cwd from this registry, else `reject_unknown`.
+    {
+        let state = state.clone();
+        router.register("list_ai_backlog", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { cwd: String, #[serde(default)] session_id: Option<String> }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let cwd = crate::daemon::methods::pr_review::resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                Ok(json!(crate::ipc::ai_todos::list_ai_backlog_local(cwd).await))
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        router.register("read_ai_todo", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { cwd: String, id: String, #[serde(default)] session_id: Option<String> }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let cwd = crate::daemon::methods::pr_review::resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                let doc = crate::ipc::ai_todos::read_ai_todo_local(cwd, p.id).await.map_err(RpcError::invalid_params)?;
+                Ok(json!(doc))
+            }
+        });
+    }
     // Mirrors the `list_slash_commands` Tauri command (params: project_dir) ->
     // Vec<SlashEntry>. project_dir is client-supplied, so reject_unknown must
     // run before any fs access when it's Some; None only scans the daemon's

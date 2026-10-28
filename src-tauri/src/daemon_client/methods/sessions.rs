@@ -78,6 +78,16 @@ impl PersistentClient {
             .ok_or_else(|| ClientError::Rpc { code: -32000, message: "start_session: no session_id in result".into() })
     }
 
+    /// Starts a chat in `cwd` whose first message is `Do todo <id>` and returns
+    /// its session id (`daemon/methods/spawn_chat/todo.rs`).
+    pub async fn ai_todo_start_chat(&self, cwd: &str, id: &str) -> Result<String, ClientError> {
+        let res = self.call("ai_todo_start_chat", json!({"cwd": cwd, "id": id})).await?;
+        res.get("session_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| ClientError::Rpc { code: -32000, message: "ai_todo_start_chat: no session_id in result".into() })
+    }
+
     pub async fn send_message(&self, session_id: &str, text: &str) -> Result<(), ClientError> {
         self.call("send_message", json!({"session_id": session_id, "text": text})).await?;
         Ok(())

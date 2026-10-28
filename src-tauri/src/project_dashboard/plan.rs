@@ -29,12 +29,18 @@ pub fn parse_plan(text: &str, repo_cwd: &str) -> Vec<PlanItem> {
         }
         let Some(rest) = open_item(line) else { continue };
         let (id, body) = split_id(rest);
-        if body.is_empty() {
+        // A bare `pc-1407` line has no label; the id stands in until `read_plan`
+        // swaps in the todo's title.
+        let text = match (&id, body.is_empty()) {
+            (Some(id), true) => clip(id),
+            _ => clip(body),
+        };
+        if text.is_empty() {
             continue;
         }
         out.push(PlanItem {
             id,
-            text: clip(body),
+            text,
             section: section.clone(),
             priority,
             repo_cwd: repo_cwd.to_string(),
@@ -63,17 +69,35 @@ fn open_item(line: &str) -> Option<&str> {
     Some(rest.trim())
 }
 
-/// `1264 - handoff: ...` -> (Some("1264"), "handoff: ..."). The id is the first
-/// token only when it is followed by ` - ` and looks like an id (short, with a
-/// digit), so a plain item that merely contains a dash keeps its whole text.
-fn split_id(rest: &str) -> (Option<String>, &str) {
-    let Some((head, tail)) = rest.split_once(" - ") else { return (None, rest) };
-    let looks_like_id = !head.is_empty()
-        && head.len() <= 12
-        && head.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-        && head.chars().any(|c| c.is_ascii_digit());
-    if looks_like_id {
-        (Some(head.to_string()), tail.trim())
+/// Longest id token before ` - `: `mac2-10000` is 10, and a ticket-style id
+/// (`sc-56160`) is shorter than the cap.
+const MAX_ID_CHARS: usize = 20;
+
+/// Splits a plan line's id off its label, keeping the id as written (never
+/// re-padded or re-labelled; `todo_ids` does the matching):
+/// - `1264 - handoff: ...` -> (Some("1264"), "handoff: ...")
+/// - `pc-1407 - label [P]` -> (Some("pc-1407"), "label [P]")
+/// - `pc-1407 [P] - label` -> (Some("pc-1407"), "label")
+/// - `pc-1407` and `pc-1407 [P]` -> (Some("pc-1407"), "")
+///
+/// With a label, the id is the first token only when it is followed by ` - `
+/// and looks like an id (short, with a digit), so a plain item that merely
+/// contains a dash keeps its whole text. Without one, the line has to be the id
+/// alone (plus an optional `[P]`) so "2026 plan review" is not read as todo 2026.
+pub(crate) fn split_id(rest: &str) -> (Option<String>, &str) {
+    if let Some((head, tail)) = rest.split_once(" - ") {
+        let id = head.strip_suffix(" [P]").unwrap_or(head);
+        let looks_like_id = !id.is_empty()
+            && id.len() <= MAX_ID_CHARS
+            && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+            && id.chars().any(|c| c.is_ascii_digit());
+        return if looks_like_id { (Some(id.to_string()), tail.trim()) } else { (None, rest) };
+    }
+    let mut tokens = rest.split_whitespace();
+    let (Some(first), second, None) = (tokens.next(), tokens.next(), tokens.next()) else { return (None, rest) };
+    let marker_only = second.is_none_or(|t| t == "[P]");
+    if marker_only && super::todo_ids::parse_wanted(first).is_some() {
+        (Some(first.to_string()), "")
     } else {
         (None, rest)
     }
@@ -90,11 +114,23 @@ fn clip(s: &str) -> String {
 /// Reads `<repo>/.claude/todos/PLAN.md`; a missing or unreadable file is just
 /// an empty plan, never an error.
 pub fn read_plan(repo_cwd: &str) -> Vec<PlanItem> {
-    let path = super::todo_stats::todos_dir(std::path::Path::new(repo_cwd)).join("PLAN.md");
-    match std::fs::read_to_string(&path) {
-        Ok(text) => parse_plan(&text, repo_cwd),
-        Err(_) => Vec::new(),
+    let dir = super::todo_stats::todos_dir(std::path::Path::new(repo_cwd));
+    let Ok(text) = std::fs::read_to_string(dir.join("PLAN.md")) else { return Vec::new() };
+    let mut items = parse_plan(&text, repo_cwd);
+    let device = super::todo_ids::device_label();
+    for item in items.iter_mut().filter(|i| i.id.as_deref() == Some(i.text.as_str())) {
+        if let Some(title) = item.id.as_deref().and_then(|id| todo_title(&dir, id, &device)) {
+            item.text = clip(&title);
+        }
     }
+    items
+}
+
+/// The title of the todo a bare plan line names, or `None` when its file is
+/// gone or ambiguous (the line then shows the id).
+fn todo_title(todos_dir: &std::path::Path, id: &str, device: &str) -> Option<String> {
+    let path = super::todo_ids::find_todo_file(todos_dir, id, device).ok()?;
+    Some(super::todo_read::read_head(&path)?.title)
 }
 
 /// Whether `/pickup` would find anything in `todos_dir`: an open PLAN.md line
@@ -103,17 +139,18 @@ pub fn read_plan(repo_cwd: &str) -> Vec<PlanItem> {
 /// the capped "Next up" rows.
 pub fn has_pickable(todos_dir: &std::path::Path) -> bool {
     let Ok(text) = std::fs::read_to_string(todos_dir.join("PLAN.md")) else { return false };
-    let files: Vec<String> = std::fs::read_dir(todos_dir)
-        .map(|it| it.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
-        .unwrap_or_default();
+    let files = super::todo_ids::list_todo_files(todos_dir);
+    let live = super::todo_stats::live_claim_keys(todos_dir);
     text.lines().filter_map(open_item).any(|rest| match split_id(rest) {
-        (_, "") => false,
+        (None, "") => false,
         (None, _) => true,
         (Some(id), _) => {
-            // `.md` is required: an id-reservation marker `<id>-.reserved` shares the
-            // `<id>-` prefix but is not a todo file.
-            let has_file = files.iter().any(|f| f == &format!("{id}.md") || (f.starts_with(&format!("{id}-")) && f.ends_with(".md")));
-            has_file && !super::todo_stats::claim_is_live(todos_dir, &id)
+            // Only `.md` todo files count: an id-reservation marker `<id>-.reserved`
+            // shares the id prefix but is not one (`list_todo_files` skips it).
+            match super::todo_ids::parse_wanted(&id) {
+                Some(wanted) => files.iter().any(|(key, _)| wanted.matches(key) && !live.contains(key)),
+                None => false,
+            }
         }
     })
 }
@@ -271,6 +308,82 @@ mod tests {
         assert_eq!(items[0].id, None);
         assert_eq!(items[0].text, "Fix the parser - it drops lines");
         assert_eq!(items[1].id.as_deref(), Some("sc-56160"));
+    }
+
+    #[test]
+    fn a_bare_device_id_line_yields_the_id() {
+        assert_eq!(split_id("pc-1407"), (Some("pc-1407".to_string()), ""));
+        assert_eq!(split_id("pc-1407 [P]"), (Some("pc-1407".to_string()), ""));
+        assert_eq!(split_id("mac2-10000"), (Some("mac2-10000".to_string()), ""));
+        assert_eq!(split_id("pc-1407 - label [P]"), (Some("pc-1407".to_string()), "label [P]"));
+        assert_eq!(split_id("pc-1407 [P] - label"), (Some("pc-1407".to_string()), "label"));
+        assert_eq!(split_id("mac2-10000 - label"), (Some("mac2-10000".to_string()), "label"));
+    }
+
+    #[test]
+    fn plain_text_that_starts_with_a_number_is_not_an_id() {
+        assert_eq!(split_id("2026 plan review"), (None, "2026 plan review"));
+        assert_eq!(split_id("fix pc-1407 soon"), (None, "fix pc-1407 soon"));
+        assert_eq!(split_id("just words"), (None, "just words"));
+    }
+
+    #[test]
+    fn a_bare_id_line_is_a_row_whose_text_is_the_id() {
+        let items = parse_plan("## A
+- [ ] pc-1407
+- [ ] pc-1408 [P]
+", REPO);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].id.as_deref(), Some("pc-1407"));
+        assert_eq!(items[0].text, "pc-1407");
+    }
+
+    #[test]
+    fn read_plan_swaps_a_bare_ids_text_for_the_todos_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let todos = dir.path().join(".claude").join("todos");
+        std::fs::create_dir_all(&todos).unwrap();
+        std::fs::write(todos.join("PLAN.md"), "## A
+- [ ] pc-0007
+- [ ] pc-0008
+").unwrap();
+        std::fs::write(todos.join("pc-0007-the-thing.md"), "# Ship the thing
+").unwrap();
+        let items = read_plan(&dir.path().to_string_lossy());
+        assert_eq!(items[0].text, "Ship the thing");
+        assert_eq!(items[1].text, "pc-0008", "no file: the id stays");
+    }
+
+    #[test]
+    fn a_bare_device_id_with_its_file_is_pickable_and_a_claim_hides_it() {
+        let dir = todos_dir("## Now
+- [ ] pc-0007
+", &["pc-0007-do-it.md"]);
+        assert!(has_pickable(dir.path()));
+        let claimed = todos_dir("## Now
+- [ ] pc-0007
+", &["pc-0007-do-it.md", ".claims/pc-0007.claim"]);
+        assert!(!has_pickable(claimed.path()));
+        let legacy_claim = todos_dir("## Now
+- [ ] pc-0007
+", &["pc-0007-do-it.md", ".claims/7.claim"]);
+        assert!(!has_pickable(legacy_claim.path()), "a legacy claim holds pc-0007");
+        let gone = todos_dir("## Now
+- [ ] pc-0007
+", &[]);
+        assert!(!has_pickable(gone.path()));
+    }
+
+    #[test]
+    fn a_legacy_numeric_plan_line_finds_a_device_label_file_and_vice_versa() {
+        let dir = todos_dir("## Now
+- [ ] 7 - do it
+", &["pc-0007-do-it.md"]);
+        assert!(has_pickable(dir.path()));
+        let other = todos_dir("## Now
+- [ ] pc-7 - do it
+", &["7-do-it.md"]);
+        assert!(has_pickable(other.path()));
     }
 
     #[test]
