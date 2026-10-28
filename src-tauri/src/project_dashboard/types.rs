@@ -148,6 +148,8 @@ pub enum CardDisplay {
     },
     /// The card's own look: an HTML document rendered in a script-only
     /// sandboxed iframe with no network, fed the response as `window.CARD_DATA`.
+    /// In the installed app the srcdoc frame inherits the app's CSP, so its
+    /// inline script does not run and only the static HTML and CSS show.
     Html {
         #[serde(default)]
         template: String,
