@@ -22,6 +22,9 @@ import { SessionStatusbar, loadStatuslineRows, loadStatuslineHideZero, fetchGitI
 import { savePendingSession } from "./pending-draft-storage";
 import { SessionHeader } from "./session-header";
 import { openChangeAccountModal } from "../../shared/change-account-modal";
+import type { AccountLite } from "../../shared/account-chip";
+import { showToast } from "../../shared/toast";
+import { loadMachineAccounts } from "./machine-accounts";
 import { applyHeaderMerge } from "./mobile-header-merge";
 
 export function rebuildSidebar(): void {
@@ -154,7 +157,7 @@ export async function mountPendingStatusbar(
     onEffortChange: (e) => { config.effort = e; },
     onModelChange: (m) => { config.model = m; },
     onConfig: (model, effort, effortEditable) => header?.setConfig(model, effort, effortEditable),
-    onAccountClick: () => { void changePendingAccount(config, placeholderId); },
+    onAccountClick: () => { void changePendingAccount(config, placeholderId, project.path); },
     layoutEditable: true,
   });
   state.statusbar = sb;
@@ -179,7 +182,11 @@ export async function mountPendingStatusbar(
  *  re-points the draft's config, which the first send carries as account_id.
  *  active-session imports are dynamic because active-session.ts sits above
  *  this module in the import graph. */
-export async function changePendingAccount(config: SessionConfig, placeholderId: string): Promise<void> {
+export async function changePendingAccount(
+  config: SessionConfig,
+  placeholderId: string,
+  projectPath?: string,
+): Promise<void> {
   const sb = state.statusbar;
   const liveId = state.renderer?.currentSessionId();
   if (liveId && liveId !== placeholderId) {
@@ -190,8 +197,41 @@ export async function changePendingAccount(config: SessionConfig, placeholderId:
     await changeAccountForSession(liveId, selectSession);
     return;
   }
-  const picked = await openChangeAccountModal({ currentId: config.accountId ?? null, title: "Change account" });
+  // Account ids are per machine, so a draft aimed at a paired machine picks
+  // from that machine's list and never falls back to the local one.
+  let accounts: readonly AccountLite[] | undefined;
+  if (config.machineId) {
+    const cwd = projectPath ?? (state.pendingNewSession?.placeholderId === placeholderId ? state.pendingNewSession.projectPath : null);
+    const loaded = cwd ? await loadMachineAccounts(config.machineId, cwd) : null;
+    if (!loaded?.list) {
+      showToast(`Could not read ${loaded?.label ?? "the other machine"}'s accounts${loaded?.error ? `: ${loaded.error}` : ""}`);
+      return;
+    }
+    accounts = loaded.list.accounts;
+  }
+  const picked = await openChangeAccountModal({ currentId: config.accountId ?? null, title: "Change account", accounts });
   if (!picked || picked === config.accountId) return;
+  // A send can promote the draft while the picker is open, so the pre-modal
+  // check above is stale: the pick belongs to the spawned chat now, and
+  // re-pointing the draft's config would leave the chip on an account the
+  // chat is not using. The pick is already made, so move without a second picker.
+  const promotedId = state.renderer?.currentSessionId();
+  if (promotedId && promotedId !== placeholderId) {
+    const [{ selectSession }, { applyAccountMove }, { capitalize, getCachedAccount }] = await Promise.all([
+      import("./active-session"),
+      import("./active-session-account"),
+      import("../../shared/chat/rate-limit-banner"),
+    ]);
+    try {
+      const newId = await api.moveSessionToAccount(promotedId, picked);
+      showToast(`Now on ${capitalize(getCachedAccount(picked)?.label ?? "the other account")}.`);
+      await applyAccountMove(promotedId, newId, selectSession);
+    } catch (e) {
+      console.error("[pending-pane] change account failed", e);
+      showToast("Failed to move chat to that account.");
+    }
+    return;
+  }
   config.accountId = picked;
   if (sb && state.statusbar === sb) sb.setAccountId(picked);
   const pending = state.pendingNewSession;

@@ -9,14 +9,14 @@ import "./account-chip.css";
 import "./change-account-modal.css";
 import "./modal.css";
 import { api } from "./api";
-import type { Account } from "./api";
 import { escapeHtml } from "./escape-html";
+import type { AccountLite } from "./account-chip";
 import { accountChipHtml, accountIconBadgeHtml, apiCreditHintHtml, apiCreditLinkedName, attachChipKeyboardActivation, isApiCreditAccount, linkedPlanAccount } from "./account-chip";
 import { lockInputToHost, registerSelectableOptions } from "./modal-input-lock";
 
 /** Tooltip naming the plan an API-credit chip draws on ("API credit · personal");
  * nothing for a subscription chip or an unlinked credit one. */
-function creditTitleAttr(a: Account, accounts: readonly Account[]): string {
+function creditTitleAttr(a: AccountLite, accounts: readonly AccountLite[]): string {
   if (!isApiCreditAccount(a) || !linkedPlanAccount(a, accounts)) return "";
   return ` title="${escapeHtml(apiCreditLinkedName(a, accounts))}"`;
 }
@@ -30,14 +30,14 @@ function creditTitleAttr(a: Account, accounts: readonly Account[]): string {
  * wire up. A sole account that is NOT current stays pickable: a draft whose
  * only account is API credit opens with none picked, and this is the only
  * place it can opt in. */
-export function renderAccountListBodyHtml(accounts: Account[], currentId: string | null): string {
+export function renderAccountListBodyHtml(accounts: readonly AccountLite[], currentId: string | null): string {
   if (accounts.length === 0) return `<div class="cc-modal-empty">No Claude accounts configured yet.</div>`;
   if (accounts.length === 1 && accounts[0]!.id === currentId) {
     const a = accounts[0]!;
     return `<div class="cam-account-list"><span class="account-chip sel cam-acc-static" style="--acc:${escapeHtml(a.colour)}"${creditTitleAttr(a, accounts)}>${accountIconBadgeHtml(a)}${escapeHtml(a.label)}${apiCreditHintHtml(a)}</span></div>`;
   }
   return `<div class="cam-account-list">${accounts
-    .map((a: Account) =>
+    .map((a) =>
       accountChipHtml(a, a.id === currentId, `data-acc-id="${escapeHtml(a.id)}"${creditTitleAttr(a, accounts)}`),
     )
     .join("")}</div>`;
@@ -56,9 +56,14 @@ export async function openChangeAccountModal(opts: {
    *  "Change account" style caller leaves this off and keeps the static
    *  confirmation, which is a display, not a gate. */
   autoPickSole?: boolean;
+  /** The accounts to offer instead of this machine's. A draft aimed at a paired
+   *  machine passes that machine's list: account ids are per machine, so a
+   *  local id picked for a peer chat would name nothing (or the wrong account)
+   *  on the host. Omitted means this machine's own accounts. */
+  accounts?: readonly AccountLite[];
 }): Promise<string | null> {
   const title = opts.title ?? "Change account";
-  const accounts = await api.listAccounts();
+  const accounts: readonly AccountLite[] = opts.accounts ?? (await api.listAccounts());
 
   // A sole API-credit account is never auto-picked: it bills the monthly API
   // credit, so choosing it has to be an explicit click.

@@ -18,16 +18,25 @@ vi.mock("../src/views/sessions/session-statusbar.ts", () => ({
   loadStatuslineHideZero: vi.fn(async () => false),
   fetchGitInfo: vi.fn(() => new Promise(() => {})),
 }));
-const modal = { pick: "acc-b" };
+const modal = { pick: "acc-b", onOpen: null };
 vi.mock("../src/shared/change-account-modal.ts", () => ({
-  openChangeAccountModal: vi.fn(async () => modal.pick),
+  openChangeAccountModal: vi.fn(async () => {
+    modal.onOpen?.();
+    return modal.pick;
+  }),
 }));
 const changeAccountForSession = vi.fn(async () => {});
-vi.mock("../src/views/sessions/active-session-account.ts", () => ({ changeAccountForSession }));
+const applyAccountMove = vi.fn(async () => {});
+vi.mock("../src/views/sessions/active-session-account.ts", () => ({ changeAccountForSession, applyAccountMove }));
+vi.mock("../src/shared/chat/rate-limit-banner.ts", () => ({
+  capitalize: (s) => s,
+  getCachedAccount: vi.fn(() => ({ label: "Beta" })),
+}));
 vi.mock("../src/views/sessions/active-session.ts", () => ({ selectSession: vi.fn() }));
 vi.mock("../src/views/sessions/pending-draft-storage.ts", () => ({ savePendingSession: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: vi.fn(async () => null) }));
-vi.mock("../src/shared/api.ts", () => ({ api: {} }));
+const moveSessionToAccount = vi.fn(async (id) => id);
+vi.mock("../src/shared/api.ts", () => ({ api: { moveSessionToAccount } }));
 vi.mock("../src/shared/chat/chat-renderer.ts", () => ({ ChatRenderer: vi.fn() }));
 vi.mock("../src/shared/chat/event-store.ts", () => ({ sessionEvents: { subscribe: vi.fn(() => () => {}) } }));
 vi.mock("../src/views/sessions/code-mode/entry.ts", () => ({ setCodeModeChatProvider: vi.fn() }));
@@ -58,8 +67,11 @@ describe("draft pane account chip", () => {
     sbOpts.current = null;
     sbInstance.setAccountId.mockClear();
     changeAccountForSession.mockClear();
+    applyAccountMove.mockClear();
+    moveSessionToAccount.mockClear();
     savePendingSession.mockClear();
     modal.pick = "acc-b";
+    modal.onOpen = null;
     state.renderer = null;
     state.pendingNewSession = null;
   });
@@ -86,5 +98,22 @@ describe("draft pane account chip", () => {
     await vi.waitFor(() => expect(changeAccountForSession).toHaveBeenCalled());
     expect(changeAccountForSession.mock.calls[0][0]).toBe("real-1");
     expect(config.accountId).toBe("acc-a");
+  });
+
+  it("moves the spawned chat, not the stale draft, when the draft is promoted while the picker is open", async () => {
+    const config = { model: "", effort: "high", accountId: "acc-a" };
+    state.pendingNewSession = { placeholderId: "ph-1", projectPath: "C:/p", projectName: "p", config: { ...config } };
+    await mount(config);
+    state.renderer = { currentSessionId: () => "ph-1" };
+    // The first send promotes the draft between the click and the pick.
+    modal.onOpen = () => { state.renderer = { currentSessionId: () => "real-1" }; };
+    sbOpts.current.onAccountClick();
+    await vi.waitFor(() => expect(moveSessionToAccount).toHaveBeenCalledWith("real-1", "acc-b"));
+    await vi.waitFor(() => expect(applyAccountMove).toHaveBeenCalled());
+    expect(applyAccountMove.mock.calls[0][0]).toBe("real-1");
+    expect(config.accountId).toBe("acc-a");
+    expect(state.pendingNewSession.config.accountId).toBe("acc-a");
+    expect(sbInstance.setAccountId).not.toHaveBeenCalled();
+    expect(savePendingSession).not.toHaveBeenCalled();
   });
 });

@@ -127,7 +127,7 @@ export function makeActions(host: ActionHost): DashActions {
         let needsAccount;
         try {
           config = await resolveNewChatConfig(project.path);
-          needsAccount = await accountPickNeeded(config);
+          needsAccount = await accountPickNeeded(config, project.path);
         } catch (err) {
           showToast(`Could not start the chat: ${String(err)}`);
           return;

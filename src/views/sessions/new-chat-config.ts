@@ -95,10 +95,17 @@ export async function resolveNewChatConfig(
 /** True when the first send must wait for an account pick. No account with
  *  none registered is fine (the daemon resolves its own default); no account
  *  while accounts exist means none was bound or default, which is the user's
- *  call to make. A paired machine with no account resolved is never a guess. */
-export async function accountPickNeeded(config: SessionConfig): Promise<boolean> {
+ *  call to make. A paired machine's chat asks the same question of the PEER's
+ *  accounts (ids are per machine): a peer with none, or one that has a default
+ *  of its own, resolves it host-side, and an unreachable peer is not a reason
+ *  to strand the draft, since the send surfaces the host's own error. */
+export async function accountPickNeeded(config: SessionConfig, projectPath: string): Promise<boolean> {
   if (config.accountId) return false;
-  if (config.machineId) return true;
+  if (config.machineId) {
+    const { list } = await loadMachineAccounts(config.machineId, projectPath);
+    if (!list) return false;
+    return list.accounts.length > 0 && !list.default_account_id;
+  }
   const accounts = await resolveCached(accountsListData(), []);
   return accounts.length > 0;
 }
@@ -107,8 +114,8 @@ export async function accountPickNeeded(config: SessionConfig): Promise<boolean>
  *  or schedule could only fail daemon-side with NoAccounts. A list that fails
  *  to load is NOT "none": blocking the send on a transient read error would
  *  strand a user who does have accounts. A paired machine's chat is never
- *  "none" here, its accounts live on the peer and `accountPickNeeded` already
- *  gates it. */
+ *  "none" here, its accounts live on the peer and the daemon there reports an
+ *  empty registry itself. */
 export async function noAccountsRegistered(config: SessionConfig): Promise<boolean> {
   if (config.accountId || config.machineId) return false;
   const accounts = await resolveCached(accountsListData(), null as Account[] | null);
