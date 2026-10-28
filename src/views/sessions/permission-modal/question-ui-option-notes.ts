@@ -19,7 +19,6 @@ export interface OptionNotesController {
   isPicked: (qi: number, label: string) => boolean;
   /** The notes that will actually ship: only on options still ticked. */
   tickedNotes: (qi: number) => [string, string][];
-  openNote: (qi: number, label: string | null) => void;
   /** Wires the pencil, the note preview and the note box after a render(). */
   wire: () => void;
 }
@@ -83,5 +82,5 @@ export function createOptionNotes(deps: OptionNotesDeps): OptionNotesController 
     });
   }
 
-  return { isPicked, tickedNotes, openNote, wire };
+  return { isPicked, tickedNotes, wire };
 }
