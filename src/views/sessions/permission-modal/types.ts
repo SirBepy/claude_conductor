@@ -15,6 +15,8 @@ export interface SecretRequestedPayload {
   label: string;
   file: string;
   key: string;
+  /** Deleted by the daemon when the asking chat closes. */
+  temporary?: boolean;
 }
 
 // Single source (todo 586): the domain/badge value lists live only here, as

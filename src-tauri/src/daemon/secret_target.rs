@@ -147,9 +147,258 @@ pub(crate) async fn validate(
     Ok(resolved)
 }
 
+/// One `temporary: true` secret that was written to disk for a chat. Holds
+/// where the value went, never the value itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TempSecret {
+    pub session_id: String,
+    pub file: PathBuf,
+    pub key: String,
+    /// The write made the file; it was absent beforehand.
+    pub created_file: bool,
+}
+
+/// Chat-scoped secrets awaiting their chat's close. In memory only: a daemon
+/// crash leaves the line on disk, which is what a non-temporary secret does
+/// anyway, so this adds a cleanup on the happy path and no new exposure.
+#[derive(Default)]
+pub(crate) struct TempSecrets {
+    inner: std::sync::Mutex<Vec<TempSecret>>,
+}
+
+impl TempSecrets {
+    /// Re-recording the same file+key keeps the first entry: its
+    /// `created_file` is the one that knows whether the file predates us.
+    pub(crate) fn record(&self, entry: TempSecret) {
+        let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if guard.iter().any(|e| e.file == entry.file && e.key == entry.key) {
+            return;
+        }
+        guard.push(entry);
+    }
+
+    /// A later permanent write to the same file+key must outlive the chat, so
+    /// it takes the line off the cleanup list.
+    pub(crate) fn forget(&self, file: &Path, key: &str) {
+        let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.retain(|e| !(e.file == file && e.key == key));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn live_for(&self, session_id: &str) -> usize {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.iter().filter(|e| e.session_id == session_id).count()
+    }
+
+    /// Remove every temporary secret `session_id` holds. Returns how many were
+    /// taken off disk or found already gone. Logs file paths and key names,
+    /// never values.
+    pub(crate) fn sweep_session(&self, session_id: &str) -> usize {
+        let taken: Vec<TempSecret> = {
+            let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+            let (mine, rest): (Vec<_>, Vec<_>) =
+                guard.drain(..).partition(|e| e.session_id == session_id);
+            *guard = rest;
+            mine
+        };
+        for entry in &taken {
+            if let Err(e) = remove_entry(entry) {
+                log::warn!(
+                    "[secret-relay] could not remove temporary secret {} from {}: {e}",
+                    entry.key,
+                    entry.file.display()
+                );
+            }
+        }
+        taken.len()
+    }
+}
+
+/// The process-wide list the write path records into and chat close sweeps.
+pub(crate) fn temporary_secrets() -> &'static TempSecrets {
+    static CELL: std::sync::OnceLock<TempSecrets> = std::sync::OnceLock::new();
+    CELL.get_or_init(TempSecrets::default)
+}
+
+/// `text` without the line that sets `key`, or `None` when no line does. Keys
+/// match the way `api_keys::rewrite_env` finds a line to overwrite, and every
+/// other line keeps its own line ending.
+fn without_key_line(text: &str, key: &str) -> Option<String> {
+    let mut found = false;
+    let kept: Vec<&str> = text
+        .split_inclusive('\n')
+        .filter(|raw| {
+            let line = raw.trim_end_matches(['\r', '\n']);
+            let is_key = line.trim().split_once('=').map(|(k, _)| k.trim()) == Some(key);
+            if is_key {
+                found = true;
+            }
+            !is_key
+        })
+        .collect();
+    if !found {
+        return None;
+    }
+    Some(kept.concat())
+}
+
+/// Take one secret's line out of its file. A file this secret created goes
+/// with it, unless a permanent secret has since been added beside it, in which
+/// case only the one line is dropped.
+fn remove_entry(entry: &TempSecret) -> std::io::Result<()> {
+    let text = match std::fs::read_to_string(&entry.file) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let Some(remaining) = without_key_line(&text, &entry.key) else {
+        return Ok(());
+    };
+    if entry.created_file && remaining.trim().is_empty() {
+        return std::fs::remove_file(&entry.file);
+    }
+    std::fs::write(&entry.file, remaining)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(sid: &str, file: &Path, key: &str, created_file: bool) -> TempSecret {
+        TempSecret { session_id: sid.into(), file: file.to_path_buf(), key: key.into(), created_file }
+    }
+
+    /// The chat closing takes the temporary key out and leaves its siblings.
+    #[test]
+    fn sweep_removes_the_temporary_key_line_and_keeps_the_rest() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        std::fs::write(&file, "# header\nOTHER=1\nAPI_KEY=sk-abc\nLAST=2\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(entry("s1", &file, "API_KEY", false));
+
+        assert_eq!(reg.sweep_session("s1"), 1);
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "# header\nOTHER=1\nLAST=2\n");
+        assert_eq!(reg.live_for("s1"), 0);
+    }
+
+    /// A file the secret itself created is deleted, not left empty.
+    #[test]
+    fn sweep_deletes_a_file_the_secret_created() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        std::fs::write(&file, "API_KEY=sk-abc\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(entry("s1", &file, "API_KEY", true));
+
+        reg.sweep_session("s1");
+
+        assert!(!file.exists());
+    }
+
+    /// A permanent secret appended to a created file after the fact must not
+    /// be deleted along with it.
+    #[test]
+    fn sweep_keeps_a_created_file_that_gained_other_keys() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        std::fs::write(&file, "API_KEY=sk-abc\nKEEP=1\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(entry("s1", &file, "API_KEY", true));
+
+        reg.sweep_session("s1");
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "KEEP=1\n");
+    }
+
+    /// A secret that was never recorded as temporary survives any chat's close.
+    #[test]
+    fn permanent_secret_survives_a_sweep() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        std::fs::write(&file, "API_KEY=sk-abc\n").unwrap();
+        let reg = TempSecrets::default();
+
+        assert_eq!(reg.sweep_session("s1"), 0);
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "API_KEY=sk-abc\n");
+    }
+
+    /// One chat's close leaves another chat's temporary secret in place.
+    #[test]
+    fn sweep_only_touches_the_closing_chats_secrets() {
+        let (_tmp, root) = fixture();
+        let a = root.join("a.env");
+        let b = root.join("b.env");
+        std::fs::write(&a, "KEY=1\n").unwrap();
+        std::fs::write(&b, "KEY=2\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(entry("s1", &a, "KEY", true));
+        reg.record(entry("s2", &b, "KEY", true));
+
+        reg.sweep_session("s1");
+
+        assert!(!a.exists());
+        assert_eq!(std::fs::read_to_string(&b).unwrap(), "KEY=2\n");
+        assert_eq!(reg.live_for("s2"), 1);
+    }
+
+    /// Re-saving the same key as permanent drops it from the cleanup list.
+    #[test]
+    fn forget_takes_a_secret_off_the_cleanup_list() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        std::fs::write(&file, "API_KEY=sk-abc\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(entry("s1", &file, "API_KEY", true));
+        reg.forget(&file, "API_KEY");
+
+        reg.sweep_session("s1");
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "API_KEY=sk-abc\n");
+    }
+
+    /// A second request for the same file+key must not overwrite the first
+    /// entry's `created_file`, or the file would outlive the chat.
+    #[test]
+    fn re_recording_keeps_the_first_created_flag() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        std::fs::write(&file, "API_KEY=sk-abc\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(entry("s1", &file, "API_KEY", true));
+        reg.record(entry("s1", &file, "API_KEY", false));
+
+        assert_eq!(reg.live_for("s1"), 1);
+        reg.sweep_session("s1");
+        assert!(!file.exists());
+    }
+
+    /// A file already deleted by hand is not an error and does not stall the
+    /// rest of the sweep.
+    #[test]
+    fn sweep_tolerates_a_file_that_is_already_gone() {
+        let (_tmp, root) = fixture();
+        let gone = root.join("gone.env");
+        let present = root.join("present.env");
+        std::fs::write(&present, "KEY=1\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(entry("s1", &gone, "KEY", true));
+        reg.record(entry("s1", &present, "KEY", true));
+
+        assert_eq!(reg.sweep_session("s1"), 2);
+
+        assert!(!present.exists());
+    }
+
+    #[test]
+    fn without_key_line_keeps_crlf_and_reports_a_missing_key() {
+        assert_eq!(without_key_line("A=1\r\nB=2\r\nC=3\r\n", "B").as_deref(), Some("A=1\r\nC=3\r\n"));
+        assert_eq!(without_key_line("A=1\n", "B"), None);
+        assert_eq!(without_key_line("A=1\nB=2", "B").as_deref(), Some("A=1\n"));
+        assert_eq!(without_key_line("# B=1\nA=1\n", "B"), None, "a commented-out key is not the key");
+    }
 
     #[test]
     fn valid_key_accepts_env_style_names() {

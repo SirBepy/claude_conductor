@@ -8,7 +8,8 @@
 //! The VALUE being saved never reaches this file: it travels only through
 //! `respond_secret`'s own params straight into the write
 //! (`methods::secret::respond_secret_inner`). This module only ever sees
-//! `label`/`file`/`key` - the metadata about the secret, never its contents.
+//! `label`/`file`/`key`/`temporary` - the metadata about the secret, never its
+//! contents.
 
 use super::permission::{await_answer, PROMPT_TIMEOUT};
 use super::validated_json::ValidatedJson;
@@ -26,6 +27,9 @@ pub(super) struct SecretRequestBody {
     key: String,
     #[serde(default)]
     session_id: Option<String>,
+    /// Delete the value when the asking chat closes.
+    #[serde(default)]
+    temporary: bool,
 }
 
 pub(super) async fn on_secret_request(
@@ -60,6 +64,7 @@ pub(super) async fn on_secret_request(
         "label": body.label,
         "file": resolved_file.to_string_lossy(),
         "key": body.key,
+        "temporary": body.temporary,
     });
     let (tx, rx) = tokio::sync::oneshot::channel::<Value>();
     ctx.state.pending.lock().await.insert(body.id.clone(), tx);
@@ -120,6 +125,7 @@ mod tests {
             file: file.to_string(),
             key: "API_KEY".to_string(),
             session_id: Some(sid.to_string()),
+            temporary: false,
         }
     }
 
@@ -200,5 +206,34 @@ mod tests {
             state.registry.get("s1").unwrap().awaiting.is_none(),
             "answering clears 'needs input', same as permission.rs"
         );
+    }
+
+    /// The `temporary` flag rides the prompt payload to the card and to
+    /// `respond_secret`, and defaults to a permanent secret.
+    #[tokio::test]
+    async fn temporary_flag_reaches_the_prompt_payload() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().join("session-cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let state = state_with_session("s1", &cwd);
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+
+        let mut body = secret_body("p1", "s1", "secrets.env");
+        body.temporary = true;
+        let handle = tokio::spawn(async move {
+            on_secret_request(AxState(ctx), ValidatedJson(body)).await.into_response()
+        });
+        await_pending(&state, "p1").await;
+
+        let prompts = state.list_prompts().await;
+        assert_eq!(prompts[0]["payload"]["temporary"], json!(true));
+
+        let tx = state.pending.lock().await.remove("p1").unwrap();
+        tx.send(json!({"ok": true, "text": "cancelled"})).unwrap();
+        handle.await.unwrap();
+
+        let absent: SecretRequestBody =
+            serde_json::from_value(json!({"id": "i", "label": "l", "file": "f", "key": "k"})).unwrap();
+        assert!(!absent.temporary, "omitted means permanent");
     }
 }

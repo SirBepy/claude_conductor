@@ -46,6 +46,7 @@ async fn respond_secret_inner(
     let file = payload["file"].as_str().unwrap_or_default().to_string();
     let key = payload["key"].as_str().unwrap_or_default().to_string();
     let session_id = payload["session_id"].as_str().map(str::to_string);
+    let temporary = payload["temporary"].as_bool().unwrap_or(false);
 
     // Re-check right before the write: the prompt can sit open for up to an
     // hour (PROMPT_TIMEOUT), long enough for the target's gitignore status -
@@ -59,6 +60,9 @@ async fn respond_secret_inner(
     }
 
     let path = PathBuf::from(&file);
+    // Decided before the write: afterwards the file always exists. A dangling
+    // symlink counts as present, matching what `resolve_target` treats as one.
+    let created_file = std::fs::symlink_metadata(&path).is_err();
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
     let updated = match crate::api_keys::rewrite_env(&existing, &key, &value) {
         Ok(u) => u,
@@ -76,6 +80,7 @@ async fn respond_secret_inner(
     }
 
     let char_count = value.chars().count();
+    record_lifetime(session_id.as_deref(), &path, &key, temporary, created_file);
     let tx = state.pending.lock().await.remove(request_id);
     let Some(tx) = tx else {
         // The write succeeded, but the blocked HTTP handler is already gone
@@ -90,6 +95,23 @@ async fn respond_secret_inner(
     }));
     state.remove_prompt(request_id).await;
     (true, None)
+}
+
+/// Ties a just-written secret to its chat when it was asked for as temporary;
+/// a permanent write to a key an earlier temporary request used takes that key
+/// off the cleanup list, so closing the chat does not delete what Joe kept.
+fn record_lifetime(session_id: Option<&str>, path: &std::path::Path, key: &str, temporary: bool, created_file: bool) {
+    use crate::daemon::secret_target::{temporary_secrets, TempSecret};
+    match (temporary, session_id) {
+        (true, Some(sid)) => temporary_secrets().record(TempSecret {
+            session_id: sid.to_string(),
+            file: path.to_path_buf(),
+            key: key.to_string(),
+            created_file,
+        }),
+        (true, None) => {}
+        (false, _) => temporary_secrets().forget(path, key),
+    }
 }
 
 pub fn register_secret(router: &mut Router, state: Arc<DaemonState>) {
@@ -133,17 +155,123 @@ mod tests {
     }
 
     async fn open_prompt(state: &Arc<DaemonState>, id: &str, sid: &str, file: &std::path::Path, key: &str) -> tokio::sync::oneshot::Receiver<Value> {
+        open_prompt_with(state, id, sid, file, key, false).await
+    }
+
+    async fn open_prompt_with(
+        state: &Arc<DaemonState>,
+        id: &str,
+        sid: &str,
+        file: &std::path::Path,
+        key: &str,
+        temporary: bool,
+    ) -> tokio::sync::oneshot::Receiver<Value> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         state.pending.lock().await.insert(id.to_string(), tx);
         state
             .add_prompt(
                 id,
                 "secret-requested",
-                json!({"id": id, "session_id": sid, "label": "x", "file": file.to_string_lossy(), "key": key}),
+                json!({"id": id, "session_id": sid, "label": "x", "file": file.to_string_lossy(), "key": key, "temporary": temporary}),
                 false,
             )
             .await;
         rx
+    }
+
+    async fn respond(state: &Arc<DaemonState>, id: &str, value: &str) {
+        let mut r = Router::new();
+        register_secret(&mut r, state.clone());
+        let resp = r
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "respond_secret".into(),
+                    params: Some(json!({"request_id": id, "value": value})),
+                },
+                dummy_ctx(),
+            )
+            .await;
+        assert_eq!(resp.result, Some(json!({"ok": true, "error": null})));
+    }
+
+    /// Closing the chat that asked for a temporary secret removes its key line
+    /// and leaves the file's other lines. Unique session ids keep these tests
+    /// off each other's entries in the process-wide cleanup list.
+    #[tokio::test]
+    async fn closing_the_chat_removes_a_temporary_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().to_path_buf();
+        let sid = "temp-remove-key";
+        let state = state_with_session(sid, &cwd);
+        let target = cwd.join("secrets.env");
+        std::fs::write(&target, "OTHER=1
+").unwrap();
+        let _rx = open_prompt_with(&state, "p1", sid, &target, "API_KEY", true).await;
+        respond(&state, "p1", "sk-abc").await;
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "OTHER=1
+API_KEY=sk-abc
+");
+
+        crate::daemon::secret_target::temporary_secrets().sweep_session(sid);
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "OTHER=1
+");
+    }
+
+    /// A temporary secret that made its file takes the file with it.
+    #[tokio::test]
+    async fn closing_the_chat_deletes_a_file_the_temporary_secret_created() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().to_path_buf();
+        let sid = "temp-delete-file";
+        let state = state_with_session(sid, &cwd);
+        let target = cwd.join("secrets.env");
+        let _rx = open_prompt_with(&state, "p1", sid, &target, "API_KEY", true).await;
+        respond(&state, "p1", "sk-abc").await;
+        assert!(target.exists());
+
+        crate::daemon::secret_target::temporary_secrets().sweep_session(sid);
+
+        assert!(!target.exists());
+    }
+
+    /// A secret not asked for as temporary is still there after its chat closes.
+    #[tokio::test]
+    async fn closing_the_chat_keeps_a_permanent_secret() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().to_path_buf();
+        let sid = "temp-permanent-survives";
+        let state = state_with_session(sid, &cwd);
+        let target = cwd.join("secrets.env");
+        let _rx = open_prompt(&state, "p1", sid, &target, "API_KEY").await;
+        respond(&state, "p1", "sk-abc").await;
+
+        crate::daemon::secret_target::temporary_secrets().sweep_session(sid);
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "API_KEY=sk-abc
+");
+    }
+
+    /// Saving the same key again as permanent cancels the earlier temporary
+    /// request's cleanup, so the value Joe kept survives the close.
+    #[tokio::test]
+    async fn a_later_permanent_save_of_the_same_key_survives_the_close() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().to_path_buf();
+        let sid = "temp-then-permanent";
+        let state = state_with_session(sid, &cwd);
+        let target = cwd.join("secrets.env");
+        let _rx1 = open_prompt_with(&state, "p1", sid, &target, "API_KEY", true).await;
+        respond(&state, "p1", "sk-one").await;
+        let _rx2 = open_prompt(&state, "p2", sid, &target, "API_KEY").await;
+        respond(&state, "p2", "sk-two").await;
+
+        crate::daemon::secret_target::temporary_secrets().sweep_session(sid);
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "API_KEY=sk-two
+");
     }
 
     /// Full round trip: request -> respond -> the target file ends up
