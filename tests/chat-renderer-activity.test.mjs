@@ -153,8 +153,18 @@ describe("ChatRenderer - activity after report_turn_status lands", () => {
     expect(seen[seen.length - 1][0]).toContain("report_turn_status");
     r.handleEvent({ type: "tool_result", tool_use_id: "t2", output: "ok", is_error: false }, { silent: true });
 
-    expect(seen[seen.length - 1]).toEqual([null, true]);
-    expect(r.lastActivity).toBeNull();
+    expect(seen[seen.length - 1]).toEqual(["", true]);
+    expect(r.lastActivity).toBe("");
+  });
+
+  it("keeps the active todo step, which the bar shows ahead of any tool label", () => {
+    const r = new ChatRenderer(document.createElement("div"));
+    r.handleEvent(userEvent("go"), { silent: true });
+    r.handleEvent(toolUse("TodoWrite", { todos: [{ content: "Ship it", status: "in_progress", activeForm: "Shipping it" }] }, "t1"), { silent: true });
+    r.handleEvent({ type: "tool_result", tool_use_id: "t1", output: "ok", is_error: false }, { silent: true });
+    r.handleEvent(toolUse(REPORT, { status: "done" }, "t2"), { silent: true });
+    r.handleEvent({ type: "tool_result", tool_use_id: "t2", output: "ok", is_error: false }, { silent: true });
+    expect(r.lastTodoActivity).toBe("Shipping it");
   });
 
   it("still reads busy when the turn keeps calling tools after reporting", () => {
