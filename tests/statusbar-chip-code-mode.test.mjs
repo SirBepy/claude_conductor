@@ -16,7 +16,6 @@ const popover = () => ({ isOpen: false, open: vi.fn(), close: vi.fn(), reanchor:
 function ctx(cwd) {
   return {
     drainPopover: popover(),
-    aiTodosPopover: popover(),
     serversPopover: popover(),
     imagesPopover: popover(),
     commitsPopover: popover(),
