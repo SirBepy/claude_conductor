@@ -1,4 +1,5 @@
 // asserts: src/views/sessions/permission-modal/question-ui-templates.ts, src/views/sessions/permission-modal/question-ui-render.ts, src/views/sessions/permission-modal/question-ui-answer-bar.ts, src/views/sessions/permission-modal-shell.css, src/views/sessions/permission-modal-question.css
+// Reviewed 2026-10-28: the phone page's ask band now runs edge to edge (track viewport widened over the body padding, panels re-inset) - phone-media only, no change to this spec's contract.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 

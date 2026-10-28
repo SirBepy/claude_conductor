@@ -378,6 +378,20 @@
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn i {
     font-size: 1.15rem;
   }
+  /* The ask band runs edge to edge (Joe, 2026-10-28). The track viewport
+     clips, so it widens over the body's 14px side padding and each panel takes
+     that padding back; the band then pulls out over it again, and its 30px
+     side padding (16px own + 14px) keeps its text aligned with the rest. */
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-track-viewport {
+    margin-inline: -14px;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-panel {
+    padding-inline: 14px;
+  }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-zone--ask {
+    margin-inline: -14px;
+    padding-inline: 30px;
+  }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) {
     height: 52px;
     padding: 0 6px;

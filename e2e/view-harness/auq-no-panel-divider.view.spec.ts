@@ -1,5 +1,6 @@
 // asserts: src/views/sessions/permission-modal-track.css, src/views/sessions/permission-modal-shell.css
 // Reviewed 2026-10-28: the phone review Submit's 48px min-height now wins over the footer's 32px button rule - no change to this spec's divider contract.
+// Reviewed 2026-10-28: the phone page's ask band now runs edge to edge (track viewport widened over the body padding, panels re-inset) - phone-media only, no change to this spec's contract.
 import { test, expect, type Page } from "@playwright/test";
 import path from "node:path";
 import { mountView } from "./harness";
