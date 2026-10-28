@@ -146,10 +146,10 @@ pub enum CardDisplay {
         #[serde(default)]
         limit: Option<u32>,
     },
-    /// The card's own look: an HTML document rendered in a script-only
-    /// sandboxed iframe with no network, fed the response as `window.CARD_DATA`.
-    /// In the installed app the srcdoc frame inherits the app's CSP, so its
-    /// inline script does not run and only the static HTML and CSS show.
+    /// The card's own look: an HTML document rendered in a sandboxed iframe
+    /// with no network. The view harness also runs its inline script, fed the
+    /// response as `window.CARD_DATA`; in the installed app the srcdoc frame
+    /// inherits the app's CSP, so only the static HTML and CSS show.
     Html {
         #[serde(default)]
         template: String,
