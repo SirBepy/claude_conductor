@@ -62,6 +62,19 @@ describe("showSecretCard", () => {
     expect(text).not.toContain("Kinetic Panel API key");
   });
 
+  it("says a temporary secret is deleted when the chat closes, as plain text with no badge", () => {
+    showSecretCard(payload({ temporary: true }));
+    const note = card().querySelector(".secret-card__temporary");
+    expect(note.textContent).toBe("Temporary: deleted when this chat closes");
+    expect(note.querySelector(".badge, .pill, i")).toBeNull();
+  });
+
+  it("shows no temporary note for a permanent secret", () => {
+    showSecretCard(payload());
+    expect(card().textContent).not.toContain("Temporary");
+    expect(card().querySelector(".secret-card__temporary")).toBeNull();
+  });
+
   it("titles the card plainly and names the asking chat in the header", () => {
     showSecretCard(payload());
     expect(card().querySelector(".prompt-card__title").textContent).toContain("Secret requested");

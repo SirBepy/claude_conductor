@@ -60,6 +60,7 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 // Fallback close path (External sessions, or end_session already
                 // gone) - drop here too so it isn't the only route that leaks.
                 crate::ask::store::drop_for_chat(&p.session_id);
+                crate::daemon::secret_target::temporary_secrets().sweep_session(&p.session_id);
                 crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"ok": true}))

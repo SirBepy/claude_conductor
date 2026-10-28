@@ -272,6 +272,9 @@ pub async fn cancel_turn(map: &SessionMap, session_id: &str) -> Result<(), Lifec
 
 pub async fn end_session(map: &SessionMap, session_id: &str) -> Result<(), LifecycleError> {
     use tokio::io::AsyncWriteExt;
+    // Before the map lookup: a chat whose child already died still holds the
+    // secret on disk, and Joe closing it is what ends its lifetime.
+    crate::daemon::secret_target::temporary_secrets().sweep_session(session_id);
     let session = map.get(session_id)
         .ok_or_else(|| LifecycleError::NotFound(session_id.to_string()))?
         .clone();
@@ -402,6 +405,26 @@ mod tests {
         let map = new_session_map();
         let r = end_session(&map, "nope").await;
         assert!(matches!(r, Err(LifecycleError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn end_session_sweeps_the_chats_temporary_secrets_even_with_no_live_child() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("secrets.env");
+        std::fs::write(&file, "API_KEY=sk-abc
+").unwrap();
+        let sid = "teardown-test-temp-secret-3b7d";
+        crate::daemon::secret_target::temporary_secrets().record(crate::daemon::secret_target::TempSecret {
+            session_id: sid.into(),
+            file: file.clone(),
+            key: "API_KEY".into(),
+            created_file: true,
+        });
+
+        let r = end_session(&new_session_map(), sid).await;
+
+        assert!(matches!(r, Err(LifecycleError::NotFound(_))));
+        assert!(!file.exists(), "closing the chat deletes its temporary secret");
     }
 
     // A live ChildStdin is required to reach end_session's happy path, so this

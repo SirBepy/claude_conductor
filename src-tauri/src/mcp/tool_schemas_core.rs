@@ -82,7 +82,11 @@ pub fn core_schemas() -> Vec<Value> {
                 "properties": {
                     "label": {"type": "string"},
                     "file": {"type": "string"},
-                    "key": {"type": "string"}
+                    "key": {"type": "string"},
+                    "temporary": {
+                        "type": "boolean",
+                        "description": "Set true for a credential you only need while this chat is open: the line is deleted from the file (or the whole file, if this call created it) when the chat closes, and the card tells Joe so. Leave it out for a secret that must outlive the chat."
+                    }
                 },
                 "required": ["label", "file", "key"]
             }

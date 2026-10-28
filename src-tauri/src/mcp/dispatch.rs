@@ -107,6 +107,7 @@ fn prompt_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "label": label,
                 "file": file,
                 "key": key,
+                "temporary": ctx.args["temporary"].as_bool().unwrap_or(false),
             });
             // Not `ctx.relay`: that helper's `success` param is a single static
             // string, but the daemon's ok=true reply carries a per-call
@@ -548,5 +549,34 @@ mod tests {
             json!(["sess-a", "sess-b"]),
             "blanks and non-strings dropped, ids trimmed"
         );
+    }
+
+    fn echo_body_post(_rt: &tokio::runtime::Runtime, _url: &str, body: Value) -> Result<Value, String> {
+        Ok(json!({"ok": true, "text": body.to_string()}))
+    }
+
+    /// `temporary` reaches the daemon route, and an omitted flag is sent as an
+    /// explicit false so the daemon never has to guess.
+    #[test]
+    fn request_secret_forwards_the_temporary_flag() {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let id = json!(1);
+        let sent = |args: Value| -> Value {
+            let resp = dispatch_tool_with(&rt, &id, TOOL_REQUEST_SECRET, &args, "s1", 1, echo_body_post);
+            serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+        };
+        let on = sent(json!({"label": "l", "file": "f", "key": "k", "temporary": true}));
+        assert_eq!(on["temporary"], json!(true));
+        let off = sent(json!({"label": "l", "file": "f", "key": "k"}));
+        assert_eq!(off["temporary"], json!(false));
+    }
+
+    #[test]
+    fn request_secret_schema_declares_the_temporary_flag() {
+        let tools = super::super::tool_schemas_core::core_schemas();
+        let schema = tools.iter().find(|t| t["name"] == TOOL_REQUEST_SECRET).expect("registered");
+        assert_eq!(schema["inputSchema"]["properties"]["temporary"]["type"], json!("boolean"));
+        let required = schema["inputSchema"]["required"].as_array().unwrap();
+        assert!(!required.contains(&json!("temporary")), "optional");
     }
 }
