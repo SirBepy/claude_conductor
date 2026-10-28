@@ -10,7 +10,6 @@ import {
   readLastChoice,
   readModels,
   readDefaultFlags,
-  latestIdForFamily,
 } from "../../shared/effort-presets";
 
 export interface ModelEffortResolvedData {
@@ -22,7 +21,6 @@ export interface ModelEffortResolvedData {
   preferredAccountId: string | null;
   accounts: AccountLite[];
   accountId: string | null;
-  idByFamily: Map<string, string>;
 }
 
 /** Where the account step's data comes from: this machine's caches, or a
@@ -90,12 +88,6 @@ export async function resolveModelEffortData(
   // default -> sole-account fallback -> null (ambiguous/empty registry).
   const accountId = resolveInitialAccountId(preferredAccountId, defaultAccountId, accounts);
 
-  const idByFamily = new Map<string, string>();
-  for (const fam of models) {
-    const id = latestIdForFamily(fam);
-    if (id) idByFamily.set(fam, id);
-  }
-
   return {
     models,
     model: initial.model,
@@ -105,6 +97,5 @@ export async function resolveModelEffortData(
     preferredAccountId,
     accounts,
     accountId,
-    idByFamily,
   };
 }

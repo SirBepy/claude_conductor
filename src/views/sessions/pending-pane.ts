@@ -62,7 +62,7 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
     state.statusbar.setSessionId(sessionId);
     state.statusbar.setReadOnlyEffort(false);
     state.statusbar.disableModelEdit();
-    // The picked-in-modal accountId already painted the chip; resync against
+    // The account picked in the new-chat config already painted the chip; resync against
     // the now-real session record in case the daemon resolved a different one
     // (e.g. the picked account vanished mid-flow and it fell back to default).
     state.statusbar.setAccountId(sess?.account_id ?? null);
@@ -77,7 +77,7 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
     h.onProjectClick = projectDashboardOpener(sess);
   }
   // Refresh the avatar from the now-assigned session character: covers the case
-  // where the user didn't pick one in the modal and the backend rolled one on
+  // where the user didn't pick one in the new-chat config and the backend rolled one on
   // start (the draft showed the muted placeholder until now). Only override when
   // we actually have an id, so a not-yet-loaded char map can't clobber the
   // portrait already shown for a user-picked character.
