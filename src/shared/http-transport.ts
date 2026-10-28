@@ -240,7 +240,7 @@ export class HttpTransport implements Transport {
       // `.claude/todos` backlog: the chat statusbar's todos chip and the
       // project picker's badge. Missing here left the chip a skeleton forever.
       case "list_ai_todos":
-        return this.rpc<T>("list_ai_todos", { cwd: args.cwd });
+        return this.rpc<T>("list_ai_todos", { cwd: args.cwd, session_id: args.sessionId ?? args.session_id });
       case "count_ai_todos":
         return this.rpc<T>("count_ai_todos", { cwd: args.cwd });
       // Phone-only: the whole new-chat flow's data in one request (see

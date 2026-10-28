@@ -181,10 +181,13 @@ pub(crate) async fn get_git_info_local(cwd: String) -> GitInfo {
 #[tauri::command]
 pub async fn get_git_info(cwd: String, session_id: Option<String>, state: State<'_, AppState>) -> Result<GitInfo, String> {
     if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
-        return Ok(client
-            .get_git_info(session_id.as_deref().unwrap(), &cwd)
-            .await
-            .unwrap_or(GitInfo { branch: None, repo: None, ahead: None, behind: None, sha: None, insertions: None, deletions: None }));
+        let sid = session_id.as_deref().unwrap();
+        // The empty answer hides the git chip with no trace, so the reason a
+        // peer read failed is only ever visible here.
+        return Ok(client.get_git_info(sid, &cwd).await.unwrap_or_else(|e| {
+            log::warn!("get_git_info: mirrored session {sid} read failed: {e}");
+            GitInfo { branch: None, repo: None, ahead: None, behind: None, sha: None, insertions: None, deletions: None }
+        }));
     }
     Ok(get_git_info_local(cwd).await)
 }

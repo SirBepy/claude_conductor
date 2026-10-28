@@ -159,9 +159,10 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
-    // Mirror `count_ai_todos` / `list_ai_todos` (params: cwd): the project
-    // picker's todo badge and the chat statusbar's todos chip. `cwd` is
-    // client-supplied and both read the dir listing, so reject_unknown first.
+    // Mirror `count_ai_todos` / `list_ai_todos` (params: cwd, plus an optional
+    // session_id for list): the project picker's todo badge and the chat
+    // statusbar's todos chip. `cwd` is client-supplied and both read the dir
+    // listing, so reject_unknown first.
     {
         let state = state.clone();
         router.register("count_ai_todos", move |params, _ctx| {
@@ -182,11 +183,13 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
             let state = state.clone();
             async move {
                 #[derive(serde::Deserialize)]
-                struct P { cwd: String }
+                struct P { cwd: String, #[serde(default)] session_id: Option<String> }
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                reject_unknown(&state, &p.cwd)?;
-                Ok(json!(crate::ipc::ai_todos::list_ai_todos(p.cwd).await))
+                // A `session_id` arrives from a paired machine reading a chat
+                // hosted here; its cwd comes from this registry, never the param.
+                let cwd = crate::daemon::methods::pr_review::resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                Ok(json!(crate::ipc::ai_todos::list_ai_todos_local(cwd).await))
             }
         });
     }
