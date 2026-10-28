@@ -134,6 +134,13 @@
 .prompt-opt > input:focus-visible {
   outline: none;
 }
+/* The answer and "Anything else" boxes reuse composer.css's 2px focus ring,
+ * which sits outside the border; the review step's box spans the panel's full
+ * width, so the same clip shaves it off on the sides and bottom. -2px pulls
+ * the whole ring inside the box, painting over the 1px border. */
+.prompt-card .composer-textarea:focus-visible {
+  outline-offset: -2px;
+}
 .prompt-opt > input {
   margin: 3px 0 0;
   flex-shrink: 0;
