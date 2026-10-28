@@ -127,18 +127,19 @@ describe("click", () => {
     expect(opened).toEqual([{ kind: "file", path: "/home/joe/project/a.rs", line: undefined }]);
   });
 
-  it("opens a path outside the chat's repo through open_in_editor", () => {
+  it("opens a path outside the chat's repo in the app's Files window, not VS Code", () => {
     const root = mount(String.raw`<p>C:\Users\x\a.ts:9</p>`);
     linkifyFilePaths(root);
     click(root);
-    expect(invokeMock).toHaveBeenCalledWith("open_in_editor", { path: String.raw`C:\Users\x\a.ts`, line: 9 });
+    expect(invokeMock).toHaveBeenCalledWith("open_file_window", { path: String.raw`C:\Users\x\a.ts`, line: 9 });
+    expect(invokeMock.mock.calls.map((c) => c[0])).not.toContain("open_in_editor");
   });
 
-  it("forwards the chip's line and column", () => {
+  it("forwards the chip's line", () => {
     const root = mount("<p>/home/joe/project/a.rs:42:7</p>");
     linkifyFilePaths(root);
     click(root);
-    expect(invokeMock.mock.calls[0][1]).toMatchObject({ path: "/home/joe/project/a.rs", line: 42, col: 7 });
+    expect(invokeMock.mock.calls[0][1]).toEqual({ path: "/home/joe/project/a.rs", line: 42 });
   });
 
   it("passes no line for a chip without one", () => {
@@ -147,8 +148,7 @@ describe("click", () => {
     click(root);
     const args = invokeMock.mock.calls[0][1];
     expect(args.path).toBe("/home/joe/project/a.rs");
-    expect(args.line).toBeUndefined();
-    expect(args.col).toBeUndefined();
+    expect(args.line).toBeNull();
   });
 
   it("only copies a path outside the chat's repo on the phone", () => {
@@ -180,10 +180,10 @@ describe("right-click menu", () => {
     expect(items(root)).toEqual(["Open", "Open in VS Code", "Copy path", "Reveal in file manager"]);
   });
 
-  it("drops Open for a path outside the chat's repo", () => {
+  it("keeps Open for a path outside the chat's repo: it opens in the Files window", () => {
     const root = mount("<p>/home/joe/project/a.rs</p>");
     linkifyFilePaths(root);
-    expect(items(root)).toEqual(["Open in VS Code", "Copy path", "Reveal in file manager"]);
+    expect(items(root)).toEqual(["Open", "Open in VS Code", "Copy path", "Reveal in file manager"]);
   });
 
   it("keeps Open on the phone and drops the desktop-disk actions", () => {

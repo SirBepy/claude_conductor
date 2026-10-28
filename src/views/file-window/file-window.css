@@ -1,0 +1,17 @@
+/* The Files window: Code mode's tab row and file surface, full window. */
+
+.file-window {
+  height: 100vh;
+}
+
+.fw-surface {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+}
+
+.file-window > [hidden] {
+  display: none !important;
+}

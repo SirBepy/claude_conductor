@@ -1,17 +1,15 @@
 // Code mode's editor body: a breadcrumb line (path, +/- counts, search) over a
 // File or Diff view, with its controls rendered icon-only into a host the
 // caller places (Code mode puts them at the right end of its tab row, VS
-// Code's editor-title spot). Read-only. Styles in file-surface.css.
+// Code's editor-title spot). The File view is a CodeMirror editor
+// (file-editor.ts) that autosaves a working-tree file inside a registered
+// project; markdown opens rendered, with a Source toggle. Styles in
+// file-surface.css.
 
 import { invoke } from "../ipc";
 import { basename } from "../path-utils";
 import { escapeHtml } from "../escape-html";
 import { isRemote } from "../transport";
-// REUSE the existing full Shiki build (same highlighter the chat diffs use),
-// loaded lazily via shiki-loader (see its header comment) so it's not in the
-// main bundle at boot. The /web bundle lacks rust/toml/etc grammars, so the
-// lazy import MUST stay /bundle/full.
-import { loadShiki } from "./shiki-loader";
 import {
   parseUnifiedDiff,
   renderUnifiedDiffHtml,
@@ -23,6 +21,8 @@ import {
   type DiffHighlightMaps,
 } from "./file-surface-diff";
 import type { FileEditView } from "./file-edits";
+import type { FileEditor, EditorStatus } from "./file-editor";
+import { renderMarkdown } from "./chat-transforms";
 import type { TextFileData } from "../../types/ipc.generated";
 
 export interface SurfaceFile {
@@ -38,6 +38,9 @@ export interface SurfaceFile {
   gitDiff?: (opts: { full: boolean }) => Promise<string>;
   /** The file's content for the File view (a past revision, or the working tree). */
   fileAtRev: () => Promise<TextFileData>;
+  /** `fileAtRev` reads the working-tree copy at `absPath`, so the File view
+   *  may edit that file in place (when the host's `canEdit` allows it). */
+  onDisk?: boolean;
 }
 
 export interface FileSurfaceOptions {
@@ -45,6 +48,12 @@ export interface FileSurfaceOptions {
   /** Where the icon-only controls render. Without one they sit at the end of
    *  the breadcrumb line. */
   toolsHost?: HTMLElement;
+  /** Whether an `onDisk` file is this machine's to edit: false on the phone
+   *  and for a chat mirrored from another machine, whose paths are that
+   *  machine's. */
+  canEdit?: () => boolean;
+  /** Opens a file a rendered markdown link points at (an absolute path). */
+  openPath?: (absPath: string) => void;
 }
 
 export interface FileSurfaceHandle {
@@ -100,6 +109,7 @@ const SURFACE_HTML =
   `<div class="fs-crumbs">` +
   `<span class="fs-path"></span>` +
   `<span class="fs-grow"></span>` +
+  `<span class="fs-status"></span>` +
   `<div class="fs-search fs-hidden">` +
   `<i class="ph ph-magnifying-glass"></i>` +
   `<input class="fs-search-input" placeholder="Search" aria-label="Search this file" />` +
@@ -120,6 +130,7 @@ const TOOLS_HTML =
   `<button type="button" class="fs-tb fs-prev-chg" title="Previous change (Shift+F7)"><i class="ph ph-caret-up"></i></button>` +
   `<button type="button" class="fs-tb fs-next-chg" title="Next change (F7)"><i class="ph ph-caret-down"></i></button>` +
   `</div>` +
+  `<button type="button" class="fs-tb fs-md-btn fs-hidden"></button>` +
   `<button type="button" class="fs-tb fs-menu-btn" title="More: search, Open in VS Code" aria-haspopup="true"><i class="ph ph-dots-three"></i></button>` +
   `<div class="fs-menu fs-hidden" role="menu">` +
   `<div class="fs-mi" data-act="search" role="menuitem"><i class="ph ph-magnifying-glass"></i><span>Search</span><kbd>Ctrl+F</kbd></div>` +
@@ -133,6 +144,26 @@ const TOOLS_HTML =
 // diff editor; nothing earns persisting them across restarts yet.
 let preferredDiffMode: "inline" | "split" = "inline";
 let preferredFull = false;
+let preferredRendered = true;
+
+function isMarkdown(path: string): boolean {
+  const lang = langFromPath(path);
+  return lang === "markdown" || lang === "mdx";
+}
+
+let editorModule: Promise<typeof import("./file-editor")> | null = null;
+
+// Same cached dynamic import as shiki-loader: CodeMirror lands in its own
+// chunk, fetched the first time a File view opens.
+function loadEditor(): Promise<typeof import("./file-editor")> {
+  if (!editorModule) {
+    editorModule = import("./file-editor").catch((err) => {
+      editorModule = null;
+      throw err;
+    });
+  }
+  return editorModule;
+}
 
 export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): FileSurfaceHandle {
   host.innerHTML = SURFACE_HTML;
@@ -146,6 +177,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
 
   const el = {
     path: host.querySelector<HTMLElement>(".fs-path")!,
+    status: host.querySelector<HTMLElement>(".fs-status")!,
     counts: host.querySelector<HTMLElement>(".fs-counts")!,
     search: host.querySelector<HTMLElement>(".fs-search")!,
     searchInput: host.querySelector<HTMLInputElement>(".fs-search-input")!,
@@ -154,6 +186,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     diffTools: tools.querySelector<HTMLElement>(".fs-diff-tools")!,
     splitBtn: tools.querySelector<HTMLButtonElement>(".fs-split-btn")!,
     fullBtn: tools.querySelector<HTMLButtonElement>(".fs-full-btn")!,
+    mdBtn: tools.querySelector<HTMLButtonElement>(".fs-md-btn")!,
     menuBtn: tools.querySelector<HTMLButtonElement>(".fs-menu-btn")!,
     menu: tools.querySelector<HTMLElement>(".fs-menu")!,
   };
@@ -163,6 +196,10 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     view: "file" as "diff" | "file",
     diffMode: preferredDiffMode,
     full: preferredFull,
+    rendered: preferredRendered,
+    editor: null as FileEditor | null,
+    /** View chosen from the menu for the open path; null until one is. */
+    pickedView: null as "diff" | "file" | null,
     menuOpen: false,
     loaded: null as TextFileData | null,
     loadedForPath: null as string | null,
@@ -176,6 +213,8 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
   };
 
   let search: SearchState = { query: "", marks: [], cur: -1 };
+  /** [current, total] when the File view's editor runs the search. */
+  let editorHits: [number, number] = [-1, 0];
 
   function hasDiffSource(file: SurfaceFile): boolean {
     return (!!file.sessionEdits && file.sessionEdits.length > 0) || !!file.gitDiff;
@@ -190,6 +229,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
   // ── search ────────────────────────────────────────────────────────────
 
   function clearSearchMarks(): void {
+    if (state.editor) editorHits = state.editor.search("");
     for (const m of Array.from(el.body.querySelectorAll<HTMLElement>("mark.fs-hit"))) {
       m.replaceWith(document.createTextNode(m.textContent ?? ""));
     }
@@ -197,7 +237,8 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
   }
 
   function updateSearchCount(): void {
-    el.searchCount.textContent = search.marks.length ? `${search.cur + 1}/${search.marks.length}` : search.query ? "0" : "";
+    const [cur, total] = state.editor ? editorHits : [search.cur, search.marks.length];
+    el.searchCount.textContent = total ? `${cur + 1}/${total}` : search.query ? "0" : "";
   }
 
   function closeSearch(): void {
@@ -223,6 +264,11 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     clearSearchMarks();
     search = { query, marks: [], cur: -1 };
     if (!query) {
+      updateSearchCount();
+      return;
+    }
+    if (state.editor) {
+      editorHits = state.editor.search(query);
       updateSearchCount();
       return;
     }
@@ -265,6 +311,11 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
   }
 
   function jumpSearch(dir: 1 | -1): void {
+    if (state.editor) {
+      editorHits = state.editor.step(dir);
+      updateSearchCount();
+      return;
+    }
     if (!search.marks.length) return;
     search.cur = (search.cur + dir + search.marks.length) % search.marks.length;
     highlightCurrentMatch();
@@ -347,6 +398,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
   });
 
   function setView(view: "diff" | "file"): void {
+    state.pickedView = view;
     if (state.view === view) return;
     state.view = view;
     closeSearch();
@@ -378,6 +430,12 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
 
   el.splitBtn.addEventListener("click", () => {
     state.diffMode = preferredDiffMode = state.diffMode === "split" ? "inline" : "split";
+    updateBar();
+    void renderBody();
+  });
+  el.mdBtn.addEventListener("click", () => {
+    state.rendered = preferredRendered = !state.rendered;
+    closeSearch();
     updateBar();
     void renderBody();
   });
@@ -415,57 +473,144 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     el.fullBtn.classList.toggle("fs-hidden", !file.gitDiff);
     el.fullBtn.classList.toggle("fs-on", state.full);
     el.fullBtn.setAttribute("aria-pressed", String(state.full));
+    const md = !isDiff && isMarkdown(file.path);
+    el.mdBtn.classList.toggle("fs-hidden", !md);
+    el.mdBtn.innerHTML = `<i class="ph ${state.rendered ? "ph-code" : "ph-eye"}"></i>`;
+    el.mdBtn.title = state.rendered ? "Show source" : "Show rendered";
+    el.mdBtn.setAttribute("aria-label", el.mdBtn.title);
   }
 
   // ── body: file view ──────────────────────────────────────────────────
 
-  function appendTruncationNotice(truncated: boolean): void {
-    if (!truncated) return;
+  function setStatus(st: EditorStatus | null): void {
+    // Autosave stays silent while it works; only a reason the file can't be
+    // edited, or a write that failed, earns text.
+    const text = st?.kind === "readonly" ? st.reason : st?.kind === "error" ? st.message : "";
+    el.status.textContent = text;
+    el.status.classList.toggle("fs-status-err", st?.kind === "error");
+  }
+
+  function teardownEditor(): void {
+    if (!state.editor) return;
+    state.editor.destroy();
+    state.editor = null;
+    editorHits = [-1, 0];
+    setStatus(null);
+  }
+
+  function setBody(html: string): void {
+    teardownEditor();
+    el.body.innerHTML = html;
+  }
+
+  /** The path the File view may write, or null when it is read-only. */
+  function diskPathOf(file: SurfaceFile): string | null {
+    return file.onDisk && file.absPath && opts.canEdit?.() ? file.absPath : null;
+  }
+
+  function truncationNotice(): HTMLElement {
     const notice = document.createElement("div");
     notice.className = "fs-truncated";
     notice.innerHTML = `<i class="ph ph-warning"></i> File is large and was truncated. Open in VS Code to see the full contents.`;
-    el.body.appendChild(notice);
+    return notice;
   }
 
   async function renderFileBody(token: number): Promise<void> {
     const file = state.file!;
-    if (!(state.loaded && state.loadedForPath === file.path)) {
-      el.body.innerHTML = `<div class="fs-loading">Loading...</div>`;
-      try {
-        const data = await file.fileAtRev();
-        if (token !== state.token) return;
-        state.loaded = data;
-        state.loadedForPath = file.path;
-      } catch (err) {
-        if (token !== state.token) return;
-        el.body.innerHTML = `<div class="fs-error">${escapeHtml(String(err))}</div>`;
-        return;
-      }
+    if (isMarkdown(file.path) && state.rendered) {
+      await renderMarkdownBody(token, file);
+      return;
     }
-    const data = state.loaded!;
+    const diskPath = diskPathOf(file);
+    // show() kept the editor for this same file: nothing to rebuild.
+    if (state.editor && diskPath !== null && state.editor.diskPath === diskPath) {
+      revealLine();
+      return;
+    }
+    setBody(`<div class="fs-loading">Loading...</div>`);
+    const holder: { ed: FileEditor | null; early: EditorStatus | null } = { ed: null, early: null };
+    let editor: FileEditor;
+    const host = document.createElement("div");
+    host.className = "fs-editor";
     try {
-      const { codeToHtml } = await loadShiki();
-      const highlighted = await codeToHtml(data.content, { lang: langFromPath(file.path), theme: "github-dark" });
+      const { openFileEditor } = await loadEditor();
       if (token !== state.token) return;
-      el.body.innerHTML = `<div class="fs-code-view">${highlighted}</div>`;
-    } catch {
+      editor = await openFileEditor(host, {
+        diskPath,
+        name: file.path,
+        fallback: () => file.fileAtRev(),
+        onStatus: (st) => {
+          if (!holder.ed) holder.early = st;
+          else if (state.editor === holder.ed) setStatus(st);
+        },
+      });
+    } catch (err) {
       if (token !== state.token) return;
-      const lines = data.content.split("\n").map((l) => `<span class="line">${escapeHtml(l) || "&#8203;"}</span>`);
-      el.body.innerHTML = `<div class="fs-code-view"><pre class="fs-plain"><code>${lines.join("\n")}</code></pre></div>`;
+      setBody(`<div class="fs-error">${escapeHtml(String(err))}</div>`);
+      return;
     }
-    appendTruncationNotice(data.truncated);
+    if (token !== state.token) {
+      editor.destroy();
+      return;
+    }
+    setBody("");
+    holder.ed = editor;
+    state.editor = editor;
+    setStatus(holder.early);
+    // Above the editor, not after it: the editor fills the body, so anything
+    // below it would sit off screen.
+    if (editor.truncated()) el.body.appendChild(truncationNotice());
+    el.body.appendChild(host);
     revealLine();
   }
+
+  async function renderMarkdownBody(token: number, file: SurfaceFile): Promise<void> {
+    const diskPath = diskPathOf(file);
+    // What the editor holds, typed-but-unsaved included, beats the disk copy.
+    let text = diskPath && editorModule ? (await loadEditor()).sessionText(diskPath) : null;
+    let truncated = false;
+    if (text === null) {
+      if (!(state.loaded && state.loadedForPath === file.path)) {
+        setBody(`<div class="fs-loading">Loading...</div>`);
+        try {
+          const data = await file.fileAtRev();
+          if (token !== state.token) return;
+          state.loaded = data;
+          state.loadedForPath = file.path;
+        } catch (err) {
+          if (token !== state.token) return;
+          setBody(`<div class="fs-error">${escapeHtml(String(err))}</div>`);
+          return;
+        }
+      }
+      text = state.loaded!.content;
+      truncated = state.loaded!.truncated;
+    }
+    if (token !== state.token) return;
+    setBody(`<div class="fs-md pr-modal-body-content">${renderMarkdown(markdownForDisplay(text))}</div>`);
+    if (truncated) el.body.appendChild(truncationNotice());
+  }
+
+  // A relative link in rendered markdown would navigate the app's own window;
+  // it opens the linked file instead. http(s)/mailto fall through to
+  // external-links.ts, which opens them in the browser.
+  el.body.addEventListener("click", (e) => {
+    const a = (e.target as HTMLElement).closest<HTMLAnchorElement>(".fs-md a[href]");
+    if (!a) return;
+    const href = a.getAttribute("href") ?? "";
+    if (/^(https?:|mailto:)/i.test(href)) return;
+    e.preventDefault();
+    const target = resolveLink(state.file?.absPath ?? null, href);
+    if (target && opts.openPath) opts.openPath(target);
+  });
 
   // One-shot per show(): a later Diff -> File toggle must not yank the
   // scroll back to a line the reader has already moved away from.
   function revealLine(): void {
     if (state.line === null) return;
-    const row = el.body.querySelectorAll<HTMLElement>(".fs-code-view .line")[state.line - 1];
+    const line = state.line;
     state.line = null;
-    if (!row) return;
-    row.classList.add("fs-line-target");
-    row.scrollIntoView({ block: "center" });
+    state.editor?.revealLine(line);
   }
 
   // ── body: diff view ──────────────────────────────────────────────────
@@ -501,7 +646,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     }
     const key = `${file.path}|${state.full}`;
     if (state.diffKey === key) return true;
-    el.body.innerHTML = `<div class="fs-loading">Loading diff...</div>`;
+    setBody(`<div class="fs-loading">Loading diff...</div>`);
     try {
       const text = await file.gitDiff({ full: state.full });
       if (token !== state.token) return false;
@@ -520,21 +665,21 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     const file = state.file!;
     if (!(await loadDiffRows(token, file)) || token !== state.token) return;
     if (state.diffError || !state.diffRows) {
-      el.body.innerHTML = `<div class="fs-error">${escapeHtml(state.diffError ?? "No diff available for this file.")}</div>`;
+      setBody(`<div class="fs-error">${escapeHtml(state.diffError ?? "No diff available for this file.")}</div>`);
       return;
     }
     if (!state.diffRows.length) {
-      el.body.innerHTML = `<div class="fs-loading">No changes in this file.</div>`;
+      setBody(`<div class="fs-loading">No changes in this file.</div>`);
       return;
     }
-    el.body.innerHTML = state.diffMode === "split" ? renderSplitDiffHtml(state.diffRows) : renderUnifiedDiffHtml(state.diffRows);
+    setBody(state.diffMode === "split" ? renderSplitDiffHtml(state.diffRows) : renderUnifiedDiffHtml(state.diffRows));
     void enhanceDiffHighlight(token, file, state.diffRows);
   }
 
   async function renderBody(): Promise<void> {
     const token = state.token;
     if (!state.file) {
-      el.body.innerHTML = "";
+      setBody("");
       return;
     }
     if (state.view === "diff") await renderDiffBody(token);
@@ -568,8 +713,17 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     // A tab reopened from another scope keeps its path but swaps its source,
     // so cached content is keyed on the file object, not the path.
     const sameFile = state.file === file;
+    // Re-showing the open path (Code mode does on every chat edit) keeps a
+    // view the reader picked from the menu instead of snapping back to diff.
+    if (state.file?.path !== file.path) state.pickedView = null;
     state.file = file;
-    state.view = resolveView(file, view);
+    state.view = resolveView(file, view ?? state.pickedView ?? undefined);
+    // A chat editing files reloads Code mode's scope, which re-shows the open
+    // tab with a fresh SurfaceFile. Remounting the editor then would steal
+    // the caret from someone typing in it, so the same file keeps its editor.
+    const diskPath = diskPathOf(file);
+    const keepEditor = !!state.editor && diskPath !== null && state.editor.diskPath === diskPath
+      && state.view === "file" && !(isMarkdown(file.path) && state.rendered);
     state.diffMode = preferredDiffMode;
     state.full = preferredFull;
     if (!sameFile) {
@@ -584,10 +738,12 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     setMenuOpen(false);
     closeSearch();
     updateBar();
-    void renderBody();
+    if (keepEditor) revealLine();
+    else void renderBody();
   }
 
   function destroy(): void {
+    teardownEditor();
     document.removeEventListener("click", onDocClick);
     document.removeEventListener("keydown", onDocKeydown, true);
     tools.remove();
@@ -596,6 +752,34 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
   }
 
   return { show, handleKey, destroy };
+}
+
+/** Markdown as a reader sees it: GitHub hides HTML comments (todo files carry
+ *  claim and cleanup notes in them), and html:false would print them raw. */
+export function markdownForDisplay(text: string): string {
+  return text.replace(/^\uFEFF/, "").replace(/<!--[\s\S]*?-->[ \t]*\r?\n?/g, "");
+}
+
+/** Absolute path a relative markdown link names, or null for an in-page
+ *  anchor or a link the viewer can't follow. */
+export function resolveLink(fromAbs: string | null, href: string): string | null {
+  let raw: string;
+  try {
+    raw = decodeURIComponent(href.split("#")[0]!.split("?")[0]!);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  if (/^file:\/\//i.test(raw)) return raw.replace(/^file:\/\/\/?/i, "");
+  if (/^[a-z]:[\\/]/i.test(raw) || raw.startsWith("/")) return raw;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || !fromAbs) return null;
+  const parts = fromAbs.replace(/\\/g, "/").split("/");
+  parts.pop();
+  for (const seg of raw.replace(/\\/g, "/").split("/")) {
+    if (seg === "..") parts.pop();
+    else if (seg !== "." && seg !== "") parts.push(seg);
+  }
+  return parts.join("/");
 }
 
 function findLastIndex<T>(arr: T[], pred: (v: T) => boolean): number {

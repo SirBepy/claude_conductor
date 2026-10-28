@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+// Reviewed 2026-10-28: main.ts gained a Files window branch (`?filewindow=1`), taken only for that URL; this spec boots the plain index URL, so its contract is unaffected. Passed after the change.
 // asserts: src/index.html, src/main.ts
 import { mountView } from "./harness";
 

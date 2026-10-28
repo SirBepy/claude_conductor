@@ -6,6 +6,7 @@ import { invoke } from "../../../shared/ipc";
 import { api } from "../../../shared/api";
 import { showToast } from "../../../shared/toast";
 import { showView } from "../../../shared/navigation";
+import { openFileWindow } from "../../../shared/open-file";
 import { createMoreMenu } from "../more-menu-base";
 import { resolveNewChatConfig, accountPickNeeded } from "../new-chat-config";
 import { selectSession } from "../active-session";
@@ -157,9 +158,7 @@ export function makeActions(host: ActionHost): DashActions {
       })();
     },
     openHistory: (sessionId) => { void openHistory(sessionId); },
-    openFile: (path) => {
-      void invoke<void>("open_in_vscode", { path }).catch((err) => showToast(`Could not open the file: ${String(err)}`));
-    },
+    openFile: (path) => openFileWindow(path),
     openUrl: (url) => { void api.openExternal(url).catch((err) => showToast(`Could not open the link: ${String(err)}`)); },
     openAllHistory: () => showView("history"),
     copyText: (text, what) => copy(text, what),

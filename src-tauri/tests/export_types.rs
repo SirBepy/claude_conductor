@@ -25,7 +25,7 @@ use claude_conductor_lib::ipc::git_commit_refs::CommitRef;
 use claude_conductor_lib::ipc::api_keys::ApiKeyStatus;
 use claude_conductor_lib::tickets::{TicketSummary, TicketTracker, TrackerInfo, TrackerKind};
 use claude_conductor_lib::ipc::git_sync::{CommitEntry, CommitHistory, CommitHistoryEntry, CommitSync};
-use claude_conductor_lib::ipc::files::TextFileData;
+use claude_conductor_lib::ipc::files::{TextFileData, TextFileStamp};
 use claude_conductor_lib::ipc::schedule::ExternalScheduledJob;
 use claude_conductor_lib::notifications::piper::{PiperStatus, VoiceEntry};
 use claude_conductor_lib::sessions::kinds::InstanceKind;
@@ -134,6 +134,7 @@ fn emit_ipc_types() {
     out.push_str(&decl::<TrackerInfo>());
     out.push_str(&decl::<TicketSummary>());
     out.push_str(&decl::<TextFileData>());
+    out.push_str(&decl::<TextFileStamp>());
     out.push_str(&decl::<AiTodoEntry>());
     out.push_str(&decl::<HiddenChatsView>());
     out.push_str(&decl::<GamingModeView>());

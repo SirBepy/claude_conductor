@@ -1,0 +1,112 @@
+/* The File view's CodeMirror body (file-editor.ts). Selectors carry the
+   .fe-host prefix so they outrank CodeMirror's own scoped base theme. */
+
+.fe-host {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.fe-cm {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.fe-host .cm-editor {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: transparent;
+  color: var(--color-text);
+}
+
+.fe-host .cm-editor.cm-focused {
+  outline: none;
+}
+
+.fe-host .cm-scroller {
+  font-family: "Fira Code", ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  font-variant-ligatures: none;
+  padding: 8px 0;
+}
+
+/* Matches the read-only view's 44px line-number column. */
+.fe-host .cm-gutters {
+  background: transparent;
+  border-right: 0;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.fe-host .cm-lineNumbers .cm-gutterElement {
+  min-width: 34px;
+  padding: 0 10px 0 0;
+}
+
+/* Also marks the line a file chip jumped to, read-only files included. */
+.fe-host .cm-activeLine,
+.fe-host .cm-activeLineGutter {
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+.fe-host .cm-cursor {
+  border-left-color: var(--color-text);
+}
+
+.fe-host .cm-selectionBackground,
+.fe-host .cm-editor.cm-focused .cm-selectionBackground {
+  background: color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+.fe-host .cm-matchingBracket {
+  background: color-mix(in srgb, var(--color-text) 14%, transparent);
+  outline: none;
+}
+
+/* Same marks as the diff and markdown views' DOM search (mark.fs-hit). */
+.fe-host .fe-hit {
+  background: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  border-radius: 2px;
+}
+
+.fe-host .fe-hit-cur {
+  background: var(--color-primary);
+  color: var(--color-background);
+}
+
+.fe-conflict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(255, 196, 0, 0.12);
+  color: #e0b341;
+  font-family: system-ui, sans-serif;
+  font-size: 0.8rem;
+}
+
+.fe-conflict[hidden] {
+  display: none;
+}
+
+.fe-conflict span {
+  flex: 1;
+}
+
+.fe-cbtn {
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.fe-cbtn:hover {
+  background: rgba(255, 196, 0, 0.16);
+}

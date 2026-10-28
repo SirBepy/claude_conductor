@@ -6,6 +6,7 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { isRemote } from "../../shared/transport";
+import { openFileInApp } from "../../shared/open-file";
 import type { AiTodoEntry } from "../../types/ipc.generated";
 import { PopoverShell } from "./statusbar-popover-shell";
 
@@ -54,12 +55,13 @@ export class AiTodosPopover {
     this.shell.open(anchor, this.buildHtml(), {
       className: "sb-ai-todos-popover",
       wire: (el) => {
-        // No editor to open on the phone: the list is read-only there.
+        // The phone has no Files window, and a peer's todo paths are that
+        // machine's, so the list is read-only there.
         if (isRemote() || this.onPeer) return;
         el.querySelectorAll<HTMLElement>(".sb-ai-todos-popover-file").forEach((f) => {
           f.addEventListener("click", () => {
             const p = f.dataset.path;
-            if (p) void invoke<void>("open_in_editor", { path: p });
+            if (p) openFileInApp(p);
           });
         });
       },

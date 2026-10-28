@@ -5,6 +5,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// The File view is CodeMirror, which measures text through Range rects that
+// jsdom doesn't implement.
+Range.prototype.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] });
+Range.prototype.getBoundingClientRect = () => ({ x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 });
+
 const ipcMock = { impl: async () => null };
 const calls = [];
 vi.mock("../src/shared/ipc.ts", () => ({
@@ -342,11 +347,12 @@ describe("Code mode", () => {
     const impl = ipcMock.impl;
     ipcMock.impl = async (cmd, args) => (cmd === "get_file_at_rev" ? { content: "one\ntwo\nthree", truncated: false } : impl(cmd, args));
     openCodeMode(chat({ key: "s12" }), { kind: "file", path: "C:\\repo\\src\\a.ts", line: 2 });
-    // Shiki loads lazily on the first File view.
-    await vi.waitFor(() => expect(root().querySelector(".fs-line-target")).not.toBeNull(), { timeout: 10000 });
+    // The editor loads lazily on the first File view; its cursor lands on
+    // the target line, which it marks as the active line.
+    await vi.waitFor(() => expect(root().querySelector(".fs-body .cm-activeLine")).not.toBeNull(), { timeout: 10000 });
     expect(root().querySelector(".cm-tab.on").textContent).toContain("a.ts");
-    expect(root().querySelector(".fs-line-target").textContent).toBe("two");
-    expect(root().querySelectorAll(".fs-line-target").length).toBe(1);
+    expect(root().querySelector(".fs-body .cm-activeLine").textContent).toBe("two");
+    expect(root().querySelectorAll(".fs-body .cm-activeLine").length).toBe(1);
   });
 
   it("offers a chat file chip only paths inside the on-screen chat's repo", async () => {

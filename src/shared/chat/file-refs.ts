@@ -8,6 +8,7 @@ import { invoke } from "../ipc";
 import { isRemote } from "../transport";
 import { createMoreMenu } from "../../views/sessions/more-menu-base";
 import { codeModeCanOpenFile, openInCodeMode } from "./code-mode-bridge";
+import { openFileInApp } from "../open-file";
 import { basename } from "../path-utils";
 
 // Windows drive path or a Unix absolute path with at least 3 segments. The
@@ -109,9 +110,9 @@ function openInEditor(path: string, line?: number, col?: number): void {
   void invoke<void>("open_in_editor", { path: winPath(path), line, col }).catch((err) => console.error("[file-ref] open failed", err));
 }
 
-export function openFileRef(path: string, line?: number, col?: number): void {
-  if (codeModeCanOpenFile(path)) openInCodeMode({ kind: "file", path, line });
-  else if (!isRemote()) openInEditor(path, line, col);
+export function openFileRef(path: string, line?: number): void {
+  if (!isRemote()) openFileInApp(path, line);
+  else if (codeModeCanOpenFile(path)) openInCodeMode({ kind: "file", path, line });
   else copyPath(path);
 }
 
@@ -139,7 +140,7 @@ const menu = createMoreMenu<[string, number | undefined, number | undefined]>({
       });
       m.appendChild(b);
     };
-    if (codeModeCanOpenFile(path)) add("ph-code", "Open", () => openInCodeMode({ kind: "file", path, line }));
+    if (!isRemote() || codeModeCanOpenFile(path)) add("ph-code", "Open", () => openFileRef(path, line));
     if (!isRemote()) add("ph-arrow-square-out", "Open in VS Code", () => openInEditor(path, line, col));
     add("ph-copy", "Copy path", () => copyPath(path));
     if (!isRemote()) add("ph-folder-open", "Reveal in file manager", () => revealFileRef(path));
@@ -154,7 +155,7 @@ export function handleFileRefClick(e: MouseEvent): void {
   const chip = chipOf(e);
   if (!chip?.dataset.path) return;
   e.preventDefault();
-  openFileRef(chip.dataset.path, numAttr(chip.dataset.line), numAttr(chip.dataset.col));
+  openFileRef(chip.dataset.path, numAttr(chip.dataset.line));
 }
 
 export function handleFileRefContextMenu(e: MouseEvent): void {
@@ -169,5 +170,5 @@ export function handleFileRefKeydown(e: KeyboardEvent): void {
   const chip = chipOf(e);
   if (!chip?.dataset.path) return;
   e.preventDefault();
-  openFileRef(chip.dataset.path, numAttr(chip.dataset.line), numAttr(chip.dataset.col));
+  openFileRef(chip.dataset.path, numAttr(chip.dataset.line));
 }

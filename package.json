@@ -44,6 +44,13 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/language-data": "6.5.2",
+    "@codemirror/search": "6.7.2",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "@lezer/highlight": "1.2.5",
     "diff": "^8.0.4",
     "lit-html": "3.3.2",
     "markdown-it": "^14.1.1",
