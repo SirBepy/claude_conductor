@@ -75,7 +75,7 @@ describe("resolveNewChatConfig", () => {
   it("leaves the account unset with several accounts and no default", async () => {
     const config = await resolveNewChatConfig(PATH);
     expect(config.accountId).toBeNull();
-    expect(await accountPickNeeded(config)).toBe(true);
+    expect(await accountPickNeeded(config, PATH)).toBe(true);
   });
 
   it("opens on the project's last model/effort, Opus/high the first time", async () => {
@@ -92,17 +92,37 @@ describe("resolveNewChatConfig", () => {
 
 describe("accountPickNeeded", () => {
   it("never blocks a chat that has an account", async () => {
-    expect(await accountPickNeeded({ model: "opus", effort: "high", accountId: "work" })).toBe(false);
+    expect(await accountPickNeeded({ model: "opus", effort: "high", accountId: "work" }, PATH)).toBe(false);
   });
 
   it("asks for no pick when no accounts are registered at all (that is a different guidance)", async () => {
     reads.accounts = [];
-    expect(await accountPickNeeded({ model: "opus", effort: "high", accountId: null })).toBe(false);
+    expect(await accountPickNeeded({ model: "opus", effort: "high", accountId: null }, PATH)).toBe(false);
   });
 
-  it("always blocks a paired machine's chat with no account", async () => {
-    reads.accounts = [];
-    expect(await accountPickNeeded({ model: "opus", effort: "high", accountId: null, machineId: "m1" })).toBe(true);
+  const peerDraft = { model: "opus", effort: "high", accountId: null, machineId: "m1" };
+  const peerList = (accounts, def = null) => ({ accounts, default_account_id: def, project_account_id: null });
+
+  it("blocks a paired machine's chat when the peer has accounts and no default", async () => {
+    apiMock.listMachineAccounts.mockResolvedValue(peerList([personal, work]));
+    expect(await accountPickNeeded(peerDraft, PATH)).toBe(true);
+    expect(apiMock.listMachineAccounts).toHaveBeenCalledWith("m1", PATH);
+  });
+
+  it("lets a paired machine with no accounts send, whatever this machine has", async () => {
+    reads.accounts = [personal, work];
+    apiMock.listMachineAccounts.mockResolvedValue(peerList([]));
+    expect(await accountPickNeeded(peerDraft, PATH)).toBe(false);
+  });
+
+  it("leaves a peer that has its own default to resolve it host-side", async () => {
+    apiMock.listMachineAccounts.mockResolvedValue(peerList([personal, work], "work"));
+    expect(await accountPickNeeded(peerDraft, PATH)).toBe(false);
+  });
+
+  it("does not strand a draft whose peer cannot be reached", async () => {
+    apiMock.listMachineAccounts.mockRejectedValue(new Error("offline"));
+    expect(await accountPickNeeded(peerDraft, PATH)).toBe(false);
   });
 });
 

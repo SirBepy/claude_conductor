@@ -121,7 +121,7 @@ export function wirePendingComposer(
         noAccountsGuidance();
         throw new Error("no account registered");
       }
-      if (!realId && (await accountPickNeeded(config))) {
+      if (!realId && (await accountPickNeeded(config, project.path))) {
         showToast("Pick an account for this chat first");
         deps.pickAccount();
         throw new Error("no account picked");
@@ -179,7 +179,7 @@ export function wirePendingComposer(
           noAccountsGuidance();
           throw new Error("no account registered");
         }
-        if (await accountPickNeeded(config)) {
+        if (await accountPickNeeded(config, project.path)) {
           started = false;
           sessionEvents.removeSynthetic(targetSid, optimisticEvent);
           showToast("Pick an account for this chat first");

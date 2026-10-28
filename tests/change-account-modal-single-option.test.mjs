@@ -161,3 +161,17 @@ describe("renderAccountListBodyHtml - one account that is not current", () => {
     expect(html).not.toContain("cam-acc-static");
   });
 });
+
+describe("openChangeAccountModal - a caller-supplied list", () => {
+  afterEach(() => { document.body.innerHTML = ""; listAccounts.mockClear(); });
+
+  it("offers that list and never reads this machine's accounts", async () => {
+    const peer = { id: "peer-1", label: "laptop-main", icon: "user", colour: "#111" };
+    const pending = openChangeAccountModal({ currentId: null, accounts: [peer, { ...peer, id: "peer-2", label: "laptop-work" }] });
+    await vi.waitFor(() => expect(document.querySelector(".cam-account-list")).not.toBeNull());
+    expect(document.body.textContent).toContain("laptop-main");
+    expect(listAccounts).not.toHaveBeenCalled();
+    document.querySelector('[data-acc-id="peer-2"]').click();
+    expect(await pending).toBe("peer-2");
+  });
+});
