@@ -5,6 +5,7 @@ vi.mock("../src/views/sessions/fab-dial.css", () => ({}));
 vi.mock("../src/views/sessions/ask-panel", () => ({ mountAskPanel: () => ({ setCwd() {}, setSessionScope() {}, destroy() {} }) }));
 vi.mock("../src/views/sessions/todos-panel", () => ({ mountTodosPanel: () => ({ setSessionScope() {}, destroy() {} }) }));
 vi.mock("../src/views/sessions/drafts-panel", () => ({ mountDraftsPanel: () => ({ setSessionScope() {}, destroy() {} }) }));
+vi.mock("../src/views/sessions/backlog-panel/backlog-panel", () => ({ mountBacklogPanel: () => ({ setSessionScope() {}, refresh() {}, destroy() {} }) }));
 
 const stubPreview = () => ({ setSessionScope() {}, refresh() {}, closeMenus() {}, destroy() {} });
 const { mountFabDial } = await import("../src/views/sessions/fab-dial.ts");
