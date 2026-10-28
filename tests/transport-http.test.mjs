@@ -415,6 +415,23 @@ describe("HttpTransport.call mapping", () => {
     expect(body(1)).toEqual({ method: "count_ai_todos", params: { cwd: "/repo" } });
   });
 
+  it("forwards the Backlog panel's reads to the same-named rpcs, session id snake-cased for a mirrored chat", async () => {
+    await new HttpTransport().call("list_ai_backlog", { cwd: "/repo" });
+    await new HttpTransport().call("list_ai_backlog", { cwd: "/repo", sessionId: "s1" });
+    await new HttpTransport().call("read_ai_todo", { cwd: "/repo", id: "pc-0007" });
+    await new HttpTransport().call("read_ai_todo", { cwd: "/repo", id: "pc-0007", sessionId: "s1" });
+    expect(body(0)).toEqual({ method: "list_ai_backlog", params: { cwd: "/repo" } });
+    expect(body(1)).toEqual({ method: "list_ai_backlog", params: { cwd: "/repo", session_id: "s1" } });
+    expect(body(2)).toEqual({ method: "read_ai_todo", params: { cwd: "/repo", id: "pc-0007" } });
+    expect(body(3)).toEqual({ method: "read_ai_todo", params: { cwd: "/repo", id: "pc-0007", session_id: "s1" } });
+  });
+
+  it("never maps the Backlog panel's writes: they are desktop-pipe only", async () => {
+    for (const cmd of ["ai_todo_archive", "ai_todo_unarchive", "ai_todo_plan_move", "ai_todo_plan_reorder_groups", "ai_todo_start_chat"]) {
+      await expect(new HttpTransport().call(cmd, { cwd: "/repo", id: "pc-1" })).rejects.toThrow();
+    }
+  });
+
   it("reshapes list_claude_md_scopes worktreePath -> worktree_path", async () => {
     await new HttpTransport().call("list_claude_md_scopes", { worktreePath: "/repo/wt" });
     expect(body()).toEqual({ method: "list_claude_md_scopes", params: { worktree_path: "/repo/wt" } });

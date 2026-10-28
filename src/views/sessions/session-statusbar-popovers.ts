@@ -7,7 +7,7 @@
 // statusbar-chips.ts's ChipRenderCtx) rather than reading `this` directly.
 import { openInCodeMode } from "../../shared/chat/code-mode-bridge";
 import { DrainPopover } from "./drain-popover";
-import { AiTodosPopover } from "./ai-todos-popover";
+import { BACKLOG_OPEN_EVENT } from "./backlog-panel/backlog-open-event";
 import { ServersPopover } from "./servers-popover";
 import { ImagesPopover } from "./images-popover";
 import { CommitsPopover } from "./commits-popover";
@@ -20,7 +20,6 @@ import { OverflowPopover, type OverflowPanelData } from "./overflow-popover";
  *  closePopover method is needed here. */
 export interface StatusbarPopovers {
   drainPopover: DrainPopover;
-  aiTodosPopover: AiTodosPopover;
   serversPopover: ServersPopover;
   imagesPopover: ImagesPopover;
   commitsPopover: CommitsPopover;
@@ -33,7 +32,6 @@ export interface StatusbarPopovers {
 /** Dismiss every chip popover (both statusbar-owned and the tool-tally one). */
 export function closeChipPopovers(p: StatusbarPopovers): void {
   p.drainPopover.close();
-  p.aiTodosPopover.close();
   p.serversPopover.close();
   p.imagesPopover.close();
   p.commitsPopover.close();
@@ -113,12 +111,11 @@ export function wireChipPopovers(container: HTMLElement, ctx: ChipPopoverWireCtx
     ctx.toggleEffortPopover(e.currentTarget as HTMLElement);
   });
 
+  // Only the phone draws this chip (ai-todos-chip.ts); it opens the Backlog panel.
   container.querySelector<HTMLElement>(".sb-ai-todos-btn")?.addEventListener("click", (e) => {
     e.stopPropagation();
-    const anchor = e.currentTarget as HTMLElement;
-    const wasOpen = ctx.aiTodosPopover.isOpen;
     closeAll();
-    if (!wasOpen) ctx.aiTodosPopover.open(anchor);
+    window.dispatchEvent(new CustomEvent(BACKLOG_OPEN_EVENT));
   });
 
   container.querySelector<HTMLElement>(".sb-drain-btn")?.addEventListener("click", (e) => {
@@ -174,10 +171,9 @@ export function wireChipPopovers(container: HTMLElement, ctx: ChipPopoverWireCtx
 
   // All popovers are body-appended and survive re-renders, but their anchor
   // chip was just replaced. Re-anchor if open so a background refresh doesn't
-  // leave one bound to a detached node. Content that streams (drain, ai_todos)
+  // leave one bound to a detached node. Content that streams (drain)
   // rebuilds in place; static content just repositions.
   reanchorIfOpen(container, ctx.drainPopover, ".sb-drain-btn", (a) => ctx.drainPopover.open(a));
-  reanchorIfOpen(container, ctx.aiTodosPopover, ".sb-ai-todos-btn", (a) => ctx.aiTodosPopover.open(a));
   reanchorIfOpen(container, ctx.serversPopover, ".sb-servers-btn", (a) => ctx.serversPopover.open(a));
   reanchorIfOpen(container, ctx.imagesPopover, ".sb-images-btn", (a) => ctx.imagesPopover.open(a));
   reanchorIfOpen(container, ctx.commitsPopover, ".sb-git-btn", (a) => ctx.commitsPopover.reanchor(a));

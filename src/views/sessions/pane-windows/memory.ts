@@ -20,6 +20,7 @@ import type { PanelKey } from "./panels";
 const FRESH_PLACEMENT: Record<PanelKey, Placement> = {
   ask: { kind: "snap", corner: "se" },
   drafts: { kind: "snap", corner: "se" },
+  backlog: { kind: "dock", side: "right" },
   todos: { kind: "dock", side: "right" },
   preview: { kind: "dock", side: "right" },
 };

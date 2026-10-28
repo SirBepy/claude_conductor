@@ -75,11 +75,11 @@ const panel = (page: Page) => page.locator(".sp-panel");
 const tab = (page: Page, k: string) => page.locator(`.sp-tab[data-sp-k="${k}"]`);
 const chatWidth = (page: Page) => page.locator("#chat-col").evaluate((el) => el.getBoundingClientRect().width);
 
-test("at rest only the strip shows, Code then Preview / Drafts / Todos / Ask top to bottom, and the chat keeps the rest", async ({ page }) => {
+test("at rest only the strip shows, Code then Preview / Drafts / Todos / Backlog / Ask top to bottom, and the chat keeps the rest", async ({ page }) => {
   await mountPane(page);
   await expect(panel(page)).toBeHidden();
   const keys = await page.locator(".sp-tab").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.spK ?? "code"));
-  expect(keys).toEqual(["code", "preview", "drafts", "todos", "ask"]);
+  expect(keys).toEqual(["code", "preview", "drafts", "todos", "backlog", "ask"]);
   expect(Math.round(await chatWidth(page))).toBe(1280 - STRIP_W);
 });
 

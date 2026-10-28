@@ -243,6 +243,12 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("list_ai_todos", { cwd: args.cwd, session_id: args.sessionId ?? args.session_id });
       case "count_ai_todos":
         return this.rpc<T>("count_ai_todos", { cwd: args.cwd });
+      // The Backlog panel's two reads. Its writes (archive, plan moves, start a
+      // chat) edit the host's disk and are desktop-pipe only, so never mapped.
+      case "list_ai_backlog":
+        return this.rpc<T>("list_ai_backlog", { cwd: args.cwd, session_id: args.sessionId ?? args.session_id });
+      case "read_ai_todo":
+        return this.rpc<T>("read_ai_todo", { cwd: args.cwd, id: args.id, session_id: args.sessionId ?? args.session_id });
       // Phone-only: the whole new-chat flow's data in one request (see
       // new-session-cache.ts). Desktop has no Tauri twin; it reads locally.
       case "new_session_bundle":

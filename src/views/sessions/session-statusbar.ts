@@ -45,7 +45,7 @@ import {
   type ChipPopoverWireCtx,
 } from "./session-statusbar-popovers";
 import { DrainPopover } from "./drain-popover";
-import { AiTodosPopover } from "./ai-todos-popover";
+import { AiTodosChip } from "./ai-todos-chip";
 import { ServersPopover } from "./servers-popover";
 import { ImagesPopover } from "./images-popover";
 import { CommitsPopover } from "./commits-popover";
@@ -129,7 +129,7 @@ export class SessionStatusbar {
 
   // Popover subsystems (each owns its own state, DOM, and event wiring).
   private drainPopover = new DrainPopover();
-  private aiTodosPopover = new AiTodosPopover();
+  private aiTodosChip = new AiTodosChip();
   private serversPopover = new ServersPopover();
   // Polls the server_supervisor for this project's running dev servers.
   private serversTimer: (() => void) | null = null;
@@ -240,7 +240,7 @@ export class SessionStatusbar {
     // `cwd` itself is never read locally for a mirrored chat.
     if (wantsGit(rows)) void this.resolveGitCwd();
     if (hasChip(rows, "ai_todos") && this.cwd) {
-      void this.aiTodosPopover.refresh(this.cwd, () => this.render(), this.mirrored ? this.sessionId : null);
+      void this.aiTodosChip.refresh(this.cwd, () => this.render(), this.mirrored ? this.sessionId : null);
     }
     if (wantsDrain(rows)) void this.refreshDrain();
     if (hasChip(rows, "servers") && this.cwd && !this.serversTimer) this.startServersPoll();
@@ -553,7 +553,7 @@ export class SessionStatusbar {
       cwd: this.cwd,
       animatedKeys: this.animatedKeys,
       renderToolChip: (tool, count, hideZero) => this.tally.renderChipFor(tool, count, hideZero),
-      renderAiTodosChip: (cwd, animClass) => this.aiTodosPopover.renderChip(cwd, animClass),
+      renderAiTodosChip: (cwd, animClass) => this.aiTodosChip.renderChip(cwd, animClass),
       renderDrainChip: (animClass) => this.drainPopover.renderChip(animClass),
       renderServersChip: (cwd, animClass) => this.serversPopover.renderChip(cwd, animClass),
       renderImagesChip: (animClass) => this.imagesPopover.renderChip(animClass),
@@ -644,7 +644,6 @@ export class SessionStatusbar {
   private popoverBundle(): StatusbarPopovers {
     return {
       drainPopover: this.drainPopover,
-      aiTodosPopover: this.aiTodosPopover,
       serversPopover: this.serversPopover,
       imagesPopover: this.imagesPopover,
       commitsPopover: this.commitsPopover,

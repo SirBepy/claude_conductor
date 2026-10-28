@@ -5,6 +5,7 @@ import type { PreviewMeta } from "../../types/ipc.generated";
 import { PREVIEW_OPEN_EVENT } from "../../shared/chat/chat-preview-card";
 import { DRAFT_OPEN_EVENT } from "../../shared/chat/chat-draft-card";
 import { ASK_OPEN_EVENT } from "./ask-open-event";
+import { BACKLOG_OPEN_EVENT } from "./backlog-panel/backlog-open-event";
 import "../../shared/chat/chat.css";
 import "./sessions.css";
 import "./session-header.css";
@@ -177,6 +178,11 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   };
   window.addEventListener(ASK_OPEN_EVENT, onAskOpen);
 
+  // The phone's todos chip in the statusbar: it opens the Backlog panel through
+  // the pane windows rather than a popover of filenames.
+  const onBacklogOpen = (): void => state.fabDial?.openPanel("backlog");
+  window.addEventListener(BACKLOG_OPEN_EVENT, onBacklogOpen);
+
   const teardownUsageDials = wireRateLimitBanner(root, listEl, myMount);
 
   if (consumePendingOpenPicker()) {
@@ -241,6 +247,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     window.removeEventListener(PREVIEW_OPEN_EVENT, onPreviewOpen);
     window.removeEventListener(DRAFT_OPEN_EVENT, onDraftOpen);
     window.removeEventListener(ASK_OPEN_EVENT, onAskOpen);
+    window.removeEventListener(BACKLOG_OPEN_EVENT, onBacklogOpen);
     previewController?.destroy();
     previewController = null;
     state.previewController = null;
