@@ -284,8 +284,9 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await expect(inline).toBeVisible();
     const band = (await page.locator(".prompt-panel.is-active .prompt-zone--ask").boundingBox())!;
     const btn = (await inline.boundingBox())!;
-    // Pinned to the band's right end, inside its height.
-    expect(band.x + band.width - (btn.x + btn.width)).toBeLessThan(16);
+    // Pinned to the band's right end, inside its height. The full-width band's
+    // 30px side padding less the button's -6px margin leaves it 24px in.
+    expect(band.x + band.width - (btn.x + btn.width)).toBeLessThan(30);
     expect(btn.y).toBeGreaterThanOrEqual(band.y);
     expect(btn.y + btn.height).toBeLessThanOrEqual(band.y + band.height);
 
@@ -302,6 +303,22 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     const width = await page.locator('.prompt-panel[data-panel="1"]')
       .evaluate((el) => getComputedStyle(el).borderLeftWidth);
     expect(width).toBe("0px");
+  });
+
+  test("phone page: the ask band spans the full width, its text aligned with the options", async ({ page }) => {
+    await mountPhoneSession(page);
+    await openQuestionCard(page, [
+      { question: "Some context first.\n\nFirst?", options: [{ label: "A" }, { label: "B" }] },
+      { question: "Second?", options: [{ label: "C" }, { label: "D" }] },
+    ]);
+    const active = page.locator(".prompt-panel.is-active");
+    const band = (await active.locator(".prompt-zone--ask").boundingBox())!;
+    expect(band.x).toBe(0);
+    expect(band.width).toBe(PHONE.width);
+    // Inset content stays inset: the options keep the card's 14px side gutter.
+    const opt = (await active.locator(".prompt-opt").first().boundingBox())!;
+    expect(opt.x).toBe(14);
+    expect(opt.x + opt.width).toBe(PHONE.width - 14);
   });
 
   test("phone page: header and footer bars are a different color from the content", async ({ page }) => {
