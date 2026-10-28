@@ -302,7 +302,9 @@ export function handleToolResultEvent(
     // idle label would show "<tool> - thinking..." for a turn that has already
     // said what it came to say; plain Thinking is the honest fallback. A turn
     // that goes on to call more tools replaces the label on its next tool_use.
-    r.setActivity(isTurnStatusActivity(r.lastActivity) ? null : r.lastActivity, { keepChip: true, idle: true });
+    // An empty label, not null: null means the turn is over and wipes the
+    // todo step and "Step N of M" the bar shows ahead of any tool label.
+    r.setActivity(isTurnStatusActivity(r.lastActivity) ? "" : r.lastActivity, { keepChip: true, idle: true });
   }
   // The tally counts didn't change, but a result can complete a custom
   // view (e.g. an AskUserQuestion answer): nudge the statusline so an open
