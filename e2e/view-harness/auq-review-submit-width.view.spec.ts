@@ -1,9 +1,9 @@
 // asserts: src/views/sessions/permission-modal-shell.css
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
 
 // The review step's Submit is a normal-width button on desktop, not a
-// stretched call-to-action bar (the phone stretches it full width instead).
+// stretched call-to-action bar; the phone stretches it full width and 48px tall.
 
 const SESSION = sessionInstance();
 
@@ -12,8 +12,7 @@ const MULTI = [
   { question: "Which features?", header: "Features", multiSelect: true, options: [{ label: "X" }, { label: "Y" }] },
 ];
 
-test("desktop review step's Submit keeps normal button width", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
+async function openReview(page: Page): Promise<Locator> {
   await mountView(page, {
     view: "sessions",
     invoke: {
@@ -38,7 +37,22 @@ test("desktop review step's Submit keeps normal button width", async ({ page }) 
   const submit = card.locator('.prompt-card__footer > [data-act="primary"]');
   await expect(submit).toBeVisible();
   await expect(submit).toHaveClass(/prompt-submit-cta/);
+  return submit;
+}
+
+test("desktop review step's Submit keeps normal button width", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const submit = await openReview(page);
   // A stretched CTA measured 280px here; a normal button is well under that.
   const width = await submit.evaluate((el) => el.getBoundingClientRect().width);
   expect(width).toBeLessThan(160);
+});
+
+test("phone review step's Submit is a full-width, 48px-tall CTA", async ({ page }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  const submit = await openReview(page);
+  const box = await submit.evaluate((el) => el.getBoundingClientRect().toJSON() as DOMRect);
+  // The footer's generic 32px button rule once out-ranked the CTA's 48px.
+  expect(box.height).toBeGreaterThanOrEqual(48);
+  expect(box.width).toBeGreaterThan(360);
 });

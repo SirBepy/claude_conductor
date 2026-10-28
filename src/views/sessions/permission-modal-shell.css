@@ -592,8 +592,11 @@
   to   { transform: rotate(360deg); }
 }
 
+/* `button.` lifts this to the footer's own `button:not(.pv-composer-send)`
+ * specificity (0,2,1); being later in the file then wins the tie. Without it
+ * that rule's 32px min-height beat this 48px one. */
 @media (max-width: 768px) {
-  .prompt-card__footer .prompt-submit-cta {
+  .prompt-card__footer button.prompt-submit-cta {
     flex: 1 1 auto;
     min-height: 48px;
     font-weight: 600;

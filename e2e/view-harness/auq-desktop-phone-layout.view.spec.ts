@@ -1,4 +1,5 @@
 // asserts: src/views/sessions/permission-modal-shell.css, src/views/sessions/permission-modal/question-ui-answer-bar.ts
+// Reviewed 2026-10-28: the phone review Submit's 48px min-height now wins over the footer's 32px button rule - phone-media only, no change to this desktop spec's contract.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
 import { shotDir } from "./shot-dir";

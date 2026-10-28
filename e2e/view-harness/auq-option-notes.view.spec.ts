@@ -31,7 +31,7 @@ async function openCard(page: Page): Promise<void> {
   });
 }
 
-test("desktop: notes on ticked options ride in the answer; review is one capped Submit", async ({ page }) => {
+test("desktop: notes on ticked options ride in the answer; review is one normal-width Submit", async ({ page }) => {
   await openCard(page);
   const card = page.locator(".prompt-card");
   const active = card.locator(".prompt-panel.is-active");
@@ -60,8 +60,8 @@ test("desktop: notes on ticked options ride in the answer; review is one capped 
   const submit = card.locator('.prompt-card__footer [data-act="primary"]');
   const box = (await submit.boundingBox())!;
   const footer = (await card.locator(".prompt-card__footer").boundingBox())!;
-  expect(box.width).toBeLessThanOrEqual(281);
-  expect(box.width).toBeGreaterThan(200);
+  // Normal button width on desktop (Joe, 2026-10-27: the 280px CTA read as too big).
+  expect(box.width).toBeLessThan(160);
   // Right-aligned, where Next sat on the steps before.
   expect(footer.x + footer.width - (box.x + box.width)).toBeLessThan(20);
 
