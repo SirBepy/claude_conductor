@@ -28,7 +28,8 @@ import {
   type StatusbarOptions,
 } from "./session-statusbar-helpers";
 import { listCachedAccounts } from "../../shared/accounts-cache";
-import { renderChip as renderChipHtml, type ChipRenderCtx } from "./statusbar-chips";
+import { renderChip as renderChipHtml, type ChipRenderCtx, type ChipAccount } from "./statusbar-chips";
+import type { MachineAccountList } from "../../shared/api";
 import {
   refreshCounts as fetchCounts,
   refreshContextStatus as fetchContextStatus,
@@ -106,13 +107,16 @@ export class SessionStatusbar {
   // git chip's branch/sha data) fall back to the chat's own repo.
   private liveCwd: string | null;
   // Mirrored chat (multi-machine federation, G10 in docs/multi-machine.md):
-  // git/dirty/commits reads now proxy to the owning peer via `sessionId`
-  // below - only the folder-explorer button (which launches THIS machine's
-  // own file manager) still checks this flag, see its click guard below.
+  // git/dirty/commits reads proxy to the owning peer via `sessionId` alone.
+  // This flag gates what cannot: the folder-explorer button (launches THIS
+  // machine's file manager), the todos read (sends `sessionId` only when set)
+  // and the account chip (the host's accounts, and no move across machines).
   private mirrored: boolean;
   private sessionId: string | null;
   private modelEffort: ModelEffortState;
   private accountId: string | null;
+  // The host machine's accounts for a mirrored chat; null for a local one.
+  private hostAccounts: ChipAccount[] | null = null;
   private onAccountClick: (() => void) | null;
   private onConfig: ((model: string | null, effort: string, effortEditable: boolean) => void) | null;
   // Global hide-at-zero: when true, count/tool chips resolving to 0 are omitted.
@@ -201,8 +205,25 @@ export class SessionStatusbar {
       this.seedSessionCaches(this.sessionId);
     }
 
+    if (this.mirrored && opts.machineId) {
+      this.hostAccounts = [];
+      void this.loadHostAccounts(opts.machineId);
+    }
+
     this.render();
     this.startRowData(this.rows);
+  }
+
+  /** A failed read leaves the list empty, so the chip stays hidden rather
+   *  than naming a local account the host does not have. */
+  private async loadHostAccounts(machineId: string): Promise<void> {
+    try {
+      const list = await invoke<MachineAccountList>("list_machine_accounts", { machineId, cwd: this.cwd });
+      this.hostAccounts = list?.accounts ?? [];
+      this.render();
+    } catch (e) {
+      console.warn("[statusbar] list_machine_accounts failed", e);
+    }
   }
 
   /** Start the fetches/timers behind whichever chips `rows` carries. Also runs
@@ -218,7 +239,9 @@ export class SessionStatusbar {
     // alongside `cwd`, which the daemon forwards one hop to the owning peer -
     // `cwd` itself is never read locally for a mirrored chat.
     if (wantsGit(rows)) void this.resolveGitCwd();
-    if (hasChip(rows, "ai_todos") && this.cwd) void this.aiTodosPopover.refresh(this.cwd, () => this.render());
+    if (hasChip(rows, "ai_todos") && this.cwd) {
+      void this.aiTodosPopover.refresh(this.cwd, () => this.render(), this.mirrored ? this.sessionId : null);
+    }
     if (wantsDrain(rows)) void this.refreshDrain();
     if (hasChip(rows, "servers") && this.cwd && !this.serversTimer) this.startServersPoll();
   }
@@ -511,7 +534,10 @@ export class SessionStatusbar {
       effort: this.modelEffort.effort,
       readOnlyEffort: this.modelEffort.readOnlyEffort,
       accountId: this.accountId,
-      hasAccountClick: !!this.onAccountClick,
+      // Moving a chat to another account is refused for a peer's chat
+      // (move_session_to_account is phone/desktop only), so its chip is a label.
+      hasAccountClick: !!this.onAccountClick && !this.mirrored,
+      hostAccounts: this.hostAccounts,
       gitInfo: this.gitInfo,
       gitInfoLoaded: this.gitInfoLoaded,
       gitCwd: this.gitCwd,
@@ -568,7 +594,7 @@ export class SessionStatusbar {
     // and resets scrollLeft, so snapshot by row index and restore after.
     const scrollLefts = Array.from(this.container.querySelectorAll<HTMLElement>(".sb-row"), (r) => r.scrollLeft);
     const ctx = this.chipRenderCtx();
-    const rows = withForcedAccountChip(this.rows, listCachedAccounts().length);
+    const rows = withForcedAccountChip(this.rows, (this.hostAccounts ?? listCachedAccounts()).length);
     const rowsHtml = rows.map((row) => {
       const chips = row.map((t) => this.renderChip(t, ctx)).filter(Boolean).join("");
       return chips ? `<div class="sb-row">${chips}</div>` : "";

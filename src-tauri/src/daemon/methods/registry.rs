@@ -100,6 +100,25 @@ mod reject_unknown_tests {
         assert_eq!(list.result.unwrap()[0]["name"], json!("01-a.md"));
     }
 
+    /// A paired machine reading a chat hosted here sends that chat's
+    /// `session_id`; the list comes from the cwd THIS registry holds for it,
+    /// so the cwd the peer sends (a path off its mirrored row) cannot steer it.
+    #[tokio::test]
+    async fn list_ai_todos_with_a_session_id_reads_the_registered_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let todos = dir.path().join(".claude").join("todos");
+        std::fs::create_dir_all(&todos).unwrap();
+        std::fs::write(todos.join("07-b.md"), "b").unwrap();
+        let state = dummy_state();
+        let sid = uuid::Uuid::new_v4().to_string();
+        state.registry.upsert_interactive(&sid, dir.path(), "proj", "2026-10-06T00:00:00Z");
+
+        let list = call(state.clone(), "list_ai_todos", json!({"cwd": "C:\\nope\\not\\registered", "session_id": sid})).await;
+        assert_eq!(list.result.unwrap()[0]["name"], json!("07-b.md"));
+        let unknown = call(state, "list_ai_todos", json!({"cwd": "C:\\nope", "session_id": "no-such-session"})).await;
+        assert!(unknown.error.is_some(), "an unknown session_id must be rejected");
+    }
+
     // Todo 656 follow-up: list_slash_commands must reject an unregistered
     // project_dir, but the None case (desktop's own ~/.claude scan) must
     // keep working - a test that only checks rejection would let someone

@@ -210,7 +210,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Read-only `.claude/todos` file names for the picker badge and the chat
     // statusbar's todos chip, reject_unknown(cwd)-gated in project_meta.rs.
     ("count_ai_todos", P),
-    ("list_ai_todos", P),
+    // PM: the todos chip of a chat mirrored from a paired machine reads the
+    // host's list, forwarded by `session_id`. With a `session_id` the host
+    // resolves the cwd from its own registry (pr_review.rs `resolve_cwd`), so
+    // a peer cannot steer the read to an arbitrary path.
+    ("list_ai_todos", PM),
     // Read-only, gated by reject_unknown(root) in registry.rs (todo 656).
     // PM (was P): an optional `machine_id` param now lets a caller ask for a
     // peer's own project icon/tech instead of this daemon's filesystem
@@ -758,7 +762,7 @@ mod tests {
         for m in [
             "get_git_info", "get_git_dirty", "get_commit_sync", "get_commit_history",
             "get_recent_branches", "get_range_files", "get_file_diff", "get_file_at_rev",
-            "list_branch_files", "list_project_files",
+            "list_branch_files", "list_project_files", "list_ai_todos",
         ] {
             assert!(allowed(m, &peer), "{m} must be callable by a peer machine mirroring the chat");
         }

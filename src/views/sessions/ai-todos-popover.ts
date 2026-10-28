@@ -12,13 +12,23 @@ import { PopoverShell } from "./statusbar-popover-shell";
 export class AiTodosPopover {
   files: AiTodoEntry[] = [];
   loaded = false;
+  // The list's paths are on another machine's disk, so there is no file here
+  // for the editor to open.
+  private onPeer = false;
   private shell = new PopoverShell();
 
   get isOpen(): boolean { return this.shell.isOpen; }
 
-  async refresh(cwd: string, rerender: () => void): Promise<void> {
+  /** `mirroredSessionId` is set only for a chat hosted on a paired machine:
+   *  the daemon forwards the read to that machine by it, since `cwd` is a
+   *  path on the host's disk. A local chat sends cwd alone, unchanged. */
+  async refresh(cwd: string, rerender: () => void, mirroredSessionId: string | null = null): Promise<void> {
+    this.onPeer = mirroredSessionId !== null;
     try {
-      const files = await invoke<AiTodoEntry[]>("list_ai_todos", { cwd });
+      const files = await invoke<AiTodoEntry[]>(
+        "list_ai_todos",
+        mirroredSessionId ? { cwd, sessionId: mirroredSessionId } : { cwd },
+      );
       // A null/absent list means "none", not "crash the whole bar" - the chip
       // ships in the default rows now, so every render path reaches this.
       this.files = files ?? [];
@@ -45,7 +55,7 @@ export class AiTodosPopover {
       className: "sb-ai-todos-popover",
       wire: (el) => {
         // No editor to open on the phone: the list is read-only there.
-        if (isRemote()) return;
+        if (isRemote() || this.onPeer) return;
         el.querySelectorAll<HTMLElement>(".sb-ai-todos-popover-file").forEach((f) => {
           f.addEventListener("click", () => {
             const p = f.dataset.path;

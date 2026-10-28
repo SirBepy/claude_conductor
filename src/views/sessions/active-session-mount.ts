@@ -70,6 +70,7 @@ export async function mountStatusbar(
     onAccountClick,
     onConfig,
     mirrored: isMirrored(sess),
+    machineId: sess.machine?.id ?? null,
     layoutEditable: true,
   });
   state.statusbar = sb;

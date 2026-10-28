@@ -5,10 +5,14 @@ import { escapeHtml } from "../../shared/escape-html";
 import { type ToolTally } from "../../shared/chat/tool-meta";
 import { formatTokenCount } from "../../shared/chat/turn-chips";
 import type { SessionMeta } from "../../shared/chat/chat-renderer";
-import type { GitInfo, ContextStatus } from "../../types/ipc.generated";
+import type { Account, GitInfo, ContextStatus } from "../../types/ipc.generated";
 import { type ChipType, isToolChip, chipToolName } from "./statusline-catalog";
 import { getCachedAccount, listCachedAccounts, capitalize } from "../../shared/accounts-cache";
 import { formatDuration, shortModelName, type SessionCounts } from "./session-statusbar-helpers";
+
+/** The display fields the account chip reads, shared by a local cached
+ *  `Account` and a paired machine's redacted `MachineAccount`. */
+export type ChipAccount = Pick<Account, "id" | "label" | "colour" | "icon">;
 
 export interface ChipRenderCtx {
   meta: SessionMeta;
@@ -18,6 +22,10 @@ export interface ChipRenderCtx {
   readOnlyEffort: boolean;
   accountId: string | null;
   hasAccountClick: boolean;
+  // Set only for a chat hosted on a paired machine: account ids are per
+  // machine, so its `accountId` names one of THAT machine's accounts and the
+  // local cache can never resolve it. Empty until the host's list arrives.
+  hostAccounts?: ChipAccount[] | null;
   gitInfo: GitInfo;
   gitInfoLoaded: boolean;
   // What git DATA was fetched against; falls back to the spawn repo when the
@@ -100,8 +108,9 @@ export function renderChip(type: ChipType, ctx: ChipRenderCtx): string {
     case "account": {
       // Naming the only account is zero information (todo 883) - the chip
       // only earns its pixels once there's a second one to distinguish from.
-      if (listCachedAccounts().length <= 1) return "";
-      const acc = getCachedAccount(ctx.accountId);
+      const host = ctx.hostAccounts;
+      if ((host ?? listCachedAccounts()).length <= 1) return "";
+      const acc = host ? host.find((a) => a.id === ctx.accountId) ?? null : getCachedAccount(ctx.accountId);
       // A draft with no bound or default account starts with none picked
       // (new-chat-config.ts); the chip is how it gets one.
       if (!acc && ctx.hasAccountClick && !ctx.accountId) {

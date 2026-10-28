@@ -1,4 +1,5 @@
 // Reviewed 2026-10-27: types.ts's QuestionDraft gained an optional per-option `notes` map (AUQ option notes) - additive, no change to this spec's contract.
+// Reviewed 2026-10-28 (mirrored todos chip): http-transport.ts's list_ai_todos case also sends an optional session_id; this spec only reads RemoteUnavailableError, so its contract is unchanged.
 // Reviewed 2026-10-26 (API-credit accounts): http-transport.ts gained get_api_credit_status and refresh_api_credit_status cases - additive, and this spec only reads RemoteUnavailableError, so its contract is unchanged.
 // Reviewed 2026-10-23 (peer account picker): http-transport.ts gained list_machine_accounts and set_machine_project_account cases - additive, and this is the mocked-invoke harness, not HttpTransport, so it never executes here.
 // Reviewed 2026-10-22: the phone question card became a fullscreen page (header back arrow + "Question" label and an answer-box send arrow, all hidden on desktop; back collapses the card to its bar instead of falling through) - this spec's contract is unchanged and it passes.
