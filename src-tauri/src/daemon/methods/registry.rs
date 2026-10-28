@@ -77,7 +77,9 @@ mod reject_unknown_tests {
 
     #[tokio::test]
     async fn ai_todos_methods_reject_unknown_cwd() {
-        for method in ["count_ai_todos", "list_ai_todos"] {
+        let read = call(dummy_state(), "read_ai_todo", json!({"cwd": "C:\\nope\\not\\registered", "id": "pc-1"})).await;
+        assert!(read.error.is_some(), "read_ai_todo: unknown cwd must be rejected");
+        for method in ["count_ai_todos", "list_ai_todos", "list_ai_backlog"] {
             let resp = call(dummy_state(), method, json!({"cwd": "C:\\nope\\not\\registered"})).await;
             assert!(resp.error.is_some(), "{method}: unknown cwd must be rejected");
         }
@@ -117,6 +119,35 @@ mod reject_unknown_tests {
         assert_eq!(list.result.unwrap()[0]["name"], json!("07-b.md"));
         let unknown = call(state, "list_ai_todos", json!({"cwd": "C:\\nope", "session_id": "no-such-session"})).await;
         assert!(unknown.error.is_some(), "an unknown session_id must be rejected");
+    }
+
+    /// The Backlog panel's reads go through the same cwd trust rule as the
+    /// chip: a known project reads its own backlog, and a `session_id`
+    /// re-derives the cwd from the registry so a peer's `cwd` string cannot
+    /// steer it.
+    #[tokio::test]
+    async fn backlog_reads_serve_a_known_project_and_follow_a_session_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let todos = dir.path().join(".claude").join("todos");
+        std::fs::create_dir_all(&todos).unwrap();
+        std::fs::write(todos.join("pc-0007-b.md"), "# Bee\n**Summary:** Buzz.\n\n## Why\n\nBecause.\n").unwrap();
+        std::fs::write(todos.join("PLAN.md"), "## Now\n- [ ] pc-0007\n").unwrap();
+        let state = dummy_state();
+        let sid = uuid::Uuid::new_v4().to_string();
+        state.registry.upsert_interactive(&sid, dir.path(), "proj", "2026-10-06T00:00:00Z");
+        let cwd = dir.path().to_string_lossy().into_owned();
+
+        let backlog = call(state.clone(), "list_ai_backlog", json!({"cwd": cwd})).await.result.unwrap();
+        assert_eq!(backlog["groups"], json!(["Now"]));
+        assert_eq!(backlog["todos"][0]["id"], json!("pc-0007"));
+        assert_eq!(backlog["todos"][0]["group"], json!("Now"));
+
+        let doc = call(state.clone(), "read_ai_todo", json!({"cwd": "C:\\nope", "id": "7", "session_id": sid})).await.result.unwrap();
+        assert_eq!(doc["entry"]["title"], json!("Bee"));
+        assert_eq!(doc["why"], json!("Because."));
+
+        let missing = call(state, "read_ai_todo", json!({"cwd": cwd, "id": "pc-99"})).await;
+        assert!(missing.error.is_some(), "an unknown todo id is an error, not an empty doc");
     }
 
     // Todo 656 follow-up: list_slash_commands must reject an unregistered

@@ -25,7 +25,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 mod forward;
+mod todo;
 pub(crate) use forward::{resolve_machine, spawn_chat_or_forward};
+pub use todo::register_todo_chat_rpc;
 
 /// Used only when the caller has no recorded `chat_config` at all (a session
 /// that predates the config file, or one whose record was lost). A real

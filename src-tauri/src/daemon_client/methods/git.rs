@@ -16,7 +16,7 @@
 //! to these same RPC names use the same param shape without a `session_id`.
 
 use super::super::{ClientError, PersistentClient};
-use crate::ipc::ai_todos::AiTodoEntry;
+use crate::ipc::ai_todos::{AiBacklog, AiTodoDoc, AiTodoEntry};
 use crate::ipc::git::{BranchEntry, GitInfo};
 use crate::ipc::git_diff::PrFileChange;
 use crate::ipc::git_sync::{CommitHistory, CommitSync};
@@ -124,5 +124,15 @@ impl PersistentClient {
     pub async fn list_ai_todos(&self, session_id: &str, cwd: &str) -> Result<Vec<AiTodoEntry>, ClientError> {
         let res = self.call("list_ai_todos", json!({"session_id": session_id, "cwd": cwd})).await?;
         serde_json::from_value(res).map_err(|e| bad_shape("list_ai_todos", e))
+    }
+
+    pub async fn list_ai_backlog(&self, session_id: &str, cwd: &str) -> Result<AiBacklog, ClientError> {
+        let res = self.call("list_ai_backlog", json!({"session_id": session_id, "cwd": cwd})).await?;
+        serde_json::from_value(res).map_err(|e| bad_shape("list_ai_backlog", e))
+    }
+
+    pub async fn read_ai_todo(&self, session_id: &str, cwd: &str, id: &str) -> Result<AiTodoDoc, ClientError> {
+        let res = self.call("read_ai_todo", json!({"session_id": session_id, "cwd": cwd, "id": id})).await?;
+        serde_json::from_value(res).map_err(|e| bad_shape("read_ai_todo", e))
     }
 }

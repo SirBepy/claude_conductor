@@ -13,7 +13,7 @@ use claude_conductor_lib::ipc::accounts::{
 };
 use claude_conductor_lib::claude_ai_publish::PublishedLink;
 use claude_conductor_lib::daemon::preview::{PreviewMeta, PreviewSnapshot};
-use claude_conductor_lib::ipc::ai_todos::AiTodoEntry;
+use claude_conductor_lib::ipc::ai_todos::{AiBacklog, AiTodoArchived, AiTodoDoc, AiTodoEntry, AiTodoSection};
 use claude_conductor_lib::ipc::hidden_chats::HiddenChatsView;
 use claude_conductor_lib::ipc::gaming_mode::GamingModeView;
 use claude_conductor_lib::ipc::servers::ServerInfo;
@@ -136,6 +136,10 @@ fn emit_ipc_types() {
     out.push_str(&decl::<TextFileData>());
     out.push_str(&decl::<TextFileStamp>());
     out.push_str(&decl::<AiTodoEntry>());
+    out.push_str(&decl::<AiBacklog>());
+    out.push_str(&decl::<AiTodoSection>());
+    out.push_str(&decl::<AiTodoDoc>());
+    out.push_str(&decl::<AiTodoArchived>());
     out.push_str(&decl::<HiddenChatsView>());
     out.push_str(&decl::<GamingModeView>());
     out.push_str(&decl::<ServerInfo>());

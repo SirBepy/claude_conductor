@@ -215,6 +215,15 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // resolves the cwd from its own registry (pr_review.rs `resolve_cwd`), so
     // a peer cannot steer the read to an arbitrary path.
     ("list_ai_todos", PM),
+    // PM, same reasoning as `list_ai_todos` above: the Backlog panel's list and
+    // reader for a mirrored chat are forwarded by `session_id` to the host,
+    // which resolves the cwd from its own registry. Read-only. The panel's
+    // writes (`ai_todo_archive`, `ai_todo_unarchive`, `ai_todo_plan_move`,
+    // `ai_todo_plan_reorder_groups`, `ai_todo_start_chat`) are deliberately
+    // absent: desktop-pipe only, so neither a phone nor a peer can edit PLAN.md,
+    // move a todo to `done/`, or spawn a chat through them.
+    ("list_ai_backlog", PM),
+    ("read_ai_todo", PM),
     // Read-only, gated by reject_unknown(root) in registry.rs (todo 656).
     // PM (was P): an optional `machine_id` param now lets a caller ask for a
     // peer's own project icon/tech instead of this daemon's filesystem
@@ -587,7 +596,7 @@ mod tests {
             "paste_attachment", "list_characters", "list_project_groups", "new_session_bundle",
             "character_asset_url", "resolve_voiceline", "resolve_whitelist_characters", "list_projects",
             "project_last_activity_at", "get_project_tech", "get_project_icon",
-            "count_ai_todos", "list_ai_todos",
+            "count_ai_todos", "list_ai_todos", "list_ai_backlog", "read_ai_todo",
             "get_history", "get_token_history", "get_active_sessions",
             "get_usage_map", "get_auth_state_map", "context_status",
             "get_api_credit_status", "refresh_api_credit_status",
@@ -762,9 +771,23 @@ mod tests {
         for m in [
             "get_git_info", "get_git_dirty", "get_commit_sync", "get_commit_history",
             "get_recent_branches", "get_range_files", "get_file_diff", "get_file_at_rev",
-            "list_branch_files", "list_project_files", "list_ai_todos",
+            "list_branch_files", "list_project_files", "list_ai_todos", "list_ai_backlog", "read_ai_todo",
         ] {
             assert!(allowed(m, &peer), "{m} must be callable by a peer machine mirroring the chat");
+        }
+    }
+
+    /// The Backlog panel edits PLAN.md, moves todos to `done/` and spawns chats:
+    /// desktop-pipe only, like the machine-identity mutators.
+    #[test]
+    fn backlog_panel_writes_are_desktop_pipe_only() {
+        for m in [
+            "ai_todo_archive", "ai_todo_unarchive", "ai_todo_plan_move",
+            "ai_todo_plan_reorder_groups", "ai_todo_start_chat",
+        ] {
+            assert!(!allowed(m, &Transport::Phone), "{m} must not be callable by a phone");
+            assert!(!allowed(m, &Transport::PeerMachine("x".into())), "{m} must not be callable by a peer machine");
+            assert!(allowed(m, &Transport::Local), "{m} must stay callable over the desktop pipe");
         }
     }
 
