@@ -399,60 +399,6 @@ table.fs-sdiff {
   overflow-wrap: anywhere;
 }
 
-/* ── file view: line-number gutter (CSS counter, no DOM surgery) ────────
- * Shiki emits one <span class="line"> per source line inside <pre
- * class="shiki">; the plain-text fallback (renderFileView's catch branch)
- * mirrors that shape by hand. Numbering is purely CSS so it survives search
- * highlighting (<mark> insertion) with zero extra bookkeeping. */
-
-.fs-code-view {
-  padding: 8px 0;
-}
-
-.fs-code-view :is(pre.shiki, pre.fs-plain) {
-  margin: 0;
-  padding: 0;
-  background: transparent !important;
-  counter-reset: fs-line;
-  /* The "\n" text nodes between the block-level .line rows would each render
-     as an extra empty row under `pre`; each .line keeps `pre` itself. */
-  white-space: normal;
-}
-
-.fs-code-view .line {
-  display: flex;
-  counter-increment: fs-line;
-  padding: 0 14px 0 0;
-  white-space: pre;
-}
-
-.fs-code-view .line::before {
-  content: counter(fs-line);
-  display: inline-block;
-  width: 44px;
-  flex-shrink: 0;
-  text-align: right;
-  padding-right: 10px;
-  margin-right: 12px;
-  color: var(--color-text-muted);
-  user-select: none;
-  font-size: 10px;
-  border-right: 1px solid var(--color-border);
-}
-
-/* The line a chat file chip like app.ts:42 pointed at. */
-.fs-code-view .line.fs-line-target {
-  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
-}
-
-.fs-code-view .line.fs-line-target::before {
-  color: var(--color-text);
-}
-
-.fs-plain {
-  color: var(--color-text);
-}
-
 /* ── search hits ──────────────────────────────────────────────────────── */
 
 mark.fs-hit {

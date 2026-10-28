@@ -81,7 +81,10 @@ export function readonlyReason(content: string, stamp: TextFileStamp, truncated:
   if (!stamp.writable) return "Read-only: outside your projects";
   if (truncated) return "Read-only: too large to edit here";
   if (content.includes("\uFFFD")) return "Read-only: not UTF-8 text";
-  if (content.includes("\r\n") && /(^|[^\r])\n/.test(content)) return "Read-only: mixed line endings";
+  const crlf = content.includes("\r\n");
+  // CodeMirror splits on a lone CR too, so a save would turn each one into
+  // the file's main separator.
+  if ((crlf && /(^|[^\r])\n/.test(content)) || /\r(?!\n)/.test(content)) return "Read-only: mixed line endings";
   return null;
 }
 
@@ -320,13 +323,15 @@ function mountSession(host: HTMLElement, opts: EditorOpts, sess: Session): FileE
     if (!discard && sess.state.doc !== sess.saved) return;
     const [bom, body] = splitBom(loaded.content);
     const scroll = view.scrollDOM.scrollTop;
-    const head = Math.min(view.state.selection.main.head, body.length);
+    const head = view.state.selection.main.head;
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: body },
-      selection: EditorSelection.cursor(Math.min(head, body.length)),
       // Not an undo step and not a save trigger: it is the disk's content.
       annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)],
     });
+    // Clamped against the doc CodeMirror built, not the raw string: a CRLF
+    // break is one character there and two in `body`.
+    view.dispatch({ selection: EditorSelection.cursor(Math.min(head, view.state.doc.length)), annotations: Transaction.addToHistory.of(false) });
     view.scrollDOM.scrollTop = scroll;
     sess.bom = bom;
     sess.mtime = loaded.stamp.mtime_us;
@@ -413,9 +418,10 @@ function mountSession(host: HTMLElement, opts: EditorOpts, sess: Session): FileE
   };
 }
 
-/** The unsaved-or-saved text the editor holds for `diskPath`, so the rendered
- *  markdown view shows what is being typed, not the stale disk copy. */
-export function sessionText(diskPath: string): string | null {
+/** Typed-but-unsaved text the editor holds for `diskPath`, so the rendered
+ *  markdown view shows what is being typed. Null once it is saved: the disk
+ *  copy is then at least as new, and may hold a chat's later edit. */
+export function unsavedText(diskPath: string): string | null {
   const s = sessions.get(keyOf(diskPath));
-  return s ? s.state.sliceDoc() : null;
+  return s && s.state.doc !== s.saved ? s.state.sliceDoc() : null;
 }

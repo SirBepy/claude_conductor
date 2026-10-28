@@ -28,6 +28,11 @@ describe("readonlyReason: only files that round-trip unchanged are editable", ()
     expect(readonlyReason("a\r\nb\nc\r\n", writable, false)).toBe("Read-only: mixed line endings");
     expect(readonlyReason("a\nb\r\n", writable, false)).toBe("Read-only: mixed line endings");
   });
+
+  it("refuses a lone CR, which a save would turn into a line break", () => {
+    expect(readonlyReason("a\rb\n", writable, false)).toBe("Read-only: mixed line endings");
+    expect(readonlyReason("a\r\nb\rc\r\n", writable, false)).toBe("Read-only: mixed line endings");
+  });
 });
 
 describe("markdownForDisplay", () => {

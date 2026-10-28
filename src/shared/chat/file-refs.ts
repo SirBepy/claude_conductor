@@ -9,7 +9,7 @@ import { isRemote } from "../transport";
 import { createMoreMenu } from "../../views/sessions/more-menu-base";
 import { codeModeCanOpenFile, openInCodeMode } from "./code-mode-bridge";
 import { openFileInApp } from "../open-file";
-import { basename } from "../path-utils";
+import { basename, winPath } from "../path-utils";
 
 // Windows drive path or a Unix absolute path with at least 3 segments. The
 // lookbehinds keep a URL (`https://a/b/c`, `://` and `m/a/b/c`) and a path glued
@@ -103,8 +103,6 @@ export function linkifyFilePaths(root: HTMLElement): void {
 
 // ── actions ───────────────────────────────────────────────────────────
 
-// Same normalisation code-mode/context-menu.ts applies before handing a path to the OS.
-const winPath = (p: string) => (/^[a-z]:\//i.test(p) ? p.replace(/\//g, "\\") : p);
 
 function openInEditor(path: string, line?: number, col?: number): void {
   void invoke<void>("open_in_editor", { path: winPath(path), line, col }).catch((err) => console.error("[file-ref] open failed", err));
