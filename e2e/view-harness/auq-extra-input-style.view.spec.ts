@@ -10,9 +10,7 @@ import { mountView } from "./harness";
 // Submit button is the only way forward. It sits behind an "Add a note" row.
 // Only reachable with 2+ questions - the extra field lives on the summary step.
 
-test("review step's extra-message textarea is the shared composer field", async ({ page }) => {
-  await mountView(page);
-
+async function openReviewNote(page: import("@playwright/test").Page) {
   await page.evaluate(async () => {
     const mod = await import("/views/sessions/permission-modal/question-ui.ts");
     mod.renderQuestionUI({
@@ -40,6 +38,12 @@ test("review step's extra-message textarea is the shared composer field", async 
   await card.locator('[data-act="add-note"]').click();
   const extra = card.locator(".prompt-summary__note .prompt-extra-input");
   await expect(extra).toBeVisible();
+  return { card, extra };
+}
+
+test("review step's extra-message textarea is the shared composer field", async ({ page }) => {
+  await mountView(page);
+  const { card, extra } = await openReviewNote(page);
 
   const style = await extra.evaluate((el) => {
     const cs = getComputedStyle(el);
@@ -59,4 +63,37 @@ test("review step's extra-message textarea is the shared composer field", async 
   const wrapBg = await wrap.evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(wrapBg).not.toBe("rgba(0, 0, 0, 0)");
   await expect(card.locator(".prompt-summary__note .composer-field-send")).toHaveCount(0);
+});
+
+// Regression: the box spans the review panel's full width, and composer.css
+// draws its 2px focus ring outside the border, so .prompt-panel/
+// .prompt-track-viewport's clip shaved the ring off its sides and bottom.
+test("review step's extra-message focus ring stays inside the panel's clip", async ({ page }) => {
+  await mountView(page);
+  const { extra } = await openReviewNote(page);
+  await extra.focus();
+
+  const fit = await extra.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    const reach = parseFloat(cs.outlineWidth) + parseFloat(cs.outlineOffset);
+    const r = el.getBoundingClientRect();
+    const ring = { left: r.left - reach, right: r.right + reach, bottom: r.bottom + reach };
+    const clips = [el.closest(".prompt-panel"), el.closest(".prompt-track-viewport")]
+      .map((c) => c!.getBoundingClientRect());
+    return {
+      outlineStyle: cs.outlineStyle,
+      overflows: clips.map((c) => ({
+        left: c.left - ring.left,
+        right: ring.right - c.right,
+        bottom: ring.bottom - c.bottom,
+      })),
+    };
+  });
+
+  expect(fit.outlineStyle).toBe("solid");
+  for (const o of fit.overflows) {
+    expect(o.left).toBeLessThanOrEqual(0);
+    expect(o.right).toBeLessThanOrEqual(0);
+    expect(o.bottom).toBeLessThanOrEqual(0);
+  }
 });
