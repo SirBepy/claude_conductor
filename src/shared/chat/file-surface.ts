@@ -567,7 +567,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
   async function renderMarkdownBody(token: number, file: SurfaceFile): Promise<void> {
     const diskPath = diskPathOf(file);
     // What the editor holds, typed-but-unsaved included, beats the disk copy.
-    let text = diskPath && editorModule ? (await loadEditor()).sessionText(diskPath) : null;
+    let text = diskPath && editorModule ? (await loadEditor()).unsavedText(diskPath) : null;
     let truncated = false;
     if (text === null) {
       if (!(state.loaded && state.loadedForPath === file.path)) {

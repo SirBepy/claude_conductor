@@ -4,6 +4,7 @@
 
 import { invoke } from "../../../shared/ipc";
 import { isRemote } from "../../../shared/transport";
+import { winPath } from "../../../shared/path-utils";
 
 export type TreeMenuTarget =
   | { kind: "file"; relPath: string; absPath: string; onMention: ((relPath: string) => void) | null }
@@ -83,7 +84,6 @@ function run(act: string, t: TreeMenuTarget): void {
     else if (act === "collapse") t.onCollapseAll();
     return;
   }
-  const winPath = (p: string) => (/^[a-z]:\//i.test(p) ? p.replace(/\//g, "\\") : p);
   switch (act) {
     case "mention": t.onMention?.(t.relPath); break;
     case "vscode":

@@ -4,10 +4,8 @@
 // from the right-click menus that offer it.
 
 import { invoke } from "./ipc";
+import { winPath } from "./path-utils";
 import { codeModeCanOpenFile, openInCodeMode } from "./chat/code-mode-bridge";
-
-// Same normalisation file-refs.ts applies before handing a path to the OS.
-const winPath = (p: string) => (/^[a-z]:\//i.test(p) ? p.replace(/\//g, "\\") : p);
 
 export function openFileInApp(path: string, line?: number): void {
   if (codeModeCanOpenFile(path)) {

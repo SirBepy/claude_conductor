@@ -114,6 +114,22 @@ test.describe("view-harness / file editor", () => {
     expect((await disk(page)).writes).toHaveLength(0);
   });
 
+  test("a CRLF file shortened on disk reloads with the cursor near its old end", async ({ page }) => {
+    // Raw string length counts each CRLF twice; the editor's doc counts it
+    // once, so a cursor clamped to the string would land past the doc's end.
+    const long = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\r\n") + "\r\n";
+    await mountFiles(page, { [FILE]: { content: long, mtime: 1, writable: true } }, FILE);
+    await page.locator("#fw-test .cm-content").click();
+    await page.keyboard.press("Control+End");
+    await page.evaluate((p) => {
+      const f = (window as unknown as { __disk: Disk }).__disk.files[p]!;
+      f.content = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\r\n") + "\r\n";
+      f.mtime = 2;
+    }, FILE);
+    await expect(page.locator("#fw-test .cm-content")).not.toContainText("line 35", { timeout: 5000 });
+    await expect(page.locator("#fw-test .cm-content")).toContainText("line 29");
+  });
+
   test("a file outside every project says why it is read-only and never writes", async ({ page }) => {
     const outside = "C:/Windows/notes.txt";
     await mountFiles(page, { [outside]: { content: "hands off\n", mtime: 1, writable: false } }, outside);
