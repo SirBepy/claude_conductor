@@ -4,7 +4,7 @@
 import { invoke } from "../../../shared/ipc";
 import { state } from "../state";
 import { mountDashboard, type DashboardHandle } from "./dashboard";
-import { fadeOutAndFold } from "./dash-motion";
+import { fadeOutAndFold, freezeEntrance } from "./dash-motion";
 import { targetForRepo } from "./format";
 import type { DashboardListRow, DashboardTargetRef } from "./types";
 
@@ -41,8 +41,10 @@ let current: DashboardHandle | null = null;
 export function unmountDraftDashboard(pane: HTMLElement): void {
   current?.destroy();
   current = null;
-  pane.querySelector(".pd-draft")?.remove();
-  pane.querySelector(".pd-qa-host.is-draft")?.remove();
+  // A fading copy left by leaveDraftDashboard removes itself when its fold
+  // ends; the send's header rebind lands mid-fade and must not cut it short.
+  pane.querySelector(".pd-draft:not(.pd-ghost)")?.remove();
+  pane.querySelector(".pd-qa-host.is-draft:not(.pd-ghost)")?.remove();
 }
 
 /** The first send: the dashboard and its chips fade out and fold away instead
@@ -50,12 +52,12 @@ export function unmountDraftDashboard(pane: HTMLElement): void {
  *  live dashboard comes down at once (no more events or fetches); what fades
  *  is a copy left in its place. */
 export function leaveDraftDashboard(pane: HTMLElement): void {
-  const parts = [pane.querySelector<HTMLElement>(".pd-draft"), pane.querySelector<HTMLElement>(".pd-qa-host.is-draft")];
-  // After the original, not before: unmountDraftDashboard's selectors take the
-  // first match in document order and must find the original.
+  const parts = [pane.querySelector<HTMLElement>(".pd-draft:not(.pd-ghost)"), pane.querySelector<HTMLElement>(".pd-qa-host.is-draft:not(.pd-ghost)")];
   const ghosts = parts.flatMap((el) => {
     if (!el || !el.firstElementChild) return [];
     const ghost = el.cloneNode(true) as HTMLElement;
+    ghost.classList.add("pd-ghost");
+    freezeEntrance(el, ghost);
     el.after(ghost);
     return [ghost];
   });
