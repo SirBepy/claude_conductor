@@ -1,6 +1,7 @@
 // asserts: src/views/sessions/permission-modal-shell.css, src/views/sessions/permission-modal/question-ui-answer-bar.ts
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
+import { shotDir } from "./shot-dir";
 
 // The desktop question card copies the phone's layout: Ask sits on the
 // question band, the answer box's arrow is Next/Submit and the footer's own
@@ -11,7 +12,7 @@ import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } 
 // in --composer mode, and shoots both cards for a human to look at.
 
 const DESKTOP = { width: 1280, height: 800 };
-const SHOTS = ".for_bepy/screenshots/53952-134376105082112240";
+const SHOTS = shotDir();
 const SESSION = sessionInstance();
 
 const SINGLE = [{
@@ -71,7 +72,7 @@ test.describe("view-harness / desktop question card in the phone layout", () => 
     await expect(arrow).toBeVisible();
     await expect(arrow).toHaveClass(/is-submit/);
 
-    await card.screenshot({ path: `${SHOTS}/1404-single.png` });
+    await card.screenshot({ path: `${SHOTS}/question-card-desktop-single.png` });
   });
 
   test("review step keeps its Submit button and has no arrow", async ({ page }) => {
@@ -91,7 +92,7 @@ test.describe("view-harness / desktop question card in the phone layout", () => 
     await expect(submit).toBeEnabled();
     await expect(card.locator(".prompt-answer-send")).toHaveCount(0);
 
-    await card.screenshot({ path: `${SHOTS}/1404-review.png` });
+    await card.screenshot({ path: `${SHOTS}/question-card-desktop-review.png` });
   });
 
   test("--viewport fallback host keeps its footer button and has no arrow", async ({ page }) => {

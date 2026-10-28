@@ -1,9 +1,11 @@
 // asserts: src/views/sessions/permission-modal-track.css, src/views/sessions/permission-modal-shell.css
 import { test, expect, type Page } from "@playwright/test";
+import path from "node:path";
 import { mountView } from "./harness";
+import { shotDir } from "./shot-dir";
 
 // Shared, gitignored, per-chat folder for the verification shot.
-const SHOT = ".for_bepy/screenshots/53952-134376105082112240/1379-question-card-step2.png";
+const SHOT = path.join(shotDir(), "question-card-step2.png");
 
 const QUESTIONS = [
   { question: "First?", options: [{ label: "A" }, { label: "B" }] },
