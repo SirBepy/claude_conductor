@@ -88,7 +88,7 @@ test("desktop has no FAB: the strip holds Code on top, then the panels, and Ask 
   // The strip already offers every dial entry, so the FAB would duplicate it.
   await expect(page.locator(".fab-dial-fab")).toHaveCount(0);
   const tabs = page.locator(".sp-strip .sp-tab");
-  await expect(tabs).toHaveCount(5);
+  await expect(tabs).toHaveCount(6);
   await expect(tabs.first()).toHaveAttribute("data-sp-code", "");
   await expect(page.locator(".sp-panel:visible")).toHaveCount(0);
 

@@ -1,4 +1,4 @@
-// The chat pane's FAB: tap to fan out Ask / Todos / Drafts / Code / Preview.
+// The chat pane's FAB: tap to fan out Ask / Todos / Drafts / Backlog / Code / Preview.
 // What a pick opens depends on the screen: on desktop a split beside the chat
 // with an icon strip on the far right (split-panels/), on the
 // phone a full-screen cover (pane-windows/).
@@ -28,6 +28,8 @@ export interface FabDialHandle {
   reattach(): void;
   /** Open straight onto one draft - the ⤢ on an inline draft card. */
   openDraft(id: string): void;
+  /** Bring one panel up, e.g. Backlog from the phone's todos chip. */
+  openPanel(panel: PanelKey): void;
   /** Open Ask with its input prefilled, e.g. from a question card. */
   askAbout(text: string): void;
   /** What the rest of the view drives Preview through. */
@@ -36,7 +38,7 @@ export interface FabDialHandle {
   destroy(): void;
 }
 
-const DIAL: PanelKey[] = ["ask", "todos", "drafts"];
+const DIAL: PanelKey[] = ["ask", "todos", "drafts", "backlog"];
 
 class FabDial implements FabDialHandle {
   private pane: HTMLElement;
@@ -143,6 +145,11 @@ class FabDial implements FabDialHandle {
     this.windows.openDraft(id);
   }
 
+  openPanel(panel: PanelKey): void {
+    this.windows.openPanel(panel);
+    this.renderChrome();
+  }
+
   askAbout(text: string): void {
     this.windows.askAbout(text);
   }
@@ -214,8 +221,8 @@ class FabDial implements FabDialHandle {
       : "";
     this.chrome.innerHTML =
       `<div class="fab-dial">${items}${code}${preview}</div>` +
-      `<button type="button" class="fab-dial-fab" data-fab-toggle title="Ask, Todos, Drafts, Code, Preview" ` +
-        `aria-label="Ask, Todos, Drafts, Code, Preview"><i class="ph ph-list"></i></button>`;
+      `<button type="button" class="fab-dial-fab" data-fab-toggle title="Ask, Todos, Drafts, Backlog, Code, Preview" ` +
+        `aria-label="Ask, Todos, Drafts, Backlog, Code, Preview"><i class="ph ph-list"></i></button>`;
     this.syncLift();
   }
 

@@ -1,5 +1,5 @@
 // The chat pane's panel registry for the kit's pane windows
-// (vendor/tauri_kit/frontend/pane-windows/): Ask / Todos / Drafts / Preview,
+// (vendor/tauri_kit/frontend/pane-windows/): Ask / Todos / Drafts / Backlog / Preview,
 // and what each tab mounts. Panels are mounted once per pane and kept alive
 // while their window is closed or the tab is hidden, so Ask keeps its thread,
 // Drafts its open card, and Preview keeps listening for pushes.
@@ -7,18 +7,20 @@
 import { mountAskPanel } from "../ask-panel";
 import { mountTodosPanel } from "../todos-panel";
 import { mountDraftsPanel, type DraftsPanelHandle } from "../drafts-panel";
+import { mountBacklogPanel } from "../backlog-panel/backlog-panel";
 import type { RailTabDeps, RailTabHandle } from "../rail-panel";
 import type { PreviewController } from "../preview-panel";
 import type { PanelMeta } from "../../../../vendor/tauri_kit/frontend/pane-windows/layout";
 
-export type PanelKey = "ask" | "todos" | "drafts" | "preview";
+export type PanelKey = "ask" | "todos" | "drafts" | "backlog" | "preview";
 
-export const PANEL_KEYS: readonly PanelKey[] = ["ask", "todos", "drafts", "preview"];
+export const PANEL_KEYS: readonly PanelKey[] = ["ask", "todos", "drafts", "backlog", "preview"];
 
 export const PANEL_META: Record<PanelKey, PanelMeta> = {
   ask: { label: "Ask", icon: "ph-chat-teardrop-dots" },
   todos: { label: "Todos", icon: "ph-list-checks" },
   drafts: { label: "Drafts", icon: "ph-note-pencil" },
+  backlog: { label: "Backlog", icon: "ph-stack" },
   preview: { label: "Preview", icon: "ph-monitor-play" },
 };
 
@@ -37,6 +39,8 @@ export interface PanelDeps {
   previewDeps: RailTabDeps;
   /** Drafts' open count after each fetch; only the split's strip shows it. */
   onDraftsCount?(n: number): void;
+  /** Backlog's open-todo count after each fetch; only the split's strip shows it. */
+  onBacklogCount?(n: number): void;
 }
 
 /** What either panel host needs from the FAB. */
@@ -96,6 +100,10 @@ export function mountPanel(key: PanelKey, root: HTMLElement, deps: PanelDeps, ou
           drafts.destroy();
         },
       };
+    }
+    case "backlog": {
+      const backlog = mountBacklogPanel(root, deps.onBacklogCount);
+      return { setSessionScope: (sid, cwd) => backlog.setSessionScope(sid, cwd), destroy: () => backlog.destroy() };
     }
     case "preview": {
       // The rail's body expects its own data-tab-body host, which its CSS keys on.

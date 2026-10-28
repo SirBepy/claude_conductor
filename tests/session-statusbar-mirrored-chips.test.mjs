@@ -10,6 +10,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const calls = [];
 const ipcMock = { impl: async () => null };
+// Only the phone draws the todos chip (the desktop split's Backlog tab replaced it).
+const env = { remote: true };
+vi.mock("../src/shared/transport.ts", async (orig) => ({ ...(await orig()), isRemote: () => env.remote }));
 vi.mock("../src/shared/ipc.ts", () => ({
   invoke: vi.fn((cmd, args) => { calls.push([cmd, args]); return ipcMock.impl(cmd, args); }),
 }));
@@ -33,6 +36,7 @@ function mount(rows, opts = {}) {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
+  env.remote = true;
   calls.length = 0;
   document.body.innerHTML = "";
   // This machine (the Mac) has one account, none of the host's ids.
@@ -51,6 +55,14 @@ describe("statusbar chips for a chat mirrored from a paired machine", () => {
     const todoCall = calls.find(([c]) => c === "list_ai_todos");
     expect(todoCall[1]).toEqual({ cwd: PC_CWD, sessionId: "sess-pc" });
     expect(el.querySelector(".sb-ai-todos")?.textContent).toContain("2");
+  });
+
+  it("draws no todos chip and reads no list on the desktop, where the Backlog tab replaced it", async () => {
+    env.remote = false;
+    const { el } = mount([["ai_todos"]]);
+    await flush();
+    expect(calls.find(([c]) => c === "list_ai_todos")).toBeUndefined();
+    expect(el.querySelector(".sb-ai-todos")).toBeNull();
   });
 
   it("keeps a local chat's todos read to cwd alone", async () => {

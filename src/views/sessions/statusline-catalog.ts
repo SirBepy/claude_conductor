@@ -47,7 +47,7 @@ export const STATIC_CHIPS = {
   duration:       { section: "session", icon: "ph-timer",            sample: "2m 30s",     tooltip: "Time since the session started." },
   cost:           { section: "session", icon: "ph-currency-dollar",  sample: "~$0.42",     tooltip: "Estimated session cost (local estimate, not a charge)." },
   clock:          { section: "session", icon: "ph-clock",            sample: "14:32",      tooltip: "Current wall-clock time." },
-  ai_todos:       { section: "session", icon: "ph-check-square",     sample: "3 todos",    tooltip: "AI todos in .claude/todos/. Click to view the list.", countLike: true },
+  ai_todos:       { section: "session", icon: "ph-check-square",     sample: "3 todos",    tooltip: "AI todos in .claude/todos/. Phone only: opens the Backlog panel.", countLike: true },
   drain:          { section: "session", icon: "ph-drop",             sample: "50% · 12%w", tooltip: "Share of a 5h session this chat has drained (and weekly). Click for a per-message rundown." },
   servers:        { section: "session", icon: "ph-broadcast",        sample: "1 live",     tooltip: "Dev servers running for this project via server_supervisor. Click to list them and open each in the browser.", countLike: true },
   images:         { section: "session", icon: "ph-image",           sample: "12 imgs",    tooltip: "Every image in this chat (attachments + tool screenshots). Click to view the list.", countLike: true },

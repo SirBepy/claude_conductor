@@ -46,7 +46,7 @@ describe("fab dial survives a pane rebuild", () => {
 
     fab.reattach();
     expect(pane.querySelector(".fab-dial-host")).not.toBeNull();
-    expect(pane.querySelectorAll("[data-dial]").length).toBe(5);
+    expect(pane.querySelectorAll("[data-dial]").length).toBe(6);
   });
 
   it("stays gone when no session is scoped", () => {

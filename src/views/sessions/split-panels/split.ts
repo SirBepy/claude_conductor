@@ -22,7 +22,7 @@ import { forgetActive, recallActive, rememberActive, loadFraction, saveFraction 
 import "./split.css";
 
 /** Top to bottom, as Joe picked it in the split mockup. */
-const STRIP_ORDER: readonly PanelKey[] = ["preview", "drafts", "todos", "ask"];
+const STRIP_ORDER: readonly PanelKey[] = ["preview", "drafts", "todos", "backlog", "ask"];
 const STRIP_W = 44;
 const DIVIDER_W = 6;
 /** Below these the split cannot keep both sides usable, so the panel covers
@@ -45,6 +45,7 @@ export class SplitPanels implements PanelHost {
   private readonly body: HTMLElement;
   private fraction = loadFraction();
   private draftsCount = 0;
+  private backlogCount = 0;
   /** Preview relocated to its own OS window for this chat (rail-panel.ts's
    *  `cc_preview_panel_popped:<id>`); the split stops showing it. */
   private popped = false;
@@ -93,8 +94,9 @@ export class SplitPanels implements PanelHost {
       this.resizeObs.observe(pane);
     }
     // Preview must hear a push for a chat whose Preview is closed in order
-    // to open it, and Drafts' count shows on the strip before it is opened.
-    for (const p of this.panels) if (p === "preview" || p === "drafts") this.ensureMounted(p);
+    // to open it, and the Drafts and Backlog counts show on the strip before
+    // either is opened.
+    for (const p of this.panels) if (p === "preview" || p === "drafts" || p === "backlog") this.ensureMounted(p);
     if (deps.mountPreview) this.watchPopOut();
     // Not apply(): its onChange would reach the FAB before it holds this host.
     this.renderStrip();
@@ -216,6 +218,11 @@ export class SplitPanels implements PanelHost {
         this.draftsCount = n;
         this.renderStrip();
       },
+      onBacklogCount: (n) => {
+        if (n === this.backlogCount) return;
+        this.backlogCount = n;
+        this.renderStrip();
+      },
     };
     const h = mountPanel(panel, root, deps, this.mounted);
     this.handles.set(panel, h);
@@ -331,9 +338,11 @@ export class SplitPanels implements PanelHost {
         const mark =
           k === "drafts" && this.draftsCount > 0
             ? `<span class="sp-count" aria-label="${this.draftsCount} open">${this.draftsCount}</span>`
-            : k === "preview" && this.previewUnseen
-              ? `<span class="sp-dot" aria-label="New preview"></span>`
-              : "";
+            : k === "backlog" && this.backlogCount > 0
+              ? `<span class="sp-count" aria-label="${this.backlogCount} open">${this.backlogCount}</span>`
+              : k === "preview" && this.previewUnseen
+                ? `<span class="sp-dot" aria-label="New preview"></span>`
+                : "";
         return (
           `<button type="button" class="sp-tab${on ? " is-on" : ""}" data-sp-k="${k}" title="${label}" ` +
           `aria-label="${label}" aria-pressed="${on}"><i class="ph ${icon}"></i>${mark}</button>`

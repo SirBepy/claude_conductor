@@ -346,39 +346,6 @@
 .sb-chip.sb-ai-todos-btn { cursor: pointer; }
 .sb-chip.sb-ai-todos-btn:hover { background: color-mix(in srgb, var(--color-warning) 10%, transparent); border-color: color-mix(in srgb, var(--color-warning) 35%, transparent); }
 
-.sb-ai-todos-popover {
-  min-width: 280px;
-  max-width: 420px;
-  padding: 8px 0;
-}
-
-.sb-ai-todos-popover-header {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  padding: 2px 12px 8px;
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.sb-ai-todos-popover-file {
-  font-size: 0.75rem;
-  font-family: 'Fira Code', monospace;
-  color: var(--color-text);
-  padding: 5px 12px;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sb-ai-todos-popover-file:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-warning);
-}
-
 /* ── Servers chip + running-servers popover ──────────────────────────────── */
 
 /* Green "live" accent to read as an active broadcast. */
