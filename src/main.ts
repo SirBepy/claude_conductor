@@ -73,7 +73,7 @@ if (import.meta.env.DEV) {
 }
 
 // wdio/view-harness e2e test seams (window.__injectEdit/__injectNews/
-// __setSelectedSession/__injectQuestion/__openNewChatModal/__startNewSession/
+// __setSelectedSession/__injectQuestion/__startNewSession/
 // __setBusy) - see src/boot/e2e-seams.ts for the per-seam rationale.
 // `installE2eSeams` gates its own body on `import.meta.env.DEV`, so this call
 // is unconditional here but installs nothing in a `vite build` production

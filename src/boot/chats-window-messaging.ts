@@ -11,7 +11,7 @@ import { showView } from "../shared/navigation";
 
 /** Shape of the `open_chats_new_chat`/`take_pending_new_chat` IPC payload
  * (Rust's `ipc::window::PendingNewChat`, serde camelCase). Carries the full
- * model/effort modal `SessionConfig` - not just model/effort - so account,
+ * new-chat `SessionConfig` - not just model/effort - so account,
  * auto-accept, and character picks survive the Chats-window "+" round trip
  * (ai_todo 163). */
 interface PendingNewChatPayload {
