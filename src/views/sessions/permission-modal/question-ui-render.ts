@@ -112,7 +112,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     btn.innerHTML = `<i class="ph ${isSubmitMode ? opts.submitIcon : "ph-caret-right"}"></i> ${escapeHtml(isSubmitMode ? opts.submitLabel : "Next")}`;
     btn.onclick = isSubmitMode ? submit : advance;
     // Review's Submit is the step's only control, so it grows into a CTA
-    // (permission-modal-shell.css): full width on the phone, capped on desktop.
+    // (permission-modal-shell.css) on the phone; on desktop it keeps a normal button's width.
     btn.classList.toggle("prompt-submit-cta", isReviewTab());
   }
 
