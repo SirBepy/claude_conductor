@@ -58,6 +58,14 @@ pub async fn context_status(
     session_id: String,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<Option<ContextStatus>, String> {
+    // A chat mirrored from a paired machine has its transcript on that
+    // machine's disk; the daemon forwards the read there by session id.
+    if let Some(client) = crate::ipc::mirror::mirrored_client(&state, Some(&session_id)).await {
+        return Ok(client.context_status(&session_id).await.unwrap_or_else(|e| {
+            log::warn!("context_status: mirrored session {session_id} read failed: {e}");
+            None
+        }));
+    }
     let resolved = resolve_session_transcript(&state, &session_id);
 
     let status = tauri::async_runtime::spawn_blocking(move || {
