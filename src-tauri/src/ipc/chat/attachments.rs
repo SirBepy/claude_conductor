@@ -147,6 +147,16 @@ pub async fn paste_attachment(
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Raster image extensions. svg is excluded on purpose: it can carry script and
+/// external references. One list for `image_read` (what it will serve) and
+/// `tokens::title` (which attachments make an "Image" chat title).
+pub(crate) const RASTER_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+
+/// Whether `ext` (no dot, any case) names a raster image.
+pub(crate) fn is_raster_ext(ext: &str) -> bool {
+    RASTER_EXTS.iter().any(|r| r.eq_ignore_ascii_case(ext))
+}
+
 /// Resolve a file extension to its MIME type. Shared by `paste_attachment_from_path`
 /// below (split out so the mirrored branch, which never touches
 /// `chat-attachments` locally, can still name a MIME for the daemon RPC) and
