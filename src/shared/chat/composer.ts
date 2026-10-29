@@ -518,7 +518,7 @@ export class Composer {
       nextTokenReset: this.opts.getNextTokenReset?.(),
       onConfirm: async (result) => {
         if (this.sending) return;
-        await this.waitForUploads();
+        if (this.att.isUploading()) await this.waitForUploads();
         const text = (this.textarea?.value ?? "").trim();
         const blocks = this.undo.buildBlocks(text);
         const savedAttachments = this.att.attachments;
@@ -554,7 +554,6 @@ export class Composer {
    *  reach Claude. `sending` blocks a second Send meanwhile, which would
    *  otherwise clear the draft out from under the waiting one. */
   private async waitForUploads(): Promise<void> {
-    if (!this.att.isUploading()) return;
     this.sending = true;
     this.sendBtn?.classList.add("spinning");
     try {
@@ -596,7 +595,9 @@ export class Composer {
         this.sending = false;
       }
     }
-    await this.waitForUploads();
+    // Only awaited when needed: with nothing uploading, send stays
+    // synchronous up to onSend, which callers like the lightbox rely on.
+    if (this.att.isUploading()) await this.waitForUploads();
     const text = (this.textarea?.value ?? "").trim();
     const empty = !text && this.att.isEmpty();
 
