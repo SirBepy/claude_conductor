@@ -186,35 +186,55 @@
 .view-dashboard .dash-acard-warning:hover { text-decoration: underline; }
 
 /* ── API-credit meter ──────────────────────────────────────────────────── */
-/* One line per API-credit account under the plan cards: text and a hairline
-   bar only, no card, so it reads as a footnote to the usage above it. */
+/* One card per API-credit account under the plan cards: name and balance on
+   top, a full-width bar, then the grant and spend figures as a quiet footer. */
 .view-dashboard .dash-credits {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: -4px 0 16px;
+  gap: 8px;
+  margin: 0 0 16px;
 }
 .view-dashboard .dash-credit {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 10px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 13px;
+  background: var(--color-surface, #1f1f2c);
+  border: 1px solid var(--color-border, #2e2e40);
+  border-radius: 10px;
   font-size: var(--fs-micro);
   color: var(--sb-muted);
 }
+.view-dashboard .dash-credit-head { display: flex; align-items: center; gap: 8px; }
 .view-dashboard .dash-credit .account-icon-badge { width: 20px; height: 20px; font-size: 11px; }
-.view-dashboard .dash-credit-name { color: var(--color-text, #e8e8ee); font-weight: 600; }
+.view-dashboard .dash-credit-name { color: var(--color-text, #e8e8ee); font-weight: 600; flex: 1; min-width: 0; }
+.view-dashboard .dash-credit-left { white-space: nowrap; }
+.view-dashboard .dash-credit-left b {
+  color: var(--color-text, #e8e8ee);
+  font-size: var(--fs-title);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
 .view-dashboard .dash-credit-bar {
-  flex: 0 0 72px;
-  height: 4px;
-  border-radius: 2px;
+  display: block;
+  height: 6px;
+  border-radius: 3px;
   background: var(--color-surface-alt, #262637);
   overflow: hidden;
 }
 .view-dashboard .dash-credit-fill {
   display: block;
   height: 100%;
+  border-radius: 3px;
   background: var(--acc, var(--color-primary, #6e8fff));
+}
+.view-dashboard .dash-credit-meta,
+.view-dashboard .dash-credit-notes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  font-variant-numeric: tabular-nums;
 }
 .view-dashboard .dash-credit-link {
   background: none;

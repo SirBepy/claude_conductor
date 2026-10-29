@@ -16,7 +16,6 @@ function lineHtml(account: Account, statuses: ApiCreditStatusMap, all: readonly 
 
   // The figures when there are any; else why there are none. A stale figure
   // plus an error shows both, the error last, so the age of the number is clear.
-  const text = line.figures ?? (line.error ? "" : "No figures yet");
   const error = line.error
     ? `<button type="button" class="dash-credit-link" title="Go to Settings > Accounts">${escapeHtml(line.error)}${line.needsConnect ? " - Connect Console" : ""}</button>`
     : "";
@@ -27,12 +26,29 @@ function lineHtml(account: Account, statuses: ApiCreditStatusMap, all: readonly 
     ? ""
     : `<span class="dash-credit-bar" role="img" aria-label="${Math.round(fraction * 100)}% of the monthly API credit left"><span class="dash-credit-fill" style="width:${(fraction * 100).toFixed(1)}%"></span></span>`;
 
+  // The big figure is the balance; what the grant came to and when it lapses
+  // sit under the bar, the Console spend against its limit opposite.
+  const big = line.left
+    ? `<span class="dash-credit-left"><b>${escapeHtml(line.left)}</b> left</span>`
+    : line.error ? "" : `<span class="dash-credit-text">No figures yet</span>`;
+  const grant = [line.total ? `of ${line.total}` : "", line.resets ? `expires ${line.resets}` : ""].filter(Boolean).join(" · ");
+  const meta = grant || line.spend
+    ? `<div class="dash-credit-meta">
+      <span>${escapeHtml(grant)}</span>
+      ${line.spend ? `<span title="This month's Console spend against its spend limit">Spent ${escapeHtml(line.spend)}</span>` : ""}
+    </div>`
+    : "";
+  const notes = error || warn ? `<div class="dash-credit-notes">${error}${warn}</div>` : "";
+
   return `<div class="dash-credit" data-acc-id="${escapeHtml(account.id)}" style="--acc:${escapeHtml(account.colour)}">
-    ${accountIconBadgeHtml(account)}
-    <span class="dash-credit-name">${escapeHtml(linkedPlanAccount(account, all) ? apiCreditLinkedName(account, all) : account.label)}</span>
+    <div class="dash-credit-head">
+      ${accountIconBadgeHtml(account)}
+      <span class="dash-credit-name">${escapeHtml(linkedPlanAccount(account, all) ? apiCreditLinkedName(account, all) : account.label)}</span>
+      ${big}
+    </div>
     ${bar}
-    ${text ? `<span class="dash-credit-text">${escapeHtml(text)}</span>` : ""}
-    ${error}${warn}
+    ${meta}
+    ${notes}
   </div>`;
 }
 

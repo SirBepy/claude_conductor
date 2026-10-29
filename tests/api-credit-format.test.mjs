@@ -51,14 +51,14 @@ describe("formatResetDate", () => {
 describe("apiCreditLine", () => {
   it("writes the live figures the way the settings row shows them", () => {
     const line = apiCreditLine(status());
-    expect(line.summary).toBe("API credit $178.71 of $200 left, resets Nov 2 · $21.28 of $200 limit");
-    expect(line.figures).toBe("$178.71 of $200 left, resets Nov 2 · $21.28 of $200 limit");
+    expect(line.summary).toBe("API credit $178.71 of $200 left, expires Nov 2 · $21.28 of $200 limit");
+    expect(line.figures).toBe("$178.71 of $200 left, expires Nov 2 · $21.28 of $200 limit");
     expect(line.error).toBeNull();
     expect(line.blockReason).toBeNull();
   });
 
   it("leaves a part out when its figure is missing", () => {
-    expect(apiCreditLine(status({ spend_cents: null })).summary).toBe("API credit $178.71 of $200 left, resets Nov 2");
+    expect(apiCreditLine(status({ spend_cents: null })).summary).toBe("API credit $178.71 of $200 left, expires Nov 2");
     expect(apiCreditLine(status({ max_grant_remaining_cents: null })).summary).toBe("API credit $21.28 of $200 limit");
     expect(apiCreditLine(status({ max_grant_total_cents: null, max_grant_expires_at: null })).figures)
       .toBe("$178.71 left · $21.28 of $200 limit");
@@ -86,7 +86,10 @@ describe("apiCreditLine", () => {
   });
 
   it("is empty before the first status arrives", () => {
-    expect(apiCreditLine(undefined)).toEqual({ figures: null, summary: null, error: null, needsConnect: false, blockReason: null });
+    expect(apiCreditLine(undefined)).toEqual({
+      figures: null, summary: null, left: null, total: null, resets: null, spend: null,
+      error: null, needsConnect: false, blockReason: null,
+    });
   });
 });
 

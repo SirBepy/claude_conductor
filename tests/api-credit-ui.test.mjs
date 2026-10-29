@@ -61,8 +61,9 @@ describe("dashboard meter", () => {
     const html = apiCreditMeterHtml([sub, credit], { "acct-credit": status() });
     expect(html.match(/class="dash-credit"/g)).toHaveLength(1);
     expect(html).toContain("API credit");
-    expect(html).toContain("$178.71 of $200 left, resets Nov 2");
-    expect(html).toContain("$21.28 of $200 limit");
+    expect(html).toContain("<b>$178.71</b> left");
+    expect(html).toContain("of $200 · expires Nov 2");
+    expect(html).toContain("Spent $21.28 of $200");
     expect(html).toContain("width:89.4%");
   });
 

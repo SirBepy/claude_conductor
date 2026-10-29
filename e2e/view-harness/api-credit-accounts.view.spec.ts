@@ -65,7 +65,7 @@ test.describe("view-harness / API-credit accounts", () => {
     });
 
     const row = page.locator('.acc-row[data-id="acct-credit"]');
-    await expect(row.locator(".acc-credit")).toContainText("API credit $178.71 of $200 left, resets Nov 2 · $21.28 of $200 limit");
+    await expect(row.locator(".acc-credit")).toContainText("API credit $178.71 of $200 left, expires Nov 2 · $21.28 of $200 limit");
     await expect(row.locator(".account-icon-badge .ph-key")).toHaveCount(1);
     await expect(row.locator(".acc-menu-connect-console")).toHaveCount(1);
     await expect(row.locator(".acc-menu-reauth, .acc-menu-default, .acc-menu-add-cookie")).toHaveCount(0);
@@ -212,7 +212,7 @@ test.describe("view-harness / API-credit accounts", () => {
     });
     await expect(page.locator('.dash-acard[data-acc-id="acct-sub"]')).toBeVisible();
     await expect(page.locator('.dash-acard[data-acc-id="acct-credit"]')).toHaveCount(0);
-    await expect(page.locator('.dash-credit[data-acc-id="acct-credit"]')).toContainText("$178.71 of $200 left, resets Nov 2");
+    await expect(page.locator('.dash-credit[data-acc-id="acct-credit"]')).toContainText("$178.71 left");
     await expect(page.locator('.dash-credit[data-acc-id="acct-credit"] .dash-credit-name')).toHaveText("API credit · Personal");
   });
 
