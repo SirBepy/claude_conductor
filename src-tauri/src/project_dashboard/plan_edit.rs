@@ -301,7 +301,7 @@ pub fn edit_plan<T>(
 ) -> Result<T, String> {
     let path = plan_path(todos_dir);
     for _ in 0..5 {
-        let before = std::fs::read_to_string(&path).ok();
+        let before = read_existing(&path)?;
         if before.is_none() && !create {
             let mut empty = LineDoc::parse("");
             return edit(&mut empty);
@@ -313,7 +313,7 @@ pub fn edit_plan<T>(
         if before.as_deref().map(|b| b.strip_prefix('\u{feff}').unwrap_or(b)) == Some(text.as_str()) {
             return Ok(out);
         }
-        if std::fs::read_to_string(&path).ok() != before {
+        if read_existing(&path)? != before {
             continue;
         }
         std::fs::create_dir_all(todos_dir).map_err(|e| format!("could not create {}: {e}", todos_dir.display()))?;
@@ -321,6 +321,18 @@ pub fn edit_plan<T>(
         return Ok(out);
     }
     Err("PLAN.md kept changing while it was being edited; try again".to_string())
+}
+
+/// `None` only when the file is genuinely absent. Any other read failure (a
+/// UTF-16 file written by Windows PowerShell, a permissions error) is an
+/// error, because treating it as missing would let `create` overwrite the
+/// real plan with a fresh `# Plan`.
+fn read_existing(path: &Path) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("could not read {}: {e}", path.display())),
+    }
 }
 
 #[cfg(test)]
@@ -485,5 +497,20 @@ mod tests {
         })
         .unwrap();
         assert_eq!(std::fs::read_to_string(plan_path(dir.path())).unwrap(), "# Plan\n\n## Now\n- [ ] pc-0001\n");
+    }
+
+    #[test]
+    fn edit_plan_refuses_an_unreadable_plan_instead_of_overwriting_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = plan_path(dir.path());
+        // UTF-16LE with a BOM, as Windows PowerShell's Out-File writes it.
+        let utf16: Vec<u8> = [0xFF, 0xFE].into_iter().chain("## A\n".encode_utf16().flat_map(u16::to_le_bytes)).collect();
+        std::fs::write(&path, &utf16).unwrap();
+        let out = edit_plan(dir.path(), true, |d| {
+            d.insert_into_group("Now", "- [ ] pc-0001", 0, &all);
+            Ok(())
+        });
+        assert!(out.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), utf16);
     }
 }
