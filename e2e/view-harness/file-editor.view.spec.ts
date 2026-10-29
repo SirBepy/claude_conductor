@@ -130,6 +130,39 @@ test.describe("view-harness / file editor", () => {
     await expect(page.locator("#fw-test .cm-content")).toContainText("line 29");
   });
 
+  test("a CRLF file rewritten as LF on disk reloads as separate lines and saves LF", async ({ page }) => {
+    await mountFiles(page, { [FILE]: { content: "a\r\nb\r\n", mtime: 1, writable: true } }, FILE);
+    await expect(page.locator("#fw-test .cm-content")).toContainText("a");
+    await page.evaluate((p) => {
+      const f = (window as unknown as { __disk: Disk }).__disk.files[p]!;
+      f.content = "one\ntwo\nthree\n";
+      f.mtime = 2;
+    }, FILE);
+    await expect(page.locator("#fw-test .cm-content")).toContainText("three", { timeout: 5000 });
+    await expect(page.locator("#fw-test .cm-line")).toHaveCount(4);
+    await page.locator("#fw-test .cm-content").click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type("four");
+    await expect.poll(async () => (await disk(page)).writes.length).toBeGreaterThan(0);
+    expect((await disk(page)).writes.at(-1)!.content).toBe("one\ntwo\nthree\nfour");
+  });
+
+  test("an LF file rewritten as CRLF on disk keeps CRLF on the next save", async ({ page }) => {
+    await mountFiles(page, { [FILE]: { content: "a\nb\n", mtime: 1, writable: true } }, FILE);
+    await expect(page.locator("#fw-test .cm-content")).toContainText("a");
+    await page.evaluate((p) => {
+      const f = (window as unknown as { __disk: Disk }).__disk.files[p]!;
+      f.content = "one\r\ntwo\r\n";
+      f.mtime = 2;
+    }, FILE);
+    await expect(page.locator("#fw-test .cm-content")).toContainText("two", { timeout: 5000 });
+    await page.locator("#fw-test .cm-content").click();
+    await page.keyboard.press("Control+End");
+    await page.keyboard.type("x");
+    await expect.poll(async () => (await disk(page)).writes.length).toBeGreaterThan(0);
+    expect((await disk(page)).writes.at(-1)!.content).toBe("one\r\ntwo\r\nx");
+  });
+
   test("a file outside every project says why it is read-only and never writes", async ({ page }) => {
     const outside = "C:/Windows/notes.txt";
     await mountFiles(page, { [outside]: { content: "hands off\n", mtime: 1, writable: false } }, outside);
@@ -159,5 +192,26 @@ test.describe("view-harness / file editor", () => {
     await expect(body).not.toContainText("claim note");
     await page.locator("#fw-test .fs-md-btn").click();
     await expect(page.locator("#fw-test .cm-content")).toContainText("<!-- claim note -->");
+  });
+
+  test("reopening a rendered markdown file shows a chat's later edit", async ({ page }) => {
+    const md = "C:/Projects/alpha/.claude/todos/12-thing.md";
+    await mountFiles(page, {
+      [FILE]: { content: "x\n", mtime: 1, writable: true },
+      [md]: { content: "# Before\n", mtime: 1, writable: true },
+    }, FILE);
+    const open = (p: string) => page.evaluate((p) => {
+      const w = window as unknown as { __ccListeners: Map<string, Set<(e: { payload: unknown }) => void>> };
+      w.__ccListeners.get("file-window-open")?.forEach((cb) => cb({ payload: { path: p, line: null } }));
+    }, p);
+    await open(md);
+    await expect(page.locator("#fw-test .fs-md h1")).toHaveText("Before");
+    await page.evaluate((p) => {
+      const f = (window as unknown as { __disk: Disk }).__disk.files[p]!;
+      f.content = "# After a chat edit\n";
+      f.mtime = 2;
+    }, md);
+    await open(md);
+    await expect(page.locator("#fw-test .fs-md h1")).toHaveText("After a chat edit");
   });
 });

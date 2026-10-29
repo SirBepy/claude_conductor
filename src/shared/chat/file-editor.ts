@@ -186,6 +186,13 @@ export async function openFileEditor(host: HTMLElement, opts: EditorOpts): Promi
 
 const lang = new Compartment();
 const editable = new Compartment();
+// Its own compartment so a reload can switch it: a chat that rewrites the
+// file with the other line ending would otherwise be split by the old one.
+const separator = new Compartment();
+
+function separatorExt(crlf: boolean) {
+  return crlf ? EditorState.lineSeparator.of("\r\n") : [];
+}
 
 function buildState(body: string, crlf: boolean, canEdit: boolean): EditorState {
   return EditorState.create({
@@ -193,7 +200,7 @@ function buildState(body: string, crlf: boolean, canEdit: boolean): EditorState 
     extensions: [
       // Round-trips a CRLF file as CRLF; without it every line would come
       // back LF and an autosave would rewrite the whole file.
-      crlf ? EditorState.lineSeparator.of("\r\n") : [],
+      separator.of(separatorExt(crlf)),
       lineNumbers(),
       highlightActiveLineGutter(),
       highlightSpecialChars(),
@@ -324,6 +331,12 @@ function mountSession(host: HTMLElement, opts: EditorOpts, sess: Session): FileE
     const [bom, body] = splitBom(loaded.content);
     const scroll = view.scrollDOM.scrollTop;
     const head = view.state.selection.main.head;
+    // Before the insert: CodeMirror splits inserted text by the separator the
+    // transaction starts with.
+    const crlf = crlfOf(body);
+    if (crlf !== (view.state.lineBreak === "\r\n")) {
+      view.dispatch({ effects: separator.reconfigure(separatorExt(crlf)), annotations: Transaction.addToHistory.of(false) });
+    }
     view.dispatch({
       changes: { from: 0, to: view.state.doc.length, insert: body },
       // Not an undo step and not a save trigger: it is the disk's content.
