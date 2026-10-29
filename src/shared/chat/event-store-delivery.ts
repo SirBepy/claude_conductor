@@ -22,6 +22,8 @@ export const DEDUP_WINDOW_MS = 10_000;
 // A cold `claude` took 24.9s to write a submitted prompt into the JSONL, long
 // past DEDUP_WINDOW_MS, so echo sigs get their own consume-on-match set (659).
 export const ECHO_MATCH_WINDOW_MS = 5 * 60_000;
+/** The sig of every attachment-only user message (see sigOf). */
+const ATTACHMENT_SIG = "u:[attachment]";
 
 // Attachment tokens the composer appends as text; stripped from the dedup
 // sig only (JSONL stores them as image blocks instead) - see sigOf.
@@ -203,7 +205,7 @@ export class DeliveryPolicy {
         // tokens or image blocks, so their counts need not agree.
         if (sig === "") {
           const blocks = (ev as { content?: { type: string }[] }).content ?? [];
-          if (blocks.some((b) => b.type === "image") || raw.search(FILE_TOKEN_SIG_RE) !== -1) return "u:[attachment]";
+          if (blocks.some((b) => b.type === "image") || raw.search(FILE_TOKEN_SIG_RE) !== -1) return ATTACHMENT_SIG;
         }
         return `u:${sig}`;
       }
@@ -232,6 +234,10 @@ export class DeliveryPolicy {
     // Cross-source only: same-channel repeats are distinct events, not races.
     if (entry.recent.some((r) => r.sig === sig && r.source !== source)) return true;
     if (ev.type !== "user_message") return false;
+    // Every image-only message shares ATTACHMENT_SIG, and a transcript copy
+    // that folded in via `recent` above leaves its echo's token behind, so a
+    // synthetic matching that token is the user's next image, not a replay.
+    if (sig === ATTACHMENT_SIG && source === "synthetic") return false;
     // The watcher's replay of an already-echoed turn, past DEDUP_WINDOW_MS.
     entry.pendingEchoes = entry.pendingEchoes.filter((e) => now - e.ts < ECHO_MATCH_WINDOW_MS);
     const idx = entry.pendingEchoes.findIndex((e) => e.sig === sig);
