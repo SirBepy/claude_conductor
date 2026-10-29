@@ -1,6 +1,7 @@
 // asserts: src/views/sessions/split-panels/split.ts, src/views/sessions/split-panels/memory.ts, src/views/sessions/fab-dial.ts
 import { test, expect, type Page } from "@playwright/test";
 import { fireEvent, mountView } from "./harness";
+import { expectIconButtonsCentred } from "./icon-centering";
 import { shotDir } from "./shot-dir";
 
 const SCREENSHOT_DIR = shotDir();
@@ -116,6 +117,7 @@ test("a strip icon fills the split beside the chat; the same icon or the X close
   expect(Math.round(p.x + p.width)).toBe(1280 - STRIP_W);
   expect(Math.abs(chat - p.width)).toBeLessThanOrEqual(1);
   expect(Math.round(chat + 6 + p.width + STRIP_W)).toBe(1280);
+  await expectIconButtonsCentred(page);
 
   await tab(page, "drafts").click();
   await expect(panel(page)).toBeHidden();

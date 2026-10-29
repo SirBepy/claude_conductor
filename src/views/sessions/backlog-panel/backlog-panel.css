@@ -469,6 +469,8 @@
   place-items: center;
   width: 28px;
   height: 28px;
+  /* The bare button rule's 7px 16px would push the glyph off centre. */
+  padding: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;

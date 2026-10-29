@@ -2,6 +2,7 @@
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
+import { expectIconButtonsCentred } from "./icon-centering";
 import { shotDir } from "./shot-dir";
 
 const SCREENSHOT_DIR = shotDir();
@@ -129,6 +130,7 @@ test("wide: the strip tab carries the count, the reader sits left of a 230px lis
   const overflow = await page.locator(".bl-reader-col").evaluate((el) => el.scrollWidth > el.clientWidth);
   expect(overflow).toBe(false);
   await page.screenshot({ path: path.join(SCREENSHOT_DIR, "backlog-wide.png") });
+  await expectIconButtonsCentred(page);
 
   await page.locator('[data-bl-act="archive-cancel"]').click();
   await expect(page.locator(".bl-note")).toBeHidden();

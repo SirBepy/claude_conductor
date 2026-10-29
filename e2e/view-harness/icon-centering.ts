@@ -16,7 +16,7 @@ export interface OffCentre {
 }
 
 /** Visible buttons whose only content is one Phosphor `<i>`, with the glyph's
- *  offset from the button's content-box centre. Buttons carrying a count/dot
+ *  offset from the centre of the button's box inside its border. Buttons carrying a count/dot
  *  mark or any text are skipped: their icon is not meant to be centred alone. */
 export async function offCentreIconButtons(page: Page, root = "body"): Promise<{ checked: number; off: OffCentre[] }> {
   return page.evaluate(
@@ -35,10 +35,13 @@ export async function offCentreIconButtons(page: Page, root = "body"): Promise<{
         const cs = getComputedStyle(btn);
         if (cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
         checked++;
-        const left = b.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft);
-        const right = b.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight);
-        const top = b.top + parseFloat(cs.borderTopWidth) + parseFloat(cs.paddingTop);
-        const bottom = b.bottom - parseFloat(cs.borderBottomWidth) - parseFloat(cs.paddingBottom);
+        // Inside the border, padding included: the eye centres on the visible
+        // box, and a stray padding (the bare `button {}` rule's 7px 16px in
+        // color-picker.css) is exactly what shoves a glyph sideways.
+        const left = b.left + parseFloat(cs.borderLeftWidth);
+        const right = b.right - parseFloat(cs.borderRightWidth);
+        const top = b.top + parseFloat(cs.borderTopWidth);
+        const bottom = b.bottom - parseFloat(cs.borderBottomWidth);
         const dx = (g.left + g.right) / 2 - (left + right) / 2;
         const dy = (g.top + g.bottom) / 2 - (top + bottom) / 2;
         if (Math.abs(dx) <= tol && Math.abs(dy) <= tol) continue;
@@ -58,7 +61,7 @@ export async function offCentreIconButtons(page: Page, root = "body"): Promise<{
 /** Fails on any off-centre glyph, and on a sweep that found no icon-only
  *  button at all (a route that never rendered would otherwise pass). */
 export async function expectIconButtonsCentred(page: Page, root = "body"): Promise<void> {
-  const { checked, off } = await offCentreIconButtons(page, root);
-  expect(off).toEqual([]);
-  expect(checked).toBeGreaterThan(0);
+  // Polled: under a loaded parallel run a route can still be painting.
+  await expect.poll(async () => (await offCentreIconButtons(page, root)).checked).toBeGreaterThan(0);
+  expect((await offCentreIconButtons(page, root)).off).toEqual([]);
 }

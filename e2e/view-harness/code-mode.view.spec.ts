@@ -9,6 +9,7 @@
 // Reviewed 2026-10-20 (Mac-mirrored project icon fix): session-header.ts's SessionHeaderBindOpts/setAvatar gained an optional `machineId` so the project-face badge can ask a peer's filesystem instead of this one's; every fixture here is a locally-hosted session, so machineId is always undefined/null and the badge markup is byte-identical to before.
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import { expectIconButtonsCentred } from "./icon-centering";
 
 // Code mode in a real browser at Joe's maximized Chats window size: the mode
 // covers the chat list and the chat, the back pill names the chat, the explorer
@@ -205,6 +206,7 @@ test.describe("view-harness / Code mode", () => {
     const box = await code.locator(".cm-tab.on .cm-x").boundingBox();
     expect(box!.width).toBeGreaterThanOrEqual(24);
     await shot(page, "code-mode-diff-tab");
+    await expectIconButtonsCentred(page);
   });
 
   test("opening a commit swaps the header for its title and hash", async ({ page }) => {
