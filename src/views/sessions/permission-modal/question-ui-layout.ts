@@ -12,7 +12,7 @@ export interface QuestionCardLayout {
   showPasteHint: (bar: HTMLElement, message: string) => void;
   paintAttachmentStrips: () => void;
   syncMessagesPadding: () => void;
-  positionTrack: (instant: boolean) => void;
+  positionTrack: (instant: boolean, slideFrom?: number) => void;
 }
 
 export function createQuestionCardLayout(
@@ -70,10 +70,18 @@ export function createQuestionCardLayout(
   // Moves the persistent track to the current activeTab. `instant` skips the
   // transition (full rebuild - a fresh node has no prior position to slide
   // from); the animated path is only for step-only nav on the SAME node.
-  function positionTrack(instant: boolean): void {
+  // `slideFrom` is for a full rebuild that still wants the slide (entering
+  // review): the fresh track is parked at that panel first, then animated.
+  function positionTrack(instant: boolean, slideFrom?: number): void {
     const track = host.querySelector<HTMLElement>(".prompt-track");
     if (!track) return;
-    if (instant) {
+    if (slideFrom !== undefined) {
+      track.style.transition = "none";
+      track.style.transform = `translateX(-${slideFrom * 100}%)`;
+      void track.offsetHeight;
+      track.style.transition = "";
+      track.style.transform = `translateX(-${state.activeTab * 100}%)`;
+    } else if (instant) {
       track.style.transition = "none";
       track.style.transform = `translateX(-${state.activeTab * 100}%)`;
       void track.offsetHeight;
