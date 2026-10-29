@@ -73,6 +73,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
   let minimized = false;
   let firstRender = true;
+  // Set by goToTab's review entry for the one render() that follows: that
+  // rebuild replaces the track, so the slide has to start from the old panel.
+  let slideFromTab: number | undefined;
   // Same ticket links + hover cards as a chat bubble. Delegated on the host,
   // which outlives every innerHTML rebuild; same function refs dedupe when a
   // later card reuses the host.
@@ -157,6 +160,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     const clamped = Math.min(Math.max(target, 0), totalPanels - 1);
     if (clamped === state.activeTab) return;
     if (hasSummary && clamped === questions.length) {
+      slideFromTab = state.activeTab;
       state.activeTab = clamped;
       render();
       return;
@@ -281,7 +285,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       // 2-option question next to a long one rendered as tall as the long
       // one - positionTrack pins the track's height to just the active
       // panel's own content instead.
-      positionTrack(true);
+      positionTrack(slideFromTab === undefined, slideFromTab);
       updatePrimaryButton();
 
       host.querySelectorAll<HTMLButtonElement>(".prompt-dot").forEach((dot) => {
@@ -359,6 +363,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       });
     }
     firstRender = false;
+    slideFromTab = undefined;
 
     requestAnimationFrame(() => syncMessagesPadding());
     if (!state.resizeObs && messagesEl && typeof ResizeObserver !== "undefined") {

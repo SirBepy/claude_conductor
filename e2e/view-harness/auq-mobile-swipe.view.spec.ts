@@ -116,6 +116,24 @@ test.describe("view-harness / AUQ mobile swipe paging", () => {
     expect(await activeTab(page)).toBe(2);
   });
 
+  // Entering review is a full rebuild (it summarizes live answers), which used
+  // to replace the track and teleport instead of sliding like every other step.
+  test("paging onto the review panel slides instead of jumping", async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await mountView(page);
+    await openCard(page);
+
+    await swipeX(page, ".prompt-track-viewport", -80);
+    await expect.poll(() => activeTab(page)).toBe(1);
+    await swipeX(page, ".prompt-track-viewport", -80);
+    await expect.poll(() => activeTab(page)).toBe(2);
+
+    const sliding = await page.evaluate(
+      () => (document.querySelector(".prompt-track")?.getAnimations().length ?? 0) > 0,
+    );
+    expect(sliding).toBe(true);
+  });
+
   // Joe, 2026-10-25: anywhere on the card, not only over the panel area.
   test("swiping on the header pages too", async ({ page }) => {
     await page.setViewportSize(PHONE);
