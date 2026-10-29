@@ -138,18 +138,21 @@ export function wirePendingComposer(
             character_id: config.characterId ?? null,
             auto_accept: config.autoAccept !== false,
           };
-      void invoke<ScheduledItem>("schedule_create", { kind, prompt, fireAt: fireAtUtcIso, recurrence })
-        .then((item) => {
-          showToast(
-            realId
-              ? `Scheduled message for ${formatFireAt(item.fire_at)}`
-              : `Scheduled new chat for ${formatFireAt(item.fire_at)}`,
-          );
-        })
-        .catch((err) => {
-          console.error("[sessions] schedule_create failed", err);
-          showToast(`Failed to schedule: ${err}`);
-        });
+      // Awaited and rethrown: the composer already cleared the draft and only
+      // a rejection from here puts the text back (and keeps it from announcing
+      // a schedule that never happened).
+      try {
+        const item = await invoke<ScheduledItem>("schedule_create", { kind, prompt, fireAt: fireAtUtcIso, recurrence });
+        showToast(
+          realId
+            ? `Scheduled message for ${formatFireAt(item.fire_at)}`
+            : `Scheduled new chat for ${formatFireAt(item.fire_at)}`,
+        );
+      } catch (err) {
+        console.error("[sessions] schedule_create failed", err);
+        showToast(`Failed to schedule: ${err}`);
+        throw err;
+      }
     },
     onSend: async (blocks: ContentBlock[]) => {
       if (state.mountId !== myMount) return;

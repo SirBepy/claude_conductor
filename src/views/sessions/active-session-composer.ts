@@ -107,19 +107,22 @@ export function mountComposer(
       const resetsAt = map[sess.account_id]?.session_resets_at;
       return resetsAt ? new Date(new Date(resetsAt).getTime() + 60_000) : null;
     },
-    onSchedule: (blocks, fireAtUtcIso, recurrence) => {
+    onSchedule: async (blocks, fireAtUtcIso, recurrence) => {
       const prompt = blocksToText(blocks);
       if (!prompt.trim()) return;
       const kind: ScheduledKind = { type: "message", session_id: sess.session_id, cwd: String(sess.cwd ?? ".") };
-      void invoke<ScheduledItem>("schedule_create", { kind, prompt, fireAt: fireAtUtcIso, recurrence })
-        .then((item) => {
-          showToast(`Scheduled for ${formatFireAt(item.fire_at)}`);
-          void state.scheduledChip?.refresh();
-        })
-        .catch((err) => {
-          console.error("[sessions] schedule_create failed", err);
-          showToast(`Failed to schedule: ${err}`);
-        });
+      // Awaited and rethrown: the composer already cleared the draft and only
+      // a rejection from here puts the text back (and keeps it from announcing
+      // a schedule that never happened).
+      try {
+        const item = await invoke<ScheduledItem>("schedule_create", { kind, prompt, fireAt: fireAtUtcIso, recurrence });
+        showToast(`Scheduled for ${formatFireAt(item.fire_at)}`);
+        void state.scheduledChip?.refresh();
+      } catch (err) {
+        console.error("[sessions] schedule_create failed", err);
+        showToast(`Failed to schedule: ${err}`);
+        throw err;
+      }
     },
   });
   state.composer = composer;
