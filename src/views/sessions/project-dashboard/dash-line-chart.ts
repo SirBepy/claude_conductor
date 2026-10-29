@@ -43,7 +43,8 @@ const MIN_MINOR_GAP = 6;
  *  to tell. So a line always means a round amount, and the key under the
  *  title says which. Pure, for tests. */
 export function tierScale(max: number, plotH: number, opts: { integer?: boolean, floor?: number } = {}): { top: number, major: number, minor: number | null } {
-  const peak = Math.max(max, opts.floor ?? 0, opts.integer ? 1 : Number.MIN_VALUE);
+  // At least 1, so an all-zero range still gets a 0 and a 1 line instead of a NaN scale.
+  const peak = Math.max(max, opts.floor ?? 0, 1);
   const major = 10 ** Math.floor(Math.log10(peak));
   let minor: number | null = major / 10;
   if (opts.integer && minor < 1) minor = null;

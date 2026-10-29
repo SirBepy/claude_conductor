@@ -24,6 +24,8 @@ function repoPaths(cwd: string, aliases: AliasMap): string[] {
   return [cwd, ...(aliases[cwd]?.mergedPaths ?? [])];
 }
 
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
 /** YYYY-MM-DD in local time, the form token records carry. */
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -41,7 +43,8 @@ export function usageByDay(
   const back = (n: number): string => { const d = new Date(now); d.setDate(d.getDate() - n); return ymd(d); };
   const byDate = new Map<string, number>();
   for (const r of records) {
-    if (!r.cwd || !r.date || !paths.some((p) => sameCwd(p, r.cwd!))) continue;
+    // A date not in YYYY-MM-DD form would make an Invalid Date the start of the All range and empty the chart.
+    if (!r.cwd || !r.date || !DAY.test(r.date) || !paths.some((p) => sameCwd(p, r.cwd!))) continue;
     byDate.set(r.date, (byDate.get(r.date) ?? 0) + totalTok(r));
   }
   const first = range === "all" ? [...byDate.keys()].sort()[0] : back(range === "7d" ? 6 : 29);
@@ -65,6 +68,6 @@ export function usage(c: DashCtx, aliases: AliasMap): TemplateResult | typeof no
   const body = !u.records ? quiet("Loading...")
     : !total ? quiet("No activity in this period")
     : html`<div class="pd-usage-total">${formatTokens(total)} tokens</div>
-      ${lineChart({ series: SERIES, rows: days, format: formatTokens })}`;
+      ${lineChart({ series: SERIES, rows: days, format: formatTokens, integer: true })}`;
   return card("Usage", body, { id: "usage", trailing: rangeTabs(u.range, c.act.setUsageRange) });
 }
