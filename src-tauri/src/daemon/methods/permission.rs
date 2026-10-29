@@ -53,8 +53,12 @@ fn auq_answer_ids(text: &str) -> Vec<&str> {
         let id = &after[..end];
         if !id.is_empty() && !id.contains('"') {
             ids.push(id);
+            rest = &after[end..];
+        } else {
+            // A malformed marker's "\"/>" may belong to the real marker that
+            // follows it; resume right after the opening so that one is found.
+            rest = after;
         }
-        rest = &after[end..];
     }
     ids
 }
@@ -447,6 +451,12 @@ mod answer_bridge_tests {
         assert!(auq_answer_ids("<auq-answer/>").is_empty());
         assert!(auq_answer_ids("<auq-answer id=\"\"/>").is_empty());
         assert!(auq_answer_ids("<auq-answer id=\"unterminated").is_empty());
+    }
+
+    #[test]
+    fn a_malformed_marker_does_not_hide_the_real_one_after_it() {
+        assert_eq!(auq_answer_ids("<auq-answer id=\"abc <auq-answer id=\"real\"/>"), ["real"]);
+        assert_eq!(auq_answer_ids("<auq-answer id=\"\"/> <auq-answer id=\"b\"/>"), ["b"]);
     }
 
     #[tokio::test]
