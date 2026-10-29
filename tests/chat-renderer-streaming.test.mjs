@@ -124,15 +124,12 @@ describe("ChatRenderer — streaming dedup (ai_todo 47)", () => {
     // Start loadFromStore but do not await — inject an event mid-flight.
     const loadPromise = r.loadFromStore();
 
-    // Drain microtasks so: loadInitial resolves, bulkLoadEvents starts,
-    // iteration 1 processes events 0-7 and queues a setTimeout(resolve, 0).
-    // 4 ticks, not 3: the router's queued invoke resolves through one more
-    // microtask hop than a raw mockResolvedValueOnce did (verified via
-    // vi.getTimerCount() polling - routing mechanics only).
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    // Drain microtasks until iteration 1 has processed events 0-7: it queues
+    // the between-chunk yield in the same synchronous run, so that is the
+    // yield window. Polled rather than a fixed tick count, which broke every
+    // time loadFromStore's await chain gained or lost a hop.
+    for (let i = 0; i < 100 && r.messages.length < 8; i++) await Promise.resolve();
+    expect(r.messages.length).toBe(8);
 
     // Inject the final event during the yield window. This fires the subscriber
     // synchronously (streamingIndex still null — iter 2 hasn't run yet).

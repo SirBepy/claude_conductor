@@ -231,7 +231,9 @@ export function handleToolUseEvent(
   }
   {
     const t = r.tallyState.tallyToolUse(ev.tool_name, ev.input, ev.id);
-    if (t) r.onToolTally?.(t);
+    // Each tally re-renders the whole statusbar (a forced layout); replay
+    // sends the final tally once from bulkLoadEvents instead.
+    if (t && !r.hydrating) r.onToolTally?.(t);
   }
   if (!r.hydrating && ev.tool_name === "Skill") {
     const inp = ev.input as Record<string, unknown>;
@@ -309,6 +311,6 @@ export function handleToolResultEvent(
   // The tally counts didn't change, but a result can complete a custom
   // view (e.g. an AskUserQuestion answer): nudge the statusline so an open
   // popover re-renders from the now-updated messages.
-  r.onToolTally?.(r.tallyState.build());
+  if (!r.hydrating) r.onToolTally?.(r.tallyState.build());
   return { touched: true, coalesce: false };
 }

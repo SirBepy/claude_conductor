@@ -28,6 +28,7 @@ import {
   type StatusbarOptions,
 } from "./session-statusbar-helpers";
 import { listCachedAccounts } from "../../shared/accounts-cache";
+import { singleFlight } from "../../shared/single-flight";
 import { renderChip as renderChipHtml, type ChipRenderCtx, type ChipAccount } from "./statusbar-chips";
 import type { MachineAccountList } from "../../shared/api";
 import {
@@ -298,7 +299,13 @@ export class SessionStatusbar {
     if (changed) this.render();
   }
 
-  private async refreshCounts(): Promise<void> {
+  // Both commands re-scan the whole transcript on the blocking pool, and a
+  // live turn asks for them on every usage line - single-flight keeps that to
+  // one scan at a time plus one trailing rerun.
+  private readonly refreshCounts = singleFlight(() => this.fetchCountsNow());
+  private readonly refreshContextStatus = singleFlight(() => this.fetchContextStatusNow());
+
+  private async fetchCountsNow(): Promise<void> {
     const sid = this.sessionId;
     if (!sid) return;
     await fetchCounts({
@@ -309,7 +316,7 @@ export class SessionStatusbar {
     });
   }
 
-  private async refreshContextStatus(allowRetry = true): Promise<void> {
+  private async fetchContextStatusNow(): Promise<void> {
     const sid = this.sessionId;
     if (!sid) return;
     await fetchContextStatus({
@@ -317,7 +324,7 @@ export class SessionStatusbar {
       isCurrent: () => this.sessionId === sid,
       hadUsage: this.meta.hasUsage,
       hasCtxStatus: () => !!this.ctxStatus,
-      allowRetry,
+      allowRetry: true,
       onResult: (r) => { this.ctxStatus = r; this.render(); },
       scheduleRetry: (fn) => setTimeout(fn, 1500),
     });

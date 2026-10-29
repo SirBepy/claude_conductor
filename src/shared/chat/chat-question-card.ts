@@ -178,7 +178,7 @@ export function tryHandleQuestionResult(
     r.dirtyIndices.add(qIdx);
     moveMessageToEnd(r, qIdx);
   }
-  r.onToolTally?.(r.tallyState.build());
+  if (!r.hydrating) r.onToolTally?.(r.tallyState.build());
   return true;
 }
 

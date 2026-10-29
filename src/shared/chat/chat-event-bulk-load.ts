@@ -24,6 +24,19 @@ export interface BulkLoadOpts {
   resumeLiveTicking?: boolean;
 }
 
+/** Lets input and paint through between chunks. `scheduler.yield()` resumes
+ *  ahead of other queued tasks, so a busy main thread (other chats streaming,
+ *  sidebar renders) can't push the open behind all of its work the way a
+ *  setTimeout(0) at the back of the task queue can. Measured in the rig on a
+ *  201-event page with back-to-back 200ms competing tasks: 1.6s with
+ *  setTimeout(0), 0.9s with scheduler.yield (2026-10-29). WKWebView (macOS)
+ *  has no scheduler API, hence the fallback. */
+function yieldToMain(): Promise<void> {
+  const sched = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+  if (typeof sched?.yield === "function") return sched.yield();
+  return new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
 export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts: BulkLoadOpts = {}): Promise<void> {
   const myGen = ++r._bulkGen;
   r.liveBuffer = [];
@@ -60,9 +73,14 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   // fade once the settle pass has folded, pinned, and highlighted it.
   beginRevealHold(r);
   let slowestChunkMs = 0;
+  // Time spent parked in yields, apart from render work: a slow load with a
+  // large share here means other main-thread work (or timer throttling)
+  // starved it, not that the events were expensive to build.
+  let yieldWaitMs = 0;
+  let yields = 0;
   const donePhase = perfPhase(
     "bulk-load",
-    () => `(${events.length} events, slowest chunk ${Math.round(slowestChunkMs)}ms)`,
+    () => `(${events.length} events, slowest chunk ${Math.round(slowestChunkMs)}ms, ${yields} yields waited ${Math.round(yieldWaitMs)}ms)`,
   );
   const CHUNK = 8;
   // Yield only once this much work has run since the last yield, not after
@@ -82,8 +100,11 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
     flushRender(r);
     slowestChunkMs = Math.max(slowestChunkMs, performance.now() - chunkStart);
     if (i + CHUNK < events.length && performance.now() - sinceYield >= YIELD_BUDGET_MS) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const parked = performance.now();
+      await yieldToMain();
       sinceYield = performance.now();
+      yieldWaitMs += sinceYield - parked;
+      yields++;
     }
   }
   donePhase();
@@ -100,6 +121,11 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   r.hydrating = false;
   r.onFileEditsChanged?.(r.getFileEdits());
   r.onActivityUpdate?.(r.lastActivity, r.activityIdle);
+  r.onToolTally?.(r.tallyState.build());
+  // Same guard as wireRenderer: a replay with no usage or model line would
+  // push zeros over the statusbar's cached chips.
+  const meta = r.getMeta();
+  if (meta.hasUsage || meta.model) r.onMetaUpdate?.(meta);
   // The final turn never gets a closing user_message: a live session resumes
   // ticking; History settles frozen (nothing left to stream in, ever).
   if (r.activeTurnChipKey !== null && r.activeTurnUsage) {
