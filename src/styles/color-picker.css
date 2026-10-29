@@ -39,9 +39,8 @@ input[type="color"]:hover {
   border-color: var(--color-primary);
 }
 
-/* No padding here: a bare `button` padding pushed every icon-only button with its own
-   width/height off centre unless it remembered `padding: 0`. Text buttons get theirs from the
-   shared classes below. */
+/* No padding here, so an icon-only button with its own width/height stays centred without
+   resetting it. Text buttons get theirs from the shared classes below. */
 button {
   border-radius: 8px;
   border: none;

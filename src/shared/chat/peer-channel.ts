@@ -7,7 +7,7 @@
 import type { ChannelMessage } from "../../types/ipc.generated";
 import { invoke } from "../ipc";
 
-/** Best-effort, same tolerance as chat-renderer.ts's fetchSkipMarks: a fetch
+/** Best-effort, same tolerance as chat-side-fetches.ts's fetchSkipMarks: a fetch
  *  failure just means the panel falls back to the wake placeholder for this
  *  load, not a broken history load. Returns `undefined` (not `[]`) on
  *  failure specifically so author-message-group.ts can tell "never fetched /

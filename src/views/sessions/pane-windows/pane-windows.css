@@ -23,7 +23,7 @@
 
 .pw-popped-note i { font-size: 1.6rem; opacity: 0.6; }
 .pw-popped-note p { margin: 0; font-size: 0.8rem; }
-/* A text button with no other styling: the padding the old bare `button` rule used to give it. */
+/* A text button with no other styling, so it carries its own padding. */
 .pw-note-btn { padding: 7px 16px; }
 
 @media (max-width: 768px) {
