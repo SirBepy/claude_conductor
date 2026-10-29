@@ -225,7 +225,24 @@ describe("sessionSegment", () => {
       opts.question ?? deriveQuestionSet([i]),
       opts.closing ?? none,
       opts.rateLimited ?? none,
+      opts.scheduled ?? none,
     );
+
+  it("a Done chat (idle or unread) with a pending scheduled message is Scheduled", () => {
+    const idle = makeInstance({ session_id: "s1", busy: false, awaiting: "done" });
+    expect(seg(idle, { scheduled: new Set(["s1"]) })).toBe(6);
+    const unreadChat = makeInstance({ session_id: "s2", busy: false, awaiting: "done" });
+    expect(seg(unreadChat, { unread: new Set(["s2"]), scheduled: new Set(["s2"]) })).toBe(6);
+  });
+  it("Input Needed still beats Scheduled", () => {
+    const i = makeInstance({ session_id: "s3", busy: false, awaiting: "question" });
+    expect(seg(i, { scheduled: new Set(["s3"]) })).toBe(0);
+  });
+  it("closing and rate-limited still beat Scheduled", () => {
+    const i = makeInstance({ session_id: "s4", busy: false });
+    expect(seg(i, { closing: new Set(["s4"]), scheduled: new Set(["s4"]) })).toBe(3);
+    expect(seg(i, { rateLimited: new Set(["s4"]), scheduled: new Set(["s4"]) })).toBe(4);
+  });
 
   it("closing overrides everything", () => {
     const i = makeInstance({ session_id: "c", busy: true, awaiting: "question" });

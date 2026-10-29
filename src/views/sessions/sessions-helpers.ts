@@ -213,7 +213,7 @@ export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<st
 /** Maps a session to its display segment index.
  *  0=Input Needed, 1=Done, 2=In Progress, 3=Closing, 4=Waiting for Reset,
  *  5=Waiting (external process), 6=Scheduled (pending scheduled msg, not
- *  Input Needed/Done), 7=Remote (kind "external"/"automated" - a `claude`
+ *  Input Needed; wins over Done), 7=Remote (kind "external"/"automated" - a `claude`
  *  process this app didn't spawn, terminal or channel bridge - wins over
  *  every other state; the row's own dot still shows the real state. NOT
  *  `is_remote`, which only means "reached over remote transport").
@@ -235,8 +235,10 @@ export function sessionSegment(
   if (rateLimited.has(s.session_id)) return 4;
   const priority = statusPriority(s, unread, attention, question);
   if (priority === 0 || priority === 1) return 0; // Input Needed
-  if (priority === 4 || priority === 5) return 1; // Done
+  // Scheduled beats Done (Joe, 2026-10-29): a finished chat with a message queued is
+  // waiting on its own schedule, not on him. Input Needed above still wins.
   if (scheduled.has(s.session_id)) return 6; // Scheduled
+  if (priority === 4 || priority === 5) return 1; // Done
   if (priority === 2 || priority === 6) return 2; // In Progress (busy + external/automated)
   return 5; // Waiting on an external process (CI / long command)
 }
