@@ -4,7 +4,7 @@
 //! `reject_unknown` before any filesystem access - see todo 656.
 
 use super::super::pr_review::reject_unknown;
-use crate::daemon::rpc::{Router, RpcError};
+use crate::daemon::rpc::{Router, RpcError, Transport};
 use crate::daemon::state::DaemonState;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -179,13 +179,21 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
     }
     {
         let state = state.clone();
-        router.register("list_ai_todos", move |params, _ctx| {
+        router.register("list_ai_todos", move |params, ctx| {
             let state = state.clone();
+            // Read off the connection, never the params: a peer cannot claim to be a phone.
+            let from_peer = matches!(ctx.transport, Transport::PeerMachine(_));
             async move {
                 #[derive(serde::Deserialize)]
                 struct P { cwd: String, #[serde(default)] session_id: Option<String> }
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                // A paired machine reads the todos of a chat it mirrors, never of an
+                // arbitrary registered project: without a `session_id` the cwd would
+                // fall back to `reject_unknown`, which accepts any project here.
+                if from_peer && p.session_id.is_none() {
+                    return Err(RpcError::invalid_params("session_id is required for a paired machine"));
+                }
                 // A `session_id` arrives from a paired machine reading a chat
                 // hosted here; its cwd comes from this registry, never the param.
                 let cwd = crate::daemon::methods::pr_review::resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
@@ -263,6 +271,38 @@ mod tests {
     use crate::daemon::settings_cache::SettingsCache;
     use crate::types::Settings;
     use tempfile::tempdir;
+
+    /// A paired machine reads todos only through a chat it mirrors. A phone
+    /// (the project picker's badge path) keeps the `cwd` fallback.
+    #[tokio::test]
+    async fn list_ai_todos_from_a_peer_requires_a_session_id() {
+        use crate::daemon::rpc::{ConnectionContext, Request};
+        let dir = tempdir().unwrap();
+        let todos = dir.path().join(".claude").join("todos");
+        std::fs::create_dir_all(&todos).unwrap();
+        std::fs::write(todos.join("07-b.md"), "b").unwrap();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("s1", dir.path(), "proj", "2026-10-06T00:00:00Z");
+        state.settings.upsert_project_for_cwd(dir.path(), "2026-10-06T00:00:00Z");
+        let cwd = dir.path().to_string_lossy().into_owned();
+        let mut router = Router::new();
+        register_project_meta(&mut router, state);
+
+        let call = |transport: Transport, params: Value| {
+            let (tx, _rx) = tokio::sync::mpsc::channel(16);
+            let mut ctx = ConnectionContext::new(tx);
+            ctx.transport = transport;
+            router.dispatch(Request { jsonrpc: "2.0".into(), id: json!(1), method: "list_ai_todos".into(), params: Some(params) }, ctx)
+        };
+        let peer = || Transport::PeerMachine("mach-b".into());
+
+        let refused = call(peer(), json!({"cwd": cwd})).await;
+        assert!(refused.error.is_some(), "a registered project's todos must not be readable by cwd alone");
+        let via_session = call(peer(), json!({"cwd": "ignored", "session_id": "s1"})).await;
+        assert_eq!(via_session.result.unwrap()[0]["name"], json!("07-b.md"));
+        let phone = call(Transport::Phone, json!({"cwd": cwd})).await;
+        assert_eq!(phone.result.unwrap()[0]["name"], json!("07-b.md"), "the phone path is unchanged");
+    }
 
     /// `get_project_icon` dispatched on A with `machine_id` naming B is
     /// forwarded over real loopback HTTP to B's REAL handler
