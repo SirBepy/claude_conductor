@@ -55,6 +55,34 @@ const FOLD_MARKER_ATTR = "authoredFoldMarker";
  *  Still visible text, never a blank row (todo 893 acceptance). */
 const AGED_OUT_HTML = `<span class="author-group-row-aged-out">Message text unavailable - it aged out of the retained history.</span>`;
 
+function realBodyHtml(channelMessages: ChannelMessage[], authorId: string, idx: number): string {
+  const real = textsFor(channelMessages, authorId)[idx];
+  return real !== undefined ? escapeHtml(real) : AGED_OUT_HTML;
+}
+
+/** Swaps the wake-placeholder text of every rendered peer-message row for the
+ *  real channel text once the backlog has arrived (it answered after the chat
+ *  painted). In place: the fold marker holds each run's authors in row order, so
+ *  nothing is rebuilt and the transcript's scroll position and loaded pages are
+ *  untouched. */
+export function refreshAuthorRowTexts(container: HTMLElement, channelMessages: ChannelMessage[]): void {
+  for (const host of container.querySelectorAll<HTMLElement>("[data-authored-fold-marker]")) {
+    const marker = host.dataset[FOLD_MARKER_ATTR];
+    if (!marker) continue;
+    const rows = host.querySelectorAll<HTMLElement>(
+      `.tool-strip-group[data-tool="${AUTHOR_KEY}"] > .author-group-row .author-group-row-text`,
+    );
+    const occurrence = new Map<string, number>();
+    marker.split("|").forEach((entry, i) => {
+      const authorId = entry.slice(entry.lastIndexOf(":") + 1);
+      const idx = occurrence.get(authorId) ?? 0;
+      occurrence.set(authorId, idx + 1);
+      const row = rows[i];
+      if (row) row.innerHTML = realBodyHtml(channelMessages, authorId, idx);
+    });
+  }
+}
+
 /** Full rebuild each call that the authored-message set in range actually
  *  changed (same idempotence as the custom-view buckets), so a late-arriving
  *  peer message just grows the count - but an unrelated tool flush with no
@@ -125,13 +153,9 @@ export function foldAuthoredIntoStrip(
       const colorClass = colorClassFor(id);
       const idx = occurrence.get(id) ?? 0;
       occurrence.set(id, idx + 1);
-      let bodyHtml: string;
-      if (channelMessages === undefined) {
-        bodyHtml = renderBlocks(m.content ?? [], true, true);
-      } else {
-        const real = textsFor(channelMessages, id)[idx];
-        bodyHtml = real !== undefined ? escapeHtml(real) : AGED_OUT_HTML;
-      }
+      const bodyHtml = channelMessages === undefined
+        ? renderBlocks(m.content ?? [], true, true)
+        : realBodyHtml(channelMessages, id, idx);
       return `<div class="author-group-row">${avatarHtml(id, colorClass)}` +
         `<div class="author-group-row-body"><div class="author-group-row-name ${colorClass}">${escapeHtml(nameFor(id))}</div>` +
         `<div class="author-group-row-text">${bodyHtml}</div></div></div>`;

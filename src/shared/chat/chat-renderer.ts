@@ -3,8 +3,6 @@ import { handleCommitRefClick, handleCommitRefKeydown } from "./commit-refs";
 import { handleDrillClick, handleDrillAnchorClick } from "./drill-links";
 import { handleFileRefClick, handleFileRefContextMenu, handleFileRefKeydown } from "./file-refs";
 import { handleTicketHover, handleTicketHoverOut } from "./ticket-refs";
-import { invoke } from "../ipc";
-import { perfPhase } from "../perf";
 import { sessionEvents } from "./event-store";
 import { RenderedMessage } from "./chat-transforms";
 import { armLazyDiffEnhance } from "./diff-enhancer";
@@ -16,8 +14,8 @@ import { clampUserMessages } from "./turn-collapse";
 import type { ToolGroup } from "./tool-strip";
 import { renderCustomToolView } from "./tool-views";
 import { ChatPaginator } from "./chat-pagination";
-import { normalizeSkipMarks, type SkipMark } from "./skip-marks";
-import { fetchChannelMessages } from "./peer-channel";
+import { raceSideFetches, startSideFetches, timedPhase, type SideAnswer } from "./chat-side-fetches";
+import { refreshAuthorRowTexts } from "./author-message-group";
 import type { ChannelMessage } from "../../types/ipc.generated";
 import { TurnFooterRegistry, type TurnChipKey, type TurnUsageTotals } from "./turn-chips";
 import { buildMessageEl, revealTranscript } from "./chat-dom-renderer";
@@ -40,7 +38,7 @@ import {
   createHandlePreviewCardClick,
   createHandleDraftCardClick,
 } from "./chat-renderer-click-handlers";
-import { findQuestionIndexById } from "./chat-question-card";
+import { applySkipMarks, findQuestionIndexById } from "./chat-question-card";
 
 export interface SessionMeta {
   model: string | null;
@@ -60,21 +58,6 @@ export interface CumulativeUsage {
   cacheRead: number;
   turns: number;
   costUsd: number;
-}
-
-/** How long a chat open waits on the skip-mark and channel-backlog fetches
- *  after the history page is in. Both answer in under 1ms on a healthy daemon
- *  (measured 2026-10-29), so this only ever fires on a stuck pipe. */
-const SIDE_FETCH_GRACE_MS = 500;
-
-/** Best-effort: a fetch failure just means no skip fold this load, not a
- *  broken history load (mirrors sessionEvents.loadInitial's own tolerance). */
-async function fetchSkipMarks(sessionId: string): Promise<SkipMark[]> {
-  try {
-    return normalizeSkipMarks(await invoke<unknown>("get_skipped_question_marks", { sessionId }));
-  } catch {
-    return [];
-  }
 }
 
 /**
@@ -119,10 +102,10 @@ export class ChatRenderer {
   // peer-message chip's inline panel can show real text instead of the wake
   // placeholder. `undefined` until that fetch resolves for THIS sessionId.
   channelMessages?: ChannelMessage[] = undefined;
-  /** Side-fetch answer that arrived after loadFromStore's grace, handed to
-   *  the rebuild it triggers so that rebuild doesn't fetch (and wait) again. */
-  _lateSides: Promise<[SkipMark[], ChannelMessage[] | undefined]> | null = null;
   _bulkGen = 0;
+  /** Counts loadFromStore calls, so a late side-fetch answer and a
+   *  superseded load can tell they no longer own the transcript. */
+  private _loadSeq = 0;
   meta: SessionMeta = { model: null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
   _cumulative: CumulativeUsage = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, turns: 0, costUsd: 0 };
   activeTurnStart: number | null = null;
@@ -508,53 +491,48 @@ export class ChatRenderer {
     if (!this.sessionId) return;
     const sid = this.sessionId;
     this.paginator.cwdHint = cwd;
-    // Skip marks (todo 661) and the real repo-channel backlog (todo 893)
-    // both fetched once per hydrate, alongside the history page.
-    // Timed apart: they run in parallel, so the slowest one gates first paint
-    // and a single combined phase would not say which.
-    const timed = <T>(label: string, p: Promise<T>): Promise<T> => {
-      const done = perfPhase(`chat-open ${label}`, () => `session=${sid}`);
-      // Side branch, not `p.finally(...)`: returning a derived promise adds
-      // microtask hops to the load, which races-sensitive callers count.
-      p.then(done, done);
-      return p;
-    };
-    const sides = this._lateSides ?? Promise.all([
-      timed("skip-marks", fetchSkipMarks(sid)),
-      timed("channel-messages", fetchChannelMessages(sid)),
-    ]);
-    this._lateSides = null;
-    const events = await timed("history-page", sessionEvents.loadInitial(sid, cwd));
+    const seq = ++this._loadSeq;
+    // Skip marks and the real repo-channel backlog, both fetched once per
+    // hydrate alongside the history page.
+    const sides = startSideFetches(sid);
+    const events = await timedPhase(sid, "history-page", sessionEvents.loadInitial(sid, cwd));
     // The two side fetches go over the daemon pipe, whose calls have no
     // timeout, so they get a short grace past the history page and no more:
     // the transcript paints without them (no skip fold, posts shown from the
-    // transcript's own copy) and a late answer re-renders it.
-    const late = Symbol("late");
-    let graceTimer: ReturnType<typeof setTimeout> | undefined;
-    const settled = await Promise.race([
-      sides,
-      new Promise<typeof late>((resolve) => { graceTimer = setTimeout(() => resolve(late), SIDE_FETCH_GRACE_MS); }),
-    ]);
-    clearTimeout(graceTimer);
+    // transcript's own copy) and a late answer is applied in place below.
+    const settled = await raceSideFetches(sides);
     if (this.sessionId !== sid) return;
-    if (settled === late) {
+    if (settled) {
+      [this.paginator.skipMarks, this.channelMessages] = settled;
+    } else {
       this.paginator.skipMarks = [];
       this.channelMessages = undefined;
-      void sides.then((answer) => {
-        if (this.sessionId !== sid) return;
-        const [marks, channelMessages] = answer;
-        if (!marks.length && !channelMessages?.length) return;
-        // Rebuild with the answer already in hand, not a fresh fetch that
-        // could time out again and loop.
-        this._lateSides = Promise.resolve(answer);
-        void this.loadFromStore(cwd, opts);
-      });
-    } else {
-      [this.paginator.skipMarks, this.channelMessages] = settled;
     }
     await bulkLoadEvents(this, [...events], opts);
-    if (this.sessionId !== sid) return;
+    // A newer load superseded this one while it yielded: it owns the DOM and
+    // the paginator, and installing here would hook the observer twice.
+    if (this.sessionId !== sid || this._loadSeq !== seq) return;
     this.paginator.install();
+    // Applied only now, after the visible load is done, and in place: a rebuild
+    // here would race a load still hydrating, or wipe the pages the user has
+    // since scrolled in.
+    if (!settled) {
+      void sides.then((answer) => {
+        if (this.sessionId === sid && this._loadSeq === seq) this.applyLateSides(answer);
+      });
+    }
+  }
+
+  private applyLateSides([marks, channelMessages]: SideAnswer): void {
+    if (marks.length) {
+      this.paginator.skipMarks = marks;
+      applySkipMarks(this, marks);
+      flushRenderNow(this);
+    }
+    if (channelMessages?.length) {
+      this.channelMessages = channelMessages;
+      refreshAuthorRowTexts(this.container, channelMessages);
+    }
   }
 
   detach(): void {
