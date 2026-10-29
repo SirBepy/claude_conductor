@@ -161,8 +161,8 @@ export function readDefaultFlags(
 }
 
 /** What a new chat opens on when neither its project nor Settings > Chat defaults says. */
-export const FALLBACK_MODEL = "sonnet";
-export const FALLBACK_EFFORT = "high";
+const FALLBACK_MODEL = "sonnet";
+const FALLBACK_EFFORT = "high";
 
 /** The app-wide default model/effort (Settings > Chat defaults), stored in settings `extra`. */
 export function readGlobalDefault(settings: Record<string, unknown>): { model: string; effort: string } {
