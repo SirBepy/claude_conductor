@@ -51,6 +51,8 @@ describe("tierScale", () => {
   it("counts of whole things never get a line between two whole numbers, and the floor keeps a few lines", () => {
     expect(tierScale(1, 126, { integer: true, floor: 4 })).toEqual({ top: 4, major: 1, minor: null });
     expect(tierScale(0, 126, { integer: true })).toEqual({ top: 1, major: 1, minor: null });
+    // Not counts, all zero: still a real scale, never NaN.
+    expect(tierScale(0, 126)).toEqual({ top: 1, major: 1, minor: 0.1 });
   });
 });
 

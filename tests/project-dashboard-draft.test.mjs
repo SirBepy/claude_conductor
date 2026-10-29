@@ -325,5 +325,7 @@ describe("usageByDay", () => {
     expect(all[0]).toEqual({ date: "2026-09-20", tokens: 5 });
     expect(all).toHaveLength(36);
     expect(usageByDay([], ["C:/p"], {}, "all", now)).toEqual([]);
+    // A malformed date is skipped rather than starting All on an Invalid Date.
+    expect(usageByDay([rec("C:/p", "1/2/2026", 9), ...records], ["C:/p"], {}, "all", now)).toEqual(all);
   });
 });
