@@ -18,13 +18,21 @@ function appStyleTags(): string {
 }
 
 // Theme and palette live on <html> as data-* attributes (and inline custom
-// properties); without them every var() in the fragment falls back. The class
-// list is copied too: appStyleTags() brings in index.html's boot gate
-// (html:not(.app-ready) body hidden), so a frame without .app-ready paints blank.
+// properties); without them every var() in the fragment falls back. Only the
+// classes in FRAME_ROOT_CLASSES are copied: appStyleTags() brings in index.html's
+// boot gate (html:not(.app-ready) body hidden), so a frame without .app-ready
+// paints blank, while the root also carries transient classes (cursor-typing-hidden
+// hides the cursor on everything, alt-held reveals shortcut keys) that would stay
+// frozen in a frame built at the wrong moment.
+const FRAME_ROOT_CLASSES = new Set(["app-ready"]);
+
 function rootAttrs(): string {
   return Array.from(document.documentElement.attributes)
-    .filter((a) => a.name.startsWith("data-") || a.name === "style" || a.name === "class")
-    .map((a) => ` ${a.name}="${escapeHtml(a.value)}"`)
+    .map((a): [string, string] => a.name === "class"
+      ? [a.name, a.value.split(/\s+/).filter((c) => FRAME_ROOT_CLASSES.has(c)).join(" ")]
+      : [a.name, a.value])
+    .filter(([name, value]) => name.startsWith("data-") || name === "style" || (name === "class" && value !== ""))
+    .map(([name, value]) => ` ${name}="${escapeHtml(value)}"`)
     .join("");
 }
 
