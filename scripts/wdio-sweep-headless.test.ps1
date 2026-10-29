@@ -116,9 +116,18 @@ if ($plan.Count -ne 1 -or $plan[0].Spec -ne 'question-card-live') { $failures +=
 $plan = @(Get-SweepPlan -Spec 'smoke' -Billed $false -UseFakeForChat $true -FakeClaudeBin 'C:\f.cmd')
 if ($plan.Count -ne 1 -or $plan[0].Spec -ne 'smoke') { $failures += "-Spec smoke: got '$(($plan | ForEach-Object { $_.Spec }) -join ',')'" }
 $plan = @(Get-SweepPlan -Spec $null -Billed $false -UseFakeForChat $true -FakeClaudeBin 'C:\f.cmd')
-if ($plan.Count -ne 10 -or ($plan | Where-Object { $_.Spec -eq 'question-card-live' })) { $failures += "unfiltered sweep without -Billed: got $($plan.Count) specs" }
+if ($plan.Count -ne 11 -or ($plan | Where-Object { $_.Spec -eq 'question-card-live' })) { $failures += "unfiltered sweep without -Billed: got $($plan.Count) specs" }
 $plan = @(Get-SweepPlan -Spec $null -Billed $true -UseFakeForChat $true -FakeClaudeBin 'C:\f.cmd')
-if ($plan.Count -ne 11 -or $plan[-1].Spec -ne 'question-card-live') { $failures += "unfiltered sweep with -Billed: got $($plan.Count) specs" }
+if ($plan.Count -ne 12 -or $plan[-1].Spec -ne 'question-card-live') { $failures += "unfiltered sweep with -Billed: got $($plan.Count) specs" }
+# question-card-reload hosts its chat on the fake claude, even when the sweep runs -RealClaude, and
+# it runs before daemon-lifecycle.
+foreach ($useFake in $true, $false) {
+    $plan = @(Get-SweepPlan -Spec $null -Billed $false -UseFakeForChat $useFake -FakeClaudeBin 'C:\f.cmd')
+    $reload = $plan | Where-Object { $_.Spec -eq 'question-card-reload' }
+    if (-not $reload -or $reload.Env['CC_CLAUDE_BIN'] -ne 'C:\f.cmd') { $failures += "question-card-reload (UseFakeForChat=$useFake): expected CC_CLAUDE_BIN=C:\f.cmd" }
+    $order = @($plan | ForEach-Object { $_.Spec })
+    if ($order.IndexOf('question-card-reload') -ge $order.IndexOf('daemon-lifecycle')) { $failures += 'question-card-reload must run before daemon-lifecycle' }
+}
 # An unknown name still fails on its own, ahead of the billing check.
 $threw = $false
 try { Get-SweepPlan -Spec 'nope' -Billed $false -UseFakeForChat $true -FakeClaudeBin 'C:\f.cmd' | Out-Null } catch { $threw = $true }

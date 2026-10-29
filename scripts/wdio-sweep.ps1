@@ -12,7 +12,7 @@
   encodes the gate rules instead of re-deriving them under time pressure each release:
 
   - Free specs (no quota): smoke, held-messages, multi-account, news-redesign, question-card,
-    schedule-view, preview-popout, daemon-lifecycle. probe.e2e.js is a debugging harness, not a suite member, and
+    question-card-reload, schedule-view, preview-popout, daemon-lifecycle. probe.e2e.js is a debugging harness, not a suite member, and
     is never included.
   - daemon-lifecycle runs LAST: a seeding spec run right after it can fail its own `before all`
     with a false 15s row timeout ([[project_wdio_daemon_lifecycle_poisons_next_spec]], todo 957).
@@ -122,11 +122,15 @@ $freeSpecs = @(
     'multi-account',
     'news-redesign',
     'question-card',
+    'question-card-reload',
     'schedule-view',
     'preview-popout',
     'daemon-lifecycle'
 )
 $chatSpecs = @('chat-flow', 'reload-dup')
+# Free specs that host a chat on the fake claude. Always the fake, even under -RealClaude: they
+# raise their own questions and have no use for a model, so a real one would only bill for nothing.
+$fakeClaudeFreeSpecs = @('question-card-reload')
 $billedOnlySpec = 'question-card-live'
 
 # First entry of `git worktree list` is always the main checkout. Specs that name the project
@@ -346,7 +350,8 @@ function Get-SweepPlan {
     )
     $plan = @()
     foreach ($s in $freeSpecs) {
-        $plan += [PSCustomObject]@{ Spec = $s; Env = @{} }
+        $env = if ($fakeClaudeFreeSpecs -contains $s) { @{ CC_CLAUDE_BIN = $FakeClaudeBin } } else { @{} }
+        $plan += [PSCustomObject]@{ Spec = $s; Env = $env }
     }
     foreach ($s in $chatSpecs) {
         $env = if ($UseFakeForChat) { @{ CC_CLAUDE_BIN = $FakeClaudeBin } } else { @{} }
