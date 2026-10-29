@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 // Reviewed 2026-10-28: dash-menu.ts's file-row menu now offers Open (the app's Files window) before Open in VS Code; this spec drives no file row, so its contract is unaffected. Passed after the change.
+// Reviewed 2026-10-29: dash-menu.ts drops "Project settings..." from a single project's menu (its settings now sit in the dashboard's rail); this spec asserts only the channel block, so its contract is unaffected. Passed after the change.
 // asserts: src/views/sessions/project-dashboard/dash-menu.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/channel-actions.ts
 import { capture, invokeCalls, mountSessionsList, sessionInstance } from "./harness";
 import { CONDUCTOR_CWD, LIST_ROWS, conductorHistory, conductorSnapshot } from "./project-dashboard-fixtures";

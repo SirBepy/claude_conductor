@@ -42,6 +42,19 @@
   text-overflow: ellipsis;
 }
 
+/* A draft becoming its chat: the new title and project line rise in (slow on
+   purpose, like the dashboard's own entrance and fold). */
+@keyframes header-text-swap {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+.session-header.is-swapping .title,
+.session-header.is-swapping .meta-proj { animation: header-text-swap 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .session-header.is-swapping .title,
+  .session-header.is-swapping .meta-proj { animation: none; }
+}
+
 .session-header .meta-cfg {
   margin-left: auto;
   flex-shrink: 0;

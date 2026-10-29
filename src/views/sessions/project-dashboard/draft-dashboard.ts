@@ -88,6 +88,11 @@ export function mountDraftDashboard(pane: HTMLElement, project: { path: string }
     });
     current = handle;
     wrap.appendChild(handle.root);
+    if (handle.rail) {
+      // Widens the draft's column past the chat's 900px to make room for the rail (sessions.css).
+      wrap.classList.add("has-rail");
+      wrap.appendChild(handle.rail);
+    }
     // Outside .composer-shell, whose border wraps only the thinking bar and the input.
     const shell = pane.querySelector(".composer-shell");
     shell?.parentElement?.insertBefore(handle.chips, shell);

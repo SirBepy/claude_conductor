@@ -117,9 +117,14 @@ export function projectItems(host: ActionHost, anchor: HTMLElement, channel: Cha
   if (t.kind === "project") {
     items.push({ icon: "pencil-simple", label: "Rename project...", run: forRepo(host, anchor, (cwd) => openRenameModal(cwd, reload)) });
   }
+  items.push({ icon: "user-circle", label: "Character...", run: forRepo(host, anchor, (cwd) => openCharacterModal(cwd)) });
+  // A single project shows its settings in the dashboard's own rail (dashboard.ts).
+  // The two share element ids, so a popup beside the rail would break both; a group
+  // has no rail, because its repos each have their own settings, and asks which.
+  if (t.kind === "group") {
+    items.push({ icon: "gear", label: "Project settings...", run: forRepo(host, anchor, (cwd) => openProjectSettingsModal(cwd)) });
+  }
   items.push(
-    { icon: "user-circle", label: "Character...", run: forRepo(host, anchor, (cwd) => openCharacterModal(cwd)) },
-    { icon: "gear", label: "Project settings...", run: forRepo(host, anchor, (cwd) => openProjectSettingsModal(cwd)) },
     { icon: "folder-simple-dashed", label: "Folder mapping...", run: forRepo(host, anchor, (cwd) => openFolderMappingModal(cwd, host)) },
     { icon: "squares-four", label: "Dashboard cards...", run: () => openCardsModal(host) },
   );

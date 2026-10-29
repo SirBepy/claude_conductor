@@ -41,9 +41,11 @@ export function mountPendingChrome(
   project: { path: string; name: string },
   config: SessionConfig,
 ): SessionHeader {
+  // The project leads while the pane still shows its dashboard; the first send
+  // swaps in the chat's own name (pending-pane.ts's rebindPaneHeader).
   const header = new SessionHeader({
-    title: "New chat",
-    meta: project.name,
+    title: project.name,
+    meta: "New chat",
   });
   pane.innerHTML = [
     // Skeleton placeholders, not the real statusbar/dashboard - both get wiped and
