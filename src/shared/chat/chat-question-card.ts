@@ -188,8 +188,15 @@ export function tryHandleQuestionSkipped(
   ev: Extract<ChatEvent, { type: "notification" }>,
 ): boolean {
   if (ev.kind !== "question_skipped") return false;
-  // Fire-and-forget Skip: no real tool_use_id to key off, so resolve the
-  // same heuristic way a real answer does - the last still-open card.
+  // The body names the skipped prompt, which is the card's tool_use id. A
+  // named card that is already answered is a reload settling a stale prompt
+  // (answered-gate.ts), so a newer open card must stay open. An unnamed or
+  // unknown card falls back to the newest open one, as a real answer does.
+  const named = ev.body ? findQuestionIndexById(r.messages, ev.body) : -1;
+  if (named >= 0) {
+    if (r.messages[named]!.text === undefined) resolvePendingQuestionCard(r, AUQ_SKIPPED_TEXT, ev.body);
+    return true;
+  }
   resolvePendingQuestionCard(r, AUQ_SKIPPED_TEXT);
   return true;
 }
