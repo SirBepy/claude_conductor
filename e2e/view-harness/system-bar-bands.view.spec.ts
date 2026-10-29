@@ -1,3 +1,4 @@
+// Reviewed 2026-10-29: .icon-btn-sq now sets place-content: center beside place-items, and the question card's Ask button uses display: grid instead of inline-flex, so its glyph is centred - no change to this spec's contract, and it passes.
 // asserts: src/styles/base.css
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
