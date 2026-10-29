@@ -1,3 +1,4 @@
+// Reviewed 2026-10-29: question cards now re-expand from their collapsed bar on re-open/re-announce, a parked question is shown only while the daemon still lists it, and an already-answered one is dropped (answered-gate.ts) - this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-27: types.ts's QuestionDraft gained an optional per-option `notes` map (AUQ option notes) - additive, no change to this spec's contract.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";

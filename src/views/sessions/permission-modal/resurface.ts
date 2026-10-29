@@ -13,7 +13,6 @@ import {
   allowPermission,
   autoAllowIfRemembered,
   isAutoAccept,
-  isQuestionSettled,
   markLatestQuestion,
   markQuestionSuperseded,
   storePendingPrompt,
@@ -21,7 +20,8 @@ import {
   peekPendingPrompt,
   selectionGuard,
 } from "./gating";
-import { getActiveCardId } from "./question-state";
+import { expandActiveCard, getActiveCardId } from "./question-state";
+import { dropIfAlreadyAnswered } from "./answered-gate";
 import type { PendingPrompt } from "./gating";
 import { state } from "../state";
 import type { Question, QuestionRequestedPayload } from "./types";
@@ -65,8 +65,34 @@ export function replayPendingPrompt(sessionId: string): boolean {
   const pending = takePendingPrompt(sessionId);
   if (!pending) return false;
   rerenderSidebar(); // clear the attention marker now that we're surfacing it
-  surfacePending(pending);
+  // A parked question is a memory of what the daemon once held: it may have
+  // been answered or expired since, so it is only shown if the daemon agrees.
+  if (pending.kind === "question") void surfaceParkedQuestion(sessionId, pending);
+  else surfacePending(pending);
   return true;
+}
+
+/** Show a parked question only if the daemon still lists it. A fetch that
+ *  fails keeps today's behaviour (show it): an unreachable daemon is not
+ *  evidence the question went away. When the daemon dropped it, look for
+ *  whatever IS pending for the chat instead. */
+async function surfaceParkedQuestion(
+  sessionId: string,
+  pending: Extract<PendingPrompt, { kind: "question" }>,
+): Promise<void> {
+  const stillSelected = selectionGuard();
+  const recs = await fetchPendingPromptsForSession(sessionId);
+  if (!stillSelected()) {
+    // Switched away mid-fetch: keep the park for the next switch-back.
+    if (!peekPendingPrompt(sessionId)) storePendingPrompt(sessionId, pending);
+    rerenderSidebar();
+    return;
+  }
+  if (recs && !recs.some((r) => r.id === pending.payload.id)) {
+    await rehydrateAndReplay(sessionId);
+    return;
+  }
+  surfacePending(pending);
 }
 
 /** Shared tail of replay/reopen: render the parked prompt's card, applying the
@@ -123,7 +149,7 @@ async function applyRehydration(
   recs: ReturnType<typeof findPendingPromptsForSession> | null,
 ): Promise<boolean> {
   if (!recs) return false;
-  recs = recs.filter((r) => r.kind !== "question" || !isQuestionSettled(r.id));
+  recs = recs.filter((r) => r.kind !== "question" || !dropIfAlreadyAnswered(sessionId, r.id));
   // One park per session, so take the longest-waiting (state/prompts.rs
   // sorts by seq, oldest first) - but queue any still-open siblings instead
   // of silently dropping them (todo 897: they'd otherwise keep the daemon's
@@ -207,10 +233,11 @@ function rebuildQuestionFromTranscript(sessionId: string, cardId: string): Quest
 /** `newestOpenQuestion`'s pick logic, given an already-fetched list. */
 function pickNewestOpenQuestion(
   recs: ReturnType<typeof findPendingPromptsForSession> | null,
+  sessionId: string,
 ): QuestionRequestedPayload | null {
   if (!recs) return null;
   const questions = recs
-    .filter((r) => r.kind === "question")
+    .filter((r) => r.kind === "question" && !dropIfAlreadyAnswered(sessionId, r.id))
     .map((r) => r.payload as QuestionRequestedPayload);
   if (!questions.length) return null;
   return questions.reduce((a, b) => ((b.seq ?? -1) >= (a.seq ?? -1) ? b : a));
@@ -220,7 +247,7 @@ function pickNewestOpenQuestion(
  *  By `seq`: the snapshot's own order is only incidentally chronological. */
 export async function newestOpenQuestion(sessionId: string): Promise<QuestionRequestedPayload | null> {
   const recs = await fetchPendingPromptsForSession(sessionId);
-  return pickNewestOpenQuestion(recs);
+  return pickNewestOpenQuestion(recs, sessionId);
 }
 
 /** Put the real card back up for a transcript card the user clicked: local
@@ -264,7 +291,7 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
   // request_id the daemon never held, stranding the real prompt (todo 833).
   // Newest open question wins instead - resolvePendingQuestionCard's own rule.
   if (!pending) {
-    const newest = recs ? pickNewestOpenQuestion(recs) : await newestOpenQuestion(sessionId);
+    const newest = recs ? pickNewestOpenQuestion(recs, sessionId) : await newestOpenQuestion(sessionId);
     if (newest) {
       markLatestQuestion(sessionId, newest.id, newest.seq);
       // `cardId` was requested but isn't the daemon's real current prompt -
@@ -315,6 +342,9 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
   // remounting it would just flicker it shut then open again for nothing.
   if (pending.kind === "question" && getActiveCardId() === pending.payload.id) {
     storePendingPrompt(sessionId, pending);
+    // Same card, but the click is a request to see it: bring it back from its
+    // collapsed bar. Leaving the DOM node alone keeps the no-flicker guarantee.
+    expandActiveCard({ id: pending.payload.id });
     return true;
   }
   // Only safe to drop what's on screen now we hold a replacement.

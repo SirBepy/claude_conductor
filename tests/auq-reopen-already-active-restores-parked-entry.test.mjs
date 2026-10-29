@@ -51,7 +51,7 @@ describe("reopenPendingPrompt's already-active no-op restores the parked entry",
     storePendingPrompt(SID, { kind: "question", payload });
     setSelectedSessionId(SID);
     // The card for CARD_ID is already the one live on screen.
-    setActiveCard({ id: CARD_ID, teardown: () => {}, getDraft: () => ({ freeText: "", selection: undefined }) });
+    setActiveCard({ id: CARD_ID, teardown: () => {}, getDraft: () => ({ freeText: "", selection: undefined }), expand: () => false });
 
     const result = await reopenPendingPrompt(SID, CARD_ID);
 

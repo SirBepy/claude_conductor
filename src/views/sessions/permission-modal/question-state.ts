@@ -163,6 +163,8 @@ export interface ActiveQuestionCard {
   sessionId?: string;
   teardown: () => void;
   getDraft: () => QuestionDraft;
+  /** Re-opens the card if it is collapsed to its bar; false when already open. */
+  expand: () => boolean;
 }
 
 let activeCard: ActiveQuestionCard | null = null;
@@ -197,6 +199,21 @@ export function dismissQuestionCard(id?: string): void {
  *  backgrounded/stale prompt that happens to share the resolve event's id. */
 export function isActiveCardId(id: string): boolean {
   return activeCard?.id === id;
+}
+
+/** Re-open the live card if it is collapsed to its bar. `match` narrows it to
+ *  one prompt id or one chat; omit it to expand whatever is up. False when no
+ *  card matches or the matching one is already open. */
+export function expandActiveCard(match: { id?: string; sessionId?: string } = {}): boolean {
+  if (!activeCard) return false;
+  if (match.id !== undefined && activeCard.id !== match.id) return false;
+  if (match.sessionId !== undefined && activeCard.sessionId !== match.sessionId) return false;
+  return activeCard.expand();
+}
+
+/** True when the live card (open or collapsed) belongs to `sessionId`. */
+export function hasActiveCardForSession(sessionId: string): boolean {
+  return activeCard?.sessionId === sessionId;
 }
 
 /** The currently-displayed card's prompt id, or null if none. Used by the

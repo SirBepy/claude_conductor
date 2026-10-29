@@ -239,7 +239,7 @@ async fn settle_at_stop(
     activity: crate::sessions::registry_turn::TurnActivity,
 ) -> bool {
     let settled = activity.correct(Some(status.to_string()));
-    let settled = state.drop_unbacked_question_report(session_id, settled).await;
+    let settled = state.settled_awaiting_for(session_id, settled).await;
     state.registry.set_awaiting_if_gen(session_id, settled, gen);
     let cleared = state.registry.set_busy_false_if_gen(session_id, gen);
     crate::daemon::machines::publish_instances_changed(state);
@@ -297,6 +297,18 @@ mod tests {
         let row = state.registry.get("s").unwrap();
         assert!(!row.busy);
         assert_eq!(row.awaiting.as_deref(), Some("done"));
+    }
+
+    /// The turn that posted a question card ends with a "done" report, but the
+    /// card still waits on Joe: the row must read "question", not "done".
+    #[tokio::test]
+    async fn stop_with_an_open_question_card_settles_to_question_not_the_report() {
+        let (state, gen) = state_with_busy_turn("s");
+        state.add_prompt("q1", "question-requested", json!({"session_id": "s", "seq": 1}), true).await;
+        assert!(settle_at_stop(&state, "s", gen, "done", TurnActivity::Idle).await);
+        let row = state.registry.get("s").unwrap();
+        assert!(!row.busy);
+        assert_eq!(row.awaiting.as_deref(), Some("question"));
     }
 
     #[tokio::test]

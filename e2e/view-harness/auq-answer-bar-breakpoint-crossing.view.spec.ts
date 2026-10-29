@@ -1,3 +1,4 @@
+// Reviewed 2026-10-29: question cards now re-expand from their collapsed bar on re-open/re-announce, a parked question is shown only while the daemon still lists it, and an already-answered one is dropped (answered-gate.ts) - this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/permission-modal/question-ui.ts, src/views/sessions/permission-modal/question-ui-render.ts
 // Reviewed 2026-10-25: the phone question page moved Skip into the header and its answer arrow became Next/Submit (live without typed text) - the answer bar's rebuild across the breakpoint is unchanged and this spec passes.
 import { test, expect, type Page } from "@playwright/test";

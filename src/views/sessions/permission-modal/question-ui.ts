@@ -286,6 +286,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       sessionId: opts.sessionId,
       teardown,
       getDraft: currentDraft,
+      expand: () => renderer.expand(),
     });
   }
 

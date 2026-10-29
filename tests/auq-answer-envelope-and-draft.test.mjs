@@ -69,8 +69,12 @@ beforeEach(() => {
   });
 });
 
+// Prompt ids are uuids in production and a settled one is never shown again,
+// so each test needs a fresh id rather than reusing "q1".
+let promptSeq = 0;
+
 async function answerOneCard() {
-  handleQuestionRequested(questionPayload("q1"));
+  handleQuestionRequested(questionPayload(`q${++promptSeq}`));
   await flushMicrotasks();
   expect(renderCalls.length).toBe(1);
   await renderCalls[0].onSubmit({ "Pick one?": "A" }, { additionalMessage: "", attachments: [] });

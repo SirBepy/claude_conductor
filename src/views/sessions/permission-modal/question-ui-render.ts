@@ -55,6 +55,8 @@ export interface QuestionCardRenderer {
   /** Collapses the card to its bar. Returns false when it already was one,
    *  so a back press can fall through to the next handler. */
   minimize: () => boolean;
+  /** Re-opens a collapsed card. Returns false when it was already open. */
+  expand: () => boolean;
   /** Rebuilds the answer bar for the other side of the 768px breakpoint. */
   onViewportCrossing: () => void;
   /** Card teardown: drops the fullscreen preview, which lives outside the host. */
@@ -237,7 +239,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
     if (minimized) {
       host.innerHTML = collapsedHtml(hasSummary, state.activeTab, questions, totalPanels, opts.cancelLabel);
-      host.querySelector(".prompt-collapsed")?.addEventListener("click", () => { minimized = false; render(); });
+      host.querySelector(".prompt-collapsed")?.addEventListener("click", () => { expand(); });
       host.querySelector('.prompt-collapsed [data-act="cancel"]')?.addEventListener("click", (e) => {
         e.stopPropagation();
         cancel();
@@ -373,6 +375,13 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     return true;
   }
 
+  function expand(): boolean {
+    if (!minimized) return false;
+    minimized = false;
+    render();
+    return true;
+  }
+
   // The answer bar's markup is picked from the viewport when it is built, so a
   // 768px crossing with the card open rebuilds it. The typed text survives in
   // freeText / state.additionalMessage; focus and caret are carried by hand.
@@ -393,5 +402,5 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     field.setSelectionRange(caret[0], caret[1]);
   };
 
-  return { render, goToTab, togglePick, refreshAttachments, minimize, onViewportCrossing, dispose: fullscreen.close };
+  return { render, goToTab, togglePick, refreshAttachments, minimize, expand, onViewportCrossing, dispose: fullscreen.close };
 }

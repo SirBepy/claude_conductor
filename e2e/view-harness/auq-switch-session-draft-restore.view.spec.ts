@@ -24,6 +24,15 @@ const SIX_QUESTIONS = Array.from({ length: 6 }, (_, i) => ({
   options: [{ label: "Yes" }, { label: "No" }],
 }));
 
+// The daemon still holds the card's prompt: a parked question is only
+// re-shown on switch-back while list_pending_prompts agrees it is open.
+const PENDING = [{
+  id: "q-a-1",
+  event: "question-requested",
+  durable: true,
+  payload: { id: "q-a-1", session_id: "s1", questions: SIX_QUESTIONS },
+}];
+
 async function mountSessions(page: Page): Promise<void> {
   await mountView(page, {
     view: "sessions",
@@ -31,6 +40,7 @@ async function mountSessions(page: Page): Promise<void> {
       ...SESSIONS_BASE_INVOKE,
       list_instances: SESSIONS,
       get_active_sessions: SESSIONS,
+      list_pending_prompts: PENDING,
       load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
     },
   });

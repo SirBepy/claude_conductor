@@ -234,6 +234,8 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // emit its first stream_event before this fn resumes past the
                 // write's own .await (todo 525 root cause 1).
                 let gen_before = state.registry.current_turn_gen(&p.session_id);
+                // Past every refusal above, so a bounced send never settles a card.
+                crate::daemon::methods::permission::settle_answered_questions(&state, &p.session_id, &p.text).await;
                 state.registry.set_awaiting(&p.session_id, None);
                 state.registry.set_busy(&p.session_id, true);
                 log::info!(
@@ -287,10 +289,6 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // so only the child's own trailing result line - via pump.rs's
                 // gen-matched set_busy_false_if_gen - should end the turn. An
                 // eager clear let a racing send_message write into the still-live child.
-                // The interrupted turn's verdict (an AUQ's "question", a prior
-                // turn's "waiting") is dead with the cancel - clear it so the
-                // sidebar doesn't keep flagging a question nobody is asking.
-                state.registry.set_awaiting(&p.session_id, None);
                 // Every subagent still running dies with the turn, and nothing
                 // in the transcript says so - the tool results it was waiting
                 // on just never arrive. Record them here, while the live set is
@@ -306,7 +304,12 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // stops resurrecting the card. Mirrors the EOF-triggered "ghost
                 // prompt" cleanup in `lifecycle.rs`'s pump loop; a no-op when
                 // nothing is open for this session (the common Stop-turn case).
-                state.expire_prompts_for_session(&p.session_id).await;
+                //
+                // The interrupted turn's verdict (a prior turn's "waiting") is
+                // dead with the cancel, so `awaiting` clears - except that a
+                // durable question card outlives the sweep and still needs
+                // Joe, so it keeps "question" (see `settle_awaiting_after_cancel`).
+                state.settle_awaiting_after_cancel(&p.session_id).await;
                 // Same reasoning one level down (todo 933): a `write_plan` step
                 // comment is keyed by step TEXT alone, so one still unclaimed
                 // when its turn dies would be delivered against whatever

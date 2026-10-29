@@ -72,7 +72,7 @@ function draft(overrides = {}) {
 function registerActiveCard(id, sessionId, getDraft) {
   let torn = false;
   const teardown = () => { torn = true; qs.clearActiveCardIfCurrent(teardown); };
-  qs.setActiveCard({ id, sessionId, teardown, getDraft });
+  qs.setActiveCard({ id, sessionId, teardown, getDraft, expand: () => false });
   return { wasTornDown: () => torn };
 }
 

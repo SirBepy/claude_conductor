@@ -20,7 +20,7 @@ import { getTransport } from "../../../shared/transport";
 import { visibleInterval } from "../../../shared/visible-interval";
 import { reconcilePendingPrompts } from "./remote-prompt-poll";
 import { confirmQuestionRendered, dismissQuestionCard, extractQuestions } from "./question-ui";
-import { getActiveCardId, isActiveCardId } from "./question-state";
+import { expandActiveCard, getActiveCardId, isActiveCardId } from "./question-state";
 import { showPermissionCard } from "./permission-card";
 import { showSecretCard, dismissSecretCard } from "./secret-card";
 import { clearQuestionDraft } from "./draft-persistence";
@@ -43,6 +43,7 @@ import {
 import type { PermissionRequestedPayload, QuestionRequestedPayload, SecretRequestedPayload } from "./types";
 import { showQuestionCard } from "./question-submit";
 import { createPromptQueue } from "./prompt-queue";
+import { dropIfAlreadyAnswered } from "./answered-gate";
 export type { ShowQuestionCardOpts } from "./question-submit";
 
 export {
@@ -227,6 +228,20 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
   // superseded card's late answer can be told apart from a live one.
   markLatestQuestion(payload.session_id, payload.id, payload.seq);
   const sid = payload.session_id;
+  // Answered elsewhere (another window, the phone, an earlier app run whose
+  // daemon still lists it): never show or park it. Still counts as delivered
+  // so the daemon's on_question_request wait doesn't time out over it.
+  if (dropIfAlreadyAnswered(sid, payload.id)) {
+    confirmQuestionRendered(payload.id, sid);
+    return;
+  }
+  // The same prompt re-announced while its card is already up (a lossy-push
+  // replay, the phone poll): re-mounting would reset the card, so only bring
+  // it back from its collapsed bar.
+  if (isActiveCardId(payload.id)) {
+    expandActiveCard({ id: payload.id });
+    return;
+  }
   if (sid) {
     const existing = peekPendingPrompt(sid);
     // A different question already owns this session's one slot - queue this

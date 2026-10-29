@@ -1,3 +1,4 @@
+// Reviewed 2026-10-29: question cards now re-expand from their collapsed bar on re-open/re-announce, a parked question is shown only while the daemon still lists it, and an already-answered one is dropped (answered-gate.ts) - this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-27: types.ts's QuestionDraft gained an optional per-option `notes` map (AUQ option notes) - additive, no change to this spec's contract.
 // Reviewed 2026-10-28 (mirrored todos chip): http-transport.ts's list_ai_todos case also sends an optional session_id; this spec only reads RemoteUnavailableError, so its contract is unchanged.
 // Reviewed 2026-10-26 (API-credit accounts): http-transport.ts gained get_api_credit_status and refresh_api_credit_status cases - additive, and this spec only reads RemoteUnavailableError, so its contract is unchanged.

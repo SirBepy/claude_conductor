@@ -47,7 +47,7 @@ mod machines;
 /// `find_person`/`remember_person` and the per-turn people block; the vault
 /// reader itself is `crate::people`.
 pub(crate) mod people;
-mod permission;
+pub(crate) mod permission;
 mod pr_review;
 mod preview;
 mod push;

@@ -20,6 +20,7 @@ import {
 } from "./gating";
 import type { Question, QuestionDraft, QuestionRequestedPayload } from "./types";
 import { rerenderSidebar } from "./index";
+import { dropIfAlreadyAnswered } from "./answered-gate";
 
 /** Mirror per-question answered/unanswered progress into the chat transcript's
  *  question card while the floating card is still being answered. No-op for a
@@ -42,6 +43,9 @@ export async function showQuestionCard(
   restoredDraft?: QuestionDraft,
   opts: ShowQuestionCardOpts = {},
 ): Promise<void> {
+  // Every show path funnels through here, so this is the last line of defence
+  // against re-presenting a question that was already answered.
+  if (dropIfAlreadyAnswered(payload.session_id, payload.id)) return;
   // Park the prompt while it's on screen so switching chats and back re-surfaces
   // it (a card torn down by navigation is otherwise lost while the daemon turn
   // hangs). Cleared when the prompt resolves (`prompt-resolved` listener).
