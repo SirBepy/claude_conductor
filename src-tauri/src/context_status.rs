@@ -6,7 +6,7 @@
 //! correction on top, and exposes the result over IPC + the daemon hooks
 //! server so every surface reads the same number.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use ts_rs::TS;
@@ -16,7 +16,7 @@ use ts_rs::TS;
 pub mod commands;
 
 /// How full a session's context window is, computed from its transcript.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct ContextStatus {
     /// Model id from the last usage line that carries one (e.g. "claude-opus-4-8").
@@ -442,5 +442,24 @@ mod tests {
         let s = compute_context_status(&path).unwrap();
         assert_eq!(s.model, "claude-opus-4-8");
         assert_eq!(s.window, 1_000_000);
+    }
+
+    /// A chat mirrored from a paired machine gets its status as the host
+    /// daemon's `context_status` JSON answer, so that answer must read back
+    /// into the same struct, null included.
+    #[test]
+    fn a_daemon_context_status_answer_reads_back_unchanged() {
+        let s = ContextStatus {
+            model: "claude-opus-4-8".into(),
+            window: 1_000_000,
+            occupancy: 250_000,
+            remaining: 750_000,
+            pct_used: 25,
+            pct_left: 75,
+            confidence: "heuristic".into(),
+        };
+        let wire = serde_json::to_value(Some(&s)).unwrap();
+        assert_eq!(serde_json::from_value::<Option<ContextStatus>>(wire).unwrap(), Some(s));
+        assert_eq!(serde_json::from_value::<Option<ContextStatus>>(serde_json::Value::Null).unwrap(), None);
     }
 }

@@ -12,6 +12,14 @@ use crate::types::chat::{ChatEvent, HistoryPage};
 use serde_json::json;
 
 impl PersistentClient {
+    pub async fn context_status(&self, session_id: &str) -> Result<Option<crate::context_status::ContextStatus>, ClientError> {
+        let res = self.call("context_status", json!({"session_id": session_id})).await?;
+        serde_json::from_value(res).map_err(|e| ClientError::Rpc {
+            code: -32000,
+            message: format!("context_status: bad result shape: {e}"),
+        })
+    }
+
     pub async fn load_history(&self, session_id: &str, cwd: Option<&str>) -> Result<Vec<ChatEvent>, ClientError> {
         let res = self.call("load_history", json!({"session_id": session_id, "cwd": cwd})).await?;
         serde_json::from_value(res).map_err(|e| ClientError::Rpc {
