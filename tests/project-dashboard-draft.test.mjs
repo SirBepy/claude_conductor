@@ -167,6 +167,31 @@ describe("draft dashboard motion", () => {
     expect(animations.length).toBe(played);
   });
 
+  it("a section rebuilt mid-wave (a column rebalance) still fades in, timed to its slot; after the wave it does not", () => {
+    const { playEntrance } = motionModule;
+    const root = document.createElement("div");
+    root.innerHTML = '<div class="pd-cols"><div class="pd-col"><section></section></div><div class="pd-col"><section></section></div></div>';
+    const chipRow = document.createElement("div");
+    let t = 0;
+    const entrance = playEntrance(root, chipRow, () => t);
+    expect(animations).toHaveLength(2);
+    t = 100;
+    const rebuilt = document.createElement("section");
+    root.querySelector(".pd-col").append(rebuilt);
+    entrance.catchUp();
+    expect(animations).toHaveLength(3);
+    expect(animations[2].el).toBe(rebuilt);
+    expect(animations[2].opts.fill).toBe("backwards");
+    expect(animations[2].opts.delay).toBeGreaterThanOrEqual(0);
+    // Already playing: a later paint leaves it alone.
+    entrance.catchUp();
+    expect(animations).toHaveLength(3);
+    t = 10_000;
+    root.querySelector(".pd-col").append(document.createElement("section"));
+    entrance.catchUp();
+    expect(animations).toHaveLength(3);
+  });
+
   it("orders sections down the page, left before right at the same height", () => {
     const at = (name, top, left) => {
       const el = document.createElement("div");

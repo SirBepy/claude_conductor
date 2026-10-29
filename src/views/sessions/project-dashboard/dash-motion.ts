@@ -37,27 +37,55 @@ export function entranceOrder(targets: HTMLElement[]): HTMLElement[] {
   });
 }
 
-/** Staggers the dashboard's sections in. Content is already laid out and
- *  visible underneath, so a failed animation leaves a normal dashboard. */
-export function playEntrance(root: HTMLElement, chips: HTMLElement): void {
-  const targets = [...root.querySelectorAll<HTMLElement>(".pd-reports, .pd-top > *, .pd-col > *, .pd-bottom > *"), ...chips.querySelectorAll<HTMLElement>(".pd-qa")]
+export interface Entrance {
+  /** Brings in any section that appeared since the wave started. */
+  catchUp(): void;
+}
+
+const sections = (root: HTMLElement, chips: HTMLElement): HTMLElement[] =>
+  [...root.querySelectorAll<HTMLElement>(".pd-reports, .pd-top > *, .pd-col > *, .pd-bottom > *"), ...chips.querySelectorAll<HTMLElement>(".pd-qa")]
     .filter((el) => canAnimate(el) && el.offsetHeight > 0);
-  if (targets.length === 0) return;
+
+/** Staggers the dashboard's sections in. Content is already laid out and
+ *  visible underneath, so a failed animation leaves a normal dashboard.
+ *
+ *  A section can be rebuilt while the wave runs: a late load (Usage's token
+ *  history) changes a card's height, the columns rebalance, and lit renders
+ *  the card that switched column as a brand-new node with no animation, so it
+ *  would sit there at full opacity ahead of everything still fading in.
+ *  `catchUp`, run after every paint, gives such a node the fade it missed,
+ *  timed to the slot it now holds in the wave. */
+export function playEntrance(root: HTMLElement, chips: HTMLElement, now: () => number = () => performance.now()): Entrance {
+  const started = now();
   const reduced = reducedMotion();
-  entranceOrder(targets).forEach((el, i) => {
+  const played = new WeakSet<HTMLElement>();
+  const play = (el: HTMLElement, delay: number): void => {
+    played.add(el);
     el.animate(
       reduced
         ? [{ opacity: 0 }, { opacity: 1 }]
         : [{ opacity: 0, transform: `translateY(${RISE_PX}px)` }, { opacity: 1, transform: "none" }],
       {
         duration: reduced ? REDUCED_MS : ENTER_MS,
-        delay: reduced ? 0 : Math.min(i * STEP_MS, MAX_DELAY_MS),
+        delay: reduced ? 0 : delay,
         easing: EASE_OUT,
         // Hidden through its own delay, not just once it starts.
         fill: "backwards",
       },
     );
-  });
+  };
+  const slot = (i: number): number => Math.min(i * STEP_MS, MAX_DELAY_MS);
+  entranceOrder(sections(root, chips)).forEach((el, i) => play(el, slot(i)));
+  return {
+    catchUp(): void {
+      const elapsed = now() - started;
+      // Past the wave's last fade a new section is an ordinary live update.
+      if (elapsed >= MAX_DELAY_MS + (reduced ? REDUCED_MS : ENTER_MS)) return;
+      entranceOrder(sections(root, chips)).forEach((el, i) => {
+        if (!played.has(el)) play(el, Math.max(0, slot(i) - elapsed));
+      });
+    },
+  };
 }
 
 /** Copies where `live`'s still-running entrance has each section right now
