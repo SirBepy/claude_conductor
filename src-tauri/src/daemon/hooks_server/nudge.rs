@@ -134,6 +134,34 @@ fn claim_text_items(
     out
 }
 
+/// `claim_text_items` with each served text run through `prepare` first. Every
+/// await happens BEFORE the claim: axum drops this handler's future when the
+/// hook request is dropped, and a claim made earlier would already have removed
+/// the items and recorded them as injected with nothing delivered. Claiming last
+/// leaves no await between "owned" and "returned", so an item is either still
+/// queued for the end-of-turn flush or in the response.
+async fn claim_prepared<F, Fut>(
+    store: &crate::daemon::draft_store::DraftStore,
+    session_id: &str,
+    held: &[crate::daemon::draft_store::HeldDraftItem],
+    prepare: F,
+) -> Vec<(u64, String, Vec<ContentBlock>)>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = String>,
+{
+    let mut prepared: std::collections::HashMap<u64, String> = std::collections::HashMap::new();
+    for item in held {
+        if let Some(text) = item_text(&item.blocks) {
+            prepared.insert(item.id, prepare(text).await);
+        }
+    }
+    claim_text_items(store, session_id, held)
+        .into_iter()
+        .map(|(id, text, blocks)| (id, prepared.remove(&id).unwrap_or(text), blocks))
+        .collect()
+}
+
 pub(super) async fn on_tool_batch(
     AxState(ctx): AxState<Arc<HookCtx>>,
     Query(q): Query<ToolBatchQuery>,
@@ -158,19 +186,23 @@ pub(super) async fn on_tool_batch(
     // Consume before serving. A turn that received the text has, by
     // definition, taken delivery of it; leaving the items queued would send
     // them a second time at end of turn. The removal also decides ownership
-    // (see `claim_text_items`), so it happens before the awaits below.
-    let claimed = claim_text_items(&ctx.state.draft_store, &q.session_id, &held);
+    // (see `claim_text_items`) and runs after the awaits (see `claim_prepared`).
+    //
+    // A slash command Joe typed mid-sentence while busy gets the same
+    // instructions-pointer block a normal send gets (`lifecycle::teardown`'s
+    // `send_message_inner`) - without this, a skill named here never
+    // reaches the model at all, since the CLI only auto-expands a command
+    // in leading position and this path bypasses that entirely.
+    let claimed = claim_prepared(&ctx.state.draft_store, &q.session_id, &held, |text| async move {
+        crate::slash::mentions::augment(&text, project_dir).await
+    })
+    .await;
     let mut delivered_ids: Vec<u64> = Vec::new();
     let mut messages: Vec<String> = Vec::new();
     let mut delivered_blocks: Vec<ContentBlock> = Vec::new();
     for (id, text, blocks) in claimed {
         delivered_ids.push(id);
-        // A slash command Joe typed mid-sentence while busy gets the same
-        // instructions-pointer block a normal send gets (`lifecycle::teardown`'s
-        // `send_message_inner`) - without this, a skill named here never
-        // reaches the model at all, since the CLI only auto-expands a command
-        // in leading position and this path bypasses that entirely.
-        messages.push(crate::slash::mentions::augment(&text, project_dir).await);
+        messages.push(text);
         delivered_blocks.extend(blocks);
     }
     // The common case by volume: nothing queued means EMPTY stdout, never an
@@ -391,6 +423,35 @@ mod tests {
         let (_, cleared) = store.clear_held("s1");
         assert_eq!(cleared.len(), 2);
         assert!(claim_text_items(&store, "s1", &snapshot).is_empty(), "everything cleared means nothing is served");
+    }
+
+    // A dropped hook request drops the handler's future at its first await. The
+    // claim removes items and records them as injected, so one made before an
+    // await would lose them with nothing delivered.
+    #[tokio::test]
+    async fn a_dropped_request_before_the_claim_leaves_the_items_queued() {
+        let store = crate::daemon::draft_store::DraftStore::new();
+        store.add_held("s1", vec![text("keep me")]);
+        let snapshot = store.get("s1").held;
+        let stalled = claim_prepared(&store, "s1", &snapshot, |t| async move {
+            std::future::pending::<()>().await;
+            t
+        });
+        let timed_out = tokio::time::timeout(std::time::Duration::from_millis(20), stalled).await;
+        assert!(timed_out.is_err(), "the prepare step never finishes, so the future is dropped");
+        assert_eq!(store.held_count("s1"), 1, "the dropped request must not have consumed the item");
+        assert!(store.injected_ids("s1").is_empty(), "nor recorded it as injected");
+    }
+
+    #[tokio::test]
+    async fn claim_prepared_serves_the_prepared_text() {
+        let store = crate::daemon::draft_store::DraftStore::new();
+        store.add_held("s1", vec![text("hello")]);
+        let snapshot = store.get("s1").held;
+        let claimed = claim_prepared(&store, "s1", &snapshot, |t| async move { format!("<{t}>") }).await;
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].1, "<hello>");
+        assert_eq!(store.held_count("s1"), 0);
     }
 
     // The draft store is in-memory, so after a restart a client cannot tell
