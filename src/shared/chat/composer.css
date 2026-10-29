@@ -58,6 +58,60 @@
   line-height: 1;
 }
 
+/* Staged but still uploading (attachment-chip.ts). An image tile has no <img>
+ * until its bytes are read, so the tile itself carries the surface. */
+.composer-attachments .attachment.uploading:not(.file-chip) {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.composer-attachments .attachment.uploading > img,
+.composer-attachments .attachment.uploading.file-chip > :not(.attachment-progress, .rm) {
+  opacity: 0.45;
+}
+
+.attachment-progress {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.attachment-progress i {
+  font-size: 22px;
+  color: var(--color-text);
+  animation: icon-btn-spin 0.8s linear infinite;
+}
+
+/* Pop-in for a freshly staged chip: grows from small, overshoots with a
+ * slight tilt at the top of the bounce, settles. Duration and a resume
+ * offset are set inline by attachment-chip.ts, since the strip is rebuilt
+ * mid-animation while the upload progresses. */
+.composer-attachments .attachment.attachment--pop {
+  animation-name: attachment-pop;
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+  transform-origin: 50% 60%;
+}
+
+@keyframes attachment-pop {
+  0% { transform: scale(0.35) rotate(0deg); opacity: 0; }
+  45% { transform: scale(1.12) rotate(-7deg); opacity: 1; }
+  68% { transform: scale(0.95) rotate(3deg); }
+  86% { transform: scale(1.02) rotate(-1deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-attachments .attachment.attachment--pop {
+    animation-name: none;
+  }
+}
+
 .composer-row {
   display: flex;
   gap: 8px;

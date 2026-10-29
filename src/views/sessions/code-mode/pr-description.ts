@@ -4,16 +4,7 @@
 
 import { invoke } from "../../../shared/ipc";
 import { escapeHtml } from "../../../shared/escape-html";
-
-const IMG_MIME: Record<string, string> = {
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
-  gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp",
-};
-
-function imageMimeFromPath(path: string): string | null {
-  const m = path.toLowerCase().match(/\.([a-z0-9]+)(?:\?.*)?$/);
-  return m ? (IMG_MIME[m[1]!] ?? null) : null;
-}
+import { imageMimeFromPath } from "../../../shared/image-mime";
 
 function imgPlaceholder(): HTMLDivElement {
   const ph = document.createElement("div");

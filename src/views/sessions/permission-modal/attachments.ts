@@ -15,6 +15,8 @@ import { invoke } from "../../../shared/ipc";
 import { blobToBase64, resolveClipboardAttachments } from "../../../shared/chat/composer-attachments";
 import { mimeToIcon } from "../../../shared/chat/attachment-hydrator";
 import { openLightbox } from "../../../shared/chat/lightbox";
+import { decorateAttachmentChip, markAttachmentPop } from "../../../shared/chat/attachment-chip";
+import { imageMimeFromPath } from "../../../shared/image-mime";
 import { downscaleImage } from "./image-downscale";
 import type { AuqAttachment } from "./types";
 
@@ -48,6 +50,10 @@ export interface AuqAttachmentsController {
   /** Live reference - copy it (`[...attachments]`) before stashing a
    *  snapshot (e.g. a draft). */
   readonly attachments: AuqAttachment[];
+  isUploading(): boolean;
+  /** Resolves once every staged upload has settled, so a submit never drops
+   *  a chip that has no path yet. */
+  whenUploaded(): Promise<void>;
   /** Returns null on success, or a rejection message (over the per-draft cap). */
   attachBlob(blob: Blob, filename: string): Promise<string | null>;
   attachFromPath(srcPath: string): Promise<string | null>;
@@ -101,62 +107,113 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
     return attachments.reduce((sum, a) => sum + a.size, 0);
   }
 
-  async function attachBlob(blob: Blob, filename: string): Promise<string | null> {
-    const toStage = blob.type.startsWith("image/") && blob.size > DOWNSCALE_TARGET_BYTES
-      ? await downscaleImage(blob, DOWNSCALE_TARGET_BYTES)
-      : blob;
-    if (attachedBytes() + toStage.size > MAX_DRAFT_ATTACHMENT_BYTES) return capMessage();
-    const data = await blobToBase64(toStage);
-    const mime = toStage.type || "application/octet-stream";
-    // A downscale re-encodes as JPEG - rename so it doesn't claim .png.
-    const displayName = toStage !== blob && mime === "image/jpeg" && !/\.jpe?g$/i.test(filename)
-      ? filename.replace(/\.\w+$/, "") + ".jpg"
-      : filename;
-    let path: string | null = null;
-    if (opts.sessionId) {
-      try {
-        path = await invoke<string>("paste_attachment", {
-          sessionId: opts.sessionId,
-          base64Data: data,
-          mime,
-        });
-      } catch (err) {
-        console.warn("[AUQ] paste_attachment failed:", err);
-      }
-    }
-    attachments.push({ mime, data, path, filename: displayName, size: toStage.size, panel: stagePanel() });
+  const inflight = new Set<Promise<string | null>>();
+
+  /** Shows `a` at once as an uploading chip, then runs `work` to fill it in.
+   *  A cap rejection or a failed read takes the chip back out. */
+  async function stage(
+    a: AuqAttachment,
+    work: (a: AuqAttachment) => Promise<string | null>,
+  ): Promise<string | null> {
+    a.uploading = true;
+    markAttachmentPop(a);
+    attachments.push(a);
     opts.onChange();
-    return null;
+    const unstage = () => {
+      const idx = attachments.indexOf(a);
+      if (idx >= 0) attachments.splice(idx, 1);
+    };
+    const done = work(a)
+      .then((msg) => {
+        if (msg) unstage();
+        return msg;
+      }, (err) => {
+        unstage();
+        throw err;
+      })
+      .finally(() => {
+        a.uploading = false;
+        inflight.delete(done);
+        opts.onChange();
+      });
+    inflight.add(done);
+    return done;
   }
 
-  async function attachFromPath(srcPath: string): Promise<string | null> {
-    const filename = srcPath.split(/[\\/]/).pop() ?? srcPath;
-    let result: { path: string; mime: string; base64: string } | null = null;
-    if (opts.sessionId) {
-      try {
-        result = await invoke<{ path: string; mime: string; base64: string }>(
-          "paste_attachment_from_path",
-          { sessionId: opts.sessionId, path: srcPath },
-        );
-      } catch (err) {
-        console.warn("[AUQ] paste_attachment_from_path failed:", err);
+  function isUploading(): boolean {
+    return inflight.size > 0;
+  }
+
+  async function whenUploaded(): Promise<void> {
+    while (inflight.size > 0) await Promise.allSettled([...inflight]);
+  }
+
+  function attachBlob(blob: Blob, filename: string): Promise<string | null> {
+    const placeholder: AuqAttachment = {
+      mime: blob.type || "application/octet-stream", data: "", path: null, filename, size: 0, panel: stagePanel(),
+    };
+    return stage(placeholder, async (a) => {
+      const toStage = blob.type.startsWith("image/") && blob.size > DOWNSCALE_TARGET_BYTES
+        ? await downscaleImage(blob, DOWNSCALE_TARGET_BYTES)
+        : blob;
+      // Excludes `a` itself, which is already in the list at size 0.
+      if (attachedBytes() + toStage.size > MAX_DRAFT_ATTACHMENT_BYTES) return capMessage();
+      a.size = toStage.size;
+      a.data = await blobToBase64(toStage);
+      a.mime = toStage.type || "application/octet-stream";
+      // A downscale re-encodes as JPEG - rename so it doesn't claim .png.
+      if (toStage !== blob && a.mime === "image/jpeg" && !/\.jpe?g$/i.test(filename)) {
+        a.filename = filename.replace(/\.\w+$/, "") + ".jpg";
       }
-    }
-    // Rust already wrote the full file by the time base64 comes back, so a
-    // cap rejection here leaves an orphan on disk - acceptable, same GC-later
-    // tradeoff composer-attachments.ts's hydrate() already documents.
-    const size = result ? Math.floor((result.base64.length * 3) / 4) : 0;
-    if (size > 0 && attachedBytes() + size > MAX_DRAFT_ATTACHMENT_BYTES) return capMessage();
-    attachments.push({
-      filename,
-      mime: result?.mime ?? "application/octet-stream",
-      data: result?.base64 ?? "",
-      path: result?.path ?? null,
-      size,
-      panel: stagePanel(),
+      opts.onChange();
+      if (opts.sessionId) {
+        try {
+          a.path = await invoke<string>("paste_attachment", {
+            sessionId: opts.sessionId,
+            base64Data: a.data,
+            mime: a.mime,
+          });
+        } catch (err) {
+          console.warn("[AUQ] paste_attachment failed:", err);
+        }
+      }
+      return null;
     });
-    opts.onChange();
-    return null;
+  }
+
+  function attachFromPath(srcPath: string): Promise<string | null> {
+    const filename = srcPath.split(/[\\/]/).pop() ?? srcPath;
+    const placeholder: AuqAttachment = {
+      mime: imageMimeFromPath(srcPath) ?? "application/octet-stream",
+      data: "", path: null, filename, size: 0, panel: stagePanel(),
+    };
+    return stage(placeholder, async (a) => {
+      let result: { path: string; mime: string; base64: string } | null = null;
+      if (opts.sessionId) {
+        try {
+          result = await invoke<{ path: string; mime: string; base64: string }>(
+            "paste_attachment_from_path",
+            { sessionId: opts.sessionId, path: srcPath },
+          );
+        } catch (err) {
+          console.warn("[AUQ] paste_attachment_from_path failed:", err);
+        }
+      }
+      // Rust already wrote the full file by the time base64 comes back, so a
+      // cap rejection here leaves an orphan on disk - acceptable, same GC-later
+      // tradeoff composer-attachments.ts's hydrate() already documents.
+      const size = result ? Math.floor((result.base64.length * 3) / 4) : 0;
+      if (size > 0 && attachedBytes() + size > MAX_DRAFT_ATTACHMENT_BYTES) return capMessage();
+      a.size = size;
+      if (result) {
+        a.mime = result.mime;
+        a.data = result.base64;
+        a.path = result.path;
+      } else {
+        a.mime = "application/octet-stream";
+      }
+      return null;
+    });
   }
 
   async function handleAttachmentPaste(e: ClipboardEvent): Promise<string | null> {
@@ -187,13 +244,15 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
         img.alt = a.filename;
         img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }));
         div.appendChild(img);
-      } else {
+      } else if (!(isImage && a.uploading)) {
+        // An image still being read stays a bare tile under the upload spinner.
         const icon = mimeToIcon(a.mime);
         div.innerHTML = `<i class="ph ${icon}"></i>`;
         const label = document.createElement("span");
         label.textContent = a.filename;
         div.appendChild(label);
       }
+      decorateAttachmentChip(div, a);
       const rm = document.createElement("button");
       rm.type = "button";
       rm.className = "rm";
@@ -210,5 +269,8 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
     });
   }
 
-  return { attachments, attachBlob, attachFromPath, attachmentsForPanel, handleAttachmentPaste, renderAttachmentsStrip };
+  return {
+    attachments, isUploading, whenUploaded, attachBlob, attachFromPath,
+    attachmentsForPanel, handleAttachmentPaste, renderAttachmentsStrip,
+  };
 }

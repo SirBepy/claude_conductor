@@ -107,6 +107,8 @@ export interface AuqAttachment {
    *  for the review step). The strip only renders on its own panel; a legacy
    *  draft with no stamp falls back to 0. */
   panel?: number;
+  /** Shown on the card but not yet on the daemon; never persisted (no path). */
+  uploading?: boolean;
 }
 
 export interface QuestionDraft {
