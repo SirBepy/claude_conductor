@@ -279,15 +279,26 @@ describe("usageByDay", () => {
       rec("C:/Projects/other", "2026-10-24", 999),
     ];
     const aliases = { "C:/Projects/zng-app": { mergedPaths: ["C:/old/zng-app-v1"] } };
-    expect(usageByDay(records, ["C:/Projects/zng-app", "C:/Projects/zng-admin"], aliases, "30d", now)).toEqual([
+    expect(usageByDay(records, ["C:/Projects/zng-app", "C:/Projects/zng-admin"], aliases, "7d", now)).toEqual([
+      { date: "2026-10-19", tokens: 0 },
+      { date: "2026-10-20", tokens: 0 },
+      { date: "2026-10-21", tokens: 0 },
+      { date: "2026-10-22", tokens: 0 },
       { date: "2026-10-23", tokens: 7 },
       { date: "2026-10-24", tokens: 150 },
+      { date: "2026-10-25", tokens: 0 },
     ]);
   });
 
-  it("drops days before the range", () => {
-    const records = [rec("C:/p", "2026-10-01", 5), rec("C:/p", "2026-10-24", 1)];
-    expect(usageByDay(records, ["C:/p"], {}, "7d", now)).toEqual([{ date: "2026-10-24", tokens: 1 }]);
-    expect(usageByDay(records, ["C:/p"], {}, "all", now)).toHaveLength(2);
+  it("covers every day of the range, quiet ones at 0, and All starts on the first active day", () => {
+    const records = [rec("C:/p", "2026-09-20", 5), rec("C:/p", "2026-10-24", 1)];
+    const month = usageByDay(records, ["C:/p"], {}, "30d", now);
+    expect(month).toHaveLength(30);
+    expect(month[0].date).toBe("2026-09-26");
+    expect(month.at(-1)).toEqual({ date: "2026-10-25", tokens: 0 });
+    const all = usageByDay(records, ["C:/p"], {}, "all", now);
+    expect(all[0]).toEqual({ date: "2026-09-20", tokens: 5 });
+    expect(all).toHaveLength(36);
+    expect(usageByDay([], ["C:/p"], {}, "all", now)).toEqual([]);
   });
 });

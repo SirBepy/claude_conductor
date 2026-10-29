@@ -51,7 +51,6 @@ export interface DashActions {
   /** Full-size view of the Reports card's current tab. */
   openReportsModal(): void;
   setUsageRange(range: DashRange): void;
-  setUsageOffset(offset: number): void;
   setTodoRange(range: DashRange): void;
 }
 

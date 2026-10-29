@@ -34,9 +34,11 @@
 .pd-subline { margin-top: 3px; min-height: 18px; color: var(--sb-muted, var(--color-text-muted)); font-size: 12px; display: flex; gap: 10px; align-items: center; }
 .pd-branch { font: 12px var(--font-mono, monospace); color: var(--sb-muted, var(--color-text-muted)); }
 
+/* padding: 0 here and on .pd-pg: the bare button rule's 7px 16px would push
+   the glyph off centre. */
 .pd-ib {
   width: 32px; height: 32px; display: grid; place-items: center; flex: none;
-  border: 0; border-radius: 8px; background: transparent; color: var(--sb-muted, var(--color-text-muted));
+  padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--sb-muted, var(--color-text-muted));
   cursor: pointer; font-size: 16px;
 }
 .pd-ib:hover { background: var(--color-surface-alt); color: var(--color-text); }
@@ -99,23 +101,25 @@
 }
 .pd-head + .pd-reports { margin-top: 14px; }
 
-/* Usage card: range words and pager in the heading, the chart under a total. */
+/* Chart cards (Usage, Todos): range words in the heading, the chart under a total. */
 .pd-usage-ranges { display: inline-flex; gap: 10px; font-weight: 400; }
 .pd-usage-total { font-size: 12px; color: var(--sb-muted, var(--color-text-muted)); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
-.pd-usage-chart { min-width: 0; }
 
-/* Todos card: a quiet legend, the line samples drawn as tiny SVGs so the dashed one reads as dashed. */
-.pd-todo-legend { display: flex; gap: 14px; font-size: 11px; color: var(--sb-muted, var(--color-text-muted)); margin-bottom: 2px; }
-.pd-todo-legend > span { display: inline-flex; align-items: center; gap: 5px; }
-.pd-todo-sw { flex: none; display: block; overflow: visible; }
-.pd-todo-chart { position: relative; min-width: 0; }
-.pd-todo-tip {
+/* The shared line chart (dash-line-chart.ts): a quiet legend, the line samples
+   drawn as tiny SVGs so the dashed one reads as dashed, and the gridline key
+   pushed to the right end of the same row. */
+.pd-line-legend { display: flex; gap: 14px; font-size: 11px; color: var(--sb-muted, var(--color-text-muted)); margin-bottom: 2px; }
+.pd-line-legend > span, .pd-line-key > span { display: inline-flex; align-items: center; gap: 5px; }
+.pd-line-key { display: inline-flex; gap: 10px; margin-left: auto; font-variant-numeric: tabular-nums; }
+.pd-line-sw { flex: none; display: block; overflow: visible; }
+.pd-line-chart { position: relative; min-width: 0; }
+.pd-line-tip {
   position: absolute; top: 0; pointer-events: none; white-space: nowrap;
   padding: 6px 8px; border-radius: 6px; font-size: 11.5px; font-variant-numeric: tabular-nums;
   background: var(--color-background); border: 1px solid var(--color-border); color: var(--color-text);
 }
-.pd-todo-tip > div { display: flex; align-items: center; gap: 6px; }
-.pd-todo-tip-date { color: var(--sb-muted, var(--color-text-muted)); margin-bottom: 2px; }
+.pd-line-tip > div { display: flex; align-items: center; gap: 6px; }
+.pd-line-tip-date { color: var(--sb-muted, var(--color-text-muted)); margin-bottom: 2px; }
 
 /* The right-click menu's anchor: a point at the cursor, never seen. */
 .pd-ctx-point { position: fixed; width: 0; height: 0; pointer-events: none; }
@@ -176,7 +180,7 @@
 /* Card pager: a quiet "2/4" with carets in the section heading, never a fold row. */
 .pd-pager { display: inline-flex; align-items: center; gap: 1px; font-weight: 400; }
 .pd-pg {
-  width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: 6px;
+  width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
   background: transparent; color: var(--sb-muted, var(--color-text-muted)); font-size: 12px; cursor: pointer;
 }
 .pd-pg:hover:not(:disabled) { background: var(--color-surface-alt); color: var(--color-text); }
