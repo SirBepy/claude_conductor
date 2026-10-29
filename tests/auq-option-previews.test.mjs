@@ -40,6 +40,22 @@ describe("option preview document", () => {
     expect(htmlTag).toContain('data-theme="void"');
   });
 
+  it("copies only the classes the frame needs, never a transient one like the typing cursor-hide", () => {
+    stubDocument([{ name: "class", value: "cursor-typing-hidden app-ready alt-held" }]);
+    const doc = mod.previewDocument("<b>x</b>");
+    const htmlTag = doc.slice(doc.indexOf("<html"), doc.indexOf(">", doc.indexOf("<html")) + 1);
+    expect(htmlTag).toContain('class="app-ready"');
+    expect(htmlTag).not.toContain("cursor-typing-hidden");
+    expect(htmlTag).not.toContain("alt-held");
+  });
+
+  it("omits the class attribute when none of the root's classes are needed", () => {
+    stubDocument([{ name: "class", value: "cursor-typing-hidden" }]);
+    const doc = mod.previewDocument("<b>x</b>");
+    const htmlTag = doc.slice(doc.indexOf("<html"), doc.indexOf(">", doc.indexOf("<html")) + 1);
+    expect(htmlTag).not.toContain("class=");
+  });
+
   it("still copies data-* attributes and drops unrelated root attributes", () => {
     const doc = mod.previewDocument("<b>x</b>");
     const htmlTag = doc.slice(doc.indexOf("<html"), doc.indexOf(">", doc.indexOf("<html")) + 1);
