@@ -87,8 +87,9 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
 
     // Durable question cards come back before the hooks server or any RPC
     // serves, so the first `list_pending_prompts` poll already sees them. The
-    // registry is not restored yet; `reconcile_pending_questions` below drops
-    // the cards of sessions that did not survive.
+    // registry is not restored yet; `reconcile_pending_questions` (run once
+    // every registry source has loaded) drops the cards of sessions that did
+    // not survive.
     state.init_pending_questions(&app_data).await;
 
     let mut router = Router::new();
@@ -257,7 +258,6 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
             chrono::Utc::now().timestamp_millis(),
         );
         let restored = crate::sessions::persistence::populate_registry(&state.registry, snapshot);
-        state.reconcile_pending_questions().await;
         if restored > 0 {
             log::info!("restored {restored} interactive session(s) from snapshot");
             crate::daemon::machines::publish_instances_changed(&state);
@@ -275,6 +275,12 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // running when the daemon (re)started. Must run AFTER adopt_running_channels
     // so channel pids are already known and excluded from the external scan.
     channel_adopt::adopt_external_sessions(state.clone());
+
+    // After every registry source (snapshot restore and both adoptions): the
+    // reconcile drops the durable question cards of sessions the registry does
+    // not know, so running it earlier would drop a card whose session only
+    // enters the registry on adoption.
+    state.reconcile_pending_questions().await;
 
     // Autostart automated channels the daemon owns. The in-session dedup guard
     // in start_channel skips any project already adopted above.

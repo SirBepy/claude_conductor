@@ -85,7 +85,8 @@ waiting for their answer. Do NOT call {tool_label} again and do NOT keep working
 on this task - end your turn now with at most a brief acknowledgement. The \
 user will reply in a separate follow-up message when they're ready, and that \
 reply resumes the work in a fresh turn. If they send something unrelated \
-instead, treat this question as dropped."
+instead, deal with that, but the card stays open on their screen until they \
+answer or skip it, so do not ask the same question again."
     )
 }
 
@@ -273,6 +274,15 @@ pub(super) async fn ask_question_decision(ctx: &Arc<HookCtx>, body: Value) -> Va
 
 #[cfg(test)]
 mod tests {
+    // An unrelated reply leaves the durable card open (Joe, 2026-10-29), so the
+    // note must not tell the model the question is gone.
+    #[test]
+    fn the_ask_note_says_the_card_stays_open_after_an_unrelated_reply() {
+        let note = super::fire_and_forget_note("this tool");
+        assert!(!note.contains("dropped"));
+        assert!(note.contains("stays open"));
+    }
+
     use super::{
         ask_question_decision, await_render_confirmation, is_question_shaped, on_question_request,
         AxState, QuestRequestBody, ValidatedJson, HookCtx,

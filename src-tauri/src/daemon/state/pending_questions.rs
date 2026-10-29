@@ -271,6 +271,37 @@ mod tests {
         assert_eq!(b.registry.get("cardless").unwrap().awaiting, None);
     }
 
+    // A card is dropped when its session is not in the registry at reconcile
+    // time, so the reconcile has to run after every source that fills the
+    // registry. The same card survives when its session registers first.
+    #[tokio::test]
+    async fn a_card_survives_when_its_session_is_adopted_before_the_reconcile() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = new_state();
+        a.init_pending_questions(dir.path()).await;
+        a.add_prompt("q1", "question-requested", q("adopted-later", 1), true).await;
+
+        // Adopt-then-reconcile first: a reconcile that drops the card rewrites the file.
+        let late = new_state();
+        late.init_pending_questions(dir.path()).await;
+        register(&late, "adopted-later");
+        late.reconcile_pending_questions().await;
+        assert_eq!(late.list_prompts().await.len(), 1);
+
+        let early = new_state();
+        early.init_pending_questions(dir.path()).await;
+        early.reconcile_pending_questions().await;
+        assert!(early.list_prompts().await.is_empty(), "reconciling before adoption drops the card");
+    }
+
+    #[test]
+    fn boot_reconciles_after_the_external_adoption() {
+        let boot = include_str!("../boot.rs");
+        let adopt = boot.find("channel_adopt::adopt_external_sessions(state.clone())").expect("boot adopts external sessions");
+        let reconcile = boot.find("state.reconcile_pending_questions().await").expect("boot reconciles question cards");
+        assert!(reconcile > adopt, "the reconcile must follow every registry source");
+    }
+
     #[tokio::test]
     async fn a_garbled_file_restores_nothing() {
         let dir = tempfile::tempdir().unwrap();
