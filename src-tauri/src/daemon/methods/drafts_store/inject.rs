@@ -26,7 +26,12 @@ fn excerpt(body: &str) -> String {
 }
 
 fn open_line(d: &MessageDraft) -> String {
-    let handles: Vec<String> = d.variants.iter().map(store::handle_of).collect();
+    // A wording Claude already posted is done; its siblings are what is open.
+    let mut waiting: Vec<&_> = d.variants.iter().filter(|v| !v.sent).collect();
+    if waiting.is_empty() {
+        waiting = d.variants.iter().collect();
+    }
+    let handles: Vec<String> = waiting.into_iter().map(store::handle_of).collect();
     format!("- [{}] {} - {}", handles.join(", "), d.topic, short(&d.id))
 }
 
@@ -140,7 +145,7 @@ mod tests {
             })
             .collect();
         let current = versions.len() as u32;
-        DraftVariant { recipient: recipient.to_string(), handle_n: n, versions, current, person: None, platform: None }
+        DraftVariant { recipient: recipient.to_string(), handle_n: n, versions, current, person: None, platform: None, sent: false }
     }
 
     fn draft(variants: Vec<DraftVariant>) -> MessageDraft {

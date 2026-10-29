@@ -79,7 +79,14 @@ export function draftResultFieldsOf(
   const variants = Array.isArray(draft.variants) ? (draft.variants as DraftVariant[]) : [];
   // Last variant, not first: a `variant` call appends, so the one this call
   // produced is at the end. For add/revise there is only ever one candidate.
-  const mine = variants[variants.length - 1];
+  // A `sent` call is the exception: it names the wording it marked, and when it
+  // names none (a bare id on a multi-wording draft) the card must not claim the
+  // last one, so the recipient stays blank and the input's own is kept.
+  let mine: DraftVariant | undefined = variants[variants.length - 1];
+  if (o.sent) {
+    const named = strField(o, "sent_recipient").trim().toLowerCase();
+    mine = named ? variants.find((v) => v.recipient.trim().toLowerCase() === named) : variants.length === 1 ? variants[0] : undefined;
+  }
   return {
     draftId: id,
     draftTopic: strField(draft, "topic"),
@@ -187,7 +194,10 @@ async function refreshCard(el: HTMLElement): Promise<void> {
   // first is still reachable.
   el.classList.toggle("superseded", superseded);
   if (superseded) el.classList.remove("open");
-  el.classList.toggle("copied", draft.state === "copied");
+  // A wording Claude posted reads as sent even while a sibling keeps the card
+  // itself open. `sent` rides the wire but is not in the generated type.
+  const variantSent = (variant as (DraftVariant & { sent?: boolean }) | undefined)?.sent === true;
+  el.classList.toggle("copied", draft.state === "copied" || variantSent);
   el.dataset.draftState = draft.state;
 }
 

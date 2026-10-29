@@ -91,6 +91,7 @@ pub(crate) fn add_at(path: &Path, new: NewDraft<'_>) -> Option<MessageDraft> {
         current: 0,
         person: new.person.map(str::to_string),
         platform: new.platform.map(|p| clamp(p.trim(), MAX_SHORT_LEN)),
+        sent: false,
     };
     push_version(&mut variant, new.body, DraftAuthor::Ai, "first pass");
     let draft = MessageDraft {
@@ -155,6 +156,8 @@ pub(crate) fn revise_at(path: &Path, id: &str, recipient: &str, body: &str, note
     mutate_at(path, id, |d, _| {
         let i = variant_index(d, recipient)?;
         push_version(&mut d.variants[i], body, DraftAuthor::Ai, note);
+        // New wording is not what went out, so it is open again.
+        d.variants[i].sent = false;
         d.state = DraftState::NeedsYou;
         Ok(())
     })
@@ -199,6 +202,7 @@ pub(crate) fn add_variant_at(
             current: 0,
             person: target.person.map(str::to_string),
             platform: target.platform.map(|p| clamp(p.trim(), MAX_SHORT_LEN)),
+            sent: false,
         };
         push_version(&mut variant, body, DraftAuthor::Ai, "first pass");
         d.variants.push(variant);
@@ -221,6 +225,7 @@ pub(crate) fn set_body_at(path: &Path, id: &str, recipient: &str, body: &str) ->
     mutate_at(path, id, |d, _| {
         let i = variant_index(d, recipient)?;
         set_body_on(&mut d.variants[i], body);
+        d.variants[i].sent = false;
         d.state = DraftState::NeedsYou;
         d.seen_by_origin = false;
         Ok(())
@@ -272,6 +277,36 @@ pub fn set_state(project_id: &str, id: &str, state: DraftState) -> Result<Messag
 pub(crate) fn set_state_at(path: &Path, id: &str, state: DraftState) -> Result<MessageDraft, String> {
     mutate_at(path, id, |d, _| {
         d.state = state;
+        // Reopening a card reopens every wording on it.
+        if state == DraftState::NeedsYou {
+            d.variants.iter_mut().for_each(|v| v.sent = false);
+        }
+        Ok(())
+    })
+}
+
+/// Marks the variant for `recipient` as posted by Claude. An empty `recipient`
+/// marks every variant (the pre-variant behaviour of `sent`). The card flips
+/// to `Copied` only once no variant is still waiting on the user, so a sibling
+/// wording for someone else stays open and keeps being injected.
+pub fn mark_variant_sent(project_id: &str, id: &str, recipient: &str) -> Result<MessageDraft, String> {
+    let path = store_path_for(project_id).ok_or_else(|| "no data dir".to_string())?;
+    mark_variant_sent_at(&path, id, recipient)
+}
+
+/// `pub(crate)`: the tempdir-injectable form `daemon::methods::drafts_store`'s
+/// hermetic tests use, same shape as `repo_channel::post_at`.
+pub(crate) fn mark_variant_sent_at(path: &Path, id: &str, recipient: &str) -> Result<MessageDraft, String> {
+    mutate_at(path, id, |d, _| {
+        if recipient.trim().is_empty() {
+            d.variants.iter_mut().for_each(|v| v.sent = true);
+        } else {
+            let i = variant_index(d, recipient)?;
+            d.variants[i].sent = true;
+        }
+        if d.variants.iter().all(|v| v.sent) {
+            d.state = DraftState::Copied;
+        }
         Ok(())
     })
 }
@@ -428,7 +463,7 @@ mod tests {
             let key = norm_recipient("Ana");
             let n = handles.get(&key).copied().unwrap_or(0) + 1;
             handles.insert(key, n);
-            let mut v = DraftVariant { recipient: "Ana".into(), handle_n: n, versions: vec![], current: 0, person: None, platform: None };
+            let mut v = DraftVariant { recipient: "Ana".into(), handle_n: n, versions: vec![], current: 0, person: None, platform: None, sent: false };
             push_version(&mut v, "plain", DraftAuthor::Ai, "first pass");
             d.variants.push(v);
             Ok(())
@@ -463,6 +498,7 @@ mod tests {
                 current: 0,
                 person: None,
                 platform: None,
+                sent: false,
             });
         }
         assert!(variant_index(&d, "").is_err());
@@ -564,9 +600,10 @@ mod tests {
             current: 99,
             person: None,
             platform: None,
+            sent: false,
         };
         assert_eq!(current_body(&v), "only");
-        let empty = DraftVariant { recipient: "X".into(), handle_n: 1, versions: vec![], current: 0, person: None, platform: None };
+        let empty = DraftVariant { recipient: "X".into(), handle_n: 1, versions: vec![], current: 0, person: None, platform: None, sent: false };
         assert_eq!(current_body(&empty), "");
     }
 
@@ -594,7 +631,7 @@ mod tests {
     }
 
     fn variant_with_ai(body: &str) -> DraftVariant {
-        let mut v = DraftVariant { recipient: "Bruno".into(), handle_n: 1, versions: vec![], current: 0, person: None, platform: None };
+        let mut v = DraftVariant { recipient: "Bruno".into(), handle_n: 1, versions: vec![], current: 0, person: None, platform: None, sent: false };
         push_version(&mut v, body, DraftAuthor::Ai, "first pass");
         v
     }

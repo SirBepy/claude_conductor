@@ -121,6 +121,22 @@ describe("tool_result parsing", () => {
     expect(f.draftTopic).toBe("Sprint slip");
   });
 
+  it("shows the wording a `sent` call names, not the draft's last variant", () => {
+    const two = {
+      ...DRAFT,
+      variants: [
+        DRAFT.variants[0],
+        { recipient: "Ana", handle_n: 3, current: 2, versions: [{ n: 2, body: "plain", author: "ai", note: "", created_at: "x" }] },
+      ],
+    };
+    const sent = (extra) => ({ type: "text", text: JSON.stringify({ ok: true, sent: two, ...extra }) });
+    const f = draftResultFieldsOf(sent({ sent_recipient: "Bruno" }));
+    expect(f.draftRecipient).toBe("Bruno");
+    expect(f.draftVersion).toBe(1);
+    // No wording named on a multi-wording draft: claim none rather than the last.
+    expect(draftResultFieldsOf(sent({ sent_recipient: null })).draftRecipient).toBe("");
+  });
+
   it("takes the LAST variant, which is the one a `variant` call just appended", () => {
     const two = {
       ...DRAFT,
@@ -281,6 +297,12 @@ describe("mount", () => {
     await vi.waitFor(() => expect(el.classList.contains("copied")).toBe(true));
     expect(el.classList.contains("gone")).toBe(false);
     expect(el.querySelector(".dc-label").textContent).toBe("Sent");
+  });
+
+  it("paints a card whose own wording was sent as copied while the draft stays open", async () => {
+    invokeMock.mockResolvedValue({ drafts: [{ ...DRAFT, state: "needs-you", variants: [{ ...DRAFT.variants[0], sent: true }] }] });
+    const el = mounted({ ...draftFieldsOf(ADD.input), draftId: DRAFT.id });
+    await vi.waitFor(() => expect(el.classList.contains("copied")).toBe(true));
   });
 
   it("reflects the copied state, which is also what drops it out of the injection", async () => {
