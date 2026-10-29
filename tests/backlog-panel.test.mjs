@@ -33,6 +33,8 @@ vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => env.remote }));
 vi.mock("../src/shared/open-file.ts", () => ({ openFileInApp: vi.fn() }));
 vi.mock("../src/shared/chat/chat-transforms.ts", () => ({ renderMarkdown: (s) => `<p>${s}</p>` }));
 vi.mock("../src/shared/chat/file-surface.ts", () => ({ markdownForDisplay: (s) => s }));
+vi.mock("../src/views/sessions/sidebar.ts", () => ({ refreshSessions: vi.fn(async () => {}) }));
+vi.mock("../src/views/sessions/session-controls.ts", () => ({ openChatById: vi.fn() }));
 vi.mock("../src/views/sessions/state.ts", () => ({ state: { get sessions() { return env.sessions; } } }));
 
 const { mountBacklogPanel } = await import("../src/views/sessions/backlog-panel/backlog-panel.ts");
@@ -145,5 +147,81 @@ describe("Backlog panel", () => {
     } finally {
       ipc.invoke.mockImplementation(base);
     }
+  });
+
+  // The chat the user switched to must not inherit the old chat's reply: the
+  // archive already ran on the backend, but a toast over the new project would
+  // carry an Undo bound to the wrong cwd, which the backend refuses.
+  describe("a chat switch while a backend call is in flight", () => {
+    const other = { groups: [], todos: [{ ...backlog.todos[0], id: "pc-0009", name: "pc-0009-z.md", title: "Other project todo" }] };
+
+    async function withHeldCall(cmd, result) {
+      const ipc = await import("../src/shared/ipc.ts");
+      const base = ipc.invoke.getMockImplementation();
+      let release;
+      const held = new Promise((r) => { release = () => r(result); });
+      ipc.invoke.mockImplementation(async (c, args) => {
+        if (c === cmd) { calls.push([c, args]); return held; }
+        if (c === "list_ai_backlog" && args.cwd === "C:\q") return other;
+        if (c === "read_ai_todo" && args.cwd === "C:\q") return { entry: other.todos[0], why: null, sections: [] };
+        return base(c, args);
+      });
+      return { release, restore: () => ipc.invoke.mockImplementation(base) };
+    }
+
+    it("drops the archive reply: no toast, no Undo, the new chat's list stays", async () => {
+      const record = { id: "pc-0001", done_path: "d", original_path: "o", original_content: "c", plan_line: null, plan_line_index: null };
+      const { release, restore } = await withHeldCall("ai_todo_archive", record);
+      try {
+        const { root, h } = await mount();
+        root.querySelector('[data-bl-act="archive"]').click();
+        root.querySelector('[data-bl-act="archive-go"]').click();
+        await flush();
+        h.setSessionScope("sess-2", "C:\q");
+        await flush();
+        release();
+        await flush();
+        expect(root.querySelector(".bl-toast").hidden).toBe(true);
+        expect(root.querySelector('[data-bl-act="undo"]')).toBeNull();
+        expect([...root.querySelectorAll(".bl-row")].map((r) => r.dataset.blId)).toEqual(["pc-0009"]);
+        expect(calls.some(([c]) => c === "ai_todo_unarchive")).toBe(false);
+      } finally {
+        restore();
+      }
+    });
+
+    it("drops the start-chat reply: does not open the chat over the one the user moved to", async () => {
+      const { release, restore } = await withHeldCall("ai_todo_start_chat", "new-sess");
+      const controls = await import("../src/views/sessions/session-controls.ts");
+      controls.openChatById.mockClear();
+      try {
+        const { root, h } = await mount();
+        root.querySelector('[data-bl-act="start"]').click();
+        await flush();
+        h.setSessionScope("sess-2", "C:\q");
+        await flush();
+        release();
+        await flush();
+        expect(controls.openChatById).not.toHaveBeenCalled();
+      } finally {
+        restore();
+      }
+    });
+
+    it("still opens the started chat when the user stayed put", async () => {
+      const { release, restore } = await withHeldCall("ai_todo_start_chat", "new-sess");
+      const controls = await import("../src/views/sessions/session-controls.ts");
+      controls.openChatById.mockClear();
+      try {
+        const { root } = await mount();
+        root.querySelector('[data-bl-act="start"]').click();
+        await flush();
+        release();
+        await flush();
+        expect(controls.openChatById).toHaveBeenCalledWith("new-sess");
+      } finally {
+        restore();
+      }
+    });
   });
 });

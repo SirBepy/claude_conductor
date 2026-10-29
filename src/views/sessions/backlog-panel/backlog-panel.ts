@@ -366,18 +366,24 @@ class BacklogPanel implements BacklogPanelHandle {
     const args = this.scopeArgs();
     const btn = this.readerEl.querySelector<HTMLButtonElement>('[data-bl-act="start"]');
     if (!id || !args || this.busy) return;
+    const epoch = this.epoch;
     this.busy = true;
     if (btn) btn.disabled = true;
     try {
       const sessionId = await invoke<string>("ai_todo_start_chat", { cwd: args.cwd, id });
+      // The user moved to another chat meanwhile: opening this one would yank
+      // them off what they are now looking at. The new chat still shows up in
+      // the sidebar through the normal instances refresh.
+      if (epoch !== this.epoch) return;
       // The new chat is not in the sessions list until the registry is re-read,
       // and selectSession refuses an id it does not know.
       const { refreshSessions } = await import("../sidebar");
       await refreshSessions();
+      if (epoch !== this.epoch) return;
       const { openChatById } = await import("../session-controls");
       openChatById(sessionId);
     } catch (err) {
-      this.showError(`Could not start a chat: ${errText(err)}`);
+      if (epoch === this.epoch) this.showError(`Could not start a chat: ${errText(err)}`);
     } finally {
       this.busy = false;
       if (btn) btn.disabled = false;
@@ -405,9 +411,14 @@ class BacklogPanel implements BacklogPanelHandle {
     const prev = this.backlog;
     if (!id || !args || !prev || this.busy) return;
     const note = this.readerEl.querySelector<HTMLTextAreaElement>(".bl-note")?.value.trim() ?? "";
+    const epoch = this.epoch;
     this.busy = true;
     try {
       const archived = await invoke<AiTodoArchived>("ai_todo_archive", { cwd: args.cwd, id, note: note || null });
+      // The chat changed while the backend worked: `prev` and `id` belong to
+      // the old project, and a toast here would offer an Undo that the new
+      // scope's cwd makes the backend refuse. The finally refresh repaints.
+      if (epoch !== this.epoch) return;
       this.archiveOpen = false;
       this.undoRecord = archived;
       // Next row takes over so the reader is never left on a file that moved.
@@ -422,7 +433,7 @@ class BacklogPanel implements BacklogPanelHandle {
       this.loadDoc();
       this.showToast(archived.id);
     } catch (err) {
-      this.showError(`Could not archive: ${errText(err)}`);
+      if (epoch === this.epoch) this.showError(`Could not archive: ${errText(err)}`);
     } finally {
       this.busy = false;
       this.refresh();
