@@ -70,3 +70,27 @@ describe("statusbar git chips", () => {
     expect(openInCodeMode).not.toHaveBeenCalled();
   });
 });
+
+// Only the phone draws the todos chip; sessions.ts listens for this event and
+// opens the Backlog panel, so the dispatch is the whole contract of the click.
+describe("statusbar todos chip", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("opens the Backlog panel by dispatching cc-backlog-open", () => {
+    const el = document.createElement("div");
+    el.innerHTML = '<button class="sb-chip sb-ai-todos-btn"></button>';
+    document.body.appendChild(el);
+    const c = ctx("C:\repo");
+    wireChipPopovers(el, c);
+    const onOpen = vi.fn();
+    window.addEventListener("cc-backlog-open", onOpen);
+    try {
+      el.querySelector(".sb-ai-todos-btn").click();
+    } finally {
+      window.removeEventListener("cc-backlog-open", onOpen);
+    }
+    expect(onOpen).toHaveBeenCalledOnce();
+  });
+});

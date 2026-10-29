@@ -5,7 +5,13 @@ vi.mock("../src/views/sessions/fab-dial.css", () => ({}));
 vi.mock("../src/views/sessions/ask-panel", () => ({ mountAskPanel: () => ({ setCwd() {}, setSessionScope() {}, destroy() {} }) }));
 vi.mock("../src/views/sessions/todos-panel", () => ({ mountTodosPanel: () => ({ setSessionScope() {}, destroy() {} }) }));
 vi.mock("../src/views/sessions/drafts-panel", () => ({ mountDraftsPanel: () => ({ setSessionScope() {}, destroy() {} }) }));
-vi.mock("../src/views/sessions/backlog-panel/backlog-panel", () => ({ mountBacklogPanel: () => ({ setSessionScope() {}, refresh() {}, destroy() {} }) }));
+const backlogRoots = vi.hoisted(() => []);
+vi.mock("../src/views/sessions/backlog-panel/backlog-panel", () => ({
+  mountBacklogPanel: (root) => {
+    backlogRoots.push(root);
+    return { setSessionScope() {}, refresh() {}, destroy() {} };
+  },
+}));
 
 const stubPreview = () => ({ setSessionScope() {}, refresh() {}, closeMenus() {}, destroy() {} });
 const { mountFabDial } = await import("../src/views/sessions/fab-dial.ts");
@@ -74,5 +80,22 @@ describe("fab dial survives a pane rebuild", () => {
     expect(tabs[0].hasAttribute("data-sp-code")).toBe(true);
     tabs[0].click();
     expect(onCode).toHaveBeenCalledTimes(1);
+  });
+
+  // The phone's todos chip dispatches cc-backlog-open, which sessions.ts routes
+  // to openPanel("backlog"); without it the chip would do nothing.
+  it("openPanel('backlog') brings the Backlog panel's window up", () => {
+    const fab = mountFabDial(pane, { onDraft() {}, onCode() {}, mountPreview: stubPreview });
+    fab.setSessionScope("sess-A", "C:/repo");
+    const shown = () => [...pane.querySelectorAll(".pw-window")].filter((w) => !w.hidden);
+    expect(shown()).toHaveLength(0);
+
+    fab.openPanel("backlog");
+
+    const open = shown();
+    expect(open).toHaveLength(1);
+    expect(open[0].dataset.active).toBe("backlog");
+    expect(open[0].querySelector('[data-panel="backlog"]')).not.toBeNull();
+    expect(backlogRoots.some((r) => open[0].contains(r))).toBe(true);
   });
 });
