@@ -134,6 +134,16 @@ test.describe("view-harness / AUQ option previews", () => {
     await expect(page.frameLocator(`${active} .prompt-opt__frame`).nth(1).locator(".probe")).toHaveText("Two");
   });
 
+  // WKWebView (macOS) has no moveBefore: picks fall back to fresh frames.
+  test("without moveBefore a pick still rebuilds the card with painted previews", async ({ page }) => {
+    await page.addInitScript(() => { delete (Element.prototype as { moveBefore?: unknown }).moveBefore; });
+    await page.setViewportSize(DESKTOP);
+    await openCard(page, [question(3)]);
+    await page.locator(`${active} .prompt-opt__body`).nth(2).click();
+    await expect.poll(() => picked(page)).toBe("Three");
+    await expect(page.frameLocator(`${active} .prompt-opt__frame`).nth(2).locator(".probe")).toHaveText("Three");
+  });
+
   test("a pick of the option the stage already shows keeps the stage frame loaded", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [question(5)]);
