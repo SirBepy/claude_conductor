@@ -32,7 +32,8 @@ export function handleSessionStartedEvent(
   ts: number,
 ): EventOutcome {
   r.meta = { model: ev.model || null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
-  r.onMetaUpdate?.(r.getMeta());
+  // Replay sends the final meta once from bulkLoadEvents instead.
+  if (!r.hydrating) r.onMetaUpdate?.(r.getMeta());
   r.messages.push({
     kind: "system",
     text: `Session started${ev.model ? ` (${ev.model})` : ""}`,
@@ -101,7 +102,11 @@ export function handleTurnUsageEvent(
   r._cumulative.cacheRead += Number(ev.cache_read_input_tokens) || 0;
   r._cumulative.costUsd += Number(ev.total_cost_usd) || 0;
   r._cumulative.turns += 1;
-  r.onMetaUpdate?.(r.getMeta());
+  // Not per replayed event: every statusbar updateMeta re-scans the whole
+  // transcript twice (instance_token_stats + context_status), and a 200-event
+  // page carries ~60 of these - measured 63 + 63 scans per chat open.
+  // bulkLoadEvents sends the final meta once when the replay ends.
+  if (!r.hydrating) r.onMetaUpdate?.(r.getMeta());
   // Accumulate the turn's COMBINED usage. History replays one usage
   // event per assistant line: output/cache/cost sum, input is the
   // latest (context size), duration keeps the max (only live's single

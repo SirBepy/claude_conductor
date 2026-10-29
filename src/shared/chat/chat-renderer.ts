@@ -62,6 +62,11 @@ export interface CumulativeUsage {
   costUsd: number;
 }
 
+/** How long a chat open waits on the skip-mark and channel-backlog fetches
+ *  after the history page is in. Both answer in under 1ms on a healthy daemon
+ *  (measured 2026-10-29), so this only ever fires on a stuck pipe. */
+const SIDE_FETCH_GRACE_MS = 500;
+
 /** Best-effort: a fetch failure just means no skip fold this load, not a
  *  broken history load (mirrors sessionEvents.loadInitial's own tolerance). */
 async function fetchSkipMarks(sessionId: string): Promise<SkipMark[]> {
@@ -114,6 +119,9 @@ export class ChatRenderer {
   // peer-message chip's inline panel can show real text instead of the wake
   // placeholder. `undefined` until that fetch resolves for THIS sessionId.
   channelMessages?: ChannelMessage[] = undefined;
+  /** Side-fetch answer that arrived after loadFromStore's grace, handed to
+   *  the rebuild it triggers so that rebuild doesn't fetch (and wait) again. */
+  _lateSides: Promise<[SkipMark[], ChannelMessage[] | undefined]> | null = null;
   _bulkGen = 0;
   meta: SessionMeta = { model: null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
   _cumulative: CumulativeUsage = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, turns: 0, costUsd: 0 };
@@ -511,14 +519,39 @@ export class ChatRenderer {
       p.then(done, done);
       return p;
     };
-    const [events, marks, channelMessages] = await Promise.all([
-      timed("history-page", sessionEvents.loadInitial(sid, cwd)),
+    const sides = this._lateSides ?? Promise.all([
       timed("skip-marks", fetchSkipMarks(sid)),
       timed("channel-messages", fetchChannelMessages(sid)),
     ]);
+    this._lateSides = null;
+    const events = await timed("history-page", sessionEvents.loadInitial(sid, cwd));
+    // The two side fetches go over the daemon pipe, whose calls have no
+    // timeout, so they get a short grace past the history page and no more:
+    // the transcript paints without them (no skip fold, posts shown from the
+    // transcript's own copy) and a late answer re-renders it.
+    const late = Symbol("late");
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const settled = await Promise.race([
+      sides,
+      new Promise<typeof late>((resolve) => { graceTimer = setTimeout(() => resolve(late), SIDE_FETCH_GRACE_MS); }),
+    ]);
+    clearTimeout(graceTimer);
     if (this.sessionId !== sid) return;
-    this.paginator.skipMarks = marks;
-    this.channelMessages = channelMessages;
+    if (settled === late) {
+      this.paginator.skipMarks = [];
+      this.channelMessages = undefined;
+      void sides.then((answer) => {
+        if (this.sessionId !== sid) return;
+        const [marks, channelMessages] = answer;
+        if (!marks.length && !channelMessages?.length) return;
+        // Rebuild with the answer already in hand, not a fresh fetch that
+        // could time out again and loop.
+        this._lateSides = Promise.resolve(answer);
+        void this.loadFromStore(cwd, opts);
+      });
+    } else {
+      [this.paginator.skipMarks, this.channelMessages] = settled;
+    }
     await bulkLoadEvents(this, [...events], opts);
     if (this.sessionId !== sid) return;
     this.paginator.install();
