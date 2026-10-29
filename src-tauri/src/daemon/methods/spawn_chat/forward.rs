@@ -63,6 +63,7 @@ pub(crate) async fn spawn_chat_for_peer(
     model: &str,
     effort: &str,
     name: Option<&str>,
+    account_id: Option<String>,
 ) -> Result<String, String> {
     let cwd = std::path::PathBuf::from(cwd);
     let params = StartSessionParams {
@@ -70,7 +71,7 @@ pub(crate) async fn spawn_chat_for_peer(
         model: model.to_string(),
         effort: effort.to_string(),
         resume_id: None,
-        account_id: None,
+        account_id,
         fork: false,
         new_session_id: None,
     };
