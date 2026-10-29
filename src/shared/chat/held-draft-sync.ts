@@ -12,8 +12,6 @@ import { isPendingSessionId } from "./pending-session-id";
 
 const EDIT_PUSH_DEBOUNCE_MS = 500;
 
-const unsyncedKey = (sessionId: string, id: number): string => `${sessionId}:${id}`;
-
 export class HeldDraftSync {
   // Per-item debounced `update_held_message` push, keyed by the item's
   // CURRENT id (local until add_held_message resolves, then server-assigned).
@@ -23,12 +21,13 @@ export class HeldDraftSync {
   // daemon has never heard of (would silently orphan the item server-side).
   private pendingServerIds = new Map<number, Promise<number | null>>();
 
-  // `sessionId:id` of items whose add_held_message failed: the daemon never saw
-  // them, so an absence from clear_held_messages' removed_ids says nothing about
-  // them. Keyed by session because local ids come from one window-wide counter
-  // while the daemon numbers each session's items from 1, so a bare id could
-  // match an unrelated item in another session.
-  private unsyncedKeys = new Set<string>();
+  // Items whose add_held_message failed: the daemon never saw them, so an
+  // absence from clear_held_messages' removed_ids says nothing about them.
+  // Marked by the item object, not its id: local ids come from one window-wide
+  // counter while the daemon numbers each session's items from 1, so a
+  // failed item's local id can equal a later item's server id, in this session
+  // or another. The WeakSet also needs no pruning when an item leaves the list.
+  private unsynced = new WeakSet<object>();
 
   isPending(id: number): boolean {
     return this.pendingServerIds.has(id);
@@ -36,27 +35,8 @@ export class HeldDraftSync {
 
   /** True when this item's add never reached the daemon (so it cannot have been
    *  injected mid-turn by the daemon's own copy of the list). */
-  isUnsynced(sessionId: string, id: number): boolean {
-    return this.unsyncedKeys.has(unsyncedKey(sessionId, id));
-  }
-
-  /** Drop the marks of `sessionId`'s items that are no longer in its held list
-   *  (`liveIds`): reconcile and markDelivered remove items without going
-   *  through remove(). */
-  retainUnsynced(sessionId: string, liveIds: number[]): void {
-    const live = new Set(liveIds.map((id) => unsyncedKey(sessionId, id)));
-    for (const key of this.unsyncedKeys) {
-      if (key.startsWith(`${sessionId}:`) && !live.has(key)) this.unsyncedKeys.delete(key);
-    }
-  }
-
-  /** Carry the marks across a pending placeholder id becoming the real session id. */
-  renameSession(from: string, to: string): void {
-    for (const key of [...this.unsyncedKeys]) {
-      if (!key.startsWith(`${from}:`)) continue;
-      this.unsyncedKeys.delete(key);
-      this.unsyncedKeys.add(`${to}${key.slice(from.length)}`);
-    }
+  isUnsynced(item: object): boolean {
+    return this.unsynced.has(item);
   }
 
   /** Fetch the daemon's held-items snapshot and hand it to `onResolved`, which
@@ -77,17 +57,18 @@ export class HeldDraftSync {
 
   /** Push a newly staged item; `onResolved` fires ONLY on success so a failed
    *  add leaves the local id in place as the permanent fallback. */
-  add(sessionId: string, localId: number, blocks: ContentBlock[], onResolved: (serverId: number) => void): void {
+  add(sessionId: string, item: { id: number; blocks: ContentBlock[] }, onResolved: (serverId: number) => void): void {
+    const localId = item.id;
     // A retry (repushHeld) starts from a clean slate; only a fresh failure re-marks it.
-    this.unsyncedKeys.delete(unsyncedKey(sessionId, localId));
-    const pending: Promise<number | null> = addHeldMessage(sessionId, blocks)
+    this.unsynced.delete(item);
+    const pending: Promise<number | null> = addHeldMessage(sessionId, item.blocks)
       .then((res) => {
         onResolved(res.id);
         return res.id;
       })
       .catch((e) => {
         console.warn("[held] add_held_message failed (offline?):", e);
-        this.unsyncedKeys.add(unsyncedKey(sessionId, localId));
+        this.unsynced.add(item);
         return null;
       })
       .finally(() => this.pendingServerIds.delete(localId));
@@ -100,7 +81,6 @@ export class HeldDraftSync {
   remove(sessionId: string, id: number): void {
     this.editPushDebounced.get(id)?.cancel();
     this.editPushDebounced.delete(id);
-    this.unsyncedKeys.delete(unsyncedKey(sessionId, id));
     const doRemove = (serverId: number): void => {
       void removeHeldMessage(sessionId, serverId).catch((e) => console.warn("[held] remove_held_message failed:", e));
     };
@@ -144,7 +124,6 @@ export class HeldDraftSync {
 
   /** Fire-and-forget: the caller already cleared local state. */
   clear(sessionId: string): void {
-    this.retainUnsynced(sessionId, []);
     void clearHeldMessages(sessionId).catch((e) => console.warn("[held] clear_held_messages failed:", e));
   }
 

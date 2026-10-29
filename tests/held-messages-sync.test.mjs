@@ -182,11 +182,46 @@ describe("HeldMessages - sendNow claims the daemon list before interrupting", ()
     expect(send).toHaveBeenCalledWith(textBlocks("queued"));
   });
 
-  it("drops the injected item but still interrupts and sends the rest", async () => {
+  // pc-1479 (Joe, 2026-10-29): interrupting would kill the turn that just
+  // received the injected item, so the rest waits for the turn to end instead.
+  it("with one item injected and one still held, skips the interrupt and keeps the rest held for turn end", async () => {
     addHeldMessage.mockResolvedValueOnce({ id: 41, updated_at: "t" }).mockResolvedValueOnce({ id: 42, updated_at: "t" });
-    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [42] });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [42], injected_ids: [41] });
     const { held, send, interrupt } = makeHarness();
     held.stage(textBlocks("already-in"));
+    held.stage(textBlocks("still-held"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(held.itemsForActive().map((i) => i.blocks)).toEqual([textBlocks("still-held")]);
+    // The claim emptied the daemon's list, so the survivor is pushed back to it.
+    await vi.waitFor(() => expect(addHeldMessage).toHaveBeenLastCalledWith("sess-A", textBlocks("still-held")));
+
+    held.onCompletion("sess-A", false);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith(textBlocks("still-held")));
+  });
+
+  it("with an item injected and a non-empty draft, skips the interrupt and holds the draft for turn end", async () => {
+    addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [], injected_ids: [41] });
+    const { held, attach, send, interrupt } = makeHarness();
+    held.attach({ ...attach, isDraftEmpty: () => false, getDraftBlocks: () => textBlocks("typed draft") });
+    held.stage(textBlocks("already-in"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(held.itemsForActive().map((i) => i.blocks)).toEqual([textBlocks("typed draft")]);
+    expect(attach.clearComposer).toHaveBeenCalledTimes(1);
+  });
+
+  it("still interrupts when the daemon reports nothing injected", async () => {
+    addHeldMessage.mockResolvedValue({ id: 42, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [42], injected_ids: [] });
+    const { held, send, interrupt } = makeHarness();
     held.stage(textBlocks("still-held"));
 
     await expect(held.sendNow()).resolves.toBe(true);
@@ -279,6 +314,29 @@ describe("HeldMessages - a failed add's unsynced mark stays with the item it des
     expect(send).not.toHaveBeenCalled();
   });
 
+  // pc-1483: the mark follows the item object, so a later item that the daemon
+  // numbers with the failed item's local id is not mistaken for the failed one.
+  it("does not mistake a later item whose server id equals a failed item's local id for the failed item", async () => {
+    const { held, send, interrupt } = makeHarness();
+    addHeldMessage.mockRejectedValueOnce(new Error("offline"));
+    held.stage(textBlocks("never-reached-daemon"));
+    const failedId = held.itemsForActive()[0].id;
+    await new Promise((r) => setTimeout(r, 10));
+
+    addHeldMessage.mockResolvedValue({ id: failedId, updated_at: "t" });
+    held.stage(textBlocks("injected"));
+    await new Promise((r) => setTimeout(r, 10));
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [], injected_ids: [failedId] });
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    // "injected" was delivered to the running turn, so no interrupt; the failed
+    // item never reached the daemon and still waits for the turn to end.
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(held.itemsForActive().map((i) => i.blocks)).toEqual([textBlocks("never-reached-daemon")]);
+  });
+
   it("forgets a failed add once its item is removed", async () => {
     const { held, send, interrupt } = makeHarness();
     addHeldMessage.mockRejectedValueOnce(new Error("offline"));
@@ -320,6 +378,28 @@ describe("HeldMessages - a failed add's unsynced mark stays with the item it des
 
     expect(interrupt).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("HeldMessages - reconcile during sendNow", () => {
+  it("does not wipe the local set when the chat is re-attached while sendNow waits for the turn to end", async () => {
+    addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [41], injected_ids: [] });
+    const { held, attach, send, state } = makeHarness();
+    // The turn ignores the interrupt until released, so sendNow sits in its poll.
+    attach.interrupt.mockImplementation(async () => {});
+    held.stage(textBlocks("queued"));
+
+    const pending = held.sendNow();
+    await new Promise((r) => setTimeout(r, 20));
+    // The daemon's list is empty after the claim; attach() reconciles against it.
+    held.attach({ ...attach });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(held.itemsForActive().map((i) => i.blocks)).toEqual([textBlocks("queued")]);
+
+    state.busy = false;
+    await expect(pending).resolves.toBe(true);
+    expect(send).toHaveBeenCalledWith(textBlocks("queued"));
   });
 });
 
