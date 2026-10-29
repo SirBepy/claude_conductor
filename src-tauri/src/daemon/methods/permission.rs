@@ -205,7 +205,7 @@ pub(crate) async fn respond_question_inner(
         if let Some(session) = session_id.as_deref().and_then(|sid| state.sessions.get(sid).map(|s| s.clone())) {
             crate::daemon::broadcast::publish(&session, crate::types::chat::ChatEvent::Notification {
                 kind: "question_skipped".into(),
-                body: String::new(),
+                body: request_id.to_string(),
             });
         }
     }

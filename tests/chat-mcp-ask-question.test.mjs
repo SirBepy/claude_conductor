@@ -147,6 +147,32 @@ describe("live: Skip flips the open card to Skipped", () => {
     r.detach();
   });
 
+  it("a skip naming an already-answered card leaves the newer open card open", () => {
+    const { r } = makeRenderer();
+    r.handleEvent(userEvent("go"));
+    r.handleEvent(mcpAskEvent([{ question: "First?" }], "q1"));
+    r.handleEvent(toolResultEvent("q1", "User answered the question(s):\nQ: First?\nA: Yes", {}));
+    r.handleEvent(mcpAskEvent([{ question: "Second?" }], "q2"));
+    // The answered-gate settling q1 after a reload publishes this.
+    r.handleEvent({ type: "notification", kind: "question_skipped", body: "q1" });
+
+    const q2 = r.messages.find((m) => m.kind === "question" && m.id === "q2");
+    expect(q2.text).toBeUndefined();
+    r.detach();
+  });
+
+  it("a skip naming an open card resolves that card, not the newest one", () => {
+    const { r } = makeRenderer();
+    r.handleEvent(userEvent("go"));
+    r.handleEvent(mcpAskEvent([{ question: "First?" }], "q1"));
+    r.handleEvent(mcpAskEvent([{ question: "Second?" }], "q2"));
+    r.handleEvent({ type: "notification", kind: "question_skipped", body: "q1" });
+
+    expect(r.messages.find((m) => m.id === "q1").text).toContain("dismissed");
+    expect(r.messages.find((m) => m.id === "q2").text).toBeUndefined();
+    r.detach();
+  });
+
   it("an unrelated notification still renders as a normal notification row", () => {
     const { r, container } = makeRenderer();
     r.handleEvent(userEvent("go"));
