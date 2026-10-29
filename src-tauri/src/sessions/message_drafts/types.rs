@@ -68,6 +68,13 @@ pub struct DraftVariant {
     /// new platform needs no code; the panel groups case-insensitively.
     #[serde(default)]
     pub platform: Option<String>,
+    /// Claude posted this variant itself (`write_draft` `sent`). Per variant
+    /// because one card can hold wordings for different recipients: sending
+    /// one must not retire the sibling still waiting on the user. Not exported
+    /// to TS: nothing in the webview reads it yet.
+    #[serde(default)]
+    #[ts(skip)]
+    pub sent: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]

@@ -225,16 +225,28 @@ pub(crate) fn write_draft_in(
             return Ok(json!({"ok": true, "dropped": full}));
         }
         "sent" => {
-            // Reuses `Copied`, the state the panel already draws as the paper
-            // plane: the draft stays visible as sent instead of vanishing as a
-            // drop would, and the injection skips it exactly as for a Copy click.
+            // Marks the named wording (`recipient`, or the handle in `id`, e.g.
+            // "Bruno #2") and nothing else; no name means every wording. The card
+            // reuses `Copied`, the state the panel already draws as the paper
+            // plane, once nothing on it is still waiting on the user: it stays
+            // visible as sent instead of vanishing as a drop would, and the
+            // injection skips it exactly as for a Copy click.
             let full = resolve_id(root, &project_id, &id)?;
+            let who = recipient_from(root, &project_id, &id, &recipient);
             let sent = match root {
-                Some(r) => store::set_state_at(&store::draft_path(r, &project_id), &full, DraftState::Copied)?,
-                None => store::set_state(&project_id, &full, DraftState::Copied)?,
+                Some(r) => store::mark_variant_sent_at(&store::draft_path(r, &project_id), &full, &who)?,
+                None => store::mark_variant_sent(&project_id, &full, &who)?,
+            };
+            // Names the wording that went out so the transcript card shows it
+            // rather than guessing from the draft's last variant. A bare id on a
+            // one-wording draft names that wording; on several it names none.
+            let sent_recipient = match (who.trim(), sent.variants.as_slice()) {
+                ("", [only]) => Some(only.recipient.clone()),
+                ("", _) => None,
+                (named, vs) => vs.iter().find(|v| v.recipient.trim().eq_ignore_ascii_case(named)).map(|v| v.recipient.clone()),
             };
             publish_changed(state, &project_id);
-            return Ok(json!({"ok": true, "sent": sent}));
+            return Ok(json!({"ok": true, "sent": sent, "sent_recipient": sent_recipient}));
         }
         other => return Err(format!("unknown action: {other} (want add|revise|variant|drop|sent)")),
     };
@@ -369,6 +381,57 @@ mod tests {
         let left = list_at_path(root.path());
         assert_eq!(left.len(), 1, "sent must not remove the draft");
         assert_eq!(left[0].state, DraftState::Copied);
+    }
+
+    #[test]
+    fn sent_marks_only_the_named_variant_and_leaves_the_sibling_open() {
+        let root = tempfile::tempdir().unwrap();
+        let state = registered();
+        let added = write_draft_at(Some(root.path()), &state, "s1", "add", &json!({"topic": "t", "recipient": "Bruno", "body": "for bruno"})).unwrap();
+        let id = added["draft"]["id"].as_str().unwrap().to_string();
+        write_draft_at(Some(root.path()), &state, "s1", "variant", &json!({"id": id, "recipient": "Ana", "body": "for ana"})).unwrap();
+
+        let v = write_draft_at(Some(root.path()), &state, "s1", "sent", &json!({"id": id, "recipient": "Bruno"})).unwrap();
+        assert_eq!(v["sent_recipient"], "Bruno");
+        assert_eq!(v["sent"]["state"], "needs-you", "Ana's wording is still waiting on the user");
+        let left = list_at_path(root.path());
+        let sent_flags: Vec<(String, bool)> = left[0].variants.iter().map(|x| (x.recipient.clone(), x.sent)).collect();
+        assert_eq!(sent_flags, [("Bruno".to_string(), true), ("Ana".to_string(), false)]);
+
+        let injected = inject::render_for_injection_at(Some(root.path()), &state, "s1").expect("the draft is still open");
+        assert!(injected.contains("Ana #1"), "got {injected}");
+        assert!(!injected.contains("Bruno #1"), "the sent wording drops out of the open list: {injected}");
+
+        // The handle in `id` names the wording too, and sending the last one closes the card.
+        let v = write_draft_at(Some(root.path()), &state, "s1", "sent", &json!({"id": "Ana #1"})).unwrap();
+        assert_eq!(v["sent_recipient"], "Ana");
+        assert_eq!(v["sent"]["state"], "copied");
+        assert!(inject::render_for_injection_at(Some(root.path()), &state, "s1").is_none());
+    }
+
+    #[test]
+    fn sent_with_no_name_on_a_multi_variant_draft_marks_every_wording() {
+        let root = tempfile::tempdir().unwrap();
+        let state = registered();
+        let added = write_draft_at(Some(root.path()), &state, "s1", "add", &json!({"topic": "t", "recipient": "Bruno", "body": "a"})).unwrap();
+        let id = added["draft"]["id"].as_str().unwrap().to_string();
+        write_draft_at(Some(root.path()), &state, "s1", "variant", &json!({"id": id, "recipient": "Ana", "body": "b"})).unwrap();
+        let v = write_draft_at(Some(root.path()), &state, "s1", "sent", &json!({"id": id})).unwrap();
+        assert_eq!(v["sent"]["state"], "copied");
+        assert!(v["sent_recipient"].is_null());
+        assert!(list_at_path(root.path())[0].variants.iter().all(|x| x.sent));
+    }
+
+    #[test]
+    fn revising_a_sent_variant_reopens_it() {
+        let root = tempfile::tempdir().unwrap();
+        let state = registered();
+        let added = write_draft_at(Some(root.path()), &state, "s1", "add", &json!({"topic": "t", "recipient": "Bruno", "body": "a"})).unwrap();
+        let id = added["draft"]["id"].as_str().unwrap().to_string();
+        write_draft_at(Some(root.path()), &state, "s1", "sent", &json!({"id": id})).unwrap();
+        write_draft_at(Some(root.path()), &state, "s1", "revise", &json!({"id": id, "body": "a2"})).unwrap();
+        let d = &list_at_path(root.path())[0];
+        assert_eq!((d.state, d.variants[0].sent), (DraftState::NeedsYou, false));
     }
 
     #[test]
