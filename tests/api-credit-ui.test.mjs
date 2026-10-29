@@ -3,10 +3,15 @@
 // The API-credit account kind where the frontend draws it: the account badge,
 // the dashboard meter line, and the live status watcher it reads.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { apiMock } = vi.hoisted(() => ({
-  apiMock: { getApiCreditStatus: vi.fn(), onApiCreditStatusChanged: vi.fn() },
+  apiMock: {
+    getApiCreditStatus: vi.fn(),
+    onApiCreditStatusChanged: vi.fn(),
+    addApiCreditAccount: vi.fn(),
+    replaceApiCreditKey: vi.fn(),
+  },
 }));
 vi.mock("../src/shared/api.ts", () => ({ api: apiMock }));
 const { openReplaceMock } = vi.hoisted(() => ({ openReplaceMock: vi.fn() }));
@@ -200,4 +205,112 @@ describe("account chip", () => {
     expect(accountChipHtml(credit)).toMatch(/<span class="cam-credit-hint">API credit<\/span><\/span>$/);
     expect(accountChipHtml(sub)).not.toContain("cam-credit-hint");
   });
+});
+
+describe("API-key modals while a save is in flight", () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let modals;
+
+  // The file mocks the modal module for the row tests above; these tests drive
+  // the real one.
+  beforeEach(async () => {
+    modals ??= await vi.importActual("../src/views/settings/subviews/accounts/add-api-credit-modal.ts");
+    apiMock.addApiCreditAccount.mockReset();
+    apiMock.replaceApiCreditKey.mockReset();
+  });
+
+  // closeHostCard tears the card down on a 150ms timer; the next test's card
+  // must not be cleared by the previous test's timer.
+  afterEach(async () => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await sleep(200);
+    document.getElementById("modal-host")?.remove();
+  });
+
+  const card = () => document.querySelector(".aikm-modal-card");
+
+  async function mountCard(open) {
+    const result = open();
+    let settled = false;
+    result.then(() => { settled = true; });
+    await vi.waitFor(() => expect(card()?.querySelector("input")).toBeTruthy());
+    return { result, isSettled: () => settled };
+  }
+
+  function type(selector, value) {
+    const input = card().querySelector(selector);
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  const pressEscape = () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+  const clickBackdrop = () => document.querySelector("#modal-host .modal-backdrop").click();
+  const cancelButton = () => card().querySelector(".btn-secondary");
+
+  const cases = [
+    {
+      name: "Add API-credit",
+      open: () => modals.openAddApiCreditModal(),
+      fill: () => { type("#aacm-label", "Credit"); type("#aacm-key", "sk-ant-x"); },
+      save: ".aacm-save-btn",
+      mock: () => apiMock.addApiCreditAccount,
+      okValue: credit,
+      cancelled: null,
+    },
+    {
+      name: "Replace API key",
+      open: () => modals.openReplaceApiKeyModal({ id: "acct-credit", label: "API credit" }),
+      fill: () => type("#rapk-key", "sk-ant-y"),
+      save: ".rapk-save-btn",
+      mock: () => apiMock.replaceApiCreditKey,
+      okValue: undefined,
+      cancelled: false,
+    },
+  ];
+
+  for (const c of cases) {
+    describe(c.name, () => {
+      it("ignores Escape, the backdrop and Cancel while saving, then resolves with the saved result", async () => {
+        let finish;
+        c.mock().mockReturnValue(new Promise((r) => { finish = r; }));
+        const { result, isSettled } = await mountCard(c.open);
+        c.fill();
+        card().querySelector(c.save).click();
+        await vi.waitFor(() => expect(c.mock()).toHaveBeenCalledTimes(1));
+
+        expect(cancelButton().disabled).toBe(true);
+        cancelButton().click();
+        pressEscape();
+        clickBackdrop();
+        await sleep(200);
+        expect(isSettled()).toBe(false);
+        expect(card()).toBeTruthy();
+
+        finish(c.okValue);
+        const value = await result;
+        expect(value).toEqual(c.name === "Replace API key" ? true : credit);
+      });
+
+      it("closes on Escape, the backdrop and Cancel while idle", async () => {
+        for (const dismiss of [pressEscape, clickBackdrop, () => cancelButton().click()]) {
+          const { result } = await mountCard(c.open);
+          dismiss();
+          expect(await result).toBe(c.cancelled);
+          await sleep(200);
+        }
+      });
+
+      it("shows the error, re-enables Cancel and stays open when the save fails", async () => {
+        c.mock().mockRejectedValue(new Error("Anthropic said no"));
+        const { result, isSettled } = await mountCard(c.open);
+        c.fill();
+        card().querySelector(c.save).click();
+        await vi.waitFor(() => expect(card().querySelector(".aikm-error")?.textContent).toContain("Anthropic said no"));
+        expect(isSettled()).toBe(false);
+        expect(cancelButton().disabled).toBe(false);
+        cancelButton().click();
+        expect(await result).toBe(c.cancelled);
+      });
+    });
+  }
 });
