@@ -1,6 +1,7 @@
 // Reviewed 2026-10-25 (desktop split): mountDraftsPanel gained an optional open-count callback for the split strip; this spec mounts without it, so its contract is unaffected.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
+import { expectIconButtonsCentred } from "./icon-centering";
 import { shotDir } from "./shot-dir";
 
 // shotDir() resolves the running session's own id and creates the directory - never a
@@ -184,6 +185,7 @@ test("the list pins this chat's drafts and gives each person one row", async ({ 
   // both people a row.
   await expect(panel.locator(".dr-person .dr-person-name")).toHaveText(["Bruno", "Ana", "Marko"]);
   await expect(panel.locator(".dr-person").first().locator(".dr-count")).toHaveText("1");
+  await expectIconButtonsCentred(page);
 });
 
 test("opening a card renders the markdown as real formatting, not markers", async ({ page }) => {
@@ -197,6 +199,7 @@ test("opening a card renders the markdown as real formatting, not markers", asyn
   await expect(body.locator("li")).toHaveCount(2);
   await expect(panel.locator(".dr-title")).toHaveText("Sprint slip heads-up");
   await expect(body).toHaveAttribute("contenteditable", "true");
+  await expectIconButtonsCentred(page);
 });
 
 test("an edit round-trips to the store as markdown and comes back as a your-edit version", async ({ page }) => {

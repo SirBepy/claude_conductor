@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
+import { expectIconButtonsCentred } from "./icon-centering";
 
 // Todo 692, "Your Todos" panel. Drives the REAL panel UI, not internal state.
 // The harness's invoke map is fixed at mount, so these specs swap in a stateful
@@ -126,6 +127,7 @@ test("default view is one This chat list, and a sibling chat's card is not in it
 
   // Backticks in a card's text render as a real code span.
   await expect(panel.locator(".td-card .td-text code").first()).toHaveText("Workers:Edit");
+  await expectIconButtonsCentred(page);
 });
 
 test("the Columns menu puts Project wide on the board and derives the sibling card into it", async ({ page }) => {

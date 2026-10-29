@@ -3,6 +3,7 @@ import { test, expect, type Page } from "@playwright/test";
 // Reviewed 2026-10-27 (dash-cards.ts gained a segmented-bar branch, drawn only for a card whose result carries `segments`; this spec's fixtures carry none, and it passed unchanged).
 // asserts: src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/dashboard-page.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/dash-sections.ts, src/views/sessions/project-dashboard/dash-cards.ts, src/views/sessions/project-dashboard/dash-reports.ts, src/views/sessions/project-dashboard/dash-header.ts, src/views/sessions/project-dashboard/dash-modals.ts, src/views/sessions/project-dashboard/dash-menu.ts, src/views/sessions/project-dashboard/dash-chats.ts, src/views/sessions/project-dashboard/dash-usage.ts, src/views/sessions/project-dashboard/dash-todo-chart.ts, src/views/sessions/project-dashboard/quick-track.ts, src/views/sessions/project-dashboard/paging.ts, src/views/sessions/session-header.ts, src/views/sessions/pending-pane.ts, src/views/sessions/session-controls.ts, src/views/sessions/state.ts
 import { capture, fireEvent, mountSessionsList, sessionInstance, waitForStableBox } from "./harness";
+import { expectIconButtonsCentred } from "./icon-centering";
 import {
   CONDUCTOR_CWD, LIST_ROWS, ZIRTUE_CWDS, conductorHistory, conductorSnapshot, fakeShot, zirtueHistory, zirtueSnapshot,
 } from "./project-dashboard-fixtures";
@@ -148,6 +149,7 @@ test.describe("view-harness / project dashboard", () => {
     expect(gap).toBeLessThan(1);
     await page.waitForTimeout(250);
     await capture(page, "dashboard-page-conductor");
+    await expectIconButtonsCentred(page);
 
     await root.locator("[data-pd-back]").click();
     await expect(page.locator(".pd-root")).toHaveCount(0);
