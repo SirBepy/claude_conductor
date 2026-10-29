@@ -11,22 +11,29 @@ impl DaemonState {
     /// marks a fire-and-forget AskUserQuestion prompt, whose turn ends the
     /// instant the card posts, so `expire_prompts_for_session` must skip it.
     pub async fn add_prompt(&self, id: &str, event: &str, payload: Value, durable: bool) {
-        self.pending_prompts.lock().await.insert(
-            id.to_string(),
-            serde_json::json!({ "id": id, "event": event, "payload": payload, "durable": durable }),
-        );
+        let record = serde_json::json!({ "id": id, "event": event, "payload": payload, "durable": durable });
+        let persist = pending_questions::is_durable_question(&record);
+        self.pending_prompts.lock().await.insert(id.to_string(), record);
+        if persist {
+            self.persist_pending_questions().await;
+        }
     }
 
     /// Drop an open prompt once it has been answered or timed out. The last
     /// one in its chat also clears the phone's banner for that chat.
     pub async fn remove_prompt(&self, id: &str) {
-        let resolved = {
+        let (resolved, was_durable_question) = {
             let mut prompts = self.pending_prompts.lock().await;
-            prompts
-                .remove(id)
+            let removed = prompts.remove(id);
+            let durable = removed.as_ref().is_some_and(pending_questions::is_durable_question);
+            let resolved = removed
                 .and_then(|v| v["payload"]["session_id"].as_str().map(str::to_string))
-                .filter(|sid| !any_prompt_for(&prompts, sid))
+                .filter(|sid| !any_prompt_for(&prompts, sid));
+            (resolved, durable)
         };
+        if was_durable_question {
+            self.persist_pending_questions().await;
+        }
         if let Some(sid) = resolved {
             self.fire_prompts_resolved(&sid);
         }
@@ -97,6 +104,32 @@ impl DaemonState {
             return None;
         }
         awaiting
+    }
+
+    /// The `awaiting` value a turn-end writer should store for `session_id`,
+    /// given the status the turn `reported`. While a question card is open the
+    /// session needs Joe's input, so that outranks done/working/waiting/None -
+    /// a Stop or result line for the turn that posted the card would otherwise
+    /// overwrite `"question"` and the chat would read "done" over an open
+    /// card. With no card open, an unbacked `"question"` report is dropped
+    /// (`drop_unbacked_question_report`) and anything else passes unchanged.
+    pub async fn settled_awaiting_for(&self, session_id: &str, reported: Option<String>) -> Option<String> {
+        if self.session_has_pending_question(session_id).await {
+            return Some("question".to_string());
+        }
+        self.drop_unbacked_question_report(session_id, reported).await
+    }
+
+    /// `cancel_turn`'s awaiting reset: the interrupted turn's verdict is dead
+    /// so `awaiting` clears, open prompts for the session are swept, and then
+    /// any question card that survived the sweep (a durable one) puts
+    /// `"question"` back, because the card still waits on Joe.
+    pub async fn settle_awaiting_after_cancel(&self, session_id: &str) {
+        self.registry.set_awaiting(session_id, None);
+        self.expire_prompts_for_session(session_id).await;
+        if self.session_has_pending_question(session_id).await {
+            self.registry.set_awaiting(session_id, Some("question".to_string()));
+        }
     }
 
     /// Snapshot of all open prompts, for the app's `list_pending_prompts` poll.
@@ -338,6 +371,69 @@ mod tests {
         st.add_prompt("q1", "question-requested", serde_json::json!({"session_id": "s1", "seq": 1}), true).await;
         let kept = st.drop_unbacked_question_report("s1", Some("question".into())).await;
         assert_eq!(kept.as_deref(), Some("question"));
+    }
+
+    /// While a question card is open the settled status is "question", whatever
+    /// the turn reported.
+    #[tokio::test]
+    async fn an_open_question_card_overrides_every_reported_status() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        st.add_prompt("q1", "question-requested", serde_json::json!({"session_id": "s1", "seq": 1}), true).await;
+        for reported in [Some("done"), Some("working"), Some("waiting"), Some("question"), None] {
+            let settled = st.settled_awaiting_for("s1", reported.map(String::from)).await;
+            assert_eq!(settled.as_deref(), Some("question"), "reported {reported:?}");
+        }
+        // Another chat's card does not count.
+        assert_eq!(st.settled_awaiting_for("s2", Some("done".into())).await.as_deref(), Some("done"));
+    }
+
+    /// With no card open the report is unchanged, except that a "question"
+    /// with nothing backing it is still dropped.
+    #[tokio::test]
+    async fn with_no_open_card_the_reported_status_is_unchanged() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        assert_eq!(st.settled_awaiting_for("s1", Some("done".into())).await.as_deref(), Some("done"));
+        assert_eq!(st.settled_awaiting_for("s1", None).await, None);
+        assert_eq!(st.settled_awaiting_for("s1", Some("question".into())).await, None);
+        st.add_prompt("p1", "permission-requested", serde_json::json!({"session_id": "s1"}), false).await;
+        assert_eq!(st.settled_awaiting_for("s1", Some("done".into())).await.as_deref(), Some("done"));
+    }
+
+    fn state_with_session(sid: &str) -> Arc<DaemonState> {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        st.registry.record_interactive_session(sid, std::path::Path::new("/tmp/x"), &settings, "2026-10-29T00:00:00Z");
+        st
+    }
+
+    /// Interrupt with a durable card open: the sweep skips it, so the status
+    /// goes back to "question" instead of staying cleared.
+    #[tokio::test]
+    async fn cancel_keeps_question_awaiting_for_a_surviving_durable_card() {
+        let st = state_with_session("s1");
+        st.registry.set_awaiting("s1", Some("question".into()));
+        st.add_prompt("q1", "question-requested", serde_json::json!({"session_id": "s1"}), true).await;
+
+        st.settle_awaiting_after_cancel("s1").await;
+
+        assert_eq!(st.registry.get("s1").unwrap().awaiting.as_deref(), Some("question"));
+        assert_eq!(st.list_prompts().await.len(), 1, "the durable card survives the cancel");
+    }
+
+    /// A blocking (non-durable) question dies with the cancel, and so does
+    /// the status that pointed at it.
+    #[tokio::test]
+    async fn cancel_clears_awaiting_when_no_card_survives() {
+        let st = state_with_session("s1");
+        st.registry.set_awaiting("s1", Some("question".into()));
+        st.add_prompt("q1", "question-requested", serde_json::json!({"session_id": "s1"}), false).await;
+
+        st.settle_awaiting_after_cancel("s1").await;
+        assert_eq!(st.registry.get("s1").unwrap().awaiting, None);
+
+        st.registry.set_awaiting("s1", Some("waiting".into()));
+        st.settle_awaiting_after_cancel("s1").await;
+        assert_eq!(st.registry.get("s1").unwrap().awaiting, None);
     }
 
     /// Non-"question" reports (and None) are never touched by this guard.

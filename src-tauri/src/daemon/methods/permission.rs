@@ -37,6 +37,50 @@ async fn settle_prompt(state: &Arc<DaemonState>, request_id: &str, clear_awaitin
     }
 }
 
+/// Opening of the marker the question card's answer message leads with:
+/// `<auq-answer id="<prompt id>"/>` (`auqAnswerSentinel` in
+/// `chat-event-to-message.ts`). A bare `<auq-answer/>` from old transcripts has
+/// no id and never matches.
+const AUQ_ANSWER_ID_OPEN: &str = "<auq-answer id=\"";
+
+/// Every prompt id named by an `<auq-answer id="..."/>` marker in `text`.
+fn auq_answer_ids(text: &str) -> Vec<&str> {
+    let mut ids = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(AUQ_ANSWER_ID_OPEN) {
+        let after = &rest[start + AUQ_ANSWER_ID_OPEN.len()..];
+        let Some(end) = after.find("\"/>") else { break };
+        let id = &after[..end];
+        if !id.is_empty() && !id.contains('"') {
+            ids.push(id);
+        }
+        rest = &after[end..];
+    }
+    ids
+}
+
+/// Settles the question card(s) a user message answers. The card's answer
+/// travels as an ordinary user message, and its `respond_question` call is a
+/// separate request that can fail (a phone transport blip) while the message
+/// still lands - leaving the daemon holding a card the transcript shows as
+/// answered. So every send path calls this before the turn starts: each
+/// `<auq-answer id="X"/>` whose X is a question still open for THIS session is
+/// settled like a non-skipped `respond_question` (record dropped, `question`
+/// awaiting cleared unless a sibling is open), minus delivering the answers
+/// in-band, because the message itself is the delivery. An id that is not
+/// pending, or belongs to another session, is a no-op.
+pub(crate) async fn settle_answered_questions(state: &Arc<DaemonState>, session_id: &str, text: &str) {
+    for id in auq_answer_ids(text) {
+        if state.prompt_session_id(id).await.as_deref() != Some(session_id) {
+            continue;
+        }
+        if state.prompt_event(id).await.as_deref() != Some("question-requested") {
+            continue;
+        }
+        settle_prompt(state, id, true).await;
+    }
+}
+
 /// How long the answered-question bridge may stand before it is withdrawn.
 /// Covers the desktop's respawn-and-retry send (a dead child is revived before
 /// `send_message` ever runs), which takes seconds, not minutes.
@@ -323,6 +367,86 @@ mod answer_bridge_tests {
 
         assert!(!respond_question_inner(&state, "q1", json!({}), false).await);
         assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some("working"));
+    }
+
+    fn sentinel(id: &str) -> String {
+        format!("<auq-answer id=\"{id}\"/>User answered the question(s):\nQ: pick one\nA: first")
+    }
+
+    /// The respond_question call can fail while the answer message still
+    /// lands; the send path must then drop the card itself.
+    #[tokio::test]
+    async fn a_send_carrying_an_answer_marker_settles_the_open_card() {
+        let state = state_with_idle_session("s");
+        state.registry.set_awaiting("s", Some("question".into()));
+        state.add_prompt("q1", "question-requested", json!({"session_id": "s"}), true).await;
+
+        settle_answered_questions(&state, "s", &sentinel("q1")).await;
+
+        assert!(state.list_prompts().await.is_empty(), "the answered card must be gone");
+        assert_eq!(state.registry.get("s").unwrap().awaiting, None);
+    }
+
+    #[tokio::test]
+    async fn an_answer_marker_keeps_question_awaiting_while_a_sibling_card_is_open() {
+        let state = state_with_idle_session("s");
+        state.registry.set_awaiting("s", Some("question".into()));
+        state.add_prompt("q1", "question-requested", json!({"session_id": "s", "seq": 1}), true).await;
+        state.add_prompt("q2", "question-requested", json!({"session_id": "s", "seq": 2}), true).await;
+
+        settle_answered_questions(&state, "s", &sentinel("q1")).await;
+
+        let left: Vec<String> =
+            state.list_prompts().await.iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(left, ["q2"]);
+        assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some("question"));
+    }
+
+    #[tokio::test]
+    async fn an_answer_marker_for_an_unknown_id_is_a_no_op() {
+        let state = state_with_idle_session("s");
+        state.registry.set_awaiting("s", Some("question".into()));
+        state.add_prompt("q1", "question-requested", json!({"session_id": "s"}), true).await;
+
+        settle_answered_questions(&state, "s", &sentinel("ghost")).await;
+
+        assert_eq!(state.list_prompts().await.len(), 1);
+        assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some("question"));
+    }
+
+    /// A plain composer message never drops an open card, and neither does a
+    /// bare marker from an old transcript.
+    #[tokio::test]
+    async fn a_message_without_an_answer_marker_leaves_the_card_alone() {
+        let state = state_with_idle_session("s");
+        state.registry.set_awaiting("s", Some("question".into()));
+        state.add_prompt("q1", "question-requested", json!({"session_id": "s"}), true).await;
+
+        settle_answered_questions(&state, "s", "just a normal message").await;
+        settle_answered_questions(&state, "s", "<auq-answer/>User answered the question(s)").await;
+
+        assert_eq!(state.list_prompts().await.len(), 1);
+        assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some("question"));
+    }
+
+    /// A marker naming another chat's card must not settle it from here.
+    #[tokio::test]
+    async fn an_answer_marker_cannot_settle_another_sessions_card() {
+        let state = state_with_idle_session("s");
+        state.add_prompt("q1", "question-requested", json!({"session_id": "other"}), true).await;
+
+        settle_answered_questions(&state, "s", &sentinel("q1")).await;
+
+        assert_eq!(state.list_prompts().await.len(), 1);
+    }
+
+    #[test]
+    fn answer_marker_ids_are_read_from_anywhere_in_the_text() {
+        assert_eq!(auq_answer_ids(&sentinel("abc-1")), ["abc-1"]);
+        assert_eq!(auq_answer_ids("x <auq-answer id=\"a\"/> y <auq-answer id=\"b\"/>"), ["a", "b"]);
+        assert!(auq_answer_ids("<auq-answer/>").is_empty());
+        assert!(auq_answer_ids("<auq-answer id=\"\"/>").is_empty());
+        assert!(auq_answer_ids("<auq-answer id=\"unterminated").is_empty());
     }
 
     #[tokio::test]

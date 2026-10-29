@@ -18,6 +18,7 @@ use std::sync::{Arc, OnceLock};
 use tokio::sync::{oneshot, Mutex, Notify};
 
 mod commit_lock;
+mod pending_questions;
 mod prompts;
 mod step_comments;
 pub mod subagents;
@@ -106,6 +107,14 @@ pub struct DaemonState {
     /// so this lets callers tell a genuinely newer question apart from a
     /// stale/ghost one for the same session.
     prompt_seq: AtomicU64,
+    /// Where durable question cards are persisted (`state::pending_questions`).
+    /// Unset until `init_pending_questions` runs, so tests and the app-side
+    /// state never write a file.
+    pending_questions_path: OnceLock<std::path::PathBuf>,
+    /// Version stamped on each save's snapshot and the last one written, so a
+    /// save that lost a race never overwrites a newer file.
+    pending_questions_version: AtomicU64,
+    pending_questions_written: std::sync::Mutex<u64>,
     /// This daemon's machine identity + paired peers (multi-machine
     /// federation). `None` until [`DaemonState::init_machines`] runs at
     /// daemon startup (needs `app_data`, unknown at construction) - mirrors
@@ -183,6 +192,9 @@ impl DaemonState {
             draft_store: DraftStore::new(),
             start_tokens: crate::daemon::start_tokens::StartTokens::new(),
             prompt_seq: AtomicU64::new(0),
+            pending_questions_path: OnceLock::new(),
+            pending_questions_version: AtomicU64::new(0),
+            pending_questions_written: std::sync::Mutex::new(0),
             machines: OnceLock::new(),
             mirror: Arc::new(crate::daemon::machines::MirrorState::new()),
             hub: Arc::new(crate::daemon::machines::MachineHub::new()),

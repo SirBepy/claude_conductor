@@ -85,6 +85,12 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // subscriptions persisted under app_data.
     state.init_push(app_data.clone());
 
+    // Durable question cards come back before the hooks server or any RPC
+    // serves, so the first `list_pending_prompts` poll already sees them. The
+    // registry is not restored yet; `reconcile_pending_questions` below drops
+    // the cards of sessions that did not survive.
+    state.init_pending_questions(&app_data).await;
+
     let mut router = Router::new();
     health::register(&mut router);
     methods::register(&mut router, state.clone());
@@ -251,6 +257,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
             chrono::Utc::now().timestamp_millis(),
         );
         let restored = crate::sessions::persistence::populate_registry(&state.registry, snapshot);
+        state.reconcile_pending_questions().await;
         if restored > 0 {
             log::info!("restored {restored} interactive session(s) from snapshot");
             crate::daemon::machines::publish_instances_changed(&state);

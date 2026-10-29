@@ -375,7 +375,7 @@ pub(crate) async fn run_stdout_pump(
                                         );
                                     }
                                     let awaiting = state_for_pump
-                                        .drop_unbacked_question_report(&pump_session.session_id, awaiting)
+                                        .settled_awaiting_for(&pump_session.session_id, awaiting)
                                         .await;
                                     state_for_pump.registry.set_awaiting_if_gen(
                                         &pump_session.session_id,

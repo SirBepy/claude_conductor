@@ -161,6 +161,7 @@ pub(super) async fn send_message(
     // the pump's `mark_turn_live` fired off the CLI's first live stdout line,
     // leaving the exact race todo 873 closed for desktop still open on the
     // phone's send path (todo 885).
+    crate::daemon::methods::permission::settle_answered_questions(&ctx.state, &id, &body.text).await;
     ctx.state.registry.set_awaiting(&id, None);
     ctx.state.registry.set_busy(&id, true);
     crate::sessions::chat_state::set_busy(&id, true);

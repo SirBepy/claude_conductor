@@ -22,6 +22,7 @@ import { changeCharacterForSession, changeAccountForSession } from "./active-ses
 import { isAutoAccept, isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar, replayPendingPrompt, rehydrateAndReplay, pendingPromptSessionIds, dismissQuestionCard } from "./permission-modal";
 import { snapshotActiveCardDraft } from "./permission-modal/question-ui";
 import { savePendingPromptDraft } from "./permission-modal/gating";
+import { expandActiveCard, hasActiveCardForSession } from "./permission-modal/question-state";
 import { SessionHeader, projectDashboardOpener } from "./session-header";
 import { closeCodeMode } from "./code-mode/code-mode";
 import { setCodeModeChatProvider } from "./code-mode/entry";
@@ -155,7 +156,15 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   // Set before the same-session early return so re-tapping the open chat from
   // the list overlay still switches away from the list.
   document.querySelector(".view-sessions")?.setAttribute("data-mobile-pane", "chat");
-  if (state.selectedId === sessionId) return;
+  if (state.selectedId === sessionId) {
+    // Re-opening the chat already on screen (the phone's list-to-chat tap, a
+    // sidebar click): nothing remounts, so a question card left collapsed by an
+    // earlier minimize or back press has to be brought back here, and a prompt
+    // the window never surfaced is looked up the same way a fresh open does.
+    if (hasActiveCardForSession(sessionId)) expandActiveCard({ sessionId });
+    else if (!replayPendingPrompt(sessionId)) void rehydrateAndReplay(sessionId);
+    return;
+  }
   // Snapshot any in-progress AUQ answer before the pane is replaced, so it
   // survives the session switch even if another session also gets an AUQ.
   if (state.selectedId) {
