@@ -122,11 +122,15 @@ export async function noAccountsRegistered(config: SessionConfig): Promise<boole
   return accounts !== null && accounts.length === 0;
 }
 
-/** Remember this chat's model/effort as the project's next default, and bind
+/** Remember this chat's model/effort as the project's last choice, and bind
  *  its account to the project when it differs from the current binding, so
- *  the next draft here opens on it. Best-effort: never blocks the send. The
- *  phone can't write settings or projects, but a paired
- *  machine's binding is a forwarded write the phone may make. */
+ *  the next draft here opens on that account. The last choice never drives a
+ *  new draft's model/effort (the project's or the global default does, see
+ *  resolveDefaultChoice); it feeds an external session's effort display
+ *  (active-session-mount.ts) and a takeover's model (ipc/chat/lifecycle.rs).
+ *  Best-effort: never blocks the send. The phone can't write settings or
+ *  projects, but a paired machine's binding is a forwarded write the phone
+ *  may make. */
 export async function persistNewChatChoice(projectPath: string, config: SessionConfig): Promise<void> {
   if (!isRemote()) {
     try {
