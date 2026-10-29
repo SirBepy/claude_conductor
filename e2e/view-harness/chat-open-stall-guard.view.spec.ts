@@ -60,6 +60,37 @@ test.describe("view-harness / chat-open stall guard", () => {
     await expect(page.locator("#session-pane .session-messages")).toBeVisible();
   });
 
+  // A load that is slow but does finish (Joe's 26s open, 2026-10-29): the
+  // banner used to be written INTO .session-messages, so the late transcript
+  // appended under it and the banner stayed stuck above the chat for good.
+  test("a slow load that finishes clears the stall banner and shows the transcript", async ({ page }) => {
+    test.setTimeout(600000);
+    await mountChat(page);
+    await page.evaluate(() => {
+      const tauri = (window as unknown as { __TAURI__: any }).__TAURI__;
+      const passthrough = tauri.core.invoke;
+      const late = {
+        events: [{ type: "assistant_message", content: [{ type: "text", text: "late reply" }], streaming: false, timestamp: 0 }],
+        oldest_seq: 0, newest_seq: 0, has_more: false,
+      };
+      tauri.core.invoke = (cmd: string, args: any) =>
+        cmd === "load_history_page"
+          ? new Promise((resolve) => setTimeout(() => resolve(late), 9500))
+          : passthrough(cmd, args);
+    });
+
+    await page.locator("#sessions-list li[data-session-id]").first().click();
+    await expect(page.locator(".chat-load-stalled")).toBeVisible({ timeout: 600000 });
+    // Outside the transcript: inside it, the bulk render's opacity hold hid it
+    // and its appends stacked the chat under it.
+    // One-shot count, not an auto-retrying toHaveCount: the late page wipes
+    // the old in-transcript banner within the retry window and would pass.
+    expect(await page.locator("#session-pane .session-messages .chat-load-stalled").count()).toBe(0);
+
+    await expect(page.locator("#session-pane .session-messages")).toContainText("late reply", { timeout: 600000 });
+    await expect(page.locator(".chat-load-stalled")).toHaveCount(0);
+  });
+
   test("a healthy mount never flashes the stall screen", async ({ page }) => {
     await mountChat(page);
     await page.evaluate((transcript) => {

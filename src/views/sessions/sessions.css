@@ -197,13 +197,16 @@
   font-size: 1.8rem;
 }
 
-/* Chat-open stall error (ai_todo 226): painted into .session-messages by the
-   selectSession watchdog when the backend doesn't answer within 8s. */
+/* Chat-open stall error (ai_todo 226): placed just above .session-messages by
+   the mountRenderer watchdog when the load hasn't settled within 8s, and
+   removed when it does. The padding stands in for the vertical centring it
+   had inside the messages pane. */
 .chat-load-stalled {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
+  padding: 24px 0;
 }
 
 .chat-load-retry {

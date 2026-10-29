@@ -95,6 +95,23 @@ pub async fn frontend_ping(app: AppHandle, raf_tick: u64) {
     }
 }
 
+/// Writes a webview `[perf]` line (src/shared/perf.ts) to the app log. Release
+/// builds have no devtools, so without this a slow chat open on the installed
+/// app leaves no trace of which phase was slow. Capped so a runaway caller
+/// cannot flood the log with one giant line.
+#[tauri::command]
+pub async fn log_webview_perf(window: tauri::Window, line: String) {
+    log::warn!(target: "webview_perf", "[{}] {}", window.label(), clip_log_line(&line));
+}
+
+fn clip_log_line(line: &str) -> &str {
+    const MAX: usize = 500;
+    match line.char_indices().nth(MAX) {
+        Some((idx, _)) => &line[..idx],
+        None => line,
+    }
+}
+
 #[tauri::command]
 pub async fn get_app_version(app: AppHandle) -> String {
     if option_env!("CI").is_none() {
@@ -220,6 +237,15 @@ fn load_or_record_install_date(current_version: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
+
+    #[test]
+    fn webview_perf_lines_are_clipped_on_a_char_boundary() {
+        assert_eq!(super::clip_log_line("short"), "short");
+        let long = "é".repeat(600);
+        let clipped = super::clip_log_line(&long);
+        assert_eq!(clipped.chars().count(), 500);
+        assert!(long.starts_with(clipped));
+    }
 
     #[test]
     fn check_paths_exist_reports_each_path_independently() {
