@@ -95,6 +95,8 @@ export class HeldMessages {
   private map: Map<string, HeldItem[]>;
   private attached: HeldAttach | null = null;
   private deferredSid: string | null = null;
+  // Sessions mid-sendNow: reconcile() must not overwrite their local set (see there).
+  private sendingNow = new Set<string>();
   private deferRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private nextId = 1;
   private render = new HeldMessagesRender(this);
@@ -170,13 +172,16 @@ export class HeldMessages {
    *  message the user staged while the reconcile was in flight. */
   private reconcile(sessionId: string): Promise<void> {
     return this.sync.reconcile(sessionId, (serverItems) => {
+      // sendNow's claim emptied the daemon's list while the local items wait
+      // for the turn to end; merging that empty snapshot would wipe them. The
+      // items are re-pushed (or flushed) when sendNow settles.
+      if (this.sendingNow.has(sessionId)) return;
       const serverIds = new Set(serverItems.map((i) => i.id));
       const pendingLocal = (this.map.get(sessionId) ?? []).filter(
         (i) => this.sync.isPending(i.id) && !serverIds.has(i.id),
       );
       const merged = [...serverItems, ...pendingLocal];
       this.map.set(sessionId, merged);
-      this.sync.retainUnsynced(sessionId, merged.map((i) => i.id));
       this.persist();
       if (this.attached?.sessionId === sessionId) {
         this.render.renderChip();
@@ -198,7 +203,6 @@ export class HeldMessages {
       this.map.set(to, [...existing, ...items]);
     }
     this.map.delete(from);
-    this.sync.renameSession(from, to);
     this.persist();
     if (this.attached && this.attached.sessionId === from) {
       this.attached.sessionId = to;
@@ -257,13 +261,14 @@ export class HeldMessages {
   stageFor(sid: string, blocks: ContentBlock[]): boolean {
     const localId = this.nextId++;
     const list = this.map.get(sid) ?? [];
-    list.push({ id: localId, blocks });
+    const newItem: HeldItem = { id: localId, blocks };
+    list.push(newItem);
     this.map.set(sid, list);
     this.persist();
     if (this.attached?.sessionId === sid) this.attached.onChange();
     // Swap only fires on success; a failed add leaves localId as the
     // permanent fallback (see HeldDraftSync.add).
-    this.sync.add(sid, localId, blocks, (serverId) => {
+    this.sync.add(sid, newItem, (serverId) => {
       const item = this.map.get(sid)?.find((i) => i.id === localId);
       if (item) {
         item.id = serverId;
@@ -326,6 +331,17 @@ export class HeldMessages {
    *  own result line lands would write fresh stdin into a still-live child.
    *  Resolves false when the turn never ended - the set stays held. */
   async sendNow(): Promise<boolean> {
+    const sid = this.sid;
+    if (!sid) return false;
+    this.sendingNow.add(sid);
+    try {
+      return await this.runSendNow();
+    } finally {
+      this.sendingNow.delete(sid);
+    }
+  }
+
+  private async runSendNow(): Promise<boolean> {
     const a = this.attached;
     if (!a) return false;
     // Manual override supersedes the auto-rescue fuse outright - flush()
@@ -349,11 +365,21 @@ export class HeldMessages {
         // With `injected` known, only a confirmed injection counts: an id the
         // daemon never held (it restarted) must still be sent, not dropped.
         const injected = snapshot
-          .filter((i) => !removedSet.has(i.id) && !this.sync.isUnsynced(sid, i.id))
-          .filter((i) => !injectedSet || injectedSet.has(i.id))
-          .map((i) => i.id);
-        this.markDelivered(sid, injected);
-        if (injected.length > 0 && this.itemsForActive().length === 0 && a.isDraftEmpty()) {
+          .filter((i) => !removedSet.has(i.id) && !this.sync.isUnsynced(i))
+          .filter((i) => !injectedSet || injectedSet.has(i.id));
+        const injectedItems = new Set(injected);
+        this.dropDelivered(sid, (i) => injectedItems.has(i));
+        if (injected.length > 0) {
+          // The running turn just received a message, so interrupting would kill
+          // it before it acts. Whatever is still held (and the draft) waits for
+          // the turn's own end, where onCompletion flushes it.
+          const rest = this.itemsForActive();
+          if (rest.length > 0) this.repushHeld(sid);
+          if (!a.isDraftEmpty()) {
+            const draft = a.getDraftBlocks();
+            a.clearComposer();
+            if (draft.length > 0) this.stageFor(sid, draft);
+          }
           this.deferredSid = null;
           this.clearDeferRetry();
           this.render.reset();
@@ -388,7 +414,7 @@ export class HeldMessages {
    *  list but the send never happened. */
   private repushHeld(sid: string): void {
     for (const item of this.map.get(sid) ?? []) {
-      this.sync.add(sid, item.id, item.blocks, (serverId) => {
+      this.sync.add(sid, item, (serverId) => {
         item.id = serverId;
         this.persist();
         if (this.attached?.sessionId === sid) this.render.renderChip();
@@ -572,13 +598,18 @@ export class HeldMessages {
    *  Works for any session, mounted or not - a chat delivering a nudge in the
    *  background must not keep showing a chip for a message it already sent. */
   markDelivered(sid: string, ids: number[]): void {
+    const gone = new Set(ids);
+    this.dropDelivered(sid, (i) => gone.has(i.id));
+  }
+
+  /** markDelivered's removal, by predicate so sendNow can match the exact items
+   *  it judged injected (ids can collide between a failed item and a later one). */
+  private dropDelivered(sid: string, isGone: (i: HeldItem) => boolean): void {
     const list = this.map.get(sid);
     if (!list?.length) return;
-    const gone = new Set(ids);
-    const remaining = list.filter((i) => !gone.has(i.id));
+    const remaining = list.filter((i) => !isGone(i));
     if (remaining.length === list.length) return;
     this.map.set(sid, remaining);
-    this.sync.retainUnsynced(sid, remaining.map((i) => i.id));
     this.persist();
     if (this.attached?.sessionId === sid) {
       this.render.renderChip();
