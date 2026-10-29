@@ -32,13 +32,13 @@ export interface ApiCreditLine {
   /** `figures` led by "API credit ", for a row that names nothing else. */
   summary: string | null;
   /** The same figures as separate pieces, for a layout that gives each its
-   * own place: "$145.68", "$200", "Nov 2", "$54.31 of $200". `resets` is when
+   * own place: "$145.68", "$200", "Nov 2", "$54.31 of $200". `expires` is when
    * the grant tranche lapses (`expires_at`), which trails the Console's own
    * "Next credit" date: live 2026-10-29 the tranche said Nov 2 while the
    * Console page said Oct 31, and no field of the three reads carries that. */
   left: string | null;
   total: string | null;
-  resets: string | null;
+  expires: string | null;
   spend: string | null;
   /** Why the figures are missing or stale (Console not connected, session
    * expired, a failed fetch). */
@@ -53,16 +53,16 @@ const CONNECT_ERROR = /not connected|expired/i;
 
 export function apiCreditLine(status: ApiCreditStatus | null | undefined): ApiCreditLine {
   if (!status) {
-    return { figures: null, summary: null, left: null, total: null, resets: null, spend: null, error: null, needsConnect: false, blockReason: null };
+    return { figures: null, summary: null, left: null, total: null, expires: null, spend: null, error: null, needsConnect: false, blockReason: null };
   }
 
   const parts: string[] = [];
   const remaining = status.max_grant_remaining_cents;
   const left = remaining != null ? formatCents(remaining) : null;
   const total = remaining != null && status.max_grant_total_cents != null ? formatCents(status.max_grant_total_cents) : null;
-  const resets = remaining != null ? formatResetDate(status.max_grant_expires_at) : null;
+  const expires = remaining != null ? formatResetDate(status.max_grant_expires_at) : null;
   if (left !== null) {
-    parts.push(`${left}${total ? ` of ${total}` : ""} left${resets ? `, expires ${resets}` : ""}`);
+    parts.push(`${left}${total ? ` of ${total}` : ""} left${expires ? `, expires ${expires}` : ""}`);
   }
   const spend = status.spend_cents != null && status.limit_cents != null
     ? `${formatCents(status.spend_cents)} of ${formatCents(status.limit_cents)}`
@@ -76,7 +76,7 @@ export function apiCreditLine(status: ApiCreditStatus | null | undefined): ApiCr
     summary: figures === null ? null : `API credit ${figures}`,
     left,
     total,
-    resets,
+    expires,
     spend,
     error,
     needsConnect: error !== null && CONNECT_ERROR.test(error),
