@@ -516,7 +516,8 @@ export class Composer {
     openSchedulePicker({
       anchor,
       nextTokenReset: this.opts.getNextTokenReset?.(),
-      onConfirm: (result) => {
+      onConfirm: async (result) => {
+        await this.att.whenUploaded();
         const text = (this.textarea?.value ?? "").trim();
         const blocks = this.undo.buildBlocks(text);
         const savedAttachments = this.att.attachments;
@@ -573,6 +574,18 @@ export class Composer {
       this.sendBtn?.classList.add("spinning");
       try {
         await this.cv.finishForSend();
+      } finally {
+        this.sendBtn?.classList.remove("spinning");
+        this.sending = false;
+      }
+    }
+    // Same spinner while a staged image is still uploading: sending now would
+    // ship the chip with no path, and the image would never reach Claude.
+    if (this.att.isUploading()) {
+      this.sending = true;
+      this.sendBtn?.classList.add("spinning");
+      try {
+        await this.att.whenUploaded();
       } finally {
         this.sendBtn?.classList.remove("spinning");
         this.sending = false;

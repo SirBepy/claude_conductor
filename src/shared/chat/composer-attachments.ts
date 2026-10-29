@@ -25,12 +25,18 @@ import { openLightbox } from "./lightbox";
 // migrate off this plugin.
 import { hasFiles, readFiles } from "tauri-plugin-clipboard-api";
 import { loadAttachmentsMeta, saveAttachmentsMeta, clearAttachmentsMeta } from "./composer-persistence";
+import { decorateAttachmentChip, markAttachmentPop } from "./attachment-chip";
+import { imageMimeFromPath } from "../image-mime";
 
 export interface Attachment {
   mime: string;
-  data: string; // base64 (no data: prefix)
+  data: string; // base64 (no data: prefix); empty while a fresh pick is still being read
   path: string | null;
   filename: string; // original filename for display; derived from uuid path if absent
+  /** Staged and shown, but its bytes are not on the daemon yet. A phone photo
+   *  can take seconds to upload, and a chip that only appeared afterwards read
+   *  as a failed pick and got picked again, sending the image twice. */
+  uploading?: boolean;
 }
 
 /** A large text paste held as a collapsed "log" chip instead of being dumped
@@ -66,6 +72,7 @@ export class ComposerAttachments {
   private cb: ComposerAttachmentsCallbacks;
   private attachmentsEl: HTMLElement | null = null;
   private fileInput: HTMLInputElement | null = null;
+  private inflight = new Set<Promise<void>>();
 
   constructor(cb: ComposerAttachmentsCallbacks) {
     this.cb = cb;
@@ -87,6 +94,16 @@ export class ComposerAttachments {
     return this.attachments.length === 0 && this.pastedBlocks.length === 0;
   }
 
+  isUploading(): boolean {
+    return this.inflight.size > 0;
+  }
+
+  /** Resolves once every staged upload has settled, including any started
+   *  while waiting, so a send never ships a chip that has no path yet. */
+  async whenUploaded(): Promise<void> {
+    while (this.inflight.size > 0) await Promise.allSettled([...this.inflight]);
+  }
+
   /** Open the native file picker (mobile "Attach image" menu entry). */
   openFilePicker(): void {
     if (!this.fileInput) return;
@@ -103,9 +120,7 @@ export class ComposerAttachments {
     const files = target.files;
     if (!files?.length) return;
     void (async () => {
-      for (const file of Array.from(files)) {
-        await this.attachBlob(file, file.name);
-      }
+      await this.dropFiles(Array.from(files));
       target.value = "";
     })();
   };
@@ -114,10 +129,9 @@ export class ComposerAttachments {
     if (!e.clipboardData) return;
     const resolved = await resolveClipboardAttachments(e);
     if (resolved) {
-      for (const r of resolved) {
-        if (r.kind === "path") await this.attachFromPath(r.path);
-        else await this.attachBlob(r.blob, r.filename);
-      }
+      await Promise.all(resolved.map((r) =>
+        r.kind === "path" ? this.attachFromPath(r.path) : this.attachBlob(r.blob, r.filename),
+      ));
       return;
     }
     // A big plain-text paste becomes a collapsed log chip instead of a wall of
@@ -144,70 +158,95 @@ export class ComposerAttachments {
   }
 
   async attachBlob(blob: Blob, filename: string): Promise<void> {
-    const data = await blobToBase64(blob);
-    let path: string | null = null;
-    const sessionId = this.cb.getSessionId();
-    if (sessionId) {
+    const mime = blob.type || "application/octet-stream";
+    await this.stage({ mime, data: "", path: null, filename }, async (a) => {
+      a.data = await blobToBase64(blob);
+      this.render();
+      const sessionId = this.cb.getSessionId();
+      if (!sessionId) return;
       try {
-        path = await invoke<string>("paste_attachment", {
+        a.path = await invoke<string>("paste_attachment", {
           sessionId,
-          base64Data: data,
-          mime: blob.type || "application/octet-stream",
+          base64Data: a.data,
+          mime,
           ...this.machineArg(),
         });
       } catch (err) {
         console.warn("[Composer] paste_attachment not available:", err);
       }
-    }
-    this.attachments.push({ mime: blob.type || "application/octet-stream", data, path, filename });
-    this.render();
-    this.persist();
+    });
   }
 
   async attachFromPath(srcPath: string): Promise<void> {
     const filename = srcPath.split(/[\\/]/).pop() ?? srcPath;
-    let result: { path: string; mime: string; base64: string } | null = null;
-    const sessionId = this.cb.getSessionId();
-    if (sessionId) {
+    // Guessed so the placeholder already has the image tile's shape; the
+    // daemon's answer below replaces it.
+    const mime = imageMimeFromPath(srcPath) ?? "application/octet-stream";
+    await this.stage({ mime, data: "", path: null, filename }, async (a) => {
+      const sessionId = this.cb.getSessionId();
+      if (!sessionId) return;
       try {
-        result = await invoke<{ path: string; mime: string; base64: string }>(
+        const result = await invoke<{ path: string; mime: string; base64: string }>(
           "paste_attachment_from_path",
           { sessionId, path: srcPath, ...this.machineArg() },
         );
+        a.mime = result.mime;
+        a.data = result.base64;
+        a.path = result.path;
       } catch (err) {
         console.warn("[Composer] paste_attachment_from_path failed:", err);
       }
-    }
-    this.attachments.push({
-      filename,
-      mime: result?.mime ?? "application/octet-stream",
-      data: result?.base64 ?? "",
-      path: result?.path ?? null,
     });
+  }
+
+  /** Shows `a` at once as an uploading chip, then runs `work` to fill in its
+   *  bytes and path. Removing the chip mid-upload just detaches the object, so
+   *  the late result lands nowhere. */
+  private async stage(a: Attachment, work: (a: Attachment) => Promise<void>): Promise<void> {
+    a.uploading = true;
+    markAttachmentPop(a);
+    this.attachments.push(a);
     this.render();
-    this.persist();
+    const done = work(a)
+      .catch((err) => {
+        // Bytes never read, so there is nothing to show or send.
+        const idx = this.attachments.indexOf(a);
+        if (idx >= 0) this.attachments.splice(idx, 1);
+        throw err;
+      })
+      .finally(() => {
+        a.uploading = false;
+        this.inflight.delete(done);
+        this.render();
+        this.persist();
+      });
+    this.inflight.add(done);
+    await done;
   }
 
   async dropFiles(files: Iterable<File>): Promise<void> {
-    for (const file of files) {
-      await this.attachBlob(file, file.name);
-    }
+    // Not sequential: every pick shows its chip now, not after the one before
+    // it finishes uploading.
+    await Promise.all(Array.from(files, (file) => this.attachBlob(file, file.name)));
   }
 
   render(): void {
     if (!this.attachmentsEl) return;
     this.attachmentsEl.innerHTML = "";
-    this.attachments.forEach((a, i) => {
+    this.attachments.forEach((a) => {
       const div = document.createElement("div");
       const isImage = a.mime.startsWith("image/");
       div.className = `attachment${isImage ? "" : " file-chip"}`;
 
       if (isImage) {
-        const img = document.createElement("img");
-        img.src = `data:${a.mime};base64,${a.data}`;
-        img.alt = a.filename;
-        img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }));
-        div.appendChild(img);
+        // No <img> until the bytes are read: the tile shows the upload spinner alone.
+        if (a.data) {
+          const img = document.createElement("img");
+          img.src = `data:${a.mime};base64,${a.data}`;
+          img.alt = a.filename;
+          img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }));
+          div.appendChild(img);
+        }
       } else {
         const icon = mimeToIcon(a.mime);
         div.innerHTML = `<i class="ph ${icon}"></i>`;
@@ -216,6 +255,7 @@ export class ComposerAttachments {
         div.appendChild(label);
         div.addEventListener("click", () => openPreviewIfSupported(a));
       }
+      decorateAttachmentChip(div, a);
 
       const rm = document.createElement("button");
       rm.className = "rm";
@@ -223,7 +263,8 @@ export class ComposerAttachments {
       rm.innerHTML = '<i class="ph ph-x"></i>';
       rm.addEventListener("click", (e) => {
         e.stopPropagation();
-        this.attachments.splice(i, 1);
+        const idx = this.attachments.indexOf(a);
+        if (idx >= 0) this.attachments.splice(idx, 1);
         this.render();
         this.persist();
       });

@@ -115,6 +115,8 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     // avoids below. A paste is typed FROM that same field, so patch just the
     // attachments strip instead when it still owns focus.
     onChange: () => {
+      // An upload can finish after the card was answered or closed.
+      if (tornDown) return;
       const active = document.activeElement as HTMLElement | null;
       const isTyping = Boolean(active) && host.contains(active)
         && (active!.classList.contains("prompt-q__other-input") || active!.classList.contains("prompt-extra-input")
@@ -293,7 +295,21 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   const answerFor = (qi: number): string | string[] | null =>
     computeAnswer(questions[qi], freeText.get(qi) ?? "", selections.get(qi), notes.get(qi));
 
+  let awaitingUploads = false;
   const submit = () => {
+    // A pasted image still uploading has no path yet and would be dropped
+    // from the answer, so hold the submit until it lands. The card stays up
+    // meanwhile with the chip's spinner showing why.
+    if (auqAttachments.isUploading()) {
+      if (awaitingUploads) return;
+      awaitingUploads = true;
+      void auqAttachments.whenUploaded().then(() => {
+        awaitingUploads = false;
+        // Answered or expired elsewhere while waiting: nothing left to submit.
+        if (!tornDown) submit();
+      });
+      return;
+    }
     const answers: Answers = {};
     questions.forEach((q, i) => {
       const a = answerFor(i);
