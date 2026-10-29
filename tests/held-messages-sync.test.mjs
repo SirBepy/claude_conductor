@@ -256,6 +256,73 @@ describe("HeldMessages - sendNow claims the daemon list before interrupting", ()
   });
 });
 
+describe("HeldMessages - a failed add's unsynced mark stays with the item it describes", () => {
+  // The mark is read in sendNow to mean "never reached the daemon, so it cannot
+  // have been injected". A stale mark that matches a later item's id would make
+  // that item look un-injected and send it a second time.
+  it("does not carry a failed add in one session over to an injected item with the same id in another", async () => {
+    const { held, attach, send, interrupt } = makeHarness();
+    addHeldMessage.mockRejectedValueOnce(new Error("offline"));
+    held.stage(textBlocks("never-reached-daemon"));
+    const failedId = held.itemsForActive()[0].id;
+    await new Promise((r) => setTimeout(r, 10));
+
+    held.attach({ ...attach, sessionId: "sess-B" });
+    addHeldMessage.mockResolvedValue({ id: failedId, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [], injected_ids: [failedId] });
+    held.stage(textBlocks("injected-in-B"));
+    await new Promise((r) => setTimeout(r, 10));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("forgets a failed add once its item is removed", async () => {
+    const { held, send, interrupt } = makeHarness();
+    addHeldMessage.mockRejectedValueOnce(new Error("offline"));
+    held.stage(textBlocks("dropped"));
+    const failedId = held.itemsForActive()[0].id;
+    await new Promise((r) => setTimeout(r, 10));
+    held.removeItem(failedId);
+
+    addHeldMessage.mockResolvedValue({ id: failedId, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [], injected_ids: [failedId] });
+    held.stage(textBlocks("injected"));
+    await new Promise((r) => setTimeout(r, 10));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("forgets a failed add once the session's held list is flushed", async () => {
+    const { held, send, interrupt, state } = makeHarness();
+    addHeldMessage.mockRejectedValueOnce(new Error("offline"));
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [] });
+    held.stage(textBlocks("flushed"));
+    const failedId = held.itemsForActive()[0].id;
+    await new Promise((r) => setTimeout(r, 10));
+    await expect(held.sendNow()).resolves.toBe(true);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    state.busy = true;
+    interrupt.mockClear();
+    send.mockClear();
+    addHeldMessage.mockResolvedValue({ id: failedId, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [], injected_ids: [failedId] });
+    held.stage(textBlocks("injected"));
+    await new Promise((r) => setTimeout(r, 10));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe("HeldMessages - reconcile on attach", () => {
   it("replaces the local held set with the daemon's copy on attach", async () => {
     getSessionDrafts.mockResolvedValue({

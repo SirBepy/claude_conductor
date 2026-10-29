@@ -174,7 +174,9 @@ export class HeldMessages {
       const pendingLocal = (this.map.get(sessionId) ?? []).filter(
         (i) => this.sync.isPending(i.id) && !serverIds.has(i.id),
       );
-      this.map.set(sessionId, [...serverItems, ...pendingLocal]);
+      const merged = [...serverItems, ...pendingLocal];
+      this.map.set(sessionId, merged);
+      this.sync.retainUnsynced(sessionId, merged.map((i) => i.id));
       this.persist();
       if (this.attached?.sessionId === sessionId) {
         this.render.renderChip();
@@ -196,6 +198,7 @@ export class HeldMessages {
       this.map.set(to, [...existing, ...items]);
     }
     this.map.delete(from);
+    this.sync.renameSession(from, to);
     this.persist();
     if (this.attached && this.attached.sessionId === from) {
       this.attached.sessionId = to;
@@ -346,7 +349,7 @@ export class HeldMessages {
         // With `injected` known, only a confirmed injection counts: an id the
         // daemon never held (it restarted) must still be sent, not dropped.
         const injected = snapshot
-          .filter((i) => !removedSet.has(i.id) && !this.sync.isUnsynced(i.id))
+          .filter((i) => !removedSet.has(i.id) && !this.sync.isUnsynced(sid, i.id))
           .filter((i) => !injectedSet || injectedSet.has(i.id))
           .map((i) => i.id);
         this.markDelivered(sid, injected);
@@ -575,6 +578,7 @@ export class HeldMessages {
     const remaining = list.filter((i) => !gone.has(i.id));
     if (remaining.length === list.length) return;
     this.map.set(sid, remaining);
+    this.sync.retainUnsynced(sid, remaining.map((i) => i.id));
     this.persist();
     if (this.attached?.sessionId === sid) {
       this.render.renderChip();
