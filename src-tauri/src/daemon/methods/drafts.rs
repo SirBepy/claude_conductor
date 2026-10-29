@@ -179,9 +179,16 @@ pub fn register_drafts(router: &mut Router, state: Arc<DaemonState>) {
             let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
             reject_unknown_session(&state, &p.session_id)?;
-            let updated_at = state.draft_store.clear_held(&p.session_id);
+            let (updated_at, removed_ids) = state.draft_store.clear_held(&p.session_id);
             sync_held_count(&state, &p.session_id);
-            Ok(json!({"updated_at": updated_at}))
+            // The caller sends exactly `removed_ids` itself: anything the
+            // mid-turn inject already took is not in the list, so it is not
+            // delivered a second time.
+            // `injected_ids`: items the nudge served earlier. The store is
+            // in-memory, so without this a client cannot tell "already
+            // delivered mid-turn" from "the daemon never held it".
+            let injected_ids = state.draft_store.injected_ids(&p.session_id);
+            Ok(json!({"updated_at": updated_at, "removed_ids": removed_ids, "injected_ids": injected_ids}))
         }
     });
 }
@@ -338,6 +345,34 @@ mod tests {
 
         call(st.clone(), "clear_held_messages", json!({"session_id": "s1"})).await;
         assert_eq!(st.registry.get("s1").unwrap().held_count, 0);
+    }
+
+    #[tokio::test]
+    async fn clear_held_messages_reports_the_ids_it_removed() {
+        let st = state_with_session("s1");
+        let a = call(st.clone(), "add_held_message", json!({"session_id": "s1", "blocks": [{"type":"text","text":"one"}]})).await;
+        let a = a.result.unwrap()["id"].as_u64().unwrap();
+        let b = call(st.clone(), "add_held_message", json!({"session_id": "s1", "blocks": [{"type":"text","text":"two"}]})).await;
+        let b = b.result.unwrap()["id"].as_u64().unwrap();
+        call(st.clone(), "remove_held_message", json!({"session_id": "s1", "id": a})).await;
+        let c = call(st.clone(), "add_held_message", json!({"session_id": "s1", "blocks": [{"type":"text","text":"three"}]})).await;
+        let c = c.result.unwrap()["id"].as_u64().unwrap();
+
+        let resp = call(st.clone(), "clear_held_messages", json!({"session_id": "s1"})).await;
+        let v = resp.result.unwrap();
+        assert_eq!(v["removed_ids"], json!([b, c]));
+        assert_eq!(v["injected_ids"], json!([]));
+
+        // An item the mid-turn nudge served is reported separately.
+        let d = call(st.clone(), "add_held_message", json!({"session_id": "s1", "blocks": [{"type":"text","text":"four"}]})).await;
+        let d = d.result.unwrap()["id"].as_u64().unwrap();
+        st.draft_store.remove_held("s1", d);
+        st.draft_store.record_injected("s1", &[d]);
+        let resp = call(st, "clear_held_messages", json!({"session_id": "s1"})).await;
+        let v = resp.result.unwrap();
+        assert_eq!(v["removed_ids"], json!([]));
+        assert_eq!(v["injected_ids"], json!([d]));
+        assert!(v["updated_at"].is_string());
     }
 
     #[tokio::test]

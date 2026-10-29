@@ -51,6 +51,9 @@ export function removeHeldMessage(sessionId: string, id: number): Promise<{ upda
   return invoke("remove_held_message", { sessionId, id });
 }
 
-export function clearHeldMessages(sessionId: string): Promise<{ updated_at: string }> {
+/** `removed_ids` is the held ids the daemon itself removed; `injected_ids` the ones
+ *  its mid-turn inject hook already delivered to the running turn. A daemon older
+ *  than either field omits it. */
+export function clearHeldMessages(sessionId: string): Promise<{ updated_at: string; removed_ids?: number[]; injected_ids?: number[] }> {
   return invoke("clear_held_messages", { sessionId });
 }

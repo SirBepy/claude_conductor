@@ -21,8 +21,18 @@ export class HeldDraftSync {
   // daemon has never heard of (would silently orphan the item server-side).
   private pendingServerIds = new Map<number, Promise<number | null>>();
 
+  // Local ids whose add_held_message failed: the daemon never saw them, so an
+  // absence from clear_held_messages' removed_ids says nothing about them.
+  private unsyncedIds = new Set<number>();
+
   isPending(id: number): boolean {
     return this.pendingServerIds.has(id);
+  }
+
+  /** True when this item's add never reached the daemon (so it cannot have been
+   *  injected mid-turn by the daemon's own copy of the list). */
+  isUnsynced(id: number): boolean {
+    return this.unsyncedIds.has(id);
   }
 
   /** Fetch the daemon's held-items snapshot and hand it to `onResolved`, which
@@ -51,6 +61,7 @@ export class HeldDraftSync {
       })
       .catch((e) => {
         console.warn("[held] add_held_message failed (offline?):", e);
+        this.unsyncedIds.add(localId);
         return null;
       })
       .finally(() => this.pendingServerIds.delete(localId));
@@ -82,6 +93,26 @@ export class HeldDraftSync {
 
   flushAllEdits(): void {
     for (const d of this.editPushDebounced.values()) d.flush();
+  }
+
+  /** Take the daemon's whole held list for `sessionId` in one step and report
+   *  which ids it removed (`removed`) and which the mid-turn inject hook had
+   *  already handed to Claude (`injected`). Both remove under the same lock, so
+   *  an id lands in exactly one of them. An id in neither was never held by
+   *  this daemon (it restarted and lost its in-memory list). `injected` is null
+   *  from a daemon that only reports `removed_ids`. Awaits every in-flight add
+   *  first, so local ids have been swapped for the server ids both lists speak
+   *  in. Null when the call fails or `removed_ids` is missing (outcome unknown). */
+  async claimAll(sessionId: string): Promise<{ removed: number[]; injected: number[] | null } | null> {
+    await Promise.all([...this.pendingServerIds.values()]);
+    try {
+      const res = await clearHeldMessages(sessionId);
+      if (!Array.isArray(res?.removed_ids)) return null;
+      return { removed: res.removed_ids, injected: Array.isArray(res.injected_ids) ? res.injected_ids : null };
+    } catch (e) {
+      console.warn("[held] clear_held_messages (claim) failed:", e);
+      return null;
+    }
   }
 
   /** Fire-and-forget: the caller already cleared local state. */
