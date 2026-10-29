@@ -4,7 +4,10 @@ import { updateSettings } from "../../../../shared/settings-update";
 import { isRemote } from "../../../../shared/transport";
 import { loadSort, saveSort } from "../../../sessions/sessions-helpers";
 import type { SessionSort } from "../../../sessions/sessions-helpers";
-import { readModels } from "../../../../shared/effort-presets";
+import {
+  EFFORTS, modelDisplayLabel, readGlobalDefault, readModels,
+} from "../../../../shared/effort-presets";
+import { settingsData } from "../../../sessions/new-session-cache";
 import { settingsHeader } from "../../ui";
 import "./chat-defaults.css";
 
@@ -18,11 +21,30 @@ function parseModels(raw: string): string[] {
   return out;
 }
 
-function template(models: string[], sort: SessionSort) {
+function template(models: string[], sort: SessionSort, def: { model: string; effort: string }) {
   return html`
     <div class="view view-settings-chat-defaults">
       ${settingsHeader("Chat defaults")}
       <div class="view-body">
+
+        ${isRemote()
+          ? ""
+          : html`<div class="kit-section">
+              <div class="kit-section-title">New chats</div>
+              <div class="kit-row">
+                <span class="kit-row-label">Default model</span>
+                <select id="chatDefaultsModel" class="kit-select">
+                  ${models.map((m) => html`<option value=${m} ?selected=${m === def.model}>${modelDisplayLabel(m)}</option>`)}
+                </select>
+              </div>
+              <div class="kit-row">
+                <span class="kit-row-label">Default effort</span>
+                <select id="chatDefaultsEffort" class="kit-select">
+                  ${EFFORTS.map((e) => html`<option value=${e} ?selected=${e === def.effort}>${e}</option>`)}
+                </select>
+              </div>
+              <p class="cd-hint">What a new chat opens on. A project can set its own in its project settings.</p>
+            </div>`}
 
         <div class="kit-section">
           <div class="kit-section-title">Behavior</div>
@@ -59,8 +81,22 @@ function template(models: string[], sort: SessionSort) {
 export async function renderChatDefaultsView(root: HTMLElement): Promise<() => void> {
   let models = readModels(getSettings());
   const sort = loadSort();
+  // The default model may not be in the offered list (a removed custom model): keep it selectable.
+  const def = readGlobalDefault(getSettings());
+  if (!models.includes(def.model)) models = [...models, def.model];
 
-  render(template(models, sort), root);
+  render(template(models, sort, def), root);
+
+  for (const [id, key] of [["#chatDefaultsModel", "defaultModel"], ["#chatDefaultsEffort", "defaultEffort"]] as const) {
+    root.querySelector<HTMLSelectElement>(id)?.addEventListener("change", (e) => {
+      const value = (e.currentTarget as HTMLSelectElement).value;
+      // Fresh-read inside updateSettings, so a concurrent daemon-owned write is kept.
+      void updateSettings((fresh) => ({ ...fresh, [key]: value }))
+        // The new-chat draft reads settings from a stale-while-revalidate cache.
+        .then(() => settingsData().ready.catch(() => {}))
+        .catch((err) => console.error("[chat-defaults] saving the default failed", err));
+    });
+  }
 
   const sortSelect = root.querySelector<HTMLSelectElement>("#chatDefaultsSort");
   if (sortSelect) {

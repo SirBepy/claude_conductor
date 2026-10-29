@@ -6,6 +6,10 @@ import type { Account } from "../../../../shared/api";
 import { accountIconBadgeHtml, isApiCreditAccount } from "../../../../shared/account-chip";
 import { invoke } from "../../../../shared/ipc";
 import { forgetTicketTracker } from "../../../../shared/chat/ticket-refs";
+import {
+  isEffort, modelDisplayLabel, modelFamilyFromId, readGlobalDefault, readModels, EFFORTS,
+} from "../../../../shared/effort-presets";
+import { projectsListData } from "../../new-session-cache";
 import type { TicketTracker, TrackerInfo } from "../../../../types/ipc.generated";
 import "../../../../shared/account-chip.css";
 import "./automation.css";
@@ -28,6 +32,65 @@ interface ProjectCfg {
   claude_ai_connectors?: boolean;
   tracker?: TicketTracker | null;
   keep_running_in_gaming_mode?: boolean;
+  default_model?: string | null;
+  default_effort?: string | null;
+}
+
+/** What a new chat in this project opens on. An unset half follows Settings >
+ *  Chat defaults, which the first option names, so the row always shows what a
+ *  new chat will actually start with. */
+async function renderChatDefaultsRow(): Promise<void> {
+  const cwd = currentCwd;
+  const modelControl = document.getElementById("chatDefaultModelControl");
+  const effortControl = document.getElementById("chatDefaultEffortControl");
+  if (!cwd || !modelControl || !effortControl) return;
+
+  let projects: ProjectCfg[] = [];
+  let settings: Record<string, unknown> = {};
+  try {
+    [projects, settings] = await Promise.all([
+      api.listProjects() as unknown as Promise<ProjectCfg[]>,
+      api.getSettings().then((s) => s ?? {}),
+    ]);
+  } catch (e) {
+    console.error("[automation] chat defaults load failed", e);
+  }
+  const proj = projects.find((p) => p.path === cwd);
+  const global = readGlobalDefault(settings);
+  const ownModel = proj?.default_model ? modelFamilyFromId(proj.default_model) : "";
+  const ownEffort = isEffort(proj?.default_effort) ? proj.default_effort : "";
+  const models = readModels(settings);
+  if (ownModel && !models.includes(ownModel)) models.push(ownModel);
+
+  const options = (own: string, defaultLabel: string, values: readonly string[], label: (v: string) => string): string =>
+    `<option value=""${own ? "" : " selected"}>${escapeHtml(defaultLabel)}</option>` +
+    values.map((v) => `<option value="${escapeHtml(v)}"${v === own ? " selected" : ""}>${escapeHtml(label(v))}</option>`).join("");
+  modelControl.innerHTML = `<select id="chatDefaultModel" class="inline-select">${options(ownModel, `Default (${modelDisplayLabel(global.model)})`, models, modelDisplayLabel)}</select>`;
+  effortControl.innerHTML = `<select id="chatDefaultEffort" class="inline-select">${options(ownEffort, `Default (${global.effort})`, EFFORTS, (v) => v)}</select>`;
+
+  const wire = (id: string, field: "default_model" | "default_effort"): void => {
+    const select = document.getElementById(id) as HTMLSelectElement | null;
+    if (!select) return;
+    select.onchange = () => {
+      void (async () => {
+        select.disabled = true;
+        try {
+          const projectId = proj?.id ?? (await api.ensureProject(cwd)).id;
+          await api.updateProject(projectId, { [field]: select.value || null });
+          // The new-chat draft reads this list from a stale-while-revalidate cache.
+          await projectsListData().ready.catch(() => {});
+          showToast("New chats in this project open on the new default.");
+        } catch (e) {
+          console.error("[automation] update chat default failed", e);
+          showToast(`Could not update the default: ${e}`);
+        } finally {
+          await renderChatDefaultsRow();
+        }
+      })();
+    };
+  };
+  wire("chatDefaultModel", "default_model");
+  wire("chatDefaultEffort", "default_effort");
 }
 
 /** Which account new chats in this project spawn under (multi-account
@@ -315,6 +378,7 @@ export async function renderProjectSettings(root: HTMLElement, cwd: string): Pro
   }
 
   await renderAutomationForm();
+  await renderChatDefaultsRow();
   await renderAccountRow();
   await renderConnectorsRow();
   await renderGamingModeRow(cwd);
@@ -324,7 +388,18 @@ export async function renderProjectSettings(root: HTMLElement, cwd: string): Pro
 function template() {
   return html`
     <div class="view-project-automation">
-        <section class="automation-section" id="accountSection" style="margin-top:0">
+        <section class="automation-section" id="chatDefaultsSection" style="margin-top:0">
+          <div class="section-title">New chat defaults</div>
+          <div class="option">
+            <span class="oi"><div class="option-label">Model</div></span>
+            <span class="acc-row-control" id="chatDefaultModelControl"></span>
+          </div>
+          <div class="option">
+            <span class="oi"><div class="option-label">Effort</div></span>
+            <span class="acc-row-control" id="chatDefaultEffortControl"></span>
+          </div>
+        </section>
+        <section class="automation-section" id="accountSection" style="margin-top:16px">
           <div class="section-title">Claude account</div>
           <div class="option">
             <span class="oi">

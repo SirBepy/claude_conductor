@@ -24,6 +24,8 @@ fn sample_project(id: &str, path: &str) -> ProjectConfig {
         claude_ai_connectors: false,
         tracker: None,
         keep_running_in_gaming_mode: false,
+        default_model: None,
+        default_effort: None,
     }
 }
 
@@ -52,6 +54,19 @@ fn update_project_applies_patch_in_place() {
     assert!(res.is_ok());
     assert_eq!(s.projects[0].name, "Alpha");
     assert_eq!(s.projects[0].avatar, Avatar::Emoji("🅰".into()));
+}
+
+#[test]
+fn update_project_sets_and_clears_the_default_model_and_effort() {
+    let mut s = Settings::default();
+    s.projects.push(sample_project("a", "C:/a"));
+    assert!(h::update_in(&mut s, "a", serde_json::json!({ "default_model": "sonnet", "default_effort": "low" })).is_ok());
+    assert_eq!(s.projects[0].default_model.as_deref(), Some("sonnet"));
+    assert_eq!(s.projects[0].default_effort.as_deref(), Some("low"));
+    // null clears one back to "follow the global default" without touching the other.
+    assert!(h::update_in(&mut s, "a", serde_json::json!({ "default_model": null })).is_ok());
+    assert_eq!(s.projects[0].default_model, None);
+    assert_eq!(s.projects[0].default_effort.as_deref(), Some("low"));
 }
 
 #[test]

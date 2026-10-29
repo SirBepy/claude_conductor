@@ -160,6 +160,36 @@ export function readDefaultFlags(
   };
 }
 
+/** What a new chat opens on when neither its project nor Settings > Chat defaults says. */
+export const FALLBACK_MODEL = "sonnet";
+export const FALLBACK_EFFORT = "high";
+
+/** The app-wide default model/effort (Settings > Chat defaults), stored in settings `extra`. */
+export function readGlobalDefault(settings: Record<string, unknown>): { model: string; effort: string } {
+  const m = settings["defaultModel"];
+  const e = settings["defaultEffort"];
+  return {
+    model: typeof m === "string" && m.trim() ? modelFamilyFromId(m.trim()) : FALLBACK_MODEL,
+    effort: isEffort(e) ? e : FALLBACK_EFFORT,
+  };
+}
+
+/** What a new chat in `project` opens on. The project's own default always wins over
+ *  whatever the last chat there used; each half falls back to the global default on
+ *  its own, so a project can pin only the model. */
+export function resolveDefaultChoice(
+  settings: Record<string, unknown>,
+  project?: { default_model?: string | null; default_effort?: string | null } | null,
+): { model: string; effort: string } {
+  const global = readGlobalDefault(settings);
+  const m = project?.default_model?.trim();
+  const e = project?.default_effort;
+  return {
+    model: m ? modelFamilyFromId(m) : global.model,
+    effort: isEffort(e) ? e : global.effort,
+  };
+}
+
 export function readLastChoice(
   settings: Record<string, unknown>,
   projectPath: string,

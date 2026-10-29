@@ -193,6 +193,8 @@ pub fn upsert_project_for_cwd(
         claude_ai_connectors: false,
         tracker: None,
         keep_running_in_gaming_mode: false,
+        default_model: None,
+        default_effort: None,
     });
     settings.bump_generation();
     (id, true)
@@ -240,6 +242,8 @@ pub fn upsert_project_with_id_for_cwd(
         claude_ai_connectors: false,
         tracker: None,
         keep_running_in_gaming_mode: false,
+        default_model: None,
+        default_effort: None,
     });
     settings.bump_generation();
 }

@@ -393,6 +393,8 @@ mod build_groups_tests {
             claude_ai_connectors: false,
             tracker: None,
             keep_running_in_gaming_mode: false,
+            default_model: None,
+            default_effort: None,
         }];
         let groups = build_groups(&projects, &history, &[], 0);
         assert_eq!(groups.len(), 1);

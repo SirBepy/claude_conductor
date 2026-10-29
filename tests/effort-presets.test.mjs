@@ -4,6 +4,8 @@ import {
   readModels,
   readDefaultFlags,
   readLastChoice,
+  readGlobalDefault,
+  resolveDefaultChoice,
   sortByImpressiveness,
   setApiModels,
   latestIdForFamily,
@@ -17,6 +19,26 @@ const API_IDS = [
   "claude-sonnet-4-6",
   "claude-haiku-4-5-20251001",
 ];
+
+describe("readGlobalDefault / resolveDefaultChoice", () => {
+  it("is Sonnet/high with nothing set", () => {
+    expect(readGlobalDefault({})).toEqual({ model: "sonnet", effort: "high" });
+  });
+
+  it("reads the settings, normalising a full id to its family and dropping an unknown effort", () => {
+    expect(readGlobalDefault({ defaultModel: "claude-opus-4-8", defaultEffort: "bogus" }))
+      .toEqual({ model: "opus", effort: "high" });
+  });
+
+  it("lets each half of a project's default override the global one on its own", () => {
+    const settings = { defaultModel: "opus", defaultEffort: "max" };
+    expect(resolveDefaultChoice(settings, { default_model: "haiku", default_effort: null }))
+      .toEqual({ model: "haiku", effort: "max" });
+    expect(resolveDefaultChoice(settings, { default_model: null, default_effort: "low" }))
+      .toEqual({ model: "opus", effort: "low" });
+    expect(resolveDefaultChoice(settings, null)).toEqual({ model: "opus", effort: "max" });
+  });
+});
 
 describe("readModels", () => {
   it("returns the default seed when settings.models is absent", () => {
