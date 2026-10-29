@@ -36,10 +36,6 @@ function answeredBy(sessionId: string | undefined, promptId: string): AnsweredBy
   return transcriptCarriesAnswer(sessionId, promptId) ? "transcript" : null;
 }
 
-export function isQuestionAlreadyAnswered(sessionId: string | undefined, promptId: string): boolean {
-  return answeredBy(sessionId, promptId) !== null;
-}
-
 /** The gate plus its cleanup: true means the prompt must not be shown. A
  *  transcript-proven answer means the daemon may still list the prompt, so it
  *  is settled there too (a skip only settles; the answer already reached
