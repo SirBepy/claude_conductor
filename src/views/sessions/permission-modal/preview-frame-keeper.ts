@@ -21,7 +21,9 @@ function slotKey(frame: HTMLIFrameElement): string {
 export function rebuildKeepingFrames(host: HTMLElement, rebuild: () => void): void {
   const park = document.createElement("div");
   const old = Array.from(host.querySelectorAll("iframe"));
-  if (!old.length || !host.isConnected || typeof (park as MovableParent).moveBefore !== "function") {
+  // moveBefore throws unless the frame and the park share a root, so a host
+  // inside a shadow root (or another document) takes the plain rebuild.
+  if (!old.length || host.getRootNode() !== document || typeof (park as MovableParent).moveBefore !== "function") {
     rebuild();
     return;
   }
