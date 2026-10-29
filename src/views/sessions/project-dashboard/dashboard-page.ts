@@ -42,6 +42,8 @@ export function leaveDashboardPage(restore: boolean): void {
   const id = resumeId;
   resumeId = null;
   const p = panes();
+  // The handle owns the root, rail and chips, not the body the page wrapped them in.
+  p?.pane.querySelector(".pd-page-body")?.remove();
   if (!restore || !p) return;
   const { view, pane, listEl } = p;
   if (id && state.pendingNewSession?.placeholderId === id && isPendingSessionId(id)) {
@@ -91,6 +93,12 @@ export async function openDashboardPage(cwd: string, projectId: string | null = 
     back: () => leaveDashboardPage(true),
     deselect: () => leaveDashboardPage(true),
   });
-  pane.append(handle.root, handle.chips);
+  // The body scrolls (not the root) so the rail sits beside the content and the
+  // scrollbar stays at the pane's edge on a wide window.
+  const body = document.createElement("div");
+  body.className = "pd-page-body";
+  body.append(handle.root);
+  if (handle.rail) body.append(handle.rail);
+  pane.append(body, handle.chips);
   if (isRemote()) view.setAttribute("data-mobile-pane", "chat");
 }

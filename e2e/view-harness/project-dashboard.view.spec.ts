@@ -279,8 +279,54 @@ test.describe("view-harness / project dashboard", () => {
 
     await card(page, "next_up").click({ button: "right", position: { x: 4, y: 4 } });
     await expect(items.first()).toHaveText("Rename project...");
-    await items.filter({ hasText: "Project settings" }).click();
+    // A project's settings live in the page's rail, not behind the menu.
+    await expect(items.filter({ hasText: "Project settings" })).toHaveCount(0);
+    await expect(page.locator(".pd-page-body > .pd-rail .view-project-automation")).toBeVisible();
+  });
+
+  test("a group's menu keeps Project settings, since a group has no rail", async ({ page }) => {
+    await mountWithDashboard(page);
+    await openPageFrom(page, "z-w");
+    await expect(page.locator(".pd-rail")).toHaveCount(0);
+    await card(page, "next_up").click({ button: "right", position: { x: 4, y: 4 } });
+    const items = page.locator(".session-more-menu .smore-item");
+    await items.filter({ hasText: "Project settings" }).first().click();
+    // A group asks which of its repos first.
+    await expect(items.first()).toContainText("zng-");
+    await items.first().click();
     await expect(page.locator(".pd-modal .pd-config-body .view-project-automation")).toBeVisible();
+  });
+
+  test("a wide window puts the settings rail beside the dashboard on the page and in a draft, a narrow one underneath", async ({ page }) => {
+    await mountWithDashboard(page, {
+      list_projects: [{ id: "p-conductor", path: CONDUCTOR_CWD, name: "claude_usage_in_taskbar", automation: null, default_model: "haiku", default_effort: null }],
+      list_accounts: [],
+      get_settings: { theme: "void", defaultModel: "sonnet", defaultEffort: "high" },
+    });
+    await page.setViewportSize({ width: 1700, height: 1000 });
+    await openDraft(page, CONDUCTOR_CWD, "claude_usage_in_taskbar");
+    const draftRail = page.locator(".pd-draft.has-rail > .pd-rail");
+    await expect(draftRail.locator(".view-project-automation")).toBeVisible();
+    const root = page.locator(".session-messages .pd-root.is-draft");
+    // The column eases out from the chat's 900px to 1160px (pd-rail.css), so measure once it has.
+    await expect.poll(async () => (await root.boundingBox())!.width).toBeGreaterThan(800);
+    const rootBox = (await root.boundingBox())!;
+    const railBox = (await draftRail.boundingBox())!;
+    expect(railBox.x).toBeGreaterThanOrEqual(rootBox.x + rootBox.width);
+    // The rail shows what a new chat here opens on: this project's own model, the global effort.
+    await expect(draftRail.locator("#chatDefaultModel")).toHaveValue("haiku");
+    await expect(draftRail.locator("#chatDefaultEffort option:checked")).toHaveText("Default (high)");
+    // The draft's header leads with the project until the first send names the chat.
+    await expect(page.locator("#session-pane .session-header .title")).toHaveText("claude_usage_in_taskbar");
+    // The message box keeps the chat's own 900px column under the wider dashboard.
+    const shell = (await page.locator(".composer-shell").boundingBox())!;
+    expect(shell.width).toBeLessThanOrEqual(900);
+    expect(rootBox.width + railBox.width).toBeGreaterThan(1000);
+    await page.waitForTimeout(250);
+    await capture(page, "dashboard-draft-with-rail");
+
+    await page.setViewportSize({ width: 1100, height: 1000 });
+    await expect.poll(async () => (await draftRail.boundingBox())!.y).toBeGreaterThan(rootBox.y + 100);
   });
 
   test("the Past results row opens the modal on the chosen tab, which loads the gallery and opens an image", async ({ page }) => {

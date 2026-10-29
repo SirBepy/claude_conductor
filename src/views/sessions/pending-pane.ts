@@ -75,6 +75,7 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
     h.setTitle(sessionSubtitle(sess));
     h.setMeta(projectName(sess));
     h.onProjectClick = projectDashboardOpener(sess);
+    h.playTextSwap();
   }
   // Refresh the avatar from the now-assigned session character: covers the case
   // where the user didn't pick one in the new-chat config and the backend rolled one on

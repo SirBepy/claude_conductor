@@ -29,6 +29,9 @@ vi.mock("../src/shared/token-history.ts", () => ({ loadTokenHistory: vi.fn(async
 vi.mock("../src/views/sessions/active-session.ts", () => ({ dismountActivePane: vi.fn(), selectSession: vi.fn(async () => {}) }));
 vi.mock("../src/views/sessions/new-chat-config.ts", () => ({ resolveNewChatConfig: vi.fn(), accountPickNeeded: vi.fn(async () => false) }));
 vi.mock("../src/views/sessions/close-chat.ts", () => ({ closeChatWithConfirm: vi.fn(async () => {}) }));
+// The rail's real controls read accounts, projects and settings; this spec only cares where they land.
+const renderSettings = vi.hoisted(() => vi.fn(async (root) => { root.innerHTML = `<div class="rail-stub"></div>`; }));
+vi.mock("../src/views/sessions/project-dashboard/project-config/automation.ts", () => ({ renderProjectSettings: renderSettings }));
 
 const draftModule = await import("../src/views/sessions/project-dashboard/draft-dashboard.ts");
 const { mountDraftDashboard, unmountDraftDashboard } = draftModule;
@@ -93,6 +96,28 @@ describe("draft dashboard", () => {
     await vi.waitFor(() => expect(chips(pane)).toEqual(["/pickup", "/audit"]));
     // A sibling right before the bordered shell, never inside it.
     expect(pane.querySelector(".composer-shell").previousElementSibling.classList.contains("pd-qa-host")).toBe(true);
+  });
+
+  it("a project's draft shows its settings in a rail beside the dashboard, filled for that repo", async () => {
+    renderSettings.mockClear();
+    const pane = await mountDraft("C:/Projects/conductor");
+    const wrap = pane.querySelector(".pd-draft");
+    expect(wrap.classList.contains("has-rail")).toBe(true);
+    const rail = wrap.querySelector(":scope > .pd-rail");
+    expect(rail).not.toBeNull();
+    // After the dashboard it sits beside, so the grid puts it in the second column.
+    expect(wrap.firstElementChild.classList.contains("pd-root")).toBe(true);
+    await vi.waitFor(() => expect(rail.querySelector(".rail-stub")).not.toBeNull());
+    expect(rail.hidden).toBe(false);
+    expect(renderSettings).toHaveBeenCalledTimes(1);
+    expect(renderSettings.mock.calls[0][1]).toBe("C:/Projects/conductor");
+  });
+
+  it("a group's draft has no rail: its repos each own their settings", async () => {
+    snapshot = groupSnapshot();
+    const pane = await mountDraft(ZIRTUE_REPOS[0].cwd);
+    expect(pane.querySelector(".pd-rail")).toBeNull();
+    expect(pane.querySelector(".pd-draft").classList.contains("has-rail")).toBe(false);
   });
 
   it("a chip types its command into this draft's message box and sends nothing", async () => {
@@ -208,7 +233,8 @@ describe("draft dashboard motion", () => {
     await vi.waitFor(() => expect(chips(pane)).toEqual(["/pickup", "/audit"]));
     animations.length = 0;
     leaveDraftDashboard(pane);
-    expect(animations.map((a) => a.el.className)).toEqual(["pd-draft pd-ghost", "pd-qa-host is-draft pd-ghost"]);
+    // The rail goes down with the dashboard: it is part of the copy that fades.
+    expect(animations.map((a) => a.el.className)).toEqual(["pd-draft has-rail pd-ghost", "pd-qa-host is-draft pd-ghost"]);
     expect(pane.querySelectorAll(".pd-draft")).toHaveLength(1);
     expect(pane.querySelector(".pd-draft").inert).toBe(true);
     // No live dashboard is left: a refetch cannot repaint into the copy.

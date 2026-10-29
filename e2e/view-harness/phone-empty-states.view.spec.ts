@@ -1,3 +1,4 @@
+// Reviewed 2026-10-29: a draft's header now opens on the project name with "New chat" under it, and draft-dashboard.ts places the project's settings rail (desktop only; the phone gets none); this spec asserts empty-state copy only, so its contract is unaffected. Passed after the change.
 // Reviewed 2026-10-25 (in-place statusline editing): pending-pane-mount.ts now passes layoutEditable: true to the statusbar; this spec asserts empty-state copy only, so its contract is unaffected.
 // Reviewed 2026-10-23 (peer account picker): pending-flow.ts now passes the picker's machine id on to the model/effort modal; this spec asserts empty-state copy only and starts no chat on a peer, so its contract is unaffected.
 // Reviewed 2026-10-22: pending-pane-mount.ts no longer wires a header Code button (it moved to the FAB menu); this spec asserts empty-state copy only, so its contract is unaffected.

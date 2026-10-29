@@ -190,7 +190,7 @@ describe("quick-action chips", () => {
     await vi.waitFor(() => expect(document.querySelectorAll(".smore-item").length).toBeGreaterThan(0));
     const items = [...document.querySelectorAll(".smore-item")].map((b) => b.textContent.trim());
     expect(items).toEqual([
-      "Rename project...", "Character...", "Project settings...", "Folder mapping...", "Dashboard cards...",
+      "Rename project...", "Character...", "Folder mapping...", "Dashboard cards...",
       "Open in VS Code", "Open a terminal here", "Show in Explorer",
     ]);
   });

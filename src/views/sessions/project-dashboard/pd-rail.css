@@ -1,0 +1,53 @@
+/* The project settings rail (dashboard.ts's `rail`), beside the dashboard on the
+   standalone page (.pd-page-body) and in a new-chat draft (.pd-draft.has-rail).
+   Theme vars only. The rail wraps project-config/automation.ts's own controls,
+   which were laid out for a popup, so the rules below restack them for 270px. */
+
+/* Page: this body scrolls, not .pd-root, so the rail sits beside the content and
+   the scrollbar stays at the pane's edge on a wide window. 1160px keeps the
+   charts from stretching on a big monitor. */
+.pd-page-body {
+  flex: 1; min-height: 0; overflow-y: auto; display: flex; align-items: flex-start; gap: 28px;
+  padding: 24px max(32px, calc((100% - 1160px) / 2)) 16px;
+}
+.pd-page-body > .pd-root.is-page { flex: 1 1 0; min-width: 0; min-height: auto; overflow: visible; padding: 0; }
+.pd-qa-host.is-page { padding-inline: max(32px, calc((100% - 1160px) / 2)); }
+
+/* Draft: the chat's 900px reading column (sessions.css) widens to the same 1160px
+   while the rail is there. The message box and chip row keep their own width. The
+   padding eases back when the first send takes the dashboard down. */
+.session-messages:has(.pd-draft.has-rail) {
+  padding-inline: max(20px, calc((100% - 1160px) / 2));
+  transition: padding-inline 0.4s ease;
+}
+.pd-draft.has-rail { display: grid; grid-template-columns: minmax(0, 1fr) 270px; column-gap: 28px; align-items: start; }
+
+.pd-rail { flex: none; width: 270px; align-self: flex-start; position: sticky; top: 0; border-left: 1px solid var(--color-border); padding: 0 0 8px 22px; }
+.pd-draft.has-rail > .pd-rail { width: auto; }
+.pd-rail[hidden] { display: none; }
+.pd-rail-title { font-size: 13px; font-weight: 600; color: var(--color-text); margin-bottom: 10px; min-height: 24px; display: flex; align-items: center; }
+
+/* The popup's sections carry an inline top margin; the rail spaces them with gap. */
+.pd-rail .view-project-automation { display: flex; flex-direction: column; gap: 18px; }
+.pd-rail .automation-section { margin-top: 0 !important; }
+.pd-rail .option { flex-direction: column; align-items: stretch; gap: 6px; }
+.pd-rail .acc-row-control { justify-content: flex-start; }
+.pd-rail .inline-select, .pd-rail .inline-input { width: 100%; max-width: none; }
+.pd-rail #automationEmpty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0; text-align: left; }
+.pd-rail #automationEmpty .v-empty-icon, .pd-rail #automationEmpty .v-empty-hint { display: none; }
+.pd-rail #automationEmpty .v-empty-title { font-size: 13px; font-weight: 400; margin: 0; }
+
+/* Narrower than 1400px the main column would drop under ~740px with the rail
+   beside it, so the settings go underneath instead. */
+@media (max-width: 1400px) {
+  .pd-page-body { flex-direction: column; align-items: stretch; gap: 8px; }
+  .pd-page-body > .pd-root.is-page { flex: none; }
+  .pd-draft.has-rail { display: block; }
+  .pd-rail, .pd-draft.has-rail > .pd-rail {
+    width: auto; position: static; border-left: 0; padding: 18px 0 8px; margin-top: 8px; border-top: 1px solid var(--color-border);
+  }
+}
+@media (max-width: 768px) {
+  .pd-page-body { padding: 16px 16px 12px; }
+  .pd-qa-host.is-page { padding-inline: 16px; }
+}

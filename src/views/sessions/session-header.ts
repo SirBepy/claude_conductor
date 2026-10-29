@@ -168,6 +168,16 @@ export class SessionHeader {
   }
 
   setTitle(text: string): void { this._titleEl.textContent = text; }
+
+  /** Fades the title and project line in again. A draft calls it as it becomes
+   *  its chat, so the project name it opened on hands over to the chat's name. */
+  playTextSwap(): void {
+    this.el.classList.remove("is-swapping");
+    // Restarts the animation if a swap is still running.
+    void this.el.offsetWidth;
+    this.el.classList.add("is-swapping");
+    this._titleEl.addEventListener("animationend", () => this.el.classList.remove("is-swapping"), { once: true });
+  }
   setMeta(text: string): void { this._projEl.textContent = text; }
 
   /** Makes the project name a button (opens the project's dashboard page). A

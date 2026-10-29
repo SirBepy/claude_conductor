@@ -4,7 +4,8 @@
 // or as a page of its own (dashboard-page.ts).
 import { html, nothing, render, type TemplateResult } from "lit-html";
 import { invoke } from "../../../shared/ipc";
-import { getTransport, type Unlisten } from "../../../shared/transport";
+import { getTransport, isRemote, type Unlisten } from "../../../shared/transport";
+import { renderProjectSettings } from "./project-config/automation";
 import { debounce } from "../../../shared/debounce";
 import { hydrateProjectTechIcons } from "../../../shared/projects";
 import { getSettings } from "../../../shared/state";
@@ -29,6 +30,7 @@ import type { CardResult, DashboardHistory, DashboardTargetRef, DashSnapshot } f
 
 import "./pd-dashboard.css";
 import "./pd-cards.css";
+import "./pd-rail.css";
 
 export interface DashboardDeps {
   mode: DashMode;
@@ -43,6 +45,8 @@ export interface DashboardDeps {
 
 export interface DashboardHandle {
   root: HTMLElement;
+  /** The project's settings, which the caller places beside `root` (null for a group and on the phone). */
+  rail: HTMLElement | null;
   /** The quick-action chip row; the caller places it (above a draft's message box, under the page). */
   chips: HTMLElement;
   /** Refetch now, bypassing the debounce. */
@@ -125,6 +129,17 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
   root.dataset.pdTarget = `${ref.kind}:${ref.id}`;
   const chips = document.createElement("div");
   chips.className = `pd-qa-host is-${deps.mode}`;
+  // Project settings sit beside the dashboard instead of behind a menu. They edit
+  // this PC's config, so the phone has none, and a group's repos each own theirs.
+  let rail: HTMLElement | null = null;
+  if (ref.kind === "project" && !isRemote()) {
+    rail = document.createElement("aside");
+    rail.className = "pd-rail";
+    rail.setAttribute("aria-label", "Project settings");
+    // Hidden with the rest of the draft until there is something to show.
+    rail.hidden = true;
+  }
+  let railFilled = false;
 
   let ctx: DashCtx | null = null;
   let destroyed = false;
@@ -146,6 +161,17 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     void hydrateProjectTechIcons(root);
     void hydrateProjectTechIcons(chips);
     syncQuickActions();
+    // The settings controls find their rows by document id, so they render once
+    // the rail is on screen, never while it is still detached.
+    const repo = ctx.snap.target.repos[0];
+    if (rail && !railFilled && repo && root.isConnected && rail.isConnected) {
+      railFilled = true;
+      rail.hidden = false;
+      rail.innerHTML = `<div class="pd-rail-title">Project settings</div><div class="pd-rail-body"></div>`;
+      // A rail that fails to fill must not take the dashboard's paint down with it.
+      renderProjectSettings(rail.querySelector<HTMLElement>(".pd-rail-body")!, repo.cwd)
+        .catch((err) => console.warn("[project-dashboard] project settings rail failed", err));
+    }
     for (const hook of [...ctx.paintHooks]) hook();
     // Once, on the first paint with content; later paints (live events) must
     // not replay it, only fade in a section rebuilt while it still runs.
@@ -309,6 +335,7 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     for (const u of unlisteners.splice(0)) { try { u(); } catch { /* already gone */ } }
     root.remove();
     chips.remove();
+    rail?.remove();
   }
 
   // Right-click (a long-press on the phone): the item's own actions, then the project's.
@@ -323,5 +350,5 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
   paint();
   void loadSnapshot();
 
-  return { root, chips, refresh: () => void loadSnapshot(), destroy };
+  return { root, rail, chips, refresh: () => void loadSnapshot(), destroy };
 }

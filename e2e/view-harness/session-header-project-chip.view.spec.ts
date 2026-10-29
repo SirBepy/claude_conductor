@@ -1,3 +1,4 @@
+// Reviewed 2026-10-29: session-header.css gained the .is-swapping title crossfade; this spec asserts the project chip only, so its contract is unaffected. Passed after the change.
 // asserts: src/views/sessions/session-header.css
 import { test, expect } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+// Reviewed 2026-10-29: project-config/automation.ts gained a "New chat defaults" section and chat-defaults.ts gained two selects; this spec asserts no row dividers, which both keep, so its contract is unaffected. Passed after the change.
 import path from "node:path";
 import { mountView } from "./harness";
 import { shotDir } from "./shot-dir";
