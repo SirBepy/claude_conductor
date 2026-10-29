@@ -22,6 +22,7 @@ import { noteThinkingEvent, setThinkingActivity, setThinkingProgress, setThinkin
 import { scrollToBottom } from "../../shared/chat/chat-dom-renderer";
 import { flushRenderNow } from "../../shared/chat/flush-scheduler";
 import { isRawViewEnabled } from "../../shared/chat/message-filter-pref";
+import { perfPhase } from "../../shared/perf";
 import {
   takeRetainedChat,
   retainChat,
@@ -46,7 +47,11 @@ export async function mountStatusbar(
   if (!sbHost) return null;
   // Both read the same in-memory settings blob; awaiting them in series put two
   // avoidable IPC round-trips in front of every chat open.
+  // Runs before mountRenderer arms the ring and the 8s banner, so a stall here
+  // is a blank pane with no feedback - this line is the only trace of it.
+  const doneSettings = perfPhase("chat-open statusbar-settings", () => `session=${sessionId}`);
   const [rows, hideZero] = await Promise.all([loadStatuslineRows(), loadStatuslineHideZero()]);
+  doneSettings();
   let effortDisplay = sess.effort ?? "";
   if (!effortDisplay && sess.kind === "external" && sess.cwd) {
     try {
@@ -226,6 +231,9 @@ export async function mountRenderer(
   }
 
   let loadSettled = false;
+  // The whole cold open as the user waits on it; its sub-phases (history page,
+  // skip marks, channel backlog, bulk-load) log their own lines.
+  const doneOpen = perfPhase("chat-open total", () => `session=${sessionId}`);
   // Held so teardown can stop the dial's paint loop, not just drop its DOM.
   let ringOverlay: ChatLoadingOverlay | null = null;
   const dropRing = (): void => {
@@ -235,29 +243,37 @@ export async function mountRenderer(
   const ringTimer = window.setTimeout(() => {
     if (!loadSettled) ringOverlay = mountChatLoadingOverlay(messagesEl);
   }, 150);
+  let stallBanner: HTMLElement | null = null;
   const stallTimer = window.setTimeout(() => {
     if (loadSettled || state.mountId !== myMount || state.selectedId !== sessionId) return;
-    // ai_todo 228 diagnostics: this guard times a purely local chain
-    // (in-memory settings read + local transcript file read) - it is NOT
-    // waiting on the daemon pipe. If this fires, the stall is in that local
-    // chain (or an unhandled exception before it), not a pipe EOF.
-    console.error(`[sessions] chat load stalled >8s (local settings/history read), session=${sessionId}`);
+    // The chain this times includes the history read, two daemon-pipe calls
+    // (skip marks, channel backlog) and the chunked bulk render, so a stall can
+    // be any of them - the `[perf] chat-open ...` lines in the log name which.
+    console.error(`[sessions] chat load stalled >8s, session=${sessionId}`);
     dropRing();
     messagesEl.querySelector(".chat-loading-overlay")?.remove();
-    messagesEl.innerHTML =
-      `<div class="session-empty session-empty--stalled chat-load-stalled">` +
+    // A sibling, never written into messagesEl: the load is usually still
+    // running, and the bulk render both holds messagesEl at opacity 0 (so a
+    // banner inside it would never show) and keeps appending to it (so wiping
+    // it left the banner stuck above the transcript once the load finished).
+    stallBanner = document.createElement("div");
+    stallBanner.className = "session-empty session-empty--stalled chat-load-stalled";
+    stallBanner.innerHTML =
       `<i class="ph ph-warning"></i>` +
       `<div>This chat isn't loading - the backend didn't respond.</div>` +
-      `<button type="button" class="chat-load-retry">Retry</button>` +
-      `</div>`;
-    messagesEl.querySelector<HTMLButtonElement>(".chat-load-retry")?.addEventListener("click", onStalledRetry);
+      `<button type="button" class="chat-load-retry">Retry</button>`;
+    stallBanner.querySelector<HTMLButtonElement>(".chat-load-retry")?.addEventListener("click", onStalledRetry);
+    messagesEl.before(stallBanner);
   }, 8000);
   const settleLoad = () => {
+    doneOpen();
     loadSettled = true;
     window.clearTimeout(ringTimer);
     window.clearTimeout(stallTimer);
     dropRing();
     messagesEl.querySelector(".chat-loading-overlay")?.remove();
+    stallBanner?.remove();
+    stallBanner = null;
   };
 
   const renderer = new ChatRenderer(messagesEl);
