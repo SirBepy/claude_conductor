@@ -329,6 +329,36 @@ export class HeldMessages {
     // below would clear it anyway on success, but this also covers the
     // "turn ignored the interrupt" path where flush() never runs.
     this.rescue.clear();
+    // Claim the daemon's held list BEFORE interrupting: the mid-turn inject hook
+    // may have already handed an item to the running turn, and cancelling that
+    // turn would kill the message it just received. Whatever the daemon did not
+    // hand back was injected; it is sent, so it is dropped here, not re-sent.
+    const sid = a.sessionId;
+    const snapshot = [...this.itemsForActive()];
+    let claimed = false;
+    if (snapshot.length > 0) {
+      const claim = await this.sync.claimAll(sid);
+      if (claim) {
+        claimed = true;
+        const removedSet = new Set(claim.removed);
+        const injectedSet = claim.injected ? new Set(claim.injected) : null;
+        // Read ids now: claimAll awaited the add round trips that swap them.
+        // With `injected` known, only a confirmed injection counts: an id the
+        // daemon never held (it restarted) must still be sent, not dropped.
+        const injected = snapshot
+          .filter((i) => !removedSet.has(i.id) && !this.sync.isUnsynced(i.id))
+          .filter((i) => !injectedSet || injectedSet.has(i.id))
+          .map((i) => i.id);
+        this.markDelivered(sid, injected);
+        if (injected.length > 0 && this.itemsForActive().length === 0 && a.isDraftEmpty()) {
+          this.deferredSid = null;
+          this.clearDeferRetry();
+          this.render.reset();
+          a.onChange();
+          return true;
+        }
+      }
+    }
     try {
       await a.interrupt();
     } catch {
@@ -342,10 +372,25 @@ export class HeldMessages {
       // The child ignored the interrupt. Flushing anyway is the exact race the
       // wait exists to avoid, so the set stays queued and the chip stays up.
       console.warn("[held] send-now: turn still live after interrupt, keeping messages held");
+      // The claim emptied the daemon's list; put the still-held items back so
+      // the next reconcile does not replace the local set with nothing.
+      if (claimed) this.repushHeld(sid);
       return false;
     }
     await this.flush(true);
     return true;
+  }
+
+  /** Re-add this session's local items to the daemon after a claim emptied its
+   *  list but the send never happened. */
+  private repushHeld(sid: string): void {
+    for (const item of this.map.get(sid) ?? []) {
+      this.sync.add(sid, item.id, item.blocks, (serverId) => {
+        item.id = serverId;
+        this.persist();
+        if (this.attached?.sessionId === sid) this.render.renderChip();
+      });
+    }
   }
 
   /** Public escape hatch for a full pane/view teardown (todo 926's "chat is

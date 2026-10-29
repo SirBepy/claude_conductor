@@ -141,6 +141,121 @@ describe("HeldMessages - clear on flush", () => {
   });
 });
 
+describe("HeldMessages - sendNow claims the daemon list before interrupting", () => {
+  it("skips the interrupt and sends nothing when the daemon says the item was already injected mid-turn", async () => {
+    addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [] });
+    const { held, send, interrupt } = makeHarness();
+    held.stage(textBlocks("queued"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(held.hasItemsForActive()).toBe(false);
+  });
+
+  it("matches removed_ids against the server id the add swapped in, even when sendNow races the add", async () => {
+    let resolveAdd;
+    addHeldMessage.mockReturnValue(new Promise((r) => { resolveAdd = r; }));
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [77] });
+    const { held, send, interrupt } = makeHarness();
+    held.stage(textBlocks("queued"));
+
+    const pending = held.sendNow();
+    resolveAdd({ id: 77, updated_at: "t" });
+    await expect(pending).resolves.toBe(true);
+
+    expect(interrupt).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(textBlocks("queued"));
+  });
+
+  it("interrupts then sends an item the daemon still held (removed_ids lists it)", async () => {
+    addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [41] });
+    const { held, send, interrupt } = makeHarness();
+    held.stage(textBlocks("queued"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(textBlocks("queued"));
+  });
+
+  it("drops the injected item but still interrupts and sends the rest", async () => {
+    addHeldMessage.mockResolvedValueOnce({ id: 41, updated_at: "t" }).mockResolvedValueOnce({ id: 42, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [42] });
+    const { held, send, interrupt } = makeHarness();
+    held.stage(textBlocks("already-in"));
+    held.stage(textBlocks("still-held"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(textBlocks("still-held"));
+  });
+
+  it("with injected_ids reported, skips the interrupt only for a confirmed injection", async () => {
+    addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [], injected_ids: [41] });
+    const { held, send, interrupt } = makeHarness();
+    held.stage(textBlocks("queued"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("sends an item the daemon neither removed nor injected (its held list was lost to a restart)", async () => {
+    addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [], injected_ids: [] });
+    const { held, send, interrupt } = makeHarness();
+    held.stage(textBlocks("queued"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(textBlocks("queued"));
+  });
+
+  it("treats an item whose add failed as not injected: it is sent", async () => {
+    addHeldMessage.mockRejectedValue(new Error("offline"));
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [] });
+    const { held, send, interrupt } = makeHarness();
+    held.stage(textBlocks("never-reached-daemon"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(textBlocks("never-reached-daemon"));
+  });
+
+  it("falls back to interrupt-then-flush when an older daemon returns no removed_ids", async () => {
+    addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t" });
+    const { held, send, interrupt } = makeHarness();
+    held.stage(textBlocks("queued"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(textBlocks("queued"));
+  });
+
+  it("falls back to the legacy path when clear_held_messages fails", async () => {
+    addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
+    clearHeldMessages.mockRejectedValue(new Error("down"));
+    const { held, send, interrupt } = makeHarness();
+    held.stage(textBlocks("queued"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(textBlocks("queued"));
+  });
+});
+
 describe("HeldMessages - reconcile on attach", () => {
   it("replaces the local held set with the daemon's copy on attach", async () => {
     getSessionDrafts.mockResolvedValue({

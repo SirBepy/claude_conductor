@@ -113,6 +113,27 @@ fn item_text(blocks: &[ContentBlock]) -> Option<String> {
     }
 }
 
+/// The text-only items of a `held` snapshot that THIS caller now owns, as
+/// `(id, text, blocks)`. The snapshot is a copy, so a concurrent
+/// `clear_held_messages` (a "Send now" that sends the cleared items itself)
+/// can empty the queue after it was taken. `remove_held` returning `Some` is
+/// the only proof the item was still queued, so only those are served: an
+/// item the other path already removed belongs to that path.
+fn claim_text_items(
+    store: &crate::daemon::draft_store::DraftStore,
+    session_id: &str,
+    held: &[crate::daemon::draft_store::HeldDraftItem],
+) -> Vec<(u64, String, Vec<ContentBlock>)> {
+    let mut out = Vec::new();
+    for item in held {
+        let Some(text) = item_text(&item.blocks) else { continue };
+        if store.remove_held(session_id, item.id).is_none() { continue }
+        store.record_injected(session_id, &[item.id]);
+        out.push((item.id, text, item.blocks.clone()));
+    }
+    out
+}
+
 pub(super) async fn on_tool_batch(
     AxState(ctx): AxState<Arc<HookCtx>>,
     Query(q): Query<ToolBatchQuery>,
@@ -134,31 +155,28 @@ pub(super) async fn on_tool_batch(
     let held = ctx.state.draft_store.get(&q.session_id).held;
     let session = ctx.state.sessions.get(&q.session_id).map(|s| s.clone());
     let project_dir = session.as_ref().map(|s| s.cwd.as_path());
+    // Consume before serving. A turn that received the text has, by
+    // definition, taken delivery of it; leaving the items queued would send
+    // them a second time at end of turn. The removal also decides ownership
+    // (see `claim_text_items`), so it happens before the awaits below.
+    let claimed = claim_text_items(&ctx.state.draft_store, &q.session_id, &held);
     let mut delivered_ids: Vec<u64> = Vec::new();
     let mut messages: Vec<String> = Vec::new();
     let mut delivered_blocks: Vec<ContentBlock> = Vec::new();
-    for item in &held {
-        let Some(text) = item_text(&item.blocks) else { continue };
-        delivered_ids.push(item.id);
+    for (id, text, blocks) in claimed {
+        delivered_ids.push(id);
         // A slash command Joe typed mid-sentence while busy gets the same
         // instructions-pointer block a normal send gets (`lifecycle::teardown`'s
         // `send_message_inner`) - without this, a skill named here never
         // reaches the model at all, since the CLI only auto-expands a command
         // in leading position and this path bypasses that entirely.
         messages.push(crate::slash::mentions::augment(&text, project_dir).await);
-        delivered_blocks.extend(item.blocks.iter().cloned());
+        delivered_blocks.extend(blocks);
     }
     // The common case by volume: nothing queued means EMPTY stdout, never an
     // envelope wrapping an empty string (same rule as `prompt-submit`).
     if messages.is_empty() {
         return (StatusCode::OK, String::new());
-    }
-
-    // Consume before serving. A turn that received the text has, by
-    // definition, taken delivery of it; leaving the items queued would send
-    // them a second time at end of turn.
-    for id in &delivered_ids {
-        ctx.state.draft_store.remove_held(&q.session_id, *id);
     }
     sync_held_count(&ctx.state, &q.session_id);
     // Live render rides the session's own chat-stream broadcast, not the
@@ -349,6 +367,51 @@ mod tests {
         assert!(out.contains("look at this"));
         assert!(!out.contains("and this one"), "an image cannot ride additionalContext");
         assert_eq!(c.state.draft_store.held_count("s1"), 1, "the image item survives to flush later");
+    }
+
+    // Interrupt-and-send race: the nudge snapshots the queue, then
+    // `clear_held_messages` (the caller's own send) empties it before the
+    // nudge removes anything. The cleared item is the caller's to send, so the
+    // nudge must not also serve it.
+    #[test]
+    fn an_item_cleared_between_the_snapshot_and_the_claim_is_not_served() {
+        let store = crate::daemon::draft_store::DraftStore::new();
+        let (kept, _) = store.add_held("s1", vec![text("keep")]);
+        let (raced, _) = store.add_held("s1", vec![text("raced")]);
+        let snapshot = store.get("s1").held;
+        store.remove_held("s1", raced);
+        let claimed = claim_text_items(&store, "s1", &snapshot);
+        let ids: Vec<u64> = claimed.iter().map(|c| c.0).collect();
+        assert_eq!(ids, [kept], "an item removed by the other path must not be served");
+
+        let store = crate::daemon::draft_store::DraftStore::new();
+        store.add_held("s1", vec![text("a")]);
+        store.add_held("s1", vec![text("b")]);
+        let snapshot = store.get("s1").held;
+        let (_, cleared) = store.clear_held("s1");
+        assert_eq!(cleared.len(), 2);
+        assert!(claim_text_items(&store, "s1", &snapshot).is_empty(), "everything cleared means nothing is served");
+    }
+
+    // The draft store is in-memory, so after a restart a client cannot tell
+    // "the nudge injected it" from "the daemon never held it" by `removed_ids`
+    // alone. The nudge's served ids are remembered for the clear to report.
+    #[test]
+    fn a_served_item_is_reported_as_injected_by_the_next_clear_not_as_removed() {
+        let store = crate::daemon::draft_store::DraftStore::new();
+        let (served, _) = store.add_held("s1", vec![text("served")]);
+        let (image, _) = store.add_held(
+            "s1",
+            vec![text("img"), ContentBlock::Image { mime: "image/png".into(), data: "AAAA".into() }],
+        );
+        let snapshot = store.get("s1").held;
+        assert_eq!(claim_text_items(&store, "s1", &snapshot).len(), 1);
+
+        let (_, removed) = store.clear_held("s1");
+        assert_eq!(removed, [image], "only the item still queued is removed by the clear");
+        assert_eq!(store.injected_ids("s1"), [served]);
+        assert!(!removed.contains(&served));
+        assert!(store.injected_ids("other").is_empty());
     }
 
     #[test]

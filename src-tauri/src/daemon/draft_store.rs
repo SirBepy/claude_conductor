@@ -48,10 +48,15 @@ pub struct SessionDrafts {
     pub held_updated_at: Option<String>,
 }
 
+/// Per-session cap on remembered nudge-served ids; a clear only ever needs
+/// the recent ones, since the client asks about items it queued moments ago.
+const MAX_INJECTED_IDS: usize = 32;
+
 struct Entry {
     drafts: SessionDrafts,
     next_held_id: u64,
     touched_seq: u64,
+    injected: Vec<u64>,
 }
 
 pub struct DraftStore {
@@ -81,7 +86,7 @@ impl DraftStore {
         }
         let seq = self.seq.fetch_add(1, Ordering::Relaxed);
         let entry = map.entry(session_id.to_string()).or_insert_with(|| {
-            Entry { drafts: SessionDrafts::default(), next_held_id: 1, touched_seq: seq }
+            Entry { drafts: SessionDrafts::default(), next_held_id: 1, touched_seq: seq, injected: Vec::new() }
         });
         entry.touched_seq = seq;
         entry
@@ -169,14 +174,37 @@ impl DraftStore {
         Some(now)
     }
 
-    pub fn clear_held(&self, session_id: &str) -> String {
+    /// Empties the queue and returns the timestamp plus the ids it actually
+    /// removed. A caller that is about to send those messages itself needs the
+    /// ids: an item the mid-turn inject (`hooks_server::nudge`) already took is
+    /// absent here, and sending it again would deliver it twice.
+    pub fn clear_held(&self, session_id: &str) -> (String, Vec<u64>) {
         let now = now_iso();
         let mut map = self.inner.lock().unwrap();
+        let mut removed = Vec::new();
         if let Some(e) = map.get_mut(session_id) {
-            e.drafts.held.clear();
+            removed = e.drafts.held.drain(..).map(|i| i.id).collect();
             e.drafts.held_updated_at = Some(now.clone());
         }
-        now
+        (now, removed)
+    }
+
+    /// Remembers ids the mid-turn nudge removed and served, newest last, capped
+    /// at [`MAX_INJECTED_IDS`]. `clear_held`'s `removed_ids` cannot say this:
+    /// this store is never persisted, so a client that sees an id missing from
+    /// it cannot tell "already injected" from "this daemon never held it".
+    pub fn record_injected(&self, session_id: &str, ids: &[u64]) {
+        let mut map = self.inner.lock().unwrap();
+        let e = self.touch(&mut map, session_id);
+        e.injected.extend_from_slice(ids);
+        if e.injected.len() > MAX_INJECTED_IDS {
+            let excess = e.injected.len() - MAX_INJECTED_IDS;
+            e.injected.drain(..excess);
+        }
+    }
+
+    pub fn injected_ids(&self, session_id: &str) -> Vec<u64> {
+        self.inner.lock().unwrap().get(session_id).map(|e| e.injected.clone()).unwrap_or_default()
     }
 
     pub fn held_count(&self, session_id: &str) -> usize {
@@ -297,6 +325,30 @@ mod tests {
         let s = DraftStore::new();
         s.add_held("a", vec![]);
         assert!(s.remove_held("a", 999).is_none());
+    }
+
+    #[test]
+    fn clear_held_returns_only_the_ids_still_queued() {
+        let s = DraftStore::new();
+        let (id1, _) = s.add_held("a", text("one"));
+        let (id2, _) = s.add_held("a", text("two"));
+        let (id3, _) = s.add_held("a", text("three"));
+        s.remove_held("a", id2);
+        let (_, removed) = s.clear_held("a");
+        assert_eq!(removed, [id1, id3], "an item taken earlier must not be reported as cleared");
+        assert!(s.get("a").held.is_empty());
+        assert_eq!(s.clear_held("a").1, Vec::<u64>::new());
+        assert_eq!(s.clear_held("ghost").1, Vec::<u64>::new());
+    }
+
+    #[test]
+    fn injected_ids_keep_only_the_last_32_per_session() {
+        let s = DraftStore::new();
+        let ids: Vec<u64> = (1..=40).collect();
+        s.record_injected("a", &ids);
+        s.record_injected("b", &[7]);
+        assert_eq!(s.injected_ids("a"), (9..=40).collect::<Vec<u64>>());
+        assert_eq!(s.injected_ids("b"), [7]);
     }
 
     #[test]
