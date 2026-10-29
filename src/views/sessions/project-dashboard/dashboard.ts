@@ -267,7 +267,7 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
       const first = !ctx;
       if (!ctx) {
         ctx = {
-          mode: deps.mode, usage: { range: "30d", offset: 0, records: null }, todoRange: "30d",
+          mode: deps.mode, usage: { range: "30d", records: null }, todoRange: "30d",
           snap, history: null, tab: "outcomes", images: new Map(), refreshing: new Set(),
           doneTodos: new Set(), pages: new Map(), columns: new Map(), halfOrder: [], paintHooks: new Set(),
           nowMs: Date.now(), act: makeActions(host),

@@ -64,7 +64,7 @@ async function fakeDashboardBackend(page: Page, backend: Backend): Promise<void>
   }, backend);
 }
 
-async function mountWithDashboard(page: Page): Promise<void> {
+async function mountWithDashboard(page: Page, invoke: Record<string, unknown> = {}): Promise<void> {
   await page.setViewportSize({ width: 1032, height: 1340 });
   await fakeDashboardBackend(page, {
     list: LIST_ROWS,
@@ -74,6 +74,7 @@ async function mountWithDashboard(page: Page): Promise<void> {
   });
   await mountSessionsList(page, SESSIONS, {
     load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+    ...invoke,
   });
 }
 
@@ -154,14 +155,44 @@ test.describe("view-harness / project dashboard", () => {
     await expect(page.locator("#session-pane .session-header")).toBeVisible();
   });
 
+  test("the Usage card is a line over every day of the range, with a key naming what each kind of gridline is worth", async ({ page }) => {
+    // A token record per active day for the last 30 days, two quiet days in between, peaking near 480M.
+    const ymd = (back: number): string => {
+      const d = new Date();
+      d.setDate(d.getDate() - back);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    };
+    const millions = [120, 30, 0, 210, 480, 60, 70, 0, 140, 205, 80, 110, 95, 40, 260, 300, 15, 50, 75, 180, 220, 90, 35, 60, 130, 410, 150, 20, 70, 100];
+    const records = millions.flatMap((m, i) => (m ? [{ cwd: CONDUCTOR_CWD, date: ymd(29 - i), inputTokens: m * 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }] : []));
+    await mountWithDashboard(page, { get_token_history: records });
+    await openPageFrom(page, "s-q");
+    const usage = card(page, "usage");
+    await expect(usage.locator("svg[data-line-chart]")).toHaveAttribute("data-n", "30");
+    await expect(usage.locator('svg[data-line-chart] path[data-line="tokens"]')).toHaveCount(1);
+    await expect(usage.locator(".pd-pg")).toHaveCount(0);
+    await expect(usage.locator('[data-line-key="major"]')).toHaveText("100M");
+    await expect(usage.locator('[data-line-grid="major"]')).toHaveCount(6);
+    await usage.locator('[data-pd-range="7d"]').click();
+    await expect(usage.locator("svg[data-line-chart]")).toHaveAttribute("data-n", "7");
+    // The last week peaks at 410M on a fresh top of 500M: same 100M lines.
+    await expect(usage.locator('[data-line-key="major"]')).toHaveText("100M");
+    await usage.locator('[data-pd-range="30d"]').click();
+    const box = (await usage.locator(".pd-line-chart").boundingBox())!;
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2);
+    await expect(usage.locator(".pd-line-tip")).toContainText("Tokens");
+    await capture(usage, "dashboard-usage-line-hover");
+    await page.mouse.move(0, 0);
+    await capture(page.locator(".pd-cols"), "dashboard-usage-and-todos");
+  });
+
   test("the Todos card draws open, created and done per day, switches range, and reads a day on hover", async ({ page }) => {
     await mountWithDashboard(page);
     await openPageFrom(page, "s-q");
     const todos = card(page, "todo_chart");
     await expect(todos.locator(".pd-usage-total")).toContainText("claimed");
-    await expect(todos.locator(".pd-todo-legend > span")).toHaveText(["Open", "Created", "Done"]);
-    await expect(todos.locator("svg[data-todo-chart] [data-todo-line]")).toHaveCount(3);
-    const pointsIn = async (): Promise<number> => Number(await todos.locator("svg[data-todo-chart]").getAttribute("data-n"));
+    await expect(todos.locator(".pd-line-legend > span:not(.pd-line-key)")).toHaveText(["Open", "Created", "Done"]);
+    await expect(todos.locator("svg[data-line-chart] [data-line]")).toHaveCount(3);
+    const pointsIn = async (): Promise<number> => Number(await todos.locator("svg[data-line-chart]").getAttribute("data-n"));
     expect(await pointsIn()).toBe(30);
 
     await todos.locator('[data-pd-range="7d"]').click();
@@ -170,12 +201,12 @@ test.describe("view-harness / project dashboard", () => {
     await todos.locator('[data-pd-range="all"]').click();
     expect(await pointsIn()).toBe(40);
 
-    const chart = todos.locator(".pd-todo-chart");
+    const chart = todos.locator(".pd-line-chart");
     const box = (await chart.boundingBox())!;
     await page.mouse.move(box.x + box.width * 0.4, box.y + box.height / 2);
-    const tip = todos.locator(".pd-todo-tip");
+    const tip = todos.locator(".pd-line-tip");
     await expect(tip).toBeVisible();
-    await expect(tip.locator(".pd-todo-tip-date")).toHaveText(/^\d{4}-\d{2}-\d{2}$/);
+    await expect(tip.locator(".pd-line-tip-date")).toHaveText(/^\d{4}-\d{2}-\d{2}$/);
     await expect(tip).toContainText("Open");
     await capture(page, "dashboard-todo-chart-hover");
     await page.mouse.move(0, 0);

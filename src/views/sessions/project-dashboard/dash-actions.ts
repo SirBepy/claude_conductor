@@ -186,10 +186,9 @@ export function makeActions(host: ActionHost): DashActions {
     setPage: (key, page) => host.patch((c) => { c.pages.set(key, Math.max(0, page)); }),
     openReportsModal: () => openReportsModal(host),
     setUsageRange: (range) => {
-      host.patch((c) => { c.usage.range = range; c.usage.offset = 0; });
+      host.patch((c) => { c.usage.range = range; });
       host.loadUsage(range);
     },
-    setUsageOffset: (offset) => host.patch((c) => { c.usage.offset = Math.max(0, offset); }),
     setTodoRange: (range) => host.patch((c) => { c.todoRange = range; }),
     openImage: (id) => {
       const c = host.ctx();
