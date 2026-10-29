@@ -118,6 +118,22 @@ describe("image-only message echo dedup", () => {
     expect(userRows(r)).toHaveLength(2);
   });
 
+  it("a second image sent after the first one's quick transcript copy still shows", async () => {
+    const sid = `sess-img-quick-copy-${Math.random()}`;
+    const r = await mountRenderer(sid, makeBus());
+    const bus = globalThis.window.__TAURI__;
+
+    sessionEvents.pushSynthetic(sid, imageOnly(Date.now()));
+    // Inside DEDUP_WINDOW_MS: folds in via the recent-sig match, not the token.
+    vi.setSystemTime(new Date("2026-10-29T10:00:03.000Z"));
+    bus.emit(`chat-watch:${sid}`, imageOnly(0));
+
+    vi.setSystemTime(new Date("2026-10-29T10:01:00.000Z"));
+    sessionEvents.pushSynthetic(sid, imageOnly(Date.now()));
+
+    expect(userRows(r)).toHaveLength(2);
+  });
+
   it("a tool-result-only user line is never swallowed by an image echo token", async () => {
     const sid = `sess-img-toolresult-${Math.random()}`;
     await mountRenderer(sid, makeBus());
