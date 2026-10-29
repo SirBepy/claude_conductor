@@ -13,7 +13,7 @@
 use crate::daemon::machines::is_local_session;
 use crate::daemon::rpc::{Router, RpcError, Transport};
 use crate::daemon::state::DaemonState;
-use crate::ipc::chat::attachments::{mime_for_ext, AttachmentData};
+use crate::ipc::chat::attachments::{is_raster_ext, mime_for_ext, AttachmentData};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,12 +22,9 @@ use std::sync::Arc;
 /// the cap keeps one call from base64-ing a multi-hundred-MB file over the wire.
 const MAX_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
 
-/// svg is excluded on purpose: it can carry script and external references.
-const RASTER_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-
 fn raster_ext(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    RASTER_EXTS.contains(&ext.as_str()).then_some(ext)
+    is_raster_ext(&ext).then_some(ext)
 }
 
 /// Pure guarded read. `roots` need not be canonical; each is canonicalized by

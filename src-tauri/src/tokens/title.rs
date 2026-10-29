@@ -67,7 +67,10 @@ pub(crate) fn normalise_and_truncate(s: &str, max_chars: usize) -> Option<String
     let cut: String = collapsed.chars().take(max_chars).collect();
     // Back up to a word boundary so a cut never lands mid-word ("pushnbu…"),
     // unless that would discard more than half the budget (one long token).
+    // A cut that already ends on a word (the next char is a space) keeps it.
+    let ends_on_word = collapsed.chars().nth(max_chars) == Some(' ');
     let cut = match cut.rfind(' ') {
+        _ if ends_on_word => cut,
         Some(i) if cut[..i].chars().count() * 2 >= max_chars => cut[..i].trim_end_matches([',', ';', ':', '-']).to_string(),
         _ => cut,
     };
@@ -366,8 +369,6 @@ pub(crate) fn user_prompt_label(msg: &serde_json::Value, max_chars: usize) -> Op
     normalise_and_truncate(&label, max_chars)
 }
 
-const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
-
 /// Removes every `<file:ABS_PATH::DISPLAY_NAME>` attachment token the
 /// composer appends for a staged file, returning the remaining text and each
 /// removed token's display name. The path itself holds `:` (`C:\...`), so the
@@ -399,7 +400,7 @@ fn attachment_only_label(names: &[String]) -> Option<String> {
         std::path::Path::new(n)
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|e| IMAGE_EXTENSIONS.iter().any(|i| i.eq_ignore_ascii_case(e)))
+            .is_some_and(crate::ipc::chat::attachments::is_raster_ext)
     });
     Some(if all_images { "Image" } else { "Attachment" }.to_string())
 }
@@ -893,6 +894,15 @@ mod tests {
         );
         // One long token: no usable boundary, so the hard cut stands.
         assert_eq!(normalise_and_truncate("abcdefghijklmnopqrstuvwxyz", 10).as_deref(), Some("abcdefghij…"));
+    }
+
+    #[test]
+    fn truncation_keeps_a_word_that_ends_exactly_at_the_cut() {
+        // The cut lands on the space after "bbbbbbbbb": that word fits, so it stays.
+        assert_eq!(
+            normalise_and_truncate("aaaaaaaaaa bbbbbbbbb ccc", 20).as_deref(),
+            Some("aaaaaaaaaa bbbbbbbbb…"),
+        );
     }
 
     #[test]
