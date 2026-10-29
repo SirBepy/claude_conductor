@@ -310,7 +310,7 @@
   display: none;
 }
 #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn {
-  display: inline-flex;
+  display: grid;
   flex-shrink: 0;
   width: 32px;
   height: 32px;
@@ -366,7 +366,7 @@
      text's one-line height. Auto left margin pins it right; after a domain
      chip (which already takes the auto margin) it sits flush beside it. */
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn {
-    display: inline-flex;
+    display: grid;
     flex-shrink: 0;
     width: 32px;
     height: 32px;

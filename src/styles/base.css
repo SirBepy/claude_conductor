@@ -149,7 +149,11 @@ html body:has(.view-sessions[data-mobile-keyboard]) {
     cursor: pointer;
     border-radius: 7px;
     display: grid;
+    /* Both, so the glyph stays centred when a surface rule swaps `display` to
+       (inline-)flex: place-items alone leaves a flex item at the left edge.
+       e2e/view-harness/icon-buttons-centred.view.spec.ts sweeps for that. */
     place-items: center;
+    place-content: center;
     flex-shrink: 0;
     transition: background 0.15s, color 0.15s;
 }

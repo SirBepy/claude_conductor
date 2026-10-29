@@ -1,3 +1,4 @@
+// Reviewed 2026-10-29: .icon-btn-sq now sets place-content: center beside place-items, and the question card's Ask button uses display: grid instead of inline-flex, so its glyph is centred - no change to this spec's contract, and it passes.
 // Reviewed 2026-10-29: question cards now re-expand from their collapsed bar on re-open/re-announce, a parked question is shown only while the daemon still lists it, and an already-answered one is dropped (answered-gate.ts) - this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/permission-modal-track.css, src/views/sessions/permission-modal-shell.css
 // Reviewed 2026-10-28: the phone review Submit's 48px min-height now wins over the footer's 32px button rule - no change to this spec's divider contract.

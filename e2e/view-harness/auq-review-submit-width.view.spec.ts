@@ -1,3 +1,4 @@
+// Reviewed 2026-10-29: .icon-btn-sq now sets place-content: center beside place-items, and the question card's Ask button uses display: grid instead of inline-flex, so its glyph is centred - no change to this spec's contract, and it passes.
 // Reviewed 2026-10-29: question cards now re-expand from their collapsed bar on re-open/re-announce, a parked question is shown only while the daemon still lists it, and an already-answered one is dropped (answered-gate.ts) - this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/permission-modal-shell.css
 // Reviewed 2026-10-28: the phone page's ask band now runs edge to edge (track viewport widened over the body padding, panels re-inset) - phone-media only, no change to this spec's contract.
