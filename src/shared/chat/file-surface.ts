@@ -570,8 +570,12 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     let text = diskPath && editorModule ? (await loadEditor()).unsavedText(diskPath) : null;
     let truncated = false;
     if (text === null) {
-      if (!(state.loaded && state.loadedForPath === file.path)) {
-        setBody(`<div class="fs-loading">Loading...</div>`);
+      const cached = !!state.loaded && state.loadedForPath === file.path;
+      // A file on disk is re-read on every render: the Files window re-shows
+      // the same SurfaceFile, so the cache would keep the first read even after
+      // a chat edited the todo. The cached copy stays up meanwhile, no flash.
+      if (!cached || diskPath !== null) {
+        if (!cached) setBody(`<div class="fs-loading">Loading...</div>`);
         try {
           const data = await file.fileAtRev();
           if (token !== state.token) return;
