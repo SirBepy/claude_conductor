@@ -58,7 +58,12 @@ test.describe("view-harness / new-chat account resolution in the draft", () => {
 
   test("no default and two accounts: first send is refused with a toast and opens the account picker", async ({ page }) => {
     await openDraft(page, { list_accounts: [WORK, HOME] });
-    await expect(page.locator("#session-pane .sb-account")).toHaveCount(0);
+    // The unbound draft shows a "Pick account" prompt chip (statusbar-chips.ts)
+    // rather than no chip, so the picker is reachable before the first send.
+    const chip = page.locator("#session-pane .sb-account");
+    await expect(chip).toHaveCount(1);
+    await expect(chip).toHaveClass(/sb-account-none/);
+    await expect(chip).toHaveAttribute("aria-label", "Pick account");
 
     const ta = page.locator("#session-pane .session-composer .composer-textarea");
     await ta.fill("hello");
