@@ -138,9 +138,9 @@ html body:has(.view-sessions[data-mobile-keyboard]) {
 }
 
 /* Caller-sized 24-28px icon button, unlike the fixed 32px .icon-btn above.
-   Callers add this alongside their own width/height/font-size rule and
-   must supply `padding: 0` - the bare `button {}` reset below sets
-   `7px 16px`, forcing an unstyled square button wider than its own box. */
+   Callers add this alongside their own width/height/font-size rule. It sets
+   `padding: 0` itself, and the bare `button {}` reset sets none, so a square
+   icon button stays the size its caller gave it. */
 .icon-btn-sq {
     border: 0;
     background: transparent;
