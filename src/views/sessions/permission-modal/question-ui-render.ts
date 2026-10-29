@@ -340,7 +340,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         });
       });
 
-      if (focusedOption) {
+      // A card that just appeared takes the keyboard from the composer, so typing
+      // answers it; later rebuilds only restore focus the card already owned.
+      if (firstRender) {
+        focusActivePanel(host, state.activeTab, hasSummary && state.activeTab === questions.length);
+      } else if (focusedOption) {
         const same = focusedOption.qi === state.activeTab
           ? Array.from(host.querySelectorAll<HTMLInputElement>(`.prompt-panel[data-panel="${state.activeTab}"] .prompt-q__opts input`))
             .find((el) => el.dataset.label === focusedOption.label)
