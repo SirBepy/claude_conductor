@@ -72,7 +72,11 @@ export class ComposerAttachments {
   private cb: ComposerAttachmentsCallbacks;
   private attachmentsEl: HTMLElement | null = null;
   private fileInput: HTMLInputElement | null = null;
-  private inflight = new Set<Promise<void>>();
+  // Keyed by chip, so removing a chip mid-upload drops its wait too: the
+  // daemon pipe has no call timeout, and a hung upload of a chip the user
+  // already removed must not hold Send forever.
+  private inflight = new Map<Attachment, Promise<void>>();
+  private inflightWaiters: (() => void)[] = [];
 
   constructor(cb: ComposerAttachmentsCallbacks) {
     this.cb = cb;
@@ -101,7 +105,17 @@ export class ComposerAttachments {
   /** Resolves once every staged upload has settled, including any started
    *  while waiting, so a send never ships a chip that has no path yet. */
   async whenUploaded(): Promise<void> {
-    while (this.inflight.size > 0) await Promise.allSettled([...this.inflight]);
+    while (this.inflight.size > 0) {
+      const changed = new Promise<void>((res) => this.inflightWaiters.push(res));
+      await Promise.race([Promise.allSettled([...this.inflight.values()]), changed]);
+    }
+  }
+
+  private dropInflight(a: Attachment): void {
+    if (!this.inflight.delete(a)) return;
+    const waiters = this.inflightWaiters;
+    this.inflightWaiters = [];
+    waiters.forEach((wake) => wake());
   }
 
   /** Open the native file picker (mobile "Attach image" menu entry). */
@@ -221,11 +235,11 @@ export class ComposerAttachments {
       })
       .finally(() => {
         a.uploading = false;
-        this.inflight.delete(done);
+        this.dropInflight(a);
         this.render();
         this.persist();
       });
-    this.inflight.add(done);
+    this.inflight.set(a, done);
     await done;
   }
 
@@ -270,6 +284,7 @@ export class ComposerAttachments {
         e.stopPropagation();
         const idx = this.attachments.indexOf(a);
         if (idx >= 0) this.attachments.splice(idx, 1);
+        this.dropInflight(a);
         this.render();
         this.persist();
       });

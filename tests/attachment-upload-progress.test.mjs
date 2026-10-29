@@ -75,6 +75,24 @@ describe("composer attachment upload progress", () => {
     expect(texts.join("\n")).not.toContain("attachment dropped");
   });
 
+  it("removing a chip whose upload hangs releases a send that was waiting on it", async () => {
+    const onSend = vi.fn(async () => {});
+    const { composer, root, textarea } = await mountComposer({ onSend });
+
+    void composer.dropFiles([png()]);
+    textarea.value = "never mind the image";
+    textarea.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onSend).not.toHaveBeenCalled();
+
+    // The upload never settles; removing its chip must be enough.
+    root.querySelector(".composer-attachments .attachment .rm").click();
+
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    const texts = onSend.mock.calls[0][0].map((b) => b.text);
+    expect(texts.join("\n")).not.toContain("<file:");
+  });
+
   it("falls back to a named file chip, not a blank image tile, when a path attach fails", async () => {
     tauriMock((cmd) => {
       if (cmd === "paste_attachment_from_path") throw new Error("daemon gone");
