@@ -350,8 +350,13 @@ pub(crate) fn user_prompt_label(msg: &serde_json::Value, max_chars: usize) -> Op
     // unlike the meta sentinel above, strip rather than exclude, or the raw
     // marker becomes the chat title.
     let (_author, text) = crate::types::chat::strip_daemon_author_sentinel(&text);
+    // Attachment tokens go before the empty check and before truncation, so
+    // an image-only message gets a name and a cut never lands mid-token.
+    let (text, attachments) = strip_attachment_tokens(&text);
     let trimmed = text.trim();
-    if trimmed.is_empty() { return None }
+    if trimmed.is_empty() {
+        return attachment_only_label(&attachments);
+    }
     if trimmed.starts_with("<local-command-caveat>") { return None }
     let trimmed = crate::slash::mentions::strip_block(trimmed);
     let trimmed = trimmed.as_ref();
@@ -361,6 +366,44 @@ pub(crate) fn user_prompt_label(msg: &serde_json::Value, max_chars: usize) -> Op
     normalise_and_truncate(&label, max_chars)
 }
 
+const IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+
+/// Removes every `<file:ABS_PATH::DISPLAY_NAME>` attachment token the
+/// composer appends for a staged file, returning the remaining text and each
+/// removed token's display name. The path itself holds `:` (`C:\...`), so the
+/// display name is whatever follows the LAST `::` inside the token. A `<file:`
+/// with no closing `>` is ordinary text and stays.
+fn strip_attachment_tokens(text: &str) -> (String, Vec<String>) {
+    const OPEN: &str = "<file:";
+    let mut out = String::with_capacity(text.len());
+    let mut names = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(OPEN) {
+        let after = &rest[start + OPEN.len()..];
+        let Some(end) = after.find('>') else { break };
+        let body = &after[..end];
+        out.push_str(&rest[..start]);
+        let name = body.rsplit_once("::").map_or(body, |(_, n)| n);
+        names.push(name.to_string());
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    (out, names)
+}
+
+/// Title for a message that held only attachment tokens: `Image` when every
+/// one is an image file, else `Attachment`. None when there were no tokens.
+fn attachment_only_label(names: &[String]) -> Option<String> {
+    if names.is_empty() { return None }
+    let all_images = names.iter().all(|n| {
+        std::path::Path::new(n)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| IMAGE_EXTENSIONS.iter().any(|i| i.eq_ignore_ascii_case(e)))
+    });
+    Some(if all_images { "Image" } else { "Attachment" }.to_string())
+}
+
 // Keep in sync: transcript_scan.rs's scan_transcript re-implements this
 // override > milestone > first-prompt precedence in a single forward pass.
 
@@ -368,6 +411,59 @@ pub(crate) fn user_prompt_label(msg: &serde_json::Value, max_chars: usize) -> Op
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    fn first_prompt_of(content: &str) -> Option<String> {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let line = serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": content}
+        }).to_string();
+        std::fs::write(&path, line).unwrap();
+        first_user_prompt(&path, 60)
+    }
+
+    #[test]
+    fn first_user_prompt_image_only_message_is_titled_image() {
+        let text = r"<file:C:\Users\tecno\AppData\Roaming\com.sirbepy.claudeconductor\uploads\x.png::51981.png>";
+        assert_eq!(first_prompt_of(text).as_deref(), Some("Image"));
+    }
+
+    #[test]
+    fn first_user_prompt_image_extension_match_is_case_insensitive_and_covers_all_tokens() {
+        let text = r"<file:C:\a\b.JPG::b.JPG> <file:C:\a\c.webp::c.webp>";
+        assert_eq!(first_prompt_of(text).as_deref(), Some("Image"));
+    }
+
+    #[test]
+    fn first_user_prompt_non_image_attachment_is_titled_attachment() {
+        let text = r"<file:C:\a\notes.pdf::notes.pdf>";
+        assert_eq!(first_prompt_of(text).as_deref(), Some("Attachment"));
+    }
+
+    #[test]
+    fn first_user_prompt_mixed_image_and_other_attachment_is_titled_attachment() {
+        let text = r"<file:C:\a\b.png::b.png><file:C:\a\n.txt::n.txt>";
+        assert_eq!(first_prompt_of(text).as_deref(), Some("Attachment"));
+    }
+
+    #[test]
+    fn first_user_prompt_text_plus_image_titles_with_just_the_text() {
+        let text = r"fix the header <file:C:\a\b.png::b.png>";
+        assert_eq!(first_prompt_of(text).as_deref(), Some("fix the header"));
+    }
+
+    #[test]
+    fn first_user_prompt_long_text_never_leaks_a_cut_attachment_token() {
+        let text = format!(r"{} <file:C:\a\b.png::b.png>", "word ".repeat(2));
+        let title = first_prompt_of(&text).unwrap();
+        assert!(!title.contains("<file"), "title leaked a token: {title}");
+    }
+
+    #[test]
+    fn first_user_prompt_unclosed_file_marker_is_ordinary_text() {
+        assert_eq!(first_prompt_of("what is <file: in html").as_deref(), Some("what is <file: in html"));
+    }
 
     #[test]
     fn first_user_prompt_uses_plain_text() {
