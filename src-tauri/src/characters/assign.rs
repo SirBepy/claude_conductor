@@ -152,6 +152,8 @@ mod tests {
             claude_ai_connectors: false,
             tracker: None,
             keep_running_in_gaming_mode: false,
+            default_model: None,
+            default_effort: None,
         }
     }
 

@@ -78,10 +78,28 @@ describe("resolveNewChatConfig", () => {
     expect(await accountPickNeeded(config, PATH)).toBe(true);
   });
 
-  it("opens on the project's last model/effort, Opus/high the first time", async () => {
-    expect(await resolveNewChatConfig(PATH)).toMatchObject({ model: "opus", effort: "high" });
-    reads.settings = { projectLastChoice: { [PATH]: { model: "sonnet", effort: "low" } } };
-    expect(await resolveNewChatConfig(PATH)).toMatchObject({ model: "sonnet", effort: "low" });
+  it("opens on Sonnet/high when neither the project nor the settings pick a default", async () => {
+    expect(await resolveNewChatConfig(PATH)).toMatchObject({ model: "sonnet", effort: "high" });
+  });
+
+  it("opens on the global default model/effort", async () => {
+    reads.settings = { defaultModel: "opus", defaultEffort: "max" };
+    expect(await resolveNewChatConfig(PATH)).toMatchObject({ model: "opus", effort: "max" });
+  });
+
+  it("the project's default beats both the global default and the last chat's choice", async () => {
+    reads.settings = {
+      defaultModel: "opus", defaultEffort: "max",
+      projectLastChoice: { [PATH]: { model: "haiku", effort: "low" } },
+    };
+    reads.projects = [{ id: "p1", path: PATH, default_model: "sonnet", default_effort: "medium" }];
+    expect(await resolveNewChatConfig(PATH)).toMatchObject({ model: "sonnet", effort: "medium" });
+  });
+
+  it("a project that pins only the model takes the effort from the global default", async () => {
+    reads.settings = { defaultEffort: "low" };
+    reads.projects = [{ id: "p1", path: PATH, default_model: "haiku", default_effort: null }];
+    expect(await resolveNewChatConfig(PATH)).toMatchObject({ model: "haiku", effort: "low" });
   });
 
   it("rolls a character from the project's pool", async () => {

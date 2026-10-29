@@ -7,7 +7,7 @@ import { isApiCreditAccount, type AccountLite } from "../../shared/account-chip"
 import { resolveCached, type CacheRead } from "./new-session-cache";
 import { resolveInitialAccountId } from "./account-picker-logic";
 import {
-  readLastChoice,
+  resolveDefaultChoice,
   readModels,
   readDefaultFlags,
 } from "../../shared/effort-presets";
@@ -42,10 +42,9 @@ export async function resolveModelEffortData(
   const settingsRaw = await resolveCached(settingsRead, {} as Record<string, unknown>);
   const models = readModels(settingsRaw);
   const defaultFlags = readDefaultFlags(settingsRaw);
-  // No presets anymore - first-ever session in a project defaults to Opus/high.
-  const initial = readLastChoice(settingsRaw, projectPath) ?? { model: "opus", effort: "high" };
-
   let projectId: string | null = null;
+  // A paired machine's project defaults live on that machine; its draft opens on this one's global default.
+  let projectDefault: { default_model?: string | null; default_effort?: string | null } | undefined;
   let preferredAccountId: string | null;
   let accounts: AccountLite[];
   let defaultAccountId: string | null;
@@ -61,10 +60,11 @@ export async function resolveModelEffortData(
     // bound account (if any) for the account picker below.
     const projectsListVal: ProjectConfig[] = await resolveCached(source.projectsRead, [] as ProjectConfig[]);
     const proj = projectsListVal.find((p) => String(p.path) === projectPath) as
-      | { id: string; preferred_account_id?: string | null }
+      | { id: string; preferred_account_id?: string | null; default_model?: string | null; default_effort?: string | null }
       | undefined;
     projectId = proj?.id ?? null;
     preferredAccountId = proj?.preferred_account_id ?? null;
+    projectDefault = proj;
     // Backend-normalized override: resolves worktree/casing cases the raw
     // find() above misses. On throw (e.g. remote transport, no mirror yet)
     // keep the raw-match result from above as a best-effort fallback.
@@ -87,6 +87,8 @@ export async function resolveModelEffortData(
   // Account picker (multi-account milestone 04): resolve project binding ->
   // default -> sole-account fallback -> null (ambiguous/empty registry).
   const accountId = resolveInitialAccountId(preferredAccountId, defaultAccountId, accounts);
+
+  const initial = resolveDefaultChoice(settingsRaw, projectDefault);
 
   return {
     models,

@@ -77,6 +77,14 @@ pub struct ProjectConfig {
     /// false so an existing project opts in explicitly.
     #[serde(default)]
     pub keep_running_in_gaming_mode: bool,
+    /// Model a new chat in this project opens on. `None` follows the global
+    /// default (Settings' `defaultModel`, kept in `extra`). Stored as a model
+    /// family (`sonnet`), like every other persisted model value.
+    #[serde(default)]
+    pub default_model: Option<String>,
+    /// Effort a new chat in this project opens on; `None` follows the global default.
+    #[serde(default)]
+    pub default_effort: Option<String>,
 }
 
 /// Which paired peer machine an `Instance` row is mirrored from, and
@@ -304,10 +312,21 @@ mod tests {
             claude_ai_connectors: false,
             tracker: None,
             keep_running_in_gaming_mode: false,
+            default_model: Some("sonnet".into()),
+            default_effort: Some("high".into()),
         };
         let raw = serde_json::to_string(&p).unwrap();
         let back: ProjectConfig = serde_json::from_str(&raw).unwrap();
         assert_eq!(p, back);
+    }
+
+    #[test]
+    fn project_config_without_default_model_fields_still_loads() {
+        // A settings.json written before the fields existed must keep loading.
+        let raw = r#"{"id":"abc","path":"C:/x/y","name":"Y","created_at":"2026-04-21T00:00:00Z"}"#;
+        let p: ProjectConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(p.default_model, None);
+        assert_eq!(p.default_effort, None);
     }
 
     #[test]
