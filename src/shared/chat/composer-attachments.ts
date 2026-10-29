@@ -184,18 +184,23 @@ export class ComposerAttachments {
     const mime = imageMimeFromPath(srcPath) ?? "application/octet-stream";
     await this.stage({ mime, data: "", path: null, filename }, async (a) => {
       const sessionId = this.cb.getSessionId();
-      if (!sessionId) return;
       try {
-        const result = await invoke<{ path: string; mime: string; base64: string }>(
-          "paste_attachment_from_path",
-          { sessionId, path: srcPath, ...this.machineArg() },
-        );
-        a.mime = result.mime;
-        a.data = result.base64;
-        a.path = result.path;
+        if (sessionId) {
+          const result = await invoke<{ path: string; mime: string; base64: string }>(
+            "paste_attachment_from_path",
+            { sessionId, path: srcPath, ...this.machineArg() },
+          );
+          a.mime = result.mime;
+          a.data = result.base64;
+          a.path = result.path;
+          return;
+        }
       } catch (err) {
         console.warn("[Composer] paste_attachment_from_path failed:", err);
       }
+      // No bytes: the guessed image mime would render a blank tile, while a
+      // file chip still names what failed to attach.
+      a.mime = "application/octet-stream";
     });
   }
 

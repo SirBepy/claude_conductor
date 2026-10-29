@@ -74,4 +74,18 @@ describe("composer attachment upload progress", () => {
     expect(texts).toContain(`<file:${UPLOADED}::photo.png>`);
     expect(texts.join("\n")).not.toContain("attachment dropped");
   });
+
+  it("falls back to a named file chip, not a blank image tile, when a path attach fails", async () => {
+    tauriMock((cmd) => {
+      if (cmd === "paste_attachment_from_path") throw new Error("daemon gone");
+      return undefined;
+    });
+    const { composer, root } = await mountComposer();
+
+    await composer.attachFromPath("C:/Users/me/Desktop/shot.png");
+
+    const chip = root.querySelector(".composer-attachments .attachment");
+    expect(chip.classList.contains("file-chip")).toBe(true);
+    expect(chip.textContent).toContain("shot.png");
+  });
 });
