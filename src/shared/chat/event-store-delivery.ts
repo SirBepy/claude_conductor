@@ -194,6 +194,17 @@ export class DeliveryPolicy {
         // contentText joins blocks with no separator, so the blank lines the
         // live copy kept would otherwise make the two sigs differ.
         const sig = normalizeUserMessageText(raw).replace(FILE_TOKEN_SIG_RE, "").replace(/\s+/g, "");
+        // An attachment-only message (an image sent with no text) strips down to
+        // "" - the sig of a tool-result-only line, which pushSynthetic must never
+        // tokenize. Marking it keeps the echo token (the only dedup that outlasts
+        // DEDUP_WINDOW_MS), so a cold `claude`'s late JSONL record folds into the
+        // echo instead of drawing the image a second time. The marker is presence
+        // only: the echo carries `<file:>` tokens, the record may carry either
+        // tokens or image blocks, so their counts need not agree.
+        if (sig === "") {
+          const blocks = (ev as { content?: { type: string }[] }).content ?? [];
+          if (blocks.some((b) => b.type === "image") || raw.search(FILE_TOKEN_SIG_RE) !== -1) return "u:[attachment]";
+        }
         return `u:${sig}`;
       }
       case "tool_use":
