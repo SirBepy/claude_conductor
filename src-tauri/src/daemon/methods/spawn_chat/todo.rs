@@ -36,6 +36,21 @@ fn model_and_effort_for(state: &DaemonState, cwd: &std::path::Path) -> (String, 
     }
 }
 
+/// The account a todo chat runs on: the one bound to the project (or its parent
+/// repo for a worktree), exactly what a manual new chat there preselects. A
+/// binding to an API-credit account is dropped to the default, because that
+/// account is only ever chosen explicitly per chat (see `accounts::pick_account`).
+fn account_for_todo_chat(
+    projects: &[crate::types::ProjectConfig],
+    registry: &[crate::accounts::model::Account],
+    cwd: &std::path::Path,
+) -> Option<String> {
+    crate::accounts::without_api_credit_in(
+        registry,
+        crate::settings::identity::resolve_effective_preferred_account_id(projects, cwd),
+    )
+}
+
 /// The first message for todo `canonical`.
 fn first_message(canonical: &str) -> String {
     format!("Do todo {canonical}")
@@ -47,7 +62,12 @@ fn first_message(canonical: &str) -> String {
 pub(crate) async fn start_todo_chat(state: &Arc<DaemonState>, cwd: &str, id: &str) -> Result<String, String> {
     let canonical = todo_actions::canonical_id_of(&todos_dir(std::path::Path::new(cwd)), id, &todo_ids::device_label())?;
     let (model, effort) = model_and_effort_for(state, std::path::Path::new(cwd));
-    spawn_chat_for_peer(state, cwd, &first_message(&canonical), &model, &effort, None).await
+    let account_id = account_for_todo_chat(
+        &state.settings.snapshot().projects,
+        &crate::accounts::load_registry(),
+        std::path::Path::new(cwd),
+    );
+    spawn_chat_for_peer(state, cwd, &first_message(&canonical), &model, &effort, None, account_id).await
 }
 
 pub fn register_todo_chat_rpc(router: &mut Router, state: Arc<DaemonState>) {
@@ -83,6 +103,51 @@ mod tests {
     #[test]
     fn the_first_message_is_do_todo_with_the_canonical_id() {
         assert_eq!(first_message("pc-1407"), "Do todo pc-1407");
+    }
+
+    fn project_json(path: &std::path::Path, preferred: Option<&str>) -> serde_json::Value {
+        // Built from JSON so a field added later with `#[serde(default)]` cannot break this test.
+        json!({
+            "id": "id-1",
+            "path": path,
+            "name": "proj",
+            "avatar": {"kind": "none"},
+            "created_at": "2026-10-29T00:00:00Z",
+            "preferred_account_id": preferred,
+        })
+    }
+
+    fn api_credit_account(id: &str) -> crate::accounts::model::Account {
+        serde_json::from_value(json!({
+            "id": id, "config_dir": "C:/x", "chrome_profile_dir": "C:/y",
+            "email": "", "org_uuid": "", "created_at": "2026-10-29T00:00:00Z",
+            "kind": "api_credit",
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_todo_chat_runs_on_the_projects_preferred_account() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let bound: Vec<crate::types::ProjectConfig> =
+            serde_json::from_value(json!([project_json(dir.path(), Some("acct-work"))])).unwrap();
+        assert_eq!(account_for_todo_chat(&bound, &[], dir.path()).as_deref(), Some("acct-work"));
+
+        let unbound: Vec<crate::types::ProjectConfig> =
+            serde_json::from_value(json!([project_json(dir.path(), None)])).unwrap();
+        assert_eq!(account_for_todo_chat(&unbound, &[], dir.path()), None, "no binding means the default account");
+        assert_eq!(account_for_todo_chat(&[], &[], dir.path()), None, "an unregistered folder means the default account");
+    }
+
+    #[test]
+    fn a_binding_to_an_api_credit_account_falls_back_to_the_default() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let bound: Vec<crate::types::ProjectConfig> =
+            serde_json::from_value(json!([project_json(dir.path(), Some("acct-credit"))])).unwrap();
+        let registry = [api_credit_account("acct-credit")];
+        assert_eq!(account_for_todo_chat(&bound, &registry, dir.path()), None);
     }
 
     #[test]

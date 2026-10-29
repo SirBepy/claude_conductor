@@ -226,7 +226,7 @@ pub fn register_spawn_chat_rpc(router: &mut Router, state: Arc<DaemonState>) {
             let model = p.get("model").and_then(Value::as_str).unwrap_or(FALLBACK_MODEL);
             let effort = p.get("effort").and_then(Value::as_str).unwrap_or(FALLBACK_EFFORT);
             let name = p.get("name").and_then(Value::as_str);
-            match forward::spawn_chat_for_peer(&state, cwd, prompt, model, effort, name).await {
+            match forward::spawn_chat_for_peer(&state, cwd, prompt, model, effort, name, None).await {
                 Ok(session_id) => Ok(json!({"ok": true, "session_id": session_id})),
                 Err(e) => Err(RpcError::invalid_params(e)),
             }
