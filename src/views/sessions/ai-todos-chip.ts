@@ -1,8 +1,7 @@
 /**
  * AI-todos statusline chip: the phone's way into the Backlog panel. Desktop
  * has the split's Backlog tab (with its own count) instead, so the chip draws
- * nothing there and no list is fetched for it. Was ai-todos-popover.ts, a
- * filename popover, before the Backlog panel replaced it.
+ * nothing there and no list is fetched for it.
  */
 
 import { invoke } from "../../shared/ipc";
@@ -24,7 +23,7 @@ export class AiTodosChip {
         mirroredSessionId ? { cwd, sessionId: mirroredSessionId } : { cwd },
       );
       // A null/absent list means "none", not "crash the whole bar" - the chip
-      // ships in the default rows now, so every render path reaches this.
+      // is in the default rows, so every render path reaches this.
       this.files = files ?? [];
       this.loaded = true;
       rerender();

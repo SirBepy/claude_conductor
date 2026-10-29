@@ -1,6 +1,6 @@
 //! The `session-file` window: the in-app file viewer/editor for any path on
-//! disk, opened where VS Code used to be (a todo row, a dashboard file, a chat
-//! file chip outside the chat's repo). Same exists-vs-build split as
+//! disk, opened from a todo row, a dashboard file, or a chat file chip outside
+//! the chat's repo. Same exists-vs-build split as
 //! `code.rs`. The label sits under `session-*` so the default capability
 //! already covers it.
 

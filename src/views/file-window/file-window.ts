@@ -1,5 +1,5 @@
-// The Files window (`session-file`): where a file opens when VS Code used to,
-// for any path on disk. Tabs over one file surface, the same editor Code mode
+// The Files window (`session-file`): opens any path on disk for reading or
+// editing. Tabs over one file surface, the same editor Code mode
 // uses, with no chat, git scope or explorer. Tabs live only as long as the
 // window: nothing about them earns surviving a restart.
 
