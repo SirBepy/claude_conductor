@@ -71,6 +71,14 @@ describe("dashboard meter", () => {
     expect(apiCreditMeterHtml([credit], {})).toContain("No figures yet");
   });
 
+  it("does not claim there are no figures when only the spend is known", () => {
+    const html = apiCreditMeterHtml([credit], {
+      "acct-credit": status({ max_grant_remaining_cents: null, max_grant_total_cents: null }),
+    });
+    expect(html).toContain("Spent $21.28 of $200");
+    expect(html).not.toContain("No figures yet");
+  });
+
   it("shows the error as a link to Settings, with the Connect Console hint when that is the fix", () => {
     const html = apiCreditMeterHtml([credit], {
       "acct-credit": status({

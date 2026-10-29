@@ -87,7 +87,7 @@ describe("apiCreditLine", () => {
 
   it("is empty before the first status arrives", () => {
     expect(apiCreditLine(undefined)).toEqual({
-      figures: null, summary: null, left: null, total: null, resets: null, spend: null,
+      figures: null, summary: null, left: null, total: null, expires: null, spend: null,
       error: null, needsConnect: false, blockReason: null,
     });
   });

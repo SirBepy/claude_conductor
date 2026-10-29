@@ -1,4 +1,4 @@
-// The dashboard's API-credit meter: one quiet line per API-credit account,
+// The dashboard's API-credit meter: one card per API-credit account,
 // under the plan-usage cards it sits beside. Pure HTML so the figures can be
 // repainted in place when a status event lands (no widget remount, see
 // dashboard.ts). Text rules live in shared/api-credit-format.ts.
@@ -14,8 +14,8 @@ function lineHtml(account: Account, statuses: ApiCreditStatusMap, all: readonly 
   const line = apiCreditLine(status);
   const fraction = grantRemainingFraction(status);
 
-  // The figures when there are any; else why there are none. A stale figure
-  // plus an error shows both, the error last, so the age of the number is clear.
+  // A stale figure plus an error shows both, the error last, so the age of
+  // the number is clear.
   const error = line.error
     ? `<button type="button" class="dash-credit-link" title="Go to Settings > Accounts">${escapeHtml(line.error)}${line.needsConnect ? " - Connect Console" : ""}</button>`
     : "";
@@ -30,8 +30,8 @@ function lineHtml(account: Account, statuses: ApiCreditStatusMap, all: readonly 
   // sit under the bar, the Console spend against its limit opposite.
   const big = line.left
     ? `<span class="dash-credit-left"><b>${escapeHtml(line.left)}</b> left</span>`
-    : line.error ? "" : `<span class="dash-credit-text">No figures yet</span>`;
-  const grant = [line.total ? `of ${line.total}` : "", line.resets ? `expires ${line.resets}` : ""].filter(Boolean).join(" · ");
+    : line.error || line.spend ? "" : `<span class="dash-credit-text">No figures yet</span>`;
+  const grant = [line.total ? `of ${line.total}` : "", line.expires ? `expires ${line.expires}` : ""].filter(Boolean).join(" · ");
   const meta = grant || line.spend
     ? `<div class="dash-credit-meta">
       <span>${escapeHtml(grant)}</span>
