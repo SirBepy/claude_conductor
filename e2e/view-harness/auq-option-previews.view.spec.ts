@@ -109,6 +109,44 @@ test.describe("view-harness / AUQ option previews", () => {
     await page.locator(".prompt-card").screenshot({ path: ".for_bepy/screenshots/_specs/auq-option-previews-tiles.png" });
   });
 
+  // A pick rebuilds the card; the loaded frames must survive it instead of
+  // reloading, or the pictures go blank until the stylesheets refetch.
+  test("a pick keeps the already-loaded preview frames instead of reloading them", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await openCard(page, [question(3)]);
+    await expect(page.frameLocator(`${active} .prompt-opt__frame`).nth(2).locator(".probe")).toHaveText("Three");
+
+    await page.evaluate(() => {
+      document.querySelectorAll<HTMLIFrameElement>(".prompt-opt__frame").forEach((f) => {
+        (f as HTMLIFrameElement & { __kept?: boolean }).__kept = true;
+        f.dataset.loads = "0";
+        f.addEventListener("load", () => { f.dataset.loads = String(Number(f.dataset.loads) + 1); });
+      });
+    });
+    await page.locator(`${active} .prompt-opt__body`).nth(1).click();
+    await expect.poll(() => picked(page)).toBe("Two");
+    await page.waitForTimeout(300);
+
+    const frames = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLIFrameElement>(".prompt-opt__frame"))
+        .map((f) => ({ kept: Boolean((f as HTMLIFrameElement & { __kept?: boolean }).__kept), loads: f.dataset.loads })));
+    expect(frames).toEqual([0, 1, 2].map(() => ({ kept: true, loads: "0" })));
+    await expect(page.frameLocator(`${active} .prompt-opt__frame`).nth(1).locator(".probe")).toHaveText("Two");
+  });
+
+  test("a pick of the option the stage already shows keeps the stage frame loaded", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await openCard(page, [question(5)]);
+    await expect(page.frameLocator(`${active} .prompt-stage__frame`).locator(".probe")).toHaveText("One");
+    await page.evaluate(() => {
+      (document.querySelector(".prompt-stage__frame") as HTMLIFrameElement & { __kept?: boolean }).__kept = true;
+    });
+    await page.locator(`${active} .prompt-opt`).nth(0).click();
+    await expect.poll(() => picked(page)).toBe("One");
+    expect(await page.evaluate(() =>
+      Boolean((document.querySelector(".prompt-stage__frame") as HTMLIFrameElement & { __kept?: boolean }).__kept))).toBe(true);
+  });
+
   test("desktop, 5 previewed options: one stage that follows hover, then the pick", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [question(5)]);

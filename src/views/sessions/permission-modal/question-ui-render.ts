@@ -15,6 +15,7 @@ import { createOptionNotes } from "./question-ui-option-notes";
 import { createQuestionCardLayout } from "./question-ui-layout";
 import { attachQuestionSwipe } from "./question-swipe";
 import { attachOptionPreviews } from "./option-previews";
+import { rebuildKeepingFrames } from "./preview-frame-keeper";
 import { createPreviewFullscreen } from "./preview-fullscreen";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqSlashPopupController } from "./slash-popup";
@@ -267,7 +268,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       // The CTA class is baked in here, not only toggled after: .btn transitions
       // `all`, so adding it after insertion animated the button's width.
       const footerHtml = `<button type="button" class="btn btn-primary${isReviewTab() ? " prompt-submit-cta" : ""}" data-act="primary"></button>`;
-      host.innerHTML = renderCardShell(headerHtml, `<div class="prompt-track-viewport"><div class="prompt-track">${panelsHtml}</div></div>`, footerHtml);
+      rebuildKeepingFrames(host, () => {
+        host.innerHTML = renderCardShell(headerHtml, `<div class="prompt-track-viewport"><div class="prompt-track">${panelsHtml}</div></div>`, footerHtml);
+      });
 
       void linkifyTickets(host, opts.cwd ?? undefined);
 
