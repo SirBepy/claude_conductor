@@ -39,8 +39,10 @@ input[type="color"]:hover {
   border-color: var(--color-primary);
 }
 
+/* No padding here: a bare `button` padding pushed every icon-only button with its own
+   width/height off centre unless it remembered `padding: 0`. Text buttons get theirs from the
+   shared classes below. */
 button {
-  padding: 7px 16px;
   border-radius: 8px;
   border: none;
   cursor: pointer;
@@ -48,6 +50,12 @@ button {
   font-size: var(--fs-title);
   font-weight: 600;
   transition: all 0.2s;
+}
+
+/* `button:where(...)` keeps the old bare-`button` specificity (0,0,1): any class rule that sets its
+   own padding still wins whatever the stylesheet order, exactly as it did against `button {}`. */
+button:where(.btn, .btn-primary, .btn-secondary, .btn-danger) {
+  padding: 7px 16px;
 }
 
 .btn-primary {

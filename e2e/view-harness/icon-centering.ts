@@ -36,8 +36,8 @@ export async function offCentreIconButtons(page: Page, root = "body"): Promise<{
         if (cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
         checked++;
         // Inside the border, padding included: the eye centres on the visible
-        // box, and a stray padding (the bare `button {}` rule's 7px 16px in
-        // color-picker.css) is exactly what shoves a glyph sideways.
+        // box, and a stray padding (a text-button class's 7px 16px on an icon
+        // button, say) is exactly what shoves a glyph sideways.
         const left = b.left + parseFloat(cs.borderLeftWidth);
         const right = b.right - parseFloat(cs.borderRightWidth);
         const top = b.top + parseFloat(cs.borderTopWidth);
