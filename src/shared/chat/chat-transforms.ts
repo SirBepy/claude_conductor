@@ -5,6 +5,7 @@ import { parseFileEdit } from "./file-edits";
 import { renderEditWindow } from "./edit-window";
 import { basename } from "../path-utils";
 import { toolSummary } from "./tool-meta";
+import { elidedRefOf, elidedRowHtml } from "./elided-image";
 import { wrapTables, linkifyInlineCodeUrls, highlightKeywords, highlightSlashMentions, markCommitCandidates } from "./markdown-highlight";
 export { highlightSlashMentions, highlightComposerInput } from "./markdown-highlight";
 import {
@@ -321,7 +322,10 @@ export function renderMessage(m: RenderedMessage): string {
     }
     case "tool_result": {
       const hasImage = m.output?.type === "image";
-      const body = m.outputTruncated
+      const elided = elidedRefOf(m);
+      const body = elided
+        ? elidedRowHtml(elided)
+        : m.outputTruncated
         ? `<button type="button" class="tool-result-load-full" data-tool-use-id="${escapeHtml(m.tool_use_id ?? "")}" data-seq="${m.fullSeq ?? ""}"${m.originSessionId ? ` data-origin-session="${escapeHtml(m.originSessionId)}"` : ""}><i class="ph ph-arrow-clockwise"></i>Load full output</button><div class="copyable-block code-card"><pre>${m.output?.type === "text" ? escapeHtml(m.output.text) : ""}</pre></div>`
         : (m.output ? renderBlocks([m.output]) : "");
       return `<details class="msg tool-result tool-row${m.is_error ? " error" : ""}"${hasImage ? " open" : ""}><summary class="tool-row-summary"><i class="ph ph-arrow-bend-down-right"></i><span class="tool-row-name">${hasImage ? "screenshot" : "result"}</span></summary>${body}</details>`;

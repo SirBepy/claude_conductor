@@ -340,6 +340,7 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
                         timestamp: ts,
                         output_truncated: false,
                         full_seq: None,
+                        output_bytes: None,
                     });
                 }
             }
@@ -459,6 +460,7 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
             timestamp: ts,
             output_truncated: false,
             full_seq: None,
+            output_bytes: None,
         }],
         // "result" is handled by ParserContext::parse_result_line (stateful:
         // needs has_thinking). If it reaches here somehow, drop it.

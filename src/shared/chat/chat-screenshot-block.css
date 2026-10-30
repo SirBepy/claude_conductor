@@ -88,3 +88,30 @@
   background: color-mix(in srgb, var(--color-primary) 85%, #000 5%);
 }
 
+/* Thumbnail whose bytes a history page left out (elided-image.ts): same 80px
+   box as a loaded thumb, so loading swaps the contents without moving the row. */
+.screenshot-thumb.elided-thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--color-border);
+  color: var(--color-text-muted);
+}
+.elided-thumb-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  text-align: center;
+  font-size: 0.62rem;
+  word-break: break-all;
+}
+.screenshot-thumb.elided-thumb[data-elided-state="loading"] {
+  cursor: progress;
+  opacity: 0.75;
+}
+.screenshot-thumb.elided-thumb[data-elided-state="error"] {
+  border-color: var(--color-danger, #d9534f);
+}
+

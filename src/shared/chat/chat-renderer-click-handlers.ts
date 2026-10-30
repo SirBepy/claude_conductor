@@ -49,6 +49,8 @@ export function createHandleScreenshotThumbClick(renderer: ChatRenderer): (e: Mo
   return (e: MouseEvent): void => {
     const thumb = (e.target as Element).closest<HTMLElement>(".screenshot-thumb");
     if (!thumb) return;
+    // No bytes to open yet; createHandleElidedImageClick loads them.
+    if (thumb.hasAttribute("data-elided-image")) return;
     const row = thumb.closest<HTMLElement>(".screenshot-row");
     if (!row) return;
     const shots = getScreenshotRowShots(row);
@@ -61,6 +63,16 @@ export function createHandleScreenshotThumbClick(renderer: ChatRenderer): (e: Mo
     const foundIndex = collection.images.findIndex((ci) => ci.kind === "screenshot" && ci.data === shot.data && ci.mime === shot.mime);
     if (foundIndex >= 0) openChatImageGallery(collection, foundIndex);
     else openLightbox({ type: "image", mime: shot.mime, base64: shot.data });
+  };
+}
+
+/** A history page's elided image placeholder: normally loaded by scrolling
+ *  near it (elided-image-loader.ts); a click loads it now, which is also how
+ *  a failed load is retried. */
+export function createHandleElidedImageClick(renderer: ChatRenderer): (e: MouseEvent) => void {
+  return (e: MouseEvent): void => {
+    const el = (e.target as Element).closest<HTMLElement>("[data-elided-image]");
+    if (el) renderer.elidedImages.hydrate(el);
   };
 }
 

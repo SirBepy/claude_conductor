@@ -24,6 +24,7 @@ import { onTranscriptTail } from "./chat-resync";
 import { flushRenderNow } from "./flush-scheduler";
 import { handleChatEvent, type HandleEventOpts } from "./chat-event-handler";
 import { bulkLoadEvents, type BulkLoadOpts } from "./chat-event-bulk-load";
+import { ElidedImageLoader } from "./elided-image-loader";
 import { getCta } from "./cta-registry";
 import { sendFailureText } from "../api-credit-blocked";
 import {
@@ -31,6 +32,7 @@ import {
   createHandleScreenshotThumbClick,
   createHandleToolFileClick,
   createHandleToolResultLoadFullClick,
+  createHandleElidedImageClick,
   createHandleRetryClick,
   createHandleWaitingChipClick,
   createHandleCtaClick,
@@ -73,6 +75,8 @@ export interface CumulativeUsage {
  */
 export class ChatRenderer {
   container: HTMLElement;
+  /** Lazy-loads images a history page elided (elided-image.ts). */
+  elidedImages = new ElidedImageLoader(this);
   messages: RenderedMessage[] = [];
   messageEls: HTMLElement[] = [];
   dirtyIndices = new Set<number>();
@@ -343,6 +347,7 @@ export class ChatRenderer {
     this.container.addEventListener("click", createHandleDraftCardClick(this));
     this.container.addEventListener("click", createHandleToolFileClick(this));
     this.container.addEventListener("click", createHandleToolResultLoadFullClick(this));
+    this.container.addEventListener("click", createHandleElidedImageClick(this));
     this.container.addEventListener("click", createHandleRetryClick(this));
     this.container.addEventListener("click", createHandleCtaClick(this));
     this.container.addEventListener("click", createHandleWaitingChipClick(this));
@@ -401,6 +406,9 @@ export class ChatRenderer {
    *  added/removed by streaming, dirty-replace, or pagination. */
   private installAnimObserver(): void {
     this.removeAnimObserver();
+    // Same scroll root and same re-arm points as the animation pause, so the
+    // elided-image loader rides this hook instead of a second set of call sites.
+    this.elidedImages.install(this.scrollRoot());
     // Test/harness environments may lack these (jsdom has no IntersectionObserver
     // at all; some test setups don't stub MutationObserver either) - skip quietly,
     // real browsers always have both.
@@ -445,6 +453,7 @@ export class ChatRenderer {
   }
 
   private removeAnimObserver(): void {
+    this.elidedImages.dispose();
     try { this.animObserver?.disconnect(); } catch { /* ignore */ }
     try { this.animMutationObserver?.disconnect(); } catch { /* ignore */ }
     this.animObserver = null;

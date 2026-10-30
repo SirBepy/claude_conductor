@@ -111,6 +111,9 @@ export function collectChatImages(messages: RenderedMessage[], messageEls: HTMLE
     const slotByToolUseId = new Map<string, number>();
     for (const shots of shotsByKey.values()) {
       for (const shot of shots) {
+        // No bytes yet (a history page elided them): nothing to show in the
+        // gallery until the lazy load fills the message in.
+        if (shot.elided) continue;
         rangeImages.push({
           kind: "screenshot",
           mime: shot.mime,
