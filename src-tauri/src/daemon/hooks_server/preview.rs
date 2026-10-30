@@ -38,11 +38,58 @@ pub(super) async fn on_preview_push(
         body.html.len(),
     );
 
+    // Only the inline card path: the panel push of a gallery carries no such
+    // iframe, and a terminal curl owns its own html.
+    if source == crate::daemon::preview::PREVIEW_SOURCE_CHAT_CARD {
+        if let Some(id) = super::preview_render::stale_render_reference(&body.html) {
+            log::warn!("hook /hooks/preview rejected: card iframes expired render id {id}");
+            return (
+                StatusCode::GONE,
+                Json(json!({
+                    "ok": false,
+                    "error": format!(
+                        "the card's iframe points at render id {id}, which the daemon no longer holds, so the card would load blank. Re-run the gallery --post for a fresh render-url, or inline the content as a data: URL."
+                    ),
+                })),
+            )
+                .into_response();
+        }
+    }
+
     match crate::daemon::preview::push_and_notify(&ctx.state, body.title, body.slug, body.html, source, body.session_id) {
         Ok(id) => (StatusCode::OK, Json(json!({ "id": id }))).into_response(),
         Err(e) => {
             log::warn!("hook /hooks/preview rejected: {e}");
             (StatusCode::PAYLOAD_TOO_LARGE, Json(json!({ "error": e.to_string() }))).into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::preview::PREVIEW_SOURCE_CHAT_CARD;
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::daemon::state::DaemonState;
+    use crate::types::Settings;
+
+    #[tokio::test]
+    async fn a_card_push_iframing_an_expired_render_id_is_refused_not_acknowledged() {
+        let ctx = Arc::new(HookCtx {
+            state: DaemonState::new(new_session_map(), SettingsCache::new(Settings::default())),
+        });
+        let body = PreviewPushBody {
+            title: "Checker".into(),
+            slug: Some("checker-card".into()),
+            html: r#"<iframe src="http://127.0.0.1:27182/hooks/preview-render/expired-id"></iframe>"#.into(),
+            source: Some(PREVIEW_SOURCE_CHAT_CARD.into()),
+            session_id: None,
+        };
+        let resp = on_preview_push(AxState(ctx), ValidatedJson(body)).await.into_response();
+        assert_eq!(resp.status(), StatusCode::GONE);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(v["error"].as_str().unwrap().contains("expired-id"), "got: {v}");
     }
 }

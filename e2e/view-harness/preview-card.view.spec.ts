@@ -8,14 +8,14 @@ import { mountView, invokeCalls, SESSIONS_BASE_INVOKE, sessionInstance } from ".
 
 const PREVIEW_URL = "http://127.0.0.1:1/hooks/preview-render/spec";
 
-function transcript(): { events: unknown[]; oldest_seq: number; newest_seq: number; has_more: boolean } {
+function transcript(html = "<p id=\"pushed\">hello</p>"): { events: unknown[]; oldest_seq: number; newest_seq: number; has_more: boolean } {
   return {
     events: [
       { type: "user_message", content: [{ type: "text", text: "show me the week" }], timestamp: 0, remote_echo: false, is_meta: false },
       {
         type: "tool_use",
         tool_name: "mcp__cc_conductor__show_preview",
-        input: { slug: "clockify-week", html: "<p id=\"pushed\">hello</p>" },
+        input: { slug: "clockify-week", html },
         id: "tu-preview",
         timestamp: 0,
         parent_tool_use_id: null,
@@ -28,14 +28,14 @@ function transcript(): { events: unknown[]; oldest_seq: number; newest_seq: numb
   };
 }
 
-async function mountChat(page: Page): Promise<void> {
+async function mountChat(page: Page, html?: string): Promise<void> {
   await mountView(page, {
     view: "sessions",
     invoke: {
       ...SESSIONS_BASE_INVOKE,
       list_instances: [sessionInstance()],
       get_active_sessions: [sessionInstance()],
-      load_history_page: transcript(),
+      load_history_page: transcript(html),
       render_preview_doc: PREVIEW_URL,
       list_previews: [],
     },
@@ -76,6 +76,20 @@ test("the pushed document reaches the iframe via render_preview_doc", async ({ p
   expect(staged).toHaveLength(1);
   expect(staged[0]).toContain("id=\"pushed\"");
   expect(staged[0]).toContain("Content-Security-Policy");
+});
+
+test("a card that iframes a gallery render-url stages that iframe untouched", async ({ page }) => {
+  // The /preview "show it inline first" shape. The nested id must reach the
+  // staged document verbatim: the daemon's render cache has to keep it loadable.
+  const galleryUrl = "http://127.0.0.1:27182/hooks/preview-render/gallery-id";
+  await mountChat(page, `<iframe src="${galleryUrl}" style="width:100%;height:400px"></iframe>`);
+
+  await expect(page.locator("#session-pane .msg.preview-card .pc-frame")).toHaveAttribute("src", PREVIEW_URL);
+  const staged = (await invokeCalls(page))
+    .filter((c) => c.cmd === "render_preview_doc")
+    .map((c) => (c.args as { html?: string } | undefined)?.html ?? "");
+  expect(staged).toHaveLength(1);
+  expect(staged[0]).toContain(`src="${galleryUrl}"`);
 });
 
 test("the card carries the question card's geometry at its own 640px cap", async ({ page }) => {
