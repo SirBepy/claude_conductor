@@ -19,13 +19,15 @@ const BASE_INVOKE = {
 };
 
 /** Creates a draft via the test seam, same as draft-discard-cancels-schedule's
- *  createDraft, and returns its real (randomly generated) placeholderId. */
+ *  createDraft, and returns its real (randomly generated) placeholderId. The
+ *  seam takes the config as given, so it carries the account the first send
+ *  needs: with none, the send refuses to spawn and never reaches start_session. */
 async function createDraft(page: Page): Promise<string> {
   await mountView(page, { view: "sessions", invoke: BASE_INVOKE });
   await page.waitForFunction(() => typeof (window as unknown as { __launchDraftForTest?: unknown }).__launchDraftForTest === "function");
   await page.evaluate(() => {
-    (window as unknown as { __launchDraftForTest: (p: { path: string; name: string }, c: { model: string; effort: string }) => void })
-      .__launchDraftForTest({ path: "C:/Projects/alpha", name: "alpha" }, { model: "sonnet", effort: "high" });
+    (window as unknown as { __launchDraftForTest: (p: { path: string; name: string }, c: { model: string; effort: string; accountId: string }) => void })
+      .__launchDraftForTest({ path: "C:/Projects/alpha", name: "alpha" }, { model: "sonnet", effort: "high", accountId: "acc1" });
   });
   await page.locator(".session-composer .composer-textarea").waitFor();
   const id = await page.locator("#sessions-list li[data-placeholder-id]").getAttribute("data-placeholder-id");
