@@ -2,7 +2,7 @@
 //! cheap head parse the list needs, the full section split the reader needs,
 //! and the listing that joins both with PLAN.md placement and live claims.
 
-use super::md_scan::fenced_lines;
+use super::md_scan::{fenced_lines, is_fence};
 use super::plan_edit::{read_plan_doc, Placement};
 use super::todo_ids::{find_todo_file, parse_file_name, TodoKey};
 use super::todo_stats::{live_claim_keys, todos_dir};
@@ -145,7 +145,17 @@ pub fn read_head(path: &Path) -> Option<Head> {
 pub fn strip_html_comments(text: &str) -> String {
     let mut out = String::new();
     let mut in_comment = false;
-    for (line, in_fence) in fenced_lines(text.lines()) {
+    let mut in_fence = false;
+    for line in text.lines() {
+        // Fence state is tracked here, not via `fenced_lines`: a fence line inside
+        // an open comment is comment text, and toggling on it would leave every
+        // later comment unstripped.
+        if !in_comment && is_fence(line) {
+            in_fence = !in_fence;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
         if in_fence {
             out.push_str(line);
             out.push('\n');
@@ -415,6 +425,14 @@ Some context.\n\
     #[test]
     fn a_hash_hash_inside_a_fence_does_not_split_a_section() {
         let (_, sections) = parse_sections("## A\n```\n## not a heading\n```\n## B\nx\n");
+        assert_eq!(sections.iter().map(|s| s.heading.as_str()).collect::<Vec<_>>(), ["A", "B"]);
+    }
+
+    #[test]
+    fn a_fence_line_inside_an_open_comment_does_not_flip_fence_state() {
+        let text = "## A\n<!-- note\n```\nmore -->\nbody\n<!-- later -->\n## B\nx\n";
+        assert_eq!(strip_html_comments(text), "## A\nbody\n## B\nx\n");
+        let (_, sections) = parse_sections(text);
         assert_eq!(sections.iter().map(|s| s.heading.as_str()).collect::<Vec<_>>(), ["A", "B"]);
     }
 
