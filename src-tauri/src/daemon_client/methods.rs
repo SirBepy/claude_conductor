@@ -23,3 +23,12 @@ mod user_todos;
 mod schedule;
 mod sessions;
 mod voice;
+
+use super::ClientError;
+
+/// The error for a result whose JSON did not deserialize into the wrapper's
+/// return type, named by RPC method so a daemon/desktop version skew is
+/// traceable from the message alone.
+pub(super) fn bad_shape(method: &str, e: serde_json::Error) -> ClientError {
+    ClientError::Rpc { code: -32000, message: format!("{method}: bad result shape: {e}") }
+}

@@ -7,6 +7,7 @@
 //! wrappers exist only for the mirrored branch.
 
 use super::super::{ClientError, PersistentClient};
+use super::bad_shape;
 use crate::chat::history::TranscriptStats;
 use crate::types::chat::{ChatEvent, HistoryPage};
 use serde_json::json;
@@ -14,26 +15,17 @@ use serde_json::json;
 impl PersistentClient {
     pub async fn context_status(&self, session_id: &str) -> Result<Option<crate::context_status::ContextStatus>, ClientError> {
         let res = self.call("context_status", json!({"session_id": session_id})).await?;
-        serde_json::from_value(res).map_err(|e| ClientError::Rpc {
-            code: -32000,
-            message: format!("context_status: bad result shape: {e}"),
-        })
+        serde_json::from_value(res).map_err(|e| bad_shape("context_status", e))
     }
 
     pub async fn load_history(&self, session_id: &str, cwd: Option<&str>) -> Result<Vec<ChatEvent>, ClientError> {
         let res = self.call("load_history", json!({"session_id": session_id, "cwd": cwd})).await?;
-        serde_json::from_value(res).map_err(|e| ClientError::Rpc {
-            code: -32000,
-            message: format!("load_history: bad result shape: {e}"),
-        })
+        serde_json::from_value(res).map_err(|e| bad_shape("load_history", e))
     }
 
     pub async fn transcript_stats(&self, session_id: &str, cwd: Option<&str>) -> Result<TranscriptStats, ClientError> {
         let res = self.call("transcript_stats", json!({"session_id": session_id, "cwd": cwd})).await?;
-        serde_json::from_value(res).map_err(|e| ClientError::Rpc {
-            code: -32000,
-            message: format!("transcript_stats: bad result shape: {e}"),
-        })
+        serde_json::from_value(res).map_err(|e| bad_shape("transcript_stats", e))
     }
 
     pub async fn load_history_page(
@@ -51,10 +43,7 @@ impl PersistentClient {
                 "message_limit": message_limit,
             }))
             .await?;
-        serde_json::from_value(res).map_err(|e| ClientError::Rpc {
-            code: -32000,
-            message: format!("load_history_page: bad result shape: {e}"),
-        })
+        serde_json::from_value(res).map_err(|e| bad_shape("load_history_page", e))
     }
 
     pub async fn load_event_detail(
@@ -72,9 +61,6 @@ impl PersistentClient {
                 "tool_use_id": tool_use_id,
             }))
             .await?;
-        serde_json::from_value(res).map_err(|e| ClientError::Rpc {
-            code: -32000,
-            message: format!("load_event_detail: bad result shape: {e}"),
-        })
+        serde_json::from_value(res).map_err(|e| bad_shape("load_event_detail", e))
     }
 }

@@ -16,16 +16,13 @@
 //! to these same RPC names use the same param shape without a `session_id`.
 
 use super::super::{ClientError, PersistentClient};
+use super::bad_shape;
 use crate::ipc::ai_todos::{AiBacklog, AiTodoDoc, AiTodoEntry};
 use crate::ipc::git::{BranchEntry, GitInfo};
 use crate::ipc::git_diff::PrFileChange;
 use crate::ipc::git_sync::{CommitHistory, CommitSync};
 use crate::ipc::files::TextFileData;
 use serde_json::json;
-
-fn bad_shape(method: &str, e: serde_json::Error) -> ClientError {
-    ClientError::Rpc { code: -32000, message: format!("{method}: bad result shape: {e}") }
-}
 
 impl PersistentClient {
     pub async fn get_git_info(&self, session_id: &str, cwd: &str) -> Result<GitInfo, ClientError> {
