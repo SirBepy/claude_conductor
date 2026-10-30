@@ -69,6 +69,11 @@ describe("showSecretCard", () => {
     expect(note.querySelector(".badge, .pill, i")).toBeNull();
   });
 
+  it("styles the temporary note with its own rule, not the phone-only desktop note's", () => {
+    showSecretCard(payload({ temporary: true }));
+    expect(card().querySelector(".secret-card__temporary").classList.contains("secret-card__desktop-only")).toBe(false);
+  });
+
   it("shows no temporary note for a permanent secret", () => {
     showSecretCard(payload());
     expect(card().textContent).not.toContain("Temporary");

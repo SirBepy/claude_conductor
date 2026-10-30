@@ -125,8 +125,7 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
       </dl>
       ${payload.temporary
         // Plain muted text, no badge: it is a fact about the file, not a state to flag.
-        // Reuses the desktop-only note's muted styling.
-        ? `<p class="secret-card__desktop-only secret-card__temporary">Temporary: deleted when this chat closes</p>`
+        ? `<p class="secret-card__temporary">Temporary: deleted when this chat closes</p>`
         : ""}
       ${isRemote()
         ? `<p class="secret-card__desktop-only"><i class="ph ph-desktop"></i> Enter this secret on the desktop. A phone can't submit it.</p>`

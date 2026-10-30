@@ -542,6 +542,12 @@
   font-size: 0.8rem;
   color: var(--color-text-muted);
 }
+/* Lifetime note under the ledger: muted plain text, never a badge. */
+.secret-card__temporary {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
 /* Clickable path: reveal_file_in_explorer, desktop-only (bodyHtml() falls
  * back to plain text on a remote/phone transport). */
 .secret-card__file {
