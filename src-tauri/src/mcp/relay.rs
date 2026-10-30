@@ -40,6 +40,37 @@ fn is_retryable(e: &reqwest::Error) -> bool {
 /// routing runs for real and only the network call is faked.
 pub(super) type HttpPost = fn(&tokio::runtime::Runtime, &str, Value) -> Result<Value, String>;
 
+/// Longest error-body excerpt appended to a relay failure.
+const ERROR_DETAIL_MAX_CHARS: usize = 300;
+
+/// What a non-2xx response body adds to the tool error: the JSON `error` field
+/// when the body parses and has one (the daemon's own refusals, e.g.
+/// `show_preview`'s stale-render 410, name the fix there), else the body's
+/// first `ERROR_DETAIL_MAX_CHARS` characters, else nothing.
+///
+/// Safe to surface for every relayed route: the only non-2xx answers the
+/// daemon hooks server produces are `preview` (410/413), the Host/Origin guard
+/// and bare 404s, none of which carry secret material. The secret routes
+/// answer 200 with `ok:false` on refusal and never see the secret value (it
+/// travels through `respond_secret`, not this relay). A new route that returns
+/// a non-2xx status must keep secrets out of its body.
+fn error_detail(body: &str) -> Option<String> {
+    let from_json = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|v| v["error"].as_str().map(str::to_owned));
+    let text = from_json.unwrap_or_else(|| body.to_owned());
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    // `take` counts chars, so the cut never lands inside a multi-byte one.
+    let mut out: String = text.chars().take(ERROR_DETAIL_MAX_CHARS).collect();
+    if text.chars().count() > ERROR_DETAIL_MAX_CHARS {
+        out.push_str("...");
+    }
+    Some(out)
+}
+
 pub(super) fn http_post(rt: &tokio::runtime::Runtime, url: &str, body: Value) -> Result<Value, String> {
     rt.block_on(async {
         let client = reqwest::Client::builder()
@@ -60,7 +91,11 @@ pub(super) fn http_post(rt: &tokio::runtime::Runtime, url: &str, body: Value) ->
                     // route (todo 906).
                     let status = resp.status();
                     if !status.is_success() {
-                        return Err(format!("HTTP {} from {url}", status.as_u16()));
+                        let detail = error_detail(&resp.text().await.unwrap_or_default());
+                        return Err(match detail {
+                            Some(d) => format!("HTTP {} from {url}: {d}", status.as_u16()),
+                            None => format!("HTTP {} from {url}", status.as_u16()),
+                        });
                     }
                     return resp.json::<Value>().await.map_err(|e| e.to_string());
                 }
@@ -146,6 +181,39 @@ mod tests {
             !err.contains("decoding response body"),
             "must not fall through to the opaque decode error, got: {err}"
         );
+    }
+
+    /// The daemon's refusal text (here the stale render id) must reach the
+    /// session, not just the status code, or it cannot tell what to redo.
+    #[test]
+    fn http_post_carries_the_json_error_field_of_a_non_2xx_body() {
+        let mut server = mockito::Server::new();
+        let _m = server
+            .mock("POST", "/hooks/preview")
+            .with_status(410)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"ok":false,"error":"the card's iframe points at render id r-abc123, which the daemon no longer holds"}"#)
+            .create();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        let err = http_post(&rt, &format!("{}/hooks/preview", server.url()), serde_json::json!({}))
+            .expect_err("a 410 must surface as an error");
+
+        assert!(err.contains("410"), "status kept: {err}");
+        assert!(err.contains("r-abc123"), "daemon error text must reach the session: {err}");
+    }
+
+    #[test]
+    fn error_detail_falls_back_to_a_truncated_plain_body() {
+        assert_eq!(error_detail("no such route").as_deref(), Some("no such route"));
+        assert_eq!(error_detail("  \n"), None);
+        // Multi-byte chars straddling the cut must not panic or split.
+        let long = "é".repeat(ERROR_DETAIL_MAX_CHARS + 50);
+        let d = error_detail(&long).unwrap();
+        assert_eq!(d.chars().count(), ERROR_DETAIL_MAX_CHARS + 3);
+        assert!(d.ends_with("..."));
+        // JSON without an `error` string falls back to the raw body.
+        assert_eq!(error_detail(r#"{"x":1}"#).as_deref(), Some(r#"{"x":1}"#));
     }
 
     /// Control: a real 200 JSON body still round-trips normally, so the new
