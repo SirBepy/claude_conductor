@@ -50,7 +50,7 @@ const { loadQuestionDraftMeta, saveQuestionDraft } = await import(
 const { scheduleAuqPush } = await import(
   "../src/views/sessions/permission-modal/auq-draft-sync.ts"
 );
-const { peekPendingPrompt, takePendingPrompt, savePendingPromptDraft, clearPendingPrompt } = await import(
+const { peekPendingPrompt, takePendingPrompt, savePendingPromptDraft, clearPendingPrompt, setSelectedSessionId } = await import(
   "../src/views/sessions/permission-modal/gating.ts"
 );
 
@@ -87,6 +87,8 @@ beforeEach(() => {
   invokeMock.mockReset().mockResolvedValue(undefined);
   qs.setActiveCard(null);
   clearPendingPrompt("s1");
+  // A card only mounts for the chat on screen.
+  setSelectedSessionId("s1");
   vi.useFakeTimers();
 });
 

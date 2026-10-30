@@ -115,6 +115,7 @@ describe("a prompt card never mounts over a chat opened while its lookup was in 
   it("a new chat's placeholder-to-real id promotion mid-fetch still shows its card", async () => {
     const { state } = await import("../src/views/sessions/state.ts");
     state.pendingNewSession = { placeholderId: "pending-1", realId: "A", projectPath: "C:/proj" };
+    state.selectedId = "pending-1";
     setSelectedSessionId("pending-1");
     const drafts = deferred();
     getSessionDrafts.mockImplementation(() => drafts.promise);
@@ -122,6 +123,7 @@ describe("a prompt card never mounts over a chat opened while its lookup was in 
     const done = showQuestionCard(QUESTION_A);
     // start_session resolved: same chat, now under its real id.
     state.pendingNewSession = null;
+    state.selectedId = "A";
     setSelectedSessionId("A");
     drafts.resolve({ composer: null, auq: null, held: [], held_updated_at: null });
     await done;

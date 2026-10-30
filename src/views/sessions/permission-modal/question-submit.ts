@@ -17,6 +17,8 @@ import {
   clearPendingPromptById,
   markPendingPromptAnswered,
   selectionGuard,
+  isForSelectedSession,
+  gateDiag,
 } from "./gating";
 import type { Question, QuestionDraft, QuestionRequestedPayload } from "./types";
 import { rerenderSidebar } from "./index";
@@ -51,6 +53,15 @@ export async function showQuestionCard(
   // hangs). Cleared when the prompt resolves (`prompt-resolved` listener).
   if (payload.session_id) {
     storePendingPrompt(payload.session_id, { kind: "question", payload });
+    // The only place a question card mounts, so the one place that can refuse
+    // a card for a chat that is not on screen. Callers check the selection at
+    // their own moment, which a later await of theirs can outlive; the park
+    // above is what shows the card when that chat is opened again.
+    if (!isForSelectedSession(payload.session_id)) {
+      console.warn("[perm-gate] DROPPED question card mount for a chat that is not selected (parked)", { eventSessionId: payload.session_id, ...gateDiag() });
+      rerenderSidebar();
+      return;
+    }
   }
   const questions: Question[] = Array.isArray(payload.questions)
     ? payload.questions
