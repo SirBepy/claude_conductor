@@ -256,7 +256,8 @@ test.describe("view-harness / file editor", () => {
 });
 
 const LINUX_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-const WINDOWS_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const MAC_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const WINDOWS_UA ="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 /** `unsavedText` for `path`, after making the open FILE's doc dirty (a refused
  *  write keeps it unsaved) so a session found under that key reports text. */
@@ -273,6 +274,16 @@ async function unsavedFor(page: Page, path: string): Promise<string | null> {
 
 test.describe("view-harness / file editor on Windows", () => {
   test.use({ userAgent: WINDOWS_UA });
+
+  test("a path in another case is the same file's session", async ({ page }) => {
+    await mountFiles(page, { [FILE]: { content: "one\n", mtime: 1, writable: true } }, FILE);
+    expect(await unsavedFor(page, FILE.toUpperCase())).toContain("dirty ");
+  });
+});
+
+test.describe("view-harness / file editor on macOS", () => {
+  // Default APFS volumes are case-insensitive, same as Windows.
+  test.use({ userAgent: MAC_UA });
 
   test("a path in another case is the same file's session", async ({ page }) => {
     await mountFiles(page, { [FILE]: { content: "one\n", mtime: 1, writable: true } }, FILE);
