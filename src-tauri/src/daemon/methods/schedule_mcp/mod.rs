@@ -49,6 +49,10 @@ pub(crate) struct ScheduleArgs {
     pub cwd: Option<String>,
     pub name: Option<String>,
     pub id: Option<String>,
+    /// Pre-fire guard command (`ScheduledItem::guard`). A command nobody sees
+    /// run, so `hooks_server::schedule::approve_guard` always shows it to a
+    /// human first, auto-accept or not.
+    pub guard: Option<String>,
 }
 
 pub(crate) fn write_schedule(
@@ -176,7 +180,9 @@ fn build_item(
         other => return Err(format!("unknown target {other:?}; expected new_chat or this_chat")),
     };
 
-    Ok(ScheduledItem::new(kind, prompt.to_string(), fire_at.to_rfc3339(), recurrence))
+    let mut item = ScheduledItem::new(kind, prompt.to_string(), fire_at.to_rfc3339(), recurrence);
+    item.guard = args.guard.as_deref().map(str::trim).filter(|g| !g.is_empty()).map(str::to_string);
+    Ok(item)
 }
 
 fn non_empty(value: &str, fallback: &str) -> String {
@@ -260,6 +266,10 @@ fn describe_settled(item: &ScheduledItem) -> String {
         ScheduledStatus::Failed { reason } => format!(
             "scheduled item {id} already fired at {} and failed: {reason} - nothing left to cancel",
             local(item.last_fired_at.as_deref().unwrap_or(&item.fire_at))
+        ),
+        ScheduledStatus::Skipped => format!(
+            "scheduled item {id} was skipped by its guard ({}) - it will not fire, nothing left to cancel",
+            item.last_skip.as_ref().map(|s| s.reason.as_str()).unwrap_or("no reason recorded")
         ),
         ScheduledStatus::Firing => format!("scheduled item {id} is firing right now - it can no longer be cancelled"),
         ScheduledStatus::Pending => format!("scheduled item {id} is pending"),
@@ -437,6 +447,36 @@ mod tests {
             a,
             utc("2026-01-05T10:00:00Z"),
         )
+    }
+
+    #[test]
+    fn a_guard_is_carried_trimmed_and_a_blank_one_is_dropped() {
+        let item = build(&cfg("opus", "high"), &args(|a| a.guard = Some("  python check.py  ".into()))).unwrap();
+        assert_eq!(item.guard.as_deref(), Some("python check.py"));
+        let item = build(&cfg("opus", "high"), &args(|a| a.guard = Some("   ".into()))).unwrap();
+        assert_eq!(item.guard, None);
+    }
+
+    #[test]
+    fn a_guard_works_on_a_repeating_new_chat_and_a_one_shot_this_chat() {
+        let repeating = build(&cfg("opus", "high"), &args(|a| {
+            a.repeat = Some("weekdays".into());
+            a.guard = Some("exit 0".into());
+        })).unwrap();
+        assert!(repeating.recurrence.is_some() && repeating.guard.is_some());
+        let reminder = build(&cfg("opus", "high"), &args(|a| {
+            a.target = Some("this_chat".into());
+            a.guard = Some("exit 0".into());
+        })).unwrap();
+        assert!(matches!(reminder.kind, ScheduledKind::Message { .. }) && reminder.guard.is_some());
+    }
+
+    #[test]
+    fn cancel_on_a_skipped_item_names_the_guard_reason() {
+        let mut it = item_with("aaaaaaaa-1111", ScheduledStatus::Skipped);
+        it.last_skip = Some(scheduled_items::SkippedFire { at: "2026-10-30T20:55:00Z".into(), reason: "already ran".into() });
+        let err = resolve_id_in(vec![it], "aaaaaaaa").unwrap_err();
+        assert!(err.contains("skipped by its guard") && err.contains("already ran"), "{err}");
     }
 
     #[test]

@@ -572,7 +572,7 @@ mod tests {
         let args = json!({
             "action": "add", "prompt": "check CI", "target": "new_chat",
             "in_minutes": 30, "at": "2026-01-06T09:00", "repeat": "weekdays",
-            "cwd": "C:/proj", "name": "CI watch", "id": "abc",
+            "cwd": "C:/proj", "name": "CI watch", "id": "abc", "guard": "exit 1",
         });
         POSTED_BODIES.with(|b| b.borrow_mut().clear());
         dispatch_tool_with(&rt, &json!(1), TOOL_SCHEDULE, &args, "sess-1", 1234, fake_http_post);
@@ -582,7 +582,7 @@ mod tests {
         assert_eq!(
             keys,
             vec![
-                "action", "at", "cwd", "id", "in_minutes", "name", "prompt", "repeat",
+                "action", "at", "cwd", "guard", "id", "in_minutes", "name", "prompt", "repeat",
                 "session_id", "target",
             ]
         );

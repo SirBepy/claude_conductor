@@ -181,7 +181,7 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             let mut body = serde_json::Map::new();
             body.insert("session_id".to_string(), json!(ctx.session_id));
             body.insert("action".to_string(), ctx.args["action"].clone());
-            for key in ["prompt", "target", "in_minutes", "at", "repeat", "cwd", "name", "id"] {
+            for key in ["prompt", "target", "in_minutes", "at", "repeat", "cwd", "name", "id", "guard"] {
                 if let Some(v) = ctx.args.get(key) {
                     body.insert(key.to_string(), v.clone());
                 }

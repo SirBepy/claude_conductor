@@ -11,7 +11,7 @@
 //! `_delete` / `_fire_now`) are all phone-reachable (`P` in
 //! `remote_transport_table.rs`, see its rationale comment).
 
-use crate::daemon::rpc::{Router, RpcError};
+use crate::daemon::rpc::{Router, RpcError, Transport};
 use crate::daemon::state::DaemonState;
 use crate::sessions::scheduled_items::{self, Recurrence, ScheduledItem, ScheduledKind};
 use serde::Deserialize;
@@ -25,12 +25,17 @@ struct CreateParams {
     fire_at: String,
     #[serde(default)]
     recurrence: Option<Recurrence>,
+    /// Arbitrary shell command, so only the desktop pipe may supply one.
+    #[serde(default)]
+    guard: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct IdParams {
     id: String,
 }
+
+const GUARD_LOCAL_ONLY: &str = "a pre-fire guard is a shell command, so it can only be set from the desktop app";
 
 pub fn register_schedule(router: &mut Router, state: Arc<DaemonState>) {
     // Read-only: mirrors the desktop `schedule_list` Tauri command's JSON
@@ -44,12 +49,18 @@ pub fn register_schedule(router: &mut Router, state: Arc<DaemonState>) {
 
     {
         let state = state.clone();
-        router.register("schedule_create", move |params, _ctx| {
+        router.register("schedule_create", move |params, ctx| {
             let state = state.clone();
             async move {
                 let p: CreateParams = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                let item = ScheduledItem::new(p.kind, p.prompt, p.fire_at, p.recurrence);
+                // Refused rather than dropped: a guarded schedule silently
+                // created without its guard would fire on days it should skip.
+                if p.guard.is_some() && ctx.transport != Transport::Local {
+                    return Err(RpcError::invalid_params(GUARD_LOCAL_ONLY));
+                }
+                let mut item = ScheduledItem::new(p.kind, p.prompt, p.fire_at, p.recurrence);
+                item.guard = p.guard.filter(|g| !g.trim().is_empty());
                 scheduled_items::upsert(item.clone());
                 publish_changed(&state);
                 serde_json::to_value(&item).map_err(|e| RpcError::internal(e.to_string()))
@@ -59,21 +70,26 @@ pub fn register_schedule(router: &mut Router, state: Arc<DaemonState>) {
 
     {
         let state = state.clone();
-        router.register("schedule_update", move |params, _ctx| {
+        router.register("schedule_update", move |params, ctx| {
             let state = state.clone();
             async move {
-                let item: ScheduledItem = serde_json::from_value(params.unwrap_or(Value::Null))
+                let mut item: ScheduledItem = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 if item.id.is_empty() {
                     return Err(RpcError::invalid_params("schedule_update: id must not be empty"));
                 }
-                if scheduled_items::get(&item.id).is_none() {
+                let Some(stored) = scheduled_items::get(&item.id) else {
                     return Err(RpcError {
                         code: -32004,
                         message: format!("scheduled item {} not found", item.id),
                         data: None,
                     });
-                }
+                };
+                // The update carries the whole record, so a phone or peer
+                // editing a time would otherwise be free to rewrite the
+                // command. Keep what is stored instead of erroring: an older
+                // client round-trips the item without the field at all.
+                item.guard = guard_after_update(&ctx.transport, item.guard, stored.guard);
                 scheduled_items::upsert(item);
                 publish_changed(&state);
                 Ok(json!({"ok": true}))
@@ -109,6 +125,15 @@ pub fn register_schedule(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+}
+
+/// Which guard an update writes: the desktop's own value, a blank one cleared,
+/// and for any other transport always the stored one.
+fn guard_after_update(transport: &Transport, incoming: Option<String>, stored: Option<String>) -> Option<String> {
+    if *transport != Transport::Local {
+        return stored;
+    }
+    incoming.filter(|g| !g.trim().is_empty())
 }
 
 /// Mirrors `daemon::schedule`'s own `notify_changed` exactly (same notifier
@@ -157,6 +182,42 @@ mod tests {
             params: Some(serde_json::to_value(&item).unwrap()),
         }, dummy_ctx()).await;
         assert_eq!(resp.error.as_ref().map(|e| e.code), Some(-32004));
+    }
+
+    #[tokio::test]
+    async fn schedule_create_with_a_guard_is_refused_from_a_phone_and_a_peer() {
+        for transport in [Transport::Phone, Transport::PeerMachine("m1".into())] {
+            let mut r = Router::new();
+            register_schedule(&mut r, dummy_state());
+            let mut ctx = dummy_ctx();
+            ctx.transport = transport;
+            let resp = r.dispatch(Request {
+                jsonrpc: "2.0".into(),
+                id: json!(1),
+                method: "schedule_create".into(),
+                params: Some(json!({
+                    "kind": {"type": "message", "session_id": "s", "cwd": "C:/x"},
+                    "prompt": "hi",
+                    "fire_at": "2026-01-01T00:00:00Z",
+                    "guard": "exit 0",
+                })),
+            }, ctx).await;
+            let err = resp.error.expect("a guard from a remote transport must be refused");
+            assert!(err.message.contains("desktop"), "{}", err.message);
+        }
+    }
+
+    #[test]
+    fn only_the_desktop_pipe_changes_a_guard_on_update() {
+        let stored = Some("check.ps1".to_string());
+        assert_eq!(guard_after_update(&Transport::Phone, None, stored.clone()), stored, "a phone's reschedule keeps it");
+        assert_eq!(
+            guard_after_update(&Transport::Phone, Some("rm -rf".into()), stored.clone()),
+            stored,
+            "a phone cannot rewrite it"
+        );
+        assert_eq!(guard_after_update(&Transport::Local, Some("new.ps1".into()), stored.clone()), Some("new.ps1".into()));
+        assert_eq!(guard_after_update(&Transport::Local, Some("  ".into()), stored), None, "blank clears it");
     }
 
     #[tokio::test]

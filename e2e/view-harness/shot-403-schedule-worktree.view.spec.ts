@@ -27,6 +27,8 @@ const ITEM_BASE: ScheduledItem = {
   last_fired_at: null,
   last_result: null,
   last_session_id: null,
+  guard: null,
+  last_skip: null,
 };
 
 function item(over: Partial<ScheduledItem>): ScheduledItem {

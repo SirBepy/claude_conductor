@@ -15,8 +15,9 @@
 //! and the claim/compute bookkeeping around it.
 
 use super::schedule_fire;
+use super::schedule_guard::{self, GuardVerdict};
 use crate::daemon::state::DaemonState;
-use crate::sessions::scheduled_items::{self, ScheduledItem, ScheduledKind, ScheduledStatus};
+use crate::sessions::scheduled_items::{self, ScheduledItem, ScheduledKind, ScheduledStatus, SkippedFire};
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use std::time::Duration;
@@ -165,7 +166,7 @@ async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
         let result = if lateness >= grace_secs {
             compute_missed(claimed, now)
         } else {
-            compute_fired(state, claimed, now).await
+            compute_guarded(state, claimed, now).await
         };
         // Defect 2: only writes back if the item is still the `Firing` record
         // we claimed - a concurrent delete/update wins over this stale
@@ -241,6 +242,48 @@ fn compute_missed(mut item: ScheduledItem, now: DateTime<Utc>) -> ScheduledItem 
         item.status = ScheduledStatus::Pending;
     } else {
         item.status = ScheduledStatus::Missed;
+    }
+    item
+}
+
+/// The scheduled (not manual) firing path: runs the item's guard first, and a
+/// guard that says skip ends the firing here without creating a chat. `fire_now`
+/// bypasses this on purpose - a click on Fire now / Retry is an explicit "run
+/// it", and a guard that answered "already ran" must not swallow it.
+async fn compute_guarded(state: &Arc<DaemonState>, item: ScheduledItem, now: DateTime<Utc>) -> ScheduledItem {
+    if let Some((command, cwd)) = guard_of(&item) {
+        let fire_date = DateTime::parse_from_rfc3339(&item.fire_at)
+            .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|_| now.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string());
+        if let GuardVerdict::Skip(reason) = schedule_guard::run(&command, &cwd, &item.id, &fire_date).await {
+            return compute_skipped(item, now, reason);
+        }
+    }
+    compute_fired(state, item, now).await
+}
+
+/// The guard command and the folder it runs in. `JarvisHygiene` has no
+/// folder and no way to be created with a guard, so it never has one.
+fn guard_of(item: &ScheduledItem) -> Option<(String, std::path::PathBuf)> {
+    let command = item.guard.as_deref().map(str::trim).filter(|g| !g.is_empty())?;
+    let cwd = match &item.kind {
+        ScheduledKind::Message { cwd, .. } | ScheduledKind::NewChat { cwd, .. } => cwd,
+        ScheduledKind::JarvisHygiene => return None,
+    };
+    Some((command.to_string(), std::path::PathBuf::from(cwd)))
+}
+
+/// A guard turned this firing away. Recurring items go back to Pending at their
+/// next occurrence, one-shots go terminal as `Skipped`; `last_fired_at` stays
+/// untouched because nothing fired. Pure like `compute_missed`.
+fn compute_skipped(mut item: ScheduledItem, now: DateTime<Utc>, reason: String) -> ScheduledItem {
+    item.last_result = Some(format!("skipped: {reason}"));
+    item.last_skip = Some(SkippedFire { at: now.to_rfc3339(), reason });
+    if let Some(rec) = item.recurrence.clone() {
+        item.fire_at = scheduled_items::next_occurrence(now, &rec).to_rfc3339();
+        item.status = ScheduledStatus::Pending;
+    } else {
+        item.status = ScheduledStatus::Skipped;
     }
     item
 }
@@ -439,6 +482,75 @@ mod tests {
             None,
         );
         assert!(grace_lateness_secs(&new_chat, fire_at, now, started) >= GRACE);
+    }
+
+    // --- pre-fire guard ---
+
+    fn guarded(guard: &str, cwd: &str, recurrence: Option<Recurrence>) -> ScheduledItem {
+        let mut item = ScheduledItem::new(
+            ScheduledKind::Message { session_id: "ghost-session".into(), cwd: cwd.into() },
+            "hi".into(),
+            (Utc::now() - chrono::Duration::minutes(1)).to_rfc3339(),
+            recurrence,
+        );
+        item.guard = Some(guard.to_string());
+        item
+    }
+
+    #[test]
+    fn compute_skipped_one_shot_goes_terminal_and_records_the_reason() {
+        let now = Utc::now();
+        let updated = compute_skipped(guarded("g", ".", None), now, "already ran".into());
+        assert_eq!(updated.status, ScheduledStatus::Skipped);
+        assert_eq!(updated.last_skip, Some(SkippedFire { at: now.to_rfc3339(), reason: "already ran".into() }));
+        assert_eq!(updated.last_result.as_deref(), Some("skipped: already ran"));
+        assert!(updated.last_fired_at.is_none(), "a skip is not a fire");
+    }
+
+    #[test]
+    fn compute_skipped_recurring_resets_to_pending_at_the_next_occurrence() {
+        let rec = Recurrence { time: "09:00".into(), rule: RecurrenceRule::Daily };
+        let item = guarded("g", ".", Some(rec));
+        let old_fire_at = item.fire_at.clone();
+        let updated = compute_skipped(item, Utc::now(), "already ran".into());
+        assert_eq!(updated.status, ScheduledStatus::Pending);
+        assert_ne!(updated.fire_at, old_fire_at);
+        assert!(updated.last_skip.is_some(), "the panel needs the skip even though the item is Pending again");
+    }
+
+    #[tokio::test]
+    async fn a_guard_that_exits_zero_skips_instead_of_firing() {
+        let state = test_state();
+        let updated = compute_guarded(&state, guarded("echo 'already ran'; exit 0", ".", None), Utc::now()).await;
+        assert_eq!(updated.status, ScheduledStatus::Skipped);
+        assert_eq!(updated.last_skip.map(|s| s.reason).as_deref(), Some("already ran"));
+    }
+
+    #[tokio::test]
+    async fn a_guard_that_cannot_run_fires_normally() {
+        // The missing cwd makes the guard fail to start (fail open) and then
+        // makes the fire itself fail, so Failed proves the fire path was reached.
+        let state = test_state();
+        let updated = compute_guarded(&state, guarded("exit 0", "Z:\\does\\not\\exist", None), Utc::now()).await;
+        assert!(matches!(updated.status, ScheduledStatus::Failed { .. }), "got {:?}", updated.status);
+        assert!(updated.last_skip.is_none());
+    }
+
+    #[tokio::test]
+    async fn an_unguarded_item_and_a_blank_guard_never_run_a_command() {
+        let state = test_state();
+        let mut blank = guarded("   ", "Z:\\does\\not\\exist", None);
+        let updated = compute_guarded(&state, blank.clone(), Utc::now()).await;
+        assert!(matches!(updated.status, ScheduledStatus::Failed { .. }));
+        blank.guard = None;
+        assert!(guard_of(&blank).is_none());
+    }
+
+    #[test]
+    fn jarvis_hygiene_never_has_a_guard() {
+        let mut item = ScheduledItem::new(ScheduledKind::JarvisHygiene, "hi".into(), Utc::now().to_rfc3339(), None);
+        item.guard = Some("exit 0".into());
+        assert!(guard_of(&item).is_none());
     }
 
     #[tokio::test]
