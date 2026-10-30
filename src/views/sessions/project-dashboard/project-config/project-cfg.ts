@@ -1,6 +1,6 @@
 import type { TicketTracker } from "../../../../types/ipc.generated";
 
-export interface Automation {
+interface Automation {
   enabled?: boolean;
   autostart_on_boot?: boolean;
   continue_flag?: boolean;

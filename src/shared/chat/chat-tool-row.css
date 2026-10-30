@@ -85,5 +85,5 @@
   opacity: 0.75;
 }
 .elided-image[data-elided-state="error"] {
-  border-color: var(--color-danger, #d9534f);
+  border-color: var(--color-danger);
 }
