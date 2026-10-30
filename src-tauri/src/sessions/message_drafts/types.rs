@@ -70,10 +70,9 @@ pub struct DraftVariant {
     pub platform: Option<String>,
     /// Claude posted this variant itself (`write_draft` `sent`). Per variant
     /// because one card can hold wordings for different recipients: sending
-    /// one must not retire the sibling still waiting on the user. Not exported
-    /// to TS: nothing in the webview reads it yet.
+    /// one must not retire the sibling still waiting on the user. The draft
+    /// card reads it to show a posted wording as sent while a sibling stays open.
     #[serde(default)]
-    #[ts(skip)]
     pub sent: bool,
 }
 
