@@ -1,5 +1,6 @@
 import { state } from "./state";
 import { visibleInterval } from "../../shared/visible-interval";
+import { refreshNextChips } from "./next-chip-strip";
 
 let _progressN: number | null = null;
 let _progressM: number = 0;
@@ -133,6 +134,9 @@ export function updateThinkingBar(): void {
     _silenceTick = null;
   }
   const hasHeld = !!state.heldMessages?.hasItemsForActive();
+  // Before the idle early return below: an idle, empty bar is exactly when the
+  // quick-reply chips show.
+  refreshNextChips(pane);
   const textEl = bar.querySelector<HTMLElement>(".thinking-text");
   bar.classList.toggle("busy", busy);
   // The header cancel button (pending pane) only belongs mid-turn; hide it while

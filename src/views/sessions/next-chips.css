@@ -1,0 +1,42 @@
+/* Quick-reply chips above the message box. A sibling slot of .scheduled-chip-slot
+   and .session-thinking, never inside either (each owns its own DOM). Inset
+   matches .composer-shell's margin so the row lines up with the box below. */
+
+.next-chip-slot {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 4px max(12px, calc((100% - 900px) / 2)) 0;
+}
+
+.next-chip-slot:empty {
+  display: none;
+}
+
+/* Muted and flat: a suggestion, not a call to action. */
+.next-chip {
+  flex: none;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 3px 11px;
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.next-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-text);
+}
+
+@media (max-width: 768px) {
+  /* The composer shell is full-bleed on the phone. */
+  .next-chip-slot {
+    margin: 4px 12px 0;
+  }
+}

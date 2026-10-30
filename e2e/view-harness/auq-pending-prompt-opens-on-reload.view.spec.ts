@@ -1,4 +1,5 @@
 // asserts: src/views/sessions/active-session.ts, src/views/sessions/permission-modal/resurface.ts
+// Reviewed 2026-10-30: active-session.ts gained an empty .next-chip-slot above the composer (quick reply chips) - additive, no change to this spec's contract; the full view suite passed.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
