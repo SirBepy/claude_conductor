@@ -1,12 +1,14 @@
 // asserts: src/views/sessions/permission-modal-track.css, src/views/sessions/permission-modal/question-ui-render.ts, src/views/sessions/permission-modal/question-ui-templates.ts
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
+import { shotDir } from "./shot-dir";
 
 // With many questions the pager's dots used to push the header's right-hand
 // buttons off the card. The dots row now shrinks and scrolls sideways, and
 // keeps the current dot in view.
 
 const SESSION = sessionInstance();
+const SHOTS = shotDir();
 const COUNT = 60;
 
 const MANY = Array.from({ length: COUNT }, (_, i) => ({
@@ -61,5 +63,7 @@ test.describe("view-harness / question pager with many questions", () => {
       return c.left >= r.left - 1 && c.right <= r.right + 1;
     });
     expect(inView).toBe(true);
+
+    await card.screenshot({ path: `${SHOTS}/question-pager-overflow.png` });
   });
 });
