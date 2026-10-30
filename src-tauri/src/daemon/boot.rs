@@ -55,6 +55,10 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // log file, this pid lets the next investigation tell the lines apart.
     log::info!("daemon: started, pid={}", std::process::id());
 
+    // Holding the lock means no other daemon owns the leftover list, so a
+    // temporary secret a crashed run never got to sweep is removed now.
+    crate::daemon::secret_target::init_persistence(&app_data, &instance::instance_suffix());
+
     let initial_settings = load_initial_settings();
     let settings_cache = SettingsCache::new(initial_settings);
 

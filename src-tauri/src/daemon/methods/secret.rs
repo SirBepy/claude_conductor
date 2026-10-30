@@ -63,6 +63,13 @@ async fn respond_secret_inner(
     // Decided before the write: afterwards the file always exists. A dangling
     // symlink counts as present, matching what `resolve_target` treats as one.
     let created_file = std::fs::symlink_metadata(&path).is_err();
+    // The file may have gained the key while the prompt sat open, so the
+    // request-time refusal is not enough.
+    if temporary {
+        if let Some(reason) = crate::daemon::secret_target::temporary_conflict(&path, &key) {
+            return (false, Some(reason));
+        }
+    }
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
     let updated = match crate::api_keys::rewrite_env(&existing, &key, &value) {
         Ok(u) => u,
@@ -80,7 +87,8 @@ async fn respond_secret_inner(
     }
 
     let char_count = value.chars().count();
-    record_lifetime(session_id.as_deref(), &path, &key, temporary, created_file);
+    let cwd = session_id.as_deref().and_then(|sid| state.registry.get(sid)).map(|i| i.cwd);
+    record_lifetime(session_id.as_deref(), cwd, &path, &key, temporary, created_file);
     let tx = state.pending.lock().await.remove(request_id);
     let Some(tx) = tx else {
         // The write succeeded, but the blocked HTTP handler is already gone
@@ -100,17 +108,25 @@ async fn respond_secret_inner(
 /// Ties a just-written secret to its chat when it was asked for as temporary;
 /// a permanent write to a key an earlier temporary request used takes that key
 /// off the cleanup list, so closing the chat does not delete what Joe kept.
-fn record_lifetime(session_id: Option<&str>, path: &std::path::Path, key: &str, temporary: bool, created_file: bool) {
+fn record_lifetime(
+    session_id: Option<&str>,
+    cwd: Option<PathBuf>,
+    path: &std::path::Path,
+    key: &str,
+    temporary: bool,
+    created_file: bool,
+) {
     use crate::daemon::secret_target::{temporary_secrets, TempSecret};
-    match (temporary, session_id) {
-        (true, Some(sid)) => temporary_secrets().record(TempSecret {
+    match (temporary, session_id, cwd) {
+        (true, Some(sid), Some(cwd)) => temporary_secrets().record(TempSecret {
             session_id: sid.to_string(),
             file: path.to_path_buf(),
             key: key.to_string(),
             created_file,
+            cwd,
         }),
-        (true, None) => {}
-        (false, _) => temporary_secrets().forget(path, key),
+        (true, ..) => {}
+        (false, ..) => temporary_secrets().forget(path, key),
     }
 }
 
@@ -202,7 +218,8 @@ mod tests {
     #[tokio::test]
     async fn closing_the_chat_removes_a_temporary_key() {
         let tmp = tempfile::tempdir().unwrap();
-        let cwd = tmp.path().to_path_buf();
+        // Canonical like the path the request handler stores in the payload.
+        let cwd = std::fs::canonicalize(tmp.path()).unwrap();
         let sid = "temp-remove-key";
         let state = state_with_session(sid, &cwd);
         let target = cwd.join("secrets.env");
@@ -224,7 +241,8 @@ API_KEY=sk-abc
     #[tokio::test]
     async fn closing_the_chat_deletes_a_file_the_temporary_secret_created() {
         let tmp = tempfile::tempdir().unwrap();
-        let cwd = tmp.path().to_path_buf();
+        // Canonical like the path the request handler stores in the payload.
+        let cwd = std::fs::canonicalize(tmp.path()).unwrap();
         let sid = "temp-delete-file";
         let state = state_with_session(sid, &cwd);
         let target = cwd.join("secrets.env");
@@ -252,6 +270,42 @@ API_KEY=sk-abc
 
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "API_KEY=sk-abc
 ");
+    }
+
+    /// A temporary secret never replaces a value already stored under its key:
+    /// the write is refused with a clear reason, the file keeps Joe's value,
+    /// and the prompt stays open for a retry.
+    #[tokio::test]
+    async fn a_temporary_secret_over_an_existing_key_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().to_path_buf();
+        let sid = "temp-refuse-existing-key";
+        let state = state_with_session(sid, &cwd);
+        let target = cwd.join("secrets.env");
+        std::fs::write(&target, "API_KEY=sk-kept\n").unwrap();
+        let _rx = open_prompt_with(&state, "p1", sid, &target, "API_KEY", true).await;
+
+        let mut r = Router::new();
+        register_secret(&mut r, state.clone());
+        let resp = r
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "respond_secret".into(),
+                    params: Some(json!({"request_id": "p1", "value": "sk-new"})),
+                },
+                dummy_ctx(),
+            )
+            .await;
+
+        let result = resp.result.unwrap();
+        assert_eq!(result["ok"], json!(false));
+        let reason = result["error"].as_str().unwrap();
+        assert!(reason.contains("API_KEY") && reason.contains("temporary"), "got: {reason}");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "API_KEY=sk-kept\n");
+        assert_eq!(state.list_prompts().await.len(), 1, "the prompt stays open");
+        assert_eq!(crate::daemon::secret_target::temporary_secrets().live_for(sid), 0);
     }
 
     /// Saving the same key again as permanent cancels the earlier temporary

@@ -228,6 +228,36 @@ mod tests {
         assert!(crate::ask::store::load(sid).is_empty(), "ask threads must be dropped on intentional close");
     }
 
+    /// The fallback close path (a chat with no live child, so `end_session` is
+    /// never reached) still removes the chat's temporary secrets.
+    #[tokio::test]
+    async fn mark_session_ended_sweeps_the_closed_chats_temporary_secrets() {
+        let sid = "lifecycle-test-temp-secret-sweep-8c1d";
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = std::fs::canonicalize(tmp.path()).unwrap();
+        let file = cwd.join("secrets.env");
+        std::fs::write(&file, "OTHER=1\nAPI_KEY=sk-abc\n").unwrap();
+        crate::daemon::secret_target::temporary_secrets().record(crate::daemon::secret_target::TempSecret {
+            session_id: sid.into(),
+            file: file.clone(),
+            key: "API_KEY".into(),
+            created_file: false,
+            cwd,
+        });
+
+        let mut r = Router::new();
+        register_lifecycle(&mut r, dummy_state());
+        let resp = r.dispatch(Request {
+            jsonrpc: "2.0".into(), id: json!(1),
+            method: "mark_session_ended".into(),
+            params: Some(json!({"session_id": sid})),
+        }, dummy_ctx()).await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "OTHER=1\n");
+        assert_eq!(crate::daemon::secret_target::temporary_secrets().live_for(sid), 0);
+    }
+
     // Crash/restart paths (pump/exit.rs's ProcessGone, hooks_server's
     // HookSessionEnd) call registry.mark_ended directly, never through this
     // RPC handler - so a crashed chat must keep its Ask threads.
