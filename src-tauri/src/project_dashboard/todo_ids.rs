@@ -64,6 +64,27 @@ fn is_label(s: &str) -> bool {
     letters > 0 && s[letters..].chars().all(|c| c.is_ascii_digit())
 }
 
+/// The device kinds the id contract names: a label is `pc` or `mac`, plus a
+/// number for a second machine (`pc2`, `mac2`).
+const DEVICE_KINDS: [&str; 2] = ["pc", "mac"];
+
+/// Read once: `parse_stem` runs per file name, and a file read each time would
+/// cost a disk hit for every entry in the backlog.
+fn this_device() -> &'static str {
+    static LABEL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    LABEL.get_or_init(device_label)
+}
+
+/// Whether `s` can be the label of a todo id. Any `^[a-z]+[0-9]*$` word has
+/// the shape (`notes`, `fix`, `sc`), so `notes-1.md` and `fix-3-things.md`
+/// would read as todos and `fix-3-a.md` / `fix-3-b.md` as one colliding id;
+/// the label has to be a device kind or the label this machine was given.
+fn is_device_label(s: &str) -> bool {
+    is_label(s)
+        && (s == this_device()
+            || DEVICE_KINDS.iter().any(|kind| s.strip_prefix(kind).is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))))
+}
+
 fn digits(s: &str) -> Option<u64> {
     if s.is_empty() || !s.chars().all(|c| c.is_ascii_digit()) {
         return None;
@@ -79,7 +100,7 @@ pub fn parse_stem(stem: &str) -> Option<ParsedName> {
         let slug = stem.get(first.len() + 1..).unwrap_or("").to_string();
         return Some(ParsedName { key: TodoKey { label: LEGACY_LABEL.into(), number }, slug, legacy: true });
     }
-    if !is_label(first) {
+    if !is_device_label(first) {
         return None;
     }
     let after = &stem[first.len()..];
@@ -228,6 +249,26 @@ mod tests {
         assert_eq!(parse_file_name("Pc-1-x.md"), None);
         assert_eq!(parse_file_name("pc-x-1.md"), None);
         assert_eq!(parse_file_name("12-x.txt"), None);
+    }
+
+    #[test]
+    fn a_name_without_a_device_label_is_not_a_todo() {
+        for name in ["notes-1.md", "fix-3-things.md", "fix-3-a.md", "sc-56160-x.md", "v2-4.md"] {
+            assert_eq!(parse_file_name(name), None, "{name}");
+        }
+        assert_eq!(parse_wanted("fix-3-things"), None);
+        assert_eq!(parse_wanted("sc-56160"), None);
+        for name in ["pc-3.md", "mac-3-x.md", "pc2-3-x.md", "mac12-0003.md"] {
+            assert!(parse_file_name(name).is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn fix_3_a_and_fix_3_b_are_neither_todos_nor_a_collision_for_pc_0003() {
+        let dir = todos(&["fix-3-a.md", "fix-3-b.md", "notes-1.md", "pc-0003-real.md"]);
+        assert_eq!(list_todo_files(dir.path()).len(), 1);
+        // Another device's bare number: the one real todo, not an ambiguity with the look-alikes.
+        assert!(find_todo_file(dir.path(), "3", "mac").unwrap().ends_with("pc-0003-real.md"));
     }
 
     #[test]

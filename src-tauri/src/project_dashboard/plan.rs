@@ -69,8 +69,7 @@ fn open_item(line: &str) -> Option<&str> {
     checkbox(line).filter(|c| c.open).map(|c| c.rest)
 }
 
-/// Longest id token before ` - `: `mac2-10000` is 10, and a ticket-style id
-/// (`sc-56160`) is shorter than the cap.
+/// Longest id token before ` - `: `mac2-10000` is 10, well under the cap.
 const MAX_ID_CHARS: usize = 20;
 
 /// Splits a plan line's id off its label, keeping the id as written (never
@@ -81,16 +80,18 @@ const MAX_ID_CHARS: usize = 20;
 /// - `pc-1407` and `pc-1407 [P]` -> (Some("pc-1407"), "")
 ///
 /// With a label, the id is the first token only when it is followed by ` - `
-/// and looks like an id (short, with a digit), so a plain item that merely
-/// contains a dash keeps its whole text. Without one, the line has to be the id
-/// alone (plus an optional `[P]`) so "2026 plan review" is not read as todo 2026.
+/// and is a todo id (short, and one `todo_ids::parse_wanted` accepts), so a
+/// plain item that merely contains a dash keeps its whole text. Without one, the
+/// line has to be the id alone (plus an optional `[P]`) so "2026 plan review" is
+/// not read as todo 2026. A token the todo parser rejects (`SC-56160`, `1264.5`)
+/// is plain text, the same answer `has_pickable` and `plan_edit` get from it.
 pub(crate) fn split_id(rest: &str) -> (Option<String>, &str) {
     if let Some((head, tail)) = rest.split_once(" - ") {
         let id = head.strip_suffix(" [P]").unwrap_or(head);
         let looks_like_id = !id.is_empty()
             && id.len() <= MAX_ID_CHARS
-            && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-            && id.chars().any(|c| c.is_ascii_digit());
+            && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+            && super::todo_ids::parse_wanted(id).is_some();
         return if looks_like_id { (Some(id.to_string()), tail.trim()) } else { (None, rest) };
     }
     let mut tokens = rest.split_whitespace();
@@ -306,10 +307,10 @@ mod tests {
 
     #[test]
     fn a_dash_inside_plain_text_is_not_an_id_split() {
-        let items = parse_plan("## A\n- [ ] Fix the parser - it drops lines\n- [ ] sc-56160 - ticket id\n", REPO);
+        let items = parse_plan("## A\n- [ ] Fix the parser - it drops lines\n- [ ] pc-1407 - todo id\n", REPO);
         assert_eq!(items[0].id, None);
         assert_eq!(items[0].text, "Fix the parser - it drops lines");
-        assert_eq!(items[1].id.as_deref(), Some("sc-56160"));
+        assert_eq!(items[1].id.as_deref(), Some("pc-1407"));
     }
 
     #[test]
@@ -320,6 +321,24 @@ mod tests {
         assert_eq!(split_id("pc-1407 - label [P]"), (Some("pc-1407".to_string()), "label [P]"));
         assert_eq!(split_id("pc-1407 [P] - label"), (Some("pc-1407".to_string()), "label"));
         assert_eq!(split_id("mac2-10000 - label"), (Some("mac2-10000".to_string()), "label"));
+    }
+
+    /// `split_id` and `parse_wanted` must agree on what an id is: a token the
+    /// todo parser rejects (`SC-56160`, `1264.5`) is plain text, so
+    /// `has_pickable`, the dashboard row and `LineDoc::placements` treat the
+    /// line the same way instead of one calling it an id and another dropping it.
+    #[test]
+    fn a_token_the_todo_parser_rejects_is_plain_text_for_every_reader() {
+        for rest in ["SC-56160 - fix it", "1264.5 - sub task"] {
+            assert_eq!(split_id(rest), (None, rest));
+        }
+        let plan = "## Now\n- [ ] SC-56160 - fix it\n- [ ] 1264.5 - sub task\n";
+        let dir = todos_dir(plan, &[]);
+        assert!(has_pickable(dir.path()), "a line naming no todo is still work to pick");
+        assert!(LineDoc::parse(plan).placements().is_empty());
+        let items = parse_plan(plan, REPO);
+        assert_eq!(items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(), [None, None]);
+        assert_eq!(items[0].text, "SC-56160 - fix it");
     }
 
     #[test]

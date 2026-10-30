@@ -3,7 +3,8 @@
 //! Desktop-local by construction: these are only registered as Tauri commands,
 //! never as daemon RPC methods, so no phone or peer transport can reach them.
 
-use super::plan_edit::{edit_plan, reopened, LineDoc};
+use super::md_scan::{checkbox, fenced_lines};
+use super::plan_edit::{edit_plan, reopened, LineDoc, PREAMBLE_GROUP};
 use super::todo_ids::{find_todo_file, list_todo_files, parse_file_name, TodoKey, Wanted};
 use super::todo_stats::live_claim_keys;
 use crate::ipc::ai_todos::AiTodoArchived;
@@ -92,14 +93,17 @@ pub fn archive(todos_dir: &Path, id: &str, note: Option<&str>, device: &str) -> 
     std::fs::write(&done_path, content).map_err(|e| format!("could not write {}: {e}", done_path.display()))?;
 
     let wanted = Wanted::Key(key.clone());
-    let removed = edit_plan(todos_dir, false, |doc| Ok(doc.remove_item(&wanted))).inspect_err(|_| {
+    let pruned = edit_plan(todos_dir, false, |doc| {
+        let before = doc.clone();
+        let removed = doc.remove_item(&wanted);
+        Ok(PlanRestore { lines: describe_removed(&before, &removed) })
+    })
+    .inspect_err(|_| {
         let _ = std::fs::remove_file(&done_path);
     })?;
     if let Err(e) = std::fs::remove_file(&path) {
         let _ = std::fs::remove_file(&done_path);
-        if let Some((idx, line)) = removed.first() {
-            let _ = reinsert_plan_line(todos_dir, &key, line, *idx);
-        }
+        let _ = reinsert_plan_lines(todos_dir, &key, &pruned);
         return Err(format!("could not move {name} out of the backlog: {e}"));
     }
     Ok(AiTodoArchived {
@@ -107,19 +111,136 @@ pub fn archive(todos_dir: &Path, id: &str, note: Option<&str>, device: &str) -> 
         done_path: done_path.to_string_lossy().into_owned(),
         original_path: path.to_string_lossy().into_owned(),
         original_content: original,
-        plan_line: removed.first().map(|(_, l)| l.clone()),
-        plan_line_index: removed.first().map(|(i, _)| *i as u32),
+        plan_line: pruned.encode(),
+        plan_line_index: pruned.lines.first().map(|l| l.index as u32),
     })
 }
 
-fn reinsert_plan_line(todos_dir: &Path, key: &TodoKey, line: &str, idx: usize) -> Result<(), String> {
+/// One PLAN.md line `archive` pruned, with where it sat. The index alone goes
+/// stale as soon as another session edits the plan, so the group and the item
+/// line above it travel along and `unarchive` finds the spot again from those.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PlanLine {
+    line: String,
+    /// The `## ` group it was under, `Plan` for the lines above the first one.
+    /// Empty only in a record from before groups were saved: `index` rules then.
+    group: String,
+    /// The nearest checkbox line above it in that group (a removed sibling
+    /// counts, so adjacent duplicates restore in order); `None` when it was the
+    /// group's first item.
+    after: Option<String>,
+    /// Its line index before the prune.
+    index: usize,
+}
+
+/// Every PLAN.md line that named the todo. `AiTodoArchived` has one string
+/// field for the pruned line, so the whole record rides in it as JSON.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PlanRestore {
+    lines: Vec<PlanLine>,
+}
+
+impl PlanRestore {
+    fn encode(&self) -> Option<String> {
+        if self.lines.is_empty() {
+            return None;
+        }
+        serde_json::to_string(self).ok()
+    }
+
+    /// A record from before groups were saved holds one bare line plus its index.
+    fn decode(plan_line: &str, index: Option<u32>) -> PlanRestore {
+        serde_json::from_str(plan_line).unwrap_or_else(|_| PlanRestore {
+            lines: vec![PlanLine {
+                line: plan_line.to_string(),
+                group: String::new(),
+                after: None,
+                index: index.unwrap_or(0) as usize,
+            }],
+        })
+    }
+}
+
+/// Records where each of `removed` (index, line) sat in `before`.
+fn describe_removed(before: &LineDoc, removed: &[(usize, String)]) -> Vec<PlanLine> {
+    let headings = before.headings();
+    let fenced = fence_flags(before);
+    removed
+        .iter()
+        .map(|(index, line)| {
+            let heading = headings.iter().rev().find(|(h, _)| h < index);
+            let (group, floor) = match heading {
+                Some((h, title)) => (title.clone(), h + 1),
+                None => (PREAMBLE_GROUP.to_string(), 0),
+            };
+            let after = (floor..*index)
+                .rev()
+                .find(|&i| !fenced[i] && checkbox(before.line(i)).is_some())
+                .map(|i| before.line(i).to_string());
+            PlanLine { line: line.clone(), group, after, index: *index }
+        })
+        .collect()
+}
+
+fn fence_flags(doc: &LineDoc) -> Vec<bool> {
+    fenced_lines((0..doc.len()).map(|i| doc.line(i))).map(|(_, in_fence)| in_fence).collect()
+}
+
+/// Puts every pruned line back (unless the todo is planned again meanwhile).
+fn reinsert_plan_lines(todos_dir: &Path, key: &TodoKey, saved: &PlanRestore) -> Result<(), String> {
     let wanted = Wanted::Key(key.clone());
     edit_plan(todos_dir, true, |doc| {
-        if !doc.has_item(&wanted) {
-            doc.insert(idx, line);
+        if doc.has_item(&wanted) {
+            return Ok(());
+        }
+        // Lines come in file order, so each search for a neighbour starts where
+        // the previous line landed: identical neighbour lines resolve in order.
+        let mut cursor = 0;
+        for line in &saved.lines {
+            cursor = place(doc, line, cursor);
         }
         Ok(())
     })
+}
+
+/// Inserts one saved line and returns the index it landed at. Under the
+/// neighbour it was below, after any indented notes of that neighbour; first
+/// in its group when it was first; at the end of the group when the neighbour
+/// is gone; in a new group at the end of the file when the group is gone.
+fn place(doc: &mut LineDoc, saved: &PlanLine, cursor: usize) -> usize {
+    if saved.group.is_empty() {
+        let at = saved.index.min(doc.len());
+        doc.insert(at, &saved.line);
+        return at;
+    }
+    let headings = doc.headings();
+    let span = match headings.iter().position(|(_, title)| *title == saved.group) {
+        Some(h) => Some((headings[h].0 + 1, headings.get(h + 1).map_or(doc.len(), |(i, _)| *i))),
+        None if saved.group == PREAMBLE_GROUP => Some((0, headings.first().map_or(doc.len(), |(i, _)| *i))),
+        None => None,
+    };
+    let Some((lo, hi)) = span else {
+        doc.insert_into_group(&saved.group, &saved.line, 0, &|_| true);
+        return doc.len() - 1;
+    };
+    let fenced = fence_flags(doc);
+    let is_item = |doc: &LineDoc, i: usize| !fenced[i] && checkbox(doc.line(i)).is_some();
+    let end_of_group = |doc: &LineDoc| doc.last_nonblank(lo, hi).map_or(lo, |i| i + 1);
+    let at = match &saved.after {
+        None => (lo..hi).find(|&i| is_item(doc, i)).unwrap_or_else(|| end_of_group(doc)),
+        Some(after) => match (lo.max(cursor)..hi).find(|&i| !fenced[i] && doc.line(i) == after.as_str()) {
+            Some(i) => {
+                let mut at = i + 1;
+                while at < hi && doc.line(at).starts_with([' ', '\t']) && !doc.line(at).trim().is_empty() {
+                    at += 1;
+                }
+                at
+            }
+            None => end_of_group(doc),
+        },
+    };
+    doc.insert(at, &saved.line);
+    at
 }
 
 /// Whether `p`'s directory is `dir`, tolerating a trailing separator.
@@ -128,8 +249,8 @@ fn is_in(p: &Path, dir: &Path) -> bool {
 }
 
 /// Undoes `archive`: writes the original content back, deletes the `done/`
-/// copy and re-inserts the PLAN.md line at its old index (unless the id is
-/// already planned again). The paths come from the caller, so both must sit in
+/// copy and re-inserts every PLAN.md line the archive pruned, by group and
+/// neighbour (unless the id is already planned again). The paths come from the caller, so both must sit in
 /// this repo's todos folder under the same file name.
 pub fn unarchive(todos_dir: &Path, archived: &AiTodoArchived) -> Result<(), String> {
     let original = PathBuf::from(&archived.original_path);
@@ -150,9 +271,9 @@ pub fn unarchive(todos_dir: &Path, archived: &AiTodoArchived) -> Result<(), Stri
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(format!("restored the todo but could not remove {}: {e}", done.display())),
     }
-    if let (Some(line), Some(idx)) = (&archived.plan_line, archived.plan_line_index) {
+    if let Some(plan_line) = &archived.plan_line {
         let key = key_of(&original)?;
-        reinsert_plan_line(todos_dir, &key, line, idx as usize)
+        reinsert_plan_lines(todos_dir, &key, &PlanRestore::decode(plan_line, archived.plan_line_index))
             .map_err(|e| format!("restored the todo but not its PLAN.md line: {e}"))?;
     }
     Ok(())
@@ -216,7 +337,7 @@ mod tests {
         let d = dir.path();
         let a = archive(d, "pc-2", None, "pc").unwrap();
         assert_eq!(a.id, "pc-0002");
-        assert_eq!(a.plan_line.as_deref(), Some("- [ ] pc-0002 - second"));
+        assert!(a.plan_line.as_deref().is_some_and(|l| l.contains("- [ ] pc-0002 - second")));
         assert_eq!(a.plan_line_index, Some(4));
         assert!(!d.join("pc-0002-two.md").exists());
         assert_eq!(read(d, "done/pc-0002-two.md"), TODO);
@@ -311,6 +432,81 @@ mod tests {
         std::fs::write(dir.path().join("PLAN.md"), "## A\n- [ ] pc-0001 - again\n").unwrap();
         unarchive(dir.path(), &a).unwrap();
         assert_eq!(read(dir.path(), "PLAN.md"), "## A\n- [ ] pc-0001 - again\n");
+    }
+
+    #[test]
+    fn unarchive_reinserts_by_group_and_neighbour_after_another_session_edited_the_plan() {
+        let plan = "# Plan\n\n## A\n- [ ] pc-0001\n- [ ] pc-0002\n- [ ] pc-0003\n\n## B\n- [ ] pc-0004\n";
+        let dir = repo(&[("pc-0002-two.md", TODO), ("PLAN.md", plan)]);
+        let a = archive(dir.path(), "pc-2", None, "pc").unwrap();
+        // Another session adds a group above, so the old absolute index now points elsewhere.
+        std::fs::write(
+            dir.path().join("PLAN.md"),
+            "# Plan\n\n## Intro\n- [ ] pc-0009\n- [ ] pc-0010\n\n## A\n- [ ] pc-0001\n- [ ] pc-0003\n\n## B\n- [ ] pc-0004\n",
+        )
+        .unwrap();
+        unarchive(dir.path(), &a).unwrap();
+        assert_eq!(
+            read(dir.path(), "PLAN.md"),
+            "# Plan\n\n## Intro\n- [ ] pc-0009\n- [ ] pc-0010\n\n## A\n- [ ] pc-0001\n- [ ] pc-0002\n- [ ] pc-0003\n\n## B\n- [ ] pc-0004\n"
+        );
+    }
+
+    #[test]
+    fn unarchive_puts_a_first_item_back_first_and_keeps_notes_under_the_neighbour_together() {
+        let plan = "## A\n- [ ] pc-0001\n- [ ] pc-0002\n  note under two\n- [ ] pc-0003\n";
+        let dir = repo(&[("pc-0001-one.md", TODO), ("pc-0003-three.md", TODO), ("PLAN.md", plan)]);
+        let first = archive(dir.path(), "pc-1", None, "pc").unwrap();
+        std::fs::write(dir.path().join("PLAN.md"), "## Z\n- [ ] pc-0008\n\n## A\n- [ ] pc-0002\n  note under two\n- [ ] pc-0003\n").unwrap();
+        unarchive(dir.path(), &first).unwrap();
+        assert_eq!(read(dir.path(), "PLAN.md"), "## Z\n- [ ] pc-0008\n\n## A\n- [ ] pc-0001\n- [ ] pc-0002\n  note under two\n- [ ] pc-0003\n");
+
+        let third = archive(dir.path(), "pc-3", None, "pc").unwrap();
+        std::fs::write(dir.path().join("PLAN.md"), "## Z\n- [ ] pc-0008\n- [ ] pc-0001\n\n## A\n- [ ] pc-0002\n  note under two\n").unwrap();
+        unarchive(dir.path(), &third).unwrap();
+        assert_eq!(read(dir.path(), "PLAN.md"), "## Z\n- [ ] pc-0008\n- [ ] pc-0001\n\n## A\n- [ ] pc-0002\n  note under two\n- [ ] pc-0003\n");
+    }
+
+    #[test]
+    fn unarchive_restores_every_line_that_named_the_todo_in_order() {
+        let plan = "## A\n- [ ] pc-0002 - first\n- [ ] pc-0002 - adjacent\n- [ ] pc-0003\n\n## B\n- [x] pc-0002 - done copy\n";
+        let dir = repo(&[("pc-0002-two.md", TODO), ("PLAN.md", plan)]);
+        let a = archive(dir.path(), "pc-2", None, "pc").unwrap();
+        assert_eq!(read(dir.path(), "PLAN.md"), "## A\n- [ ] pc-0003\n\n## B\n");
+        unarchive(dir.path(), &a).unwrap();
+        assert_eq!(read(dir.path(), "PLAN.md"), plan);
+    }
+
+    #[test]
+    fn unarchive_falls_back_to_the_group_end_then_to_a_new_group() {
+        let plan = "## A\n- [ ] pc-0001\n- [ ] pc-0002\n\n## B\n- [ ] pc-0003\n";
+        let dir = repo(&[("pc-0002-two.md", TODO), ("PLAN.md", plan)]);
+        let a = archive(dir.path(), "pc-2", None, "pc").unwrap();
+        // The neighbour is gone: the line lands at the end of its group.
+        std::fs::write(dir.path().join("PLAN.md"), "## A\n- [ ] pc-0005\n\n## B\n- [ ] pc-0003\n").unwrap();
+        unarchive(dir.path(), &a).unwrap();
+        assert_eq!(read(dir.path(), "PLAN.md"), "## A\n- [ ] pc-0005\n- [ ] pc-0002\n\n## B\n- [ ] pc-0003\n");
+
+        std::fs::remove_file(dir.path().join("pc-0002-two.md")).unwrap();
+        std::fs::write(dir.path().join("PLAN.md"), "## B\n- [ ] pc-0003\n").unwrap();
+        std::fs::write(dir.path().join("done/pc-0002-two.md"), TODO).unwrap();
+        unarchive(dir.path(), &a).unwrap();
+        assert_eq!(read(dir.path(), "PLAN.md"), "## B\n- [ ] pc-0003\n\n## A\n- [ ] pc-0002\n");
+    }
+
+    #[test]
+    fn unarchive_still_reads_a_record_from_before_the_group_was_saved() {
+        let dir = repo(&[("done/pc-0002-two.md", TODO), ("PLAN.md", "## A\n- [ ] pc-0001\n- [ ] pc-0003\n")]);
+        let old = AiTodoArchived {
+            id: "pc-0002".into(),
+            done_path: dir.path().join("done/pc-0002-two.md").to_string_lossy().into_owned(),
+            original_path: dir.path().join("pc-0002-two.md").to_string_lossy().into_owned(),
+            original_content: TODO.into(),
+            plan_line: Some("- [ ] pc-0002".into()),
+            plan_line_index: Some(2),
+        };
+        unarchive(dir.path(), &old).unwrap();
+        assert_eq!(read(dir.path(), "PLAN.md"), "## A\n- [ ] pc-0001\n- [ ] pc-0002\n- [ ] pc-0003\n");
     }
 
     const PLAN: &str = "# Plan\n\n## A\n- [ ] pc-0001\n- [ ] pc-0002 - two [P]\n\n## B\n- [ ] pc-0003\n";
