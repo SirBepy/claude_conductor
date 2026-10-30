@@ -113,14 +113,67 @@ pub async fn list_ai_todos(
     session_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<Vec<AiTodoEntry>, String> {
-    if let Some(client) = super::mirror::mirrored_client(&state, session_id.as_deref()).await {
+    Ok(list_ai_todos_routed(cwd, session_id, &state.cached_instances, state.client().await).await)
+}
+
+/// `list_ai_todos` with its two inputs from `AppState` passed in, so a test
+/// can drive the mirrored branch with a fake client.
+async fn list_ai_todos_routed<C: super::mirror::MirrorReads>(
+    cwd: String,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Vec<AiTodoEntry> {
+    if let Some(client) = super::mirror::route_mirrored(instances, session_id.as_deref(), client) {
         let sid = session_id.as_deref().unwrap_or_default();
-        return Ok(client.list_ai_todos(sid, &cwd).await.unwrap_or_else(|e| {
+        return client.list_ai_todos(sid, &cwd).await.unwrap_or_else(|e| {
             log::warn!("list_ai_todos: mirrored session {sid} read failed: {e}");
             Vec::new()
-        }));
+        });
     }
-    Ok(list_ai_todos_local(cwd).await)
+    list_ai_todos_local(cwd).await
+}
+
+#[cfg(test)]
+mod mirrored_branch_tests {
+    use super::*;
+    use crate::ipc::mirror::fake::{instance_cache, FakeMirror, PEER_TODO_ID};
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_todos_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let todos = list_ai_todos_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert_eq!(todos.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), [PEER_TODO_ID]);
+        assert_eq!(fake.calls(), [("list_ai_todos".into(), "mirror-1".into(), "C:/peer/repo".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_reads_as_no_todos() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let todos = list_ai_todos_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert!(todos.is_empty());
+        assert_eq!(fake.calls().len(), 1, "the failed read must have been attempted, not skipped");
+    }
+
+    #[tokio::test]
+    async fn a_local_session_never_touches_the_client() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+        let dir = std::env::temp_dir().join(format!("cc_mirrored_todos_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let todos = list_ai_todos_routed(dir.to_string_lossy().into(), Some("local-1".into()), &cache, Some(fake.clone())).await;
+
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(todos.is_empty());
+        assert!(fake.calls().is_empty());
+    }
 }
 
 /// Every backlog todo of `<cwd>/.claude/todos/`, ordered by id. Empty if the
