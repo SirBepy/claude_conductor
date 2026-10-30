@@ -69,4 +69,43 @@ describe("AUQ card attachment upload progress", () => {
     await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][1].attachments.map((a) => a.path)).toEqual([UPLOADED]);
   });
+
+  // A card rebuilt mid-upload (switch away and back, a draft merge) is seeded
+  // from the old card's snapshot, whose chips still have no path.
+  it("a card rebuilt mid-upload still waits for the upload and sends its path", async () => {
+    const { snapshotActiveCardDraft, dismissQuestionCard } = await import("../src/views/sessions/permission-modal/question-state.ts");
+    const onSubmit = vi.fn();
+    const card = () => ({
+      id: "prompt-1",
+      questions: [{ question: "Pick one?", options: [{ label: "A" }, { label: "B" }] }],
+      sessionId: "sess-1",
+      supportsExtras: true,
+      titleIcon: "ph-question",
+      cancelLabel: "Skip",
+      submitLabel: "Submit",
+      submitIcon: "ph-check",
+      onCancel: vi.fn(),
+      onSubmit,
+    });
+    renderQuestionUI(card());
+    const ta = document.querySelector(".prompt-q__other-input");
+    ta.focus();
+    pastePng(ta);
+    await vi.waitFor(() => expect(document.querySelector(".prompt-attachments .attachment.uploading")).toBeTruthy());
+
+    const draft = snapshotActiveCardDraft("sess-1", "prompt-1");
+    dismissQuestionCard("prompt-1");
+    renderQuestionUI({ ...card(), initialDraft: draft });
+    expect(document.querySelector(".prompt-attachments .attachment.uploading")).toBeTruthy();
+
+    document.querySelector('.prompt-panel[data-panel="0"] input[data-label="A"]').click();
+    document.querySelector('[data-act="primary"]').click();
+    document.querySelector('[data-act="primary"]')?.click();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    upload.resolve(UPLOADED);
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][1].attachments.map((a) => a.path)).toEqual([UPLOADED]);
+  });
 });

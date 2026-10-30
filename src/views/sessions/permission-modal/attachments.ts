@@ -18,7 +18,7 @@ import { openLightbox } from "../../../shared/chat/lightbox";
 import { decorateAttachmentChip, markAttachmentPop } from "../../../shared/chat/attachment-chip";
 import { imageMimeFromPath } from "../../../shared/image-mime";
 import { downscaleImage } from "./image-downscale";
-import type { AuqAttachment } from "./types";
+import type { AuqAttachment, QuestionDraft } from "./types";
 
 // Per-draft raw-byte budget (sum across every staged attachment). A realistic
 // pasted screenshot is 3-8MB raw; 8MB fits 1-2 full-res shots or several
@@ -32,8 +32,22 @@ function capMessage(): string {
   return `Can't attach: this draft's images already total ${mb} MB, the per-draft limit.`;
 }
 
+/** An upload still running for a staged chip. */
+export interface PendingUpload {
+  attachment: AuqAttachment;
+  done: Promise<string | null>;
+}
+
+/** In-flight uploads travel beside the draft snapshot that a rebuilt card is
+ *  seeded from: the chips are shared objects, but only the promises tell the
+ *  new card's controller they have no path yet. Keyed by draft identity so
+ *  the persisted draft shape stays free of promises. */
+export const draftUploads = new WeakMap<QuestionDraft, PendingUpload[]>();
+
 export interface AuqAttachmentsOpts {
   sessionId?: string;
+  /** Uploads the previous card's controller was still running for `initial`. */
+  initialUploads?: PendingUpload[];
   /** Paste attaches nothing when false - only the async MCP flow can deliver
    *  attachments to Claude (see QuestionUIOpts.supportsExtras's doc). Still
    *  reported back to the caller as a message (not a silent no-op). */
@@ -51,6 +65,8 @@ export interface AuqAttachmentsController {
    *  snapshot (e.g. a draft). */
   readonly attachments: AuqAttachment[];
   isUploading(): boolean;
+  /** The uploads still running, for handing to a rebuilt card with the draft. */
+  pendingUploads(): PendingUpload[];
   /** Resolves once every staged upload has settled, so a submit never drops
    *  a chip that has no path yet. */
   whenUploaded(): Promise<void>;
@@ -107,7 +123,32 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
     return attachments.reduce((sum, a) => sum + a.size, 0);
   }
 
-  const inflight = new Set<Promise<string | null>>();
+  const inflight = new Map<Promise<string | null>, AuqAttachment>();
+
+  // The previous controller's onChange is dead once its card is torn down, so
+  // this one watches the same uploads itself: it re-renders when each lands and
+  // takes the chip back out if the upload was refused or failed.
+  for (const { attachment, done } of opts.initialUploads ?? []) {
+    if (!attachments.includes(attachment)) continue;
+    const watched: Promise<string | null> = done
+      .then((msg) => {
+        if (msg) removeAttachment(attachment);
+        return msg;
+      }, () => {
+        removeAttachment(attachment);
+        return null;
+      })
+      .finally(() => {
+        inflight.delete(watched);
+        opts.onChange();
+      });
+    inflight.set(watched, attachment);
+  }
+
+  function removeAttachment(a: AuqAttachment): void {
+    const idx = attachments.indexOf(a);
+    if (idx >= 0) attachments.splice(idx, 1);
+  }
 
   /** Shows `a` at once as an uploading chip, then runs `work` to fill it in.
    *  A cap rejection or a failed read takes the chip back out. */
@@ -119,16 +160,12 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
     markAttachmentPop(a);
     attachments.push(a);
     opts.onChange();
-    const unstage = () => {
-      const idx = attachments.indexOf(a);
-      if (idx >= 0) attachments.splice(idx, 1);
-    };
-    const done = work(a)
+    const done: Promise<string | null> = work(a)
       .then((msg) => {
-        if (msg) unstage();
+        if (msg) removeAttachment(a);
         return msg;
       }, (err) => {
-        unstage();
+        removeAttachment(a);
         throw err;
       })
       .finally(() => {
@@ -136,7 +173,7 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
         inflight.delete(done);
         opts.onChange();
       });
-    inflight.add(done);
+    inflight.set(done, a);
     return done;
   }
 
@@ -144,8 +181,12 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
     return inflight.size > 0;
   }
 
+  function pendingUploads(): PendingUpload[] {
+    return [...inflight].map(([done, attachment]) => ({ attachment, done }));
+  }
+
   async function whenUploaded(): Promise<void> {
-    while (inflight.size > 0) await Promise.allSettled([...inflight]);
+    while (inflight.size > 0) await Promise.allSettled([...inflight.keys()]);
   }
 
   function attachBlob(blob: Blob, filename: string): Promise<string | null> {
@@ -270,7 +311,7 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
   }
 
   return {
-    attachments, isUploading, whenUploaded, attachBlob, attachFromPath,
+    attachments, isUploading, pendingUploads, whenUploaded, attachBlob, attachFromPath,
     attachmentsForPanel, handleAttachmentPaste, renderAttachmentsStrip,
   };
 }
