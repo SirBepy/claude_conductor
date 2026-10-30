@@ -25,12 +25,15 @@ vi.mock("../src/views/sessions/permission-modal/question-ui.ts", () => ({
 }));
 
 const { showQuestionCard } = await import("../src/views/sessions/permission-modal/index.ts");
+const { setSelectedSessionId } = await import("../src/views/sessions/permission-modal/gating.ts");
 
 beforeEach(() => {
   renderCalls.length = 0;
   renderQuestionUISpy.mockClear();
   invokeMock.mockClear();
   qs.setActiveCard(null);
+  // A card only mounts for the chat on screen.
+  setSelectedSessionId("s1");
 });
 
 describe("showQuestionCard threads payload.degraded_builtin into the render opts", () => {

@@ -54,7 +54,9 @@ const {
   reopenPendingPrompt,
   pendingPromptSessionIds,
 } = await import("../src/views/sessions/permission-modal/index.ts");
-const { peekPendingPrompt } = await import("../src/views/sessions/permission-modal/gating.ts");
+const { peekPendingPrompt, setSelectedSessionId } = await import(
+  "../src/views/sessions/permission-modal/gating.ts"
+);
 
 // A fresh session id per test: the sibling queue added for todo 897 lives in
 // index.ts's own module-level Map (no test-facing clear function, matching
@@ -113,8 +115,12 @@ describe("todo 897: two simultaneous questions from one backgrounded session", (
 
     // User switches into the chat and opens q2's own transcript card - its
     // tool_use never got a live card of its own while parked.
+    // The card mount refuses a chat that is not selected, so switching in
+    // means selecting it.
+    setSelectedSessionId(SID);
     const opened = await reopenPendingPrompt(SID, "q2-b");
     await flush();
+    setSelectedSessionId(null);
     expect(opened).toBe(true);
     expect(renderCalls.map((o) => o.id)).toEqual(["q2-b"]);
     expect(peekPendingPrompt(SID)?.payload.id).toBe("q2-b"); // q2 now the front slot
