@@ -188,7 +188,7 @@ export function buildChart(
       return `<circle data-line="${name}" cx="${px(first.t).toFixed(1)}" cy="${py(first[key]).toFixed(1)}" r="2.5" fill="${color}"/>`;
     }
     const d = buildSmoothPath(f.map((p) => ({ x: px(p.t), y: py(p[key]) })));
-    return `<path data-line="${name}" d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    return `<path class="chart-line-draw" pathLength="1" data-line="${name}" d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`;
   };
 
   const hoverPts = pts

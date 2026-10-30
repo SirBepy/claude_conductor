@@ -6,7 +6,7 @@
 // animation-delay rather than restarting on each rebuild.
 
 /** Set inline on the chip, so the CSS keyframes and this cutoff never drift. */
-export const ATTACHMENT_POP_MS = 720;
+export const ATTACHMENT_POP_MS = 380;
 
 const popStartedAt = new WeakMap<object, number>();
 
