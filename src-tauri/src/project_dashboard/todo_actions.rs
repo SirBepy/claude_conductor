@@ -3,7 +3,7 @@
 //! Desktop-local by construction: these are only registered as Tauri commands,
 //! never as daemon RPC methods, so no phone or peer transport can reach them.
 
-use super::md_scan::{checkbox, fenced_lines};
+use super::md_scan::checkbox;
 use super::plan_edit::{edit_plan, reopened, LineDoc, PREAMBLE_GROUP};
 use super::todo_ids::{find_todo_file, list_todo_files, parse_file_name, TodoKey, Wanted};
 use super::todo_stats::live_claim_keys;
@@ -164,7 +164,7 @@ impl PlanRestore {
 /// Records where each of `removed` (index, line) sat in `before`.
 fn describe_removed(before: &LineDoc, removed: &[(usize, String)]) -> Vec<PlanLine> {
     let headings = before.headings();
-    let fenced = fence_flags(before);
+    let fenced = before.fence_flags();
     removed
         .iter()
         .map(|(index, line)| {
@@ -180,10 +180,6 @@ fn describe_removed(before: &LineDoc, removed: &[(usize, String)]) -> Vec<PlanLi
             PlanLine { line: line.clone(), group, after, index: *index }
         })
         .collect()
-}
-
-fn fence_flags(doc: &LineDoc) -> Vec<bool> {
-    fenced_lines((0..doc.len()).map(|i| doc.line(i))).map(|(_, in_fence)| in_fence).collect()
 }
 
 /// Puts every pruned line back (unless the todo is planned again meanwhile).
@@ -223,7 +219,7 @@ fn place(doc: &mut LineDoc, saved: &PlanLine, cursor: usize) -> usize {
         doc.insert_into_group(&saved.group, &saved.line, 0, &|_| true);
         return doc.len() - 1;
     };
-    let fenced = fence_flags(doc);
+    let fenced = doc.fence_flags();
     let is_item = |doc: &LineDoc, i: usize| !fenced[i] && checkbox(doc.line(i)).is_some();
     let end_of_group = |doc: &LineDoc| doc.last_nonblank(lo, hi).map_or(lo, |i| i + 1);
     let at = match &saved.after {

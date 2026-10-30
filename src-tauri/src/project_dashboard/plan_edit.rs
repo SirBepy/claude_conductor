@@ -89,7 +89,7 @@ impl LineDoc {
 
     /// Per line, whether it is part of a fenced code block, so a `## ` or a
     /// checkbox inside one is not mistaken for structure.
-    fn fence_flags(&self) -> Vec<bool> {
+    pub(crate) fn fence_flags(&self) -> Vec<bool> {
         fenced_lines(self.lines.iter().map(|l| body(l))).map(|(_, in_fence)| in_fence).collect()
     }
 
