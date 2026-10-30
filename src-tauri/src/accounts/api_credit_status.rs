@@ -96,6 +96,12 @@ fn resets_clause(ts: Option<&str>) -> String {
     ts.map(|t| format!(", resets {}", short_date(t))).unwrap_or_default()
 }
 
+/// The Max grant's date is a tranche expiry, not a reset: the Console's next
+/// credit date can differ from it.
+fn expires_clause(ts: Option<&str>) -> String {
+    ts.map(|t| format!(", expires {}", short_date(t))).unwrap_or_default()
+}
+
 fn dollars(cents: i64) -> String {
     if cents % 100 == 0 {
         format!("${}", cents / 100)
@@ -113,7 +119,7 @@ fn compute_block_kind(s: &ApiCreditStatus) -> Option<(BlockKind, String)> {
         if remaining <= 0 {
             let reason = format!(
                 "API credit for this cycle is used up{}",
-                resets_clause(s.max_grant_expires_at.as_deref())
+                expires_clause(s.max_grant_expires_at.as_deref())
             );
             return Some((BlockKind::GrantUsedUp, reason));
         }
@@ -320,12 +326,12 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_max_grant_blocks_with_the_reset_date() {
+    fn an_empty_max_grant_blocks_with_the_expiry_date() {
         let mut s = live_status();
         s.max_grant_remaining_cents = Some(0);
         assert_eq!(
             compute_block(&s),
-            (true, Some("API credit for this cycle is used up, resets 2026-11-02".into()))
+            (true, Some("API credit for this cycle is used up, expires 2026-11-02".into()))
         );
         s.max_grant_remaining_cents = Some(-5);
         assert!(compute_block(&s).0, "an overdrawn grant is also used up");
@@ -489,7 +495,7 @@ mod tests {
         let mut s = live_status();
         s.max_grant_remaining_cents = Some(0);
         s.blocked = true;
-        s.block_reason = Some("API credit for this cycle is used up, resets 2026-11-02".into());
+        s.block_reason = Some("API credit for this cycle is used up, expires 2026-11-02".into());
         s
     }
 
@@ -501,7 +507,7 @@ mod tests {
     fn a_non_auth_fetch_error_keeps_the_previous_block() {
         let next = keep_block_across_error(Some(&blocked_prev()), blank_after_error("credit balance: HTTP 500"));
         assert!(next.blocked);
-        assert_eq!(next.block_reason.as_deref(), Some("API credit for this cycle is used up, resets 2026-11-02"));
+        assert_eq!(next.block_reason.as_deref(), Some("API credit for this cycle is used up, expires 2026-11-02"));
         assert_eq!(next.fetched_at, "t2", "only the block is carried, not the old figures");
         assert_eq!(next.max_grant_remaining_cents, None);
     }

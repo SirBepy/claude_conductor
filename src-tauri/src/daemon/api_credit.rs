@@ -189,8 +189,8 @@ mod tests {
         assert_eq!(block_reason_of(None), None, "no status yet: unknown never blocks");
         assert_eq!(block_reason_of(Some(&status("a", false, None))), None);
         assert_eq!(
-            block_reason_of(Some(&status("a", true, Some("API credit for this cycle is used up, resets 2026-11-02")))),
-            Some("API credit for this cycle is used up, resets 2026-11-02".into())
+            block_reason_of(Some(&status("a", true, Some("API credit for this cycle is used up, expires 2026-11-02")))),
+            Some("API credit for this cycle is used up, expires 2026-11-02".into())
         );
         assert!(block_reason_of(Some(&status("a", true, None))).is_some(), "a blocked status always has a reason");
     }
