@@ -88,14 +88,35 @@ const WATCHDOG_TICK: Duration = Duration::from_secs(2);
 /// stops during device suspend, so only the wall clock shows the gap.
 const RESUME_GAP: Duration = Duration::from_secs(20);
 
-// A dial queued behind the connection lock delays the next gap check by up to
-// one CONNECT_TIMEOUT plus a tick. If that exceeded RESUME_GAP, every slow dial
-// would read as a wake-up and tear down the connection it just made.
-const _: () = assert!(CONNECT_TIMEOUT.as_secs() + WATCHDOG_TICK.as_secs() < RESUME_GAP.as_secs());
-
 /// How long `remote_known` waits on iroh's remote-state actor. It sits under the
 /// connection lock, so a wedged actor must not stall every socket.
 const REMOTE_INFO_TIMEOUT: Duration = Duration::from_millis(250);
+
+/// Upper bound on one `Endpoint::network_change` call. iroh only enqueues a
+/// message to its socket actor there, so it is fast unless that actor is wedged;
+/// `connection()` runs it under the connection lock, up to twice per call (the
+/// wake-up or closed-connection path, then the failed-dial path).
+const NETWORK_CHANGE_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Network-change notifications one `connection()` call can run under its lock.
+const NETWORK_CHANGES_UNDER_LOCK: u128 = 2;
+
+/// Longest the connection lock can be held by one `connection()` call, in ms:
+/// every await it makes under the lock, plus one watchdog tick (the lock can be
+/// released just after a tick) and the 1s that `now_secs` truncation can add.
+/// `take_resume` stamps `last_alive` at the START of the call, so the next caller
+/// or watchdog tick sees this whole duration as the gap since the previous check.
+const fn max_lock_held_ms() -> u128 {
+    NETWORK_CHANGES_UNDER_LOCK * NETWORK_CHANGE_TIMEOUT.as_millis()
+        + REMOTE_INFO_TIMEOUT.as_millis()
+        + CONNECT_TIMEOUT.as_millis()
+        + WATCHDOG_TICK.as_millis()
+        + 1_000
+}
+
+// If the lock-held time reached RESUME_GAP, every slow dial would read as a
+// wake-up and tear down the connection it just made.
+const _: () = assert!(max_lock_held_ms() < RESUME_GAP.as_millis());
 
 /// A running tunnel plus what is needed to stop it.
 struct RunningTunnel {
@@ -255,6 +276,14 @@ impl Tunnel {
         }
     }
 
+    /// `Endpoint::network_change` bounded by `NETWORK_CHANGE_TIMEOUT`, so a stalled
+    /// iroh actor cannot stretch the connection lock past `RESUME_GAP`.
+    async fn network_change(&self) {
+        if tokio::time::timeout(NETWORK_CHANGE_TIMEOUT, self.endpoint.network_change()).await.is_err() {
+            warn!("network_change did not return within {}ms", NETWORK_CHANGE_TIMEOUT.as_millis());
+        }
+    }
+
     /// Whether iroh already holds state for the PC (a warm redial), as opposed
     /// to a cold lookup. Bounded: it waits on iroh's remote-state actor.
     async fn remote_known(&self) -> bool {
@@ -275,7 +304,7 @@ impl Tunnel {
         let resumed = self.take_resume();
         if let Some(secs) = resumed {
             Self::drop_locked(&mut guard, &format!("resumed after {secs}s asleep (seen by connection())"));
-            self.endpoint.network_change().await;
+            self.network_change().await;
         } else if let Some(conn) = guard.as_ref() {
             match conn.close_reason() {
                 None => return Ok(conn.clone()),
@@ -286,7 +315,7 @@ impl Tunnel {
                     // row (15s each) and the first success took 14s, while a
                     // fresh endpoint dialed in 272ms. iroh cannot see network
                     // changes on Android, so tell it before redialing.
-                    self.endpoint.network_change().await;
+                    self.network_change().await;
                 }
             }
         }
@@ -297,13 +326,13 @@ impl Tunnel {
             Ok(Err(e)) => {
                 warn!("tunnel connect failed after {}ms warm={warm}: {e}", started.elapsed().as_millis());
                 *guard = None;
-                self.endpoint.network_change().await;
+                self.network_change().await;
                 return Err(e.into());
             }
             Err(_) => {
                 warn!("tunnel connect timed out after {}s warm={warm}", CONNECT_TIMEOUT.as_secs());
                 *guard = None;
-                self.endpoint.network_change().await;
+                self.network_change().await;
                 return Err("tunnel connect timed out".into());
             }
         };
@@ -325,7 +354,7 @@ impl Tunnel {
     /// sleep would otherwise keep it on stale sockets and relay state.
     async fn invalidate(&self, why: &str) {
         Self::drop_locked(&mut *self.conn.lock().await, why);
-        self.endpoint.network_change().await;
+        self.network_change().await;
     }
 
     /// One watchdog tick. The lock is taken BEFORE the gap is consumed: if the
@@ -337,7 +366,7 @@ impl Tunnel {
         if let Some(secs) = self.take_resume() {
             Self::drop_locked(&mut guard, &format!("resumed after {secs}s asleep"));
             drop(guard);
-            self.endpoint.network_change().await;
+            self.network_change().await;
         }
     }
 
@@ -483,6 +512,16 @@ mod tests {
         drop(free);
         let (_l, port) = bind_loopback(&[taken, next]).await.expect("falls through");
         assert_eq!(port, next);
+    }
+
+    /// The lock-held time of one `connection()` call must stay under the wake-up gap,
+    /// or a slow dial reads as a wake-up. The const assert pins it at compile time;
+    /// this names the figures when it fails and keeps a floor on the margin.
+    #[test]
+    fn worst_case_lock_held_stays_under_the_resume_gap() {
+        let held = max_lock_held_ms();
+        assert!(held < RESUME_GAP.as_millis(), "lock held up to {held}ms against a {}ms resume gap", RESUME_GAP.as_millis());
+        assert!(held >= CONNECT_TIMEOUT.as_millis() + REMOTE_INFO_TIMEOUT.as_millis(), "every await under the lock is counted");
     }
 
     #[test]
