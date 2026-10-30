@@ -93,6 +93,58 @@ describe("composer attachment upload progress", () => {
     expect(texts.join("\n")).not.toContain("<file:");
   });
 
+  function scheduleViaMenu(root) {
+    root.querySelector(".composer-send-chevron").click();
+    const row = [...document.querySelectorAll(".composer-menu-popover [data-idx]")].find((b) =>
+      b.textContent.includes("Schedule message"),
+    );
+    row.click();
+    document.querySelector(".schedule-picker-popover [data-preset]").click();
+  }
+
+  it("does not schedule a draft that was emptied while the schedule waited on an upload", async () => {
+    const onSchedule = vi.fn(async () => {});
+    const { composer, root, textarea } = await mountComposer({ onSchedule });
+
+    void composer.dropFiles([png()]);
+    textarea.value = "remind me";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    scheduleViaMenu(root);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onSchedule).not.toHaveBeenCalled();
+
+    // Emptying the draft is what releases the wait: the chip's removal settles it.
+    textarea.value = "";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    root.querySelector(".composer-attachments .attachment .rm").click();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(onSchedule).not.toHaveBeenCalled();
+  });
+
+  it("tells the user when a schedule is confirmed while a send is held, instead of dropping it silently", async () => {
+    const onSchedule = vi.fn(async () => {});
+    const onSend = vi.fn(async () => {});
+    const { composer, root, textarea } = await mountComposer({ onSend, onSchedule });
+
+    void composer.dropFiles([png()]);
+    textarea.value = "look at this";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(root.querySelector(".composer-send.spinning")).toBeTruthy();
+
+    scheduleViaMenu(root);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const notice = root.querySelector(".composer-notice");
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toContain("Still sending");
+    expect(onSchedule).not.toHaveBeenCalled();
+    upload.resolve(UPLOADED);
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+  });
+
   it("falls back to a named file chip, not a blank image tile, when a path attach fails", async () => {
     tauriMock((cmd) => {
       if (cmd === "paste_attachment_from_path") throw new Error("daemon gone");

@@ -517,9 +517,17 @@ export class Composer {
       anchor,
       nextTokenReset: this.opts.getNextTokenReset?.(),
       onConfirm: async (result) => {
-        if (this.sending) return;
+        // The picker has already closed, so a silent return would read as a
+        // scheduled message that never was.
+        if (this.sending) {
+          this.showNotice("Still sending - pick a time again in a moment.");
+          return;
+        }
         if (this.att.isUploading()) await this.waitForUploads();
         const text = (this.textarea?.value ?? "").trim();
+        // The draft can be emptied while the upload wait is open; an empty
+        // schedule would be created otherwise (send() guards the same way).
+        if (!text && this.att.isEmpty()) return;
         const blocks = this.undo.buildBlocks(text);
         const savedAttachments = this.att.attachments;
         const savedPastedBlocks = this.att.pastedBlocks;

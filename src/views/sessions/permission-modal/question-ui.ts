@@ -1,6 +1,6 @@
 import { registerOverlayBack } from "../../../shared/back-button";
 import { clearHost, ensureHost } from "./host";
-import { createAuqAttachments } from "./attachments";
+import { createAuqAttachments, draftUploads } from "./attachments";
 import { createAuqSlashPopup } from "./slash-popup";
 import { LIGHTBOX_OVERLAY_CLASS } from "../../../shared/chat/lightbox";
 import { createQuestionCardRenderer } from "./question-ui-render";
@@ -109,6 +109,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     sessionId: opts.sessionId,
     supportsExtras: opts.supportsExtras,
     initial: initialDraft?.attachments,
+    initialUploads: initialDraft ? draftUploads.get(initialDraft) : undefined,
     currentPanel: () => state.activeTab,
     // A full render() would recreate the answer-bar textarea and drop focus/
     // cursor - exactly the class of bug mergeFreshDraft's isTyping guard
@@ -270,16 +271,21 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     }
     clearActiveCardIfCurrent(teardown);
   };
-  const currentDraft = (): QuestionDraft => ({
-    freeText: new Map(freeText),
-    selections: new Map(
-      Array.from(selections.entries()).map(([k, v]) => [k, v instanceof Set ? new Set(v) : v])
-    ),
-    activeTab: state.activeTab,
-    additionalMessage: state.additionalMessage,
-    attachments: [...auqAttachments.attachments],
-    notes: new Map(Array.from(notes, ([qi, m]) => [qi, new Map(m)])),
-  });
+  const currentDraft = (): QuestionDraft => {
+    const draft: QuestionDraft = {
+      freeText: new Map(freeText),
+      selections: new Map(
+        Array.from(selections.entries()).map(([k, v]) => [k, v instanceof Set ? new Set(v) : v])
+      ),
+      activeTab: state.activeTab,
+      additionalMessage: state.additionalMessage,
+      attachments: [...auqAttachments.attachments],
+      notes: new Map(Array.from(notes, ([qi, m]) => [qi, new Map(m)])),
+    };
+    // A rebuilt card seeded from this draft keeps waiting on the same uploads.
+    draftUploads.set(draft, auqAttachments.pendingUploads());
+    return draft;
+  };
   if (opts.id) {
     setActiveCard({
       id: opts.id,
