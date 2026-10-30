@@ -40,6 +40,9 @@ export function entranceOrder(targets: HTMLElement[]): HTMLElement[] {
 export interface Entrance {
   /** Brings in any section that appeared since the wave started. */
   catchUp(): void;
+  /** Ms from now until the step after the wave's last section: where the
+   *  settings rail arrives, so it comes in last. */
+  tailDelay(): number;
 }
 
 const sections = (root: HTMLElement, chips: HTMLElement): HTMLElement[] =>
@@ -75,8 +78,10 @@ export function playEntrance(root: HTMLElement, chips: HTMLElement, now: () => n
     );
   };
   const slot = (i: number): number => Math.min(i * STEP_MS, MAX_DELAY_MS);
-  entranceOrder(sections(root, chips)).forEach((el, i) => play(el, slot(i)));
+  const ordered = entranceOrder(sections(root, chips));
+  ordered.forEach((el, i) => play(el, slot(i)));
   return {
+    tailDelay: () => (reduced ? 0 : Math.max(0, slot(ordered.length) - (now() - started))),
     catchUp(): void {
       const elapsed = now() - started;
       // Past the wave's last fade a new section is an ordinary live update.
@@ -86,6 +91,20 @@ export function playEntrance(root: HTMLElement, chips: HTMLElement, now: () => n
       });
     },
   };
+}
+
+/** Fades the project settings rail in after the dashboard's own wave. The rail
+ *  is filled asynchronously, so this runs once its rows are in; `delay` is
+ *  the wave's `tailDelay()`, or 0 where there is no wave. */
+export function playRailEntrance(rail: HTMLElement, delay: number): void {
+  if (!canAnimate(rail)) return;
+  const reduced = reducedMotion();
+  rail.animate(
+    reduced
+      ? [{ opacity: 0 }, { opacity: 1 }]
+      : [{ opacity: 0, transform: `translateY(${RISE_PX}px)` }, { opacity: 1, transform: "none" }],
+    { duration: reduced ? REDUCED_MS : ENTER_MS, delay: reduced ? 0 : delay, easing: EASE_OUT, fill: "backwards" },
+  );
 }
 
 /** Copies where `live`'s still-running entrance has each section right now

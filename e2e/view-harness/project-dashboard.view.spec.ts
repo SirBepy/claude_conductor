@@ -302,6 +302,7 @@ test.describe("view-harness / project dashboard", () => {
       list_projects: [{ id: "p-conductor", path: CONDUCTOR_CWD, name: "claude_usage_in_taskbar", automation: null, default_model: "haiku", default_effort: null }],
       list_accounts: [],
       get_settings: { theme: "void", defaultModel: "sonnet", defaultEffort: "high" },
+      update_project: null,
     });
     await page.setViewportSize({ width: 1700, height: 1000 });
     await openDraft(page, CONDUCTOR_CWD, "claude_usage_in_taskbar");
@@ -314,8 +315,9 @@ test.describe("view-harness / project dashboard", () => {
     const railBox = (await draftRail.boundingBox())!;
     expect(railBox.x).toBeGreaterThanOrEqual(rootBox.x + rootBox.width);
     // The rail shows what a new chat here opens on: this project's own model, the global effort.
-    await expect(draftRail.locator("#chatDefaultModel")).toHaveValue("haiku");
-    await expect(draftRail.locator("#chatDefaultEffort option:checked")).toHaveText("Default (high)");
+    await expect(draftRail.locator("#chatDefaultModelControl .vs-stop.active")).toHaveText(/haiku/i);
+    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("Default");
+    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop").first()).toHaveAttribute("title", /high/);
     // The draft's header leads with the project until the first send names the chat.
     await expect(page.locator("#session-pane .session-header .title")).toHaveText("claude_usage_in_taskbar");
     // The message box keeps the chat's own 900px column under the wider dashboard.
@@ -323,7 +325,12 @@ test.describe("view-harness / project dashboard", () => {
     expect(shell.width).toBeLessThanOrEqual(900);
     expect(rootBox.width + railBox.width).toBeGreaterThan(1000);
     await page.waitForTimeout(250);
+    // The rail fades in after the dashboard's wave; shoot it once settled.
+    await expect.poll(() => draftRail.evaluate((el) => el.getAnimations().length), { timeout: 8000 }).toBe(0);
     await capture(page, "dashboard-draft-with-rail");
+    // Clicking a stop moves the slider onto it.
+    await draftRail.locator("#chatDefaultEffortControl .vs-stop", { hasText: "max" }).click();
+    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("max");
 
     await page.setViewportSize({ width: 1100, height: 1000 });
     await expect.poll(async () => (await draftRail.boundingBox())!.y).toBeGreaterThan(rootBox.y + 100);

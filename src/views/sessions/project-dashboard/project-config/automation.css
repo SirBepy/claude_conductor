@@ -1,47 +1,69 @@
-/* Automation subview styles. Moved from src/dashboard.css. */
+/* Project settings: the rail beside the dashboard and the group popup share this
+   one layout. Short labels carry their explanation as a tooltip, selects and
+   sliders stack under their label, toggles sit on the label's own line. */
 
-.automate-cta {
-  background: var(--color-primary, #2c5fd6);
-  color: var(--color-background);
-  border: 0;
-  border-radius: 6px;
-  padding: 6px 12px;
+.view-project-automation { display: flex; flex-direction: column; gap: 16px; }
+.view-project-automation .ps-group { display: flex; flex-direction: column; gap: 14px; }
+.view-project-automation .ps-group + .ps-group { border-top: 1px solid var(--color-border); padding-top: 14px; gap: 10px; }
+.ps-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ps-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; }
+.ps-sub { display: flex; flex-direction: column; gap: 10px; }
+.ps-label { font-size: var(--fs-body); color: var(--color-text); line-height: 1.2; }
+.ps-label[title] { cursor: help; }
+
+.view-project-automation .inline-select,
+.view-project-automation .inline-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 30px;
+  background: var(--color-background, #16151f);
+  border: 1px solid var(--color-border, #2a2a3a);
+  color: var(--color-text, #e4e4ee);
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: var(--fs-body);
+}
+
+.acc-row-control { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.acc-row-control .inline-select { flex: 1; min-width: 0; }
+#trackerControl { flex-direction: column; align-items: stretch; gap: 6px; }
+.acc-row-empty-hint { color: var(--sb-muted); font-size: var(--fs-body); }
+
+.ps-actions { display: flex; justify-content: space-between; gap: 8px; }
+.ps-btn {
+  background: var(--color-surface-alt, #24242e);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 3px 10px;
   font-size: var(--fs-body);
   cursor: pointer;
-  font-weight: 500;
 }
-.automate-cta:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
+.ps-btn:hover { border-color: var(--color-primary); }
+.ps-btn-primary { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-background); font-weight: 500; }
 
-.automation-section { margin-top: 16px; }
-.automation-section .inline-input {
-  background: var(--color-background, #16151f);
-  border: 1px solid var(--color-border, #2a2a3a);
-  color: var(--color-text, #e4e4ee);
-  padding: 5px 8px;
-  border-radius: 5px;
-  font-size: var(--fs-body);
-  width: 160px;
+/* Model / effort: stops sit in equal columns, so the track is inset by half a
+   column and every thumb position lands on its label's centre. */
+.vs { --vs-inset: calc(100% / var(--n) / 2); }
+.vs-wrap { padding: 8px 0 6px; margin-inline: var(--vs-inset); cursor: pointer; touch-action: none; }
+.vs-track { position: relative; height: 4px; background: var(--color-border); border-radius: 2px; }
+.vs-fill {
+  position: absolute; inset: 0 auto 0 0; width: 0; background: var(--color-primary); border-radius: 2px;
+  transition: width 0.28s cubic-bezier(.4, 0, .2, 1);
 }
-
-/* Claude account row (multi-account milestone 04). */
-.acc-row-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: none;
+.vs-thumb {
+  position: absolute; top: 50%; left: 0; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--color-primary); transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 25%, transparent);
+  transition: left 0.28s cubic-bezier(.4, 0, .2, 1);
 }
-.acc-row-control .inline-select {
-  background: var(--color-background, #16151f);
-  border: 1px solid var(--color-border, #2a2a3a);
-  color: var(--color-text, #e4e4ee);
-  padding: 5px 8px;
-  border-radius: 5px;
-  font-size: var(--fs-body);
+.vs-wrap.is-drag .vs-fill, .vs-wrap.is-drag .vs-thumb { transition: none; }
+.vs-wrap:focus-visible { outline: none; }
+.vs-wrap:focus-visible .vs-thumb { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.vs-stops { display: grid; grid-template-columns: repeat(var(--n), 1fr); }
+.vs-stop {
+  background: none; border: 0; padding: 2px 0; font: inherit; font-size: 11px; text-align: center;
+  color: var(--color-text-muted); cursor: pointer; min-width: 0; white-space: nowrap;
 }
-.acc-row-empty-hint {
-  color: var(--sb-muted);
-  font-size: var(--fs-body);
-}
+.vs-stop:hover { color: var(--color-text); }
+.vs-stop.active { color: var(--color-primary); font-weight: 600; }
