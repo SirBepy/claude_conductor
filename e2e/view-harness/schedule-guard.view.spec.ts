@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { capture, mountView } from "./harness";
+import { capture, invokeCalls, mountView } from "./harness";
 import type { ScheduledItem } from "../../src/types/ipc.generated";
 
 // asserts: src/views/schedule/schedule-render.ts, src/views/schedule/schedule-format.ts, src/views/schedule/schedule-recurrence.ts
@@ -44,6 +44,8 @@ const ITEMS: ScheduledItem[] = [
     recurrence: { time: "23:55", rule: { type: "weekly", weekdays: [0, 1, 2, 3, 4, 5, 6] } },
     last_result: "skipped: already ran for 2026-10-30",
     last_skip: { at: today(8, 30), reason: "already ran for 2026-10-30" },
+    // Fired before, so its row opens that chat on click: the drawer sits inside it.
+    last_session_id: "sess-old",
   },
   // A one-shot whose guard said skip: terminal, but its own state.
   {
@@ -92,6 +94,11 @@ test("a guarded item shows a shield that opens its drawer and a skip shows its r
   // The view fades in; shoot the settled agenda, not a half-opaque frame.
   await page.waitForTimeout(900);
   await capture(page.locator(".agenda"), "schedule-guard-agenda");
+
+  // Selecting or clicking the command must not navigate to the item's chat.
+  await expect(upcoming).toHaveClass(/agenda-row--nav/);
+  await drawer.locator(".sgd-cmd").click();
+  expect((await invokeCalls(page)).filter((c) => c.cmd === "open_chats_for_session")).toHaveLength(0);
 
   await upcoming.locator(".schedule-guard-btn").click();
   await expect(page.locator(".schedule-guard-drawer")).toHaveCount(0);

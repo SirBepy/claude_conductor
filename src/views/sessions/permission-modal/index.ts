@@ -28,6 +28,7 @@ import { cancelAuqPush } from "./auq-draft-sync";
 import {
   allowPermission,
   autoAllowIfRemembered,
+  needsHumanApproval,
   hydrateAutoAccept,
   hydrateWrapUpOnDone,
   isAutoAccept,
@@ -169,7 +170,7 @@ function handlePermissionRequested(payload: PermissionRequestedPayload): void {
       // Auto-accept is on for this backgrounded chat: allow NOW rather than
       // parking, so no "needs attention" dot appears for a prompt that will
       // never need the user. (Questions still park - never auto-answered.)
-      if (isAutoAccept(payload.session_id) && extractQuestions(payload.input) === null) {
+      if (isAutoAccept(payload.session_id) && extractQuestions(payload.input) === null && !needsHumanApproval(payload)) {
         console.debug("[auto-accept] background allow", payload.tool_name, "for", payload.session_id);
         allowPermission(payload, "background respond_permission");
         return;
@@ -198,6 +199,7 @@ function handlePermissionRequested(payload: PermissionRequestedPayload): void {
     payload.session_id
     && isAutoAccept(payload.session_id)
     && extractQuestions(payload.input) === null
+    && !needsHumanApproval(payload)
   ) {
     console.debug("[auto-accept] allowing", payload.tool_name, "for", payload.session_id);
     allowPermission(payload, "respond_permission");
