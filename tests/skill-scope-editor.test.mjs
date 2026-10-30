@@ -32,6 +32,11 @@ describe("scopeSummary", () => {
     expect(scopeSummary({ projects: ["p1", "p2"], elsewhere: "name-only" }, projects)).toBe("2 projects, name only elsewhere");
     expect(scopeSummary({ projects: [], elsewhere: "off" }, projects)).toBe("no projects");
   });
+
+  it("falls back to the folder name of an unnamed project, Windows separators included", () => {
+    const unnamed = [{ id: "w", path: "C:\\Users\\joe\\proj\\" }];
+    expect(scopeSummary({ projects: ["w"], elsewhere: "off" }, unnamed)).toBe("proj");
+  });
 });
 
 describe("scopeEditor", () => {
