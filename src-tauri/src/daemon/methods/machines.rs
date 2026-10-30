@@ -278,7 +278,6 @@ mod tests {
             path: std::path::PathBuf::from(&proj_path),
             name: "proj1".into(),
             avatar: crate::types::Avatar::Image(std::path::PathBuf::from("C:/secret/avatar.png")),
-            automation: None,
             created_at: "2026-09-05T00:00:00Z".into(),
             last_active_at: None,
             whitelist: Default::default(),

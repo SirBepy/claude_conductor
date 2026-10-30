@@ -281,7 +281,7 @@ test.describe("view-harness / project dashboard", () => {
     await expect(items.first()).toHaveText("Rename project...");
     // A project's settings live in the page's rail, not behind the menu.
     await expect(items.filter({ hasText: "Project settings" })).toHaveCount(0);
-    await expect(page.locator(".pd-page-body > .pd-rail .view-project-automation")).toBeVisible();
+    await expect(page.locator(".pd-page-body > .pd-rail .view-project-settings")).toBeVisible();
   });
 
   test("a group's menu keeps Project settings, since a group has no rail", async ({ page }) => {
@@ -294,12 +294,12 @@ test.describe("view-harness / project dashboard", () => {
     // A group asks which of its repos first.
     await expect(items.first()).toContainText("zng-");
     await items.first().click();
-    await expect(page.locator(".pd-modal .pd-config-body .view-project-automation")).toBeVisible();
+    await expect(page.locator(".pd-modal .pd-config-body .view-project-settings")).toBeVisible();
   });
 
   test("a wide window puts the settings rail beside the dashboard on the page and in a draft, a narrow one underneath", async ({ page }) => {
     await mountWithDashboard(page, {
-      list_projects: [{ id: "p-conductor", path: CONDUCTOR_CWD, name: "claude_usage_in_taskbar", automation: null, default_model: "haiku", default_effort: null }],
+      list_projects: [{ id: "p-conductor", path: CONDUCTOR_CWD, name: "claude_usage_in_taskbar", default_model: "haiku", default_effort: null }],
       list_accounts: [],
       get_settings: { theme: "void", defaultModel: "sonnet", defaultEffort: "high" },
       update_project: null,
@@ -307,7 +307,7 @@ test.describe("view-harness / project dashboard", () => {
     await page.setViewportSize({ width: 1700, height: 1000 });
     await openDraft(page, CONDUCTOR_CWD, "claude_usage_in_taskbar");
     const draftRail = page.locator(".pd-draft.has-rail > .pd-rail");
-    await expect(draftRail.locator(".view-project-automation")).toBeVisible();
+    await expect(draftRail.locator(".view-project-settings")).toBeVisible();
     const root = page.locator(".session-messages .pd-root.is-draft");
     // The column eases out from the chat's 900px to 1160px (pd-rail.css), so measure once it has.
     await expect.poll(async () => (await root.boundingBox())!.width).toBeGreaterThan(800);

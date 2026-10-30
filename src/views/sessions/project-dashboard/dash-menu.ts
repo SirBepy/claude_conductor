@@ -6,8 +6,6 @@ import { invoke } from "../../../shared/ipc";
 import { askConfirm } from "../../../shared/confirm";
 import { showToast } from "../../../shared/toast";
 import { isRemote } from "../../../shared/transport";
-import { api } from "../../../shared/api";
-import { channelItems, type ChannelRef } from "../channel-actions";
 import { createMoreMenu } from "../more-menu-base";
 import { closeChatWithConfirm } from "../close-chat";
 import { state } from "../state";
@@ -86,30 +84,9 @@ function forRepo(host: ActionHost, anchor: HTMLElement, open: (cwd: string, name
   };
 }
 
-/** The shown project's channel, or null when it has no automation enabled. A
- *  group is skipped: its repos each have their own channel and a block of
- *  channel actions has no way to say which one it means. Looks the project up
- *  by id, then by path, because a repo not yet in the registry has no id. */
-export async function channelFor(host: ActionHost): Promise<ChannelRef | null> {
-  if (isRemote()) return null;
-  const t = host.ctx().snap.target;
-  const repo = t.kind === "project" ? t.repos[0] : undefined;
-  if (!repo) return null;
-  let projects;
-  try { projects = await api.listProjects(); } catch { return null; }
-  // A failed or empty read only hides the channel block; the menu still opens.
-  const proj = (projects ?? []).find((p) => (repo.project_id ? p.id === repo.project_id : p.path === repo.cwd));
-  // api.ts types a project's automation block as an open object.
-  if (!proj || !(proj.automation as { enabled?: boolean } | null)?.enabled) return null;
-  // A dead channel has no session; its Restart/Show terminal/Stop still work by project id.
-  const live = state.sessions.find((s) => s.project_id === proj.id && s.kind === "automated");
-  return { projectId: proj.id, phoneSessionId: live?.bridge_session_id ? live.session_id : null };
-}
-
 /** Everything about the project itself. Empty on the phone: each one opens an
- *  app on the PC or edits this PC's project config. `channel` (from
- *  `channelFor`) adds the automated channel's controls. */
-export function projectItems(host: ActionHost, anchor: HTMLElement, channel: ChannelRef | null = null): Entry[] {
+ *  app on the PC or edits this PC's project config. */
+export function projectItems(host: ActionHost, anchor: HTMLElement): Entry[] {
   if (isRemote()) return [];
   const t = host.ctx().snap.target;
   const reload = (): void => host.reload();
@@ -135,7 +112,6 @@ export function projectItems(host: ActionHost, anchor: HTMLElement, channel: Cha
     );
   }
   items.push(...OPEN_IN.map((o): MenuItem => ({ icon: o.icon, label: o.label, run: () => host.ctx().act.openIn(anchor, o.kind) })));
-  if (channel) items.push(null, ...channelItems(channel));
   return items;
 }
 
@@ -215,9 +191,7 @@ function itemAt(target: EventTarget | null, root: Element): CtxItem | null {
 
 export function openProjectMenu(anchor: HTMLElement, host: ActionHost): void {
   if (menu.element()) { menu.close(); return; }
-  // The channel block needs the project's automation flag, a daemon read, so
-  // the menu opens once that lands.
-  void channelFor(host).then((channel) => menu.open(anchor, projectItems(host, anchor, channel)));
+  menu.open(anchor, projectItems(host, anchor));
 }
 
 export function openContextMenu(e: MouseEvent, host: ActionHost): void {
@@ -227,12 +201,9 @@ export function openContextMenu(e: MouseEvent, host: ActionHost): void {
   const anchor = pointAt(e.clientX, e.clientY);
   const item = itemAt(e.target, root);
   const own = item ? itemActions(host, item) : [];
-  // Cancelled before the await: the default menu would otherwise show while the lookup runs.
   // The phone has no project items, so there only an item's own actions swallow the click.
   if (own.length || !isRemote()) e.preventDefault();
-  void channelFor(host).then((channel) => {
-    const project = projectItems(host, anchor, channel);
-    const entries: Entry[] = own.length && project.length ? [...own, null, ...project] : [...own, ...project];
-    if (entries.length) menu.open(anchor, entries);
-  });
+  const project = projectItems(host, anchor);
+  const entries: Entry[] = own.length && project.length ? [...own, null, ...project] : [...own, ...project];
+  if (entries.length) menu.open(anchor, entries);
 }

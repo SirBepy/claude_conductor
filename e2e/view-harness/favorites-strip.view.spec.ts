@@ -31,7 +31,7 @@ const FAVORITES_KEY = "claude_companion_project_favorites";
 function proj(name: string, emoji: string) {
   return {
     id: name, path: `C:/Projects/${name}`, name, parent_segment: null,
-    avatar: { kind: "emoji", value: emoji }, automation_enabled: false, tokens_7d: 0, live: 0,
+    avatar: { kind: "emoji", value: emoji }, tokens_7d: 0, live: 0,
     any_automated: false, last_active_at: null,
     path_exists: true, worktrees: [], last_worktree_path: null, last_start_folder_rel: null,
   };

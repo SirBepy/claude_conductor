@@ -1,4 +1,4 @@
-//! Explicit daemon stop: kill channels and any live chat sessions, then
+//! Explicit daemon stop: kill any live chat sessions, then
 //! signal the main loop to exit the process. Sessions are NOT spared -
 //! this is the deliberate full stop. Not named in the split's original 8
 //! (the count was already slightly stale), but it's its own concern and
@@ -16,9 +16,6 @@ pub fn register_shutdown(router: &mut Router, state: Arc<DaemonState>) {
         router.register("shutdown_daemon", move |_params, _ctx| {
             let state = state.clone();
             async move {
-                for c in state.channels.list() {
-                    let _ = crate::daemon::channels::stop_channel(&state, &c.project_id);
-                }
                 crate::daemon::kill_all_sessions(&state);
                 state.shutdown.notify_one();
                 Ok(json!({"ok": true}))

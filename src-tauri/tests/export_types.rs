@@ -93,12 +93,10 @@ fn emit_ipc_types() {
     out.push_str(&decl::<WorktreeDetail>());
     out.push_str(&decl::<ClaudeMdScope>());
 
-    // automation
-    out.push_str(&decl::<AutomationConfig>());
+    // sessions
     out.push_str(&decl::<InstanceKind>());
     out.push_str(&decl::<EndReason>());
     out.push_str(&decl::<AuthState>());
-    out.push_str(&decl::<ChannelStatus>());
 
     // storage / retention (referenced by Settings + storage IPC)
     out.push_str(&decl::<RetentionPolicy>());

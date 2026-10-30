@@ -1,4 +1,5 @@
 pub mod claude_bin;
+pub mod kill;
 pub mod path;
 pub mod process;
 pub mod secret_store;

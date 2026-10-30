@@ -183,7 +183,6 @@ pub fn upsert_project_for_cwd(
         path: root,
         name,
         avatar: crate::types::Avatar::None,
-        automation: None,
         created_at: now.to_string(),
         last_active_at: Some(now.to_string()),
         whitelist: crate::types::CharacterWhitelist::default(),
@@ -232,7 +231,6 @@ pub fn upsert_project_with_id_for_cwd(
         path: root,
         name,
         avatar: crate::types::Avatar::None,
-        automation: None,
         created_at: now.to_string(),
         last_active_at: Some(now.to_string()),
         whitelist: crate::types::CharacterWhitelist::default(),
@@ -784,11 +782,10 @@ mod tests {
         assert_eq!(s.extra.get("defaultAutoAllow"), Some(&serde_json::json!(true)));
     }
 
-    /// Todo 787: `AutomationConfig` carries `#[serde(default)]`, so a project's
-    /// `automation` object predating a newer field no longer fails that
-    /// project entry. Remove that attribute and this test goes red.
+    /// The retired `automation` object a project may still carry in an old
+    /// `settings.json` is ignored, not a reason to reject the project entry.
     #[test]
-    fn an_automation_object_predating_a_field_still_parses() {
+    fn a_project_still_carrying_the_retired_automation_object_parses() {
         let mut v: serde_json::Value = serde_json::from_str(BROKEN_FIXTURE).unwrap();
         v["projects"] = serde_json::json!([
             {
@@ -800,17 +797,10 @@ mod tests {
             }
         ]);
         let s = serde_json::from_value::<Settings>(v)
-            .expect("an older automation object must not reject the project entry");
+            .expect("a retired automation object must not reject the project entry");
 
         assert_eq!(s.projects.len(), 1);
-        let automation = s.projects[0]
-            .automation
-            .as_ref()
-            .expect("automation must still parse");
-        assert!(automation.enabled);
-        assert!(automation.autostart_on_boot);
-        assert_eq!(automation.continue_flag, bool::default());
-        assert_eq!(automation.session_name_prefix, None);
+        assert_eq!(s.projects[0].id, "keep");
     }
 
     /// Manufactures the conflict real `Settings` cannot reproduce (todo

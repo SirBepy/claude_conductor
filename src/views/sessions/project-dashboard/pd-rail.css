@@ -1,6 +1,6 @@
 /* The project settings rail (dashboard.ts's `rail`), beside the dashboard on the
    standalone page (.pd-page-body) and in a new-chat draft (.pd-draft.has-rail).
-   Theme vars only. The controls inside are project-config/automation.css's. */
+   Theme vars only. The controls inside are project-config/project-settings.css's. */
 
 /* Page: this body scrolls, not .pd-root, so the rail sits beside the content and
    the scrollbar stays at the pane's edge on a wide window. 1160px keeps the

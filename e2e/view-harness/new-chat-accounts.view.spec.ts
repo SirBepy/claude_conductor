@@ -11,7 +11,7 @@ import { mountView, invokeCalls, SESSIONS_BASE_INVOKE } from "./harness";
 
 const PROJECT = {
   id: "proj1", path: "C:/repo", name: "repo", parent_segment: null,
-  avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0,
+  avatar: { kind: "none" }, tokens_7d: 0, live: 0,
   any_automated: false, last_active_at: null, path_exists: true,
   worktrees: [], last_worktree_path: null, last_start_folder_rel: null,
 };

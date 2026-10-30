@@ -16,7 +16,7 @@ const {
 function group(path, avatar) {
   return {
     id: "p", path, name: "widget", parent_segment: null, avatar,
-    automation_enabled: false, tokens_7d: 0, live: 0, any_automated: false,
+    tokens_7d: 0, live: 0, any_automated: false,
     last_active_at: "2026-10-22T10:00:00Z", path_exists: true,
     worktrees: [{ path: `${path}-wt`, name: "wt", tokens_7d: 0, live: 0, last_active_at: null, path_exists: true }],
     last_worktree_path: null, last_start_folder_rel: null,

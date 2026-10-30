@@ -282,7 +282,6 @@ mod tests {
             path: path.to_path_buf(),
             name: "proj1".into(),
             avatar: crate::types::Avatar::None,
-            automation: None,
             created_at: "2026-09-05T00:00:00Z".into(),
             last_active_at: None,
             whitelist: Default::default(),

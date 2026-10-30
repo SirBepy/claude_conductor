@@ -66,8 +66,7 @@
 - **Skills per project** - on a skill's page in Skills, "Available in" limits a global skill (or a whole plugin, MCP servers included) to chosen projects. Chats elsewhere start without it, either hidden entirely or listed by name only, so its description costs no context there. Typing it anyway shows "off in this project": Enter or **Enable here** adds the project and restarts the chat with its history kept, **Send anyway** skips that. Applies to chats started from the app; a plain terminal `claude` still sees every skill.
 - **History** - read-only browser of past Claude sessions from `~/.claude/sessions/`.
 - **Mute notifications** from the tray icon's Mute Notifications submenu: "Until I turn it back on" (persists across restarts) or a timed mute (1 hour, 3 hours, 1 day) that clears itself at its deadline, or on the next restart if sooner.
-- **Gaming mode** - one switch (tray icon's check item, or Settings > Chats) that parks every chat and stops every supervised dev server, Docker container and Docker Desktop itself, so a game gets the CPU/RAM/GPU back. A project can opt out via its Automation page's "Keep running in gaming mode" toggle - its chats and dev servers stay up. Flipping it back off restarts exactly what was stopped and resumes every parked chat from where it left a stopping note, even across an app/daemon restart in between.
-- **Channel management** for headless Claude Code automation (`--remote-control`).
+- **Gaming mode** - one switch (tray icon's check item, or Settings > Chats) that parks every chat and stops every supervised dev server, Docker container and Docker Desktop itself, so a game gets the CPU/RAM/GPU back. A project can opt out via its project settings' "Run in gaming mode" toggle - its chats and dev servers stay up. Flipping it back off restarts exactly what was stopped and resumes every parked chat from where it left a stopping note, even across an app/daemon restart in between.
 - **Manual session takeover** - reach into a Claude process running in your terminal and resume it inside this app.
 - **Voice dictation** in the composer, transcribed locally by a Python `faster-whisper` sidecar. Not bundled into the installer today - it only works if this repo's `stt-sidecar/` folder (with its `.venv` set up per `stt-sidecar/requirements.txt`) is reachable from the running app, which in practice means building/running from a source checkout. An installer-only install with no repo nearby has no working dictation.
 
@@ -203,8 +202,6 @@ chmod +x Claude-Conductor_<version>_linux_x64.AppImage
 
 The app needs a Chromium-based browser (Google Chrome, Chromium, or Brave) installed for the one-time login flow.
 
-Note: channel automation (running Claude Code remote-control instances from the dashboard) is Windows + macOS only on v1; Intel macOS is build-from-source only, see the "Paused" note above.
-
 </details>
 
 ## 📚 Guides
@@ -246,7 +243,7 @@ Every project has a dashboard. **Starting a new chat shows it** above the empty 
 
 - **Built-in sections:** past results (each finished chat's last message to you, images from past chats, and files chats wrote in the repo) along the top, your todos, running and recent chats, next up (the project's `.claude/todos/PLAN.md` plus scheduled items), ship state (branch, unpushed commits, working tree, recent commits), usage (tokens per day, 7d / 30d / All), and what is running (dev servers).
 - **Quick-action chips** sit right above the message box with your pinned or most-used slash commands; clicking one types it into the box so you can add arguments before sending.
-- **Right-click** anything for its actions (open or close a chat, tick a todo, refresh or hide a card, copy a commit hash) plus the project's own: rename, character, project settings (account, connectors, gaming mode, tickets, automation), folder mapping, dashboard cards, and open in VS Code / Terminal / Explorer.
+- **Right-click** anything for its actions (open or close a chat, tick a todo, refresh or hide a card, copy a commit hash) plus the project's own: rename, character, project settings (model, effort, account, tickets, connectors, gaming mode), folder mapping, dashboard cards, and open in VS Code / Terminal / Explorer.
 - **Multi-repo projects:** a client note in your Obsidian vault with a `repos:` list (e.g. `repos: [zng-app, zng-admin]`) groups those repos, and a chat in any of them shows the one group dashboard covering all of them. Edit a group's repos from its dashboard menu.
 - **Custom cards:** ask Claude in a chat to add one, e.g. "add a Shortcut card of my stories". A card calls an HTTP API or a local command, pulls values out of the JSON, and shows them as labels and numbers with a refresh button. A card can also carry a button with a quick prompt or a skill (say `/clockify-reconciliator`): one click starts a chat and sends it along with what the card shows right now, so the chat picks up from those numbers. Card configs live in the app's data folder, never in a repo; API tokens are read from `~/.claude/.env` by name, never stored in the card. Each card write asks for your permission, and cards can only be added from this PC.
 - **Cards with their own look:** a card can also be HTML that Claude writes (e.g. "make the Clockify card a pie chart"), and the same request restyles an existing card with no rebuild. It runs in a sandboxed frame that can't reach the app or the network, and it picks up the current theme's colours.
@@ -268,18 +265,10 @@ Any preview can be published to claude.ai from the preview panel's **More option
 </details>
 
 <details>
-<summary><b>📡 Channel management</b></summary>
-
-Beyond tracking Claude Code usage, this app manages Claude Code channels per project:
+<summary><b>📡 Running instances</b></summary>
 
 - See every running Claude Code instance on your machine, live.
-- Configure "automated channels" per project that start at boot and stay alive.
-  - **Windows:** each channel runs in a hidden terminal; choose **Show terminal** to bring it to the foreground and type into it directly.
-  - **macOS:** channels run headless (no visible console). Stop/Restart work as on Windows; Show/Hide is not applicable.
-  - A channel never restarts itself. Its controls (**Restart channel**, **Show terminal**, **Phone link**, **Stop channel**) sit in the project dashboard's menu (the kebab and right-click), which works even when the channel is dead, and in the live channel chat's **Agent** menu.
 - Copy a phone link for any remote-control session to open it in the Claude mobile app.
-
-Replaces the previous `obsidian_claude_remote` tray app (now discontinued and archived).
 
 </details>
 

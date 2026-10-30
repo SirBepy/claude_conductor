@@ -64,7 +64,7 @@ pub mod projects_test_helpers {
 }
 
 pub mod legacy_import_test_helpers {
-    use crate::types::{AutomationConfig, ProjectConfig, Settings};
+    use crate::types::{ProjectConfig, Settings};
 
     pub fn import_into(
         settings: &mut Settings,
@@ -78,18 +78,7 @@ pub mod legacy_import_test_helpers {
             std::path::Path::new(vault),
             now,
         );
-        let p = settings.projects.iter_mut().find(|p| p.id == id).unwrap();
-        if p.automation.is_none() {
-            p.automation = Some(AutomationConfig {
-                enabled: true,
-                autostart_on_boot: v
-                    .get("auto_registered_startup")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true),
-                session_name_prefix: None,
-                continue_flag: true,
-            });
-        }
+        let p = settings.projects.iter().find(|p| p.id == id).unwrap();
         Some(p.clone())
     }
 }
@@ -277,17 +266,6 @@ pub async fn check_paths_exist(paths: Vec<String>) -> std::collections::HashMap<
                 (p, exists)
             })
             .collect()
-    })
-    .await
-    .unwrap_or_default()
-}
-
-// --- Vault detector ---
-
-#[tauri::command]
-pub async fn detect_obsidian_vaults() -> Vec<std::path::PathBuf> {
-    tauri::async_runtime::spawn_blocking(|| {
-        crate::channels::vault_detector::detect().unwrap_or_default()
     })
     .await
     .unwrap_or_default()

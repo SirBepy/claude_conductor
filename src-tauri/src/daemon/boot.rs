@@ -11,7 +11,7 @@ use crate::daemon::session::new_session_map;
 use crate::daemon::settings_cache::SettingsCache;
 use crate::daemon::state::DaemonState;
 use crate::daemon::{
-    api_credit, browser, busy_watchdog, channel_adopt, channels, claude_config, detector_task, health, hooks_server,
+    api_credit, browser, busy_watchdog, claude_config, detector_task, external_adopt, health, hooks_server,
     instance, iroh_tunnel, machines, methods, remote_server, resume_interrupted, schedule,
 };
 #[cfg(unix)]
@@ -36,7 +36,7 @@ fn load_initial_settings() -> Settings {
 /// is no pump task left to reap it once the daemon process is gone.
 pub fn kill_all_sessions(state: &DaemonState) {
     for entry in state.sessions.iter() {
-        crate::channels::kill::kill_tree(entry.pid);
+        crate::util::kill::kill_tree(entry.pid);
     }
 }
 
@@ -103,7 +103,6 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_settings(&mut router, settings_cache, state.notifier.clone());
     methods::register_responders(&mut router, state.clone());
     methods::register_secret(&mut router, state.clone());
-    methods::register_channels(&mut router, state.clone());
     methods::register_chat_registry(&mut router, state.clone());
     methods::register_usage(&mut router, state.clone());
     methods::register_context(&mut router, state.clone());
@@ -271,24 +270,15 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
         resume_interrupted::spawn_resumes(state.clone(), interrupted);
     }
 
-    // Adopt bridges that survived a previous daemon shutdown before spawning
-    // new ones (prevents duplicate bridge trees on daemon restart).
-    channel_adopt::adopt_running_channels(state.clone());
-
     // Re-track any external `claude` terminal sessions that were already
-    // running when the daemon (re)started. Must run AFTER adopt_running_channels
-    // so channel pids are already known and excluded from the external scan.
-    channel_adopt::adopt_external_sessions(state.clone());
+    // running when the daemon (re)started.
+    external_adopt::adopt_external_sessions(state.clone());
 
-    // After every registry source (snapshot restore and both adoptions): the
+    // After every registry source (snapshot restore and the adoption): the
     // reconcile drops the durable question cards of sessions the registry does
     // not know, so running it earlier would drop a card whose session only
     // enters the registry on adoption.
     state.reconcile_pending_questions().await;
-
-    // Autostart automated channels the daemon owns. The in-session dedup guard
-    // in start_channel skips any project already adopted above.
-    channels::autostart_all(state.clone());
 
     #[cfg(windows)]
     {

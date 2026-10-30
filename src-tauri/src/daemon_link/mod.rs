@@ -8,11 +8,10 @@ mod handlers;
 use tauri::Manager;
 
 /// Spawned once at startup. Connect-or-spawn the daemon (via `ensure_daemon`),
-/// push settings, subscribe for notifications, seed the instance/channel caches
-/// from the daemon snapshot, then pump notifications. On connection loss it
-/// respawns + reconnects with capped backoff. The transport is a named pipe on
-/// Windows and a Unix socket on macOS/Linux; channel automation stays
-/// Windows-only (see `daemon::channel_adopt`).
+/// push settings, subscribe for notifications, seed the instance cache from the
+/// daemon snapshot, then pump notifications. On connection loss it respawns +
+/// reconnects with capped backoff. The transport is a named pipe on Windows and
+/// a Unix socket on macOS/Linux.
 pub async fn run_app_subscription(app_handle: tauri::AppHandle) {
     spawn_pending_prompt_poll(app_handle.clone());
     let state = app_handle.state::<crate::state::AppState>();
@@ -47,21 +46,14 @@ pub async fn run_app_subscription(app_handle: tauri::AppHandle) {
                     continue;
                 }
             };
-            // Seed the caches from the daemon's current snapshot so
-            // already-running sessions/channels render immediately on
-            // connect, instead of waiting for the next change event
-            // (ai_todo 63). The frontend's `instances-changed` /
-            // `channels-changed` listeners re-read the caches.
+            // Seed the cache from the daemon's current snapshot so
+            // already-running sessions render immediately on connect,
+            // instead of waiting for the next change event. The frontend's
+            // `instances-changed` listener re-reads the cache.
             {
                 use tauri::Emitter;
                 if let Some(instances) = fetch_and_reseed_instances(&client, &state).await {
                     let _ = app_handle.emit("instances-changed", instances);
-                }
-                if let Ok(channels) = client.list_channels().await {
-                    if let Some(arr) = channels.as_array() {
-                        *state.cached_channels.lock().unwrap() = arr.clone();
-                        let _ = app_handle.emit("channels-changed", channels);
-                    }
                 }
                 // Gaming mode is daemon-persisted and can already be on from
                 // before this app process started (or across a daemon
@@ -264,15 +256,6 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
             }
             crate::tray::rebuild_menu_and_render(app);
             let _ = app.emit("gaming-mode-changed", params);
-        }
-        "channels_changed" => {
-            let state = app.state::<crate::state::AppState>();
-            // params is the channel-snapshot JSON array (see daemon::channels::emit_changed).
-            if let Some(arr) = params.as_array() {
-                let mut cache = state.cached_channels.lock().unwrap();
-                *cache = arr.clone();
-            }
-            let _ = app.emit("channels-changed", params);
         }
         // Scheduled messages / scheduled new-chats (`daemon::schedule::notify_changed`).
         // No app-side cache to seed (unlike instances/channels): the schedule view

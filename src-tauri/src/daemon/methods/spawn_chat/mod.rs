@@ -279,7 +279,6 @@ mod tests {
             path: std::path::PathBuf::from(path),
             name: "Known Project".into(),
             avatar: Default::default(),
-            automation: None,
             created_at: "2026-08-18T00:00:00Z".into(),
             last_active_at: None,
             whitelist: Default::default(),

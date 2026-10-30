@@ -186,7 +186,6 @@ describe("quick-action chips", () => {
     expect([...root.querySelectorAll(".pd-head .pd-ib")].map((b) => b.title)).toEqual(["Back", "More"]);
     expect(chips(root)).toEqual(["+ New chat", "/pickup"]);
     root.querySelector("[data-pd-kebab]").click();
-    // The menu opens after the automation-flag read (channelFor) settles.
     await vi.waitFor(() => expect(document.querySelectorAll(".smore-item").length).toBeGreaterThan(0));
     const items = [...document.querySelectorAll(".smore-item")].map((b) => b.textContent.trim());
     expect(items).toEqual([

@@ -28,8 +28,7 @@ const M: TransportMask = TransportMask { phone: false, machine: true };
 /// `POST /api/rpc`, and which of the two may. This is the load-bearing
 /// security allowlist: anything NOT here is 403, so adding a method is a
 /// deliberate, reviewable act. Deliberately EXCLUDED: `shutdown_daemon`,
-/// `set_settings` (could disable security), all `*_channel` (automation/bridge
-/// control), and the streaming methods `attach_session` /
+/// `set_settings` (could disable security), and the streaming methods `attach_session` /
 /// `detach_session` / `subscribe_global` (connection-scoped; the WS endpoint
 /// handles streaming instead). See the tests below.
 pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
@@ -577,8 +576,7 @@ mod tests {
     #[test]
     fn allowlist_excludes_dangerous_methods() {
         for m in [
-            "shutdown_daemon", "set_settings", "start_channel", "stop_channel",
-            "restart_channel", "show_channel", "hide_channel",
+            "shutdown_daemon", "set_settings",
             "attach_session", "detach_session", "subscribe_global",
             "externalize_session", "takeover_manual",
             // schedule mutators became remote-callable in ai_todo 259 (they are

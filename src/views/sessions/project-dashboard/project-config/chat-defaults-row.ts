@@ -22,7 +22,7 @@ export async function renderChatDefaultsRow(cwd: string): Promise<void> {
       api.getSettings().then((s) => s ?? {}),
     ]);
   } catch (e) {
-    console.error("[automation] chat defaults load failed", e);
+    console.error("[project-settings] chat defaults load failed", e);
   }
   const proj = projects.find((p) => p.path === cwd);
   const global = readGlobalDefault(settings);
@@ -50,7 +50,7 @@ export async function renderChatDefaultsRow(cwd: string): Promise<void> {
             await projectsListData().ready.catch(() => {});
             showToast("New chats in this project open on the new default.");
           } catch (e) {
-            console.error("[automation] update chat default failed", e);
+            console.error("[project-settings] update chat default failed", e);
             showToast(`Could not update the default: ${e}`);
             slider.set(saved);
           }

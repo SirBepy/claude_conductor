@@ -12,10 +12,9 @@ import "../../../../shared/account-chip.css";
 /** Which account new chats in this project spawn under (multi-account
  * milestone 04): the project's own binding if set, else the global default,
  * shown here only as the "Default (X)" option label - not resolved to an id.
- * Independent of whether the project has automation configured, so it lives
- * outside the automationEmpty/automationForm toggle. */
+ */
 export async function renderAccountRow(cwd: string): Promise<void> {
-  const control = document.getElementById("automationAccountControl");
+  const control = document.getElementById("projectAccountControl");
   if (!cwd || !control) return;
 
   let accounts: Account[] = [];
@@ -31,7 +30,7 @@ export async function renderAccountRow(cwd: string): Promise<void> {
     const settings = await api.getSettings();
     defaultAccountId = (settings?.["default_account_id"] as string | null | undefined) ?? null;
   } catch (e) {
-    console.error("[automation] account row load failed", e);
+    console.error("[project-settings] account row load failed", e);
   }
 
   if (accounts.length === 0) {
@@ -56,13 +55,13 @@ export async function renderAccountRow(cwd: string): Promise<void> {
 
   control.innerHTML = `
     ${current ? accountIconBadgeHtml(current) : `<i class="ph ph-user-circle" style="font-size:20px"></i>`}
-    <select id="automationAccountSelect" class="inline-select">
+    <select id="projectAccountSelect" class="inline-select">
       <option value="">${escapeHtml(defaultLabel)}</option>
       ${accounts.map((a) => `<option value="${escapeHtml(a.id)}"${a.id === currentId ? " selected" : ""}>${escapeHtml(a.label)}</option>`).join("")}
     </select>
   `;
 
-  const select = document.getElementById("automationAccountSelect") as HTMLSelectElement | null;
+  const select = document.getElementById("projectAccountSelect") as HTMLSelectElement | null;
   if (select) {
     select.onchange = () => {
       void (async () => {
@@ -76,7 +75,7 @@ export async function renderAccountRow(cwd: string): Promise<void> {
           await api.updateProject(id, { preferred_account_id: select.value || null });
           showToast("Account updated.");
         } catch (e) {
-          console.error("[automation] update account binding failed", e);
+          console.error("[project-settings] update account binding failed", e);
           showToast(`Could not update account: ${e}`);
         } finally {
           await renderAccountRow(cwd);
@@ -111,7 +110,7 @@ async function renderProjectBooleanToggleRow(cwd: string, row: ProjectBooleanTog
         await api.updateProject(id, { [row.field]: toggle.checked });
         showToast(toggle.checked ? row.onToast : row.offToast);
       } catch (e) {
-        console.error(`[automation] update ${row.what} failed`, e);
+        console.error(`[project-settings] update ${row.what} failed`, e);
         showToast(`Could not update ${row.what}: ${e}`);
       } finally {
         toggle.disabled = false;
@@ -187,7 +186,7 @@ export async function renderTrackerRow(cwd: string): Promise<void> {
       forgetTicketTracker(cwd);
       showToast("Ticket links updated for new messages and turns.");
     } catch (e) {
-      console.error("[automation] update tracker failed", e);
+      console.error("[project-settings] update tracker failed", e);
       showToast(`Could not update ticket tracker: ${e}`);
     } finally {
       await renderTrackerRow(cwd);

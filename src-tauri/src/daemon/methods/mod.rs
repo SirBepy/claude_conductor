@@ -8,7 +8,6 @@
 pub(crate) mod channel;
 mod api_credit;
 mod ask;
-mod channels;
 mod claude_ai_publish;
 mod context;
 // pub(crate): `hooks_server::nudge` (the PostToolBatch route that drains held
@@ -83,7 +82,6 @@ mod usage;
 pub(crate) mod user_todos;
 mod voice;
 
-pub use channels::register_channels;
 pub use claude_ai_publish::register_claude_ai_publish;
 pub use context::register_context;
 pub use drafts::register_drafts;
@@ -116,7 +114,7 @@ pub use worktrees::register_worktrees;
 
 #[cfg(test)]
 mod tests {
-    use super::{register, register_channels, register_chat_registry, register_responders, register_schedule};
+    use super::{register, register_chat_registry, register_responders, register_schedule};
     use crate::daemon::rpc::{ConnectionContext, Request, Router};
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
@@ -226,20 +224,6 @@ mod tests {
         }, dummy_ctx()).await;
         assert!(resp.error.is_none(), "expected no error, got {:?}", resp.error);
         assert_eq!(resp.result, Some(json!({"ok": true, "delivered": false})));
-    }
-
-    #[tokio::test]
-    async fn list_channels_empty_returns_array() {
-        let mut r = Router::new();
-        register_channels(&mut r, dummy_state());
-        let resp = r.dispatch(Request {
-            jsonrpc: "2.0".into(),
-            id: json!(1),
-            method: "list_channels".into(),
-            params: None,
-        }, dummy_ctx()).await;
-        assert!(resp.error.is_none(), "expected no error, got {:?}", resp.error);
-        assert_eq!(resp.result, Some(json!([])));
     }
 
     #[tokio::test]

@@ -59,7 +59,7 @@ pub async fn takeover(
     //    the kill to succeed for correctness - the next user message
     //    will spawn a fresh `--resume` regardless. Killing prevents the
     //    external claude from continuing to write into the same JSONL.
-    crate::channels::kill::kill_tree(manual_pid);
+    crate::util::kill::kill_tree(manual_pid);
     // kill_tree on Windows + macOS returns before the OS has finished
     // tearing down the child's pipes; brief grace prevents a JSONL race
     // if the user immediately fires send_message. 250ms is enough on

@@ -3,7 +3,7 @@
 //! Keyed by `session_id`. The canonical source for "what Claude Code
 //! processes are currently alive across the machine". Populated by
 //! `hook_server.rs` (SessionStart hook), `detector.rs` (ps reconcile),
-//! and `channels.rs` (future, Plan C). Any mutation emits an
+//! and the daemon's adoption scan. Any mutation emits an
 //! `instances-changed` Tauri event so the webview refreshes.
 //!
 //! Registration/mutation methods (`register`, `mark_ended`, `set_pid`, ...)

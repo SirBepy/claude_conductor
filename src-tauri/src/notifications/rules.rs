@@ -220,7 +220,6 @@ mod tests {
             path: std::path::PathBuf::from(path),
             name: "test".into(),
             avatar,
-            automation: None,
             created_at: "2026-05-02T00:00:00Z".into(),
             last_active_at: None,
             whitelist: crate::types::CharacterWhitelist::default(),

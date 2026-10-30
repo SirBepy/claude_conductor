@@ -136,7 +136,7 @@ mod tests {
     fn group(path: &str, last_wt: Option<&str>, worktrees: &[&str]) -> ProjectGroup {
         let mut g: ProjectGroup = serde_json::from_value(json!({
             "id": null, "path": path, "name": "p", "parent_segment": null,
-            "avatar": {"kind": "none"}, "worktrees": [], "automation_enabled": false, "tokens_7d": 0,
+            "avatar": {"kind": "none"}, "worktrees": [], "tokens_7d": 0,
             "live": 0, "any_automated": false, "last_active_at": null, "path_exists": true,
         }))
         .unwrap_or_else(|_| panic!("ProjectGroup fixture no longer deserializes"));
