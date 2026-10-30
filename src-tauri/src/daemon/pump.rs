@@ -472,7 +472,13 @@ pub(crate) async fn run_stdout_pump(
                                     let activity = state_for_pump
                                         .registry
                                         .turn_activity(&pump_session.session_id);
-                                    if close_stand_down_is_failure(&prompt, close_confirmed, activity) {
+                                    // Read after the turn-end `set_awaiting_if_gen` above, so
+                                    // it is this turn's final status.
+                                    let question_pending = state_for_pump
+                                        .registry
+                                        .get(&pump_session.session_id)
+                                        .is_some_and(|i| i.awaiting.as_deref() == Some("question"));
+                                    if close_stand_down_is_failure(&prompt, close_confirmed, activity, question_pending) {
                                         log::warn!(
                                             "daemon: session {} /close armed but never confirmed via close_session tool; chat still open",
                                             pump_session.session_id

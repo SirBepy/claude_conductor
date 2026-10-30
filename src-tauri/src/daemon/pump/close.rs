@@ -45,12 +45,20 @@ fn has_dont_close_arg(last_prompt: &str) -> bool {
 /// flagged `close_failed` - which then read as "Done" in the sidebar segment
 /// grouping despite the session actively working. `Idle`/`Unknown` still flag
 /// as failure: only positive evidence of continued work exempts the stand-down.
+///
+/// `question_pending` is true when the turn ended on a posted question (the
+/// registry's `awaiting` is `question`). `/close` stops to ask when only the dev
+/// can unblock something and finishes on a later turn, so that stand-down is
+/// the chat waiting for an answer: calling it a failed close would also
+/// overwrite the question state the dev needs to see.
 pub(crate) fn close_stand_down_is_failure(
     last_prompt: &str,
     close_confirmed: bool,
     activity: TurnActivity,
+    question_pending: bool,
 ) -> bool {
     !close_confirmed
+        && !question_pending
         && !has_dont_close_arg(last_prompt)
         && !matches!(
             activity,
@@ -212,19 +220,19 @@ mod tests {
     /// terminal-kill script instead) - must be flagged as a failure.
     #[test]
     fn close_stand_down_is_failure_when_never_confirmed() {
-        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Idle));
+        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Idle, false));
     }
 
     #[test]
     fn close_stand_down_not_failure_when_confirmed() {
-        assert!(!close_stand_down_is_failure("/close", true, TurnActivity::Idle));
+        assert!(!close_stand_down_is_failure("/close", true, TurnActivity::Idle, false));
     }
 
     /// `--dont-close` is an intentional dry run; standing down unconfirmed
     /// is expected there, not a failure.
     #[test]
     fn close_stand_down_not_failure_on_dont_close_flag() {
-        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle));
+        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle, false));
     }
 
     /// Todo 1221: a `/close` turn that dispatched a background subagent
@@ -234,17 +242,28 @@ mod tests {
     /// still genuinely working, not deviating.
     #[test]
     fn close_stand_down_not_failure_while_a_background_task_is_still_working() {
-        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::Working));
-        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::WaitingOnProcess));
-        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::WaitingOnSchedule));
+        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::Working, false));
+        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::WaitingOnProcess, false));
+        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::WaitingOnSchedule, false));
     }
 
     /// `Idle`/`Unknown` give no positive evidence of continued work, so the
     /// pre-1221 failure behavior is unchanged for them.
     #[test]
     fn close_stand_down_still_a_failure_on_idle_or_unknown_activity() {
-        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Idle));
-        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Unknown));
+        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Idle, false));
+        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Unknown, false));
+    }
+
+    /// A `/close` turn that ends on a posted question is waiting for the dev's
+    /// answer, not a failed close, whatever the Stop hook's activity says.
+    #[test]
+    fn close_stand_down_not_failure_while_a_question_is_pending() {
+        for activity in [TurnActivity::Idle, TurnActivity::Unknown] {
+            assert!(!close_stand_down_is_failure("/close", false, activity, true));
+        }
+        // Without a pending question the same turn is still a failure.
+        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Idle, false));
     }
 
     /// The EOF branch's own logic (todo 467 blind spot 1), previously
@@ -259,15 +278,15 @@ mod tests {
     /// flag always completes normally, so reaching EOF still-closing is a genuine crash.
     #[test]
     fn eof_path_diverges_from_result_line_path_on_dont_close() {
-        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle));
+        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle, false));
         assert!(close_stand_down_is_failure_at_eof(false));
     }
 
     /// Todo 498 blind spot 4: a genuine `--dont-close` argument still exempts.
     #[test]
     fn dont_close_word_boundary_exempts_genuine_flag() {
-        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle));
-        assert!(!close_stand_down_is_failure("/close --dont-close please", false, TurnActivity::Idle));
+        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle, false));
+        assert!(!close_stand_down_is_failure("/close --dont-close please", false, TurnActivity::Idle, false));
     }
 
     /// A longer token that merely contains the string (a different flag name,
@@ -275,7 +294,7 @@ mod tests {
     /// whitespace-delimited token counts.
     #[test]
     fn dont_close_word_boundary_rejects_substring_mentions() {
-        assert!(close_stand_down_is_failure("/close --dont-close-yet", false, TurnActivity::Idle));
-        assert!(close_stand_down_is_failure("/close xx--dont-closexx", false, TurnActivity::Idle));
+        assert!(close_stand_down_is_failure("/close --dont-close-yet", false, TurnActivity::Idle, false));
+        assert!(close_stand_down_is_failure("/close xx--dont-closexx", false, TurnActivity::Idle, false));
     }
 }
