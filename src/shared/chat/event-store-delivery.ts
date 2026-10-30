@@ -23,7 +23,7 @@ export const DEDUP_WINDOW_MS = 10_000;
 // past DEDUP_WINDOW_MS, so echo sigs get their own consume-on-match set (659).
 export const ECHO_MATCH_WINDOW_MS = 5 * 60_000;
 /** The sig of every attachment-only user message (see sigOf). */
-const ATTACHMENT_SIG = "u:[attachment]";
+export const ATTACHMENT_SIG = "u:[attachment]";
 
 // Attachment tokens the composer appends as text; stripped from the dedup
 // sig only (JSONL stores them as image blocks instead) - see sigOf.
@@ -231,14 +231,30 @@ export class DeliveryPolicy {
     }
     const sig = this.sigOf(ev);
     if (sig === null) return false;
-    // Cross-source only: same-channel repeats are distinct events, not races.
-    if (entry.recent.some((r) => r.sig === sig && r.source !== source)) return true;
-    if (ev.type !== "user_message") return false;
-    // Every image-only message shares ATTACHMENT_SIG, and a transcript copy
-    // that folded in via `recent` above leaves its echo's token behind, so a
-    // synthetic matching that token is the user's next image, not a replay.
+    // The composer echo of an image-only send is by definition the user's own
+    // fresh send. Letting it match a transcript copy of an EARLIER image in
+    // `recent` below would drop it (every image-only message shares
+    // ATTACHMENT_SIG), so it skips both the recent and the token match.
     if (sig === ATTACHMENT_SIG && source === "synthetic") return false;
+    // Cross-source only: same-channel repeats are distinct events, not races.
+    const hit = entry.recent.find((r) => r.sig === sig && r.source !== source);
+    if (hit) {
+      // A transcript copy that folds into its echo here settles that echo's
+      // token too. Left behind, the token would swallow the next image-only
+      // message from another device. Oldest token first: transcript copies
+      // arrive in send order. A late second copy of the same send (past
+      // DEDUP_WINDOW_MS) then renders; accepted, since without a shared
+      // per-message marker it is indistinguishable from a new image.
+      if (sig === ATTACHMENT_SIG && hit.source === "synthetic") this.consumeEchoToken(entry, sig, now);
+      return true;
+    }
+    if (ev.type !== "user_message") return false;
     // The watcher's replay of an already-echoed turn, past DEDUP_WINDOW_MS.
+    return this.consumeEchoToken(entry, sig, now);
+  }
+
+  /** Removes the oldest in-window pending echo token with this sig. */
+  private consumeEchoToken(entry: CacheEntry, sig: string, now: number): boolean {
     entry.pendingEchoes = entry.pendingEchoes.filter((e) => now - e.ts < ECHO_MATCH_WINDOW_MS);
     const idx = entry.pendingEchoes.findIndex((e) => e.sig === sig);
     if (idx === -1) return false;

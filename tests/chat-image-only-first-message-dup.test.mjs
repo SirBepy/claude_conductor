@@ -134,6 +134,67 @@ describe("image-only message echo dedup", () => {
     expect(userRows(r)).toHaveLength(2);
   });
 
+  it("an image from another device is not swallowed by the leftover token of an already-copied echo", async () => {
+    const sid = `sess-img-leftover-token-${Math.random()}`;
+    const r = await mountRenderer(sid, makeBus());
+    const bus = globalThis.window.__TAURI__;
+
+    sessionEvents.pushSynthetic(sid, imageOnly(Date.now()));
+    // Inside DEDUP_WINDOW_MS: folds into the echo through `recent`, which must
+    // also settle the echo's token.
+    vi.setSystemTime(new Date("2026-10-29T10:00:03.000Z"));
+    bus.emit(`chat-watch:${sid}`, imageBlockEvent());
+    expect(userRows(r)).toHaveLength(1);
+
+    // A different image sent from elsewhere, past the 10s window, inside the 5 min token window.
+    vi.setSystemTime(new Date("2026-10-29T10:00:30.000Z"));
+    bus.emit(`chat-watch:${sid}`, imageBlockEvent());
+
+    expect(userRows(r)).toHaveLength(2);
+  });
+
+  it("a second image sent 3s after a transcript copy of the first still shows", async () => {
+    const sid = `sess-img-after-watcher-copy-${Math.random()}`;
+    const r = await mountRenderer(sid, makeBus());
+    const bus = globalThis.window.__TAURI__;
+
+    // The first image arrives only as a transcript copy (sent from another device).
+    bus.emit(`chat-watch:${sid}`, imageBlockEvent());
+    vi.setSystemTime(new Date("2026-10-29T10:00:03.000Z"));
+    sessionEvents.pushSynthetic(sid, imageOnly(Date.now()));
+
+    expect(userRows(r)).toHaveLength(2);
+  });
+
+  it("a transcript page with two image-only messages recovers the one the cache lacks", async () => {
+    const sid = `sess-img-page-diff-${Math.random()}`;
+    const r = await mountRenderer(sid, makeBus());
+
+    sessionEvents.pushSynthetic(sid, imageOnly(Date.now()));
+    expect(userRows(r)).toHaveLength(1);
+
+    invokeMock.mockResolvedValue({
+      events: [imageBlockEvent(), imageBlockEvent()],
+      oldest_seq: 0,
+      newest_seq: 1,
+      has_more: false,
+    });
+    await sessionEvents.reconcileLatest(sid);
+
+    expect(userRows(r)).toHaveLength(2);
+  });
+
+  it("a transcript page whose only image-only message the cache already holds adds nothing", async () => {
+    const sid = `sess-img-page-same-${Math.random()}`;
+    const r = await mountRenderer(sid, makeBus());
+
+    sessionEvents.pushSynthetic(sid, imageOnly(Date.now()));
+    invokeMock.mockResolvedValue({ events: [imageBlockEvent()], oldest_seq: 0, newest_seq: 0, has_more: false });
+    await sessionEvents.reconcileLatest(sid);
+
+    expect(userRows(r)).toHaveLength(1);
+  });
+
   it("a tool-result-only user line is never swallowed by an image echo token", async () => {
     const sid = `sess-img-toolresult-${Math.random()}`;
     await mountRenderer(sid, makeBus());
