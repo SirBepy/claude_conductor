@@ -281,9 +281,15 @@ describe("Question card across reload, daemon restart and answer", () => {
 
   it("a daemon restart keeps the card and the input needed status", async () => {
     await restartTestDaemon();
-    assert.ok(
-      (await daemonPromptIds()).includes(CARD_ID),
-      "restarted daemon does not list the persisted card (pending-questions-wdio.json not restored)"
+    // The hooks port is healthy a moment before the pipe the app talks over is serving and
+    // the app has redialled it, so the first list_pending_prompts can land on the outage.
+    await browser.waitUntil(
+      async () => (await daemonPromptIds()).includes(CARD_ID),
+      {
+        timeout: 30000,
+        interval: 500,
+        timeoutMsg: "restarted daemon does not list the persisted card (pending-questions-wdio.json not restored)",
+      }
     );
     // The app reconnects on its own; a reload covers the window whose poll missed the outage.
     await reloadWebview();
