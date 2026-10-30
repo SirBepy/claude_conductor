@@ -12,7 +12,7 @@ import { CHAIN_DIVIDER_KIND } from "./chat-classifiers";
 import { visibleEventSigs } from "./chat-transcript-sig";
 import type { CacheEntry, TailListener } from "./event-store";
 import { touchAccess } from "./event-store-eviction";
-import type { DeliveryPolicy } from "./event-store-delivery";
+import { ATTACHMENT_SIG, type DeliveryPolicy } from "./event-store-delivery";
 import { loadCachedPage, saveCachedPage } from "./history-page-cache";
 
 // Page size counts AssistantMessage events only, plus every user/tool/turn
@@ -216,8 +216,15 @@ export class PaginationPolicy {
         if (t !== null) have.add(`a:${t}`);
       }
     }
+    // Image-only messages all share one sig, so presence in `have` says nothing
+    // about a second one: the page's surplus over the cache's count is what is
+    // missing (the page's latest ones, since the tail is what a drop loses).
+    const cachedAttachments = entry.events.filter((ev) => this.delivery.sigOf(ev) === ATTACHMENT_SIG).length;
+    const pageAttachments = page.events.filter((ev) => this.delivery.sigOf(ev) === ATTACHMENT_SIG).length;
+    let skipAttachments = Math.min(cachedAttachments, pageAttachments);
     const missing = page.events.filter((ev) => {
       const s = this.delivery.sigOf(ev);
+      if (s === ATTACHMENT_SIG) return skipAttachments-- <= 0;
       return s !== null && !have.has(s);
     });
     for (const ev of missing) {
