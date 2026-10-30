@@ -203,16 +203,16 @@ pub fn resolve() -> Result<OsString, NotFound> {
     if let Some(hit) = FOUND.get() {
         return Ok(hit.clone());
     }
-    let found = search(true)?.into_os_string();
+    let found = search()?.into_os_string();
     let _ = FOUND.set(found.clone());
     Ok(found)
 }
 
-/// The one lookup order behind both public resolvers: override env, PATH,
-/// fixed install locations, then the login-shell probe. `bare_name_ok` decides
-/// whether a PATH hit may be returned as the literal `"claude"` (see
-/// [`resolve_absolute`] for why some callers cannot accept that).
-fn search(bare_name_ok: bool) -> Result<PathBuf, NotFound> {
+/// The lookup order behind the resolvers: override env, PATH, fixed install
+/// locations, then the login-shell probe. A PATH hit is returned as the literal
+/// `"claude"`, which is safe because `Command::new`'s own PATH search never
+/// consults the child's cwd.
+fn search() -> Result<PathBuf, NotFound> {
     if let Some(over) = std::env::var_os(BIN_ENV) {
         let p = PathBuf::from(&over);
         if p.is_file() {
@@ -223,8 +223,8 @@ fn search(bare_name_ok: bool) -> Result<PathBuf, NotFound> {
 
     // PATH already works: keep the bare name so nothing about the current
     // spawn behavior changes on platforms that were never broken.
-    if let Ok(on_path) = which::which("claude") {
-        return Ok(if bare_name_ok { PathBuf::from("claude") } else { on_path });
+    if which::which("claude").is_ok() {
+        return Ok(PathBuf::from("claude"));
     }
 
     let home = dirs::home_dir();
@@ -241,30 +241,8 @@ fn search(bare_name_ok: bool) -> Result<PathBuf, NotFound> {
     Err(NotFound { searched: candidates, shell_probed: cfg!(not(windows)) })
 }
 
-/// Like [`resolve`], but never takes the bare-name PATH shortcut: always an
-/// absolute (or at least fully-qualified) path, never the literal `"claude"`.
-///
-/// `resolve()`'s shortcut is safe for its other callers because they hand the
-/// result to `Command::new`, whose own PATH search never consults the
-/// child's cwd. A caller that instead builds its own Windows command line
-/// and runs it with no shell in between
-/// needs this variant: `CreateProcessW`'s module search checks the child's
-/// current directory BEFORE `PATH`, so a bare `"claude"` would let a
-/// `claude.cmd`/`claude.exe` planted in that directory run instead of the
-/// real CLI. `which::which` itself only ever searches `PATH`, so using its
-/// resolved path instead of the bare name closes that gap.
-pub fn resolve_absolute() -> Result<PathBuf, NotFound> {
-    static FOUND: OnceLock<PathBuf> = OnceLock::new();
-    if let Some(hit) = FOUND.get() {
-        return Ok(hit.clone());
-    }
-    let found = search(false)?;
-    let _ = FOUND.set(found.clone());
-    Ok(found)
-}
-
 /// Lenient variant for spawn sites that already treat a failure to launch as a
-/// soft, logged error (auth probes, the news summarizer, the ask sidecar).
+/// soft, logged error (auth probes, the ask sidecar).
 /// Falls back to the bare name so those paths keep their existing behavior and
 /// their existing error text when the CLI genuinely is not installed.
 pub fn program() -> OsString {
