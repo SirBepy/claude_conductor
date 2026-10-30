@@ -188,6 +188,8 @@ describe("HeldMessages - sendNow claims the daemon list before interrupting", ()
     addHeldMessage.mockResolvedValueOnce({ id: 41, updated_at: "t" }).mockResolvedValueOnce({ id: 42, updated_at: "t" });
     clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [42], injected_ids: [41] });
     const { held, send, interrupt } = makeHarness();
+    // Once the survivor is re-pushed, the daemon's list (which sendNow re-reads on settling) holds it.
+    getSessionDrafts.mockResolvedValue({ composer: null, auq: null, held: [{ id: 42, blocks: textBlocks("still-held"), updated_at: "t" }], held_updated_at: "t" });
     held.stage(textBlocks("already-in"));
     held.stage(textBlocks("still-held"));
 
@@ -203,11 +205,31 @@ describe("HeldMessages - sendNow claims the daemon list before interrupting", ()
     await vi.waitFor(() => expect(send).toHaveBeenCalledWith(textBlocks("still-held")));
   });
 
+  it("flushes the rest right away when the turn ended while the claim was awaiting", async () => {
+    addHeldMessage.mockResolvedValueOnce({ id: 41, updated_at: "t" }).mockResolvedValueOnce({ id: 42, updated_at: "t" });
+    const { held, send, interrupt, state } = makeHarness();
+    // The turn's completion lands during the claim round trip, before the branch runs.
+    clearHeldMessages.mockImplementation(async () => {
+      state.busy = false;
+      return { updated_at: "t", removed_ids: [42], injected_ids: [41] };
+    });
+    held.stage(textBlocks("already-in"));
+    held.stage(textBlocks("still-held"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(interrupt).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith(textBlocks("still-held")));
+    expect(held.hasItemsForActive()).toBe(false);
+  });
+
   it("with an item injected and a non-empty draft, skips the interrupt and holds the draft for turn end", async () => {
     addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
     clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [], injected_ids: [41] });
     const { held, attach, send, interrupt } = makeHarness();
     held.attach({ ...attach, isDraftEmpty: () => false, getDraftBlocks: () => textBlocks("typed draft") });
+    // The staged draft reaches the daemon, whose list sendNow re-reads on settling.
+    getSessionDrafts.mockResolvedValue({ composer: null, auq: null, held: [{ id: 41, blocks: textBlocks("typed draft"), updated_at: "t" }], held_updated_at: "t" });
     held.stage(textBlocks("already-in"));
 
     await expect(held.sendNow()).resolves.toBe(true);
@@ -394,6 +416,51 @@ describe("HeldMessages - reconcile during sendNow", () => {
     await new Promise((r) => setTimeout(r, 20));
     // The daemon's list is empty after the claim; attach() reconciles against it.
     held.attach({ ...attach });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(held.itemsForActive().map((i) => i.blocks)).toEqual([textBlocks("queued")]);
+
+    state.busy = false;
+    await expect(pending).resolves.toBe(true);
+    expect(send).toHaveBeenCalledWith(textBlocks("queued"));
+  });
+
+  it("shows a held message added on the daemon during the wait once sendNow settles", async () => {
+    addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [41], injected_ids: [] });
+    const { held, attach, state } = makeHarness();
+    attach.interrupt.mockImplementation(async () => {});
+    held.stage(textBlocks("queued"));
+
+    const pending = held.sendNow();
+    await new Promise((r) => setTimeout(r, 20));
+    // Another surface stages a message mid-wait; this reconcile is suppressed.
+    getSessionDrafts.mockResolvedValue({
+      composer: null,
+      auq: null,
+      held: [{ id: 99, blocks: textBlocks("from phone"), updated_at: "t" }],
+      held_updated_at: "t",
+    });
+    held.attach({ ...attach });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(held.itemsForActive().map((i) => i.blocks)).toEqual([textBlocks("queued")]);
+
+    state.busy = false;
+    await expect(pending).resolves.toBe(true);
+    await vi.waitFor(() => expect(held.itemsForActive().map((i) => i.blocks)).toEqual([textBlocks("from phone")]));
+  });
+
+  it("keeps reconcile suppressed when the session is renamed during the wait", async () => {
+    addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [41], injected_ids: [] });
+    const { held, attach, send, state } = makeHarness();
+    attach.interrupt.mockImplementation(async () => {});
+    held.stage(textBlocks("queued"));
+
+    const pending = held.sendNow();
+    await new Promise((r) => setTimeout(r, 20));
+    held.renameSession("sess-A", "sess-B");
+    // The daemon's list for the new id is empty after the claim; attach() reconciles against it.
+    held.attach({ ...attach, sessionId: "sess-B" });
     await new Promise((r) => setTimeout(r, 20));
     expect(held.itemsForActive().map((i) => i.blocks)).toEqual([textBlocks("queued")]);
 

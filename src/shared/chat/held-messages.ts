@@ -96,7 +96,9 @@ export class HeldMessages {
   private attached: HeldAttach | null = null;
   private deferredSid: string | null = null;
   // Sessions mid-sendNow: reconcile() must not overwrite their local set (see there).
-  private sendingNow = new Set<string>();
+  // The value is the run's own record so renameSession can re-key it and the
+  // run's `finally` still finds its entry under the id it ends up with.
+  private sendingNow = new Map<string, { sid: string }>();
   private deferRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private nextId = 1;
   private render = new HeldMessagesRender(this);
@@ -204,6 +206,13 @@ export class HeldMessages {
     }
     this.map.delete(from);
     this.persist();
+    // A rename mid-sendNow must not lift reconcile's guard on the moved items.
+    const run = this.sendingNow.get(from);
+    if (run) {
+      this.sendingNow.delete(from);
+      run.sid = to;
+      this.sendingNow.set(to, run);
+    }
     if (this.attached && this.attached.sessionId === from) {
       this.attached.sessionId = to;
       this.render.renderChip();
@@ -333,11 +342,17 @@ export class HeldMessages {
   async sendNow(): Promise<boolean> {
     const sid = this.sid;
     if (!sid) return false;
-    this.sendingNow.add(sid);
+    const run = { sid };
+    this.sendingNow.set(sid, run);
     try {
       return await this.runSendNow();
     } finally {
-      this.sendingNow.delete(sid);
+      if (this.sendingNow.get(run.sid) === run) this.sendingNow.delete(run.sid);
+      // Reconciles that landed during the wait were skipped, so a held change
+      // made on the daemon meanwhile is only picked up by re-running one now.
+      // It waits for the re-pushed items' adds, or the snapshot could predate
+      // them and replace the local set with a list missing them.
+      void this.sync.addsSettled().then(() => this.reconcile(run.sid));
     }
   }
 
@@ -384,6 +399,9 @@ export class HeldMessages {
           this.clearDeferRetry();
           this.render.reset();
           a.onChange();
+          // The turn may have ended while claimAll awaited: its completion
+          // already fired, so nothing else would flush what was just parked.
+          if (!a.getIsBusy()) this.onCompletion(sid, false);
           return true;
         }
       }

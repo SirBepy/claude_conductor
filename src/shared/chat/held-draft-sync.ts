@@ -39,6 +39,12 @@ export class HeldDraftSync {
     return this.unsynced.has(item);
   }
 
+  /** Resolves once every in-flight add_held_message has finished, so a snapshot
+   *  requested afterwards already includes those items. */
+  async addsSettled(): Promise<void> {
+    await Promise.all([...this.pendingServerIds.values()]);
+  }
+
   /** Fetch the daemon's held-items snapshot and hand it to `onResolved`, which
    *  fires from the SAME `.then` as the fetch - no extra hop, so this can't
    *  reorder against stage()'s pendingServerIds swap. Caller reads its own
@@ -111,7 +117,7 @@ export class HeldDraftSync {
    *  first, so local ids have been swapped for the server ids both lists speak
    *  in. Null when the call fails or `removed_ids` is missing (outcome unknown). */
   async claimAll(sessionId: string): Promise<{ removed: number[]; injected: number[] | null } | null> {
-    await Promise.all([...this.pendingServerIds.values()]);
+    await this.addsSettled();
     try {
       const res = await clearHeldMessages(sessionId);
       if (!Array.isArray(res?.removed_ids)) return null;
