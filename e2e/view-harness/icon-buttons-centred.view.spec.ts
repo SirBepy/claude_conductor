@@ -1,3 +1,4 @@
+// Reviewed 2026-10-30: the question card's ask band is now two rows (domain chip + Ask button on top, question text under them) and the ? icon is gone - this spec's contract is unchanged and it passes.
 // asserts: src/styles/base.css, src/views/sessions/permission-modal-shell.css, src/views/sessions/permission-modal-question.css
 import { test, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";

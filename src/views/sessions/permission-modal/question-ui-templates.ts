@@ -49,10 +49,10 @@ export function badgesHtml(badges?: OptionBadge[]): string {
 
 // Zones 1+2: splitAsk() already separates the leading context from the
 // final ask - zone 1 (dimmed context) is omitted entirely when there's no
-// separate ask to highlight. The domain chip rides along in whichever zone
-// survives, so a terse one-sentence question still shows it. The ask band's
-// own Ask button is the phone page's copy of the header one
-// (permission-modal-shell.css shows one or the other).
+// separate ask to highlight. The ask band is two rows: the domain chip and the
+// Ask button on top, the question text under them, so the chip shows for a
+// terse one-sentence question too. The band's Ask button is the phone page's
+// copy of the header one (permission-modal-shell.css shows one or the other).
 export function questionZonesHtml(q: Question): string {
   const { context, ask } = splitAsk(q.question);
   const ctxZone = context
@@ -60,7 +60,7 @@ export function questionZonesHtml(q: Question): string {
         <span class="prompt-ctx__rail"><i class="ph ph-info"></i></span>
         <span class="prompt-ctx__body">
           <span class="prompt-ctx__head">
-            <span class="prompt-ctx__label">Context</span>${domainChipHtml(q.domain)}
+            <span class="prompt-ctx__label">Context</span>
           </span>
           <div class="prompt-ctx__text prompt-q__context">${renderMarkdown(context)}</div>
         </span>
@@ -69,10 +69,11 @@ export function questionZonesHtml(q: Question): string {
   return `
     ${ctxZone}
     <div class="prompt-zone prompt-zone--ask">
-      <i class="ph-fill ph-question prompt-ask__icon"></i>
+      <div class="prompt-ask__top">
+        ${domainChipHtml(q.domain)}
+        <button type="button" class="icon-btn-sq prompt-icon-btn prompt-ask__btn" data-act="ask-inline" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button>
+      </div>
       <div class="prompt-ask__text prompt-q__text">${renderMarkdown(ask)}</div>
-      ${context ? "" : domainChipHtml(q.domain)}
-      <button type="button" class="icon-btn-sq prompt-icon-btn prompt-ask__btn" data-act="ask-inline" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button>
     </div>
   `;
 }
