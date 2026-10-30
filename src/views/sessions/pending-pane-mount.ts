@@ -177,6 +177,56 @@ export async function mountPendingStatusbar(
     .catch(() => {});
 }
 
+/** Drafts whose start_session is awaiting its session id, by placeholder id.
+ *  The renderer only swaps to the real id after that resolves, so
+ *  `currentSessionId() === placeholderId` alone cannot tell "not sent yet"
+ *  from "sent, id pending". */
+const spawnsInFlight = new Map<string, {
+  /** The account the spawn took (config.accountId when it began). */
+  spawnedAccountId: string | null;
+  /** The newest pick made while the spawn was pending; applied as a move. */
+  pick: { id: string; label: string | null } | null;
+}>();
+
+/** Call right before start_session so a pick made during it is tracked. */
+export function beginDraftSpawn(placeholderId: string, spawnedAccountId: string | null): void {
+  spawnsInFlight.set(placeholderId, { spawnedAccountId, pick: null });
+}
+
+/** Call once start_session settles. Returns the pick held during it, if any;
+ *  on success the caller moves the new chat there, on failure it drops it. */
+export function endDraftSpawn(placeholderId: string): { id: string; label: string | null } | null {
+  const flight = spawnsInFlight.get(placeholderId);
+  spawnsInFlight.delete(placeholderId);
+  return flight?.pick ?? null;
+}
+
+/** Move an already-spawned chat to `pickedId` and follow it to its new id.
+ *  `label` is looked up by the caller in the list the pick came from: a
+ *  peer-hosted chat's account ids exist only in that peer's list, so the local
+ *  cache would read a peer account as "the other account". */
+export async function moveSpawnedChat(
+  sessionId: string,
+  pickedId: string,
+  label: string | null,
+  machineAimed: boolean,
+): Promise<void> {
+  const [{ selectSession }, { applyAccountMove }, { capitalize, getCachedAccount }] = await Promise.all([
+    import("./active-session"),
+    import("./active-session-account"),
+    import("../../shared/chat/rate-limit-banner"),
+  ]);
+  try {
+    const newId = await api.moveSessionToAccount(sessionId, pickedId);
+    const name = label ?? (machineAimed ? null : getCachedAccount(pickedId)?.label) ?? "the other account";
+    showToast(`Now on ${capitalize(name)}.`);
+    await applyAccountMove(sessionId, newId, selectSession);
+  } catch (e) {
+    console.error("[pending-pane] change account failed", e);
+    showToast("Failed to move chat to that account.");
+  }
+}
+
 /** The draft pane's account chip. This statusbar outlives the draft (the pane
  *  is rebound in place on promotion, not remounted), so once the renderer has
  *  swapped to a real session id the click is a live-chat move, same as the
@@ -211,29 +261,32 @@ export async function changePendingAccount(
     }
     accounts = loaded.list.accounts;
   }
-  const picked = await openChangeAccountModal({ currentId: config.accountId ?? null, title: "Change account", accounts });
-  if (!picked || picked === config.accountId) return;
+  // While the spawn is in flight the draft's config is already spent, so the
+  // account in force is the last in-flight pick (or the one the spawn took).
+  const inFlight = spawnsInFlight.get(placeholderId);
+  const currentId = inFlight ? (inFlight.pick?.id ?? inFlight.spawnedAccountId) : (config.accountId ?? null);
+  const picked = await openChangeAccountModal({ currentId, title: "Change account", accounts });
+  if (!picked) return;
+  const labelOf = (id: string) => accounts?.find((a) => a.id === id)?.label ?? null;
   // A send can promote the draft while the picker is open, so the pre-modal
   // check above is stale: the pick belongs to the spawned chat now, and
   // re-pointing the draft's config would leave the chip on an account the
   // chat is not using. The pick is already made, so move without a second picker.
   const promotedId = state.renderer?.currentSessionId();
   if (promotedId && promotedId !== placeholderId) {
-    const [{ selectSession }, { applyAccountMove }, { capitalize, getCachedAccount }] = await Promise.all([
-      import("./active-session"),
-      import("./active-session-account"),
-      import("../../shared/chat/rate-limit-banner"),
-    ]);
-    try {
-      const newId = await api.moveSessionToAccount(promotedId, picked);
-      showToast(`Now on ${capitalize(getCachedAccount(picked)?.label ?? "the other account")}.`);
-      await applyAccountMove(promotedId, newId, selectSession);
-    } catch (e) {
-      console.error("[pending-pane] change account failed", e);
-      showToast("Failed to move chat to that account.");
-    }
+    if (picked === config.accountId) return;
+    await moveSpawnedChat(promotedId, picked, labelOf(picked), !!config.machineId);
     return;
   }
+  // The spawn has taken the old account and the session id is not known yet:
+  // hold the pick, which the composer applies as a move once the id arrives.
+  // The id arriving also repaints the chip from the real session record.
+  const live = spawnsInFlight.get(placeholderId);
+  if (live) {
+    live.pick = picked === live.spawnedAccountId ? null : { id: picked, label: labelOf(picked) };
+    return;
+  }
+  if (picked === config.accountId) return;
   config.accountId = picked;
   if (sb && state.statusbar === sb) sb.setAccountId(picked);
   const pending = state.pendingNewSession;

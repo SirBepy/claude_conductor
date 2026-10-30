@@ -43,7 +43,7 @@ export async function renderPendingPane(
   mountDraftDashboard(pane, project, myMount);
   wirePendingComposer(pane, placeholderId, project, config, myMount, {
     rebindPaneHeader,
-    pickAccount: () => { void changePendingAccount(config, placeholderId); },
+    pickAccount: () => { void changePendingAccount(config, placeholderId, project.path); },
   });
 
   const ta = pane.querySelector<HTMLTextAreaElement>(".composer-textarea");
