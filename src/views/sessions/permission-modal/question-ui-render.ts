@@ -139,7 +139,10 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     const dots = host.querySelector<HTMLElement>(".prompt-dots");
     const cur = dots?.querySelector<HTMLElement>(".prompt-dot.is-current");
     if (!dots || !cur) return;
-    dots.scrollLeft = cur.offsetLeft - (dots.clientWidth - cur.offsetWidth) / 2;
+    // Rect deltas, not offsetLeft: .prompt-dots is not positioned, so
+    // offsetLeft would measure from the card host instead of from the row.
+    const offset = cur.getBoundingClientRect().left - dots.getBoundingClientRect().left + dots.scrollLeft;
+    dots.scrollLeft = offset - (dots.clientWidth - cur.offsetWidth) / 2;
   }
 
   // Step-only nav: patches the track/dots/arrows/footer in place instead of
