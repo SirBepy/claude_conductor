@@ -74,11 +74,16 @@ test("option badges render with their labels", async ({ page }) => {
   await expect(card.locator(".prompt-badge--rec")).toHaveCount(1);
 });
 
-test("a question WITH context keeps the chip on the context row, never both", async ({ page }) => {
+test("the ask band is two rows: chip and Ask button on top, the question text under them, no ? icon", async ({ page }) => {
   const card = await mount(page, WITH_CONTEXT);
 
-  await expect(card.locator(".prompt-ctx__head .prompt-domain")).toHaveCount(1);
-  await expect(card.locator(".prompt-zone--ask .prompt-domain")).toHaveCount(0);
+  await expect(card.locator(".prompt-ctx__head .prompt-domain")).toHaveCount(0);
+  await expect(card.locator(".prompt-zone--ask .prompt-ask__top .prompt-domain")).toHaveCount(1);
+  await expect(card.locator(".prompt-zone--ask .prompt-ask__icon")).toHaveCount(0);
+
+  const topBox = await card.locator(".prompt-ask__top").boundingBox();
+  const textBox = await card.locator(".prompt-ask__text").boundingBox();
+  expect(textBox!.y).toBeGreaterThanOrEqual(topBox!.y + topBox!.height - 1);
 
   await card.screenshot({
     path: ".for_bepy/screenshots/_specs/auq-domain-chip-context.png",
