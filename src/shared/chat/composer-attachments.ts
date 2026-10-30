@@ -60,8 +60,7 @@ export interface ComposerAttachmentsCallbacks {
    * whose `claude` will Read the file; this does. */
   getMachineId?: () => string | null;
   /** Fired whenever the attachment/pasted-block set (re)renders, so the
-   * composer can react (mirrors the old renderAttachments() ->
-   * updateScheduleBtnState() call). */
+   * composer can react (it refreshes Send's ready fill). */
   onChange: () => void;
 }
 

@@ -1,5 +1,5 @@
-// Small action menu popped from the composer's split-send chevron. Body-appended,
-// position:fixed, anchored off the chevron - mirrors the openSchedulePicker
+// Small action menu popped from a right-click or long-press on the composer's
+// Send button. Body-appended, position:fixed, anchored off Send - mirrors the openSchedulePicker
 // popover idiom and reuses its popover/row styles so there's no new chrome.
 import { openActionPopover } from "./anchored-popover";
 import "./schedule-picker.css";
