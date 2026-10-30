@@ -94,7 +94,8 @@
   right: 0;
   bottom: 0;
   height: 46px;
-  background: linear-gradient(transparent, color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-alt)));
+  /* The bubble's own colour, so a send-failed (red) bubble fades to red. */
+  background: linear-gradient(transparent, var(--user-bubble-bg));
   pointer-events: none;
 }
 .msg.user.has-clamp.expanded .msg-clamp-body::after { display: none; }

@@ -723,7 +723,11 @@ export class ChatRenderer {
     });
 
     strip.append(pill, btn);
-    last.appendChild(strip);
+    // With an attachment tray the .msg.user is a transparent wrapper and the
+    // danger tint lives on its .msg-bubble, so the strip goes inside that or it
+    // would hang under the tray, outside the red box. An attachments-only
+    // message has no bubble: the strip then sits under the tray.
+    (last.querySelector<HTMLElement>(":scope > .msg-bubble") ?? last).appendChild(strip);
   }
 
   /** Append an action button to the last assistant message bubble. */

@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
+import { readFileSync } from "node:fs";
 import { userEvent, makeBus } from "./helpers/chat-events.mjs";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
@@ -85,6 +86,39 @@ describe("failed-send bubble", () => {
     await vi.waitFor(() => expect(btn.disabled).toBe(false));
     expect(bubble.classList.contains("send-failed")).toBe(true);
     expect(bubble.querySelector(".failed-chip").title).toContain("still gone");
+  });
+
+  it("hangs the strip inside the bubble when the message has an attachment tray", async () => {
+    const { r, container } = await mountRenderer(`sess-tray-strip-${Math.random()}`);
+    sessionEvents.pushSynthetic(
+      r.currentSessionId(),
+      userEvent("see this\n\n<file:C:\\x\\a.png::a.png>", Date.now()),
+    );
+
+    r.markLastUserSendFailed("boom", async () => {});
+
+    const msg = [...container.querySelectorAll(".msg.user")].at(-1);
+    expect(msg.classList.contains("has-tray")).toBe(true);
+    expect(msg.querySelector(":scope > .msg-bubble > .send-failed-strip")).not.toBeNull();
+    expect(msg.querySelector(":scope > .send-failed-strip")).toBeNull();
+  });
+
+  it("falls back to the message itself when an attachments-only message has no bubble", async () => {
+    const { r, container } = await mountRenderer(`sess-tray-only-${Math.random()}`);
+    sessionEvents.pushSynthetic(r.currentSessionId(), userEvent("<file:C:\\x\\a.png::a.png>", Date.now()));
+
+    r.markLastUserSendFailed("boom", async () => {});
+
+    const msg = [...container.querySelectorAll(".msg.user")].at(-1);
+    expect(msg.querySelector(":scope > .msg-bubble")).toBeNull();
+    expect(msg.querySelectorAll(":scope > .send-failed-strip")).toHaveLength(1);
+  });
+
+  it("fades a clamped bubble to the bubble's own colour, which the failed state overrides", () => {
+    const css = readFileSync(new URL("../src/shared/chat/chat-messages-user.css", import.meta.url), "utf8");
+    const fade = /\.msg-clamp-body::after\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(fade).toContain("var(--user-bubble-bg)");
+    expect(fade).not.toContain("--color-primary");
   });
 
   it("does not stack a second strip on a repeat failure", async () => {
