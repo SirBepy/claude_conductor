@@ -51,7 +51,7 @@ export const STATIC_CHIPS = {
   drain:          { section: "session", icon: "ph-drop",             sample: "50% · 12%w", tooltip: "Share of a 5h session this chat has drained (and weekly). Click for a per-message rundown." },
   servers:        { section: "session", icon: "ph-broadcast",        sample: "1 live",     tooltip: "Dev servers running for this project via server_supervisor. Click to list them and open each in the browser.", countLike: true },
   images:         { section: "session", icon: "ph-image",           sample: "12 imgs",    tooltip: "Every image in this chat (attachments + tool screenshots). Click to view the list.", countLike: true },
-  overflow:       { section: "session", icon: "ph-dots-three",       sample: "···",        tooltip: "Message/turn/duration counts, the two drain meters and the tool mix, in one panel. Sits at the right end of its row." },
+  overflow:       { section: "session", icon: "ph-chart-bar",        sample: "Stats",      tooltip: "Message/turn/duration counts, the two drain meters and the tool mix, in one panel. Sits at the right end of its row." },
 
   separator:      { section: "layout",  icon: "ph-minus",            sample: "|",          tooltip: "Vertical divider line between chips." },
   flex_separator: { section: "layout",  icon: "ph-arrows-left-right", sample: "· · ·",    tooltip: "Flexible spacer: pushes chips after it to the right end." },
