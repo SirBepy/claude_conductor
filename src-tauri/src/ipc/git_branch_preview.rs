@@ -7,7 +7,6 @@ use tauri::State;
 
 use super::git::run_git;
 use super::git_diff::reject_option_like;
-use crate::ipc::mirror::mirrored_client;
 use crate::state::AppState;
 
 /// Repo-relative file list for `<branch>` without checking it out, for the
@@ -42,13 +41,54 @@ pub async fn list_branch_files(
     session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
-        return client
-            .list_branch_files(session_id.as_deref().unwrap(), &cwd, &branch)
-            .await
-            .map_err(|e| e.to_string());
+    list_branch_files_routed(cwd, branch, session_id, &state.cached_instances, state.client().await).await
+}
+
+/// `list_branch_files` with its two inputs from `AppState` passed in, so a
+/// test can drive the mirrored branch with a fake client.
+async fn list_branch_files_routed<C: crate::ipc::mirror::MirrorReads>(
+    cwd: String,
+    branch: String,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Result<Vec<String>, String> {
+    if let Some(client) = crate::ipc::mirror::route_mirrored(instances, session_id.as_deref(), client) {
+        let sid = session_id.as_deref().unwrap_or_default();
+        return client.list_branch_files(sid, &cwd, &branch).await.map_err(|e| e.to_string());
     }
     list_branch_files_local(cwd, branch).await
+}
+
+#[cfg(test)]
+mod mirrored_branch_tests {
+    use super::*;
+    use crate::ipc::mirror::fake::{instance_cache, FakeMirror, PEER_FILE};
+
+    #[tokio::test]
+    async fn a_mirrored_row_lists_the_branch_files_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let files = list_branch_files_routed("C:/peer/repo".into(), "feature".into(), Some("mirror-1".into()), &cache, Some(fake.clone()))
+            .await
+            .unwrap();
+
+        assert_eq!(files, [PEER_FILE]);
+        assert_eq!(fake.calls(), [("list_branch_files".into(), "mirror-1".into(), "C:/peer/repo|feature".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_fails_the_branch_files_read() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let err = list_branch_files_routed("C:/peer/repo".into(), "feature".into(), Some("mirror-1".into()), &cache, Some(fake.clone()))
+            .await
+            .unwrap_err();
+
+        assert!(err.contains("peer unreachable"), "got: {err}");
+    }
 }
 
 #[cfg(test)]

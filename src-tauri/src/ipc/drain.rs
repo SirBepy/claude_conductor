@@ -260,6 +260,59 @@ pub(crate) fn chat_drain_for(
     )
 }
 
+/// The mirrored branch of `chat_drain`: `Some` with the host's answer (`None`
+/// inside when that read fails) for a chat mirrored from a paired machine, and
+/// `None` outside when the chat is local. Split out with its two `AppState`
+/// inputs passed in so a test can drive it with a fake client.
+async fn chat_drain_forwarded<C: crate::ipc::mirror::MirrorReads>(
+    session_id: &str,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Option<Option<ChatDrain>> {
+    let client = crate::ipc::mirror::route_mirrored(instances, Some(session_id), client)?;
+    Some(client.chat_drain(session_id).await.unwrap_or_else(|e| {
+        log::warn!("chat_drain: mirrored session {session_id} read failed: {e}");
+        None
+    }))
+}
+
+#[cfg(test)]
+mod mirrored_branch_tests {
+    use super::*;
+    use crate::ipc::mirror::fake::{instance_cache, FakeMirror, PEER_TOKENS};
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_drain_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let drain = chat_drain_forwarded("mirror-1", &cache, Some(fake.clone())).await.expect("a mirrored row forwards");
+
+        assert_eq!(drain.map(|d| (d.session_id, d.tokens)), Some(("mirror-1".to_string(), PEER_TOKENS)));
+        assert_eq!(fake.calls(), [("chat_drain".into(), "mirror-1".into(), "".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_reads_as_no_drain() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let drain = chat_drain_forwarded("mirror-1", &cache, Some(fake.clone())).await;
+
+        assert!(matches!(drain, Some(None)), "a failed host read answers 'no drain', not 'read it locally'");
+        assert_eq!(fake.calls().len(), 1, "the failed read must have been attempted, not skipped");
+    }
+
+    #[tokio::test]
+    async fn a_local_session_never_touches_the_client() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        assert!(chat_drain_forwarded("local-1", &cache, Some(fake.clone())).await.is_none());
+        assert!(fake.calls().is_empty());
+    }
+}
+
 /// Full rundown for ONE chat (the popover): raw tokens + per-message breakdown +
 /// the chat's size as a % of a 5h/weekly window. Resolves the visible set itself
 /// so the capacity estimate is available without the sidebar's drain sort having
@@ -271,11 +324,8 @@ pub async fn chat_drain(
 ) -> Result<Option<ChatDrain>, String> {
     // A chat mirrored from a paired machine has its transcript and usage
     // windows on that machine; the daemon forwards the read there by session id.
-    if let Some(client) = crate::ipc::mirror::mirrored_client(&state, Some(&session_id)).await {
-        return Ok(client.chat_drain(&session_id).await.unwrap_or_else(|e| {
-            log::warn!("chat_drain: mirrored session {session_id} read failed: {e}");
-            None
-        }));
+    if let Some(drain) = chat_drain_forwarded(&session_id, &state.cached_instances, state.client().await).await {
+        return Ok(drain);
     }
     let Some((target_cwd, main_transcript)) = resolve_session(&session_id, &state) else {
         return Ok(None);

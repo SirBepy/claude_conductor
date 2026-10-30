@@ -16,7 +16,6 @@ use tauri::State;
 
 use super::git::run_git;
 use super::git_range_parse::{parse_range_files, resolve_lower_bound};
-use crate::ipc::mirror::mirrored_client;
 use crate::state::AppState;
 
 pub(in crate::ipc) use option_guard::reject_option_like;
@@ -92,9 +91,24 @@ pub async fn get_range_files(
     session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<PrFileChange>, String> {
-    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+    get_range_files_routed(cwd, from, to, base, session_id, &state.cached_instances, state.client().await).await
+}
+
+/// `get_range_files` with its two inputs from `AppState` passed in, so a test
+/// can drive the mirrored branch with a fake client.
+async fn get_range_files_routed<C: crate::ipc::mirror::MirrorReads>(
+    cwd: String,
+    from: Option<String>,
+    to: Option<String>,
+    base: Option<String>,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Result<Vec<PrFileChange>, String> {
+    if let Some(client) = crate::ipc::mirror::route_mirrored(instances, session_id.as_deref(), client) {
+        let sid = session_id.as_deref().unwrap_or_default();
         return client
-            .get_range_files(session_id.as_deref().unwrap(), &cwd, from.as_deref(), to.as_deref(), base.as_deref())
+            .get_range_files(sid, &cwd, from.as_deref(), to.as_deref(), base.as_deref())
             .await
             .map_err(|e| e.to_string());
     }
@@ -181,9 +195,26 @@ pub async fn get_file_diff(
     session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
+    get_file_diff_routed(cwd, from, to, base, path, context, session_id, &state.cached_instances, state.client().await).await
+}
+
+/// `get_file_diff` with its two inputs from `AppState` passed in, so a test can
+/// drive the mirrored branch with a fake client.
+async fn get_file_diff_routed<C: crate::ipc::mirror::MirrorReads>(
+    cwd: String,
+    from: Option<String>,
+    to: Option<String>,
+    base: Option<String>,
+    path: String,
+    context: Option<u32>,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Result<String, String> {
+    if let Some(client) = crate::ipc::mirror::route_mirrored(instances, session_id.as_deref(), client) {
+        let sid = session_id.as_deref().unwrap_or_default();
         return client
-            .get_file_diff(session_id.as_deref().unwrap(), &cwd, from.as_deref(), to.as_deref(), base.as_deref(), &path, context)
+            .get_file_diff(sid, &cwd, from.as_deref(), to.as_deref(), base.as_deref(), &path, context)
             .await
             .map_err(|e| e.to_string());
     }
@@ -233,13 +264,150 @@ pub async fn get_file_at_rev(
     session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<crate::ipc::files::TextFileData, String> {
-    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
-        return client
-            .get_file_at_rev(session_id.as_deref().unwrap(), &cwd, rev.as_deref(), &path)
-            .await
-            .map_err(|e| e.to_string());
+    get_file_at_rev_routed(cwd, rev, path, session_id, &state.cached_instances, state.client().await).await
+}
+
+/// `get_file_at_rev` with its two inputs from `AppState` passed in, so a test
+/// can drive the mirrored branch with a fake client.
+async fn get_file_at_rev_routed<C: crate::ipc::mirror::MirrorReads>(
+    cwd: String,
+    rev: Option<String>,
+    path: String,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Result<crate::ipc::files::TextFileData, String> {
+    if let Some(client) = crate::ipc::mirror::route_mirrored(instances, session_id.as_deref(), client) {
+        let sid = session_id.as_deref().unwrap_or_default();
+        return client.get_file_at_rev(sid, &cwd, rev.as_deref(), &path).await.map_err(|e| e.to_string());
     }
     get_file_at_rev_local(cwd, rev, path).await
+}
+
+#[cfg(test)]
+mod mirrored_branch_tests {
+    use super::*;
+    use crate::ipc::mirror::fake::{instance_cache, FakeMirror, PEER_CONTENT, PEER_DIFF, PEER_FILE};
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_range_files_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let files = get_range_files_routed(
+            "C:/peer/repo".into(),
+            Some("aaa".into()),
+            Some("bbb".into()),
+            None,
+            Some("mirror-1".into()),
+            &cache,
+            Some(fake.clone()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), [PEER_FILE]);
+        assert_eq!(
+            fake.calls(),
+            [("get_range_files".into(), "mirror-1".into(), "C:/peer/repo|Some(\"aaa\")|Some(\"bbb\")|None".into())]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_client_error_fails_the_range_files_read() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let err = get_range_files_routed("C:/peer/repo".into(), None, None, None, Some("mirror-1".into()), &cache, Some(fake.clone()))
+            .await
+            .unwrap_err();
+
+        assert!(err.contains("peer unreachable"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_file_diff_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let diff = get_file_diff_routed(
+            "C:/peer/repo".into(),
+            None,
+            Some("bbb".into()),
+            Some("HEAD".into()),
+            "src/a.rs".into(),
+            Some(9),
+            Some("mirror-1".into()),
+            &cache,
+            Some(fake.clone()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(diff, PEER_DIFF);
+        assert_eq!(
+            fake.calls(),
+            [("get_file_diff".into(), "mirror-1".into(), "C:/peer/repo|None|Some(\"bbb\")|Some(\"HEAD\")|src/a.rs|Some(9)".into())]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_client_error_fails_the_file_diff_read() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let err = get_file_diff_routed(
+            "C:/peer/repo".into(),
+            None,
+            None,
+            None,
+            "src/a.rs".into(),
+            None,
+            Some("mirror-1".into()),
+            &cache,
+            Some(fake.clone()),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.contains("peer unreachable"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_file_at_a_rev_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let data = get_file_at_rev_routed(
+            "C:/peer/repo".into(),
+            Some("abc".into()),
+            "src/a.rs".into(),
+            Some("mirror-1".into()),
+            &cache,
+            Some(fake.clone()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(data.content, PEER_CONTENT);
+        assert_eq!(
+            fake.calls(),
+            [("get_file_at_rev".into(), "mirror-1".into(), "C:/peer/repo|Some(\"abc\")|src/a.rs".into())]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_client_error_fails_the_file_at_rev_read() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let err = get_file_at_rev_routed("C:/peer/repo".into(), None, "src/a.rs".into(), Some("mirror-1".into()), &cache, Some(fake.clone()))
+            .await
+            .map(|d| d.content)
+            .unwrap_err();
+
+        assert!(err.contains("peer unreachable"), "got: {err}");
+    }
 }
 
 #[cfg(test)]

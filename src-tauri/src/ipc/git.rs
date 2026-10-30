@@ -7,12 +7,11 @@
 //! Every read-only command below takes an optional `session_id`: when it
 //! resolves to a session mirrored from a paired peer machine (G10,
 //! docs/multi-machine.md), the read is routed one hop to the owning peer via
-//! the daemon (`ipc::mirror::mirrored_client`) instead of running `git`
+//! the daemon (`ipc::mirror::route_mirrored`) instead of running `git`
 //! against `cwd`, which is a path on the PEER's disk, not this one's.
 
 use tauri::State;
 
-use crate::ipc::mirror::mirrored_client;
 use crate::state::AppState;
 
 // Re-exported so `ipc::*`/`ipc::git::*` callers (including the daemon
@@ -93,13 +92,22 @@ pub(crate) async fn get_git_dirty_local(cwd: String) -> Vec<String> {
 /// same as before this command took `state`.
 #[tauri::command]
 pub async fn get_git_dirty(cwd: String, session_id: Option<String>, state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
-        return Ok(client
-            .get_git_dirty(session_id.as_deref().unwrap(), &cwd)
-            .await
-            .unwrap_or_default());
+    Ok(get_git_dirty_routed(cwd, session_id, &state.cached_instances, state.client().await).await)
+}
+
+/// `get_git_dirty` with its two inputs from `AppState` passed in, so a test can
+/// drive the mirrored branch with a fake client.
+async fn get_git_dirty_routed<C: crate::ipc::mirror::MirrorReads>(
+    cwd: String,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Vec<String> {
+    if let Some(client) = crate::ipc::mirror::route_mirrored(instances, session_id.as_deref(), client) {
+        let sid = session_id.as_deref().unwrap_or_default();
+        return client.get_git_dirty(sid, &cwd).await.unwrap_or_default();
     }
-    Ok(get_git_dirty_local(cwd).await)
+    get_git_dirty_local(cwd).await
 }
 
 /// Runs `git -C <cwd> <args>`, hiding the console window on Windows. Returns
@@ -192,7 +200,7 @@ async fn get_git_info_routed<C: crate::ipc::mirror::MirrorReads>(
     client: Option<C>,
 ) -> GitInfo {
     if let Some(client) = crate::ipc::mirror::route_mirrored(instances, session_id.as_deref(), client) {
-        let sid = session_id.as_deref().unwrap();
+        let sid = session_id.as_deref().unwrap_or_default();
         // The empty answer hides the git chip with no trace, so the reason a
         // peer read failed is only ever visible here.
         return client.get_git_info(sid, &cwd).await.unwrap_or_else(|e| {
@@ -253,19 +261,28 @@ pub(crate) async fn get_recent_branches_local(cwd: String) -> Vec<BranchEntry> {
 /// the pure read is split out.
 #[tauri::command]
 pub async fn get_recent_branches(cwd: String, session_id: Option<String>, state: State<'_, AppState>) -> Result<Vec<BranchEntry>, String> {
-    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
-        return Ok(client
-            .get_recent_branches(session_id.as_deref().unwrap(), &cwd)
-            .await
-            .unwrap_or_default());
+    Ok(get_recent_branches_routed(cwd, session_id, &state.cached_instances, state.client().await).await)
+}
+
+/// `get_recent_branches` with its two inputs from `AppState` passed in, so a
+/// test can drive the mirrored branch with a fake client.
+async fn get_recent_branches_routed<C: crate::ipc::mirror::MirrorReads>(
+    cwd: String,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Vec<BranchEntry> {
+    if let Some(client) = crate::ipc::mirror::route_mirrored(instances, session_id.as_deref(), client) {
+        let sid = session_id.as_deref().unwrap_or_default();
+        return client.get_recent_branches(sid, &cwd).await.unwrap_or_default();
     }
-    Ok(get_recent_branches_local(cwd).await)
+    get_recent_branches_local(cwd).await
 }
 
 #[cfg(test)]
 mod git_info_mirrored_tests {
     use super::*;
-    use crate::ipc::mirror::fake::{instance_cache, FakeMirror, PEER_BRANCH};
+    use crate::ipc::mirror::fake::{instance_cache, FakeMirror, PEER_BRANCH, PEER_FILE};
 
     #[tokio::test]
     async fn a_mirrored_row_reads_the_info_through_the_client_by_session_id() {
@@ -286,6 +303,50 @@ mod git_info_mirrored_tests {
         let info = get_git_info_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone())).await;
 
         assert!(info.branch.is_none() && info.repo.is_none() && info.sha.is_none());
+        assert_eq!(fake.calls().len(), 1, "the failed read must have been attempted, not skipped");
+    }
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_dirty_files_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let dirty = get_git_dirty_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert_eq!(dirty, [PEER_FILE]);
+        assert_eq!(fake.calls(), [("get_git_dirty".into(), "mirror-1".into(), "C:/peer/repo".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_reads_as_no_dirty_files() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let dirty = get_git_dirty_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert!(dirty.is_empty());
+        assert_eq!(fake.calls().len(), 1, "the failed read must have been attempted, not skipped");
+    }
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_branches_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let branches = get_recent_branches_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert_eq!(branches.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), [PEER_BRANCH]);
+        assert_eq!(fake.calls(), [("get_recent_branches".into(), "mirror-1".into(), "C:/peer/repo".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_reads_as_no_branches() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let branches = get_recent_branches_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert!(branches.is_empty());
         assert_eq!(fake.calls().len(), 1, "the failed read must have been attempted, not skipped");
     }
 }
