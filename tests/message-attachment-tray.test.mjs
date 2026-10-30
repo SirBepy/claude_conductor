@@ -13,7 +13,8 @@ vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 if (!globalThis.window) globalThis.window = {};
 
 const { groupAttachmentTray, foldTray, TRAY_IMAGE_CAP } = await import("../src/shared/chat/message-attachment-tray.ts");
-const { clampUserMessages } = await import("../src/shared/chat/turn-collapse.ts");
+const { isRasterImageName, IMAGE_EXTS, RASTER_IMAGE_EXTS } = await import("../src/shared/chat/tool-meta.ts");
+const { clampUserMessages } =await import("../src/shared/chat/turn-collapse.ts");
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 const { sessionEvents } = await import("../src/shared/chat/event-store.ts");
 
@@ -82,6 +83,17 @@ describe("groupAttachmentTray", () => {
   });
 });
 
+describe("isRasterImageName", () => {
+  it("is the one raster list: svg stays a tool-row-only image", () => {
+    expect(isRasterImageName("C:\\x\\Shot.PNG")).toBe(true);
+    expect(isRasterImageName("/tmp/a.jpeg")).toBe(true);
+    expect(isRasterImageName("logo.svg")).toBe(false);
+    expect(isRasterImageName("notes.pdf")).toBe(false);
+    expect(isRasterImageName("png")).toBe(false);
+    expect(IMAGE_EXTS).toEqual([...RASTER_IMAGE_EXTS, ".svg"]);
+  });
+});
+
 describe("foldTray", () => {
   it("shows every image up to the cap with no +N tile", () => {
     const el = userEl("x", pngs(TRAY_IMAGE_CAP));
@@ -101,6 +113,29 @@ describe("foldTray", () => {
     const pdfs = [...el.querySelectorAll(".attachment-chip")].filter((c) => c.dataset.filename.endsWith(".pdf"));
     expect(pdfs).toHaveLength(2);
     for (const p of pdfs) expect(p.classList.contains("msg-tray-folded")).toBe(false);
+  });
+
+  it("counts raster images only: a svg chip is a plain item and never folds", () => {
+    const el = userEl("x", [...pngs(TRAY_IMAGE_CAP), "logo.svg", "photo.JPEG"]);
+    groupAttachmentTray(el);
+
+    const folded = [...el.querySelectorAll(".msg-tray-folded")];
+    expect(folded.map((f) => f.dataset.filename)).toEqual(["photo.JPEG"]);
+    const svg = [...el.querySelectorAll(".attachment-chip")].find((c) => c.dataset.filename === "logo.svg");
+    expect(svg.classList.contains("msg-tray-folded")).toBe(false);
+  });
+
+  it("never folds a chip whose read failed, and does not count it as an image", () => {
+    const el = userEl("x", pngs(8));
+    groupAttachmentTray(el);
+    const tray = el.querySelector(".msg-tray");
+    const chips = [...tray.querySelectorAll(".attachment-chip")];
+    chips[6].dataset.attachmentFailed = "true";
+    foldTray(tray);
+
+    expect(chips[6].classList.contains("msg-tray-folded")).toBe(false);
+    expect(chips[7].classList.contains("msg-tray-folded")).toBe(true);
+    expect(tray.querySelector(".msg-tray-more").textContent).toBe("+1");
   });
 
   it("re-folds after hydration replaces a chip with a fresh thumb node", () => {
@@ -181,5 +216,68 @@ describe("ChatRenderer wiring", () => {
       expect(msg.querySelectorAll(".msg-tray-folded")).toHaveLength(2);
     });
     expect(msg.querySelector(".msg-tray-more").textContent).toBe("+2");
+  });
+
+  async function mountWithReads(read) {
+    globalThis.window.__TAURI__ = makeBus();
+    invokeMock.mockImplementation(async (cmd, args) => {
+      if (cmd === "read_attachment") return read(args.path);
+      return { events: [], oldest_seq: 0, newest_seq: 0, has_more: false };
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const r = new ChatRenderer(container);
+    await r.attach(`sess-tray-${Math.random()}`);
+    await r.loadFromStore();
+    const tokens = pngs(8).map((n) => `<file:C:\\x\\${n}::${n}>`).join("\n");
+    sessionEvents.pushSynthetic(r.currentSessionId(), userEvent(`see these\n\n${tokens}`, Date.now()));
+    return container;
+  }
+
+  it("keeps images past the cap folded while a later read is still pending", async () => {
+    let release;
+    const gate = new Promise((res) => { release = res; });
+    const container = await mountWithReads(async (path) => {
+      if (path.endsWith("shot-8.png")) await gate;
+      return { mime: "image/png", base64: "AAAA" };
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll(".msg.user > .msg-tray .sent-attachment-thumb")).toHaveLength(7);
+    });
+    const msg = container.querySelector(".msg.user");
+    // The 7th is a fresh thumb (no fold class of its own) and the 8th is still
+    // a loading chip: both must be folded behind a "+N" that points at them.
+    const folded = [...msg.querySelectorAll(".msg-tray-folded")];
+    expect(folded).toHaveLength(2);
+    expect(folded[0].classList.contains("sent-attachment-thumb")).toBe(true);
+    expect(folded[1].classList.contains("attachment-chip")).toBe(true);
+    expect(msg.querySelector(".msg-tray-more").textContent).toBe("+2");
+
+    release();
+    await vi.waitFor(() => {
+      expect(msg.querySelectorAll(".msg-tray-folded.sent-attachment-thumb")).toHaveLength(2);
+    });
+    expect(msg.querySelector(".msg-tray-more").textContent).toBe("+2");
+  });
+
+  it("leaves a failed 7th image visible and folds the next image instead", async () => {
+    const container = await mountWithReads(async (path) => {
+      if (path.endsWith("shot-7.png")) throw new Error("gone");
+      return { mime: "image/png", base64: "AAAA" };
+    });
+
+    const msg = () => container.querySelector(".msg.user");
+    await vi.waitFor(() => {
+      expect(msg().querySelectorAll(".msg-tray .sent-attachment-thumb")).toHaveLength(7);
+    });
+    const failed = msg().querySelector(".attachment-chip[data-attachment-failed]");
+    expect(failed.dataset.filename).toBe("shot-7.png");
+    expect(failed.querySelector(".ph-warning")).not.toBeNull();
+    expect(failed.classList.contains("msg-tray-folded")).toBe(false);
+    const folded = [...msg().querySelectorAll(".msg-tray-folded")];
+    expect(folded).toHaveLength(1);
+    expect(folded[0].querySelector("img").alt).toBe("shot-8.png");
+    expect(msg().querySelector(".msg-tray-more").textContent).toBe("+1");
   });
 });

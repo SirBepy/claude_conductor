@@ -27,7 +27,14 @@ export function mimeToIcon(mime: string): string {
  *  file (multi-machine federation: a mirrored chat's attachments live on the
  *  peer, not this disk) - omit it only where the caller has no session scope
  *  (e.g. a detached preview host). */
-export async function hydrateAttachments(el: HTMLElement, sessionId?: string | null): Promise<void> {
+export async function hydrateAttachments(
+  el: HTMLElement,
+  sessionId?: string | null,
+  /** Runs after each chip is settled (swapped for a thumb or marked failed), so
+   *  a caller that lays the chips out (the tray's "+N" fold) stays correct while
+   *  a slow read is still pending instead of only after the last one. */
+  onSettled?: () => void,
+): Promise<void> {
   const chips = Array.from(el.querySelectorAll<HTMLElement>(".attachment-chip[data-attachment-path]"));
   for (const chip of chips) {
     const path = chip.dataset.attachmentPath;
@@ -62,6 +69,7 @@ export async function hydrateAttachments(el: HTMLElement, sessionId?: string | n
           openLightbox({ type: "image", mime, base64, filename: name, sourcePath: path });
         });
         chip.replaceWith(thumb);
+        onSettled?.();
       } else {
         chipData.set(chip, { ...data, path });
         chip.classList.remove("loading");
@@ -72,7 +80,11 @@ export async function hydrateAttachments(el: HTMLElement, sessionId?: string | n
         chip.innerHTML = `<i class="ph ${escapeHtml(icon)}"></i><span class="chip-name">${escapeHtml(name)}</span>`;
       }
     } catch {
+      // Marked so the tray stops counting it as an image: a failed chip has no
+      // click handler, so folding it behind "+N" would make it unreachable.
+      chip.dataset.attachmentFailed = "true";
       chip.innerHTML = `<i class="ph ph-warning"></i><span class="chip-name">${escapeHtml(name)}</span>`;
+      onSettled?.();
     }
   }
 }
