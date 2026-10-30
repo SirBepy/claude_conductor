@@ -1,9 +1,9 @@
 /* Markdown element styling shared by every message kind: lists, tables/table
  * overlay, paragraphs, headings, blockquote, hr, inline code. Split out of
- * chat-messages.css. The drill popover (drill-links.ts) renders the same
- * markdown but is body-appended, outside any message, so every rule names
- * both scopes; without it the popover falls back to the reset's unpadded
- * lists and bare inline code. */
+ * chat-messages.css. The drill card (drill-links.ts) renders the same
+ * markdown inside the bubble it drills out of, so the `.msg` half of each
+ * `:is(.msg, .drill-pop)` scope already reaches it; the `.drill-pop` half
+ * keeps it styled if the card is ever mounted outside a bubble again. */
 
 /* Markdown lists default to padding-left: 40px which pushes long items past
    the bubble's right edge. Trim the indent and let list-position render the
