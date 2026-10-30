@@ -195,8 +195,8 @@ async function refreshCard(el: HTMLElement): Promise<void> {
   el.classList.toggle("superseded", superseded);
   if (superseded) el.classList.remove("open");
   // A wording Claude posted reads as sent even while a sibling keeps the card
-  // itself open. `sent` rides the wire but is not in the generated type.
-  const variantSent = (variant as (DraftVariant & { sent?: boolean }) | undefined)?.sent === true;
+  // itself open.
+  const variantSent = variant?.sent === true;
   el.classList.toggle("copied", draft.state === "copied" || variantSent);
   el.dataset.draftState = draft.state;
 }
