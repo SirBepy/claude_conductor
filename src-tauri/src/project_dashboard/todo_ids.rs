@@ -130,15 +130,6 @@ pub fn parse_wanted(input: &str) -> Option<Wanted> {
     Some(if p.legacy { Wanted::Bare(p.key.number) } else { Wanted::Key(p.key) })
 }
 
-/// `pc-1407` for any spelling that names a device, else `None` (a bare number
-/// has no canonical form until it is resolved to a file).
-pub fn canonical_of(input: &str) -> Option<String> {
-    match parse_wanted(input)? {
-        Wanted::Key(k) => Some(k.canonical()),
-        Wanted::Bare(_) => None,
-    }
-}
-
 /// This machine's device label (`~/.claude/device-label`). The id scripts fail
 /// loudly without it; a reader falls back to the legacy label instead, since
 /// the only todos that exist without a label were made on the PC.
@@ -274,14 +265,14 @@ mod tests {
     #[test]
     fn padding_is_not_significant_on_read() {
         assert_eq!(parse_wanted("pc-7"), parse_wanted("pc-0007"));
-        assert_eq!(canonical_of("pc-7").as_deref(), Some("pc-0007"));
+        assert_eq!(parse_wanted("pc-7"), Some(Wanted::Key(key("pc", 7))));
+        assert_eq!(key("pc", 7).canonical(), "pc-0007");
     }
 
     #[test]
     fn a_bare_number_is_wanted_without_a_label() {
         assert_eq!(parse_wanted("1407"), Some(Wanted::Bare(1407)));
         assert_eq!(parse_wanted("1407-slug"), Some(Wanted::Bare(1407)));
-        assert_eq!(canonical_of("1407"), None);
         assert_eq!(parse_wanted("pc-1407.md"), Some(Wanted::Key(key("pc", 1407))));
     }
 

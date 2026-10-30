@@ -7,7 +7,7 @@
 //! times).
 
 use super::snapshot_types::{TodoDay, TodoStats};
-use super::todo_ids::{parse_claim_name, parse_file_name, parse_wanted, TodoKey, Wanted, LEGACY_LABEL};
+use super::todo_ids::{parse_claim_name, parse_file_name, TodoKey};
 use chrono::{Duration, Local, NaiveDate};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -68,27 +68,6 @@ fn live_claim_names(todos_dir: &Path) -> Vec<String> {
 /// legacy `1407.claim`; all three claim `pc-1407`.
 pub fn live_claim_keys(todos_dir: &Path) -> HashSet<TodoKey> {
     live_claim_names(todos_dir).iter().filter_map(|n| parse_claim_name(n)).map(|p| p.key).collect()
-}
-
-/// Whether todo `id` (any spelling `todo_ids::parse_wanted` accepts) holds a
-/// live claim in `<todos_dir>/.claims/`. A bare number is the legacy `pc`
-/// label. An `id` that is not an id at all falls back to a literal
-/// `<id>.claim` / `<id>-<slug>.claim` match.
-pub fn claim_is_live(todos_dir: &Path, id: &str) -> bool {
-    match parse_wanted(id) {
-        Some(Wanted::Key(k)) => live_claim_keys(todos_dir).contains(&k),
-        Some(Wanted::Bare(n)) => live_claim_keys(todos_dir).contains(&TodoKey { label: LEGACY_LABEL.into(), number: n }),
-        None => {
-            let slug_prefix = format!("{id}-");
-            let exact = format!("{id}.claim");
-            live_claim_names(todos_dir).iter().any(|name| *name == exact || (name.starts_with(&slug_prefix) && name.ends_with(".claim")))
-        }
-    }
-}
-
-/// The canonical id of a todo file (`1264-handoff-x.md` -> `pc-1264`).
-pub fn todo_id(file_name: &str) -> Option<String> {
-    parse_file_name(file_name).map(|p| p.key.canonical())
 }
 
 /// Every todo file of one repo, backlog and `done/`, plus how many backlog
@@ -182,11 +161,17 @@ mod tests {
         dir
     }
 
+    /// Whether `<label>-<number>` holds a live claim, through the production
+    /// reader every caller uses.
+    fn holds(dir: &Path, label: &str, number: u64) -> bool {
+        live_claim_keys(dir).contains(&TodoKey { label: label.into(), number })
+    }
+
     #[test]
     fn a_fresh_claim_is_live() {
         let dir = claims_dir(&["7.claim"]);
-        assert!(claim_is_live(dir.path(), "7"));
-        assert!(!claim_is_live(dir.path(), "8"));
+        assert!(holds(dir.path(), "pc", 7));
+        assert!(!holds(dir.path(), "pc", 8));
     }
 
     #[test]
@@ -194,24 +179,25 @@ mod tests {
         let dir = claims_dir(&["7.claim"]);
         let claim = dir.path().join(".claims").join("7.claim");
         backdate(&claim, 3);
-        assert!(claim_is_live(dir.path(), "7"));
+        assert!(holds(dir.path(), "pc", 7));
         backdate(&claim, 5);
-        assert!(!claim_is_live(dir.path(), "7"));
+        assert!(!holds(dir.path(), "pc", 7));
     }
 
     #[test]
     fn a_slug_suffixed_claim_counts_but_a_longer_id_does_not() {
         let dir = claims_dir(&["7-handoff.claim", "70.claim", "71-x.claim"]);
-        assert!(claim_is_live(dir.path(), "7"));
-        assert!(!claim_is_live(dir.path(), "8"));
+        assert!(holds(dir.path(), "pc", 7));
+        assert!(!holds(dir.path(), "pc", 8));
         let only_longer = claims_dir(&["70.claim", "71-x.claim"]);
-        assert!(!claim_is_live(only_longer.path(), "7"));
+        assert!(!holds(only_longer.path(), "pc", 7));
     }
 
     #[test]
     fn no_claims_folder_is_no_claim() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!claim_is_live(dir.path(), "7"));
+        assert!(!holds(dir.path(), "pc", 7));
+        assert!(live_claim_keys(dir.path()).is_empty());
     }
 
     #[test]
@@ -276,23 +262,18 @@ mod tests {
     }
 
     #[test]
-    fn todo_ids_are_canonical_whatever_the_file_spelling() {
-        assert_eq!(todo_id("1264-handoff-x.md").as_deref(), Some("pc-1264"));
-        assert_eq!(todo_id("7.md").as_deref(), Some("pc-0007"));
-        assert_eq!(todo_id("pc-1407-x.md").as_deref(), Some("pc-1407"));
-        assert_eq!(todo_id("mac2-10000-x.md").as_deref(), Some("mac2-10000"));
-        assert_eq!(todo_id("notes.md"), None);
-        assert_eq!(todo_id("12-x.txt"), None);
+    fn a_device_label_claim_and_a_legacy_claim_both_hold_the_same_todo() {
+        let dir = claims_dir(&["pc-1407.claim", "88.claim", "mac-0003-x.claim"]);
+        assert!(holds(dir.path(), "pc", 1407));
+        assert!(holds(dir.path(), "pc", 88), "legacy 88.claim claims pc-0088");
+        assert!(holds(dir.path(), "mac", 3));
+        assert!(!holds(dir.path(), "pc", 3), "a claim on mac-0003 is not pc-0003");
     }
 
     #[test]
-    fn a_device_label_claim_and_a_legacy_claim_both_hold_the_same_todo() {
-        let dir = claims_dir(&["pc-1407.claim", "88.claim", "mac-0003-x.claim"]);
-        assert!(claim_is_live(dir.path(), "pc-1407"));
-        assert!(claim_is_live(dir.path(), "pc-88"), "legacy 88.claim claims pc-0088");
-        assert!(claim_is_live(dir.path(), "88"));
-        assert!(claim_is_live(dir.path(), "mac-3"));
-        assert!(!claim_is_live(dir.path(), "pc-3"), "a claim on mac-0003 is not pc-0003");
+    fn a_file_that_is_not_a_claim_name_holds_nothing() {
+        let dir = claims_dir(&["notes.claim", "fix-3-a.claim", "pc-9.txt"]);
+        assert!(live_claim_keys(dir.path()).is_empty());
     }
 
     #[test]
