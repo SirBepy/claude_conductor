@@ -22,7 +22,7 @@ const BRANCHES = [
 ];
 
 function row(sessionId, cwd = CWD) {
-  return { session_id: sessionId, pid: 1, cwd, project_id: "p", kind: "interactive", is_remote: false, started_at: "now", transcript_path: null, bridge_session_id: null, name: null, ended_at: null, end_reason: null };
+  return { session_id: sessionId, pid: 1, cwd, project_id: "p", kind: "interactive", is_remote: false, started_at: "now", transcript_path: null, name: null, ended_at: null, end_reason: null };
 }
 
 /** Answers the switcher's own load; `extra` overrides or adds commands. */

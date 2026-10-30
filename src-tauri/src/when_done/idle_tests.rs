@@ -22,7 +22,6 @@ fn instance(session_id: &str, busy: bool, ended: bool) -> Instance {
         is_remote: false,
         started_at: "2026-06-05T00:00:00Z".into(),
         transcript_path: None,
-        bridge_session_id: None,
         name: None,
         ended_at: if ended {
             Some("2026-06-05T01:00:00Z".into())

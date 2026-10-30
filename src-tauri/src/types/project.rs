@@ -110,8 +110,6 @@ pub struct Instance {
     pub started_at: String,
     #[serde(default)]
     pub transcript_path: Option<std::path::PathBuf>,
-    #[serde(default)]
-    pub bridge_session_id: Option<String>,
     /// Short label derived from the transcript's first user prompt
     /// (truncated). Mirrors what `/resume` shows so the user can tell
     /// concurrent sessions apart at a glance. None until the prompt
@@ -384,7 +382,6 @@ mod tests {
             is_remote: false,
             started_at: "2026-04-21T10:00:00Z".into(),
             transcript_path: Some(std::path::PathBuf::from("C:/t/abc.jsonl")),
-            bridge_session_id: None,
             name: None,
             ended_at: None,
             end_reason: None,
@@ -414,5 +411,14 @@ mod tests {
         let raw = serde_json::to_string(&i).unwrap();
         let back: Instance = serde_json::from_str(&raw).unwrap();
         assert_eq!(i, back);
+    }
+
+    // A paired peer on an older build, or a restored snapshot, still sends the
+    // retired `bridge_session_id` key; the row must keep loading.
+    #[test]
+    fn instance_loads_a_payload_carrying_the_retired_bridge_session_id_key() {
+        let raw = r#"{"session_id":"s1","pid":1,"cwd":"C:/x","project_id":"p","kind":"external","started_at":"2026-04-21T10:00:00Z","bridge_session_id":"abc"}"#;
+        let got: Instance = serde_json::from_str(raw).unwrap();
+        assert_eq!(got.session_id, "s1");
     }
 }

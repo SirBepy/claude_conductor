@@ -240,7 +240,6 @@ mod relay_tests {
             is_remote: false,
             started_at: "2026-09-05T00:00:00Z".into(),
             transcript_path: None,
-            bridge_session_id: None,
             name: None,
             ended_at: None,
             end_reason: None,

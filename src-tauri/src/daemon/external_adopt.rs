@@ -97,9 +97,6 @@ pub fn adopt_external_sessions(state: Arc<DaemonState>) {
         let (_, created) = state.registry.register(input, &shim, &now);
         if created {
             adopted_count += 1;
-            if let Some(bridge) = &sess.bridge_session_id {
-                state.registry.set_bridge_session_id(&sess.session_id, bridge.clone());
-            }
             // Derive the sidebar title from the transcript's first user prompt,
             // same as the restore + hook-enrichment paths. Without this an
             // adopted session shows as "New chat" forever (it never goes through

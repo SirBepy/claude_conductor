@@ -31,24 +31,6 @@ pub async fn list_instances_for_project(
         .collect())
 }
 
-#[tauri::command]
-pub async fn phone_link(session_id: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
-    let Some(inst) = state
-        .cached_instances
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|i| i.session_id == session_id)
-        .cloned()
-    else {
-        return Ok(None);
-    };
-    let Some(bridge) = inst.bridge_session_id else {
-        return Ok(None);
-    };
-    Ok(Some(format!("https://claude.ai/code/{bridge}")))
-}
-
 /// The only transcript a session-keyed stats call may read: the recorded path,
 /// else the file named after this session id. Never the newest file in the
 /// shared project dir - that belongs to a neighbouring session (todo 660: a

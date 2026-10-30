@@ -56,7 +56,7 @@ test.describe("@shot", () => {
     const session = {
       session_id: "s1", pid: 100, cwd: "C:/Projects/alpha", project_id: "p1",
       kind: "interactive", is_remote: false, started_at: "2026-08-01T10:00:00Z",
-      transcript_path: null, bridge_session_id: null, name: "Alpha chat",
+      transcript_path: null, name: "Alpha chat",
       ended_at: null, end_reason: null, busy: false, model: "claude-opus-5",
       effort: "high", awaiting: "done", autopilot: false, jarvis: false,
       worker_of: null, closing: false, account_id: null,

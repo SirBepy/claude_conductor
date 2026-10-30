@@ -268,7 +268,6 @@ Any preview can be published to claude.ai from the preview panel's **More option
 <summary><b>📡 Running instances</b></summary>
 
 - See every running Claude Code instance on your machine, live.
-- Copy a phone link for any remote-control session to open it in the Claude mobile app.
 
 </details>
 
