@@ -8,6 +8,7 @@ import { html, type TemplateResult } from "lit-html";
 import type { InstalledSkill } from "../../types/ipc.generated";
 import type { SettingsShape } from "../../shared/state";
 import { updateSettings } from "../../shared/settings-update";
+import { basename } from "../../shared/path-utils";
 
 export type Elsewhere = "off" | "name-only";
 export interface SkillScope {
@@ -53,7 +54,7 @@ export async function saveScope(key: string, scope: SkillScope | null): Promise<
 function projectName(projects: readonly ScopeProject[], id: string): string {
   const p = projects.find((x) => x.id === id);
   if (!p) return "removed project";
-  return typeof p.name === "string" && p.name ? p.name : (p.path.split(/[\/]/).pop() ?? p.path);
+  return typeof p.name === "string" && p.name ? p.name : basename(p.path);
 }
 
 /** The Skills list's quiet line for a scoped skill, or null when unscoped. */
