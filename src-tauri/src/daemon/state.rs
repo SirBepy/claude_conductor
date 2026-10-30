@@ -264,7 +264,7 @@ impl DaemonState {
     /// under `app_data`) and install it. Idempotent: a second call is ignored.
     pub fn init_push(&self, app_data: std::path::PathBuf) {
         let pm = PushManager::load(app_data);
-        let data_dir_override = std::env::var("CC_DATA_DIR").ok();
+        let data_dir_override = crate::daemon::data_dir_override();
         if crate::daemon::push::is_isolated_on_shared_data(
             &crate::daemon::instance::instance_suffix(),
             data_dir_override.as_deref(),

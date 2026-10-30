@@ -125,7 +125,7 @@ pub struct PushManager {
 /// buzz Joe's real phone. An isolated `CC_DATA_DIR` has its own handle file, so
 /// it stays enabled and phone-verify can still exercise the push path.
 pub fn is_isolated_on_shared_data(instance_suffix: &str, data_dir_override: Option<&str>) -> bool {
-    !instance_suffix.is_empty() && data_dir_override.map_or(true, str::is_empty)
+    !instance_suffix.is_empty() && !crate::daemon::names_own_data_dir(data_dir_override)
 }
 
 impl PushManager {

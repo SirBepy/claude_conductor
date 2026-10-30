@@ -78,10 +78,8 @@ pub use boot::{kill_all_sessions, run_daemon_main};
 /// path on Windows, different on Linux/macOS, where sharing it would move
 /// the daemon's existing on-disk root.
 fn resolve_app_data_dir(override_: Option<&str>) -> PathBuf {
-    if let Some(v) = override_ {
-        if !v.is_empty() {
-            return PathBuf::from(v);
-        }
+    if names_own_data_dir(override_) {
+        return PathBuf::from(override_.unwrap_or_default());
     }
     let mut p = dirs::data_dir().expect("data_dir");
     p.push("claude-conductor");
@@ -98,7 +96,21 @@ fn resolve_app_data_dir(override_: Option<&str>) -> PathBuf {
 /// or a `CC_DATA_DIR`-scoped daemon binds a path its own client can't attach
 /// to.
 pub(crate) fn app_data_dir() -> PathBuf {
-    resolve_app_data_dir(std::env::var("CC_DATA_DIR").ok().as_deref())
+    resolve_app_data_dir(data_dir_override().as_deref())
+}
+
+/// The daemon's one read of `CC_DATA_DIR`.
+pub(crate) fn data_dir_override() -> Option<String> {
+    std::env::var("CC_DATA_DIR").ok()
+}
+
+/// True when a `CC_DATA_DIR` value points the daemon at its own data dir. An
+/// empty value counts as unset (the shared default dir), so a launcher that
+/// exports `CC_DATA_DIR=` cannot half-isolate a daemon. The one home for that
+/// rule inside the daemon; pure over the value so tests never touch process
+/// env.
+pub(crate) fn names_own_data_dir(override_: Option<&str>) -> bool {
+    override_.is_some_and(|v| !v.is_empty())
 }
 
 #[cfg(test)]
