@@ -138,6 +138,19 @@
   outline-offset: 2px;
 }
 
+/* A todo id in chat text (markTodoRefs) opens that todo in the Backlog panel.
+   Whether it names a real todo is not known until it is clicked, so it stays
+   plain until hovered rather than showing a link that may lead nowhere. */
+.todo-ref {
+  cursor: pointer;
+  border-radius: 2px;
+  transition: color 0.12s, background 0.12s;
+}
+.todo-ref:hover {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+
 /* An absolute path in an assistant message (file-refs.ts): a quiet inline chip,
    monospace name, muted until hovered. Inside inline code it inherits the
    code span's own background, so only the border-less text reads as a link. */

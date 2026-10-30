@@ -6,7 +6,7 @@ import { renderEditWindow } from "./edit-window";
 import { basename } from "../path-utils";
 import { toolSummary } from "./tool-meta";
 import { elidedRefOf, elidedRowHtml } from "./elided-image";
-import { wrapTables, linkifyInlineCodeUrls, highlightKeywords, highlightSlashMentions, markCommitCandidates } from "./markdown-highlight";
+import { wrapTables, linkifyInlineCodeUrls, highlightKeywords, highlightSlashMentions, markCommitCandidates, markTodoRefs } from "./markdown-highlight";
 export { highlightSlashMentions, highlightComposerInput } from "./markdown-highlight";
 import {
   type RenderedMessage,
@@ -339,7 +339,7 @@ export function renderMessage(m: RenderedMessage): string {
 
 export function renderMarkdown(text: string, breaks = false): string {
   const inst = breaks ? mdBreaks : md;
-  return markCommitCandidates(highlightKeywords(wrapTables(linkifyInlineCodeUrls(highlightSlashMentions(inst.render(text)), inst))));
+  return markTodoRefs(markCommitCandidates(highlightKeywords(wrapTables(linkifyInlineCodeUrls(highlightSlashMentions(inst.render(text)), inst)))));
 }
 
 export function wrapBlockquotes(container: HTMLElement): void {
