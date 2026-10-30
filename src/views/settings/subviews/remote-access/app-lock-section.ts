@@ -95,8 +95,11 @@ export function appLockSectionTemplate(): TemplateResult | string {
               let pending = false;
               try { pending = b.setLockEnabled!(want) === false; } catch (err) { console.error("[app-lock] save failed", err); }
               if (pending) {
-                // Locked against a second flip while the prompt is up.
+                // Locked against a second flip while the prompt is up. The picker
+                // shares the shell's one answer callback, so a change there would
+                // overwrite it and strand this switch disabled.
                 input.disabled = true;
+                if (select) select.disabled = true;
                 return;
               }
               delete win.__ccLockSwitchResult;
