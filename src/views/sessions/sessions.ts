@@ -6,6 +6,7 @@ import { PREVIEW_OPEN_EVENT } from "../../shared/chat/chat-preview-card";
 import { DRAFT_OPEN_EVENT } from "../../shared/chat/chat-draft-card";
 import { ASK_OPEN_EVENT } from "./ask-open-event";
 import { BACKLOG_OPEN_EVENT } from "./backlog-panel/backlog-open-event";
+import { handleTodoRefClick } from "./backlog-panel/todo-ref-click";
 import "../../shared/chat/chat.css";
 import "./sessions.css";
 import "./session-header.css";
@@ -182,6 +183,8 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   // the pane windows rather than a popover of filenames.
   const onBacklogOpen = (): void => state.fabDial?.openPanel("backlog");
   window.addEventListener(BACKLOG_OPEN_EVENT, onBacklogOpen);
+  // A todo id in any chat text; one listener rather than one per renderer.
+  document.addEventListener("click", handleTodoRefClick);
 
   const teardownUsageDials = wireRateLimitBanner(root, listEl, myMount);
 
@@ -248,6 +251,7 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
     window.removeEventListener(DRAFT_OPEN_EVENT, onDraftOpen);
     window.removeEventListener(ASK_OPEN_EVENT, onAskOpen);
     window.removeEventListener(BACKLOG_OPEN_EVENT, onBacklogOpen);
+    document.removeEventListener("click", handleTodoRefClick);
     previewController?.destroy();
     previewController = null;
     state.previewController = null;

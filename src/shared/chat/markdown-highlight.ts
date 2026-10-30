@@ -47,7 +47,8 @@ const SHA_WORD_RE = /(?<![\w#\-/.:@&])([0-9a-f]{7,40})(?![\w\-/@]|\.\w)/g;
 // Inline <code> IS scanned, since `8a180b5` in backticks is the common case.
 const PROTECTED_RE = /(<(pre|a)(?:\s[^>]*)?>[\s\S]*?<\/\2>)/gi;
 
-export function markCommitCandidates(html: string): string {
+// Runs `replace` over the text between tags, outside the protected spans.
+function mapUnprotectedText(html: string, replace: (text: string) => string): string {
   return html
     .split(PROTECTED_RE)
     .map((part, i) => {
@@ -55,10 +56,26 @@ export function markCommitCandidates(html: string): string {
       if (i % 3 !== 0) return i % 3 === 1 ? part : "";
       return part
         .split(/(<[^>]*>)/)
-        .map((seg) => (seg.startsWith("<") ? seg : seg.replace(SHA_WORD_RE, '<span class="commit-ref" data-sha="$1">$1</span>')))
+        .map((seg) => (seg.startsWith("<") ? seg : replace(seg)))
         .join("");
     })
     .join("");
+}
+
+export function markCommitCandidates(html: string): string {
+  return mapUnprotectedText(html, (t) => t.replace(SHA_WORD_RE, '<span class="commit-ref" data-sha="$1">$1</span>'));
+}
+
+// Todo ids as the todo system writes them: a device label (`pc`, `mac2`), a
+// dash, the number zero-padded to 4 digits. Requiring the 4 digits keeps
+// `utf-8`, `gpt-4` and `x-12` plain. Not part of a longer word, a path
+// (`.claude/todos/pc-0007-slug.md` is left to the file-ref pass), a slug
+// (`pc-0007-slug`) or a filename (`pc-0007.md`); a sentence-ending `.` is fine.
+// Whether the id exists is only known when the Backlog panel opens it.
+const TODO_ID_RE = /(?<![\w#\-/\\.:@&])([a-z]+[0-9]*-[0-9]{4,})(?![\w\-/\\@]|\.\w)/g;
+
+export function markTodoRefs(html: string): string {
+  return mapUnprotectedText(html, (t) => t.replace(TODO_ID_RE, '<span class="todo-ref" data-todo-id="$1">$1</span>'));
 }
 
 // @file-path token for the composer backdrop, unconditional (no registry

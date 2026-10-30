@@ -21,12 +21,15 @@ import {
   type DropSpot, type PlanMove,
 } from "./backlog-model";
 import { listHtml, readerHtml } from "./backlog-render";
+import { BACKLOG_OPEN_EVENT, takePendingTodoId } from "./backlog-open-event";
 import { attachBacklogDrag } from "./backlog-drag";
 import "./backlog-panel.css";
 
 export interface BacklogPanelHandle {
   setSessionScope(sessionId: string | null, cwd: string | null): void;
   refresh(): void;
+  /** Shows the todo `id` in the reader; says so quietly when the project has none. */
+  openTodo(id: string): void;
   destroy(): void;
 }
 
@@ -62,6 +65,9 @@ class BacklogPanel implements BacklogPanelHandle {
   /** A refetch that landed mid-drag and was dropped; replayed when the drag
    *  ends, so a cancelled drag does not leave the list stale. */
   private refetchDropped = false;
+  /** A todo asked for before the list holding it was fetched (a new scope, a
+   *  panel mounted by the click itself, or a todo filed after the last fetch). */
+  private wantedId: string | null = null;
   private readonly panel: HTMLElement;
   private readonly listEl: HTMLElement;
   private readonly readerEl: HTMLElement;
@@ -93,6 +99,8 @@ class BacklogPanel implements BacklogPanelHandle {
     this.emptyEl = root.querySelector<HTMLElement>(".bl-empty")!;
     root.addEventListener("click", this.onClick);
     root.addEventListener("change", this.onChange);
+    window.addEventListener(BACKLOG_OPEN_EVENT, this.onOpenRequest);
+    this.wantedId = takePendingTodoId();
     this.disposeDrag = attachBacklogDrag({
       list: this.listEl,
       enabled: () => this.canAct() && !this.busy,
@@ -169,8 +177,10 @@ class BacklogPanel implements BacklogPanelHandle {
         this.refetchDropped = false;
         this.backlog = b && Array.isArray(b.todos) ? { groups: Array.isArray(b.groups) ? b.groups : [], todos: b.todos } : { groups: [], todos: [] };
         this.onCount?.(this.backlog.todos.length);
+        const jumped = this.showWanted();
         this.ensureSelection();
         this.renderList();
+        if (jumped) this.renderReader();
         this.loadDoc();
       })
       .catch((err) => {
@@ -178,6 +188,35 @@ class BacklogPanel implements BacklogPanelHandle {
         // todos folder, and the list simply stays as it was.
         console.warn("[backlog-panel] list_ai_backlog failed", err);
       });
+  }
+
+  openTodo(id: string): void {
+    this.wantedId = id;
+    if (this.backlog?.todos.some((t) => t.id === id)) {
+      this.showWanted();
+      this.render();
+      this.loadDoc();
+    } else {
+      // Not in the list we hold: it may be newer than the last fetch.
+      this.refresh();
+    }
+  }
+
+  /** Selects the wanted todo if the loaded list has it, else tells the user.
+   *  True when the reader moved. */
+  private showWanted(): boolean {
+    const id = this.wantedId;
+    if (!id || !this.backlog) return false;
+    this.wantedId = null;
+    if (!this.backlog.todos.some((t) => t.id === id)) {
+      this.showError(`${id} is not in this project's backlog`);
+      return false;
+    }
+    this.select(id);
+    this.view = "reader";
+    this.archiveOpen = false;
+    this.hideError();
+    return true;
   }
 
   private selectedId(): string | null {
@@ -276,6 +315,11 @@ class BacklogPanel implements BacklogPanelHandle {
   }
 
   // ── Events ───────────────────────────────────────────────────────────────
+
+  private onOpenRequest = (): void => {
+    const id = takePendingTodoId();
+    if (id) this.openTodo(id);
+  };
 
   private onClick = (ev: MouseEvent): void => {
     const t = ev.target as HTMLElement;
@@ -507,6 +551,7 @@ class BacklogPanel implements BacklogPanelHandle {
     this.disposeDrag();
     this.resizeObs?.disconnect();
     window.removeEventListener("focus", this.focusHandler);
+    window.removeEventListener(BACKLOG_OPEN_EVENT, this.onOpenRequest);
     this.root.removeEventListener("click", this.onClick);
     this.root.removeEventListener("change", this.onChange);
     if (this.toastTimer) clearTimeout(this.toastTimer);
