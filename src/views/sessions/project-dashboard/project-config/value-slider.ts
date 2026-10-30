@@ -3,14 +3,19 @@ import { escapeHtml } from "../../../../shared/escape-html";
 export interface ValueSlider {
   /** Moves the thumb to `idx` with the transition, without calling `onCommit`. */
   set(idx: number): void;
+  /** Moves the thumb to `idx` and calls `onCommit`, as a click on that stop does. */
+  commit(idx: number): void;
 }
 
 export interface ValueSliderOpts {
   label: string;
   stops: string[];
-  /** Tooltip per stop, by index. */
-  hints?: Record<number, string>;
+  /** The stop that means "follow the default": marked with a star. */
+  defaultIndex?: number;
+  defaultHint?: string;
   index: number;
+  /** The thumb is now showing `idx` (first paint, drag, click, key, `set`). */
+  onChange?: (idx: number) => void;
   onCommit: (idx: number) => void;
 }
 
@@ -28,7 +33,10 @@ export function mountValueSlider(host: HTMLElement, o: ValueSliderOpts): ValueSl
         <div class="vs-track"><div class="vs-fill"></div><div class="vs-thumb"></div></div>
       </div>
       <div class="vs-stops">
-        ${o.stops.map((s, i) => `<button type="button" class="vs-stop" data-idx="${i}" tabindex="-1"${o.hints?.[i] ? ` title="${escapeHtml(o.hints[i])}"` : ""}>${escapeHtml(s)}</button>`).join("")}
+        ${o.stops.map((s, i) => {
+          const star = i === o.defaultIndex;
+          return `<button type="button" class="vs-stop" data-idx="${i}" tabindex="-1"${star && o.defaultHint ? ` title="${escapeHtml(o.defaultHint)}"` : ""}>${star ? `<i class="ph-fill ph-star vs-star"></i>` : ""}${escapeHtml(s)}</button>`;
+        }).join("")}
       </div>
     </div>`;
   const wrap = host.querySelector<HTMLElement>(".vs-wrap")!;
@@ -44,6 +52,7 @@ export function mountValueSlider(host: HTMLElement, o: ValueSliderOpts): ValueSl
     stops.forEach((el, i) => el.classList.toggle("active", i === idx));
     wrap.setAttribute("aria-valuenow", String(idx));
     wrap.setAttribute("aria-valuetext", o.stops[idx] ?? "");
+    o.onChange?.(idx);
   };
   const commit = (idx: number): void => {
     if (idx === current) { show(current); return; }
@@ -92,5 +101,5 @@ export function mountValueSlider(host: HTMLElement, o: ValueSliderOpts): ValueSl
   void wrap.offsetWidth;
   wrap.classList.remove("is-drag");
 
-  return { set(idx) { current = idx; show(idx); } };
+  return { set(idx) { current = idx; show(idx); }, commit };
 }
