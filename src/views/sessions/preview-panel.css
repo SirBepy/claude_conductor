@@ -361,3 +361,12 @@
   padding: 1px 5px;
 }
 
+/* The reply bar is for when the panel covers the chat (data-overlay, set by
+ * split.ts when the pane is too narrow for both: always on a phone), because
+ * the main composer is then out of reach. Beside the chat, that composer is
+ * right there. `.pv-body +` keeps this off the same-classed answer bar in the
+ * AUQ card (question-ui-templates.ts). */
+.sp-panel:not([data-overlay]) .pv-body + .pv-composer {
+  display: none;
+}
+

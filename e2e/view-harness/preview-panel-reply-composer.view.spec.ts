@@ -1,5 +1,5 @@
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mountSessionsLayout, mountView, invokeCalls, sessionInstance } from "./harness";
 
 // Preview panel reply composer (ai_todo composer-unification, task 5): a
@@ -11,7 +11,7 @@ import { mountSessionsLayout, mountView, invokeCalls, sessionInstance } from "./
 // path resolves the owning session's `cwd` from there, same as the main
 // composer's send_message call.
 
-test("typing in the preview reply composer and pressing Enter sends a tagged message to the owning session", async ({ page }) => {
+async function openPreview(page: Page, opts: { header?: boolean } = {}): Promise<void> {
   await mountView(page, {
     invoke: {
       list_previews: [
@@ -32,14 +32,28 @@ test("typing in the preview reply composer and pressing Enter sends a tagged mes
     const stateMod = await import("/views/sessions/state.ts");
     stateMod.state.sessions.push(session);
   }, sessionInstance({ session_id: "sess-1", cwd: "/fake/project" }));
-  await mountSessionsLayout(page);
+  await mountSessionsLayout(page, opts);
   await page.evaluate(() => (window as unknown as { __preview: { open(id: string): void } }).__preview.open("snap-1"));
+}
 
-  const root = page.locator('.sp-panel[data-active="preview"]');
-  const input = root.locator(".pv-composer-input");
+test("the reply bar is hidden on desktop, where the chat's own composer is beside the panel", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openPreview(page);
+  await expect(page.locator('.sp-panel[data-active="preview"] .pv-canvas')).toBeVisible();
+  await expect(page.locator('.sp-panel[data-active="preview"] .pv-composer')).toBeHidden();
+});
+
+test("typing in the preview reply composer and pressing Enter sends a tagged message to the owning session", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await openPreview(page, { header: true });
+
+  // A phone-width mount gets the pane windows' full-screen cover, not the
+  // desktop split's `.sp-panel` (fab-dial.ts usesSplit), so no panel scope.
+  const input = page.locator(".pv-composer-input");
   await expect(input).toBeVisible();
   await input.fill("looks off on mobile");
-  await input.press("Enter");
+  // Phone-width composers treat Enter as a newline (composer-core/core.ts), so send via the arrow.
+  await page.locator(".pv-composer-send").click();
 
   await expect(input).toHaveValue("");
 
