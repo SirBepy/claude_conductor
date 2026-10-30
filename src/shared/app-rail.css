@@ -1,10 +1,11 @@
 /* Global half of the Chats window's right rail (app-rail.ts). The in-strip
-   group borrows split.css's .sp-strip/.sp-tab; this file adds the group, the
-   Jarvis orb and the standalone column used where there is no split strip.
+   group borrows split.css's .sp-strip/.sp-tab; this file adds the group and
+   the standalone column used where there is no split strip.
    Widths must match split.ts's STRIP_W (44px). */
 
 /* Pushed to the bottom of the strip, so chat tools stay on top and the
-   global screens read as a separate kind of thing. */
+   global screens read as a separate kind of thing. Jarvis leads the group,
+   above its label, so he belongs to neither half. */
 .sp-global {
   margin-top: auto;
   align-self: stretch;
@@ -13,30 +14,6 @@
   align-items: center;
   gap: 6px;
   padding-bottom: 10px;
-}
-
-/* Jarvis sits above the divider: tied to neither this chat nor a screen. */
-.sp-orb {
-  width: 30px;
-  height: 30px;
-  margin-bottom: 4px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: 50%;
-  /* Jarvis blue: no theme token for it, and it must not shift with the theme
-     so he stays recognisable. */
-  background: radial-gradient(circle at 35% 30%, #bae6fd, #38bdf8 45%, #0369a1);
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.18);
-  color: #06293d;
-  font-size: 1rem;
-  cursor: pointer;
-  transition: box-shadow 0.15s;
-}
-
-.sp-orb:hover {
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.3), 0 0 12px rgba(56, 189, 248, 0.45);
 }
 
 .sp-global-label {
