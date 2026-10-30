@@ -51,7 +51,6 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
 
     crate::scheduler::spawn(handle.clone());
     crate::when_done::spawn_nightly_scheduler(handle.clone());
-    crate::news::spawn_poll_loop(handle.clone());
     crate::slash::watcher::spawn(handle.clone());
     crate::meeting::start(handle.clone());
 

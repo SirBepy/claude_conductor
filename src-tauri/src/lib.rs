@@ -382,6 +382,7 @@ pub fn run() {
             ipc::get_skill_usage_detail,
             ipc::list_installed_skills,
             ipc::frontend_ready,
+            ipc::take_pending_nav,
             ipc::frontend_ping,
             ipc::log_webview_perf,
             ipc::fetch_available_models,

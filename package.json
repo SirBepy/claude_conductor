@@ -20,7 +20,6 @@
     "test:e2e:probe": "wdio run e2e/wdio.conf.js --spec e2e/specs/probe.e2e.js",
     "test:e2e:chat": "wdio run e2e/wdio.conf.js --spec e2e/specs/reload-dup.e2e.js",
     "test:e2e:flow": "wdio run e2e/wdio.conf.js --spec e2e/specs/chat-flow.e2e.js",
-    "test:e2e:news": "wdio run e2e/wdio.conf.js --spec e2e/specs/news-redesign.e2e.js",
     "test:e2e:accounts": "wdio run e2e/wdio.conf.js --spec e2e/specs/multi-account.e2e.js",
     "test:e2e:question": "wdio run e2e/wdio.conf.js --spec e2e/specs/question-card.e2e.js",
     "test:e2e:schedule": "wdio run e2e/wdio.conf.js --spec e2e/specs/schedule-view.e2e.js",

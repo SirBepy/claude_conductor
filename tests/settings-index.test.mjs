@@ -28,7 +28,7 @@ describe("Settings index", () => {
   it("lists every page on desktop, with no Statusline row and no Gaming mode toggle", async () => {
     const labels = await rowLabels();
     expect(labels).toEqual([
-      "Appearance", "Usage meter", "Notifications", "Voice & dictation", "Characters",
+      "Appearance", "Usage meter", "Notifications", "Voice & dictation", "Characters", "Skills",
       "Chat defaults", "Permissions", "Claude's browser",
       "Claude accounts & API keys", "Remote access",
       "Power & startup", "Shortcuts", "Data & storage", "About & updates",

@@ -19,6 +19,8 @@ import {
   mountPanel, PANEL_KEYS, PANEL_META, type MountedPanels, type PanelDeps, type PanelHandle, type PanelHost, type PanelHostDeps, type PanelKey,
 } from "../pane-windows/panels";
 import { forgetActive, recallActive, rememberActive, loadFraction, saveFraction } from "./memory";
+import { announceSplitStrip, globalGroupHtml, handleRailClick } from "../../../shared/app-rail";
+import { getActiveView } from "../../../shared/navigation";
 import "./split.css";
 
 /** Top to bottom, as Joe picked it in the split mockup. */
@@ -29,6 +31,12 @@ const DIVIDER_W = 6;
  *  the chat instead. 420px of chat keeps a message line near 60 characters. */
 const MIN_PANEL = 320;
 const MIN_CHAT = 420;
+
+/** The global rail group only exists in the Chats window; the phone and the
+ *  detached/pop-out windows use their own chrome. */
+function inChatsWindow(): boolean {
+  return document.body.classList.contains("chats-window-mode");
+}
 
 export class SplitPanels implements PanelHost {
   private sessionId: string | null = null;
@@ -101,6 +109,7 @@ export class SplitPanels implements PanelHost {
     // Not apply(): its onChange would reach the FAB before it holds this host.
     this.renderStrip();
     this.paint();
+    if (inChatsWindow()) announceSplitStrip(true);
   }
 
   // ── Public ───────────────────────────────────────────────────────────────
@@ -176,6 +185,7 @@ export class SplitPanels implements PanelHost {
 
   destroy(): void {
     this.destroyed = true;
+    if (inChatsWindow()) announceSplitStrip(false);
     this.resizeObs?.disconnect();
     if (this.storageHandler) window.removeEventListener("storage", this.storageHandler);
     this.unlistenDocked?.();
@@ -348,12 +358,13 @@ export class SplitPanels implements PanelHost {
           `aria-label="${label}" aria-pressed="${on}"><i class="ph ${icon}"></i>${mark}</button>`
         );
       })
-      .join("");
+      .join("") + (inChatsWindow() ? globalGroupHtml(getActiveView()) : "");
   }
 
   // ── Events ───────────────────────────────────────────────────────────────
 
   private onStripClick = (ev: MouseEvent): void => {
+    if (handleRailClick(ev.target)) return;
     if ((ev.target as HTMLElement).closest("[data-sp-code]")) return this.deps.onCode?.();
     const btn = (ev.target as HTMLElement).closest<HTMLElement>("[data-sp-k]");
     if (!btn) return;

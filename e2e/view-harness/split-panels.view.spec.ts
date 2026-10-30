@@ -1,4 +1,4 @@
-// asserts: src/views/sessions/split-panels/split.ts, src/views/sessions/split-panels/memory.ts, src/views/sessions/fab-dial.ts
+// asserts: src/views/sessions/split-panels/split.ts, src/views/sessions/split-panels/memory.ts, src/views/sessions/fab-dial.ts, src/shared/app-rail.ts
 import { test, expect, type Page } from "@playwright/test";
 import { fireEvent, mountView } from "./harness";
 import { expectIconButtonsCentred } from "./icon-centering";
@@ -46,12 +46,13 @@ const DRAFT = {
 };
 
 /** A full-bleed pane with a chat column we can measure, and the real FAB. */
-async function mountPane(page: Page, invoke: Record<string, unknown> = {}, width = 1280): Promise<void> {
+async function mountPane(page: Page, invoke: Record<string, unknown> = {}, width = 1280, chatsWindow = false): Promise<void> {
   await page.setViewportSize({ width, height: 800 });
   await mountView(page, { invoke: { list_slash_commands: [], list_previews: [], ...invoke } });
   await page.evaluate(
-    async ({ draft, viewer }) => {
+    async ({ draft, viewer, chatsWindow }) => {
       localStorage.clear();
+      if (chatsWindow) document.body.classList.add("chats-window-mode");
       const tauri = (window as any).__TAURI__;
       const passthrough = tauri.core.invoke;
       tauri.core.invoke = (cmd: string, args: any) =>
@@ -68,7 +69,7 @@ async function mountPane(page: Page, invoke: Record<string, unknown> = {}, width
       fab.setSessionScope(viewer, "/proj");
       (window as any).__fab = fab;
     },
-    { draft: DRAFT, viewer: VIEWER },
+    { draft: DRAFT, viewer: VIEWER, chatsWindow },
   );
 }
 
@@ -309,4 +310,27 @@ test("Revise opens its preset menu over the draft editor", async ({ page }) => {
   await expect(items.first()).toBeVisible();
   await expect(page.locator(".dr-rv-scope")).toHaveText("Whole draft");
   await page.screenshot({ path: `${SCREENSHOT_DIR}/split-panels-revise.png` });
+});
+
+test("in the Chats window the strip ends in a GLOBAL group: Jarvis on the boundary, then Home / Schedule / Settings", async ({ page }) => {
+  await mountPane(page, {}, 1280, true);
+  const group = page.locator(".sp-strip .sp-global");
+  await expect(group.locator("[data-rail-jarvis]")).toHaveCount(1);
+  const go = await group.locator("[data-rail-go]").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.railGo));
+  expect(go).toEqual(["dashboard", "schedule", "settings"]);
+  // Chat tools stay on top and the group is pushed to the strip's bottom edge.
+  const geo = await page.evaluate(() => {
+    const strip = document.querySelector(".sp-strip")!.getBoundingClientRect();
+    const group = document.querySelector(".sp-global")!.getBoundingClientRect();
+    const lastTab = [...document.querySelectorAll(".sp-strip > .sp-tab")].pop()!.getBoundingClientRect();
+    return { stripBottom: strip.bottom, groupBottom: group.bottom, groupTop: group.top, lastTabBottom: lastTab.bottom };
+  });
+  expect(geo.groupTop).toBeGreaterThan(geo.lastTabBottom);
+  expect(Math.round(geo.groupBottom)).toBeGreaterThanOrEqual(Math.round(geo.stripBottom) - 12);
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/rail-global-group.png` });
+});
+
+test("outside the Chats window the strip has no global group", async ({ page }) => {
+  await mountPane(page);
+  await expect(page.locator(".sp-global")).toHaveCount(0);
 });
