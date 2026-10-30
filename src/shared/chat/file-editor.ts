@@ -72,7 +72,13 @@ interface Session {
 
 const sessions = new Map<string, Session>();
 
-const keyOf = (p: string) => p.replace(/\\/g, "/").toLowerCase();
+// Only Windows folds case: on Linux (and case-sensitive macOS volumes) `A.md`
+// and `a.md` are two files, and sharing one session would show one file's
+// text, undo history and unsaved typing in the other's tab.
+const keyOf = (p: string) => {
+  const slashed = p.replace(/\\/g, "/");
+  return navigator.userAgent.includes("Windows") ? slashed.toLowerCase() : slashed;
+};
 
 /** Whether a file can round-trip through the editor unchanged. CodeMirror
  *  rejoins lines with one separator, so a file mixing CRLF and LF would be

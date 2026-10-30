@@ -214,4 +214,85 @@ test.describe("view-harness / file editor", () => {
     await open(md);
     await expect(page.locator("#fw-test .fs-md h1")).toHaveText("After a chat edit");
   });
+
+  test("closing the last tab frees the mounted editor and its disk poll; reopening brings it back", async ({ page }) => {
+    await mountFiles(page, { [FILE]: { content: "export const x = 1;\n", mtime: 1, writable: true } }, FILE);
+    await expect(page.locator("#fw-test .cm-editor")).toHaveCount(1);
+    await page.evaluate(() => {
+      const w = window as unknown as { __TAURI__: { core: { invoke: (c: string, a?: unknown) => Promise<unknown> } }; __stats: number };
+      w.__stats = 0;
+      const prev = w.__TAURI__.core.invoke;
+      w.__TAURI__.core.invoke = (cmd, args) => {
+        if (cmd === "stat_text_file") w.__stats++;
+        return prev(cmd, args);
+      };
+    });
+    await page.locator("#fw-test .cm-x").click();
+    await expect(page.locator("#fw-test .cm-empty")).toBeVisible();
+    await expect(page.locator("#fw-test .cm-editor")).toHaveCount(0);
+    // Longer than one 1.5 s poll: a live editor would have stat'ed the file.
+    const stats = () => page.evaluate(() => (window as unknown as { __stats: number }).__stats);
+    const before = await stats();
+    await page.waitForTimeout(1800);
+    expect(await stats()).toBe(before);
+    // The Files window stays up with no tab, so the next open must rebuild the surface.
+    await page.evaluate((p) => {
+      const w = window as unknown as { __ccListeners: Map<string, Set<(e: { payload: unknown }) => void>> };
+      w.__ccListeners.get("file-window-open")?.forEach((cb) => cb({ payload: { path: p, line: null } }));
+    }, FILE);
+    await expect(page.locator("#fw-test .cm-tab")).toHaveCount(1);
+    await expect(page.locator("#fw-test .cm-content")).toContainText("export const x = 1;");
+  });
+});
+
+const LINUX_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const WINDOWS_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+/** `unsavedText` for `path`, after making the open FILE's doc dirty (a refused
+ *  write keeps it unsaved) so a session found under that key reports text. */
+async function unsavedFor(page: Page, path: string): Promise<string | null> {
+  await page.evaluate(() => { (window as unknown as { __disk: Disk }).__disk.conflictNext = true; });
+  await page.locator("#fw-test .cm-content").click();
+  await page.keyboard.type("dirty ");
+  await expect(page.locator("#fw-test .fe-conflict")).toBeVisible();
+  return page.evaluate(async (p) => {
+    const mod = await import("/shared/chat/file-editor.ts");
+    return mod.unsavedText(p);
+  }, path);
+}
+
+test.describe("view-harness / file editor on Windows", () => {
+  test.use({ userAgent: WINDOWS_UA });
+
+  test("a path in another case is the same file's session", async ({ page }) => {
+    await mountFiles(page, { [FILE]: { content: "one\n", mtime: 1, writable: true } }, FILE);
+    expect(await unsavedFor(page, FILE.toUpperCase())).toContain("dirty ");
+  });
+});
+
+test.describe("view-harness / file editor on a case-sensitive platform", () => {
+  test.use({ userAgent: LINUX_UA });
+
+  test("a path in another case is a different file's session", async ({ page }) => {
+    await mountFiles(page, { [FILE]: { content: "one\n", mtime: 1, writable: true } }, FILE);
+    expect(await unsavedFor(page, FILE.toUpperCase())).toBeNull();
+    expect(await unsavedFor(page, FILE)).toContain("dirty ");
+  });
+
+  test("A.txt and a.txt open as two files, each with its own text", async ({ page }) => {
+    const upper = "/home/u/proj/A.txt";
+    const lower = "/home/u/proj/a.txt";
+    await mountFiles(page, {
+      [upper]: { content: "upper file\n", mtime: 1, writable: true },
+      [lower]: { content: "lower file\n", mtime: 1, writable: true },
+    }, upper);
+    await expect(page.locator("#fw-test .cm-content")).toContainText("upper file");
+    await page.evaluate((p) => {
+      const w = window as unknown as { __ccListeners: Map<string, Set<(e: { payload: unknown }) => void>> };
+      w.__ccListeners.get("file-window-open")?.forEach((cb) => cb({ payload: { path: p, line: null } }));
+    }, lower);
+    await expect(page.locator("#fw-test .cm-tab")).toHaveCount(2);
+    await expect(page.locator("#fw-test .cm-content")).toContainText("lower file");
+    await expect(page.locator("#fw-test .cm-content")).not.toContainText("upper file");
+  });
 });
