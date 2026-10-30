@@ -1,3 +1,4 @@
+// Reviewed 2026-10-30: popup.css gained a dimmed `.row.off-here` style for skills scoped to other projects - additive, the row order this spec asserts is unchanged and it passes.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 

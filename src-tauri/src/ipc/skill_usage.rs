@@ -82,18 +82,21 @@ pub async fn list_installed_skills(state: State<'_, AppState>) -> Result<Vec<Ins
                     description: e.description,
                     plugin: None,
                     project: None,
+                    scope_key: e.scope_key,
                 }),
                 SlashSource::PluginSkill { plugin } => Some(InstalledSkill {
                     skill: format!("{plugin}:{}", e.name),
                     description: e.description,
                     plugin: Some(plugin),
                     project: None,
+                    scope_key: e.scope_key,
                 }),
                 SlashSource::ProjectSkill { project } => Some(InstalledSkill {
                     skill: e.name,
                     description: e.description,
                     plugin: None,
                     project: Some(project),
+                    scope_key: None,
                 }),
                 _ => None,
             })

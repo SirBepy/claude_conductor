@@ -27,6 +27,7 @@ import { openFrozenChoice } from "./composer-frozen-choice";
 import { ComposerUndo } from "./composer-undo";
 import { ComposerHighlight } from "./composer-highlight";
 import { ComposerStrayInput } from "./composer-stray-input";
+import { SkillScopeWarning } from "./composer-skill-scope";
 import {
   setLightboxComposerBridge,
   clearLightboxComposerBridge,
@@ -120,6 +121,9 @@ export class Composer {
   // Cross-surface sync: debounced push + reconcile-on-open/regain-visibility.
   // One instance per Composer, itself created fresh per window/pane.
   private draftSync = new ComposerDraftSync();
+  private scopeWarn: SkillScopeWarning;
+  // Set by the scope warning's "Send anyway" for the one send it triggers.
+  private skipScopeOnce = false;
 
   // Identity the lightbox holds onto, so clearLightboxComposerBridge() can tell
   // "still mine" from "a successor already took over". Built as a field, not in
@@ -196,8 +200,26 @@ export class Composer {
       this.root.style.position = "relative";
     }
     this.slash = new SlashProvider();
-    // Repaint once the registry lands so already-typed /commands colorize.
-    void this.slash.start(opts.projectDir ?? null).then(() => this.updateHighlight());
+    this.scopeWarn = new SkillScopeWarning({
+      getProjectDir: () => this.opts.projectDir ?? null,
+      getSessionId: () => this.sessionId,
+      getEntries: () => this.slash?.entries() ?? [],
+      refreshEntries: async () => {
+        await this.slash?.refresh();
+      },
+      sendAnyway: () => {
+        this.skipScopeOnce = true;
+        void this.send();
+      },
+      sendWithEnable: () => void this.send(),
+      notice: (text) => this.showNotice(text),
+    });
+    // Repaint once the registry lands so already-typed /commands colorize,
+    // and a restored draft naming an off-here skill shows its warning.
+    void this.slash.start(opts.projectDir ?? null).then(() => {
+      this.updateHighlight();
+      this.scopeWarn.update(this.textarea?.value ?? "");
+    });
     this.file = new FileProvider();
     this.file.start(opts.projectDir ?? null);
     this.render();
@@ -357,6 +379,7 @@ export class Composer {
     // to silently drop the picked file on-device (ai_todo 409).
     this.root.innerHTML = `
       <div class="composer-attachments"></div>
+      <div class="composer-scope-warning" hidden></div>
       <div class="composer-row">
         <div class="composer-input-wrap cc-typing-wrap">
           <div class="composer-highlight cc-typing-highlight" aria-hidden="true"></div>
@@ -382,6 +405,7 @@ export class Composer {
     this.textarea = this.root.querySelector<HTMLTextAreaElement>(".composer-textarea");
     this.highlightEl = this.root.querySelector<HTMLElement>(".composer-highlight");
     this.noticeEl = this.root.querySelector<HTMLElement>(".composer-notice");
+    this.scopeWarn.bind(this.root.querySelector<HTMLElement>(".composer-scope-warning"));
     this.sendBtn = this.root.querySelector<HTMLButtonElement>(".composer-send");
     this.scheduleBtn = this.root.querySelector<HTMLButtonElement>(".composer-send-chevron");
     this.micBtn = this.root.querySelector<HTMLButtonElement>(".composer-mic");
@@ -409,6 +433,7 @@ export class Composer {
               this.undo.resetChain();
               this.persistDraft();
               this.updateScheduleBtnState();
+              this.scopeWarn.update(this.textarea?.value ?? "");
               this.opts.onDraftActivity?.();
             }
           : undefined,
@@ -456,6 +481,7 @@ export class Composer {
     this.autoResize();
     this.updateHighlight();
     this.updateScheduleBtnState();
+    this.scopeWarn.update(this.textarea?.value ?? "");
   }
 
   /** Chevron is disabled while read-only or the draft (text + attachments +
@@ -623,6 +649,23 @@ export class Composer {
       this.clearComposer();
       this.sending = false;
       return;
+    }
+
+    // A leading /skill scoped to other projects: enable it here (restarting
+    // the chat) before sending, or `claude` refuses it. Never mid-turn, since
+    // the restart would cut the running turn off.
+    const skipScope = this.skipScopeOnce;
+    this.skipScopeOnce = false;
+    const offHere = text && !skipScope ? this.scopeWarn.needsEnable(text) : null;
+    if (offHere) {
+      if (this.opts.isBusy?.()) {
+        this.showNotice("Enabling a skill restarts the chat, so send it once this turn finishes.");
+        return;
+      }
+      this.sending = true;
+      const ok = await this.scopeWarn.enable(offHere);
+      this.sending = false;
+      if (!ok) return;
     }
 
     // Every branch below clears the box, and several can end without the text

@@ -30,22 +30,39 @@ export class SlashProvider implements SuggestProvider<SlashEntry> {
     return /(^|\s)\/[^\s]*$/.test(textBefore);
   }
 
+  /** The last fetched list, off-here and menu-hidden entries included. */
+  entries(): readonly SlashEntry[] {
+    return this.cache;
+  }
+
+  async refresh(): Promise<void> {
+    await this.refetch();
+  }
+
   query(token: string): SlashEntry[] {
     // The list depends on the project's PLAN.md too (/pickup only shows while
     // it has something to pick), which no watcher reports, so each fresh "/"
     // re-reads it; the keystrokes after it see the result.
     if (token === "/") void this.refetch();
-    return match(this.cache.filter((e) => !e.menu_hidden), token.slice(1));
+    const hits = match(this.cache.filter((e) => !e.menu_hidden), token.slice(1));
+    // Skills scoped to other projects stay findable, after everything usable.
+    return [...hits.filter((e) => !e.off_here), ...hits.filter((e) => e.off_here)];
   }
 
   renderRow(e: SlashEntry, selected: boolean): HTMLElement {
     const row = document.createElement("div");
-    row.className = selected ? "row selected" : "row";
+    row.className = [selected ? "row selected" : "row", e.off_here ? "off-here" : ""].join(" ").trim();
 
     const head = document.createElement("div");
     head.className = "head";
     const fullName = slashEntryQualifiedName(e) ?? e.name;
     head.textContent = e.args ? `/${fullName} ${e.args}` : `/${fullName}`;
+    if (e.off_here) {
+      const tag = document.createElement("span");
+      tag.className = "off-here-tag";
+      tag.textContent = "off in this project";
+      head.appendChild(tag);
+    }
 
     const meta = document.createElement("div");
     meta.className = "meta";

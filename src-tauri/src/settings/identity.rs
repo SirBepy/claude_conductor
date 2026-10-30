@@ -165,6 +165,12 @@ pub fn resolve_project_tracker(
     resolve_project_setting(projects, path, |p| p.tracker.clone())
 }
 
+/// The Conductor project id owning `path`, own project first, then the parent
+/// repo of an unbound worktree.
+pub fn resolve_project_id(projects: &[crate::types::ProjectConfig], path: &std::path::Path) -> Option<String> {
+    resolve_project_setting(projects, path, |p| Some(p.id.clone()))
+}
+
 fn resolve_project_setting<T>(
     projects: &[crate::types::ProjectConfig],
     path: &std::path::Path,

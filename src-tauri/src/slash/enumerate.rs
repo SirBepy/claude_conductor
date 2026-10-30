@@ -14,8 +14,16 @@ pub fn scan_all(project_dir: Option<&Path>) -> Vec<SlashEntry> {
 /// it to pick up. It stays in the list, so the chat still highlights a
 /// `/pickup` mention and /help still lists it; only the popup leaves it out.
 /// With no project there is no PLAN.md to judge by, so nothing is marked.
-pub fn scan_menu(project_dir: Option<&Path>) -> Vec<SlashEntry> {
-    let entries = scan_all(project_dir);
+/// Also marks per-project skill scopes (`scope::mark_entries`) from `settings`.
+pub fn scan_menu(project_dir: Option<&Path>, settings: &crate::types::Settings) -> Vec<SlashEntry> {
+    let mut entries = scan_all(project_dir);
+    let project = super::scope::project_id(settings, project_dir);
+    super::scope::mark_entries(
+        &mut entries,
+        &super::scope::scopes(settings),
+        project.as_deref(),
+        &super::scope::user_enabled_plugins(),
+    );
     match project_dir {
         Some(dir) => hide_idle_pickup(entries, &crate::project_dashboard::todo_stats::todos_dir(dir)),
         None => entries,
@@ -82,6 +90,8 @@ fn scan_commands(dir: &Path, src: &SlashSource, out: &mut Vec<SlashEntry>) {
             source: src.clone(),
             path: Some(p.to_string_lossy().into_owned()),
             menu_hidden: false,
+            scope_key: None,
+            off_here: false,
         });
     }
 }
@@ -103,6 +113,9 @@ fn scan_skills(dir: &Path, src: &SlashSource, out: &mut Vec<SlashEntry>) {
         else {
             continue;
         };
+        // Only user skills scope by name; a plugin's whole set gets the
+        // plugin's key in `scan_plugins`, and project skills are already local.
+        let scope_key = matches!(src, SlashSource::UserSkill).then(|| name.clone());
         out.push(SlashEntry {
             name,
             args: extract_args(&body),
@@ -110,6 +123,8 @@ fn scan_skills(dir: &Path, src: &SlashSource, out: &mut Vec<SlashEntry>) {
             source: src.clone(),
             path: Some(skill_file.to_string_lossy().into_owned()),
             menu_hidden: false,
+            scope_key,
+            off_here: false,
         });
     }
 }
@@ -140,8 +155,15 @@ fn scan_plugins(dir: &Path, out: &mut Vec<SlashEntry>) {
             version_dirs.sort_by_key(|e| e.file_name());
             if let Some(latest) = version_dirs.last() {
                 let vp = latest.path();
+                let first = out.len();
                 scan_skills(&vp.join("skills"), &skill_src, out);
                 scan_commands(&vp.join("commands"), &cmd_src, out);
+                // The cache's publisher dir is the marketplace name, so this is
+                // the plugin's `enabledPlugins` key.
+                let key = format!("{plugin_name}@{}", pub_ent.file_name().to_string_lossy());
+                for e in &mut out[first..] {
+                    e.scope_key = Some(key.clone());
+                }
             }
         }
     }
@@ -153,4 +175,35 @@ fn first_nonempty_line(s: &str) -> String {
         .find(|l| !l.is_empty())
         .unwrap_or("")
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn skill(dir: &Path, name: &str) {
+        let d = dir.join(name);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("SKILL.md"), format!("---
+name: {name}
+description: d
+---
+")).unwrap();
+    }
+
+    #[test]
+    fn scope_keys_are_the_skill_name_or_the_plugins_enabled_plugins_key() {
+        let home = tempfile::tempdir().unwrap();
+        skill(&home.path().join("skills"), "figma-tiles");
+        skill(&home.path().join("plugins/cache/claude-plugins-official/figma/2.0.0/skills"), "figma-use");
+        let project = tempfile::tempdir().unwrap();
+        skill(&project.path().join(".claude/skills"), "local-only");
+
+        let entries = scan_dirs(home.path(), &[project.path()]);
+        let key = |n: &str| entries.iter().find(|e| e.name == n).unwrap().scope_key.clone();
+        assert_eq!(key("figma-tiles").as_deref(), Some("figma-tiles"));
+        assert_eq!(key("figma-use").as_deref(), Some("figma@claude-plugins-official"));
+        assert_eq!(key("local-only"), None);
+        assert_eq!(key("help"), None);
+    }
 }

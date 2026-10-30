@@ -135,7 +135,11 @@ pub async fn spawn_session(
     let settings = state.settings.snapshot();
     let (browser, browser_script) = (settings.claude_browser_enabled(), settings.claude_browser_script_tool());
     let mcp_config_path = write_mcp_config(&turn_id, &session_id, is_jarvis, browser, browser_script, connectors);
-    let hook_settings_path = write_hook_settings(&turn_id, &session_id);
+    let skills = {
+        let project = crate::slash::scope::project_id(&settings, Some(&params.cwd));
+        crate::slash::scope::chat_settings(&crate::slash::scope::scopes(&settings), project.as_deref())
+    };
+    let hook_settings_path = write_hook_settings(&turn_id, &session_id, skills);
 
     let claude = crate::util::claude_bin::resolve()
         .map_err(|e| LifecycleError::ClaudeNotFound(e.to_string()))?;

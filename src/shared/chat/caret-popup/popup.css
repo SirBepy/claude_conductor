@@ -61,6 +61,17 @@
     border-bottom: none;
   }
 }
+/* A skill scoped to other projects: still listed, dimmed (slash.ts sorts it last). */
+.caret-popup .row.off-here .head,
+.caret-popup .row.off-here .meta {
+  opacity: 0.5;
+}
+.caret-popup .off-here-tag {
+  font-family: inherit;
+  font-size: 0.8em;
+  margin-left: 8px;
+  color: var(--sb-muted);
+}
 /* Only project-local kinds render a badge (see SlashProvider.renderRow). */
 .caret-popup .badge.project-skill,
 .caret-popup .badge.project-command { background: #7cb6ff; }

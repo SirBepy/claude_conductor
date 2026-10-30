@@ -82,4 +82,8 @@ pub struct InstalledSkill {
     pub plugin: Option<String>,
     /// Project basename when sourced from a project's `.claude/skills/`, else None.
     pub project: Option<String>,
+    /// The key its per-project scope is stored under (`slash::scope`): the
+    /// skill's name, or the whole plugin's `<plugin>@<marketplace>`. `None`
+    /// for project skills, which are already local to one project.
+    pub scope_key: Option<String>,
 }

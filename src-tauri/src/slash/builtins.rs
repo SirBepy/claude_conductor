@@ -19,5 +19,7 @@ fn e(name: &str, args: Option<&str>, desc: &str) -> SlashEntry {
         source: SlashSource::Builtin,
         path: None,
         menu_hidden: false,
+        scope_key: None,
+        off_here: false,
     }
 }

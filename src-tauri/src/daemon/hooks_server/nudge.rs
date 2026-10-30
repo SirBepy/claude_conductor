@@ -516,6 +516,8 @@ mod tests {
             source: SlashSource::UserSkill,
             path: Some("/home/u/.claude/skills/close/SKILL.md".to_string()),
             menu_hidden: false,
+            scope_key: None,
+            off_here: false,
         };
         let block = crate::slash::mentions::build_block("do /close now", std::slice::from_ref(&entry))
             .expect("the fixture entry matches the mentioned command");

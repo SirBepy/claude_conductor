@@ -40,7 +40,14 @@ use std::path::PathBuf;
 /// is the precise "is this actually `commit`" check once inside the daemon,
 /// since `if`'s prefix matching alone can't safely narrow past the `-C <path>`
 /// form. The 2-minute poll budget only ever applies to an actual `git commit`.
-pub(crate) fn write_hook_settings(turn_id: &str, tracking_id: &str) -> Option<PathBuf> {
+///
+/// `skills` holds this chat's per-project `skillOverrides` / `enabledPlugins`
+/// (`slash::scope::chat_settings`), merged in beside `hooks`.
+pub(crate) fn write_hook_settings(
+    turn_id: &str,
+    tracking_id: &str,
+    skills: serde_json::Map<String, serde_json::Value>,
+) -> Option<PathBuf> {
     let dir = crate::settings::paths::mcp_temp_dir().ok()?;
     // Both --max-time AND the hook's `timeout` field MUST out-wait the daemon's
     // prompt window (hooks_server::permission::PROMPT_TIMEOUT = 3600s). The server
@@ -97,7 +104,7 @@ pub(crate) fn write_hook_settings(turn_id: &str, tracking_id: &str) -> Option<Pa
         daemon_hook_port(),
         tracking_id
     );
-    let config = serde_json::json!({
+    let mut config = serde_json::json!({
         "hooks": {
             "UserPromptSubmit": [
                 {
@@ -147,6 +154,9 @@ pub(crate) fn write_hook_settings(turn_id: &str, tracking_id: &str) -> Option<Pa
             ]
         }
     });
+    if let Some(obj) = config.as_object_mut() {
+        obj.extend(skills);
+    }
     let path = dir.join(format!("{turn_id}.settings.json"));
     let body = serde_json::to_string(&config).ok()?;
     // Same atomicity rationale as mcp_config.rs's write_mcp_config_inner: this
@@ -164,4 +174,23 @@ pub(crate) fn daemon_hook_port() -> u16 {
     let suffix = crate::daemon::instance::instance_suffix();
     crate::settings::paths::read_hook_port(&suffix)
         .unwrap_or(crate::daemon::hooks_server::HOOK_PORT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The per-project skill scope rides in the same file as the hooks, so a
+    // chat in a project without the skill really starts without it.
+    #[test]
+    fn skill_scope_keys_sit_beside_the_hooks() {
+        let mut skills = serde_json::Map::new();
+        skills.insert("skillOverrides".into(), serde_json::json!({ "figma-tiles": "off" }));
+        let turn = format!("hook-settings-test-{}", std::process::id());
+        let path = write_hook_settings(&turn, "tracking", skills).expect("settings file written");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(v["skillOverrides"]["figma-tiles"], "off");
+        assert!(v["hooks"]["UserPromptSubmit"].is_array());
+    }
 }

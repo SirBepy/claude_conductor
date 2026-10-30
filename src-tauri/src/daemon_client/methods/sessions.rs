@@ -217,6 +217,13 @@ impl PersistentClient {
         Ok(res.get("restarted").and_then(Value::as_bool).unwrap_or(false))
     }
 
+    /// Kills and resumes the session's live process so a launch-only setting
+    /// (its per-chat skill scopes) applies now. False when nothing was live.
+    pub async fn restart_session_process(&self, session_id: &str) -> Result<bool, ClientError> {
+        let res = self.call("restart_session_process", json!({"session_id": session_id})).await?;
+        Ok(res.get("restarted").and_then(Value::as_bool).unwrap_or(false))
+    }
+
     pub async fn set_auto_accept(&self, session_id: &str, value: bool) -> Result<(), ClientError> {
         self.call("set_auto_accept", json!({"session_id": session_id, "value": value})).await?;
         Ok(())

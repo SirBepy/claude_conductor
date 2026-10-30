@@ -212,6 +212,8 @@ mod tests {
             source: SlashSource::UserSkill,
             path: Some(format!("/home/u/.claude/skills/{name}/SKILL.md")),
             menu_hidden: false,
+            scope_key: None,
+            off_here: false,
         }
     }
 
