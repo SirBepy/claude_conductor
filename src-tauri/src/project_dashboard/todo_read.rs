@@ -2,6 +2,7 @@
 //! cheap head parse the list needs, the full section split the reader needs,
 //! and the listing that joins both with PLAN.md placement and live claims.
 
+use super::md_scan::fenced_lines;
 use super::plan_edit::{read_plan_doc, Placement};
 use super::todo_ids::{find_todo_file, parse_file_name, TodoKey};
 use super::todo_stats::{live_claim_keys, todos_dir};
@@ -63,20 +64,15 @@ fn comment_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
 pub fn parse_head(text: &str, fallback_title: &str) -> Head {
     let mut head = Head::default();
     let mut title: Option<String> = None;
-    let mut in_fence = false;
     let mut seen_section = false;
     let mut in_goal = false;
     let mut goal = String::new();
     let mut goal_done = false;
-    for line in text.lines() {
-        let line = line.trim_end();
-        if line.trim_start().starts_with("```") {
-            in_fence = !in_fence;
-            continue;
-        }
+    for (line, in_fence) in fenced_lines(text.lines()) {
         if in_fence {
             continue;
         }
+        let line = line.trim_end();
         let trimmed = line.trim();
         if trimmed.starts_with("<!--") && trimmed.contains("cleanup:") && head.complexity.is_none() && head.worth.is_none() {
             head.complexity = comment_value(trimmed, "complexity").map(str::to_string);
@@ -148,13 +144,9 @@ pub fn read_head(path: &Path) -> Option<Head> {
 /// A line that held only a comment is dropped whole.
 pub fn strip_html_comments(text: &str) -> String {
     let mut out = String::new();
-    let mut in_fence = false;
     let mut in_comment = false;
-    for line in text.lines() {
-        if !in_comment && line.trim_start().starts_with("```") {
-            in_fence = !in_fence;
-        }
-        if in_fence || line.trim_start().starts_with("```") {
+    for (line, in_fence) in fenced_lines(text.lines()) {
+        if in_fence {
             out.push_str(line);
             out.push('\n');
             continue;
@@ -200,11 +192,7 @@ pub fn strip_html_comments(text: &str) -> String {
 pub fn parse_sections(text: &str) -> (Option<String>, Vec<AiTodoSection>) {
     let clean = strip_html_comments(text);
     let mut sections: Vec<(String, Vec<&str>)> = Vec::new();
-    let mut in_fence = false;
-    for line in clean.lines() {
-        if line.trim_start().starts_with("```") {
-            in_fence = !in_fence;
-        }
+    for (line, in_fence) in fenced_lines(clean.lines()) {
         match line.strip_prefix("## ").filter(|_| !in_fence) {
             Some(h) => sections.push((h.trim().to_string(), Vec::new())),
             None => {

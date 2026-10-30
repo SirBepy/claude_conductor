@@ -1,6 +1,8 @@
 //! Reads a repo's `.claude/todos/PLAN.md` (the ordered pull-next lane) into the
 //! dashboard's "Next up" rows. Pure: the caller hands over the file text.
 
+use super::md_scan::{checkbox, fenced_lines};
+use super::plan_edit::LineDoc;
 use super::snapshot_types::PlanItem;
 
 /// Rows kept per repo, and again for a group's merged list. A plan is a
@@ -18,13 +20,15 @@ pub fn parse_plan(text: &str, repo_cwd: &str) -> Vec<PlanItem> {
     let mut out = Vec::new();
     let mut section = String::new();
     let mut priority = false;
-    for line in text.lines() {
-        if let Some(heading) = line.strip_prefix("##") {
-            // `###` and deeper are sub-headings of the same lane section.
-            if !heading.starts_with('#') {
-                section = heading.trim().to_string();
-                priority = section.to_lowercase().contains("priorities");
-            }
+    for (line, in_fence) in fenced_lines(text.lines()) {
+        if in_fence {
+            continue;
+        }
+        // `###` and deeper are sub-headings of the same lane section. The
+        // Backlog panel takes its groups from the same `heading_title`.
+        if let Some(title) = LineDoc::heading_title(line) {
+            section = title.to_string();
+            priority = section.to_lowercase().contains("priorities");
             continue;
         }
         let Some(rest) = open_item(line) else { continue };
@@ -62,11 +66,7 @@ pub fn rank(items: &mut Vec<PlanItem>) {
 /// The text after `- [ ] ` for an unchecked top-level item. Indented lines are
 /// notes under an item, not lane entries.
 fn open_item(line: &str) -> Option<&str> {
-    let rest = line.strip_prefix("- [ ]").or_else(|| line.strip_prefix("* [ ]"))?;
-    if !rest.starts_with(' ') {
-        return None;
-    }
-    Some(rest.trim())
+    checkbox(line).filter(|c| c.open).map(|c| c.rest)
 }
 
 /// Longest id token before ` - `: `mac2-10000` is 10, and a ticket-style id
@@ -141,7 +141,9 @@ pub fn has_pickable(todos_dir: &std::path::Path) -> bool {
     let Ok(text) = std::fs::read_to_string(todos_dir.join("PLAN.md")) else { return false };
     let files = super::todo_ids::list_todo_files(todos_dir);
     let live = super::todo_stats::live_claim_keys(todos_dir);
-    text.lines().filter_map(open_item).any(|rest| match split_id(rest) {
+    let open_lines = fenced_lines(text.lines()).filter(|(_, in_fence)| !in_fence).map(|(line, _)| line);
+    let mut rests = open_lines.filter_map(open_item);
+    rests.any(|rest| match split_id(rest) {
         (None, "") => false,
         (None, _) => true,
         (Some(id), _) => {
@@ -400,6 +402,37 @@ mod tests {
         let items = parse_plan(md, REPO);
         assert_eq!(items[0].section, "Priorities");
         assert!(items[0].priority);
+    }
+
+    /// A `## ` or `- [ ]` line inside a code fence is plain text, so the
+    /// dashboard Next up rows and the Backlog panel agree on every group.
+    #[test]
+    fn a_fenced_heading_gives_the_same_groups_in_the_dashboard_and_the_backlog() {
+        let dir = tempfile::tempdir().unwrap();
+        let todos = dir.path().join(".claude").join("todos");
+        std::fs::create_dir_all(&todos).unwrap();
+        std::fs::write(
+            todos.join("PLAN.md"),
+            "## Real\n```\n## Fake\n- [ ] pc-0009 - in a fence\n```\n- [ ] pc-0001 - after the fence\n",
+        )
+        .unwrap();
+        std::fs::write(todos.join("pc-0001-after.md"), "# After\n").unwrap();
+        std::fs::write(todos.join("pc-0009-fenced.md"), "# Fenced\n").unwrap();
+
+        let items = read_plan(&dir.path().to_string_lossy());
+        let backlog = super::super::todo_read::list_backlog(&todos);
+
+        assert_eq!(items.len(), 1, "the fenced item is not a lane entry");
+        assert_eq!(items[0].section, "Real");
+        assert_eq!(backlog.groups, ["Real"]);
+        let placed: Vec<(&str, Option<&str>)> = backlog.todos.iter().map(|t| (t.id.as_str(), t.group.as_deref())).collect();
+        assert_eq!(placed, [("pc-0001", Some("Real")), ("pc-0009", None)]);
+    }
+
+    #[test]
+    fn a_checkbox_inside_a_code_fence_is_not_pickable() {
+        let dir = todos_dir("## A\n```\n- [ ] just an example\n```\n", &[]);
+        assert!(!has_pickable(dir.path()));
     }
 
     #[test]
