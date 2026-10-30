@@ -43,6 +43,22 @@ describe("drill chips", () => {
     expect(document.querySelector(".drill-pop")).toBeNull();
   });
 
+  it("opens the card inside its own bubble, one at a time, closed by its button or Esc", () => {
+    const root = mount(bubble("a [t](#d:ign)", DETAILS), bubble("b [t](#d:ign)", undefined));
+    const [c1, c2] = root.querySelectorAll("button.drill-chip");
+    c1.click();
+    expect(c1.closest(".msg").querySelector(".drill-pop .drill-pop-title").textContent).toBe("23 ignored tickets");
+    c2.click();
+    expect(document.querySelectorAll(".drill-pop").length).toBe(1);
+    expect(c2.closest(".msg").querySelector(".drill-pop")).not.toBeNull();
+    expect(c1.getAttribute("aria-expanded")).toBe("false");
+    document.querySelector(".drill-pop-close").click();
+    expect(document.querySelector(".drill-pop")).toBeNull();
+    c1.click();
+    document.querySelector(".drill-pop").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.querySelector(".drill-pop")).toBeNull();
+  });
+
   it("resolves an id defined by an earlier message, not a later one", () => {
     const root = mount(
       bubble("[tickets](#d:ign)", [{ id: "ign", label: "old", body_md: "old body" }]),
