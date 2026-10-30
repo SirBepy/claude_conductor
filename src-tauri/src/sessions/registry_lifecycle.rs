@@ -1,7 +1,7 @@
 //! Registration and mutation methods split out of `registry.rs` (todo 801):
 //! `register`, `record_interactive_session`, `upsert_interactive`,
 //! `externalize_session`, `mark_ended`, `set_bridge_session_id`, `set_pid`,
-//! `set_kind`, `retag_pid_as_automated`, `set_name`, `prune_ended_keeping_newest`.
+//! `set_name`, `prune_ended_keeping_newest`.
 
 use super::kinds::InstanceKind;
 use super::registry::{RegisterInput, Registry};
@@ -241,34 +241,6 @@ impl Registry {
         true
     }
 
-    /// Upgrade a session's kind. Only flips `External` -> the given kind so we
-    /// never clobber an `Interactive`/`Automated` entry. Returns true if changed.
-    pub fn set_kind(&self, session_id: &str, kind: InstanceKind, is_remote: bool) -> bool {
-        let mut guard = self.inner.lock().unwrap();
-        let Some(i) = guard.get_mut(session_id) else { return false };
-        if i.kind != InstanceKind::External { return false; }
-        if i.kind == kind && i.is_remote == is_remote { return false; }
-        i.kind = kind;
-        i.is_remote = is_remote;
-        true
-    }
-
-    /// Upgrade every `External` instance whose pid matches `pid` to
-    /// `Automated` + remote, once the channel lifecycle resolves the real
-    /// `claude` pid (closes the spawn-vs-hook race). Returns true if changed.
-    pub fn retag_pid_as_automated(&self, pid: u32) -> bool {
-        let mut guard = self.inner.lock().unwrap();
-        let mut changed = false;
-        for i in guard.values_mut() {
-            if i.pid == pid && i.kind == InstanceKind::External {
-                i.kind = InstanceKind::Automated;
-                i.is_remote = true;
-                changed = true;
-            }
-        }
-        changed
-    }
-
     /// Late-binding name update. Resolved from the transcript's first
     /// user prompt. Returns true if the name actually changed.
     pub fn set_name(&self, session_id: &str, name: String) -> bool {
@@ -329,34 +301,6 @@ mod tests {
         assert_eq!(entry.busy, false);
         assert_eq!(entry.pid, 0);
         assert_eq!(entry.project_id, project_id);
-    }
-
-    #[test]
-    fn retag_pid_as_automated_upgrades_only_external() {
-        let registry = Registry::new();
-        let settings = fresh_settings();
-        registry.register(
-            RegisterInput {
-                session_id: "chan-1".into(),
-                cwd: PathBuf::from("/tmp/z"),
-                pid: 4242,
-                kind: InstanceKind::External,
-                is_remote: false,
-                transcript_path: None,
-                started_at: "2026-05-20T00:00:00Z".into(),
-            },
-            &settings,
-            "2026-05-20T00:00:00Z",
-        );
-        // Matching pid upgrades External -> Automated + remote.
-        assert!(registry.retag_pid_as_automated(4242));
-        let e = registry.get("chan-1").unwrap();
-        assert_eq!(e.kind, InstanceKind::Automated);
-        assert!(e.is_remote);
-        // Idempotent: already Automated, not re-upgraded.
-        assert!(!registry.retag_pid_as_automated(4242));
-        // Non-matching pid: no change.
-        assert!(!registry.retag_pid_as_automated(9999));
     }
 
     #[test]
@@ -424,38 +368,6 @@ mod tests {
         assert_eq!(entry.kind, InstanceKind::Interactive);
         assert!(entry.ended_at.is_none());
         assert!(entry.end_reason.is_none());
-    }
-
-    #[test]
-    fn set_kind_upgrades_external_only() {
-        let registry = Registry::new();
-        let settings = fresh_settings();
-        // Register as External.
-        registry.register(
-            RegisterInput {
-                session_id: "ext-1".into(),
-                cwd: PathBuf::from("/tmp/ext"),
-                pid: 42,
-                kind: InstanceKind::External,
-                is_remote: false,
-                transcript_path: None,
-                started_at: "2026-05-20T10:00:00Z".into(),
-            },
-            &settings,
-            "2026-05-20T10:00:00Z",
-        );
-        assert_eq!(registry.get("ext-1").unwrap().kind, InstanceKind::External);
-
-        // First call: External -> Automated, returns true.
-        assert!(registry.set_kind("ext-1", InstanceKind::Automated, true));
-        let entry = registry.get("ext-1").unwrap();
-        assert_eq!(entry.kind, InstanceKind::Automated);
-        assert_eq!(entry.is_remote, true);
-
-        // Second call: already Automated (not External), returns false.
-        assert!(!registry.set_kind("ext-1", InstanceKind::Automated, true));
-        // Kind must not have been downgraded.
-        assert_eq!(registry.get("ext-1").unwrap().kind, InstanceKind::Automated);
     }
 
     fn register_ended(registry: &Registry, settings: &Mutex<Settings>, id: &str, ended_at: &str) {
