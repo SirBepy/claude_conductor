@@ -164,6 +164,8 @@ export function handleCopyClick(e: MouseEvent): void {
       // browser capture, which WebView2 has been dropping to plain-text-only.
       const clone = msg.cloneNode(true) as HTMLElement;
       clone.querySelector(".msg-copy-btn")?.remove();
+      // An open detail card lives inside the bubble but is not the message.
+      clone.querySelector(".drill-pop")?.remove();
       const html = clone.innerHTML;
       const plain = clone.textContent ?? "";
 

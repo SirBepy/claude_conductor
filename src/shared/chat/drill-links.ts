@@ -1,14 +1,14 @@
 // Terse-but-drillable replies: a send_message text links `[23 tickets](#d:ids)`
 // and attaches `details: [{id, label, body_md}]`. The link becomes a quiet chip
-// whose click opens the body in an anchored popover. A message that links an id
-// it does not define resolves to the newest EARLIER definition in the chat, read
-// straight from the rendered DOM (`data-details` on each defining bubble), so
-// there is no second store to keep in sync across reload and history paging.
-// The phone reuses the same popover: no generic bottom-sheet exists to share
-// (permission-modal's drag-handle sheet is specific to that modal).
+// whose click opens the body in a fixed-size card just above the message. A
+// message that links an id it does not define resolves to the newest EARLIER
+// definition in the chat, read straight from the rendered DOM (`data-details`
+// on each defining bubble), so there is no second store to keep in sync across
+// reload and history paging. The phone reuses the same card: no generic
+// bottom-sheet exists to share (permission-modal's drag-handle sheet is
+// specific to that modal).
 
 import type { ChatDetail } from "./chat-details";
-import { openAnchoredPopover, type AnchoredPopoverHandle } from "./anchored-popover";
 import { renderTextBlock } from "./chat-transforms";
 
 const parsed = new WeakMap<Element, ChatDetail[]>();
@@ -73,35 +73,82 @@ export function linkifyDrillRefs(root: HTMLElement, container: ParentNode = root
   }
 }
 
-let open: { chip: HTMLElement; handle: AnchoredPopoverHandle } | null = null;
+const CARD_W = 560;
+const CARD_H = 340;
+const CARD_GAP = 8;
+const CARD_EDGE = 8;
 
-function openDrill(chip: HTMLElement, detail: ChatDetail): void {
-  const wasOpen = open?.chip === chip;
-  open?.handle.close();
-  if (wasOpen) return;
-  const pop = document.createElement("div");
-  pop.className = "drill-pop";
-  pop.setAttribute("role", "dialog");
-  pop.setAttribute("aria-label", detail.label);
-  pop.innerHTML = `<div class="drill-pop-title"></div>${renderTextBlock(detail.body_md)}`;
-  pop.querySelector(".drill-pop-title")!.textContent = detail.label;
+let open: { chip: HTMLElement; card: HTMLElement; close: () => void } | null = null;
+
+/** Sizes the card (fixed height, so every detail has the same shape) and puts
+ *  it directly above its message, left-aligned with it but kept inside the
+ *  scroller. When the message has less than a card of content above it (the
+ *  very top of the chat) it opens below instead. Then scrolls the chat so the
+ *  whole card is on screen. */
+function placeCard(card: HTMLElement, msg: HTMLElement, host: HTMLElement): void {
+  const hr = host.getBoundingClientRect();
+  const mr = msg.getBoundingClientRect();
+  const w = Math.min(CARD_W, hr.width - 2 * CARD_EDGE);
+  const h = Math.min(CARD_H, host.clientHeight - 2 * CARD_EDGE);
+  card.style.width = `${w}px`;
+  card.style.height = `${h}px`;
+  const left = Math.min(Math.max(mr.left, hr.left + CARD_EDGE), hr.right - CARD_EDGE - w);
+  card.style.left = `${left - mr.left}px`;
+
+  const msgTopInContent = mr.top - hr.top + host.scrollTop;
+  const below = msgTopInContent < h + CARD_GAP;
+  card.classList.toggle("below", below);
+  const cr = card.getBoundingClientRect();
+  const deficit = below ? cr.bottom - (hr.bottom - CARD_EDGE) : hr.top + CARD_EDGE - cr.top;
+  if (deficit > 0) host.scrollTop += below ? deficit : -deficit;
+}
+
+function openDrill(chip: HTMLElement, detail: ChatDetail, host: HTMLElement): void {
+  const wasOpen = open?.chip === chip && open.card.isConnected;
+  open?.close();
+  const msg = chip.closest<HTMLElement>(".msg");
+  if (wasOpen || !msg) return;
+  const card = document.createElement("div");
+  card.className = "drill-pop";
+  card.tabIndex = -1;
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-label", detail.label);
+  card.innerHTML =
+    `<div class="drill-pop-head"><span class="drill-pop-title"></span>` +
+    `<button type="button" class="drill-pop-close" aria-label="Close"><i class="ph ph-x"></i></button></div>` +
+    `<div class="drill-pop-body">${renderTextBlock(detail.body_md)}</div>`;
+  card.querySelector(".drill-pop-title")!.textContent = detail.label;
+  // Esc is scoped to the card (and the chip that opened it) so it never fights
+  // the composer's own Esc handling while the user is typing.
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key !== "Escape") return;
+    e.stopPropagation();
+    close();
+    chip.focus({ preventScroll: true });
+  };
+  const close = (): void => {
+    card.remove();
+    chip.removeEventListener("keydown", onKey);
+    chip.setAttribute("aria-expanded", "false");
+    if (open?.card === card) open = null;
+  };
+  card.querySelector(".drill-pop-close")!.addEventListener("click", () => {
+    close();
+    chip.focus({ preventScroll: true });
+  });
+  card.addEventListener("keydown", onKey);
+  chip.addEventListener("keydown", onKey);
   // Links inside a detail body must not navigate the app away either.
-  pop.addEventListener("click", (e) => {
+  card.addEventListener("click", (e) => {
     if ((e.target as Element).closest('a[href^="#"]')) e.preventDefault();
   });
-  document.body.appendChild(pop);
+  // Child of the bubble, so it scrolls with the message and vanishes with it
+  // when the bubble re-renders; the chat's own child list stays untouched.
+  msg.appendChild(card);
   chip.setAttribute("aria-expanded", "true");
-  const handle = openAnchoredPopover({
-    anchor: chip,
-    el: pop,
-    onClose: () => {
-      pop.remove();
-      chip.setAttribute("aria-expanded", "false");
-      if (open?.handle === handle) open = null;
-    },
-  });
-  open = { chip, handle };
-  handle.reposition();
+  open = { chip, card, close };
+  placeCard(card, msg, host);
+  card.focus({ preventScroll: true });
 }
 
 const chipOf = (e: Event) => (e.target as Element | null)?.closest<HTMLElement>(".drill-chip") ?? null;
@@ -111,7 +158,7 @@ export function handleDrillClick(e: MouseEvent): void {
   const detail = chip && chipDetail.get(chip);
   if (!chip || !detail) return;
   e.preventDefault();
-  openDrill(chip, detail);
+  openDrill(chip, detail, e.currentTarget as HTMLElement);
 }
 
 // A <button> opens on Enter/Space through its native click, so no keydown

@@ -190,14 +190,18 @@
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
-/* Body-appended, so not scoped under .msg. Above the floating question card. */
+/* The detail card (drill-links.ts) is a child of the bubble it drills out of:
+   it sits directly above it, scrolls with it and goes when the bubble does.
+   width/height/left are set from JS (clamped to the chat pane); the height is
+   fixed so every detail has the same shape, the body scrolls inside it. */
 .drill-pop {
-  position: fixed;
-  z-index: 1001;
-  width: min(340px, calc(100vw - 16px));
-  max-height: 50vh;
-  overflow-y: auto;
-  padding: 10px 12px;
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 10px;
@@ -207,18 +211,57 @@
   font-size: 0.88rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
+  outline: none;
+}
+/* No room above (top of the chat): opens under the message instead. */
+.drill-pop.below {
+  bottom: auto;
+  top: calc(100% + 8px);
 }
 /* A code span that wraps keeps its pill edges on every line. */
 .drill-pop :not(pre) > code {
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
+.drill-pop-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-alt, var(--color-surface));
+}
 .drill-pop-title {
+  flex: 1;
+  min-width: 0;
   font-size: 0.78em;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-text-muted);
-  margin-bottom: 6px;
+}
+.drill-pop-close {
+  appearance: none;
+  display: inline-flex;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  padding: 3px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.drill-pop-close:hover {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+.drill-pop-close:focus-visible {
+  outline: 2px solid var(--color-primary);
+}
+.drill-pop-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px 14px;
 }
 
 /* Hover card for a ticket link (ticket-refs.ts). Body-appended, so not
