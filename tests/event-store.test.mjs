@@ -342,6 +342,25 @@ describe("SessionEventStore pagination", () => {
     expect(seen.map((e) => e.content[0].text)).toEqual(["u2", "a2 recovered"]);
   });
 
+  // Image-only messages share one dedup sig, so the tail page is compared with
+  // the cache's attachments over that same window, not over every loaded page.
+  it("reconcileLatest recovers a dropped image even when an older loaded page holds an image too", async () => {
+    const sid = "sess-reconcile-older-image";
+    const image = () => ({ type: "user_message", content: [{ type: "image", mime: "image/png", data: "iVBORw0KGgo=" }], timestamp: 0 });
+    routeHistoryPage(
+      sid,
+      { events: [userEvent("u1", 0), assistantEvent("a1", 0)], oldest_seq: 4, newest_seq: 5, has_more: true },
+      { events: [image(), userEvent("u0", 0), assistantEvent("a0", 0)], oldest_seq: 0, newest_seq: 3, has_more: false },
+      // The authoritative tail: the same two messages plus the image the live channel dropped.
+      { events: [userEvent("u1", 0), assistantEvent("a1", 0), image()], oldest_seq: 4, newest_seq: 6, has_more: true },
+    );
+    await sessionEvents.loadInitial(sid);
+    await sessionEvents.loadOlder(sid);
+    await sessionEvents.reconcileLatest(sid);
+    const images = sessionEvents.events(sid).filter((e) => e.type === "user_message" && e.content.some((b) => b.type === "image"));
+    expect(images).toHaveLength(2);
+  });
+
   it("reconcileLatest is a no-op when the cache already has the latest turn", async () => {
     const sid = "sess-reconcile-noop";
     // Transcript matches the cache exactly: nothing to recover.

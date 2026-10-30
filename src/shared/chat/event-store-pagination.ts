@@ -219,9 +219,22 @@ export class PaginationPolicy {
     // Image-only messages all share one sig, so presence in `have` says nothing
     // about a second one: the page's surplus over the cache's count is what is
     // missing (the page's latest ones, since the tail is what a drop loses).
-    const cachedAttachments = entry.events.filter((ev) => this.delivery.sigOf(ev) === ATTACHMENT_SIG).length;
-    const pageAttachments = page.events.filter((ev) => this.delivery.sigOf(ev) === ATTACHMENT_SIG).length;
-    let skipAttachments = Math.min(cachedAttachments, pageAttachments);
+    // Both counts cover the tail window only: the cache also holds older pages
+    // whose images the page never shows. The window starts at the page's first
+    // event that has its own sig (the earliest cache match, so a repeated sig
+    // widens the window back to the old cumulative count rather than narrowing
+    // it into a duplicate). Page images before that anchor are assumed cached.
+    const isAttachment = (ev: ChatEvent): boolean => this.delivery.sigOf(ev) === ATTACHMENT_SIG;
+    const anchorSig = page.events
+      .map((ev) => this.delivery.sigOf(ev))
+      .find((s): s is string => s !== null && s !== ATTACHMENT_SIG);
+    const anchorPage = anchorSig === undefined ? -1 : page.events.findIndex((ev) => this.delivery.sigOf(ev) === anchorSig);
+    const anchorCache = anchorSig === undefined ? -1 : entry.events.findIndex((ev) => this.delivery.sigOf(ev) === anchorSig);
+    const windowed = anchorPage >= 0 && anchorCache >= 0;
+    const cachedAttachments = entry.events.slice(windowed ? anchorCache : 0).filter(isAttachment).length;
+    const pageAttachments = page.events.slice(windowed ? anchorPage : 0).filter(isAttachment).length;
+    const leadingAttachments = windowed ? page.events.slice(0, anchorPage).filter(isAttachment).length : 0;
+    let skipAttachments = leadingAttachments + Math.min(cachedAttachments, pageAttachments);
     const missing = page.events.filter((ev) => {
       const s = this.delivery.sigOf(ev);
       if (s === ATTACHMENT_SIG) return skipAttachments-- <= 0;
