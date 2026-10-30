@@ -216,10 +216,10 @@ pub async fn fire_now(state: &Arc<DaemonState>, id: &str) {
 }
 
 /// Daemon-side notifier method name; snake_case to match every other
-/// notifier method (`instances_changed`, `channels_changed`, ...- see
+/// notifier method (`instances_changed`, ...- see
 /// `daemon_link::handle_daemon_notification`). The app-side Tauri event
 /// (`scheduled-items-changed`, hyphenated per the rest of that layer's
-/// `instances-changed` / `channels-changed` convention) is wired up where the
+/// `instances-changed` convention) is wired up where the
 /// schedule view consumes it (later phase); this only emits the daemon-side
 /// notification.
 fn notify_changed(state: &Arc<DaemonState>) {

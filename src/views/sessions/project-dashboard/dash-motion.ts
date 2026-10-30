@@ -37,6 +37,18 @@ export function entranceOrder(targets: HTMLElement[]): HTMLElement[] {
   });
 }
 
+/** The entrance fade: opacity plus a short rise, or opacity alone when motion
+ *  is reduced. `fill: backwards` keeps the element hidden through its own delay,
+ *  not just once it starts. */
+function fadeIn(el: HTMLElement, delay: number, reduced: boolean): void {
+  el.animate(
+    reduced
+      ? [{ opacity: 0 }, { opacity: 1 }]
+      : [{ opacity: 0, transform: `translateY(${RISE_PX}px)` }, { opacity: 1, transform: "none" }],
+    { duration: reduced ? REDUCED_MS : ENTER_MS, delay: reduced ? 0 : delay, easing: EASE_OUT, fill: "backwards" },
+  );
+}
+
 export interface Entrance {
   /** Brings in any section that appeared since the wave started. */
   catchUp(): void;
@@ -64,18 +76,7 @@ export function playEntrance(root: HTMLElement, chips: HTMLElement, now: () => n
   const played = new WeakSet<HTMLElement>();
   const play = (el: HTMLElement, delay: number): void => {
     played.add(el);
-    el.animate(
-      reduced
-        ? [{ opacity: 0 }, { opacity: 1 }]
-        : [{ opacity: 0, transform: `translateY(${RISE_PX}px)` }, { opacity: 1, transform: "none" }],
-      {
-        duration: reduced ? REDUCED_MS : ENTER_MS,
-        delay: reduced ? 0 : delay,
-        easing: EASE_OUT,
-        // Hidden through its own delay, not just once it starts.
-        fill: "backwards",
-      },
-    );
+    fadeIn(el, delay, reduced);
   };
   const slot = (i: number): number => Math.min(i * STEP_MS, MAX_DELAY_MS);
   const ordered = entranceOrder(sections(root, chips));
@@ -98,13 +99,7 @@ export function playEntrance(root: HTMLElement, chips: HTMLElement, now: () => n
  *  the wave's `tailDelay()`, or 0 where there is no wave. */
 export function playRailEntrance(rail: HTMLElement, delay: number): void {
   if (!canAnimate(rail)) return;
-  const reduced = reducedMotion();
-  rail.animate(
-    reduced
-      ? [{ opacity: 0 }, { opacity: 1 }]
-      : [{ opacity: 0, transform: `translateY(${RISE_PX}px)` }, { opacity: 1, transform: "none" }],
-    { duration: reduced ? REDUCED_MS : ENTER_MS, delay: reduced ? 0 : delay, easing: EASE_OUT, fill: "backwards" },
-  );
+  fadeIn(rail, delay, reducedMotion());
 }
 
 /** Copies where `live`'s still-running entrance has each section right now

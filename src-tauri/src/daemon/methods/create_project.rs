@@ -289,9 +289,8 @@ mod tests {
     }
 
     /// RED against the pre-fix deny-list, which stopped at `\ / : * ? " < > |`
-    /// and let a folder named e.g. `pwn&calc` through - that name becomes a
-    /// channel's `--remote-control-session-name-prefix`, so it must never
-    /// reach `cmd.exe` carrying a live command separator/operator.
+    /// and let a folder named e.g. `pwn&calc` through - a name carrying a
+    /// live cmd.exe command separator/operator must never be accepted.
     #[test]
     fn rejects_cmd_exe_operators() {
         for ch in ['&', '^', '%', '!', '(', ')'] {

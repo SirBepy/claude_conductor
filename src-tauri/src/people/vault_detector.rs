@@ -32,11 +32,6 @@ pub fn parse_entries(raw: &str) -> Result<Vec<Vault>> {
     Ok(out)
 }
 
-pub fn detect_entries() -> Result<Vec<Vault>> {
-    let Some(cfg) = dirs::config_dir() else { return Ok(vec![]) };
-    detect_entries_in(&cfg)
-}
-
 /// `cfg` is the platform config dir. On Windows `config_dir()` is
 /// %APPDATA%/Roaming, on macOS ~/Library/Application Support.
 pub fn detect_entries_in(cfg: &Path) -> Result<Vec<Vault>> {
@@ -52,10 +47,6 @@ pub fn detect_entries_in(cfg: &Path) -> Result<Vec<Vault>> {
         }
     }
     Ok(vec![])
-}
-
-pub fn detect() -> Result<Vec<PathBuf>> {
-    Ok(detect_entries()?.into_iter().map(|v| v.path).collect())
 }
 
 #[cfg(test)]

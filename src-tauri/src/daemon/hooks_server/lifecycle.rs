@@ -1,6 +1,6 @@
 //! Lifecycle endpoints: `/hooks/session-start` + `/hooks/session-end`. These
 //! populate / close registry entries and own the background enrichment that
-//! resolves pid, bridgeSessionId, channel-tagging, and session name.
+//! resolves pid, bridgeSessionId, and session name.
 
 use super::HookCtx;
 use crate::sessions::kinds::InstanceKind;
