@@ -12,7 +12,7 @@ import type { ChannelMessage } from "../../types/ipc.generated";
 /** How long a chat open waits on the skip-mark and channel-backlog fetches
  *  after the history page is in. Both answer in under 1ms on a healthy daemon
  *  (measured 2026-10-29), so this only ever fires on a stuck pipe. */
-export const SIDE_FETCH_GRACE_MS = 500;
+const SIDE_FETCH_GRACE_MS = 500;
 
 export type SideAnswer = [SkipMark[], ChannelMessage[] | undefined];
 

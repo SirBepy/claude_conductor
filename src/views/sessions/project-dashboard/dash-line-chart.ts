@@ -18,9 +18,9 @@ export interface LineSeries {
   endLabel?: boolean;
 }
 
-export type LineRow = { date: string } & Record<string, number | string>;
+type LineRow = { date: string } & Record<string, number | string>;
 
-export interface LineChartSpec {
+interface LineChartSpec {
   series: readonly LineSeries[];
   /** Oldest day first. */
   rows: LineRow[];
