@@ -48,8 +48,6 @@ const DELIBERATELY_UNHANDLED_SNAKE = {
 const DESKTOP_ONLY_KEBAB = {
   "settings-changed": "Tauri-only ev.listen; phone has no window.__TAURI__.",
   "daemon-status-changed": "Tauri-only ev.listen; phone has no window.__TAURI__.",
-  "news-updated": "Tauri-only ev.listen; phone has no window.__TAURI__.",
-  "news-notification": "Tauri-only ev.listen; phone has no window.__TAURI__.",
   "permission-requested": "Tauri-only ev.listen; delivered to the phone via the prompt poll instead.",
   "question-requested": "Tauri-only ev.listen; delivered to the phone via the prompt poll instead.",
   "secret-requested": "Tauri-only ev.listen; delivered to the phone via the prompt poll instead.",

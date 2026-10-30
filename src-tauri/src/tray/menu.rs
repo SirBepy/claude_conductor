@@ -38,7 +38,6 @@ pub fn setup(app: &AppHandle) -> Result<()> {
         .on_menu_event(|app, event| {
             log::info!("tray: menu event {:?}", event.id.as_ref());
             match event.id.as_ref() {
-                "open" => crate::ipc::open_dashboard(app.clone()),
                 "open-chats" => {
                     let h = app.clone();
                     tauri::async_runtime::spawn(async move {
@@ -285,8 +284,7 @@ fn build_menu(app: &AppHandle, settings: &Settings, update: &serde_json::Value) 
         )
         .build()?;
     let mut builder = MenuBuilder::new(app)
-        .item(&MenuItemBuilder::with_id("open", "Open Dashboard").build(app)?)
-        .item(&MenuItemBuilder::with_id("open-chats", "Open Chats").build(app)?)
+        .item(&MenuItemBuilder::with_id("open-chats", "Open Claude Conductor").build(app)?)
         .item(&MenuItemBuilder::with_id("open-jarvis", "Jarvis").build(app)?);
     // Hidden while a widget host draws our widget: that host owns the overlay
     // surface for as long as it stays connected.

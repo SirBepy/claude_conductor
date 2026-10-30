@@ -62,31 +62,6 @@ pub fn surface_main(w: &tauri::WebviewWindow) {
     let _ = w.set_focus();
 }
 
-/// Whether the main window's webview has actually finished its first
-/// navigation (see `AppState::main_window_loaded`). Fails open (`true`) if
-/// state isn't available, matching the existing `frontend_alive` fallback
-/// pattern below - state is only ever missing during early startup, before
-/// any window could exist to show.
-fn main_window_loaded(app: &AppHandle) -> bool {
-    app.try_state::<crate::state::AppState>()
-        .map(|s| s.main_window_loaded.load(Ordering::SeqCst))
-        .unwrap_or(true)
-}
-
-/// Show + focus `w` only if its webview has finished loading at least once.
-/// Guards every "window already exists" branch below: a `main` window that
-/// was just built (see `build_main_window`) exists as soon as `.build()`
-/// returns, well before its `ipc::ready` heartbeat gate fires. Calling
-/// `surface_main` unconditionally in that window would force a still-loading,
-/// unpainted webview visible - producing a blank white window that swallows
-/// input until the user notices and re-triggers a show (ai_todo-095 ghost
-/// dashboard bug). When not yet loaded, `ipc::ready::mark_ready` shows it once alive.
-fn surface_main_if_ready(app: &AppHandle, w: &tauri::WebviewWindow) {
-    if main_window_loaded(app) {
-        surface_main(w);
-    }
-}
-
 /// What closing a window does.
 #[derive(Debug, PartialEq)]
 enum ClosePolicy {
@@ -149,44 +124,36 @@ fn attach_hide_to_tray_with(
     });
 }
 
-/// Shared body for every `open_dashboard*` command below: surface `main` and
-/// emit `event`/`payload` to it if the webview is already alive, queue
-/// `pending` into `AppState.pending_main_nav` for `frontend_ready` to drain if
-/// it's still loading, or lazily build `main` with `pending` queued if it
-/// doesn't exist yet. Collapses the four near-identical surface-or-build
-/// blocks that used to be copy-pasted across these commands (ai_todo 311) -
-/// each one differed only in `event`/`payload`/`pending`. Does NOT change the
-/// `surface_main_if_ready` guard (ai_todo-095) or the `frontend_alive` /
-/// `pending_main_nav` cold-boot queue path (`frontend_ready` in `misc.rs`).
-fn surface_main_with_nav(
+/// Shared body for the `open_dashboard*` commands below. The Chats window is
+/// the app's one desktop window (Home, Schedule and Settings are screens inside
+/// it, reached from its rail), so every "open the dashboard" request surfaces
+/// it and routes it to `pending`. A live window gets `event`/`payload`; a window
+/// that must be built first gets `pending` stashed in `AppState.pending_main_nav`
+/// for its boot to drain through `take_pending_nav`, since a freshly built
+/// webview cannot reliably catch an event emitted before its listeners mount.
+fn surface_chats_with_nav(
     app: &AppHandle,
     event: &str,
     payload: impl serde::Serialize + Clone,
     pending: String,
 ) {
-    if let Some(w) = app.get_webview_window("main") {
-        surface_main_if_ready(app, &w);
-        let alive = app
-            .try_state::<crate::state::AppState>()
-            .map(|s| s.frontend_alive.load(Ordering::SeqCst))
-            .unwrap_or(true);
-        if alive {
-            let _ = w.emit(event, payload);
-        } else if let Some(state) = app.try_state::<crate::state::AppState>() {
-            // Webview is still loading; queue for frontend_ready to drain.
+    if app.get_webview_window("session-chats").is_some() {
+        let _ = chats::open_chats_window(app.clone());
+        let _ = app.emit_to("session-chats", event, payload);
+    } else {
+        if let Some(state) = app.try_state::<crate::state::AppState>() {
             *state.pending_main_nav.lock().unwrap() = Some(pending);
         }
-    } else {
-        // Not built yet (main is lazy - see build_main_window). Build it with
-        // the nav queued for frontend_ready to drain once the SPA mounts.
-        let _ = build_main_window(app, Some(&pending));
+        let _ = chats::open_chats_window(app.clone());
     }
 }
 
-// `(async)`: lazily builds `main` - see the module doc's deadlock rule.
+// `(async)`: can build `session-chats` - see the module doc's deadlock rule.
+/// Surfaces the app (the tray's "Open Claude Conductor" calls
+/// `open_chats_window` directly; this serves a second launch).
 #[tauri::command(async)]
 pub fn open_dashboard(app: AppHandle) {
-    surface_main_with_nav(&app, "navigate-to-dashboard", (), "dashboard".to_string());
+    let _ = chats::open_chats_window(app);
 }
 
 /// Surfaces the chats window on a project's dashboard page. Called from the
@@ -198,15 +165,14 @@ pub fn open_dashboard_project(app: AppHandle, cwd: String) -> Result<(), String>
     chats::open_chats_for_session(app, cwd, "project".to_string())
 }
 
-/// Surfaces the main dashboard window and tells it to navigate to the
-/// accounts settings page. Called from the chats window's "Add account" link
-/// (model-effort-modal) so the account picker never routes the settings view
-/// into the chats window's own router - that trapped users there with no way
-/// back to the chat view (regression introduced in 0.2.6/0.2.7).
-// `(async)`: lazily builds `main` - see the module doc's deadlock rule.
+/// Surfaces the app on the accounts settings page. Called from the chat model
+/// picker's "Add account" link. The settings view used to be kept out of the
+/// chats window's router because that trapped users with no way back to the
+/// chat view (0.2.6/0.2.7); the window's rail is that way back now.
+// `(async)`: can build `session-chats` - see the module doc's deadlock rule.
 #[tauri::command(async)]
 pub fn open_dashboard_settings_accounts(app: AppHandle) {
-    surface_main_with_nav(
+    surface_chats_with_nav(
         &app,
         "navigate-to-settings-accounts",
         (),
@@ -214,20 +180,22 @@ pub fn open_dashboard_settings_accounts(app: AppHandle) {
     );
 }
 
-/// Surfaces the main dashboard window and focuses it on a specific account.
-/// Called from an overlay card click (overlay.ts) so tapping an account in the
-/// floating overlay jumps straight to that account's dashboard view. Emits
-/// `navigate-to-account` if the webview is live, else queues `account:<id>`
-/// for `frontend_ready` to drain on cold boot.
-// `(async)`: lazily builds `main` - see the module doc's deadlock rule. Called
-// from the overlay webview, so this one is a live deadlock path whenever the
-// dashboard window hasn't been built yet.
+/// Surfaces the app focused on a specific account's dashboard view. Called from
+/// an overlay card click (overlay.ts). Emits `navigate-to-account` if the
+/// window is live, else queues `account:<id>` for `take_pending_nav`.
+// `(async)`: can build `session-chats` - see the module doc's deadlock rule.
+// Called from the overlay webview, so this one is a live deadlock path
+// whenever the chats window hasn't been built yet.
 #[tauri::command(async)]
 pub fn open_dashboard_account(app: AppHandle, account_id: String) {
     let pending = format!("account:{account_id}");
-    surface_main_with_nav(&app, "navigate-to-account", account_id, pending);
+    surface_chats_with_nav(&app, "navigate-to-account", account_id, pending);
 }
 
+/// No caller builds this window any more: the Chats window is the app's one
+/// desktop window and the dashboard is a screen inside it. Kept until the
+/// `main` label's remaining watchdog and ready-gate hooks are removed with it.
+///
 /// Build the main dashboard window (label `main`) lazily, on first open, rather
 /// than eagerly at startup. An eagerly-created window (whether via
 /// `tauri.conf.json app.windows` or in `setup()`) is the process's first window

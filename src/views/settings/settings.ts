@@ -39,6 +39,7 @@ function template() {
           ${navRow("Notifications", "ph-bell", () => nav("settings-notifications"))}
           ${navRow("Voice & dictation", "ph-microphone", () => nav("settings-voice"))}
           ${navRow("Characters", "ph-smiley", () => nav("settings-characters"))}
+          ${navRow("Skills", "ph-lightning", () => nav("skills"))}
         </div>
 
         <div class="kit-section">

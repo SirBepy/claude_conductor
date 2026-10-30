@@ -24,8 +24,13 @@ describe("sidemenu markup", () => {
     // Statistics was absorbed into the dashboard's widget registry and its
     // nav entry deleted (multi-account milestone 05) - see
     // src/views/dashboard/widget-registry.ts.
-    for (const view of ["dashboard", "skills", "settings"]) {
+    for (const view of ["dashboard", "schedule", "settings"]) {
       expect(html).toMatch(new RegExp(`data-view="${view}"`));
+    }
+    // News is retired; Characters lives in Settings and Skills is reached from
+    // Settings or by clicking a skill, so none of them has a nav entry.
+    for (const view of ["news", "characters", "skills"]) {
+      expect(html).not.toMatch(new RegExp(`data-view="${view}"`));
     }
     // Projects moved into the Chats window (a project's dashboard opens from a
     // chat header), so the main window has no Projects page to navigate to.

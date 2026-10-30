@@ -3,6 +3,7 @@ import { setActiveView } from "./shared/navigation";
 import { noteNavigation } from "./shared/back-button";
 import { isRemote } from "./shared/transport";
 import { noteView } from "./shared/on-screen-chat";
+import { syncAppRail } from "./shared/app-rail";
 
 type RenderFn = (
   root: HTMLElement,
@@ -87,6 +88,7 @@ export async function navigateTo(name: string): Promise<void> {
     updateSidemenuActive?: (n: string) => void;
   }).updateSidemenuActive;
   updateActive?.(name);
+  syncAppRail(name);
   // Update the hash WITHOUT adding a browser history entry. Pushing one (via
   // `location.hash = name`) is what let the phone's back button walk off the
   // SPA and close the app; the back-button trap owns history now. The hash

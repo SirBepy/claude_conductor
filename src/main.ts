@@ -36,13 +36,14 @@ import { setAuthorTagResolver } from "./shared/chat/author-tag-source";
 import { characterForSessionId } from "./views/sessions/session-characters";
 import { state as sessionsState } from "./views/sessions/state";
 import { setupRemoteVoicelines } from "./shared/remote-voiceline";
-import { setupNewsBadgeAndNotifications, setupScheduleMissedPopup, setupScheduledFireToast } from "./shared/notification-listeners";
+import { setupScheduleMissedPopup, setupScheduledFireToast } from "./shared/notification-listeners";
 import { initWindowTitlebar } from "./shared/window-titlebar";
 import { initCursorAutohide } from "./shared/cursor-autohide";
 import { installE2eSeams } from "./boot/e2e-seams";
 import { installPrintBlock } from "./shared/print-block";
 import { detachedSessionFromHash, previewSessionFromHash, codeSessionFromHash, fileWindowTargetFromHash } from "./boot/window-mode-hash";
 import { installChatsWindowMessaging } from "./boot/chats-window-messaging";
+import { mountAppRail } from "./shared/app-rail";
 import { setupUpdateToast } from "./shared/update-toast";
 import "./missed-panel.css";
 
@@ -96,7 +97,6 @@ registerView("history", lazyView(() => import("./views/history/history"), "rende
 registerView("schedule", lazyView(() => import("./views/schedule/schedule"), "renderScheduleView"));
 registerView("characters", lazyView(() => import("./views/characters/characters"), "renderCharactersView"));
 registerView("character-detail", lazyView(() => import("./views/characters/character-detail"), "renderCharacterDetailView"));
-registerView("news", lazyView(() => import("./views/news/news"), "renderNewsView"));
 registerView("settings", lazyView(() => import("./views/settings/settings"), "renderSettingsView"));
 registerView("skill-detail", lazyView(() => import("./views/skill-detail/skill-detail"), "renderSkillDetailView"));
 registerView("skills", lazyView(() => import("./views/skills/skills"), "renderSkillsView"));
@@ -302,29 +302,40 @@ if (detachedSessionId) {
     });
   }
 
-  if (!document.body.classList.contains("chats-window-mode")) {
-    void window.__TAURI__?.event?.listen?.("navigate-to-dashboard", () => {
-      void (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo("dashboard");
-    });
-
-    // Cross-window jump from the chats window's "Add account" link: navigate
-    // to the accounts settings page in the dashboard window instead of the
-    // chats window's own router.
-    void window.__TAURI__?.event?.listen?.("navigate-to-settings-accounts", () => {
-      void (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo("settings-accounts");
-    });
-
-    // Cross-window jump from a floating-overlay card click: show the dashboard
-    // focused on that account.
-    void window.__TAURI__?.event?.listen?.("navigate-to-account", async (e: { payload: string }) => {
-      const accountId = e.payload;
-      if (!accountId) return;
-      const { focusDashboardAccount } = await import("./views/dashboard/dashboard");
-      focusDashboardAccount(accountId);
-      await (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo("dashboard");
-    });
-  } else {
+  // The Chats window is the app's one desktop window, so the cross-window
+  // jumps that used to land in the dashboard window (tray, overlay card, the
+  // chat model picker's "Add account" link) route here, and its rail carries
+  // the way back to Chats from wherever they land.
+  void window.__TAURI__?.event?.listen?.("navigate-to-dashboard", () => {
+    void (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo("dashboard");
+  });
+  void window.__TAURI__?.event?.listen?.("navigate-to-settings-accounts", () => {
+    void (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo("settings-accounts");
+  });
+  // Show the dashboard focused on that account (an overlay card click).
+  void window.__TAURI__?.event?.listen?.("navigate-to-account", async (e: { payload: string }) => {
+    const accountId = e.payload;
+    if (!accountId) return;
+    const { focusDashboardAccount } = await import("./views/dashboard/dashboard");
+    focusDashboardAccount(accountId);
+    await (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo("dashboard");
+  });
+  if (document.body.classList.contains("chats-window-mode")) {
+    mountAppRail();
     installChatsWindowMessaging();
+    // A navigation queued while this window was still being built (tray-less
+    // callers such as the overlay's account card on a cold start).
+    void invoke<string | null>("take_pending_nav").then((nav) => {
+      if (!nav) return;
+      const go = (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo;
+      if (nav === "dashboard" || nav === "settings-accounts") void go(nav);
+      else if (nav.startsWith("account:")) {
+        void import("./views/dashboard/dashboard").then((m) => {
+          m.focusDashboardAccount(nav.slice("account:".length));
+          return go("dashboard");
+        });
+      }
+    }).catch(() => {});
   }
 
   // Sidemenu wiring (ported from legacy dashboard.js). Burger buttons inside
@@ -373,7 +384,6 @@ if (detachedSessionId) {
     btn.onclick = () => showView("settings");
   });
 
-  setupNewsBadgeAndNotifications();
   setupScheduleMissedPopup();
   setupScheduledFireToast();
   setupUpdateToast();

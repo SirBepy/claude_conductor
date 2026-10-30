@@ -3,61 +3,14 @@ import { getTransport } from "../shared/transport";
 import { showView } from "../shared/navigation";
 import { invoke } from "../shared/ipc";
 import { updateMissedPanel } from "../missed-panel";
-import type { NewsPost, ScheduledItem } from "../types/ipc.generated";
-
-export function setupNewsBadgeAndNotifications(): void {
-  const navItem = document.getElementById("sm-news");
-  if (!navItem) return;
-
-  const setBadge = (unread: number): void => {
-    navItem.classList.toggle("has-unread", unread > 0);
-  };
-
-  // Initial unread snapshot. The 6h backend poll updates from there.
-  void (async () => {
-    try {
-      const posts = await invoke<NewsPost[]>("list_news");
-      setBadge((posts || []).filter((p) => p.unread).length);
-    } catch (err) {
-      console.warn("[news] initial list_news failed", err);
-    }
-  })();
-
-  const ev = window.__TAURI__?.event;
-  if (!ev?.listen) return;
-
-  void ev.listen<{ unreadCount?: number }>("news-updated", (e) => {
-    setBadge(e.payload?.unreadCount ?? 0);
-  });
-
-  void ev.listen<{ title?: string; body?: string }>("news-notification", async (e) => {
-    const title = e.payload?.title || "Anthropic news";
-    const body = e.payload?.body || "";
-    try {
-      if (typeof Notification !== "undefined") {
-        if (Notification.permission === "default") {
-          await Notification.requestPermission();
-        }
-        if (Notification.permission === "granted") {
-          const n = new Notification(title, { body });
-          n.onclick = () => { void showView("news"); window.focus(); };
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn("[news] OS notification failed", err);
-    }
-    // Fallback: lightweight in-app toast.
-    showToast(`${title}: ${body}`.trim(), { onClick: () => { void showView("news"); } });
-  });
-}
+import type { ScheduledItem } from "../types/ipc.generated";
 
 // Scheduled items (messages / new chats) that missed their fire time (past the
 // grace window - see `daemon::schedule::compute_missed`). Global, not gated on
 // the schedule view being open. Surfaced as a non-blocking, dismissible panel
 // (see missed-panel.ts) with PERMANENT per-item dismissal, plus a one-shot OS
-// notification per newly-missed item when the window is hidden (reusing the raw
-// `Notification` API from the news path - no new plugin). `notifiedMissedIds`
+// notification per newly-missed item when the window is hidden (the raw
+// `Notification` API, no plugin). `notifiedMissedIds`
 // is in-memory (don't re-notify the same miss twice this session); the panel's
 // own dismissal set is the durable localStorage one.
 const notifiedMissedIds = new Set<string>();
