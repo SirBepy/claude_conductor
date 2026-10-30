@@ -99,6 +99,22 @@ pub enum ScheduledStatus {
     Sent,
     Failed { reason: String },
     Missed,
+    /// A one-shot whose pre-fire guard said "skip" (`ScheduledItem::guard`).
+    /// Terminal like `Missed`, but its own state so a deliberate skip never
+    /// reads as a run that got lost. The reason lives in `last_skip`.
+    Skipped,
+}
+
+/// The most recent firing a guard turned away. A recurring item goes back to
+/// `Pending` after a skip, so without this record the panel would have nothing
+/// to show for it; it stays until the item skips again.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct SkippedFire {
+    /// UTC RFC3339, when the guard ran.
+    pub at: String,
+    /// First line of the guard's stdout, or a fixed fallback when it printed nothing.
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, ts_rs::TS)]
@@ -119,6 +135,15 @@ pub struct ScheduledItem {
     /// the item has fired at least once (or the fire failed before a session
     /// id was known).
     pub last_session_id: Option<String>,
+    /// Optional shell command run just before each firing creates its chat
+    /// (`daemon::schedule_guard`): exit 0 skips that firing, anything else
+    /// fires. Arbitrary code, so only a local desktop caller or an approved
+    /// `schedule` MCP add may set it. `#[serde(default)]` keeps items written
+    /// before this field existed deserializable.
+    #[serde(default)]
+    pub guard: Option<String>,
+    #[serde(default)]
+    pub last_skip: Option<SkippedFire>,
 }
 
 impl ScheduledItem {
@@ -137,6 +162,8 @@ impl ScheduledItem {
             last_fired_at: None,
             last_result: None,
             last_session_id: None,
+            guard: None,
+            last_skip: None,
         }
     }
 }

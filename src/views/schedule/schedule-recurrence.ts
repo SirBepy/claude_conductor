@@ -9,7 +9,7 @@ import type {
   Recurrence,
 } from "../../types/ipc.generated";
 
-export type DotStatus = "upcoming" | "firing" | "sent" | "failed" | "missed" | "external";
+export type DotStatus = "upcoming" | "firing" | "sent" | "failed" | "missed" | "skipped" | "external";
 
 /** One placement of an item on a specific calendar day. */
 export interface Occurrence {
@@ -126,7 +126,7 @@ export function gridRange(year: number, month: number): { start: Date; end: Date
 }
 
 export function isPastStatus(t: ScheduledItem["status"]["type"]): boolean {
-  return t === "sent" || t === "failed" || t === "missed";
+  return t === "sent" || t === "failed" || t === "missed" || t === "skipped";
 }
 
 /** Places every item/external job onto the calendar days it occupies within
@@ -146,11 +146,19 @@ export function buildOccurrences(
   for (const item of items) {
     const st = item.status.type;
     if (isPastStatus(st)) {
-      // Past: place on when it actually fired (fall back to fire_at).
-      const when = new Date(item.last_fired_at || item.fire_at);
+      // Past: place on when it actually fired (fall back to fire_at). A
+      // skipped one never fired, so its guard's run time is the moment.
+      const when = new Date(st === "skipped" ? item.last_skip?.at || item.fire_at : item.last_fired_at || item.fire_at);
       if (isNaN(when.getTime())) continue;
       push({ dayKey: dayKeyOf(when), time: when.getTime(), status: st as DotStatus, item, recurring: false });
       continue;
+    }
+    // A recurring item goes back to Pending after its guard turns a firing
+    // away, so the skip is the only trace of that firing - give it its own
+    // past placement, or it would look like the run never happened.
+    const skippedAt = item.last_skip ? new Date(item.last_skip.at) : null;
+    if (skippedAt && !isNaN(skippedAt.getTime())) {
+      push({ dayKey: dayKeyOf(skippedAt), time: skippedAt.getTime(), status: "skipped", item, recurring: false });
     }
     // Pending / firing (upcoming).
     const base = new Date(item.fire_at);

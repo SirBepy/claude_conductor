@@ -37,6 +37,19 @@ export function recurrenceBadge(rec: Recurrence | null): string {
     : "";
 }
 
+/** Marks an item that only fires when its pre-fire guard lets it. The command
+ * itself is arbitrary code, so it is printed on the row too (`guardLine`), not
+ * only in this chip's tooltip, which a phone never shows. */
+export function guardBadge(item: ScheduledItem): string {
+  if (!item.guard) return "";
+  return `<span class="schedule-badge schedule-badge--guard" title="${escapeHtml(`Runs before each firing; skips it when the command exits 0: ${item.guard}`)}"><i class="ph ph-shield-check"></i>conditional</span>`;
+}
+
+export function guardLine(item: ScheduledItem): string {
+  if (!item.guard) return "";
+  return `<div class="schedule-guard-line" title="${escapeHtml(item.guard)}">Skips if <code>${escapeHtml(item.guard)}</code> exits 0</div>`;
+}
+
 export function kindIconClass(item: ScheduledItem): string {
   if (item.kind.type === "new_chat") return "ph-plus-circle";
   if (item.kind.type === "jarvis_hygiene") return "ph-broom";
@@ -73,6 +86,7 @@ export function statusPill(status: DotStatus): string {
     sent: ["sent", "Sent"],
     failed: ["failed", "Failed"],
     missed: ["missed", "Missed"],
+    skipped: ["skipped", "Skipped"],
     external: ["external", "Task Scheduler"],
   };
   // A projected recurring upcoming keeps the "Upcoming" label; a concrete

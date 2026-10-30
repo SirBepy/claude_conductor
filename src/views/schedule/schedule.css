@@ -70,6 +70,7 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
 .dot--sent { background: var(--color-success, #7af0c0); }
 .dot--missed { background: var(--color-warning); }
 .dot--failed { background: var(--color-danger, #ff6b6b); }
+.dot--skipped { background: var(--color-text-muted); }
 .dot--external { background: var(--color-text-muted); }
 .dot--recurring { background: transparent; border: 1.5px solid var(--color-primary); width: 7px; height: 7px; }
 .cal-more { font-size: 0.6rem; color: var(--color-text-muted); }
@@ -183,6 +184,7 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
   border-radius: 10px;
   background: var(--color-surface-alt);
 }
+.schedule-status-pill--skipped { background: var(--color-border); color: var(--color-text-muted); }
 .schedule-status-pill--external { background: var(--color-border); color: var(--color-text-muted); }
 
 .schedule-loading {
@@ -394,6 +396,19 @@ details.schedule-section[open] > summary.schedule-section-title::before {
   color: var(--color-danger, #ff6b6b);
   font-style: italic;
 }
+/* A skip is a decision, not a fault: muted like the pill, never danger red. */
+.schedule-reason--skipped { color: var(--color-text-muted); font-style: normal; font-size: 0.78rem; }
+
+.schedule-badge--guard { color: var(--color-primary); }
+.schedule-guard-line {
+  margin-top: 3px;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.schedule-guard-line code { font-family: var(--font-mono, ui-monospace, monospace); }
 
 .schedule-delta {
   color: var(--color-warning);

@@ -58,12 +58,21 @@ fn line_for(item: &ScheduledItem) -> String {
         ScheduledKind::NewChat { .. } => "new chat",
         ScheduledKind::JarvisHygiene => "jarvis",
     };
-    format!("- [{}] {when}{repeat} -> {target}: {}", short(&item.id), item.prompt)
+    let guarded = if item.guard.is_some() { ", guarded" } else { "" };
+    format!("- [{}] {when}{repeat}{guarded} -> {target}: {}", short(&item.id), item.prompt)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_guarded_item_is_marked_so_the_model_knows_it_may_not_fire() {
+        let mut item = ScheduledItem::new(ScheduledKind::JarvisHygiene, "p".into(), "2026-10-30T10:00:00Z".into(), None);
+        assert!(!line_for(&item).contains("guarded"));
+        item.guard = Some("exit 0".into());
+        assert!(line_for(&item).contains(", guarded ->"), "{}", line_for(&item));
+    }
 
     #[test]
     fn short_id_is_the_injected_prefix() {

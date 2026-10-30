@@ -27,6 +27,8 @@ function scheduledNewChat(over: Record<string, unknown> = {}): Record<string, un
     last_fired_at: null,
     last_result: null,
     last_session_id: null,
+    guard: null,
+    last_skip: null,
     ...over,
   };
 }

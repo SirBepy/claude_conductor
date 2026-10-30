@@ -209,7 +209,8 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "repeat": {"type": "string", "description": "Makes it recurring at the same time of day: `daily`, `weekdays`, `weekly`, or `every-N-days`. Omit for a one-shot."},
                     "cwd": {"type": "string", "description": "Project for a new_chat. This session's own, or another already known to the app. Defaults to this session's."},
                     "name": {"type": "string", "description": "Optional short label for the chat this spawns."},
-                    "id": {"type": "string", "description": "Which item, for cancel. The short id from the injected list."}
+                    "id": {"type": "string", "description": "Which item, for cancel. The short id from the injected list."},
+                    "guard": {"type": "string", "description": "Optional shell command the app runs just before each firing creates its chat, in the target project's folder (Windows: PowerShell, elsewhere: sh). Exit code 0 SKIPS that firing; any other exit code, a crash, a missing command or no answer within 30 seconds fires as normal. Its first stdout line is shown in the Schedule panel as the skip reason, and CC_SCHEDULE_DATE (local YYYY-MM-DD of the firing) and CC_SCHEDULE_ID are set. Use it to skip a run that is already done, and keep the check owned by whatever does the work, e.g. `python <skill>/check.py`. It is arbitrary code, so the user is always asked to approve the exact command, even in an auto-accept chat."}
                 },
                 "required": ["action"]
             }

@@ -43,7 +43,7 @@ use claude_conductor_lib::project_dashboard::{
 };
 use claude_conductor_lib::sessions::user_todos::{TodoState, UserTodo};
 use claude_conductor_lib::sessions::scheduled_items::{
-    Recurrence, RecurrenceRule, ScheduledItem, ScheduledKind, ScheduledStatus,
+    Recurrence, RecurrenceRule, ScheduledItem, ScheduledKind, ScheduledStatus, SkippedFire,
 };
 use claude_conductor_lib::skill_usage::types::{
     InstalledSkill, InvocationCounts, InvocationSource, SkillDetail, SkillUsageEntry,
@@ -193,6 +193,7 @@ fn emit_ipc_types() {
     out.push_str(&decl::<RecurrenceRule>());
     out.push_str(&decl::<Recurrence>());
     out.push_str(&decl::<ScheduledStatus>());
+    out.push_str(&decl::<SkippedFire>());
     out.push_str(&decl::<ScheduledItem>());
     out.push_str(&decl::<ExternalScheduledJob>());
 

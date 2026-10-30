@@ -12,6 +12,8 @@ import {
   MONTH_NAMES,
   DOW_HEAD,
   recurrenceBadge,
+  guardBadge,
+  guardLine,
   kindIconClass,
   targetLabel,
   navTarget,
@@ -57,14 +59,19 @@ function agendaRowHtml(occ: Occurrence): string {
     </li>`;
   }
   const item = occ.item!;
-  const nav = navTarget(item);
+  // The skip row of a still-live recurring item is history, not the item:
+  // its actions would delete or open something that is not that firing.
+  const skipHistory = occ.status === "skipped" && item.status.type !== "skipped";
+  const nav = occ.status === "skipped" ? null : navTarget(item);
   const rescheduleOpen = state.reschedulingId === item.id;
   const isFailed = item.status.type === "failed";
-  const reason = item.status.type === "failed"
-    ? item.status.reason
-    : (occ.status === "failed" ? item.last_result || "" : "");
+  const reason = occ.status === "skipped"
+    ? item.last_skip?.reason || ""
+    : item.status.type === "failed"
+      ? item.status.reason
+      : (occ.status === "failed" ? item.last_result || "" : "");
   const canFire = occ.status === "upcoming" || occ.status === "firing" || occ.status === "failed";
-  const showDelete = occ.status !== "firing";
+  const showDelete = occ.status !== "firing" && !skipHistory;
   return `<li class="agenda-row ${nav ? "agenda-row--nav" : ""}" data-id="${escapeHtml(item.id)}" ${nav ? `data-nav-session="${escapeHtml(nav.sessionId)}" data-nav-mode="${nav.mode}"` : ""}>
     <span class="agenda-time">${escapeHtml(timeStr)}</span>
     <i class="ph ${kindIconClass(item)} agenda-icon"></i>
@@ -73,8 +80,10 @@ function agendaRowHtml(occ: Occurrence): string {
       <div class="agenda-meta">
         ${statusPill(occ.status)}
         ${recurrenceBadge(item.recurrence)}
-        ${reason ? `<span class="schedule-reason">${escapeHtml(reason)}</span>` : ""}
+        ${guardBadge(item)}
+        ${reason ? `<span class="schedule-reason${occ.status === "skipped" ? " schedule-reason--skipped" : ""}">${escapeHtml(reason)}</span>` : ""}
       </div>
+      ${guardLine(item)}
     </div>
     <div class="agenda-actions">
       ${canFire ? `<button class="icon-btn" data-action="fire-now" data-id="${escapeHtml(item.id)}" title="${isFailed ? "Retry" : "Fire now"}"><i class="ph ${isFailed ? "ph-arrow-clockwise" : "ph-play"}"></i></button>` : ""}
@@ -143,6 +152,7 @@ function renderMonthView(): string {
       <span><span class="dot dot--upcoming"></span>Upcoming</span>
       <span><span class="dot dot--sent"></span>Sent</span>
       <span><span class="dot dot--missed"></span>Missed</span>
+      <span><span class="dot dot--skipped"></span>Skipped</span>
       <span><span class="dot dot--failed"></span>Failed</span>
       <span><span class="dot dot--recurring"></span>Recurring</span>
     </div>

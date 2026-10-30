@@ -117,6 +117,8 @@ mod tests {
             last_fired_at: None,
             last_result: None,
             last_session_id: None,
+            guard: None,
+            last_skip: None,
         }
     }
 

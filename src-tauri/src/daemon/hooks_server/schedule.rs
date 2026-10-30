@@ -36,6 +36,8 @@ pub(super) struct WriteScheduleBody {
     name: Option<String>,
     #[serde(default)]
     id: Option<String>,
+    #[serde(default)]
+    guard: Option<String>,
 }
 
 pub(super) async fn on_write_schedule(
@@ -54,6 +56,7 @@ pub(super) async fn on_write_schedule(
         cwd: body.cwd,
         name: body.name,
         id: body.id,
+        guard: body.guard,
     };
     if let Err(e) = approve_new_chat(&ctx, &body.session_id, &args).await {
         return (StatusCode::OK, Json(json!({"ok": false, "error": e})));
@@ -72,18 +75,22 @@ pub(super) async fn on_write_schedule(
 /// own permission relay applies. An unregistered caller skips the card:
 /// `write_schedule` refuses it anyway, and a card for a session nobody can
 /// see would only hang the call.
+///
+/// A guard is the exception to the auto-accept shortcut: it is a shell command
+/// the daemon runs on every firing with no chat and no card around it, so a
+/// human sees the exact command before it is stored, for either target.
 async fn approve_new_chat(ctx: &Arc<HookCtx>, session_id: &str, args: &ScheduleArgs) -> Result<(), String> {
-    let new_chat = args.action == "add" && args.target.as_deref().unwrap_or("new_chat") == "new_chat";
-    if !new_chat || ctx.state.registry.get(session_id).is_none() {
+    if ctx.state.registry.get(session_id).is_none() {
         return Ok(());
     }
     let auto_accept = crate::sessions::chat_config::get(session_id).map(|c| c.auto_accept).unwrap_or(false);
-    if auto_accept {
+    if !needs_card(args, auto_accept) {
         return Ok(());
     }
     let input = json!({
         "action": "add",
-        "target": "new_chat",
+        "target": args.target.as_deref().unwrap_or("new_chat"),
+        "guard": args.guard,
         "prompt": args.prompt,
         "in_minutes": args.in_minutes,
         "at": args.at,
@@ -101,6 +108,17 @@ async fn approve_new_chat(ctx: &Arc<HookCtx>, session_id: &str, args: &ScheduleA
             .map(|m| format!("not scheduled: {m}"))
             .unwrap_or_else(|| "not scheduled: Joe declined the new chat".to_string()))
     }
+}
+
+/// Pure so the auto-accept exemption and its guard exception are testable
+/// without the on-disk chat_config store.
+fn needs_card(args: &ScheduleArgs, auto_accept: bool) -> bool {
+    if args.action != "add" {
+        return false;
+    }
+    let guarded = args.guard.as_deref().is_some_and(|g| !g.trim().is_empty());
+    let new_chat = args.target.as_deref().unwrap_or("new_chat") == "new_chat";
+    guarded || (new_chat && !auto_accept)
 }
 
 const SCHEDULE_TOOL: &str = "mcp__cc_conductor__schedule";
@@ -137,7 +155,59 @@ mod tests {
             cwd: None,
             name: None,
             id: None,
+            guard: None,
         }
+    }
+
+    fn add_args(target: Option<&str>, guard: Option<&str>) -> ScheduleArgs {
+        ScheduleArgs {
+            action: "add".into(),
+            target: target.map(str::to_string),
+            guard: guard.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_guard_asks_a_human_even_when_the_chat_has_auto_accept() {
+        for target in [None, Some("new_chat"), Some("this_chat")] {
+            assert!(needs_card(&add_args(target, Some("python check.py")), true), "{target:?}");
+            assert!(needs_card(&add_args(target, Some("python check.py")), false), "{target:?}");
+        }
+    }
+
+    #[test]
+    fn without_a_guard_the_existing_rule_is_unchanged() {
+        assert!(needs_card(&add_args(None, None), false), "new_chat asks");
+        assert!(!needs_card(&add_args(None, None), true), "auto-accept skips it");
+        assert!(!needs_card(&add_args(Some("this_chat"), None), false), "a reminder never asks");
+        assert!(!needs_card(&add_args(None, Some("   ")), true), "a blank guard is no guard");
+        let cancel = ScheduleArgs { action: "cancel".into(), guard: Some("x".into()), ..Default::default() };
+        assert!(!needs_card(&cancel, false));
+    }
+
+    #[tokio::test]
+    async fn a_guarded_this_chat_add_raises_a_card_that_shows_the_command() {
+        let ctx = ctx();
+        let sid = registered(&ctx);
+        let task_ctx = ctx.clone();
+        let mut body = add_body(&sid);
+        body.target = Some("this_chat".into());
+        body.guard = Some("python check.py".into());
+        let handle = tokio::spawn(async move {
+            on_write_schedule(AxState(task_ctx), ValidatedJson(body)).await.into_response()
+        });
+
+        let id = first_pending_id(&ctx).await;
+        let prompts = ctx.state.list_prompts().await;
+        let card = prompts.iter().find(|p| p["id"] == id.as_str()).expect("card is listed");
+        assert_eq!(card["payload"]["input"]["guard"], "python check.py");
+        assert_eq!(card["payload"]["input"]["target"], "this_chat");
+
+        let tx = ctx.state.pending.lock().await.remove(&id).unwrap();
+        tx.send(json!({"behavior": "deny", "message": "no"})).unwrap();
+        let v: Value = serde_json::from_str(&body_text(handle.await.unwrap()).await).unwrap();
+        assert_eq!(v["ok"], false);
     }
 
     /// The tool is advertised to every session, so the method's registry
