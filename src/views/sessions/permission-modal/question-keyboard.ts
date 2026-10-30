@@ -57,7 +57,7 @@ export function handleQuestionCardKey(e: KeyboardEvent, deps: QuestionKeyboardDe
   const { host, questions, hasSummary, totalPanels, state, answeredAt, goToTab, togglePick } = deps;
   // defaultPrevented: the slash popup's own Tab/arrow handling already ran on
   // the textarea before this document-level listener.
-  if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || !host.isConnected) return false;
+  if (e.defaultPrevented || e.ctrlKey || e.metaKey || !host.isConnected) return false;
   // Minimized, the collapsed bar shows a fixed question - paging from its
   // Restore button would move activeTab invisibly under it.
   if (!host.querySelector(".prompt-card")) return false;
@@ -67,12 +67,26 @@ export function handleQuestionCardKey(e: KeyboardEvent, deps: QuestionKeyboardDe
   const refocus = () => { if (host.isConnected) focusActivePanel(host, state.activeTab, isReview()); };
   // Ungated, unlike the Next arrow: paging is free like the dots, so an
   // unanswered question can be skipped and come back to later.
-  const page = (dir: -1 | 1) => {
+  const page = (dir: -1 | 1, moveFocus = true) => {
     const next = state.activeTab + dir;
     if (next < 0 || next > totalPanels - 1) return;
     goToTab(next);
-    refocus();
+    if (moveFocus) refocus();
   };
+
+  // Alt+Left/Right pages from anywhere in the card or the composer, where
+  // plain arrows belong to the caret. Alt rather than Ctrl, which already
+  // jumps words in a text box. preventDefault also stops WebView2 treating it
+  // as history back.
+  if (e.altKey) {
+    if (e.shiftKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return false;
+    const inCard = host.contains(target);
+    if (!inCard && !target.closest(".session-composer") && target !== document.body) return false;
+    e.preventDefault();
+    // From the composer the caret stays put: only the card's own focus follows the page.
+    page(e.key === "ArrowLeft" ? -1 : 1, inCard);
+    return true;
+  }
 
   const option = target instanceof HTMLInputElement && host.contains(target) && target.closest(".prompt-q__opts")
     ? target

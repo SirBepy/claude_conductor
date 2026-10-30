@@ -7,8 +7,8 @@ import { mountView } from "./harness";
 // Keyboard answering for the AUQ card (question-keyboard.ts): Tab from a text
 // box enters the options, Up/Down move, Space toggles without advancing,
 // Enter mirrors the Next/Submit button (picking the highlighted option first
-// on an unanswered single-select), Left/Right page freely, and typing a letter on an
-// option lands it in the answer box.
+// on an unanswered single-select), Left/Right page freely (Alt+Left/Right from
+// any text box too), and typing a letter on an option lands it in the answer box.
 
 declare global {
   interface Window {
@@ -122,6 +122,29 @@ test.describe("view-harness / AUQ keyboard navigation", () => {
     await expect.poll(() => activeTab(page)).toBe(0);
     expect(await focusedLabel(page)).toBe("A");
     await expect(card.locator('.prompt-panel[data-panel="0"] input:checked')).toHaveCount(0);
+  });
+
+  test("Alt+Left/Right page from the answer box, where plain arrows move the caret", async ({ page }) => {
+    await mountView(page);
+    await openCard(page);
+    const card = page.locator(".prompt-card");
+    const field = card.locator(".prompt-card__answer-bar textarea");
+    await field.fill("note");
+    await field.focus();
+
+    await page.keyboard.press("Alt+ArrowRight");
+    await expect.poll(() => activeTab(page)).toBe(1);
+    await page.keyboard.press("Alt+ArrowRight");
+    await expect.poll(() => activeTab(page)).toBe(2);
+    await page.keyboard.press("Alt+ArrowRight");
+    expect(await activeTab(page)).toBe(2);
+
+    await page.keyboard.press("Alt+ArrowLeft");
+    await expect.poll(() => activeTab(page)).toBe(1);
+    await page.keyboard.press("Alt+ArrowLeft");
+    await expect.poll(() => activeTab(page)).toBe(0);
+    await page.keyboard.press("Alt+ArrowLeft");
+    expect(await activeTab(page)).toBe(0);
   });
 
   test("arrows do nothing while the card is minimized", async ({ page }) => {
