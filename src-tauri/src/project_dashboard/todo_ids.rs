@@ -66,6 +66,12 @@ fn is_label(s: &str) -> bool {
 
 /// The device kinds the id contract names: a label is `pc` or `mac`, plus a
 /// number for a second machine (`pc2`, `mac2`).
+///
+/// Hardcoded on purpose: one dev, two machines, so a registry of labels would
+/// be machinery for a set that never changes. The cost is that a third kind of
+/// device (a todo from a peer labelled `laptop`) stops being recognized as a
+/// todo until it is added here, unless it is this machine's own
+/// `device-label`.
 const DEVICE_KINDS: [&str; 2] = ["pc", "mac"];
 
 /// Read once: `parse_stem` runs per file name, and a file read each time would

@@ -81,9 +81,14 @@ pub struct AiTodoArchived {
     pub original_path: String,
     /// The file as it was before the note was appended.
     pub original_content: String,
-    /// The PLAN.md line that was pruned, if there was one.
+    /// The PLAN.md lines the prune removed, as a JSON-encoded `PlanRestore`
+    /// (each line with its group, the item above it and its index) so
+    /// `unarchive` can find the spot again after PLAN.md was edited. `None`
+    /// when no line named the todo. A record from before that encoding holds
+    /// one bare line instead, which `unarchive` still reads.
     pub plan_line: Option<String>,
-    /// Its line index in PLAN.md before the prune.
+    /// The first pruned line's index in PLAN.md before the prune; only the
+    /// bare-line record needs it, the JSON one carries an index per line.
     pub plan_line_index: Option<u32>,
 }
 
