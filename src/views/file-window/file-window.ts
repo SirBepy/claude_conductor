@@ -109,6 +109,10 @@ export function mountFileWindow(app: HTMLElement, first: { path: string; line: n
     surface?.handleKey(e);
   }, true);
 
-  void listen<{ path: string; line: number | null }>("file-window-open", ({ path, line }) => open(path, line));
+  // The host queues any open that arrives before this listener exists and only
+  // flushes it once told the listener is up, so signal after `listen` resolves.
+  void listen<{ path: string; line: number | null }>("file-window-open", ({ path, line }) => open(path, line))
+    .then(() => invoke("file_window_ready"))
+    .catch(() => {});
   open(first.path, first.line);
 }

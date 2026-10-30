@@ -439,6 +439,7 @@ pub fn run() {
             ipc::window::code::open_code_window,
             ipc::window::code::close_code_window,
             ipc::window::file::open_file_window,
+            ipc::window::file::file_window_ready,
             ipc::window::code::focus_app_window,
             ipc::ask_list_threads,
             ipc::ask_send,
