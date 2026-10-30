@@ -69,7 +69,9 @@ pub fn register_preview(router: &mut Router, state: Arc<DaemonState>) {
         });
     }
     // Mirrors the desktop `get_preview` command (params: id, optional
-    // session_id) -> PreviewSnapshot (html included), for the iframe render.
+    // session_id, optional version) -> PreviewSnapshot (html included), for the
+    // iframe render. `version` names an archived page (`PreviewMeta.versions`);
+    // absent means the latest. The result is always ONE page, never the archive.
     {
         let state = state.clone();
         router.register("get_preview", move |params, ctx| {
@@ -80,11 +82,13 @@ pub fn register_preview(router: &mut Router, state: Arc<DaemonState>) {
                     id: String,
                     #[serde(default)]
                     session_id: Option<String>,
+                    #[serde(default)]
+                    version: Option<u32>,
                 }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
                 let peer = matches!(ctx.transport, Transport::PeerMachine(_));
-                let snap = crate::daemon::preview::get(&p.id)
+                let snap = crate::daemon::preview::get_view(&p.id, p.version)
                     .ok_or_else(|| RpcError::internal(format!("no such preview: {}", p.id)))?;
                 check_snapshot_scope(&snap, p.session_id.as_deref(), peer, |sid| {
                     crate::daemon::machines::is_local_session(&state, sid)
@@ -176,6 +180,7 @@ mod tests {
             version: 1,
             created_at: "2026-10-23T00:00:00.000Z".into(),
             published: None,
+            versions: Vec::new(),
         }
     }
 
@@ -190,6 +195,7 @@ mod tests {
             version: 1,
             created_at: "2026-10-23T00:00:00.000Z".into(),
             published: None,
+            previous: Vec::new(),
         }
     }
 
@@ -283,6 +289,8 @@ mod tests {
         for (method, params) in [
             ("list_previews", json!({"session_id": "s1"})),
             ("get_preview", json!({"id": "p1", "session_id": "s1"})),
+            // The archived-version number rides along to the host that holds it.
+            ("get_preview", json!({"id": "p1", "session_id": "s1", "version": 2})),
         ] {
             let (tx, _rx) = tokio::sync::mpsc::channel(16);
             let resp = router
@@ -294,8 +302,9 @@ mod tests {
             assert_eq!(resp.result, Some(json!("from-host")), "{method} must be answered by the host: {resp:?}");
         }
         let seen = seen.lock().unwrap();
-        assert_eq!(seen.len(), 2, "both calls must reach the host");
+        assert_eq!(seen.len(), 3, "every call must reach the host");
         assert_eq!(seen[1], json!({"id": "p1", "session_id": "s1"}));
+        assert_eq!(seen[2], json!({"id": "p1", "session_id": "s1", "version": 2}));
         b_serve.kill();
     }
 

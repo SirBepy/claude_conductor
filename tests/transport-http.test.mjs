@@ -367,6 +367,11 @@ describe("HttpTransport.call mapping", () => {
     expect(body()).toEqual({ method: "get_preview", params: { id: "prev-1", session_id: "s1" } });
   });
 
+  it("forwards the archived version a get_preview names", async () => {
+    await new HttpTransport().call("get_preview", { id: "prev-1", sessionId: "s1", version: 3 });
+    expect(body()).toEqual({ method: "get_preview", params: { id: "prev-1", session_id: "s1", version: 3 } });
+  });
+
   it("forwards read_image_file with the chat's session id", async () => {
     await new HttpTransport().call("read_image_file", { path: "C:/p/a.png", sessionId: "s1" });
     expect(url()).toBe("/api/rpc");

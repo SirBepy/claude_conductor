@@ -12,7 +12,7 @@ use claude_conductor_lib::ipc::accounts::{
     AccountIdentity, AccountsSetupPromptState, AddAccountSession, LoginCheckOutcome,
 };
 use claude_conductor_lib::claude_ai_publish::PublishedLink;
-use claude_conductor_lib::daemon::preview::{PreviewMeta, PreviewSnapshot};
+use claude_conductor_lib::daemon::preview::{PreviewMeta, PreviewSnapshot, PreviewVersionMeta};
 use claude_conductor_lib::ipc::ai_todos::{AiBacklog, AiTodoArchived, AiTodoDoc, AiTodoEntry, AiTodoSection};
 use claude_conductor_lib::ipc::hidden_chats::HiddenChatsView;
 use claude_conductor_lib::ipc::gaming_mode::GamingModeView;
@@ -197,6 +197,7 @@ fn emit_ipc_types() {
     // HTML preview window (ai_todo 138)
     out.push_str(&decl::<PublishedLink>());
     out.push_str(&decl::<PreviewSnapshot>());
+    out.push_str(&decl::<PreviewVersionMeta>());
     out.push_str(&decl::<PreviewMeta>());
 
     // Your Todos panel (todo 692)

@@ -59,52 +59,87 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 10px;
+  padding: 3px 10px;
   border-bottom: 1px solid var(--color-border);
   min-width: 0;
 }
 
-.pv-title {
-  font-weight: 700;
+/* The preview name and its version are two plain dropdown triggers (Joe,
+   2026-10-30: no chip, a small down triangle in the bottom-right corner marks
+   each as a dropdown). */
+.pv-pick {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  padding: 6px 12px 6px 2px;
+  border: 0;
+  background: transparent;
   color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
 }
 
-.pv-title i {
+.pv-pick:hover {
+  color: var(--color-primary);
+}
+
+.pv-pick[hidden] {
+  display: none;
+}
+
+.pv-pick-name {
+  font-weight: 700;
+}
+
+.pv-pick-name i.ph {
   color: var(--color-primary);
   flex-shrink: 0;
+}
+
+/* The version reads as secondary to the name. */
+.pv-pick-ver {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.pv-tri {
+  position: absolute;
+  right: 2px;
+  bottom: 3px;
+  font-size: 8px;
+  color: var(--color-text-muted);
+}
+
+/* One preview and no versions leaves nothing to pick, so it is a plain label. */
+.pv-pick[data-single] {
+  cursor: default;
+  pointer-events: none;
+}
+
+.pv-pick[data-single] .pv-tri {
+  display: none;
+}
+
+/* A push landed on a page other than the one in view; the view stays put and
+   the picker that reaches it carries this dot. */
+.pv-pick[data-new]::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
 }
 
 .pv-name {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* The version number IS the history toggle now (Joe, 2026-08-19), so it is a
-   real button - but a quiet one, styled as the label it replaced. */
-.pv-ver {
-  color: var(--color-text-muted);
-  font: inherit;
-  font-weight: 500;
-  flex-shrink: 0;
-  border: 1px solid transparent;
-  background: transparent;
-  border-radius: 6px;
-  padding: 1px 5px;
-  cursor: pointer;
-}
-
-.pv-ver:hover {
-  color: var(--color-text);
-  border-color: var(--color-border);
-}
-
-.pv-ver[hidden] {
-  display: none;
 }
 
 .pv-grow {
@@ -208,12 +243,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--color-text);
-}
-
-.pv-live-tag {
-  color: var(--chat-state-done);
-  font-size: 9px;
-  font-weight: 800;
 }
 
 .pv-snap-meta {

@@ -98,10 +98,14 @@ export class PopoverShell {
     // A rotate or a window resize across the phone breakpoint changes which
     // placement applies, so re-run it rather than leave the old geometry.
     const onResize = () => this.reanchor();
-    setTimeout(() => document.addEventListener("click", onOutside), 0);
+    // Deferred so the click that opened it does not close it. A popover closed
+    // before the timer fires must never attach the listener afterwards: it would
+    // outlive its popover and close whichever one opens next.
+    const attach = setTimeout(() => document.addEventListener("click", onOutside), 0);
     document.addEventListener("keydown", onKeyDown);
     window.addEventListener("resize", onResize);
     this.cleanup = () => {
+      clearTimeout(attach);
       document.removeEventListener("click", onOutside);
       document.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("resize", onResize);

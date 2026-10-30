@@ -13,7 +13,7 @@ import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
 import { canPublish, publishIcon, publishLabel, publishTitle, publishToClaudeAi } from "../../shared/claude-ai-publish";
 import { PREVIEW_SOURCE_CHAT_CARD } from "../../shared/chat/chat-preview-card";
 import { togglePvMoreMenu, closePvMoreMenu, type DeviceWidth, type PvMoreMenuDeps } from "./preview-panel-more-menu";
-import { togglePvHistory, closePvHistory, type PvHistoryDeps } from "./preview-panel-history";
+import { togglePvPicker, closePvHistory, versionsOf, type PvPickerDeps } from "./preview-panel-history";
 import { mountPvComposer, type PvComposerDeps, type PvComposerHandle } from "./preview-panel-composer";
 import { mountPreviewWindowShell, type RailController, type RailTabDeps, type RailTabHandle } from "./rail-panel";
 import { isMirrored } from "./sessions-helpers";
@@ -32,11 +32,17 @@ class PreviewTab implements RailTabHandle {
   private deps: RailTabDeps;
   private snapshots: PreviewMeta[] = [];
   private selected: PreviewSnapshot | null = null;
-  /** Full-html snapshots already fetched this session, keyed by id, so
-   *  revisiting a chat (or a window-focus refetch) never re-invokes
-   *  get_preview or rebuilds the iframe for content already seen. Pruned in
-   *  refreshList to whatever ids the daemon's list still reports, so it can
-   *  never outgrow the daemon-side MAX_HISTORY cap. */
+  /** The archived version in view, or null while the latest page is. */
+  private selectedVersion: number | null = null;
+  /** Previews that got a push while another one, or an older version of the
+   *  same one, was in view: the push never moves the view (see onLivePush), so
+   *  the pickers carry a dot until the pushed page is opened. */
+  private unseenIds = new Set<string>();
+  /** Full-html snapshots already fetched this session, keyed by id and version
+   *  (`cacheKey`), so revisiting a chat (or a window-focus refetch) never
+   *  re-invokes get_preview or rebuilds the iframe for content already seen.
+   *  Pruned in refreshList to the ids and versions the daemon's list still
+   *  reports, so it can never outgrow the daemon-side caps. */
   private snapshotCache = new Map<string, PreviewSnapshot>();
   private deviceWidth: DeviceWidth = "desktop";
   /** Only previews pushed with this session_id are shown. Set by
@@ -81,6 +87,7 @@ class PreviewTab implements RailTabHandle {
     if (this.currentSessionId === sessionId) return;
     this.closeMenus();
     this.currentSessionId = sessionId;
+    this.unseenIds.clear();
     if (this.deps.isVisible()) {
       void this.refreshList();
       return;
@@ -89,6 +96,7 @@ class PreviewTab implements RailTabHandle {
     // previous chat's snapshots before the fresh fetch lands.
     this.snapshots = [];
     this.selected = null;
+    this.selectedVersion = null;
     this.renderHeaderEmpty();
     this.renderCanvasEmpty();
     // Baseline only - the chat just switched into may already have older
@@ -156,9 +164,12 @@ class PreviewTab implements RailTabHandle {
       this.snapshots.forEach((s) => this.seenIds.add(s.id));
       // The list now covers only this chat, so only this chat's cached
       // snapshots can be judged gone; another chat's stay until it is revisited.
-      const validIds = new Set(all.map((m) => m.id));
-      for (const [id, cached] of this.snapshotCache) {
-        if (cached.session_id === this.currentSessionId && !validIds.has(id)) this.snapshotCache.delete(id);
+      const listed = new Map(all.map((m) => [m.id, m]));
+      for (const [key, cached] of this.snapshotCache) {
+        if (cached.session_id !== this.currentSessionId) continue;
+        const meta = listed.get(cached.id);
+        const archived = meta && versionsOf(meta).some((v) => v.version === cached.version);
+        if (!meta || (cached.version !== meta.version && !archived)) this.snapshotCache.delete(key);
       }
     } catch (err) {
       console.error("[preview-panel] list_previews failed", err);
@@ -166,44 +177,73 @@ class PreviewTab implements RailTabHandle {
     const first = this.snapshots[0];
     if (!first) {
       this.selected = null;
+      this.selectedVersion = null;
       this.renderHeaderEmpty();
       this.renderCanvasEmpty();
       return;
     }
     const targetId = opts.selectId ?? this.selected?.id ?? first.id;
-    const stillExists = this.snapshots.some((s) => s.id === targetId);
-    await this.selectSnapshot(stillExists ? targetId : first.id);
+    const target = this.snapshots.find((s) => s.id === targetId);
+    // A refetch keeps an archived version in view while it is still kept; a
+    // push naming a preview (selectId) always lands on that preview's latest.
+    const keepVersion = !opts.selectId && target?.id === this.selected?.id && target && versionsOf(target).some((v) => v.version === this.selectedVersion);
+    await this.selectSnapshot(target ? targetId : first.id, keepVersion ? this.selectedVersion : null);
   }
 
-  private async selectSnapshot(id: string): Promise<void> {
-    // Already the exact snapshot on screen (same id + version) — a
-    // window-focus refetch or a re-scope back to a chat whose top snapshot
-    // hasn't changed. Skip the round-trip and the iframe rebuild entirely so
-    // switching chats doesn't re-execute the previewed HTML's scripts.
+  private cacheKey(id: string, version: number | null): string {
+    return `${id}@${version ?? "latest"}`;
+  }
+
+  /** Shows `id`'s page: its latest when `version` is null, otherwise that
+   *  archived version. */
+  private async selectSnapshot(id: string, version: number | null = null): Promise<void> {
     const meta = this.snapshots.find((s) => s.id === id);
-    if (this.selected?.id === id && (!meta || meta.version === this.selected.version)) {
+    // Already the exact page on screen: a window-focus refetch or a re-scope
+    // back to a chat whose top snapshot hasn't changed. Skip the round-trip and
+    // the iframe rebuild entirely so switching chats doesn't re-execute the
+    // previewed HTML's scripts. An archived version never changes; the latest
+    // is the same page only while its version number is.
+    if (this.selected?.id === id && this.selectedVersion === version
+      && (version !== null || !meta || meta.version === this.selected.version)) {
+      this.unseenIds.delete(id);
+      this.renderHeader();
       return;
     }
-    const cached = this.snapshotCache.get(id);
-    if (cached && meta && cached.version === meta.version) {
-      this.selected = cached;
+    const key = this.cacheKey(id, version);
+    const cached = this.snapshotCache.get(key);
+    let next: PreviewSnapshot;
+    if (cached && (version !== null || (meta && cached.version === meta.version))) {
+      next = cached;
     } else {
       try {
-        this.selected = await invoke<PreviewSnapshot>("get_preview", { id, sessionId: this.currentSessionId });
+        next = await invoke<PreviewSnapshot>("get_preview", {
+          id,
+          sessionId: this.currentSessionId,
+          ...(version !== null ? { version } : {}),
+        });
       } catch (err) {
         console.error("[preview-panel] get_preview failed", err);
+        // The archived version was dropped between listing and fetching.
+        if (version !== null) await this.selectSnapshot(id, null);
         return;
       }
-      this.snapshotCache.set(id, this.selected);
+      this.snapshotCache.set(key, next);
     }
+    this.selected = next;
+    this.selectedVersion = version;
+    if (version === null) this.unseenIds.delete(id);
     this.renderHeader();
     void this.renderIframe();
   }
 
-  /** `preview` notifier broadcast handler. Opens the panel for the active
-   * chat's push (Joe, 2026-07-20: no opt-out on auto-refresh), EXCEPT a
-   * `show_preview` push, which already rendered as a card in the transcript.
-   * A background chat's push never switches the view (Joe, 2026-08-03). */
+  /** `preview` notifier broadcast handler. A push for the active chat opens the
+   * panel while it is closed (Joe, 2026-07-20: no opt-out on auto-refresh),
+   * EXCEPT a `show_preview` push, which already rendered as a card in the
+   * transcript. Once open, the view only follows a push while it shows the
+   * latest page of the preview being pushed (Joe, 2026-10-30): a push for
+   * another preview, or while an older version is in view, leaves the view
+   * alone and dots the picker that would reach it. A background chat's push
+   * never switches the view (Joe, 2026-08-03). */
   private onLivePush(meta: PreviewMeta | undefined): void {
     if (!meta) return;
     if (meta.session_id !== this.currentSessionId) {
@@ -213,13 +253,14 @@ class PreviewTab implements RailTabHandle {
     this.seenIds.add(meta.id);
 
     const idx = this.snapshots.findIndex((s) => s.id === meta.id);
+    const known = idx >= 0 ? this.snapshots[idx] : undefined;
     if (idx >= 0) this.snapshots[idx] = meta;
     else this.snapshots.unshift(meta);
 
     // A publish re-broadcasts the same id + version with only `published`
-    // changed, which selectSnapshot skips as already on screen.
-    if (this.selected?.id === meta.id && this.selected.version === meta.version) {
-      this.selected.published = meta.published;
+    // changed: not a new page, so it neither moves the view nor earns a dot.
+    if (known && known.version === meta.version) {
+      if (this.selected?.id === meta.id && this.selectedVersion === null) this.selected.published = meta.published;
       return;
     }
 
@@ -227,7 +268,13 @@ class PreviewTab implements RailTabHandle {
       if (meta.source !== PREVIEW_SOURCE_CHAT_CARD) this.deps.requestOpen(meta.id);
       return;
     }
-    void this.selectSnapshot(meta.id);
+    const following = !this.selected || (this.selected.id === meta.id && this.selectedVersion === null);
+    if (following) {
+      void this.selectSnapshot(meta.id);
+      return;
+    }
+    this.unseenIds.add(meta.id);
+    this.renderHeader();
   }
 
   private async subscribeLive(): Promise<void> {
@@ -275,8 +322,9 @@ class PreviewTab implements RailTabHandle {
       onSetDeviceWidth: (w) => this.setDeviceWidth(w),
       getDeviceWidth: () => this.deviceWidth,
       // Publish reads the LOCAL preview store, which never holds a mirrored
-      // chat's snapshots (they live on the machine hosting the chat).
-      publish: this.selected && canPublish() && !this.chatIsMirrored()
+      // chat's snapshots (they live on the machine hosting the chat), and it
+      // publishes the latest page, so an older version in view must not offer it.
+      publish: this.selected && this.selectedVersion === null && canPublish() && !this.chatIsMirrored()
         ? {
             label: publishLabel(this.selected.published, this.selected.version),
             icon: publishIcon(this.selected.published, this.selected.version),
@@ -287,11 +335,13 @@ class PreviewTab implements RailTabHandle {
     };
   }
 
-  private pvHistoryDeps(): PvHistoryDeps {
+  private pvPickerDeps(): PvPickerDeps {
     return {
       getSnapshots: () => this.snapshots,
       getSelectedId: () => this.selected?.id,
-      onSelect: (id) => void this.selectSnapshot(id),
+      getSelectedVersion: () => this.selectedVersion,
+      onSelectPreview: (id) => void this.selectSnapshot(id),
+      onSelectVersion: (version) => { if (this.selected) void this.selectSnapshot(this.selected.id, version); },
     };
   }
 
@@ -313,7 +363,8 @@ class PreviewTab implements RailTabHandle {
     if (!actBtn) return;
     switch (actBtn.dataset.act) {
       case "more": togglePvMoreMenu(actBtn as HTMLButtonElement, this.pvMoreMenuDeps()); return;
-      case "history": togglePvHistory(actBtn, this.pvHistoryDeps()); return;
+      case "previews": togglePvPicker("previews", actBtn, this.pvPickerDeps()); return;
+      case "versions": togglePvPicker("versions", actBtn, this.pvPickerDeps()); return;
       default: return;
     }
   }
@@ -323,8 +374,12 @@ class PreviewTab implements RailTabHandle {
   private renderShell(): void {
     this.root.innerHTML = `
       <header class="pv-head">
-        <span class="pv-title"><i class="ph ph-monitor-play"></i><span class="pv-name">No previews yet</span></span>
-        <button type="button" class="pv-ver" data-act="history" title="Version history"></button>
+        <button type="button" class="pv-pick pv-pick-name" data-act="previews" title="Switch preview" data-single>
+          <i class="ph ph-monitor-play"></i><span class="pv-name">No previews yet</span><i class="ph-fill ph-caret-down pv-tri"></i>
+        </button>
+        <button type="button" class="pv-pick pv-pick-ver" data-act="versions" title="Switch version" hidden>
+          <span class="pv-ver">Latest</span><i class="ph-fill ph-caret-down pv-tri"></i>
+        </button>
         <span class="pv-grow"></span>
         <button type="button" class="icon-btn" data-act="more" title="More options"><i class="ph ph-dots-three-vertical"></i></button>
       </header>
@@ -343,24 +398,33 @@ class PreviewTab implements RailTabHandle {
 
   private renderHeader(): void {
     if (!this.selected) return;
+    const selected = this.selected;
+    const nameBtn = this.root.querySelector<HTMLElement>(".pv-pick-name");
+    const verBtn = this.root.querySelector<HTMLElement>(".pv-pick-ver");
     const nameEl = this.root.querySelector<HTMLElement>(".pv-name");
     const verEl = this.root.querySelector<HTMLElement>(".pv-ver");
-    if (nameEl) nameEl.textContent = this.selected.slug;
-    if (verEl) {
-      verEl.textContent = `· v${this.selected.version}`;
-      verEl.hidden = false;
+    if (nameEl) nameEl.textContent = selected.slug;
+    // A lone preview has nothing to switch to, so its name is a plain label.
+    nameBtn?.toggleAttribute("data-single", this.snapshots.length <= 1);
+    nameBtn?.toggleAttribute("data-new", [...this.unseenIds].some((id) => id !== selected.id && this.snapshots.some((s) => s.id === id)));
+    const current = this.snapshots.find((s) => s.id === selected.id);
+    const versions = current ? versionsOf(current) : [];
+    if (verEl) verEl.textContent = this.selectedVersion === null ? "Latest" : `v${this.selectedVersion}`;
+    if (verBtn) {
+      verBtn.hidden = versions.length === 0;
+      verBtn.toggleAttribute("data-new", this.unseenIds.has(selected.id) && this.selectedVersion !== null);
     }
   }
 
   private renderHeaderEmpty(): void {
+    const nameBtn = this.root.querySelector<HTMLElement>(".pv-pick-name");
+    const verBtn = this.root.querySelector<HTMLElement>(".pv-pick-ver");
     const nameEl = this.root.querySelector<HTMLElement>(".pv-name");
-    const verEl = this.root.querySelector<HTMLElement>(".pv-ver");
     if (nameEl) nameEl.textContent = "No previews yet";
-    if (verEl) {
-      verEl.textContent = "";
-      // Nothing to open a history popover on, so the toggle isn't offered.
-      verEl.hidden = true;
-    }
+    nameBtn?.setAttribute("data-single", "");
+    nameBtn?.removeAttribute("data-new");
+    // Nothing to open a version list on, so the picker isn't offered.
+    if (verBtn) verBtn.hidden = true;
   }
 
   // No re-entry guard like chat-preview-card.ts's mountPreviewFrame: this
