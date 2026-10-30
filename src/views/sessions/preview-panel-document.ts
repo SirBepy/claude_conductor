@@ -2,6 +2,9 @@
 // split off of preview-panel.ts). Pure functions, zero PreviewPanel instance
 // state - they build the CSP/sandbox-relevant iframe document string.
 
+import { PAGE_ZOOM_SCRIPT } from "./preview-page-zoom";
+import { previewTemplateHead } from "./preview-templates";
+
 /** AI-pushed HTML may be a bare fragment; wrap it in minimal boilerplate
  * before it becomes the iframe's data: URL document. */
 export function wrapFragmentIfNeeded(html: string): string {
@@ -56,36 +59,31 @@ const DIAGNOSTICS_HEAD_SCRIPT = `<script>(function(){
 // no-op (the documented failure mode) rather than only catching exceptions.
 const DIAGNOSTICS_BODY_END_SCRIPT = `<script>window.__previewDiag && (window.__previewDiag.bodyEndRan = true);</script>`;
 
-/** `data` tag on the zoom-key forwarder's postMessage, read by
- *  preview-panel-zoom-gate.ts. */
-export const ZOOM_KEY_MESSAGE = "cc-preview-zoom-key";
+/** Splices `headHtml` in right after the document's opening head tag, adding
+ *  the head (or the whole prefix) when the page has none. */
+function spliceHead(doc: string, headHtml: string): string {
+  if (/<head[^>]*>/i.test(doc)) return doc.replace(/<head[^>]*>/i, (m) => `${m}${headHtml}`);
+  if (/<html[^>]*>/i.test(doc)) return doc.replace(/<html[^>]*>/i, (m) => `${m}<head>${headHtml}</head>`);
+  return `${headHtml}${doc}`;
+}
 
-// Once the page is clicked, keys go to the iframe and the panel never sees
-// Ctrl/Cmd go down, so the page reports it. Capture phase, so a page that
-// stops propagation on its own key handlers still reports.
-const ZOOM_KEY_FORWARDER_SCRIPT = `<script>(function(){
-  function send(held, blur){ try { parent.postMessage({ type: "${ZOOM_KEY_MESSAGE}", held: held, blur: blur }, "*"); } catch (e) {} }
-  function onKey(e){ if (e.key === "Control" || e.key === "Meta") send(e.type === "keydown", false); }
-  window.addEventListener("keydown", onKey, true);
-  window.addEventListener("keyup", onKey, true);
-  window.addEventListener("blur", function(){ send(false, true); });
-})();</script>`;
+/** The pushed page with its template applied (see preview-templates.ts), and
+ *  nothing else: no CSP, no diagnostics. What "Open in browser" writes to disk. */
+export function applyPreviewTemplate(html: string): string {
+  const wrapped = wrapFragmentIfNeeded(html);
+  return spliceHead(wrapped, previewTemplateHead(wrapped));
+}
 
 /** Loaded via a `data:` URL, never `iframe.srcdoc`: a srcdoc document has no
  * navigation, so it inherits the app's CSP and can only intersect this meta,
  * never loosen it. A data: URL navigates into its own opaque origin, which
  * makes this meta the sole governing policy.
  *
- * `forwardZoomKeys` adds the Ctrl/Cmd forwarder the Preview panel's zoom gate
- * listens for; the inline chat card has no zoom, so it leaves it off. */
-export function buildPreviewDocumentHtml(html: string, opts: { forwardZoomKeys?: boolean } = {}): string {
-  const wrapped = wrapFragmentIfNeeded(html);
-  const headScripts = `${INNER_CSP_META}${DIAGNOSTICS_HEAD_SCRIPT}${opts.forwardZoomKeys ? ZOOM_KEY_FORWARDER_SCRIPT : ""}`;
-  const withHead = /<head[^>]*>/i.test(wrapped)
-    ? wrapped.replace(/<head[^>]*>/i, (m) => `${m}${headScripts}`)
-    : /<html[^>]*>/i.test(wrapped)
-      ? wrapped.replace(/<html[^>]*>/i, (m) => `${m}<head>${headScripts}</head>`)
-      : `${headScripts}${wrapped}`;
+ * `zoom` adds the in-page pinch/wheel zoom (preview-page-zoom.ts) the Preview
+ * panel wants; the inline chat card scrolls with the chat, so it leaves it off. */
+export function buildPreviewDocumentHtml(html: string, opts: { zoom?: boolean } = {}): string {
+  const templated = applyPreviewTemplate(html);
+  const withHead = spliceHead(templated, `${INNER_CSP_META}${DIAGNOSTICS_HEAD_SCRIPT}${opts.zoom ? PAGE_ZOOM_SCRIPT : ""}`);
   // The LAST </body>, not the first: a mockup's own inline script commonly
   // builds HTML strings containing the literal text "</body>" (e.g. an
   // AI-generated mockup that itself renders HTML), and .replace() with no
