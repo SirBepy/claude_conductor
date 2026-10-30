@@ -19,7 +19,7 @@ import { Composer } from "../../shared/chat/composer";
 import { HeldMessages } from "../../shared/chat/held-messages";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { refreshSessions } from "./sidebar";
-import { rebuildSidebar } from "./pending-pane-mount";
+import { rebuildSidebar, beginDraftSpawn, endDraftSpawn, moveSpawnedChat } from "./pending-pane-mount";
 import { leaveDraftDashboard } from "./project-dashboard/draft-dashboard";
 
 /** With no account registered there is nothing to pick, so the picker would
@@ -117,6 +117,12 @@ export function wirePendingComposer(
       // because the composer clears the draft before calling this and only
       // puts it back on a throw; it also keeps the blocked-by-limit path from
       // announcing "Scheduled for ..." for a schedule that never happened.
+      // ScheduledKind::NewChat carries no machine id, so a scheduled machine
+      // draft would spawn here with the peer's working directory.
+      if (!realId && config.machineId) {
+        showToast("Scheduling a new chat on another machine is not supported yet. Send it now, or switch the draft to this machine.");
+        throw new Error("machine draft cannot be scheduled");
+      }
       if (!realId && (await noAccountsRegistered(config))) {
         noAccountsGuidance();
         throw new Error("no account registered");
@@ -197,6 +203,7 @@ export function wirePendingComposer(
         }
         leaveDraftDashboard(pane);
         rebuildSidebar();
+        beginDraftSpawn(placeholderId, config.accountId ?? null);
         try {
           const sessionId = await invoke<string>("start_session", {
             cwd: project.path,
@@ -214,7 +221,12 @@ export function wirePendingComposer(
             // call can't race ahead of it under real network latency.
             autoAccept: config.autoAccept !== false,
           });
-          if (state.mountId !== myMount) return;
+          const heldPick = endDraftSpawn(placeholderId);
+          if (state.mountId !== myMount) {
+            // The pane is gone but the chat spawned: the pick still belongs to it.
+            if (heldPick && sessionId) await moveSpawnedChat(sessionId, heldPick.id, heldPick.label, !!config.machineId);
+            return;
+          }
           if (sessionId) {
             if (config.autoAccept !== false) setAutoAccept(sessionId, true);
             const isStillActive = state.selectedId === placeholderId || state.selectedId === sessionId;
@@ -235,6 +247,10 @@ export function wirePendingComposer(
             if (state.mountId !== myMount) return;
             rebuildSidebar();
             if (isStillActive) deps.rebindPaneHeader(pane, sessionId);
+            // An account picked while the spawn was pending: the chat started
+            // on the old one, so the pick is a move, after the rebind that
+            // would otherwise repaint the chip back to the spawned account.
+            if (heldPick) await moveSpawnedChat(sessionId, heldPick.id, heldPick.label, !!config.machineId);
           } else {
             // A resolve with no id runs none of the branch above and never
             // reaches the catch, so nothing clears the pending row and it
@@ -244,6 +260,9 @@ export function wirePendingComposer(
           }
         } catch (err) {
           console.error("[sessions] start_session failed", err);
+          // Nothing spawned, so a pick held during it is dropped; the chip
+          // keeps the account the retry will use.
+          endDraftSpawn(placeholderId);
           started = false;
           // Roll the pending row back to a draft so it doesn't hang on
           // "starting…" forever; the user can retry from the same composer
