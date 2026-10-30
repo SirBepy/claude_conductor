@@ -73,7 +73,7 @@ export function linkifyDrillRefs(root: HTMLElement, container: ParentNode = root
   }
 }
 
-const CARD_W = 560;
+const CARD_W = 460;
 const CARD_H = 340;
 const CARD_GAP = 8;
 const CARD_EDGE = 8;
