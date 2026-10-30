@@ -95,3 +95,34 @@ test("a multi-line failed send keeps the strip clear of the bubble's own text", 
 
   await capture(page, "chat-failed-send-bubble-multiline", { fullPage: false });
 });
+
+test("a failed send with attachments keeps the strip inside the red bubble, above the tray", async ({ page }) => {
+  await mountChatRejectingOnce(page);
+  // read_attachment is not stubbed here, so the chips stay unhydrated in the
+  // tray, which is all the layout needs.
+  await sendText(page, "look at this\n<file:C:/shots/step-1.png::step-1.png>");
+
+  const msg = page.locator(".msg.user.send-failed");
+  await expect(msg).toBeVisible();
+  const bubble = msg.locator(":scope > .msg-bubble");
+  const tray = msg.locator(":scope > .msg-tray");
+  await expect(tray).toBeVisible();
+  const strip = bubble.locator(".send-failed-strip");
+  await expect(strip).toBeVisible();
+  await expect(msg.locator(":scope > .send-failed-strip")).toHaveCount(0);
+
+  const stripBox = (await strip.boundingBox())!;
+  const bubbleBox = (await bubble.boundingBox())!;
+  const trayBox = (await tray.boundingBox())!;
+  expect(stripBox.y).toBeGreaterThan(bubbleBox.y);
+  expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(bubbleBox.y + bubbleBox.height + 1);
+  expect(trayBox.y).toBeGreaterThanOrEqual(bubbleBox.y + bubbleBox.height - 1);
+
+  // The red tint is on the bubble, not the transparent wrapper.
+  const bubbleBg = await bubble.evaluate((e) => getComputedStyle(e).backgroundColor);
+  const wrapperBg = await msg.evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(wrapperBg).toBe("rgba(0, 0, 0, 0)");
+  expect(bubbleBg).not.toBe("rgba(0, 0, 0, 0)");
+
+  await capture(page, "chat-failed-send-bubble-tray", { fullPage: false });
+});
