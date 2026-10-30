@@ -106,6 +106,20 @@ describe("App lock section", () => {
       expect(sw.disabled).toBe(true);
     });
 
+    // The picker shares the switch's one answer callback, so a change made while
+    // the switch's prompt is up would overwrite it and strand the switch.
+    it("holds the picker still while the switch's unlock prompt is up", () => {
+      const { host } = flipOffAwaitingUnlock();
+      expect(host.querySelector("#ra-app-lock-minutes").disabled).toBe(true);
+    });
+
+    it("frees the switch and the picker again after the prompt's answer", () => {
+      const { host, sw } = flipOffAwaitingUnlock();
+      window.__ccLockSwitchResult(false);
+      expect(sw.disabled).toBe(false);
+      expect(host.querySelector("#ra-app-lock-minutes").disabled).toBe(false);
+    });
+
     it("flips back on and keeps the picker usable when the unlock is cancelled", () => {
       const { host, sw } = flipOffAwaitingUnlock();
       window.__ccLockSwitchResult(false);
