@@ -182,16 +182,20 @@ pub async fn connect_console_login(
         .await
         .map_err(|e| e.to_string())?;
 
-    if account.org_uuid.is_empty() {
-        let (org_uuid, email) = console_identity(CONSOLE_BASE_URL, &cookie).await.ok_or_else(|| {
-            "That Console login has no API organization. Sign in with the account that owns the API credit.".to_string()
-        })?;
-        let accounts_file = paths::accounts_file().map_err(|e| e.to_string())?;
-        if credit_accounts::fill_missing_identity(&accounts_file, &account.id, &org_uuid, &email)
-            .map_err(|e| format!("{e:#}"))?
-        {
-            emit_settings_changed(&state, &app);
+    match console_identity(CONSOLE_BASE_URL, &cookie).await {
+        Some((org_uuid, email)) => {
+            let accounts_file = paths::accounts_file().map_err(|e| e.to_string())?;
+            if credit_accounts::adopt_console_identity(&accounts_file, &account.id, &org_uuid, &email)
+                .map_err(|e| format!("{e:#}"))?
+            {
+                emit_settings_changed(&state, &app);
+            }
         }
+        None if account.org_uuid.is_empty() => {
+            return Err("That Console login has no API organization. Sign in with the account that owns the API credit.".to_string());
+        }
+        // A lookup hiccup must not block a login for an account whose org is already known.
+        None => {}
     }
 
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
