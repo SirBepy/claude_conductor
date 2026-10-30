@@ -8,6 +8,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
+use super::chat_side::short;
 use super::model::{Ext, ExtId};
 use super::{App, Bridge, PING_EVERY};
 
@@ -60,10 +61,11 @@ impl Bridge {
             i.pending.retain(|_, (e, _)| *e != ext);
             i.model.drop_ext(ext)
         };
+        let chats: Vec<_> = events.iter().map(|(k, _)| short(k)).collect();
+        log::info!("browser bridge: extension connection {ext} closed, dropped {} tab(s) of chats {chats:?}", events.len());
         for (key, event) in events {
             self.send_chat(&key, event);
         }
-        log::info!("browser bridge: extension connection {ext} closed");
     }
 
     fn on_ext_message(&'static self, ext: ExtId, text: &str) {
@@ -104,6 +106,16 @@ impl Bridge {
             "debugger.onDetach" | "tabs.onRemoved" => {
                 let tab = if event == "tabs.onRemoved" { args[0].as_i64() } else { args[0]["tabId"].as_i64() };
                 let dropped = tab.and_then(|t| self.lock().model.drop_tab(ext, t));
+                // The reason and removeInfo are what tell a crash or a user close from a page that merely navigated away.
+                let cause = if event == "tabs.onRemoved" {
+                    format!("isWindowClosing={}, windowId={}", args[1]["isWindowClosing"], args[1]["windowId"])
+                } else {
+                    format!("reason={}", args[1])
+                };
+                log::info!(
+                    "browser bridge: {event} tab {tab:?} ({cause}, connection {ext}), chat {}",
+                    dropped.as_ref().map_or("none", |(k, _)| short(k))
+                );
                 if let Some((key, m)) = dropped {
                     self.send_chat(&key, m);
                 }
