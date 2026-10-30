@@ -59,6 +59,16 @@ async function mountFiles(page: Page, files: Disk["files"], first: string): Prom
 const disk = (page: Page) => page.evaluate(() => (window as unknown as { __disk: Disk }).__disk);
 
 test.describe("view-harness / file editor", () => {
+  test("the window tells the host its open listener is registered", async ({ page }) => {
+    await mountFiles(page, { [FILE]: { content: "x\n", mtime: 1, writable: true } }, FILE);
+    await expect.poll(() => page.evaluate(() => {
+      const w = window as unknown as { __ccInvokeCalls: { cmd: string }[]; __ccListeners: Map<string, Set<unknown>> };
+      // Listener first: a ready signal sent before it would let the host flush into nothing.
+      return (w.__ccListeners.get("file-window-open")?.size ?? 0) > 0
+        && w.__ccInvokeCalls.some((c) => c.cmd === "file_window_ready");
+    })).toBe(true);
+  });
+
   test("typing autosaves once it stops, with the stamp it loaded", async ({ page }) => {
     await mountFiles(page, { [FILE]: { content: "export const x = 1;\n", mtime: 100, writable: true } }, FILE);
     await expect(page.locator("#fw-test .cm-tab.on")).toContainText("main.ts");

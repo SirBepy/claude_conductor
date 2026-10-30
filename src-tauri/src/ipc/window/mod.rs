@@ -87,9 +87,28 @@ fn surface_main_if_ready(app: &AppHandle, w: &tauri::WebviewWindow) {
     }
 }
 
-/// Hide-to-tray on close instead of destroying. A destroyed window means every
-/// reopen is a cold webview boot; a hidden one reopens instantly with its state
-/// intact. Real quit (tray menu) sets should_quit and passes.
+/// What closing a window does.
+#[derive(Debug, PartialEq)]
+enum ClosePolicy {
+    HideToTray,
+    Destroy,
+}
+
+/// The Files window holds tabs and mounted editors (each with a disk poll) that
+/// are meant to live only as long as the window, so closing it destroys it and
+/// the next open builds a fresh one. Every other window keeps its state hidden.
+fn close_policy(label: &str) -> ClosePolicy {
+    if label == file::LABEL {
+        ClosePolicy::Destroy
+    } else {
+        ClosePolicy::HideToTray
+    }
+}
+
+/// Hide-to-tray on close instead of destroying, except where `close_policy`
+/// says otherwise. A destroyed window means every reopen is a cold webview
+/// boot; a hidden one reopens instantly with its state intact. Real quit (tray
+/// menu) sets should_quit and passes.
 fn attach_hide_to_tray(window: &tauri::WebviewWindow) {
     attach_hide_to_tray_with(window, |_| {});
 }
@@ -109,6 +128,11 @@ fn attach_hide_to_tray_with(
     let w = window.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            // Let the close through; `ipc::ready::watch`'s handler already syncs
+            // the dock on CloseRequested and Destroyed.
+            if close_policy(w.label()) == ClosePolicy::Destroy {
+                return;
+            }
             let app = w.app_handle();
             let quitting = app
                 .try_state::<crate::state::AppState>()
@@ -357,7 +381,15 @@ mod tests {
         );
     }
 
-    use super::is_degenerate_size;
+    use super::{close_policy, is_degenerate_size, ClosePolicy};
+
+    #[test]
+    fn only_the_files_window_is_destroyed_on_close() {
+        assert_eq!(close_policy("session-file"), ClosePolicy::Destroy);
+        for label in ["main", "session-chats", "session-code", "session-schedule", "session-jarvis", "overlay", "session-file-2"] {
+            assert_eq!(close_policy(label), ClosePolicy::HideToTray, "{label}");
+        }
+    }
 
     #[test]
     fn below_floor_on_either_axis_is_degenerate() {
