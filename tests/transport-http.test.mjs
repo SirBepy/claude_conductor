@@ -712,10 +712,11 @@ describe("HttpTransport.listen — instances-changed poll", () => {
     const afterImmediate = received.length;
     expect(afterImmediate).toBe(1);
 
-    // Advance short of the watchdog's staleness threshold
-    // (GLOBAL_WATCHDOG_STALE_MS, 20s, checked every GLOBAL_WATCHDOG_INTERVAL_MS):
-    // the degrade poll never starts, so no further tick fires.
-    await vi.advanceTimersByTimeAsync(9000);
+    // 19s sits just under GLOBAL_WATCHDOG_STALE_MS (20s): the watchdog ticks at
+    // 5, 10 and 15s all read an age under the limit, so the degrade poll never
+    // starts. Under the old 10s limit the 15s tick trips it and its first 3.5s
+    // poll tick fires at 18.5s, so this advance is what pins the 20s limit.
+    await vi.advanceTimersByTimeAsync(19000);
 
     expect(received.length).toBe(afterImmediate);
 
