@@ -222,6 +222,11 @@ impl Model {
     /// Who should hear a `chrome.debugger.onEvent`, and as what message.
     pub fn route_event(&mut self, ext: ExtId, source: &Value, method: &str, params: &Value) -> Option<(String, Value)> {
         let tab = source["tabId"].as_i64()?;
+        // A tab that dies under a live debugger announces it only here, and the
+        // extension's onDetach may follow much later or never.
+        if matches!(method, "Inspector.detached" | "Inspector.targetCrashed") {
+            log::info!("browser bridge: {method} on tab {tab} (connection {ext}), params {params}");
+        }
         let key = self.owners.get(&(ext, tab))?.clone();
         let t = self.chats.get_mut(&key)?.tabs.get_mut(&tab)?;
         if let Some(child) = params["sessionId"].as_str() {

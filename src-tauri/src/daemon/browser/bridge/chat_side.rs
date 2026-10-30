@@ -11,17 +11,27 @@ use tokio::sync::mpsc;
 use super::model::{Chat, ExtId, Model, Route, Tab, TabId};
 use super::Bridge;
 
+/// A chat key is the path credential of its CDP socket, so logs carry only a prefix.
+pub(super) fn short(key: &str) -> &str {
+    key.get(..8).unwrap_or(key)
+}
+
 impl Bridge {
     pub(super) async fn serve_chat(&'static self, key: String, socket: WebSocket) {
         let (mut sink, mut stream) = socket.split();
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         {
             let mut i = self.lock();
-            let Some((app, wants_profile)) = i.registrations.get(&key).copied() else { return };
+            let Some((app, wants_profile)) = i.registrations.get(&key).copied() else {
+                log::info!("browser bridge: chat {} socket refused, not registered", short(&key));
+                return;
+            };
             if i.model.chats.contains_key(&key) {
+                log::info!("browser bridge: chat {} socket refused, already connected", short(&key));
                 return;
             }
             let ext = i.model.pick_ext_for(app, wants_profile);
+            log::info!("browser bridge: chat {} socket connected ({app:?}, connection {ext:?})", short(&key));
             i.model.chats.insert(key.clone(), Chat { app, wants_profile, ext, window_id: None, tabs: HashMap::new(), auto_attach: false });
             i.chat_tx.insert(key.clone(), tx);
         }
@@ -32,13 +42,15 @@ impl Bridge {
                 }
             }
         });
-        while let Some(Ok(msg)) = stream.next().await {
-            match msg {
-                Message::Text(text) => self.on_cdp(&key, &text),
-                Message::Close(_) => break,
-                _ => {}
+        let why = loop {
+            match stream.next().await {
+                Some(Ok(Message::Text(text))) => self.on_cdp(&key, &text),
+                Some(Ok(Message::Close(frame))) => break format!("close frame {:?}", frame.map(|f| f.code)),
+                Some(Ok(_)) => {}
+                Some(Err(e)) => break format!("socket error: {e}"),
+                None => break "stream ended".to_string(),
             }
-        }
+        };
         writer.abort();
         let window = {
             let mut i = self.lock();
@@ -46,6 +58,7 @@ impl Bridge {
             i.model.owners.retain(|_, k| k != &key);
             i.model.chats.remove(&key).and_then(|c| Some((c.ext?, c.window_id?)))
         };
+        log::info!("browser bridge: chat {} socket closed ({why}), window {:?}", short(&key), window.map(|(_, w)| w));
         // The chat's child exited (idle, chat closed, or retired): its window goes too.
         if let Some((ext, window)) = window {
             let _ = self.call(ext, "windows.remove", json!([window])).await;
@@ -84,6 +97,7 @@ impl Bridge {
                 });
             }
             Route::CloseTab { ext, tab } => {
+                log::info!("browser bridge: chat {} asked to close tab {tab} (Target.closeTarget)", short(&key));
                 tokio::spawn(async move {
                     let r = self.call(ext, "tabs.remove", json!([tab])).await.map(|_| json!({ "success": true }));
                     self.reply(&key, &id, session.as_deref(), r);
@@ -96,6 +110,7 @@ impl Bridge {
                 });
             }
             Route::CloseWindow { ext, window } => {
+                log::info!("browser bridge: chat {} asked to close window {window} (Browser.close)", short(&key));
                 tokio::spawn(async move {
                     let r = self.call(ext, "windows.remove", json!([window])).await.map(|_| json!({}));
                     self.reply(&key, &id, session.as_deref(), r);
@@ -139,6 +154,7 @@ impl Bridge {
         let target = self.attach_locked(key, ext, tab, true).await?;
         let stale = self.lock().model.superseded(key, tab);
         if !stale.is_empty() {
+            log::info!("browser bridge: chat {} closes superseded tabs {stale:?} after opening tab {tab}", short(key));
             let _ = self.call(ext, "tabs.remove", json!([stale])).await;
         }
         Ok(target)
