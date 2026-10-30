@@ -301,7 +301,14 @@ export async function mountRenderer(
   messagesEl.classList.toggle("show-raw-chat", isRawViewEnabled(sessionId));
   // Activity feed routes to the thinking bar.
   wireRenderer(pane, sess, header, renderer);
-  await renderer.attach(sessionId);
+  try {
+    await renderer.attach(sessionId);
+  } catch (err) {
+    // Nothing later settles this load, so the stall timer and supersede watch
+    // would otherwise outlive it.
+    settleLoad();
+    throw err;
+  }
   // Bail if a newer mount or selectSession superseded us during await.
   if (state.mountId !== myMount || state.selectedId !== sessionId) {
     settleLoad();

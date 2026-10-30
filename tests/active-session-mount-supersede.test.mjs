@@ -20,6 +20,8 @@ vi.mock("../src/shared/perf.ts", () => ({
   },
 }));
 
+const hooks = { attachError: null };
+
 const settings = {
   rows: async () => [],
   hideZero: async () => false,
@@ -39,7 +41,7 @@ vi.mock("../src/shared/chat/chat-renderer.ts", () => ({
       this.paginator = {};
       this.toolTally = {};
     }
-    async attach() {}
+    async attach() { if (hooks.attachError) throw hooks.attachError; }
     detach() {}
     getMeta() { return {}; }
     customToolView() { return null; }
@@ -94,6 +96,7 @@ beforeEach(() => {
   phaseDone.mockClear();
   settings.rows = async () => [];
   settings.hideZero = async () => false;
+  hooks.attachError = null;
 });
 
 afterEach(() => {
@@ -114,6 +117,17 @@ describe("mountRenderer stall banner", () => {
     state.selectedId = "sess-b";
     await vi.advanceTimersByTimeAsync(2000);
     expect(pane.querySelector(".chat-load-stalled")).toBeNull();
+  });
+
+  it("settles the load when attach throws, so no stall timer or supersede watch outlives it", async () => {
+    vi.useFakeTimers();
+    hooks.attachError = new Error("attach failed");
+    const pane = makePane();
+    const header = { el: document.createElement("div") };
+    await expect(mountRenderer(pane, session, header, "sess-a", state.mountId, () => {})).rejects.toThrow("attach failed");
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(pane.querySelector(".chat-load-stalled")).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("keeps the banner while the mount is still the visible one", async () => {
