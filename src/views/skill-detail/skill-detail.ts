@@ -1,10 +1,18 @@
 import { html, render, type TemplateResult } from "lit-html";
 import { api } from "../../shared/api";
-import type { SkillDetail, SkillUsageEvent } from "../../types/ipc.generated";
+import type { InstalledSkill, SkillDetail, SkillUsageEvent } from "../../types/ipc.generated";
 import { showView } from "../../shared/navigation";
 import { tokensAllIn } from "../../shared/tokens";
 import { buildPieSvg } from "../../shared/pie";
+import { readScopes, saveScope, scopeEditor, type ScopeMap, type ScopeProject, type SkillScope } from "./scope-editor";
 import "./skill-detail.css";
+
+interface ScopeState {
+  skill: InstalledSkill | null;
+  projects: ScopeProject[];
+  scopes: ScopeMap;
+  addOpen: boolean;
+}
 
 const SOURCE_COLORS = {
   manual: "var(--color-info)",
@@ -55,28 +63,84 @@ export async function renderSkillDetailView(root: HTMLElement): Promise<() => vo
     return () => { /* noop */ };
   }
 
-  const draw = (detail: SkillDetail | null) => {
+  let detail: SkillDetail | null = null;
+  const scope: ScopeState = { skill: null, projects: [], scopes: {}, addOpen: false };
+  const draw = () => {
     if (!detail) {
       render(html`<div class="skill-detail loading">Loading&hellip;</div>`, root);
       return;
     }
-    render(buildView(detail), root);
+    render(buildView(detail, scopeSection(scope, draw)), root);
   };
+  const closeMenu = () => {
+    if (!scope.addOpen) return;
+    scope.addOpen = false;
+    draw();
+  };
+  document.addEventListener("click", closeMenu);
 
-  draw(null);
-  const detail = await api.getSkillUsageDetail(skill);
-  draw(detail);
+  draw();
+  const [d, installed, projects, settings] = await Promise.all([
+    api.getSkillUsageDetail(skill),
+    api.listInstalledSkills().catch(() => [] as InstalledSkill[]),
+    api.listProjects().catch(() => [] as ScopeProject[]),
+    api.getSettings().catch(() => null),
+  ]);
+  detail = d;
+  scope.skill = installed.find((s) => s.skill === skill) ?? null;
+  scope.projects = projects;
+  scope.scopes = readScopes(settings);
+  draw();
 
   const unlisten = api.onSkillUsageChanged(() => {
-    void api.getSkillUsageDetail(skill).then(draw);
+    void api.getSkillUsageDetail(skill).then((next) => {
+      detail = next;
+      draw();
+    });
   });
 
   return () => {
+    document.removeEventListener("click", closeMenu);
     try { unlisten(); } catch { /* ignore */ }
   };
 }
 
-function buildView(d: SkillDetail): TemplateResult {
+function scopeSection(s: ScopeState, redraw: () => void): TemplateResult {
+  const key = s.skill?.scope_key;
+  if (!s.skill || !key) return html``;
+  return scopeEditor({
+    skill: s.skill,
+    scope: s.scopes[key] ?? null,
+    projects: s.projects,
+    addOpen: s.addOpen,
+    onToggleAdd: () => {
+      s.addOpen = !s.addOpen;
+      redraw();
+    },
+    onChange: (next: SkillScope | null) => {
+      s.addOpen = false;
+      // Optimistic, so the click lands at once; the save's own result wins.
+      const prev = s.scopes;
+      s.scopes = { ...prev };
+      if (next) s.scopes[key] = next;
+      else delete s.scopes[key];
+      redraw();
+      saveScope(key, next).then(
+        (saved) => {
+          s.scopes = saved;
+          redraw();
+        },
+        (err) => {
+          console.error("[skill-detail] saving the scope failed", err);
+          s.scopes = prev;
+          redraw();
+        },
+      );
+    },
+  });
+}
+
+function buildView(d: SkillDetail, scope: TemplateResult): TemplateResult {
   return html`
     <div class="view view-skill-detail">
       <div class="view-header">
@@ -88,6 +152,7 @@ function buildView(d: SkillDetail): TemplateResult {
       </div>
       <div class="view-body">
         <div class="view-body-inner">
+          ${scope}
           <div class="counters">
             ${counter("Total", d.invocations.total)}
             ${counter("Manual", d.invocations.manual)}

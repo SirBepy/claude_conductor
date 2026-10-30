@@ -121,6 +121,20 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+    // The composer's "Enable here" (ipc::enable_skill_here): the per-chat
+    // skill scope lives in the `--settings` file, read only at spawn.
+    {
+        let state = state.clone();
+        router.register("restart_session_process", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let p: SessionId = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let restarted = restart_live_session(&state, "restart_session_process", &p.session_id).await;
+                Ok(json!({"ok": true, "restarted": restarted}))
+            }
+        });
+    }
     // Chat menu's "Freeze chat": force-kills the live child (if any) and
     // flips the frozen flag - never marks the session ended, so it keeps its
     // sidebar slot (new Frozen segment). Interactive-only; External/Automated

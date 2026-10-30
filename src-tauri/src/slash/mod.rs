@@ -5,6 +5,7 @@ pub mod parse;
 pub mod builtins;
 pub mod enumerate;
 pub mod mentions;
+pub mod scope;
 pub mod watcher;
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -21,6 +22,13 @@ pub struct SlashEntry {
     /// typed or rendered mention of it resolves and /help lists it (`/pickup`
     /// while its PLAN.md has nothing to pick, see `enumerate::scan_menu`).
     pub menu_hidden: bool,
+    /// The key `scope::SETTINGS_KEY` scopes this entry under: a user skill's
+    /// name, or a plugin's `<plugin>@<marketplace>`. `None` for everything
+    /// that can't be scoped (builtins, commands, project skills).
+    pub scope_key: Option<String>,
+    /// Scoped to other projects, so the chat's `claude` doesn't have it. The
+    /// popup still lists it (dimmed) and the composer offers "Enable here".
+    pub off_here: bool,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]

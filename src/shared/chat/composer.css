@@ -130,6 +130,54 @@
   display: none;
 }
 
+/* A leading /skill that is scoped to other projects (composer-skill-scope.ts).
+ * Same quiet line as .composer-notice, above the input, with text-link actions. */
+.composer-scope-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  padding: 0 2px 6px;
+}
+
+.composer-scope-warning[hidden] {
+  display: none;
+}
+
+.composer-scope-warning > i {
+  color: var(--color-warning);
+}
+
+.composer-scope-warning code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--color-text);
+}
+
+.composer-scope-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.composer-scope-link.quiet {
+  color: var(--sb-muted);
+}
+
+.composer-scope-spin {
+  animation: composer-scope-spin 1s linear infinite;
+}
+
+@keyframes composer-scope-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Input wrap holds the highlight backdrop + the transparent-text textarea on
  * top of it, glyph-for-glyph aligned. The surface/rounding lives on the wrap
  * so the textarea can be transparent and let the colored backdrop show. */

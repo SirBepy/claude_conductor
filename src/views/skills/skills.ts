@@ -1,11 +1,14 @@
 import { html, render, type TemplateResult } from "lit-html";
 import { api } from "../../shared/api";
 import type { InstalledSkill } from "../../types/ipc.generated";
+import { readScopes, scopeSummary, type ScopeMap, type ScopeProject } from "../skill-detail/scope-editor";
 import { showView } from "../../shared/navigation";
 import { openSidemenu } from "../../shared/sidemenu";
 import "./skills.css";
 
 let allSkills: InstalledSkill[] = [];
+let scopes: ScopeMap = {};
+let projects: ScopeProject[] = [];
 let query = "";
 let loadingFlag = true;
 let hasError = false;
@@ -35,6 +38,12 @@ function badge(s: InstalledSkill): TemplateResult {
   if (s.plugin) return html`<span class="skill-badge skill-badge-plugin">${s.plugin}</span>`;
   if (s.project) return html`<span class="skill-badge skill-badge-project">${s.project}</span>`;
   return html`<span class="skill-badge skill-badge-personal">personal</span>`;
+}
+
+function scopeLine(s: InstalledSkill): TemplateResult {
+  const text = s.scope_key ? scopeSummary(scopes[s.scope_key], projects) : null;
+  if (!text) return html``;
+  return html`<span class="skill-where" title="Available in"><i class="ph ph-folder-simple"></i>${text}</span>`;
 }
 
 function openSkill(skill: string) {
@@ -110,6 +119,7 @@ function content(): TemplateResult {
             <div class="skill-row-main">
               <span class="skill-name">${displayName(s)}</span>
               ${badge(s)}
+              ${scopeLine(s)}
             </div>
             ${s.description
               ? html`<div class="skill-desc" title=${s.description}>${s.description}</div>`
@@ -172,7 +182,14 @@ async function load(): Promise<void> {
   hasError = false;
   draw();
   try {
-    allSkills = await api.listInstalledSkills();
+    const [skills, settings, projectList] = await Promise.all([
+      api.listInstalledSkills(),
+      api.getSettings().catch(() => null),
+      api.listProjects().catch(() => [] as ScopeProject[]),
+    ]);
+    allSkills = skills;
+    scopes = readScopes(settings);
+    projects = projectList;
   } catch (err) {
     console.error("list_installed_skills failed", err);
     allSkills = [];

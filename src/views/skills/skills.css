@@ -90,6 +90,17 @@
   text-transform: none;
 }
 
+/* A scoped skill's "Available in" summary: one muted line, no badge. */
+.skill-where {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-micro);
+  color: var(--sb-muted);
+  white-space: nowrap;
+}
+
 .skill-desc {
   font-size: var(--fs-micro);
   color: var(--sb-muted);
