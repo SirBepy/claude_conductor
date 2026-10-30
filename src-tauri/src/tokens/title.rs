@@ -372,8 +372,10 @@ pub(crate) fn user_prompt_label(msg: &serde_json::Value, max_chars: usize) -> Op
 /// Removes every `<file:ABS_PATH::DISPLAY_NAME>` attachment token the
 /// composer appends for a staged file, returning the remaining text and each
 /// removed token's display name. The path itself holds `:` (`C:\...`), so the
-/// display name is whatever follows the LAST `::` inside the token. A `<file:`
-/// with no closing `>` is ordinary text and stays.
+/// display name is whatever follows the LAST `::` inside the token. Only that
+/// composer shape is stripped: a `<file:` with no closing `>`, or a span that
+/// is not an absolute path plus `::` plus a name, is something the user typed
+/// ("what does <file: x> mean") and stays.
 fn strip_attachment_tokens(text: &str) -> (String, Vec<String>) {
     const OPEN: &str = "<file:";
     let mut out = String::with_capacity(text.len());
@@ -382,14 +384,38 @@ fn strip_attachment_tokens(text: &str) -> (String, Vec<String>) {
     while let Some(start) = rest.find(OPEN) {
         let after = &rest[start + OPEN.len()..];
         let Some(end) = after.find('>') else { break };
-        let body = &after[..end];
+        let Some(name) = composer_token_name(&after[..end]) else {
+            // Keep the marker as text and rescan just past it, so a real token
+            // later in the same span is still found.
+            out.push_str(&rest[..start + OPEN.len()]);
+            rest = after;
+            continue;
+        };
         out.push_str(&rest[..start]);
-        let name = body.rsplit_once("::").map_or(body, |(_, n)| n);
         names.push(name.to_string());
         rest = &after[end + 1..];
     }
     out.push_str(rest);
     (out, names)
+}
+
+/// The display name of a composer token body (`ABS_PATH::NAME`), or None when
+/// the body is not that shape.
+fn composer_token_name(body: &str) -> Option<&str> {
+    let (path, name) = body.rsplit_once("::")?;
+    if name.is_empty() || body.contains('\n') || !is_absolute_path_text(path) {
+        return None;
+    }
+    Some(name)
+}
+
+/// Platform-independent absolute-path test: the transcript may have been
+/// written on another OS than the one titling it.
+fn is_absolute_path_text(path: &str) -> bool {
+    let b = path.as_bytes();
+    path.starts_with('/')
+        || path.starts_with('\\')
+        || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'))
 }
 
 /// Title for a message that held only attachment tokens: `Image` when every
@@ -464,6 +490,26 @@ mod tests {
     #[test]
     fn first_user_prompt_unclosed_file_marker_is_ordinary_text() {
         assert_eq!(first_prompt_of("what is <file: in html").as_deref(), Some("what is <file: in html"));
+    }
+
+    #[test]
+    fn first_user_prompt_typed_file_angle_brackets_are_ordinary_text() {
+        assert_eq!(first_prompt_of("what does <file: x> mean").as_deref(), Some("what does <file: x> mean"));
+        // A closed span that is the whole message must not be titled Attachment.
+        assert_eq!(first_prompt_of("<file: x>").as_deref(), Some("<file: x>"));
+        // `::` alone is not enough: the composer always writes an absolute path.
+        assert_eq!(first_prompt_of("see <file:foo::bar> here").as_deref(), Some("see <file:foo::bar> here"));
+    }
+
+    #[test]
+    fn first_user_prompt_typed_marker_before_a_real_token_keeps_the_text_and_strips_the_token() {
+        let text = r"what is <file: x> <file:C:\a\b.png::b.png>";
+        assert_eq!(first_prompt_of(text).as_deref(), Some("what is <file: x>"));
+    }
+
+    #[test]
+    fn first_user_prompt_unix_composer_token_is_stripped() {
+        assert_eq!(first_prompt_of("<file:/home/w/shot.png::shot.png>").as_deref(), Some("Image"));
     }
 
     #[test]
