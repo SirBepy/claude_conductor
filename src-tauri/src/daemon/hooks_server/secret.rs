@@ -58,6 +58,14 @@ pub(super) async fn on_secret_request(
         }
     };
 
+    // Tell the asking chat now, before Joe is shown a card that could only
+    // end in a refusal.
+    if body.temporary {
+        if let Some(reason) = crate::daemon::secret_target::temporary_conflict(&resolved_file, &body.key) {
+            return (StatusCode::OK, Json(json!({"ok": false, "error": reason})));
+        }
+    }
+
     let payload = json!({
         "id": body.id,
         "session_id": body.session_id,
@@ -159,6 +167,29 @@ mod tests {
         let v: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["ok"], json!(false));
         assert!(v["error"].as_str().unwrap().contains(".."));
+        assert!(state.list_prompts().await.is_empty());
+        assert!(state.pending.lock().await.is_empty());
+    }
+
+    /// A temporary request for a key the file already holds is answered with
+    /// the reason straight away, with no card shown.
+    #[tokio::test]
+    async fn temporary_request_for_an_existing_key_is_refused_before_the_card() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().join("session-cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(cwd.join("secrets.env"), "API_KEY=sk-kept\n").unwrap();
+        let state = state_with_session("s1", &cwd);
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+
+        let mut body = secret_body("p1", "s1", "secrets.env");
+        body.temporary = true;
+        let resp = on_secret_request(AxState(ctx), ValidatedJson(body)).await.into_response();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: Value = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(v["ok"], json!(false));
+        assert!(v["error"].as_str().unwrap().contains("API_KEY"), "got: {v}");
         assert!(state.list_prompts().await.is_empty());
         assert!(state.pending.lock().await.is_empty());
     }

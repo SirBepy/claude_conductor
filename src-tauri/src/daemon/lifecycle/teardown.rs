@@ -410,7 +410,8 @@ mod tests {
     #[tokio::test]
     async fn end_session_sweeps_the_chats_temporary_secrets_even_with_no_live_child() {
         let tmp = tempfile::tempdir().unwrap();
-        let file = tmp.path().join("secrets.env");
+        let cwd = std::fs::canonicalize(tmp.path()).unwrap();
+        let file = cwd.join("secrets.env");
         std::fs::write(&file, "API_KEY=sk-abc
 ").unwrap();
         let sid = "teardown-test-temp-secret-3b7d";
@@ -419,6 +420,7 @@ mod tests {
             file: file.clone(),
             key: "API_KEY".into(),
             created_file: true,
+            cwd,
         });
 
         let r = end_session(&new_session_map(), sid).await;

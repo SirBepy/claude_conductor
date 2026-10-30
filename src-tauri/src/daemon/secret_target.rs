@@ -4,8 +4,18 @@
 //! re-check right before the write - the prompt can sit open for up to an
 //! hour, during which the repo's ignore rules or even the cwd itself could
 //! change underneath it).
+//!
+//! Also owns the lifetime of `temporary: true` secrets (`TempSecrets`): the
+//! list of file+key pairs a chat wrote, swept when the chat closes. The list
+//! is mirrored to `temp-secrets[suffix].json` in the data dir (file and key
+//! names only, never a value) so a daemon that died with a live temporary
+//! secret removes it on its next boot. A temporary write never replaces a key
+//! that already sits in the file (`temporary_conflict`), and a sweep re-checks
+//! its target (not a symlink, still resolving to the recorded path inside the
+//! chat's cwd) before rewriting it.
 
 use crate::daemon::state::DaemonState;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -149,28 +159,35 @@ pub(crate) async fn validate(
 
 /// One `temporary: true` secret that was written to disk for a chat. Holds
 /// where the value went, never the value itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TempSecret {
     pub session_id: String,
+    /// The path `resolve_target` produced when the secret was written.
     pub file: PathBuf,
     pub key: String,
-    /// The write made the file; it was absent beforehand.
+    /// The write made the file, or another held secret in it did; it was
+    /// absent beforehand.
     pub created_file: bool,
+    /// The chat's cwd, so the sweep can re-run `resolve_target` on `file`.
+    pub cwd: PathBuf,
 }
 
-/// Chat-scoped secrets awaiting their chat's close. In memory only: a daemon
-/// crash leaves the line on disk, which is what a non-temporary secret does
-/// anyway, so this adds a cleanup on the happy path and no new exposure.
+/// Chat-scoped secrets awaiting their chat's close. Once persistence is on
+/// (`init_persistence`), every change is mirrored to disk so a crashed daemon's
+/// leftovers are swept on the next boot.
 #[derive(Default)]
 pub(crate) struct TempSecrets {
     inner: std::sync::Mutex<Vec<TempSecret>>,
+    persist_path: std::sync::OnceLock<PathBuf>,
 }
 
 impl TempSecrets {
     /// Re-recording the same file+key keeps the first entry's `created_file`:
     /// it is the one that knows whether the file predates us. Another chat
     /// asking for the same key becomes a second holder of the one line on
-    /// disk, which stays until the last holder closes.
+    /// disk, which stays until the last holder closes. A file any held entry
+    /// created is treated as created by all of them, so whichever entry is
+    /// swept last takes the then-empty file with it.
     pub(crate) fn record(&self, mut entry: TempSecret) {
         let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(first) = guard.iter().find(|e| e.file == entry.file && e.key == entry.key) {
@@ -179,14 +196,28 @@ impl TempSecrets {
             }
             entry.created_file = first.created_file;
         }
+        if guard.iter().any(|e| e.file == entry.file && e.created_file) {
+            entry.created_file = true;
+        }
         guard.push(entry);
+        self.persist(&guard);
     }
 
     /// A later permanent write to the same file+key must outlive the chat, so
     /// it takes the line off the cleanup list.
     pub(crate) fn forget(&self, file: &Path, key: &str) {
         let mut guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let before = guard.len();
         guard.retain(|e| !(e.file == file && e.key == key));
+        if guard.len() != before {
+            self.persist(&guard);
+        }
+    }
+
+    /// Whether any chat holds `key` in `file` as a temporary secret.
+    pub(crate) fn holds(&self, file: &Path, key: &str) -> bool {
+        let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.iter().any(|e| e.file == file && e.key == key)
     }
 
     #[cfg(test)]
@@ -204,6 +235,9 @@ impl TempSecrets {
             let (mine, rest): (Vec<_>, Vec<_>) =
                 guard.drain(..).partition(|e| e.session_id == session_id);
             *guard = rest;
+            if !mine.is_empty() {
+                self.persist(&guard);
+            }
             mine
         };
         let mut removed = 0;
@@ -228,12 +262,80 @@ impl TempSecrets {
         let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         guard.iter().any(|e| e.file == entry.file && e.key == entry.key)
     }
+
+    /// Turn on the on-disk mirror at `path`, after removing whatever a
+    /// previous daemon run left listed there. Returns how many leftovers were
+    /// swept. Call once, at daemon boot, before any chat can write a secret.
+    pub(crate) fn init_persistence(&self, path: &Path) -> usize {
+        let leftovers: Vec<TempSecret> = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        let mut swept = 0;
+        for entry in &leftovers {
+            swept += 1;
+            if let Err(e) = remove_entry(entry) {
+                log::warn!(
+                    "[secret-relay] could not remove leftover temporary secret {} from {}: {e}",
+                    entry.key,
+                    entry.file.display()
+                );
+            }
+        }
+        if self.persist_path.set(path.to_path_buf()).is_ok() {
+            let guard = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+            self.persist(&guard);
+        }
+        swept
+    }
+
+    /// Best-effort: a failed write only costs the crash-leftover sweep, never
+    /// the chat's own close-time cleanup, which runs from memory.
+    fn persist(&self, entries: &[TempSecret]) {
+        let Some(path) = self.persist_path.get() else { return };
+        let body = match serde_json::to_string_pretty(entries) {
+            Ok(b) => b,
+            Err(e) => {
+                log::warn!("[secret-relay] could not serialize the temporary-secret list: {e}");
+                return;
+            }
+        };
+        if let Err(e) = crate::util::write_json_atomic(path, &body) {
+            log::warn!("[secret-relay] could not persist the temporary-secret list: {e}");
+        }
+    }
 }
 
 /// The process-wide list the write path records into and chat close sweeps.
 pub(crate) fn temporary_secrets() -> &'static TempSecrets {
     static CELL: std::sync::OnceLock<TempSecrets> = std::sync::OnceLock::new();
     CELL.get_or_init(TempSecrets::default)
+}
+
+/// Daemon boot: sweep the previous run's leftover temporary secrets, then
+/// mirror the live list to `<app_data>/temp-secrets[suffix].json`.
+pub(crate) fn init_persistence(app_data: &Path, instance_suffix: &str) {
+    let path = app_data.join(format!("temp-secrets{instance_suffix}.json"));
+    let swept = temporary_secrets().init_persistence(&path);
+    if swept > 0 {
+        log::info!("[secret-relay] swept {swept} temporary secret(s) left by a previous daemon run");
+    }
+}
+
+/// Why a `temporary` write to `key` in `file` must be refused, or `None` when
+/// it may go ahead. A temporary secret is deleted when its chat closes, so
+/// letting it replace a value Joe stored permanently would destroy that value.
+/// A key a chat already holds as temporary is fine to overwrite.
+pub(crate) fn temporary_conflict(file: &Path, key: &str) -> Option<String> {
+    let text = std::fs::read_to_string(file).ok()?;
+    if without_key_line(&text, key).is_none() || temporary_secrets().holds(file, key) {
+        return None;
+    }
+    Some(format!(
+        "{key} is already set in {}; a temporary secret is deleted when its chat closes, so it \
+         never replaces a stored value. Ask for it without temporary, or use a different key or file",
+        file.display()
+    ))
 }
 
 /// `text` without the line that sets `key`, or `None` when no line does. Keys
@@ -260,11 +362,28 @@ fn without_key_line(text: &str, key: &str) -> Option<String> {
 
 /// Take one secret's line out of its file. A file this secret created goes
 /// with it, unless a permanent secret has since been added beside it, in which
-/// case only the one line is dropped.
+/// case only the one line is dropped. The path is re-validated first: a chat
+/// can swap the recorded file for a symlink (or a directory above it for a
+/// junction) between the write and the close, and the rewrite must not follow
+/// that to another file holding the same `KEY=` line.
 fn remove_entry(entry: &TempSecret) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    match std::fs::symlink_metadata(&entry.file) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(Error::new(ErrorKind::PermissionDenied, "the target is now a symlink, left alone"));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    }
+    let resolved = resolve_target(&entry.cwd, &entry.file.to_string_lossy())
+        .map_err(|e| Error::new(ErrorKind::PermissionDenied, e))?;
+    if resolved != entry.file {
+        return Err(Error::new(ErrorKind::PermissionDenied, "the target no longer resolves to the recorded path"));
+    }
     let text = match std::fs::read_to_string(&entry.file) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),
     };
     let Some(remaining) = without_key_line(&text, &entry.key) else {
@@ -281,7 +400,8 @@ mod tests {
     use super::*;
 
     fn entry(sid: &str, file: &Path, key: &str, created_file: bool) -> TempSecret {
-        TempSecret { session_id: sid.into(), file: file.to_path_buf(), key: key.into(), created_file }
+        let cwd = file.parent().unwrap().to_path_buf();
+        TempSecret { session_id: sid.into(), file: file.to_path_buf(), key: key.into(), created_file, cwd }
     }
 
     /// The chat closing takes the temporary key out and leaves its siblings.
@@ -427,6 +547,152 @@ mod tests {
         assert!(!present.exists());
     }
 
+    /// A key already stored in the file is a conflict for a temporary write:
+    /// the close would delete Joe's value. A missing file or key is not, and a
+    /// key a chat already holds as temporary may be overwritten.
+    #[test]
+    fn temporary_write_over_an_existing_key_is_a_conflict() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        assert_eq!(temporary_conflict(&file, "API_KEY"), None, "no file yet");
+        std::fs::write(&file, "OTHER=1\nAPI_KEY=sk-kept\n").unwrap();
+        let reason = temporary_conflict(&file, "API_KEY").expect("an existing key must be refused");
+        assert!(reason.contains("API_KEY") && !reason.contains("sk-kept"), "got: {reason}");
+        assert_eq!(temporary_conflict(&file, "NEW_KEY"), None, "a key the file lacks is fine");
+
+        temporary_secrets().record(entry("conflict-held-chat", &file, "API_KEY", false));
+        assert_eq!(temporary_conflict(&file, "API_KEY"), None, "a held temporary key may be rewritten");
+        temporary_secrets().forget(&file, "API_KEY");
+    }
+
+    /// A file swapped for a symlink to another file that holds the same key
+    /// must not have that other file rewritten by the close.
+    #[test]
+    fn sweep_refuses_a_target_swapped_for_a_symlink() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        let victim = root.join("victim.env");
+        std::fs::write(&file, "API_KEY=sk-abc\n").unwrap();
+        std::fs::write(&victim, "API_KEY=precious\nOTHER=1\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(entry("s1", &file, "API_KEY", false));
+        std::fs::remove_file(&file).unwrap();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(&victim, &file);
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&victim, &file);
+        if made.is_err() {
+            eprintln!("skipping: symlink creation not permitted here");
+            return;
+        }
+
+        reg.sweep_session("s1");
+
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "API_KEY=precious\nOTHER=1\n");
+    }
+
+    /// The same swap one level up: the recorded file's directory becomes a
+    /// junction to another directory inside cwd. `mklink /J` needs no
+    /// privilege, so this runs on every Windows machine.
+    #[cfg(windows)]
+    #[test]
+    fn sweep_refuses_a_target_whose_directory_became_a_junction() {
+        let (_tmp, root) = fixture();
+        let sub = root.join("sub");
+        let other = root.join("other");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let file = sub.join("secrets.env");
+        std::fs::write(&file, "API_KEY=sk-abc\n").unwrap();
+        std::fs::write(other.join("secrets.env"), "API_KEY=precious\nOTHER=1\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(TempSecret { cwd: root.clone(), ..entry("s1", &file, "API_KEY", false) });
+        std::fs::rename(&sub, root.join("sub-old")).unwrap();
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.arg("/C").arg("mklink").arg("/J").arg(&sub).arg(&other);
+        crate::util::process::hide_console(&mut cmd);
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "mklink /J failed: {}", String::from_utf8_lossy(&out.stderr));
+
+        reg.sweep_session("s1");
+
+        assert_eq!(
+            std::fs::read_to_string(other.join("secrets.env")).unwrap(),
+            "API_KEY=precious\nOTHER=1\n"
+        );
+    }
+
+    /// A daemon that died holding a temporary secret removes it on the next
+    /// boot, and the persisted list carries file and key names, never a value.
+    #[test]
+    fn boot_sweeps_the_previous_runs_leftover_temporary_secrets() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        let list = root.join("temp-secrets.json");
+        std::fs::write(&file, "OTHER=1\nAPI_KEY=sk-leaked\n").unwrap();
+        let before_crash = TempSecrets::default();
+        assert_eq!(before_crash.init_persistence(&list), 0);
+        before_crash.record(entry("s1", &file, "API_KEY", false));
+        let persisted = std::fs::read_to_string(&list).unwrap();
+        assert!(persisted.contains("API_KEY") && !persisted.contains("sk-leaked"), "got: {persisted}");
+
+        let after_restart = TempSecrets::default();
+        assert_eq!(after_restart.init_persistence(&list), 1);
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "OTHER=1\n");
+        assert_eq!(std::fs::read_to_string(&list).unwrap().trim(), "[]", "the swept list is emptied");
+    }
+
+    /// A normal close takes the entry off the persisted list too, so the next
+    /// boot has nothing to sweep.
+    #[test]
+    fn a_closed_chat_leaves_nothing_on_the_persisted_list() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        let list = root.join("temp-secrets.json");
+        std::fs::write(&file, "API_KEY=sk-abc\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.init_persistence(&list);
+        reg.record(entry("s1", &file, "API_KEY", true));
+
+        reg.sweep_session("s1");
+
+        assert_eq!(std::fs::read_to_string(&list).unwrap().trim(), "[]");
+    }
+
+    /// Saving A then B as temporary into a file neither chat found leaves no
+    /// empty file behind, whichever order the entries are swept in.
+    #[test]
+    fn a_file_left_empty_after_two_temporary_keys_is_removed() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        std::fs::write(&file, "A=1\nB=2\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(entry("s1", &file, "A", true));
+        reg.record(entry("s1", &file, "B", false));
+
+        reg.sweep_session("s1");
+
+        assert!(!file.exists(), "an empty leftover file must not stay behind");
+    }
+
+    /// The same, when the two keys belong to different chats.
+    #[test]
+    fn a_file_two_chats_filled_is_removed_when_the_last_closes() {
+        let (_tmp, root) = fixture();
+        let file = root.join("secrets.env");
+        std::fs::write(&file, "A=1\nB=2\n").unwrap();
+        let reg = TempSecrets::default();
+        reg.record(entry("s1", &file, "A", true));
+        reg.record(entry("s2", &file, "B", false));
+
+        reg.sweep_session("s1");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "B=2\n");
+        reg.sweep_session("s2");
+
+        assert!(!file.exists());
+    }
+
     #[test]
     fn without_key_line_keeps_crlf_and_reports_a_missing_key() {
         assert_eq!(without_key_line("A=1\r\nB=2\r\nC=3\r\n", "B").as_deref(), Some("A=1\r\nC=3\r\n"));
@@ -456,6 +722,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("session-cwd");
         std::fs::create_dir_all(&root).unwrap();
+        // Canonical, because a sweep compares the recorded path with what
+        // `resolve_target` returns, and that is always canonical.
+        let root = std::fs::canonicalize(&root).unwrap();
         (tmp, root)
     }
 
