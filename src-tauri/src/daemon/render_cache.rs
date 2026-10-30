@@ -10,6 +10,12 @@ use std::sync::{Mutex, OnceLock};
 /// render id minted many renders earlier (the gallery's `render-url`), so a small
 /// count cap 404ed live cards after ten later renders. Docs are typically tens to a
 /// few hundred KB, so this holds hundreds of them.
+///
+/// This is a per-cache ceiling and the daemon runs two (hooks server and remote
+/// server, see `RenderCache::instance`), so the worst case is twice this in
+/// resident memory until the daemon restarts. That is the price of keeping old
+/// card ids alive; it is deliberately not lowered, since a smaller budget brings
+/// back the 404ing cards the byte budget replaced the entry count to avoid.
 const MAX_RENDER_BYTES: usize = 64 * 1024 * 1024;
 
 struct Entry {
