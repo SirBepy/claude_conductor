@@ -62,7 +62,7 @@ test("drill chip opens a fixed-size card above its bubble, with a header", async
     };
   });
   expect(m.h).toBe(340);
-  expect(m.w).toBe(560);
+  expect(m.w).toBe(460);
   // 8px off the bubble's padding box, so 7px off its 1px border.
   expect(m.gap).toBe(7);
   expect(m.inHost).toBe(true);
