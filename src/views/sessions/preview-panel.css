@@ -241,10 +241,11 @@
   background: var(--color-primary);
 }
 
-/* Fills edge-to-edge by default (Joe, 2026-07-20: "I want my view split into
-   2 ... why the fuck is the preview not fullscreened in there" - no padding,
-   no checkerboard "device mockup" staging). The checkerboard/padding/frame
-   chrome only reappears for the Tablet/Phone size simulation below, where a
+/* The canvas fills the panel (Joe, 2026-07-20: "I want my view split into
+   2 ... why the fuck is the preview not fullscreened in there" - no
+   checkerboard "device mockup" staging); the page's own breathing room comes
+   from its template (preview-templates.ts), not from padding out here. The
+   frame chrome only reappears for the Tablet/Phone size simulation below, where a
    visual boundary actually communicates something (this is narrower than the
    real canvas), not for the Desktop default. */
 .pv-canvas {
@@ -282,10 +283,8 @@
   width: 190px;
 }
 
-/* The stage clips the zoomed page; the zoomee is what image-zoom-pan.ts
-   transforms. The page takes the pointer until preview-panel-zoom-gate.ts
-   arms zoom/pan (`.is-zoom`, Ctrl held or the toggle pressed); then the
-   iframe lets pointer events through to the stage's zoom/pan listeners. */
+/* Zoom lives inside the page (preview-page-zoom.ts), so the stage is just the
+   frame and the iframe always takes the pointer. */
 .pv-stage {
   position: relative;
   width: 100%;
@@ -293,44 +292,11 @@
   overflow: hidden;
 }
 
-.pv-zoomee {
-  width: 100%;
-  height: 100%;
-}
-
 .pv-iframe {
   width: 100%;
   height: 100%;
   border: 0;
   display: block;
-}
-
-.pv-stage.is-zoom .pv-iframe {
-  pointer-events: none;
-}
-
-.pv-stage.is-zoom {
-  touch-action: none;
-}
-
-.pv-zoom-toggle {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  width: 28px;
-  height: 28px;
-  background: var(--color-surface-alt);
-  border: 1px solid var(--color-border);
-  opacity: 0.7;
-}
-
-.pv-zoom-toggle:hover,
-.pv-zoom-toggle[aria-pressed="true"] {
-  opacity: 1;
-}
-
-.pv-zoom-toggle[aria-pressed="true"] {
-  color: var(--color-primary);
 }
 
 .pv-frame[data-w="tablet"] .pv-stage,

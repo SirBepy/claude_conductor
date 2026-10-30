@@ -19,6 +19,7 @@ import { mountPreviewWindowShell, type RailController, type RailTabDeps, type Ra
 import { isMirrored } from "./sessions-helpers";
 import { state } from "./state";
 import { mountPreviewStage } from "./preview-canvas";
+import { applyPreviewTemplate } from "./preview-panel-document";
 import "../../shared/chat/caret-popup/popup.css";
 import "../../shared/chat/composer.css";
 import { composerFieldHtml } from "../../shared/chat/composer-field";
@@ -54,8 +55,6 @@ class PreviewTab implements RailTabHandle {
    *  DOM is never innerHTML-rebuilt (renderIframe/renderHeader
    *  only touch their own sub-elements), so there's no per-render remount. */
   private composer: PvComposerHandle | null = null;
-  /** Tears down the current canvas's zoom/pan listeners. */
-  private disposeZoom: (() => void) | null = null;
 
   constructor(root: HTMLElement, deps: RailTabDeps) {
     this.root = root;
@@ -118,8 +117,6 @@ class PreviewTab implements RailTabHandle {
     }
     this.composer?.destroy();
     this.composer = null;
-    this.disposeZoom?.();
-    this.disposeZoom = null;
     closePvHistory();
   }
 
@@ -252,7 +249,7 @@ class PreviewTab implements RailTabHandle {
     // write a real temp .html file and open that path instead.
     void (async () => {
       try {
-        const path = await invoke<string>("write_temp_html", { html: this.selected!.html });
+        const path = await invoke<string>("write_temp_html", { html: applyPreviewTemplate(this.selected!.html) });
         await invoke("open_external", { url: path });
       } catch (err) {
         console.error("[preview-panel] open_external failed", err);
@@ -373,19 +370,14 @@ class PreviewTab implements RailTabHandle {
     if (!this.selected) return;
     const canvas = this.root.querySelector<HTMLElement>(".pv-canvas");
     if (!canvas) return;
-    this.disposeZoom?.();
-    this.disposeZoom = null;
     const stage = mountPreviewStage(canvas, this.deviceWidth, this.selected.html);
     if (!stage) return;
-    this.disposeZoom = stage.dispose;
     await stage.ready;
   }
 
   private renderCanvasEmpty(): void {
     const canvas = this.root.querySelector<HTMLElement>(".pv-canvas");
     if (!canvas) return;
-    this.disposeZoom?.();
-    this.disposeZoom = null;
     canvas.innerHTML = `
       <div class="pv-empty">
         <i class="ph ph-monitor-play"></i>

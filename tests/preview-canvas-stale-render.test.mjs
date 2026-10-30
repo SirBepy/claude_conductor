@@ -19,7 +19,6 @@ describe("mountPreviewStage", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     const first = mountPreviewStage(canvas, "desktop", "<p>one</p>");
-    first.dispose();
     const second = mountPreviewStage(canvas, "desktop", "<p>two</p>");
 
     pending[1].resolve("http://127.0.0.1/doc/2");
