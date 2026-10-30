@@ -13,11 +13,14 @@ export function clampUserMessages(messages: RenderedMessage[], messageEls: HTMLE
     // fight its own DOM rewrite for no benefit.
     if (msg.authorSessionId) continue;
     el.dataset.clampChecked = "1";
-    if (el.scrollHeight <= MAX_PX + 40) continue;
+    // With an attachment tray (message-attachment-tray.ts) only the bubble
+    // clamps, so the tray stays visible under the clipped text.
+    const host = el.querySelector<HTMLElement>(":scope > .msg-bubble") ?? el;
+    if (host.scrollHeight <= MAX_PX + 40) continue;
     const body = document.createElement("div");
     body.className = "msg-clamp-body";
-    while (el.firstChild) body.appendChild(el.firstChild);
-    el.appendChild(body);
+    while (host.firstChild) body.appendChild(host.firstChild);
+    host.appendChild(body);
     el.classList.add("has-clamp");
     const toggle = document.createElement("button");
     toggle.className = "msg-clamp-toggle";
@@ -26,6 +29,6 @@ export function clampUserMessages(messages: RenderedMessage[], messageEls: HTMLE
       const expanded = el.classList.toggle("expanded");
       toggle.textContent = expanded ? "Show less" : "Show more";
     });
-    el.appendChild(toggle);
+    host.appendChild(toggle);
   }
 }

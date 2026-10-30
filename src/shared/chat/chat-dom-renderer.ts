@@ -15,6 +15,7 @@ import { linkifyDrillRefs } from "./drill-links";
 import { toolSummary } from "./tool-meta";
 import { groupToolRange } from "./tool-strip";
 import { clampUserMessages } from "./turn-collapse";
+import { groupAttachmentTray, refoldAttachmentTray } from "./message-attachment-tray";
 import { renderQuestionCardHtml } from "./tool-views";
 import { renderPreviewCardHtml, mountPreviewFrame } from "./chat-preview-card";
 import { renderDraftCardHtml, mountDraftCard } from "./chat-draft-card";
@@ -186,7 +187,8 @@ export function buildMessageEl(m: RenderedMessage, sessionId: string | null = nu
   const ms = m.ts ? (m.ts < 1e10 ? m.ts * 1000 : m.ts) : Date.now();
   el.dataset.ts = new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   if (el.querySelector(".attachment-chip[data-attachment-path]")) {
-    void hydrateAttachments(el, sessionId);
+    if (m.kind === "user") groupAttachmentTray(el);
+    void hydrateAttachments(el, sessionId).then(() => refoldAttachmentTray(el));
   }
   return el;
 }
