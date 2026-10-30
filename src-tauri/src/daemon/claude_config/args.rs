@@ -77,6 +77,9 @@ pub(crate) const TURN_STATUS_PROMPT: &str = "Call the report_turn_status tool as
 /// Space-separated, the multi-tool form `ask/sidecar.rs`'s ALLOWED_TOOLS
 /// already proves the CLI accepts.
 ///
+/// `in_meeting` is here too: it takes no arguments, writes nothing, and only
+/// reports whether a call is live.
+///
 /// Todo 1034 (Joe's decision, 2026-10-02): all seven display-only/app-local
 /// writers join `ask_user_question`/`show_preview` here - `write_plan`,
 /// `send_message`, `report_turn_status`, `update_message`, `write_draft`,
@@ -114,7 +117,8 @@ pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question 
      mcp__cc_conductor__update_message \
      mcp__cc_conductor__write_draft \
      mcp__cc_conductor__write_user_todo \
-     mcp__cc_conductor__schedule";
+     mcp__cc_conductor__schedule \
+     mcp__cc_conductor__in_meeting";
 
 /// Monotonic per-turn suffix, so one session's successive turns never share a
 /// temp-file name (todo 867). Wall-clock nanos would be enough in practice but
@@ -232,10 +236,11 @@ mod tests {
             "mcp__cc_conductor__write_draft",
             "mcp__cc_conductor__write_user_todo",
             "mcp__cc_conductor__schedule",
+            "mcp__cc_conductor__in_meeting",
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 11, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 12, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// `person` writes to the user's vault and must go through the ordinary

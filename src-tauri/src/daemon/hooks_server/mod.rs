@@ -21,6 +21,7 @@ mod decision;
 mod drafts;
 mod jarvis;
 mod lifecycle;
+mod meeting;
 mod messages;
 mod origin_guard;
 // pub(crate): chat::parser's "attachment" arm needs parse_mid_turn_frame to
@@ -203,6 +204,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/people/find", post(people::on_find_person))
         .route("/people/remember", post(people::on_remember_person))
         .route("/schedule/write", post(schedule::on_write_schedule))
+        .route("/meeting/status", post(meeting::on_meeting_status))
         .route("/browser/call", post(browser::on_browser_call))
         .route("/hooks/prompt-submit", post(user_todos::on_prompt_submit))
         .route("/hooks/tool-batch", post(nudge::on_tool_batch))

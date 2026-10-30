@@ -144,6 +144,14 @@ pub struct ScheduledItem {
     pub guard: Option<String>,
     #[serde(default)]
     pub last_skip: Option<SkippedFire>,
+    /// `Some(true)` holds each due firing while a meeting is active
+    /// (`daemon::meeting_monitor::holds_for_meeting`). An `Option` rather than a
+    /// `bool` only because ts-rs can mark just an `Option` as an optional TS
+    /// property, and this one must stay optional so items written before the
+    /// field existed, and frontend code that builds an item, need no change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub after_meeting: Option<bool>,
 }
 
 impl ScheduledItem {
@@ -164,7 +172,13 @@ impl ScheduledItem {
             last_session_id: None,
             guard: None,
             last_skip: None,
+            after_meeting: None,
         }
+    }
+
+    /// Whether a due firing waits for the current meeting to end.
+    pub fn waits_for_meeting(&self) -> bool {
+        self.after_meeting == Some(true)
     }
 }
 

@@ -53,6 +53,8 @@ pub(crate) struct ScheduleArgs {
     /// run, so `hooks_server::schedule::approve_guard` always shows it to a
     /// human first, auto-accept or not.
     pub guard: Option<String>,
+    /// `ScheduledItem::after_meeting`.
+    pub after_meeting: Option<bool>,
 }
 
 pub(crate) fn write_schedule(
@@ -182,6 +184,7 @@ fn build_item(
 
     let mut item = ScheduledItem::new(kind, prompt.to_string(), fire_at.to_rfc3339(), recurrence);
     item.guard = args.guard.as_deref().map(str::trim).filter(|g| !g.is_empty()).map(str::to_string);
+    item.after_meeting = args.after_meeting.filter(|on| *on);
     Ok(item)
 }
 
@@ -469,6 +472,21 @@ mod tests {
             a.guard = Some("exit 0".into());
         })).unwrap();
         assert!(matches!(reminder.kind, ScheduledKind::Message { .. }) && reminder.guard.is_some());
+    }
+
+    #[test]
+    fn after_meeting_is_carried_onto_the_item_and_defaults_off() {
+        let item = build(&cfg("opus", "high"), &args(|_| {})).unwrap();
+        assert!(!item.waits_for_meeting(), "an add that does not ask for it never waits on a meeting");
+        let item = build(&cfg("opus", "high"), &args(|a| a.after_meeting = Some(true))).unwrap();
+        assert!(item.waits_for_meeting());
+        let item = build(&cfg("opus", "high"), &args(|a| a.after_meeting = Some(false))).unwrap();
+        assert!(!item.waits_for_meeting());
+        let reminder = build(&cfg("opus", "high"), &args(|a| {
+            a.target = Some("this_chat".into());
+            a.after_meeting = Some(true);
+        })).unwrap();
+        assert!(reminder.waits_for_meeting(), "a this_chat nudge can wait for the meeting too");
     }
 
     #[test]

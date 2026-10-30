@@ -25,6 +25,7 @@ pub mod jsonl_tail;
 pub mod lifecycle;
 pub mod lockfile;
 pub mod machines;
+pub mod meeting_monitor;
 pub mod methods;
 pub mod notifier;
 pub mod preview;

@@ -119,6 +119,7 @@ mod tests {
             last_session_id: None,
             guard: None,
             last_skip: None,
+            after_meeting: None,
         }
     }
 
