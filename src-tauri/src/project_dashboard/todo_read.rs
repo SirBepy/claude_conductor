@@ -2,7 +2,7 @@
 //! cheap head parse the list needs, the full section split the reader needs,
 //! and the listing that joins both with PLAN.md placement and live claims.
 
-use super::md_scan::{fenced_lines, is_fence};
+use super::md_scan::{fenced_lines, fenced_lines_with_comments, is_fence};
 use super::plan_edit::{read_plan_doc, Placement};
 use super::todo_ids::{find_todo_file, parse_file_name, TodoKey};
 use super::todo_stats::{live_claim_keys, todos_dir};
@@ -68,7 +68,7 @@ pub fn parse_head(text: &str, fallback_title: &str) -> Head {
     let mut in_goal = false;
     let mut goal = String::new();
     let mut goal_done = false;
-    for (line, in_fence) in fenced_lines(text.lines()) {
+    for (line, in_fence) in fenced_lines_with_comments(text.lines()) {
         if in_fence {
             continue;
         }
@@ -395,6 +395,25 @@ Some context.\n\
     fn fields_inside_a_code_fence_are_ignored() {
         let h = parse_head("# Real\n```\n# Fake\n**Summary:** nope\n```\n", "f");
         assert_eq!((h.title.as_str(), h.summary), ("Real", None));
+    }
+
+    #[test]
+    fn a_fence_line_inside_a_head_comment_does_not_hide_the_fields_after_it() {
+        let text = "# T
+<!-- note
+```
+more -->
+**Type:** task
+**Origin:** dev
+**Summary:** Kept.
+## Goal
+
+x
+";
+        let h = parse_head(text, "f");
+        assert_eq!(h.todo_type.as_deref(), Some("task"));
+        assert_eq!(h.origin.as_deref(), Some("dev"));
+        assert_eq!(h.summary.as_deref(), Some("Kept."));
     }
 
     #[test]

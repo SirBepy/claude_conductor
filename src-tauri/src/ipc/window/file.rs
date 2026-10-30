@@ -104,16 +104,29 @@ pub async fn file_window_ready(app: AppHandle, window: tauri::Window) {
     if window.label() != LABEL {
         return;
     }
-    let held = QUEUE.lock().unwrap().listener_ready();
-    let Some(target) = app.get_webview_window(LABEL) else { return };
-    for open in held {
-        let _ = target.emit("file-window-open", open);
+    let target = app.get_webview_window(LABEL);
+    flush_held(&QUEUE, |open| {
+        if let Some(target) = &target {
+            let _ = target.emit("file-window-open", open);
+        }
+    });
+}
+
+/// Marks the listener ready and emits the held opens oldest first, all under
+/// the queue lock. An `open_file_window` offer arriving once `listening` is set
+/// would otherwise go straight out ahead of the held ones and the tabs would
+/// open out of order; with the lock held it waits and emits after them.
+fn flush_held(queue: &Mutex<OpenQueue>, mut emit: impl FnMut(OpenRequest)) {
+    let mut queue = queue.lock().unwrap();
+    for open in queue.listener_ready() {
+        emit(open);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{window_url, OpenQueue, OpenRequest};
+    use super::{flush_held, window_url, OpenQueue, OpenRequest};
+    use std::sync::Mutex;
 
     fn open(path: &str) -> OpenRequest {
         OpenRequest { path: path.into(), line: None }
@@ -133,6 +146,26 @@ mod tests {
         assert!(q.listener_ready().is_empty());
         assert_eq!(q.offer(open("a")), Some(open("a")));
         assert!(q.listener_ready().is_empty(), "a second ready must not replay a delivered open");
+    }
+
+    #[test]
+    fn held_opens_are_emitted_while_the_queue_lock_is_held() {
+        let queue = Mutex::new(OpenQueue::default());
+        queue.lock().unwrap().offer(open("a"));
+        queue.lock().unwrap().offer(open("b"));
+        let mut emitted = Vec::new();
+        let mut lockable_mid_flush = Vec::new();
+
+        flush_held(&queue, |o| {
+            // A concurrent offer needs this lock; it must not get it between
+            // two held emits.
+            lockable_mid_flush.push(queue.try_lock().is_ok());
+            emitted.push(o);
+        });
+
+        assert_eq!(emitted, vec![open("a"), open("b")]);
+        assert_eq!(lockable_mid_flush, vec![false, false]);
+        assert_eq!(queue.lock().unwrap().offer(open("c")), Some(open("c")), "the listener is ready afterwards");
     }
 
     #[test]

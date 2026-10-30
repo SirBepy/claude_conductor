@@ -141,8 +141,7 @@ impl Chrome {
         let Some(mut running) = self.running.lock().await.take() else {
             return;
         };
-        let http = format!("http://127.0.0.1:{}", running.port);
-        if let Ok(ws) = cdp::browser_ws_url(&http).await {
+        if let Ok(ws) = browser_ws(running.port).await {
             let _ = cdp::call(&ws, "Browser.close", json!({}), Duration::from_secs(3)).await;
         }
         if let Some(child) = running.child.as_mut() {
@@ -187,10 +186,15 @@ impl WindowInfo {
     }
 }
 
+/// The browser-level CDP websocket of the Chrome listening on `port`.
+async fn browser_ws(port: u16) -> anyhow::Result<String> {
+    cdp::browser_ws_url(&format!("http://127.0.0.1:{port}")).await
+}
+
 /// Every window of the browser on `port`, one entry per window however many
 /// tabs it holds.
 async fn browser_windows(port: u16) -> Result<Vec<WindowInfo>, String> {
-    let ws = cdp::browser_ws_url(&format!("http://127.0.0.1:{port}")).await.map_err(|e| e.to_string())?;
+    let ws = browser_ws(port).await.map_err(|e| e.to_string())?;
     let targets = cdp::call(&ws, "Target.getTargets", json!({}), CDP_TIMEOUT).await.map_err(|e| e.to_string())?;
     let mut windows: Vec<WindowInfo> = Vec::new();
     for target in targets["targetInfos"].as_array().into_iter().flatten() {
@@ -213,7 +217,7 @@ async fn bring_offscreen_windows_back(port: u16) -> Result<(), String> {
     if stranded.is_empty() {
         return Ok(());
     }
-    let ws = cdp::browser_ws_url(&format!("http://127.0.0.1:{port}")).await.map_err(|e| e.to_string())?;
+    let ws = browser_ws(port).await.map_err(|e| e.to_string())?;
     for window in stranded {
         log::info!("claude-browser: window {} was off-screen at ({}, {}); moving it back", window.id, window.left, window.top);
         let bounds = json!({ "left": ONSCREEN_ORIGIN, "top": ONSCREEN_ORIGIN, "windowState": "normal" });

@@ -169,6 +169,9 @@ pub(crate) struct TempSecret {
     /// absent beforehand.
     pub created_file: bool,
     /// The chat's cwd, so the sweep can re-run `resolve_target` on `file`.
+    /// Defaulted so a list written before this field existed still loads: one
+    /// unparseable entry would otherwise empty the whole boot sweep.
+    #[serde(default)]
     pub cwd: PathBuf,
 }
 
@@ -641,6 +644,39 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "OTHER=1\n");
         assert_eq!(std::fs::read_to_string(&list).unwrap().trim(), "[]", "the swept list is emptied");
+    }
+
+    /// A list written before `cwd` existed still loads: its entry is refused by
+    /// the re-validation (no cwd to resolve against) instead of the parse
+    /// failure silently dropping every entry from the boot sweep.
+    #[test]
+    fn boot_loads_a_persisted_list_from_before_the_cwd_field() {
+        let (_tmp, root) = fixture();
+        let old_file = root.join("old.env");
+        let new_file = root.join("new.env");
+        let list = root.join("temp-secrets.json");
+        std::fs::write(&old_file, "API_KEY=sk-old
+").unwrap();
+        std::fs::write(&new_file, "API_KEY=sk-new
+OTHER=1
+").unwrap();
+        let body = serde_json::json!([
+            { "session_id": "s-old", "file": old_file, "key": "API_KEY", "created_file": false },
+            { "session_id": "s-new", "file": new_file, "key": "API_KEY", "created_file": false, "cwd": root },
+        ]);
+        std::fs::write(&list, body.to_string()).unwrap();
+
+        let reg = TempSecrets::default();
+        assert_eq!(reg.init_persistence(&list), 2, "both entries must load, not none");
+
+        assert_eq!(std::fs::read_to_string(&new_file).unwrap(), "OTHER=1
+");
+        assert_eq!(
+            std::fs::read_to_string(&old_file).unwrap(),
+            "API_KEY=sk-old
+",
+            "an entry with no cwd cannot be re-validated, so it is left alone"
+        );
     }
 
     /// A normal close takes the entry off the persisted list too, so the next

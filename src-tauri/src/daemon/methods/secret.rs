@@ -125,7 +125,16 @@ fn record_lifetime(
             created_file,
             cwd,
         }),
-        (true, ..) => {}
+        // The chat closed (or was never registered) while the prompt was open,
+        // so there is no cwd to re-validate the path against at sweep time and
+        // no close left to trigger one. The value stays on disk; say so rather
+        // than let a "temporary" secret outlive its chat unnoticed.
+        (true, sid, _) => log::warn!(
+            "[secret-relay] temporary secret {key} written to {} is not tracked for cleanup: \
+             no registry entry for session {}",
+            path.display(),
+            sid.unwrap_or("(none)")
+        ),
         (false, ..) => temporary_secrets().forget(path, key),
     }
 }
@@ -326,6 +335,20 @@ API_KEY=sk-abc
 
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "API_KEY=sk-two
 ");
+    }
+
+    /// A temporary write whose chat is gone from the registry cannot be tied to
+    /// a close, so it is not put on the cleanup list (the sweep would have no
+    /// cwd to validate against) and the write path does not panic on it.
+    #[test]
+    fn a_temporary_write_with_no_registry_entry_is_not_tracked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("untracked.env");
+
+        record_lifetime(Some("closed-mid-prompt"), None, &file, "API_KEY", true, true);
+        record_lifetime(None, None, &file, "API_KEY", true, true);
+
+        assert!(!crate::daemon::secret_target::temporary_secrets().holds(&file, "API_KEY"));
     }
 
     /// Full round trip: request -> respond -> the target file ends up
