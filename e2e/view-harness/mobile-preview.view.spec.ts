@@ -1,6 +1,5 @@
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
-// Reviewed 2026-10-29: session-header.ts gained playTextSwap() (a draft's title crossfade on its first send); this spec never calls it, so its contract is unaffected. Its desktop split test times out on `.fab-dial-fab` on pristine HEAD c6a0af5f as well, so that failure is not from this change.
-// Reviewed 2026-10-22: session-header.ts lost its `.code-mode-btn` (Code mode moved to the FAB menu) and its model/effort became icons; this spec asserts only the lead/trail slots, avatar, title and `.meta-proj`, so its contract is unaffected.
+// Reviewed 2026-10-29: session-header.ts gained playTextSwap() (a draft's title crossfade on its first send); this spec never calls it, so its contract is unaffected.// Reviewed 2026-10-22: session-header.ts lost its `.code-mode-btn` (Code mode moved to the FAB menu) and its model/effort became icons; this spec asserts only the lead/trail slots, avatar, title and `.meta-proj`, so its contract is unaffected.
 // Reviewed 2026-10-08: session-header.ts gained setMirrored() (hides the `</>` Code mode button for a mirrored chat); never called by this spec, so its existing header behavior is unchanged.
 // Reviewed 2026-10-23: session-header.ts's model/effort markup changed again (words on desktop, rank battery + short effort on the phone); this spec asserts only the lead/trail slots, avatar, title and `.meta-proj`, so its contract is unaffected.
 // Reviewed 2026-10-13 (G10 follow-up, docs/multi-machine.md): setMirrored() was removed again - Code mode's reads now proxy to a mirrored chat's owning peer instead of being hidden, so the `</>` button is never hidden. Never called by this spec either way. Re-ran this spec file directly (`npx playwright test e2e/view-harness/mobile-preview.view.spec.ts`): 16/16 pass.
@@ -290,8 +289,9 @@ test("desktop keeps the side-by-side split: Preview shrinks the chat instead of 
   await expect(page.locator(SPLIT)).toBeHidden();
   await expect(page.locator(".view-sessions .view-header h2")).toBeVisible();
 
-  await page.locator(".fab-dial-fab").click();
-  await page.locator('[data-dial="preview"]').click();
+  // Desktop has no FAB: the split's icon strip carries every dial entry.
+  await expect(page.locator(".fab-dial-fab")).toHaveCount(0);
+  await page.locator('.sp-tab[data-sp-k="preview"]').click();
   // Desktop's split (split-panels/), not the phone's cover.
   await expect(page.locator(SPLIT)).toBeVisible();
   await expect(page.locator(PREVIEW)).toHaveCount(0);
