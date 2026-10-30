@@ -23,7 +23,7 @@ vi.mock("../src/shared/api.ts", () => ({
 }));
 vi.mock("../src/shared/toast.ts", () => ({ showToast: vi.fn() }));
 const { renderGamingModeRow } = await import(
-  "../src/views/sessions/project-dashboard/project-config/automation.ts"
+  "../src/views/sessions/project-dashboard/project-config/rows.ts"
 );
 
 const PROJECT = { id: "proj-alpha", path: "C:/proj/alpha", keep_running_in_gaming_mode: false };
