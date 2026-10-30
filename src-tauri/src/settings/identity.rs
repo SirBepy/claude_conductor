@@ -142,6 +142,20 @@ pub fn resolve_claude_ai_connectors(
     resolve_project_setting(projects, path, |p| p.claude_ai_connectors.then_some(())).is_some()
 }
 
+/// The model and effort a new chat in the project owning `path` opens on (own
+/// project first, then the parent repo of an unbound worktree). Blank values
+/// count as unset, so each half falls back on its own.
+pub fn resolve_project_chat_defaults(
+    projects: &[crate::types::ProjectConfig],
+    path: &std::path::Path,
+) -> (Option<String>, Option<String>) {
+    let non_blank = |v: &Option<String>| v.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    (
+        resolve_project_setting(projects, path, |p| non_blank(&p.default_model)),
+        resolve_project_setting(projects, path, |p| non_blank(&p.default_effort)),
+    )
+}
+
 /// The ticket tracker set on the project owning `path` (or its parent repo).
 /// `None` means unset, not "off" - the caller falls back to the git remote.
 pub fn resolve_project_tracker(

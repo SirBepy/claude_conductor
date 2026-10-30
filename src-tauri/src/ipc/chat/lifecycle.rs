@@ -188,9 +188,10 @@ pub async fn debug_daemon_sleep(
     client.debug_sleep(ms).await.map_err(|e| e.to_string())
 }
 
-/// Resolve model+effort for takeover from settings.extra:
-/// 1. projectLastChoice[cwd_path] -> {model, effort}
-/// 2. fall back to ("opus", "high")
+/// Resolve model+effort for takeover, the same chain a new chat uses
+/// (`src/shared/effort-presets.ts`): the project's last choice, else each half
+/// from the project's own default, then Settings' `defaultModel`/`defaultEffort`,
+/// then sonnet/high.
 fn resolve_takeover_model_effort(manual_pid: u32, state: &AppState) -> (String, String) {
     let entry = state
         .cached_instances
@@ -204,23 +205,59 @@ fn resolve_takeover_model_effort(manual_pid: u32, state: &AppState) -> (String, 
         .unwrap_or_default();
 
     let settings = state.settings.lock().unwrap();
-    let extra = &settings.extra;
+    takeover_choice(&settings.extra, &settings.projects, &cwd_key)
+}
 
-    // 1. projectLastChoice[cwd_key]
+const FALLBACK_MODEL: &str = "sonnet";
+const FALLBACK_EFFORT: &str = "high";
+const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+
+/// Same normalisation as the frontend's `modelFamilyFromId`: persisted
+/// defaults may hold a full model id, but spawns take a family.
+fn model_family(id: &str) -> String {
+    let lower = id.to_lowercase();
+    ["fable", "opus", "sonnet", "haiku"]
+        .into_iter()
+        .find(|f| lower.contains(f))
+        .map(str::to_string)
+        .unwrap_or_else(|| id.to_string())
+}
+
+fn takeover_choice(
+    extra: &serde_json::Map<String, Value>,
+    projects: &[crate::types::ProjectConfig],
+    cwd_key: &str,
+) -> (String, String) {
     if !cwd_key.is_empty() {
-        if let Some(map) = extra.get("projectLastChoice").and_then(|v| v.as_object()) {
-            if let Some(choice) = map.get(&cwd_key).and_then(|v| v.as_object()) {
-                let model = choice.get("model").and_then(|v| v.as_str()).unwrap_or("");
-                let effort = choice.get("effort").and_then(|v| v.as_str()).unwrap_or("");
-                if !model.is_empty() && !effort.is_empty() {
-                    return (model.to_string(), effort.to_string());
-                }
+        if let Some(choice) = extra
+            .get("projectLastChoice")
+            .and_then(|v| v.as_object())
+            .and_then(|map| map.get(cwd_key))
+            .and_then(|v| v.as_object())
+        {
+            let model = choice.get("model").and_then(|v| v.as_str()).unwrap_or("");
+            let effort = choice.get("effort").and_then(|v| v.as_str()).unwrap_or("");
+            if !model.is_empty() && !effort.is_empty() {
+                return (model.to_string(), effort.to_string());
             }
         }
     }
 
-    // 2. fallback
-    ("opus".to_string(), "high".to_string())
+    let (project_model, project_effort) = if cwd_key.is_empty() {
+        (None, None)
+    } else {
+        crate::settings::identity::resolve_project_chat_defaults(projects, std::path::Path::new(cwd_key))
+    };
+    let global = |key: &str| extra.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
+    let model = project_model
+        .or_else(|| global("defaultModel").map(str::to_string))
+        .map(|m| model_family(&m))
+        .unwrap_or_else(|| FALLBACK_MODEL.to_string());
+    let effort = project_effort
+        .filter(|e| EFFORTS.contains(&e.as_str()))
+        .or_else(|| global("defaultEffort").filter(|e| EFFORTS.contains(e)).map(str::to_string))
+        .unwrap_or_else(|| FALLBACK_EFFORT.to_string());
+    (model, effort)
 }
 
 /// Respond to a pending permission request from the MCP server.
@@ -380,4 +417,78 @@ pub async fn read_attachment(
             .map_err(|e| e.to_string());
     }
     super::attachments::read_attachment(path).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    const CWD: &str = "/nonexistent/takeover-proj";
+
+    fn extra(v: Value) -> serde_json::Map<String, Value> {
+        v.as_object().unwrap().clone()
+    }
+
+    fn project(model: Option<&str>, effort: Option<&str>) -> Vec<crate::types::ProjectConfig> {
+        vec![crate::types::ProjectConfig {
+            id: "p".into(),
+            path: std::path::PathBuf::from(CWD),
+            name: "proj".into(),
+            avatar: crate::types::Avatar::None,
+            automation: None,
+            created_at: "2026-04-21T00:00:00Z".into(),
+            last_active_at: None,
+            whitelist: crate::types::CharacterWhitelist::default(),
+            preferred_account_id: None,
+            last_worktree_path: None,
+            last_start_folder_rel: None,
+            claude_ai_connectors: false,
+            tracker: None,
+            keep_running_in_gaming_mode: false,
+            default_model: model.map(str::to_string),
+            default_effort: effort.map(str::to_string),
+        }]
+    }
+
+    fn pick(extra_json: Value, projects: &[crate::types::ProjectConfig]) -> (String, String) {
+        takeover_choice(&extra(extra_json), projects, CWD)
+    }
+
+    #[test]
+    fn resolve_takeover_the_last_choice_wins_over_every_default() {
+        let got = pick(
+            json!({
+                "projectLastChoice": { CWD: { "model": "haiku", "effort": "low" } },
+                "defaultModel": "opus", "defaultEffort": "max",
+            }),
+            &project(Some("fable"), Some("xhigh")),
+        );
+        assert_eq!(got, ("haiku".to_string(), "low".to_string()));
+    }
+
+    #[test]
+    fn resolve_takeover_the_project_default_beats_the_global_default_when_there_is_no_last_choice() {
+        let got = pick(json!({ "defaultModel": "opus", "defaultEffort": "max" }), &project(Some("claude-fable-5"), Some("xhigh")));
+        assert_eq!(got, ("fable".to_string(), "xhigh".to_string()));
+    }
+
+    #[test]
+    fn resolve_takeover_the_global_default_is_used_when_the_project_sets_none() {
+        let got = pick(json!({ "defaultModel": "claude-opus-4-8", "defaultEffort": "medium" }), &project(None, Some("  ")));
+        assert_eq!(got, ("opus".to_string(), "medium".to_string()));
+    }
+
+    #[test]
+    fn resolve_takeover_each_half_falls_back_on_its_own() {
+        let got = pick(json!({ "defaultEffort": "low" }), &project(Some("haiku"), None));
+        assert_eq!(got, ("haiku".to_string(), "low".to_string()));
+    }
+
+    #[test]
+    fn resolve_takeover_nothing_set_falls_to_sonnet_high_and_an_invalid_effort_is_ignored() {
+        assert_eq!(pick(json!({}), &[]), ("sonnet".to_string(), "high".to_string()));
+        let got = pick(json!({ "defaultEffort": "ludicrous", "projectLastChoice": { CWD: { "model": "opus" } } }), &[]);
+        assert_eq!(got, ("sonnet".to_string(), "high".to_string()));
+    }
 }
