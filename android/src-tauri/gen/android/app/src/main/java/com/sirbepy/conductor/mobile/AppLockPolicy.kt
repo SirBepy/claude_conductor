@@ -75,8 +75,19 @@ object AppLockPolicy {
   fun switchRequest(enable: Boolean, hasScreenLock: Boolean): SwitchRequest =
     if (enable || !hasScreenLock) SwitchRequest.SAVE_NOW else SwitchRequest.UNLOCK_FIRST
 
+  // Both sides are judged as normalizeMinutes would save them, so an off-list
+  // value cannot sneak a longer window past the check or read as one when it is not.
+  fun isWeakening(oldMinutes: Int, newMinutes: Int): Boolean =
+    normalizeMinutes(newMinutes) > normalizeMinutes(oldMinutes)
+
+  // A longer relock window is as much a way to weaken the lock as switching it
+  // off, so it takes the same fresh unlock; a shorter one only makes the phone
+  // safer. With no screen lock there is nothing to unlock with.
+  fun relockRequest(oldMinutes: Int, newMinutes: Int, hasScreenLock: Boolean): SwitchRequest =
+    if (isWeakening(oldMinutes, newMinutes) && hasScreenLock) SwitchRequest.UNLOCK_FIRST else SwitchRequest.SAVE_NOW
+
   // The SPA registers window.__ccLockSwitchResult before it asks, so the answer
-  // to a prompt can never arrive ahead of the handler.
+  // to a prompt can never arrive ahead of the handler. The relock picker shares it.
   fun switchResultJs(applied: Boolean): String =
     "window.__ccLockSwitchResult&&window.__ccLockSwitchResult($applied)"
 

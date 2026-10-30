@@ -157,6 +157,46 @@ class AppLockPolicyTest {
   }
 
   @Test
+  fun aLongerRelockWindowWeakensTheLock() {
+    assertTrue(AppLockPolicy.isWeakening(10, 30))
+    assertTrue(AppLockPolicy.isWeakening(0, 1))
+    assertTrue(AppLockPolicy.isWeakening(5, 60))
+  }
+
+  @Test
+  fun anEqualOrShorterRelockWindowDoesNotWeakenTheLock() {
+    assertFalse(AppLockPolicy.isWeakening(30, 30))
+    assertFalse(AppLockPolicy.isWeakening(30, 5))
+    assertFalse(AppLockPolicy.isWeakening(60, 0))
+  }
+
+  @Test
+  fun aValueOffTheListIsJudgedAsTheDefaultItWouldBeSavedAs() {
+    // 100_000 is saved as the 10-minute default, so it lengthens a 5-minute window...
+    assertTrue(AppLockPolicy.isWeakening(5, 100_000))
+    // ...and shortens a 60-minute one.
+    assertFalse(AppLockPolicy.isWeakening(60, 100_000))
+    // A stored off-list value reads as the default too.
+    assertFalse(AppLockPolicy.isWeakening(100_000, 10))
+  }
+
+  @Test
+  fun lengtheningTheRelockWindowNeedsAFreshUnlock() {
+    assertEquals(AppLockPolicy.SwitchRequest.UNLOCK_FIRST, AppLockPolicy.relockRequest(10, 60, true))
+  }
+
+  @Test
+  fun shorteningTheRelockWindowNeedsNoPrompt() {
+    assertEquals(AppLockPolicy.SwitchRequest.SAVE_NOW, AppLockPolicy.relockRequest(60, 10, true))
+    assertEquals(AppLockPolicy.SwitchRequest.SAVE_NOW, AppLockPolicy.relockRequest(10, 10, true))
+  }
+
+  @Test
+  fun lengtheningWithNoScreenLockHasNothingToUnlockWith() {
+    assertEquals(AppLockPolicy.SwitchRequest.SAVE_NOW, AppLockPolicy.relockRequest(10, 60, false))
+  }
+
+  @Test
   fun theSwitchResultCallsTheHandlerTheSpaRegisters() {
     assertEquals(
       "window.__ccLockSwitchResult&&window.__ccLockSwitchResult(true)",

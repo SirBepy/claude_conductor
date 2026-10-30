@@ -8,7 +8,10 @@ import { toggleRow } from "../../ui";
 
 interface LockBridge {
   getRelockMinutes(): number;
-  setRelockMinutes(minutes: number): void;
+  // true = saved. false = a longer window is waiting on the fingerprint/PIN and
+  // the shell answers through window.__ccLockSwitchResult. Older shells return
+  // nothing and have saved already.
+  setRelockMinutes(minutes: number): boolean | void;
   // Absent on shells older than the opt-in lock: the switch hides then.
   getRelockChoices?(): string;
   isLockEnabled?(): boolean;
@@ -107,8 +110,31 @@ export function appLockSectionTemplate(): TemplateResult | string {
       <div class="kit-row">
         <span class="kit-row-label">Ask for fingerprint</span>
         <select id="ra-app-lock-minutes" class="kit-select" ?disabled=${hasSwitch && !switchOn} @change=${(e: Event) => {
-          const v = Number((e.target as HTMLSelectElement).value);
-          try { b.setRelockMinutes(v); } catch (err) { console.error("[app-lock] save failed", err); }
+          const select = e.target as HTMLSelectElement;
+          const v = Number(select.value);
+          const previous = current;
+          const sw = select.closest("#ra-app-lock-section")?.querySelector<HTMLInputElement>("#ra-app-lock-enabled");
+          const win = window as unknown as { __ccLockSwitchResult?: (applied: boolean) => void };
+          // Registered before the call so the shell's answer cannot beat it.
+          win.__ccLockSwitchResult = (applied) => {
+            delete win.__ccLockSwitchResult;
+            select.disabled = hasSwitch && !!sw && !sw.checked;
+            if (sw) sw.disabled = !screenLock;
+            // A cancelled or failed unlock leaves the old window in force.
+            if (applied) current = v;
+            else select.value = String(previous);
+          };
+          let pending = false;
+          try { pending = b.setRelockMinutes(v) === false; } catch (err) { console.error("[app-lock] save failed", err); }
+          if (pending) {
+            // A longer window waits on the fingerprint/PIN. Both controls share
+            // the shell's one answer callback, so neither may fire a second request.
+            select.disabled = true;
+            if (sw) sw.disabled = true;
+            return;
+          }
+          delete win.__ccLockSwitchResult;
+          current = v;
         }}>
           ${choices.map((m) => html`<option value=${String(m)} ?selected=${m === current}>${minutesLabel(m)}</option>`)}
         </select>
