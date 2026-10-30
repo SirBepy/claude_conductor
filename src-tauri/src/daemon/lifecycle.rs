@@ -186,7 +186,7 @@ mod tests {
         crate::accounts::ApiCreditStatus {
             account_id: account_id.into(),
             blocked: true,
-            block_reason: Some("API credit for this cycle is used up, resets 2026-11-02".into()),
+            block_reason: Some("API credit for this cycle is used up, expires 2026-11-02".into()),
             ..Default::default()
         }
     }
