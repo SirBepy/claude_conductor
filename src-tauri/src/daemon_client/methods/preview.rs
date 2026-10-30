@@ -1,4 +1,5 @@
 use super::super::{ClientError, PersistentClient};
+use super::bad_shape;
 use crate::ipc::chat::attachments::AttachmentData;
 use serde_json::{json, Value};
 
@@ -46,10 +47,7 @@ impl PersistentClient {
     /// confines the path; see `daemon/methods/registry/image_read.rs`.
     pub async fn read_image_file(&self, path: &str, session_id: &str) -> Result<AttachmentData, ClientError> {
         let res = self.call("read_image_file", json!({"path": path, "session_id": session_id})).await?;
-        serde_json::from_value(res).map_err(|e| ClientError::Rpc {
-            code: -32000,
-            message: format!("read_image_file: bad result shape: {e}"),
-        })
+        serde_json::from_value(res).map_err(|e| bad_shape("read_image_file", e))
     }
 }
 

@@ -6,6 +6,7 @@
 //! land on the OWNING peer's own `<app-data>/chat-attachments/` instead.
 
 use super::super::{ClientError, PersistentClient};
+use super::bad_shape;
 use crate::ipc::chat::attachments::AttachmentData;
 use serde_json::{json, Value};
 
@@ -80,10 +81,7 @@ impl PersistentClient {
         machine_id: Option<&str>,
     ) -> Result<AttachmentData, ClientError> {
         let res = self.call("read_attachment", read_attachment_params(path, session_id, machine_id)).await?;
-        serde_json::from_value(res).map_err(|e| ClientError::Rpc {
-            code: -32000,
-            message: format!("read_attachment: bad result shape: {e}"),
-        })
+        serde_json::from_value(res).map_err(|e| bad_shape("read_attachment", e))
     }
 }
 
