@@ -10,7 +10,7 @@
 //! else gates the legacy phone call shape with `reject_unknown` - without
 //! either a remote client could point `git ls-files` at any path on disk.
 
-use super::pr_review::resolve_cwd;
+use super::pr_review::resolve_cwd_for;
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use serde_json::json;
@@ -18,8 +18,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub fn register_files(router: &mut Router, state: Arc<DaemonState>) {
-    router.register("list_project_files", move |params, _ctx| {
+    router.register("list_project_files", move |params, ctx| {
         let state = state.clone();
+        let transport = ctx.transport.clone();
         async move {
             #[derive(serde::Deserialize)]
             struct P {
@@ -29,7 +30,7 @@ pub fn register_files(router: &mut Router, state: Arc<DaemonState>) {
             }
             let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            let project_dir = resolve_cwd(&state, p.project_dir, p.session_id.as_deref())?;
+            let project_dir = resolve_cwd_for(&state, &transport, p.project_dir, p.session_id.as_deref())?;
             let dir = PathBuf::from(project_dir);
             let files = tokio::task::spawn_blocking(move || crate::files::scan(&dir))
                 .await

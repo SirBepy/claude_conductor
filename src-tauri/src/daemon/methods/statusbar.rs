@@ -3,7 +3,7 @@
 //! git/servers chips and the "Open .claude" modal aren't wired to nothing.
 //! Same pattern as `worktrees.rs`; every path is gated by `is_known_cwd`.
 
-use super::pr_review::{reject_unknown, resolve_cwd};
+use super::pr_review::{reject_unknown, resolve_cwd_for};
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use serde_json::json;
@@ -12,8 +12,9 @@ use std::sync::Arc;
 pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
     {
         let state = state.clone();
-        router.register("get_git_info", move |params, _ctx| {
+        router.register("get_git_info", move |params, ctx| {
             let state = state.clone();
+            let transport = ctx.transport.clone();
             async move {
                 #[derive(serde::Deserialize)]
                 struct P {
@@ -23,7 +24,7 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
                 }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                let cwd = resolve_cwd_for(&state, &transport, p.cwd, p.session_id.as_deref())?;
                 Ok(json!(crate::ipc::git::get_git_info_local(cwd).await))
             }
         });
@@ -31,8 +32,9 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
 
     {
         let state = state.clone();
-        router.register("get_git_dirty", move |params, _ctx| {
+        router.register("get_git_dirty", move |params, ctx| {
             let state = state.clone();
+            let transport = ctx.transport.clone();
             async move {
                 #[derive(serde::Deserialize)]
                 struct P {
@@ -42,7 +44,7 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
                 }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                let cwd = resolve_cwd_for(&state, &transport, p.cwd, p.session_id.as_deref())?;
                 Ok(json!(crate::ipc::git::get_git_dirty_local(cwd).await))
             }
         });
@@ -50,8 +52,9 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
 
     {
         let state = state.clone();
-        router.register("get_commit_sync", move |params, _ctx| {
+        router.register("get_commit_sync", move |params, ctx| {
             let state = state.clone();
+            let transport = ctx.transport.clone();
             async move {
                 #[derive(serde::Deserialize)]
                 struct P {
@@ -61,7 +64,7 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
                 }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                let cwd = resolve_cwd_for(&state, &transport, p.cwd, p.session_id.as_deref())?;
                 Ok(json!(crate::ipc::git::get_commit_sync_local(cwd).await))
             }
         });
@@ -69,8 +72,9 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
 
     {
         let state = state.clone();
-        router.register("get_commit_history", move |params, _ctx| {
+        router.register("get_commit_history", move |params, ctx| {
             let state = state.clone();
+            let transport = ctx.transport.clone();
             async move {
                 #[derive(serde::Deserialize)]
                 struct P {
@@ -87,7 +91,7 @@ pub fn register_statusbar(router: &mut Router, state: Arc<DaemonState>) {
                 }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+                let cwd = resolve_cwd_for(&state, &transport, p.cwd, p.session_id.as_deref())?;
                 Ok(json!(
                     crate::ipc::git::get_commit_history_local(cwd, p.offset, p.limit).await
                 ))

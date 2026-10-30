@@ -213,11 +213,16 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // PM: the todos chip of a chat mirrored from a paired machine reads the
     // host's list, forwarded by `session_id`. With a `session_id` the host
     // resolves the cwd from its own registry (pr_review.rs `resolve_cwd`), so
-    // a peer cannot steer the read to an arbitrary path.
+    // a peer cannot steer the read to an arbitrary path. A peer that sends no
+    // `session_id` is refused by the handler (`resolve_cwd_for`), because
+    // without one the cwd falls to `reject_unknown`, which accepts any
+    // registered project. Every PM method below that takes a cwd plus an
+    // optional `session_id` carries the same handler-level refusal.
     ("list_ai_todos", PM),
     // PM, same reasoning as `list_ai_todos` above: the Backlog panel's list and
     // reader for a mirrored chat are forwarded by `session_id` to the host,
-    // which resolves the cwd from its own registry. Read-only. The panel's
+    // which resolves the cwd from its own registry (a peer naming only a cwd is
+    // refused, as for `list_ai_todos`; `read_ai_todo` returns full bodies). Read-only. The panel's
     // writes (`ai_todo_archive`, `ai_todo_unarchive`, `ai_todo_plan_move`,
     // `ai_todo_plan_reorder_groups`, `ai_todo_start_chat`) are deliberately
     // absent: desktop-pipe only, so neither a phone nor a peer can edit PLAN.md,
