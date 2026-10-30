@@ -1,14 +1,12 @@
 // asserts: src/views/sessions/permission-modal-track.css, src/views/sessions/permission-modal/question-ui-render.ts, src/views/sessions/permission-modal/question-ui-templates.ts
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
-import { shotDir } from "./shot-dir";
+import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
 
 // With many questions the pager's dots used to push the header's right-hand
 // buttons off the card. The dots row now shrinks and scrolls sideways, and
 // keeps the current dot in view.
 
 const SESSION = sessionInstance();
-const SHOTS = shotDir();
 const COUNT = 60;
 
 const MANY = Array.from({ length: COUNT }, (_, i) => ({
@@ -53,17 +51,18 @@ test.describe("view-harness / question pager with many questions", () => {
     const next = (await card.locator('.prompt-pager [data-nav="1"]').boundingBox())!;
     expect(next.x + next.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
 
-    // Jumping to a far dot scrolls the row so that dot is inside it.
-    await dots.locator('.prompt-dot[data-dot="50"]').evaluate((el) => (el as HTMLElement).click());
+    // A mid-row dot has room to scroll either way, so it lands centred; an
+    // end dot would clamp and hide a wrong offset.
+    await dots.locator('.prompt-dot[data-dot="30"]').evaluate((el) => (el as HTMLElement).click());
     await page.waitForTimeout(300);
-    const inView = await dots.evaluate((row) => {
+    const offCentre = await dots.evaluate((row) => {
       const cur = row.querySelector<HTMLElement>(".prompt-dot.is-current")!;
       const r = row.getBoundingClientRect();
       const c = cur.getBoundingClientRect();
-      return c.left >= r.left - 1 && c.right <= r.right + 1;
+      return Math.abs((c.left + c.width / 2) - (r.left + r.width / 2));
     });
-    expect(inView).toBe(true);
+    expect(offCentre).toBeLessThanOrEqual(2);
 
-    await card.screenshot({ path: `${SHOTS}/question-pager-overflow.png` });
+    await capture(card, "question-pager-overflow");
   });
 });
