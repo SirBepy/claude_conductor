@@ -83,7 +83,6 @@ mod tests {
             is_remote: false,
             started_at: "2026-10-13T00:00:00Z".to_string(),
             transcript_path: None,
-            bridge_session_id: None,
             name: None,
             ended_at: if ended { Some("2026-10-13T01:00:00Z".to_string()) } else { None },
             end_reason: None,

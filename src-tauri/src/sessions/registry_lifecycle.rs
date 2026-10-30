@@ -1,6 +1,6 @@
 //! Registration and mutation methods split out of `registry.rs` (todo 801):
 //! `register`, `record_interactive_session`, `upsert_interactive`,
-//! `externalize_session`, `mark_ended`, `set_bridge_session_id`, `set_pid`,
+//! `externalize_session`, `mark_ended`, `set_pid`,
 //! `set_name`, `prune_ended_keeping_newest`.
 
 use super::kinds::InstanceKind;
@@ -37,7 +37,6 @@ impl Registry {
             is_remote: input.is_remote,
             started_at: input.started_at,
             transcript_path: input.transcript_path,
-            bridge_session_id: None,
             name: None,
             ended_at: None,
             end_reason: None,
@@ -100,7 +99,6 @@ impl Registry {
             is_remote: false,
             started_at: now.to_string(),
             transcript_path: None,
-            bridge_session_id: None,
             name: None,
             ended_at: None,
             end_reason: None,
@@ -159,7 +157,6 @@ impl Registry {
             is_remote: false,
             started_at: now.to_string(),
             transcript_path: None,
-            bridge_session_id: None,
             name: None,
             ended_at: None,
             end_reason: None,
@@ -221,13 +218,6 @@ impl Registry {
         self.clear_all_turn_state(session_id);
         crate::sessions::repo_channel::forget_session(session_id);
         true
-    }
-
-    pub fn set_bridge_session_id(&self, session_id: &str, bridge_id: String) {
-        let mut guard = self.inner.lock().unwrap();
-        if let Some(i) = guard.get_mut(session_id) {
-            i.bridge_session_id = Some(bridge_id);
-        }
     }
 
     /// Late-binding pid update, used when the SessionStart hook payload

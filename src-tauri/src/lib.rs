@@ -249,7 +249,6 @@ pub fn run() {
             ipc::instances::list_instances,
             ipc::instances::list_instances_for_project,
             ipc::instances::is_daemon_connected,
-            ipc::instances::phone_link,
             ipc::instances::instance_token_stats,
             ipc::token_source::token_stats_by_source,
             ipc::chat_drain,

@@ -114,7 +114,6 @@ describe("sidebar empty states", () => {
         is_remote: false,
         started_at: "2026-06-12T00:00:00Z",
         transcript_path: null,
-        bridge_session_id: null,
         name: null,
         ended_at: null,
         end_reason: null,

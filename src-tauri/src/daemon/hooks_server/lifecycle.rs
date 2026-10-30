@@ -1,6 +1,6 @@
 //! Lifecycle endpoints: `/hooks/session-start` + `/hooks/session-end`. These
 //! populate / close registry entries and own the background enrichment that
-//! resolves pid, bridgeSessionId, and session name.
+//! resolves pid and session name.
 
 use super::HookCtx;
 use crate::sessions::kinds::InstanceKind;
@@ -116,7 +116,7 @@ pub(super) async fn on_session_start(
         );
     }
 
-    // Background enrichment: pid + bridgeSessionId via session_files, name from transcript.
+    // Background enrichment: pid via session_files, name from transcript.
     let state = ctx.state.clone();
     let sid = payload.session_id.clone();
     let payload_pid = payload.pid;
@@ -126,15 +126,6 @@ pub(super) async fn on_session_start(
         if payload_pid.is_none() || payload_pid == Some(0) {
             if let Some(meta) = crate::hooks::session_files::resolve_session_meta(&sid).await {
                 if state.registry.set_pid(&sid, meta.pid) { changed = true; }
-                if let Some(bridge) = meta.bridge_session_id {
-                    state.registry.set_bridge_session_id(&sid, bridge);
-                    changed = true;
-                }
-            }
-        } else if let Some(pid) = payload_pid {
-            if let Some(bridge) = crate::hooks::session_files::resolve_bridge_session_id(pid).await {
-                state.registry.set_bridge_session_id(&sid, bridge);
-                changed = true;
             }
         }
         if let Some(path) = transcript_path_opt {

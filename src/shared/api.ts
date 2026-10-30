@@ -496,11 +496,6 @@ export const api = {
     try { return (await invoke<InstanceInfo[]>("list_instances")) || []; }
     catch (e) { console.error("list_instances failed", e); return []; }
   },
-  // Rejects on failure: null means "no phone link yet", so a swallowed error
-  // would be indistinguishable from that (the caller's try/catch already
-  // shows a distinct "failed" toast instead of "not available yet").
-  phoneLink: (sessionId: string): Promise<string | null> =>
-    invoke<string | null>("phone_link", { sessionId }),
   tokenStatsBySource: async (): Promise<TokenSourceBucket[]> => {
     try {
       const r = await invoke<{ buckets: TokenSourceBucket[] }>("token_stats_by_source");

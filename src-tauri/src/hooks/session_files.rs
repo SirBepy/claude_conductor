@@ -1,8 +1,7 @@
-//! Reads `~/.claude/sessions/<pid>.json` to resolve the
-//! `bridgeSessionId` that's needed for remote-control phone links.
+//! Reads `~/.claude/sessions/<pid>.json` to resolve a session's pid.
 //!
-//! Claude Code writes this file async after starting. We poll up to
-//! 15 × 500ms = ~7.5s before giving up.
+//! Claude Code writes this file async after starting, so `resolve_session_meta`
+//! polls for it.
 //!
 //! On app startup we also scan the whole directory to re-hydrate the
 //! in-memory instance registry for Claude sessions that started while
@@ -12,7 +11,6 @@
 //! a fresh SessionStart hook (which they don't, because Claude only
 //! fires it on session creation).
 
-use anyhow::Result;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -28,20 +26,6 @@ pub struct ScannedSession {
     /// Epoch milliseconds as written by Claude CLI. Converted to RFC3339
     /// by the caller since that's the shape the registry stores.
     pub started_at_ms: i64,
-    pub bridge_session_id: Option<String>,
-}
-
-pub fn read_bridge_session_id(path: &Path) -> Result<Option<String>> {
-    match std::fs::read_to_string(path) {
-        Ok(raw) => {
-            let v: Value = serde_json::from_str(&raw)?;
-            Ok(v.get("bridgeSessionId")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()))
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.into()),
-    }
 }
 
 // multi-account audit: stays valid - every profile dir junctions `sessions/`
@@ -51,22 +35,9 @@ pub fn session_file_for_pid(pid: u32) -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude").join("sessions").join(format!("{pid}.json")))
 }
 
-/// Polls up to 15 × 500ms for the bridgeSessionId to appear. Returns
-/// `None` if the file never materialises or never contains the field.
-pub async fn resolve_bridge_session_id(pid: u32) -> Option<String> {
-    let Some(path) = session_file_for_pid(pid) else { return None };
-    for _ in 0..15 {
-        if let Ok(Some(id)) = read_bridge_session_id(&path) {
-            return Some(id);
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-    None
-}
-
 /// Scans `~/.claude/sessions/*.json` once for a file whose `sessionId`
 /// matches `session_id`, returning its parsed shape. Used to resolve
-/// pid + bridgeSessionId from a SessionStart hook whose payload only
+/// the pid from a SessionStart hook whose payload only
 /// gave us `session_id` (Claude Code v2.x stopped including pid).
 pub fn find_by_session_id(session_id: &str) -> Option<ScannedSession> {
     let dir = sessions_dir()?;
@@ -119,16 +90,11 @@ pub fn parse_session_file(path: &Path) -> Option<ScannedSession> {
     let session_id = v.get("sessionId").and_then(|x| x.as_str())?.to_string();
     let cwd = v.get("cwd").and_then(|x| x.as_str())?;
     let started_at_ms = v.get("startedAt").and_then(|x| x.as_i64()).unwrap_or(0);
-    let bridge_session_id = v
-        .get("bridgeSessionId")
-        .and_then(|x| x.as_str())
-        .map(|s| s.to_string());
     Some(ScannedSession {
         pid,
         session_id,
         cwd: PathBuf::from(cwd),
         started_at_ms,
-        bridge_session_id,
     })
 }
 
@@ -197,11 +163,10 @@ mod tests {
         assert_eq!(got.session_id, "abc");
         assert_eq!(got.cwd, PathBuf::from("C:\\x"));
         assert_eq!(got.started_at_ms, 1776868109727);
-        assert_eq!(got.bridge_session_id, None);
     }
 
     #[test]
-    fn parse_session_file_reads_bridge_session_id_when_present() {
+    fn parse_session_file_ignores_a_bridge_session_id_key() {
         let dir = tempdir().unwrap();
         write_session(
             dir.path(),
@@ -209,7 +174,8 @@ mod tests {
             r#"{"pid":1,"sessionId":"s","cwd":"C:\\x","bridgeSessionId":"bridge-uuid"}"#,
         );
         let got = parse_session_file(&dir.path().join("1.json")).unwrap();
-        assert_eq!(got.bridge_session_id.as_deref(), Some("bridge-uuid"));
+        assert_eq!(got.pid, 1);
+        assert_eq!(got.session_id, "s");
     }
 
     #[test]

@@ -25,7 +25,6 @@ function makeInstance(overrides = {}) {
     is_remote: false,
     started_at: "2026-05-08T10:00:00Z",
     transcript_path: null,
-    bridge_session_id: null,
     name: null,
     ended_at: null,
     end_reason: null,
