@@ -176,6 +176,8 @@ export interface RenderedMessage {
   metaDetail?: string;
   /** Drill-down bodies a `kind:"message"` text links to as `[x](#d:id)`. */
   details?: ChatDetail[];
+  /** Quick replies a `kind:"message"` offers (see chat-next-actions.ts). */
+  nextActions?: string[];
   /** Retracted via `update_message`; `text` keeps the original for the tooltip. */
   retracted?: boolean;
   /** Set when a failed send_message's tool_result was is_error:true - stays

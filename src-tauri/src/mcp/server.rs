@@ -368,6 +368,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn send_message_offers_optional_next_actions_and_update_message_does_not() {
+        let resp = dispatch(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+            27182,
+            "",
+        );
+        let tools = resp["result"]["tools"].as_array().unwrap();
+        let find = |name: &str| tools.iter().find(|t| t["name"] == name).unwrap().clone();
+
+        let send = find("send_message");
+        let n = &send["inputSchema"]["properties"]["next_actions"];
+        assert_eq!(n["type"], "array");
+        assert_eq!(n["maxItems"], 3);
+        assert_eq!(n["items"]["maxLength"], 60);
+        let required = send["inputSchema"]["required"].as_array().unwrap();
+        assert!(!required.iter().any(|r| r == "next_actions"), "next_actions is optional");
+
+        // An edit keeps the chips through the frontend's `...prev` spread, so the
+        // edit tool must not invite new ones.
+        let update = find("update_message");
+        assert!(update["inputSchema"]["properties"].get("next_actions").is_none());
+    }
+
     /// todo 963: `TodoWrite` is not in a spawned session's tool list (measured
     /// 2026-09-26 against CLI 2.1.278: `claude -p --input-format=stream-json`
     /// registers `TaskCreate`/`TaskList`/`TaskUpdate` but no `TodoWrite`, and
