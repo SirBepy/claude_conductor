@@ -131,7 +131,7 @@ export function renderChip(type: ChipType, ctx: ChipRenderCtx): string {
       return ctx.meta.hasThinking ? `<span class="sb-chip sb-thinking active${ac("thinking")}"><i class="ph ph-brain"></i>thinking</span>` : "";
     case "git": return renderGitChip(ctx);
     case "overflow":
-      return `<span class="sb-chip sb-overflow sb-overflow-btn${ac("overflow")}" role="button" tabindex="0" title="Session stats, drain and tool mix"><i class="ph ph-dots-three"></i></span>`;
+      return `<span class="sb-chip sb-overflow sb-overflow-btn${ac("overflow")}" role="button" tabindex="0" title="Session stats, drain and tool mix"><i class="ph ph-chart-bar"></i></span>`;
     case "branch": {
       if (ctx.gitInfo.branch) return `<span class="sb-chip sb-branch sb-branch-btn${ac("branch")}" role="button" tabindex="0"><i class="ph ph-git-branch"></i>${escapeHtml(ctx.gitInfo.branch)}</span>`;
       if (!ctx.gitInfoLoaded) return skeletonChip("branch", "sb-branch", "ph-git-branch", "60px");

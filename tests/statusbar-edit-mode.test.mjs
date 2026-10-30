@@ -197,6 +197,15 @@ describe("statusbar in-place layout edit", () => {
     expect(document.querySelectorAll(".sb-popover").length).toBe(0);
   });
 
+  it("the overflow stats chip wears a chart icon, not the generic dots", () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    new SessionStatusbar(el, null, [["overflow"]], { sessionId: "s1", hideZero: true, layoutEditable: true });
+    const icon = el.querySelector(".sb-overflow-btn i");
+    expect(icon.classList.contains("ph-chart-bar")).toBe(true);
+    expect(icon.classList.contains("ph-dots-three")).toBe(false);
+  });
+
   it("a chip with nothing to show is dimmed, not dropped", async () => {
     const el = document.createElement("div");
     document.body.appendChild(el);
