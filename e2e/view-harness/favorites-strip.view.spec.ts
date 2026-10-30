@@ -38,7 +38,7 @@ function proj(name: string, emoji: string) {
 }
 
 const PROJECTS = [proj("zng-app", "⚡"), proj("countoff", "⏱️"), proj("fibo", "🌀")];
-const STRIP = "#session-pane .composer-shell > .favorites-strip";
+const STRIP = "body > .favorites-strip";
 
 async function mountChat(page: Page, favorites: (string | null)[]): Promise<void> {
   await page.addInitScript(([k, v]) => localStorage.setItem(k, JSON.stringify(v)), [FAVORITES_KEY, favorites] as const);
@@ -108,6 +108,21 @@ test("Ctrl+Shift+Arrow word selection never shows the strip", async ({ page }) =
   await page.keyboard.press("ArrowLeft");
   await page.waitForTimeout(700);
   await expect(page.locator(STRIP)).toHaveCount(0);
+  await page.keyboard.up("Shift");
+  await page.keyboard.up("Control");
+});
+
+test("the strip shows with no chat selected, where there is no composer to sit above", async ({ page }) => {
+  await page.addInitScript(([k, v]) => localStorage.setItem(k, JSON.stringify(v)), [FAVORITES_KEY, SEEDED] as const);
+  await mountView(page, {
+    view: "sessions",
+    invoke: { ...SESSIONS_BASE_INVOKE, list_project_groups: PROJECTS, list_instances: [], get_active_sessions: [] },
+  });
+  await expect(page.locator("#session-pane .composer-shell")).toHaveCount(0);
+  await page.keyboard.down("Control");
+  await page.keyboard.down("Shift");
+  await expect(page.locator(STRIP)).toBeVisible();
+  await expect(page.locator(`${STRIP} .pp-fav-slot`)).toHaveCount(9);
   await page.keyboard.up("Shift");
   await page.keyboard.up("Control");
 });

@@ -40,10 +40,6 @@ vi.mock("../src/views/sessions/pending-flow.ts", () => ({
   resumeDraft: vi.fn(),
   resumeParkedDraft: vi.fn(),
 }));
-vi.mock("../src/views/sessions/favorites-strip.ts", () => ({
-  showFavoritesStrip: vi.fn(),
-  hideFavoritesStrip: vi.fn(),
-}));
 vi.mock("../src/shared/chat/composer.ts", () => ({ discardComposerDraft: vi.fn() }));
 vi.mock("../src/views/sessions/pending-draft-storage.ts", () => ({ saveParkedDrafts: vi.fn() }));
 vi.mock("../src/views/sessions/active-session.ts", () => ({ selectSession: vi.fn() }));

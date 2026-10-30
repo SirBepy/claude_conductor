@@ -30,6 +30,7 @@ import { curateLatestPerFamily, setApiModels } from "./effort-presets";
 import { refreshDashboardView } from "../views/dashboard/dashboard";
 import * as shortcuts from "./shortcuts";
 import { triggerNewSessionGlobal, triggerNewSessionFavoriteGlobal } from "../views/sessions/sessions";
+import { showFavoritesStrip, hideFavoritesStrip } from "../views/sessions/favorites-strip";
 import { showView } from "./navigation";
 import { isRemote } from "./transport";
 import { wireInitialFetches } from "./initial-render-gate";
@@ -327,6 +328,12 @@ export function initBoot(): void {
   for (let slot = 1; slot <= 9; slot++) {
     shortcuts.register(`new-chat-favorite-${slot}`, () => triggerNewSessionFavoriteGlobal(slot));
   }
+  // Global like the shortcuts above: the strip must show on every screen, not
+  // only while the Chats view is mounted.
+  shortcuts.onModifierHint((hint) => {
+    if (hint.favorites) showFavoritesStrip(triggerNewSessionFavoriteGlobal);
+    else hideFavoritesStrip();
+  });
   shortcuts.register("go-home", () => showView("dashboard"));
   shortcuts.register("go-chats", () => showView("sessions"));
 }
