@@ -198,16 +198,63 @@ fn cancel(state: &Arc<DaemonState>, args: &ScheduleArgs) -> Result<Value, String
     Ok(json!({"ok": existed, "id": short(&full)}))
 }
 
-/// Accepts the short id the injected list prints, or a full uuid. Restricted
-/// to `Pending` items because that's the only status `render_for_injection`
-/// ever hands the model an id for; a `cancel` against a `Sent`/`Missed` item's
-/// id (or its prefix) should read as "not found", not resurrect it.
+/// Accepts the short id the injected list prints, or a full uuid. Only
+/// `Pending` items are cancellable because that's the only status
+/// `render_for_injection` ever hands the model an id for. An id that matches no
+/// Pending item but exactly one settled (`Sent`/`Missed`/`Failed`/`Firing`)
+/// item reports that item's outcome instead of "no scheduled item matching": a
+/// model whose wake-up never arrived needs to learn it already fired or was
+/// missed, not that the id is unknown.
 fn resolve_id(wanted: &str) -> Result<String, String> {
-    let pending = scheduled_items::list()
-        .into_iter()
+    resolve_id_in(scheduled_items::list(), wanted)
+}
+
+fn resolve_id_in(items: Vec<ScheduledItem>, wanted: &str) -> Result<String, String> {
+    let pending = items
+        .iter()
         .filter(|it| matches!(it.status, ScheduledStatus::Pending))
-        .map(|it| it.id);
-    resolve_unique_prefix(pending, wanted)
+        .map(|it| it.id.clone());
+    match resolve_unique_prefix(pending, wanted) {
+        Ok(id) => Ok(id),
+        Err(not_found) => {
+            let settled: Vec<&ScheduledItem> = items
+                .iter()
+                .filter(|it| !matches!(it.status, ScheduledStatus::Pending))
+                .filter(|it| it.id == wanted || it.id.starts_with(wanted))
+                .collect();
+            match settled.as_slice() {
+                [one] => Err(describe_settled(one)),
+                _ => Err(not_found),
+            }
+        }
+    }
+}
+
+/// The user-facing sentence for a cancel aimed at an item that is no longer
+/// Pending. Times are local, the same form `add` echoes back.
+fn describe_settled(item: &ScheduledItem) -> String {
+    let local = |rfc: &str| {
+        DateTime::parse_from_rfc3339(rfc)
+            .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_else(|_| rfc.to_string())
+    };
+    let id = short(&item.id);
+    match &item.status {
+        ScheduledStatus::Sent => {
+            let at = item.last_fired_at.as_deref().unwrap_or(&item.fire_at);
+            format!("scheduled item {id} already fired at {} - nothing left to cancel", local(at))
+        }
+        ScheduledStatus::Missed => format!(
+            "scheduled item {id} was missed at {} (its fire time passed without it firing) - it will not fire, nothing left to cancel",
+            local(&item.fire_at)
+        ),
+        ScheduledStatus::Failed { reason } => format!(
+            "scheduled item {id} already fired at {} and failed: {reason} - nothing left to cancel",
+            local(item.last_fired_at.as_deref().unwrap_or(&item.fire_at))
+        ),
+        ScheduledStatus::Firing => format!("scheduled item {id} is firing right now - it can no longer be cancelled"),
+        ScheduledStatus::Pending => format!("scheduled item {id} is pending"),
+    }
 }
 
 /// Pure over an id iterator so the ambiguity rule is unit-testable without
@@ -277,6 +324,62 @@ mod tests {
     fn no_match_keeps_the_original_error_wording() {
         let err = resolve_unique_prefix(ids(&["abcd1111"]), "zzzz").unwrap_err();
         assert_eq!(err, "no scheduled item matching \"zzzz\"");
+    }
+
+    // --- resolve_id_in: a cancel on a settled item says what happened ---
+
+    fn item_with(id: &str, status: ScheduledStatus) -> ScheduledItem {
+        let mut it = ScheduledItem::new(
+            ScheduledKind::Message { session_id: "s".into(), cwd: "C:/proj".into() },
+            "hi".into(),
+            "2026-10-29T10:00:00Z".into(),
+            None,
+        );
+        it.id = id.to_string();
+        it.status = status;
+        it
+    }
+
+    #[test]
+    fn cancel_on_a_missed_item_says_it_was_missed_not_unknown() {
+        let items = vec![item_with("14be89a0-1111", ScheduledStatus::Missed)];
+        let err = resolve_id_in(items, "14be89a0").unwrap_err();
+        assert!(err.contains("missed"), "got {err}");
+        assert!(!err.contains("no scheduled item matching"), "got {err}");
+    }
+
+    #[test]
+    fn cancel_on_a_sent_item_says_it_already_fired() {
+        let items = vec![item_with("14be89a0-1111", ScheduledStatus::Sent)];
+        let err = resolve_id_in(items, "14be89a0").unwrap_err();
+        assert!(err.contains("already fired"), "got {err}");
+    }
+
+    #[test]
+    fn cancel_on_a_failed_item_carries_the_reason() {
+        let items = vec![item_with("14be89a0-1111", ScheduledStatus::Failed { reason: "boom".into() })];
+        let err = resolve_id_in(items, "14be89a0").unwrap_err();
+        assert!(err.contains("failed: boom"), "got {err}");
+    }
+
+    #[test]
+    fn a_pending_match_still_wins_and_an_unknown_id_keeps_the_original_error() {
+        let items = vec![
+            item_with("aaaa1111", ScheduledStatus::Pending),
+            item_with("bbbb2222", ScheduledStatus::Sent),
+        ];
+        assert_eq!(resolve_id_in(items.clone(), "aaaa").unwrap(), "aaaa1111");
+        assert_eq!(resolve_id_in(items, "zzzz").unwrap_err(), "no scheduled item matching \"zzzz\"");
+    }
+
+    #[test]
+    fn an_ambiguous_settled_prefix_falls_back_to_not_found_rather_than_guessing() {
+        let items = vec![
+            item_with("cccc1111", ScheduledStatus::Sent),
+            item_with("cccc2222", ScheduledStatus::Missed),
+        ];
+        let err = resolve_id_in(items, "cccc").unwrap_err();
+        assert_eq!(err, "no scheduled item matching \"cccc\"");
     }
 
     // --- build_item: the whole decision surface, pure (no store I/O), so

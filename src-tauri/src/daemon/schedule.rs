@@ -71,6 +71,7 @@ pub fn next_stagger_slot(
 /// Spawn the scheduler tick loop. Call once at daemon startup, alongside the
 /// other background loops in `daemon::run_daemon_main` (e.g. `detector_task::spawn`).
 pub fn spawn(state: Arc<DaemonState>) {
+    let started_at = Utc::now();
     tokio::spawn(async move {
         // Startup recovery: an item stuck in `Firing` means the daemon died
         // mid-fire on a previous run (claimed and persisted, but `finish_fire`
@@ -81,9 +82,33 @@ pub fn spawn(state: Arc<DaemonState>) {
         }
         loop {
             sleep_chunked(TICK_SECS).await;
-            tick(&state).await;
+            tick(&state, started_at).await;
         }
     });
+}
+
+/// How late an item is for grace purposes. A one-shot `Message` (a `this_chat`
+/// wake-up) whose fire time passed while the daemon was not running has its
+/// downtime credited: lateness counts from `max(fire_at, daemon_started_at)`,
+/// so a PC that was off for hours still delivers the nudge once on the next
+/// start instead of marking it Missed. The prompt is self-contained by design,
+/// so a late delivery is still useful.
+///
+/// Anchored on the daemon's start rather than "the first tick" so an item
+/// deferred by the busy guard on that first tick keeps its credit on later
+/// ticks. Only `Message` one-shots get it: a `NewChat` or recurring item stays
+/// on the real lateness (recurring ones keep their next-occurrence behavior),
+/// and an item that went overdue while the daemon was up has `fire_at` after
+/// `daemon_started_at`, so it is judged exactly as before.
+fn grace_lateness_secs(
+    item: &ScheduledItem,
+    fire_at: DateTime<Utc>,
+    now: DateTime<Utc>,
+    daemon_started_at: DateTime<Utc>,
+) -> i64 {
+    let one_shot_message = item.recurrence.is_none() && matches!(item.kind, ScheduledKind::Message { .. });
+    let anchor = if one_shot_message { fire_at.max(daemon_started_at) } else { fire_at };
+    (now - anchor).num_seconds()
 }
 
 /// Sleeps in `SLEEP_CHUNK_SECS` steps instead of one long sleep, so a system
@@ -99,7 +124,7 @@ async fn sleep_chunked(total_secs: u64) {
 }
 
 /// One scheduler tick: evaluate every Pending item against `now`.
-async fn tick(state: &Arc<DaemonState>) {
+async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
     let now = Utc::now();
     let grace_secs = state
         .settings
@@ -120,7 +145,7 @@ async fn tick(state: &Arc<DaemonState>) {
         if fire_at > now {
             continue;
         }
-        let lateness = (now - fire_at).num_seconds();
+        let lateness = grace_lateness_secs(&item, fire_at, now, daemon_started_at);
         // Defect 4 guard: a live, busy Message-kind session (mid-turn) must
         // not be written into out of band - every interactive send path
         // respects the same busy gate. Only defer within the grace window;
@@ -354,6 +379,66 @@ mod tests {
         let updated = compute_fired(&state, item, now).await;
         assert_eq!(updated.status, ScheduledStatus::Pending, "recurring item stays Pending regardless of fire outcome");
         assert_ne!(updated.fire_at, old_fire_at.to_rfc3339());
+    }
+
+    // --- grace_lateness_secs: the downtime credit, pure so no store I/O ---
+
+    const GRACE: i64 = DEFAULT_GRACE_SECS;
+
+    #[test]
+    fn this_chat_one_shot_overdue_across_downtime_is_inside_grace_on_the_first_tick() {
+        let now = Utc::now();
+        let started = now - chrono::Duration::seconds(30);
+        // Fire time was ~2h before the daemon came back up.
+        let fire_at = started - chrono::Duration::hours(2);
+        let item = make_item(fire_at, None);
+        let lateness = grace_lateness_secs(&item, fire_at, now, started);
+        assert!(lateness < GRACE, "downtime must not count against grace, got {lateness}");
+        assert_eq!(lateness, 30, "counted from the daemon's start, not the original fire time");
+    }
+
+    #[test]
+    fn this_chat_one_shot_that_went_overdue_while_the_daemon_was_up_is_still_missed() {
+        let now = Utc::now();
+        let started = now - chrono::Duration::hours(5);
+        let fire_at = now - chrono::Duration::seconds(GRACE + 60);
+        let item = make_item(fire_at, None);
+        let lateness = grace_lateness_secs(&item, fire_at, now, started);
+        assert!(lateness >= GRACE, "mid-run overdue keeps the grace/Missed path, got {lateness}");
+    }
+
+    #[test]
+    fn downtime_credit_survives_later_ticks_so_a_busy_deferral_is_not_missed() {
+        let started = Utc::now() - chrono::Duration::minutes(10);
+        let fire_at = started - chrono::Duration::hours(8);
+        let item = make_item(fire_at, None);
+        let lateness = grace_lateness_secs(&item, fire_at, Utc::now(), started);
+        assert_eq!(lateness, 600);
+    }
+
+    #[test]
+    fn recurring_and_new_chat_items_get_no_downtime_credit() {
+        let now = Utc::now();
+        let started = now - chrono::Duration::seconds(30);
+        let fire_at = started - chrono::Duration::hours(2);
+        let rec = Recurrence { time: "09:00".into(), rule: RecurrenceRule::Daily };
+        let recurring = make_item(fire_at, Some(rec));
+        assert!(grace_lateness_secs(&recurring, fire_at, now, started) >= GRACE);
+        let new_chat = ScheduledItem::new(
+            ScheduledKind::NewChat {
+                cwd: "C:/proj".into(),
+                model: "opus".into(),
+                effort: "high".into(),
+                account_id: None,
+                placeholder_id: None,
+                character_id: None,
+                auto_accept: false,
+            },
+            "hi".into(),
+            fire_at.to_rfc3339(),
+            None,
+        );
+        assert!(grace_lateness_secs(&new_chat, fire_at, now, started) >= GRACE);
     }
 
     #[tokio::test]
