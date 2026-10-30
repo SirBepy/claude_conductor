@@ -50,33 +50,20 @@ pub struct AppState {
     pub hook_registration_pending: Mutex<bool>,
     pub update_state: Mutex<serde_json::Value>,
     pub should_quit: Arc<AtomicBool>,
-    /// Set to true the first time the webview JS sends `frontend_ready`.
-    /// Watchdog spawned in lib.rs reloads the main window if this never flips
-    /// (covers WebView2 showing a "can't reach this page" error when the
-    /// dev/prod start URL fails at boot, e.g. autostart racing with the network).
+    /// Set to true the first time any webview's JS sends `frontend_ready`. The
+    /// heartbeat watchdog does not judge the Chats window before this latches.
     pub frontend_alive: Arc<AtomicBool>,
-    /// Last time the frontend's `frontend_ping` heartbeat fired (see
-    /// `ipc::misc::frontend_ping`). The renderer-crash watchdog in lib.rs
-    /// setup reloads the main window if this goes stale while it's visible.
+    /// Last time the Chats window's `frontend_ping` heartbeat fired (see
+    /// `ipc::misc::frontend_ping`). The heartbeat watchdog reloads that window
+    /// if this goes stale while it's visible.
     pub last_frontend_ping: Arc<Mutex<Option<std::time::Instant>>>,
     /// `(last raf_tick reported, when it last changed)` - paint-liveness
     /// signal distinct from `last_frontend_ping`: JS can keep pinging while
     /// WebView2's compositor stops presenting frames. The heartbeat watchdog
     /// uses this to catch that case, which a JS-alive check alone can't see.
     pub last_frontend_raf: Arc<Mutex<(u64, std::time::Instant)>>,
-    /// Set to true only once the main dashboard window's `on_page_load`
-    /// "Finished" event has fired for the first time (see
-    /// `ipc::window::build_main_window`). Every show-path that surfaces an
-    /// *already-built* `main` window (`ipc::window::open_dashboard` and its
-    /// siblings) must check this before calling `surface_main` - a window
-    /// that exists but is still mid-navigation paints blank/white and
-    /// swallows input if forced visible early. `build_main_window`'s own
-    /// `on_page_load` handler is unaffected: it shows the window itself once
-    /// this flips, so callers that find it still `false` simply skip the
-    /// show and let that handler do it.
-    pub main_window_loaded: Arc<AtomicBool>,
     /// A pending "open this session in the chats window" request, set when the
-    /// chats window is created fresh from the main window's "Open in chats" CTA.
+    /// chats window is created fresh by an "Open in chats" request.
     /// The chats window drains it on boot via `take_pending_chat_open`. Holds
     /// `(session_id, mode)` where mode is "live" or "history", or `(cwd, "project")`
     /// for a project's dashboard page.
@@ -87,9 +74,10 @@ pub struct AppState {
     /// the full `ipc::window::PendingNewChat` (model/effort plus
     /// account_id/auto_accept/remote/character_id - ai_todo 163).
     pub pending_new_chat: Mutex<Option<crate::ipc::window::PendingNewChat>>,
-    /// A pending main-window navigation queued while `frontend_alive` was false
-    /// (webview still loading). Drained by `frontend_ready` once JS is running.
-    /// Value is "dashboard" or "project:{cwd}".
+    /// A navigation queued for the Chats window while it was still being built
+    /// (`ipc::window::surface_chats_with_nav`). Drained once by `take_pending_nav`
+    /// when the window boots. Value is `dashboard`, `settings-accounts`, or
+    /// `account:<id>`.
     pub pending_main_nav: Mutex<Option<String>>,
     /// True while the meeting watcher detects an active meeting (camera/mic in
     /// use, or an allowlisted meeting app producing audio). Read by
@@ -108,10 +96,6 @@ pub struct AppState {
     /// app run: that first call seeds the set without glowing, so sessions
     /// already waiting before the app started don't flash the taskbar on boot.
     pub known_awaiting_sessions: Arc<Mutex<Option<std::collections::HashSet<String>>>>,
-    /// Slugs for which a `news::summarizer::generate_for_slug` call is currently
-    /// running. Guards against double-spawning when the eager backfill and the
-    /// lazy IPC path race on the same new post.
-    pub news_inflight: Arc<Mutex<std::collections::HashSet<String>>>,
     /// State + task handle for the "do-X-when-all-sessions-idle" protocol
     /// (sleep/shutdown when every session goes idle). At most one armed at a
     /// time; arming aborts any prior task. See `crate::when_done`.
@@ -167,14 +151,12 @@ impl AppState {
             frontend_alive: Arc::new(AtomicBool::new(false)),
             last_frontend_ping: Arc::new(Mutex::new(None)),
             last_frontend_raf: Arc::new(Mutex::new((0, std::time::Instant::now()))),
-            main_window_loaded: Arc::new(AtomicBool::new(false)),
             pending_chat_open: Mutex::new(None),
             pending_new_chat: Mutex::new(None),
             pending_main_nav: Mutex::new(None),
             meeting_active: Arc::new(AtomicBool::new(false)),
             input_needed: Arc::new(AtomicBool::new(false)),
             known_awaiting_sessions: Arc::new(Mutex::new(None)),
-            news_inflight: Arc::new(Mutex::new(std::collections::HashSet::new())),
             when_done: Arc::new(Mutex::new(crate::when_done::WhenDoneInner::default())),
             db: Mutex::new(db),
             account_wizard_sessions: Mutex::new(std::collections::HashMap::new()),

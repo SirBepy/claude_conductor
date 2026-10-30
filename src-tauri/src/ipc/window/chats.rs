@@ -3,6 +3,22 @@
 
 use tauri::{AppHandle, Manager};
 
+/// Label of the app's one desktop window. The frontend names it too
+/// (`src/shared/window-roles.ts`); a test in `bootstrap::watchdogs` pins them together.
+pub const CHATS_WINDOW_LABEL: &str = "session-chats";
+
+/// App-relative URL the chats window loads, reused verbatim when the heartbeat
+/// watchdog or the ready gate has to reload it.
+pub const CHATS_WINDOW_URL: &str = "index.html?chatswindow=1#sessions";
+
+/// Show + focus an already-built chats window.
+pub fn surface_chats(w: &tauri::WebviewWindow) {
+    super::activation::before_show(w.app_handle(), w.label());
+    let _ = w.show();
+    let _ = w.unminimize();
+    let _ = w.set_focus();
+}
+
 /// Build the chats window (label `session-chats`). Built hidden so
 /// tauri-plugin-window-state can restore the saved size + position before the
 /// window is ever painted. Without this the window flashes briefly at the
@@ -11,18 +27,17 @@ use tauri::{AppHandle, Manager};
 /// alive (`ipc::ready`) - a finished page load alone can be WebView2's own
 /// error page.
 fn build_chats_window(app: &AppHandle) -> Result<(), String> {
-    const URL: &str = "index.html?chatswindow=1#sessions";
     let window = tauri::WebviewWindowBuilder::new(
         app,
-        "session-chats",
-        tauri::WebviewUrl::App(URL.into()),
+        CHATS_WINDOW_LABEL,
+        tauri::WebviewUrl::App(CHATS_WINDOW_URL.into()),
     )
     .title(super::test_title("Claude Chats"))
     .inner_size(1280.0, 860.0)
     .min_inner_size(600.0, 400.0)
     .resizable(true)
     // Windows gets a custom in-webview title bar (window-titlebar.ts, mounted
-    // for the "main" and "session-chats" window labels only) instead of the
+    // for the "session-chats" window label only) instead of the
     // native one, folding minimize/maximize/close into a dedicated strip
     // above the existing header row. macOS/Linux keep native decorations.
     .decorations(!cfg!(target_os = "windows"))
@@ -33,7 +48,7 @@ fn build_chats_window(app: &AppHandle) -> Result<(), String> {
     .build()
     .map_err(|e| e.to_string())?;
     super::attach_hide_to_tray(&window);
-    crate::ipc::ready::watch(app, "session-chats", URL);
+    crate::ipc::ready::watch(app, CHATS_WINDOW_LABEL, CHATS_WINDOW_URL);
     Ok(())
 }
 

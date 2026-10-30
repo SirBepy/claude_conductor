@@ -11,7 +11,7 @@
   output down to the passing/failing lines, throwing away the full log (todo 1055). This script
   encodes the gate rules instead of re-deriving them under time pressure each release:
 
-  - Free specs (no quota): smoke, held-messages, multi-account, news-redesign, question-card,
+  - Free specs (no quota): smoke, held-messages, multi-account, question-card,
     question-card-reload, schedule-view, preview-popout, daemon-lifecycle. probe.e2e.js is a debugging harness, not a suite member, and
     is never included.
   - daemon-lifecycle runs LAST: a seeding spec run right after it can fail its own `before all`
@@ -120,7 +120,6 @@ $freeSpecs = @(
     'smoke',
     'held-messages',
     'multi-account',
-    'news-redesign',
     'question-card',
     'question-card-reload',
     'schedule-view',

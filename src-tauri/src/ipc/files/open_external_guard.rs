@@ -2,7 +2,7 @@
 
 /// True if `url` is one Conductor's own shell opener may receive. Scoped to
 /// what the app's callers actually pass (grepped `src/`): an `http(s)://`
-/// link (news items, the update-available link, waiting-on chips, the
+/// link (the update-available link, waiting-on chips, the
 /// dev-server popover) or a `mailto:` link, or a local file on a drive path
 /// (a bare path, or a `file:` URL from a chat link) - the preview panel's
 /// "Open in browser" passes the temp file `write_temp_file` just wrote. A

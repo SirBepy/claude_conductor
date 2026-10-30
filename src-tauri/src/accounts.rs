@@ -159,7 +159,7 @@ pub fn resolve_account(
 }
 
 /// Convenience wrapper for spawn sites that have no per-instance account
-/// selection yet (channels, the news summarizer): resolves purely from
+/// selection yet (channels): resolves purely from
 /// `Settings.default_account_id`, re-reading `settings.json` from disk since
 /// these callers hold no live settings cache. Never falls back to
 /// `~/.claude` - an unresolvable default means the caller skips/refuses.

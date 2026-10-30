@@ -46,7 +46,6 @@ const INVOKE = {
   list_auto_accept: [],
   list_wrap_up_on_done: [],
   get_settings_load_notice: null,
-  list_news: [],
 };
 
 const SHOT_DIR = shotDir();

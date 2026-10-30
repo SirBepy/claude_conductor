@@ -52,7 +52,7 @@ pub async fn close_code_window(app: AppHandle) -> Result<(), String> {
 /// window labels so a caller can't name anything else.
 #[tauri::command]
 pub async fn focus_app_window(app: AppHandle, label: String) -> Result<(), String> {
-    if label != "main" && !label.starts_with("session-") {
+    if !label.starts_with("session-") {
         return Err(format!("not an app window: {label}"));
     }
     let win = app.get_webview_window(&label).ok_or_else(|| format!("no window {label}"))?;

@@ -166,9 +166,6 @@ fn emit_ipc_types() {
     out.push_str(&decl::<HistoryPage>());
     out.push_str(&decl::<TranscriptStats>());
 
-    // news
-    out.push_str(&decl::<NewsPost>());
-
     // slash autocomplete
     out.push_str(&decl::<SlashEntry>());
     out.push_str(&decl::<SlashSource>());

@@ -1,7 +1,7 @@
 //! Cleans a raw speech-to-text dictation transcript via a cheap, one-shot
 //! `claude -p` pass (haiku, low effort): strips stutters/false
 //! starts/repeated words, never rephrases. Same billing-guarded,
-//! subscription-only sidecar shape as `ask::sidecar` and `news::summarizer`;
+//! subscription-only sidecar shape as `ask::sidecar`;
 //! unlike `ask`, this is stateless - no store, no resume.
 
 use crate::chat::billing::check_metered_billing;

@@ -14,7 +14,6 @@ pub mod chat;
 pub mod auth;
 pub mod hooks;
 pub mod mcp;
-pub mod news;
 pub mod people;
 pub mod project_dashboard;
 pub mod notifications;
@@ -361,11 +360,6 @@ pub fn run() {
             ipc::confirm_question_rendered,
             ipc::get_skipped_question_marks,
             ipc::list_pending_prompts,
-            ipc::list_news,
-            ipc::refresh_news,
-            ipc::mark_news_read,
-            ipc::mark_all_news_read,
-            ipc::generate_news_summary,
             ipc::list_slash_commands,
             ipc::enable_skill_here,
             ipc::list_project_files,
