@@ -106,6 +106,10 @@ export async function renderScheduleView(root: HTMLElement): Promise<() => void>
       return;
     }
 
+    // The drawers live inside the row, and their text is meant to be read and
+    // selected, so a click there must not open the chat.
+    if (target.closest(".schedule-guard-drawer, .schedule-reschedule-inline")) return;
+
     // Row body click -> navigate to the chat.
     const row = target.closest<HTMLElement>(".agenda-row--nav");
     if (row) {

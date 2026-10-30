@@ -12,6 +12,7 @@ import { fetchFreshestAuqDraft } from "./auq-draft-sync";
 import {
   allowPermission,
   autoAllowIfRemembered,
+  needsHumanApproval,
   isAutoAccept,
   markLatestQuestion,
   markQuestionSuperseded,
@@ -41,7 +42,11 @@ import { showQuestionCard } from "./question-submit";
 export function autoAcceptParked(sessionId: string): void {
   const pending = takePendingPrompt(sessionId);
   if (!pending) return;
-  if (pending.kind === "permission" && extractQuestions(pending.payload.input) === null) {
+  if (
+    pending.kind === "permission"
+    && extractQuestions(pending.payload.input) === null
+    && !needsHumanApproval(pending.payload)
+  ) {
     allowPermission(pending.payload, "flush respond_permission");
     rerenderSidebar();
     return;
@@ -113,6 +118,7 @@ function surfacePending(pending: PendingPrompt, reopened = false): void {
     payload.session_id
     && isAutoAccept(payload.session_id)
     && extractQuestions(payload.input) === null
+    && !needsHumanApproval(payload)
   ) {
     allowPermission(payload, "replay respond_permission");
     return;

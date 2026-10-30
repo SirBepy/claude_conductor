@@ -41,6 +41,16 @@ export function isAutoAccept(sessionId: string | undefined | null): boolean {
   return state.sessions.some((s) => s.session_id === sessionId && s.jarvis === true);
 }
 
+/** A permission card no auto path may answer, same as a question or a secret.
+ *  A guarded `schedule` add stores a shell command the daemon runs on every
+ *  firing with no chat or card around it, so the human must see that exact
+ *  command: neither auto-accept nor a remembered Always-allow rule applies. */
+export function needsHumanApproval(payload: { tool_name: string; input?: unknown }): boolean {
+  if (payload.tool_name !== "mcp__cc_conductor__schedule") return false;
+  const guard = (payload.input as { guard?: unknown } | null | undefined)?.guard;
+  return typeof guard === "string" && guard.trim() !== "";
+}
+
 export function setAutoAccept(sessionId: string, value: boolean): void {
   if (value) _autoAccept.set(sessionId, true);
   else _autoAccept.delete(sessionId);
@@ -306,6 +316,7 @@ export async function autoAllowIfRemembered(
   payload: PermissionRequestedPayload,
 ): Promise<boolean> {
   if (extractQuestions(payload.input) !== null) return false;
+  if (needsHumanApproval(payload)) return false;
   if (isDestructive(payload.tool_name, payload.input)) return false;
   const cwd = resolveCwdForSession(payload.session_id);
   if (!cwd) return false;

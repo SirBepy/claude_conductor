@@ -50,8 +50,8 @@ pub(crate) struct ScheduleArgs {
     pub name: Option<String>,
     pub id: Option<String>,
     /// Pre-fire guard command (`ScheduledItem::guard`). A command nobody sees
-    /// run, so `hooks_server::schedule::approve_guard` always shows it to a
-    /// human first, auto-accept or not.
+    /// run, so `hooks_server::schedule::needs_card` always has a human approve
+    /// it first, auto-accept or not.
     pub guard: Option<String>,
     /// `ScheduledItem::after_meeting`.
     pub after_meeting: Option<bool>,
@@ -210,7 +210,7 @@ fn cancel(state: &Arc<DaemonState>, args: &ScheduleArgs) -> Result<Value, String
 /// Accepts the short id the injected list prints, or a full uuid. Only
 /// `Pending` items are cancellable because that's the only status
 /// `render_for_injection` ever hands the model an id for. An id that matches no
-/// Pending item but exactly one settled (`Sent`/`Missed`/`Failed`/`Firing`)
+/// Pending item but exactly one settled (`Sent`/`Missed`/`Skipped`/`Failed`/`Firing`)
 /// item reports that item's outcome instead of "no scheduled item matching": a
 /// model whose wake-up never arrived needs to learn it already fired or was
 /// missed, not that the id is unknown.
