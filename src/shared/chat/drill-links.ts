@@ -88,11 +88,15 @@ let open: { chip: HTMLElement; card: HTMLElement; close: () => void } | null = n
 function placeCard(card: HTMLElement, msg: HTMLElement, host: HTMLElement): void {
   const hr = host.getBoundingClientRect();
   const mr = msg.getBoundingClientRect();
-  const w = Math.min(CARD_W, hr.width - 2 * CARD_EDGE);
+  // clientWidth/clientLeft, not the rect's width: the rect includes the
+  // scrollbar gutter, which the card (inside the scrolled content) never gets.
+  const innerLeft = hr.left + host.clientLeft;
+  const innerRight = innerLeft + host.clientWidth;
+  const w = Math.min(CARD_W, host.clientWidth - 2 * CARD_EDGE);
   const h = Math.min(CARD_H, host.clientHeight - 2 * CARD_EDGE);
   card.style.width = `${w}px`;
   card.style.height = `${h}px`;
-  const left = Math.min(Math.max(mr.left, hr.left + CARD_EDGE), hr.right - CARD_EDGE - w);
+  const left = Math.min(Math.max(mr.left, innerLeft + CARD_EDGE), innerRight - CARD_EDGE - w);
   card.style.left = `${left - mr.left}px`;
 
   const msgTopInContent = mr.top - hr.top + host.scrollTop;
