@@ -72,12 +72,13 @@ interface Session {
 
 const sessions = new Map<string, Session>();
 
-// Only Windows folds case: on Linux (and case-sensitive macOS volumes) `A.md`
-// and `a.md` are two files, and sharing one session would show one file's
-// text, undo history and unsaved typing in the other's tab.
+// Windows (NTFS) and macOS (default APFS) volumes are case-insensitive, so
+// `A.md` and `a.md` are one file there and must share a session. Linux is
+// case-sensitive: folding there would show one file's text, undo history and
+// unsaved typing in the other's tab.
 const keyOf = (p: string) => {
   const slashed = p.replace(/\\/g, "/");
-  return navigator.userAgent.includes("Windows") ? slashed.toLowerCase() : slashed;
+  return /Windows|Mac/.test(navigator.userAgent) ? slashed.toLowerCase() : slashed;
 };
 
 /** Whether a file can round-trip through the editor unchanged. CodeMirror
