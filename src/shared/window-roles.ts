@@ -7,6 +7,17 @@
 
 export const CHATS_WINDOW_LABEL = "session-chats";
 
+/** Body class main.ts sets once, from the `chatswindow=1` query the backend
+ *  opens the Chats window with; every later "am I the Chats window" test reads it. */
+export const CHATS_WINDOW_MODE_CLASS = "chats-window-mode";
+
+/** Whether this document is the Chats window. Reads the body class rather than
+ *  the Tauri label so it also holds in the view harness and tests, which have no
+ *  window object. Only meaningful once main.ts has run its window-mode setup. */
+export function isChatsWindow(): boolean {
+  return document.body.classList.contains(CHATS_WINDOW_MODE_CLASS);
+}
+
 /**
  * Whether this window feeds the Rust renderer-crash watchdog. Chats only: the
  * ping timestamp is shared and unscoped, so a pop-out that also pinged would

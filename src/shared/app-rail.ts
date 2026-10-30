@@ -11,6 +11,7 @@
 
 import { getActiveView, showView } from "./navigation";
 import { isTauri } from "./transport";
+import { openJarvisSafely } from "./open-jarvis-safely";
 // The standalone column reuses the strip's own look, so it needs split.css even
 // when no chat (and so no split.ts) has loaded yet.
 import "../views/sessions/split-panels/split.css";
@@ -58,9 +59,7 @@ export function handleRailClick(target: EventTarget | null): boolean {
   const el = (target as HTMLElement | null)?.closest<HTMLElement>("[data-rail-go], [data-rail-jarvis]");
   if (!el) return false;
   if (el.hasAttribute("data-rail-jarvis")) {
-    void import("../views/sessions/open-jarvis")
-      .then((m) => m.openJarvis())
-      .catch((err) => console.error("[rail] open Jarvis failed", err));
+    void openJarvisSafely();
     return true;
   }
   const view = el.dataset.railGo;

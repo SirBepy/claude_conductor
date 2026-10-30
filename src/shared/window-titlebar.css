@@ -1,5 +1,5 @@
-/* Windows-only custom title bar (window-titlebar.ts, mounted for "main" and
-   "session-chats" only). "Blend" direction picked from /mockup 2026-09-25:
+/* Windows-only custom title bar (window-titlebar.ts, mounted for the
+   "session-chats" window only). "Blend" direction picked from /mockup 2026-09-25:
    matches the window's own background so it reads as part of the same
    surface as .view-header below it, with a thin border to still mark it as
    its own row (a fully seamless variant existed too but wasn't the pick). */

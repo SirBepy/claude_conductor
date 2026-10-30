@@ -25,7 +25,9 @@ import { followAppearanceChanges } from "./shared/theme-sync";
 import { api } from "./shared/api";
 import { ensureRemoteToken } from "./shared/remote-gate";
 import { isRemote } from "./shared/transport";
-import { runsRendererHeartbeat } from "./shared/window-roles";
+import { CHATS_WINDOW_MODE_CLASS, isChatsWindow, runsRendererHeartbeat } from "./shared/window-roles";
+import { openJarvisSafely } from "./shared/open-jarvis-safely";
+import { applyPendingNav } from "./boot/pending-nav";
 import { showView } from "./shared/navigation";
 import { closeSidemenu } from "./shared/sidemenu";
 import { initBackButton, registerOverlayBack } from "./shared/back-button";
@@ -164,7 +166,7 @@ initWindowTitlebar();
 initCursorAutohide();
 
 if (new URLSearchParams(window.location.search).get("chatswindow") === "1") {
-  document.body.classList.add("chats-window-mode");
+  document.body.classList.add(CHATS_WINDOW_MODE_CLASS);
   // The sidemenu has no purpose in the chats window. Drop the DOM entirely
   // so the initial CSS transition can't briefly animate it in during paint.
   document.getElementById("sidemenu")?.remove();
@@ -321,21 +323,18 @@ if (detachedSessionId) {
     focusDashboardAccount(accountId);
     await (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo("dashboard");
   });
-  if (document.body.classList.contains("chats-window-mode")) {
+  if (isChatsWindow()) {
     mountAppRail();
     installChatsWindowMessaging();
     // A navigation queued while this window was still being built (tray-less
     // callers such as the overlay's account card on a cold start).
     void invoke<string | null>("take_pending_nav").then((nav) => {
-      if (!nav) return;
-      const go = (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo;
-      if (nav === "dashboard" || nav === "settings-accounts") void go(nav);
-      else if (nav.startsWith("account:")) {
-        void import("./views/dashboard/dashboard").then((m) => {
-          m.focusDashboardAccount(nav.slice("account:".length));
-          return go("dashboard");
-        });
-      }
+      void applyPendingNav(nav, {
+        navigateTo: (view) => (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo(view),
+        focusAccount: async (accountId) => {
+          (await import("./views/dashboard/dashboard")).focusDashboardAccount(accountId);
+        },
+      });
     }).catch(() => {});
   }
 
@@ -351,9 +350,7 @@ if (detachedSessionId) {
       // Jarvis has no route of its own: desktop opens its dedicated
       // window, the phone opens it in the Chats view (see open-jarvis.ts).
       if (item.dataset.action === "jarvis") {
-        void import("./views/sessions/open-jarvis")
-          .then((m) => m.openJarvis())
-          .catch((err) => console.error("[nav] open Jarvis failed", err));
+        void openJarvisSafely();
         closeSidemenu();
         return;
       }
