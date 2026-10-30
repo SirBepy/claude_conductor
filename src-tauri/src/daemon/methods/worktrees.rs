@@ -6,7 +6,7 @@
 //! Every path param is gated by `is_known_cwd`: these are in SAFE_METHODS, so
 //! without it a paired remote client could `remove_worktree` any repo on disk.
 
-use super::pr_review::{reject_unknown, resolve_cwd};
+use super::pr_review::{reject_unknown, resolve_cwd_for};
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use serde_json::json;
@@ -87,8 +87,9 @@ pub fn register_worktrees(router: &mut Router, state: Arc<DaemonState>) {
 
     // Needed by the picker's "New worktree" base-branch field; not part of
     // `ipc::worktrees` itself but has no other remote path either.
-    router.register("get_recent_branches", move |params, _ctx| {
+    router.register("get_recent_branches", move |params, ctx| {
         let state = state.clone();
+        let transport = ctx.transport.clone();
         async move {
             #[derive(serde::Deserialize)]
             struct P {
@@ -98,7 +99,7 @@ pub fn register_worktrees(router: &mut Router, state: Arc<DaemonState>) {
             }
             let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            let cwd = resolve_cwd(&state, p.cwd, p.session_id.as_deref())?;
+            let cwd = resolve_cwd_for(&state, &transport, p.cwd, p.session_id.as_deref())?;
             Ok(json!(crate::ipc::git::get_recent_branches_local(cwd).await))
         }
     });
