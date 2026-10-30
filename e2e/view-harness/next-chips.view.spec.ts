@@ -89,6 +89,62 @@ test.describe("quick reply chips", () => {
   });
 });
 
+const userEvent = (text: string) => ({ type: "user_message", content: [{ type: "text", text }], timestamp: 0, remote_echo: false, is_meta: false });
+const sendMessageEvent = (text: string, nextActions?: unknown) => ({
+  type: "tool_use",
+  tool_name: "mcp__cc_conductor__send_message",
+  input: { text, ...(nextActions === undefined ? {} : { next_actions: nextActions }) },
+  id: `tu-${text}`,
+  timestamp: 0,
+  parent_tool_use_id: null,
+});
+const transcript = (...events: unknown[]) => ({ events, oldest_seq: 0, newest_seq: 0, has_more: false });
+
+test.describe("quick reply chips written by the model", () => {
+  const proposal = transcript(userEvent("plan it"), sendMessageEvent("Plan ready.", ["Yes, implement this", "/commit", "/close"]));
+
+  test("its replies sit after /close, and a model-written /close is not doubled", async ({ page }) => {
+    await mountChat(page, {}, { load_history_page: proposal });
+    await expect(chip(page)).toHaveText(["/close", "Yes, implement this", "/commit"]);
+  });
+
+  test("a reply fills an empty box, Shift+click on an empty box sends it", async ({ page }) => {
+    await mountChat(page, {}, { load_history_page: proposal });
+    await chip(page).filter({ hasText: "Yes, implement this" }).click();
+    await expect(box(page)).toHaveValue("Yes, implement this");
+    await box(page).fill("");
+    await chip(page).filter({ hasText: "Yes, implement this" }).click({ modifiers: ["Shift"] });
+    await expect.poll(async () => (await invokeCalls(page)).some((c) => JSON.stringify(c.args ?? "").includes("Yes, implement this"))).toBe(true);
+  });
+
+  test("a reply goes above what was typed, and a second click does not stack it", async ({ page }) => {
+    await mountChat(page, {}, { load_history_page: proposal });
+    await box(page).fill("but keep the old name");
+    const reply = chip(page).filter({ hasText: "Yes, implement this" });
+    await reply.click();
+    await expect(box(page)).toHaveValue("Yes, implement this\nbut keep the old name");
+    await reply.click();
+    await expect(box(page)).toHaveValue("Yes, implement this\nbut keep the old name");
+  });
+
+  test("a slash reply puts its command first like /close does", async ({ page }) => {
+    await mountChat(page, {}, { load_history_page: proposal });
+    await box(page).fill("everything");
+    await chip(page).filter({ hasText: "/commit" }).click();
+    await expect(box(page)).toHaveValue("/commit everything");
+  });
+
+  test("the replies are gone once Joe has written after them", async ({ page }) => {
+    await mountChat(page, {}, { load_history_page: transcript(...proposal.events, userEvent("ok go")) });
+    await expect(chip(page)).toHaveText(["/close"]);
+  });
+
+  test("only the newest message counts: an older proposal does not outlive the message that replaced it", async ({ page }) => {
+    await mountChat(page, {}, { load_history_page: transcript(userEvent("plan it"), sendMessageEvent("Plan ready.", ["Go"]), sendMessageEvent("Done.")) });
+    await expect(chip(page)).toHaveText(["/close"]);
+  });
+});
+
 test.describe("quick reply chips on the phone", () => {
   test.use({ viewport: { width: 390, height: 780 } });
 

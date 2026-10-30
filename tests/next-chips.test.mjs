@@ -38,6 +38,32 @@ describe("nextChips", () => {
     expect(nextChips(ctx({ wrapUp: true }))).toEqual([]);
   });
 
+  it("lists the model's replies after /close", () => {
+    expect(nextChips(ctx({ nextActions: ["Yes, implement this", "/commit"] }))).toEqual(["/close", "Yes, implement this", "/commit"]);
+  });
+
+  it("caps the strip at 3", () => {
+    expect(nextChips(ctx({ nextActions: ["A", "B", "C"] }))).toEqual(["/close", "A", "B"]);
+  });
+
+  it("drops a model-written /close, which would duplicate the built-in one", () => {
+    expect(nextChips(ctx({ nextActions: ["/close it worked", "/CLOSE", "Go"] }))).toEqual(["/close", "Go"]);
+  });
+
+  it("dedupes a reply that repeats another chip", () => {
+    expect(nextChips(ctx({ nextActions: ["Go", "go"] }))).toEqual(["/close", "Go"]);
+  });
+
+  it("keeps the model's replies but not /close while the chat wraps up on its own", () => {
+    expect(nextChips(ctx({ wrapUp: true, nextActions: ["Go"] }))).toEqual(["Go"]);
+  });
+
+  it("hides the model's replies on every gate that hides /close", () => {
+    expect(nextChips(ctx({ nextActions: ["Go"] }, { awaiting: "question" }))).toEqual([]);
+    expect(nextChips(ctx({ nextActions: ["Go"], enabled: false }))).toEqual([]);
+    expect(nextChips(ctx({ nextActions: ["Go"], hasHeld: true }))).toEqual([]);
+  });
+
   it("offers nothing without a registry row (a draft)", () => {
     expect(nextChips({ enabled: true, wrapUp: false, hasHeld: false, inst: undefined })).toEqual([]);
   });

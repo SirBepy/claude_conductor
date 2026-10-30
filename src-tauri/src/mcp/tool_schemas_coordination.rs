@@ -41,6 +41,18 @@ fn details_schema() -> Value {
     })
 }
 
+/// send_message only. The daemon route ignores it: the chat view reads it from
+/// the tool_use input in the transcript (parseNextActions), the same way it
+/// reads `details`, and enforces the same limits there.
+fn next_actions_schema() -> Value {
+    json!({
+        "type": "array",
+        "maxItems": 3,
+        "items": {"type": "string", "maxLength": 60},
+        "description": "Optional. Up to 3 short replies Joe can click to put in his message box as his next message, shown as chips above his input. Write exactly what he would type: a slash command (\"/commit\") or a short reply (\"Yes, implement this\"). Set it on the LAST send_message of a turn, just before report_turn_status(done), when that message proposes work or finishes work with an obvious next step. Omit it when you ask Joe a question, report a blocker, or nothing natural follows. Never offer /close: the app already does."
+    })
+}
+
 pub fn coordination_schemas() -> Vec<Value> {
     vec![
         json!({
@@ -91,12 +103,13 @@ pub fn coordination_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_SEND_MESSAGE,
-            "description": "Send Joe a message in the chat window. This is the ONLY way your text reaches him - regular assistant text and tool-call narration are hidden from the chat view entirely.\n\nSEND for: the final result of a turn; a blocker or failure (lead with why); a discovery that changes the plan; a verification outcome (tests/typecheck/build); a commit or deploy landing; a short plan before starting a long task.\n\nDO NOT SEND for: peer-session coordination. A clean `list_peers`/`post_message` exchange is invisible plumbing - Joe does not want to hear that another session acked or that there was no overlap. Message him about peers ONLY when it changes what you do (you are holding off a commit, another session owns files you need).\n\nDO NOT SEND for: step-by-step progress. Use `write_plan` instead - it renders a live step-checklist in the turn footer, which is where in-progress work belongs. Never narrate milestones as chat bubbles.\n\nA turn may end with NO message at all when there is genuinely nothing worth saying - but the turn that finishes the work must always report.\n\nFormat: short. Bullets are encouraged over long sentences; break things up with blank lines rather than writing a dense paragraph. If it is long, Joe will not read it. Keep the text short. Put supporting detail (lists, ids, reasons) in `details` instead of the text. Each detail has an id, a label and a markdown body. Link to it in the text as [label](#d:id). Joe clicks the link to see the body. To point at a detail from an earlier message, use the same #d:id link and do not repeat the body.\n\nReturns the message's ordinal (always 1 - it is now your newest), which update_message uses to revise or retract it later.",
+            "description": "Send Joe a message in the chat window. This is the ONLY way your text reaches him - regular assistant text and tool-call narration are hidden from the chat view entirely.\n\nSEND for: the final result of a turn; a blocker or failure (lead with why); a discovery that changes the plan; a verification outcome (tests/typecheck/build); a commit or deploy landing; a short plan before starting a long task.\n\nDO NOT SEND for: peer-session coordination. A clean `list_peers`/`post_message` exchange is invisible plumbing - Joe does not want to hear that another session acked or that there was no overlap. Message him about peers ONLY when it changes what you do (you are holding off a commit, another session owns files you need).\n\nDO NOT SEND for: step-by-step progress. Use `write_plan` instead - it renders a live step-checklist in the turn footer, which is where in-progress work belongs. Never narrate milestones as chat bubbles.\n\nA turn may end with NO message at all when there is genuinely nothing worth saying - but the turn that finishes the work must always report.\n\nFormat: short. Bullets are encouraged over long sentences; break things up with blank lines rather than writing a dense paragraph. If it is long, Joe will not read it. Keep the text short. Put supporting detail (lists, ids, reasons) in `details` instead of the text. Each detail has an id, a label and a markdown body. Link to it in the text as [label](#d:id). Joe clicks the link to see the body. To point at a detail from an earlier message, use the same #d:id link and do not repeat the body.\n\nOn the last message of a turn that proposes or finishes work, add `next_actions`: the replies Joe is most likely to click next.\n\nReturns the message's ordinal (always 1 - it is now your newest), which update_message uses to revise or retract it later.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "The message to show Joe."},
-                    "details": details_schema()
+                    "details": details_schema(),
+                    "next_actions": next_actions_schema()
                 },
                 "required": ["text"]
             }

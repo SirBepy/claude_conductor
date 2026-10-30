@@ -5,6 +5,7 @@
 
 import type { ChatEvent } from "../../types/ipc.generated";
 import { parseDetails } from "./chat-details";
+import { parseNextActions } from "./chat-next-actions";
 import { eventToRenderedMessage } from "./chat-event-to-message";
 import { parseFileEdit } from "./file-edits";
 import {
@@ -65,7 +66,7 @@ export function handleToolUseEvent(
   if (ev.tool_name === "mcp__cc_conductor__send_message" && !ev.parent_tool_use_id) {
     const text = typeof (ev.input as { text?: unknown })?.text === "string"
       ? (ev.input as { text: string }).text : "";
-    r.messages.push({ kind: "message", text, id: ev.id, ts, parentToolUseId: null, details: parseDetails(ev.input) });
+    r.messages.push({ kind: "message", text, id: ev.id, ts, parentToolUseId: null, details: parseDetails(ev.input), nextActions: parseNextActions(ev.input) });
     return { touched: true, coalesce: false };
   }
   // Pushed HTML the user is meant to LOOK at: its own centered card row, not
