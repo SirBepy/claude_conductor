@@ -87,11 +87,10 @@ pub async fn instance_token_stats(
 ) -> Result<serde_json::Value, String> {
     // A chat mirrored from a paired machine has its transcript on that
     // machine's disk; the daemon forwards the read there by session id.
-    if let Some(client) = crate::ipc::mirror::mirrored_client(&state, Some(&session_id)).await {
-        return Ok(client.instance_token_stats(&session_id).await.unwrap_or_else(|e| {
-            log::warn!("instance_token_stats: mirrored session {session_id} read failed: {e}");
-            serde_json::json!({ "tokens": 0, "turns": 0, "prompts": 0 })
-        }));
+    if let Some(stats) =
+        token_stats_forwarded(&session_id, &state.cached_instances, state.client().await).await
+    {
+        return Ok(stats);
     }
     let inst = {
         let instances = state.cached_instances.lock().unwrap();
@@ -106,6 +105,59 @@ pub async fn instance_token_stats(
     })
     .await
     .map_err(|e| format!("instance_token_stats join error: {e}"))
+}
+
+/// The mirrored branch of `instance_token_stats`: `Some` with the host's totals
+/// (zeroes when that read fails) for a chat mirrored from a paired machine,
+/// `None` when the chat is local. Split out with its two `AppState` inputs
+/// passed in so a test can drive it with a fake client.
+async fn token_stats_forwarded<C: crate::ipc::mirror::MirrorReads>(
+    session_id: &str,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Option<serde_json::Value> {
+    let client = crate::ipc::mirror::route_mirrored(instances, Some(session_id), client)?;
+    Some(client.instance_token_stats(session_id).await.unwrap_or_else(|e| {
+        log::warn!("instance_token_stats: mirrored session {session_id} read failed: {e}");
+        serde_json::json!({ "tokens": 0, "turns": 0, "prompts": 0 })
+    }))
+}
+
+#[cfg(test)]
+mod mirrored_branch_tests {
+    use super::*;
+    use crate::ipc::mirror::fake::{instance_cache, FakeMirror, PEER_TOKENS};
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_stats_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let stats = token_stats_forwarded("mirror-1", &cache, Some(fake.clone())).await.expect("a mirrored row forwards");
+
+        assert_eq!(stats["tokens"], PEER_TOKENS);
+        assert_eq!(fake.calls(), [("instance_token_stats".into(), "mirror-1".into(), "".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_reads_as_zero_stats() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let stats = token_stats_forwarded("mirror-1", &cache, Some(fake.clone())).await.expect("a mirrored row forwards");
+
+        assert_eq!(stats, serde_json::json!({ "tokens": 0, "turns": 0, "prompts": 0 }));
+        assert_eq!(fake.calls().len(), 1, "the failed read must have been attempted, not skipped");
+    }
+
+    #[tokio::test]
+    async fn a_local_session_never_touches_the_client() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        assert!(token_stats_forwarded("local-1", &cache, Some(fake.clone())).await.is_none());
+        assert!(fake.calls().is_empty());
+    }
 }
 
 #[cfg(test)]

@@ -6,7 +6,6 @@
 use tauri::State;
 
 use super::git::{run_git, run_git_opt};
-use crate::ipc::mirror::mirrored_client;
 use crate::state::AppState;
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
@@ -62,13 +61,25 @@ pub(crate) async fn get_commit_sync_local(cwd: String) -> CommitSync {
 /// the same local read as before.
 #[tauri::command]
 pub async fn get_commit_sync(cwd: String, session_id: Option<String>, state: State<'_, AppState>) -> Result<CommitSync, String> {
-    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
-        return Ok(client
-            .get_commit_sync(session_id.as_deref().unwrap(), &cwd)
+    Ok(get_commit_sync_routed(cwd, session_id, &state.cached_instances, state.client().await).await)
+}
+
+/// `get_commit_sync` with its two inputs from `AppState` passed in, so a test
+/// can drive the mirrored branch with a fake client.
+async fn get_commit_sync_routed<C: crate::ipc::mirror::MirrorReads>(
+    cwd: String,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> CommitSync {
+    if let Some(client) = crate::ipc::mirror::route_mirrored(instances, session_id.as_deref(), client) {
+        let sid = session_id.as_deref().unwrap_or_default();
+        return client
+            .get_commit_sync(sid, &cwd)
             .await
-            .unwrap_or(CommitSync { ahead: vec![], behind: vec![], has_upstream: false }));
+            .unwrap_or(CommitSync { ahead: vec![], behind: vec![], has_upstream: false });
     }
-    Ok(get_commit_sync_local(cwd).await)
+    get_commit_sync_local(cwd).await
 }
 
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
@@ -141,13 +152,78 @@ pub(crate) async fn get_commit_history_local(cwd: String, offset: u32, limit: u3
 /// the same local read as before.
 #[tauri::command]
 pub async fn get_commit_history(cwd: String, offset: u32, limit: u32, session_id: Option<String>, state: State<'_, AppState>) -> Result<CommitHistory, String> {
-    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
-        return Ok(client
-            .get_commit_history(session_id.as_deref().unwrap(), &cwd, offset, limit)
+    Ok(get_commit_history_routed(cwd, offset, limit, session_id, &state.cached_instances, state.client().await).await)
+}
+
+/// `get_commit_history` with its two inputs from `AppState` passed in, so a
+/// test can drive the mirrored branch with a fake client.
+async fn get_commit_history_routed<C: crate::ipc::mirror::MirrorReads>(
+    cwd: String,
+    offset: u32,
+    limit: u32,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> CommitHistory {
+    if let Some(client) = crate::ipc::mirror::route_mirrored(instances, session_id.as_deref(), client) {
+        let sid = session_id.as_deref().unwrap_or_default();
+        return client
+            .get_commit_history(sid, &cwd, offset, limit)
             .await
-            .unwrap_or(CommitHistory { entries: vec![], has_more: false, has_upstream: false }));
+            .unwrap_or(CommitHistory { entries: vec![], has_more: false, has_upstream: false });
     }
-    Ok(get_commit_history_local(cwd, offset, limit).await)
+    get_commit_history_local(cwd, offset, limit).await
+}
+
+#[cfg(test)]
+mod mirrored_branch_tests {
+    use super::*;
+    use crate::ipc::mirror::fake::{instance_cache, FakeMirror};
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_commit_sync_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let sync = get_commit_sync_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert_eq!(sync.ahead.len(), 1);
+        assert!(sync.has_upstream);
+        assert_eq!(fake.calls(), [("get_commit_sync".into(), "mirror-1".into(), "C:/peer/repo".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_reads_as_an_empty_commit_sync() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let sync = get_commit_sync_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert!(sync.ahead.is_empty() && sync.behind.is_empty() && !sync.has_upstream);
+        assert_eq!(fake.calls().len(), 1, "the failed read must have been attempted, not skipped");
+    }
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_commit_history_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let history = get_commit_history_routed("C:/peer/repo".into(), 20, 50, Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert_eq!(history.entries.len(), 1);
+        assert_eq!(fake.calls(), [("get_commit_history".into(), "mirror-1".into(), "C:/peer/repo|20|50".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_reads_as_an_empty_commit_history() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let history = get_commit_history_routed("C:/peer/repo".into(), 0, 50, Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert!(history.entries.is_empty() && !history.has_more && !history.has_upstream);
+        assert_eq!(fake.calls().len(), 1, "the failed read must have been attempted, not skipped");
+    }
 }
 
 /// `publish=true` runs `git push -u origin <branch>` (no upstream yet);

@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 
 use crate::files;
-use crate::ipc::mirror::mirrored_client;
 use crate::state::AppState;
 
 mod open_external_guard;
@@ -38,11 +37,20 @@ pub async fn list_project_files(
     session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
-        return client
-            .list_project_files(session_id.as_deref().unwrap(), &project_dir)
-            .await
-            .map_err(|e| e.to_string());
+    list_project_files_routed(project_dir, session_id, &state.cached_instances, state.client().await).await
+}
+
+/// `list_project_files` with its two inputs from `AppState` passed in, so a
+/// test can drive the mirrored branch with a fake client.
+async fn list_project_files_routed<C: crate::ipc::mirror::MirrorReads>(
+    project_dir: String,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Result<Vec<String>, String> {
+    if let Some(client) = crate::ipc::mirror::route_mirrored(instances, session_id.as_deref(), client) {
+        let sid = session_id.as_deref().unwrap_or_default();
+        return client.list_project_files(sid, &project_dir).await.map_err(|e| e.to_string());
     }
     list_project_files_local(project_dir).await
 }
@@ -221,11 +229,10 @@ pub async fn read_image_file(
     state: State<'_, AppState>,
 ) -> Result<crate::ipc::chat::attachments::AttachmentData, String> {
     use base64::Engine;
-    if let Some(client) = mirrored_client(&state, session_id.as_deref()).await {
-        return client
-            .read_image_file(&path, session_id.as_deref().unwrap())
-            .await
-            .map_err(|e| e.to_string());
+    if let Some(forwarded) =
+        read_image_file_forwarded(&path, session_id.as_deref(), &state.cached_instances, state.client().await).await
+    {
+        return forwarded;
     }
     let target = match std::path::PathBuf::from(&path).canonicalize() {
         Ok(t) => t,
@@ -250,6 +257,20 @@ pub async fn read_image_file(
         .to_string();
     let base64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(crate::ipc::chat::attachments::AttachmentData { mime, base64 })
+}
+
+/// The mirrored branch of `read_image_file`: `Some` with the host's answer for
+/// a chat mirrored from a paired machine, `None` when the read is local. Split
+/// out with its two `AppState` inputs passed in so a test can drive it with a
+/// fake client.
+async fn read_image_file_forwarded<C: crate::ipc::mirror::MirrorReads>(
+    path: &str,
+    session_id: Option<&str>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Option<Result<crate::ipc::chat::attachments::AttachmentData, String>> {
+    let client = crate::ipc::mirror::route_mirrored(instances, session_id, client)?;
+    Some(client.read_image_file(path, session_id.unwrap_or_default()).await.map_err(|e| e.to_string()))
 }
 
 /// Whether a local not-found image read retries through the daemon: only for
@@ -382,6 +403,75 @@ pub async fn write_text_file(
     tauri::async_runtime::spawn_blocking(move || write_text_file_impl(&path, &content, expected_mtime_us, &roots))
         .await
         .map_err(|e| format!("write_text_file join error: {e}"))?
+}
+
+#[cfg(test)]
+mod mirrored_branch_tests {
+    use super::*;
+    use crate::ipc::mirror::fake::{instance_cache, FakeMirror, PEER_CONTENT, PEER_FILE};
+
+    #[tokio::test]
+    async fn a_mirrored_row_lists_the_project_files_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let files = list_project_files_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone()))
+            .await
+            .unwrap();
+
+        assert_eq!(files, [PEER_FILE]);
+        assert_eq!(fake.calls(), [("list_project_files".into(), "mirror-1".into(), "C:/peer/repo".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_fails_the_project_files_read() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let err = list_project_files_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone()))
+            .await
+            .unwrap_err();
+
+        assert!(err.contains("peer unreachable"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_image_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let data = read_image_file_forwarded("C:/peer/shot.png", Some("mirror-1"), &cache, Some(fake.clone()))
+            .await
+            .expect("a mirrored row forwards")
+            .unwrap();
+
+        assert_eq!(data.base64, PEER_CONTENT);
+        assert_eq!(fake.calls(), [("read_image_file".into(), "mirror-1".into(), "C:/peer/shot.png".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_fails_the_image_read() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let err = read_image_file_forwarded("C:/peer/shot.png", Some("mirror-1"), &cache, Some(fake.clone()))
+            .await
+            .expect("a mirrored row forwards")
+            .map(|d| d.base64)
+            .unwrap_err();
+
+        assert!(err.contains("peer unreachable"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn a_local_or_session_less_image_read_never_touches_the_client() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        assert!(read_image_file_forwarded("C:/x.png", Some("local-1"), &cache, Some(fake.clone())).await.is_none());
+        assert!(read_image_file_forwarded("C:/x.png", None, &cache, Some(fake.clone())).await.is_none());
+        assert!(fake.calls().is_empty());
+    }
 }
 
 #[cfg(test)]

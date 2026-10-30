@@ -179,6 +179,53 @@ mod mirrored_branch_tests {
         assert!(todos.is_empty());
         assert!(fake.calls().is_empty());
     }
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_backlog_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let backlog = list_ai_backlog_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert_eq!(backlog.todos.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), [PEER_TODO_ID]);
+        assert_eq!(fake.calls(), [("list_ai_backlog".into(), "mirror-1".into(), "C:/peer/repo".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_reads_as_an_empty_backlog() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let backlog = list_ai_backlog_routed("C:/peer/repo".into(), Some("mirror-1".into()), &cache, Some(fake.clone())).await;
+
+        assert_eq!(backlog, AiBacklog::default());
+        assert_eq!(fake.calls().len(), 1, "the failed read must have been attempted, not skipped");
+    }
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_one_todo_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let doc = read_ai_todo_routed("C:/peer/repo".into(), "pc-7".into(), Some("mirror-1".into()), &cache, Some(fake.clone()))
+            .await
+            .unwrap();
+
+        assert_eq!(doc.entry.id, PEER_TODO_ID);
+        assert_eq!(fake.calls(), [("read_ai_todo".into(), "mirror-1".into(), "C:/peer/repo|pc-7".into())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_fails_the_todo_read_instead_of_showing_nothing() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let err = read_ai_todo_routed("C:/peer/repo".into(), "pc-7".into(), Some("mirror-1".into()), &cache, Some(fake.clone()))
+            .await
+            .unwrap_err();
+
+        assert!(err.contains("peer unreachable"), "got: {err}");
+    }
 }
 
 /// Every backlog todo of `<cwd>/.claude/todos/`, ordered by id. Empty if the
@@ -196,14 +243,25 @@ pub async fn list_ai_backlog(
     session_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<AiBacklog, String> {
-    if let Some(client) = super::mirror::mirrored_client(&state, session_id.as_deref()).await {
+    Ok(list_ai_backlog_routed(cwd, session_id, &state.cached_instances, state.client().await).await)
+}
+
+/// `list_ai_backlog` with its two inputs from `AppState` passed in, so a test
+/// can drive the mirrored branch with a fake client.
+async fn list_ai_backlog_routed<C: super::mirror::MirrorReads>(
+    cwd: String,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> AiBacklog {
+    if let Some(client) = super::mirror::route_mirrored(instances, session_id.as_deref(), client) {
         let sid = session_id.as_deref().unwrap_or_default();
-        return Ok(client.list_ai_backlog(sid, &cwd).await.unwrap_or_else(|e| {
+        return client.list_ai_backlog(sid, &cwd).await.unwrap_or_else(|e| {
             log::warn!("list_ai_backlog: mirrored session {sid} read failed: {e}");
             AiBacklog::default()
-        }));
+        });
     }
-    Ok(list_ai_backlog_local(cwd).await)
+    list_ai_backlog_local(cwd).await
 }
 
 pub async fn list_ai_backlog_local(cwd: String) -> AiBacklog {
@@ -220,7 +278,19 @@ pub async fn read_ai_todo(
     session_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<AiTodoDoc, String> {
-    if let Some(client) = super::mirror::mirrored_client(&state, session_id.as_deref()).await {
+    read_ai_todo_routed(cwd, id, session_id, &state.cached_instances, state.client().await).await
+}
+
+/// `read_ai_todo` with its two inputs from `AppState` passed in, so a test can
+/// drive the mirrored branch with a fake client.
+async fn read_ai_todo_routed<C: super::mirror::MirrorReads>(
+    cwd: String,
+    id: String,
+    session_id: Option<String>,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Result<AiTodoDoc, String> {
+    if let Some(client) = super::mirror::route_mirrored(instances, session_id.as_deref(), client) {
         let sid = session_id.as_deref().unwrap_or_default();
         return client.read_ai_todo(sid, &cwd, &id).await.map_err(|e| e.to_string());
     }
