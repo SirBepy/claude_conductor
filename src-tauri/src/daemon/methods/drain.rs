@@ -6,9 +6,12 @@
 //! only session resolution and the usage-window context differ, since the
 //! daemon has no `AppState` to read.
 
-use crate::daemon::rpc::{Router, RpcError};
+use crate::daemon::rpc::{Router, RpcError, Transport};
 use crate::daemon::state::DaemonState;
-use crate::ipc::drain::{drain_board, resolve_instance_transcript, resolve_session_from_history, windows_from_snapshot, DrainBoard};
+use crate::ipc::drain::{
+    chat_drain_for, drain_board, resolve_instance_transcript, resolve_session_from_history, windows_from_snapshot,
+    DrainBoard, WindowCtx,
+};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -55,7 +58,75 @@ fn latest_current_usage_snapshot(
     all.into_iter().last()
 }
 
+/// The 5h and weekly window contexts this daemon's usage figures describe.
+async fn current_windows(state: &DaemonState) -> Result<(WindowCtx, WindowCtx), RpcError> {
+    let default_account_id = state.settings.snapshot().default_account_id;
+    match state.db.clone() {
+        Some(db) => tokio::task::spawn_blocking(move || {
+            let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
+            let all = crate::storage::usage_store::get_all_snapshots(mgr.conn()).unwrap_or_default();
+            let snap = latest_current_usage_snapshot(all, default_account_id.as_deref());
+            windows_from_snapshot(snap.as_ref())
+        })
+        .await
+        .map_err(|e| RpcError::internal(format!("join: {e}"))),
+        // No DB open on this daemon - same "unknown" pair the desktop
+        // command's `windows_from_state` returns before the first poll.
+        None => Ok(windows_from_snapshot(None)),
+    }
+}
+
 pub fn register_drain(router: &mut Router, state: Arc<DaemonState>) {
+    {
+        let state = state.clone();
+        router.register("chat_drain", move |params, ctx| {
+            let state = state.clone();
+            let from_peer = matches!(ctx.transport, Transport::PeerMachine(_));
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P {
+                    session_id: String,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                // Same charset guard as `chat_drains`: the id is joined into a
+                // history path when the live registry doesn't know it.
+                crate::ipc::chat::attachments::validate_session_id(&p.session_id)
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                // A paired machine reads a chat it mirrors from here, which is
+                // always live in this registry; it never reaches the history scan.
+                if from_peer && state.registry.get(&p.session_id).is_none() {
+                    return Err(RpcError::invalid_params(format!("unknown session_id: {}", p.session_id)));
+                }
+                let Some((target_cwd, main_transcript)) = resolve_session(&p.session_id, &state) else {
+                    return Ok(serde_json::Value::Null);
+                };
+
+                // Visible set = every live instance plus the target itself (it
+                // may be history-only), like the desktop command.
+                let mut ids: Vec<String> = state.registry.list().into_iter().map(|i| i.session_id).collect();
+                if !ids.iter().any(|i| i == &p.session_id) {
+                    ids.push(p.session_id.clone());
+                }
+                let mut resolved: Vec<(String, PathBuf, PathBuf)> = Vec::new();
+                for id in &ids {
+                    if let Some((cwd, transcript)) = resolve_session(id, &state) {
+                        resolved.push((id.clone(), cwd, transcript));
+                    }
+                }
+
+                let (five, weekly) = current_windows(&state).await?;
+                let target = p.session_id;
+                let drain = tokio::task::spawn_blocking(move || {
+                    chat_drain_for(&target, &target_cwd, &main_transcript, &resolved, &five, &weekly)
+                })
+                .await
+                .map_err(|e| RpcError::internal(format!("join: {e}")))?;
+                Ok(json!(drain))
+            }
+        });
+    }
+
     router.register("chat_drains", move |params, _ctx| {
         let state = state.clone();
         async move {
@@ -83,20 +154,7 @@ pub fn register_drain(router: &mut Router, state: Arc<DaemonState>) {
                 }
             }
 
-            let default_account_id = state.settings.snapshot().default_account_id;
-            let (five, weekly) = match state.db.clone() {
-                Some(db) => tokio::task::spawn_blocking(move || {
-                    let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
-                    let all = crate::storage::usage_store::get_all_snapshots(mgr.conn()).unwrap_or_default();
-                    let snap = latest_current_usage_snapshot(all, default_account_id.as_deref());
-                    windows_from_snapshot(snap.as_ref())
-                })
-                .await
-                .map_err(|e| RpcError::internal(format!("join: {e}")))?,
-                // No DB open on this daemon - same "unknown" pair the desktop
-                // command's `windows_from_state` returns before the first poll.
-                None => windows_from_snapshot(None),
-            };
+            let (five, weekly) = current_windows(&state).await?;
 
             let board: DrainBoard = tokio::task::spawn_blocking(move || drain_board(&resolved, &five, &weekly))
                 .await
@@ -153,5 +211,74 @@ mod tests {
         assert!(resp.error.is_none(), "got {:?}", resp.error);
         let chats = resp.result.unwrap()["chats"].as_object().cloned().unwrap();
         assert!(chats.is_empty(), "expected no resolvable sessions, got {chats:?}");
+    }
+
+    async fn chat_drain_as(state: Arc<DaemonState>, transport: Transport, session_id: &str) -> crate::daemon::rpc::Response {
+        let mut r = Router::new();
+        register_drain(&mut r, state);
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let mut ctx = ConnectionContext::new(tx);
+        ctx.transport = transport;
+        r.dispatch(
+            Request {
+                jsonrpc: "2.0".into(),
+                id: json!(1),
+                method: "chat_drain".into(),
+                params: Some(json!({ "session_id": session_id })),
+            },
+            ctx,
+        )
+        .await
+    }
+
+    fn host_a_chat(state: &DaemonState, session_id: &str, dir: &std::path::Path) {
+        use crate::sessions::kinds::InstanceKind;
+        use crate::sessions::registry::RegisterInput;
+        use std::io::Write;
+        let transcript = dir.join(format!("{session_id}.jsonl"));
+        let mut f = std::fs::File::create(&transcript).unwrap();
+        writeln!(f, r#"{{"type":"user","message":{{"role":"user","content":"first prompt"}}}}"#).unwrap();
+        writeln!(f, r#"{{"type":"assistant","message":{{"usage":{{"output_tokens":7}}}}}}"#).unwrap();
+        drop(f);
+        let settings = std::sync::Mutex::new(Settings::default());
+        state.registry.register(
+            RegisterInput {
+                session_id: session_id.into(),
+                cwd: dir.to_path_buf(),
+                pid: 1,
+                kind: InstanceKind::Interactive,
+                is_remote: false,
+                transcript_path: Some(transcript),
+                started_at: "2026-01-01T00:00:00Z".into(),
+            },
+            &settings,
+            "2026-01-01T00:00:00Z",
+        );
+    }
+
+    /// The host builds the popover payload from ITS registry and transcript by
+    /// `session_id`, so the Mac's drain section fills in for a PC chat. A paired
+    /// machine may only name a chat that is live here.
+    #[tokio::test]
+    async fn chat_drain_resolves_the_hosts_transcript_by_session_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = state();
+        host_a_chat(&state, "hosted", dir.path());
+
+        let peer = || Transport::PeerMachine("mach-b".into());
+        let resp = chat_drain_as(state.clone(), peer(), "hosted").await;
+        assert!(resp.error.is_none(), "got {:?}", resp.error);
+        let drain = resp.result.unwrap();
+        assert_eq!(drain["sessionId"], json!("hosted"));
+        assert_eq!(drain["tokens"], json!(7));
+        assert_eq!(drain["messages"].as_array().unwrap().len(), 1, "one user message in the transcript");
+
+        let unknown = chat_drain_as(state.clone(), peer(), "not-hosted").await;
+        assert!(unknown.error.is_some(), "a peer must name a chat hosted here");
+        let bad_id = chat_drain_as(state.clone(), peer(), "../x").await;
+        assert!(bad_id.error.is_some(), "a traversal-shaped id never reaches a path join");
+        let phone_unknown = chat_drain_as(state, Transport::Phone, "not-hosted").await;
+        assert!(phone_unknown.error.is_none());
+        assert!(matches!(phone_unknown.result, None | Some(serde_json::Value::Null)), "no transcript anywhere answers null");
     }
 }

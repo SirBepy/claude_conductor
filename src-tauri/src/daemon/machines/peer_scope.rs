@@ -25,6 +25,8 @@ const SEE_ONLY: &[&str] = &[
     "load_event_detail",
     "load_history",
     "transcript_stats",
+    "instance_token_stats",
+    "chat_drain",
     "read_attachment",
     // Read-only views of a chat's previews and images; a view-only peer still
     // sees what a mirrored chat shows.

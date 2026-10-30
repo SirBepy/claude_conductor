@@ -18,6 +18,19 @@ impl PersistentClient {
         serde_json::from_value(res).map_err(|e| bad_shape("context_status", e))
     }
 
+    /// Message/turn/prompt totals for a chat mirrored from a paired machine,
+    /// read from the host's transcript.
+    pub async fn instance_token_stats(&self, session_id: &str) -> Result<serde_json::Value, ClientError> {
+        self.call("instance_token_stats", json!({"session_id": session_id})).await
+    }
+
+    /// The drain popover's payload for a chat mirrored from a paired machine;
+    /// `None` when the host cannot resolve the chat's transcript.
+    pub async fn chat_drain(&self, session_id: &str) -> Result<Option<crate::tokens::ChatDrain>, ClientError> {
+        let res = self.call("chat_drain", json!({"session_id": session_id})).await?;
+        serde_json::from_value(res).map_err(|e| bad_shape("chat_drain", e))
+    }
+
     pub async fn load_history(&self, session_id: &str, cwd: Option<&str>) -> Result<Vec<ChatEvent>, ClientError> {
         let res = self.call("load_history", json!({"session_id": session_id, "cwd": cwd})).await?;
         serde_json::from_value(res).map_err(|e| bad_shape("load_history", e))

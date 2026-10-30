@@ -414,6 +414,13 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // todo 1007). Aggregate token counts only, ids validated against a strict
     // charset before touching disk (daemon/methods/drain.rs).
     ("chat_drains", P),
+    // PM: the overflow panel's message and turn counts and the drain popover
+    // of a chat mirrored from a paired machine are answered by the host, which
+    // resolves the transcript from its own registry by `session_id` (a peer
+    // must name a chat hosted here, see `daemon/methods/drain.rs`). Read-only
+    // aggregate token counts; the phone gets the same answer.
+    ("instance_token_stats", PM),
+    ("chat_drain", PM),
     // Write: phone's "Create <name>" new-project flow (todo 1058). Narrow:
     // `name` is a single validated path segment (daemon/methods/create_project.rs
     // rejects separators/"..`/drive letters and re-checks via a canonicalized
@@ -613,7 +620,8 @@ mod tests {
             "get_range_files", "get_file_diff", "resolve_commit_refs", "get_ticket_tracker", "get_file_at_rev",
             "list_branch_files",
             "get_git_info", "get_git_dirty", "get_commit_sync", "get_commit_history",
-            "push_commits", "list_project_files", "chat_drains", "create_project_folder", "list_project_servers",
+            "push_commits", "list_project_files", "chat_drains", "instance_token_stats", "chat_drain",
+            "create_project_folder", "list_project_servers",
             "list_claude_md_scopes",
             "get_session_drafts", "set_composer_draft", "clear_composer_draft",
             "set_auq_draft", "clear_auq_draft", "add_held_message",
@@ -757,6 +765,7 @@ mod tests {
             "set_wrap_up_on_done", "list_wrap_up_on_done",
             "freeze_session", "unfreeze_session", "paste_attachment", "read_attachment",
             "transcript_stats", "load_history", "context_status",
+            "instance_token_stats", "chat_drain",
         ] {
             assert!(allowed(m, &peer), "{m} must be callable by a peer machine mirroring the chat");
         }
