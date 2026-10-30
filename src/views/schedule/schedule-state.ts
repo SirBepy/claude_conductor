@@ -25,6 +25,8 @@ export interface ScheduleState {
   selectedKey: string | null;
   /** id of the row currently showing its inline reschedule datetime picker. */
   reschedulingId: string | null;
+  /** `occurrenceKey` of the row whose guard drawer is open. */
+  guardOpenKey: string | null;
   /** "month" (grid) or "week" (7 collapsible day-row-groups). */
   viewMode: "month" | "week";
   /** Day key (yyyy-mm-dd) anchoring the visible week - any day within it. */
@@ -48,6 +50,7 @@ export function freshState(mountId: number): ScheduleState {
     viewMonth: now0.getMonth(),
     selectedKey: todayKey(),
     reschedulingId: null,
+    guardOpenKey: null,
     viewMode: "month",
     weekAnchor: todayKey(),
     collapsedDays: new Set(),
