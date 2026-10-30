@@ -13,6 +13,8 @@ export interface DragHost {
   enabled(): boolean;
   onRowDrop(id: string, spot: DropSpot): void;
   onGroupDrop(name: string, before: string | null): void;
+  /** Runs once a drag that began has ended, after any drop handler. */
+  onEnd?(): void;
 }
 
 /** Movement under this is a click, so a tap on a row still selects it. */
@@ -128,9 +130,11 @@ export function attachBacklogDrag(host: DragHost): () => void {
       swallowClick = true;
       setTimeout(() => { swallowClick = false; }, 0);
     }
-    if (!drop || !wasDrag || !g || !s) return;
-    if (g.kind === "row") host.onRowDrop(g.id, s as DropSpot);
-    else host.onGroupDrop(g.name, (s as { before: string | null }).before);
+    if (drop && wasDrag && g && s) {
+      if (g.kind === "row") host.onRowDrop(g.id, s as DropSpot);
+      else host.onGroupDrop(g.name, (s as { before: string | null }).before);
+    }
+    if (wasDrag) host.onEnd?.();
   };
 
   const up = (): void => finish(true);
