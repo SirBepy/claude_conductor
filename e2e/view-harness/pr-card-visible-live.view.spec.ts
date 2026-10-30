@@ -1,3 +1,4 @@
+// Reviewed 2026-10-30 (user-message attachment tray): chat-dom-renderer.ts now groups a USER message's attachment chips into a tray; this spec only asserts assistant /create-pr cards, so its contract is unchanged.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, fireEvent } from "./harness";
 

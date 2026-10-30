@@ -1,8 +1,12 @@
 /* .msg.user bubble + long-message clamp/collapse. Split out of chat-messages.css. */
 
 .msg.user {
-  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-alt));
-  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  /* Variables, because a message with an attachment tray moves this look onto
+     its inner .msg-bubble (see .has-tray below). */
+  --user-bubble-bg: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-alt));
+  --user-bubble-border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  background: var(--user-bubble-bg);
+  border: var(--user-bubble-border);
   align-self: flex-end;
   max-width: 85%;
   margin-left: 32px;
@@ -110,8 +114,8 @@
  * put and readable - it is the user's only copy - so the failure reads as a
  * danger-tinted border plus the strip below, never a dimmed-out row. */
 .msg.user.send-failed {
-  border-color: color-mix(in srgb, var(--color-danger) 55%, transparent);
-  background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface-alt));
+  --user-bubble-border: 1px solid color-mix(in srgb, var(--color-danger) 55%, transparent);
+  --user-bubble-bg: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface-alt));
 }
 .send-failed-strip {
   display: flex;
@@ -120,3 +124,59 @@
   margin-top: 8px;
 }
 .send-failed-strip .api-retry-btn { margin-top: 0; }
+
+/* A message with sent attachments (message-attachment-tray.ts): the bubble
+ * keeps the text, a slim tray under it holds the thumbs and file chips, so the
+ * long-text clamp never clips them. The wrapper turns transparent and the
+ * bubble takes over its look. align-items: flex-end lets the bubble stay as
+ * narrow as its text while the tray sets the wrapper's width. */
+.msg.user.has-tray {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0;
+  background: none;
+  border: none;
+}
+.msg.user.has-tray > .msg-bubble {
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--user-bubble-bg);
+  border: var(--user-bubble-border);
+}
+.msg-tray {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 3px;
+  max-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-alt);
+}
+.msg-tray .sent-attachment-thumb { width: 32px; height: 32px; margin: 0; }
+.msg-tray .attachment-chip {
+  height: 32px;
+  margin: 0;
+  padding: 0 9px;
+  box-sizing: border-box;
+  max-width: 190px;
+}
+.msg-tray .msg-tray-folded { display: none; }
+.msg-tray-more {
+  width: 32px;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.msg-tray-more:hover { border-color: var(--color-primary); }
