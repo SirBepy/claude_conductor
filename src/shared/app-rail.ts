@@ -1,11 +1,11 @@
 // The Chats window's right-hand rail, global half. The window is the app's one
-// desktop window now, so Home, Schedule and Settings are reached from here
+// desktop window now, so the Dashboard, Schedule and Settings are reached from here
 // instead of from their own windows, and Jarvis sits on the boundary between
 // this chat's panels (split.ts's strip) and these screens.
 //
 // One rail, two homes: while a chat's split strip is on screen the global group
 // is appended to that strip (globalGroupHtml), so chat tools and global screens
-// read as one column. Everywhere else (Home, Schedule, Settings, History, and
+// read as one column. Everywhere else (Dashboard, Schedule, Settings, History, and
 // Chats with no chat open) there is no strip, so a standalone column with the
 // same look carries the group plus a way back to Chats.
 
@@ -18,7 +18,7 @@ import "./app-rail.css";
 
 /** Rail entries that route in-window. `view` is the router name. */
 const GLOBAL_ENTRIES = [
-  { view: "dashboard", label: "Home", icon: "ph-house" },
+  { view: "dashboard", label: "Dashboard", icon: "ph-squares-four" },
   { view: "schedule", label: "Schedule", icon: "ph-alarm" },
   { view: "settings", label: "Settings", icon: "ph-gear" },
 ] as const;
@@ -40,20 +40,17 @@ function tab(attrs: string, label: string, icon: string, on: boolean): string {
   );
 }
 
-/** The Jarvis orb. It is the loudest thing on the rail on purpose, but only in
- *  proportion to what it is, so it carries no state glow yet. */
-function jarvisOrb(): string {
-  return (
-    `<button type="button" class="sp-orb" data-rail-jarvis title="Jarvis" aria-label="Jarvis">` +
-    `<i class="ph-fill ph-sparkle"></i></button>`
-  );
+/** Jarvis is a plain rail icon like its neighbours: his place on the boundary
+ *  between chat tools and global screens is what sets him apart. */
+function jarvisButton(): string {
+  return tab(`data-rail-jarvis`, "Jarvis", "ph-sparkle", false);
 }
 
 /** The bottom half of the rail: Jarvis on the boundary, then the global screens. */
 export function globalGroupHtml(activeView: string): string {
   const active = railActiveFor(activeView);
   const entries = GLOBAL_ENTRIES.map((e) => tab(`data-rail-go="${e.view}"`, e.label, e.icon, active === e.view)).join("");
-  return `<div class="sp-global" role="group" aria-label="Global">${jarvisOrb()}<span class="sp-global-label">GLOBAL</span>${entries}</div>`;
+  return `<div class="sp-global" role="group" aria-label="Global">${jarvisButton()}<span class="sp-global-label">GLOBAL</span>${entries}</div>`;
 }
 
 /** Handles a click on any rail control. Returns true when it was one. */

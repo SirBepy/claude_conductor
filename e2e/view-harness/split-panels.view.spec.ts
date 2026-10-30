@@ -312,7 +312,7 @@ test("Revise opens its preset menu over the draft editor", async ({ page }) => {
   await page.screenshot({ path: `${SCREENSHOT_DIR}/split-panels-revise.png` });
 });
 
-test("in the Chats window the strip ends in a GLOBAL group: Jarvis on the boundary, then Home / Schedule / Settings", async ({ page }) => {
+test("in the Chats window the strip ends in a GLOBAL group: Jarvis on the boundary, then Dashboard / Schedule / Settings", async ({ page }) => {
   await mountPane(page, {}, 1280, true);
   const group = page.locator(".sp-strip .sp-global");
   await expect(group.locator("[data-rail-jarvis]")).toHaveCount(1);

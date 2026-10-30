@@ -2,7 +2,7 @@
 
 // The Chats window's global rail group: which entry each router view lights up,
 // what the group renders, and that a click routes in-window (the window is the
-// app's one desktop window, so Home/Schedule/Settings must be reachable from it).
+// app's one desktop window, so Dashboard/Schedule/Settings must be reachable from it).
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -40,10 +40,14 @@ describe("railActiveFor", () => {
 });
 
 describe("globalGroupHtml", () => {
-  it("renders Jarvis then Home, Schedule and Settings, with no News entry", () => {
+  it("renders Jarvis then Dashboard, Schedule and Settings as plain icons, with no News entry", () => {
     const host = document.createElement("div");
     host.innerHTML = rail.globalGroupHtml("dashboard");
-    expect(host.querySelector("[data-rail-jarvis]")).not.toBeNull();
+    const jarvis = host.querySelector("[data-rail-jarvis]");
+    expect(jarvis).not.toBeNull();
+    // A plain strip tab: no bespoke orb styling to shout over its neighbours.
+    expect(jarvis.classList.contains("sp-tab")).toBe(true);
+    expect(host.querySelector('[data-rail-go="dashboard"] i').classList.contains("ph-squares-four")).toBe(true);
     expect([...host.querySelectorAll("[data-rail-go]")].map((e) => e.dataset.railGo)).toEqual(["dashboard", "schedule", "settings"]);
     expect(host.querySelector('[data-rail-go="dashboard"]').classList.contains("is-on")).toBe(true);
     expect(host.querySelector('[data-rail-go="schedule"]').classList.contains("is-on")).toBe(false);
