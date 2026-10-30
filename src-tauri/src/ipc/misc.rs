@@ -49,15 +49,15 @@ pub async fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
-/// Frontend signals it loaded successfully. Watchdog in lib.rs::setup uses
-/// this to detect a stalled webview (WebView2 "can't reach this page" error)
-/// and trigger a reload. Idempotent; safe to call from every page load.
+/// Frontend signals it loaded successfully. `ipc::ready` uses this to detect a
+/// stalled webview (WebView2 "can't reach this page" error) and reload it.
+/// Idempotent; safe to call from every page load.
 #[tauri::command]
 pub async fn frontend_ready(app: AppHandle, window: tauri::Window) {
     use std::sync::atomic::Ordering;
     use tauri::Manager;
     // Every window sends this, so it doubles as the per-window ready gate in
-    // `ipc::ready`, which now also registers `main` (ai_todo 786).
+    // `ipc::ready`.
     crate::ipc::ready::mark_ready(&app, window.label());
     if let Some(state) = app.try_state::<crate::state::AppState>() {
         state.frontend_alive.store(true, Ordering::SeqCst);
@@ -76,7 +76,7 @@ pub async fn take_pending_nav(app: AppHandle) -> Option<String> {
     nav
 }
 
-/// Heartbeat for the lib.rs renderer-crash watchdog; catches a WebView2
+/// Heartbeat for the Chats window's renderer-crash watchdog; catches a WebView2
 /// crash after boot that `frontend_alive` (one-way, set-once) can't see.
 /// `raf_tick` is a `requestAnimationFrame` counter - a paint-liveness signal
 /// distinct from this call succeeding, since JS can keep running while the

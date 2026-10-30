@@ -230,10 +230,6 @@ pub(crate) fn read_hook_port(suffix: &str) -> Option<u16> {
     .and_then(|s| s.trim().parse().ok())
 }
 
-pub fn news_file() -> Result<PathBuf> {
-    Ok(data_dir()?.join("news.json"))
-}
-
 pub fn interactive_sessions_file() -> Result<PathBuf> {
     // Instance-scoped, like the daemon lockfile/pipe/hook-port: a test or wdio
     // daemon (CC_DAEMON_INSTANCE set) must not read or clobber the production

@@ -10,6 +10,7 @@
 // 2026-09-25 /mockup session).
 import "./window-titlebar.css";
 import { isTauri } from "./transport";
+import { CHATS_WINDOW_LABEL } from "./window-roles";
 
 // withGlobalTauri = true, so the window API lives on the global - same loose
 // typing as overlay-drag.ts, which has no bundled @tauri-apps/api types.
@@ -29,11 +30,11 @@ function tauriWindow(): TauriWindowApi | null {
   return (window as unknown as { __TAURI__?: { window?: TauriWindowApi } }).__TAURI__?.window ?? null;
 }
 
-// The only two window labels built with decorations(false) on Windows - see
-// build_main_window/build_chats_window. Every other Tauri window this SPA can
-// boot into (detached session, schedule, preview pop-out) keeps native
-// decorations and must never get this bar.
-const TITLEBAR_WINDOW_LABELS = new Set(["main", "session-chats"]);
+// The only window label built with decorations(false) on Windows - see
+// build_chats_window. Every other Tauri window this SPA can boot into
+// (detached session, schedule, preview pop-out) keeps native decorations and
+// must never get this bar.
+const TITLEBAR_WINDOW_LABELS = new Set([CHATS_WINDOW_LABEL]);
 
 function mount(appWin: TauriWindow): void {
   if (document.getElementById("win-titlebar")) return;
@@ -66,7 +67,7 @@ function mount(appWin: TauriWindow): void {
   void appWin.onResized(syncMaximized);
 }
 
-/** Call once at boot. No-op unless: Tauri + Windows + this window is "main" or "session-chats". */
+/** Call once at boot. No-op unless: Tauri + Windows + this window is the Chats window. */
 export function initWindowTitlebar(): void {
   if (!isTauri()) return;
   if (!navigator.userAgent.includes("Windows")) return;

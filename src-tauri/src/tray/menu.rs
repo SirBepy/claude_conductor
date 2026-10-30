@@ -234,16 +234,16 @@ pub fn render_tray_now(app: &AppHandle) {
 /// Taskbar flash / dock bounce for a session that just transitioned into
 /// awaiting-input, fired only while no app window is focused -
 /// a focused window means Joe is already looking at the app, so there is
-/// nothing to flash for. Targets `main` and `session-chats`, the only two
-/// windows with a taskbar button (the overlay is `skip_taskbar(true)`), and
-/// only a VISIBLE one of those - a hidden window has no taskbar button to
-/// flash, and the tray dot already covers that case. Marshaled onto the main
+/// nothing to flash for. Targets `session-chats`, the only window with a
+/// taskbar button (the overlay is `skip_taskbar(true)`), and only while it is
+/// VISIBLE - a hidden window has no taskbar button to flash, and the tray dot
+/// already covers that case. Marshaled onto the main
 /// thread like every other window call here, since this can be reached from
 /// the async daemon-notification path.
 pub fn glow_if_unfocused(app: &AppHandle) {
     let h = app.clone();
     let _ = app.run_on_main_thread(move || {
-        let windows: Vec<tauri::WebviewWindow<tauri::Wry>> = ["main", "session-chats"]
+        let windows: Vec<tauri::WebviewWindow<tauri::Wry>> = ["session-chats"]
             .iter()
             .filter_map(|label| h.get_webview_window(label))
             .collect();

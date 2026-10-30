@@ -25,6 +25,7 @@ import { followAppearanceChanges } from "./shared/theme-sync";
 import { api } from "./shared/api";
 import { ensureRemoteToken } from "./shared/remote-gate";
 import { isRemote } from "./shared/transport";
+import { runsRendererHeartbeat } from "./shared/window-roles";
 import { showView } from "./shared/navigation";
 import { closeSidemenu } from "./shared/sidemenu";
 import { initBackButton, registerOverlayBack } from "./shared/back-button";
@@ -73,7 +74,7 @@ if (import.meta.env.DEV) {
   else document.addEventListener("DOMContentLoaded", paintTestBanner);
 }
 
-// wdio/view-harness e2e test seams (window.__injectEdit/__injectNews/
+// wdio/view-harness e2e test seams (window.__injectEdit/
 // __setSelectedSession/__injectQuestion/__startNewSession/
 // __setBusy) - see src/boot/e2e-seams.ts for the per-seam rationale.
 // `installE2eSeams` gates its own body on `import.meta.env.DEV`, so this call
@@ -126,13 +127,13 @@ if (!app) {
 // at boot (autostart racing the network / vite dev server).
 void invoke("frontend_ready").catch(() => {});
 
-// Heartbeat for the renderer-crash watchdog. "main"-only: detached windows
-// (chats/schedule) share this entry point and would otherwise keep the
-// shared, unscoped ping timestamp fresh forever, masking a dead "main".
+// Heartbeat for the renderer-crash watchdog. Chats-window-only: pop-outs share
+// this entry point and would otherwise keep the shared, unscoped ping
+// timestamp fresh forever, masking a dead Chats window.
 const currentWindowLabel = (window as unknown as {
   __TAURI__?: { window?: { getCurrentWindow: () => { label: string } } };
 }).__TAURI__?.window?.getCurrentWindow().label;
-if (currentWindowLabel === "main") {
+if (runsRendererHeartbeat(currentWindowLabel)) {
   // Paint-liveness counter: JS can keep running (so pings keep firing) while
   // WebView2's compositor stops presenting frames. rAF only fires on an
   // actual paint, so a frozen count here (while pings keep arriving) is the

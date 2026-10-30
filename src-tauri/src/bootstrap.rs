@@ -29,12 +29,6 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
         let _ = crate::ipc::open_chats_window(app.handle().clone());
     }
 
-    // The main dashboard window is built lazily on first open (see
-    // `build_main_window`), NOT eagerly here - an eager startup window
-    // flashes a white ghost frame on Windows (ai_todo 143). Usage
-    // polling runs in the backend `scheduler::spawn` loop and does not
-    // need this window.
-
     let handle = app.handle().clone();
 
     // One-time legacy import into SQLite for all three datasets. Each
@@ -59,9 +53,6 @@ pub(crate) fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::
     spawn_hook_install_migration(&handle);
     spawn_character_backfill_migration(&handle);
     spawn_daemon_subscription(&handle);
-
-    // (Main-window hide-to-tray lives in `build_main_window`; the window
-    // is built lazily on first open, so there is nothing to wire here.)
 
     // Windows session-end guard. Owns its own hidden window + message
     // pump on a dedicated thread so a PC shutdown is never left waiting

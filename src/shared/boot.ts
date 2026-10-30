@@ -33,6 +33,8 @@ import { triggerNewSessionGlobal, triggerNewSessionFavoriteGlobal } from "../vie
 import { showFavoritesStrip, hideFavoritesStrip } from "../views/sessions/favorites-strip";
 import { showView } from "./navigation";
 import { isRemote } from "./transport";
+import { ownsAppToasts } from "./window-roles";
+import { wireDaemonStatusToasts } from "./daemon-status-toast";
 import { wireInitialFetches } from "./initial-render-gate";
 import { mountBootProgress } from "./boot-progress";
 import { mountReconnectStrip } from "./reconnect-strip";
@@ -290,20 +292,10 @@ export function initBoot(): void {
     setTokenHistory(merged);
     refreshDashboardView();
   });
-  let _daemonWasConnected = true;
-  // daemon-status-changed is an app-wide event: every window that runs initBoot
-  // (main + the Chats window) would otherwise toast the same drop, so one real
-  // reconnect looked like "over and over". Own the toast in the main window only.
-  const _isMainWindow = !document.body.classList.contains("chats-window-mode");
-  api.onDaemonStatus((s) => {
-    if (!s.connected) {
-      _daemonWasConnected = false;
-      if (_isMainWindow) showToast("Daemon disconnected - reconnecting...");
-    } else if (!_daemonWasConnected) {
-      _daemonWasConnected = true;
-      if (_isMainWindow) showToast("Daemon reconnected.");
-    }
-  });
+  // daemon-status-changed is an app-wide event, so one window owns its toasts
+  // (see ownsAppToasts) or a single reconnect would toast over and over.
+  const ownsToasts = ownsAppToasts(document.body.classList.contains("chats-window-mode"), isRemote());
+  wireDaemonStatusToasts(ownsToasts);
 
   // Discover available models from the API and update the model picker base.
   // Silent on failure (offline, expired token, missing credentials).
@@ -320,9 +312,9 @@ export function initBoot(): void {
   wireHookModal();
   void maybeOfferLegacyImport();
   void maybeShowHookModal();
-  // Main window only: otherwise the Chats window can win the take() race and
-  // swallow the one toast.
-  if (_isMainWindow) void maybeShowSettingsLoadNotice();
+  // One owning window only: the notice is take()n once, so a second window
+  // could win the race and swallow the one toast.
+  if (ownsToasts) void maybeShowSettingsLoadNotice();
 
   shortcuts.register("new-chat", triggerNewSessionGlobal);
   for (let slot = 1; slot <= 9; slot++) {

@@ -223,9 +223,8 @@ border-radius:6px;padding:8px 20px;font-size:14px;cursor:pointer;">Retry</button
     )
 }
 
-/// Origin Tauri serves `WebviewUrl::App(...)` paths under, mirroring
-/// `bootstrap::watchdogs::boot_start_url` (kept separate since that one is
-/// hardcoded to `index.html` and `pub(super)` to its own module).
+/// Origin Tauri serves `WebviewUrl::App(...)` paths under (the `tauri.conf.json`
+/// dev/prod hosts).
 fn origin() -> &'static str {
     if cfg!(dev) {
         "http://localhost:1420/"
@@ -236,7 +235,7 @@ fn origin() -> &'static str {
     }
 }
 
-fn app_url(path: &str) -> String {
+pub(crate) fn app_url(path: &str) -> String {
     format!("{}{}", origin(), path)
 }
 
@@ -251,17 +250,12 @@ pub fn mark_ready(app: &AppHandle, label: &str) {
         record_heartbeat(entry)
     };
     if outcome == HeartbeatOutcome::Show {
-        // `main` alone also drives two AppState flags formerly set from its
-        // `on_page_load` "Finished" handler (ai_todo 786): a heartbeat can't
-        // be a WebView2 error page, so it's the correct "opened" signal.
-        if label == "main" {
+        // The Chats window is the one the heartbeat watchdog watches. Reset the
+        // paint-liveness baseline: otherwise it still holds its boot-time
+        // default, the first `frontend_ping`'s `raf_tick: 0` equals it, and the
+        // watchdog misfires on a live window.
+        if label == crate::ipc::window::CHATS_WINDOW_LABEL {
             if let Some(state) = app.try_state::<crate::state::AppState>() {
-                state.main_window_loaded.store(true, std::sync::atomic::Ordering::SeqCst);
-                // Reset the paint-liveness baseline: otherwise it still holds
-                // its boot-time default, the first `frontend_ping`'s
-                // `raf_tick: 0` equals it, and the watchdog misfires on a
-                // live window.
-
                 *state.last_frontend_raf.lock().unwrap() = (0, std::time::Instant::now());
             }
         }

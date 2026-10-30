@@ -725,6 +725,18 @@ mod tests {
         );
     }
 
+    /// `newsNotificationsEnabled` is a key of the retired News feature with no
+    /// field behind it any more: an old file carrying it must load, keep it
+    /// verbatim in `extra`, and write it back instead of dropping the user's value.
+    #[test]
+    fn a_settings_file_with_the_retired_news_key_still_loads_and_round_trips() {
+        let s: Settings = serde_json::from_str(r#"{"newsNotificationsEnabled": false}"#)
+            .expect("an unknown key must not reject the document");
+        assert_eq!(s.extra.get("newsNotificationsEnabled"), Some(&serde_json::json!(false)));
+        let back = serde_json::to_value(&s).unwrap();
+        assert_eq!(back["newsNotificationsEnabled"], serde_json::json!(false));
+    }
+
     #[test]
     fn a_clean_load_moves_nothing_aside_and_raises_no_notice() {
         let dir = tempdir().unwrap();

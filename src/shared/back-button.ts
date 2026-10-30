@@ -8,7 +8,7 @@
  * popstate, so back can never exit. Each press is routed to handleBack(), which:
  *
  *   1. closes the top open overlay (modal, sidemenu, prompt card, mobile chat
- *      pane, news article) if any is registered, else
+ *      pane) if any is registered, else
  *   2. steps back one entry through the view-navigation stack, else
  *   3. falls back to the chats list (HOME_VIEW) from any other root, else
  *   4. stays put on the chats list (back never closes the app).

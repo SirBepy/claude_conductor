@@ -423,7 +423,7 @@ pub async fn add_account_finalize(
     // The first account becomes the default. Nothing else ever sets
     // `default_account_id` (only the per-row "Set as default" menu item does),
     // and every spawn path that omits an explicit `account_id` - scheduled
-    // `NewChat` items, channels, the news summarizer - refuses outright
+    // `NewChat` items, channels - refuses outright
     // without one. Leaving it unset would make a single-account install fail
     // those flows with an error about accounts it plainly has.
     if was_first_account {

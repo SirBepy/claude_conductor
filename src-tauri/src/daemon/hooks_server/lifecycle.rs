@@ -70,7 +70,7 @@ pub(super) async fn on_session_start(
     };
     let cwd_path = std::path::PathBuf::from(&cwd);
 
-    // Ask / news-summary sidecars are daemon-internal `claude -p` runs, not
+    // Ask sidecars are daemon-internal `claude -p` runs, not
     // chats. The global hook fires for them too, and registering one put a
     // ghost External row in the sidebar that died the instant the sidecar
     // exited, plus the app-data dir itself in the project list.

@@ -1,6 +1,6 @@
 //! Spawns the read-only `claude -p` sidecar that answers one Ask question.
-//! Gate order matches `news::summarizer`: drift owns the NotLoggedIn message,
-//! so it runs before credentials and billing.
+//! Gate order: drift owns the NotLoggedIn message, so it runs before
+//! credentials and billing.
 
 use crate::chat::billing::check_metered_billing;
 use crate::util::process::hide_console_tokio;
@@ -9,11 +9,11 @@ use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
 /// Hardcoded for v1. Joe picked medium effort explicitly (2026-08-24); the
-/// model was never answered, so this takes `news::summarizer`'s precedent of a
-/// const rather than inventing a settings surface nobody asked for.
+/// model was never answered, so it is a const rather than a settings surface
+/// nobody asked for.
 pub const ASK_MODEL: &str = "sonnet";
-/// Higher than the summarizer's `low`: "what was i meant to do" means reading a
-/// transcript and inferring intent, which low effort visibly degrades.
+/// "What was i meant to do" means reading a transcript and inferring intent,
+/// which low effort visibly degrades.
 pub const ASK_EFFORT: &str = "medium";
 
 /// `--allowedTools` only PRE-APPROVES: it is not an exhaustive allowlist, so

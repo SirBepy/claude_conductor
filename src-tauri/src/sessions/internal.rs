@@ -1,4 +1,4 @@
-//! Tells a daemon-internal `claude` sidecar (Ask, news summaries) apart from a
+//! Tells a daemon-internal `claude` sidecar (Ask) apart from a
 //! chat the developer is meant to see. Both run in the app-data ROOT so a stray
 //! `CLAUDE.md` can't be read as instructions, and the global SessionStart hook
 //! fires for them like any other session.
