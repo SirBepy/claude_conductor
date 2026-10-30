@@ -35,7 +35,9 @@ export type Entry = "index" | "overlay";
  *  of the boot seed via {@link mountView}'s `invoke` option. */
 export type InvokeMap = Record<string, unknown>;
 
-const HARNESS_ORIGIN = "http://localhost:4420";
+// Same env var and default as playwright.config.ts: the vite it starts takes
+// VIEW_HARNESS_PORT, so a hardcoded origin here would goto a port nothing serves.
+const HARNESS_ORIGIN = `http://localhost:${Number(process.env.VIEW_HARNESS_PORT) || 4420}`;
 
 // Minimum command seeds for each entry's boot sequence to COMPLETE without an
 // unmocked-command rejection. Verified against src/shared/boot.ts (index) and
