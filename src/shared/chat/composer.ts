@@ -108,6 +108,8 @@ export class Composer {
   private file: FileProvider | null = null;
   private core: ComposerCore | null = null;
   private sending = false;
+  // Guards syncTall's own re-measure against recursing through onResize.
+  private syncingTall = false;
   // Wall-clock of the last keystroke; feeds isComposing() so an auto-flush
   // doesn't fire out from under the user mid-type.
   private lastKeyAt = 0;
@@ -520,9 +522,20 @@ export class Composer {
    * width back, unwrap it, drop the flag and loop. */
   private syncTall(): void {
     const row = this.root.querySelector<HTMLElement>(".composer-row");
-    if (!row || !this.textarea) return;
+    if (!row || !this.textarea || this.syncingTall) return;
+    const was = row.classList.contains("composer-row--tall");
     row.classList.remove("composer-row--tall");
-    row.classList.toggle("composer-row--tall", this.textarea.scrollHeight > 44);
+    const tall = this.textarea.scrollHeight > 44;
+    row.classList.toggle("composer-row--tall", tall);
+    if (tall === was) return;
+    // The flip changes the textarea's right padding. Without CSS field-sizing the
+    // inline height was fixed under the old padding, so size it once more.
+    this.syncingTall = true;
+    try {
+      this.autoResize();
+    } finally {
+      this.syncingTall = false;
+    }
   }
 
   private autoResize(): void {

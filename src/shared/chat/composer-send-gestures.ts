@@ -57,7 +57,16 @@ export function wireSendGestures(btn: HTMLElement, wrap: HTMLElement, cb: SendGe
     stop();
     cb.onSwipeUp();
   });
-  for (const type of ["pointerup", "pointercancel", "pointerleave"]) btn.addEventListener(type, stop);
+  for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
+    btn.addEventListener(type, () => {
+      stop();
+      // A release elsewhere (off Send, or on the menu) never produces the click
+      // that clears `consumed`, which would otherwise swallow a later keyboard
+      // activation. The click that does follow a release on Send is dispatched in
+      // the same task, ahead of this timer.
+      if (consumed) setTimeout(() => { consumed = false; }, 0);
+    });
+  }
 
   // Capture phase on the target itself runs before the composer's own click
   // listener, whichever order the two were added in.

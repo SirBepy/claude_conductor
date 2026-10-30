@@ -62,6 +62,22 @@ describe("wireSendGestures", () => {
     expect(clicked).toHaveBeenCalledTimes(1);
   });
 
+  it("does not swallow a later click when the hold was released somewhere other than Send", () => {
+    const clicked = vi.fn();
+    wireSendGestures(btn, wrap, cb);
+    btn.addEventListener("click", clicked);
+
+    btn.dispatchEvent(pointer("pointerdown"));
+    vi.advanceTimersByTime(450);
+    // Finger lifted off Send: no click follows, only the pointer leaving it.
+    btn.dispatchEvent(pointer("pointerleave"));
+    vi.advanceTimersByTime(1);
+
+    // A later keyboard activation of the focused button is a real click.
+    btn.click();
+    expect(clicked).toHaveBeenCalledTimes(1);
+  });
+
   it("lets a short press through as a normal click", () => {
     const clicked = vi.fn();
     wireSendGestures(btn, wrap, cb);

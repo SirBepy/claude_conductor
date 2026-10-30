@@ -1,7 +1,7 @@
 /* Voice dictation: mic button states + volatile-tail styling. */
 
-/* Dictation lives in the split-send ▾ menu on both desktop and mobile (plus
-   push-to-talk on desktop). The button itself only surfaces *while active* -
+/* Dictation lives in Send's right-click / long-press menu and its swipe-up, on
+   both desktop and mobile (plus push-to-talk on desktop). The button itself only surfaces *while active* -
    a visible recording state and a one-click stop, not a permanent row icon. */
 .composer-mic {
   display: none;
