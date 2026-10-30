@@ -90,6 +90,7 @@ pub fn register_schedule(router: &mut Router, state: Arc<DaemonState>) {
                 // command. Keep what is stored instead of erroring: an older
                 // client round-trips the item without the field at all.
                 item.guard = guard_after_update(&ctx.transport, item.guard, stored.guard);
+                item.after_meeting = after_meeting_after_update(item.after_meeting, stored.after_meeting);
                 scheduled_items::upsert(item);
                 publish_changed(&state);
                 Ok(json!({"ok": true}))
@@ -134,6 +135,13 @@ fn guard_after_update(transport: &Transport, incoming: Option<String>, stored: O
         return stored;
     }
     incoming.filter(|g| !g.trim().is_empty())
+}
+
+/// The meeting gate an update writes. A client that predates the field
+/// round-trips the record without it (the field is skipped when `None`), and
+/// that must not turn a gated item into an ungated one; an explicit value wins.
+fn after_meeting_after_update(incoming: Option<bool>, stored: Option<bool>) -> Option<bool> {
+    incoming.or(stored)
 }
 
 /// Mirrors `daemon::schedule`'s own `notify_changed` exactly (same notifier
@@ -218,6 +226,14 @@ mod tests {
         );
         assert_eq!(guard_after_update(&Transport::Local, Some("new.ps1".into()), stored.clone()), Some("new.ps1".into()));
         assert_eq!(guard_after_update(&Transport::Local, Some("  ".into()), stored), None, "blank clears it");
+    }
+
+    #[test]
+    fn an_update_without_the_meeting_gate_keeps_the_stored_one() {
+        assert_eq!(after_meeting_after_update(None, Some(true)), Some(true), "an older client's round trip keeps it");
+        assert_eq!(after_meeting_after_update(None, None), None);
+        assert_eq!(after_meeting_after_update(Some(false), Some(true)), Some(false), "an explicit off wins");
+        assert_eq!(after_meeting_after_update(Some(true), None), Some(true), "an explicit on wins");
     }
 
     #[tokio::test]

@@ -24,14 +24,23 @@ enum Verdict {
     KickThenReload,
 }
 
+/// Whether the page is expected to be pinging at all. A tray-hidden window is
+/// not, and neither is a minimized one: Windows reports a minimized window as
+/// still visible, but the frontend only pings while `document.visibilityState`
+/// is "visible" and the webview is marked hidden on minimize, so a reload would
+/// just land on another page that stays silent (and discard its in-page state).
+fn is_judged(visible: bool, minimized: bool) -> bool {
+    visible && !minimized
+}
+
 fn verdict(
     alive: bool,
-    visible: bool,
+    judged: bool,
     focused: bool,
     ping_age: Option<Duration>,
     raf_age: Duration,
 ) -> Verdict {
-    if !alive || !visible {
+    if !alive || !judged {
         return Verdict::Healthy;
     }
     if ping_age.is_some_and(|age| age > PING_STALE) {
@@ -63,7 +72,7 @@ pub(super) fn spawn_heartbeat_watchdog(app: &tauri::AppHandle) {
             let Some(w) = h.get_webview_window(CHATS_WINDOW_LABEL) else { continue };
             let action = verdict(
                 alive.load(Ordering::SeqCst),
-                w.is_visible().unwrap_or(false),
+                is_judged(w.is_visible().unwrap_or(false), w.is_minimized().unwrap_or(false)),
                 w.is_focused().unwrap_or(false),
                 last_ping.lock().unwrap().map(|t| t.elapsed()),
                 last_raf.lock().unwrap().1.elapsed(),
@@ -129,6 +138,29 @@ mod tests {
         let stale = PING_STALE + FRESH;
         assert_eq!(verdict(true, false, true, Some(stale), stale), Verdict::Healthy);
         assert_eq!(verdict(false, true, true, Some(stale), stale), Verdict::Healthy);
+    }
+
+    #[test]
+    fn a_minimized_window_with_a_stale_ping_is_not_reloaded() {
+        let stale = PING_STALE + FRESH;
+        // Windows still reports it visible while minimized.
+        let judged = is_judged(true, true);
+        assert!(!judged);
+        assert_eq!(verdict(true, judged, false, Some(stale), stale), Verdict::Healthy);
+    }
+
+    #[test]
+    fn a_visible_restored_window_with_a_stale_ping_is_still_reloaded() {
+        let stale = PING_STALE + FRESH;
+        let judged = is_judged(true, false);
+        assert!(judged);
+        assert_eq!(verdict(true, judged, false, Some(stale), FRESH), Verdict::Reload);
+    }
+
+    #[test]
+    fn a_tray_hidden_window_stays_unjudged() {
+        assert!(!is_judged(false, false));
+        assert!(!is_judged(false, true));
     }
 
     #[test]
