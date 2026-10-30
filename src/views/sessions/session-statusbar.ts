@@ -118,6 +118,11 @@ export class SessionStatusbar {
   private accountId: string | null;
   // The host machine's accounts for a mirrored chat; null for a local one.
   private hostAccounts: ChipAccount[] | null = null;
+  private hostMachineId: string | null = null;
+  // Only a failed read is retried: a successful empty list is the host's answer.
+  private hostAccountsFailed = false;
+  private hostAccountsInFlight = false;
+  private destroyed = false;
   private onAccountClick: (() => void) | null;
   private onConfig: ((model: string | null, effort: string, effortEditable: boolean) => void) | null;
   // Global hide-at-zero: when true, count/tool chips resolving to 0 are omitted.
@@ -207,6 +212,7 @@ export class SessionStatusbar {
     }
 
     if (this.mirrored && opts.machineId) {
+      this.hostMachineId = opts.machineId;
       this.hostAccounts = [];
       void this.loadHostAccounts(opts.machineId);
     }
@@ -216,14 +222,23 @@ export class SessionStatusbar {
   }
 
   /** A failed read leaves the list empty, so the chip stays hidden rather
-   *  than naming a local account the host does not have. */
+   *  than naming a local account the host does not have. `updateMeta` retries
+   *  it, so a peer link that was still reconnecting at mount does not hide the
+   *  chip for the life of the bar. */
   private async loadHostAccounts(machineId: string): Promise<void> {
+    if (this.hostAccountsInFlight) return;
+    this.hostAccountsInFlight = true;
     try {
       const list = await invoke<MachineAccountList>("list_machine_accounts", { machineId, cwd: this.cwd });
       this.hostAccounts = list?.accounts ?? [];
-      this.render();
+      this.hostAccountsFailed = false;
+      // A fetch that lands after destroy() would repaint a detached container.
+      if (!this.destroyed) this.render();
     } catch (e) {
+      this.hostAccountsFailed = true;
       console.warn("[statusbar] list_machine_accounts failed", e);
+    } finally {
+      this.hostAccountsInFlight = false;
     }
   }
 
@@ -392,6 +407,7 @@ export class SessionStatusbar {
     this.metaLoaded = true;
     if (this.sessionId) metaCache.set(this.sessionId, meta);
     this.render();
+    if (this.hostMachineId && this.hostAccountsFailed) void this.loadHostAccounts(this.hostMachineId);
     if (wantsCounts(this.rows)) void this.refreshCounts();
     if (wantsContext(this.rows)) void this.refreshContextStatus();
     if (wantsDrain(this.rows)) void this.refreshDrain();
@@ -510,6 +526,7 @@ export class SessionStatusbar {
   }
 
   destroy(): void {
+    this.destroyed = true;
     if (this.durationTimer) { this.durationTimer(); this.durationTimer = null; }
     if (this.serversTimer) { this.serversTimer(); this.serversTimer = null; }
     if (this.mobileUnsub) { this.mobileUnsub(); this.mobileUnsub = null; }
