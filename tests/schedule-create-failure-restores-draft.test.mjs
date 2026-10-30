@@ -45,7 +45,7 @@ const scheduleCalls = () => invoke.mock.calls.filter(([c]) => c === "schedule_cr
 function scheduleViaMenu(root, textarea, text) {
   textarea.value = text;
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
-  root.querySelector(".composer-send-chevron").click();
+  root.querySelector(".composer-send").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
   const row = [...document.querySelectorAll(".composer-menu-popover [data-idx]")].find((b) =>
     b.textContent.includes("Schedule message"),
   );
@@ -117,7 +117,7 @@ describe("draft pane: schedule_create rejects", () => {
 });
 
 describe("live chat: schedule_create rejects", () => {
-  it("puts the text back from the chevron menu", async () => {
+  it("puts the text back from Send's right-click menu", async () => {
     const { root, textarea } = await mountActive(false);
     scheduleViaMenu(root, textarea, "remember the milk");
 

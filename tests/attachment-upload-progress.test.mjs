@@ -94,7 +94,7 @@ describe("composer attachment upload progress", () => {
   });
 
   function scheduleViaMenu(root) {
-    root.querySelector(".composer-send-chevron").click();
+    root.querySelector(".composer-send").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     const row = [...document.querySelectorAll(".composer-menu-popover [data-idx]")].find((b) =>
       b.textContent.includes("Schedule message"),
     );

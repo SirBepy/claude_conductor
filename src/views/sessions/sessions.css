@@ -609,20 +609,21 @@
   width: 40%;
 }
 
-/* Top compartment of .composer-shell, fused to the input box below (no
- * gap) - rounds only the top corners; see the :has() rule further down. */
+/* Strip above the input row inside .composer-shell. The shell has no border of
+ * its own (the field carries it), so the strip draws its own. */
 .session-thinking {
   display: flex;
   align-items: center;
   gap: 7px;
+  margin: 6px 6px 0;
   padding: 6px 12px;
   font-size: 0.78rem;
   color: var(--color-text-muted);
   font-style: italic;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--color-border);
+  border: 1px solid var(--color-border);
   background: var(--color-surface-alt);
-  border-radius: 8px 8px 0 0;
+  border-radius: 6px;
 }
 
 .session-thinking[hidden] {
@@ -677,17 +678,15 @@
   font-size: 1rem;
 }
 
-/* Slack-style bordered container for thinking bar + input. No overflow:hidden -
+/* Container for thinking strip + input row. Borderless: the input field carries
+ * the border and Send sits outside it as its own chip. No overflow:hidden -
  * the floating prompt-card (permission/question relay) anchors off
  * .session-composer's position:relative below and must not get clipped. */
 .composer-shell {
   /* Same padding-based centering as .session-messages, so the input column
      lines up under the capped transcript instead of spanning the full pane. */
   margin: 10px max(12px, calc((100% - 900px) / 2)) 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
   flex-shrink: 0;
-  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .session-composer {
@@ -695,38 +694,34 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: var(--color-surface);
-  border-radius: 0 0 8px 8px;
   /* Anchor for the prompt-card floating panel (permission + question relay). */
   position: relative;
 }
 
-/* Idle (thinking bar hidden): composer is the shell's only visible child. */
-.composer-shell:has(.session-thinking[hidden]) .session-composer {
-  border-radius: 8px;
-}
-
-/* Shell draws the single outer boundary now - the pair's own is redundant.
- * Dropped through composer.css's shared var so the highlight backdrop loses
- * the same 1px the textarea does and keeps wrapping at the same column. */
+/* The field's own surface, radius and hairline. The hairline is an inset
+ * shadow rather than a border so the field adds no layout px and stays exactly
+ * as tall as the Send chip beside it; --composer-input-border is zeroed so the
+ * highlight backdrop and the textarea still agree on their content box. */
 .composer-shell .composer-input-wrap:not(#prompt-card-host *) {
-  background: transparent;
+  background: var(--color-surface);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--color-border);
   --composer-input-border: 0px;
+  transition: box-shadow 0.15s;
 }
 
 /* :not(#prompt-card-host *): the phone question page mounts inside this
  * shell and renders the Preview panel's reply bar, which keeps its own
  * border, fill and radius. */
 .composer-shell .composer-textarea:not(#prompt-card-host *) {
-  border-radius: 0;
+  border-radius: 6px;
 }
 
 /* :has(textarea:focus), not :focus-within: the AUQ prompt-card's host mounts
  * inside .session-composer (a descendant), so :focus-within would also glow
- * the shell while only the question card's own free-text input is focused. */
-.composer-shell:has(.composer-textarea:focus) {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(157, 125, 252, 0.12);
+ * the field while only the question card's own free-text input is focused. */
+.composer-shell .composer-input-wrap:not(#prompt-card-host *):has(.composer-textarea:focus) {
+  box-shadow: inset 0 0 0 1px var(--color-primary), 0 0 0 3px rgba(157, 125, 252, 0.12);
 }
 
 .composer-shell .composer-textarea:not(#prompt-card-host *):focus {
