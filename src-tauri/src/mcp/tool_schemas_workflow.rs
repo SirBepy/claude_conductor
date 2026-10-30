@@ -54,6 +54,10 @@ pub const TOOL_PERSON: &str = "person";
 // a card is a stored command or URL, so each write goes through the
 // permission prompt.
 pub const TOOL_DASHBOARD_CARD: &str = "dashboard_card";
+// Whether the user is on a call right now, read from the OS (camera, mic, call
+// audio) by the daemon's `MeetingMonitor`. Takes no arguments and writes
+// nothing, so it is pretrusted like the other read-only tools.
+pub const TOOL_IN_MEETING: &str = "in_meeting";
 
 pub fn workflow_schemas() -> Vec<Value> {
     vec![
@@ -210,6 +214,7 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "cwd": {"type": "string", "description": "Project for a new_chat. This session's own, or another already known to the app. Defaults to this session's."},
                     "name": {"type": "string", "description": "Optional short label for the chat this spawns."},
                     "id": {"type": "string", "description": "Which item, for cancel. The short id from the injected list."},
+                    "after_meeting": {"type": "boolean", "description": "Hold the firing while the user is in a meeting and send it once no meeting has been active for about 20 seconds (a gap between back-to-back calls does not count as over). Combine with `in_minutes`/`at` as the earliest time it may run. It stops waiting 3 hours after that time even if a meeting is still reported. The app only sees a live call (camera, mic, call audio), not a calendar. Applies to every firing of a repeating item."},
                     "guard": {"type": "string", "description": "Optional shell command the app runs just before each firing creates its chat, in the target project's folder (Windows: PowerShell, elsewhere: sh). Exit code 0 SKIPS that firing; any other exit code, a crash, a missing command or no answer within 30 seconds fires as normal. Its first stdout line is shown in the Schedule panel as the skip reason, and CC_SCHEDULE_DATE (local YYYY-MM-DD of the firing) and CC_SCHEDULE_ID are set. Use it to skip a run that is already done, and keep the check owned by whatever does the work, e.g. `python <skill>/check.py`. It is arbitrary code, so the user is always asked to approve the exact command, even in an auto-accept chat."}
                 },
                 "required": ["action"]
@@ -264,12 +269,37 @@ pub fn workflow_schemas() -> Vec<Value> {
                 "required": ["action"]
             }
         }),
+        json!({
+            "name": TOOL_IN_MEETING,
+            "description": "Whether the user is in a meeting right now. Returns {active, sources, since}: `sources` lists which signals are on (`camera`, `mic`, `audio` = a meeting app is playing call audio), and `since` is when the app first noticed the current meeting (null when none), so it can be later than the real start. It only sees a live call: a silent or in-person meeting reads as not active. Use it before interrupting the user with something that can wait. To run a prompt once the meeting is over, use `schedule` with `after_meeting`.",
+            "inputSchema": {"type": "object", "properties": {}}
+        }),
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The schedule tool's text quotes the gate's timings in words, so a changed
+    // constant must change the text with it.
+    #[test]
+    fn after_meeting_description_matches_the_gate_constants() {
+        use crate::daemon::meeting_monitor::{AFTER_MEETING_DEBOUNCE_SECS, AFTER_MEETING_MAX_WAIT_SECS};
+        let schedule = workflow_schemas().into_iter().find(|s| s["name"] == TOOL_SCHEDULE).expect("schedule schema");
+        let d = schedule["inputSchema"]["properties"]["after_meeting"]["description"].as_str().expect("after_meeting property");
+        assert_eq!(AFTER_MEETING_DEBOUNCE_SECS, 20);
+        assert_eq!(AFTER_MEETING_MAX_WAIT_SECS, 3 * 60 * 60);
+        assert!(d.contains("20 seconds") && d.contains("3 hours"), "{d}");
+    }
+
+    #[test]
+    fn in_meeting_takes_no_arguments() {
+        let schemas = workflow_schemas();
+        let tool = schemas.iter().find(|s| s["name"] == TOOL_IN_MEETING).expect("in_meeting schema");
+        assert_eq!(tool["inputSchema"]["properties"], json!({}));
+        assert!(tool["inputSchema"].get("required").is_none());
+    }
 
     // The preview panel's page template is only as consistent as what the model
     // is told to write; a description that stops naming it sends back hand-rolled

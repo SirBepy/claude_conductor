@@ -201,7 +201,7 @@ mod tests {
         TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN,
         TOOL_RESPOND_WORKER_PROMPT, TOOL_SCHEDULE, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION,
         TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
-        TOOL_DASHBOARD_CARD, TOOL_PR_PREVIEW, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
+        TOOL_DASHBOARD_CARD, TOOL_IN_MEETING, TOOL_PR_PREVIEW, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
     };
 
     thread_local! {
@@ -321,7 +321,7 @@ mod tests {
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 21);
+        assert_eq!(tools.len(), 22);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -346,6 +346,7 @@ mod tests {
         assert!(names.contains(&"create_project"));
         assert!(names.contains(&"person"));
         assert!(names.contains(&"dashboard_card"));
+        assert!(names.contains(&"in_meeting"));
     }
 
     #[test]
@@ -426,7 +427,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 25, "21 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 26, "22 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -541,6 +542,7 @@ mod tests {
             (TOOL_DASHBOARD_CARD, "/dashboard/card"),
             (TOOL_WRITE_PLAN, "/plan/write"),
             (TOOL_SCHEDULE, "/schedule/write"),
+            (TOOL_IN_MEETING, "/meeting/status"),
             (TOOL_CREATE_PROJECT, "/projects/create"),
             (TOOL_SHOW_PREVIEW, "/hooks/preview"),
             (TOOL_SPAWN_WORKER, "/jarvis/spawn-worker"),
@@ -572,7 +574,7 @@ mod tests {
         let args = json!({
             "action": "add", "prompt": "check CI", "target": "new_chat",
             "in_minutes": 30, "at": "2026-01-06T09:00", "repeat": "weekdays",
-            "cwd": "C:/proj", "name": "CI watch", "id": "abc", "guard": "exit 1",
+            "cwd": "C:/proj", "name": "CI watch", "id": "abc", "guard": "exit 1", "after_meeting": true,
         });
         POSTED_BODIES.with(|b| b.borrow_mut().clear());
         dispatch_tool_with(&rt, &json!(1), TOOL_SCHEDULE, &args, "sess-1", 1234, fake_http_post);
@@ -582,7 +584,7 @@ mod tests {
         assert_eq!(
             keys,
             vec![
-                "action", "at", "cwd", "guard", "id", "in_minutes", "name", "prompt", "repeat",
+                "action", "after_meeting", "at", "cwd", "guard", "id", "in_minutes", "name", "prompt", "repeat",
                 "session_id", "target",
             ]
         );

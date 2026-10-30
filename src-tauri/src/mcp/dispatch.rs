@@ -15,7 +15,7 @@ use super::dispatch_jarvis::jarvis_tools;
 use super::relay::{http_post, Ctx, HttpPost};
 use super::server::{mcp_error, question_args, tool_error_result, tool_result, waiting_target};
 use super::tool_schemas::{
-    TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_DASHBOARD_CARD, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
+    TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_DASHBOARD_CARD, TOOL_IN_MEETING, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN, TOOL_SCHEDULE,
     TOOL_PERSON, TOOL_PR_PREVIEW, TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT,
     TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
@@ -181,7 +181,7 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             let mut body = serde_json::Map::new();
             body.insert("session_id".to_string(), json!(ctx.session_id));
             body.insert("action".to_string(), ctx.args["action"].clone());
-            for key in ["prompt", "target", "in_minutes", "at", "repeat", "cwd", "name", "id", "guard"] {
+            for key in ["prompt", "target", "in_minutes", "at", "repeat", "cwd", "name", "id", "guard", "after_meeting"] {
                 if let Some(v) = ctx.args.get(key) {
                     body.insert(key.to_string(), v.clone());
                 }
@@ -194,6 +194,9 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "path": ctx.args["path"],
             });
             Some(ctx.relay("/projects/create", body, Some("invalid project path"), None))
+        }
+        TOOL_IN_MEETING => {
+            Some(ctx.relay("/meeting/status", json!({ "session_id": ctx.session_id }), None, None))
         }
         _ => None,
     }

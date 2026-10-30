@@ -14,6 +14,9 @@
 //! `respawn_for_message`, `fire_new_chat`). This module keeps the tick loop
 //! and the claim/compute bookkeeping around it.
 
+use super::meeting_monitor::{
+    holds_for_meeting, MeetingSnapshot, AFTER_MEETING_MAX_WAIT_SECS, SCHEDULE_LINGER, SCHEDULE_LOOKAHEAD_SECS,
+};
 use super::schedule_fire;
 use super::schedule_guard::{self, GuardVerdict};
 use crate::daemon::state::DaemonState;
@@ -112,6 +115,39 @@ fn grace_lateness_secs(
     (now - anchor).num_seconds()
 }
 
+/// The grace window one item gets. An `after_meeting` item can legitimately sit
+/// due for up to `AFTER_MEETING_MAX_WAIT_SECS` while the meeting runs, so that
+/// wait is added on top: otherwise the default 1h grace would mark it Missed
+/// long before its own 3h fallback could fire it.
+fn grace_secs_for(item: &ScheduledItem, grace_secs: i64) -> i64 {
+    if item.waits_for_meeting() {
+        grace_secs + AFTER_MEETING_MAX_WAIT_SECS
+    } else {
+        grace_secs
+    }
+}
+
+/// Whether the meeting gate keeps this due item waiting. Waiting leaves it
+/// Pending and unclaimed (the next tick asks again), so it is not a skip and
+/// never touches the guard.
+fn waits_for_meeting(item: &ScheduledItem, snapshot: &MeetingSnapshot, fire_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+    item.waits_for_meeting() && holds_for_meeting(snapshot, fire_at, now)
+}
+
+/// Starts the meeting poller ahead of time for any gated item about to come
+/// due, so the debounce has samples behind it when the item is judged.
+fn demand_meeting_for_upcoming(state: &Arc<DaemonState>, items: &[ScheduledItem], now: DateTime<Utc>) {
+    let upcoming = items.iter().any(|it| {
+        it.waits_for_meeting()
+            && matches!(it.status, ScheduledStatus::Pending)
+            && DateTime::parse_from_rfc3339(&it.fire_at)
+                .is_ok_and(|t| (t.with_timezone(&Utc) - now).num_seconds() <= SCHEDULE_LOOKAHEAD_SECS)
+    });
+    if upcoming {
+        state.meeting.demand(SCHEDULE_LINGER);
+    }
+}
+
 /// Sleeps in `SLEEP_CHUNK_SECS` steps instead of one long sleep, so a system
 /// suspend/resume is recovered from within one chunk instead of missing a
 /// whole tick - same rationale as `scheduler::sleep_until_next_target`.
@@ -134,7 +170,11 @@ async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
         .map(|s| s as i64)
         .unwrap_or(DEFAULT_GRACE_SECS);
     let mut changed = false;
-    for item in scheduled_items::list() {
+    let items = scheduled_items::list();
+    demand_meeting_for_upcoming(state, &items, now);
+    // Read at most once per tick, and only when a gated item is actually due.
+    let mut meeting: Option<MeetingSnapshot> = None;
+    for item in items {
         if !matches!(item.status, ScheduledStatus::Pending) {
             continue;
         }
@@ -147,6 +187,7 @@ async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
             continue;
         }
         let lateness = grace_lateness_secs(&item, fire_at, now, daemon_started_at);
+        let grace_secs = grace_secs_for(&item, grace_secs);
         // Defect 4 guard: a live, busy Message-kind session (mid-turn) must
         // not be written into out of band - every interactive send path
         // respects the same busy gate. Only defer within the grace window;
@@ -155,6 +196,15 @@ async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
         // manual control.
         if lateness < grace_secs && is_message_session_busy(state, &item) {
             continue; // stays Pending; retried next tick (~30s later)
+        }
+        if item.waits_for_meeting() {
+            let snapshot = match meeting {
+                Some(s) => s,
+                None => *meeting.insert(state.meeting.sample_blocking().await),
+            };
+            if waits_for_meeting(&item, &snapshot, fire_at, now) {
+                continue; // stays Pending; asked again next tick
+            }
         }
         // Atomic claim (Defects 1 & 3): flips Pending -> Firing and persists
         // BEFORE any fire is attempted. `None` means a concurrent fire_now
@@ -360,6 +410,7 @@ pub(crate) fn parse_rate_limited(reason: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::daemon::meeting_monitor::AFTER_MEETING_DEBOUNCE_SECS;
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::sessions::scheduled_items::{Recurrence, RecurrenceRule};
@@ -551,6 +602,93 @@ mod tests {
         let mut item = ScheduledItem::new(ScheduledKind::JarvisHygiene, "hi".into(), Utc::now().to_rfc3339(), None);
         item.guard = Some("exit 0".into());
         assert!(guard_of(&item).is_none());
+    }
+
+    // --- after_meeting gate ---
+
+    fn gated(fire_at: DateTime<Utc>) -> ScheduledItem {
+        let mut item = make_item(fire_at, None);
+        item.after_meeting = Some(true);
+        item
+    }
+
+    fn mic() -> crate::meeting::Sources {
+        crate::meeting::Sources { mic: true, ..Default::default() }
+    }
+
+    fn monitor() -> crate::daemon::meeting_monitor::MeetingMonitor {
+        use crate::meeting::SignalSource;
+        struct Off;
+        impl SignalSource for Off {
+            fn camera_in_use(&self) -> bool {
+                false
+            }
+            fn mic_in_use(&self) -> bool {
+                false
+            }
+            fn meeting_app_audio_active(&self, _: &[String]) -> bool {
+                false
+            }
+        }
+        crate::daemon::meeting_monitor::MeetingMonitor::with_source(Box::new(Off))
+    }
+
+    #[test]
+    fn a_gated_item_does_not_fire_during_a_meeting_and_fires_once_the_debounce_has_passed() {
+        let fire_at = Utc::now() - chrono::Duration::minutes(2);
+        let item = gated(fire_at);
+        let m = monitor();
+        let t = fire_at + chrono::Duration::minutes(1);
+
+        m.record(mic(), t);
+        assert!(waits_for_meeting(&item, &m.snapshot(), fire_at, t + chrono::Duration::seconds(30)), "during the call");
+
+        let ended = t + chrono::Duration::minutes(20);
+        m.record(mic(), ended);
+        m.record(Default::default(), ended + chrono::Duration::seconds(3));
+        let soon = ended + chrono::Duration::seconds(AFTER_MEETING_DEBOUNCE_SECS - 1);
+        assert!(waits_for_meeting(&item, &m.snapshot(), fire_at, soon), "inside the gap between back-to-back calls");
+
+        let after = ended + chrono::Duration::seconds(AFTER_MEETING_DEBOUNCE_SECS);
+        assert!(!waits_for_meeting(&item, &m.snapshot(), fire_at, after), "released after the quiet window");
+    }
+
+    #[test]
+    fn an_ungated_item_never_waits_on_a_meeting() {
+        let fire_at = Utc::now() - chrono::Duration::minutes(2);
+        let m = monitor();
+        m.record(mic(), fire_at);
+        assert!(!waits_for_meeting(&make_item(fire_at, None), &m.snapshot(), fire_at, fire_at));
+    }
+
+    #[test]
+    fn a_gated_item_stops_waiting_at_the_max_wait_even_in_a_meeting() {
+        let fire_at = Utc::now() - chrono::Duration::hours(4);
+        let m = monitor();
+        let now = fire_at + chrono::Duration::seconds(AFTER_MEETING_MAX_WAIT_SECS);
+        m.record(mic(), now);
+        assert!(!waits_for_meeting(&gated(fire_at), &m.snapshot(), fire_at, now));
+    }
+
+    #[test]
+    fn a_gated_item_gets_its_max_wait_on_top_of_the_grace_window() {
+        assert_eq!(grace_secs_for(&make_item(Utc::now(), None), GRACE), GRACE);
+        assert_eq!(grace_secs_for(&gated(Utc::now()), GRACE), GRACE + AFTER_MEETING_MAX_WAIT_SECS);
+        assert!(
+            AFTER_MEETING_MAX_WAIT_SECS < grace_secs_for(&gated(Utc::now()), GRACE),
+            "the fallback fires before the item can be marked Missed"
+        );
+    }
+
+    #[tokio::test]
+    async fn waiting_for_a_meeting_does_not_stop_a_guard_from_skipping_once_released() {
+        // The gate only decides WHEN; once released the firing goes through the
+        // same guard path as any other, so a guard that says skip still skips.
+        let state = test_state();
+        let mut item = guarded("echo 'already ran'; exit 0", ".", None);
+        item.after_meeting = Some(true);
+        let updated = compute_guarded(&state, item, Utc::now()).await;
+        assert_eq!(updated.status, ScheduledStatus::Skipped);
     }
 
     #[tokio::test]

@@ -38,6 +38,8 @@ pub(super) struct WriteScheduleBody {
     id: Option<String>,
     #[serde(default)]
     guard: Option<String>,
+    #[serde(default)]
+    after_meeting: Option<bool>,
 }
 
 pub(super) async fn on_write_schedule(
@@ -57,6 +59,7 @@ pub(super) async fn on_write_schedule(
         name: body.name,
         id: body.id,
         guard: body.guard,
+        after_meeting: body.after_meeting,
     };
     if let Err(e) = approve_new_chat(&ctx, &body.session_id, &args).await {
         return (StatusCode::OK, Json(json!({"ok": false, "error": e})));
@@ -91,6 +94,7 @@ async fn approve_new_chat(ctx: &Arc<HookCtx>, session_id: &str, args: &ScheduleA
         "action": "add",
         "target": args.target.as_deref().unwrap_or("new_chat"),
         "guard": args.guard,
+        "after_meeting": args.after_meeting,
         "prompt": args.prompt,
         "in_minutes": args.in_minutes,
         "at": args.at,
@@ -156,6 +160,7 @@ mod tests {
             name: None,
             id: None,
             guard: None,
+            after_meeting: None,
         }
     }
 
@@ -304,6 +309,18 @@ mod tests {
         .unwrap();
         assert_eq!(body.in_minutes, Some(30));
         assert_eq!(body.at, None);
+    }
+
+    #[test]
+    fn body_takes_after_meeting_and_tolerates_it_being_absent_or_null() {
+        let with: WriteScheduleBody = serde_json::from_str(
+            r#"{"session_id":"s","action":"add","prompt":"p","in_minutes":30,"after_meeting":true}"#,
+        )
+        .unwrap();
+        assert_eq!(with.after_meeting, Some(true));
+        let null: WriteScheduleBody =
+            serde_json::from_str(r#"{"session_id":"s","action":"add","after_meeting":null}"#).unwrap();
+        assert_eq!(null.after_meeting, None);
     }
 
     #[test]

@@ -90,15 +90,26 @@ pub fn apply_capture_affinity(exclude: bool) {
     }
 }
 
+/// The OS signal reader for this platform. Both the app's watcher (`start`) and
+/// the daemon's `MeetingMonitor` read through it: they are separate processes,
+/// and `AppState.meeting_active` is invisible from the daemon.
+pub fn platform_source() -> Box<dyn SignalSource> {
+    #[cfg(windows)]
+    {
+        Box::new(windows_source::WindowsSignalSource::default())
+    }
+    #[cfg(not(windows))]
+    {
+        Box::new(NoopSource)
+    }
+}
+
 /// Spawn the background meeting watcher. Polls every 3s; on each active/inactive
 /// transition it updates `AppState.meeting_active`, emits `meeting://changed`
 /// (so the tray tooltip re-renders), and logs the edge. On non-Windows the
 /// signal source always reports false, so `meeting_active` stays off.
 pub fn start(app: AppHandle) {
-    #[cfg(windows)]
-    let source: Box<dyn SignalSource> = Box::new(windows_source::WindowsSignalSource::default());
-    #[cfg(not(windows))]
-    let source: Box<dyn SignalSource> = Box::new(NoopSource);
+    let source = platform_source();
     let apps = default_meeting_apps();
 
     std::thread::spawn(move || {

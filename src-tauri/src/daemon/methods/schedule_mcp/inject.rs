@@ -59,7 +59,8 @@ fn line_for(item: &ScheduledItem) -> String {
         ScheduledKind::JarvisHygiene => "jarvis",
     };
     let guarded = if item.guard.is_some() { ", guarded" } else { "" };
-    format!("- [{}] {when}{repeat}{guarded} -> {target}: {}", short(&item.id), item.prompt)
+    let after_meeting = if item.waits_for_meeting() { ", after meeting" } else { "" };
+    format!("- [{}] {when}{repeat}{after_meeting}{guarded} -> {target}: {}", short(&item.id), item.prompt)
 }
 
 #[cfg(test)]
@@ -72,6 +73,14 @@ mod tests {
         assert!(!line_for(&item).contains("guarded"));
         item.guard = Some("exit 0".into());
         assert!(line_for(&item).contains(", guarded ->"), "{}", line_for(&item));
+    }
+
+    #[test]
+    fn an_after_meeting_item_is_marked_so_the_model_knows_it_may_wait() {
+        let mut item = ScheduledItem::new(ScheduledKind::JarvisHygiene, "p".into(), "2026-10-30T10:00:00Z".into(), None);
+        assert!(!line_for(&item).contains("after meeting"));
+        item.after_meeting = Some(true);
+        assert!(line_for(&item).contains(", after meeting ->"), "{}", line_for(&item));
     }
 
     #[test]

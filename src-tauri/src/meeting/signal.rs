@@ -11,6 +11,17 @@ pub struct Sources {
     pub audio: bool,
 }
 
+impl Sources {
+    /// The signals that are on, by the name each field carries. `audio` means a
+    /// meeting-app audio session, not any sound.
+    pub fn names(self) -> Vec<&'static str> {
+        [("camera", self.camera), ("mic", self.mic), ("audio", self.audio)]
+            .into_iter()
+            .filter_map(|(name, on)| on.then_some(name))
+            .collect()
+    }
+}
+
 /// Reads the three raw signals. Implemented by the OS layer; faked in tests.
 pub trait SignalSource: Send {
     fn camera_in_use(&self) -> bool;
@@ -40,6 +51,13 @@ mod tests {
         assert!(compute_in_meeting(Sources { camera: true, ..Default::default() }));
         assert!(compute_in_meeting(Sources { mic: true, ..Default::default() }));
         assert!(compute_in_meeting(Sources { audio: true, ..Default::default() }));
+    }
+
+    #[test]
+    fn names_lists_only_the_signals_that_are_on() {
+        assert!(Sources::default().names().is_empty());
+        assert_eq!(Sources { camera: true, mic: false, audio: true }.names(), vec!["camera", "audio"]);
+        assert_eq!(Sources { camera: true, mic: true, audio: true }.names(), vec!["camera", "mic", "audio"]);
     }
 
     #[test]
