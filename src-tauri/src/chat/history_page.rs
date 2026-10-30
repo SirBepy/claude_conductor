@@ -499,11 +499,9 @@ mod tests {
         lines.push(assistant_line("done", 99));
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
         write_jsonl(&p, &refs);
-        let file_bytes = std::fs::metadata(&p).unwrap().len();
 
         let page = read_page(&p, None, 5).unwrap();
         let page_bytes = serde_json::to_string(&page).unwrap().len();
-        eprintln!("MEASURE transcript={file_bytes}B page_json={page_bytes}B");
         assert!(page_bytes < 50_000, "page carries {page_bytes} bytes");
 
         let mut elided = 0;
