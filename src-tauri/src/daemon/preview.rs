@@ -21,6 +21,10 @@
 //! - A push with an absent/new slug APPENDS a new snapshot (version 1). An
 //!   absent slug gets a synthetic one derived from the id so every entry is
 //!   addressable.
+//! - A same-slug replace first archives the page it overwrites into
+//!   `previous` (newest first, [`KEEP_PREVIOUS_VERSIONS`] kept), so the panel can
+//!   go back and look at an earlier version. A page pushed before that existed
+//!   has only its latest copy; its history starts at the next push.
 //! - History caps at [`MAX_HISTORY`]; evicting the oldest entry logs a note
 //!   (never a silent drop).
 
@@ -38,6 +42,16 @@ pub const PREVIEW_SOURCE_CHAT_CARD: &str = "chat_card";
 /// Max snapshots retained in the timeline. Oldest (smallest `created_at`) is
 /// evicted first when a genuinely NEW slug would push the count over this.
 pub const MAX_HISTORY: usize = 30;
+
+/// How many replaced versions a preview keeps besides its current one.
+pub const KEEP_PREVIOUS_VERSIONS: usize = 5;
+
+/// Upper bound on the `html` bytes the store holds across every preview and its
+/// archived versions. Each push rewrites the whole file, so the worst case of
+/// [`MAX_HISTORY`] previews times [`KEEP_PREVIOUS_VERSIONS`] pages of
+/// [`MAX_HTML_BYTES`] each (hundreds of MB) must not be reachable; past this the
+/// oldest archived versions are dropped first.
+pub const MAX_STORE_HTML_BYTES: usize = 64 * 1024 * 1024;
 
 /// Reject a push whose `html` exceeds this many bytes (~2MB). Guards against
 /// an unbounded payload bloating the persisted JSON file / in-app iframe.
@@ -72,6 +86,29 @@ pub struct PreviewSnapshot {
     /// behind `version` is how the UI tells the link is out of date.
     #[serde(default)]
     pub published: Option<PublishedLink>,
+    /// Pages this slug held before its latest push, newest first. Persisted but
+    /// never sent to a client: `get_preview` returns one version at a time and
+    /// `list_previews` carries [`PreviewVersionMeta`] instead.
+    #[serde(default)]
+    #[ts(skip)]
+    pub previous: Vec<PreviousVersion>,
+}
+
+/// One archived page of a preview.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PreviousVersion {
+    pub version: u32,
+    pub title: String,
+    pub html: String,
+    pub created_at: String,
+}
+
+/// An archived version without its html, for the version picker.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct PreviewVersionMeta {
+    pub version: u32,
+    pub created_at: String,
 }
 
 /// Metadata-only projection for the history rail (`list_previews`) - omits
@@ -89,6 +126,10 @@ pub struct PreviewMeta {
     pub created_at: String,
     #[serde(default)]
     pub published: Option<PublishedLink>,
+    /// Archived versions behind `version`, newest first. Empty for a preview
+    /// pushed once, and for any entry a peer running an older build mirrors in.
+    #[serde(default)]
+    pub versions: Vec<PreviewVersionMeta>,
 }
 
 impl From<&PreviewSnapshot> for PreviewMeta {
@@ -102,6 +143,11 @@ impl From<&PreviewSnapshot> for PreviewMeta {
             version: s.version,
             created_at: s.created_at.clone(),
             published: s.published.clone(),
+            versions: s
+                .previous
+                .iter()
+                .map(|p| PreviewVersionMeta { version: p.version, created_at: p.created_at.clone() })
+                .collect(),
         }
     }
 }
@@ -191,13 +237,22 @@ fn push_at(
 
     if let Some(slug) = slug.filter(|s| !s.is_empty()) {
         if let Some(existing) = list.iter_mut().find(|s| s.slug == slug) {
-            existing.title = title;
-            existing.html = html;
+            let replaced_at = std::mem::replace(&mut existing.created_at, now_rfc3339());
+            existing.previous.insert(
+                0,
+                PreviousVersion {
+                    version: existing.version,
+                    title: std::mem::replace(&mut existing.title, title),
+                    html: std::mem::replace(&mut existing.html, html),
+                    created_at: replaced_at,
+                },
+            );
+            existing.previous.truncate(KEEP_PREVIOUS_VERSIONS);
             existing.source = source;
             existing.session_id = session_id;
             existing.version += 1;
-            existing.created_at = now_rfc3339();
             let id = existing.id.clone();
+            trim_to_budget(&mut list);
             write_atomic(path, &list);
             return Ok(id);
         }
@@ -214,6 +269,7 @@ fn push_at(
             version: 1,
             created_at: now_rfc3339(),
             published: None,
+            previous: Vec::new(),
         });
         write_atomic(path, &list);
         return Ok(id);
@@ -233,6 +289,7 @@ fn push_at(
         version: 1,
         created_at: now_rfc3339(),
         published: None,
+        previous: Vec::new(),
     });
     write_atomic(path, &list);
     Ok(id)
@@ -256,6 +313,29 @@ fn evict_if_at_cap(list: &mut Vec<PreviewSnapshot>) {
             oldest.id, oldest.slug,
         );
         list.remove(idx);
+    }
+}
+
+/// Drops archived versions, oldest first across every preview, until the html the
+/// store holds fits [`MAX_STORE_HTML_BYTES`]. Current pages are never dropped
+/// here; the 30-preview cap and the 2MB push cap already bound those.
+fn trim_to_budget(list: &mut [PreviewSnapshot]) {
+    let held = |l: &[PreviewSnapshot]| -> usize {
+        l.iter().map(|s| s.html.len() + s.previous.iter().map(|p| p.html.len()).sum::<usize>()).sum()
+    };
+    while held(list) > MAX_STORE_HTML_BYTES {
+        let oldest = list
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.previous.last().map(|p| (i, p.created_at.clone())))
+            .min_by(|a, b| a.1.cmp(&b.1));
+        let Some((i, _)) = oldest else { return };
+        let dropped = list[i].previous.pop();
+        log::info!(
+            "preview-history: html budget reached, dropping v{} of {}",
+            dropped.map(|p| p.version).unwrap_or(0),
+            list[i].slug,
+        );
     }
 }
 
@@ -300,6 +380,29 @@ pub fn get(id: &str) -> Option<PreviewSnapshot> {
 
 fn get_at(path: &Path, id: &str) -> Option<PreviewSnapshot> {
     load_list(path).into_iter().find(|s| s.id == id)
+}
+
+/// What `get_preview` returns: the snapshot as one page, with `previous`
+/// emptied so a client never receives every archived version at once. With
+/// `version` set, that archived page's title, html, version and timestamp stand
+/// in for the current ones and `published` is cleared, since the link belongs
+/// to the latest page. `None` when the id or that version is gone.
+pub fn get_view(id: &str, version: Option<u32>) -> Option<PreviewSnapshot> {
+    let path = store_path()?;
+    get_view_at(&path, id, version)
+}
+
+fn get_view_at(path: &Path, id: &str, version: Option<u32>) -> Option<PreviewSnapshot> {
+    let mut snap = get_at(path, id)?;
+    let previous = std::mem::take(&mut snap.previous);
+    let Some(v) = version.filter(|v| *v != snap.version) else { return Some(snap) };
+    let old = previous.into_iter().find(|p| p.version == v)?;
+    snap.title = old.title;
+    snap.html = old.html;
+    snap.version = old.version;
+    snap.created_at = old.created_at;
+    snap.published = None;
+    Some(snap)
 }
 
 /// Records `id`'s claude.ai link and broadcasts the refreshed metadata on the
@@ -402,6 +505,91 @@ mod tests {
         )
         .unwrap();
         assert_eq!(list_at(&path).len(), 1);
+    }
+
+    #[test]
+    fn a_replace_archives_the_page_it_overwrites() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        let id = push_at(&path, "one".into(), Some("m".into()), "<p>1</p>".into(), "chat".into(), None).unwrap();
+        push_at(&path, "two".into(), Some("m".into()), "<p>2</p>".into(), "chat".into(), None).unwrap();
+
+        let meta = &list_at(&path)[0];
+        assert_eq!(meta.version, 2);
+        assert_eq!(meta.versions.iter().map(|v| v.version).collect::<Vec<_>>(), vec![1]);
+
+        let old = get_view_at(&path, &id, Some(1)).unwrap();
+        assert_eq!((old.html.as_str(), old.title.as_str(), old.version), ("<p>1</p>", "one", 1));
+        let latest = get_view_at(&path, &id, None).unwrap();
+        assert_eq!((latest.html.as_str(), latest.version), ("<p>2</p>", 2));
+        // Asking for the current version by number is the latest page too.
+        assert_eq!(get_view_at(&path, &id, Some(2)).unwrap().html, "<p>2</p>");
+    }
+
+    #[test]
+    fn only_the_newest_previous_versions_are_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        let id = push_at(&path, "t".into(), Some("m".into()), "<p>1</p>".into(), "chat".into(), None).unwrap();
+        for n in 2..=(KEEP_PREVIOUS_VERSIONS as u32 + 4) {
+            push_at(&path, "t".into(), Some("m".into()), format!("<p>{n}</p>"), "chat".into(), None).unwrap();
+        }
+        let meta = &list_at(&path)[0];
+        let latest = KEEP_PREVIOUS_VERSIONS as u32 + 4;
+        assert_eq!(meta.version, latest);
+        let kept: Vec<u32> = meta.versions.iter().map(|v| v.version).collect();
+        assert_eq!(kept, (latest - KEEP_PREVIOUS_VERSIONS as u32..latest).rev().collect::<Vec<_>>(), "newest first, oldest dropped");
+        assert!(get_view_at(&path, &id, Some(1)).is_none(), "a dropped version is gone");
+    }
+
+    #[test]
+    fn a_view_never_carries_the_archive_or_an_old_pages_publish_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        let id = push_at(&path, "a".into(), Some("m".into()), "<p>1</p>".into(), "chat".into(), None).unwrap();
+        push_at(&path, "b".into(), Some("m".into()), "<p>2</p>".into(), "chat".into(), None).unwrap();
+        let link = PublishedLink { url: "https://claude.ai/artifact/AB".into(), version: 2, account: "Joe".into(), published_at: "now".into() };
+        set_published_at(&path, &id, link.clone()).unwrap();
+
+        assert!(get_view_at(&path, &id, None).unwrap().previous.is_empty());
+        let old = get_view_at(&path, &id, Some(1)).unwrap();
+        assert!(old.previous.is_empty());
+        assert_eq!(old.published, None);
+        assert_eq!(get_view_at(&path, &id, None).unwrap().published, Some(link));
+    }
+
+    #[test]
+    fn the_html_budget_drops_the_oldest_archived_version_across_previews() {
+        let page = |tag: &str, created: &str| PreviousVersion { version: 1, title: tag.into(), html: "x".repeat(MAX_STORE_HTML_BYTES / 3), created_at: created.into() };
+        let snap = |slug: &str, prev: Vec<PreviousVersion>| PreviewSnapshot {
+            id: slug.into(), slug: slug.into(), title: slug.into(), html: "<p></p>".into(), source: "chat".into(),
+            session_id: None, version: 2, created_at: "2026-02-01T00:00:00.000Z".into(), published: None, previous: prev,
+        };
+        let mut list = vec![
+            snap("new", vec![page("n", "2026-01-03T00:00:00.000Z"), page("n-old", "2026-01-02T00:00:00.000Z")]),
+            snap("older", vec![page("o", "2026-01-01T00:00:00.000Z")]),
+        ];
+        trim_to_budget(&mut list);
+        // Three third-budget pages plus the current ones overflow; only the single oldest one is dropped.
+        assert_eq!(list[1].previous.len(), 0);
+        assert_eq!(list[0].previous.len(), 2);
+    }
+
+    #[test]
+    fn a_history_file_written_before_versions_existed_loads_with_no_archive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        std::fs::write(
+            &path,
+            r#"[{"id":"a","slug":"s","title":"t","html":"<p>now</p>","source":"chat","session_id":null,"version":3,"created_at":"2026-01-01T00:00:00.000Z"}]"#,
+        )
+        .unwrap();
+        assert!(list_at(&path)[0].versions.is_empty());
+        assert_eq!(get_view_at(&path, "a", None).unwrap().html, "<p>now</p>");
+        assert!(get_view_at(&path, "a", Some(2)).is_none());
+        // Its history starts at the next push.
+        push_at(&path, "t2".into(), Some("s".into()), "<p>next</p>".into(), "chat".into(), None).unwrap();
+        assert_eq!(list_at(&path)[0].versions.iter().map(|v| v.version).collect::<Vec<_>>(), vec![3]);
     }
 
     #[test]

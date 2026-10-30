@@ -38,8 +38,9 @@ impl PersistentClient {
 
     /// Full preview snapshot (html included) by id. `session_id` is the chat
     /// the panel is showing: it routes the call to the host for a mirrored chat.
-    pub async fn get_preview(&self, id: &str, session_id: Option<&str>) -> Result<Value, ClientError> {
-        self.call("get_preview", get_preview_params(id, session_id)).await
+    /// `version` picks an archived page; `None` is the latest.
+    pub async fn get_preview(&self, id: &str, session_id: Option<&str>, version: Option<u32>) -> Result<Value, ClientError> {
+        self.call("get_preview", get_preview_params(id, session_id, version)).await
     }
 
     /// One raster image off the HOST's disk for a chat mirrored from a paired
@@ -58,11 +59,15 @@ fn list_previews_params(session_id: Option<&str>) -> Value {
     }
 }
 
-fn get_preview_params(id: &str, session_id: Option<&str>) -> Value {
-    match session_id {
-        Some(sid) => json!({"id": id, "session_id": sid}),
-        None => json!({"id": id}),
+fn get_preview_params(id: &str, session_id: Option<&str>, version: Option<u32>) -> Value {
+    let mut params = json!({"id": id});
+    if let Some(sid) = session_id {
+        params["session_id"] = json!(sid);
     }
+    if let Some(v) = version {
+        params["version"] = json!(v);
+    }
+    params
 }
 
 #[cfg(test)]
@@ -73,7 +78,8 @@ mod tests {
     fn preview_params_carry_the_session_id_the_daemon_routes_on() {
         assert_eq!(list_previews_params(Some("s1")), json!({"session_id": "s1"}));
         assert_eq!(list_previews_params(None), Value::Null);
-        assert_eq!(get_preview_params("p1", Some("s1")), json!({"id": "p1", "session_id": "s1"}));
-        assert_eq!(get_preview_params("p1", None), json!({"id": "p1"}));
+        assert_eq!(get_preview_params("p1", Some("s1"), None), json!({"id": "p1", "session_id": "s1"}));
+        assert_eq!(get_preview_params("p1", None, None), json!({"id": "p1"}));
+        assert_eq!(get_preview_params("p1", Some("s1"), Some(3)), json!({"id": "p1", "session_id": "s1", "version": 3}));
     }
 }

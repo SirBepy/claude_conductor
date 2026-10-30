@@ -772,7 +772,12 @@ export class HttpTransport implements Transport {
       }
       case "get_preview": {
         const sid = args.sessionId ?? args.session_id;
-        return this.rpc<T>("get_preview", sid ? { id: args.id, session_id: sid } : { id: args.id });
+        // An archived version rides along only when one is named.
+        return this.rpc<T>("get_preview", {
+          id: args.id,
+          ...(sid ? { session_id: sid } : {}),
+          ...(args.version != null ? { version: args.version } : {}),
+        });
       }
       // One raster image off the daemon host's disk (ask_user_question option
       // pictures, status-bar images). The daemon confines the path to project

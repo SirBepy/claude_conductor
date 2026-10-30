@@ -35,7 +35,7 @@ async function openMoreMenu(sessionId) {
   document.body.appendChild(root);
   tab = mountPreviewTab(root, { isOpen: () => true, isVisible: () => true, requestOpen() {}, markOpenFor() {} });
   tab.setSessionScope(sessionId);
-  await vi.waitFor(() => expect(root.querySelector(".pv-ver")?.textContent).toBeTruthy());
+  await vi.waitFor(() => expect(root.querySelector(".pv-name")?.textContent).not.toBe("No previews yet"));
   root.querySelector('[data-act="more"]').click();
   await vi.waitFor(() => expect(document.querySelector(".smore-item")).not.toBeNull());
 }

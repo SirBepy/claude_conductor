@@ -42,15 +42,17 @@ pub async fn list_previews(
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
-/// Full preview snapshot (html included) by id, for the iframe render.
+/// Full preview snapshot (html included) by id, for the iframe render. `version`
+/// picks an archived page (`PreviewMeta.versions`); absent is the latest.
 #[tauri::command]
 pub async fn get_preview(
     id: String,
     session_id: Option<String>,
+    version: Option<u32>,
     state: State<'_, AppState>,
 ) -> Result<PreviewSnapshot, String> {
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
-    let v = client.get_preview(&id, session_id.as_deref()).await.map_err(|e| e.to_string())?;
+    let v = client.get_preview(&id, session_id.as_deref(), version).await.map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
