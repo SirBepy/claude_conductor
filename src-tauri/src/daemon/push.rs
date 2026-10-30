@@ -21,6 +21,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use base64ct::{Base64UrlUnpadded, Encoding};
@@ -113,6 +114,18 @@ pub struct PushManager {
     /// session_id -> last prompt id we fired for, so a re-registered prompt
     /// (same id) can't double-buzz. A genuinely new prompt has a new id.
     last_fired: Mutex<HashMap<String, String>>,
+    /// Set for a test/dev daemon that reads the production app-data dir: it
+    /// holds the real phone's handle but must never buzz or clear it.
+    outbound_off: AtomicBool,
+}
+
+/// True for a daemon with its own instance suffix (wdio, `-dev`, live-verify)
+/// that still points at the shared default data dir. Such a daemon loads the
+/// production `push-fcm-handles.json`, so a fake chat blocking in a test would
+/// buzz Joe's real phone. An isolated `CC_DATA_DIR` has its own handle file, so
+/// it stays enabled and phone-verify can still exercise the push path.
+pub fn is_isolated_on_shared_data(instance_suffix: &str, data_dir_override: Option<&str>) -> bool {
+    !instance_suffix.is_empty() && data_dir_override.map_or(true, str::is_empty)
 }
 
 impl PushManager {
@@ -139,7 +152,13 @@ impl PushManager {
                 .build()
                 .unwrap_or_default(),
             last_fired: Mutex::new(HashMap::new()),
+            outbound_off: AtomicBool::new(false),
         })
+    }
+
+    /// Stops every outgoing buzz and clear; registration and storage keep working.
+    pub fn disable_outbound(&self) {
+        self.outbound_off.store(true, Ordering::Relaxed);
     }
 
     pub fn vapid_public(&self) -> &str {
@@ -282,6 +301,9 @@ impl PushManager {
         prompt_id: String,
         show_chat_name: bool,
     ) {
+        if self.outbound_off.load(Ordering::Relaxed) {
+            return;
+        }
         if crate::daemon::idle::idle_secs() < IDLE_THRESHOLD_SECS {
             return; // Joe is at the desk - the in-app card already surfaces it.
         }
@@ -301,6 +323,9 @@ impl PushManager {
     /// when this daemon buzzed for the chat, so an answered prompt that never
     /// pushed costs no relay call. Best-effort, like the buzz itself.
     pub async fn notify_resolved(self: Arc<Self>, session_id: String) {
+        if self.outbound_off.load(Ordering::Relaxed) {
+            return;
+        }
         if self.last_fired.lock().unwrap().remove(&session_id).is_none() {
             return;
         }
@@ -862,6 +887,28 @@ mod tests {
         pm.register_fcm_handle(handle("a"));
         pm.clone().notify_resolved("sid".into()).await;
         clear.assert_async().await;
+    }
+
+    #[test]
+    fn only_a_suffixed_daemon_on_the_shared_data_dir_is_isolated() {
+        assert!(is_isolated_on_shared_data("-wdio", None));
+        assert!(is_isolated_on_shared_data("-dev", Some("")));
+        assert!(!is_isolated_on_shared_data("", None), "production daemon");
+        assert!(!is_isolated_on_shared_data("-phone", Some("C:/tmp/scratch")), "own data dir, own handles");
+    }
+
+    #[tokio::test]
+    async fn a_disabled_manager_sends_no_clear_and_no_buzz() {
+        let mut server = mockito::Server::new_async().await;
+        let any = server.mock("POST", mockito::Matcher::Any).expect(0).create_async().await;
+        let dir = tempfile::tempdir().unwrap();
+        let pm = PushManager::load_with_relay(dir.path().to_path_buf(), &server.url());
+        pm.register_fcm_handle(handle("a"));
+        pm.note_fired_for_test("sid", "p1");
+        pm.disable_outbound();
+        pm.clone().notify_resolved("sid".into()).await;
+        pm.clone().maybe_notify_blocked(Some("sid".into()), "My chat".into(), "p2".into(), true).await;
+        any.assert_async().await;
     }
 
     #[tokio::test]

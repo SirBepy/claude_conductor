@@ -266,7 +266,16 @@ impl DaemonState {
     /// Load the Web Push manager (VAPID key + persisted phone subscriptions
     /// under `app_data`) and install it. Idempotent: a second call is ignored.
     pub fn init_push(&self, app_data: std::path::PathBuf) {
-        let _ = self.push.set(PushManager::load(app_data));
+        let pm = PushManager::load(app_data);
+        let data_dir_override = std::env::var("CC_DATA_DIR").ok();
+        if crate::daemon::push::is_isolated_on_shared_data(
+            &crate::daemon::instance::instance_suffix(),
+            data_dir_override.as_deref(),
+        ) {
+            log::info!("[push] test/dev daemon on the shared data dir: outgoing pushes disabled");
+            pm.disable_outbound();
+        }
+        let _ = self.push.set(pm);
     }
 
     /// Fire a "Claude is blocked on you" push for a freshly-registered prompt.
