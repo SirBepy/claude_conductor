@@ -493,3 +493,17 @@ describe("HeldMessages - reconcile on attach", () => {
     expect(held.hasItemsForActive()).toBe(true);
   });
 });
+
+describe("HeldMessages - sendNow's trailing reconcile", () => {
+  it("logs a failed wait for the re-pushed adds instead of leaving an unhandled rejection", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { held } = makeHarness();
+    held.sync.addsSettled = () => Promise.reject(new Error("adds wait broke"));
+
+    await held.sendNow();
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(warn).toHaveBeenCalledWith("[held] post-restage reconcile failed:", expect.any(Error));
+    warn.mockRestore();
+  });
+});

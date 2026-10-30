@@ -2,7 +2,7 @@ import type { RenderedMessage } from "./chat-transforms";
 import { extractAttachedFilePaths } from "./chat-transforms";
 import { toolSummary, canonicalTool, toolLabel } from "./tool-meta";
 import { escapeHtml } from "../escape-html";
-import { elidedAttrs, elidedLabel, elidedRefOf, type ElidedImageRef } from "./elided-image";
+import { elidedAttrs, elidedInnerHtml, elidedRefOf, type ElidedImageRef } from "./elided-image";
 
 /** One screenshot surfaced from a turn's tool_result image outputs. */
 export interface ScreenshotShot {
@@ -128,7 +128,7 @@ export function collectScreenshotShots(
 function screenshotThumbHtml(shot: ScreenshotShot, index: number): string {
   const titleAttr = escapeHtml(`${shot.title} — ${shot.agentTag}`);
   if (shot.elided) {
-    return `<div class="sent-attachment-thumb screenshot-thumb elided-thumb" data-agent="${shot.agentKind}" data-shot-index="${index}" title="${titleAttr}" ${elidedAttrs(shot.elided)}><span class="screenshot-agent-tag">${escapeHtml(shot.agentTag)}</span><span class="elided-thumb-body"><i class="ph ph-image"></i><span class="elided-image-label">${escapeHtml(elidedLabel(shot.elided))}</span></span></div>`;
+    return `<div class="sent-attachment-thumb screenshot-thumb elided-thumb" data-agent="${shot.agentKind}" data-shot-index="${index}" title="${titleAttr}" ${elidedAttrs(shot.elided)}><span class="screenshot-agent-tag">${escapeHtml(shot.agentTag)}</span><span class="elided-thumb-body">${elidedInnerHtml(shot.elided)}</span></div>`;
   }
   // base64's alphabet can't contain &<>"', so escaping shot.data (can be
   // multiple MB, and there's one of these per thumbnail in the row) would

@@ -2,7 +2,6 @@
 // selectSession (ai_todo 870): changeCharacterForSession, carrySessionSettings,
 // applyAccountMove and changeAccountForSession. Pure move, no behavior change.
 
-import { showToast } from "../../shared/toast";
 import type { Instance } from "../../types/ipc.generated";
 import { state } from "./state";
 import { renderSidebar, refreshSessions } from "./sidebar";
@@ -17,7 +16,8 @@ import { api } from "../../shared/api";
 import { openChangeCharacterModal } from "../../shared/change-character-modal";
 import { openChangeAccountModal } from "../../shared/change-account-modal";
 import { isAutoAccept, setAutoAccept } from "./permission-modal";
-import { capitalize, getCachedAccount } from "../../shared/chat/rate-limit-banner";
+import { getCachedAccount } from "../../shared/chat/rate-limit-banner";
+import { moveChatToAccount } from "./account-move";
 import { loadDraft, moveComposerDraft } from "../../shared/chat/composer-persistence";
 import { setComposerDraft, clearComposerDraft } from "../../shared/chat/session-draft-sync";
 
@@ -143,13 +143,10 @@ export async function changeAccountForSession(
   if (!sess) return;
   const picked = await openChangeAccountModal({ currentId: sess.account_id ?? null, title: "Change account" });
   if (!picked || picked === sess.account_id) return;
-  try {
-    const newId = await api.moveSessionToAccount(sessionId, picked);
-    const label = capitalize(getCachedAccount(picked)?.label ?? "the other account");
-    showToast(`Now on ${label}.`);
-    await applyAccountMove(sessionId, newId, selectSession);
-  } catch (e) {
-    console.error("[active-session] change account failed", e);
-    showToast("Failed to move chat to that account.");
-  }
+  await moveChatToAccount(
+    sessionId,
+    picked,
+    getCachedAccount(picked)?.label ?? "the other account",
+    (newId) => applyAccountMove(sessionId, newId, selectSession),
+  );
 }
