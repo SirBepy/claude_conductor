@@ -216,7 +216,16 @@ fn resolve_id_in(items: Vec<ScheduledItem>, wanted: &str) -> Result<String, Stri
         .map(|it| it.id.clone());
     match resolve_unique_prefix(pending, wanted) {
         Ok(id) => Ok(id),
-        Err(not_found) => {
+        Err(err) => {
+            // The settled lookup only answers a prefix no Pending item matches; an
+            // ambiguous Pending prefix keeps its own "more characters" error.
+            let pending_hit = items
+                .iter()
+                .any(|it| matches!(it.status, ScheduledStatus::Pending) && it.id.starts_with(wanted));
+            if pending_hit {
+                return Err(err);
+            }
+            let not_found = err;
             let settled: Vec<&ScheduledItem> = items
                 .iter()
                 .filter(|it| !matches!(it.status, ScheduledStatus::Pending))
@@ -380,6 +389,17 @@ mod tests {
         ];
         let err = resolve_id_in(items, "cccc").unwrap_err();
         assert_eq!(err, "no scheduled item matching \"cccc\"");
+    }
+
+    #[test]
+    fn an_ambiguous_pending_prefix_is_not_masked_by_one_settled_match() {
+        let items = vec![
+            item_with("dddd1111", ScheduledStatus::Pending),
+            item_with("dddd2222", ScheduledStatus::Pending),
+            item_with("dddd3333", ScheduledStatus::Sent),
+        ];
+        let err = resolve_id_in(items, "dddd").unwrap_err();
+        assert!(err.contains("more characters"), "got {err}");
     }
 
     // --- build_item: the whole decision surface, pure (no store I/O), so
