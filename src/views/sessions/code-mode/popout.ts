@@ -4,6 +4,7 @@
 // Tauri events; the Code window streams back mention / focus / dock asks.
 
 import { invoke } from "../../../shared/ipc";
+import { CHATS_WINDOW_LABEL } from "../../../shared/window-roles";
 import type { FileEditView } from "../../../shared/chat/file-edits";
 import type { Instance } from "../../../types/ipc.generated";
 import {
@@ -53,7 +54,7 @@ function fromWire(t: WireTarget): CodeModeTarget {
 
 function myLabel(): string {
   return (window as unknown as { __TAURI__?: { window?: { getCurrentWindow: () => { label: string } } } })
-    .__TAURI__?.window?.getCurrentWindow().label ?? "main";
+    .__TAURI__?.window?.getCurrentWindow().label ?? CHATS_WINDOW_LABEL;
 }
 
 function listen<T>(event: string, cb: (payload: T) => void): void {
@@ -215,7 +216,7 @@ async function fallbackOpen(sessionId: string): Promise<void> {
   const rows = await invoke<Instance[]>("list_instances").catch(() => [] as Instance[]);
   const row = rows.find((r) => r.session_id === sessionId);
   if (!row?.cwd || windowState || windowSession !== sessionId) return;
-  windowState = { sessionId, owner: "main", cwd: String(row.cwd), title: row.name ?? "", busy: row.busy, line: "" };
+  windowState = { sessionId, owner: CHATS_WINDOW_LABEL, cwd: String(row.cwd), title: row.name ?? "", busy: row.busy, line: "" };
   openInWindow({ kind: "default" }, null);
 }
 

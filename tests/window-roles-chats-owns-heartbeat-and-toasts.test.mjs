@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 // The Chats window is the app's one desktop window. Two duties used to belong
 // to the retired "main" window and silently went unowned: the renderer-crash
 // heartbeat (gated on label "main") and the daemon disconnected/reconnected
@@ -12,7 +14,7 @@ const { onDaemonStatusMock, showToastMock } = vi.hoisted(() => ({
 vi.mock("../src/shared/api.ts", () => ({ api: { onDaemonStatus: (cb) => onDaemonStatusMock(cb) } }));
 vi.mock("../src/shared/toast.ts", () => ({ showToast: (...a) => showToastMock(...a) }));
 
-const { runsRendererHeartbeat, ownsAppToasts, CHATS_WINDOW_LABEL } = await import(
+const { runsRendererHeartbeat, ownsAppToasts, isChatsWindow, CHATS_WINDOW_MODE_CLASS, CHATS_WINDOW_LABEL } = await import(
   "../src/shared/window-roles.ts"
 );
 const { wireDaemonStatusToasts } = await import("../src/shared/daemon-status-toast.ts");
@@ -30,6 +32,22 @@ describe("renderer heartbeat ownership", () => {
     expect(runsRendererHeartbeat("session-schedule")).toBe(false);
     expect(runsRendererHeartbeat("session-code")).toBe(false);
     expect(runsRendererHeartbeat(undefined)).toBe(false);
+  });
+});
+
+describe("isChatsWindow", () => {
+  it("follows the body class main.ts sets for the Chats window", () => {
+    document.body.className = "";
+    expect(isChatsWindow()).toBe(false);
+    document.body.classList.add("detached-mode");
+    expect(isChatsWindow()).toBe(false);
+    document.body.classList.add(CHATS_WINDOW_MODE_CLASS);
+    expect(isChatsWindow()).toBe(true);
+    document.body.className = "";
+  });
+
+  it("uses the class base.css styles the Chats window by", () => {
+    expect(CHATS_WINDOW_MODE_CLASS).toBe("chats-window-mode");
   });
 });
 

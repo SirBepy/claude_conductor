@@ -7,7 +7,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const showView = vi.fn();
+const openJarvisSafely = vi.fn();
 vi.mock("../src/shared/navigation.ts", () => ({ showView, getActiveView: () => "sessions" }));
+vi.mock("../src/shared/open-jarvis-safely.ts", () => ({ openJarvisSafely }));
 vi.mock("../src/shared/transport.ts", () => ({ isTauri: () => true }));
 vi.mock("../src/views/sessions/split-panels/split.css", () => ({}));
 vi.mock("../src/shared/app-rail.css", () => ({}));
@@ -16,6 +18,7 @@ const rail = await import("../src/shared/app-rail.ts");
 
 beforeEach(() => {
   showView.mockClear();
+  openJarvisSafely.mockClear();
   document.body.className = "";
   document.body.innerHTML = "";
 });
@@ -61,6 +64,14 @@ describe("handleRailClick", () => {
     host.innerHTML = rail.globalGroupHtml("sessions");
     expect(rail.handleRailClick(host.querySelector('[data-rail-go="settings"] i'))).toBe(true);
     expect(showView).toHaveBeenCalledWith("settings");
+  });
+
+  it("opens Jarvis through the shared safe opener", () => {
+    const host = document.createElement("div");
+    host.innerHTML = rail.globalGroupHtml("sessions");
+    expect(rail.handleRailClick(host.querySelector("[data-rail-jarvis] i"))).toBe(true);
+    expect(openJarvisSafely).toHaveBeenCalledTimes(1);
+    expect(showView).not.toHaveBeenCalled();
   });
 
   it("ignores clicks that are not on a rail control", () => {

@@ -33,7 +33,7 @@ import { triggerNewSessionGlobal, triggerNewSessionFavoriteGlobal } from "../vie
 import { showFavoritesStrip, hideFavoritesStrip } from "../views/sessions/favorites-strip";
 import { showView } from "./navigation";
 import { isRemote } from "./transport";
-import { ownsAppToasts } from "./window-roles";
+import { isChatsWindow, ownsAppToasts } from "./window-roles";
 import { wireDaemonStatusToasts } from "./daemon-status-toast";
 import { wireInitialFetches } from "./initial-render-gate";
 import { mountBootProgress } from "./boot-progress";
@@ -294,7 +294,7 @@ export function initBoot(): void {
   });
   // daemon-status-changed is an app-wide event, so one window owns its toasts
   // (see ownsAppToasts) or a single reconnect would toast over and over.
-  const ownsToasts = ownsAppToasts(document.body.classList.contains("chats-window-mode"), isRemote());
+  const ownsToasts = ownsAppToasts(isChatsWindow(), isRemote());
   wireDaemonStatusToasts(ownsToasts);
 
   // Discover available models from the API and update the model picker base.
