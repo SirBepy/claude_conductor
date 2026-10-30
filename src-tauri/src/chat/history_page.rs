@@ -11,12 +11,33 @@ use std::path::Path;
 /// this - `replay` (History view) and live events stay untouched.
 const TOOL_RESULT_PREVIEW_CHARS: usize = 4000;
 
+/// Base64 chars an image tool result may carry inline before `read_page`
+/// elides it. Small icons and thumbnails stay inline (a round trip to fetch
+/// them costs more than they weigh); a screenshot is hundreds of KB to MB.
+const IMAGE_INLINE_MAX_B64: usize = 32 * 1024;
+
 /// If `ev`'s output text exceeds the preview cap, replace it with a
 /// truncated copy carrying `output_truncated` + `full_seq` (this line's own
-/// byte offset, reused as `load_event_detail`'s lookup key). No-op for
-/// anything else (image output, short results, non-ToolResult events).
+/// byte offset, reused as `load_event_detail`'s lookup key). An image output
+/// above `IMAGE_INLINE_MAX_B64` is elided the same way: empty `data`, the
+/// media type kept, `output_bytes` carrying its approximate decoded size, so
+/// a screenshot-heavy page stays small and the bytes load on demand. No-op
+/// for anything else (short results, small images, non-ToolResult events).
 fn truncate_tool_result(ev: ChatEvent, line_offset: u64) -> ChatEvent {
     match ev {
+        ChatEvent::ToolResult { tool_use_id, output: ContentBlock::Image { mime, data }, is_error, timestamp, .. }
+            if data.len() > IMAGE_INLINE_MAX_B64 =>
+        {
+            ChatEvent::ToolResult {
+                tool_use_id,
+                output: ContentBlock::Image { mime, data: String::new() },
+                is_error,
+                timestamp,
+                output_truncated: true,
+                full_seq: Some(line_offset),
+                output_bytes: Some(data.len() as u64 / 4 * 3),
+            }
+        }
         ChatEvent::ToolResult { tool_use_id, output: ContentBlock::Text { text }, is_error, timestamp, .. }
             if text.len() > TOOL_RESULT_PREVIEW_CHARS =>
         {
@@ -30,6 +51,7 @@ fn truncate_tool_result(ev: ChatEvent, line_offset: u64) -> ChatEvent {
                 timestamp,
                 output_truncated: true,
                 full_seq: Some(line_offset),
+                output_bytes: None,
             }
         }
         other => other,
@@ -453,6 +475,77 @@ mod tests {
             }
             _ => panic!("expected untruncated tool_result"),
         }
+    }
+
+    fn tool_result_image_line(tool_use_id: &str, ts: i64, data: &str) -> String {
+        format!(
+            r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":{:?},"content":[{{"type":"image","source":{{"type":"base64","media_type":"image/png","data":{:?}}}}}]}}]}},"timestamp":{}}}"#,
+            tool_use_id, data, ts
+        )
+    }
+
+    #[test]
+    fn read_page_elides_large_screenshot_and_detail_loader_returns_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("shots.jsonl");
+        // 2MB of base64 per screenshot, five of them: a screenshot-heavy stretch.
+        let big_image = "A".repeat(2 * 1024 * 1024);
+        let mut lines = vec![user_line("take screenshots", 0)];
+        for i in 0..5 {
+            let id = format!("shot{i}");
+            lines.push(tool_use_line(&id, 1 + i));
+            lines.push(tool_result_image_line(&id, 1 + i, &big_image));
+        }
+        lines.push(assistant_line("done", 99));
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        write_jsonl(&p, &refs);
+        let file_bytes = std::fs::metadata(&p).unwrap().len();
+
+        let page = read_page(&p, None, 5).unwrap();
+        let page_bytes = serde_json::to_string(&page).unwrap().len();
+        eprintln!("MEASURE transcript={file_bytes}B page_json={page_bytes}B");
+        assert!(page_bytes < 50_000, "page carries {page_bytes} bytes");
+
+        let mut elided = 0;
+        for ev in &page.events {
+            if let ChatEvent::ToolResult { tool_use_id, output, output_truncated, full_seq, output_bytes, .. } = ev {
+                let ContentBlock::Image { mime, data } = output else { panic!("expected image output") };
+                assert_eq!(mime, "image/png");
+                assert!(data.is_empty(), "base64 must not ride the page");
+                assert!(*output_truncated);
+                // 2MB of base64 decodes to 1.5MB.
+                assert_eq!(*output_bytes, Some(1_572_864));
+                // The elided bytes come back through the same lookup text results use.
+                let full = read_single_event(&p, full_seq.expect("full_seq set"), tool_use_id).unwrap();
+                match full {
+                    ChatEvent::ToolResult { output: ContentBlock::Image { data, .. }, output_truncated, .. } => {
+                        assert!(!output_truncated);
+                        assert_eq!(data, big_image);
+                    }
+                    other => panic!("expected image detail, got {other:?}"),
+                }
+                elided += 1;
+            }
+        }
+        assert_eq!(elided, 5);
+    }
+
+    #[test]
+    fn read_page_keeps_a_small_image_inline() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("small-shot.jsonl");
+        let lines = vec![tool_use_line("t1", 0), tool_result_image_line("t1", 1, "iVBORw0KGgo="), assistant_line("a0", 2)];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        write_jsonl(&p, &refs);
+        let page = read_page(&p, None, 5).unwrap();
+        let tr = page.events.iter().find_map(|e| match e {
+            ChatEvent::ToolResult { output, output_truncated, full_seq, .. } => Some((output.clone(), *output_truncated, *full_seq)),
+            _ => None,
+        });
+        assert_eq!(
+            tr,
+            Some((ContentBlock::Image { mime: "image/png".into(), data: "iVBORw0KGgo=".into() }, false, None))
+        );
     }
 
     #[test]

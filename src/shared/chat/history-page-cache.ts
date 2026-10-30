@@ -54,7 +54,9 @@ function stripImages(ev: ChatEvent): ChatEvent {
     if (!ev.content.some((b) => b.type === "image")) return ev;
     return { ...ev, content: ev.content.filter((b) => b.type !== "image") };
   }
-  if (ev.type === "tool_result" && ev.output.type === "image") {
+  // An elided placeholder (empty data) is already tiny and keeps its
+  // full_seq, so the cached page can still lazy-load it; only real bytes go.
+  if (ev.type === "tool_result" && ev.output.type === "image" && ev.output.data !== "") {
     const stand: ContentBlock = { type: "text", text: "[image]" };
     return { ...ev, output: stand };
   }

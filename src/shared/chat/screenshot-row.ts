@@ -2,14 +2,17 @@ import type { RenderedMessage } from "./chat-transforms";
 import { extractAttachedFilePaths } from "./chat-transforms";
 import { toolSummary, canonicalTool, toolLabel } from "./tool-meta";
 import { escapeHtml } from "../escape-html";
+import { elidedAttrs, elidedLabel, elidedRefOf, type ElidedImageRef } from "./elided-image";
 
 /** One screenshot surfaced from a turn's tool_result image outputs. */
 export interface ScreenshotShot {
   /** tool_use id whose result produced this screenshot. */
   toolUseId: string;
   mime: string;
-  /** base64-encoded image bytes. */
+  /** base64-encoded image bytes. Empty while `elided` is set. */
   data: string;
+  /** Set while a history page left the bytes out; the loader clears it. */
+  elided?: ElidedImageRef;
   /** Short label shown as the gallery header title + thumbnail title attr. */
   title: string;
   /** "main" for a top-level call, "sub" for any subagent's call (styling hook). */
@@ -109,6 +112,7 @@ export function collectScreenshotShots(
       toolUseId: tid,
       mime: out.mime,
       data: out.data,
+      elided: elidedRefOf(m) ?? undefined,
       title,
       agentKind,
       agentTag,
@@ -123,6 +127,9 @@ export function collectScreenshotShots(
 
 function screenshotThumbHtml(shot: ScreenshotShot, index: number): string {
   const titleAttr = escapeHtml(`${shot.title} — ${shot.agentTag}`);
+  if (shot.elided) {
+    return `<div class="sent-attachment-thumb screenshot-thumb elided-thumb" data-agent="${shot.agentKind}" data-shot-index="${index}" title="${titleAttr}" ${elidedAttrs(shot.elided)}><span class="screenshot-agent-tag">${escapeHtml(shot.agentTag)}</span><span class="elided-thumb-body"><i class="ph ph-image"></i><span class="elided-image-label">${escapeHtml(elidedLabel(shot.elided))}</span></span></div>`;
+  }
   // base64's alphabet can't contain &<>"', so escaping shot.data (can be
   // multiple MB, and there's one of these per thumbnail in the row) would
   // scan every payload for zero benefit.

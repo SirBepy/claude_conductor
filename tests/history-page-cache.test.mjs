@@ -110,6 +110,19 @@ describe("phone history page cache", () => {
     expect(stored.events[1].output).toEqual({ type: "text", text: "[image]" });
   });
 
+  it("keeps an elided image placeholder so the cached page can still lazy-load it", async () => {
+    const elided = {
+      type: "tool_result", tool_use_id: "t1", is_error: false, timestamp: 0,
+      output: { type: "image", mime: "image/png", data: "" },
+      output_truncated: true, full_seq: 4200, output_bytes: 1572864,
+    };
+    invoke.mockResolvedValueOnce(page([elided]));
+    await (await reload()).loadInitial("s1");
+    const stored = JSON.parse(localStorage.getItem("cc_history_page_v1:s1"));
+    expect(stored.events[0].output).toEqual({ type: "image", mime: "image/png", data: "" });
+    expect(stored.events[0].full_seq).toBe(4200);
+  });
+
   it("does not store a page over the byte cap", async () => {
     invoke.mockResolvedValueOnce(page([assistantEvent("x".repeat(200_000))]));
     await (await reload()).loadInitial("big");

@@ -205,6 +205,9 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
         ts,
         outputTruncated: ev.output_truncated,
         fullSeq: ev.full_seq !== null ? Number(ev.full_seq) : undefined,
+        // Truthy test, not `!== null`: a page cached before this field existed
+        // (history-page-cache) or served by an older peer omits it entirely.
+        outputBytes: ev.output_bytes ? Number(ev.output_bytes) : undefined,
       };
     case "notification":
       if (ev.kind === CHAIN_DIVIDER_KIND) {

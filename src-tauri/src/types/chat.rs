@@ -113,6 +113,11 @@ pub enum ChatEvent {
         /// - reuses `read_page`'s existing pagination-cursor offset.
         #[serde(default)]
         full_seq: Option<u64>,
+        /// Set by `read_page` when `output` is an image whose base64 was elided
+        /// to an empty `data`: the approximate decoded size, so the placeholder
+        /// can say how big the real image is before it loads.
+        #[serde(default)]
+        output_bytes: Option<u64>,
     },
     Notification {
         kind: String,

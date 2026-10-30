@@ -199,6 +199,9 @@ export interface RenderedMessage {
    *  content via `load_event_detail`, keyed on `fullSeq` + `tool_use_id`. */
   outputTruncated?: boolean;
   fullSeq?: number;
+  /** Approximate decoded size of an image `read_page` elided (empty `data`),
+   *  shown on its placeholder - see elided-image.ts. */
+  outputBytes?: number;
   /** Session id of the `/respawn` predecessor this event was spliced in
    *  from (event-store.ts loadOlder), so "Load full output" reads that
    *  transcript instead of the open chat's. Unset for native events. */
