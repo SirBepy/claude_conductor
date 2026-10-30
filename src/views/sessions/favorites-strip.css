@@ -1,19 +1,16 @@
-/* Favourite slots floating just above the composer box while Ctrl+Shift is
-   held (favorites-strip.ts). Tiles are the Pick project rail's .pp-fav-slot,
-   restyled taller so each one can carry its project name.
+/* Favourite slots floating while Ctrl+Shift is held (favorites-strip.ts).
+   Tiles are the Pick project rail's .pp-fav-slot, restyled taller so each one
+   can carry its project name.
 
    An overlay, never in flow: the strip shows on the very keydown, so
    Ctrl+Shift+Arrow word selection opens and closes it in one blink, and an
-   in-flow strip would make the composer jump each time. */
-.composer-shell:has(> .favorites-strip) {
-  position: relative;
-}
+   in-flow strip would make the composer jump each time. left/width/bottom are
+   set inline to sit above the question card or composer; z-index clears the
+   viewport-mode prompt card host (1000). */
 .favorites-strip {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(100% + 6px);
-  z-index: 3;
+  position: fixed;
+  box-sizing: border-box;
+  z-index: 1100;
   display: flex;
   gap: 6px;
   padding: 6px;

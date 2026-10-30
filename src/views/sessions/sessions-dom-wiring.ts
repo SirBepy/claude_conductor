@@ -9,7 +9,6 @@ import { mountFabDial } from "./fab-dial";
 import { enterCodeMode } from "./code-mode/entry";
 import { initHeaderMerge } from "./mobile-header-merge";
 import { startNewSession, launchNewSession, discardDraft, resumeDraft, resumeParkedDraft } from "./pending-flow";
-import { showFavoritesStrip, hideFavoritesStrip } from "./favorites-strip";
 import { discardComposerDraft } from "../../shared/chat/composer";
 import { saveParkedDrafts } from "./pending-draft-storage";
 import { selectSession } from "./active-session";
@@ -28,7 +27,6 @@ import {
   selectSessionByIndex,
   closeFocusedChat,
   toggleWrapUpOnDoneForFocusedChat,
-  triggerNewSessionFavoriteGlobal,
   openFocusedChatDashboard,
 } from "./session-controls";
 
@@ -117,17 +115,16 @@ export async function wireOverflowMenu(
 }
 
 /** Registers the chats-view keyboard shortcuts (numbered chat jump,
- * close-chat), the ctrl-held sidebar hint class and the ctrl+shift-held
- * favourites strip. Returns a dispose function that unregisters everything.
- * Ctrl+Shift+1-9 (new chat from a favourite project slot) is registered
- * globally in boot.ts instead, since it must work even when this view isn't
- * mounted. */
+ * close-chat) and the ctrl-held sidebar hint class. Returns a dispose function
+ * that unregisters everything. Ctrl+Shift+1-9 (new chat from a favourite
+ * project slot) and the favourites strip shown while Ctrl+Shift is held live
+ * in boot.ts instead, since they must work even when this view isn't mounted. */
 // > kbd-hint-in's 160ms animation + its 120ms max stagger delay (sessions.css).
 const KBD_HINT_ENTER_MS = 300;
 // Haiku, Sonnet, Opus, Fable: shortcuts.ts declares set-model-1..4.
 const MODEL_SLOTS = 4;
 
-export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): () => void {
+export function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
   for (let i = 0; i < 9; i++) {
     const slot = i + 1;
     shortcuts.register(`open-chat-${slot}`, () => selectSessionByIndex(i));
@@ -158,11 +155,6 @@ export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): (
       clearTimeout(enterTimer);
       listEl.classList.remove("kbd-hint-entering");
     }
-    if (hint.favorites) {
-      showFavoritesStrip(pane, triggerNewSessionFavoriteGlobal);
-    } else {
-      hideFavoritesStrip(pane);
-    }
   });
 
   return () => {
@@ -176,7 +168,6 @@ export function wireKeyboardShortcuts(listEl: HTMLElement, pane: HTMLElement): (
     shortcuts.unregister("effort-down");
     clearTimeout(enterTimer);
     unlistenModifierHint();
-    hideFavoritesStrip(pane);
   };
 }
 
