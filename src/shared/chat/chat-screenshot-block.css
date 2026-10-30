@@ -112,6 +112,6 @@
   opacity: 0.75;
 }
 .screenshot-thumb.elided-thumb[data-elided-state="error"] {
-  border-color: var(--color-danger, #d9534f);
+  border-color: var(--color-danger);
 }
 
