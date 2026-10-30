@@ -6,7 +6,7 @@
 import { escapeHtml } from "../../shared/escape-html";
 import { basename } from "../../shared/path-utils";
 import { listen } from "../../shared/events";
-import { createFileSurface, type SurfaceFile } from "../../shared/chat/file-surface";
+import { createFileSurface, type FileSurfaceHandle, type SurfaceFile } from "../../shared/chat/file-surface";
 import { invoke } from "../../shared/ipc";
 import type { TextFileData } from "../../types/ipc.generated";
 import "../sessions/code-mode/code-mode-shell.css";
@@ -40,12 +40,9 @@ export function mountFileWindow(app: HTMLElement, first: { path: string; line: n
   const tools = app.querySelector<HTMLElement>(".cm-tools")!;
   const surfaceHost = app.querySelector<HTMLElement>(".fw-surface")!;
   const empty = app.querySelector<HTMLElement>(".cm-empty")!;
-  const surface = createFileSurface(surfaceHost, {
-    defaultView: "file",
-    toolsHost: tools,
-    canEdit: () => true,
-    openPath: (p) => open(p, null),
-  });
+  // Built on the first tab and dropped with the last one: a mounted editor
+  // keeps its 1.5 s disk poll running even while its host is hidden.
+  let surface: FileSurfaceHandle | null = null;
   const tabs: Tab[] = [];
   let active: string | null = null;
 
@@ -63,7 +60,18 @@ export function mountFileWindow(app: HTMLElement, first: { path: string; line: n
     tools.hidden = !tab;
     empty.hidden = !!tab;
     document.title = tab ? `${basename(tab.path)} - Files` : "Files";
-    if (tab) surface.show(tab.surface, "file", line ?? undefined);
+    if (tab) {
+      surface ??= createFileSurface(surfaceHost, {
+        defaultView: "file",
+        toolsHost: tools,
+        canEdit: () => true,
+        openPath: (p) => open(p, null),
+      });
+      surface.show(tab.surface, "file", line ?? undefined);
+    } else if (surface) {
+      surface.destroy();
+      surface = null;
+    }
   }
 
   function open(rawPath: string, line: number | null): void {
@@ -98,7 +106,7 @@ export function mountFileWindow(app: HTMLElement, first: { path: string; line: n
       close(active);
       return;
     }
-    surface.handleKey(e);
+    surface?.handleKey(e);
   }, true);
 
   void listen<{ path: string; line: number | null }>("file-window-open", ({ path, line }) => open(path, line));
