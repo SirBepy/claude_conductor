@@ -42,7 +42,7 @@ fn instances_changed_frame(state: &DaemonState, keep_jarvis: bool) -> String {
 
 /// Forwards every daemon-wide notifier event to a global (not
 /// session-scoped) WebSocket client verbatim - no per-event filtering -
-/// because every notifier event (`instances_changed`, `channels_changed`,
+/// because every notifier event (`instances_changed`,
 /// `project_created`, `scheduled_items_changed`, `scheduled_item_fired`,
 /// `permission_request`, `question_request`, `question_expired`,
 /// `turn_sound`, `refresh_requested`, `usage_poll_requested`, `notify_requested`, `quit_requested`,

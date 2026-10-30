@@ -18,7 +18,7 @@ fn project_allowlisted(projects: &[ProjectConfig], project_id: &str) -> bool {
 /// minus anything in an allowlisted project. `instances` must come from
 /// `Registry::list()` (never `machines::all_instances`), whose rows never
 /// carry a `machine` tag in the first place - so "not mirrored from a peer"
-/// needs no extra filter here. Automated (automation channel) and External
+/// needs no extra filter here. Automated and External
 /// (terminal-only, unmessageable) kinds are excluded by the `Interactive`
 /// check alone; callers that want to log the skipped kinds do so separately.
 pub fn target_sessions(instances: &[Instance], projects: &[ProjectConfig]) -> Vec<PausedSession> {

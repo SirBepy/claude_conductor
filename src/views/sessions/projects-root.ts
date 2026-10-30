@@ -75,11 +75,9 @@ export function joinProjectPath(root: string, name: string): string {
  *  <name>" row: offering to create `../evil` or `C:\Windows` from a search
  *  box is not a feature.
  *
- *  Also rejects `& ^ % ! ( )` and control characters: a created name becomes
- *  a channel's `--remote-control-session-name-prefix` on the daemon side
- *  (`create_project::is_valid_project_name`, kept in lockstep with this
- *  function), which reaches a `cmd.exe` command line - a name carrying one of
- *  cmd.exe's own operators must never be offered as a folder to create. */
+ *  Also rejects `& ^ % ! ( )` and control characters (kept in lockstep with
+ *  `create_project::is_valid_project_name` on the daemon side): a name carrying
+ *  one of cmd.exe's own operators must never be offered as a folder to create. */
 export function isValidProjectName(name: string): boolean {
   const t = name.trim();
   if (t.length === 0) return false;
