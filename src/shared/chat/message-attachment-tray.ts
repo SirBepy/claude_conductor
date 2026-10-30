@@ -4,20 +4,24 @@
  *  element, because the chat gallery collects a message's thumbs by querying
  *  that element (chat-image-gallery-data.ts). */
 
+import { isRasterImageName } from "./tool-meta";
+
 /** Images shown before the rest fold into one "+N" tile. Files never fold: the
  *  chat gallery that "+N" opens holds images only, so a folded PDF could not be
  *  reached from anywhere. */
 export const TRAY_IMAGE_CAP = 6;
 
 const ATTACHMENT_CHIP = ".attachment-chip[data-attachment-path]";
-const IMAGE_NAME_RE = /\.(png|jpe?g|gif|webp|bmp)$/i;
 
 /** A tray item is a loading chip until hydrateAttachments swaps an image chip
  *  for a `.sent-attachment-thumb`, so an unhydrated chip is judged by its
- *  extension: the daemon's mime is the real answer but arrives later. */
+ *  extension: the daemon's mime is the real answer but arrives later. A chip
+ *  whose read failed is not an image any more: it has no click handler, so
+ *  folding it behind "+N" would leave it unreachable. */
 function isImageItem(item: HTMLElement): boolean {
   if (item.classList.contains("sent-attachment-thumb")) return true;
-  return IMAGE_NAME_RE.test(item.dataset.filename ?? item.dataset.attachmentPath ?? "");
+  if (item.dataset.attachmentFailed) return false;
+  return isRasterImageName(item.dataset.filename ?? item.dataset.attachmentPath ?? "");
 }
 
 function trayItems(tray: HTMLElement): HTMLElement[] {
@@ -49,8 +53,8 @@ export function groupAttachmentTray(el: HTMLElement): void {
 }
 
 /** Marks every image past the cap as folded and (re)builds the "+N" tile.
- *  Safe to call again once attachments hydrate: hydration replaces a chip with
- *  a fresh thumb node, which drops the earlier fold class. */
+ *  Safe to call again as attachments hydrate (once per settled chip): hydration
+ *  replaces a chip with a fresh thumb node, which drops the earlier fold class. */
 export function foldTray(tray: HTMLElement): void {
   tray.querySelector(":scope > .msg-tray-more")?.remove();
   const folded: HTMLElement[] = [];

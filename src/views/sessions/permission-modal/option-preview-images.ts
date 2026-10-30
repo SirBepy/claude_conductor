@@ -16,9 +16,9 @@
 // preview cannot be used to pull an arbitrary local file into the frame.
 
 import { invoke } from "../../../shared/ipc";
+import { isRasterImageName } from "../../../shared/chat/tool-meta";
 
 const IMG_SRC = /(<img\b[^>]*?\bsrc\s*=\s*)(["'])(.*?)\2/gi;
-const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
 const WIN_PATH = /^[A-Za-z]:[\\/]/;
 
 // Resolved data: URL per (session, source path); null = read in flight. A failed read is
@@ -54,7 +54,7 @@ function localImagePath(src: string): string | null {
   } else {
     return null;
   }
-  return IMAGE_EXT.test(path) ? path : null;
+  return isRasterImageName(path) ? path : null;
 }
 
 function localPaths(fragment: string): string[] {

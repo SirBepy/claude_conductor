@@ -188,7 +188,7 @@ export function buildMessageEl(m: RenderedMessage, sessionId: string | null = nu
   el.dataset.ts = new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   if (el.querySelector(".attachment-chip[data-attachment-path]")) {
     if (m.kind === "user") groupAttachmentTray(el);
-    void hydrateAttachments(el, sessionId).then(() => refoldAttachmentTray(el));
+    void hydrateAttachments(el, sessionId, () => refoldAttachmentTray(el));
   }
   return el;
 }

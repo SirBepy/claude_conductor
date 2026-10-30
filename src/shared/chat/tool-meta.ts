@@ -2,7 +2,17 @@ import { basename } from "../path-utils";
 import { asObj, strField } from "../obj-utils";
 import { titleCaseWords } from "../formatters";
 
-export const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
+// Raster only, matching the Rust RASTER_EXTS (ipc/chat/attachments.rs): svg can
+// carry script and external references, so anything that READS a file into the
+// webview (attachment tray, option previews) uses this list, never IMAGE_EXTS.
+export const RASTER_IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"];
+// Display-only classification (a tool row naming an image path), so svg counts.
+export const IMAGE_EXTS = [...RASTER_IMAGE_EXTS, ".svg"];
+
+/** True when a file name or path ends in a raster image extension. */
+export function isRasterImageName(nameOrPath: string): boolean {
+  return RASTER_IMAGE_EXTS.includes(extOf(nameOrPath));
+}
 
 // The app's real ask channel is the MCP tool (see CLAUDE.md "One ask channel");
 // the builtin name is kept recognized too since history/tests may still carry
