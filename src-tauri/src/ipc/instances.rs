@@ -65,6 +65,33 @@ pub(crate) fn stats_transcript_path(
     if own.exists() { Some(own) } else { None }
 }
 
+/// Token/turn/prompt totals for one session's transcript, or the all-zero
+/// answer when no transcript resolves. Blocking (walks the whole JSONL file):
+/// shared by the desktop `instance_token_stats` command and the daemon RPC of
+/// the same name, which answers it for a chat mirrored from a paired machine.
+pub(crate) fn token_stats_for_session(
+    cwd: &std::path::Path,
+    recorded: Option<&std::path::Path>,
+    session_id: &str,
+) -> serde_json::Value {
+    let empty = serde_json::json!({ "tokens": 0, "turns": 0, "prompts": 0 });
+    // The recorded path alone is enough when it still exists, so a machine with
+    // no projects dir at all still answers for a chat whose transcript it recorded.
+    let path = recorded.filter(|p| p.exists()).map(std::path::Path::to_path_buf).or_else(|| {
+        let projects = crate::tokens::claude_projects_dir()?;
+        let project_dir = projects.join(crate::tokens::encode_cwd_as_project_dir(cwd));
+        stats_transcript_path(None, &project_dir, session_id)
+    });
+    let Some(path) = path else { return empty };
+    let t = crate::tokens::parse_transcript(&path);
+    let total = t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens;
+    serde_json::json!({
+        "tokens": total,
+        "turns": t.turns,
+        "prompts": t.user_prompts,
+    })
+}
+
 /// Token/turn/prompt totals for one session's transcript.
 ///
 /// `async` is load-bearing, not stylistic: a sync `#[tauri::command]` runs on
@@ -76,28 +103,24 @@ pub async fn instance_token_stats(
     session_id: String,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let empty = serde_json::json!({ "tokens": 0, "turns": 0, "prompts": 0 });
+    // A chat mirrored from a paired machine has its transcript on that
+    // machine's disk; the daemon forwards the read there by session id.
+    if let Some(client) = crate::ipc::mirror::mirrored_client(&state, Some(&session_id)).await {
+        return Ok(client.instance_token_stats(&session_id).await.unwrap_or_else(|e| {
+            log::warn!("instance_token_stats: mirrored session {session_id} read failed: {e}");
+            serde_json::json!({ "tokens": 0, "turns": 0, "prompts": 0 })
+        }));
+    }
     let inst = {
         let instances = state.cached_instances.lock().unwrap();
         instances.iter().find(|i| i.session_id == session_id).cloned()
     };
-    let Some(inst) = inst else { return Ok(empty) };
-    let Some(projects) = crate::tokens::claude_projects_dir() else { return Ok(empty) };
-    let project_dir = projects.join(crate::tokens::encode_cwd_as_project_dir(&inst.cwd));
-    let Some(path) = stats_transcript_path(
-        inst.transcript_path.as_deref(),
-        &project_dir,
-        &inst.session_id,
-    ) else { return Ok(empty) };
+    let Some(inst) = inst else {
+        return Ok(serde_json::json!({ "tokens": 0, "turns": 0, "prompts": 0 }));
+    };
 
     tauri::async_runtime::spawn_blocking(move || {
-        let t = crate::tokens::parse_transcript(&path);
-        let total = t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_creation_tokens;
-        serde_json::json!({
-            "tokens": total,
-            "turns": t.turns,
-            "prompts": t.user_prompts,
-        })
+        token_stats_for_session(&inst.cwd, inst.transcript_path.as_deref(), &inst.session_id)
     })
     .await
     .map_err(|e| format!("instance_token_stats join error: {e}"))

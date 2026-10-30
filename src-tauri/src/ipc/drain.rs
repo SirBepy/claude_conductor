@@ -235,6 +235,31 @@ fn build_chat_drain(
     }
 }
 
+/// The popover's math for ONE chat: capacity estimate over the visible set
+/// (`resolved`), then the chat's lifetime drain as a % of each window plus its
+/// per-message breakdown. Blocking (file parsing); shared by the desktop
+/// `chat_drain` command and the daemon RPC of the same name, which answers it
+/// for a chat mirrored from a paired machine.
+pub(crate) fn chat_drain_for(
+    target: &str,
+    target_cwd: &Path,
+    main_transcript: &Path,
+    resolved: &[(String, PathBuf, PathBuf)],
+    five: &WindowCtx,
+    weekly: &WindowCtx,
+) -> ChatDrain {
+    let (cap_5h, cap_weekly) = compute_capacities(resolved, five, weekly, None);
+    let lifetime = drain_engine::drain_units_for_session(target_cwd, target, None);
+    let messages = drain_engine::message_drains(main_transcript);
+    build_chat_drain(
+        target,
+        main_transcript,
+        size_pct(lifetime, cap_5h),
+        size_pct(lifetime, cap_weekly),
+        messages,
+    )
+}
+
 /// Full rundown for ONE chat (the popover): raw tokens + per-message breakdown +
 /// the chat's size as a % of a 5h/weekly window. Resolves the visible set itself
 /// so the capacity estimate is available without the sidebar's drain sort having
@@ -244,6 +269,14 @@ pub async fn chat_drain(
     session_id: String,
     state: State<'_, AppState>,
 ) -> Result<Option<ChatDrain>, String> {
+    // A chat mirrored from a paired machine has its transcript and usage
+    // windows on that machine; the daemon forwards the read there by session id.
+    if let Some(client) = crate::ipc::mirror::mirrored_client(&state, Some(&session_id)).await {
+        return Ok(client.chat_drain(&session_id).await.unwrap_or_else(|e| {
+            log::warn!("chat_drain: mirrored session {session_id} read failed: {e}");
+            None
+        }));
+    }
     let Some((target_cwd, main_transcript)) = resolve_session(&session_id, &state) else {
         return Ok(None);
     };
@@ -273,16 +306,7 @@ pub async fn chat_drain(
 
     // Heavy file parsing off the async runtime.
     let result = tokio::task::spawn_blocking(move || {
-        let (cap_5h, cap_weekly) = compute_capacities(&resolved, &five, &weekly, None);
-        let lifetime = drain_engine::drain_units_for_session(&target_cwd, &target, None);
-        let messages = drain_engine::message_drains(&main_transcript);
-        build_chat_drain(
-            &target,
-            &main_transcript,
-            size_pct(lifetime, cap_5h),
-            size_pct(lifetime, cap_weekly),
-            messages,
-        )
+        chat_drain_for(&target, &target_cwd, &main_transcript, &resolved, &five, &weekly)
     })
     .await
     .map_err(|e| e.to_string())?;

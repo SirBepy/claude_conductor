@@ -140,7 +140,7 @@ pub fn drain_units_for_session(cwd: &Path, session_id: &str, since: Option<Syste
 /// assistant turn from this user message up to (but not including) the next one.
 /// No dollar figure is exposed: the user is subscription-based, so the rundown
 /// is in raw tokens, and `expensive` is flagged from an internal cost-weight.
-#[derive(serde::Serialize, Clone, Debug, ts_rs::TS)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct MessageDrain {
@@ -160,7 +160,7 @@ pub struct MessageDrain {
 /// / `weekly_pct` are the chat's slice of the CURRENT window utilization, filled
 /// by the IPC layer (`None` when there's no usage snapshot to apportion against);
 /// `drain.rs` only produces the raw token total + per-message breakdown.
-#[derive(serde::Serialize, Clone, Debug, ts_rs::TS)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 #[serde(rename_all = "camelCase")]
 pub struct ChatDrain {
