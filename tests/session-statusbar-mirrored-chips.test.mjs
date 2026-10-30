@@ -94,4 +94,42 @@ describe("statusbar chips for a chat mirrored from a paired machine", () => {
     await flush();
     expect(el.querySelector(".sb-account")).toBeNull();
   });
+
+  it("shows the host's account chip once a later meta update finds the machine reachable again", async () => {
+    let reachable = false;
+    ipcMock.impl = async (cmd) => {
+      if (cmd !== "list_machine_accounts") return null;
+      if (!reachable) throw new Error("peer link reconnecting");
+      return { accounts: hostAccounts, default_account_id: null, project_account_id: null };
+    };
+    const { el, sb } = mount([["git"]], { mirrored: true, machineId: "pc", accountId: "pc-work" });
+    await flush();
+    expect(el.querySelector(".sb-account")).toBeNull();
+    reachable = true;
+    sb.updateMeta({});
+    await flush();
+    expect(el.querySelector(".sb-account")?.textContent).toContain("Work");
+  });
+
+  it("does not re-read the host's accounts on every meta update once the read succeeded", async () => {
+    const { sb } = mount([["git"]], { mirrored: true, machineId: "pc", accountId: "pc-work" });
+    await flush();
+    sb.updateMeta({});
+    await flush();
+    expect(calls.filter(([c]) => c === "list_machine_accounts")).toHaveLength(1);
+  });
+
+  it("leaves the container alone when the host's account read lands after destroy", async () => {
+    let resolve;
+    ipcMock.impl = (cmd) => cmd === "list_machine_accounts"
+      ? new Promise((r) => { resolve = r; })
+      : Promise.resolve(null);
+    // Account-only row: a git chip's own fetches would repaint the container too.
+    const { el, sb } = mount([["account"]], { mirrored: true, machineId: "pc", accountId: "pc-work" });
+    sb.destroy();
+    el.innerHTML = "";
+    resolve({ accounts: hostAccounts, default_account_id: null, project_account_id: null });
+    await flush();
+    expect(el.innerHTML).toBe("");
+  });
 });
