@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-// Reviewed 2026-10-29: project-config/automation.ts gained a "New chat defaults" section and chat-defaults.ts gained two selects; this spec asserts no row dividers, which both keep, so its contract is unaffected. Passed after the change.
+// Reviewed 2026-10-30: project-config/automation.ts now lays its rows out as .ps-line (label + toggle) instead of the Settings .option rows; the popup test below checks the new rows for dividers. Passed after the change.
 import path from "node:path";
 import { mountView } from "./harness";
 import { shotDir } from "./shot-dir";
@@ -10,8 +10,7 @@ import { shotDir } from "./shot-dir";
 // button kept its line and cards showed lines under some rows and not others.
 // Shortcuts, Permissions and Character detail style their own row classes, so
 // each needs its own check: the kit rule does not reach them.
-// The project-config automation popup reuses the Settings .option rows and goes
-// without lines too, so the one unscoped .option rule stays gone for it as well.
+// The project-config automation popup's own .ps-line rows go without lines too.
 
 const SHOT_DIR = shotDir();
 const LABEL = process.env.CC_SHOT_LABEL ?? "after";
@@ -141,5 +140,5 @@ test("project config automation rows draw no divider lines", async ({ page }) =>
   }, cwd);
   await page.locator("#project-config-host #automationForm").waitFor({ state: "visible" });
 
-  expectNoDividers(await rowBorders(page, "#project-config-host .option"), 6);
+  expectNoDividers(await rowBorders(page, "#project-config-host .ps-line"), 5);
 });

@@ -1,7 +1,6 @@
 /* The project settings rail (dashboard.ts's `rail`), beside the dashboard on the
    standalone page (.pd-page-body) and in a new-chat draft (.pd-draft.has-rail).
-   Theme vars only. The rail wraps project-config/automation.ts's own controls,
-   which were laid out for a popup, so the rules below restack them for 270px. */
+   Theme vars only. The controls inside are project-config/automation.css's. */
 
 /* Page: this body scrolls, not .pd-root, so the rail sits beside the content and
    the scrollbar stays at the pane's edge on a wide window. 1160px keeps the
@@ -26,16 +25,6 @@
 .pd-draft.has-rail > .pd-rail { width: auto; }
 .pd-rail[hidden] { display: none; }
 .pd-rail-title { font-size: 13px; font-weight: 600; color: var(--color-text); margin-bottom: 10px; min-height: 24px; display: flex; align-items: center; }
-
-/* The popup's sections carry an inline top margin; the rail spaces them with gap. */
-.pd-rail .view-project-automation { display: flex; flex-direction: column; gap: 18px; }
-.pd-rail .automation-section { margin-top: 0 !important; }
-.pd-rail .option { flex-direction: column; align-items: stretch; gap: 6px; }
-.pd-rail .acc-row-control { justify-content: flex-start; }
-.pd-rail .inline-select, .pd-rail .inline-input { width: 100%; max-width: none; }
-.pd-rail #automationEmpty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0; text-align: left; }
-.pd-rail #automationEmpty .v-empty-icon, .pd-rail #automationEmpty .v-empty-hint { display: none; }
-.pd-rail #automationEmpty .v-empty-title { font-size: 13px; font-weight: 400; margin: 0; }
 
 /* Narrower than 1400px the main column would drop under ~740px with the rail
    beside it, so the settings go underneath instead. */

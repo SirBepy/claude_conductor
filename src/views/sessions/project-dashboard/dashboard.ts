@@ -24,7 +24,7 @@ import { openContextMenu } from "./dash-menu";
 import { chats } from "./dash-chats";
 import { nextUp, running, shipState, yourTodos } from "./dash-sections";
 import { assignColumns, naturalHeight } from "../../../shared/balance";
-import { playEntrance, type Entrance } from "./dash-motion";
+import { playEntrance, playRailEntrance, type Entrance } from "./dash-motion";
 import { cardRefreshSecs, staleCardIds } from "./format";
 import type { CardResult, DashboardHistory, DashboardTargetRef, DashSnapshot } from "./types";
 
@@ -167,10 +167,19 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     if (rail && !railFilled && repo && root.isConnected && rail.isConnected) {
       railFilled = true;
       rail.hidden = false;
+      // Takes its place in the layout now but stays unseen until its rows are
+      // in, then fades in after the dashboard's own wave.
+      rail.style.opacity = "0";
       rail.innerHTML = `<div class="pd-rail-title">Project settings</div><div class="pd-rail-body"></div>`;
       // A rail that fails to fill must not take the dashboard's paint down with it.
-      renderProjectSettings(rail.querySelector<HTMLElement>(".pd-rail-body")!, repo.cwd)
-        .catch((err) => console.warn("[project-dashboard] project settings rail failed", err));
+      const shown = rail;
+      renderProjectSettings(shown.querySelector<HTMLElement>(".pd-rail-body")!, repo.cwd)
+        .catch((err) => console.warn("[project-dashboard] project settings rail failed", err))
+        .finally(() => {
+          if (destroyed) return;
+          shown.style.opacity = "";
+          playRailEntrance(shown, entrance?.tailDelay() ?? 0);
+        });
     }
     for (const hook of [...ctx.paintHooks]) hook();
     // Once, on the first paint with content; later paints (live events) must

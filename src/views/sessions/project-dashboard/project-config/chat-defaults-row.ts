@@ -1,4 +1,3 @@
-import { escapeHtml } from "../../../../shared/escape-html";
 import { showToast } from "../../../../shared/toast";
 import { api } from "../../../../shared/api";
 import {
@@ -6,10 +5,10 @@ import {
 } from "../../../../shared/effort-presets";
 import { projectsListData } from "../../new-session-cache";
 import type { ProjectCfg } from "./project-cfg";
+import { mountValueSlider } from "./value-slider";
 
-/** What a new chat in this project opens on. An unset half follows Settings >
- *  Chat defaults, which the first option names, so the row always shows what a
- *  new chat will actually start with. */
+/** What a new chat in this project opens on, as two sliders. An unset half
+ *  sits on "Default" and follows Settings > Chat defaults. */
 export async function renderChatDefaultsRow(cwd: string): Promise<void> {
   const modelControl = document.getElementById("chatDefaultModelControl");
   const effortControl = document.getElementById("chatDefaultEffortControl");
@@ -32,33 +31,33 @@ export async function renderChatDefaultsRow(cwd: string): Promise<void> {
   const models = readModels(settings);
   if (ownModel && !models.includes(ownModel)) models.push(ownModel);
 
-  const options = (own: string, defaultLabel: string, values: readonly string[], label: (v: string) => string): string =>
-    `<option value=""${own ? "" : " selected"}>${escapeHtml(defaultLabel)}</option>` +
-    values.map((v) => `<option value="${escapeHtml(v)}"${v === own ? " selected" : ""}>${escapeHtml(label(v))}</option>`).join("");
-  modelControl.innerHTML = `<select id="chatDefaultModel" class="inline-select">${options(ownModel, `Default (${modelDisplayLabel(global.model)})`, models, modelDisplayLabel)}</select>`;
-  effortControl.innerHTML = `<select id="chatDefaultEffort" class="inline-select">${options(ownEffort, `Default (${global.effort})`, EFFORTS, (v) => v)}</select>`;
-
-  const wire = (id: string, field: "default_model" | "default_effort"): void => {
-    const select = document.getElementById(id) as HTMLSelectElement | null;
-    if (!select) return;
-    select.onchange = () => {
-      void (async () => {
-        select.disabled = true;
-        try {
-          const projectId = proj?.id ?? (await api.ensureProject(cwd)).id;
-          await api.updateProject(projectId, { [field]: select.value || null });
-          // The new-chat draft reads this list from a stale-while-revalidate cache.
-          await projectsListData().ready.catch(() => {});
-          showToast("New chats in this project open on the new default.");
-        } catch (e) {
-          console.error("[automation] update chat default failed", e);
-          showToast(`Could not update the default: ${e}`);
-        } finally {
-          await renderChatDefaultsRow(cwd);
-        }
-      })();
-    };
+  const wire = (host: HTMLElement, label: string, field: "default_model" | "default_effort", own: string, values: readonly string[], text: (v: string) => string, followed: string): void => {
+    // Stop 0 is "no pin": the chat follows the global default, which the stop's tooltip names.
+    const all = ["", ...values];
+    let saved = Math.max(0, all.indexOf(own));
+    const slider = mountValueSlider(host, {
+      label,
+      stops: ["Default", ...values.map(text)],
+      hints: { 0: `Follows Settings > Chat defaults (${followed})` },
+      index: saved,
+      onCommit: (idx) => {
+        void (async () => {
+          try {
+            const projectId = proj?.id ?? (await api.ensureProject(cwd)).id;
+            await api.updateProject(projectId, { [field]: all[idx] || null });
+            saved = idx;
+            // The new-chat draft reads this list from a stale-while-revalidate cache.
+            await projectsListData().ready.catch(() => {});
+            showToast("New chats in this project open on the new default.");
+          } catch (e) {
+            console.error("[automation] update chat default failed", e);
+            showToast(`Could not update the default: ${e}`);
+            slider.set(saved);
+          }
+        })();
+      },
+    });
   };
-  wire("chatDefaultModel", "default_model");
-  wire("chatDefaultEffort", "default_effort");
+  wire(modelControl, "Model", "default_model", ownModel, models, modelDisplayLabel, modelDisplayLabel(global.model));
+  wire(effortControl, "Effort", "default_effort", ownEffort, EFFORTS, (v) => v, global.effort);
 }

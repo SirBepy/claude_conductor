@@ -19,7 +19,7 @@ async function renderAutomationForm(cwd: string): Promise<void> {
     return;
   }
   empty.style.display = "none";
-  form.style.display = "block";
+  form.style.display = "";
   const enabled = document.getElementById("automationEnabled") as HTMLInputElement | null;
   const autostart = document.getElementById("automationAutostart") as HTMLInputElement | null;
   const cont = document.getElementById("automationContinue") as HTMLInputElement | null;
@@ -31,8 +31,8 @@ async function renderAutomationForm(cwd: string): Promise<void> {
   form.dataset.projectId = proj.id;
 }
 
-/** Fills a popup body with the project's settings (account, connectors,
- *  gaming mode, tickets, automation). */
+/** Fills a popup body with the project's settings (model and effort, account,
+ *  tickets, connectors, gaming mode, automation). */
 export async function renderProjectSettings(root: HTMLElement, cwd: string): Promise<void> {
   render(template(), root);
 
@@ -103,88 +103,64 @@ export async function renderProjectSettings(root: HTMLElement, cwd: string): Pro
   await renderTrackerRow(cwd);
 }
 
+// A short label with the explanation on hover: the rail is 270px wide, so a
+// sentence per row would stack taller than the settings themselves.
 function template() {
+  const toggle = (id: string) => html`<label class="switch"><input type="checkbox" id=${id}><span class="slider"></span></label>`;
   return html`
     <div class="view-project-automation">
-        <section class="automation-section" id="chatDefaultsSection" style="margin-top:0">
-          <div class="section-title">New chat defaults</div>
-          <div class="option">
-            <span class="oi"><div class="option-label">Model</div></span>
-            <span class="acc-row-control" id="chatDefaultModelControl"></span>
+      <div class="ps-group">
+        <div class="ps-field">
+          <div class="ps-label" title="The model new chats in this project open on">Model</div>
+          <div id="chatDefaultModelControl"></div>
+        </div>
+        <div class="ps-field">
+          <div class="ps-label" title="The effort new chats in this project open on">Effort</div>
+          <div id="chatDefaultEffortControl"></div>
+        </div>
+        <div class="ps-field">
+          <div class="ps-label" title="Which Claude account new chats in this project use">Account</div>
+          <span class="acc-row-control" id="automationAccountControl"></span>
+        </div>
+        <div class="ps-field">
+          <div class="ps-label" title="Where this project's tickets live, so ticket ids in chat link to them">Tickets</div>
+          <span class="acc-row-control" id="trackerControl"></span>
+        </div>
+      </div>
+      <div class="ps-group">
+        <div class="ps-line">
+          <span class="ps-label" title="Use your claude.ai connectors (Google Drive etc.) in this project's chats">Connectors</span>
+          ${toggle("connectorsEnabled")}
+        </div>
+        <div class="ps-line">
+          <span class="ps-label" title="Chats and dev servers here are not parked while gaming mode is on">Run in gaming mode</span>
+          ${toggle("gamingModeKeepRunning")}
+        </div>
+        <div id="automationEmpty" class="ps-line">
+          <span class="ps-label" title="Start this project's Claude Code session at boot and keep it alive">Automation</span>
+          <button type="button" class="ps-btn" id="automateChannelBtn">+ Add</button>
+        </div>
+        <div id="automationForm" class="ps-sub" style="display:none">
+          <div class="ps-label" title="Start this project's Claude Code session at boot and keep it alive">Automation</div>
+          <div class="ps-line">
+            <span class="ps-label">Enabled</span>
+            ${toggle("automationEnabled")}
           </div>
-          <div class="option">
-            <span class="oi"><div class="option-label">Effort</div></span>
-            <span class="acc-row-control" id="chatDefaultEffortControl"></span>
+          <div class="ps-line">
+            <span class="ps-label">Start on boot</span>
+            ${toggle("automationAutostart")}
           </div>
-        </section>
-        <section class="automation-section" id="accountSection" style="margin-top:16px">
-          <div class="section-title">Claude account</div>
-          <div class="option">
-            <span class="oi">
-              <div class="option-label">Which account new chats in this project use</div>
-            </span>
-            <span class="acc-row-control" id="automationAccountControl"></span>
+          <div class="ps-line">
+            <span class="ps-label" title="Resume the previous session with --continue">Continue last session</span>
+            ${toggle("automationContinue")}
           </div>
-        </section>
-        <section class="automation-section" id="connectorsSection" style="margin-top:16px">
-          <div class="section-title">Connectors</div>
-          <div class="option">
-            <span class="oi">
-              <div class="option-label">Use your claude.ai connectors (Google Drive etc.) in this project's chats</div>
-            </span>
-            <label class="switch"><input type="checkbox" id="connectorsEnabled"><span class="slider"></span></label>
+          <input type="text" id="automationPrefix" class="inline-input" placeholder="Session name prefix" aria-label="Session name prefix">
+          <div class="ps-actions">
+            <button type="button" class="ps-btn" id="automationRemoveBtn">Remove</button>
+            <button type="button" class="ps-btn ps-btn-primary" id="automationApplyBtn">Apply</button>
           </div>
-        </section>
-        <section class="automation-section" id="gamingModeSection" style="margin-top:16px">
-          <div class="section-title">Gaming mode</div>
-          <div class="option">
-            <span class="oi">
-              <div class="option-label">Keep running in gaming mode</div>
-            </span>
-            <label class="switch"><input type="checkbox" id="gamingModeKeepRunning"><span class="slider"></span></label>
-          </div>
-        </section>
-        <section class="automation-section" id="trackerSection" style="margin-top:16px">
-          <div class="section-title">Tickets</div>
-          <div class="option">
-            <span class="oi">
-              <div class="option-label">Where this project's tickets live, so ticket ids in chat link to them</div>
-            </span>
-            <span class="acc-row-control" id="trackerControl"></span>
-          </div>
-        </section>
-        <section class="automation-section" id="automationSection" style="margin-top:16px">
-          <div class="section-title">Automation</div>
-          <div id="automationEmpty" class="v-empty">
-            <i class="ph ph-robot v-empty-icon"></i>
-            <div class="v-empty-title">No automation configured</div>
-            <div class="v-empty-hint">Have this project's Claude Code session start at boot and stay alive.</div>
-            <button class="automate-cta" id="automateChannelBtn">+ Automate channel</button>
-          </div>
-          <div id="automationForm" style="display:none">
-            <div class="option">
-              <span class="option-label">Enabled</span>
-              <label class="switch"><input type="checkbox" id="automationEnabled"><span class="slider"></span></label>
-            </div>
-            <div class="option">
-              <span class="option-label">Start on boot</span>
-              <label class="switch"><input type="checkbox" id="automationAutostart"><span class="slider"></span></label>
-            </div>
-            <div class="option">
-              <span class="option-label">Continue previous session (<code>--continue</code>)</span>
-              <label class="switch"><input type="checkbox" id="automationContinue"><span class="slider"></span></label>
-            </div>
-            <div class="option">
-              <span class="option-label">Session name prefix</span>
-              <input type="text" id="automationPrefix" class="inline-input" placeholder="(uses project name)">
-            </div>
-            <div style="display:flex;gap:6px;margin-top:8px">
-              <button class="btn-secondary" id="automationRemoveBtn">Remove automation</button>
-              <div style="flex:1"></div>
-              <button class="btn-primary" id="automationApplyBtn">Apply</button>
-            </div>
-          </div>
-        </section>
+        </div>
+      </div>
     </div>
   `;
 }
