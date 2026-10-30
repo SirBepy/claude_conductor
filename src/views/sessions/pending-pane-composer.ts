@@ -244,7 +244,11 @@ export function wirePendingComposer(
               clearPendingSession();
             }
             await refreshSessions();
-            if (state.mountId !== myMount) return;
+            if (state.mountId !== myMount) {
+              // Same as the check above: the pane unmounted mid-refresh, but the spawned chat still owns the pick.
+              if (heldPick) await moveSpawnedChat(sessionId, heldPick.id, heldPick.label, !!config.machineId);
+              return;
+            }
             rebuildSidebar();
             if (isStillActive) deps.rebindPaneHeader(pane, sessionId);
             // An account picked while the spawn was pending: the chat started

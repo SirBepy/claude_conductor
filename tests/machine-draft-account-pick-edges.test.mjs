@@ -131,6 +131,20 @@ describe("machine draft account pick and schedule edges", () => {
     startSession.resolve = null;
   });
 
+  it("still applies the held pick when the pane unmounts during the post-spawn session refresh", async () => {
+    const { refreshSessions } = await import("../src/views/sessions/sidebar.ts");
+    refreshSessions.mockImplementationOnce(async () => { state.mountId += 1; });
+    const config = { model: "", effort: "high", accountId: "peer-1", machineId: "m1" };
+    wire(config);
+    const sent = composerOpts.current.onSend(text("hi"));
+    await vi.waitFor(() => expect(startSession.resolve).not.toBeNull());
+    await changePendingAccount(config, "ph-1", "C:/p");
+    startSession.resolve("real-1");
+    await sent;
+    expect(apiMock.moveSessionToAccount).toHaveBeenCalledWith("real-1", "peer-2");
+    startSession.resolve = null;
+  });
+
   it("drops a pick held during a spawn that failed, and moves nothing", async () => {
     const config = { model: "", effort: "high", accountId: "peer-1", machineId: "m1" };
     wire(config);
