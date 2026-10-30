@@ -132,6 +132,16 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     host, state, notes, selections, render: () => render(), syncMessagesPadding, notifyDraftChange,
   });
 
+  // With many questions the dots row overflows and scrolls sideways; keep the
+  // current dot inside it. Sets scrollLeft directly because scrollIntoView
+  // would also scroll every ancestor (the card, the page).
+  function revealCurrentDot(): void {
+    const dots = host.querySelector<HTMLElement>(".prompt-dots");
+    const cur = dots?.querySelector<HTMLElement>(".prompt-dot.is-current");
+    if (!dots || !cur) return;
+    dots.scrollLeft = cur.offsetLeft - (dots.clientWidth - cur.offsetWidth) / 2;
+  }
+
   // Step-only nav: patches the track/dots/arrows/footer in place instead of
   // rebuilding host.innerHTML, so .prompt-track's transition has a real "from"
   // position to slide from. Only for moves that don't change any panel's
@@ -143,6 +153,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     host.querySelectorAll<HTMLElement>(".prompt-dot").forEach((dot) => {
       dot.classList.toggle("is-current", Number(dot.dataset.dot) === state.activeTab);
     });
+    revealCurrentDot();
     const prevArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="-1"]');
     if (prevArrow) prevArrow.disabled = state.activeTab === 0;
     const nextArrow = host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]');
@@ -286,6 +297,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       // one - positionTrack pins the track's height to just the active
       // panel's own content instead.
       positionTrack(slideFromTab === undefined, slideFromTab);
+      revealCurrentDot();
       updatePrimaryButton();
 
       host.querySelectorAll<HTMLButtonElement>(".prompt-dot").forEach((dot) => {

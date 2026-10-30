@@ -45,6 +45,9 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  /* Lets the pager shrink below its dots' total width so the header's
+   * right-hand buttons stay on screen; the dots row scrolls instead. */
+  min-width: 0;
 }
 .prompt-pager button:disabled {
   opacity: 0.28;
@@ -61,8 +64,18 @@
   display: inline-flex;
   align-items: center;
   padding: 0 2px;
+  /* Many questions overflow the header: cut off and scroll sideways rather
+   * than pushing the buttons on the right off screen. */
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.prompt-dots::-webkit-scrollbar {
+  display: none;
 }
 .prompt-dot {
+  flex: none;
   width: 22px;
   height: 22px;
   padding: 0;
