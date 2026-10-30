@@ -42,7 +42,7 @@ const BARE: PreviewTemplate = { headHtml: "" };
 
 const TEMPLATES: Record<string, PreviewTemplate> = { page: PAGE, bare: BARE };
 
-export const DEFAULT_PREVIEW_TEMPLATE = "page";
+const DEFAULT_PREVIEW_TEMPLATE = "page";
 
 /** Either attribute order, single or double quotes. */
 const TEMPLATE_META_RES = [
@@ -51,7 +51,7 @@ const TEMPLATE_META_RES = [
 ];
 
 /** The template a page names; an unknown or missing name falls back to the default. */
-export function previewTemplateOf(html: string): string {
+function previewTemplateOf(html: string): string {
   for (const re of TEMPLATE_META_RES) {
     const name = re.exec(html)?.[1]?.toLowerCase();
     if (name && name in TEMPLATES) return name;
