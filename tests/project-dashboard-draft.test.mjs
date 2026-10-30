@@ -36,7 +36,7 @@ vi.mock("../src/views/sessions/project-dashboard/project-config/project-settings
 const draftModule = await import("../src/views/sessions/project-dashboard/draft-dashboard.ts");
 const { mountDraftDashboard, unmountDraftDashboard } = draftModule;
 const motionModule = await import("../src/views/sessions/project-dashboard/dash-motion.ts");
-const { withCommand } = await import("../src/views/sessions/project-dashboard/dash-actions.ts");
+const { withCommand } = await import("../src/views/sessions/project-dashboard/format.ts");
 const { usageByDay } = await import("../src/views/sessions/project-dashboard/dash-usage.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 

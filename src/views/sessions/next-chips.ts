@@ -1,8 +1,11 @@
 // Which quick-reply chips sit above a chat's message box. Pure (no DOM, no IPC)
 // so every gate can be unit-tested; next-chip-strip.ts renders the result.
 import type { Instance } from "../../types/ipc.generated";
+import { MAX_NEXT_ACTIONS } from "../../shared/chat/chat-next-actions";
 
-export const MAX_NEXT_CHIPS = 3;
+// The built-in /close plus the model's up to MAX_NEXT_ACTIONS replies (the tool
+// schema promises it three), so a full set of replies is never cut to two.
+export const MAX_NEXT_CHIPS = 1 + MAX_NEXT_ACTIONS;
 
 const CLOSE = "/close";
 

@@ -73,10 +73,6 @@ export async function pickRepo(c: DashCtx, anchor: HTMLElement): Promise<RepoRef
   });
 }
 
-// Lives in format.ts so the chat's next-action strip can use it without
-// importing this module (it pulls in selectSession and the whole dashboard).
-export { withCommand };
-
 function fillComposer(command: string): void {
   const composer = state.composer;
   if (!composer) return;
