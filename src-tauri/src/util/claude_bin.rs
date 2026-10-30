@@ -247,7 +247,7 @@ fn search(bare_name_ok: bool) -> Result<PathBuf, NotFound> {
 /// `resolve()`'s shortcut is safe for its other callers because they hand the
 /// result to `Command::new`, whose own PATH search never consults the
 /// child's cwd. A caller that instead builds its own Windows command line
-/// (`channels::spawn::build_cmdline`) and runs it with no shell in between
+/// and runs it with no shell in between
 /// needs this variant: `CreateProcessW`'s module search checks the child's
 /// current directory BEFORE `PATH`, so a bare `"claude"` would let a
 /// `claude.cmd`/`claude.exe` planted in that directory run instead of the

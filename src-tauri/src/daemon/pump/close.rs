@@ -82,7 +82,7 @@ pub(crate) fn finalize_close(state: &Arc<DaemonState>, session: &Session) {
         );
     }
     session.expected_exit.store(true, std::sync::atomic::Ordering::SeqCst);
-    crate::channels::kill::kill_tree(session.pid);
+    crate::util::kill::kill_tree(session.pid);
     carry_held_messages_to_successor(state, &session.session_id);
 }
 

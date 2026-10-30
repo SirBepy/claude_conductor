@@ -263,9 +263,6 @@ pub(crate) fn dedupe_projects_by_path_key(projects: &mut Vec<crate::types::Proje
                 {
                     keep.avatar = p.avatar.clone();
                 }
-                if keep.automation.is_none() && p.automation.is_some() {
-                    keep.automation = p.automation.clone();
-                }
                 if keep.preferred_account_id.is_none() && p.preferred_account_id.is_some() {
                     keep.preferred_account_id = p.preferred_account_id.clone();
                 }
@@ -303,7 +300,6 @@ mod tests {
             path,
             name: "proj".into(),
             avatar: crate::types::Avatar::None,
-            automation: None,
             created_at: "2026-04-21T00:00:00Z".into(),
             last_active_at: None,
             whitelist: crate::types::CharacterWhitelist::default(),

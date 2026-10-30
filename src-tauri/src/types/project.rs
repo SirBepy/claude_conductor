@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use super::automation::{AutomationConfig, EndReason};
+use super::session_end::EndReason;
 use crate::sessions::kinds::InstanceKind;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]
@@ -37,8 +37,6 @@ pub struct ProjectConfig {
     pub name: String,
     #[serde(default)]
     pub avatar: Avatar,
-    #[serde(default)]
-    pub automation: Option<AutomationConfig>,
     pub created_at: String,
     #[serde(default)]
     pub last_active_at: Option<String>,
@@ -254,7 +252,6 @@ pub struct ProjectGroup {
     pub name: String,
     pub parent_segment: Option<String>,
     pub avatar: Avatar,
-    pub automation_enabled: bool,
     pub tokens_7d: u64,
     pub live: u32,
     pub any_automated: bool,
@@ -302,7 +299,6 @@ mod tests {
             path: std::path::PathBuf::from("C:/x/y"),
             name: "YProject".into(),
             avatar: Avatar::Emoji("🪶".into()),
-            automation: None,
             created_at: "2026-04-21T00:00:00Z".into(),
             last_active_at: None,
             whitelist: CharacterWhitelist::default(),

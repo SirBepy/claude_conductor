@@ -5,7 +5,7 @@
 import { html, nothing, render, type TemplateResult } from "lit-html";
 import { invoke } from "../../../shared/ipc";
 import { getTransport, isRemote, type Unlisten } from "../../../shared/transport";
-import { renderProjectSettings } from "./project-config/automation";
+import { renderProjectSettings } from "./project-config/project-settings";
 import { debounce } from "../../../shared/debounce";
 import { hydrateProjectTechIcons } from "../../../shared/projects";
 import { getSettings } from "../../../shared/state";

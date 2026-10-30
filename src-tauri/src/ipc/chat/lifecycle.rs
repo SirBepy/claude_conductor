@@ -436,7 +436,6 @@ mod tests {
             path: std::path::PathBuf::from(CWD),
             name: "proj".into(),
             avatar: crate::types::Avatar::None,
-            automation: None,
             created_at: "2026-04-21T00:00:00Z".into(),
             last_active_at: None,
             whitelist: crate::types::CharacterWhitelist::default(),

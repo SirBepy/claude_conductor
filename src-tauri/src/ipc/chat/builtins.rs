@@ -31,7 +31,7 @@ pub async fn clear_session(
         .unwrap_or(false);
     if let Some(inst) = &cached {
         if inst.kind == crate::sessions::kinds::InstanceKind::External && inst.pid != 0 {
-            let _ = crate::channels::kill::kill_tree(inst.pid);
+            let _ = crate::util::kill::kill_tree(inst.pid);
         }
     }
 

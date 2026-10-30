@@ -235,7 +235,7 @@ pub async fn send_message_with_respawn_meta_and_author(
 pub async fn kill_and_wait_for_teardown(state: &Arc<DaemonState>, session_id: &str) {
     if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
         session.expected_exit.store(true, std::sync::atomic::Ordering::SeqCst);
-        crate::channels::kill::kill_tree(session.pid);
+        crate::util::kill::kill_tree(session.pid);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while std::time::Instant::now() < deadline && state.sessions.get(session_id).is_some() {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -295,7 +295,7 @@ pub async fn end_session(map: &SessionMap, session_id: &str) -> Result<(), Lifec
     }
     // Force-kill if still present.
     session.expected_exit.store(true, std::sync::atomic::Ordering::SeqCst);
-    crate::channels::kill::kill_tree(session.pid);
+    crate::util::kill::kill_tree(session.pid);
     if let Some(ref p) = session.mcp_config_path {
         let _ = std::fs::remove_file(p);
     }
@@ -430,8 +430,7 @@ mod tests {
     }
 
     // A live ChildStdin is required to reach end_session's happy path, so this
-    // spawns a real throwaway process (same pattern as channels.rs's
-    // refresh_with_cmd_populates_argv, Windows-only for the same reason).
+    // spawns a real throwaway process (Windows-only).
     #[cfg(windows)]
     #[tokio::test]
     async fn end_session_drops_the_closed_chats_ask_threads() {

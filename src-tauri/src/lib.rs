@@ -2,7 +2,6 @@ mod bootstrap;
 pub mod accounts;
 pub mod api_keys;
 pub mod ask;
-pub mod channels;
 pub mod characters;
 pub mod claude_ai_publish;
 pub mod context_status;
@@ -246,13 +245,6 @@ pub fn run() {
             ipc::ensure_project,
             ipc::update_project,
             ipc::delete_project,
-            ipc::spawn_channel,
-            ipc::stop_channel,
-            ipc::restart_channel,
-            ipc::show_terminal,
-            ipc::hide_terminal,
-            ipc::list_channels,
-            ipc::detect_obsidian_vaults,
             ipc::import_legacy_obsidian_config,
             ipc::confirm_legacy_obsidian_import,
             ipc::instances::list_instances,

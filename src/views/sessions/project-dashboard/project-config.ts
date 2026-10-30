@@ -1,6 +1,6 @@
 // A project's own configuration, opened from the dashboard's menus as popups
 // in the shared modal host: rename, character whitelist, project settings
-// (account, connectors, gaming mode, tickets, automation) and folder mapping.
+// (model, effort, account, tickets, connectors, gaming mode) and folder mapping.
 import { html, render, type TemplateResult } from "lit-html";
 import { closeHostCard, modalCardSlot, presentHostCard, setBackdropCancel } from "../../../shared/modal";
 import { getSettings, getTokenHistory } from "../../../shared/state";
@@ -15,7 +15,7 @@ import type { DashMode } from "./dash-parts";
 import { openDashboardPage } from "./dashboard-page";
 import { forgetTargets, mountDraftDashboard, unmountDraftDashboard } from "./draft-dashboard";
 import { renderCharacterPick } from "./project-config/character-pick";
-import { renderProjectSettings } from "./project-config/automation";
+import { renderProjectSettings } from "./project-config/project-settings";
 import { renderFolderMapping } from "./project-config/folder-mapping";
 
 const nameOf = (cwd: string): string => projectLabel(cwd, getSettings().projectAliases || {});

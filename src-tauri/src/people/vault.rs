@@ -1,7 +1,7 @@
 //! Finding things in a vault: which vault, and which notes are clients.
 
 use super::{Client, Frontmatter};
-use crate::channels::vault_detector::{self, Vault};
+use super::vault_detector::{self, Vault};
 use std::fs;
 use std::path::{Path, PathBuf};
 

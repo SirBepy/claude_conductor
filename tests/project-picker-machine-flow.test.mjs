@@ -23,7 +23,7 @@ const PEER = {
 };
 const PEER_PROJECT = {
   id: "peer-proj-1", path: "C:/PeerProjects/widget", name: "widget", parent_segment: null,
-  avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0, any_automated: false,
+  avatar: { kind: "none" }, tokens_7d: 0, live: 0, any_automated: false,
   last_active_at: null, path_exists: true, last_worktree_path: null, last_start_folder_rel: null,
   worktrees: [{ path: "C:/PeerProjects/widget-wt", name: "wt", tokens_7d: 0, live: 0, last_active_at: null, path_exists: true }],
 };

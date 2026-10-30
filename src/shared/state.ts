@@ -15,7 +15,6 @@ export interface ProjectConfig {
   path: string;
   name?: string;
   avatar?: Avatar;
-  automation?: { enabled?: boolean } | null;
 }
 
 export interface SettingsShape {

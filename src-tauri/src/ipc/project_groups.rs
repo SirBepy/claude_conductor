@@ -39,7 +39,6 @@ pub mod groups_test_helpers {
             entry.id = Some(p.id.clone());
             entry.name = p.name.clone();
             entry.avatar = p.avatar.clone();
-            entry.automation_enabled = p.automation.as_ref().map(|a| a.enabled).unwrap_or(false);
             if let Some(la) = p.last_active_at.as_deref() {
                 update_last_active(&mut entry.last_active_at, la);
             }
@@ -90,7 +89,6 @@ pub mod groups_test_helpers {
             name: basename,
             parent_segment: None,
             avatar: Avatar::None,
-            automation_enabled: false,
             tokens_7d: 0,
             live: 0,
             any_automated: false,
@@ -328,7 +326,7 @@ mod build_groups_tests {
     use crate::tokens::TokenRecord;
     use crate::sessions::kinds::InstanceKind;
     use crate::types::{
-        AutomationConfig, Avatar, Instance, ProjectConfig,
+        Avatar, Instance, ProjectConfig,
     };
     use std::path::PathBuf;
 
@@ -378,12 +376,6 @@ mod build_groups_tests {
             path: PathBuf::from("C:\\Users\\joe\\repo"),
             name: "My Cool Repo".into(),
             avatar: Avatar::Emoji("🐉".into()),
-            automation: Some(AutomationConfig {
-                enabled: true,
-                autostart_on_boot: false,
-                session_name_prefix: None,
-                continue_flag: false,
-            }),
             created_at: "2026-04-01T00:00:00Z".into(),
             last_active_at: Some("2026-04-28T00:00:00Z".into()),
             whitelist: crate::types::CharacterWhitelist::default(),
@@ -400,7 +392,6 @@ mod build_groups_tests {
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].id.as_deref(), Some("abc"));
         assert_eq!(groups[0].name, "My Cool Repo");
-        assert!(groups[0].automation_enabled);
         assert!(matches!(groups[0].avatar, Avatar::Emoji(_)));
     }
 
@@ -530,7 +521,6 @@ mod build_groups_tests {
                 name: "x".into(),
                 parent_segment: None,
                 avatar: Avatar::None,
-                automation_enabled: false,
                 tokens_7d: 0,
                 live: 0,
                 any_automated: false,
@@ -564,7 +554,6 @@ mod build_groups_tests {
                 name: "x".into(),
                 parent_segment: None,
                 avatar: Avatar::None,
-                automation_enabled: false,
                 tokens_7d: 0,
                 live: 0,
                 any_automated: false,
@@ -598,7 +587,6 @@ mod build_groups_tests {
                 name: path.to_string(),
                 parent_segment: None,
                 avatar: Avatar::None,
-                automation_enabled: false,
                 tokens_7d: 0,
                 live: 0,
                 any_automated: false,
@@ -696,7 +684,6 @@ mod fold_worktrees_tests {
             name: name.to_string(),
             parent_segment: None,
             avatar: Avatar::None,
-            automation_enabled: false,
             tokens_7d: 0,
             live: 0,
             any_automated: false,

@@ -22,7 +22,7 @@ import { mountView, SESSIONS_BASE_INVOKE, delayInvokes } from "./harness";
 
 const PROJECT = {
   id: "proj1", path: "C:/repo", name: "repo", parent_segment: null,
-  avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0,
+  avatar: { kind: "none" }, tokens_7d: 0, live: 0,
   any_automated: false, last_active_at: null, path_exists: true,
   // No worktree choice: openLocationModal's start() awaits loadScopes()
   // BEFORE ever painting a card, so the project-picker's card (and its own

@@ -3,7 +3,6 @@
 //! is constructed in `bin/cc_conductor_daemon.rs` and injected into the hook
 //! server, RPC handlers, and detector loop.
 
-use crate::channels::manager::Manager as ChannelsManager;
 use crate::daemon::draft_store::DraftStore;
 use crate::daemon::notifier::Notifier;
 use crate::daemon::session::SessionMap;
@@ -39,7 +38,6 @@ pub struct DaemonState {
     pub settings: SettingsCache,
     pub notifier: Notifier,
     pub pending: PendingMap,
-    pub channels: Arc<ChannelsManager>,
     /// Reliable-delivery store for prompts the app must surface (question cards).
     /// The lossy `notifier` broadcast can silently drop a frame under pipe
     /// backpressure, which left AskUserQuestion turns hung forever. Instead the
@@ -178,7 +176,6 @@ impl DaemonState {
             settings,
             notifier: Notifier::new(),
             pending: Arc::new(Mutex::new(HashMap::new())),
-            channels: Arc::new(ChannelsManager::new()),
             pending_prompts: Arc::new(Mutex::new(HashMap::new())),
             render_confirm: Arc::new(Mutex::new(HashMap::new())),
             shutdown: Arc::new(Notify::new()),
@@ -325,7 +322,6 @@ mod tests {
         let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         assert_eq!(st.registry.list().len(), 0);
         assert_eq!(st.pending.lock().await.len(), 0);
-        assert_eq!(st.channels.list().len(), 0);
     }
 
     #[tokio::test]

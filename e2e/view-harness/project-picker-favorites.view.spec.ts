@@ -30,7 +30,7 @@ const FAVORITES_KEY = "claude_companion_project_favorites";
 function proj(id: string, name: string, path: string, extra: Record<string, unknown> = {}) {
   return {
     id, path, name, parent_segment: null,
-    avatar: { kind: "none" }, automation_enabled: false, tokens_7d: 0, live: 0,
+    avatar: { kind: "none" }, tokens_7d: 0, live: 0,
     any_automated: false, last_active_at: null,
     path_exists: true, worktrees: [],
     last_worktree_path: null, last_start_folder_rel: null,

@@ -9,7 +9,6 @@ mod api_credit;
 mod ask;
 mod attachments;
 mod claude_ai_publish;
-mod channels;
 mod gaming_mode;
 mod git;
 mod hidden_chats;

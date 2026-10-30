@@ -1,6 +1,6 @@
 // Shared account icon/colour rendering (multi-account milestone 04). One
-// definition reused by Settings > Accounts, the project Automation "Claude
-// account" row, its reverse "projects using this account" list, and the
+// definition reused by Settings > Accounts, the project settings "Account"
+// row, its reverse "projects using this account" list, and the
 // new-chat account picker - never a per-view visual copy.
 // See docs/multi-account/04-project-binding.md.
 

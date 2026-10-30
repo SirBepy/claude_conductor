@@ -25,7 +25,6 @@ import { state } from "./state";
 import { changeCharacterForSession, changeAccountForSession } from "./active-session-account";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 import { sessionEvents } from "../../shared/chat/event-store";
-import { channelItems } from "./channel-actions";
 import type { ChatEvent, ContentBlock } from "../../types/ipc.generated";
 
 export interface ChatMenuCtx {
@@ -345,18 +344,6 @@ export function buildAgentItems(ctx: ChatMenuCtx): ItemDesc[] {
         : (!sessionId ? "No session" : (ctx.readOnly ? "Only available for interactive chats" :
             (gatedOff ? "No .github/workflows/deploy.yml in this repo" : undefined))),
   });
-
-  // Only an automated chat is a channel. Its project's channel is local, so a
-  // mirrored row (hosted on a peer) and the phone get none of these.
-  const channelSession = !isDraft && sessionId && ctx.readOnly && !ctx.mirrored && !isRemote()
-    ? state.sessions.find((s) => s.session_id === sessionId && s.kind === "automated")
-    : undefined;
-  if (channelSession) {
-    items.push(...channelItems({
-      projectId: channelSession.project_id,
-      phoneSessionId: channelSession.bridge_session_id ? channelSession.session_id : null,
-    }));
-  }
 
   return items;
 }

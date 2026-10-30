@@ -1,16 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
-// Reviewed 2026-10-30: project-config/automation.ts now lays its rows out as .ps-line (label + toggle) instead of the Settings .option rows; the popup test below checks the new rows for dividers. Passed after the change.
+// Reviewed 2026-10-30: project-config/project-settings.ts (formerly automation.ts, its Automation section is gone) lays its rows out as .ps-line (label + toggle) instead of the Settings .option rows; the popup test below checks the new rows for dividers. Passed after the change.
 import path from "node:path";
 import { mountView } from "./harness";
 import { shotDir } from "./shot-dir";
 
-// asserts: src/styles/settings-sections.css, src/views/settings/subviews/shortcuts/shortcuts.css, src/views/settings/subviews/permissions/permissions.css, src/views/characters/character-detail.css, src/views/sessions/project-dashboard/project-config/automation.ts
+// asserts: src/styles/settings-sections.css, src/views/settings/subviews/shortcuts/shortcuts.css, src/views/settings/subviews/permissions/permissions.css, src/views/characters/character-detail.css, src/views/sessions/project-dashboard/project-config/project-settings.ts
 // Settings cards draw no hairline between rows. The kit's per-row divider
 // skipped only a card's :last-of-type row, so a row followed by a caption or a
 // button kept its line and cards showed lines under some rows and not others.
 // Shortcuts, Permissions and Character detail style their own row classes, so
 // each needs its own check: the kit rule does not reach them.
-// The project-config automation popup's own .ps-line rows go without lines too.
+// The project settings popup's own .ps-line rows go without lines too.
 
 const SHOT_DIR = shotDir();
 const LABEL = process.env.CC_SHOT_LABEL ?? "after";
@@ -109,7 +109,7 @@ test("character detail slot rows draw no divider lines", async ({ page }) => {
   expectNoDividers(await rowBorders(page, ".char-slot-row"), 2);
 });
 
-test("project config automation rows draw no divider lines", async ({ page }) => {
+test("project settings rows draw no divider lines", async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 900 });
   const cwd = "C:/work/demo";
   await mountView(page, {
@@ -118,27 +118,19 @@ test("project config automation rows draw no divider lines", async ({ page }) =>
       list_accounts: [],
       resolve_project_account: null,
       get_ticket_tracker: null,
-      // A project that already has automation, so the Enabled / Start on boot
-      // rows are shown and not just the "Add automation" empty state.
-      list_projects: [
-        {
-          id: "p1",
-          path: cwd,
-          automation: { enabled: false, autostart_on_boot: true, continue_flag: true, session_name_prefix: null },
-        },
-      ],
+      list_projects: [{ id: "p1", path: cwd }],
     },
   });
   await page.locator(".kit-row").first().waitFor();
 
   await page.evaluate(async (projectCwd) => {
-    const { renderProjectSettings } = await import("/views/sessions/project-dashboard/project-config/automation.ts");
+    const { renderProjectSettings } = await import("/views/sessions/project-dashboard/project-config/project-settings.ts");
     const host = document.createElement("div");
     host.id = "project-config-host";
     document.body.appendChild(host);
     await renderProjectSettings(host, projectCwd);
   }, cwd);
-  await page.locator("#project-config-host #automationForm").waitFor({ state: "visible" });
+  await page.locator("#project-config-host #chatDefaultModelControl .vs").waitFor({ state: "visible" });
 
-  expectNoDividers(await rowBorders(page, "#project-config-host .ps-line"), 5);
+  expectNoDividers(await rowBorders(page, "#project-config-host .ps-line"), 2);
 });

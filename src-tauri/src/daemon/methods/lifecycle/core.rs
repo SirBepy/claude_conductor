@@ -128,7 +128,7 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 let auto_accept = params_value.get("auto_accept").and_then(Value::as_bool).unwrap_or(false);
                 // Idempotency key: the placeholder id is the one value that
                 // survives the caller's retry (`daemon::start_tokens`). Absent
-                // for channels, schedules and resumes - those spawn as before.
+                // for schedules and resumes - those spawn as before.
                 let token = params_value
                     .get("placeholder_id")
                     .and_then(Value::as_str)

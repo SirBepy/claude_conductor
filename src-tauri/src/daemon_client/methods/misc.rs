@@ -13,7 +13,7 @@ impl PersistentClient {
         self.call("health", Value::Null).await
     }
 
-    /// Tell the daemon to stop (kill channels + exit the process).
+    /// Tell the daemon to stop (kill live chats + exit the process).
     pub async fn shutdown_daemon(&self) -> Result<(), ClientError> {
         self.call("shutdown_daemon", Value::Null).await.map(|_| ())
     }
@@ -104,7 +104,7 @@ mod tests {
         exe.push("cc-conductor-daemon.exe");
         let child = Command::new(&exe)
             .env("CC_DAEMON_INSTANCE", INSTANCE)
-            // Don't launch real automation channels from a test daemon.
+            // Don't auto-continue interrupted chats from a test daemon.
             .env("CC_DAEMON_NO_AUTOSTART", "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

@@ -31,10 +31,6 @@ pub struct AppState {
     /// `instances_changed` notifications. App-side reads consult this cache;
     /// writes go through `daemon_client` (Phase 5 wires the writers).
     pub cached_instances: Arc<Mutex<Vec<crate::types::Instance>>>,
-    /// Daemon-owned channel list, mirrored locally. Refreshed from
-    /// `channels_changed` notifications. Replaces the app-owned `channels`
-    /// Manager for read paths now that the daemon owns channel processes.
-    pub cached_channels: Arc<Mutex<Vec<serde_json::Value>>>,
     /// True while a widget host (windows_taskbar_widgets) is rendering our
     /// widget itself, which hides the tray menu's own "Show overlay" entry.
     /// Connection-scoped: the daemon clears it when that client's socket drops.
@@ -161,7 +157,6 @@ impl AppState {
             audio,
             preview,
             cached_instances: Arc::new(Mutex::new(Vec::new())),
-            cached_channels: Arc::new(Mutex::new(Vec::new())),
             widget_hosted: Mutex::new(false),
             gaming_mode: Mutex::new(false),
             attached_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),

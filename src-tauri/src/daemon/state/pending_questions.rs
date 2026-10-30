@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn boot_reconciles_after_the_external_adoption() {
         let boot = include_str!("../boot.rs");
-        let adopt = boot.find("channel_adopt::adopt_external_sessions(state.clone())").expect("boot adopts external sessions");
+        let adopt = boot.find("external_adopt::adopt_external_sessions(state.clone())").expect("boot adopts external sessions");
         let reconcile = boot.find("state.reconcile_pending_questions().await").expect("boot reconciles question cards");
         assert!(reconcile > adopt, "the reconcile must follow every registry source");
     }

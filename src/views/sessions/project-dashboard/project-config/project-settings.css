@@ -2,17 +2,16 @@
    one layout. Short labels carry their explanation as a tooltip, selects and
    sliders stack under their label, toggles sit on the label's own line. */
 
-.view-project-automation { display: flex; flex-direction: column; gap: 16px; }
-.view-project-automation .ps-group { display: flex; flex-direction: column; gap: 14px; }
-.view-project-automation .ps-group + .ps-group { border-top: 1px solid var(--color-border); padding-top: 14px; gap: 10px; }
+.view-project-settings { display: flex; flex-direction: column; gap: 16px; }
+.view-project-settings .ps-group { display: flex; flex-direction: column; gap: 14px; }
+.view-project-settings .ps-group + .ps-group { border-top: 1px solid var(--color-border); padding-top: 14px; gap: 10px; }
 .ps-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ps-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; }
-.ps-sub { display: flex; flex-direction: column; gap: 10px; }
 .ps-label { font-size: var(--fs-body); color: var(--color-text); line-height: 1.2; }
 .ps-label[title] { cursor: help; }
 
-.view-project-automation .inline-select,
-.view-project-automation .inline-input {
+.view-project-settings .inline-select,
+.view-project-settings .inline-input {
   width: 100%;
   box-sizing: border-box;
   height: 30px;
@@ -28,19 +27,6 @@
 .acc-row-control .inline-select { flex: 1; min-width: 0; }
 #trackerControl { flex-direction: column; align-items: stretch; gap: 6px; }
 .acc-row-empty-hint { color: var(--sb-muted); font-size: var(--fs-body); }
-
-.ps-actions { display: flex; justify-content: space-between; gap: 8px; }
-.ps-btn {
-  background: var(--color-surface-alt, #24242e);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: 5px;
-  padding: 3px 10px;
-  font-size: var(--fs-body);
-  cursor: pointer;
-}
-.ps-btn:hover { border-color: var(--color-primary); }
-.ps-btn-primary { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-background); font-weight: 500; }
 
 /* Model / effort: stops sit in equal columns, so the track is inset by half a
    column and every thumb position lands on its label's centre. */

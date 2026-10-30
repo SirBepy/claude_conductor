@@ -2,13 +2,12 @@ use claude_conductor_lib::ipc::legacy_import_test_helpers as h;
 use claude_conductor_lib::types::Settings;
 
 #[test]
-fn parses_old_config_into_project_with_automation() {
+fn parses_old_config_into_project() {
     let raw = r#"{ "vault_path": "C:/Users/x/Obsidian/Vault", "auto_registered_startup": true }"#;
     let mut s = Settings::default();
     let project = h::import_into(&mut s, raw, "now").unwrap();
     assert_eq!(s.projects.len(), 1);
     assert_eq!(s.projects[0].path, std::path::PathBuf::from("C:/Users/x/Obsidian/Vault"));
-    assert!(s.projects[0].automation.as_ref().unwrap().autostart_on_boot);
     assert_eq!(project.id, s.projects[0].id);
 }
 

@@ -84,24 +84,8 @@ pub(super) async fn on_session_start(
 
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 
-    // Phase 4: if the hook's pid belongs to a channel we spawned, tag it
-    // Automated + remote (restores the pre-Phase-3 correlation that lived in
-    // the old app-side hook server). We match against BOTH the channel's
-    // launcher pid and its resolved `claude` pid: on Windows the launcher is a
-    // `cmd.exe` wrapper and the hook reports claude's (child) pid. When the
-    // payload omits pid (common in v2.x) or the claude pid isn't resolved yet,
-    // this misses here; the background enrichment block below re-runs the match
-    // once the real pid is known, and the channel lifecycle also re-tags from
-    // its side when it resolves the claude pid.
-    let hook_pid = payload.pid.unwrap_or(0);
-    let (kind, is_remote) = if hook_pid != 0
-        && ctx.state.channels.list().iter()
-            .any(|c| c.pid == Some(hook_pid) || c.claude_pid == Some(hook_pid))
-    {
-        (InstanceKind::Automated, true)
-    } else {
-        (InstanceKind::External, false)
-    };
+    // A session reaching the hook server was started outside this daemon.
+    let (kind, is_remote) = (InstanceKind::External, false);
 
     let transcript_path_buf = payload.transcript_path.clone().map(std::path::PathBuf::from);
 
@@ -139,11 +123,8 @@ pub(super) async fn on_session_start(
     let transcript_path_opt = transcript_path_buf;
     tokio::spawn(async move {
         let mut changed = false;
-        // Track the resolved real pid so we can re-run the channel match below.
-        let mut resolved_pid: Option<u32> = None;
         if payload_pid.is_none() || payload_pid == Some(0) {
             if let Some(meta) = crate::hooks::session_files::resolve_session_meta(&sid).await {
-                resolved_pid = Some(meta.pid);
                 if state.registry.set_pid(&sid, meta.pid) { changed = true; }
                 if let Some(bridge) = meta.bridge_session_id {
                     state.registry.set_bridge_session_id(&sid, bridge);
@@ -151,23 +132,9 @@ pub(super) async fn on_session_start(
                 }
             }
         } else if let Some(pid) = payload_pid {
-            resolved_pid = Some(pid);
             if let Some(bridge) = crate::hooks::session_files::resolve_bridge_session_id(pid).await {
                 state.registry.set_bridge_session_id(&sid, bridge);
                 changed = true;
-            }
-        }
-        // Phase 4 follow-up (ai_todo 60): once the real pid is known, re-run the
-        // channel match. v2.x SessionStart often omits pid, so the immediate match
-        // in the synchronous path above misses; this upgrades External -> Automated.
-        if let Some(rpid) = resolved_pid {
-            let is_channel = state.channels.list().iter()
-                .any(|c| c.pid == Some(rpid) || c.claude_pid == Some(rpid));
-            if is_channel
-                && state.registry.set_kind(&sid, InstanceKind::Automated, true)
-            {
-                changed = true;
-                log::info!("session {sid} re-tagged Automated (channel claude pid {rpid})");
             }
         }
         if let Some(path) = transcript_path_opt {

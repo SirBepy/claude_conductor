@@ -147,7 +147,6 @@ export interface ProjectGroup {
   name: string;
   parent_segment: string | null;
   avatar: { kind: string; value?: unknown };
-  automation_enabled: boolean;
   tokens_7d: number;
   live: number;
   any_automated: boolean;
@@ -481,29 +480,6 @@ export const api = {
     catch (e) { console.error("delete_project failed", e); throw e; }
   },
 
-  // --- Channels ---
-  spawnChannel: async (projectId: string): Promise<void> => {
-    try { await invoke("spawn_channel", { projectId }); }
-    catch (e) { console.error("spawn_channel failed", e); throw e; }
-  },
-  stopChannel: async (projectId: string): Promise<void> => {
-    try { await invoke("stop_channel", { projectId }); }
-    catch (e) { console.error("stop_channel failed", e); throw e; }
-  },
-  restartChannel: async (projectId: string): Promise<void> => {
-    try { await invoke("restart_channel", { projectId }); }
-    catch (e) { console.error("restart_channel failed", e); throw e; }
-  },
-  showTerminal: async (projectId: string): Promise<void> => {
-    try { await invoke("show_terminal", { projectId }); }
-    catch (e) { console.error("show_terminal failed", e); throw e; }
-  },
-  hideTerminal: async (projectId: string): Promise<void> => {
-    try { await invoke("hide_terminal", { projectId }); }
-    catch (e) { console.error("hide_terminal failed", e); throw e; }
-  },
-  listChannels: (): Promise<unknown[]> => invoke("list_channels"),
-  detectObsidianVaults: (): Promise<string[]> => invoke("detect_obsidian_vaults"),
   importLegacyObsidianConfig: (): Promise<unknown> =>
     invoke("import_legacy_obsidian_config"),
   confirmLegacyObsidianImport: (accept: boolean): Promise<unknown> =>
@@ -620,8 +596,6 @@ export const api = {
       try { cb(payload || []); }
       catch (err) { console.error("onTokenHistoryUpdated handler threw", err); }
     }),
-  onChannelsChanged: (cb: (payload: unknown) => void): Unlisten =>
-    listenEvent("channels-changed", cb),
   onInstancesChanged: (cb: (list: unknown) => void): Unlisten =>
     listenEvent("instances-changed", (payload) => {
       try { cb(payload || []); }

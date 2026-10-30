@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-// The project popup's "Claude account" row picks which account new chats in
+// The project settings "Account" row picks which account new chats in
 // the project use. An API-credit account can never be a project binding (the
 // backend refuses it), so it is not an option there.
 
@@ -21,7 +21,7 @@ vi.mock("../src/shared/ipc.ts", () => ({ invoke: vi.fn(async () => null) }));
 vi.mock("../src/shared/toast.ts", () => ({ showToast: vi.fn() }));
 
 const { renderProjectSettings } = await import(
-  "../src/views/sessions/project-dashboard/project-config/automation.ts"
+  "../src/views/sessions/project-dashboard/project-config/project-settings.ts"
 );
 
 const sub = { id: "acct-sub", label: "Personal", icon: "user", colour: "#9d7dfc", kind: "subscription" };
@@ -38,10 +38,10 @@ async function optionValues(accounts) {
   const root = document.createElement("div");
   document.body.appendChild(root);
   await renderProjectSettings(root, "C:/proj");
-  return Array.from(root.querySelectorAll("#automationAccountSelect option")).map((o) => o.value);
+  return Array.from(root.querySelectorAll("#projectAccountSelect option")).map((o) => o.value);
 }
 
-describe("project Automation account row", () => {
+describe("project settings account row", () => {
   it("lists plan accounts but not the API-credit one", async () => {
     expect(await optionValues([sub, credit, work])).toEqual(["", "acct-sub", "acct-work"]);
   });
@@ -51,7 +51,7 @@ describe("project Automation account row", () => {
     const root = document.createElement("div");
     document.body.appendChild(root);
     await renderProjectSettings(root, "C:/proj");
-    expect(root.querySelector("#automationAccountSelect")).toBeNull();
+    expect(root.querySelector("#projectAccountSelect")).toBeNull();
     expect(root.querySelector(".acc-row-empty-hint")).not.toBeNull();
   });
 });

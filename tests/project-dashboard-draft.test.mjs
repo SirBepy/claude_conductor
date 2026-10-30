@@ -31,7 +31,7 @@ vi.mock("../src/views/sessions/new-chat-config.ts", () => ({ resolveNewChatConfi
 vi.mock("../src/views/sessions/close-chat.ts", () => ({ closeChatWithConfirm: vi.fn(async () => {}) }));
 // The rail's real controls read accounts, projects and settings; this spec only cares where they land.
 const renderSettings = vi.hoisted(() => vi.fn(async (root) => { root.innerHTML = `<div class="rail-stub"></div>`; }));
-vi.mock("../src/views/sessions/project-dashboard/project-config/automation.ts", () => ({ renderProjectSettings: renderSettings }));
+vi.mock("../src/views/sessions/project-dashboard/project-config/project-settings.ts", () => ({ renderProjectSettings: renderSettings }));
 
 const draftModule = await import("../src/views/sessions/project-dashboard/draft-dashboard.ts");
 const { mountDraftDashboard, unmountDraftDashboard } = draftModule;
@@ -290,7 +290,6 @@ describe("draft dashboard motion", () => {
 describe("right-click menu", () => {
   const rightClick = (el) => el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
   const items = () => [...document.querySelectorAll(".session-more-menu .smore-item")].map((b) => b.textContent.trim());
-  // The menu opens once the automation-flag read (channelFor) settles.
   const opened = () => vi.waitFor(() => expect(items().length).toBeGreaterThan(0));
 
   it("puts a live chat's own actions above the project's, split by a divider", async () => {

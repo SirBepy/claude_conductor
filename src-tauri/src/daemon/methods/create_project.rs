@@ -24,13 +24,10 @@ const PROJECTS_ROOT_SETTINGS_KEY: &str = "newProjectLastParent";
 /// out of it on its own; `register_create_project` below still re-checks via
 /// a canonicalized prefix comparison as defense in depth.
 ///
-/// Also rejects `& ^ % ! ( )` and control characters: a project
-/// name becomes a channel's `--remote-control-session-name-prefix` value at
-/// `channels::spawn::build_cmdline`, which now quotes on these too, but a
-/// folder name is user/attacker-chosen content that reaches a `cmd.exe`
-/// command line at all only because of that later spawn - denying the
-/// cmd.exe operator set here closes the gap for any other future consumer of
-/// a project name that is less careful about quoting.
+/// Also rejects `& ^ % ! ( )` and control characters: a folder name is
+/// user/attacker-chosen content, and denying the cmd.exe operator set here
+/// keeps it out of any consumer of a project name that builds a `cmd.exe`
+/// command line and is less careful about quoting.
 pub(crate) fn is_valid_project_name(name: &str) -> bool {
     let t = name.trim();
     if t.is_empty() {
@@ -243,7 +240,6 @@ mod tests {
             path: path.to_path_buf(),
             name: path.file_name().unwrap().to_string_lossy().into_owned(),
             avatar: Default::default(),
-            automation: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             last_active_at: None,
             whitelist: Default::default(),

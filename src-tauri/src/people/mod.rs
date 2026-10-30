@@ -18,6 +18,7 @@ mod resolve;
 #[cfg(test)]
 mod test_support;
 mod vault;
+pub mod vault_detector;
 mod write;
 
 pub use resolve::{resolve, resolve_in, similar, Resolved};
