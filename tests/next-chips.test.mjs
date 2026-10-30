@@ -42,8 +42,12 @@ describe("nextChips", () => {
     expect(nextChips(ctx({ nextActions: ["Yes, implement this", "/commit"] }))).toEqual(["/close", "Yes, implement this", "/commit"]);
   });
 
-  it("caps the strip at 3", () => {
-    expect(nextChips(ctx({ nextActions: ["A", "B", "C"] }))).toEqual(["/close", "A", "B"]);
+  it("shows all three of the model's replies after /close", () => {
+    expect(nextChips(ctx({ nextActions: ["A", "B", "C"] }))).toEqual(["/close", "A", "B", "C"]);
+  });
+
+  it("never shows more than /close plus three replies", () => {
+    expect(nextChips(ctx({ nextActions: ["A", "B", "C", "D"] }))).toEqual(["/close", "A", "B", "C"]);
   });
 
   it("drops a model-written /close, which would duplicate the built-in one", () => {
