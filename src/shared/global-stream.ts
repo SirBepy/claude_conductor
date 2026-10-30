@@ -44,12 +44,19 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
 export const GLOBAL_KEBAB_EVENTS = new Set(Object.values(GLOBAL_EVENT_MAP));
 
 /** How stale (ms since the last inbound frame, heartbeat or otherwise) the
- *  global stream must be before the watchdog treats it as a zombie socket.
- *  Browsers never surface native WS ping/pong to JS, so `onclose` does not
- *  fire when the connection silently dies (e.g. after the phone's screen was
- *  off long enough for the OS to freeze it) - only a missed app-level
- *  heartbeat can detect that. */
-const GLOBAL_STALE_MS = 10_000;
+ *  global stream must be before a RESUME or `online` event treats it as a
+ *  zombie socket. Browsers never surface native WS ping/pong to JS, so
+ *  `onclose` does not fire when the connection silently dies (e.g. after the
+ *  phone's screen was off long enough for the OS to freeze it) - only a
+ *  missed app-level heartbeat can detect that. Kept eager on purpose: a
+ *  resume is the moment a dead socket is most likely. */
+export const GLOBAL_STALE_MS = 10_000;
+/** The steady-state watchdog's limit. It must stay above the daemon's
+ *  heartbeat period (`GLOBAL_HEARTBEAT_INTERVAL`, 15s, in
+ *  src-tauri/src/daemon/remote_ws_pump.rs) plus slack, or a healthy quiet
+ *  socket whose age peaks just under 15s gets closed and redialed every
+ *  cycle. A contract test pins the relation. */
+export const GLOBAL_WATCHDOG_STALE_MS = 20_000;
 const GLOBAL_WATCHDOG_INTERVAL_MS = 5_000;
 /** Degrade-path poll cadence, matching the interval the old per-listener poll
  *  used before this singleton existed. */
@@ -146,7 +153,9 @@ function ensureGlobalWatchdog(): void {
   if (globalWatchdogTimer) return;
   globalWatchdogTimer = visibleInterval(() => {
     if (globalWsStopped) return;
-    if (Date.now() - globalLastFrameAt > GLOBAL_STALE_MS) {
+    const age = Date.now() - globalLastFrameAt;
+    if (age > GLOBAL_WATCHDOG_STALE_MS) {
+      console.info("[global-stream] watchdog stale", { age });
       // Stale: assume the socket is a zombie (half-open, no clean close).
       // Start degrading immediately and force-close so the existing
       // reconnect/backoff in onclose kicks in.

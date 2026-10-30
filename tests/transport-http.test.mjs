@@ -712,12 +712,34 @@ describe("HttpTransport.listen — instances-changed poll", () => {
     const afterImmediate = received.length;
     expect(afterImmediate).toBe(1);
 
-    // Advance short of the watchdog's staleness threshold (GLOBAL_STALE_MS,
-    // checked every GLOBAL_WATCHDOG_INTERVAL_MS) — the degrade poll never
-    // starts, so no further tick fires.
+    // Advance short of the watchdog's staleness threshold
+    // (GLOBAL_WATCHDOG_STALE_MS, 20s, checked every GLOBAL_WATCHDOG_INTERVAL_MS):
+    // the degrade poll never starts, so no further tick fires.
     await vi.advanceTimersByTimeAsync(9000);
 
     expect(received.length).toBe(afterImmediate);
+
+    unlisten();
+  });
+
+  it("a quiet socket that gets the daemon's 15s heartbeat is never closed or degraded", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => [] });
+
+    const unlisten = await new HttpTransport().listen("instances-changed", () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    const ws = lastWs;
+    ws.onopen();
+    const fetchesAfterImmediate = fetchMock.mock.calls.length;
+
+    // A healthy quiet socket's frame age peaks just under 15s; the old 10s
+    // watchdog limit closed it and started the degrade poll every cycle.
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(15000);
+      ws.onmessage({ data: JSON.stringify({ jsonrpc: "2.0", method: "heartbeat", params: {} }) });
+    }
+
+    expect(ws.close).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.length).toBe(fetchesAfterImmediate);
 
     unlisten();
   });
@@ -733,10 +755,10 @@ describe("HttpTransport.listen — instances-changed poll", () => {
     const afterImmediate = received.length;
     expect(afterImmediate).toBe(1);
 
-    // The mock WS never opens/frames, so the watchdog (ticking every 5s)
-    // eventually finds the last-frame timestamp older than the 10s staleness
-    // threshold, starts the degrade poll, and that poll's first 3.5s tick fires.
-    await vi.advanceTimersByTimeAsync(19000);
+    // The mock WS never opens/frames, so the watchdog (ticking every 5s) trips
+    // at the 25s tick (age 20s is not yet over GLOBAL_WATCHDOG_STALE_MS),
+    // starts the degrade poll, and that poll's first 3.5s tick fires at 28.5s.
+    await vi.advanceTimersByTimeAsync(30000);
 
     expect(received.length).toBeGreaterThan(afterImmediate);
 
