@@ -99,10 +99,9 @@
 }
 
 @keyframes attachment-pop {
-  0% { transform: scale(0.35) rotate(0deg); opacity: 0; }
-  45% { transform: scale(1.12) rotate(-7deg); opacity: 1; }
-  68% { transform: scale(0.95) rotate(3deg); }
-  86% { transform: scale(1.02) rotate(-1deg); }
+  0% { transform: scale(0.45) rotate(0deg); opacity: 0; }
+  55% { transform: scale(1.05) rotate(-3deg); opacity: 1; }
+  80% { transform: scale(0.98) rotate(1deg); }
   100% { transform: scale(1) rotate(0deg); }
 }
 

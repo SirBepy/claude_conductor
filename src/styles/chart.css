@@ -41,6 +41,24 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
+/* Solid lines draw in left to right on every render. pathLength="1" on the
+ * path normalises the dash to the line's own length. Dashed series skip the
+ * class because the draw trick would replace their dash pattern. */
+.chart-line-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: chart-line-draw 0.9s ease-out both;
+}
+
+@keyframes chart-line-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-line-draw { animation: none; }
+}
+
 .chart-legend {
   display: flex;
   gap: 16px;

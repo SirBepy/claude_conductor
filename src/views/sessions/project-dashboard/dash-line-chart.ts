@@ -136,7 +136,7 @@ function chartSvg(spec: LineChartSpec, g: ReturnType<typeof geometry>): string {
     const fill = s.lead
       ? `<path d="${path} L${xAt(g, n - 1).toFixed(1)},${base} L${xAt(g, 0).toFixed(1)},${base} Z" fill="${s.color}" opacity="0.08"/>`
       : "";
-    return `${fill}<path data-line="${s.key}" d="${path}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round"${s.dash ? ` stroke-dasharray="${s.dash}"` : ""}${s.lead ? "" : ` opacity="0.7"`}/>`;
+    return `${fill}<path${s.dash ? "" : ` class="chart-line-draw" pathLength="1"`} data-line="${s.key}" d="${path}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round"${s.dash ? ` stroke-dasharray="${s.dash}"` : ""}${s.lead ? "" : ` opacity="0.7"`}/>`;
   }).join("");
   const last = rows[n - 1]!;
   const ends = series.filter((s) => s.endLabel).map((s) =>
