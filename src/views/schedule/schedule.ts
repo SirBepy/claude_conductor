@@ -95,6 +95,12 @@ export async function renderScheduleView(root: HTMLElement): Promise<() => void>
     const btn = target.closest<HTMLButtonElement>("button[data-action]");
     if (btn) {
       const action = btn.dataset.action;
+      if (action === "guard-toggle") {
+        const key = btn.dataset.key ?? null;
+        state.guardOpenKey = state.guardOpenKey === key ? null : key;
+        rerender(bodyEl);
+        return;
+      }
       const id = btn.dataset.id;
       if (action && id) void handleAction(action, id, bodyEl, myMount);
       return;

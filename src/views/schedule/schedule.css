@@ -396,19 +396,61 @@ details.schedule-section[open] > summary.schedule-section-title::before {
   color: var(--color-danger, #ff6b6b);
   font-style: italic;
 }
-/* A skip is a decision, not a fault: muted like the pill, never danger red. */
-.schedule-reason--skipped { color: var(--color-text-muted); font-style: normal; font-size: 0.78rem; }
-
-.schedule-badge--guard { color: var(--color-primary); }
-.schedule-guard-line {
-  margin-top: 3px;
-  font-size: 0.72rem;
+/* A skip is a decision, not a fault: one muted line, the row dimmed, never danger red. */
+.schedule-skip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
   color: var(--color-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.schedule-guard-line code { font-family: var(--font-mono, ui-monospace, monospace); }
+.agenda-row--skipped .agenda-time,
+.agenda-row--skipped .agenda-icon,
+.agenda-row--skipped .agenda-name { opacity: 0.6; }
+
+/* The shield after a guarded item's name opens its drawer. */
+.schedule-guard-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  padding: 0;
+  vertical-align: middle;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.schedule-guard-btn:hover,
+.schedule-guard-btn.is-open { background: color-mix(in srgb, var(--color-primary) 15%, transparent); }
+
+.schedule-guard-drawer {
+  flex-basis: 100%;
+  margin: 2px 0 0 68px;
+  padding: 9px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
+  cursor: default;
+}
+.sgd-cmd {
+  display: block;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--color-surface-3);
+  color: var(--color-text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.sgd-last { display: flex; align-items: center; gap: 6px; }
 
 .schedule-delta {
   color: var(--color-warning);

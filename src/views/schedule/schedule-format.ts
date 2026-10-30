@@ -37,17 +37,39 @@ export function recurrenceBadge(rec: Recurrence | null): string {
     : "";
 }
 
-/** Marks an item that only fires when its pre-fire guard lets it. The command
- * itself is arbitrary code, so it is printed on the row too (`guardLine`), not
- * only in this chip's tooltip, which a phone never shows. */
-export function guardBadge(item: ScheduledItem): string {
-  if (!item.guard) return "";
-  return `<span class="schedule-badge schedule-badge--guard" title="${escapeHtml(`Runs before each firing; skips it when the command exits 0: ${item.guard}`)}"><i class="ph ph-shield-check"></i>conditional</span>`;
+/** Identity of one placement of an item on the calendar, so opening the guard
+ * drawer on one day's row never opens it on the item's other projected days. */
+export function occurrenceKey(item: ScheduledItem, time: number): string {
+  return `${item.id}|${time}`;
 }
 
-export function guardLine(item: ScheduledItem): string {
+/** The shield after a guarded item's name: it only fires when the guard lets
+ * it, and a click opens `guardDrawer`. A button, not a tooltip, because the
+ * command is arbitrary code and a phone never shows tooltips. */
+export function guardShield(item: ScheduledItem, key: string, open: boolean): string {
   if (!item.guard) return "";
-  return `<div class="schedule-guard-line" title="${escapeHtml(item.guard)}">Skips if <code>${escapeHtml(item.guard)}</code> exits 0</div>`;
+  return `<button class="schedule-guard-btn${open ? " is-open" : ""}" data-action="guard-toggle" data-id="${escapeHtml(item.id)}" data-key="${escapeHtml(key)}" aria-expanded="${open}" title="Conditional: click to see the guard"><i class="ph${open ? "-fill" : ""} ph-shield-check"></i></button>`;
+}
+
+function skipTime(iso: string): string {
+  const d = new Date(iso);
+  return isNaN(d.getTime())
+    ? iso
+    : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/** What the guard is, what its exit code means, and when it last turned a
+ * firing away. */
+export function guardDrawer(item: ScheduledItem): string {
+  if (!item.guard) return "";
+  const last = item.last_skip
+    ? `<i class="ph ph-skip-forward"></i>Last skipped ${escapeHtml(skipTime(item.last_skip.at))}: ${escapeHtml(item.last_skip.reason)}`
+    : `<i class="ph ph-check-circle"></i>Has not skipped a firing yet`;
+  return `<div class="schedule-guard-drawer">
+    <div class="sgd-rule">Runs before each firing. Exit code 0 skips that firing; any other result, or no answer in 30 seconds, lets it fire.</div>
+    <code class="sgd-cmd">${escapeHtml(item.guard)}</code>
+    <div class="sgd-last">${last}</div>
+  </div>`;
 }
 
 export function kindIconClass(item: ScheduledItem): string {

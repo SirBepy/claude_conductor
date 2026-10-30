@@ -12,8 +12,9 @@ import {
   MONTH_NAMES,
   DOW_HEAD,
   recurrenceBadge,
-  guardBadge,
-  guardLine,
+  guardShield,
+  guardDrawer,
+  occurrenceKey,
   kindIconClass,
   targetLabel,
   navTarget,
@@ -65,25 +66,28 @@ function agendaRowHtml(occ: Occurrence): string {
   const nav = occ.status === "skipped" ? null : navTarget(item);
   const rescheduleOpen = state.reschedulingId === item.id;
   const isFailed = item.status.type === "failed";
-  const reason = occ.status === "skipped"
-    ? item.last_skip?.reason || ""
-    : item.status.type === "failed"
-      ? item.status.reason
-      : (occ.status === "failed" ? item.last_result || "" : "");
+  const skipped = occ.status === "skipped";
+  const reason = item.status.type === "failed"
+    ? item.status.reason
+    : (occ.status === "failed" ? item.last_result || "" : "");
+  const key = occurrenceKey(item, occ.time);
+  const guardOpen = !!item.guard && state.guardOpenKey === key;
   const canFire = occ.status === "upcoming" || occ.status === "firing" || occ.status === "failed";
   const showDelete = occ.status !== "firing" && !skipHistory;
-  return `<li class="agenda-row ${nav ? "agenda-row--nav" : ""}" data-id="${escapeHtml(item.id)}" ${nav ? `data-nav-session="${escapeHtml(nav.sessionId)}" data-nav-mode="${nav.mode}"` : ""}>
+  // A skip is one quiet line, not a status pill: it is a decision, not a fault.
+  const meta = skipped
+    ? `<span class="schedule-skip"><i class="ph ph-skip-forward"></i>Skipped: ${escapeHtml(item.last_skip?.reason || "")}</span>`
+    : `${statusPill(occ.status)}
+        ${recurrenceBadge(item.recurrence)}
+        ${reason ? `<span class="schedule-reason">${escapeHtml(reason)}</span>` : ""}`;
+  return `<li class="agenda-row ${nav ? "agenda-row--nav" : ""} ${skipped ? "agenda-row--skipped" : ""}" data-id="${escapeHtml(item.id)}" ${nav ? `data-nav-session="${escapeHtml(nav.sessionId)}" data-nav-mode="${nav.mode}"` : ""}>
     <span class="agenda-time">${escapeHtml(timeStr)}</span>
     <i class="ph ${kindIconClass(item)} agenda-icon"></i>
     <div class="agenda-main">
-      <div class="agenda-name">${escapeHtml(targetLabel(item))}</div>
+      <div class="agenda-name">${escapeHtml(targetLabel(item))}${guardShield(item, key, guardOpen)}</div>
       <div class="agenda-meta">
-        ${statusPill(occ.status)}
-        ${recurrenceBadge(item.recurrence)}
-        ${guardBadge(item)}
-        ${reason ? `<span class="schedule-reason${occ.status === "skipped" ? " schedule-reason--skipped" : ""}">${escapeHtml(reason)}</span>` : ""}
+        ${meta}
       </div>
-      ${guardLine(item)}
     </div>
     <div class="agenda-actions">
       ${canFire ? `<button class="icon-btn" data-action="fire-now" data-id="${escapeHtml(item.id)}" title="${isFailed ? "Retry" : "Fire now"}"><i class="ph ${isFailed ? "ph-arrow-clockwise" : "ph-play"}"></i></button>` : ""}
@@ -91,6 +95,7 @@ function agendaRowHtml(occ: Occurrence): string {
       ${showDelete ? `<button class="icon-btn" data-action="delete" data-id="${escapeHtml(item.id)}" title="Delete"><i class="ph ph-trash"></i></button>` : ""}
       ${nav ? `<i class="ph ph-caret-right agenda-chevron"></i>` : ""}
     </div>
+    ${guardOpen ? guardDrawer(item) : ""}
     ${rescheduleOpen ? `
       <div class="schedule-reschedule-inline">
         <input type="datetime-local" data-reschedule-input="${escapeHtml(item.id)}" value="${datetimeLocalValue(item.fire_at)}">
