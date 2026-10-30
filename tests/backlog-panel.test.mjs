@@ -224,4 +224,164 @@ describe("Backlog panel", () => {
       }
     });
   });
+
+  async function overrideIpc(handler) {
+    const ipc = await import("../src/shared/ipc.ts");
+    const base = ipc.invoke.getMockImplementation();
+    ipc.invoke.mockImplementation(async (cmd, args) => {
+      const r = handler(cmd, args);
+      return r === undefined ? base(cmd, args) : r;
+    });
+    return () => ipc.invoke.mockImplementation(base);
+  }
+
+  // Undo runs against the cwd it captured, but what it does AFTER the await
+  // (select a row, show an error, refetch) acts on whatever chat is current.
+  describe("Undo after a chat switch", () => {
+    const record = { id: "pc-0001", done_path: "d", original_path: "o", original_content: "c", plan_line: null, plan_line_index: null };
+    // The other project also has a pc-0001, listed second, so a stray select
+    // of the old project's id would visibly move the reader onto it.
+    const other = {
+      groups: [],
+      todos: ["pc-0009", "pc-0001"].map((id, i) => ({ ...backlog.todos[0], id, name: `${id}-z.md`, title: `Other ${id}`, group: null, plan_index: null, mtime_ms: 10 - i })),
+    };
+
+    async function archiveThenHoldUndo(unarchiveOutcome) {
+      let settle;
+      const held = new Promise((res, rej) => { settle = () => (unarchiveOutcome instanceof Error ? rej(unarchiveOutcome) : res(null)); });
+      const restore = await overrideIpc((cmd, args) => {
+        if (cmd === "ai_todo_archive") return record;
+        if (cmd === "ai_todo_unarchive") { calls.push([cmd, args]); return held; }
+        if (cmd === "list_ai_backlog" && args.cwd === "C:q") return other;
+        if (cmd === "read_ai_todo" && args.cwd === "C:q") return { entry: other.todos.find((t) => t.id === args.id), why: null, sections: [] };
+        return undefined;
+      });
+      const m = await mount();
+      m.root.querySelector('[data-bl-act="archive"]').click();
+      m.root.querySelector('[data-bl-act="archive-go"]').click();
+      await flush();
+      m.root.querySelector('[data-bl-act="undo"]').click();
+      await flush();
+      m.h.setSessionScope("sess-2", "C:\q");
+      await flush();
+      return { ...m, settle, restore };
+    }
+
+    it("does not select the restored todo in the project the user moved to", async () => {
+      const { root, settle, restore } = await archiveThenHoldUndo(null);
+      try {
+        expect(root.querySelector(".bl-row.is-on").dataset.blId).toBe("pc-0009");
+        settle();
+        await flush();
+        expect(calls.find(([c]) => c === "ai_todo_unarchive")[1].cwd).toBe("C:\\p");
+        expect(root.querySelector(".bl-row.is-on").dataset.blId).toBe("pc-0009");
+      } finally {
+        restore();
+      }
+    });
+
+    it("does not show a failed undo's error over the project the user moved to", async () => {
+      const { root, settle, restore } = await archiveThenHoldUndo(new Error("refused"));
+      try {
+        settle();
+        await flush();
+        expect(root.querySelector(".bl-error").hidden).toBe(true);
+      } finally {
+        restore();
+      }
+    });
+
+    it("still selects the restored todo when the user stayed put", async () => {
+      const restore = await overrideIpc((cmd) => (cmd === "ai_todo_archive" ? record : undefined));
+      try {
+        const { root } = await mount();
+        root.querySelector('[data-bl-act="archive"]').click();
+        root.querySelector('[data-bl-act="archive-go"]').click();
+        await flush();
+        root.querySelector('[data-bl-act="undo"]').click();
+        await flush();
+        expect(root.querySelector(".bl-row.is-on").dataset.blId).toBe("pc-0001");
+      } finally {
+        restore();
+      }
+    });
+  });
+
+  // jsdom has no layout, so the drag helpers read rects stubbed per element.
+  const pointer = (target, type, init) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0, ...init }));
+  function stackSections(root) {
+    root.querySelectorAll(".bl-group").forEach((el, i) => {
+      el.getBoundingClientRect = () => ({ top: i * 100, bottom: i * 100 + 100, height: 100, left: 0, right: 100, width: 100 });
+    });
+  }
+
+  describe("dragging a group", () => {
+    // PLAN.md lists A and B; X and Y exist only because todos name them.
+    const withExtras = {
+      groups: ["A", "B"],
+      todos: ["A", "B", "X", "Y"].map((g, i) => ({ ...backlog.todos[0], id: `pc-01${i}`, name: `pc-01${i}.md`, title: `In ${g}`, group: g, plan_index: i })),
+    };
+
+    async function dragGroup(name, y) {
+      const restore = await overrideIpc((cmd, args) => {
+        if (cmd === "list_ai_backlog") return withExtras;
+        if (cmd === "read_ai_todo") return { entry: withExtras.todos.find((t) => t.id === args.id), why: null, sections: [] };
+        return undefined;
+      });
+      const { root } = await mount();
+      stackSections(root);
+      const head = root.querySelector(`.bl-group[data-group="${name}"] [data-bl-group-grab]`);
+      pointer(head, "pointerdown", { clientX: 0, clientY: 0 });
+      pointer(document, "pointermove", { clientX: 30, clientY: y });
+      pointer(document, "pointerup", { clientX: 30, clientY: y });
+      await flush();
+      return restore;
+    }
+
+    it("orders a todo-only group among the groups the list shows, not just PLAN.md's", async () => {
+      // Sections sit at A 0, B 100, X 200, Y 300: y=210 is above X's midpoint.
+      const restore = await dragGroup("Y", 210);
+      try {
+        expect(calls.find(([c]) => c === "ai_todo_plan_reorder_groups")[1]).toEqual({ cwd: "C:\\p", groups: ["A", "B", "Y", "X"] });
+      } finally {
+        restore();
+      }
+    });
+
+    it("sends nothing when the drop leaves the shown order unchanged", async () => {
+      // Y is already last: the drop below every section is a no-op.
+      const restore = await dragGroup("Y", 10000);
+      try {
+        expect(calls.some(([c]) => c === "ai_todo_plan_reorder_groups")).toBe(false);
+      } finally {
+        restore();
+      }
+    });
+  });
+
+  describe("a refetch that lands mid-drag", () => {
+    it("is replayed when the drag is cancelled, so the list does not stay stale", async () => {
+      let title = "First";
+      const restore = await overrideIpc((cmd) => {
+        if (cmd !== "list_ai_backlog") return undefined;
+        return { groups: backlog.groups, todos: backlog.todos.map((t) => (t.id === "pc-0001" ? { ...t, title } : t)) };
+      });
+      try {
+        const { root } = await mount();
+        const row = root.querySelector('[data-bl-id="pc-0001"]');
+        pointer(row, "pointerdown", { clientX: 0, clientY: 0 });
+        pointer(document, "pointermove", { clientX: 30, clientY: 0 });
+        expect(root.querySelector(".bl-list").classList.contains("is-reordering")).toBe(true);
+        title = "Renamed while dragging";
+        window.dispatchEvent(new Event("focus"));
+        await flush();
+        expect(root.querySelector('[data-bl-id="pc-0001"] .bl-title').textContent).toBe("First");
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        await flush();
+        expect(root.querySelector('[data-bl-id="pc-0001"] .bl-title').textContent).toBe("Renamed while dragging");
+      } finally {
+        restore();
+      }
+    });
+  });
 });

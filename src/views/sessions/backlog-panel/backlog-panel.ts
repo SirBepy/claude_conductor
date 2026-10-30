@@ -59,6 +59,9 @@ class BacklogPanel implements BacklogPanelHandle {
   /** Identifies the current scope (and ends at destroy), so a slow reply for a
    *  chat the user already left cannot paint over the current one. */
   private epoch = 0;
+  /** A refetch that landed mid-drag and was dropped; replayed when the drag
+   *  ends, so a cancelled drag does not leave the list stale. */
+  private refetchDropped = false;
   private readonly panel: HTMLElement;
   private readonly listEl: HTMLElement;
   private readonly readerEl: HTMLElement;
@@ -95,6 +98,9 @@ class BacklogPanel implements BacklogPanelHandle {
       enabled: () => this.canAct() && !this.busy,
       onRowDrop: (id, spot) => void this.dropRow(id, spot),
       onGroupDrop: (name, before) => void this.dropGroup(name, before),
+      // After a drop the write's own refresh covers it, and a refetch racing the
+      // write would repaint the pre-write list over the optimistic one.
+      onEnd: () => { if (this.refetchDropped && !this.busy) this.refresh(); },
     });
     window.addEventListener("focus", this.focusHandler);
     // Hidden panels have no size; the 0 -> visible edge is the panel being
@@ -117,6 +123,7 @@ class BacklogPanel implements BacklogPanelHandle {
     this.sessionId = sessionId;
     this.cwd = cwd;
     this.epoch++;
+    this.refetchDropped = false;
     this.backlog = null;
     this.docs.clear();
     this.lastDoc.clear();
@@ -153,8 +160,13 @@ class BacklogPanel implements BacklogPanelHandle {
     const epoch = this.epoch;
     void invoke<AiBacklog>("list_ai_backlog", args)
       .then((b) => {
-        // Mid-drag the list DOM is the user's hand; the focus refetch lands after.
-        if (epoch !== this.epoch || this.listEl.classList.contains("is-reordering")) return;
+        if (epoch !== this.epoch) return;
+        // Mid-drag the list DOM is the user's hand; the drag's end replays this.
+        if (this.listEl.classList.contains("is-reordering")) {
+          this.refetchDropped = true;
+          return;
+        }
+        this.refetchDropped = false;
         this.backlog = b && Array.isArray(b.todos) ? { groups: Array.isArray(b.groups) ? b.groups : [], todos: b.todos } : { groups: [], todos: [] };
         this.onCount?.(this.backlog.todos.length);
         this.ensureSelection();
@@ -220,7 +232,6 @@ class BacklogPanel implements BacklogPanelHandle {
   }
 
   private renderList(): void {
-    this.panel.dataset.view = this.view;
     const b = this.backlog;
     const none = !b || isEmptyBacklog(b);
     const loading = b === null && !!this.cwd;
@@ -320,8 +331,11 @@ class BacklogPanel implements BacklogPanelHandle {
     const args = this.scopeArgs();
     const prev = this.backlog;
     if (!args || !prev) return;
-    const next = reorderedGroups(prev.groups, name, before);
-    if (next.join("\n") === prev.groups.join("\n")) return;
+    // The headings the list actually shows: todos can name a group PLAN.md
+    // lacks, and the drop's `before` may be one of those.
+    const shown = buildListGroups(prev).flatMap((g) => (g.name == null ? [] : [g.name]));
+    const next = reorderedGroups(shown, name, before);
+    if (next.join("\n") === shown.join("\n")) return;
     await this.write(
       () => { this.backlog = applyGroupOrder(prev, next); this.renderList(); },
       () => invoke<void>("ai_todo_plan_reorder_groups", { cwd: args.cwd, groups: next }),
@@ -444,15 +458,19 @@ class BacklogPanel implements BacklogPanelHandle {
     const rec = this.undoRecord;
     const args = this.scopeArgs();
     if (!rec || !args) return;
+    const epoch = this.epoch;
     this.undoRecord = null;
     this.hideToast();
     try {
       await invoke<void>("ai_todo_unarchive", { cwd: args.cwd, archived: rec });
+      // After a chat switch `select` and `scopeArgs` would act on the new
+      // project; the restore already ran against the cwd captured above.
+      if (epoch !== this.epoch) return;
       this.select(rec.id);
     } catch (err) {
-      this.showError(`Could not undo: ${errText(err)}`);
+      if (epoch === this.epoch) this.showError(`Could not undo: ${errText(err)}`);
     }
-    this.refresh();
+    if (epoch === this.epoch) this.refresh();
   }
 
   // ── Toast & error ────────────────────────────────────────────────────────
