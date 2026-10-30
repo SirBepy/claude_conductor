@@ -8,6 +8,7 @@
 //! pseudo-group `Plan`. `###` and deeper are notes inside a group, as in
 //! `plan::parse_plan`.
 
+use super::md_scan::{checkbox, fenced_lines};
 use super::plan::split_id;
 use super::todo_ids::{parse_wanted, Wanted};
 use std::path::{Path, PathBuf};
@@ -86,27 +87,19 @@ impl LineDoc {
         }
     }
 
-    /// Whether line `i` opens or closes a fenced code block, so a `## ` inside
-    /// a fence is not mistaken for a heading.
-    fn fence_toggles(line: &str) -> bool {
-        line.trim_start().starts_with("```")
+    /// Per line, whether it is part of a fenced code block, so a `## ` or a
+    /// checkbox inside one is not mistaken for structure.
+    fn fence_flags(&self) -> Vec<bool> {
+        fenced_lines(self.lines.iter().map(|l| body(l))).map(|(_, in_fence)| in_fence).collect()
     }
 
     /// `(line index, title)` of every `## ` heading outside code fences.
     pub fn headings(&self) -> Vec<(usize, String)> {
-        let mut out = Vec::new();
-        let mut in_fence = false;
-        for i in 0..self.lines.len() {
-            let l = body(&self.lines[i]);
-            if Self::fence_toggles(l) {
-                in_fence = !in_fence;
-            } else if !in_fence {
-                if let Some(t) = Self::heading_title(l) {
-                    out.push((i, t.to_string()));
-                }
-            }
-        }
-        out
+        fenced_lines(self.lines.iter().map(|l| body(l)))
+            .enumerate()
+            .filter(|(_, (_, in_fence))| !in_fence)
+            .filter_map(|(i, (l, _))| Self::heading_title(l).map(|t| (i, t.to_string())))
+            .collect()
     }
 
     /// Index of the last non-blank line in `lo..hi`, if any.
@@ -120,14 +113,7 @@ impl LineDoc {
 /// `plan::open_item`, because an archived todo's line must be pruned whatever
 /// its state.
 fn item_rest(line: &str) -> Option<&str> {
-    let after = line.strip_prefix("- [").or_else(|| line.strip_prefix("* ["))?;
-    let mut chars = after.chars();
-    let mark = chars.next()?;
-    if !matches!(mark, ' ' | 'x' | 'X') {
-        return None;
-    }
-    let rest = chars.as_str().strip_prefix(']')?;
-    rest.starts_with(' ').then(|| rest.trim())
+    checkbox(line).map(|c| c.rest)
 }
 
 /// `- [ ] rest` for an item line of any checkbox state, keeping its id and any
@@ -167,17 +153,22 @@ impl LineDoc {
     }
 
     fn preamble_has_items(&self) -> bool {
-        (0..self.first_heading()).any(|i| item_wanted(body(&self.lines[i])).is_some())
+        let fenced = self.fence_flags();
+        (0..self.first_heading()).any(|i| !fenced[i] && item_wanted(body(&self.lines[i])).is_some())
     }
 
     pub fn placements(&self) -> Vec<Placement> {
         let headings = self.headings();
+        let fenced = self.fence_flags();
         let mut out = Vec::new();
         let mut group = PREAMBLE_GROUP.to_string();
         let mut next_heading = headings.iter().peekable();
         for i in 0..self.lines.len() {
             if next_heading.peek().is_some_and(|(h, _)| *h == i) {
                 group = next_heading.next().map(|(_, t)| t.clone()).unwrap_or_default();
+                continue;
+            }
+            if fenced[i] {
                 continue;
             }
             if let Some(wanted) = item_wanted(body(&self.lines[i])) {
@@ -195,8 +186,9 @@ impl LineDoc {
     /// Removes every item line that names `wanted`; returns each removed line
     /// with the index it had in the file before this call.
     pub fn remove_item(&mut self, wanted: &Wanted) -> Vec<(usize, String)> {
+        let fenced = self.fence_flags();
         let hits: Vec<usize> = (0..self.lines.len())
-            .filter(|&i| item_wanted(body(&self.lines[i])).is_some_and(|w| same_todo(&w, wanted)))
+            .filter(|&i| !fenced[i] && item_wanted(body(&self.lines[i])).is_some_and(|w| same_todo(&w, wanted)))
             .collect();
         let removed: Vec<(usize, String)> = hits.iter().map(|&i| (i, body(&self.lines[i]).to_string())).collect();
         for &i in hits.iter().rev() {
@@ -229,8 +221,9 @@ impl LineDoc {
             self.insert(self.lines.len(), item);
             return;
         };
+        let fenced = self.fence_flags();
         let visible_items: Vec<usize> = (lo..hi)
-            .filter(|&i| item_wanted(body(&self.lines[i])).is_some_and(|w| visible(&w)))
+            .filter(|&i| !fenced[i] && item_wanted(body(&self.lines[i])).is_some_and(|w| visible(&w)))
             .collect();
         let at = match visible_items.get(position) {
             Some(&i) => i,
@@ -376,6 +369,15 @@ mod tests {
     fn a_heading_inside_a_code_fence_is_not_a_group() {
         let doc = LineDoc::parse("## A\n```\n## not a group\n```\n- [ ] pc-0001\n");
         assert_eq!(doc.groups(), ["A"]);
+    }
+
+    #[test]
+    fn an_item_inside_a_code_fence_is_not_placed_or_removed() {
+        let mut doc = LineDoc::parse("## A\n```\n- [ ] pc-0001\n```\n- [ ] pc-0002\n");
+        assert_eq!(doc.placements().len(), 1);
+        assert!(!doc.has_item(&pc(1)));
+        assert!(doc.remove_item(&pc(1)).is_empty());
+        assert!(doc.to_text().contains("- [ ] pc-0001"));
     }
 
     #[test]
