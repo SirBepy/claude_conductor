@@ -167,23 +167,27 @@ pub fn pick_lookup_account<'a>(accounts: &'a [Account], default_id: Option<&str>
         .or_else(|| accounts.iter().find(subscription))
 }
 
-/// Fills the Console org uuid (and the email) of an existing account that was
-/// created without them. Only empty fields are written, so a later lookup can
-/// never overwrite what the user or an earlier login settled on. Returns whether
+/// Records the Console org uuid and email that a Console login reported for
+/// `account_id`. The login is the source of truth: the org copied at creation
+/// from the default Subscription account's login belongs to a different Console
+/// when the API key is owned by another login, and the Console answers 404 for
+/// an org its session cannot see. Blank values never overwrite. Returns whether
 /// anything changed.
-pub fn fill_missing_identity(accounts_file: &Path, account_id: &str, org_uuid: &str, email: &str) -> Result<bool> {
+pub fn adopt_console_identity(accounts_file: &Path, account_id: &str, org_uuid: &str, email: &str) -> Result<bool> {
     let mut accounts = store::load(accounts_file);
     let account = accounts
         .iter_mut()
         .find(|a| a.id == account_id)
         .ok_or_else(|| anyhow!("no account with id {account_id}"))?;
     let mut changed = false;
-    if account.org_uuid.is_empty() && !org_uuid.trim().is_empty() {
-        account.org_uuid = org_uuid.trim().to_string();
+    let org_uuid = org_uuid.trim();
+    if !org_uuid.is_empty() && account.org_uuid != org_uuid {
+        account.org_uuid = org_uuid.to_string();
         changed = true;
     }
-    if account.email.is_empty() && !email.trim().is_empty() {
-        account.email = email.trim().to_string();
+    let email = email.trim();
+    if !email.is_empty() && account.email != email {
+        account.email = email.to_string();
         changed = true;
     }
     if changed {
@@ -276,16 +280,18 @@ mod tests {
     }
 
     #[test]
-    fn fill_missing_identity_writes_only_empty_fields() {
+    fn adopt_console_identity_overwrites_a_stale_org_but_never_with_blanks() {
         let (_root, p) = setup();
-        let a = create_api_credit_account_in(&p, "id-1", "API credit", "k", "", "").unwrap();
-        assert!(fill_missing_identity(&p.accounts_file, &a.id, "ORG", "j@x.com").unwrap());
+        let a = create_api_credit_account_in(&p, "id-1", "API credit", "k", "STALE-ORG", "old@x.com").unwrap();
+        assert!(adopt_console_identity(&p.accounts_file, &a.id, "ORG", "j@x.com").unwrap());
         let got = store::load(&p.accounts_file).remove(0);
         assert_eq!((got.org_uuid.as_str(), got.email.as_str()), ("ORG", "j@x.com"));
-        assert!(!fill_missing_identity(&p.accounts_file, &a.id, "OTHER", "o@x.com").unwrap());
+        // Same values again is a no-op, and blanks leave what is stored alone.
+        assert!(!adopt_console_identity(&p.accounts_file, &a.id, "ORG", "j@x.com").unwrap());
+        assert!(!adopt_console_identity(&p.accounts_file, &a.id, "  ", "").unwrap());
         let got = store::load(&p.accounts_file).remove(0);
         assert_eq!((got.org_uuid.as_str(), got.email.as_str()), ("ORG", "j@x.com"));
-        assert!(fill_missing_identity(&p.accounts_file, "missing", "ORG", "").is_err());
+        assert!(adopt_console_identity(&p.accounts_file, "missing", "ORG", "").is_err());
     }
 
     #[test]
