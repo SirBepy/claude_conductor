@@ -50,8 +50,15 @@ export async function mountStatusbar(
   // Runs before mountRenderer arms the ring and the 8s banner, so a stall here
   // is a blank pane with no feedback - this line is the only trace of it.
   const doneSettings = perfPhase("chat-open statusbar-settings", () => `session=${sessionId}`);
-  const [rows, hideZero] = await Promise.all([loadStatuslineRows(), loadStatuslineHideZero()]);
-  doneSettings();
+  // finally, not a trailing call: a rejected read would otherwise leave the
+  // phase open, and the longtask observer would keep naming it long after.
+  let rows: Awaited<ReturnType<typeof loadStatuslineRows>>;
+  let hideZero: Awaited<ReturnType<typeof loadStatuslineHideZero>>;
+  try {
+    [rows, hideZero] = await Promise.all([loadStatuslineRows(), loadStatuslineHideZero()]);
+  } finally {
+    doneSettings();
+  }
   let effortDisplay = sess.effort ?? "";
   if (!effortDisplay && sess.kind === "external" && sess.cwd) {
     try {
@@ -244,6 +251,7 @@ export async function mountRenderer(
     if (!loadSettled) ringOverlay = mountChatLoadingOverlay(messagesEl);
   }, 150);
   let stallBanner: HTMLElement | null = null;
+  let supersedeWatch: number | undefined;
   const stallTimer = window.setTimeout(() => {
     if (loadSettled || state.mountId !== myMount || state.selectedId !== sessionId) return;
     // The chain this times includes the history read, two daemon-pipe calls
@@ -264,12 +272,23 @@ export async function mountRenderer(
       `<button type="button" class="chat-load-retry">Retry</button>`;
     stallBanner.querySelector<HTMLButtonElement>(".chat-load-retry")?.addEventListener("click", onStalledRetry);
     messagesEl.before(stallBanner);
+    // A load that hangs forever never reaches settleLoad, and nothing else
+    // announces that a newer selectSession took over, so watch for it here.
+    supersedeWatch = window.setInterval(() => {
+      if (state.mountId === myMount && state.selectedId === sessionId) return;
+      window.clearInterval(supersedeWatch);
+      supersedeWatch = undefined;
+      stallBanner?.remove();
+      stallBanner = null;
+    }, 500);
   }, 8000);
   const settleLoad = () => {
     doneOpen();
     loadSettled = true;
     window.clearTimeout(ringTimer);
     window.clearTimeout(stallTimer);
+    window.clearInterval(supersedeWatch);
+    supersedeWatch = undefined;
     dropRing();
     messagesEl.querySelector(".chat-loading-overlay")?.remove();
     stallBanner?.remove();
