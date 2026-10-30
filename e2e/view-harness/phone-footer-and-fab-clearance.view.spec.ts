@@ -102,19 +102,18 @@ test.describe("view-harness / phone footer + FAB clearance", () => {
     expect(fabBox.y + fabBox.height).toBeLessThanOrEqual(sendBox.y);
   });
 
-  // Send's own centre was never stolen - the FAB only covered the split's
-  // right end - so probing Send would pass with or without the lift. The
-  // schedule chevron is the control that actually became unreachable.
-  test("the tap at the schedule chevron's centre reaches the chevron", async ({ page }) => {
+  // Send is now the rightmost control (no schedule chevron beside it), so it
+  // is the one the FAB's resting spot used to cover.
+  test("the tap at Send's centre reaches Send", async ({ page }) => {
     await mountPhoneSession(page);
 
-    const chevBox = (await page.locator(".composer-send-chevron").boundingBox())!;
+    const sendBox = (await page.locator(".composer-send").boundingBox())!;
     const hit = await page.evaluate(({ x, y }) => {
       const el = document.elementFromPoint(x, y);
       if (el?.closest(".fab-dial-fab")) return "fab";
-      if (el?.closest(".composer-send-chevron")) return "chevron";
+      if (el?.closest(".composer-send")) return "send";
       return el?.className ?? "none";
-    }, { x: chevBox.x + chevBox.width / 2, y: chevBox.y + chevBox.height / 2 });
-    expect(hit).toBe("chevron");
+    }, { x: sendBox.x + sendBox.width / 2, y: sendBox.y + sendBox.height / 2 });
+    expect(hit).toBe("send");
   });
 });

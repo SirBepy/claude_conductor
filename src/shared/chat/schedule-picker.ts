@@ -3,7 +3,7 @@
 // Body-appended, position:fixed, repositioned off an anchor element: mirrors
 // the DrainPopover idiom in views/sessions/statusbar-popover-shell.ts rather
 // than the held-messages anchor-relative pattern, since the anchor here
-// (the split-Send chevron, or a dropdown row) isn't always position:relative.
+// (the Send button, or a dropdown row) isn't always position:relative.
 
 import { escapeHtml } from "../escape-html";
 import type { Recurrence, RecurrenceRule } from "../../types/ipc.generated";

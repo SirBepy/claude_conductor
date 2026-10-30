@@ -29,7 +29,7 @@ afterEach(() => {
 function scheduleViaMenu(root, textarea, text) {
   textarea.value = text;
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
-  root.querySelector(".composer-send-chevron").click();
+  root.querySelector(".composer-send").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
   const scheduleRow = [...document.querySelectorAll(".composer-menu-popover [data-idx]")].find((b) =>
     b.textContent.includes("Schedule message"),
   );
@@ -40,7 +40,7 @@ function scheduleViaMenu(root, textarea, text) {
   preset.click();
 }
 
-describe("composer schedule from the chevron menu", () => {
+describe("composer schedule from Send's right-click menu", () => {
   it("puts the text back when onSchedule refuses, and shows no scheduled notice", async () => {
     const onSchedule = vi.fn(async () => {
       throw new Error("no account picked");

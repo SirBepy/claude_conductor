@@ -190,34 +190,22 @@
     font-size: 16px;
   }
 
-  /* Full-bleed composer: the shell's 12px margin + 1px border sit OUTSIDE
-     .session-composer, which the AUQ sheet anchors off, so they read as the
+  /* Full-bleed composer: the shell's 12px margin sits OUTSIDE
+     .session-composer, which the AUQ sheet anchors off, so it reads as the
      sheet's side gutter. Nothing to centre at phone width anyway. */
   .composer-shell {
     margin-left: 0;
     margin-right: 0;
-    border-left: none;
-    border-right: none;
-    border-radius: 0;
   }
   /* Flush to the nav-bar band (or the open keyboard): the desktop 12px margin
      would otherwise come back as a stray strip above either. */
   .composer-shell {
     margin-bottom: 0;
   }
-  /* Corners follow the removed side borders; the fused thinking-bar/input
-     boundary is the shared border, not the radius, so the merge survives. */
-  .composer-shell .session-thinking,
-  .composer-shell .session-composer,
-  .composer-shell:has(.session-thinking[hidden]) .session-composer {
-    border-radius: 0;
-  }
-  /* The desktop focus glow is a ring that sits outside the border, in the
-     margin sessions.css:632 gives the shell - full-bleed removes that
-     margin, so the ring has nowhere to sit and instead reads as a second
-     colored band stacked on the border-color change, top and bottom. */
-  .composer-shell:has(.composer-textarea:focus) {
-    box-shadow: none;
+  /* With the shell's side borders gone the field and Send chip would sit 6px
+     from the screen edge; a slightly deeper inset keeps them off it. */
+  .session-composer {
+    padding: 8px 10px;
   }
 }
 

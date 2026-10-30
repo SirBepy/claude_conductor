@@ -3,7 +3,7 @@
 // main composer's own .composer-input-wrap/.composer-highlight/
 // .composer-textarea trio plus an .icon-btn send, so all of them look exactly
 // like the chat composer; only the main composer adds its own extras (mic,
-// schedule chevron). Enter policy comes from ComposerCore: desktop Enter
+// paperclip, Send's schedule gestures). Enter policy comes from ComposerCore: desktop Enter
 // sends, Shift+Enter is a newline, and on a phone Enter is always a newline.
 
 import { escapeHtml } from "../escape-html";

@@ -6,6 +6,7 @@
 import type { ContentBlock, Recurrence } from "../../types/ipc.generated";
 import { openSchedulePicker } from "./schedule-picker";
 import { openComposerMenu, type ComposerMenuItem } from "./composer-menu";
+import { wireSendGestures } from "./composer-send-gestures";
 import { SlashProvider } from "./caret-popup/providers/slash";
 import { FileProvider } from "./caret-popup/providers/file";
 import type { SuggestProvider } from "./caret-popup/types";
@@ -78,8 +79,8 @@ export interface ComposerOptions {
   /** Fired on draft input/blur so a deferred auto-flush can retry. */
   onDraftActivity?: () => void;
   /** Schedule the current draft to fire later instead of sending it now. When
-   * omitted, the split-Send chevron doesn't render. The composer builds the
-   * blocks from the draft and clears itself before calling. */
+   * omitted, Send's right-click / long-press menu has no Schedule row. The
+   * composer builds the blocks from the draft and clears itself before calling. */
   onSchedule?: (blocks: ContentBlock[], fireAtUtcIso: string, recurrence: Recurrence | null) => Promise<void> | void;
   /** Resolves the active session's account's next usage-window reset (already
    * +60s-buffered), surfaced as a "Next token reset" preset in the schedule
@@ -103,7 +104,6 @@ export class Composer {
   private noticeEl: HTMLElement | null = null;
   private noticeTimer: ReturnType<typeof setTimeout> | null = null;
   private sendBtn: HTMLButtonElement | null = null;
-  private scheduleBtn: HTMLButtonElement | null = null;
   private slash: SlashProvider | null = null;
   private file: FileProvider | null = null;
   private core: ComposerCore | null = null;
@@ -166,7 +166,7 @@ export class Composer {
       sendQueuedNow: opts.sendQueuedNow,
     });
     this.cv = new ComposerVoice({
-      onAfterEdit: () => { this.autoResize(); this.updateHighlight(); this.persistDraft(); this.opts.onDraftActivity?.(); },
+      onAfterEdit: () => { this.autoResize(); this.updateHighlight(); this.updateSendState(); this.persistDraft(); this.opts.onDraftActivity?.(); },
       onHighlightOnly: () => this.updateHighlight(),
     });
     this.highlight = new ComposerHighlight({
@@ -187,7 +187,7 @@ export class Composer {
     this.att = new ComposerAttachments({
       getSessionId: () => this.sessionId,
       getMachineId: () => this.opts.getMachineId?.() ?? null,
-      onChange: () => this.updateScheduleBtnState(),
+      onChange: () => this.updateSendState(),
     });
     this.strayInput = new ComposerStrayInput({
       getTextarea: () => this.textarea,
@@ -288,6 +288,7 @@ export class Composer {
       this.textarea.value = restored;
       this.autoResize();
       this.updateHighlight();
+      this.updateSendState();
       if (stored && !inMemoryDraft) saveDraft(id, stored);
     }
     // A placeholder->real rename: the daemon never knew the placeholder id.
@@ -319,6 +320,7 @@ export class Composer {
     else clearDraft(sid);
     this.autoResize();
     this.updateHighlight();
+    this.updateSendState();
   }
 
   /** Idle placeholder text. Offline (mirrored session's host machine dropped)
@@ -355,8 +357,9 @@ export class Composer {
       this.disabled = next;
       if (this.textarea) this.textarea.disabled = next;
       if (this.sendBtn) this.sendBtn.disabled = next;
-      if (this.scheduleBtn) this.scheduleBtn.disabled = next;
+      this.root.querySelectorAll<HTMLButtonElement>(".composer-attach, .composer-attach-in").forEach((b) => { b.disabled = next; });
       if (this.micBtn) this.micBtn.disabled = next;
+      this.updateSendState();
     }
     this.refreshBlockedState();
   }
@@ -373,29 +376,39 @@ export class Composer {
 
   private render(): void {
     const placeholder = this.computePlaceholder();
-    // .composer-file-input's native-picker click is mobile-only (the "Attach
-    // image" menu item); narrowed from a mixed accept list so Android favours
+    // .composer-file-input's native-picker click is mobile-only (the paperclip
+    // buttons are hidden above the phone breakpoint, desktop attaches by paste
+    // or drop); narrowed from a mixed accept list so Android favours
     // its streamlined Photo Picker over the generic Files app, which appeared
     // to silently drop the picked file on-device (ai_todo 409).
+    // Two paperclips, one visible at a time (composer.css): .composer-attach-in
+    // sits inside the field while the message is one line, .composer-attach
+    // stacks above Send once it wraps, so wrapped text gets the full width back.
+    const dis = this.disabled ? "disabled" : "";
+    const sendTitle = this.opts.onSchedule ? "Send (Enter). Right-click or hold to schedule." : "Send";
     this.root.innerHTML = `
       <div class="composer-attachments"></div>
       <div class="composer-scope-warning" hidden></div>
       <div class="composer-row">
         <div class="composer-input-wrap cc-typing-wrap">
           <div class="composer-highlight cc-typing-highlight" aria-hidden="true"></div>
-          <textarea class="composer-textarea cc-typing-input" rows="1" placeholder="${placeholder}" ${this.disabled ? "disabled" : ""}></textarea>
+          <textarea class="composer-textarea cc-typing-input" rows="1" placeholder="${placeholder}" ${dis}></textarea>
+          <button type="button" class="composer-attach-in icon-btn" ${dis} title="Attach image">
+            <i class="ph ph-paperclip"></i>
+          </button>
         </div>
         <div class="composer-actions">
-          <button class="composer-mic icon-btn" ${this.disabled ? "disabled" : ""} title="Voice dictation (tap to start/stop)">
+          <button class="composer-mic icon-btn" ${dis} title="Voice dictation (tap to start/stop)">
             <i class="ph ph-microphone"></i>
           </button>
-          <div class="composer-send-split">
-            <button class="composer-send icon-btn" ${this.disabled ? "disabled" : ""} title="Send">
+          <button type="button" class="composer-attach icon-btn" ${dis} title="Attach image">
+            <i class="ph ph-paperclip"></i>
+          </button>
+          <div class="composer-send-wrap">
+            <button class="composer-send icon-btn" ${dis} title="${sendTitle}">
               <i class="ph ph-paper-plane-right"></i>
             </button>
-            <button class="composer-send-chevron icon-btn" ${this.disabled ? "disabled" : ""} title="More actions">
-              <i class="ph ph-caret-down"></i>
-            </button>
+            <span class="composer-send-ring" aria-hidden="true"></span>
           </div>
         </div>
       </div>
@@ -407,7 +420,6 @@ export class Composer {
     this.noticeEl = this.root.querySelector<HTMLElement>(".composer-notice");
     this.scopeWarn.bind(this.root.querySelector<HTMLElement>(".composer-scope-warning"));
     this.sendBtn = this.root.querySelector<HTMLButtonElement>(".composer-send");
-    this.scheduleBtn = this.root.querySelector<HTMLButtonElement>(".composer-send-chevron");
     this.micBtn = this.root.querySelector<HTMLButtonElement>(".composer-mic");
     this.att.bind(this.root);
     // The popup/highlight backdrop were inside root.innerHTML, so they're
@@ -432,7 +444,7 @@ export class Composer {
               this.lastKeyAt = Date.now();
               this.undo.resetChain();
               this.persistDraft();
-              this.updateScheduleBtnState();
+              this.updateSendState();
               this.scopeWarn.update(this.textarea?.value ?? "");
               this.opts.onDraftActivity?.();
             }
@@ -444,9 +456,7 @@ export class Composer {
         // through to the document-level blur-composer shortcut.
         stopPropagationOnPopupConsume: true,
         isMobileViewport: () => isMobileViewport(),
-        onResize: (scrollHeight) => {
-          this.root.querySelector<HTMLElement>(".composer-row")?.classList.toggle("composer-row--tall", scrollHeight > 44);
-        },
+        onResize: () => this.syncTall(),
       });
     }
     if (!this.disabled && this.textarea && this.slash && this.file) {
@@ -454,11 +464,23 @@ export class Composer {
         this.opts.onDraftActivity?.();
         this.draftSync.flush();
       });
+      const sendWrap = this.root.querySelector<HTMLElement>(".composer-send-wrap");
+      if (this.sendBtn && sendWrap) {
+        // Before the click listener below: the gesture module swallows the click
+        // that follows a hold or swipe, and listener order decides that.
+        wireSendGestures(this.sendBtn, sendWrap, {
+          onMenu: () => this.openSendMenu(this.sendBtn!),
+          onSwipeUp: () => {
+            this.textarea?.focus();
+            void this.cv.toggle(this.undo.currentInsertPos());
+          },
+          swipeUpEnabled: voiceDictationEnabled,
+          isDisabled: () => this.disabled,
+        });
+      }
       this.sendBtn?.addEventListener("click", () => void this.send());
-      this.scheduleBtn?.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (this.disabled || !this.scheduleBtn) return;
-        this.openActionsMenu(this.scheduleBtn);
+      this.root.querySelectorAll<HTMLElement>(".composer-attach, .composer-attach-in").forEach((b) => {
+        b.addEventListener("click", () => this.att.openFilePicker());
       });
       this.att.wireInteractive();
       this.micBtn?.addEventListener("click", () => {
@@ -480,16 +502,27 @@ export class Composer {
     }
     this.autoResize();
     this.updateHighlight();
-    this.updateScheduleBtnState();
+    this.updateSendState();
     this.scopeWarn.update(this.textarea?.value ?? "");
   }
 
-  /** Chevron is disabled while read-only or the draft (text + attachments +
-   * pasted blocks) is empty — mirrors isDraftEmpty()'s definition of "empty". */
-  private updateScheduleBtnState(): void {
-    // The chevron now opens the actions menu (voice/attach are available even
-    // with an empty draft), so it's only disabled when the composer is read-only.
-    if (this.scheduleBtn) this.scheduleBtn.disabled = this.disabled;
+  /** Send keeps its chip even with nothing to send (composer.css) and only takes
+   * the accent fill once the draft (text + attachments + pasted blocks) has
+   * something in it. Never disabled for an empty draft: Enter on one is a
+   * no-op already, and a held set can still flush through it. */
+  private updateSendState(): void {
+    this.sendBtn?.classList.toggle("composer-send--ready", !this.disabled && !this.isDraftEmpty());
+  }
+
+  /** Flips the actions column (paperclip above Send) once the message wraps.
+   * Measured with the flag off: the in-field paperclip's right padding is what
+   * makes text wrap, and measuring with the flag on would give the text its full
+   * width back, unwrap it, drop the flag and loop. */
+  private syncTall(): void {
+    const row = this.root.querySelector<HTMLElement>(".composer-row");
+    if (!row || !this.textarea) return;
+    row.classList.remove("composer-row--tall");
+    row.classList.toggle("composer-row--tall", this.textarea.scrollHeight > 44);
   }
 
   private autoResize(): void {
@@ -505,11 +538,10 @@ export class Composer {
   }
 
 
-  /** Build + open the split-send chevron menu: Voice + (mobile-only) Attach +
-   *  Schedule. Voice lives here on both platforms now - the mic button itself
-   *  only surfaces while actively recording (see composer-mic in voice.css).
-   *  Schedule only appears with content to schedule. */
-  private openActionsMenu(anchor: HTMLElement): void {
+  /** Right-click / long-press on Send: Schedule (only with something to
+   *  schedule) and, when dictation is enabled, Voice. The mic button itself
+   *  only surfaces while actively recording (see composer-mic in voice.css). */
+  private openSendMenu(anchor: HTMLElement): void {
     const items: ComposerMenuItem[] = [];
     // Re-warm on menu open so Voice is hot by the time it's clicked, even if
     // the sidecar idle-shut-down since the chat opened. Throttled inside warm().
@@ -524,15 +556,12 @@ export class Composer {
         },
       });
     }
-    if (isMobileViewport()) {
-      items.push({
-        icon: "image",
-        label: "Attach image",
-        run: () => this.att.openFilePicker(),
-      });
-    }
     if (this.opts.onSchedule && !this.isDraftEmpty()) {
       items.push({ icon: "clock", label: "Schedule message", run: () => this.openSchedule(anchor) });
+    }
+    if (items.length === 0) {
+      if (this.opts.onSchedule) this.showNotice("Nothing to schedule yet.");
+      return;
     }
     openComposerMenu(anchor, items);
   }
@@ -795,6 +824,7 @@ export class Composer {
     // doesn't leave the controller running against stale anchor positions.
     this.cv.reset();
     this.att.clear();
+    this.updateSendState();
     // Explicit clear: send/discard only, never blur or navigate-away.
     if (this.sessionId) {
       clearDraft(this.sessionId);
@@ -812,6 +842,7 @@ export class Composer {
     this.att.restoreDraft(attachments, pastedBlocks);
     this.autoResize();
     this.updateHighlight();
+    this.updateSendState();
     this.persistDraft();
   }
 
@@ -828,6 +859,7 @@ export class Composer {
     }
     this.autoResize();
     this.updateHighlight();
+    this.updateSendState();
     this.persistDraft();
     this.opts.onDraftActivity?.();
   }

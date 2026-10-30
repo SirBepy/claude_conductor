@@ -293,33 +293,129 @@
   flex-direction: column;
 }
 
-/* Split-Send: one visual control, two hit areas (Send | schedule chevron). */
-.composer-send-split {
+/* Send sits outside the field as its own chip: a surface fill and hairline even
+   with nothing to send (glyph dimmed), the accent fill once there is. Schedule
+   and voice hang off right-click / long-press (composer-send-gestures.ts). */
+.composer-send-wrap {
+  position: relative;
   display: flex;
-  align-items: stretch;
+  flex-shrink: 0;
 }
 
-.composer-send-split .composer-send {
-  border-radius: 6px 0 0 6px;
+.composer-send-wrap .composer-send {
+  background: var(--color-surface-alt);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+  color: var(--color-text-muted);
+  /* The swipe-up for voice would otherwise be read as a page scroll. */
+  touch-action: none;
+  -webkit-touch-callout: none;
+  transition: background-color 0.15s, color 0.15s;
 }
 
-.composer-send-split .composer-send-chevron {
-  width: 16px;
-  border-radius: 0 6px 6px 0;
-  border-left: 1px solid var(--color-border);
-  font-size: 0.7rem;
+.composer-send-wrap .composer-send i {
+  transition: opacity 0.15s;
 }
 
-.composer-send-split .composer-send-chevron:disabled {
+.composer-send-wrap .composer-send:not(.composer-send--ready) i {
+  opacity: 0.5;
+}
+
+.composer-send-wrap .composer-send--ready {
+  background: var(--color-primary);
+  color: var(--color-background);
+  box-shadow: none;
+}
+
+.composer-send-wrap .composer-send:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
+/* Hold ring: a border-only sweep around Send that fills over the long-press
+   delay (HOLD_MS in composer-send-gestures.ts), then the menu opens. Skipped
+   where @property is unsupported: the menu still opens, just without the ring. */
+@property --send-hold {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+.composer-send-ring {
+  position: absolute;
+  inset: -3px;
+  padding: 2px;
+  border-radius: 9px;
+  pointer-events: none;
+  opacity: 0;
+  background: conic-gradient(var(--color-primary) calc(var(--send-hold) * 1turn), transparent 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+.composer-send-wrap.holding .composer-send-ring {
+  opacity: 1;
+  animation: composer-send-hold 450ms linear forwards;
+}
+
+@keyframes composer-send-hold {
+  from { --send-hold: 0; }
+  to { --send-hold: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-send-wrap.holding .composer-send-ring {
+    animation: none;
+  }
+}
+
+/* Paperclips are phone-only: desktop attaches by paste or drop. */
+.composer-attach,
+.composer-attach-in {
+  display: none;
+}
+
 @media (max-width: 768px) {
-  /* The chevron sub-button stays narrower than Send (it's a secondary
-     action), but 16px was well under any usable touch target. */
-  .composer-send-split .composer-send-chevron {
-    width: 36px;
+  .composer-actions {
+    gap: 2px;
+  }
+  .composer-attach,
+  .composer-attach-in {
+    color: var(--color-text-muted);
+    opacity: 0.45;
+  }
+  .composer-attach:active,
+  .composer-attach-in:active {
+    opacity: 0.9;
+  }
+  .composer-attach i,
+  .composer-attach-in i {
+    font-size: 1.15rem;
+    transform: rotate(-45deg);
+  }
+  /* One line: the paperclip sits at the field's right end, and both text layers
+     keep clear of it (padding on the textarea AND the highlight backdrop, or the
+     caret drifts off the text). */
+  .composer-attach-in {
+    display: flex;
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+    width: 40px;
+  }
+  .composer-row:not(.composer-row--tall) .composer-textarea,
+  .composer-row:not(.composer-row--tall) .composer-highlight {
+    padding-right: 40px;
+  }
+  /* Wrapped: the paperclip leaves the field and stacks above Send. */
+  .composer-row--tall .composer-attach-in {
+    display: none;
+  }
+  .composer-row--tall .composer-attach {
+    display: flex;
+    width: 44px;
+    height: 30px;
   }
   /* 20px was the smallest target in the chat, perched on a corner. */
   .composer-attachments .rm {

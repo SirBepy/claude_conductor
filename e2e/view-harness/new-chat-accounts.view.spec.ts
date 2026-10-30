@@ -83,7 +83,7 @@ test.describe("view-harness / new-chat account resolution in the draft", () => {
 
     const ta = page.locator("#session-pane .session-composer .composer-textarea");
     await ta.fill("hello later");
-    await page.locator("#session-pane .composer-send-chevron").click();
+    await page.locator("#session-pane .composer-send").click({ button: "right" });
     await page.getByRole("button", { name: "Schedule message" }).click();
     await page.locator(".schedule-picker-popover [data-preset]").first().click();
 
@@ -112,7 +112,7 @@ test.describe("view-harness / new-chat account resolution in the draft", () => {
 
     const ta = page.locator("#session-pane .session-composer .composer-textarea");
     await ta.fill("hello later");
-    await page.locator("#session-pane .composer-send-chevron").click();
+    await page.locator("#session-pane .composer-send").click({ button: "right" });
     await page.getByRole("button", { name: "Schedule message" }).click();
     await page.locator(".schedule-picker-popover [data-preset]").first().click();
 
