@@ -133,6 +133,16 @@ export function offerableCommands(cmds: string[]): string[] {
   return cmds.filter((c) => !/^\/close(\s|$)/i.test(c));
 }
 
+/** A chip's command goes at the front of the draft's message box, where a
+ *  slash command has to be; whatever was already typed stays after it as the
+ *  command's arguments. A command already leading the box is swapped out, so
+ *  clicking a second chip changes the command instead of stacking two.
+ *  Attachments are kept. */
+export function withCommand(current: string, command: string): string {
+  const rest = current.trim().replace(/^\/\S+\s*/, "");
+  return rest ? `${command} ${rest}` : `${command} `;
+}
+
 /** How long a custom card's result counts as fresh when its config names no refresh_secs. */
 export const DEFAULT_CARD_REFRESH_SECS = 900;
 /** A chat can write any refresh_secs, 0 included; each run is an HTTP call or a local

@@ -8,7 +8,7 @@ import {
   EFFORTS, modelDisplayLabel, readGlobalDefault, readModels,
 } from "../../../../shared/effort-presets";
 import { settingsData } from "../../../sessions/new-session-cache";
-import { settingsHeader } from "../../ui";
+import { settingsHeader, toggleRow } from "../../ui";
 import "./chat-defaults.css";
 
 /** Parse a comma-separated models string into a trimmed, deduped, non-empty list. */
@@ -21,7 +21,7 @@ function parseModels(raw: string): string[] {
   return out;
 }
 
-function template(models: string[], sort: SessionSort, def: { model: string; effort: string }) {
+function template(models: string[], sort: SessionSort, def: { model: string; effort: string }, chips: boolean) {
   return html`
     <div class="view view-settings-chat-defaults">
       ${settingsHeader("Chat defaults")}
@@ -57,6 +57,12 @@ function template(models: string[], sort: SessionSort, def: { model: string; eff
               <option value="drain" ?selected=${sort === "drain"}>Token drain</option>
             </select>
           </div>
+          ${toggleRow({
+            label: "Quick reply chips",
+            inputId: "chatDefaultsNextChips",
+            checked: chips,
+            tooltip: "After a chat finishes a turn, offer one-click replies above the message box, like /close. Click fills the box; Shift+click sends.",
+          })}
         </div>
 
         ${isRemote()
@@ -85,7 +91,14 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
   const def = readGlobalDefault(getSettings());
   if (!models.includes(def.model)) models = [...models, def.model];
 
-  render(template(models, sort, def), root);
+  // Default on: an absent key resolves to true.
+  render(template(models, sort, def, getSettings().nextActionChips !== false), root);
+
+  root.querySelector<HTMLInputElement>("#chatDefaultsNextChips")?.addEventListener("change", (e) => {
+    const checked = (e.currentTarget as HTMLInputElement).checked;
+    void updateSettings((fresh) => ({ ...fresh, nextActionChips: checked }))
+      .catch((err) => console.error("[chat-defaults] saving quick reply chips failed", err));
+  });
 
   for (const [id, key] of [["#chatDefaultsModel", "defaultModel"], ["#chatDefaultsEffort", "defaultEffort"]] as const) {
     root.querySelector<HTMLSelectElement>(id)?.addEventListener("change", (e) => {

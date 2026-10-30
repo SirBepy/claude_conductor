@@ -77,9 +77,19 @@ export function isWrapUpOnDone(sessionId: string | undefined | null): boolean {
   return _wrapUpOnDone.get(sessionId) === true;
 }
 
+const _wrapUpListeners = new Set<() => void>();
+
+/** Run `cb` after any chat's wrap-up flag flips, so UI that hides while it is on
+ *  (the next-action strip's /close chip) re-evaluates without each of the toggle
+ *  call sites knowing about it. */
+export function onWrapUpChange(cb: () => void): void {
+  _wrapUpListeners.add(cb);
+}
+
 export function setWrapUpOnDone(sessionId: string, value: boolean): void {
   if (value) _wrapUpOnDone.set(sessionId, true);
   else _wrapUpOnDone.delete(sessionId);
+  for (const cb of _wrapUpListeners) cb();
   void invoke("set_wrap_up_on_done", { sessionId, value }).catch((e) =>
     console.warn("[wrap-up-on-done] persist failed:", e),
   );

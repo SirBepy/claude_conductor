@@ -13,6 +13,7 @@ import { selectSession } from "../active-session";
 import { updateThinkingBar } from "../session-thinking-bar";
 import { state } from "../state";
 import type { DashActions, DashCtx } from "./dash-parts";
+import { withCommand } from "./format";
 import { openReportsModal, showImageOverlay } from "./dash-reports";
 import { copy, openProjectMenu } from "./dash-menu";
 import type { CardResult, DashTodo, RepoRef } from "./types";
@@ -72,15 +73,9 @@ export async function pickRepo(c: DashCtx, anchor: HTMLElement): Promise<RepoRef
   });
 }
 
-/** A chip's command goes at the front of the draft's message box, where a
- *  slash command has to be; whatever was already typed stays after it as the
- *  command's arguments. A command already leading the box is swapped out, so
- *  clicking a second chip changes the command instead of stacking two.
- *  Attachments are kept. */
-export function withCommand(current: string, command: string): string {
-  const rest = current.trim().replace(/^\/\S+\s*/, "");
-  return rest ? `${command} ${rest}` : `${command} `;
-}
+// Lives in format.ts so the chat's next-action strip can use it without
+// importing this module (it pulls in selectSession and the whole dashboard).
+export { withCommand };
 
 function fillComposer(command: string): void {
   const composer = state.composer;
