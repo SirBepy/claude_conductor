@@ -22,11 +22,17 @@ function template() {
     <div class="view-project-settings">
       <div class="ps-group">
         <div class="ps-field">
-          <div class="ps-label" title="The model new chats in this project open on">Model</div>
+          <div class="ps-label-row">
+            <div class="ps-label" title="The model new chats in this project open on">Model</div>
+            <button type="button" class="ps-revert" id="chatDefaultModelRevert" aria-label="Back to default"><i class="ph ph-arrow-counter-clockwise"></i></button>
+          </div>
           <div id="chatDefaultModelControl"></div>
         </div>
         <div class="ps-field">
-          <div class="ps-label" title="The effort new chats in this project open on">Effort</div>
+          <div class="ps-label-row">
+            <div class="ps-label" title="The effort new chats in this project open on">Effort</div>
+            <button type="button" class="ps-revert" id="chatDefaultEffortRevert" aria-label="Back to default"><i class="ph ph-arrow-counter-clockwise"></i></button>
+          </div>
           <div id="chatDefaultEffortControl"></div>
         </div>
         <div class="ps-field">

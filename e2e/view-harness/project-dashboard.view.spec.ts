@@ -316,8 +316,12 @@ test.describe("view-harness / project dashboard", () => {
     expect(railBox.x).toBeGreaterThanOrEqual(rootBox.x + rootBox.width);
     // The rail shows what a new chat here opens on: this project's own model, the global effort.
     await expect(draftRail.locator("#chatDefaultModelControl .vs-stop.active")).toHaveText(/haiku/i);
-    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("Default");
-    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop").first()).toHaveAttribute("title", /high/);
+    // The global default (sonnet, high) is starred; the pinned model shows a revert arrow, the unpinned effort does not.
+    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("high");
+    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop.active .vs-star")).toHaveCount(1);
+    await expect(draftRail.locator("#chatDefaultModelControl .vs-star")).toHaveCount(1);
+    await expect(draftRail.locator(".ps-field.is-changed #chatDefaultModelRevert")).toHaveCount(1);
+    await expect(draftRail.locator(".ps-field.is-changed #chatDefaultEffortRevert")).toHaveCount(0);
     // The draft's header leads with the project until the first send names the chat.
     await expect(page.locator("#session-pane .session-header .title")).toHaveText("claude_usage_in_taskbar");
     // The message box keeps the chat's own 900px column under the wider dashboard.
@@ -331,6 +335,10 @@ test.describe("view-harness / project dashboard", () => {
     // Clicking a stop moves the slider onto it.
     await draftRail.locator("#chatDefaultEffortControl .vs-stop", { hasText: "max" }).click();
     await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("max");
+    // The arrow brings it back to the starred default.
+    await draftRail.locator("#chatDefaultEffortRevert").click();
+    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("high");
+    await expect(draftRail.locator(".ps-field.is-changed #chatDefaultEffortRevert")).toHaveCount(0);
 
     await page.setViewportSize({ width: 1100, height: 1000 });
     await expect.poll(async () => (await draftRail.boundingBox())!.y).toBeGreaterThan(rootBox.y + 100);

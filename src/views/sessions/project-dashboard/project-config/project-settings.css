@@ -8,6 +8,10 @@
 .ps-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ps-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; }
 .ps-label { font-size: var(--fs-body); color: var(--color-text); line-height: 1.2; }
+/* One label height for every field, so the rows with a revert arrow do not sit taller. */
+.ps-field > .ps-label, .ps-label-row { min-height: 20px; }
+.ps-field > .ps-label { display: flex; align-items: center; }
+.ps-label-row { display: flex; align-items: center; justify-content: space-between; }
 .ps-label[title] { cursor: help; }
 
 .view-project-settings .inline-select,
@@ -53,3 +57,13 @@
 }
 .vs-stop:hover { color: var(--color-text); }
 .vs-stop.active { color: var(--color-primary); font-weight: 600; }
+.vs-star { font-size: 9px; margin-right: 3px; color: var(--color-warning); vertical-align: 0.5px; }
+
+/* Back to the default: only while the project is pinned to something else. */
+.ps-revert {
+  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0;
+  background: none; border: 0; border-radius: 4px; color: var(--color-text-muted); font-size: 14px; cursor: pointer;
+  opacity: 0; pointer-events: none; transform: rotate(40deg); transition: opacity 0.2s ease, transform 0.25s ease, color 0.15s;
+}
+.ps-field.is-changed .ps-revert { opacity: 1; pointer-events: auto; transform: none; }
+.ps-revert:hover { color: var(--color-primary); background: var(--color-surface-alt); }
