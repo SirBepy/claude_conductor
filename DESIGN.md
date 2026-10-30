@@ -204,6 +204,12 @@ which enlarges `.icon-btn` to a 44px touch target (`base.css:130-138`) and adds
 safe-area insets for notches/home indicators on mobile/PWA contexts
 (`base.css:58-66`, `widgets.css:794-801`).
 
+Two reading columns are the deliberate exception: the chat column is centered
+and capped at 900px (`src/views/sessions/sessions.css`), and the project
+dashboard column at 1160px (`src/views/sessions/project-dashboard/pd-rail.css`).
+Past those widths prose lines grow too long to read and the dashboard's charts
+stretch out of proportion. Everything else still fills the window.
+
 ## Elevation & Depth
 
 Flat by default, with a soft ambient drop shadow (never a hard/directional one)
