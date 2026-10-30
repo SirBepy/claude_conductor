@@ -60,11 +60,10 @@ pub async fn context_status(
 ) -> Result<Option<ContextStatus>, String> {
     // A chat mirrored from a paired machine has its transcript on that
     // machine's disk; the daemon forwards the read there by session id.
-    if let Some(client) = crate::ipc::mirror::mirrored_client(&state, Some(&session_id)).await {
-        return Ok(client.context_status(&session_id).await.unwrap_or_else(|e| {
-            log::warn!("context_status: mirrored session {session_id} read failed: {e}");
-            None
-        }));
+    if let Some(forwarded) =
+        context_status_forwarded(&session_id, &state.cached_instances, state.client().await).await
+    {
+        return Ok(forwarded);
     }
     let resolved = resolve_session_transcript(&state, &session_id);
 
@@ -80,6 +79,22 @@ pub async fn context_status(
     .map_err(|e| format!("context_status join error: {e}"))?;
 
     Ok(status)
+}
+
+/// The mirrored-session branch of `context_status`: `None` when the session is
+/// local (the caller reads its own disk), else `Some(answer)` where a failed
+/// read answers `Some(None)`, the same "no usage lines" the statusbar already
+/// handles.
+async fn context_status_forwarded<C: crate::ipc::mirror::MirrorReads>(
+    session_id: &str,
+    instances: &std::sync::Mutex<Vec<crate::types::Instance>>,
+    client: Option<C>,
+) -> Option<Option<ContextStatus>> {
+    let client = crate::ipc::mirror::route_mirrored(instances, Some(session_id), client)?;
+    Some(client.context_status(session_id).await.unwrap_or_else(|e| {
+        log::warn!("context_status: mirrored session {session_id} read failed: {e}");
+        None
+    }))
 }
 
 /// Scans a transcript for the most recent line carrying a non-empty `cwd`.
@@ -160,6 +175,44 @@ pub async fn session_live_cwd(
     .map_err(|e| format!("session_live_cwd join error: {e}"))?;
 
     Ok(cwd.unwrap_or(fallback))
+}
+
+#[cfg(test)]
+mod mirrored_branch_tests {
+    use super::context_status_forwarded;
+    use crate::ipc::mirror::fake::{instance_cache, FakeMirror, PEER_MODEL};
+
+    #[tokio::test]
+    async fn a_mirrored_row_reads_the_status_through_the_client_by_session_id() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let answer = context_status_forwarded("mirror-1", &cache, Some(fake.clone())).await;
+
+        let status = answer.expect("a mirrored session is forwarded").expect("the fake has a status");
+        assert_eq!(status.model, PEER_MODEL);
+        assert_eq!(fake.calls(), [("context_status".into(), "mirror-1".into(), String::new())]);
+    }
+
+    #[tokio::test]
+    async fn a_client_error_reads_as_no_status() {
+        let fake = FakeMirror::failing();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        let answer = context_status_forwarded("mirror-1", &cache, Some(fake.clone())).await;
+
+        assert_eq!(answer, Some(None));
+        assert_eq!(fake.calls().len(), 1, "the failed read must have been attempted, not skipped");
+    }
+
+    #[tokio::test]
+    async fn a_local_session_is_not_forwarded() {
+        let fake = FakeMirror::ok();
+        let cache = instance_cache("local-1", "mirror-1");
+
+        assert_eq!(context_status_forwarded("local-1", &cache, Some(fake.clone())).await, None);
+        assert!(fake.calls().is_empty());
+    }
 }
 
 #[cfg(test)]
