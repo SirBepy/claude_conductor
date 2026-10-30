@@ -137,7 +137,7 @@ pub fn workflow_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_SHOW_PREVIEW,
-            "description": "Render HTML for the user to LOOK at - a mockup, a chart, a timeline, a diagram. The card lands inline in the chat, expanded, and he can promote it to the side panel from there. Use it whenever the answer is easier to see than to read; a table in your message text is the fallback, not the goal.\n\nThe HTML is self-contained: it renders in a sandboxed frame with no access to the app, so inline `<style>`/`<script>` and CDN links all work, but nothing relative resolves - no `<link href=\"./x.css\">`.\n\n`slug` is the identity. Pushing the same slug again REPLACES that card in place rather than stacking a second one, so iterate on a design by re-pushing one slug.",
+            "description": "Render HTML for the user to LOOK at - a mockup, a chart, a timeline, a diagram. The card lands inline in the chat, expanded, and he can promote it to the side panel from there. Use it whenever the answer is easier to see than to read; a table in your message text is the fallback, not the goal.\n\nThe HTML is self-contained: it renders in a sandboxed frame with no access to the app, so inline `<style>`/`<script>` and CDN links all work, but nothing relative resolves - no `<link href=\"./x.css\">`.\n\nThe panel wraps every page in a centered, padded page template and gives it pinch and Ctrl+wheel zoom, so write no body padding, max-width or zoom controls (your own CSS still wins). Only a page that owns its whole layout, such as an app shell, opts out with `<meta name=\"preview-template\" content=\"bare\">` in its head.\n\n`slug` is the identity. Pushing the same slug again REPLACES that card in place rather than stacking a second one, so iterate on a design by re-pushing one slug.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -265,4 +265,21 @@ pub fn workflow_schemas() -> Vec<Value> {
             }
         }),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The preview panel's page template is only as consistent as what the model
+    // is told to write; a description that stops naming it sends back hand-rolled
+    // body padding and zoom controls.
+    #[test]
+    fn show_preview_description_names_the_page_template_and_its_opt_out() {
+        let schemas = workflow_schemas();
+        let show = schemas.iter().find(|s| s["name"] == TOOL_SHOW_PREVIEW).expect("show_preview schema");
+        let description = show["description"].as_str().unwrap();
+        assert!(description.contains("page template"));
+        assert!(description.contains(r#"<meta name="preview-template" content="bare">"#));
+    }
 }
