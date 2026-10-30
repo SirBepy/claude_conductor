@@ -82,8 +82,22 @@ class AppLockBridge(
   @JavascriptInterface
   fun getRelockMinutes(): Int = AppLockSettings.relockMinutes(context)
 
+  // Same contract as setLockEnabled: true = saved already, false = a prompt is
+  // up and the outcome arrives through window.__ccLockSwitchResult. Only a
+  // LONGER window needs the unlock; a script must not be able to stretch it.
   @JavascriptInterface
-  fun setRelockMinutes(minutes: Int) = AppLockSettings.setRelockMinutes(context, minutes)
+  fun setRelockMinutes(minutes: Int): Boolean {
+    val request = AppLockPolicy.relockRequest(AppLockSettings.relockMinutes(context), minutes, phoneHasScreenLock(context))
+    if (request == AppLockPolicy.SwitchRequest.SAVE_NOW) {
+      AppLockSettings.setRelockMinutes(context, minutes)
+      return true
+    }
+    confirmUnlock { passed ->
+      if (passed) AppLockSettings.setRelockMinutes(context, minutes)
+      runJs(AppLockPolicy.switchResultJs(passed))
+    }
+    return false
+  }
 
   @JavascriptInterface
   fun getRelockChoices(): String = AppLockPolicy.choicesJson()

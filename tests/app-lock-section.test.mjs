@@ -158,4 +158,60 @@ describe("App lock section", () => {
     select.dispatchEvent(new Event("change"));
     expect(setRelockMinutes).toHaveBeenCalledWith(60);
   });
+
+  describe("relock window change that needs an unlock", () => {
+    // The shell returns false when a longer window is waiting on the fingerprint/PIN
+    // and answers through window.__ccLockSwitchResult, same as the switch.
+    function pickAwaitingUnlock(over = {}) {
+      const setRelockMinutes = vi.fn(() => false);
+      window.ConductorLock = { getRelockMinutes: () => 10, setRelockMinutes, ...over };
+      const host = mount();
+      const select = host.querySelector("#ra-app-lock-minutes");
+      select.value = "60";
+      select.dispatchEvent(new Event("change"));
+      return { host, select, setRelockMinutes };
+    }
+
+    it("holds the picker still while the unlock prompt is up", () => {
+      const { select, setRelockMinutes } = pickAwaitingUnlock();
+      expect(setRelockMinutes).toHaveBeenCalledWith(60);
+      expect(select.disabled).toBe(true);
+    });
+
+    it("puts the picker back on the old window when the unlock is cancelled", () => {
+      const { select } = pickAwaitingUnlock();
+      window.__ccLockSwitchResult(false);
+      expect(select.value).toBe("10");
+      expect(select.disabled).toBe(false);
+      expect(window.__ccLockSwitchResult).toBeUndefined();
+    });
+
+    it("keeps the new window and frees the picker once the unlock passes", () => {
+      const { select } = pickAwaitingUnlock();
+      window.__ccLockSwitchResult(true);
+      expect(select.value).toBe("60");
+      expect(select.disabled).toBe(false);
+    });
+
+    it("a window saved without a prompt leaves the picker usable and registers no handler", () => {
+      const setRelockMinutes = vi.fn(() => true);
+      window.ConductorLock = { getRelockMinutes: () => 10, setRelockMinutes };
+      const select = mount().querySelector("#ra-app-lock-minutes");
+      select.value = "1";
+      select.dispatchEvent(new Event("change"));
+      expect(select.disabled).toBe(false);
+      expect(select.value).toBe("1");
+      expect(window.__ccLockSwitchResult).toBeUndefined();
+    });
+
+    it("a refused change is reverted even if a later pick follows a cancel", () => {
+      const { select, setRelockMinutes } = pickAwaitingUnlock();
+      window.__ccLockSwitchResult(false);
+      select.value = "30";
+      select.dispatchEvent(new Event("change"));
+      expect(setRelockMinutes).toHaveBeenLastCalledWith(30);
+      window.__ccLockSwitchResult(false);
+      expect(select.value).toBe("10");
+    });
+  });
 });
