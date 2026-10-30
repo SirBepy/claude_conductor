@@ -47,6 +47,20 @@ export function unmountDraftDashboard(pane: HTMLElement): void {
   pane.querySelector(".pd-qa-host.is-draft:not(.pd-ghost)")?.remove();
 }
 
+/** An iframe cloned with the tree reloads its srcdoc, which can blank or flash
+ *  mid-fade. Each copy's frame becomes a block of the live frame's height
+ *  (frames pair up by document order, the clone preserving it) that inherits
+ *  the card's background; the live frame is the one the user last saw. */
+function freezeHtmlFrames(live: HTMLElement, ghost: HTMLElement): void {
+  const liveFrames = live.querySelectorAll<HTMLIFrameElement>("iframe.pd-html-frame");
+  ghost.querySelectorAll("iframe.pd-html-frame").forEach((frame, i) => {
+    const block = document.createElement("div");
+    block.className = "pd-html-frame-ghost";
+    block.style.height = `${liveFrames[i]?.offsetHeight ?? 0}px`;
+    frame.replaceWith(block);
+  });
+}
+
 /** The first send: the dashboard and its chips fade out and fold away instead
  *  of vanishing, so the message that follows slides up rather than jumps. The
  *  live dashboard comes down at once (no more events or fetches); what fades
@@ -58,6 +72,7 @@ export function leaveDraftDashboard(pane: HTMLElement): void {
     const ghost = el.cloneNode(true) as HTMLElement;
     ghost.classList.add("pd-ghost");
     freezeEntrance(el, ghost);
+    freezeHtmlFrames(el, ghost);
     el.after(ghost);
     return [ghost];
   });
