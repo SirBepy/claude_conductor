@@ -244,6 +244,21 @@ describe("draft dashboard motion", () => {
     expect(pane.querySelector(".pd-qa-host")).toBeNull();
   });
 
+  it("an html card's frame is not cloned into the fading copy, which would reload it", async () => {
+    const pane = await mountDraft("C:/Projects/conductor");
+    await vi.waitFor(() => expect(chips(pane)).toEqual(["/pickup", "/audit"]));
+    // The fixtures hold no html card: stand one in for what dash-html-card.ts renders.
+    const frame = document.createElement("iframe");
+    frame.className = "pd-html-frame";
+    pane.querySelector(".pd-reports").append(frame);
+    leaveDraftDashboard(pane);
+    const ghost = pane.querySelector(".pd-draft.pd-ghost");
+    expect(ghost.querySelector("iframe")).toBeNull();
+    // Same size as the frame it replaces, so the fold's layout does not jump.
+    expect(ghost.querySelector(".pd-html-frame-ghost").style.height).toBe("40px");
+    expect(pane.querySelector("iframe")).toBeNull();
+  });
+
   it("the send's header rebind leaves the fading copy to finish its fold", async () => {
     const pane = await mountDraft("C:/Projects/conductor");
     await vi.waitFor(() => expect(chips(pane)).toEqual(["/pickup", "/audit"]));
