@@ -36,6 +36,22 @@ pub(super) async fn on_preview_render(
     (StatusCode::OK, Json(json!({ "id": id })))
 }
 
+/// First render id in `html` that this server no longer holds, if any. An inline
+/// card embeds the gallery's `render-url` as an iframe, and the card draws from the
+/// pushed html alone, so an expired id would show a blank frame with no signal
+/// back to the session that wrote it.
+pub(super) fn stale_render_reference(html: &str) -> Option<String> {
+    const MARKER: &str = "/hooks/preview-render/";
+    let cache = cell().lock().unwrap_or_else(|e| e.into_inner());
+    html.match_indices(MARKER).find_map(|(at, _)| {
+        let id: String = html[at + MARKER.len()..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect();
+        (!id.is_empty() && !cache.contains(&id)).then_some(id)
+    })
+}
+
 /// Deliberately wide-open: this doc is sandboxed (`allow-scripts`, no
 /// `allow-same-origin`), so its policy is independent of the app shell's.
 pub(crate) const RENDER_DOC_CSP: &str =
@@ -58,5 +74,42 @@ pub(super) async fn on_preview_render_get(AxPath(id): AxPath<String>) -> Respons
             .into_response(),
         // Evicted or unknown id - frontend treats this as "nothing to show".
         None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card_html(id: &str) -> String {
+        format!(r#"<iframe src="http://127.0.0.1:27182/hooks/preview-render/{id}" style="width:100%"></iframe>"#)
+    }
+
+    #[test]
+    fn a_card_iframing_a_held_render_id_is_not_stale() {
+        cell().lock().unwrap().insert("pr-held-1".into(), "<p>gallery</p>".into());
+        assert_eq!(stale_render_reference(&card_html("pr-held-1")), None);
+    }
+
+    #[test]
+    fn a_card_iframing_an_unknown_render_id_is_stale() {
+        assert_eq!(
+            stale_render_reference(&card_html("pr-never-staged")).as_deref(),
+            Some("pr-never-staged"),
+        );
+    }
+
+    #[test]
+    fn html_without_a_render_reference_is_never_stale() {
+        assert_eq!(stale_render_reference("<p>hello</p>"), None);
+        // The path quoted as prose has no id after it.
+        assert_eq!(stale_render_reference("served at /hooks/preview-render/<id>"), None);
+    }
+
+    #[test]
+    fn the_second_reference_is_checked_too() {
+        cell().lock().unwrap().insert("pr-held-2".into(), "<p>gallery</p>".into());
+        let html = format!("{}{}", card_html("pr-held-2"), card_html("pr-gone-2"));
+        assert_eq!(stale_render_reference(&html).as_deref(), Some("pr-gone-2"));
     }
 }
