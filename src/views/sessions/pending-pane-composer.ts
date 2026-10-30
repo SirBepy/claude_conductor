@@ -19,7 +19,8 @@ import { Composer } from "../../shared/chat/composer";
 import { HeldMessages } from "../../shared/chat/held-messages";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { refreshSessions } from "./sidebar";
-import { rebuildSidebar, beginDraftSpawn, endDraftSpawn, moveSpawnedChat } from "./pending-pane-mount";
+import { rebuildSidebar } from "./pending-pane-mount";
+import { beginDraftSpawn, endDraftSpawn, moveSpawnedChat } from "./pending-pane-spawn";
 import { leaveDraftDashboard } from "./project-dashboard/draft-dashboard";
 
 /** With no account registered there is nothing to pick, so the picker would

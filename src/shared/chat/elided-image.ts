@@ -46,8 +46,14 @@ export function elidedLabel(ref: ElidedImageRef): string {
   return ref.bytes !== undefined ? `${ref.mime}, ${formatBytes(ref.bytes)}` : ref.mime;
 }
 
+/** The icon and size label every elided placeholder shows, whatever box
+ *  (tool_result row or screenshot thumb) wraps it. */
+export function elidedInnerHtml(ref: ElidedImageRef): string {
+  return `<i class="ph ph-image"></i><span class="elided-image-label">${escapeHtml(elidedLabel(ref))}</span>`;
+}
+
 /** The inline stand-in for a tool_result row's image: a box that loads the
  *  real image when it scrolls into view, or on click if that failed. */
 export function elidedRowHtml(ref: ElidedImageRef): string {
-  return `<div class="elided-image" ${elidedAttrs(ref)} role="button" tabindex="0"><i class="ph ph-image"></i><span class="elided-image-label">${escapeHtml(elidedLabel(ref))}</span></div>`;
+  return `<div class="elided-image" ${elidedAttrs(ref)} role="button" tabindex="0">${elidedInnerHtml(ref)}</div>`;
 }

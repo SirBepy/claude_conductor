@@ -113,6 +113,6 @@ export function mountFileWindow(app: HTMLElement, first: { path: string; line: n
   // flushes it once told the listener is up, so signal after `listen` resolves.
   void listen<{ path: string; line: number | null }>("file-window-open", ({ path, line }) => open(path, line))
     .then(() => invoke("file_window_ready"))
-    .catch(() => {});
+    .catch((e) => console.warn("[file-window] listener-ready handshake failed; queued opens stay held:", e));
   open(first.path, first.line);
 }

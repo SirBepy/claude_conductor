@@ -55,7 +55,9 @@ export function curateLatestPerFamily(models: string[]): string[] {
   return out;
 }
 
-/** "claude-opus-5" -> "opus". Returns the id unchanged for unknown families. */
+/** "claude-opus-5" -> "opus". Returns the id unchanged for unknown families.
+ *  Mirrored by `model_family` in src-tauri/src/ipc/chat/lifecycle.rs; a new
+ *  family needs adding to both. */
 export function modelFamilyFromId(id: string): string {
   const s = id.toLowerCase();
   if (s.includes("fable")) return "fable";

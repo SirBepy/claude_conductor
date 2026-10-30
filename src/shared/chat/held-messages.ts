@@ -352,7 +352,10 @@ export class HeldMessages {
       // made on the daemon meanwhile is only picked up by re-running one now.
       // It waits for the re-pushed items' adds, or the snapshot could predate
       // them and replace the local set with a list missing them.
-      void this.sync.addsSettled().then(() => this.reconcile(run.sid));
+      this.sync
+        .addsSettled()
+        .then(() => this.reconcile(run.sid))
+        .catch((e) => console.warn("[held] post-restage reconcile failed:", e));
     }
   }
 
