@@ -6,11 +6,12 @@
 //! connection. The daemon side already loops `accept_bi` per connection, so
 //! no change is needed there.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use iroh::endpoint::{presets, Connection, RecvStream, SendStream, VarInt};
-use iroh::{Endpoint, EndpointAddr, EndpointId};
+use iroh::{Endpoint, EndpointAddr, EndpointId, TransportAddr};
 use log::{error, info, warn};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
@@ -87,6 +88,15 @@ const WATCHDOG_TICK: Duration = Duration::from_secs(2);
 /// stops during device suspend, so only the wall clock shows the gap.
 const RESUME_GAP: Duration = Duration::from_secs(20);
 
+// A dial queued behind the connection lock delays the next gap check by up to
+// one CONNECT_TIMEOUT plus a tick. If that exceeded RESUME_GAP, every slow dial
+// would read as a wake-up and tear down the connection it just made.
+const _: () = assert!(CONNECT_TIMEOUT.as_secs() + WATCHDOG_TICK.as_secs() < RESUME_GAP.as_secs());
+
+/// How long `remote_known` waits on iroh's remote-state actor. It sits under the
+/// connection lock, so a wedged actor must not stall every socket.
+const REMOTE_INFO_TIMEOUT: Duration = Duration::from_millis(250);
+
 /// A running tunnel plus what is needed to stop it.
 struct RunningTunnel {
     port: u16,
@@ -136,10 +146,15 @@ pub async fn start_iroh_tunnel(
     })?;
     let mut running = state.0.lock().await;
     if let Some(live) = running.get(&remote_id) {
+        // Logged so a reopen can be told apart in logcat: this line means the
+        // shell reloaded in a live process, "listener successfully bound"
+        // means a fresh one.
+        info!("start_iroh_tunnel: reusing live tunnel on port {}", live.port);
         return Ok(live.port);
     }
     // The old PC's tunnel stays up until the new one is bound, so a failed
     // switch leaves the phone on a working tunnel instead of none.
+    let bind_started = Instant::now();
     let endpoint = Endpoint::builder(presets::N0)
         .alpns(vec![ALPN.to_vec()])
         .bind()
@@ -149,6 +164,7 @@ pub async fn start_iroh_tunnel(
             error!("{}", msg);
             msg
         })?;
+    info!("iroh bound in {}ms", bind_started.elapsed().as_millis());
     let candidates = port_candidates(&remote_id, legacy.unwrap_or(false));
     // A candidate held by an old tunnel is freed first, so the new PC still
     // lands on its own deterministic port and keeps that origin's token.
@@ -195,38 +211,110 @@ struct Tunnel {
     endpoint: Endpoint,
     remote: EndpointAddr,
     conn: Mutex<Option<Connection>>,
+    /// Wall-clock seconds of the last gap check. Starts at "now" so a fresh
+    /// tunnel's first dial is not mistaken for a wake-up.
+    last_alive: AtomicU64,
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// `*` marks the path QUIC currently sends on. Takes owned data because a
+/// live `Path` borrows its connection and cannot be built in a test.
+fn path_summary(paths: &[(bool, TransportAddr)]) -> String {
+    paths
+        .iter()
+        .map(|(selected, addr)| format!("{}{addr}", if *selected { "*" } else { "" }))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 impl Tunnel {
     fn new(endpoint: Endpoint, remote: EndpointAddr) -> Self {
-        Self { endpoint, remote, conn: Mutex::new(None) }
+        Self { endpoint, remote, conn: Mutex::new(None), last_alive: AtomicU64::new(now_secs()) }
+    }
+
+    /// Returns the length of the gap when the process was frozen or the phone
+    /// slept since the previous call, `None` otherwise. The swap makes exactly
+    /// one caller see each gap; callers hold the connection lock around it so
+    /// the gap and the cached connection are handled together.
+    fn take_resume(&self) -> Option<u64> {
+        let now = now_secs();
+        let prev = self.last_alive.swap(now, Ordering::SeqCst);
+        is_resume_gap(UNIX_EPOCH + Duration::from_secs(prev), UNIX_EPOCH + Duration::from_secs(now))
+            .then(|| now.saturating_sub(prev))
+    }
+
+    /// Closes and clears the cached connection. Takes the guard's contents, not
+    /// `invalidate`: the connection mutex is not reentrant.
+    fn drop_locked(guard: &mut Option<Connection>, why: &str) {
+        if let Some(conn) = guard.take() {
+            info!("dropping tunnel connection: {why}");
+            conn.close(VarInt::from_u32(0), why.as_bytes());
+        }
+    }
+
+    /// Whether iroh already holds state for the PC (a warm redial), as opposed
+    /// to a cold lookup. Bounded: it waits on iroh's remote-state actor.
+    async fn remote_known(&self) -> bool {
+        tokio::time::timeout(REMOTE_INFO_TIMEOUT, self.endpoint.remote_info(self.remote.id))
+            .await
+            .ok()
+            .flatten()
+            .is_some()
     }
 
     /// The lock is held across the dial on purpose: a burst of WebView sockets
     /// on resume waits for one connect instead of racing several.
     async fn connection(&self) -> Result<Connection, BoxError> {
         let mut guard = self.conn.lock().await;
-        if let Some(conn) = guard.as_ref() {
+        // A cached connection that sat through a freeze can look open while
+        // every byte on it disappears, so a gap is checked before it is
+        // handed out, not left to the watchdog's next tick.
+        let resumed = self.take_resume();
+        if let Some(secs) = resumed {
+            Self::drop_locked(&mut guard, &format!("resumed after {secs}s asleep (seen by connection())"));
+            self.endpoint.network_change().await;
+        } else if let Some(conn) = guard.as_ref() {
             match conn.close_reason() {
                 None => return Ok(conn.clone()),
-                Some(reason) => info!("tunnel connection closed ({reason}), redialing"),
+                Some(reason) => {
+                    info!("tunnel connection closed ({reason}), redialing");
+                    // Measured on a Pixel 7 (2026-10-30): after the idle close,
+                    // redials on the same iroh state timed out four times in a
+                    // row (15s each) and the first success took 14s, while a
+                    // fresh endpoint dialed in 272ms. iroh cannot see network
+                    // changes on Android, so tell it before redialing.
+                    self.endpoint.network_change().await;
+                }
             }
         }
+        let warm = self.remote_known().await;
         let started = Instant::now();
         let conn = match tokio::time::timeout(CONNECT_TIMEOUT, self.endpoint.connect(self.remote.clone(), ALPN)).await {
             Ok(Ok(conn)) => conn,
             Ok(Err(e)) => {
-                warn!("tunnel connect failed after {}ms: {e}", started.elapsed().as_millis());
+                warn!("tunnel connect failed after {}ms warm={warm}: {e}", started.elapsed().as_millis());
                 *guard = None;
+                self.endpoint.network_change().await;
                 return Err(e.into());
             }
             Err(_) => {
-                warn!("tunnel connect timed out after {}s", CONNECT_TIMEOUT.as_secs());
+                warn!("tunnel connect timed out after {}s warm={warm}", CONNECT_TIMEOUT.as_secs());
                 *guard = None;
+                self.endpoint.network_change().await;
                 return Err("tunnel connect timed out".into());
             }
         };
-        info!("tunnel connected in {}ms", started.elapsed().as_millis());
+        let paths: Vec<(bool, TransportAddr)> =
+            conn.paths().iter().map(|p| (p.is_selected(), p.remote_addr().clone())).collect();
+        info!(
+            "tunnel connected in {}ms warm={warm} paths=[{}] resumed={}",
+            started.elapsed().as_millis(),
+            path_summary(&paths),
+            resumed.is_some()
+        );
         *guard = Some(conn.clone());
         Ok(conn)
     }
@@ -236,11 +324,21 @@ impl Tunnel {
     /// (see `Endpoint::network_change`'s docs), so a Wi-Fi/LTE switch during
     /// sleep would otherwise keep it on stale sockets and relay state.
     async fn invalidate(&self, why: &str) {
-        if let Some(conn) = self.conn.lock().await.take() {
-            info!("dropping tunnel connection: {why}");
-            conn.close(VarInt::from_u32(0), why.as_bytes());
-        }
+        Self::drop_locked(&mut *self.conn.lock().await, why);
         self.endpoint.network_change().await;
+    }
+
+    /// One watchdog tick. The lock is taken BEFORE the gap is consumed: if the
+    /// gap were consumed first, a `connection()` call racing in would see no
+    /// gap and hand out the dead connection, or the late drop would close a
+    /// connection dialed after the gap.
+    async fn watchdog_tick(&self) {
+        let mut guard = self.conn.lock().await;
+        if let Some(secs) = self.take_resume() {
+            Self::drop_locked(&mut guard, &format!("resumed after {secs}s asleep"));
+            drop(guard);
+            self.endpoint.network_change().await;
+        }
     }
 
     async fn open_stream(&self) -> Result<(SendStream, RecvStream), BoxError> {
@@ -274,15 +372,9 @@ fn is_resume_gap(prev: SystemTime, now: SystemTime) -> bool {
 /// byte sent on it disappears until the idle timeout. Dropping it on resume
 /// makes the WebView's first requests redial instead of hanging.
 async fn resume_watchdog(tunnel: Arc<Tunnel>) {
-    let mut last = SystemTime::now();
     loop {
         tokio::time::sleep(WATCHDOG_TICK).await;
-        let now = SystemTime::now();
-        if is_resume_gap(last, now) {
-            let secs = now.duration_since(last).map(|d| d.as_secs()).unwrap_or(0);
-            tunnel.invalidate(&format!("resumed after {secs}s asleep")).await;
-        }
-        last = now;
+        tunnel.watchdog_tick().await;
     }
 }
 
@@ -469,6 +561,81 @@ mod tests {
         ping(port).await;
         ping(port).await;
         assert_eq!(accepted.load(Ordering::SeqCst), 1);
+    }
+
+    fn stale(tunnel: &Tunnel) {
+        tunnel.last_alive.store(now_secs() - RESUME_GAP.as_secs() - 10, Ordering::SeqCst);
+    }
+
+    #[tokio::test]
+    async fn take_resume_fires_once_per_gap() {
+        let (server, _) = pong_server().await;
+        let (tunnel, _) = tunnel_to(server).await;
+        assert_eq!(tunnel.take_resume(), None, "a fresh tunnel is not a wake-up");
+        stale(&tunnel);
+        let gap = tunnel.take_resume().expect("a stale last_alive is a gap");
+        assert!(gap >= RESUME_GAP.as_secs() + 10);
+        assert_eq!(tunnel.take_resume(), None, "the gap is consumed by the first caller");
+    }
+
+    #[tokio::test]
+    async fn a_stale_last_alive_makes_the_next_request_redial_instead_of_reusing() {
+        let (server, accepted) = pong_server().await;
+        let (tunnel, port) = tunnel_to(server).await;
+        ping(port).await;
+        assert_eq!(accepted.load(Ordering::SeqCst), 1);
+        stale(&tunnel);
+        ping(port).await;
+        assert_eq!(accepted.load(Ordering::SeqCst), 2, "the cached connection must not outlive a wake-up");
+        ping(port).await;
+        assert_eq!(accepted.load(Ordering::SeqCst), 2, "the redialed connection is reused afterwards");
+    }
+
+    /// The deterministic half of the race fix: while another task holds the
+    /// connection lock (a dial in progress), a watchdog tick must not consume
+    /// the gap, or the dial's result could be closed by a late drop.
+    #[tokio::test]
+    async fn watchdog_tick_waits_for_the_lock_before_consuming_the_gap() {
+        let (server, _) = pong_server().await;
+        let (tunnel, _) = tunnel_to(server).await;
+        stale(&tunnel);
+        let held = tunnel.conn.lock().await;
+        let blocked = tokio::time::timeout(Duration::from_millis(100), tunnel.watchdog_tick()).await;
+        assert!(blocked.is_err(), "the tick must wait for the lock");
+        assert!(tunnel.last_alive.load(Ordering::SeqCst) < now_secs() - RESUME_GAP.as_secs(), "gap consumed too early");
+        drop(held);
+        tunnel.watchdog_tick().await;
+        assert!(tunnel.last_alive.load(Ordering::SeqCst) >= now_secs() - 1, "gap consumed once the lock is free");
+    }
+
+    #[tokio::test]
+    async fn a_watchdog_tick_racing_a_request_never_closes_the_fresh_connection() {
+        let (server, accepted) = pong_server().await;
+        let (tunnel, port) = tunnel_to(server).await;
+        ping(port).await;
+        stale(&tunnel);
+        tokio::join!(ping(port), tunnel.watchdog_tick());
+        ping(port).await;
+        assert_eq!(accepted.load(Ordering::SeqCst), 2, "one redial for the one wake-up, then reuse");
+    }
+
+    #[test]
+    fn path_summary_marks_the_selected_path_and_names_each_kind() {
+        let ip: std::net::SocketAddr = "192.168.1.5:4000".parse().unwrap();
+        let relay: iroh::RelayUrl = "https://relay.example.com./".parse().unwrap();
+        let summary = path_summary(&[(true, TransportAddr::Ip(ip)), (false, TransportAddr::Relay(relay))]);
+        assert!(summary.starts_with("*ip:192.168.1.5:4000"), "{summary}");
+        assert!(summary.contains(",relay:"), "{summary}");
+        assert_eq!(path_summary(&[]), "");
+    }
+
+    #[tokio::test]
+    async fn remote_known_flips_after_the_first_dial() {
+        let (server, _) = pong_server().await;
+        let (tunnel, port) = tunnel_to(server).await;
+        assert!(!tunnel.remote_known().await, "no state before the first dial");
+        ping(port).await;
+        assert!(tunnel.remote_known().await, "iroh keeps the remote after a dial");
     }
 
     #[tokio::test]
