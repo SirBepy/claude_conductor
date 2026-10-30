@@ -37,7 +37,7 @@ export async function renderChatDefaultsRow(cwd: string): Promise<void> {
 
   const wire = (
     host: HTMLElement,
-    revert: HTMLElement | null,
+    revert: HTMLButtonElement | null,
     label: string,
     field: "default_model" | "default_effort",
     own: string,
@@ -49,7 +49,16 @@ export async function renderChatDefaultsRow(cwd: string): Promise<void> {
     // A pin equal to the default is the same as no pin.
     let saved = own && values.includes(own) ? values.indexOf(own) : defaultIdx;
     const row = host.closest(".ps-field");
-    const sync = (idx: number): void => { row?.classList.toggle("is-changed", idx !== defaultIdx); };
+    const sync = (idx: number): void => {
+      row?.classList.toggle("is-changed", idx !== defaultIdx);
+      // Disabled, not just faded: an invisible arrow must not stay in the Tab order.
+      if (revert) revert.disabled = idx === defaultIdx;
+    };
+    // Saves run one after another so the persisted value is always the last one
+    // that succeeded, and only the newest commit may revert the thumb: an older
+    // failure would otherwise glide it back over a value that is still saving.
+    let queue: Promise<void> = Promise.resolve();
+    let latest = 0;
     const slider = mountValueSlider(host, {
       label,
       stops: values.map(text),
@@ -58,7 +67,8 @@ export async function renderChatDefaultsRow(cwd: string): Promise<void> {
       index: saved,
       onChange: sync,
       onCommit: (idx) => {
-        void (async () => {
+        const mine = ++latest;
+        queue = queue.then(async () => {
           try {
             const projectId = proj?.id ?? (await api.ensureProject(cwd)).id;
             await api.updateProject(projectId, { [field]: idx === defaultIdx ? null : values[idx] });
@@ -69,9 +79,9 @@ export async function renderChatDefaultsRow(cwd: string): Promise<void> {
           } catch (e) {
             console.error("[project-settings] update chat default failed", e);
             showToast(`Could not update the default: ${e}`);
-            slider.set(saved);
+            if (mine === latest) slider.set(saved);
           }
-        })();
+        });
       },
     });
     if (revert) {
@@ -79,6 +89,6 @@ export async function renderChatDefaultsRow(cwd: string): Promise<void> {
       revert.onclick = () => slider.commit(defaultIdx);
     }
   };
-  wire(modelControl, document.getElementById("chatDefaultModelRevert"), "Model", "default_model", ownModel, globalModel, models, modelDisplayLabel);
-  wire(effortControl, document.getElementById("chatDefaultEffortRevert"), "Effort", "default_effort", ownEffort, global.effort, EFFORTS, (v) => v);
+  wire(modelControl, document.getElementById("chatDefaultModelRevert") as HTMLButtonElement | null, "Model", "default_model", ownModel, globalModel, models, modelDisplayLabel);
+  wire(effortControl, document.getElementById("chatDefaultEffortRevert") as HTMLButtonElement | null, "Effort", "default_effort", ownEffort, global.effort, EFFORTS, (v) => v);
 }

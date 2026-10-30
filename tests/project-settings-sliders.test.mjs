@@ -75,6 +75,43 @@ describe("mountValueSlider", () => {
     expect(stop(0).classList.contains("active")).toBe(true);
     expect(onCommit).not.toHaveBeenCalled();
   });
+
+  // jsdom has neither PointerEvent nor pointer capture; a MouseEvent of the
+  // pointer type carries the button, buttons and clientX the handlers read.
+  const pointer = (type, init = {}) => {
+    const wrap = host.querySelector(".vs-wrap");
+    wrap.setPointerCapture = () => {};
+    // 4 stops over a 300px track: x of 0 / 100 / 200 / 300 hits stop 0 / 1 / 2 / 3.
+    host.querySelector(".vs-track").getBoundingClientRect = () => ({ left: 0, width: 300 });
+    const ev = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, buttons: 1, ...init });
+    ev.pointerId = 1;
+    wrap.dispatchEvent(ev);
+  };
+
+  it("a primary-button drag commits the stop it is released on", () => {
+    const { onCommit } = mount();
+    pointer("pointerdown", { clientX: 100 });
+    pointer("pointerup", { clientX: 300 });
+    expect(onCommit).toHaveBeenCalledWith(3);
+  });
+
+  it("a non-primary pointer button starts no drag and commits nothing", () => {
+    const { onCommit } = mount();
+    pointer("pointerdown", { button: 2, buttons: 2, clientX: 300 });
+    expect(host.querySelector(".vs-wrap").classList.contains("is-drag")).toBe(false);
+    pointer("pointerup", { button: 2, buttons: 0, clientX: 300 });
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("a hover with no button held ends a drag whose pointerup was lost", () => {
+    const { onCommit } = mount();
+    pointer("pointerdown", { clientX: 100 });
+    pointer("pointermove", { buttons: 0, clientX: 300 });
+    expect(host.querySelector(".vs-wrap").classList.contains("is-drag")).toBe(false);
+    expect(stop(1).classList.contains("active")).toBe(true);
+    pointer("pointerup", { buttons: 0, clientX: 300 });
+    expect(onCommit).not.toHaveBeenCalled();
+  });
 });
 
 describe("project settings model and effort sliders", () => {
@@ -130,5 +167,42 @@ describe("project settings model and effort sliders", () => {
     modelStop("haiku").click();
     await flush();
     expect(modelStop("opus").classList.contains("active")).toBe(true);
+  });
+
+  it("an older failed save does not pull the thumb off a newer value that saved", async () => {
+    apiMock.listProjects.mockResolvedValue([{ id: "p1", path: "C:/proj", default_model: "opus" }]);
+    apiMock.updateProject.mockRejectedValueOnce(new Error("nope")).mockResolvedValue(undefined);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await renderChatDefaultsRow("C:/proj");
+    modelStop("haiku").click();
+    modelStop("sonnet").click();
+    await flush();
+    await flush();
+    expect(apiMock.updateProject).toHaveBeenCalledTimes(2);
+    expect(apiMock.updateProject).toHaveBeenLastCalledWith("p1", { default_model: null });
+    expect(modelStop("sonnet").classList.contains("active")).toBe(true);
+  });
+
+  it("a newer failed save reverts to the value the older save persisted", async () => {
+    apiMock.listProjects.mockResolvedValue([{ id: "p1", path: "C:/proj", default_model: "opus" }]);
+    apiMock.updateProject.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("nope"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await renderChatDefaultsRow("C:/proj");
+    modelStop("haiku").click();
+    modelStop("sonnet").click();
+    await flush();
+    await flush();
+    expect(modelStop("haiku").classList.contains("active")).toBe(true);
+  });
+
+  it("the revert arrow is disabled, so out of the Tab order, while unpinned", async () => {
+    apiMock.listProjects.mockResolvedValue([{ id: "p1", path: "C:/proj", default_model: "opus" }]);
+    await renderChatDefaultsRow("C:/proj");
+    const arrow = (id) => document.getElementById(id);
+    expect(arrow("chatDefaultModelRevert").disabled).toBe(false);
+    expect(arrow("chatDefaultEffortRevert").disabled).toBe(true);
+    arrow("chatDefaultModelRevert").click();
+    await flush();
+    expect(arrow("chatDefaultModelRevert").disabled).toBe(true);
   });
 });

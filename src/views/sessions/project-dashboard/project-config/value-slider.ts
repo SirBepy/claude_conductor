@@ -68,13 +68,26 @@ export function mountValueSlider(host: HTMLElement, o: ValueSliderOpts): ValueSl
   // The thumb follows the pointer 1:1 while dragging (transitions off, like a
   // native slider) and the value only commits on release.
   let dragging = false;
+  const abortDrag = (): void => {
+    dragging = false;
+    wrap.classList.remove("is-drag");
+    show(current);
+  };
   wrap.addEventListener("pointerdown", (e) => {
+    // A right or middle click would otherwise commit a stop on release, and its
+    // context menu can swallow the pointerup that ends the drag.
+    if (e.button !== 0) return;
     dragging = true;
     wrap.classList.add("is-drag");
     wrap.setPointerCapture(e.pointerId);
     show(idxAt(e.clientX));
   });
-  wrap.addEventListener("pointermove", (e) => { if (dragging) show(idxAt(e.clientX)); });
+  wrap.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    // No button held means the release was lost; following the hover would drag with nothing pressed.
+    if (e.buttons === 0) { abortDrag(); return; }
+    show(idxAt(e.clientX));
+  });
   const release = (e: PointerEvent): void => {
     if (!dragging) return;
     dragging = false;
@@ -82,7 +95,7 @@ export function mountValueSlider(host: HTMLElement, o: ValueSliderOpts): ValueSl
     commit(idxAt(e.clientX));
   };
   wrap.addEventListener("pointerup", release);
-  wrap.addEventListener("pointercancel", () => { dragging = false; wrap.classList.remove("is-drag"); show(current); });
+  wrap.addEventListener("pointercancel", abortDrag);
   wrap.addEventListener("keydown", (e) => {
     let next = current;
     if (e.key === "ArrowRight" || e.key === "ArrowUp") next = Math.min(max, current + 1);
