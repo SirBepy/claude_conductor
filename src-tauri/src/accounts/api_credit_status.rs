@@ -104,17 +104,10 @@ fn dollars(cents: i64) -> String {
     }
 }
 
-/// Whether a new turn on this account must be refused, and why. Blocks when
-/// the Max grant is spent (so purchased credit is never drained by chats) or
-/// when Console spend has reached the spend limit. Unknown figures never block.
-pub fn compute_block(s: &ApiCreditStatus) -> (bool, Option<String>) {
-    match compute_block_kind(s) {
-        Some((_, reason)) => (true, Some(reason)),
-        None => (false, None),
-    }
-}
-
-/// `compute_block` plus the figure that decided it.
+/// Whether a new turn on this account must be refused, and why, plus the figure
+/// that decided it. Blocks when the Max grant is spent (so purchased credit is
+/// never drained by chats) or when Console spend has reached the spend limit.
+/// Unknown figures never block.
 fn compute_block_kind(s: &ApiCreditStatus) -> Option<(BlockKind, String)> {
     if let Some(remaining) = s.max_grant_remaining_cents {
         if remaining <= 0 {
@@ -240,8 +233,10 @@ pub fn keep_block_across_error(prev: Option<&ApiCreditStatus>, mut next: ApiCred
     let blind = match prev.block_kind {
         Some(BlockKind::GrantUsedUp) => next.max_grant_remaining_cents.is_none(),
         Some(BlockKind::SpendLimit) => next.limit_cents.is_none() || next.spend_cents.is_none(),
-        // A successful credits read always yields a purchased figure.
-        Some(BlockKind::NoMaxGrant) => next.purchased_remaining_cents.is_none(),
+        // The block means a successful credits read showed no Max grant tranche,
+        // so it is over once a read shows one. `purchased_remaining_cents` is no
+        // signal: a successful read leaves it None when every purchased amount is null.
+        Some(BlockKind::NoMaxGrant) => next.max_grant_remaining_cents.is_none(),
         None => next.max_grant_remaining_cents.is_none() || next.limit_cents.is_none() || next.spend_cents.is_none(),
     };
     if prev.blocked && !next.blocked && transient_error && blind {
@@ -281,6 +276,13 @@ pub async fn fetch_status(
 mod tests {
     use super::*;
     use crate::scraping::{CreditTranche, SpendLimit};
+
+    fn compute_block(s: &ApiCreditStatus) -> (bool, Option<String>) {
+        match compute_block_kind(s) {
+            Some((_, reason)) => (true, Some(reason)),
+            None => (false, None),
+        }
+    }
 
     fn tranche(program: &str, granted: i64, remaining: i64, expires: Option<&str>) -> CreditTranche {
         CreditTranche {
@@ -580,6 +582,24 @@ mod tests {
         let kept = keep_block_across_error(Some(&prev), partial(Err(fetch_failed()), Ok(ok_spend())));
         assert!(kept.blocked);
         assert_eq!(kept.block_kind, Some(BlockKind::NoMaxGrant));
+    }
+
+    #[test]
+    fn a_no_max_grant_block_clears_on_a_partial_read_that_shows_the_grant_even_with_unreadable_purchased_amounts() {
+        let no_grant = PrepaidCredits { tranches: vec![tranche("api_credits", 100, 100, None)], ..Default::default() };
+        let prev = built_block(no_grant, ok_spend());
+        assert_eq!(prev.block_kind, Some(BlockKind::NoMaxGrant));
+        // Credits read fine and show the grant; the purchased amounts are null
+        // (so `purchased_remaining_cents` is None) and the spend read failed.
+        let credits = PrepaidCredits {
+            promo_tranches: vec![tranche("subscription_api_credit", 20000, 17871, None)],
+            tranches: vec![unknown_tranche("api_credits")],
+            ..Default::default()
+        };
+        let next = partial(Ok(credits), Err(fetch_failed()));
+        assert_eq!((next.max_grant_remaining_cents, next.purchased_remaining_cents), (Some(17871), None));
+        let next = keep_block_across_error(Some(&prev), next);
+        assert!(!next.blocked, "the grant is visible, so the no-grant block is over");
     }
 
     #[test]
