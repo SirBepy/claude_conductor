@@ -25,7 +25,10 @@ function apply(el: HTMLElement, ref: CommitRef, cwd: string): void {
 
 export async function resolveCommitRefs(root: HTMLElement, cwd: string | undefined): Promise<void> {
   if (!cwd) return;
-  const spans = Array.from(root.querySelectorAll<HTMLElement>(".commit-ref:not(.resolved)"));
+  // An open detail card (.drill-pop) is never re-processed by the chat passes.
+  const spans = Array.from(root.querySelectorAll<HTMLElement>(".commit-ref:not(.resolved)")).filter(
+    (el) => !el.closest(".drill-pop"),
+  );
   if (spans.length === 0) return;
   let known = cache.get(cwd);
   if (!known) cache.set(cwd, (known = new Map()));

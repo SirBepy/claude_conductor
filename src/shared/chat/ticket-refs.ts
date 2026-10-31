@@ -142,14 +142,15 @@ function linkMatches(
 export function applyTicketLinks(root: HTMLElement, t: TrackerInfo): string[] {
   const re = idPattern(t);
   if (!re) return [];
-  const skip = "a, pre, .ticket-ref, .commit-ref";
+  // .drill-pop: an open detail card sits inside its bubble and is not re-linkified.
+  const skip = "a, pre, .ticket-ref, .commit-ref, .drill-pop";
   const pending = new Set<string>();
   linkMatches(root, re, skip, t, (m) => (t.kind === "shortcut" ? m.toLowerCase() : m));
   if (t.kind === "shortcut") {
     const confirmed = (n: string) => bareStory.get(bareKey(t, n)) === true;
     linkMatches(root, BARE_SHORTCUT, `${skip}, code`, t, (m) => m, confirmed, pending);
     root.querySelectorAll<HTMLElement>("code").forEach((code) => {
-      if (code.closest("pre, a") || code.children.length > 0) return;
+      if (code.closest("pre, a, .drill-pop") || code.children.length > 0) return;
       const txt = code.textContent ?? "";
       if (!/^\d{5,6}$/.test(txt)) return;
       if (confirmed(txt)) code.replaceChildren(anchorFor(t, txt));

@@ -345,7 +345,7 @@ export function renderMarkdown(text: string, breaks = false): string {
 export function wrapBlockquotes(container: HTMLElement): void {
   const quotes = Array.from(
     container.querySelectorAll<HTMLElement>(".msg.assistant blockquote:not([data-wrapped])"),
-  );
+  ).filter((bq) => !bq.closest(".drill-pop")); // an open detail card is never re-processed
   for (const bq of quotes) {
     bq.dataset.wrapped = "true";
     const wrapper = document.createElement("div");
