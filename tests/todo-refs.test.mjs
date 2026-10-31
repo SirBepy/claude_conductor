@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const { markTodoRefs } = await import("../src/shared/chat/markdown-highlight.ts");
 const { renderMarkdown } = await import("../src/shared/chat/chat-transforms.ts");
 const { handleTodoRefClick } = await import("../src/views/sessions/backlog-panel/todo-ref-click.ts");
+const { isTodoRefClick } = await import("../src/shared/chat/chat-click-handlers.ts");
 const { BACKLOG_OPEN_EVENT, takePendingTodoId } = await import("../src/views/sessions/backlog-panel/backlog-open-event.ts");
 
 const span = (id) => `<span class="todo-ref" data-todo-id="${id}">${id}</span>`;
@@ -53,6 +54,20 @@ describe("markTodoRefs", () => {
   it("runs as part of renderMarkdown, and not inside a markdown link", () => {
     expect(renderMarkdown("done in pc-1479")).toContain(span("pc-1479"));
     expect(renderMarkdown("see [pc-1479](https://x.dev)")).not.toContain("todo-ref");
+  });
+});
+
+describe("isTodoRefClick", () => {
+  // The sessions pane's click-to-reopen on a question card skips a click that
+  // lands on a todo id, so the id opens its todo and the card stays put.
+  it("is true for the id (or something inside it) and false elsewhere on the same card", () => {
+    document.body.innerHTML = `<div class="msg question-card"><div class="tool-qa-q"><p>ship ${span("pc-1479")} first?</p></div><div class="tool-qa-a">awaiting</div></div>`;
+    const seen = [];
+    document.body.addEventListener("click", (e) => seen.push(isTodoRefClick(e)));
+    document.querySelector(".todo-ref").click();
+    document.querySelector(".tool-qa-a").click();
+    document.querySelector("p").click();
+    expect(seen).toEqual([true, false, false]);
   });
 });
 

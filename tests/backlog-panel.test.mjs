@@ -24,6 +24,7 @@ const doc = (id) => ({
 vi.mock("../src/shared/ipc.ts", () => ({
   invoke: vi.fn(async (cmd, args) => {
     calls.push([cmd, args]);
+    if (cmd === "list_ai_backlog" && env.failList) throw new Error("boom");
     if (cmd === "list_ai_backlog") return backlog;
     if (cmd === "read_ai_todo") return doc(args.id);
     return null;
@@ -55,6 +56,7 @@ beforeEach(() => {
   calls.length = 0;
   document.body.innerHTML = "";
   env.remote = false;
+  env.failList = false;
   env.sessions = [{ session_id: "sess-1" }];
 });
 
@@ -111,6 +113,30 @@ describe("Backlog panel", () => {
     h.setSessionScope("sess-1", "C:\\p");
     await flush();
     expect(root.querySelector(".bl-row.is-on").dataset.blId).toBe("pc-0002");
+  });
+
+  it("does not keep a todo asked for with no project, so a later scope does not jump to it", async () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const h = mountBacklogPanel(root);
+    h.openTodo("pc-0002");
+    h.setSessionScope("sess-1", "C:\\p");
+    await flush();
+    expect(root.querySelector(".bl-row.is-on").dataset.blId).toBe("pc-0001");
+  });
+
+  it("does not keep a todo asked for when the list fetch failed", async () => {
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    const h = mountBacklogPanel(root);
+    env.failList = true;
+    h.setSessionScope("sess-1", "C:\\p");
+    h.openTodo("pc-0002");
+    await flush();
+    env.failList = false;
+    h.refresh();
+    await flush();
+    expect(root.querySelector(".bl-row.is-on").dataset.blId).toBe("pc-0001");
   });
 
   it("says No todos when the project has none", async () => {

@@ -65,6 +65,14 @@ export function handlePastedLogClick(e: MouseEvent): void {
   openBase64TextChip(e, ".pasted-log-chip", "pastedText", name);
 }
 
+/** True when the click landed on a todo id (`.todo-ref`). A surface that has
+ *  its own click action for the whole row around the id (the question card's
+ *  click-to-reopen) checks this first, so the id opens its todo (the document
+ *  listener, todo-ref-click.ts) without also triggering the row's action. */
+export function isTodoRefClick(e: Event): boolean {
+  return !!(e.target as Element | null)?.closest?.(".todo-ref");
+}
+
 export function handleAuqAnswerClick(e: MouseEvent): void {
   openBase64TextChip(e, ".auq-answer-chip", "auqAnswerText", "answer.txt");
 }
