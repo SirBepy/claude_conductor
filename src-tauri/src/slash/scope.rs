@@ -109,11 +109,13 @@ pub fn chat_settings(scopes: &BTreeMap<String, SkillScope>, project: Option<&str
 }
 
 /// Adds `project` to `key`'s scope. Returns false when it was already there or
-/// `key` is unscoped (already available everywhere).
+/// `key` is unscoped (already available everywhere). A malformed entry counts
+/// as unscoped too, matching `scopes()`: rewriting it from defaults would turn
+/// "available everywhere" into "only here" and drop its unknown fields.
 pub fn add_project(settings: &mut Settings, key: &str, project: &str) -> bool {
     let Some(Value::Object(map)) = settings.extra.get_mut(SETTINGS_KEY) else { return false };
     let Some(entry) = map.get_mut(key) else { return false };
-    let mut scope: SkillScope = serde_json::from_value(entry.clone()).unwrap_or_default();
+    let Ok(mut scope) = serde_json::from_value::<SkillScope>(entry.clone()) else { return false };
     if scope.projects.iter().any(|p| p == project) {
         return false;
     }
@@ -240,6 +242,15 @@ mod tests {
         let sc = scopes(&s);
         assert_eq!(sc["figma-tiles"].projects, vec!["p1", "p2"]);
         assert_eq!(sc["figma-tiles"].elsewhere, Elsewhere::NameOnly);
+    }
+
+    #[test]
+    fn add_project_leaves_a_malformed_entry_untouched() {
+        let raw = json!({ "bad": 7, "worse": { "projects": "p1", "note": "keep" } });
+        let mut s = settings_with(raw.clone());
+        assert!(!add_project(&mut s, "bad", "p2"));
+        assert!(!add_project(&mut s, "worse", "p2"));
+        assert_eq!(s.extra[SETTINGS_KEY], raw);
     }
 
     #[test]
