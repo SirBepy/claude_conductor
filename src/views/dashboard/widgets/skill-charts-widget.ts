@@ -81,11 +81,22 @@ export const skillTopWidget: Widget = {
   dataDeps: ["skillUsage"],
   render: (root) => {
     let alive = true;
+    // A refresh that fails after data was painted keeps that data; only the
+    // initial "Loading" has nothing better to fall back to than the empty state.
+    let painted = false;
     const load = () => {
-      // A failed read leaves the empty state instead of an unhandled rejection.
       void api.getSkillUsageWeek().then((w) => {
-        if (alive && w) drawTop(root, topSkills(w.entries));
-      }).catch((err) => console.error("getSkillUsageWeek failed", err));
+        if (!alive) return;
+        if (w) {
+          painted = true;
+          drawTop(root, topSkills(w.entries));
+        } else if (!painted) {
+          drawTop(root, []);
+        }
+      }).catch((err) => {
+        console.error("getSkillUsageWeek failed", err);
+        if (alive && !painted) drawTop(root, []);
+      });
     };
     drawTop(root, null);
     load();
@@ -106,18 +117,29 @@ export const skillRunsWidget: Widget = {
   dataDeps: ["skillUsage"],
   render: (root) => {
     let alive = true;
+    // Same rule as the top-skills widget: a failed refresh keeps painted data.
+    let painted = false;
+    const drawEmpty = () => {
+      if (alive && !painted) drawDays(root, runsPerDay([], new Date()), false);
+    };
     const load = async () => {
       const week = await api.getSkillUsageWeek();
-      if (!week) return;
+      if (!week) return drawEmpty();
       const { skills, truncated } = skillsToFetch(week.entries);
       // The week summary has no timestamps; each skill's detail does.
       const details = await Promise.all(skills.map((s) => api.getSkillUsageDetail(s)));
       if (!alive) return;
+      // A null detail would make the totals undercount silently, so it reads as
+      // a failed load rather than a partial chart.
+      if (details.some((d) => !d)) return drawEmpty();
       const events: SkillUsageEvent[] = details.flatMap((d) => d.events);
+      painted = true;
       drawDays(root, runsPerDay(events, new Date()), truncated);
     };
-    // A failed read leaves the empty state instead of an unhandled rejection.
-    const safeLoad = () => load().catch((err) => console.error("skill runs load failed", err));
+    const safeLoad = () => load().catch((err) => {
+      console.error("skill runs load failed", err);
+      drawEmpty();
+    });
     drawDays(root, null, false);
     void safeLoad();
     const unlisten = api.onSkillUsageChanged(() => void safeLoad());

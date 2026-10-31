@@ -6,11 +6,11 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 
-const calls = { week: async () => null };
+const calls = { week: async () => null, detail: async () => ({ events: [] }) };
 vi.mock("../src/shared/api.ts", () => ({
   api: {
     getSkillUsageWeek: () => calls.week(),
-    getSkillUsageDetail: async () => ({ events: [] }),
+    getSkillUsageDetail: () => calls.detail(),
     onSkillUsageChanged: () => () => {},
   },
 }));
@@ -45,6 +45,27 @@ describe.each([
       cleanup?.();
       err.mockRestore();
       expect(unhandled).toEqual([]);
+      // Both widgets paint "Loading" first; a failed read must replace it.
+      expect(root.textContent).not.toContain("Loading");
+      expect(root.querySelector(".v-empty")).not.toBeNull();
     });
   }
+});
+
+describe("skill runs per day widget, a null detail read", () => {
+  it("leaves the empty state instead of 'Loading' or a thrown TypeError", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    calls.week = async () => ({
+      entries: [{ skill: "figma-tiles", invocations: { total: 3 } }],
+    });
+    calls.detail = async () => null;
+    const root = document.createElement("div");
+    const cleanup = skillRunsWidget.render(root, {});
+    await new Promise((r) => setTimeout(r, 20));
+    cleanup?.();
+    err.mockRestore();
+    calls.detail = async () => ({ events: [] });
+    expect(root.textContent).not.toContain("Loading");
+    expect(root.querySelector(".v-empty")).not.toBeNull();
+  });
 });
