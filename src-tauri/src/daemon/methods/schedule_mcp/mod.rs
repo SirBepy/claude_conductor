@@ -183,7 +183,7 @@ fn build_item(
     };
 
     let mut item = ScheduledItem::new(kind, prompt.to_string(), fire_at.to_rfc3339(), recurrence);
-    item.guard = args.guard.as_deref().map(str::trim).filter(|g| !g.is_empty()).map(str::to_string);
+    item.guard = scheduled_items::normalize_guard(args.guard.as_deref()).map(str::to_string);
     item.after_meeting = args.after_meeting.filter(|on| *on);
     Ok(item)
 }

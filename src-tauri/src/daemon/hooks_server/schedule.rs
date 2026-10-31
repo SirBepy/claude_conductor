@@ -120,7 +120,7 @@ fn needs_card(args: &ScheduleArgs, auto_accept: bool) -> bool {
     if args.action != "add" {
         return false;
     }
-    let guarded = args.guard.as_deref().is_some_and(|g| !g.trim().is_empty());
+    let guarded = crate::sessions::scheduled_items::normalize_guard(args.guard.as_deref()).is_some();
     let new_chat = args.target.as_deref().unwrap_or("new_chat") == "new_chat";
     guarded || (new_chat && !auto_accept)
 }
