@@ -124,8 +124,6 @@ export class Composer {
   // One instance per Composer, itself created fresh per window/pane.
   private draftSync = new ComposerDraftSync();
   private scopeWarn: SkillScopeWarning;
-  // Set by the scope warning's "Send anyway" for the one send it triggers.
-  private skipScopeOnce = false;
 
   // Identity the lightbox holds onto, so clearLightboxComposerBridge() can tell
   // "still mine" from "a successor already took over". Built as a field, not in
@@ -209,10 +207,10 @@ export class Composer {
       refreshEntries: async () => {
         await this.slash?.refresh();
       },
-      sendAnyway: () => {
-        this.skipScopeOnce = true;
-        void this.send();
-      },
+      // Passed as an argument, not stored: send() can return early (disabled,
+      // re-entry) before reading it, and a leftover flag would skip the scope
+      // check on the user's next, unrelated send.
+      sendAnyway: () => void this.send({ skipScope: true }),
       sendWithEnable: () => void this.send(),
       notice: (text) => this.showNotice(text),
     });
@@ -649,7 +647,7 @@ export class Composer {
     };
   }
 
-  private async send(): Promise<void> {
+  private async send(opts: { skipScope?: boolean } = {}): Promise<void> {
     if (this.disabled) return;
     if (this.sending) {
       console.warn("[composer] re-entry blocked — double-fire suspect");
@@ -696,9 +694,7 @@ export class Composer {
     // A leading /skill scoped to other projects: enable it here (restarting
     // the chat) before sending, or `claude` refuses it. Never mid-turn, since
     // the restart would cut the running turn off.
-    const skipScope = this.skipScopeOnce;
-    this.skipScopeOnce = false;
-    const offHere = text && !skipScope ? this.scopeWarn.needsEnable(text) : null;
+    const offHere = text && !opts.skipScope ? this.scopeWarn.needsEnable(text) : null;
     if (offHere) {
       if (this.opts.isBusy?.()) {
         this.showNotice("Enabling a skill restarts the chat, so send it once this turn finishes.");
