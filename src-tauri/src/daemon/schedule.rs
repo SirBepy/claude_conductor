@@ -252,7 +252,7 @@ async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
         // BEFORE any fire is attempted. `None` means a concurrent fire_now
         // (or a delete/update) already claimed or removed this item this
         // tick, so there's nothing left for us to do.
-        let Some(claimed) = scheduled_items::claim_for_fire(&item.id) else {
+        let Some(claimed) = claim_unless_busy(state, &item, past_grace, scheduled_items::claim_for_fire) else {
             continue;
         };
         let result = if past_grace {
@@ -273,6 +273,27 @@ async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
     if changed {
         notify_changed(state);
     }
+}
+
+/// The claim step of one due item, with the busy gate re-applied. The gate in
+/// the collection loop runs before ANY due item has fired, so two items aimed
+/// at the same idle session both pass it; the first fire then marks the session
+/// busy and the second would claim, hit `fire_message`'s busy refusal and be
+/// recorded as a failure (a one-shot goes Failed, a recurring one loses the
+/// occurrence). Checking again right before the claim, after the earlier items
+/// in this tick have fired, leaves such an item Pending for the next tick.
+/// `claim` is injected because the real one writes the on-disk item store.
+fn claim_unless_busy(
+    state: &Arc<DaemonState>,
+    item: &ScheduledItem,
+    past_grace: bool,
+    claim: impl FnOnce(&str) -> Option<ScheduledItem>,
+) -> Option<ScheduledItem> {
+    // Past grace the item is Missed, never sent, so a busy target is irrelevant.
+    if !past_grace && is_message_session_busy(state, item) {
+        return None;
+    }
+    claim(&item.id)
 }
 
 /// Defect 4 guard: only `Message`-kind items can collide with an in-flight
@@ -869,6 +890,56 @@ mod tests {
             None,
         );
         assert!(!is_message_session_busy(&state, &item));
+    }
+
+    fn message_to(session_id: &str) -> ScheduledItem {
+        ScheduledItem::new(
+            ScheduledKind::Message { session_id: session_id.into(), cwd: "C:/proj".into() },
+            "hi".into(),
+            Utc::now().to_rfc3339(),
+            None,
+        )
+    }
+
+    #[test]
+    fn a_second_due_message_to_the_same_session_stays_pending_once_the_first_has_fired() {
+        let state = test_state();
+        state.registry.upsert_interactive("shared", std::path::Path::new("C:/proj"), "proj-1", "2026-01-01T00:00:00Z");
+        let (a, b) = (message_to("shared"), message_to("shared"));
+        // Both passed the collection loop's gate: nothing had fired yet.
+        assert!(!is_message_session_busy(&state, &a) && !is_message_session_busy(&state, &b));
+
+        let claimed_a = claim_unless_busy(&state, &a, false, |id| {
+            // Stands in for A's fire, which marks the session busy.
+            state.registry.set_busy("shared", true);
+            Some(ScheduledItem { id: id.to_string(), ..a.clone() })
+        });
+        assert!(claimed_a.is_some(), "the first item claims normally");
+
+        let mut b_claim_attempted = false;
+        let claimed_b = claim_unless_busy(&state, &b, false, |_| {
+            b_claim_attempted = true;
+            Some(b.clone())
+        });
+        assert!(claimed_b.is_none(), "B is left for the next tick");
+        assert!(!b_claim_attempted, "B must not be claimed: a claimed row can only be finished as fired or failed");
+    }
+
+    #[test]
+    fn a_busy_target_does_not_stop_a_past_grace_item_from_going_missed() {
+        let state = test_state();
+        state.registry.upsert_interactive("busy-s", std::path::Path::new("C:/proj"), "proj-1", "2026-01-01T00:00:00Z");
+        state.registry.set_busy("busy-s", true);
+        let item = message_to("busy-s");
+        assert!(claim_unless_busy(&state, &item, true, |_| Some(item.clone())).is_some());
+    }
+
+    #[test]
+    fn an_idle_target_is_claimed() {
+        let state = test_state();
+        state.registry.upsert_interactive("idle-s", std::path::Path::new("C:/proj"), "proj-1", "2026-01-01T00:00:00Z");
+        let item = message_to("idle-s");
+        assert!(claim_unless_busy(&state, &item, false, |_| Some(item.clone())).is_some());
     }
 
     #[test]
