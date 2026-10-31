@@ -1,0 +1,30 @@
+.skill-chart.loading { opacity: 0.6; }
+
+.skill-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.skill-bar-row { display: grid; grid-template-columns: minmax(0, 40%) 1fr auto; align-items: center; gap: 8px; }
+.skill-bar-name {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--color-text);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.skill-bar-name:hover, .skill-bar-name:focus-visible { color: var(--color-primary); text-decoration: underline; }
+.skill-bar-track { height: 8px; border-radius: 4px; background: var(--color-surface-alt, rgba(128, 128, 128, 0.15)); overflow: hidden; }
+.skill-bar-fill { display: block; height: 100%; border-radius: 4px; background: var(--color-primary); }
+.skill-bar-count { font-size: var(--fs-micro); color: var(--color-text-muted, #8a8aa0); font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
+
+.skill-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; height: 120px; }
+.skill-day { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; min-width: 0; height: 100%; }
+.skill-day-count { font-size: var(--fs-micro); color: var(--color-text-muted, #8a8aa0); min-height: 1.2em; font-variant-numeric: tabular-nums; }
+/* The plot is the flex-grown middle cell so a bar's percentage height is of a definite box, not of the whole column. */
+.skill-day-plot { flex: 1; width: 100%; min-height: 0; display: flex; align-items: flex-end; justify-content: center; }
+.skill-day-bar { display: block; width: 100%; max-width: 28px; border-radius: 4px 4px 0 0; background: var(--color-primary); }
+.skill-day-label { font-size: var(--fs-micro); color: var(--color-text-muted, #8a8aa0); }
+.skill-days-note { margin-top: 6px; font-size: var(--fs-micro); color: var(--color-text-muted, #8a8aa0); }

@@ -163,3 +163,30 @@ describe("widgetNeedsAccountRerender / widgetsNeedingAccountRerender", () => {
     expect(ids.sort()).toEqual(["session-bars", "session-chart"]);
   });
 });
+
+describe("Home schedule + skill widgets", () => {
+  const HOME = ["schedule", "skill-top", "skill-runs"];
+
+  it("are in the registry as global widgets", () => {
+    for (const id of HOME) expect(widgetScope(id)).toBe("global");
+  });
+
+  it("are enabled on a brand-new dashboard", () => {
+    const byId = Object.fromEntries(migrateLegacyPinnedCards([]).map((w) => [w.id, w.enabled]));
+    for (const id of HOME) expect(byId[id]).toBe(true);
+  });
+
+  it("appear enabled in a layout saved before they shipped", () => {
+    const out = resolveDashboardWidgets({ dashboardWidgets: [{ id: "today", enabled: true }] });
+    const byId = Object.fromEntries(out.map((w) => [w.id, w.enabled]));
+    for (const id of HOME) expect(byId[id]).toBe(true);
+    expect(byId["weekly-bars"]).toBe(false);
+  });
+
+  it("stay off once the user has switched them off", () => {
+    const out = resolveDashboardWidgets({
+      dashboardWidgets: HOME.map((id) => ({ id, enabled: false })),
+    });
+    for (const id of HOME) expect(out.find((w) => w.id === id)?.enabled).toBe(false);
+  });
+});
