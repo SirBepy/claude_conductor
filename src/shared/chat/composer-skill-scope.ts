@@ -118,11 +118,6 @@ export class SkillScopeWarning {
         key: e.scope_key,
         sessionId: sid && !isPendingSessionId(sid) ? sid : null,
       });
-      await this.host.refreshEntries();
-      this.busy = false;
-      this.hide();
-      this.host.notice(`/${displayName(e)} is now enabled in this project.`);
-      return true;
     } catch (err) {
       console.error("[skill-scope] enable_skill_here failed", err);
       this.busy = false;
@@ -130,6 +125,17 @@ export class SkillScopeWarning {
       this.host.notice(`Couldn't enable /${displayName(e)}: ${String(err)}`);
       return false;
     }
+    // The scope is saved by here. A failed re-read only leaves the slash list
+    // stale, so it must not report the enable as failed (and block the send).
+    try {
+      await this.host.refreshEntries();
+    } catch (err) {
+      console.error("[skill-scope] refreshEntries after enable failed", err);
+    }
+    this.busy = false;
+    this.hide();
+    this.host.notice(`/${displayName(e)} is now enabled in this project.`);
+    return true;
   }
 
   hide(): void {

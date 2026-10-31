@@ -117,6 +117,29 @@ describe("composer skill scope", () => {
     expect(enableCalls()).toEqual([]);
   });
 
+  // "Send anyway" used to park a flag for the next send() to read; when send()
+  // returned early (disabled) the flag survived and silently skipped the scope
+  // check on the user's NEXT, unrelated send.
+  it("a Send anyway that never reached send() does not skip the check on the next send", async () => {
+    const onSend = vi.fn(async () => {});
+    let offline = null;
+    const { composer, root, textarea } = await mount({ onSend, isOffline: () => offline });
+    typeInto(textarea, "/figma-tiles x");
+    // The host drops after the warning is up, so the click lands on a disabled composer.
+    offline = "host offline";
+    composer.refreshOfflineState();
+    const anyway = [...warning(root).querySelectorAll("button")].find((b) => b.textContent === "Send anyway");
+    anyway.click();
+    await new Promise((res) => setTimeout(res, 20));
+    expect(onSend).not.toHaveBeenCalled();
+    // The host comes back; a plain Enter must still enable the skill first.
+    offline = null;
+    composer.refreshOfflineState();
+    pressEnter(textarea);
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalled());
+    expect(enableCalls().length).toBe(1);
+  });
+
   it("does not restart a busy chat, and keeps the draft", async () => {
     const onSend = vi.fn(async () => {});
     const onStage = vi.fn(() => true);
