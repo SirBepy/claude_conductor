@@ -413,11 +413,32 @@ describe("HttpTransport.call mapping", () => {
     expect(body()).toEqual({ method: "list_project_servers", params: { cwd: "/repo" } });
   });
 
-  it("forwards list_ai_todos and count_ai_todos to the rpc with cwd", async () => {
+  it("forwards list_ai_todos and count_ai_todos to the rpc with cwd, session id snake-cased for a mirrored chat", async () => {
     await new HttpTransport().call("list_ai_todos", { cwd: "/repo" });
     await new HttpTransport().call("count_ai_todos", { cwd: "/repo" });
+    await new HttpTransport().call("count_ai_todos", { cwd: "/repo", sessionId: "s1" });
     expect(body(0)).toEqual({ method: "list_ai_todos", params: { cwd: "/repo" } });
     expect(body(1)).toEqual({ method: "count_ai_todos", params: { cwd: "/repo" } });
+    expect(body(2)).toEqual({ method: "count_ai_todos", params: { cwd: "/repo", session_id: "s1" } });
+  });
+
+  it("maps enable_skill_here to the narrow scope add, then a restart for a live chat", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ restarted: true }) });
+    const restarted = await new HttpTransport().call("enable_skill_here", { projectDir: "/repo", key: "figma-tiles", sessionId: "s1" });
+    expect(restarted).toBe(true);
+    expect(body(0)).toEqual({
+      method: "add_project_to_skill_scope",
+      params: { project_dir: "/repo", key: "figma-tiles", session_id: "s1" },
+    });
+    expect(body(1)).toEqual({ method: "restart_session_process", params: { session_id: "s1" } });
+  });
+
+  it("enable_skill_here for a draft adds the project to the scope and restarts nothing", async () => {
+    const restarted = await new HttpTransport().call("enable_skill_here", { projectDir: "/repo", key: "figma-tiles", sessionId: null });
+    expect(restarted).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(body(0).method).toBe("add_project_to_skill_scope");
+    expect(body(0).params.session_id).toBeNull();
   });
 
   it("forwards the Backlog panel's reads to the same-named rpcs, session id snake-cased for a mirrored chat", async () => {

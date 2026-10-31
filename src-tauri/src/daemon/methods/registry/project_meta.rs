@@ -160,20 +160,25 @@ pub fn register_project_meta(router: &mut Router, state: Arc<DaemonState>) {
         });
     }
     // Mirror `count_ai_todos` / `list_ai_todos` (params: cwd, plus an optional
-    // session_id for list): the project picker's todo badge and the chat
-    // statusbar's todos chip. `cwd` is client-supplied and both read the dir
-    // listing, so reject_unknown first.
+    // session_id): the project picker's todo badge and the chat statusbar's
+    // todos chip. `cwd` is client-supplied and both read the dir listing, so
+    // it goes through the same trust rule: a `session_id` re-derives it from
+    // this registry, else `reject_unknown`, and a paired machine must send one.
+    // The chip asks for the count rather than the list so it never reads file
+    // heads just to draw a number.
     {
         let state = state.clone();
-        router.register("count_ai_todos", move |params, _ctx| {
+        router.register("count_ai_todos", move |params, ctx| {
             let state = state.clone();
+            // Read off the connection, never the params: a peer cannot claim to be a phone.
+            let transport = ctx.transport.clone();
             async move {
                 #[derive(serde::Deserialize)]
-                struct P { cwd: String }
+                struct P { cwd: String, #[serde(default)] session_id: Option<String> }
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-                reject_unknown(&state, &p.cwd)?;
-                Ok(json!(crate::ipc::ai_todos::count_ai_todos(p.cwd).await))
+                let cwd = crate::daemon::methods::pr_review::resolve_cwd_for(&state, &transport, p.cwd, p.session_id.as_deref())?;
+                Ok(json!(crate::ipc::ai_todos::count_ai_todos(cwd).await))
             }
         });
     }
@@ -317,6 +322,32 @@ mod tests {
         router
             .dispatch(Request { jsonrpc: "2.0".into(), id: json!(1), method: method.into(), params: Some(params) }, ctx)
             .await
+    }
+
+    /// The chip counts instead of listing, under the same rule as `list_ai_todos`:
+    /// a paired machine counts only through a chat it mirrors.
+    #[tokio::test]
+    async fn count_ai_todos_from_a_peer_requires_a_session_id() {
+        let dir = tempdir().unwrap();
+        let todos = dir.path().join(".claude").join("todos");
+        std::fs::create_dir_all(&todos).unwrap();
+        std::fs::write(todos.join("07-b.md"), "b").unwrap();
+        std::fs::write(todos.join("08-c.md"), "c").unwrap();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("s1", dir.path(), "proj", "2026-10-06T00:00:00Z");
+        state.settings.upsert_project_for_cwd(dir.path(), "2026-10-06T00:00:00Z");
+        let cwd = dir.path().to_string_lossy().into_owned();
+        let mut router = Router::new();
+        register_project_meta(&mut router, state);
+        let peer = || Transport::PeerMachine("mach-b".into());
+
+        let refused = dispatch_as(&router, "count_ai_todos", peer(), json!({"cwd": cwd})).await;
+        assert!(refused.error.is_some(), "a registered project's count must not be readable by cwd alone");
+        let via_session =
+            dispatch_as(&router, "count_ai_todos", peer(), json!({"cwd": "ignored", "session_id": "s1"})).await;
+        assert_eq!(via_session.result, Some(json!(2)));
+        let phone = dispatch_as(&router, "count_ai_todos", Transport::Phone, json!({"cwd": cwd})).await;
+        assert_eq!(phone.result, Some(json!(2)), "the phone path (picker badge) is unchanged");
     }
 
     /// Same scoping as `list_ai_todos`: the Backlog panel's list is readable by

@@ -121,6 +121,25 @@ mod reject_unknown_tests {
         assert!(unknown.error.is_some(), "an unknown session_id must be rejected");
     }
 
+    /// The chip's count for a chat hosted here follows the same `session_id`
+    /// rule as the list: the registered cwd wins over whatever cwd is sent.
+    #[tokio::test]
+    async fn count_ai_todos_with_a_session_id_reads_the_registered_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let todos = dir.path().join(".claude").join("todos");
+        std::fs::create_dir_all(&todos).unwrap();
+        std::fs::write(todos.join("07-b.md"), "b").unwrap();
+        std::fs::write(todos.join("08-c.md"), "c").unwrap();
+        let state = dummy_state();
+        let sid = uuid::Uuid::new_v4().to_string();
+        state.registry.upsert_interactive(&sid, dir.path(), "proj", "2026-10-06T00:00:00Z");
+
+        let count = call(state.clone(), "count_ai_todos", json!({"cwd": "C:\\nope\\not\\registered", "session_id": sid})).await;
+        assert_eq!(count.result, Some(json!(2)));
+        let unknown = call(state, "count_ai_todos", json!({"cwd": "C:\\nope", "session_id": "no-such-session"})).await;
+        assert!(unknown.error.is_some(), "an unknown session_id must be rejected");
+    }
+
     /// The Backlog panel's reads go through the same cwd trust rule as the
     /// chip: a known project reads its own backlog, and a `session_id`
     /// re-derives the cwd from the registry so a peer's `cwd` string cannot

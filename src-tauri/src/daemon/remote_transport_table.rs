@@ -206,9 +206,12 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Read-only tracker lookup for linking ticket ids in a phone-rendered chat,
     // reject_unknown(cwd)-gated in project_meta.rs. Never returns a token.
     ("get_ticket_tracker", P),
-    // Read-only `.claude/todos` file names for the picker badge and the chat
-    // statusbar's todos chip, reject_unknown(cwd)-gated in project_meta.rs.
-    ("count_ai_todos", P),
+    // PM (was P): the statusbar's todos chip counts the todos of a chat
+    // mirrored from a paired machine, forwarded by `session_id` exactly like
+    // `list_ai_todos` below, and the picker badge keeps its cwd-only call. Same
+    // handler-level trust rule (project_meta.rs: `resolve_cwd_for`), and the
+    // count is read-only and strictly less than the list it replaced for the chip.
+    ("count_ai_todos", PM),
     // PM: the todos chip of a chat mirrored from a paired machine reads the
     // host's list, forwarded by `session_id`. With a `session_id` the host
     // resolves the cwd from its own registry (pr_review.rs `resolve_cwd`), so
@@ -511,6 +514,20 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // comes from params), so the phone gets this one setting without being
     // allowed `save_settings`. P, never M: a peer has no phone UI here.
     ("set_push_show_chat_name", P),
+    // Write: the composer's "Enable here" on a phone. Only ADDS the calling
+    // chat's own project to the scope of one key that is already scoped (the
+    // project is read from the session registry's cwd, or a project dir this
+    // daemon already knows for a draft, never a project id from params), so the
+    // phone gets this one step without `save_settings`: it cannot remove a
+    // project, create or delete a scope, or change `elsewhere`. P, never M: a
+    // chat hosted on a peer is refused as not forwardable rather than edited here.
+    ("add_project_to_skill_scope", P),
+    // Write: kills and respawns one chat's `claude` (history kept) so the scope
+    // above, read only at spawn, applies now. P: the phone already restarts a
+    // chat this way through `set_session_model`/`set_session_effort`, and it
+    // takes only a `session_id` that must be live here, no path or content. Never
+    // M: a peer asks the owning machine's own model/effort swap instead.
+    ("restart_session_process", P),
     // Edits a machine's name and icon. PM so a phone or paired peer can edit any
     // machine. The owner only ever executes the edit on its OWN registry: the
     // forwarding daemon strips `machine_id`, and a PeerMachine caller that names
@@ -633,7 +650,7 @@ mod tests {
             "set_draft_state",
             "ensure_jarvis_session",
             "list_machines", "list_machine_projects", "list_machine_accounts", "set_machine_project_account",
-            "set_machine_profile",
+            "set_machine_profile", "add_project_to_skill_scope", "restart_session_process",
         ] {
             assert!(allowed(m, &Transport::Phone), "{m} should be remotely callable");
         }
@@ -783,7 +800,7 @@ mod tests {
         for m in [
             "get_git_info", "get_git_dirty", "get_commit_sync", "get_commit_history",
             "get_recent_branches", "get_range_files", "get_file_diff", "get_file_at_rev",
-            "list_branch_files", "list_project_files", "list_ai_todos", "list_ai_backlog", "read_ai_todo",
+            "list_branch_files", "list_project_files", "count_ai_todos", "list_ai_todos", "list_ai_backlog", "read_ai_todo",
         ] {
             assert!(allowed(m, &peer), "{m} must be callable by a peer machine mirroring the chat");
         }
@@ -880,6 +897,22 @@ mod tests {
     fn set_push_show_chat_name_is_phone_only() {
         assert!(allowed("set_push_show_chat_name", &Transport::Phone));
         assert!(!allowed("set_push_show_chat_name", &Transport::PeerMachine("x".into())));
+    }
+
+    /// The phone's "Enable here": add one project to a skill's scope, then restart
+    /// the chat. Phone and desktop pipe only; a peer machine edits neither this
+    /// machine's scopes nor restarts its chats through them.
+    #[test]
+    fn skill_scope_enable_and_restart_are_phone_only() {
+        for m in ["add_project_to_skill_scope", "restart_session_process"] {
+            assert!(allowed(m, &Transport::Phone), "{m} must be callable by the phone");
+            assert!(!allowed(m, &Transport::PeerMachine("x".into())), "{m} must not be callable by a peer machine");
+            assert!(allowed(m, &Transport::Local), "{m} must stay callable over the desktop pipe");
+        }
+        // The scope write is narrow by name: no generic scope setter is exposed.
+        for m in ["set_skill_scope", "set_skill_scopes", "remove_project_from_skill_scope"] {
+            assert!(!allowed(m, &Transport::Phone), "{m} must not be remotely callable");
+        }
     }
 
     /// The host halves of the cross-machine account picker are machine-only:
