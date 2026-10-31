@@ -6,6 +6,9 @@
 
 import type { SlashEntry } from "../../types/ipc.generated";
 import { invoke } from "../ipc";
+import { isRemote } from "../transport";
+import { state } from "../../views/sessions/state";
+import { isMirrored } from "../../views/sessions/sessions-helpers";
 import { isPendingSessionId } from "./pending-session-id";
 import { slashEntryQualifiedName } from "./slash-registry";
 
@@ -71,15 +74,31 @@ export class SkillScopeWarning {
     const parts: Node[] = [icon, msg];
     // The phone can't save settings, but `enable_skill_here` reaches it as two
     // narrow daemon RPCs (http-transport.ts), so both platforms get the button.
-    parts.push(this.link("Enable here", "", () => this.host.sendWithEnable()));
-    parts.push(this.link("Send anyway", "quiet", () => this.host.sendAnyway()));
+    // A mirrored chat on the phone has no working action: the daemon refuses
+    // the scope write for a session hosted elsewhere, and a plain send already
+    // goes through as-is, so the line stays informational.
+    if (!this.phoneOnMirroredChat()) {
+      parts.push(this.link("Enable here", "", () => this.host.sendWithEnable()));
+      parts.push(this.link("Send anyway", "quiet", () => this.host.sendAnyway()));
+    }
     this.el.replaceChildren(...parts);
     this.el.hidden = false;
   }
 
   /** Whether a send of `text` has to enable a skill first. */
   needsEnable(text: string): SlashEntry | null {
+    if (this.phoneOnMirroredChat()) return null;
     return offHereEntry(text, this.host.getEntries());
+  }
+
+  /** The phone's `add_project_to_skill_scope` is refused for a session hosted
+   * on a paired machine ("not available for a session hosted on another
+   * machine"), so enabling would fail and block the send. Desktop keeps its own
+   * path for mirrored chats, hence the isRemote gate. */
+  private phoneOnMirroredChat(): boolean {
+    if (!isRemote()) return false;
+    const sid = this.host.getSessionId();
+    return isMirrored(state.sessions.find((s) => s.session_id === sid));
   }
 
   /** Enables `e` for this project and restarts the chat. False (draft kept,

@@ -63,3 +63,38 @@ describe("composer skill scope on the phone", () => {
     expect(notices.at(-1)).toContain("is now enabled in this project");
   });
 });
+
+// The daemon refuses add_project_to_skill_scope for a session hosted on a
+// paired machine, so on the phone a plain Send would run enable(), fail, and
+// swallow the message. A mirrored chat must send as-is and offer no button.
+describe("composer skill scope on the phone, mirrored chat", () => {
+  const mirroredRow = { session_id: "sess-m", machine: { id: "m1", label: "Desk", online: true } };
+
+  async function withSessions(rows, fn) {
+    const { state } = await import("../src/views/sessions/state.ts");
+    const prev = state.sessions;
+    state.sessions = rows;
+    try { return await fn(); } finally { state.sessions = prev; }
+  }
+
+  it("does not make a send enable the skill first", () =>
+    withSessions([mirroredRow], () => {
+      const { warn } = setup("sess-m");
+      expect(warn.needsEnable("/figma-tiles go")).toBeNull();
+    }));
+
+  it("hides Enable here and Send anyway but still names the skill", () =>
+    withSessions([mirroredRow], () => {
+      const { el, warn } = setup("sess-m");
+      warn.update("/figma-tiles go");
+      expect(el.hidden).toBe(false);
+      expect(el.querySelectorAll("button")).toHaveLength(0);
+      expect(el.textContent).toContain("/figma-tiles");
+    }));
+
+  it("keeps the enable step for a phone chat hosted on the daemon itself", () =>
+    withSessions([{ session_id: "sess-1", machine: null }], () => {
+      const { warn } = setup("sess-1");
+      expect(warn.needsEnable("/figma-tiles go")?.name).toBe("figma-tiles");
+    }));
+});
