@@ -6,10 +6,8 @@ use std::path::PathBuf;
 /// Resolves the data dir given an optional `CC_DATA_DIR` override value.
 /// Pure so it's testable without touching process env state.
 fn resolve_data_dir(override_: Option<&str>) -> Result<PathBuf> {
-    if let Some(v) = override_ {
-        if !v.is_empty() {
-            return Ok(PathBuf::from(v));
-        }
+    if let Some(v) = override_.filter(|v| crate::daemon::names_own_data_dir(Some(v))) {
+        return Ok(PathBuf::from(v));
     }
     let base = dirs::config_dir()
         .ok_or_else(|| anyhow!("could not resolve user config dir"))?;

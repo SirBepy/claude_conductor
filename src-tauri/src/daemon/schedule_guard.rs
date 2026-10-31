@@ -14,6 +14,9 @@ use std::time::Duration;
 /// A guard is a quick check, not work. Past this the shell is killed and the
 /// firing goes ahead.
 const GUARD_TIMEOUT: Duration = Duration::from_secs(30);
+/// Only the first line is ever used (and cut to `MAX_REASON_CHARS`), so a
+/// runaway guard must not be able to grow the daemon's memory for 30 s.
+const MAX_STDOUT_BYTES: u64 = 64 * 1024;
 const MAX_REASON_CHARS: usize = 200;
 const FALLBACK_REASON: &str = "guard said skip";
 
@@ -47,16 +50,27 @@ async fn run_with_timeout(
         // Dropping the wait future on timeout is what kills the shell.
         .kill_on_drop(true);
     crate::util::process::hide_console_tokio(&mut cmd);
-    let child = match cmd.spawn() {
+    let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             log::warn!("schedule guard for {item_id}: cannot start ({e}); firing normally");
             return GuardVerdict::Fire;
         }
     };
-    match tokio::time::timeout(timeout, child.wait_with_output()).await {
-        Ok(Ok(out)) if out.status.success() => {
-            GuardVerdict::Skip(reason_from(&String::from_utf8_lossy(&out.stdout)))
+    let Some(stdout) = child.stdout.take() else {
+        log::warn!("schedule guard for {item_id}: no stdout pipe; firing normally");
+        return GuardVerdict::Fire;
+    };
+    // The child moves into this future, so the timeout dropping it is what
+    // kills the shell.
+    let run = async move {
+        let head = read_head_and_drain(stdout, MAX_STDOUT_BYTES).await?;
+        let status = child.wait().await?;
+        Ok::<_, std::io::Error>((status, head))
+    };
+    match tokio::time::timeout(timeout, run).await {
+        Ok(Ok((status, head))) if status.success() => {
+            GuardVerdict::Skip(reason_from(&String::from_utf8_lossy(&head)))
         }
         Ok(Ok(_)) => GuardVerdict::Fire,
         Ok(Err(e)) => {
@@ -68,6 +82,20 @@ async fn run_with_timeout(
             GuardVerdict::Fire
         }
     }
+}
+
+/// Keeps the first `cap` bytes and discards the rest. The remainder is still
+/// read to EOF because a child blocked on a full pipe would never exit, and
+/// the exit code is the verdict.
+async fn read_head_and_drain<R>(mut reader: R, cap: u64) -> std::io::Result<Vec<u8>>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+    let mut head = Vec::new();
+    (&mut reader).take(cap).read_to_end(&mut head).await?;
+    tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
+    Ok(head)
 }
 
 /// Windows Powershell 5.1 on purpose: PowerShell 7 is not guaranteed to be
@@ -147,6 +175,30 @@ mod tests {
         #[cfg(not(windows))]
         let cmd = "echo \"$CC_SCHEDULE_ID $CC_SCHEDULE_DATE\"; exit 0";
         assert_eq!(verdict(cmd).await, GuardVerdict::Skip("item-1 2026-10-30".to_string()));
+    }
+
+    #[tokio::test]
+    async fn only_a_prefix_is_kept_and_the_rest_is_still_consumed() {
+        let data = vec![b'x'; 1024 * 1024];
+        let mut reader = &data[..];
+        let head = read_head_and_drain(&mut reader, MAX_STDOUT_BYTES).await.unwrap();
+        assert_eq!(head.len() as u64, MAX_STDOUT_BYTES);
+        assert!(reader.is_empty(), "the tail must be drained so the child never blocks on a full pipe");
+    }
+
+    // ~4 MB of output, well past MAX_STDOUT_BYTES, with the reason on line one.
+    #[cfg(windows)]
+    const FLOOD: &str = "echo 'flood reason'; 1..40000 | ForEach-Object { 'y' * 100 }";
+    #[cfg(not(windows))]
+    const FLOOD: &str = "echo 'flood reason'; yes yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy | head -c 4000000";
+
+    #[tokio::test]
+    async fn a_flood_of_output_keeps_the_exit_verdict_and_first_line_reason() {
+        assert_eq!(
+            verdict(&format!("{FLOOD}; exit 0")).await,
+            GuardVerdict::Skip("flood reason".to_string())
+        );
+        assert_eq!(verdict(&format!("{FLOOD}; exit 3")).await, GuardVerdict::Fire);
     }
 
     #[test]

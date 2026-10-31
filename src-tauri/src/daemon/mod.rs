@@ -100,7 +100,9 @@ pub(crate) fn app_data_dir() -> PathBuf {
     resolve_app_data_dir(data_dir_override().as_deref())
 }
 
-/// The daemon's one read of `CC_DATA_DIR`.
+/// The daemon's read of `CC_DATA_DIR`. `settings::paths::data_dir()` reads the
+/// same variable for the non-daemon side, but its empty-means-unset rule goes
+/// through `names_own_data_dir` below, so there is still one definition.
 pub(crate) fn data_dir_override() -> Option<String> {
     std::env::var("CC_DATA_DIR").ok()
 }
