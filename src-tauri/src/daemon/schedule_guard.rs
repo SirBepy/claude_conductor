@@ -186,17 +186,23 @@ mod tests {
         assert!(reader.is_empty(), "the tail must be drained so the child never blocks on a full pipe");
     }
 
-    // ~4 MB of output, well past MAX_STDOUT_BYTES, with the reason on line one.
+    // ~300 KB of output, several times MAX_STDOUT_BYTES, with the reason on line
+    // one. One big string instead of a per-line loop: a PowerShell pipeline of
+    // 40k objects took longer than the test's timeout on the CI runner.
     #[cfg(windows)]
-    const FLOOD: &str = "echo 'flood reason'; 1..40000 | ForEach-Object { 'y' * 100 }";
+    const FLOOD: &str = "echo 'flood reason'; 'y' * 300000";
     #[cfg(not(windows))]
-    const FLOOD: &str = "echo 'flood reason'; yes yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy | head -c 4000000";
+    const FLOOD: &str = "echo 'flood reason'; head -c 300000 /dev/zero | tr '\\0' y";
 
     #[tokio::test]
     async fn a_flood_of_output_keeps_the_exit_verdict_and_first_line_reason() {
+        let started = std::time::Instant::now();
+        let skip = verdict(&format!("{FLOOD}; exit 0")).await;
         assert_eq!(
-            verdict(&format!("{FLOOD}; exit 0")).await,
-            GuardVerdict::Skip("flood reason".to_string())
+            skip,
+            GuardVerdict::Skip("flood reason".to_string()),
+            "flood guard took {:?}",
+            started.elapsed()
         );
         assert_eq!(verdict(&format!("{FLOOD}; exit 3")).await, GuardVerdict::Fire);
     }
