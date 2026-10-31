@@ -70,6 +70,11 @@ describe("upcomingRows", () => {
     expect(r.icon).toBe("ph-plus-circle");
   });
 
+  it("cuts a long prompt label with the calendar's ellipsis character", () => {
+    const [r] = upcomingRows([item({ prompt: "x".repeat(80) })], [], new Map());
+    expect(r.label).toBe(`${"x".repeat(60)}…`);
+  });
+
   it("drops an item with an unparseable fire time", () => {
     expect(upcomingRows([item({ fire_at: "nope" })], [], titles)).toEqual([]);
   });
@@ -82,6 +87,9 @@ describe("whenLabel", () => {
   });
   it("says Tomorrow for the next day", () => {
     expect(whenLabel(new Date(2030, 0, 2, 23, 30).getTime(), now)).toBe("Tomorrow 23:30");
+  });
+  it("shows just the time for an overdue item on a past day", () => {
+    expect(whenLabel(new Date(2029, 11, 30, 21, 15).getTime(), now)).toBe("21:15");
   });
   it("shows the weekday and date further out", () => {
     expect(whenLabel(new Date(2030, 0, 5, 7, 0).getTime(), now)).toMatch(/Sat.*5.*Jan.*07:00/);

@@ -54,16 +54,34 @@ export function scopeOf(target: DashboardTarget): Scope {
   return { kind: "project", cwd: target.repos[0]?.cwd ?? target.id };
 }
 
-/** "today 14:30" / "tomorrow 10:00" / "Fri 3 Nov 09:00" for a scheduled row. */
-export function whenLabel(ms: number, nowMs: number = Date.now()): string {
+/** The pieces both "when" wordings are built from: local 24h time, whole
+ * calendar days from `nowMs` (negative once the day has passed), and the short
+ * weekday/date. `locale` is a parameter because the Home schedule widget pins
+ * en-GB while the project dashboard follows the user's locale. */
+export function whenParts(ms: number, nowMs: number, locale?: string): { hm: string, days: number, date: string } {
   const d = new Date(ms);
   const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   const dayStart = (t: Date): number => new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
   const days = Math.round((dayStart(d) - dayStart(new Date(nowMs))) / 86_400_000);
+  const date = d.toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short" });
+  return { hm, days, date };
+}
+
+/** "today 14:30" / "tomorrow 10:00" / "Fri 3 Nov 09:00" for a scheduled row. */
+export function whenLabel(ms: number, nowMs: number = Date.now()): string {
+  const { hm, days, date } = whenParts(ms, nowMs);
   if (days === 0) return `today ${hm}`;
   if (days === 1) return `tomorrow ${hm}`;
-  const date = d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
   return `${date} ${hm}`;
+}
+
+/** `s` trimmed and cut to `n` characters plus an ellipsis. Lives here, not in
+ * schedule-format.ts, because that module and schedule-state.ts import each
+ * other, so a dependency-light caller (the Home schedule widget's logic) can't
+ * import it without pulling in the calendar view. */
+export function truncate(s: string, n: number): string {
+  const t = s.trim();
+  return t.length > n ? `${t.slice(0, n).trimEnd()}…` : t;
 }
 
 const FILE_ICONS: Record<string, string> = {

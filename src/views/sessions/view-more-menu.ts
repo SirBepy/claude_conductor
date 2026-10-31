@@ -33,7 +33,7 @@ import {
 import { loadHiddenSessions, loadHiddenProjects, isJarvisOrWorker, loadSort, loadUnreadSet, deriveQuestionSet, isMirrored } from "./sessions-helpers";
 import { isAutoAccept, isWrapUpOnDone, pendingPromptSessionIds } from "./permission-modal";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
-import { invoke } from "../../shared/ipc";
+import { openSchedule } from "../../shared/open-schedule";
 import { isRemote } from "../../shared/transport";
 import { cachedHasDeployWorkflow, refreshDeployWorkflowCache } from "./deploy-workflow-gate";
 import { renderSidebarRow, sessionRowOptions } from "./sidebar-rows";
@@ -145,9 +145,7 @@ const viewMenu = createMoreMenu<[]>({
     schedBtn.className = "smore-item";
     schedBtn.innerHTML = `<i class="ph ph-calendar-dots"></i><span>Scheduled</span>`;
     schedBtn.addEventListener("click", () => {
-      void invoke("open_schedule_window").catch((err) =>
-        console.error("[view-more] open_schedule_window failed", err),
-      );
+      openSchedule();
       close();
     });
     menu.appendChild(schedBtn);

@@ -5,6 +5,7 @@
 import type { ExternalScheduledJob, ScheduledItem } from "../../../types/ipc.generated";
 import { cwdToProjectName } from "../../sessions/sessions-helpers";
 import { dateFromHumanTime } from "../../schedule/schedule-recurrence";
+import { truncate, whenParts } from "../../sessions/project-dashboard/format";
 
 export interface UpcomingRow {
   /** Scheduled item id, or the external job id. */
@@ -20,11 +21,6 @@ export interface UpcomingRow {
 }
 
 export const UPCOMING_LIMIT = 4;
-
-function truncate(s: string, n: number): string {
-  const t = s.trim();
-  return t.length > n ? `${t.slice(0, n).trimEnd()}...` : t;
-}
 
 function itemLabel(item: ScheduledItem, titles: ReadonlyMap<string, string>): string {
   if (item.kind.type === "new_chat") return `New chat: ${cwdToProjectName(item.kind.cwd)}`;
@@ -83,14 +79,11 @@ export function upcomingRows(
 }
 
 /** Short "when" text: a time today, "Tomorrow 09:00", or "Mon 3 Nov 09:00".
- * Local time, 24h, matching the calendar's own rows. */
+ * Local time, 24h, matching the calendar's own rows. An overdue item (a past
+ * day) shows just its time, since it is about to fire or be marked missed. */
 export function whenLabel(whenMs: number, now: Date): string {
-  const d = new Date(whenMs);
-  const hhmm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const dayDiff = Math.round((startOf(d) - startOf(now)) / 86_400_000);
-  if (dayDiff <= 0) return hhmm;
-  if (dayDiff === 1) return `Tomorrow ${hhmm}`;
-  const day = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
-  return `${day} ${hhmm}`;
+  const { hm, days, date } = whenParts(whenMs, now.getTime(), "en-GB");
+  if (days <= 0) return hm;
+  if (days === 1) return `Tomorrow ${hm}`;
+  return `${date} ${hm}`;
 }
