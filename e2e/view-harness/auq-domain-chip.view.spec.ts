@@ -1,3 +1,4 @@
+// Reviewed 2026-10-31: the chip is back on the context row's right (the edge-to-edge zones are asserted in auq-desktop-phone-layout.view.spec.ts).
 // Reviewed 2026-10-29: question cards now re-expand from their collapsed bar on re-open/re-announce, a parked question is shown only while the daemon still lists it, and an already-answered one is dropped (answered-gate.ts) - this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-27: types.ts's QuestionDraft gained an optional per-option `notes` map (AUQ option notes) - additive, no change to this spec's contract.
 // Reviewed 2026-10-22: the phone question card became a fullscreen page (header back arrow + "Question" label and an answer-box send arrow, all hidden on desktop; back collapses the card to its bar instead of falling through) - this spec's contract is unchanged and it passes.
@@ -74,16 +75,16 @@ test("option badges render with their labels", async ({ page }) => {
   await expect(card.locator(".prompt-badge--rec")).toHaveCount(1);
 });
 
-test("the ask band is two rows: chip and Ask button on top, the question text under them, no ? icon", async ({ page }) => {
+test("a question WITH context keeps the chip on the context row, right-aligned", async ({ page }) => {
   const card = await mount(page, WITH_CONTEXT);
 
-  await expect(card.locator(".prompt-ctx__head .prompt-domain")).toHaveCount(0);
-  await expect(card.locator(".prompt-zone--ask .prompt-ask__top .prompt-domain")).toHaveCount(1);
+  await expect(card.locator(".prompt-ctx__head .prompt-domain")).toHaveCount(1);
+  await expect(card.locator(".prompt-zone--ask .prompt-domain")).toHaveCount(0);
   await expect(card.locator(".prompt-zone--ask .prompt-ask__icon")).toHaveCount(0);
 
-  const topBox = await card.locator(".prompt-ask__top").boundingBox();
-  const textBox = await card.locator(".prompt-ask__text").boundingBox();
-  expect(textBox!.y).toBeGreaterThanOrEqual(topBox!.y + topBox!.height - 1);
+  const head = (await card.locator(".prompt-ctx__head").boundingBox())!;
+  const chip = (await card.locator(".prompt-ctx__head .prompt-domain").boundingBox())!;
+  expect(chip.x).toBeGreaterThan(head.x + head.width / 2);
 
   await card.screenshot({
     path: ".for_bepy/screenshots/_specs/auq-domain-chip-context.png",

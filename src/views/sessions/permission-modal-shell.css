@@ -299,10 +299,10 @@
  * question it asks about instead of in the header, and the footer is just the
  * answer box whose arrow is Next/Submit (question-ui-answer-bar.ts), so the
  * Next/Submit button is hidden while the box is up. Skip lives only in the
- * collapsed bar. Ask shares the band's top row with the domain chip: the
- * negative block margins keep its 32px box from growing that row past the
- * chip's height, and the auto left margin pins it right. Review has no box
- * and keeps its Submit button. */
+ * collapsed bar. The negative block margins keep its 32px box from growing
+ * the band past the text's one-line height; the auto left margin pins it
+ * right, and after a domain chip (which already takes the auto margin) it
+ * sits flush beside it. Review has no box and keeps its Submit button. */
 .prompt-ask__btn {
   display: none;
 }
@@ -316,8 +316,30 @@
   height: 32px;
   margin: -5px -6px -5px auto;
 }
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-domain ~ .prompt-ask__btn {
+  margin-left: 0;
+}
 #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn i {
   font-size: 1.15rem;
+}
+/* The context box and ask band run edge to edge, flush under the header
+ * (Joe, 2026-10-31; phone since 2026-10-28). The track viewport clips, so it
+ * widens over the body's 14px side padding and each panel takes that padding
+ * back; the two zones pull out over it again, and their 30px side padding
+ * (16px own + 14px) keeps their text aligned with the rest. */
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__body {
+  padding-top: 0;
+}
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-track-viewport {
+  margin-inline: -14px;
+}
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-panel {
+  padding-inline: 14px;
+}
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-zone--ctx,
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-zone--ask {
+  margin-inline: -14px;
+  padding-inline: 30px;
 }
 #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-card__footer:has(.prompt-card__answer-bar:not(:empty)) > .btn {
   display: none;
@@ -358,10 +380,10 @@
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) [data-act="ask"] {
     display: none;
   }
-  /* Ask sits on the question it asks about instead of in the header, on the
-     band's top row beside the domain chip. The negative block margins keep its
-     32px box from growing that row past the chip's height. Auto left margin
-     pins it right. */
+  /* Ask sits on the question it asks about instead of in the header. The
+     negative block margins keep its 32px box from growing the band past the
+     text's one-line height. Auto left margin pins it right; after a domain
+     chip (which already takes the auto margin) it sits flush beside it. */
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn {
     display: grid;
     flex-shrink: 0;
@@ -369,22 +391,11 @@
     height: 32px;
     margin: -5px -6px -5px auto;
   }
+  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-domain ~ .prompt-ask__btn {
+    margin-left: 0;
+  }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn i {
     font-size: 1.15rem;
-  }
-  /* The ask band runs edge to edge (Joe, 2026-10-28). The track viewport
-     clips, so it widens over the body's 14px side padding and each panel takes
-     that padding back; the band then pulls out over it again, and its 30px
-     side padding (16px own + 14px) keeps its text aligned with the rest. */
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-track-viewport {
-    margin-inline: -14px;
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-panel {
-    padding-inline: 14px;
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-zone--ask {
-    margin-inline: -14px;
-    padding-inline: 30px;
   }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) {
     height: 52px;

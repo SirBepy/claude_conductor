@@ -1,3 +1,4 @@
+// Reviewed 2026-10-31: the context box and ask band run edge to edge on desktop too (new test below); the chip moved back to the context row.
 // Reviewed 2026-10-30: the question card's ask band is now two rows (domain chip + Ask button on top, question text under them) and the ? icon is gone - this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-29: .icon-btn-sq now sets place-content: center beside place-items, and the question card's Ask button uses display: grid instead of inline-flex, so its glyph is centred - no change to this spec's contract, and it passes.
 // Reviewed 2026-10-29: question cards now re-expand from their collapsed bar on re-open/re-announce, a parked question is shown only while the daemon still lists it, and an already-answered one is dropped (answered-gate.ts) - this spec's contract is unchanged and it passes.
@@ -78,6 +79,30 @@ test.describe("view-harness / desktop question card in the phone layout", () => 
     await expect(arrow).toHaveClass(/is-submit/);
 
     await card.screenshot({ path: `${SHOTS}/question-card-desktop-single.png` });
+  });
+
+  test("context box and ask band run edge to edge, flush under the header", async ({ page }) => {
+    await mountDesktopSession(page);
+    await openQuestionCard(page, [{
+      question: "The relay drops frames under load. Which approach fits best?",
+      header: "Approach",
+      domain: "arch",
+      options: [{ label: "A" }, { label: "B" }],
+    }]);
+
+    const card = page.locator(".prompt-card");
+    const cardBox = (await card.boundingBox())!;
+    const header = (await card.locator(".prompt-card__header").boundingBox())!;
+    const ctx = (await card.locator(".prompt-zone--ctx").boundingBox())!;
+    const ask = (await card.locator(".prompt-zone--ask").boundingBox())!;
+    // 1px each side is the card's own border.
+    for (const zone of [ctx, ask]) {
+      expect(zone.x).toBeLessThanOrEqual(cardBox.x + 1.5);
+      expect(zone.x + zone.width).toBeGreaterThanOrEqual(cardBox.x + cardBox.width - 1.5);
+    }
+    expect(ctx.y).toBeLessThanOrEqual(header.y + header.height + 1.5);
+
+    await card.screenshot({ path: `${SHOTS}/question-card-desktop-context.png` });
   });
 
   test("review step keeps its Submit button and has no arrow", async ({ page }) => {
