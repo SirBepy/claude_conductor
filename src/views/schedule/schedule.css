@@ -408,6 +408,15 @@ details.schedule-section[open] > summary.schedule-section-title::before {
 .agenda-row--skipped .agenda-icon,
 .agenda-row--skipped .agenda-name { opacity: 0.6; }
 
+/* A due after-meeting item is held, not late: one muted line like a skip. */
+.schedule-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
 /* The shield after a guarded item's name opens its drawer. */
 .schedule-guard-btn {
   display: inline-grid;

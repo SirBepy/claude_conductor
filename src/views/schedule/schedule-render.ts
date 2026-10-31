@@ -14,6 +14,10 @@ import {
   recurrenceBadge,
   guardShield,
   guardDrawer,
+  isWaitingForMeeting,
+  meetingWaitLine,
+  meetingMarker,
+  meetingDrawer,
   occurrenceKey,
   kindIconClass,
   targetLabel,
@@ -72,19 +76,22 @@ function agendaRowHtml(occ: Occurrence): string {
     : (occ.status === "failed" ? item.last_result || "" : "");
   const key = occurrenceKey(item, occ.time);
   const guardOpen = !!item.guard && state.guardOpenKey === key;
+  const meetingOpen = item.after_meeting === true && state.meetingOpenKey === key;
+  // Only the concrete next fire is held; a projected repeat is just upcoming.
+  const waiting = occ.status === "upcoming" && occ.time === new Date(item.fire_at).getTime() && isWaitingForMeeting(item, Date.now());
   const canFire = occ.status === "upcoming" || occ.status === "firing" || occ.status === "failed";
   const showDelete = occ.status !== "firing" && !skipHistory;
   // A skip is one quiet line, not a status pill: it is a decision, not a fault.
   const meta = skipped
     ? `<span class="schedule-skip"><i class="ph ph-skip-forward"></i>Skipped: ${escapeHtml(item.last_skip?.reason || "")}</span>`
-    : `${statusPill(occ.status)}
+    : `${waiting ? meetingWaitLine() : statusPill(occ.status)}
         ${recurrenceBadge(item.recurrence)}
         ${reason ? `<span class="schedule-reason">${escapeHtml(reason)}</span>` : ""}`;
   return `<li class="agenda-row ${nav ? "agenda-row--nav" : ""} ${skipped ? "agenda-row--skipped" : ""}" data-id="${escapeHtml(item.id)}" ${nav ? `data-nav-session="${escapeHtml(nav.sessionId)}" data-nav-mode="${nav.mode}"` : ""}>
     <span class="agenda-time">${escapeHtml(timeStr)}</span>
     <i class="ph ${kindIconClass(item)} agenda-icon"></i>
     <div class="agenda-main">
-      <div class="agenda-name">${escapeHtml(targetLabel(item))}${guardShield(item, key, guardOpen)}</div>
+      <div class="agenda-name">${escapeHtml(targetLabel(item))}${guardShield(item, key, guardOpen)}${meetingMarker(item, key, meetingOpen)}</div>
       <div class="agenda-meta">
         ${meta}
       </div>
@@ -96,6 +103,7 @@ function agendaRowHtml(occ: Occurrence): string {
       ${nav ? `<i class="ph ph-caret-right agenda-chevron"></i>` : ""}
     </div>
     ${guardOpen ? guardDrawer(item) : ""}
+    ${meetingOpen ? meetingDrawer(item) : ""}
     ${rescheduleOpen ? `
       <div class="schedule-reschedule-inline">
         <input type="datetime-local" data-reschedule-input="${escapeHtml(item.id)}" value="${datetimeLocalValue(item.fire_at)}">

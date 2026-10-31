@@ -101,6 +101,12 @@ export async function renderScheduleView(root: HTMLElement): Promise<() => void>
         rerender(bodyEl);
         return;
       }
+      if (action === "meeting-toggle") {
+        const key = btn.dataset.key ?? null;
+        state.meetingOpenKey = state.meetingOpenKey === key ? null : key;
+        rerender(bodyEl);
+        return;
+      }
       const id = btn.dataset.id;
       if (action && id) void handleAction(action, id, bodyEl, myMount);
       return;
