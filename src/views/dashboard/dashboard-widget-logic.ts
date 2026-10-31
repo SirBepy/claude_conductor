@@ -21,6 +21,9 @@ export interface DashboardWidgetEntry {
 /** Registry widget ids in their canonical/default order. */
 export const WIDGET_METAS: WidgetMeta[] = [
   { id: "today", scope: "global" },
+  { id: "schedule", scope: "global" },
+  { id: "skill-top", scope: "global" },
+  { id: "skill-runs", scope: "global" },
   { id: "skill-usage", scope: "global" },
   { id: "session-chart", scope: "account" },
   { id: "session-bars", scope: "account" },
@@ -35,6 +38,13 @@ const REGISTRY_IDS = WIDGET_METAS.map((w) => w.id);
 // them on Statistics' deletion would violate "no widget lost", so both ride
 // onto every dashboard - migrated or brand new - enabled by default.
 const ALWAYS_ON_BY_DEFAULT = ["today", "skill-usage"];
+
+// Home widgets that are on the moment they first exist in a layout - for a
+// brand-new dashboard and for one saved before the widget shipped - so an
+// existing user sees them without hunting through "add widget". A widget the
+// user has already seen (present in the saved layout, even disabled) is never
+// re-enabled: presence in the layout is what records their choice.
+const ENABLED_WHEN_FIRST_ADDED = ["schedule", "skill-top", "skill-runs"];
 
 /** One-time forward migration of the old closed-enum `pinnedCards` list into
  * the new ordered `dashboardWidgets` layout. Old ids match 1:1 with new
@@ -56,7 +66,7 @@ export function migrateLegacyPinnedCards(pinnedCards: unknown): DashboardWidgetE
     if (REGISTRY_IDS.includes(id)) add(id, true);
   }
   for (const id of ALWAYS_ON_BY_DEFAULT) add(id, true);
-  for (const id of REGISTRY_IDS) add(id, false);
+  for (const id of REGISTRY_IDS) add(id, ENABLED_WHEN_FIRST_ADDED.includes(id));
   return out;
 }
 
@@ -64,7 +74,8 @@ export function migrateLegacyPinnedCards(pinnedCards: unknown): DashboardWidgetE
  * `pinnedCards` field exactly once - absence of `dashboardWidgets` is the
  * migration trigger; once it has been saved (even as `[]`), it always wins.
  * Any registry id missing from a persisted layout (e.g. a widget added in a
- * later release) is appended disabled so "add widget" can still surface it
+ * later release) is appended (disabled, unless listed in
+ * ENABLED_WHEN_FIRST_ADDED) so "add widget" can still surface it
  * instead of it silently vanishing. */
 export function resolveDashboardWidgets(settings: {
   dashboardWidgets?: unknown;
@@ -79,8 +90,12 @@ export function resolveDashboardWidgets(settings: {
         typeof (w as DashboardWidgetEntry).enabled === "boolean",
     );
     const seen = new Set(existing.map((w) => w.id));
+    // An empty saved layout is "everything switched off" on purpose, not an
+    // older layout that predates these widgets.
+    const wasEmpty = existing.length === 0;
     for (const id of REGISTRY_IDS) {
-      if (!seen.has(id)) existing.push({ id, enabled: false });
+      const onByDefault = !wasEmpty && ENABLED_WHEN_FIRST_ADDED.includes(id);
+      if (!seen.has(id)) existing.push({ id, enabled: onByDefault });
     }
     return existing;
   }

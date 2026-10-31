@@ -5,6 +5,8 @@
 import type { Widget } from "./widgets/types";
 import { todayWidget } from "./widgets/today-widget";
 import { renderSkillUsageWidget } from "./widgets/skill-usage-widget";
+import { scheduleWidget } from "./widgets/schedule-widget";
+import { skillTopWidget, skillRunsWidget } from "./widgets/skill-charts-widget";
 import {
   sessionChartWidget,
   sessionBarsWidget,
@@ -24,6 +26,9 @@ const skillUsageWidget: Widget = {
 
 export const WIDGETS: Widget[] = [
   todayWidget,
+  scheduleWidget,
+  skillTopWidget,
+  skillRunsWidget,
   skillUsageWidget,
   sessionChartWidget,
   sessionBarsWidget,

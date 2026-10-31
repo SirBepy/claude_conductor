@@ -141,7 +141,11 @@ test.describe("view-harness / dashboard", () => {
     await mountView(page, {
       view: "dashboard",
       invoke: {
-        get_settings: { theme: "void", dashboardWidgets: order.map((id) => ({ id, enabled: true })) },
+        get_settings: { theme: "void", dashboardWidgets: [
+          ...order.map((id) => ({ id, enabled: true })),
+          // Widgets the saved layout already knows about stay off; one absent from it would come in enabled.
+          ...["schedule", "skill-top", "skill-runs"].map((id) => ({ id, enabled: false })),
+        ] },
         get_accounts_setup_prompt_state: { shouldShow: false },
         list_accounts: [],
         get_usage_map: {},
@@ -211,7 +215,10 @@ test.describe("view-harness / dashboard", () => {
     await mountView(page, {
       view: "dashboard",
       invoke: {
-        get_settings: { theme: "void", dashboardWidgets: ["session-chart", "weekly-chart"].map((id) => ({ id, enabled: true })) },
+        get_settings: { theme: "void", dashboardWidgets: [
+          ...["session-chart", "weekly-chart"].map((id) => ({ id, enabled: true })),
+          ...["schedule", "skill-top", "skill-runs"].map((id) => ({ id, enabled: false })),
+        ] },
         get_accounts_setup_prompt_state: { shouldShow: false },
         list_accounts: [],
         get_usage_map: {},

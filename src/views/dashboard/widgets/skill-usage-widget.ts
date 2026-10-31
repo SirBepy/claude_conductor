@@ -7,7 +7,7 @@
 import { html, render, type TemplateResult } from "lit-html";
 import { api } from "../../../shared/api";
 import type { SkillUsageEntry, SkillUsageWeek } from "../../../types/ipc.generated";
-import { showView } from "../../../shared/navigation";
+import { openSkillDetail } from "../../../shared/open-skill-detail";
 import { tokensAllIn, formatTokens } from "../../../shared/tokens";
 import { buildPieSvg } from "../../../shared/pie";
 import "./skill-usage-widget.css";
@@ -107,11 +107,11 @@ export function renderSkillUsageWidget(container: HTMLElement): () => void {
               class="v-focusable"
               role="button"
               tabindex="0"
-              @click=${() => onRowClick(e.skill)}
+              @click=${() => openSkillDetail(e.skill)}
               @keydown=${(ev: KeyboardEvent) => {
                 if (ev.key === "Enter" || ev.key === " ") {
                   ev.preventDefault();
-                  onRowClick(e.skill);
+                  openSkillDetail(e.skill);
                 }
               }}
             >
@@ -144,11 +144,6 @@ export function renderSkillUsageWidget(container: HTMLElement): () => void {
         </ul>
       </div>
     `;
-  }
-
-  function onRowClick(skill: string) {
-    (window as unknown as { skillDetailTarget?: string }).skillDetailTarget = skill;
-    showView("skill-detail");
   }
 
   function load() {
