@@ -156,6 +156,29 @@ describe("a push while the panel is open", () => {
     expect(fetches().at(-1).args).toEqual({ id: "one", sessionId: SID });
   });
 
+  it("keeps the version dot across a window refocus and a re-click of the open version", async () => {
+    await mount([meta("one", 3, [{ version: 2, created_at: at(2) }, { version: 1, created_at: at(1) }])]);
+    await pickVersion("v1");
+    await vi.waitFor(() => expect(root.querySelector(".pv-ver").textContent).toBe("v1"));
+
+    previews = [meta("one", 4, [{ version: 3, created_at: at(3) }, { version: 2, created_at: at(2) }, { version: 1, created_at: at(1) }])];
+    pushed(previews[0]);
+    expect(verBtn().hasAttribute("data-new")).toBe(true);
+
+    const listCalls = () => calls.filter((c) => c.cmd === "list_previews").length;
+    const listed = listCalls();
+    window.dispatchEvent(new Event("focus"));
+    await vi.waitFor(() => expect(listCalls()).toBeGreaterThan(listed));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(root.querySelector(".pv-ver").textContent).toBe("v1");
+    expect(verBtn().hasAttribute("data-new")).toBe(true);
+
+    // Re-picking the version already open is the same early return.
+    await pickVersion("v1");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(verBtn().hasAttribute("data-new")).toBe(true);
+  });
+
   it("stays on the current preview when a different one is pushed, and dots the name picker", async () => {
     await mount([meta("one", 1)]);
     const before = fetches().length;
