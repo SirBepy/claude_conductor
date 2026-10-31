@@ -122,6 +122,15 @@ impl SettingsCache {
         g.jarvis_session_id = Some(session_id.to_string());
     }
 
+    /// Adds `project` to the scope of `key` in the cache so the next spawn reads
+    /// it; false when `key` is unscoped or already lists the project. The caller
+    /// publishes `skill_scope_project_added` so the app process persists the same
+    /// add.
+    pub fn add_skill_scope_project(&self, key: &str, project: &str) -> bool {
+        let mut g = self.inner.lock().unwrap();
+        crate::slash::scope::add_project(&mut g, key, project)
+    }
+
     /// Sets one boolean `Settings.extra` key and nothing else, for an instant
     /// in-memory read. The caller publishes a notification so the app process
     /// persists the same value (this module's header: the daemon never writes

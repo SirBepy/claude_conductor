@@ -57,6 +57,7 @@ const SEE_ONLY: &[&str] = &[
     "get_commit_sync",
     "get_commit_history",
     "list_project_files",
+    "count_ai_todos",
     "list_ai_todos",
     "list_ai_backlog",
     "read_ai_todo",

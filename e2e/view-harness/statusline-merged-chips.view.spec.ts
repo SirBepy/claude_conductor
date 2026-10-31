@@ -20,7 +20,7 @@ async function mount(page: Page, over: Record<string, unknown> = {}, ready = "#s
       get_settings: { theme: "glacier", statuslineRowsV2Applied: true },
       session_live_cwd: SPAWN,
       get_git_info: { branch: "master", repo: "zng-app", ahead: 2, behind: 4, sha: "abc1234", insertions: null, deletions: null },
-      list_ai_todos: [{ name: "889-git-card.md", path: `${SPAWN}/.claude/todos/889.md` }],
+      count_ai_todos: 1,
       get_commit_sync: { ahead: [{ short_sha: "a41c9d20", message: "one" }], behind: [], has_upstream: true },
       get_recent_branches: [
         { name: "master", current: true, short_sha: "08828e1c", upstream: "origin/master" },

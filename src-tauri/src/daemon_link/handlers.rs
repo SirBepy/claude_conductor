@@ -244,6 +244,55 @@ pub(super) fn handle_push_show_chat_name_set(app: &tauri::AppHandle, params: ser
     }
 }
 
+/// The phone enabled a skill for a project (`add_project_to_skill_scope`) and
+/// the daemon updated its own cache; merge the same add here and persist, so
+/// the next app-side settings push cannot drop it.
+pub(super) fn handle_skill_scope_project_added(app: &tauri::AppHandle, params: serde_json::Value) {
+    use tauri::Manager;
+    let state = app.state::<crate::state::AppState>();
+    let mut settings_guard = state.settings.lock().unwrap();
+    if !merge_skill_scope_project(&mut settings_guard, &params) {
+        return;
+    }
+    settings_guard.bump_generation();
+    let snapshot = settings_guard.clone();
+    drop(settings_guard);
+    crate::settings::persist(app, &snapshot);
+}
+
+/// Applies the event to `settings`; false when it was malformed or changed nothing.
+fn merge_skill_scope_project(settings: &mut crate::types::Settings, params: &serde_json::Value) -> bool {
+    let (Some(key), Some(project)) =
+        (params.get("key").and_then(|v| v.as_str()), params.get("project").and_then(|v| v.as_str()))
+    else {
+        return false;
+    };
+    crate::slash::scope::add_project(settings, key, project)
+}
+
+#[cfg(test)]
+mod skill_scope_merge_tests {
+    use super::merge_skill_scope_project;
+    use crate::slash::scope;
+    use crate::types::Settings;
+    use serde_json::json;
+
+    #[test]
+    fn merges_one_project_into_an_existing_scope_only() {
+        let mut s = Settings::default();
+        s.extra.insert(scope::SETTINGS_KEY.into(), json!({ "figma-tiles": { "projects": ["a"] } }));
+
+        assert!(merge_skill_scope_project(&mut s, &json!({ "key": "figma-tiles", "project": "b" })));
+        assert_eq!(scope::scopes(&s)["figma-tiles"].projects, vec!["a".to_string(), "b".to_string()]);
+
+        // Already there, unscoped key, and malformed events change nothing.
+        assert!(!merge_skill_scope_project(&mut s, &json!({ "key": "figma-tiles", "project": "b" })));
+        assert!(!merge_skill_scope_project(&mut s, &json!({ "key": "commit", "project": "b" })));
+        assert!(!merge_skill_scope_project(&mut s, &json!({ "key": "figma-tiles" })));
+        assert_eq!(scope::scopes(&s).len(), 1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{respawned_attached_sessions, stale_attached_sessions};

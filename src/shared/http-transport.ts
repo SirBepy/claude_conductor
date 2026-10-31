@@ -242,7 +242,9 @@ export class HttpTransport implements Transport {
       case "list_ai_todos":
         return this.rpc<T>("list_ai_todos", { cwd: args.cwd, session_id: args.sessionId ?? args.session_id });
       case "count_ai_todos":
-        return this.rpc<T>("count_ai_todos", { cwd: args.cwd });
+        // session_id only for a chat hosted on a paired machine, so the daemon
+        // forwards the count to the host (its cwd is a path on the host's disk).
+        return this.rpc<T>("count_ai_todos", { cwd: args.cwd, session_id: args.sessionId ?? args.session_id });
       // The Backlog panel's two reads. Its writes (archive, plan moves, start a
       // chat) edit the host's disk and are desktop-pipe only, so never mapped.
       case "list_ai_backlog":
@@ -431,6 +433,20 @@ export class HttpTransport implements Transport {
           session_id: args.session_id ?? args.sessionId,
           model: args.model,
         });
+      // The composer's "Enable here": two narrow daemon RPCs standing in for the
+      // desktop's single `enable_skill_here` command, which edits settings.json
+      // directly and so has no phone twin. Returns whether a live chat restarted.
+      case "enable_skill_here": {
+        const sid = (args.sessionId ?? args.session_id ?? null) as string | null;
+        await this.rpc<unknown>("add_project_to_skill_scope", {
+          project_dir: args.projectDir ?? args.project_dir,
+          key: args.key,
+          session_id: sid,
+        });
+        if (!sid) return false as unknown as T;
+        const res = await this.rpc<{ restarted: boolean }>("restart_session_process", { session_id: sid });
+        return res.restarted as unknown as T;
+      }
       // The daemon answers {session_id}; the Tauri command returns the bare id.
       case "move_session_to_account": {
         const res = await this.rpc<{ session_id: string }>("move_session_to_account", {

@@ -743,6 +743,32 @@ mod tests {
         }
     }
 
+    /// The phone's todo chip counts a mirrored chat's todos on the host, never
+    /// against this daemon's disk (the cwd is a path on the host's).
+    #[tokio::test]
+    async fn a_mirrored_chats_todo_count_is_answered_by_the_host() {
+        let dir = tempdir().unwrap();
+        let peer_dir = tempdir().unwrap();
+        let mut b_router = Router::new();
+        b_router.register("count_ai_todos", |params, _ctx| async move {
+            let sid = params.and_then(|p| p.get("session_id").and_then(|s| s.as_str().map(str::to_string)));
+            Ok::<Value, RpcError>(json!(if sid.as_deref() == Some("s1") { 3 } else { 0 }))
+        });
+        let b_state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (_stt, b_port, b_serve) =
+            crate::daemon::remote_server::spawn_on(b_state.clone(), peer_dir.path().to_path_buf(), b_router, 0);
+        let (state, _peer) = state_with_machines_and_peer(dir.path(), peer_dir.path(), b_port, true).await;
+        mirror_owned_session(&state, "s1");
+
+        let result =
+            forward_one(&state, "count_ai_todos", Some(json!({"cwd": "C:/x", "session_id": "s1"})), &Transport::Phone).await;
+        match result {
+            Some(Ok(v)) => assert_eq!(v, json!(3)),
+            other => panic!("expected the host's count to round-trip, got {other:?}"),
+        }
+        b_serve.kill();
+    }
+
     #[tokio::test]
     async fn forwardable_method_lands_on_the_peer() {
         use crate::daemon::rpc::RpcError as RE;

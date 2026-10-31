@@ -6,7 +6,6 @@
 
 import type { SlashEntry } from "../../types/ipc.generated";
 import { invoke } from "../ipc";
-import { isRemote } from "../transport";
 import { isPendingSessionId } from "./pending-session-id";
 import { slashEntryQualifiedName } from "./slash-registry";
 
@@ -70,16 +69,16 @@ export class SkillScopeWarning {
     if (plugin) msg.append(` (turns on the whole ${plugin} plugin)`);
     msg.append(".");
     const parts: Node[] = [icon, msg];
-    // The phone can't save settings, so it only gets the way out.
-    if (!isRemote()) parts.push(this.link("Enable here", "", () => this.host.sendWithEnable()));
+    // The phone can't save settings, but `enable_skill_here` reaches it as two
+    // narrow daemon RPCs (http-transport.ts), so both platforms get the button.
+    parts.push(this.link("Enable here", "", () => this.host.sendWithEnable()));
     parts.push(this.link("Send anyway", "quiet", () => this.host.sendAnyway()));
     this.el.replaceChildren(...parts);
     this.el.hidden = false;
   }
 
-  /** Whether a send of `text` has to enable a skill first (desktop only). */
+  /** Whether a send of `text` has to enable a skill first. */
   needsEnable(text: string): SlashEntry | null {
-    if (isRemote()) return null;
     return offHereEntry(text, this.host.getEntries());
   }
 

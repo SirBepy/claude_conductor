@@ -42,25 +42,27 @@ beforeEach(() => {
   // This machine (the Mac) has one account, none of the host's ids.
   setCachedAccounts([{ id: "mac-only", label: "mac", colour: "#000", icon: "user" }]);
   ipcMock.impl = async (cmd) => {
-    if (cmd === "list_ai_todos") return [{ name: "01-a.md", path: `${PC_CWD}\\.claude\\todos\\01-a.md` }, { name: "02-b.md", path: "x" }];
+    if (cmd === "count_ai_todos") return 2;
     if (cmd === "list_machine_accounts") return { accounts: hostAccounts, default_account_id: null, project_account_id: null };
     return null;
   };
 });
 
 describe("statusbar chips for a chat mirrored from a paired machine", () => {
-  it("reads the todos list on the host by session id", async () => {
+  it("counts the todos on the host by session id, and never fetches the list for the chip", async () => {
     const { el } = mount([["ai_todos"]], { mirrored: true, machineId: "pc" });
     await flush();
-    const todoCall = calls.find(([c]) => c === "list_ai_todos");
+    const todoCall = calls.find(([c]) => c === "count_ai_todos");
     expect(todoCall[1]).toEqual({ cwd: PC_CWD, sessionId: "sess-pc" });
     expect(el.querySelector(".sb-ai-todos")?.textContent).toContain("2");
+    expect(calls.find(([c]) => c === "list_ai_todos")).toBeUndefined();
   });
 
-  it("draws no todos chip and reads no list on the desktop, where the Backlog tab replaced it", async () => {
+  it("draws no todos chip and reads no count on the desktop, where the Backlog tab replaced it", async () => {
     env.remote = false;
     const { el } = mount([["ai_todos"]]);
     await flush();
+    expect(calls.find(([c]) => c === "count_ai_todos")).toBeUndefined();
     expect(calls.find(([c]) => c === "list_ai_todos")).toBeUndefined();
     expect(el.querySelector(".sb-ai-todos")).toBeNull();
   });
@@ -68,7 +70,7 @@ describe("statusbar chips for a chat mirrored from a paired machine", () => {
   it("keeps a local chat's todos read to cwd alone", async () => {
     mount([["ai_todos"]]);
     await flush();
-    expect(calls.find(([c]) => c === "list_ai_todos")[1]).toEqual({ cwd: PC_CWD });
+    expect(calls.find(([c]) => c === "count_ai_todos")[1]).toEqual({ cwd: PC_CWD });
   });
 
   it("names the host's account, forced into the row by the host's account count", async () => {
