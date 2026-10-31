@@ -84,9 +84,14 @@ export const skillTopWidget: Widget = {
     // A refresh that fails after data was painted keeps that data; only the
     // initial "Loading" has nothing better to fall back to than the empty state.
     let painted = false;
+    // onSkillUsageChanged can fire again before the last read returns; only the
+    // newest load may paint, or a slow older reply overwrites fresher data.
+    let epoch = 0;
     const load = () => {
+      const mine = ++epoch;
+      const current = () => alive && mine === epoch;
       void api.getSkillUsageWeek().then((w) => {
-        if (!alive) return;
+        if (!current()) return;
         if (w) {
           painted = true;
           drawTop(root, topSkills(w.entries));
@@ -95,7 +100,7 @@ export const skillTopWidget: Widget = {
         }
       }).catch((err) => {
         console.error("getSkillUsageWeek failed", err);
-        if (alive && !painted) drawTop(root, []);
+        if (current() && !painted) drawTop(root, []);
       });
     };
     drawTop(root, null);
@@ -119,30 +124,37 @@ export const skillRunsWidget: Widget = {
     let alive = true;
     // Same rule as the top-skills widget: a failed refresh keeps painted data.
     let painted = false;
-    const drawEmpty = () => {
-      if (alive && !painted) drawDays(root, runsPerDay([], new Date()), false);
-    };
+    // Same newest-load-wins guard as the top-skills widget; this one matters
+    // more here because each load fans out up to a dozen detail reads.
+    let epoch = 0;
     const load = async () => {
-      const week = await api.getSkillUsageWeek();
-      if (!week) return drawEmpty();
-      const { skills, truncated } = skillsToFetch(week.entries);
-      // The week summary has no timestamps; each skill's detail does.
-      const details = await Promise.all(skills.map((s) => api.getSkillUsageDetail(s)));
-      if (!alive) return;
-      // A null detail would make the totals undercount silently, so it reads as
-      // a failed load rather than a partial chart.
-      if (details.some((d) => !d)) return drawEmpty();
-      const events: SkillUsageEvent[] = details.flatMap((d) => d.events);
-      painted = true;
-      drawDays(root, runsPerDay(events, new Date()), truncated);
+      const mine = ++epoch;
+      const current = () => alive && mine === epoch;
+      const drawEmpty = () => {
+        if (current() && !painted) drawDays(root, runsPerDay([], new Date()), false);
+      };
+      try {
+        const week = await api.getSkillUsageWeek();
+        if (!current()) return;
+        if (!week) return drawEmpty();
+        const { skills, truncated } = skillsToFetch(week.entries);
+        // The week summary has no timestamps; each skill's detail does.
+        const details = await Promise.all(skills.map((s) => api.getSkillUsageDetail(s)));
+        if (!current()) return;
+        // A null detail would make the totals undercount silently, so it reads as
+        // a failed load rather than a partial chart.
+        if (details.some((d) => !d)) return drawEmpty();
+        const events: SkillUsageEvent[] = details.flatMap((d) => d.events);
+        painted = true;
+        drawDays(root, runsPerDay(events, new Date()), truncated);
+      } catch (err) {
+        console.error("skill runs load failed", err);
+        drawEmpty();
+      }
     };
-    const safeLoad = () => load().catch((err) => {
-      console.error("skill runs load failed", err);
-      drawEmpty();
-    });
     drawDays(root, null, false);
-    void safeLoad();
-    const unlisten = api.onSkillUsageChanged(() => void safeLoad());
+    void load();
+    const unlisten = api.onSkillUsageChanged(() => void load());
     return () => {
       alive = false;
       try { unlisten(); } catch { /* ignore */ }
