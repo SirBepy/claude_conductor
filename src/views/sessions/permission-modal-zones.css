@@ -38,6 +38,9 @@
   margin-bottom: 5px;
   min-height: 20px;
 }
+.prompt-ctx__head .prompt-domain {
+  margin-left: auto;
+}
 .prompt-ctx__label {
   font-size: 0.64rem;
   font-weight: 700;
@@ -51,12 +54,12 @@
   color: var(--color-text-muted);
 }
 
-/* Ask band always takes the domain colour. Two rows (Joe, 2026-10-30): chip
- * and Ask button on top, question text under them. */
+/* Ask band always takes the domain colour. One row: question text, then the
+ * domain chip (only when there is no context row to carry it) and Ask. */
 .prompt-zone--ask {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 11px;
   padding: 14px 16px;
   background: linear-gradient(
     90deg,
@@ -66,18 +69,18 @@
   border-top: 1px solid color-mix(in srgb, var(--dom) 22%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--dom) 22%, transparent);
 }
-.prompt-ask__top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
 .prompt-ask__text {
+  min-width: 0;
+  flex: 1;
   font-size: 1.04rem;
   font-weight: 700;
   line-height: 1.35;
   color: var(--color-text);
 }
+/* Fallback slot: only present when there is no context row to carry the chip.
+ * 3px nudges it onto the first line's optical centre (1.04rem/1.35 text). */
 .prompt-zone--ask .prompt-domain {
+  margin-left: auto;
+  margin-top: 3px;
   flex-shrink: 0;
 }

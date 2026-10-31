@@ -1,3 +1,4 @@
+// Reviewed 2026-10-31: the question card's context box and ask band now run edge to edge on desktop too and the domain chip is back on the context row - this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-30: the question card's ask band is now two rows (domain chip + Ask button on top, question text under them) and the ? icon is gone - this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/permission-modal-track.css, src/views/sessions/permission-modal/question-ui-render.ts, src/views/sessions/permission-modal/question-ui-templates.ts
 import { test, expect, type Page } from "@playwright/test";
