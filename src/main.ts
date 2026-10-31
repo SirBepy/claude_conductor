@@ -29,6 +29,7 @@ import { CHATS_WINDOW_MODE_CLASS, isChatsWindow, runsRendererHeartbeat } from ".
 import { openJarvisSafely } from "./shared/open-jarvis-safely";
 import { applyPendingNav } from "./boot/pending-nav";
 import { showView } from "./shared/navigation";
+import { openSchedule } from "./shared/open-schedule";
 import { closeSidemenu } from "./shared/sidemenu";
 import { initBackButton, registerOverlayBack } from "./shared/back-button";
 import { installPermissionModalListener, setSidebarRerenderHook } from "./views/sessions/permission-modal";
@@ -358,13 +359,10 @@ if (detachedSessionId) {
         closeSidemenu();
         return;
       }
-      // Schedule now lives in its own window (the calendar). Open that instead
-      // of routing in-place; fall back to the in-app route in the browser/remote
-      // build where there's no separate-window concept.
-      if (view === "schedule" && window.__TAURI__) {
-        void invoke("open_schedule_window").catch((err) =>
-          console.error("[nav] open_schedule_window failed", err),
-        );
+      // Schedule now lives in its own window (the calendar); openSchedule falls
+      // back to the in-app route where there's no separate-window concept.
+      if (view === "schedule") {
+        openSchedule();
         closeSidemenu();
         return;
       }

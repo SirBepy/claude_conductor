@@ -6,24 +6,11 @@
 import { html, render } from "lit-html";
 import { invoke } from "../../../shared/ipc";
 import { listen } from "../../../shared/events";
-import { showView } from "../../../shared/navigation";
+import { openSchedule } from "../../../shared/open-schedule";
 import type { ExternalScheduledJob, Instance, ScheduledItem } from "../../../types/ipc.generated";
 import { upcomingRows, whenLabel, type UpcomingRow } from "./schedule-widget-logic";
 import type { Widget } from "./types";
 import "./schedule-widget.css";
-
-/** The calendar lives in its own window on desktop. The browser/remote build
- * has no separate-window concept, so it routes in-place instead (same split as
- * the sidemenu's Schedule entry in main.ts). */
-export function openFullSchedule(): void {
-  if (window.__TAURI__) {
-    void invoke("open_schedule_window").catch((err) =>
-      console.error("[dashboard] open_schedule_window failed", err),
-    );
-    return;
-  }
-  showView("schedule");
-}
 
 function rowTemplate(r: UpcomingRow, now: Date) {
   return html`
@@ -36,14 +23,28 @@ function rowTemplate(r: UpcomingRow, now: Date) {
   `;
 }
 
-function draw(root: HTMLElement, rows: UpcomingRow[] | null): void {
+/** `"error"` is a failed `schedule_list` read: not the same as an empty
+ * calendar, so it must not claim "Nothing scheduled". */
+function draw(root: HTMLElement, rows: UpcomingRow[] | null | "error"): void {
   const openBtn = html`
-    <button type="button" class="sched-w-open" @click=${openFullSchedule}>
+    <button type="button" class="sched-w-open" @click=${openSchedule}>
       Open calendar<i class="ph ph-arrow-square-out"></i>
     </button>
   `;
   if (rows === null) {
     render(html`<div class="sched-w loading">Loading schedule&hellip;</div>`, root);
+    return;
+  }
+  if (rows === "error") {
+    render(html`
+      <div class="sched-w">
+        <div class="v-empty">
+          <i class="ph ph-warning-circle v-empty-icon"></i>
+          <div class="v-empty-title">Couldn't load the schedule</div>
+        </div>
+        <div class="sched-w-foot">${openBtn}</div>
+      </div>
+    `, root);
     return;
   }
   if (rows.length === 0) {
@@ -67,14 +68,33 @@ function draw(root: HTMLElement, rows: UpcomingRow[] | null): void {
   `, root);
 }
 
-async function load(root: HTMLElement, alive: () => boolean): Promise<void> {
+/** Reads that only enrich the list (external jobs, chat titles) degrade to
+ * empty on failure; `schedule_list` is the list itself, so its failure is
+ * surfaced instead of being drawn as an authoritative empty calendar. */
+function softRead<T>(cmd: string, fallback: T): Promise<T> {
+  return invoke<T>(cmd).catch((err) => {
+    console.error(`[schedule-widget] ${cmd} failed`, err);
+    return fallback;
+  });
+}
+
+async function load(root: HTMLElement, alive: () => boolean, mount: { painted: boolean }): Promise<void> {
   const [items, external, instances] = await Promise.all([
-    invoke<ScheduledItem[]>("schedule_list").catch(() => [] as ScheduledItem[]),
-    invoke<ExternalScheduledJob[]>("schedule_list_external").catch(() => [] as ExternalScheduledJob[]),
-    invoke<Instance[]>("list_instances").catch(() => [] as Instance[]),
+    invoke<ScheduledItem[]>("schedule_list").catch((err): null => {
+      console.error("[schedule-widget] schedule_list failed", err);
+      return null;
+    }),
+    softRead<ExternalScheduledJob[]>("schedule_list_external", []),
+    softRead<Instance[]>("list_instances", []),
   ]);
   if (!alive()) return;
+  if (items === null) {
+    // A refresh that fails after rows were painted keeps those rows.
+    if (!mount.painted) draw(root, "error");
+    return;
+  }
   const titles = new Map((instances || []).map((i) => [i.session_id, i.name || ""]));
+  mount.painted = true;
   draw(root, upcomingRows(items || [], external || [], titles));
 }
 
@@ -88,9 +108,10 @@ export const scheduleWidget: Widget = {
     // A re-render replaces the body's content; a late reply from this mount
     // must not paint over it.
     let alive = true;
+    const mount = { painted: false };
     draw(root, null);
-    void load(root, () => alive);
-    const unlisten = listen("scheduled-items-changed", () => void load(root, () => alive));
+    void load(root, () => alive, mount);
+    const unlisten = listen("scheduled-items-changed", () => void load(root, () => alive, mount));
     return () => {
       alive = false;
       void unlisten.then((u) => u());

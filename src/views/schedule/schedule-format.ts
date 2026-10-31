@@ -4,17 +4,13 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import { cwdToProjectName } from "../sessions/sessions-helpers";
+import { truncate } from "../sessions/project-dashboard/format";
 import type { ScheduledItem, Recurrence } from "../../types/ipc.generated";
 import { pad, dayKeyOf, type DotStatus, type Occurrence } from "./schedule-recurrence";
 import { state } from "./schedule-state";
 
 export function todayKey(): string {
   return dayKeyOf(new Date());
-}
-
-export function truncate(s: string, n: number): string {
-  const t = s.trim();
-  return t.length > n ? `${t.slice(0, n).trimEnd()}…` : t;
 }
 
 export const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];

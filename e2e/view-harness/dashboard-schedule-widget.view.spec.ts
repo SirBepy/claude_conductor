@@ -1,4 +1,4 @@
-// asserts: src/views/dashboard/widgets/schedule-widget.ts, src/views/dashboard/widgets/skill-charts-widget.ts
+// asserts: src/views/dashboard/widgets/schedule-widget.ts, src/views/dashboard/widgets/skill-charts-widget.ts, src/shared/open-schedule.ts
 import { test, expect } from "@playwright/test";
 import { mountView, invokeCalls, capture } from "./harness";
 
