@@ -138,14 +138,18 @@ impl MeetingMonitor {
     /// One reading of the OS signals, recorded. Blocking (registry, COM, a
     /// process snapshot), so async callers go through `sample_blocking`.
     pub fn sample(&self) -> MeetingSnapshot {
-        let sources = {
-            let source = self.source.lock().unwrap();
-            Sources {
-                camera: source.camera_in_use(),
-                mic: source.mic_in_use(),
-                audio: source.meeting_app_audio_active(&self.apps),
-            }
+        // Poison is ignored on purpose: a source that panicked mid-read leaves
+        // nothing half-written (it holds no invariant), and unwrapping would
+        // turn that one panic into a panic on every later sample.
+        let source = self.source.lock().unwrap_or_else(|e| e.into_inner());
+        let sources = Sources {
+            camera: source.camera_in_use(),
+            mic: source.mic_in_use(),
+            audio: source.meeting_app_audio_active(&self.apps),
         };
+        // Stamped and recorded before the source lock drops: two concurrent
+        // samples then record in the order they read, so an older reading can
+        // never overwrite a newer one.
         self.record(sources, Utc::now())
     }
 
@@ -198,7 +202,12 @@ impl MeetingMonitor {
                 }
                 return;
             }
-            self.sample();
+            // A panicking signal source must not end this thread: the exit path
+            // above is the only place `poller_running` is cleared, so a dead
+            // poller would read as running forever and no demand could restart it.
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.sample())).is_err() {
+                log::warn!("meeting monitor: a signal source panicked; polling on");
+            }
             std::thread::sleep(POLL_INTERVAL);
         }
     }
@@ -346,5 +355,67 @@ mod tests {
         }
         assert!(!m.poller_running.load(Ordering::Acquire), "the poller must exit when nothing wants it");
         assert_eq!(m.snapshot(), MeetingSnapshot::default(), "a stopped poller leaves no stale meeting behind");
+    }
+
+    /// Panics on its first camera read, then reports a mic in use.
+    struct PanicsOnce(std::sync::atomic::AtomicBool);
+    impl SignalSource for PanicsOnce {
+        fn camera_in_use(&self) -> bool {
+            if !self.0.swap(true, Ordering::SeqCst) {
+                panic!("signal source blew up (test)");
+            }
+            false
+        }
+        fn mic_in_use(&self) -> bool {
+            true
+        }
+        fn meeting_app_audio_active(&self, _allow: &[String]) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn a_panicking_signal_source_does_not_strand_the_poller() {
+        let m = Arc::new(MeetingMonitor::with_source(Box::new(PanicsOnce(Default::default()))));
+        m.demand(Duration::from_secs(30));
+        // The first sample panics; the poller must survive to the next beat and read the mic.
+        let started = Instant::now();
+        while !m.snapshot().active && started.elapsed() < POLL_INTERVAL + Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(m.snapshot().active, "the poller died with the panicking sample");
+        // Let it wind down so the thread does not outlive the test.
+        *m.demand_until.lock().unwrap() = None;
+    }
+
+    /// Reports a meeting on every odd read and none on every even one, so the
+    /// last reading taken is knowable from the read count alone.
+    struct Alternating(std::sync::atomic::AtomicUsize);
+    impl SignalSource for Alternating {
+        fn camera_in_use(&self) -> bool {
+            self.0.fetch_add(1, Ordering::SeqCst) % 2 == 0
+        }
+        fn mic_in_use(&self) -> bool {
+            false
+        }
+        fn meeting_app_audio_active(&self, _allow: &[String]) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn concurrent_samples_leave_the_newest_reading_in_the_snapshot() {
+        // The race window is microseconds wide, so this is a stress test: it
+        // cannot be forced red, only made very likely to catch a regression.
+        let m = Arc::new(MeetingMonitor::with_source(Box::new(Alternating(Default::default()))));
+        for round in 0..300 {
+            let (a, b) = (m.clone(), m.clone());
+            let ta = std::thread::spawn(move || a.sample());
+            let tb = std::thread::spawn(move || b.sample());
+            let (ra, rb) = (ta.join().unwrap(), tb.join().unwrap());
+            // Round N takes reads 2N (active) and 2N+1 (inactive), so whichever
+            // thread read second must be the one recorded last.
+            assert!(!m.snapshot().active, "round {round}: snapshot holds the older reading ({ra:?} / {rb:?})");
+        }
     }
 }
