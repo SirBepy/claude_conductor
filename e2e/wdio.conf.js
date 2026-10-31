@@ -115,10 +115,12 @@ export function checkEdgeDriverVersion(driverPath, installedRuntimeVersion) {
   return { driverVersion, runtimeVersion: installedRuntimeVersion };
 }
 
-// The debug binary auto-opens ONLY the Chats window (`bootstrap.rs:29-31`) and
-// builds the dashboard lazily (`:33-37`), so tauri-driver binds to
-// `session-chats` where `main.ts:206` has stripped `#sidemenu`. Root cause of
-// every rotted opt-in spec (ai_todo 649/688).
+// The Chats window (`session-chats`) is the app's only desktop window: Dashboard,
+// Schedule and Settings are screens inside it, reached from its app rail, and the
+// old separate `main` window with `#sidemenu` is gone. The debug binary opens it
+// at boot, so tauri-driver is already bound to it; `open_dashboard` just surfaces
+// that same window, and the drivable handle is the one with the router's
+// `showView` exposed.
 async function switchToMainWindow() {
   await browser.waitUntil(
     async () => browser.execute(() => !!window.__TAURI__?.core?.invoke).catch(() => false),
@@ -130,17 +132,17 @@ async function switchToMainWindow() {
     async () => {
       for (const handle of await browser.getWindowHandles()) {
         await browser.switchToWindow(handle);
-        const isMain = await browser
-          .execute(() => !location.search.includes("chatswindow") && typeof window.showView === "function")
+        const isShell = await browser
+          .execute(() => new URLSearchParams(location.search).get("chatswindow") === "1" && typeof window.showView === "function")
           .catch(() => false);
-        if (isMain) return true;
+        if (isShell) return true;
       }
       return false;
     },
-    { timeout: 30000, interval: 400, timeoutMsg: "main dashboard window never became drivable" }
+    { timeout: 30000, interval: 400, timeoutMsg: "the Chats window (the app's single desktop window) never became drivable" }
   );
 
-  // The dashboard opens at 520x720 and window-state then restores the dev's
+  // The window can open narrow and window-state then restores the dev's
   // saved geometry - both hit the phone layout. Its restore lands after the
   // webview is drivable, so hold the width instead of setting it once.
   let stable = 0;
