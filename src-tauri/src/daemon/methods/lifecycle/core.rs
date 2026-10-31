@@ -284,6 +284,17 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
             async move {
                 let p: SessionIdOnly = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                // The state at the moment of the interrupt, read before it lands:
+                // a wedged chat's cancel is only diagnosable if the log says
+                // whether the turn was still busy and what it had reported.
+                let (busy, awaiting) = state
+                    .registry
+                    .get(&p.session_id)
+                    .map_or((None, None), |i| (Some(i.busy), i.awaiting));
+                log::info!(
+                    "daemon: cancel_turn on session {} (busy={busy:?}, awaiting={awaiting:?})",
+                    p.session_id
+                );
                 lifecycle::cancel_turn(&map, &p.session_id).await.map_err(err_to_rpc)?;
                 // No force-clear here (todo 873): the interrupt is cooperative,
                 // so only the child's own trailing result line - via pump.rs's
