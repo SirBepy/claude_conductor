@@ -49,6 +49,10 @@ export function linkifyDrillRefs(root: HTMLElement, container: ParentNode = root
   for (const msg of scope) {
     const pending = Array.from(msg.querySelectorAll<HTMLElement>("span.drill-pending[data-d]"));
     for (const el of [...Array.from(msg.querySelectorAll<HTMLAnchorElement>('a[href^="#d:"]')), ...pending]) {
+      // An open card is a child of this bubble; a `#d:` link in its body must
+      // stay a plain link (its click handler only swallows navigation), not
+      // turn into a chip that swaps the card for another detail mid-read.
+      if (el.closest(".drill-pop")) continue;
       const id = el instanceof HTMLAnchorElement ? (el.getAttribute("href") ?? "").slice(3) : (el.dataset.d ?? "");
       const detail = resolve(id, msg, container);
       if (!detail) {

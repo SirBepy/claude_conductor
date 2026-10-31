@@ -12,9 +12,12 @@ function extractFenceLang(className: string): string | null {
 
 /** Wrap inline `<code>` elements (not inside `<pre>`) in a hover-copyable span. */
 export function highlightInlineCode(container: HTMLElement): void {
+  // `.drill-pop` (an open detail card, a child of its bubble) is skipped by
+  // every per-message pass: the card is built once and must not change under
+  // the reader when a history page or re-render sweeps the container.
   const codes = Array.from(
     container.querySelectorAll<HTMLElement>(".msg.assistant code:not(pre > code):not([data-ic])"),
-  );
+  ).filter((c) => !c.closest(".drill-pop"));
   for (const code of codes) {
     code.dataset.ic = "1";
     const wrap = document.createElement("span");
@@ -39,7 +42,7 @@ export async function highlightCodeBlocks(container: HTMLElement): Promise<void>
   // skipped on subsequent passes (incremental render preserves them).
   const codes = Array.from(
     container.querySelectorAll<HTMLElement>("pre > code:not([data-highlighted])"),
-  );
+  ).filter((c) => !c.closest(".drill-pop"));
   if (codes.length === 0) return;
   const donePhase = perfPhase("shiki-highlight", () => `(${codes.length} blocks)`);
   for (let i = 0; i < codes.length; i++) {

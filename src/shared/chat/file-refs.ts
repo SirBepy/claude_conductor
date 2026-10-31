@@ -80,7 +80,8 @@ export function linkifyFilePaths(root: HTMLElement): void {
     const NF = (msg.ownerDocument.defaultView ?? window).NodeFilter;
     const walker = msg.ownerDocument.createTreeWalker(msg, NF.SHOW_TEXT, {
       acceptNode: (n) =>
-        n.parentElement?.closest("pre, a, button, .file-ref") ? NF.FILTER_REJECT : NF.FILTER_ACCEPT,
+        // .drill-pop: an open detail card sits inside its bubble and is not re-linkified.
+        n.parentElement?.closest("pre, a, button, .file-ref, .drill-pop") ? NF.FILTER_REJECT : NF.FILTER_ACCEPT,
     });
     const hits: Array<{ node: Text; refs: FileRef[] }> = [];
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
