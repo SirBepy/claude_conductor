@@ -82,9 +82,10 @@ export const skillTopWidget: Widget = {
   render: (root) => {
     let alive = true;
     const load = () => {
+      // A failed read leaves the empty state instead of an unhandled rejection.
       void api.getSkillUsageWeek().then((w) => {
-        if (alive) drawTop(root, topSkills(w.entries));
-      });
+        if (alive && w) drawTop(root, topSkills(w.entries));
+      }).catch((err) => console.error("getSkillUsageWeek failed", err));
     };
     drawTop(root, null);
     load();
@@ -107,6 +108,7 @@ export const skillRunsWidget: Widget = {
     let alive = true;
     const load = async () => {
       const week = await api.getSkillUsageWeek();
+      if (!week) return;
       const { skills, truncated } = skillsToFetch(week.entries);
       // The week summary has no timestamps; each skill's detail does.
       const details = await Promise.all(skills.map((s) => api.getSkillUsageDetail(s)));
@@ -114,9 +116,11 @@ export const skillRunsWidget: Widget = {
       const events: SkillUsageEvent[] = details.flatMap((d) => d.events);
       drawDays(root, runsPerDay(events, new Date()), truncated);
     };
+    // A failed read leaves the empty state instead of an unhandled rejection.
+    const safeLoad = () => load().catch((err) => console.error("skill runs load failed", err));
     drawDays(root, null, false);
-    void load();
-    const unlisten = api.onSkillUsageChanged(() => void load());
+    void safeLoad();
+    const unlisten = api.onSkillUsageChanged(() => void safeLoad());
     return () => {
       alive = false;
       try { unlisten(); } catch { /* ignore */ }
