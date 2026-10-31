@@ -329,13 +329,17 @@ if (detachedSessionId) {
     // A navigation queued while this window was still being built (tray-less
     // callers such as the overlay's account card on a cold start).
     void invoke<string | null>("take_pending_nav").then((nav) => {
-      void applyPendingNav(nav, {
+      return applyPendingNav(nav, {
         navigateTo: (view) => (window as unknown as { navigateTo: (n: string) => Promise<void> }).navigateTo(view),
         focusAccount: async (accountId) => {
           (await import("./views/dashboard/dashboard")).focusDashboardAccount(accountId);
         },
       });
-    }).catch(() => {});
+    }).catch((err) => {
+      // Covers both the take_pending_nav read and applyPendingNav's own
+      // navigation; the window is usable without the queued jump.
+      console.warn("[main] pending navigation failed", err);
+    });
   }
 
   // Sidemenu wiring (ported from legacy dashboard.js). Burger buttons inside

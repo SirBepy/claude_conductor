@@ -187,10 +187,15 @@ class BacklogPanel implements BacklogPanelHandle {
         // Not worth a banner: the eager mount also fetches for a chat with no
         // todos folder, and the list simply stays as it was.
         console.warn("[backlog-panel] list_ai_backlog failed", err);
+        // A request that never got an answer must not fire on a later refresh.
+        if (epoch === this.epoch) this.wantedId = null;
       });
   }
 
   openTodo(id: string): void {
+    // With no project there is nothing to fetch or look in. Keeping the id would
+    // make it fire on whatever unrelated scope arrives next.
+    if (!this.scopeArgs()) return;
     this.wantedId = id;
     if (this.backlog?.todos.some((t) => t.id === id)) {
       this.showWanted();

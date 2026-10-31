@@ -4,6 +4,7 @@ import { invoke } from "../../shared/ipc";
 import type { PreviewMeta } from "../../types/ipc.generated";
 import { PREVIEW_OPEN_EVENT } from "../../shared/chat/chat-preview-card";
 import { DRAFT_OPEN_EVENT } from "../../shared/chat/chat-draft-card";
+import { isTodoRefClick } from "../../shared/chat/chat-click-handlers";
 import { ASK_OPEN_EVENT } from "./ask-open-event";
 import { BACKLOG_OPEN_EVENT } from "./backlog-panel/backlog-open-event";
 import { handleTodoRefClick } from "./backlog-panel/todo-ref-click";
@@ -119,6 +120,8 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   // an already-resolved one pops a read-only replay instead (todo 755) - the
   // question and whichever answer was given, dismissable, no submit control.
   pane.addEventListener("click", (e) => {
+    // A todo id in the question text opens its todo, not the card.
+    if (isTodoRefClick(e)) return;
     const card = (e.target as HTMLElement).closest<HTMLElement>(".msg.question-card");
     if (!card) return;
     const sid = getSelectedSessionId();
