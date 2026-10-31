@@ -51,6 +51,42 @@ export function guardShield(item: ScheduledItem, key: string, open: boolean): st
   return `<button class="schedule-guard-btn${open ? " is-open" : ""}" data-action="guard-toggle" data-id="${escapeHtml(item.id)}" data-key="${escapeHtml(key)}" aria-expanded="${open}" title="Conditional: click to see the guard"><i class="ph${open ? "-fill" : ""} ph-shield-check"></i></button>`;
 }
 
+/** Mirrors `AFTER_MEETING_MAX_WAIT_SECS` in daemon/meeting_monitor.rs: past
+ * this the daemon stops holding the item and fires it (or ages it out), so the
+ * panel stops calling it waiting. */
+const MEETING_MAX_WAIT_MS = 3 * 60 * 60 * 1000;
+
+/** True while the daemon may be holding a due item back for a meeting: still
+ * Pending, flagged `after_meeting`, due, and inside the max-wait window. The
+ * panel cannot see the call itself, so this is "held if a call is on", which
+ * is exactly what makes the row read as waiting rather than overdue. */
+export function isWaitingForMeeting(item: ScheduledItem, nowMs: number): boolean {
+  if (item.status.type !== "pending" || item.after_meeting !== true) return false;
+  const due = new Date(item.fire_at).getTime();
+  if (isNaN(due)) return false;
+  return due <= nowMs && nowMs - due < MEETING_MAX_WAIT_MS;
+}
+
+/** The quiet replacement for the "Upcoming" pill on a due item that is waiting
+ * for a call to end. */
+export function meetingWaitLine(): string {
+  return `<span class="schedule-waiting"><i class="ph ph-hourglass-medium"></i>Waiting for the meeting to end</span>`;
+}
+
+/** The phone icon after an after-meeting item's name; a click opens
+ * `meetingDrawer`. A button for the same reason as `guardShield`. */
+export function meetingMarker(item: ScheduledItem, key: string, open: boolean): string {
+  if (item.after_meeting !== true) return "";
+  return `<button class="schedule-guard-btn schedule-meeting-btn${open ? " is-open" : ""}" data-action="meeting-toggle" data-id="${escapeHtml(item.id)}" data-key="${escapeHtml(key)}" aria-expanded="${open}" title="After meeting: click to see when it fires"><i class="ph${open ? "-fill" : ""} ph-phone-call"></i></button>`;
+}
+
+export function meetingDrawer(item: ScheduledItem): string {
+  if (item.after_meeting !== true) return "";
+  return `<div class="schedule-guard-drawer schedule-meeting-drawer">
+    <div class="sgd-rule">If a call is on when this comes due, it waits. It fires 20 seconds after the call ends, or 3 hours after its set time at the latest.</div>
+  </div>`;
+}
+
 function skipTime(iso: string): string {
   const d = new Date(iso);
   return isNaN(d.getTime())

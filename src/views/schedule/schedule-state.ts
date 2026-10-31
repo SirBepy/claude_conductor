@@ -27,6 +27,8 @@ export interface ScheduleState {
   reschedulingId: string | null;
   /** `occurrenceKey` of the row whose guard drawer is open. */
   guardOpenKey: string | null;
+  /** `occurrenceKey` of the row whose after-meeting drawer is open. */
+  meetingOpenKey: string | null;
   /** "month" (grid) or "week" (7 collapsible day-row-groups). */
   viewMode: "month" | "week";
   /** Day key (yyyy-mm-dd) anchoring the visible week - any day within it. */
@@ -51,6 +53,7 @@ export function freshState(mountId: number): ScheduleState {
     selectedKey: todayKey(),
     reschedulingId: null,
     guardOpenKey: null,
+    meetingOpenKey: null,
     viewMode: "month",
     weekAnchor: todayKey(),
     collapsedDays: new Set(),
