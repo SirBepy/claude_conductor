@@ -58,7 +58,7 @@ fn line_for(item: &ScheduledItem) -> String {
         ScheduledKind::NewChat { .. } => "new chat",
         ScheduledKind::JarvisHygiene => "jarvis",
     };
-    let guarded = if item.guard.is_some() { ", guarded" } else { "" };
+    let guarded = if item.guard_command().is_some() { ", guarded" } else { "" };
     let after_meeting = if item.waits_for_meeting() { ", after meeting" } else { "" };
     format!("- [{}] {when}{repeat}{after_meeting}{guarded} -> {target}: {}", short(&item.id), item.prompt)
 }
@@ -73,6 +73,8 @@ mod tests {
         assert!(!line_for(&item).contains("guarded"));
         item.guard = Some("exit 0".into());
         assert!(line_for(&item).contains(", guarded ->"), "{}", line_for(&item));
+        item.guard = Some("  ".into());
+        assert!(!line_for(&item).contains("guarded"), "a blank stored guard is no guard");
     }
 
     #[test]

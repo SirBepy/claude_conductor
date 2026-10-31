@@ -154,7 +154,20 @@ pub struct ScheduledItem {
     pub after_meeting: Option<bool>,
 }
 
+/// The one rule for what counts as a guard command: trimmed and non-empty, so a
+/// blank string means "no guard". Every writer and reader of `guard` goes through
+/// it, otherwise a stored `Some("")` would read as guarded in one place and
+/// unguarded in another.
+pub fn normalize_guard(raw: Option<&str>) -> Option<&str> {
+    raw.map(str::trim).filter(|g| !g.is_empty())
+}
+
 impl ScheduledItem {
+    /// The guard command to run, or `None` when the item has no real guard.
+    pub fn guard_command(&self) -> Option<&str> {
+        normalize_guard(self.guard.as_deref())
+    }
+
     /// Builds a fresh Pending item: generates the id (uuid, matching the
     /// codebase's session-id convention in `daemon::lifecycle::spawn_session`)
     /// and `created_at`, leaving `last_fired_at`/`last_result` unset.
@@ -389,6 +402,20 @@ mod tests {
 
     fn message_kind() -> ScheduledKind {
         ScheduledKind::Message { session_id: "sess-1".into(), cwd: "C:/proj".into() }
+    }
+
+    #[test]
+    fn a_guard_is_trimmed_and_a_blank_one_is_no_guard() {
+        assert_eq!(normalize_guard(Some("  python check.py \n")), Some("python check.py"));
+        assert_eq!(normalize_guard(Some("")), None);
+        assert_eq!(normalize_guard(Some(" \t\r\n")), None);
+        assert_eq!(normalize_guard(None), None);
+        let mut it = item(message_kind());
+        assert_eq!(it.guard_command(), None);
+        it.guard = Some("   ".into());
+        assert_eq!(it.guard_command(), None, "a stored blank guard reads as unguarded");
+        it.guard = Some(" exit 0 ".into());
+        assert_eq!(it.guard_command(), Some("exit 0"));
     }
 
     // --- store round-trip ---

@@ -60,7 +60,7 @@ pub fn register_schedule(router: &mut Router, state: Arc<DaemonState>) {
                     return Err(RpcError::invalid_params(GUARD_LOCAL_ONLY));
                 }
                 let mut item = ScheduledItem::new(p.kind, p.prompt, p.fire_at, p.recurrence);
-                item.guard = p.guard.filter(|g| !g.trim().is_empty());
+                item.guard = scheduled_items::normalize_guard(p.guard.as_deref()).map(str::to_string);
                 scheduled_items::upsert(item.clone());
                 publish_changed(&state);
                 serde_json::to_value(&item).map_err(|e| RpcError::internal(e.to_string()))
@@ -134,7 +134,7 @@ fn guard_after_update(transport: &Transport, incoming: Option<String>, stored: O
     if *transport != Transport::Local {
         return stored;
     }
-    incoming.filter(|g| !g.trim().is_empty())
+    scheduled_items::normalize_guard(incoming.as_deref()).map(str::to_string)
 }
 
 /// The meeting gate an update writes. A client that predates the field
@@ -225,7 +225,12 @@ mod tests {
             "a phone cannot rewrite it"
         );
         assert_eq!(guard_after_update(&Transport::Local, Some("new.ps1".into()), stored.clone()), Some("new.ps1".into()));
-        assert_eq!(guard_after_update(&Transport::Local, Some("  ".into()), stored), None, "blank clears it");
+        assert_eq!(guard_after_update(&Transport::Local, Some("  ".into()), stored.clone()), None, "blank clears it");
+        assert_eq!(
+            guard_after_update(&Transport::Local, Some("  new.ps1 ".into()), stored),
+            Some("new.ps1".into()),
+            "stored trimmed, same as an MCP-created one"
+        );
     }
 
     #[test]

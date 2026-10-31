@@ -141,8 +141,8 @@ fn gated_lateness_secs(
 }
 
 /// A meeting reading older than this is taken again before a gated item is
-/// judged: a guard command ahead of it in the tick can run for up to 30s, long
-/// enough for a call to have started or ended.
+/// judged: a slow sample ahead of it in the tick can take long enough for a
+/// call to have started or ended.
 const MEETING_SAMPLE_MAX_AGE: Duration = Duration::from_secs(5);
 
 fn meeting_sample_is_stale(age: Duration) -> bool {
@@ -175,6 +175,15 @@ async fn sleep_chunked(total_secs: u64) {
     }
 }
 
+/// An item this tick decided to act on, not yet claimed.
+struct Due {
+    item: ScheduledItem,
+    /// The `now` its lateness was judged against.
+    now: DateTime<Utc>,
+    /// Past the grace window: it goes to Missed and its guard never runs.
+    past_grace: bool,
+}
+
 /// One scheduler tick: evaluate every Pending item against `now`.
 async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
     let now = Utc::now();
@@ -189,6 +198,7 @@ async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
     demand_meeting_for_upcoming(state, &items, now);
     // Read only when a gated item is actually due, and reused while fresh.
     let mut meeting: Option<(MeetingSnapshot, std::time::Instant)> = None;
+    let mut due: Vec<Due> = Vec::new();
     for item in items {
         if !matches!(item.status, ScheduledStatus::Pending) {
             continue;
@@ -210,7 +220,7 @@ async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
                     s
                 }
             };
-            // The tick's `now` may predate earlier items' guard commands.
+            // The tick's `now` may predate an earlier item's meeting sample.
             let now = Utc::now();
             match gated_lateness_secs(&item, &snapshot, fire_at, now, daemon_started_at) {
                 Some(lateness) => (now, lateness),
@@ -228,6 +238,16 @@ async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
         if lateness < grace_secs && is_message_session_busy(state, &item) {
             continue; // stays Pending; retried next tick (~30s later)
         }
+        due.push(Due { item, now, past_grace: lateness >= grace_secs });
+    }
+    // Guards run side by side and BEFORE the claim: run inline per item, each
+    // slow one (up to its 30s timeout) held every other due item behind it,
+    // and running them after the claim would leave the row on "Firing" for the
+    // whole check. A verdict is only ever a decision about whether to send;
+    // the send itself still waits for the claim below.
+    let verdicts = guard_verdicts(due.iter().map(|d| (!d.past_grace).then_some(&d.item))).await;
+    for (due, pre_verdict) in due.into_iter().zip(verdicts) {
+        let Due { item, now, past_grace } = due;
         // Atomic claim (Defects 1 & 3): flips Pending -> Firing and persists
         // BEFORE any fire is attempted. `None` means a concurrent fire_now
         // (or a delete/update) already claimed or removed this item this
@@ -235,9 +255,12 @@ async fn tick(state: &Arc<DaemonState>, daemon_started_at: DateTime<Utc>) {
         let Some(claimed) = scheduled_items::claim_for_fire(&item.id) else {
             continue;
         };
-        let result = if lateness >= grace_secs {
+        let result = if past_grace {
             compute_missed(claimed, now)
+        } else if guard_of(&claimed) == guard_of(&item) {
+            apply_guard_verdict(state, claimed, now, pre_verdict).await
         } else {
+            // Edited while the guard ran: that verdict belongs to the old command.
             compute_guarded(state, claimed, now).await
         };
         // Defect 2: only writes back if the item is still the `Firing` record
@@ -323,13 +346,40 @@ fn compute_missed(mut item: ScheduledItem, now: DateTime<Utc>) -> ScheduledItem 
 /// bypasses this on purpose - a click on Fire now / Retry is an explicit "run
 /// it", and a guard that answered "already ran" must not swallow it.
 async fn compute_guarded(state: &Arc<DaemonState>, item: ScheduledItem, now: DateTime<Utc>) -> ScheduledItem {
-    if let Some((command, cwd)) = guard_of(&item) {
-        let fire_date = DateTime::parse_from_rfc3339(&item.fire_at)
-            .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
-            .unwrap_or_else(|_| now.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string());
-        if let GuardVerdict::Skip(reason) = schedule_guard::run(&command, &cwd, &item.id, &fire_date).await {
-            return compute_skipped(item, now, reason);
+    let verdict = guard_verdict(&item, now).await;
+    apply_guard_verdict(state, item, now, verdict).await
+}
+
+/// Runs the item's guard, if it has one. `None` means there was nothing to run.
+async fn guard_verdict(item: &ScheduledItem, now: DateTime<Utc>) -> Option<GuardVerdict> {
+    let (command, cwd) = guard_of(item)?;
+    let fire_date = DateTime::parse_from_rfc3339(&item.fire_at)
+        .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|_| now.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string());
+    Some(schedule_guard::run(&command, &cwd, &item.id, &fire_date).await)
+}
+
+/// One verdict per input slot (a `None` slot runs no guard), taken concurrently
+/// so N slow guards cost the slowest one rather than their sum.
+async fn guard_verdicts<'a>(items: impl Iterator<Item = Option<&'a ScheduledItem>>) -> Vec<Option<GuardVerdict>> {
+    let now = Utc::now();
+    futures_util::future::join_all(items.map(|slot| async move {
+        match slot {
+            Some(item) => guard_verdict(item, now).await,
+            None => None,
         }
+    }))
+    .await
+}
+
+async fn apply_guard_verdict(
+    state: &Arc<DaemonState>,
+    item: ScheduledItem,
+    now: DateTime<Utc>,
+    verdict: Option<GuardVerdict>,
+) -> ScheduledItem {
+    if let Some(GuardVerdict::Skip(reason)) = verdict {
+        return compute_skipped(item, now, reason);
     }
     compute_fired(state, item, now).await
 }
@@ -337,7 +387,7 @@ async fn compute_guarded(state: &Arc<DaemonState>, item: ScheduledItem, now: Dat
 /// The guard command and the folder it runs in. `JarvisHygiene` has no
 /// folder and no way to be created with a guard, so it never has one.
 fn guard_of(item: &ScheduledItem) -> Option<(String, std::path::PathBuf)> {
-    let command = item.guard.as_deref().map(str::trim).filter(|g| !g.is_empty())?;
+    let command = item.guard_command()?;
     let cwd = match &item.kind {
         ScheduledKind::Message { cwd, .. } | ScheduledKind::NewChat { cwd, .. } => cwd,
         ScheduledKind::JarvisHygiene => return None,
@@ -754,6 +804,21 @@ mod tests {
         assert!(!meeting_sample_is_stale(MEETING_SAMPLE_MAX_AGE));
         assert!(meeting_sample_is_stale(MEETING_SAMPLE_MAX_AGE + Duration::from_millis(1)));
         assert!(meeting_sample_is_stale(Duration::from_secs(30)), "after a guard command's worth of time");
+    }
+
+    #[tokio::test]
+    async fn two_slow_guards_cost_one_guard_s_time_not_two() {
+        // `exit 1` fires, so the verdict is irrelevant: the point is the clock.
+        let slow = guarded("sleep 3; exit 1", ".", None);
+        let skip = guarded("sleep 3; echo 'already ran'; exit 0", ".", None);
+        let started = std::time::Instant::now();
+        let verdicts = guard_verdicts([Some(&slow), None, Some(&skip)].into_iter()).await;
+        let took = started.elapsed();
+        assert_eq!(verdicts.len(), 3, "one slot per input, in order");
+        assert_eq!(verdicts[0], Some(GuardVerdict::Fire));
+        assert_eq!(verdicts[1], None, "an empty slot runs nothing");
+        assert_eq!(verdicts[2], Some(GuardVerdict::Skip("already ran".into())));
+        assert!(took < Duration::from_millis(5500), "guards ran one after another: {took:?}");
     }
 
     #[tokio::test]
