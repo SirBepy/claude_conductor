@@ -129,15 +129,41 @@ fn surface_chats_with_nav(
     payload: impl serde::Serialize + Clone,
     pending: String,
 ) {
-    if app.get_webview_window("session-chats").is_some() {
-        let _ = chats::open_chats_window(app.clone());
-        let _ = app.emit_to("session-chats", event, payload);
-    } else {
-        if let Some(state) = app.try_state::<crate::state::AppState>() {
-            *state.pending_main_nav.lock().unwrap() = Some(pending);
+    match nav_route(app.get_webview_window(chats::CHATS_WINDOW_LABEL).is_some()) {
+        NavRoute::EmitToLiveWindow => {
+            let _ = chats::open_chats_window(app.clone());
+            let _ = app.emit_to(chats::CHATS_WINDOW_LABEL, event, payload);
         }
-        let _ = chats::open_chats_window(app.clone());
+        NavRoute::StashThenBuild => {
+            if let Some(state) = app.try_state::<crate::state::AppState>() {
+                stash_pending_nav(&state.pending_main_nav, pending);
+            }
+            let _ = chats::open_chats_window(app.clone());
+        }
     }
+}
+
+/// How a navigation request reaches the Chats window.
+#[derive(Debug, PartialEq)]
+enum NavRoute {
+    EmitToLiveWindow,
+    StashThenBuild,
+}
+
+/// A window that does not exist yet cannot catch an event, so its nav goes in
+/// the stash instead. Split out so that decision is testable: `AppHandle` is
+/// the `Wry` runtime, and no mock app can stand in for it.
+fn nav_route(chats_window_exists: bool) -> NavRoute {
+    if chats_window_exists {
+        NavRoute::EmitToLiveWindow
+    } else {
+        NavRoute::StashThenBuild
+    }
+}
+
+/// Last request wins: the window only ever drains one.
+fn stash_pending_nav(slot: &std::sync::Mutex<Option<String>>, pending: String) {
+    *slot.lock().unwrap() = Some(pending);
 }
 
 // `(async)`: can build `session-chats` - see the module doc's deadlock rule.
@@ -268,5 +294,18 @@ mod tests {
         for label in ["session-chats", "session-code", "session-schedule", "session-jarvis", "overlay", "session-file-2"] {
             assert_eq!(close_policy(label), ClosePolicy::HideToTray, "{label}");
         }
+    }
+
+    #[test]
+    fn a_nav_for_a_chats_window_that_does_not_exist_is_stashed_not_emitted() {
+        use super::{nav_route, stash_pending_nav, NavRoute};
+        assert_eq!(nav_route(false), NavRoute::StashThenBuild);
+        assert_eq!(nav_route(true), NavRoute::EmitToLiveWindow);
+
+        let slot = std::sync::Mutex::new(None);
+        stash_pending_nav(&slot, "settings-accounts".to_string());
+        assert_eq!(slot.lock().unwrap().as_deref(), Some("settings-accounts"));
+        stash_pending_nav(&slot, "account:a1".to_string());
+        assert_eq!(slot.lock().unwrap().take().as_deref(), Some("account:a1"), "the later request replaces the earlier");
     }
 }
