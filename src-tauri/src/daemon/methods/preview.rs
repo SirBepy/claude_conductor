@@ -238,6 +238,23 @@ mod tests {
         assert!(check_snapshot_scope(&s2_snap, None, false, local).is_ok(), "non-peer callers are unscoped");
     }
 
+    /// A same-slug push by another chat archives the first chat's page; the
+    /// second chat's session id must not unlock it.
+    #[test]
+    fn a_peer_scoped_to_the_replacing_chat_cannot_read_the_replaced_chats_page() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        let id = crate::daemon::preview::push_at(&path, "a".into(), Some("m".into()), "<p>secret</p>".into(), "chat".into(), Some("A".into())).unwrap();
+        crate::daemon::preview::push_at(&path, "b".into(), Some("m".into()), "<p>b</p>".into(), "chat".into(), Some("B".into())).unwrap();
+        let local = |_: &str| true;
+
+        let old = crate::daemon::preview::get_view_at(&path, &id, Some(1)).unwrap();
+        assert!(check_snapshot_scope(&old, Some("B"), true, local).is_err(), "B must not read A's archived page");
+        assert!(check_snapshot_scope(&old, Some("A"), true, local).is_ok(), "A still reads its own");
+        let latest = crate::daemon::preview::get_view_at(&path, &id, None).unwrap();
+        assert!(check_snapshot_scope(&latest, Some("B"), true, local).is_ok());
+    }
+
     /// Both RPCs forward to the host for a chat mirrored from a peer: the
     /// local store holds none of that chat's previews.
     #[tokio::test]
