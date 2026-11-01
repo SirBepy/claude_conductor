@@ -13,6 +13,7 @@ import { linkifyTickets } from "./ticket-refs";
 import { linkifyFilePaths } from "./file-refs";
 import { linkifyDrillRefs } from "./drill-links";
 import { toolSummary } from "./tool-meta";
+import { asObj, strField } from "../obj-utils";
 import { groupToolRange } from "./tool-strip";
 import { clampUserMessages } from "./turn-collapse";
 import { groupAttachmentTray, refoldAttachmentTray } from "./message-attachment-tray";
@@ -26,8 +27,26 @@ import { ensureActiveTurnFooter, applyRunningHighlight, processTurnCloseQueue } 
 // moved their implementation to chat-scroll.ts).
 export { isElNearBottom, isNearBottom, scrollToBottom, beginRevealHold, revealTranscript, scrollToBottomWhenSettled } from "./chat-scroll";
 
+// The working bar ellipsises by width, so its label only needs a sanity cap.
+const FULL_LABEL_MAX = 400;
+
+/** The one-line label the working bar prints. A shell call shows its description,
+ *  else its command whole (toolSummary stops the command at 48 characters). */
+export function describeActivityFull(toolName: string, input: unknown): string {
+  return buildActivity(toolName, input, true);
+}
+
+/** The same label cut to 60 characters, for the agent dots' tooltip lines. */
 export function describeActivity(toolName: string, input: unknown): string {
-  const { target } = toolSummary(toolName, input);
+  return buildActivity(toolName, input, false);
+}
+
+function buildActivity(toolName: string, input: unknown, full: boolean): string {
+  let { target } = toolSummary(toolName, input);
+  if (full && (toolName === "Bash" || toolName === "PowerShell")) {
+    const obj = asObj(input);
+    target = strField(obj, "description") || strField(obj, "command").replace(/\s+/g, " ").trim();
+  }
   let s: string;
   switch (toolName) {
     case "Edit":
@@ -54,7 +73,8 @@ export function describeActivity(toolName: string, input: unknown): string {
     default:
       s = `${toolName}…`;
   }
-  return s.length > 60 ? s.slice(0, 59) + "…" : s;
+  const max = full ? FULL_LABEL_MAX : 60;
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
 /** True when `activity` is the label describeActivity gives the turn-status

@@ -1,7 +1,49 @@
 import { state } from "./state";
 import { visibleInterval } from "../../shared/visible-interval";
+import { escapeHtml } from "../../shared/escape-html";
+import type { ActivityDetail } from "../../shared/chat/tool-meta";
 import { refreshNextChips } from "./next-chip-strip";
 
+/** The bar's markup, one copy for the established pane and the draft pane. The
+ *  line is a button (it opens the detail block, the only route to Stop on a
+ *  phone); Stop sits in the elapsed time's slot and replaces it on hover. */
+export function thinkingBarHtml(): string {
+  return (
+    `<div class="session-thinking" hidden>` +
+    `<div class="thinking-detail" hidden></div>` +
+    `<div class="thinking-row">` +
+    `<button type="button" class="thinking-main" aria-expanded="false" disabled>` +
+    `<span class="thinking-text"></span><i class="ph ph-caret-up thinking-caret"></i></button>` +
+    `<span class="held-chip-slot"></span>` +
+    `<span class="thinking-slot"><span class="thinking-elapsed"></span>` +
+    `<button type="button" class="thinking-pause-btn" title="Stop turn" hidden><i class="ph ph-stop-circle"></i>Stop</button></span>` +
+    `</div></div>`
+  );
+}
+
+/** Opens/closes the detail block on a click of the line, copies its text, and
+ *  routes both Stop buttons to `onStop`. Delegated, so the re-rendered block
+ *  needs no rewiring. */
+export function wireThinkingBar(pane: HTMLElement, onStop: () => void): void {
+  const bar = pane.querySelector<HTMLElement>(".session-thinking");
+  if (!bar) return;
+  bar.addEventListener("click", (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest(".thinking-pause-btn, .thinking-stop-turn")) {
+      onStop();
+    } else if (t.closest(".thinking-copy")) {
+      const text = _src?.lastActivityDetail?.text;
+      if (text) void navigator.clipboard.writeText(text);
+    } else if (t.closest(".thinking-main:not(:disabled)")) {
+      bar.classList.toggle("is-open");
+      updateThinkingBar();
+    }
+  });
+}
+
+let _src: ThinkingBarSource | null = null;
+let _busySince = 0;
+let _elapsedTick: (() => void) | null = null;
 let _progressN: number | null = null;
 let _progressM: number = 0;
 let _activity: string | null = null;
@@ -27,7 +69,12 @@ export function initThinkingBar(pane: HTMLElement | null): void {
     _silenceTick();
     _silenceTick = null;
   }
+  if (_elapsedTick !== null) {
+    _elapsedTick();
+    _elapsedTick = null;
+  }
   _wasBusy = false;
+  _src = null;
   _pane = pane;
 }
 
@@ -60,12 +107,20 @@ export interface ThinkingBarSource {
   activityIdle: boolean;
   lastProgress: { n: number; m: number } | null;
   lastTodoActivity: string | null;
+  /** Optional: the live renderer carries both, a plain snapshot (tests) may not. */
+  lastActivityDetail?: ActivityDetail | null;
+  /** When the in-flight turn began (ms), 0 while unknown. */
+  activeTurnStartedAtMs?: number;
 }
 
 /** Repoint the bar at a newly mounted chat. Every field is overwritten, so a
  *  chat with no progress of its own blanks the previous chat's "Step N of M"
  *  instead of inheriting it - the module state below is global to the pane. */
 export function syncThinkingBar(src: ThinkingBarSource | null): void {
+  // Kept by reference: the live renderer mutates its detail and turn start as
+  // events arrive, and the bar reads them at paint time instead of a callback each.
+  _src = src;
+  _busySince = Date.now();
   _activity = src?.lastActivity ?? null;
   _activityIdle = src?.activityIdle ?? false;
   _progressN = src?.lastProgress?.n ?? null;
@@ -125,13 +180,24 @@ export function updateThinkingBar(): void {
   const busy = isCurrentSessionBusy();
   // Rising edge = a fresh turn, so silence is measured from here rather than
   // from whatever the previous turn last said.
-  if (busy && !_wasBusy) _lastEventAt = Date.now();
+  if (busy && !_wasBusy) {
+    _lastEventAt = Date.now();
+    _busySince = Date.now();
+  }
   _wasBusy = busy;
   if (busy && _silenceTick === null) {
     _silenceTick = visibleInterval(updateThinkingBar, 5000);
   } else if (!busy && _silenceTick !== null) {
     _silenceTick();
     _silenceTick = null;
+  }
+  // A second timer, not a faster silence tick: this one only rewrites the
+  // clock's text, where updateThinkingBar also redraws chips and the label.
+  if (busy && _elapsedTick === null) {
+    _elapsedTick = visibleInterval(paintElapsed, 1000);
+  } else if (!busy && _elapsedTick !== null) {
+    _elapsedTick();
+    _elapsedTick = null;
   }
   const hasHeld = !!state.heldMessages?.hasItemsForActive();
   // Before the idle early return below: an idle, empty bar is exactly when the
@@ -144,11 +210,17 @@ export function updateThinkingBar(): void {
   const cancelBtn = pane.querySelector<HTMLButtonElement>(".cancel-btn");
   if (cancelBtn) cancelBtn.toggleAttribute("hidden", !busy);
   const pauseBtn = pane.querySelector<HTMLButtonElement>(".thinking-pause-btn");
-  if (pauseBtn) pauseBtn.toggleAttribute("hidden", !(busy && !hasHeld));
+  // While messages are held the chip's "Send now" is the interrupt, so Stop
+  // would be a second, competing way to end the same turn.
+  const showStop = busy && !hasHeld;
+  if (pauseBtn) pauseBtn.toggleAttribute("hidden", !showStop);
+  const mainBtn = bar.querySelector<HTMLButtonElement>(".thinking-main");
+  if (mainBtn) mainBtn.disabled = !busy;
 
   if (!busy && !hasHeld) {
     bar.setAttribute("hidden", "");
     if (textEl) textEl.textContent = "";
+    renderDetail(bar, false, false);
     state.heldMessages?.renderChip();
     return;
   }
@@ -167,5 +239,57 @@ export function updateThinkingBar(): void {
       textEl.textContent = "Not responding - no output from the session";
     } else textEl.textContent = "Thinking…";
   }
+  renderDetail(bar, busy, showStop);
+  paintElapsed();
   state.heldMessages?.renderChip();
+}
+
+/** m:ss, or h:mm:ss once a turn passes the hour. */
+export function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const s = String(total % 60).padStart(2, "0");
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+function paintElapsed(): void {
+  const bar = _pane?.querySelector<HTMLElement>(".session-thinking");
+  if (!bar) return;
+  // The renderer's own turn start survives a chat switch; _busySince is the
+  // fallback while a first turn has produced no event yet.
+  const start = _src?.activeTurnStartedAtMs || _busySince;
+  const text = _wasBusy ? formatElapsed(Date.now() - start) : "";
+  for (const n of bar.querySelectorAll<HTMLElement>(".thinking-elapsed")) n.textContent = text;
+}
+
+/** The opened block: the full command or path, then tool, time, step. Redrawn only
+ *  when its content changes, so a text selection inside it survives the stream. */
+function renderDetail(bar: HTMLElement, busy: boolean, showStop: boolean): void {
+  if (!busy) bar.classList.remove("is-open");
+  const open = busy && bar.classList.contains("is-open");
+  bar.querySelector(".thinking-main")?.setAttribute("aria-expanded", String(open));
+  const host = bar.querySelector<HTMLElement>(".thinking-detail");
+  if (!host) return;
+  host.toggleAttribute("hidden", !open);
+  if (!open) {
+    delete host.dataset.key;
+    return;
+  }
+  const d = _src?.lastActivityDetail ?? null;
+  const step = _progressN !== null ? `Step ${_progressN} of ${_progressM}` : null;
+  const key = JSON.stringify([d, step, _todoActivity, showStop]);
+  if (host.dataset.key === key) return;
+  host.dataset.key = key;
+  host.innerHTML =
+    (d?.text
+      ? `<div class="thinking-cmd"><code>${escapeHtml(d.text)}</code><button type="button" class="thinking-copy" title="Copy"><i class="ph ph-copy"></i></button></div>`
+      : "") +
+    `<div class="thinking-meta">` +
+    (d ? `<span><i class="ph ph-wrench"></i>${escapeHtml(d.tool)}</span>` : "") +
+    `<span><i class="ph ph-timer"></i><span class="thinking-elapsed"></span></span>` +
+    (step ? `<span><i class="ph ph-list-checks"></i>${escapeHtml(step)}</span>` : "") +
+    (_todoActivity ? `<span><i class="ph ph-check-square"></i>${escapeHtml(_todoActivity)}</span>` : "") +
+    `</div>` +
+    (showStop ? `<button type="button" class="thinking-stop-turn"><i class="ph ph-stop-circle"></i>Stop turn</button>` : "");
 }

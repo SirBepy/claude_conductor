@@ -1,3 +1,4 @@
+// Reviewed 2026-11-01: chat-dom-renderer.ts gained describeActivityFull for the working bar's label; the PR card path this spec drives is untouched and it passes.
 // Reviewed 2026-10-30 (user-message attachment tray): chat-dom-renderer.ts now groups a USER message's attachment chips into a tray; this spec only asserts assistant /create-pr cards, so its contract is unchanged.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, fireEvent } from "./harness";

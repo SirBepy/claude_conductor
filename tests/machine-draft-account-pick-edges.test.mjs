@@ -54,6 +54,8 @@ vi.mock("../src/views/sessions/session-thinking-bar.ts", () => ({
   isCurrentSessionBusy: vi.fn(() => false),
   updateThinkingBar: vi.fn(),
   syncThinkingBar: vi.fn(),
+  thinkingBarHtml: vi.fn(() => ""),
+  wireThinkingBar: vi.fn(),
 }));
 vi.mock("../src/shared/chat/event-store.ts", () => ({
   sessionEvents: { subscribe: vi.fn(() => () => {}), pushSynthetic: vi.fn(), removeSynthetic: vi.fn() },

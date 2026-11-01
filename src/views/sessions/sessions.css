@@ -609,33 +609,56 @@
   width: 40%;
 }
 
-/* Strip above the input row inside .composer-shell. The shell has no border of
- * its own (the field carries it), so the strip draws its own. */
+/* The working strip above the input row: one quiet line with no card of its own.
+ * Its dot lines up with the field's text (6px strip inset + 12px row padding
+ * = the composer's 6px inset + 12px field padding). The line opens a detail block
+ * above it; Stop shares a slot with the elapsed time, so hovering swaps them
+ * without moving anything. */
 .session-thinking {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+  --thinking-line-h: 28px;
+  position: relative;
   margin: 6px 6px 0;
-  padding: 6px 12px;
-  /* Same height as the input row under it. */
-  box-sizing: border-box;
-  min-height: var(--control-h);
+  flex-shrink: 0;
   font-size: 0.78rem;
   color: var(--color-text-muted);
   font-style: italic;
-  flex-shrink: 0;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-alt);
-  border-radius: 6px;
 }
 
 .session-thinking[hidden] {
   display: none;
 }
 
-.session-thinking::before {
+.thinking-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--thinking-line-h);
+  padding: 0 12px;
+}
+
+.thinking-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--thinking-line-h);
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thinking-main:disabled {
+  cursor: default;
+}
+
+.thinking-main::before {
   content: "";
-  display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -649,36 +672,183 @@
   50%       { opacity: 1; }
 }
 
-.thinking-pause-btn {
-  margin-left: auto;
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  padding: 0;
+/* Says the line opens: on hover where there is one, always on a touch screen. */
+.thinking-caret {
+  flex: none;
+  font-size: 0.8rem;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.2s;
+}
+
+.session-thinking.busy .thinking-row:hover .thinking-caret {
+  opacity: 0.6;
+}
+
+.session-thinking.is-open .thinking-caret {
+  transform: rotate(180deg);
+}
+
+.thinking-slot {
+  position: relative;
+  flex: none;
+  min-width: 64px;
+  height: var(--thinking-line-h);
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  opacity: 0.65;
+  justify-content: flex-end;
+}
+
+.thinking-slot .thinking-elapsed {
+  font-size: 0.74rem;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  transition: opacity 0.12s;
+}
+
+.thinking-pause-btn {
+  position: absolute;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 0.74rem;
+  font-style: normal;
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
   cursor: pointer;
-  border-radius: 4px;
-  transition: opacity 0.15s, color 0.15s;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s, color 0.15s, border-color 0.15s;
 }
 
 .thinking-pause-btn[hidden] {
   display: none;
 }
 
-.thinking-pause-btn:hover {
-  opacity: 1;
+.thinking-pause-btn:hover,
+.thinking-stop-turn:hover {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+@media (hover: hover) {
+  .thinking-row:hover .thinking-slot .thinking-elapsed {
+    opacity: 0;
+  }
+  .thinking-row:hover .thinking-pause-btn,
+  .thinking-pause-btn:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* No hover to reveal it: Stop lives in the opened block only. */
+@media (hover: none) {
+  .thinking-pause-btn {
+    display: none;
+  }
+  .session-thinking.busy .thinking-caret {
+    opacity: 0.6;
+  }
+}
+
+.thinking-detail {
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  font-style: normal;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.thinking-detail[hidden] {
+  display: none;
+}
+
+.thinking-cmd {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.thinking-cmd code {
+  flex: 1;
+  min-width: 0;
+  max-height: 6.5em;
+  overflow-y: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  /* anywhere, not break-all: a path or flag breaks only when it must. */
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.thinking-copy {
+  flex: none;
+  padding: 2px 4px;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.thinking-copy:hover {
   color: var(--color-text);
   background: var(--color-surface-alt);
 }
 
-.thinking-pause-btn i {
-  font-size: 1rem;
+.thinking-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 8px;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+.thinking-detail > .thinking-meta:first-child {
+  margin-top: 0;
+}
+
+.thinking-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.thinking-stop-turn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 4px 11px;
+  font: inherit;
+  font-size: 0.76rem;
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  /* A tap target, not a hover line. */
+  .session-thinking {
+    --thinking-line-h: 40px;
+  }
+  .thinking-stop-turn {
+    min-height: 40px;
+    padding: 0 14px;
+    font-size: 0.85rem;
+  }
 }
 
 /* Container for thinking strip + input row. Borderless: the input field carries

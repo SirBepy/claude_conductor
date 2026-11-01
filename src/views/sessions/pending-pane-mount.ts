@@ -9,7 +9,7 @@ import { sessionEvents } from "../../shared/chat/event-store";
 import { setCodeModeChatProvider } from "./code-mode/entry";
 import { sessionCodeModeChat } from "./code-mode/session-chat";
 import { state } from "./state";
-import { syncThinkingBar } from "./session-thinking-bar";
+import { syncThinkingBar, thinkingBarHtml, wireThinkingBar } from "./session-thinking-bar";
 import { renderSidebar, refreshSessions } from "./sidebar";
 import { characterIconUrl } from "./session-characters";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
@@ -59,7 +59,7 @@ export function mountPendingChrome(
     `<div class="session-statusbar-host"><div class="session-statusbar-skeleton v-skeleton" aria-hidden="true"></div></div>`,
     `<div class="session-messages"><div class="session-messages-skeleton" aria-hidden="true"><div class="session-messages-skeleton-bubble v-skeleton"></div><div class="session-messages-skeleton-bubble v-skeleton"></div></div></div>`,
     `<div class="composer-shell">`,
-    `  <div class="session-thinking" hidden><span class="thinking-text"></span><span class="held-chip-slot"></span><button class="thinking-pause-btn icon-btn" title="Stop turn" hidden><i class="ph ph-stop-circle"></i></button></div>`,
+    thinkingBarHtml(),
     `  <div class="session-composer"></div>`,
     `</div>`,
   ].join("\n");
@@ -70,7 +70,7 @@ export function mountPendingChrome(
   // The wipe above ran after setSessionScope, so the FAB host is detached.
   state.fabDial?.reattach();
 
-  pane.querySelector<HTMLButtonElement>(".thinking-pause-btn")?.addEventListener("click", async () => {
+  wireThinkingBar(pane, async () => {
     // Same source of truth the established pane's button closes over: the
     // renderer's own tracked session id, which swapSubscription flips to the
     // real id on promotion (state.pendingNewSession goes null right after).

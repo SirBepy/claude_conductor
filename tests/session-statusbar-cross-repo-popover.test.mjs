@@ -49,6 +49,8 @@ vi.mock("../src/views/sessions/session-thinking-bar.ts", () => ({
   isCurrentSessionBusy: vi.fn(() => false),
   updateThinkingBar: vi.fn(),
   syncThinkingBar: vi.fn(),
+  thinkingBarHtml: vi.fn(() => ""),
+  wireThinkingBar: vi.fn(),
 }));
 vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({
   projectName: vi.fn(() => ""),

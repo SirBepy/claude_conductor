@@ -7,7 +7,7 @@ import { sessionEvents } from "./event-store";
 import { RenderedMessage } from "./chat-transforms";
 import { armLazyDiffEnhance } from "./diff-enhancer";
 import { type FileEditView } from "./file-edits";
-import { type ToolTally } from "./tool-meta";
+import { type ActivityDetail, type ToolTally } from "./tool-meta";
 import { ToolTallyState } from "./tool-tally-state";
 import { handleCopyClick, handleSlashClick, handleAttachmentClick, handlePastedLogClick, handleAuqAnswerClick, handleTableFullscreen, handlePrPreviewClick } from "./chat-click-handlers";
 import { clampUserMessages } from "./turn-collapse";
@@ -190,6 +190,9 @@ export class ChatRenderer {
   }[] = [];
   fileEdits: FileEditView[] = [];
   lastActivity: string | null = null;
+  // The tool, and its uncut command/path, behind `lastActivity` - what the
+  // working bar shows when opened. Same lifecycle as lastActivity.
+  lastActivityDetail: ActivityDetail | null = null;
   // True once the tool `lastActivity` describes has RETURNED - the label
   // stays on screen (no blank-to-generic-"Thinking" flash) but the bar
   // suffixes it to show the model is past that step. False while the tool
@@ -262,11 +265,18 @@ export class ChatRenderer {
     }
   }
 
-  setActivity(a: string | null, opts: { keepChip?: boolean; idle?: boolean } = {}): void {
+  setActivity(a: string | null, opts: { keepChip?: boolean; idle?: boolean; detail?: ActivityDetail } = {}): void {
     // keepChip skips the highlight clear for the "turn's tools resolved" case
     // (thinking-bar text goes idle, chip keeps pulsing till the turn closes).
     if (a === null && !opts.keepChip) this.activityToolCanon = null;
     if (a === null) { this.lastProgress = null; this.lastTodoActivity = null; }
+    // The detail belongs to the label it was set with: a different label with
+    // none of its own (a retry notice, "Waiting for your answer") drops it, the
+    // idle re-set of the same label keeps it. Set before the same-label early
+    // return so the bar's opened block never describes the previous tool.
+    if (a === null) this.lastActivityDetail = null;
+    else if (opts.detail !== undefined) this.lastActivityDetail = opts.detail;
+    else if (a !== this.lastActivity) this.lastActivityDetail = null;
     const idle = !!opts.idle;
     if (this.lastActivity === a && this.activityIdle === idle) return;
     this.lastActivity = a;
@@ -379,6 +389,7 @@ export class ChatRenderer {
     this.channelMessages = undefined;
     this.fileEdits = [];
     this.lastActivity = null;
+    this.lastActivityDetail = null;
     this.activityIdle = false;
     this.activityToolCanon = null;
     this.lastProgress = null;

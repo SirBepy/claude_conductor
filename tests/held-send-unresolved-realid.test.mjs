@@ -59,6 +59,9 @@ vi.mock("../src/views/sessions/session-thinking-bar.ts", () => ({
   isCurrentSessionBusy: vi.fn(() => false),
   updateThinkingBar: vi.fn(),
   syncThinkingBar: vi.fn(),
+  // The pane only attaches HeldMessages when it finds the bar and its chip slot.
+  thinkingBarHtml: vi.fn(() => `<div class="session-thinking" hidden><span class="held-chip-slot"></span></div>`),
+  wireThinkingBar: vi.fn(),
 }));
 vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({
   projectName: vi.fn(() => ""),

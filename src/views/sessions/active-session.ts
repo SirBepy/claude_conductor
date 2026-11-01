@@ -27,7 +27,7 @@ import { SessionHeader, projectDashboardOpener } from "./session-header";
 import { closeCodeMode } from "./code-mode/code-mode";
 import { setCodeModeChatProvider } from "./code-mode/entry";
 import { applyHeaderMerge } from "./mobile-header-merge";
-import { setThinkingActivity } from "./session-thinking-bar";
+import { setThinkingActivity, thinkingBarHtml, wireThinkingBar } from "./session-thinking-bar";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { resolveNewChatConfig } from "./new-chat-config";
 import { registerCta } from "../../shared/chat/cta-registry";
@@ -252,7 +252,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     `<div class="scheduled-chip-slot"></div>`,
     `<div class="next-chip-slot"></div>`,
     `<div class="composer-shell">`,
-    `  <div class="session-thinking" hidden><span class="thinking-text"></span><span class="held-chip-slot"></span><button class="thinking-pause-btn icon-btn" title="Stop turn" hidden><i class="ph ph-stop-circle"></i></button></div>`,
+    thinkingBarHtml(),
     `  <div class="session-composer"></div>`,
     `</div>`,
   ].join("");
@@ -263,7 +263,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   // The wipe above ran after setSessionScope, so the FAB host is detached.
   state.fabDial?.reattach();
 
-  pane.querySelector<HTMLButtonElement>(".thinking-pause-btn")?.addEventListener("click", () => {
+  wireThinkingBar(pane, () => {
     void invoke<void>("cancel_turn", { sessionId: sess.session_id }).catch(err => console.error("[sessions] cancel_turn failed", err));
   });
 
