@@ -330,6 +330,27 @@ test("in the Chats window the strip ends in a GLOBAL group: Jarvis on the bounda
   await page.screenshot({ path: `${SCREENSHOT_DIR}/rail-global-group.png` });
 });
 
+test("in the Chats window with no chat open, the standalone rail carries the GLOBAL group", async ({ page }) => {
+  await mountPane(page, {}, 1280, true);
+  await page.evaluate(async () => {
+    (await import("/shared/navigation.ts")).setActiveView("sessions");
+    const rail = await import("/shared/app-rail.ts");
+    rail.mountAppRail();
+    // The strip announced itself before this rail existed (boot mounts the rail first).
+    rail.announceSplitStrip(true);
+  });
+  const solo = page.locator("#app-rail");
+  await expect(solo).toBeHidden();
+
+  // The last chat closes: the strip leaves with the FAB host.
+  await page.evaluate(() => (window as any).__fab.setSessionScope(null, null));
+  await expect(solo).toBeVisible();
+  await expect(solo.locator('[data-rail-go="dashboard"]')).toBeVisible();
+
+  await page.evaluate(() => (window as any).__fab.setSessionScope("sess-A", "/proj"));
+  await expect(solo).toBeHidden();
+});
+
 test("outside the Chats window the strip has no global group", async ({ page }) => {
   await mountPane(page);
   await expect(page.locator(".sp-global")).toHaveCount(0);

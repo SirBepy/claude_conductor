@@ -131,6 +131,9 @@ export class SplitPanels implements PanelHost {
     // Before apply(): a newly-shown Preview must fetch for the new chat.
     for (const h of this.handles.values()) h.setSessionScope(sessionId, cwd);
     this.apply(changed);
+    // With no chat the FAB host (and this strip inside it) is detached, so the
+    // standalone rail has to carry the GLOBAL group or it is unreachable.
+    if (isChatsWindow()) announceSplitStrip(!!sessionId);
   }
 
   openPanel(panel: PanelKey): void {
