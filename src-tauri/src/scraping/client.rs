@@ -318,6 +318,30 @@ mod tests {
         assert_eq!(snap.seven_day.utilization, 94.0);
     }
 
+    /// Live, read-only: polls usage for the chat org of the stored web session
+    /// named by `CC_LIVE_SESSION_FILE` (a `session-<account id>.txt`) and prints
+    /// the two utilizations, never the cookie. Run with
+    /// `cargo test --lib -- --ignored live_usage_poll --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_usage_poll() {
+        let path = std::env::var("CC_LIVE_SESSION_FILE").expect("set CC_LIVE_SESSION_FILE");
+        let stored = std::fs::read_to_string(path).unwrap();
+        let key = crate::util::secret_store::unprotect(stored.trim()).unwrap();
+        let key = key.trim();
+        let account = fetch_web_account("https://claude.ai", key).await.unwrap();
+        let org = account.chat_org().expect("no chat org in this session");
+        let snap = fetch_usage_for_org("https://claude.ai", key, Some(&org.uuid)).await;
+        match snap {
+            Ok(s) => println!(
+                "LIVE 5h={}% (resets {:?}) 7d={}% (resets {:?})",
+                s.five_hour.utilization, s.five_hour.resets_at,
+                s.seven_day.utilization, s.seven_day.resets_at
+            ),
+            Err(e) => panic!("LIVE poll failed: {e:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn unauthorized_on_401() {
         let mut server = mockito::Server::new_async().await;
