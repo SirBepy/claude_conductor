@@ -9,6 +9,7 @@ import { parseNextActions } from "./chat-next-actions";
 import { eventToRenderedMessage } from "./chat-event-to-message";
 import { parseFileEdit } from "./file-edits";
 import {
+  activityDetail,
   BUILTIN_TODO_WRITE_TOOL,
   canonicalTool,
   isPrPreviewTool,
@@ -23,7 +24,7 @@ import {
   tryHandleQuestionToolUse,
   tryHandleQuestionResult,
 } from "./chat-question-card";
-import { describeActivity, isTurnStatusActivity } from "./chat-dom-renderer";
+import { describeActivity, describeActivityFull, isTurnStatusActivity } from "./chat-dom-renderer";
 import { resolveOrdinalIn } from "./chat-pagination";
 import { descOf } from "./tool-strip-subagents";
 import type { ChatRenderer } from "./chat-renderer";
@@ -243,7 +244,7 @@ export function handleToolUseEvent(
     }
   }
   r.activityToolCanon = canonicalTool(ev.tool_name);
-  r.setActivity(describeActivity(ev.tool_name, ev.input));
+  r.setActivity(describeActivityFull(ev.tool_name, ev.input), { detail: activityDetail(ev.tool_name, ev.input) });
   r.outstandingActivityToolIds.add(ev.id);
   return { touched: true, coalesce: false };
 }

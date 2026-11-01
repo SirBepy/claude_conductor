@@ -150,6 +150,52 @@ export function toolSummary(tool: string, input: unknown): { icon: string; tool:
   return { icon, tool, target: capTarget(target) };
 }
 
+/** What the working bar shows when it is opened: the display tool name plus the
+ *  tool's real argument, uncut (toolSummary's target is capped for a one-line row). */
+export interface ActivityDetail {
+  tool: string;
+  /** The full command, path, pattern or URL; null when the tool has no such argument. */
+  text: string | null;
+}
+
+// A Bash command can be a pasted script; the bar's open block scrolls past this.
+const DETAIL_MAX = 2000;
+
+/** The uncut counterpart of toolSummary's target, for the working bar's opened block. */
+export function activityDetail(tool: string, input: unknown): ActivityDetail {
+  const obj = asObj(input);
+  const text = ((): string => {
+    switch (tool) {
+      case "Bash":
+      case "PowerShell":
+        return strField(obj, "command");
+      case "Read":
+      case "Edit":
+      case "MultiEdit":
+      case "Write":
+        return strField(obj, "file_path");
+      case "NotebookEdit":
+        return strField(obj, "notebook_path");
+      case "Grep":
+      case "Glob": {
+        const pattern = strField(obj, "pattern");
+        const path = strField(obj, "path");
+        return pattern && path ? `${pattern}  in ${path}` : pattern;
+      }
+      case "WebFetch":
+        return strField(obj, "url");
+      case "WebSearch":
+        return strField(obj, "query");
+      default:
+        return "";
+    }
+  })();
+  return {
+    tool: toolSummary(tool, input).tool,
+    text: text ? (text.length > DETAIL_MAX ? text.slice(0, DETAIL_MAX) + "…" : text) : null,
+  };
+}
+
 // Tools that fold into another tool's chip/tally so the user sees one bucket
 // per concept, not per CLI variant: PowerShell and Bash are both "Ran"; the
 // edit family (MultiEdit/NotebookEdit) AND Write fold into "Edit" - one

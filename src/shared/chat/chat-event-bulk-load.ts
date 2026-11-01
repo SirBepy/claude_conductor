@@ -48,6 +48,7 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   r.auqPreContent = null;
   r.fileEdits = [];
   r.lastActivity = null;
+  r.lastActivityDetail = null;
   r.activityIdle = false;
   r.activityToolCanon = null;
   r.activeToolGroups.clear();
