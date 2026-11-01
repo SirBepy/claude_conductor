@@ -191,6 +191,11 @@
      border shifts the painted text 1px right and narrows its line box 2px,
      wrapping a just-fitting last word early (todo 774). */
   --composer-input-border: 1px;
+  /* A single line is exactly --control-h tall: vertical padding is whatever
+     is left after the 1.4 line box and the border, so it centres at any
+     height. Horizontal padding clears the text from the rounded edge. */
+  --composer-pad-x: 12px;
+  --composer-pad-y: calc((var(--control-h) - 1.4em - 2 * var(--composer-input-border)) / 2);
 }
 
 .composer-highlight {
@@ -201,7 +206,7 @@
   overflow: hidden;
   box-sizing: border-box;
   /* MUST match .composer-textarea box + type metrics exactly. */
-  padding: 6px 8px;
+  padding: var(--composer-pad-y) var(--composer-pad-x);
   border: var(--composer-input-border) solid transparent;
   border-radius: 4px;
   font-family: inherit;
@@ -224,7 +229,7 @@
      avoiding the JS height:"auto"→height:scrollHeight pattern that caused a
      one-frame box-shadow render at the wrong size after line wraps. */
   field-sizing: content;
-  min-height: 32px;
+  min-height: var(--control-h);
   max-height: 200px;
   overflow-y: auto;
   background: transparent;
@@ -232,7 +237,7 @@
   caret-color: var(--color-text);
   border: var(--composer-input-border) solid var(--color-border);
   border-radius: 4px;
-  padding: 6px 8px;
+  padding: var(--composer-pad-y) var(--composer-pad-x);
   font-family: inherit;
   font-size: 0.88rem;
   line-height: 1.4;
@@ -309,6 +314,8 @@
   /* The swipe-up for voice would otherwise be read as a page scroll. */
   touch-action: none;
   -webkit-touch-callout: none;
+  width: var(--control-h);
+  min-height: var(--control-h);
   transition: background-color 0.15s, color 0.15s;
 }
 
@@ -423,14 +430,6 @@
     height: 28px;
     top: -8px;
     right: -8px;
-  }
-  /* The row stretches to base.css's 44px phone .icon-btn, so a 6px top pad
-     left one line of text ~6px above the send button's centre. Padding sized
-     to that 44px centres it; both layers, or the caret drifts off the text. */
-  .composer-textarea,
-  .composer-highlight {
-    padding-top: calc((44px - 1.4em) / 2);
-    padding-bottom: calc((44px - 1.4em) / 2);
   }
 }
 

@@ -515,4 +515,23 @@ test.describe("view-harness / project dashboard", () => {
     // The scrollbar hides again once the row stops moving.
     await expect(track).not.toHaveClass(/\bis-scrolling\b/, { timeout: 3000 });
   });
+
+  test("the rail's Tickets select is a full control-height field led by the same badge as Account", async ({ page }) => {
+    // A bare `flex: 1` in the column-direction tracker control collapsed the select to its text (~20px).
+    await mountWithDashboard(page, {
+      list_projects: [{ id: "p-conductor", path: CONDUCTOR_CWD, name: "claude_usage_in_taskbar", default_model: "haiku", default_effort: null }],
+      list_accounts: [],
+      get_settings: { theme: "void", defaultModel: "sonnet", defaultEffort: "high" },
+      update_project: null,
+    });
+    await page.setViewportSize({ width: 1700, height: 1000 });
+    await openDraft(page, CONDUCTOR_CWD, "claude_usage_in_taskbar");
+    const control = page.locator(".pd-draft.has-rail > .pd-rail #trackerControl");
+    const select = control.locator("#trackerKind");
+    await expect(select).toBeVisible();
+    const want = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--control-h")));
+    expect(want).toBeGreaterThan(0);
+    expect((await select.boundingBox())!.height).toBeCloseTo(want, 0);
+    await expect(control.locator(".account-icon-badge")).toBeVisible();
+  });
 });

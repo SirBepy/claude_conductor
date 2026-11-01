@@ -162,11 +162,15 @@ export async function renderTrackerRow(cwd: string): Promise<void> {
   const kind = own?.kind ?? "";
   const workspace = own?.workspace ?? inferred?.workspace ?? "";
   const opt = (v: string, label: string) => `<option value="${v}"${v === kind ? " selected" : ""}>${escapeHtml(label)}</option>`;
+  // Leads with a badge like the Account row's, so the two stacked selects read as siblings.
   control.innerHTML = `
-    <select id="trackerKind" class="inline-select">
-      ${opt("", autoLabel)}${opt("shortcut", "Shortcut")}${opt("linear", "Linear")}${opt("off", "None")}
-    </select>
-    <input id="trackerWorkspace" class="inline-input" type="text" placeholder="workspace" value="${escapeHtml(workspace)}"${kind === "shortcut" || kind === "linear" ? "" : " hidden"}>
+    <span class="account-icon-badge"><i class="ph ph-ticket"></i></span>
+    <span class="tracker-fields">
+      <select id="trackerKind" class="inline-select">
+        ${opt("", autoLabel)}${opt("shortcut", "Shortcut")}${opt("linear", "Linear")}${opt("off", "None")}
+      </select>
+      <input id="trackerWorkspace" class="inline-input" type="text" placeholder="workspace" value="${escapeHtml(workspace)}"${kind === "shortcut" || kind === "linear" ? "" : " hidden"}>
+    </span>
   `;
   const select = document.getElementById("trackerKind") as HTMLSelectElement | null;
   const input = document.getElementById("trackerWorkspace") as HTMLInputElement | null;
