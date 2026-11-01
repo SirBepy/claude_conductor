@@ -184,6 +184,24 @@ pub async fn fetch_web_account(base_url: &str, session_key: &str)
     resp.json().await.context("parsing account identity").map_err(ScrapeError::Other)
 }
 
+/// The API returns { five_hour, seven_day, extra_usage } without a
+/// captured_at field; we stamp that ourselves. A whole window comes back as
+/// `null` (not just its `resets_at`) while the account is idle, so each is
+/// optional here and read as 0% by `idle_window`.
+#[derive(Deserialize)]
+struct RawUsage {
+    #[serde(default)]
+    five_hour: Option<crate::types::WindowUsage>,
+    #[serde(default)]
+    seven_day: Option<crate::types::WindowUsage>,
+    #[serde(default)]
+    extra_usage: Option<crate::types::ExtraUsage>,
+}
+
+fn idle_window() -> crate::types::WindowUsage {
+    crate::types::WindowUsage { utilization: 0.0, resets_at: String::new() }
+}
+
 /// Fetches current usage, always scraping the FIRST org in the session's org
 /// list. This is the legacy single-cookie behavior (`docs/multi-account/
 /// 03-per-account-usage.md`'s migration bridge): correct only when the
@@ -233,22 +251,13 @@ pub async fn fetch_usage_for_org(base_url: &str, session_key: &str, org_uuid: Op
         )));
     }
 
-    // The API returns { five_hour, seven_day, extra_usage } without a
-    // captured_at field; we stamp that ourselves.
-    #[derive(Deserialize)]
-    struct RawUsage {
-        five_hour: crate::types::WindowUsage,
-        seven_day: crate::types::WindowUsage,
-        #[serde(default)]
-        extra_usage: Option<crate::types::ExtraUsage>,
-    }
     let raw: RawUsage = usage_resp.json().await
         .context("parsing usage").map_err(ScrapeError::Other)?;
 
     Ok(UsageSnapshot {
         captured_at: chrono::Utc::now().to_rfc3339(),
-        five_hour: raw.five_hour,
-        seven_day: raw.seven_day,
+        five_hour: raw.five_hour.unwrap_or_else(idle_window),
+        seven_day: raw.seven_day.unwrap_or_else(idle_window),
         extra_usage: raw.extra_usage,
         // The caller (scheduler) stamps `account_id` once it knows which
         // registered account this fetch was for; `fetch_usage_for_org` only
@@ -281,6 +290,32 @@ mod tests {
         let snap = fetch_usage(&server.url(), "sk-abc").await.unwrap();
         assert_eq!(snap.five_hour.utilization, 10.0);
         assert_eq!(snap.seven_day.utilization, 5.0);
+    }
+
+    #[tokio::test]
+    async fn null_window_reads_as_idle_zero_percent() {
+        // Live 2026-11-01: an idle account answers `"five_hour": null`, which
+        // failed every poll ("expected struct WindowUsage") and left the
+        // dashboard card on "No data yet".
+        let mut server = mockito::Server::new_async().await;
+        let _m1 = server.mock("GET", "/api/organizations")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"[{"uuid":"ORG-1"}]"#)
+            .create_async().await;
+        let _m2 = server.mock("GET", "/api/organizations/ORG-1/usage")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{
+                "five_hour": null,
+                "seven_day": {"utilization": 94.0, "resets_at": "y"}
+            }"#)
+            .create_async().await;
+
+        let snap = fetch_usage(&server.url(), "sk-abc").await.unwrap();
+        assert_eq!(snap.five_hour.utilization, 0.0);
+        assert_eq!(snap.five_hour.resets_at, "");
+        assert_eq!(snap.seven_day.utilization, 94.0);
     }
 
     #[tokio::test]
