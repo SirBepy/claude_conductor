@@ -1,3 +1,4 @@
+// Reviewed 2026-11-02: .icon-btn is now var(--control-h) square instead of a fixed 32px; this spec asserts the bands' layout and passes.
 // Reviewed 2026-10-29: .icon-btn-sq now sets place-content: center beside place-items, and the question card's Ask button uses display: grid instead of inline-flex, so its glyph is centred - no change to this spec's contract, and it passes.
 // asserts: src/styles/base.css
 import { test, expect, type Page } from "@playwright/test";

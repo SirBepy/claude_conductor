@@ -4,9 +4,10 @@ import { mountView } from "./harness";
 import { shotDir } from "./shot-dir";
 
 // asserts: src/styles/settings-sections.css, src/views/settings/subviews/about/about.ts
-// Every Settings subpage shares one 45px row, and every field, dropdown and
-// button on it is 32px, inside a row or not (Add account, Copy link, Pair, the
-// Data page's Clear all). The index keeps the kit's compact 36px nav rows.
+// Every Settings subpage shares one row (--control-h + 12px), and every field,
+// dropdown and button on it is --control-h (36px; 44px on a phone), inside a row
+// or not (Add account, Copy link, Pair, the Data page's Clear all). The index
+// keeps the kit's compact 36px nav rows.
 
 const SUBPAGES = [
   "settings-appearance", "settings-notifications", "settings-chat-defaults",
@@ -51,7 +52,7 @@ const INVOKE = {
 const SHOT_DIR = shotDir();
 
 for (const view of SUBPAGES) {
-  test(`${view}: rows are 45px and their controls 32px`, async ({ page }) => {
+  test(`${view}: rows are one control height plus padding and their controls one control height`, async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 1400 });
     await mountView(page, { view, invoke: INVOKE });
     await page.locator(`.view-${view}`).waitFor();
@@ -67,7 +68,8 @@ for (const view of SUBPAGES) {
           h: Math.round(el.getBoundingClientRect().height),
         })),
     );
-    for (const r of rows) expect(r.h, `row "${r.label}"`).toBe(45);
+    const control = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--control-h")));
+    for (const r of rows) expect(r.h, `row "${r.label}"`).toBe(control + 12);
 
     // Fields, dropdowns and text buttons; color swatches (28px), sliders and
     // icon-only buttons have their own sizes.
@@ -81,7 +83,7 @@ for (const view of SUBPAGES) {
             h: Math.round(el.getBoundingClientRect().height),
           })),
       );
-    for (const c of controls) expect(c.h, c.what).toBe(32);
+    for (const c of controls) expect(c.h, c.what).toBe(control);
   });
 }
 

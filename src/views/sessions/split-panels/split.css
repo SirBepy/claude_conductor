@@ -37,8 +37,8 @@
 .sp-tab {
   position: relative;
   box-sizing: border-box;
-  width: 34px;
-  height: 34px;
+  width: var(--control-h);
+  height: var(--control-h);
   padding: 0;
   margin: 0;
   display: grid;
