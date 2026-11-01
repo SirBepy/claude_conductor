@@ -132,8 +132,11 @@
 }
 
 /* Dark / Light segmented switch */
+/* The switch is the control-height box; its two segments fill it. */
 .tp-seg {
   display: inline-flex;
+  box-sizing: border-box;
+  height: var(--control-h);
   gap: 2px;
   padding: 3px;
   border-radius: 8px;
@@ -144,7 +147,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 11px;
+  padding: 0 11px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -177,7 +180,8 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 6px 9px;
+  min-height: var(--control-h);
+  padding: 0 9px;
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;

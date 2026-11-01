@@ -9,7 +9,7 @@ input[type="password"] {
   border: 1px solid var(--color-border);
   border-top-color: rgba(0, 0, 0, 0.5);
   border-bottom-color: rgba(255, 255, 255, 0.1);
-  padding: 0.65rem 1rem;
+  padding: 0 1rem;
   border-radius: 10px;
   outline: none;
   font-family: "DM Sans", system-ui, sans-serif;
@@ -21,6 +21,25 @@ input[type="password"] {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: textfield;
+}
+
+/* One field height, whatever the field's own padding. :where() keeps this at
+   zero specificity, so a field that is deliberately another size (an inline
+   editor, a tight list row) still wins with its own class rule. */
+:where(
+  input[type="number"],
+  input[type="text"],
+  input[type="search"],
+  input[type="time"],
+  input[type="password"],
+  input[type="date"],
+  input[type="datetime-local"],
+  input[type="email"],
+  input[type="url"],
+  select
+) {
+  box-sizing: border-box;
+  height: var(--control-h);
 }
 
 input[type="number"]:focus,
@@ -66,7 +85,7 @@ select {
   border: 1px solid var(--color-border);
   border-top-color: rgba(0, 0, 0, 0.5);
   border-bottom-color: rgba(255, 255, 255, 0.1);
-  padding: 0.35rem 0.75rem;
+  padding: 0 0.75rem;
   border-radius: 8px;
   min-width: 150px;
   outline: none;

@@ -27,10 +27,10 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
   color: var(--color-text);
   border-radius: 7px;
   cursor: pointer;
-  height: 30px;
+  height: var(--control-h);
   font-family: inherit;
 }
-.cal-nav { width: 30px; padding: 0; font-size: 1.05rem; line-height: 1; display: grid; place-items: center; }
+.cal-nav { width: var(--control-h); padding: 0; font-size: 1.05rem; line-height: 1; display: grid; place-items: center; }
 .cal-today { padding: 0 12px; font-size: 0.8rem; color: var(--color-text-muted); }
 .cal-nav:hover, .cal-today:hover { border-color: var(--color-primary); }
 
@@ -86,11 +86,14 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
 .cal-legend span { display: inline-flex; align-items: center; gap: 4px; }
 
 /* ── view-mode toggle (Month / Week) ── */
+/* The toggle is the control-height box; its segments fill it. */
 .view-toggle {
   display: flex;
+  box-sizing: border-box;
+  height: var(--control-h);
   width: fit-content;
   gap: 2px;
-  padding: 2px;
+  padding: 3px;
   margin-bottom: 10px;
   background: var(--color-surface-alt);
   border: 1px solid var(--color-border);
@@ -103,7 +106,7 @@ body.schedule-window-mode .view-schedule .view-body.schedule-view-body { height:
   border: none;
   background: none;
   color: var(--color-text-muted);
-  padding: 5px 14px;
+  padding: 0 14px;
   border-radius: 6px;
   cursor: pointer;
 }

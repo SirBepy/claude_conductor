@@ -106,8 +106,9 @@ html body:has(.view-sessions[data-mobile-keyboard]) {
     letter-spacing: -0.01em;
 }
 
-/* Fixed 32px icon button. For a caller-sized 24-28px target, use
-   .icon-btn-sq instead. */
+/* A square icon button, one control height (--control-h in tokens.css: 36px,
+   44px on a phone). For a caller-sized 24-28px target, use .icon-btn-sq
+   instead. */
 .icon-btn {
     background: none;
     border: none;
@@ -116,8 +117,8 @@ html body:has(.view-sessions[data-mobile-keyboard]) {
     font-size: 1.1rem;
     padding: 4px 6px;
     border-radius: 6px;
-    width: 32px;
-    height: 32px;
+    width: var(--control-h);
+    height: var(--control-h);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -169,11 +170,8 @@ html body:has(.view-sessions[data-mobile-keyboard]) {
 }
 
 @media (max-width: 768px) {
-    /* Bring every icon button up to the ~44px touch-target minimum on phones;
-       desktop keeps the tighter 32px sizing. */
+    /* The 44px touch-target size comes from --control-h; only the glyph grows here. */
     .icon-btn {
-        width: 44px;
-        height: 44px;
         font-size: 1.375rem;
     }
 }

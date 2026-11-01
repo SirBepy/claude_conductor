@@ -4,14 +4,14 @@ import { mountView } from "./harness";
 import { shotDir } from "./shot-dir";
 
 // asserts: src/views/settings/subviews/remote-access/remote-access.ts
-// Settings subpages share a 45px row via `[class*="view-settings-"]` in
+// Settings subpages share one row (--control-h + 12px) via `[class*="view-settings-"]` in
 // settings-sections.css. The Remote access root once carried only the index's
 // plain `view-settings` class, so its rows measured the kit's 36px baseline.
 
 const SHOT_DIR = shotDir();
 const LABEL = process.env.CC_SHOT_LABEL ?? "after";
 
-test("remote access page: every kit-row is the shared 45px height", async ({ page }) => {
+test("remote access page: every kit-row is the shared control-height row", async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 900 });
   await mountView(page, {
     view: "settings-remote-access",
@@ -46,23 +46,26 @@ test("remote access page: every kit-row is the shared 45px height", async ({ pag
   expect(rows.length).toBeGreaterThanOrEqual(1);
   await page.screenshot({ path: path.join(SHOT_DIR, `remote-access-${LABEL}.png`), fullPage: true });
 
-  // The kit trims the first/last row of a card on purpose; the rest are 45px.
-  // Each card here holds a single row, so there are no interior rows to compare:
-  // the sibling rule is checked against the heights the kit gives edge rows.
+  // The kit trims the first/last row of a card on purpose; the rest are one
+  // control height plus 12px. Each card here holds a single row, so there are no
+  // interior rows to compare: the sibling rule is checked against the heights the
+  // kit gives edge rows.
+  const control = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--control-h")));
+  const rowH = control + 12;
   for (const r of rows) {
-    expect(r.h, `row "${r.label}" (edge=${r.edge})`).toBeGreaterThanOrEqual(r.edge ? 44 : 45);
+    expect(r.h, `row "${r.label}" (edge=${r.edge})`).toBeGreaterThanOrEqual(r.edge ? rowH - 1 : rowH);
   }
 
-  // In-row fields fit the 32px control pin.
+  // In-row fields fit the control-height pin.
   const fields = await page.locator(".kit-row input[type=text]").evaluateAll((els) =>
     els.map((el) => Math.round(el.getBoundingClientRect().height)),
   );
-  for (const h of fields) expect(h).toBeLessThanOrEqual(32);
+  for (const h of fields) expect(h).toBeLessThanOrEqual(control);
 
-  // Per-device rename fields and Unpair/Revoke buttons stay within 32px.
+  // Per-device rename fields and Unpair/Revoke buttons stay within the control height.
   const controls = await page
     .locator(".ra-device-row .ra-name-input, .ra-device-row .btn-danger-sm")
     .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
   expect(controls.length).toBeGreaterThanOrEqual(4);
-  for (const h of controls) expect(h).toBeLessThanOrEqual(32);
+  for (const h of controls) expect(h).toBeLessThanOrEqual(control);
 });

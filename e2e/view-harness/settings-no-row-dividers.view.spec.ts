@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+// Reviewed 2026-11-02: settings rows and the shortcut Rebind button now size from --control-h; this spec asserts divider lines, not heights, and passes.
 // Reviewed 2026-10-30: project-config/project-settings.ts (formerly automation.ts, its Automation section is gone) lays its rows out as .ps-line (label + toggle) instead of the Settings .option rows; the popup test below checks the new rows for dividers. Passed after the change.
 import path from "node:path";
 import { mountView } from "./harness";

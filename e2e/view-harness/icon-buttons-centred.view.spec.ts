@@ -1,3 +1,4 @@
+// Reviewed 2026-11-02: .icon-btn is now var(--control-h) square (36px, 44px on a phone) instead of 32px / 44px; this spec asserts glyph centring, not size, and passes.
 // Reviewed 2026-10-31: the question card's context box and ask band now run edge to edge on desktop too and the domain chip is back on the context row - this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-30: the question card's ask band is now two rows (domain chip + Ask button on top, question text under them) and the ? icon is gone - this spec's contract is unchanged and it passes.
 // asserts: src/styles/base.css, src/views/sessions/permission-modal-shell.css, src/views/sessions/permission-modal-question.css

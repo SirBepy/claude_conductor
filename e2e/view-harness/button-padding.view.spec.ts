@@ -1,4 +1,5 @@
 // asserts: src/styles/color-picker.css
+// Reviewed 2026-11-02: the shared text-button classes gained min-height: var(--control-h); this spec reads padding only and passes.
 import { test, expect } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
 

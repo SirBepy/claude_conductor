@@ -72,14 +72,14 @@
 }
 
 /* One row height on every Settings subpage, whatever the row holds. The kit's
-   36px baseline left toggle rows 36px tall next to 45px dropdown rows; 45px
-   fits a 32px control plus the row's 6px padding each side, with 1px spare.
-   Every field, dropdown and button inside a row is pinned to that 32px so a
-   time picker or number box can't stretch its row either. The index (plain
+   36px baseline left toggle rows 36px tall next to taller dropdown rows; a row
+   is one control height plus the row's 6px padding each side. Every field,
+   dropdown and button inside a row is pinned to --control-h so a time picker
+   or number box can't stretch its row either. The index (plain
    .view-settings, no suffix) holds only same-height nav rows, so it keeps the
    compact baseline and stays one screen tall. */
 [class*="view-settings-"] {
-  --kit-row-min-h: 45px;
+  --kit-row-min-h: calc(var(--control-h) + 12px);
 }
 [class*="view-settings-"] .kit-row :is(
   select,
@@ -87,15 +87,29 @@
   .btn-danger
 ),
 /* Buttons and the pairing-URL fields sit outside a row too (Add account, Copy
-   link, Pair); same 32px so they match the controls in the rows above them. */
+   link, Pair); same height so they match the controls in the rows above them. */
 [class*="view-settings-"] :is(.btn-secondary, .ra-token-field) {
-  height: 32px;
+  height: var(--control-h);
   box-sizing: border-box;
   padding-top: 0;
   padding-bottom: 0;
 }
+/* The kit's own buttons (vendor/tauri_kit, not edited here) take the same height. */
+:is(.kit-btn-primary, .kit-btn-secondary, .kit-btn-danger) {
+  min-height: var(--control-h);
+  box-sizing: border-box;
+}
+.kit-dev-link {
+  display: grid;
+  place-items: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
+}
+
+/* A swatch, inset inside the row's control height. */
 [class*="view-settings-"] .kit-row input[type="color"] {
-  height: 28px;
+  height: calc(var(--control-h) - 8px);
   box-sizing: border-box;
 }
 

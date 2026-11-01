@@ -55,6 +55,10 @@ button {
    own padding still wins whatever the stylesheet order, exactly as it did against `button {}`. */
 button:where(.btn, .btn-primary, .btn-secondary, .btn-danger) {
   padding: 7px 16px;
+  /* The shared control height (tokens.css), so a text button lines up with the
+     field or select beside it. min-, not fixed: a wrapped label still grows it. */
+  min-height: var(--control-h);
+  box-sizing: border-box;
 }
 
 .btn-primary {
