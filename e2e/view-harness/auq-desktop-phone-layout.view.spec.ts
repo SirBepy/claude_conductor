@@ -1,3 +1,4 @@
+// Reviewed 2026-11-01: the review panel supplies its own top gap now that the card body has none (assertion in the review-step test).
 // Reviewed 2026-10-31: the context box and ask band run edge to edge on desktop too (new test below); the chip moved back to the context row.
 // Reviewed 2026-10-30: the question card's ask band is now two rows (domain chip + Ask button on top, question text under them) and the ? icon is gone - this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-29: .icon-btn-sq now sets place-content: center beside place-items, and the question card's Ask button uses display: grid instead of inline-flex, so its glyph is centred - no change to this spec's contract, and it passes.
@@ -121,6 +122,11 @@ test.describe("view-harness / desktop question card in the phone layout", () => 
     await expect(submit).toHaveText(/Submit/);
     await expect(submit).toBeEnabled();
     await expect(card.locator(".prompt-answer-send")).toHaveCount(0);
+
+    // The body has no top padding, so the review panel's own gap keeps its intro off the header.
+    const headerBox = (await card.locator(".prompt-card__header").boundingBox())!;
+    const introBox = (await card.locator(".prompt-summary__intro").boundingBox())!;
+    expect(introBox.y - (headerBox.y + headerBox.height)).toBeGreaterThanOrEqual(8);
 
     await card.screenshot({ path: `${SHOTS}/question-card-desktop-review.png` });
   });

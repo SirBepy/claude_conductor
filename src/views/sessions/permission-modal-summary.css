@@ -3,6 +3,9 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* The card body has no top padding (the question panel's zones sit flush
+   * under the header), so the review panel supplies its own. */
+  padding-top: 12px;
 }
 .prompt-summary__intro {
   font-size: 0.78rem;
