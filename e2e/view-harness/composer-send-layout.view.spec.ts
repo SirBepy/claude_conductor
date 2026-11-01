@@ -44,6 +44,16 @@ for (const [name, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(page.locator("#session-pane .composer-send-chevron")).toHaveCount(0);
     });
 
+    test("an empty field is exactly one control height, with text clear of the rounded edge", async ({ page }) => {
+      await mountSession(page, size);
+      const want = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--control-h")));
+      const field = await box(page, "#session-pane .composer-row .composer-input-wrap");
+      expect(field.height).toBeCloseTo(want, 0);
+      const padLeft = await page.locator("#session-pane .composer-row .composer-textarea")
+        .evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft));
+      expect(padLeft).toBeGreaterThanOrEqual(12);
+    });
+
     test("an empty Send keeps a visible chip, and a draft fills it with the accent", async ({ page }) => {
       await mountSession(page, size);
       const send = page.locator("#session-pane .composer-send");

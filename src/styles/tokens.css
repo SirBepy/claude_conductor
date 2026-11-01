@@ -14,4 +14,15 @@
     --fs-title: 0.875rem;
     --fs-body: 0.8125rem;
     --fs-micro: 0.72rem;
+
+    /* One height for every single-line control (text field, select, composer,
+     * send chip, status strip) so neighbours line up; 44px on phones is the
+     * touch-target floor. A control sizes from this, never from its own px. */
+    --control-h: 36px;
+}
+
+@media (max-width: 768px) {
+    :root {
+        --control-h: 44px;
+    }
 }

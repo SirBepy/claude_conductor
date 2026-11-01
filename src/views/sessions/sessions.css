@@ -617,6 +617,9 @@
   gap: 7px;
   margin: 6px 6px 0;
   padding: 6px 12px;
+  /* Same height as the input row under it. */
+  box-sizing: border-box;
+  min-height: var(--control-h);
   font-size: 0.78rem;
   color: var(--color-text-muted);
   font-style: italic;
