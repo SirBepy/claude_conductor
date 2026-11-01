@@ -77,7 +77,18 @@ export function leaveDraftDashboard(pane: HTMLElement): void {
     return [ghost];
   });
   unmountDraftDashboard(pane);
-  for (const ghost of ghosts) fadeOutAndFold(ghost);
+  // The chat column (padding on .session-messages) is wider while the rail is
+  // up and narrows once the live dashboard is gone; pd-leaving makes that
+  // narrowing last as long as the fold, so the sent bubble resizes while it
+  // rises rather than jumping to chat width afterwards.
+  const messagesEl = pane.querySelector<HTMLElement>(".session-messages");
+  let folding = ghosts.length;
+  if (folding > 0) messagesEl?.classList.add("pd-leaving");
+  for (const ghost of ghosts) {
+    fadeOutAndFold(ghost, () => {
+      if (--folding === 0) messagesEl?.classList.remove("pd-leaving");
+    });
+  }
 }
 
 /** Mounts into a draft pane built by pending-pane-mount.ts. Must run after the
