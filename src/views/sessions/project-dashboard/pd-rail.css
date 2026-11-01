@@ -14,10 +14,21 @@
 
 /* Draft: the chat's 900px reading column (sessions.css) widens to the same 1160px
    while the rail is there. The message box and chip row keep their own width. The
-   padding eases back when the first send takes the dashboard down. */
-.session-messages:has(.pd-draft.has-rail) {
+   fading copy (.pd-ghost) does not count: if it did, the column would stay wide
+   for the whole fold and the sent bubble would rise at dashboard width, then
+   snap to chat width the moment the copy is removed. */
+.session-messages:has(.pd-draft.has-rail:not(.pd-ghost)) {
   padding-inline: max(20px, calc((100% - 1160px) / 2));
   transition: padding-inline 0.4s ease;
+}
+/* Set by leaveDraftDashboard for the length of the fold (LEAVE_MS and EASE_IN_OUT
+   in dash-motion.ts), so the column narrows in step with the dashboard folding up
+   instead of in its own quicker beat. */
+.session-messages.pd-leaving {
+  transition: padding-inline 880ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-messages.pd-leaving { transition-duration: 140ms; }
 }
 .pd-draft.has-rail { display: grid; grid-template-columns: minmax(0, 1fr) 270px; column-gap: 28px; align-items: start; }
 

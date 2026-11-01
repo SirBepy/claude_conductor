@@ -244,6 +244,24 @@ describe("draft dashboard motion", () => {
     expect(pane.querySelector(".pd-qa-host")).toBeNull();
   });
 
+  it("the chat column narrows in step with the fold: pd-leaving spans it, and the fading copy no longer holds the wide column", async () => {
+    const { readFileSync } = await import("node:fs");
+    const css = readFileSync("src/views/sessions/project-dashboard/pd-rail.css", "utf8");
+    // A copy still carrying has-rail would keep the column wide until it is removed, then snap.
+    expect(css).toContain(".session-messages:has(.pd-draft.has-rail:not(.pd-ghost))");
+    expect(css).toMatch(/\.session-messages\.pd-leaving\s*\{\s*transition: padding-inline 880ms/);
+    const pane = await mountDraft("C:/Projects/conductor");
+    await vi.waitFor(() => expect(chips(pane)).toEqual(["/pickup", "/audit"]));
+    const messages = pane.querySelector(".session-messages");
+    animations.length = 0;
+    leaveDraftDashboard(pane);
+    expect(messages.classList.contains("pd-leaving")).toBe(true);
+    animations[0].onfinish();
+    expect(messages.classList.contains("pd-leaving")).toBe(true);
+    animations[1].onfinish();
+    expect(messages.classList.contains("pd-leaving")).toBe(false);
+  });
+
   it("an html card's frame is not cloned into the fading copy, which would reload it", async () => {
     const pane = await mountDraft("C:/Projects/conductor");
     await vi.waitFor(() => expect(chips(pane)).toEqual(["/pickup", "/audit"]));

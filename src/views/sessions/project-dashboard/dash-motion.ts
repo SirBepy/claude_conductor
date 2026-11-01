@@ -120,9 +120,9 @@ export function freezeEntrance(live: HTMLElement, copy: HTMLElement): void {
 
 /** Fades a detached copy of a dashboard part out and folds its height to
  *  nothing, so whatever sits below it glides up instead of jumping. Removes
- *  the copy when done. */
-export function fadeOutAndFold(ghost: HTMLElement): void {
-  const remove = (): void => ghost.remove();
+ *  the copy when done, then calls `onDone`. */
+export function fadeOutAndFold(ghost: HTMLElement, onDone?: () => void): void {
+  const remove = (): void => { ghost.remove(); onDone?.(); };
   if (!canAnimate(ghost)) { remove(); return; }
   ghost.inert = true;
   ghost.setAttribute("aria-hidden", "true");
