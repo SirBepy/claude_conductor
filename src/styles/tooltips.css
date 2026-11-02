@@ -48,3 +48,9 @@
   pointer-events: none;
 }
 
+/* The shared box is parented to <body>, so it has to clear whatever its anchor
+   sits in: the Settings popup (2500), and the dialogs and confirm above that. */
+.cc-row-tip {
+  z-index: 2800;
+}
+

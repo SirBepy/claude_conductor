@@ -37,7 +37,7 @@ function hydrateUsageMeter(): void {
     el.addEventListener("change", saveSettings);
   }
 
-  attachTooltips(document.getElementById("app") || document.body, { placement: "above" });
+  attachTooltips(document.body, { placement: "above" });
 
   const overlayBackgroundStyle = $("overlayBackgroundStyle") as HTMLSelectElement | null;
   if (overlayBackgroundStyle) {

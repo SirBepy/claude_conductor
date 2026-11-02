@@ -165,7 +165,8 @@
    inherit anything from the settings page. */
 .ra-icon-pop {
   position: fixed;
-  z-index: 1000;
+  /* Over the Settings popup (2500), which opens this. */
+  z-index: 2600;
   display: flex;
   flex-direction: column;
   gap: 6px;

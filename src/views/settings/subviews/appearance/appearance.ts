@@ -35,7 +35,7 @@ async function hydrateInterface(): Promise<void> {
 
   // Tooltips for the theme/background rows; the phone omits those sections.
   if (isRemote()) return;
-  attachTooltips(document.getElementById("app") || document.body, { placement: "above" });
+  attachTooltips(document.body, { placement: "above" });
 
   const hideInMeetingSwitch = $("hideInMeetingSwitch") as HTMLInputElement | null;
   if (hideInMeetingSwitch) {

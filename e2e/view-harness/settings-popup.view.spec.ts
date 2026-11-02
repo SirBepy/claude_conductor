@@ -31,9 +31,13 @@ const INVOKE = {
 
 /** The Chats window with a stand-in chat view underneath, and the standalone rail
  *  mounted the way boot does. */
-async function mountChats(page: Page, size = { width: 1280, height: 800 }): Promise<void> {
+async function mountChats(
+  page: Page,
+  size = { width: 1280, height: 800 },
+  invoke: Record<string, unknown> = INVOKE,
+): Promise<void> {
   await page.setViewportSize(size);
-  await mountView(page, { view: "blank", invoke: INVOKE });
+  await mountView(page, { view: "blank", invoke });
   await page.evaluate(async () => {
     document.body.classList.add("chats-window-mode");
     const chat = document.createElement("main");
@@ -213,6 +217,67 @@ test("Escape on the popup does not close Code mode under it", async ({ page }) =
   });
   expect(closes).toBe(0);
   await expect(popup(page)).toHaveCount(0);
+});
+
+/** What a click at the centre of `selector` would land on is inside it, so the
+ *  popup's backdrop is not covering it. */
+async function expectOnTop(page: Page, selector: string): Promise<void> {
+  await expect(page.locator(selector).first()).toBeVisible();
+  const onTop = await page.locator(selector).first().evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!hit && el.contains(hit);
+  });
+  expect(onTop, `${selector} is under the popup`).toBe(true);
+}
+
+// Each of these is appended to <body>, outside the popup's stacking context.
+test("the Add account wizard opened from the popup lands on top of it", async ({ page }) => {
+  await mountChats(page);
+  await openFromRail(page);
+  await page.evaluate(async () => (await import("/shared/navigation.ts")).showView("settings-accounts"));
+  await popup(page).locator("#acc-add-btn").click();
+  await page.locator('.aac-kind-choice[data-kind="subscription"]').click();
+  await expectOnTop(page, ".aaw-overlay .wizard");
+  await expect(popup(page)).toBeAttached();
+});
+
+test("the edit account modal opened from the popup lands on top of it", async ({ page }) => {
+  await mountChats(page);
+  await openFromRail(page);
+  await page.evaluate(async () => {
+    const m = await import("/views/settings/subviews/accounts/edit-account-modal.ts");
+    void m.openEditAccountModal({ id: "a1", name: "Work", kind: "subscription", config_dir: "C:/x" } as never);
+  });
+  await expectOnTop(page, ".aem-overlay");
+});
+
+test("the device icon picker opened from the popup lands on top of it", async ({ page }) => {
+  await mountChats(page, undefined, {
+    ...INVOKE,
+    remote_access_status: { enabled: true },
+    list_remote_devices: [{ id: "d1", name: "Pixel 8", created_at: 1760000000, last_used: 1760100000, kind: "phone" }],
+  });
+  await openFromRail(page);
+  await page.evaluate(async () => (await import("/shared/navigation.ts")).showView("settings-remote-access"));
+  await popup(page).locator(".ra-icon-btn").first().click();
+  await expectOnTop(page, ".ra-icon-pop");
+});
+
+test("a settings row's info tooltip shows above the popup", async ({ page }) => {
+  await mountChats(page);
+  await openFromRail(page);
+  await page.evaluate(async () => (await import("/shared/navigation.ts")).showView("settings-usage-meter"));
+  // Scrolling an icon into view dismisses the tooltip, so bring it in first and then hover.
+  const icon = popup(page).locator(".info-icon").first();
+  await icon.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(200);
+  await icon.hover();
+  const tip = page.locator(".cc-row-tip");
+  await expect(tip).toBeVisible();
+  const z = await tip.evaluate((el) => Number(getComputedStyle(el).zIndex));
+  const popupZ = await backdrop(page).evaluate((el) => Number(getComputedStyle(el).zIndex));
+  expect(z).toBeGreaterThan(popupZ);
 });
 
 test("closing, and moving to another page, call the shown view's teardown", async ({ page }) => {
