@@ -19,6 +19,10 @@
      * send chip, status strip) so neighbours line up; 44px on phones is the
      * touch-target floor. A control sizes from this, never from its own px. */
     --control-h: 36px;
+
+    /* The one small size: chips, pills and tiny buttons that sit in or beside
+     * text. A control is --control-h or this, never a number in between. */
+    --control-h-sm: 24px;
 }
 
 @media (max-width: 768px) {

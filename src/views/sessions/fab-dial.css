@@ -34,8 +34,8 @@
   z-index: 1000;
   right: calc(var(--pw-dock-r, 0px) + 14px);
   bottom: calc(var(--fab-lift, 0px) + 14px);
-  width: 40px;
-  height: 40px;
+  width: var(--control-h);
+  height: var(--control-h);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -106,8 +106,8 @@
 }
 
 .fab-dial-ic {
-  width: 34px;
-  height: 34px;
+  width: var(--control-h);
+  height: var(--control-h);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -141,8 +141,8 @@
 @media (max-width: 768px) {
   .fab-dial-fab {
     bottom: calc(var(--fab-lift, 0px) + 12px);
-    width: 48px;
-    height: 48px;
+    width: var(--control-h);
+    height: var(--control-h);
     font-size: 1.25rem;
   }
 
@@ -151,8 +151,6 @@
   }
 
   .fab-dial-ic {
-    width: 44px;
-    height: 44px;
     font-size: 1.15rem;
   }
 

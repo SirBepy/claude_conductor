@@ -252,8 +252,8 @@
 
 /* Header icon buttons (nav arrows + minimize). */
 .prompt-icon-btn {
-  width: 26px;
-  height: 26px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   border: 1px solid transparent;
 }
 .prompt-icon-btn i {

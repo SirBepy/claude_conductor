@@ -34,30 +34,22 @@ const VIEWS = [
   "characters", "history", "dashboard", "schedule",
 ];
 
-/** Controls that are deliberately not one control height, each with its reason. A new entry needs a reason a
- *  reviewer would accept: "it was already that size" is not one. */
+/** Controls that are deliberately neither size, each with its reason. A new entry needs a reason a reviewer
+ *  would accept: "it was already that size" is not one. Every other control is --control-h or --control-h-sm. */
 const EXEMPT = [
-  // Text that happens to be a button: sized by its line of text, not a target.
-  ".sched-w-open", ".btn-link-muted", ".ps-revert",
   // A name that edits in place, drawn as plain text until hovered.
   "input.ra-name-input",
-  // Caller-sized glyph targets in dense rows; the class exists to say "not a control-height button".
-  ".icon-btn-sq",
   // Segments inside a segmented switch: the switch itself (.view-toggle, .tp-seg) is measured and is control-h.
   ".view-toggle button", ".tp-seg button",
-  // The working strip above the composer: a status line with a hover Stop, on its own 28px / 40px-touch line.
-  ".thinking-main", ".thinking-pause-btn",
-  // Floating action button: a free-standing target, sized by its own dial, not a row control.
-  ".fab-dial-fab",
-  // The header's wrap-up glyph is 16px, text-sized. A small tap target on a phone, kept out of this sweep.
-  ".wrap-up-btn",
 ].join(", ");
 
 interface Offender { sig: string; h: number }
 
 async function offenders(page: Page): Promise<{ want: number; bad: Offender[] }> {
   return page.evaluate((exempt) => {
-    const want = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--control-h"));
+    const rootStyle = getComputedStyle(document.documentElement);
+    const want = parseFloat(rootStyle.getPropertyValue("--control-h"));
+    const small = parseFloat(rootStyle.getPropertyValue("--control-h-sm"));
     const SEL = "button, input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=hidden]), select, .view-toggle, .tp-seg";
     const bad: { sig: string; h: number }[] = [];
     for (const el of Array.from(document.querySelectorAll<HTMLElement>(SEL))) {
@@ -67,7 +59,7 @@ async function offenders(page: Page): Promise<{ want: number; bad: Offender[] }>
       if (r.width < 4 || r.height < 4 || cs.visibility === "hidden") continue;
       // A control inside a closed popover/overlay has no box of its own; off-screen ones are not on the screen.
       if (r.bottom < 0 || r.right < 0) continue;
-      if (Math.abs(r.height - want) > 0.6) {
+      if (Math.abs(r.height - want) > 0.6 && Math.abs(r.height - small) > 0.6) {
         const cls = typeof el.className === "string" ? el.className.split(/\s+/).filter(Boolean).slice(0, 3).join(".") : "";
         bad.push({ sig: `${el.tagName.toLowerCase()}${cls ? "." + cls : ""}`, h: Math.round(r.height * 10) / 10 });
       }
@@ -83,7 +75,7 @@ for (const [label, size] of [["desktop", { width: 1200, height: 900 }], ["phone"
     test.use({ viewport: size });
 
     for (const view of VIEWS) {
-      test(`${view}: every field, select and button is --control-h`, async ({ page }) => {
+      test(`${view}: every field, select and button is --control-h or --control-h-sm`, async ({ page }) => {
         await mountView(page, { view, invoke: INVOKE });
         await page.waitForTimeout(1200);
         const { want, bad } = await offenders(page);
@@ -92,15 +84,41 @@ for (const [label, size] of [["desktop", { width: 1200, height: 900 }], ["phone"
       });
     }
 
-    test("chat: composer, Send, header buttons and the rest of the pane", async ({ page }) => {
+    test("chat: composer, Send, header buttons, tool chips, working line and the rest of the pane", async ({ page }) => {
       const sess = sessionInstance({ busy: true, awaiting: null });
-      await mountView(page, {
-        view: "sessions",
-        invoke: { ...INVOKE, list_instances: [sess], get_active_sessions: [sess], load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false } },
-      });
+      const history = {
+        events: [
+          { type: "user_message", content: [{ type: "text", text: "Check the modal." }], timestamp: 0, remote_echo: false, is_meta: false },
+          { type: "assistant_message", content: [{ type: "text", text: "Reading the stylesheet first." }], timestamp: 0 },
+          { type: "tool_use", tool_name: "PowerShell", input: { command: "rg -n prompt-card src" }, id: "tu-1", timestamp: 0, parent_tool_use_id: null },
+        ],
+        oldest_seq: 0, newest_seq: 0, has_more: false,
+      };
+      await mountView(page, { view: "sessions", invoke: { ...INVOKE, list_instances: [sess], get_active_sessions: [sess], load_history_page: history } });
       await page.locator("#sessions-list li[data-session-id]").first().click();
       await page.locator("#session-pane .session-composer").first().waitFor();
       await waitForPaneSettled(page);
+      const { bad } = await offenders(page);
+      expect(summarise(bad)).toEqual([]);
+    });
+
+    test("question card: header button, options, answer field and footer", async ({ page }) => {
+      await mountView(page, { invoke: { respond_question: null } });
+      await page.evaluate(async () => {
+        const qm = await import("/views/sessions/permission-modal/index.ts");
+        const sm = await import("/views/sessions/state.ts");
+        sm.state.selectedId = "sess-1";
+        qm.setSelectedSessionId("sess-1");
+        const pane = document.createElement("div");
+        pane.innerHTML = '<div class="session-composer"></div>';
+        document.body.appendChild(pane);
+        qm.handleQuestionRequested({
+          id: "q1", session_id: "sess-1",
+          questions: [{ question: "Which lane should the builder take?", header: "Lane", options: [{ label: "Inline" }, { label: "Subagent" }] }],
+        });
+      });
+      await page.locator(".prompt-card").waitFor();
+      await page.waitForTimeout(600);
       const { bad } = await offenders(page);
       expect(summarise(bad)).toEqual([]);
     });

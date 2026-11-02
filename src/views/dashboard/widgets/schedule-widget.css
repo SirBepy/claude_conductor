@@ -22,7 +22,8 @@
   gap: 4px;
   background: none;
   border: 0;
-  padding: 4px 2px;
+  min-height: var(--control-h-sm);
+  padding: 0 2px;
   font: inherit;
   font-size: var(--fs-micro);
   color: var(--color-text-muted, #8a8aa0);

@@ -155,9 +155,10 @@
 .session-header-avatar-wrap .wrap-up-btn {
   position: absolute;
   top: -2px;
-  left: -5px;
-  width: 16px;
-  height: 16px;
+  left: -8px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  box-sizing: border-box;
   border-radius: 50%;
   border: 2px solid var(--color-surface, #0d0f15);
   z-index: 10;
@@ -170,7 +171,7 @@
   cursor: pointer;
 }
 
-.session-header-avatar-wrap .wrap-up-btn i { font-size: 9px; }
+.session-header-avatar-wrap .wrap-up-btn i { font-size: 12px; }
 
 .session-header-avatar-wrap .wrap-up-btn:hover,
 .session-header-avatar-wrap .wrap-up-btn:focus-visible {
