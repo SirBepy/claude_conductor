@@ -22,6 +22,8 @@ test.describe("view-harness / dashboard", () => {
         get_skill_usage_week: { entries: [], total_sessions: 0 },
         list_instances: [],
         poll_now: null,
+        schedule_list: [],
+        schedule_list_external: [],
       },
     });
 
@@ -60,6 +62,8 @@ test.describe("view-harness / dashboard", () => {
         get_skill_usage_week: { entries: [], total_sessions: 0 },
         list_instances: [],
         poll_now: null,
+        schedule_list: [],
+        schedule_list_external: [],
       },
     });
 
@@ -85,6 +89,8 @@ test.describe("view-harness / dashboard", () => {
         get_skill_usage_week: { entries: [], total_sessions: 0 },
         list_instances: [],
         poll_now: null,
+        schedule_list: [],
+        schedule_list_external: [],
       },
     });
 
@@ -125,6 +131,8 @@ test.describe("view-harness / dashboard", () => {
         get_skill_usage_week: { entries: [], total_sessions: 0 },
         list_instances: [],
         poll_now: null,
+        schedule_list: [],
+        schedule_list_external: [],
       },
     });
 
@@ -153,6 +161,8 @@ test.describe("view-harness / dashboard", () => {
         get_skill_usage_week: { entries: [], total_sessions: 0 },
         list_instances: [],
         poll_now: null,
+        schedule_list: [],
+        schedule_list_external: [],
       },
     });
   };
@@ -227,6 +237,8 @@ test.describe("view-harness / dashboard", () => {
         list_instances: [],
         get_history: history,
         poll_now: null,
+        schedule_list: [],
+        schedule_list_external: [],
       },
     });
     const chart = page.locator(".dash-widget[data-widget-id='session-chart']");
@@ -258,6 +270,8 @@ test.describe("view-harness / dashboard", () => {
         get_auth_state_map: {},
         get_skill_usage_week: { entries: [], total_sessions: 0 },
         list_instances: [],
+        schedule_list: [],
+        schedule_list_external: [],
         // Session window already expired -> the crossover auto-poll fires
         // immediately on mount instead of waiting for the real interval.
         get_history: [
