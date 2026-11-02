@@ -395,6 +395,34 @@ async function mountChatsWindow(page: Page, mocks: Record<string, unknown> = GLO
   });
 }
 
+test("a Preview pushed while the Dashboard panel is open leaves the panel and dots Preview's icon", async ({ page }) => {
+  await mountChatsWindow(page, { ...GLOBAL_MOCKS, ...PREVIEW_MOCKS });
+  await globalTab(page, "dashboard").click();
+  await expect(panel(page)).toHaveAttribute("data-active", "dashboard");
+
+  await fireEvent(page, "preview", [{ snapshot: { ...PREVIEW_MOCKS.list_previews[0], id: "snap-2", version: 3 } }]);
+  await expect(tab(page, "preview").locator(".sp-dot")).toHaveCount(1);
+  await expect(panel(page)).toHaveAttribute("data-active", "dashboard");
+  await expect(panel(page).locator(".view-dashboard")).toHaveCount(1);
+
+  await tab(page, "preview").click();
+  await expect(panel(page)).toHaveAttribute("data-active", "preview");
+  await expect(tab(page, "preview").locator(".sp-dot")).toHaveCount(0);
+});
+
+test("Escape on the Settings popup leaves an open chat panel as it is", async ({ page }) => {
+  await mountChatsWindow(page);
+  await tab(page, "drafts").click();
+  await expect(panel(page)).toHaveAttribute("data-active", "drafts");
+  await page.evaluate(async () => (await import("/shared/navigation.ts")).showView("settings"));
+  await expect(page.locator(".settings-popup")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".settings-popup")).toHaveCount(0);
+  await expect(panel(page)).toBeVisible();
+  await expect(panel(page)).toHaveAttribute("data-active", "drafts");
+});
+
 test("Dashboard in the GLOBAL group opens the real dashboard in a 400px panel; the same icon closes it", async ({ page }) => {
   await mountChatsWindow(page);
   await globalTab(page, "dashboard").click();
