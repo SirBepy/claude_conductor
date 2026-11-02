@@ -255,9 +255,8 @@
   transform: none;
 }
 .prompt-card__footer button:not(.pv-composer-send) {
-  /* Matches the answer field's one-line height (composer.css's 32px
-   * .composer-textarea and .icon-btn send) so the buttons sit level with it. */
-  min-height: 32px;
+  /* Sits level with the answer field, which is one control height too. */
+  min-height: var(--control-h);
   padding: 6px 14px;
   display: inline-flex;
   align-items: center;
@@ -619,7 +618,7 @@
 
 /* `button.` lifts this to the footer's own `button:not(.pv-composer-send)`
  * specificity (0,2,1); being later in the file then wins the tie. Without it
- * that rule's 32px min-height beat this 48px one. */
+ * that rule's min-height beat this 48px one. */
 @media (max-width: 768px) {
   .prompt-card__footer button.prompt-submit-cta {
     flex: 1 1 auto;

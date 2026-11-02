@@ -68,4 +68,9 @@ test("remote access page: every kit-row is the shared control-height row", async
     .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)));
   expect(controls.length).toBeGreaterThanOrEqual(4);
   for (const h of controls) expect(h).toBeLessThanOrEqual(control);
+
+  // The rename field reads as the row's plain name until hovered, so it sizes to its
+  // line of text rather than taking a control's height.
+  const nameH = await page.locator(".ra-device-row .ra-name-input").first().evaluate((el) => el.getBoundingClientRect().height);
+  expect(nameH).toBeLessThan(control);
 });

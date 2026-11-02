@@ -122,6 +122,8 @@ test.describe("view-harness / desktop question card in the phone layout", () => 
     await expect(submit).toHaveText(/Submit/);
     await expect(submit).toBeEnabled();
     await expect(card.locator(".prompt-answer-send")).toHaveCount(0);
+    const control = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--control-h")));
+    expect(Math.round((await submit.boundingBox())!.height)).toBe(control);
 
     // The body has no top padding, so the review panel's own gap keeps its intro off the header.
     const headerBox = (await card.locator(".prompt-card__header").boundingBox())!;
