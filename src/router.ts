@@ -1,6 +1,7 @@
 import { html, render } from "lit-html";
 import { setActiveView, showView } from "./shared/navigation";
 import { opensInGlobalPanel } from "./shared/global-panel";
+import { closeSettingsPopup, opensInSettingsPopup, showInSettingsPopup } from "./shared/settings-popup";
 import { noteNavigation } from "./shared/back-button";
 import { isRemote } from "./shared/transport";
 import { noteView } from "./shared/on-screen-chat";
@@ -35,7 +36,9 @@ export function mountRouter(root: HTMLElement): void {
   // Chats is the only screen phone users open regularly, so the remote/phone
   // PWA lands there directly instead of the desktop's Dashboard default.
   const initial = window.location.hash.replace(/^#/, "") || (isRemote() ? "sessions" : "dashboard");
-  void navigateTo(initial);
+  // The popup sits over a view, so a reload that lands on Settings needs Chats under it.
+  if (opensInSettingsPopup(initial)) void navigateTo("sessions").then(() => navigateTo(initial));
+  else void navigateTo(initial);
 }
 
 function hideAllLegacyViews(): void {
@@ -66,6 +69,15 @@ export async function navigateTo(name: string): Promise<void> {
     showView(name);
     return;
   }
+  // Settings and its subpages render into a popup over whatever view is active,
+  // which stays mounted: no active-view, hash or history change.
+  const popupView = opensInSettingsPopup(name) ? views.get(name) : undefined;
+  if (popupView) {
+    await showInSettingsPopup(name, popupView, (v) => void navigateTo(v));
+    return;
+  }
+  // Any other screen takes over from the popup.
+  closeSettingsPopup();
   setActiveView(name);
   noteView(name);
   // Feed the back-button view stack so the phone's hardware back can step back
