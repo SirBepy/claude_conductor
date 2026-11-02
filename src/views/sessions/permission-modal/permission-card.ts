@@ -1,6 +1,7 @@
 import { invoke } from "../../../shared/ipc";
 import { updateSettings } from "../../../shared/settings-update";
 import { isRemote } from "../../../shared/transport";
+import { isSettingsPopupOpen } from "../../../shared/settings-popup";
 import { escapeHtml } from "../../../shared/escape-html";
 import { buildRule, describeRule, isDestructive, withAddedRule } from "../permission-rules";
 import { clearHost, ensureHost, renderCardShell } from "./host";
@@ -100,7 +101,9 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
   };
 
   const escHandler = (e: KeyboardEvent) => {
-    if (e.key === "Escape") void respond("deny");
+    // The Settings popup covers this card and owns the key: an Escape aimed at
+    // the popup must not deny a request nobody can see.
+    if (e.key === "Escape" && !isSettingsPopupOpen()) void respond("deny");
   };
   document.addEventListener("keydown", escHandler);
   // Registered for teardown (todo 731) so a swap via ensureHost() - not only
@@ -161,7 +164,7 @@ export function showQuestionReplay(m: RenderedMessage): void {
 
   const close = () => { clearHost(); teardownEsc(); };
   const escHandler = (e: KeyboardEvent) => {
-    if (e.key === "Escape") close();
+    if (e.key === "Escape" && !isSettingsPopupOpen()) close();
   };
   document.addEventListener("keydown", escHandler);
   const teardownEsc = () => {

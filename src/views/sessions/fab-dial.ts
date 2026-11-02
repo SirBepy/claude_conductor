@@ -4,6 +4,7 @@
 // phone a full-screen cover (pane-windows/).
 
 import { isRemote } from "../../shared/transport";
+import { isSettingsPopupOpen } from "../../shared/settings-popup";
 import { DEFAULT_COMPACT_QUERY } from "../../../vendor/tauri_kit/frontend/pane-windows/manager";
 import { PaneWindows } from "./pane-windows/manager";
 import { PANEL_META, type PanelDeps, type PanelHost, type PanelKey } from "./pane-windows/panels";
@@ -215,6 +216,8 @@ class FabDial implements FabDialHandle {
 
   private onKeydown = (ev: KeyboardEvent): void => {
     if (ev.key !== "Escape") return;
+    // This Escape closes the Settings popup over the chat, not a panel under it.
+    if (isSettingsPopupOpen()) return;
     // Never swallow Escape from a text field inside a window.
     const t = ev.target as HTMLElement | null;
     if (t?.matches("input, textarea")) return;
