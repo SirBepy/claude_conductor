@@ -560,7 +560,9 @@ export class SplitPanels implements PanelHost {
       });
       return;
     }
-    if (!explicit && this.active && this.active !== "preview") {
+    // A global panel counts as in use, and a chat panel it covers could not
+    // show this Preview anyway.
+    if (!explicit && (this.global || (this.active && this.active !== "preview"))) {
       this.previewUnseen = true;
       // The flag outlives a chat switch; previewUnseen alone would not.
       if (this.sessionId) savePreviewOpen(this.sessionId, true);
