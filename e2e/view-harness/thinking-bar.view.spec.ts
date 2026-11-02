@@ -1,3 +1,4 @@
+// Reviewed 2026-11-02: the line is --control-h-sm tall on desktop and --control-h on a phone (it was 28 / 40px); the asserts below hold.
 // asserts: src/views/sessions/session-thinking-bar.ts, src/views/sessions/active-session.ts, src/views/sessions/sessions.css, src/shared/chat/chat-dom-renderer.ts, src/shared/chat/tool-meta.ts
 import { expect, test, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";

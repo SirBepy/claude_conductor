@@ -311,9 +311,10 @@
 #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn {
   display: grid;
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  margin: -5px -6px -5px auto;
+  width: var(--control-h);
+  height: var(--control-h);
+  /* Overhangs the header's 22px text line evenly top and bottom. */
+  margin: calc((22px - var(--control-h)) / 2) -6px calc((22px - var(--control-h)) / 2) auto;
 }
 #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-domain ~ .prompt-ask__btn {
   margin-left: 0;
@@ -386,9 +387,9 @@
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn {
     display: grid;
     flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    margin: -5px -6px -5px auto;
+    width: var(--control-h);
+    height: var(--control-h);
+    margin: calc((22px - var(--control-h)) / 2) -6px calc((22px - var(--control-h)) / 2) auto;
   }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-domain ~ .prompt-ask__btn {
     margin-left: 0;

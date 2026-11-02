@@ -1,3 +1,4 @@
+// Reviewed 2026-11-02: the working line is now --control-h-sm tall (--control-h on a phone); nothing this spec drives changed and it passes.
 // Reviewed 2026-11-01: sessions.css's working strip lost its card and became a bare line (earlier the same day it gained a --control-h min-height); nothing this spec drives changed and it passes.
 // Reviewed 2026-10-25 (desktop split): sessions-dom-wiring.ts only had wirePreviewPanel's doc comment reworded for the desktop split; nothing this spec drives changed.
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
