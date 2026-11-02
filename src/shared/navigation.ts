@@ -12,6 +12,7 @@
 
 import { updateSidemenuActive } from "./sidemenu";
 import { askConfirm } from "./confirm";
+import { opensInGlobalPanel, setGlobalPanel } from "./global-panel";
 
 const LEGACY_VIEWS = [
   "settings",
@@ -32,6 +33,14 @@ function routerWin(): RouterWindow {
 let activeView = "dashboard";
 
 export function showView(name: string): void {
+  // Dashboard and Schedule are a side panel of the Chats window, not a screen:
+  // open it, after stepping back to Chats from any other full view (History,
+  // Settings), whose split is what hosts the panel.
+  if (opensInGlobalPanel(name)) {
+    setGlobalPanel(name);
+    if (activeView !== "sessions") showView("sessions");
+    return;
+  }
   activeView = name;
   const nav = routerWin().navigateTo;
   if (typeof nav === "function") {

@@ -1,4 +1,4 @@
-// asserts: src/views/sessions/split-panels/split.ts, src/views/sessions/split-panels/memory.ts, src/views/sessions/fab-dial.ts, src/shared/app-rail.ts
+// asserts: src/views/sessions/split-panels/split.ts, src/views/sessions/split-panels/memory.ts, src/views/sessions/fab-dial.ts, src/shared/app-rail.ts, src/shared/global-panel.ts, src/shared/navigation.ts, src/router.ts, src/views/dashboard/dashboard.ts, src/views/schedule/schedule.ts
 import { test, expect, type Page } from "@playwright/test";
 import { fireEvent, mountView } from "./harness";
 import { expectIconButtonsCentred } from "./icon-centering";
@@ -46,9 +46,15 @@ const DRAFT = {
 };
 
 /** A full-bleed pane with a chat column we can measure, and the real FAB. */
-async function mountPane(page: Page, invoke: Record<string, unknown> = {}, width = 1280, chatsWindow = false): Promise<void> {
+async function mountPane(
+  page: Page,
+  invoke: Record<string, unknown> = {},
+  width = 1280,
+  chatsWindow = false,
+  view?: string,
+): Promise<void> {
   await page.setViewportSize({ width, height: 800 });
-  await mountView(page, { invoke: { list_slash_commands: [], list_previews: [], ...invoke } });
+  await mountView(page, { view, invoke: { list_slash_commands: [], list_previews: [], ...invoke } });
   await page.evaluate(
     async ({ draft, viewer, chatsWindow }) => {
       localStorage.clear();
@@ -354,4 +360,176 @@ test("in the Chats window with no chat open, the standalone rail carries the GLO
 test("outside the Chats window the strip has no global group", async ({ page }) => {
   await mountPane(page);
   await expect(page.locator(".sp-global")).toHaveCount(0);
+});
+
+// ── Dashboard and Schedule in the side panel (Joe, 2026-11-02) ──────────────
+// The GLOBAL group's Dashboard and Schedule open beside the chat in the same
+// split as the chat tools, at their own remembered width, instead of replacing
+// the whole window. The real views render inside, so these mock their commands.
+
+const GLOBAL_MOCKS = {
+  get_accounts_setup_prompt_state: { shouldShow: false },
+  list_accounts: [],
+  get_usage_map: {},
+  get_auth_state_map: {},
+  get_skill_usage_week: { entries: [], total_sessions: 0 },
+  list_instances: [],
+  poll_now: null,
+  schedule_list: [],
+  schedule_list_external: [],
+};
+
+const globalTab = (page: Page, view: string) => page.locator(`.sp-strip:not(#app-rail) [data-rail-go="${view}"]`);
+
+/** The Chats window with a chat open on a blank router view, so no second
+ *  full-screen dashboard competes with the panel's, and the standalone rail
+ *  mounted the way boot does. */
+async function mountChatsWindow(page: Page): Promise<void> {
+  await mountPane(page, GLOBAL_MOCKS, 1280, true, "blank");
+  await page.evaluate(async () => {
+    (await import("/shared/navigation.ts")).setActiveView("sessions");
+    const rail = await import("/shared/app-rail.ts");
+    rail.mountAppRail();
+    // The strip announced itself before this rail existed (boot mounts the rail first).
+    rail.announceSplitStrip(true);
+  });
+}
+
+test("Dashboard in the GLOBAL group opens the real dashboard in a 400px panel; the same icon closes it", async ({ page }) => {
+  await mountChatsWindow(page);
+  await globalTab(page, "dashboard").click();
+
+  await expect(panel(page)).toBeVisible();
+  await expect(panel(page)).toHaveAttribute("data-active", "dashboard");
+  await expect(panel(page).locator(".sp-title")).toHaveText("Dashboard");
+  await expect(panel(page).locator(".view-dashboard")).toHaveCount(1);
+  await expect(globalTab(page, "dashboard")).toHaveAttribute("aria-pressed", "true");
+  await expect(globalTab(page, "dashboard")).toHaveClass(/is-on/);
+
+  const p = (await panel(page).boundingBox())!;
+  expect(Math.abs(p.width - 400)).toBeLessThanOrEqual(2);
+  expect(Math.round(await chatWidth(page))).toBe(1280 - STRIP_W - 6 - Math.round(p.width));
+
+  // The view's own title row would repeat the panel's header; its kebab stays.
+  await expect(panel(page).locator(".view-header h2")).toBeHidden();
+  await expect(panel(page).locator(".view-header .burger")).toBeHidden();
+  await expect(panel(page).locator("#dashMoreBtn")).toBeVisible();
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/global-panel-dashboard-with-chat.png` });
+
+  await globalTab(page, "dashboard").click();
+  await expect(panel(page)).toBeHidden();
+  await expect(panel(page).locator(".view-dashboard")).toHaveCount(0);
+  expect(Math.round(await chatWidth(page))).toBe(1280 - STRIP_W);
+});
+
+test("Schedule opens in the same panel, without its own title row or Chats button", async ({ page }) => {
+  await mountChatsWindow(page);
+  await globalTab(page, "schedule").click();
+  await expect(panel(page)).toHaveAttribute("data-active", "schedule");
+  await expect(panel(page).locator(".sp-title")).toHaveText("Schedule");
+  await expect(panel(page).locator(".view-schedule")).toHaveCount(1);
+  await expect(panel(page).locator(".view-header")).toBeHidden();
+
+  // Swapping to Dashboard tears Schedule down: one panel at a time.
+  await globalTab(page, "dashboard").click();
+  await expect(panel(page)).toHaveAttribute("data-active", "dashboard");
+  await expect(panel(page).locator(".view-schedule")).toHaveCount(0);
+  await expect(globalTab(page, "schedule")).toHaveAttribute("aria-pressed", "false");
+});
+
+test("a global panel stays open across chat switches and is never written into a chat's remembered panel", async ({ page }) => {
+  await mountChatsWindow(page);
+  await globalTab(page, "dashboard").click();
+  await expect(panel(page)).toBeVisible();
+
+  await scopeTo(page, "sess-B");
+  await expect(panel(page)).toHaveAttribute("data-active", "dashboard");
+  await expect(panel(page).locator(".view-dashboard")).toHaveCount(1);
+  await expect(globalTab(page, "dashboard")).toHaveAttribute("aria-pressed", "true");
+
+  const stored = await page.evaluate(() => localStorage.getItem("cc.split.active"));
+  expect(stored ?? "").not.toMatch(/dashboard|schedule/);
+});
+
+test("a chat tool replaces the global panel, and closing a global panel brings back the chat's own", async ({ page }) => {
+  await mountChatsWindow(page);
+  await tab(page, "drafts").click();
+  await globalTab(page, "dashboard").click();
+  await expect(panel(page)).toHaveAttribute("data-active", "dashboard");
+  await expect(tab(page, "drafts")).toHaveAttribute("aria-pressed", "false");
+
+  await tab(page, "todos").click();
+  await expect(panel(page)).toHaveAttribute("data-active", "todos");
+  await expect(globalTab(page, "dashboard")).toHaveAttribute("aria-pressed", "false");
+  await expect(panel(page).locator(".view-dashboard")).toHaveCount(0);
+
+  await tab(page, "drafts").click();
+  await globalTab(page, "schedule").click();
+  await panel(page).locator('[data-sp-act="close"]').click();
+  await expect(panel(page)).toHaveAttribute("data-active", "drafts");
+  await expect(tab(page, "drafts")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("with no chat open the panel is still reachable, and the standalone rail and the strip never both show or both vanish", async ({ page }) => {
+  await mountChatsWindow(page);
+  const solo = page.locator("#app-rail");
+  const strips = page.locator(".sp-strip:not(#app-rail)");
+  await expect(solo).toBeHidden();
+
+  await page.evaluate(() => (window as any).__fab.setSessionScope(null, null));
+  await expect(solo).toBeVisible();
+  await expect(strips).toHaveCount(0);
+
+  // The standalone rail's own Dashboard opens the panel.
+  await solo.locator('[data-rail-go="dashboard"]').click();
+  await expect(panel(page)).toBeVisible();
+  await expect(panel(page).locator(".view-dashboard")).toHaveCount(1);
+  await expect(solo).toBeHidden();
+  await expect(strips).toHaveCount(1);
+  // No chat, so no chat tools: only the way to close it or switch screens.
+  await expect(page.locator(".sp-strip .sp-tab[data-sp-k]")).toHaveCount(0);
+  await expect(globalTab(page, "dashboard")).toHaveAttribute("aria-pressed", "true");
+  const p = (await panel(page).boundingBox())!;
+  expect(Math.abs(p.width - 400)).toBeLessThanOrEqual(2);
+  expect(Math.round(p.x + p.width)).toBe(1280 - STRIP_W);
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/global-panel-dashboard-no-chat.png` });
+
+  await globalTab(page, "schedule").click();
+  await expect(panel(page)).toHaveAttribute("data-active", "schedule");
+
+  await globalTab(page, "schedule").click();
+  await expect(panel(page)).toBeHidden();
+  await expect(solo).toBeVisible();
+  await expect(strips).toHaveCount(0);
+  expect(await page.locator(".session-pane").evaluate((el) => getComputedStyle(el).paddingRight)).toBe("0px");
+});
+
+test("a global panel keeps its own width, apart from the chat panels' shared fraction", async ({ page }) => {
+  await mountChatsWindow(page);
+  await globalTab(page, "dashboard").click();
+  const div = (await page.locator(".sp-divider").boundingBox())!;
+  await page.mouse.move(div.x + div.width / 2, div.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(div.x - 100, div.y + 200, { steps: 8 });
+  await page.mouse.up();
+  const widened = (await panel(page).boundingBox())!.width;
+  expect(Math.abs(widened - 500)).toBeLessThanOrEqual(3);
+
+  // The chat panels still open at half and half.
+  await tab(page, "drafts").click();
+  const draftsW = (await panel(page).boundingBox())!.width;
+  expect(Math.abs(draftsW - (1280 - STRIP_W - 6) / 2)).toBeLessThanOrEqual(2);
+  expect(await page.evaluate(() => localStorage.getItem("cc.split.fraction"))).toBeNull();
+
+  // And the dashboard comes back at the width he left it.
+  await globalTab(page, "dashboard").click();
+  expect(Math.abs((await panel(page).boundingBox())!.width - widened)).toBeLessThanOrEqual(2);
+});
+
+test("the tray's route into the dashboard opens the panel instead of replacing the window", async ({ page }) => {
+  await mountChatsWindow(page);
+  await page.evaluate(() => (window as any).navigateTo("dashboard"));
+  await expect(panel(page)).toHaveAttribute("data-active", "dashboard");
+  await expect(page.locator("#app .view-dashboard")).toHaveCount(0);
+  expect(await page.evaluate(async () => (await import("/shared/navigation.ts")).getActiveView())).toBe("sessions");
 });

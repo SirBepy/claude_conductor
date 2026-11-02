@@ -12,6 +12,7 @@
 import { getActiveView, showView } from "./navigation";
 import { isTauri } from "./transport";
 import { openJarvisSafely } from "./open-jarvis-safely";
+import { GLOBAL_PANEL_META, getGlobalPanel, opensInGlobalPanel, setGlobalPanel } from "./global-panel";
 // The standalone column reuses the strip's own look, so it needs split.css even
 // when no chat (and so no split.ts) has loaded yet.
 import "../views/sessions/split-panels/split.css";
@@ -19,14 +20,17 @@ import "./app-rail.css";
 
 /** Rail entries that route in-window. `view` is the router name. */
 const GLOBAL_ENTRIES = [
-  { view: "dashboard", label: "Dashboard", icon: "ph-squares-four" },
-  { view: "schedule", label: "Schedule", icon: "ph-alarm" },
+  { view: "dashboard", ...GLOBAL_PANEL_META.dashboard },
+  { view: "schedule", ...GLOBAL_PANEL_META.schedule },
   { view: "settings", label: "Settings", icon: "ph-gear" },
 ] as const;
 
 /** Which rail entry a router view lights up. Settings subpages and the
- *  skill/character detail pages hang off Settings; History hangs off Chats. */
+ *  skill/character detail pages hang off Settings; History hangs off Chats.
+ *  In the Chats window Dashboard and Schedule are a side panel of the Chats
+ *  view, not router views, so on Chats the open panel is what lights up. */
 export function railActiveFor(view: string): string | null {
+  if (view === "sessions") return getGlobalPanel() ?? "sessions";
   if (view === "dashboard" || view === "schedule") return view;
   if (view === "settings" || view.startsWith("settings-")) return "settings";
   if (view === "characters" || view === "character-detail" || view === "skills" || view === "skill-detail") return "settings";
@@ -63,7 +67,9 @@ export function handleRailClick(target: EventTarget | null): boolean {
     return true;
   }
   const view = el.dataset.railGo;
-  if (view) showView(view);
+  // The pressed entry toggles shut, like a chat tool tab does.
+  if (view && opensInGlobalPanel(view) && getGlobalPanel() === view && getActiveView() === "sessions") setGlobalPanel(null);
+  else if (view) showView(view);
   return true;
 }
 

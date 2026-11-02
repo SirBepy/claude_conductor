@@ -1,7 +1,9 @@
 // What the split remembers in localStorage: which panel each chat had in the
 // split (leave a chat on Drafts, come back, Drafts is still there, across
 // restarts too), and the divider's position, which is one width for every
-// chat the way the pane windows' size was.
+// chat the way the pane windows' size was. The global panels (Dashboard,
+// Schedule) are deliberately absent from the per-chat map: they follow him
+// across chats and only their width is remembered.
 
 import type { PanelKey } from "../pane-windows/panels";
 
@@ -11,6 +13,8 @@ const FRACTION_KEY = "cc.split.fraction";
 const MAX_CHATS = 60;
 /** Half and half, as Joe picked it in the split mockup. */
 const DEFAULT_FRACTION = 0.5;
+const GLOBAL_WIDTH_KEY = "cc.split.globalWidth";
+const DEFAULT_GLOBAL_WIDTH = 400;
 
 type ActiveMap = Record<string, { panel: PanelKey; at: number }>;
 
@@ -70,6 +74,25 @@ export function loadFraction(): number {
 export function saveFraction(fraction: number): void {
   try {
     localStorage.setItem(FRACTION_KEY, String(fraction));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** A Dashboard / Schedule panel opens narrower than the chat tools, so it keeps
+ *  its own pixel width instead of borrowing their shared fraction. */
+export function loadGlobalWidth(): number {
+  try {
+    const n = Number(localStorage.getItem(GLOBAL_WIDTH_KEY));
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_GLOBAL_WIDTH;
+  } catch {
+    return DEFAULT_GLOBAL_WIDTH;
+  }
+}
+
+export function saveGlobalWidth(px: number): void {
+  try {
+    localStorage.setItem(GLOBAL_WIDTH_KEY, String(Math.round(px)));
   } catch {
     /* ignore */
   }

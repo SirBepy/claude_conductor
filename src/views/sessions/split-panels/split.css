@@ -219,6 +219,39 @@
   padding-right: 70px;
 }
 
+/* ── Global panels: the real Dashboard / Schedule views (split.ts) ────────── */
+
+/* The panel header already names the screen and closes it, so the view's own
+   title row, burger and Chats button would repeat it. */
+.sp-global-pane .view-header h2,
+.sp-global-pane .view-header .burger,
+.sp-global-pane .view-schedule .view-header {
+  display: none;
+}
+
+/* The dashboard's kebab (edit widgets, refresh) is not repeated anywhere, so
+   its header row shrinks to just that button and sits in the panel header,
+   left of the X (28px button + 6px padding + 4px gap = 38px, 40 for air). The
+   body stops being the containing block so the row is not clipped by it. */
+.sp-panel[data-global] .sp-body {
+  position: static;
+}
+
+.sp-global-pane .view-dashboard .view-header {
+  position: absolute;
+  top: 0;
+  right: 40px;
+  z-index: 2;
+  height: 40px;
+  padding: 0;
+  border-bottom: none;
+}
+
+/* schedule.css sizes its body to the window (100vh minus its own header). */
+.sp-global-pane .view-schedule .view-body.schedule-view-body {
+  height: auto;
+}
+
 .sp-body {
   position: relative;
   flex: 1;

@@ -64,6 +64,9 @@ export interface PanelHost {
   openDraft(id: string): void;
   /** Escape: closes the front-most panel. False when none was open. */
   closeFront(): boolean;
+  /** True while the FAB must keep this host on the pane even with no chat open
+   *  (the desktop split showing Dashboard or Schedule). Absent: never. */
+  wantsHost?(): boolean;
   previewController(): PreviewController;
   destroy(): void;
 }
