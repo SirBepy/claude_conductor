@@ -13,6 +13,7 @@
 import { updateSidemenuActive } from "./sidemenu";
 import { askConfirm } from "./confirm";
 import { opensInGlobalPanel, setGlobalPanel } from "./global-panel";
+import { closeSettingsPopup, opensInSettingsPopup } from "./settings-popup";
 
 const LEGACY_VIEWS = [
   "settings",
@@ -37,8 +38,14 @@ export function showView(name: string): void {
   // open it, after stepping back to Chats from any other full view (History,
   // Settings), whose split is what hosts the panel.
   if (opensInGlobalPanel(name)) {
+    closeSettingsPopup();
     setGlobalPanel(name);
     if (activeView !== "sessions") showView("sessions");
+    return;
+  }
+  // Settings is a popup over the active view, so that view stays the active one.
+  if (opensInSettingsPopup(name) && typeof routerWin().navigateTo === "function") {
+    void routerWin().navigateTo!(name);
     return;
   }
   activeView = name;

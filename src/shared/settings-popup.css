@@ -1,0 +1,80 @@
+/* Settings popup (settings-popup.ts): a 560px card centred over the Chats view.
+ * Backdrop and card look are modal.css's loading card (#modal-host), so the two
+ * read as the same family; the z-index sits under confirm.css's 2700 and the
+ * 2600 modals so a dialog opened from a settings page lands on top of it. */
+.settings-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-popup {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  /* A fixed height keeps the card from jumping as pages of different length swap
+     in; the 24px margins are what cap it to a short window. */
+  height: 660px;
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  overflow: hidden;
+  background: var(--color-surface, #1c1c24);
+  border: 1px solid var(--color-border, #2a2a36);
+  border-radius: 10px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  outline: none;
+}
+
+/* .view is flex:1 in a column already; this is the column it fills. The views'
+   own .view-body is the scroller. */
+.settings-popup-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The X and the back arrow sit in the view header's row: header padding 14px
+   puts its 36px controls at top 14, and 16px in from each side. */
+.settings-popup-close,
+.settings-popup-back {
+  position: absolute;
+  top: 14px;
+  z-index: 3;
+}
+.settings-popup-close { right: 16px; }
+.settings-popup-back { left: 16px; }
+.settings-popup-back[hidden] { display: none; }
+
+/* Every page's header row is as tall as one holding a 36px control, so the X (and the
+   back arrow) centre on the title whether or not the page has a control of its own. */
+.settings-popup .view-header {
+  box-sizing: border-box;
+  min-height: calc(var(--control-h) + 29px);
+}
+
+/* A page's right-hand header actions (Characters' kebab) would sit under the X. */
+.settings-popup .view-header:has(.view-header-actions) {
+  padding-right: calc(16px + var(--control-h) + 8px);
+}
+
+/* Pages with no left-hand control (the index, and Skills / Characters whose burger
+   Chats mode hides) balance the title against the 32px spacer on the right. */
+.settings-popup[data-view="settings"] .view-header,
+.settings-popup[data-view="skills"] .view-header,
+.settings-popup[data-view="characters"] .view-header {
+  padding-left: 48px;
+}
+
+/* The pages size to the window elsewhere (viewport units, #app's flex column);
+   inside the card the card is the bound. */
+.settings-popup .view {
+  min-height: 0;
+}

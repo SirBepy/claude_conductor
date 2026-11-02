@@ -26,6 +26,7 @@ import {
   GLOBAL_PANEL_META, getGlobalPanel, onGlobalPanelChange, registerPanelHost, setGlobalPanel, type GlobalPanelView,
 } from "../../../shared/global-panel";
 import { isChatsWindow } from "../../../shared/window-roles";
+import { onSettingsPopupChange } from "../../../shared/settings-popup";
 import "./split.css";
 
 /** Top to bottom, as Joe picked it in the split mockup. */
@@ -63,6 +64,7 @@ export class SplitPanels implements PanelHost {
   private globalLoad: Promise<void> = Promise.resolve();
   private globalWidth = loadGlobalWidth();
   private readonly unsubGlobal: () => void;
+  private readonly unsubPopup: () => void;
   private readonly releaseHost: () => void;
   private draftsCount = 0;
   private backlogCount = 0;
@@ -120,6 +122,8 @@ export class SplitPanels implements PanelHost {
     if (deps.mountPreview) this.watchPopOut();
     this.releaseHost = registerPanelHost();
     this.unsubGlobal = onGlobalPanelChange(() => this.syncGlobal());
+    // The strip's Settings entry shows pressed while the popup is open.
+    this.unsubPopup = onSettingsPopupChange(() => this.renderStrip());
     // A panel opened before this split existed (a tray jump into a freshly
     // built chat view) is waiting for it.
     this.global = getGlobalPanel();
@@ -217,6 +221,7 @@ export class SplitPanels implements PanelHost {
     this.destroyed = true;
     if (isChatsWindow()) announceSplitStrip(false);
     this.unsubGlobal();
+    this.unsubPopup();
     this.releaseHost();
     this.unmountGlobal();
     this.resizeObs?.disconnect();

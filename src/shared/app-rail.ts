@@ -13,6 +13,7 @@ import { getActiveView, showView } from "./navigation";
 import { isTauri } from "./transport";
 import { openJarvisSafely } from "./open-jarvis-safely";
 import { GLOBAL_PANEL_META, getGlobalPanel, opensInGlobalPanel, setGlobalPanel } from "./global-panel";
+import { closeSettingsPopup, isSettingsPopupOpen, onSettingsPopupChange } from "./settings-popup";
 // The standalone column reuses the strip's own look, so it needs split.css even
 // when no chat (and so no split.ts) has loaded yet.
 import "../views/sessions/split-panels/split.css";
@@ -30,6 +31,8 @@ const GLOBAL_ENTRIES = [
  *  In the Chats window Dashboard and Schedule are a side panel of the Chats
  *  view, not router views, so on Chats the open panel is what lights up. */
 export function railActiveFor(view: string): string | null {
+  // The Settings popup sits over any view, and is what the user is looking at.
+  if (isSettingsPopupOpen()) return "settings";
   if (view === "sessions") return getGlobalPanel() ?? "sessions";
   if (view === "dashboard" || view === "schedule") return view;
   if (view === "settings" || view.startsWith("settings-")) return "settings";
@@ -68,7 +71,8 @@ export function handleRailClick(target: EventTarget | null): boolean {
   }
   const view = el.dataset.railGo;
   // The pressed entry toggles shut, like a chat tool tab does.
-  if (view && opensInGlobalPanel(view) && getGlobalPanel() === view && getActiveView() === "sessions") setGlobalPanel(null);
+  if (view === "settings" && isSettingsPopupOpen()) closeSettingsPopup();
+  else if (view && opensInGlobalPanel(view) && getGlobalPanel() === view && getActiveView() === "sessions") setGlobalPanel(null);
   else if (view) showView(view);
   return true;
 }
@@ -102,6 +106,7 @@ export function mountAppRail(): void {
   solo.setAttribute("aria-label", "Navigation");
   solo.addEventListener("click", (ev) => void handleRailClick(ev.target));
   document.body.appendChild(solo);
+  onSettingsPopupChange(() => syncSolo(getActiveView()));
   // split.ts announces its strip so the two homes never show at once.
   window.addEventListener("cc:split-strip", (ev) => {
     stripOnScreen = (ev as CustomEvent<{ present: boolean }>).detail.present;
