@@ -384,8 +384,8 @@ const globalTab = (page: Page, view: string) => page.locator(`.sp-strip:not(#app
 /** The Chats window with a chat open on a blank router view, so no second
  *  full-screen dashboard competes with the panel's, and the standalone rail
  *  mounted the way boot does. */
-async function mountChatsWindow(page: Page): Promise<void> {
-  await mountPane(page, GLOBAL_MOCKS, 1280, true, "blank");
+async function mountChatsWindow(page: Page, mocks: Record<string, unknown> = GLOBAL_MOCKS): Promise<void> {
+  await mountPane(page, mocks, 1280, true, "blank");
   await page.evaluate(async () => {
     (await import("/shared/navigation.ts")).setActiveView("sessions");
     const rail = await import("/shared/app-rail.ts");
@@ -532,4 +532,37 @@ test("the tray's route into the dashboard opens the panel instead of replacing t
   await expect(panel(page)).toHaveAttribute("data-active", "dashboard");
   await expect(page.locator("#app .view-dashboard")).toHaveCount(0);
   expect(await page.evaluate(async () => (await import("/shared/navigation.ts")).getActiveView())).toBe("sessions");
+});
+
+test("the dashboard's account cards stack in the 400px panel, with no ring past its card's edge", async ({ page }) => {
+  const at = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
+  const snap = (five: number, seven: number) => ({
+    captured_at: new Date().toISOString(),
+    five_hour: { utilization: five, resets_at: at(2) },
+    seven_day: { utilization: seven, resets_at: at(48) },
+  });
+  await mountChatsWindow(page, {
+    ...GLOBAL_MOCKS,
+    list_accounts: [
+      { id: "acc-1", label: "Personal", icon: "user", colour: "#8b5cf6" },
+      { id: "acc-2", label: "Work", icon: "user", colour: "#f59e0b" },
+    ],
+    get_usage_map: { "acc-1": snap(40, 20), "acc-2": snap(15, 60) },
+  });
+  await globalTab(page, "dashboard").click();
+  await expect(panel(page).locator(".dash-acard .dash-ring").first()).toBeVisible();
+
+  const cards = await panel(page).locator(".dash-acard").evaluateAll((els) =>
+    els.map((el) => {
+      const c = el.getBoundingClientRect();
+      return {
+        top: c.top,
+        overflow: Math.max(...[...el.querySelectorAll(".dash-ring")].map((r) => r.getBoundingClientRect().right - c.right)),
+      };
+    }),
+  );
+  expect(cards).toHaveLength(2);
+  expect(cards[1]!.top).toBeGreaterThan(cards[0]!.top);
+  for (const c of cards) expect(c.overflow).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/dashboard-panel-stacked-cards.png` });
 });

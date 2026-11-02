@@ -1,4 +1,9 @@
-.view-dashboard .view-body { padding: 20px 16px; }
+.view-dashboard .view-body {
+  padding: 20px 16px;
+  /* The side panel (global-panel.ts) is ~400px inside a wide window, so layout that
+     depends on the dashboard's own width asks this container, not the viewport. */
+  container: dash-body / inline-size;
+}
 .view-dashboard .home-card {
   background: var(--color-surface, #1f1f2c);
   border: 1px solid var(--color-border, #2e2e40);
@@ -109,6 +114,13 @@
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
   margin-bottom: 16px;
+}
+/* A card needs 214px: two 84px rings and their 18px gap (186) plus 13px padding and a
+   1px border a side. The grid's 160px floor lets two share a row below the 440px that
+   fits two cards and the 12px gap, so the rings overran the card's edge; under that
+   width the cards stack. */
+@container dash-body (max-width: 439px) {
+  .view-dashboard .dash-sel-row { grid-template-columns: 1fr; }
 }
 .view-dashboard .dash-acard {
   background: var(--color-surface, #1f1f2c);
