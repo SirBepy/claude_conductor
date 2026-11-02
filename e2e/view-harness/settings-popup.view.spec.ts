@@ -139,6 +139,82 @@ test("the X, Escape and a click on the backdrop each close it; a click on the ca
   await expect(railSettings(page)).toHaveAttribute("aria-pressed", "false");
 });
 
+// The chat stays mounted under the popup, so its document-level key handlers stay live:
+// the keys typed at the popup must not reach them.
+test("Escape on the popup leaves a permission card waiting behind it, and the next Escape reaches the card", async ({ page }) => {
+  await mountChats(page);
+  await page.evaluate(async () => {
+    const pc = await import("/views/sessions/permission-modal/permission-card.ts");
+    pc.showPermissionCard({ id: "p-1", session_id: "s1", tool_name: "Bash", input: { command: "ls" } } as never);
+  });
+  await expect(page.locator(".prompt-card")).toHaveCount(1);
+  await openFromRail(page);
+
+  await page.keyboard.press("Escape");
+  await expect(popup(page)).toHaveCount(0);
+  await expect(page.locator(".prompt-card")).toHaveCount(1);
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".prompt-card")).toHaveCount(0);
+});
+
+test("Escape on the popup leaves a secret request waiting behind it", async ({ page }) => {
+  await mountChats(page);
+  await page.evaluate(async () => {
+    const sc = await import("/views/sessions/permission-modal/secret-card.ts");
+    sc.showSecretCard({ id: "sec-1", session_id: "s1", label: "API key", key: "API_KEY", file: "C:/x/.env" });
+  });
+  await expect(page.locator(".prompt-card")).toHaveCount(1);
+  await openFromRail(page);
+
+  await page.keyboard.press("Escape");
+  await expect(popup(page)).toHaveCount(0);
+  await expect(page.locator(".prompt-card")).toHaveCount(1);
+});
+
+test("Ctrl+Enter inside the popup does not submit a question card waiting behind it", async ({ page }) => {
+  await mountChats(page);
+  await page.evaluate(async () => {
+    const qm = await import("/views/sessions/permission-modal/index.ts");
+    await qm.showQuestionCard({
+      id: "q-1",
+      questions: [{ question: "Proceed?", options: [{ label: "Yes" }, { label: "No" }] }] as never,
+    });
+  });
+  await expect(page.locator(".prompt-card")).toHaveCount(1);
+  await page.locator('.prompt-card .prompt-panel[data-panel="0"] input[data-label="Yes"]').click();
+  await openFromRail(page);
+
+  await page.keyboard.press("Control+Enter");
+  await expect(popup(page)).toBeVisible();
+  // submit() on a single question removes the card, so give it a beat to have happened.
+  await page.waitForTimeout(150);
+  await expect(page.locator(".prompt-card")).toHaveCount(1);
+});
+
+test("Escape on the popup does not close Code mode under it", async ({ page }) => {
+  await mountChats(page);
+  const closes = await page.evaluate(async () => {
+    const { createHandleKey } = await import("/views/sessions/code-mode/events.ts");
+    let closed = 0;
+    const handler = createHandleKey({
+      root: document.createElement("div"),
+      hooks: {},
+      phone: false,
+      menuOpen: false,
+      branchOpen: false,
+      close: () => { closed++; },
+    } as never);
+    document.addEventListener("keydown", handler, true);
+    (await import("/shared/navigation.ts")).showView("settings");
+    await new Promise((r) => setTimeout(r, 200));
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    return closed;
+  });
+  expect(closes).toBe(0);
+  await expect(popup(page)).toHaveCount(0);
+});
+
 test("closing, and moving to another page, call the shown view's teardown", async ({ page }) => {
   await mountChats(page);
   await page.evaluate(async () => {

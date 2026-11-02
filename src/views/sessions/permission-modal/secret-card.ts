@@ -12,6 +12,7 @@
 import { invoke } from "../../../shared/ipc";
 import { escapeHtml } from "../../../shared/escape-html";
 import { isRemote } from "../../../shared/transport";
+import { isSettingsPopupOpen } from "../../../shared/settings-popup";
 import { state } from "../state";
 import { sessionSubtitle, projectName } from "../sessions-helpers";
 import { clearHost, ensureHost, renderCardShell } from "./host";
@@ -63,7 +64,8 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   let error: string | null = null;
 
   const escHandler = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") { if (isRemote()) teardownEsc(); else void cancel(); }
+    // The Settings popup covers this card and owns the key.
+    if (e.key === "Escape" && !isSettingsPopupOpen()) { if (isRemote()) teardownEsc(); else void cancel(); }
   };
 
   // Removes the DOM too (not just the Escape listener) - this is the same

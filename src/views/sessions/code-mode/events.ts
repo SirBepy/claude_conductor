@@ -3,6 +3,7 @@
 // bodies as before - each factory closes over the instance, same shape as
 // chat-renderer-click-handlers.ts's createHandleXClick pattern.
 
+import { isSettingsPopupOpen } from "../../../shared/settings-popup";
 import { allDirs } from "./tree";
 import { openTreeContextMenu } from "./context-menu";
 import type { BaseScope } from "./data";
@@ -135,6 +136,9 @@ function copy(el: HTMLElement): void {
 
 export function createHandleKey(inst: CodeModeInstance): (e: KeyboardEvent) => void {
   return (e: KeyboardEvent): void => {
+    // Code mode stays mounted under the Settings popup, and this capture-phase
+    // handler would otherwise take the popup's keys before it sees them.
+    if (isSettingsPopupOpen()) return;
     const t = e.target instanceof HTMLElement ? e.target : null;
     const inField = t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement;
     // The File view's editor: its keys are typing, not Code mode commands.

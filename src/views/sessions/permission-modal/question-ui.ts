@@ -1,4 +1,5 @@
 import { registerOverlayBack } from "../../../shared/back-button";
+import { isSettingsPopupOpen } from "../../../shared/settings-popup";
 import { clearHost, ensureHost } from "./host";
 import { createAuqAttachments, draftUploads } from "./attachments";
 import { createAuqSlashPopup } from "./slash-popup";
@@ -146,6 +147,9 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // temporal dead zone, safe today only because nothing calls teardown
   // synchronously during setup.
   const keydownHandler = (e: KeyboardEvent) => {
+    // The Settings popup covers this card: Ctrl+Enter or an arrow typed there
+    // must not answer or page a question nobody can see.
+    if (isSettingsPopupOpen()) return;
     if (e.key === "Escape") {
       handleEscape();
       return;
