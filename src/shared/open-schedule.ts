@@ -6,9 +6,11 @@
 
 import { invoke } from "./ipc";
 import { showView } from "./navigation";
+import { opensInGlobalPanel } from "./global-panel";
 
 export function openSchedule(): void {
-  if (window.__TAURI__) {
+  // The Chats window shows the calendar as its own side panel, not a second window.
+  if (window.__TAURI__ && !opensInGlobalPanel("schedule")) {
     void invoke("open_schedule_window").catch((err) =>
       console.error("[schedule] open_schedule_window failed", err),
     );

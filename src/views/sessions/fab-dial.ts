@@ -50,6 +50,7 @@ class FabDial implements FabDialHandle {
   private onCode: () => void;
   private sessionId: string | null = null;
   private liftObs: ResizeObserver | null = null;
+  private keepObs: MutationObserver | null = null;
   private split = false;
 
   constructor(pane: HTMLElement, deps: FabDialDeps) {
@@ -69,7 +70,10 @@ class FabDial implements FabDialHandle {
     const hostDeps = {
       onDraft: deps.onDraft,
       mountPreview: deps.mountPreview,
-      onChange: () => this.renderChrome(),
+      onChange: () => {
+        this.syncHost();
+        this.renderChrome();
+      },
     };
     // The split's icon strip already offers every dial entry, so on desktop
     // the FAB would only duplicate it; Code moves into the strip instead.
@@ -120,14 +124,16 @@ class FabDial implements FabDialHandle {
     this.sessionId = sessionId;
     this.dialOpen = false;
     // No chat mounted means no transcript to ask about, so the FAB goes away
-    // rather than floating over an empty pane.
+    // rather than floating over an empty pane. The desktop split can ask to
+    // stay (a Dashboard panel open beside the empty pane), which syncHost()
+    // decides from inside this call, through onChange.
     if (!sessionId) {
       this.windows.setSessionScope(null, null);
-      this.liftObs?.disconnect();
-      this.liftObs = null;
-      this.host.remove();
+      this.syncHost();
       return;
     }
+    this.keepObs?.disconnect();
+    this.keepObs = null;
     this.attach();
     // Each chat lands the way he left it: its own windows, where he put them.
     this.windows.setSessionScope(sessionId, cwd);
@@ -138,7 +144,29 @@ class FabDial implements FabDialHandle {
    *  the host is orphaned by the time the new DOM lands. The host keeps its own
    *  subtree while detached, so re-appending restores it without a re-render. */
   reattach(): void {
-    if (this.sessionId) this.attach();
+    if (this.sessionId || this.windows.wantsHost?.()) this.attach();
+  }
+
+  /** With no chat the host is on the pane only while the split wants it. The
+   *  empty states rewrite the pane's children without calling reattach(), so a
+   *  kept host is watched and put back. */
+  private syncHost(): void {
+    if (this.sessionId) return;
+    if (this.windows.wantsHost?.()) {
+      this.attach();
+      if (!this.keepObs && typeof MutationObserver !== "undefined") {
+        this.keepObs = new MutationObserver(() => {
+          if (this.host.parentElement !== this.pane) this.pane.appendChild(this.host);
+        });
+        this.keepObs.observe(this.pane, { childList: true });
+      }
+      return;
+    }
+    this.keepObs?.disconnect();
+    this.keepObs = null;
+    this.liftObs?.disconnect();
+    this.liftObs = null;
+    this.host.remove();
   }
 
   openDraft(id: string): void {
@@ -228,6 +256,7 @@ class FabDial implements FabDialHandle {
 
   destroy(): void {
     this.windows.destroy();
+    this.keepObs?.disconnect();
     this.liftObs?.disconnect();
     this.liftObs = null;
     this.chrome.removeEventListener("click", this.onClick);

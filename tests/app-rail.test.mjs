@@ -15,10 +15,19 @@ vi.mock("../src/views/sessions/split-panels/split.css", () => ({}));
 vi.mock("../src/shared/app-rail.css", () => ({}));
 
 const rail = await import("../src/shared/app-rail.ts");
+const { setGlobalPanel, getGlobalPanel } = await import("../src/shared/global-panel.ts");
+
+/** The data-rail-go of whichever global rail entry renders pressed. */
+function globalGroupActive(view) {
+  const host = document.createElement("div");
+  host.innerHTML = rail.globalGroupHtml(view);
+  return host.querySelector(".is-on")?.dataset.railGo ?? null;
+}
 
 beforeEach(() => {
   showView.mockClear();
   openJarvisSafely.mockClear();
+  setGlobalPanel(null);
   document.body.className = "";
   document.body.innerHTML = "";
 });
@@ -39,6 +48,19 @@ describe("railActiveFor", () => {
     expect(rail.railActiveFor("sessions")).toBe("sessions");
     expect(rail.railActiveFor("history")).toBe("sessions");
     expect(rail.railActiveFor("nope")).toBeNull();
+  });
+
+  // Dashboard and Schedule are a side panel of the Chats view, so the pressed
+  // entry follows the open panel, not a router view that no longer changes.
+  it("lights the open global panel while on Chats, and only there", () => {
+    setGlobalPanel("schedule");
+    expect(rail.railActiveFor("sessions")).toBe("schedule");
+    expect(rail.railActiveFor("history")).toBe("sessions");
+    expect(rail.railActiveFor("settings")).toBe("settings");
+    expect(globalGroupActive("sessions")).toBe("schedule");
+    setGlobalPanel(null);
+    expect(rail.railActiveFor("sessions")).toBe("sessions");
+    expect(globalGroupActive("sessions")).toBeNull();
   });
 });
 
@@ -64,6 +86,23 @@ describe("handleRailClick", () => {
     host.innerHTML = rail.globalGroupHtml("sessions");
     expect(rail.handleRailClick(host.querySelector('[data-rail-go="settings"] i'))).toBe(true);
     expect(showView).toHaveBeenCalledWith("settings");
+  });
+
+  it("in the Chats window the pressed Dashboard entry closes its panel instead of routing", () => {
+    document.body.classList.add("chats-window-mode");
+    const host = document.createElement("div");
+    host.innerHTML = rail.globalGroupHtml("sessions");
+    const dash = host.querySelector('[data-rail-go="dashboard"] i');
+
+    // Not open yet: the click routes, and showView is what opens the panel.
+    rail.handleRailClick(dash);
+    expect(showView).toHaveBeenCalledWith("dashboard");
+
+    setGlobalPanel("dashboard");
+    showView.mockClear();
+    rail.handleRailClick(dash);
+    expect(showView).not.toHaveBeenCalled();
+    expect(getGlobalPanel()).toBeNull();
   });
 
   it("opens Jarvis through the shared safe opener", () => {

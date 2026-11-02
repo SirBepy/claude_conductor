@@ -1,5 +1,6 @@
 import { html, render } from "lit-html";
-import { setActiveView } from "./shared/navigation";
+import { setActiveView, showView } from "./shared/navigation";
+import { opensInGlobalPanel } from "./shared/global-panel";
 import { noteNavigation } from "./shared/back-button";
 import { isRemote } from "./shared/transport";
 import { noteView } from "./shared/on-screen-chat";
@@ -59,6 +60,12 @@ function retriggerEnter(el: HTMLElement): void {
 
 export async function navigateTo(name: string): Promise<void> {
   if (!currentRoot) return;
+  // The tray, the overlay card and the cold-start drain call this directly
+  // rather than through showView; they land in the Chats window's panel too.
+  if (opensInGlobalPanel(name)) {
+    showView(name);
+    return;
+  }
   setActiveView(name);
   noteView(name);
   // Feed the back-button view stack so the phone's hardware back can step back

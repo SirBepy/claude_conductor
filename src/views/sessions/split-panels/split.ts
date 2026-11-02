@@ -18,9 +18,13 @@ import type { PreviewController } from "../preview-panel";
 import {
   mountPanel, PANEL_KEYS, PANEL_META, type MountedPanels, type PanelDeps, type PanelHandle, type PanelHost, type PanelHostDeps, type PanelKey,
 } from "../pane-windows/panels";
-import { forgetActive, recallActive, rememberActive, loadFraction, saveFraction } from "./memory";
+import {
+  forgetActive, recallActive, rememberActive, loadFraction, saveFraction, loadGlobalWidth, saveGlobalWidth,
+} from "./memory";
 import { announceSplitStrip, globalGroupHtml, handleRailClick } from "../../../shared/app-rail";
-import { getActiveView } from "../../../shared/navigation";
+import {
+  GLOBAL_PANEL_META, getGlobalPanel, onGlobalPanelChange, registerPanelHost, setGlobalPanel, type GlobalPanelView,
+} from "../../../shared/global-panel";
 import { isChatsWindow } from "../../../shared/window-roles";
 import "./split.css";
 
@@ -47,6 +51,19 @@ export class SplitPanels implements PanelHost {
   private readonly head: HTMLElement;
   private readonly body: HTMLElement;
   private fraction = loadFraction();
+  /** Dashboard or Schedule in the split (shared/global-panel.ts). It covers
+   *  `active` without replacing it, so closing it brings back this chat's own
+   *  panel, and it follows him across chats instead of being remembered per chat. */
+  private global: GlobalPanelView | null = null;
+  private globalRoot: HTMLElement | null = null;
+  private globalTeardown: (() => void) | null = null;
+  private globalSeq = 0;
+  /** The dashboard module keeps one mounted instance in module state, so mounts
+   *  and their teardowns run strictly one after another. */
+  private globalLoad: Promise<void> = Promise.resolve();
+  private globalWidth = loadGlobalWidth();
+  private readonly unsubGlobal: () => void;
+  private readonly releaseHost: () => void;
   private draftsCount = 0;
   private backlogCount = 0;
   /** Preview relocated to its own OS window for this chat (rail-panel.ts's
@@ -101,6 +118,12 @@ export class SplitPanels implements PanelHost {
     // either is opened.
     for (const p of this.panels) if (p === "preview" || p === "drafts" || p === "backlog") this.ensureMounted(p);
     if (deps.mountPreview) this.watchPopOut();
+    this.releaseHost = registerPanelHost();
+    this.unsubGlobal = onGlobalPanelChange(() => this.syncGlobal());
+    // A panel opened before this split existed (a tray jump into a freshly
+    // built chat view) is waiting for it.
+    this.global = getGlobalPanel();
+    if (this.global) this.mountGlobal(this.global);
     // Not apply(): its onChange would reach the FAB before it holds this host.
     this.renderStrip();
     this.paint();
@@ -131,9 +154,18 @@ export class SplitPanels implements PanelHost {
     // Before apply(): a newly-shown Preview must fetch for the new chat.
     for (const h of this.handles.values()) h.setSessionScope(sessionId, cwd);
     this.apply(changed);
-    // With no chat the FAB host (and this strip inside it) is detached, so the
-    // standalone rail has to carry the GLOBAL group or it is unreachable.
-    if (isChatsWindow()) announceSplitStrip(!!sessionId);
+    this.announce();
+  }
+
+  /** The FAB keeps its host on the pane without a chat only while a global
+   *  panel is open; otherwise it detaches and the standalone rail carries the
+   *  GLOBAL group (app-rail.ts), so exactly one of the two is ever on screen. */
+  wantsHost(): boolean {
+    return this.global !== null;
+  }
+
+  private announce(): void {
+    if (isChatsWindow()) announceSplitStrip(!!this.sessionId || this.global !== null);
   }
 
   openPanel(panel: PanelKey): void {
@@ -153,7 +185,7 @@ export class SplitPanels implements PanelHost {
   }
 
   closeFront(): boolean {
-    if (!this.active) return false;
+    if (!this.active && !this.global) return false;
     this.close();
     return true;
   }
@@ -165,12 +197,12 @@ export class SplitPanels implements PanelHost {
       toggle: () => {
         // Popped out, so there is nothing here to toggle - surface that window.
         if (this.popped) return this.popOut();
-        if (this.active === "preview") this.close();
+        if (this.active === "preview" && !this.global) this.closeChatPanel();
         else this.openPreview(undefined, true);
       },
       open: (snapshotId?: string) => this.openPreview(snapshotId, true),
       close: () => {
-        if (this.active === "preview") this.close();
+        if (this.active === "preview") this.closeChatPanel();
       },
       isOpen: () => this.previewOpen(),
       // FabDial scopes this whole host; state.ts calling it too is a no-op.
@@ -184,6 +216,9 @@ export class SplitPanels implements PanelHost {
   destroy(): void {
     this.destroyed = true;
     if (isChatsWindow()) announceSplitStrip(false);
+    this.unsubGlobal();
+    this.releaseHost();
+    this.unmountGlobal();
     this.resizeObs?.disconnect();
     if (this.storageHandler) window.removeEventListener("storage", this.storageHandler);
     this.unlistenDocked?.();
@@ -199,14 +234,66 @@ export class SplitPanels implements PanelHost {
 
   private show(panel: PanelKey): void {
     if (!this.panels.includes(panel)) return;
+    // One panel at a time: a chat tool replaces a Dashboard / Schedule panel.
+    if (this.global) setGlobalPanel(null);
     this.ensureMounted(panel);
     this.active = panel;
     this.apply(false);
   }
 
+  /** Closes what is on screen. A global panel goes first, and the chat's own
+   *  panel it was covering comes back. */
   private close(): void {
+    if (this.global) setGlobalPanel(null);
+    else this.closeChatPanel();
+  }
+
+  private closeChatPanel(): void {
     this.active = null;
     this.apply(false);
+  }
+
+  // ── Global panels (Dashboard, Schedule) ──────────────────────────────────
+
+  private syncGlobal(): void {
+    const next = getGlobalPanel();
+    if (next === this.global) return;
+    this.unmountGlobal();
+    this.global = next;
+    if (next) this.mountGlobal(next);
+    this.apply(false);
+    this.announce();
+  }
+
+  /** Renders the real view, not a copy. Both bring their own header (title,
+   *  burger, a Chats button); split.css hides what the panel header repeats. */
+  private mountGlobal(view: GlobalPanelView): void {
+    const root = document.createElement("div");
+    root.className = "pw-panel sp-pane sp-global-pane";
+    root.dataset.view = view;
+    this.body.appendChild(root);
+    this.globalRoot = root;
+    const seq = ++this.globalSeq;
+    this.globalLoad = this.globalLoad
+      .then(async () => {
+        // Closed again before its turn came up.
+        if (seq !== this.globalSeq) return;
+        const teardown =
+          view === "dashboard"
+            ? await (await import("../../dashboard/dashboard")).renderDashboard(root)
+            : await (await import("../../schedule/schedule")).renderScheduleView(root);
+        if (seq !== this.globalSeq || this.destroyed) teardown();
+        else this.globalTeardown = teardown;
+      })
+      .catch((err) => console.error("[split-panels] global panel mount failed", err));
+  }
+
+  private unmountGlobal(): void {
+    this.globalSeq++;
+    this.globalTeardown?.();
+    this.globalTeardown = null;
+    this.globalRoot?.remove();
+    this.globalRoot = null;
   }
 
   private ensureMounted(panel: PanelKey): void {
@@ -240,12 +327,15 @@ export class SplitPanels implements PanelHost {
   /** Puts the DOM in line with `active`, then runs Preview's on-screen edge
    *  and remembers the choice for this chat. */
   private apply(scoping: boolean): void {
-    for (const [k, root] of this.roots) root.hidden = k !== this.active;
-    this.panelEl.dataset.active = this.active ?? "";
+    for (const [k, root] of this.roots) root.hidden = this.global !== null || k !== this.active;
+    this.panelEl.dataset.active = this.global ?? this.active ?? "";
+    this.panelEl.toggleAttribute("data-global", this.global !== null);
     this.renderHead();
     this.paint();
 
-    const shown = !this.popped && this.active === "preview";
+    const previewActive = !this.popped && this.active === "preview";
+    // Covered by a global panel it is still the chat's panel, but not on screen.
+    const shown = previewActive && this.global === null;
     // A chat switch is the body's own setSessionScope's to fetch for.
     if (shown && !this.previewShown && !scoping) {
       const id = this.pendingSnapshot;
@@ -263,7 +353,7 @@ export class SplitPanels implements PanelHost {
       // another panel while a Preview pushed behind it is still pending, and
       // writing `shown=false` then would erase that pending state.
       // Switching panels in front of that pending Preview must not erase it either.
-      if (!scoping && !this.popped && this.panels.includes("preview")) savePreviewOpen(this.sessionId, shown || this.previewUnseen);
+      if (!scoping && !this.popped && this.panels.includes("preview")) savePreviewOpen(this.sessionId, previewActive || this.previewUnseen);
     }
     this.renderStrip();
     this.deps.onChange();
@@ -272,15 +362,16 @@ export class SplitPanels implements PanelHost {
   /** Sizes the panel from the remembered fraction, clamped so neither side
    *  drops under its minimum; the chat yields through the pane's padding. */
   private paint(): void {
-    // No chat, no host on the pane (fab-dial.ts), so nothing may hold width.
-    if (!this.sessionId) {
+    // No chat, no host on the pane (fab-dial.ts) unless a global panel keeps it
+    // there, so otherwise nothing may hold width.
+    if (!this.sessionId && !this.global) {
       this.panelEl.hidden = true;
       this.divider.hidden = true;
       this.clearPaneInset();
       return;
     }
     const total = this.pane.clientWidth;
-    const open = this.active !== null && total > 0;
+    const open = (this.active !== null || this.global !== null) && total > 0;
     this.panelEl.hidden = !open;
     let panelW = 0;
     let overlay = false;
@@ -290,7 +381,8 @@ export class SplitPanels implements PanelHost {
         overlay = true;
         panelW = total - STRIP_W;
       } else {
-        panelW = Math.round(Math.min(avail - MIN_CHAT, Math.max(MIN_PANEL, avail * this.fraction)));
+        const want = this.global ? this.globalWidth : avail * this.fraction;
+        panelW = Math.round(Math.min(avail - MIN_CHAT, Math.max(MIN_PANEL, want)));
       }
     }
     this.divider.hidden = !open || overlay;
@@ -309,17 +401,18 @@ export class SplitPanels implements PanelHost {
   }
 
   private renderHead(): void {
-    const k = this.active;
+    const k = this.global ?? this.active;
     if (!k) {
       this.head.innerHTML = "";
       return;
     }
+    const meta = this.global ? GLOBAL_PANEL_META[this.global] : PANEL_META[k as PanelKey];
     // Preview's own head carries its title, version and kebab, so this one
     // shrinks to its buttons and sits at the end of that row (split.css).
     const title =
       k === "preview"
         ? ""
-        : `<span class="sp-title"><i class="ph ${PANEL_META[k].icon}"></i><span>${PANEL_META[k].label}</span></span>`;
+        : `<span class="sp-title"><i class="ph ${meta.icon}"></i><span>${meta.label}</span></span>`;
     const popout =
       k === "preview"
         ? `<button type="button" class="sp-btn" data-sp-act="popout" title="Pop out into its own window">` +
@@ -327,7 +420,7 @@ export class SplitPanels implements PanelHost {
         : "";
     this.head.innerHTML =
       `${title}<span class="sp-grow"></span>${popout}` +
-      `<button type="button" class="sp-btn" data-sp-act="close" title="Close" aria-label="Close ${PANEL_META[k].label}">` +
+      `<button type="button" class="sp-btn" data-sp-act="close" title="Close" aria-label="Close ${meta.label}">` +
       `<i class="ph ph-x"></i></button>`;
   }
 
@@ -338,9 +431,12 @@ export class SplitPanels implements PanelHost {
       ? `<button type="button" class="sp-tab" data-sp-code title="Code mode (Ctrl+Shift+E)" aria-label="Code mode">` +
         `<i class="ph ph-code"></i></button>`
       : "";
-    this.strip.innerHTML = code + STRIP_ORDER.filter((k) => this.panels.includes(k))
+    // With no chat only a global panel keeps this strip on screen, and the chat
+    // tools have nothing to act on.
+    const tools = this.sessionId ? STRIP_ORDER.filter((k) => this.panels.includes(k)) : [];
+    this.strip.innerHTML = (this.sessionId ? code : "") + tools
       .map((k) => {
-        const on = k === this.active;
+        const on = k === this.active && this.global === null;
         const { label, icon } = PANEL_META[k];
         // Quiet marks only (Joe's rule): a small number, a small dot.
         const mark =
@@ -358,7 +454,8 @@ export class SplitPanels implements PanelHost {
       })
       // The global rail group only exists in the Chats window; the phone and
       // the pop-out windows use their own chrome.
-      .join("") + (isChatsWindow() ? globalGroupHtml(getActiveView()) : "");
+      // This strip only lives in the Chats view, so that is the view it lights.
+      .join("") + (isChatsWindow() ? globalGroupHtml("sessions") : "");
   }
 
   // ── Events ───────────────────────────────────────────────────────────────
@@ -370,7 +467,8 @@ export class SplitPanels implements PanelHost {
     if (!btn) return;
     const k = btn.dataset.spK as PanelKey;
     if (k === "preview" && this.popped) return this.popOut();
-    if (this.active === k) this.close();
+    // Under a global panel a chat tab is a swap, even for the panel it covers.
+    if (this.active === k && this.global === null) this.close();
     else if (k === "preview") this.openPreview(undefined, true);
     else this.show(k);
   };
@@ -389,12 +487,15 @@ export class SplitPanels implements PanelHost {
     div.classList.add("is-dragging");
     // The iframe under the pointer would swallow the moves mid-drag.
     this.panelEl.classList.add("is-resizing");
+    // A global panel keeps its own width, so it must not move the chat panels' fraction.
+    const global = this.global !== null;
     const move = (e: PointerEvent) => {
       const box = this.pane.getBoundingClientRect();
       const avail = box.width - STRIP_W - DIVIDER_W;
       if (avail <= 0) return;
       const panelW = box.right - STRIP_W - e.clientX - DIVIDER_W / 2;
-      this.fraction = Math.min(1, Math.max(0, panelW / avail));
+      if (global) this.globalWidth = Math.max(0, panelW);
+      else this.fraction = Math.min(1, Math.max(0, panelW / avail));
       this.paint();
     };
     const up = () => {
@@ -406,6 +507,11 @@ export class SplitPanels implements PanelHost {
       // Stored clamped, so a drag past a minimum doesn't leave a value the
       // next wider window would honour literally.
       const avail = this.pane.clientWidth - STRIP_W - DIVIDER_W;
+      if (global) {
+        if (avail > MIN_PANEL + MIN_CHAT) this.globalWidth = Math.min(avail - MIN_CHAT, Math.max(MIN_PANEL, this.globalWidth));
+        saveGlobalWidth(this.globalWidth);
+        return;
+      }
       if (avail > MIN_PANEL + MIN_CHAT) {
         this.fraction = Math.min((avail - MIN_CHAT) / avail, Math.max(MIN_PANEL / avail, this.fraction));
       }
@@ -421,7 +527,7 @@ export class SplitPanels implements PanelHost {
   private previewDeps(): RailTabDeps {
     return {
       isOpen: () => this.previewOpen(),
-      isVisible: () => !this.popped && this.active === "preview",
+      isVisible: () => !this.popped && this.active === "preview" && this.global === null,
       // A push: it may not take the split from a panel he is using.
       requestOpen: (id) => this.openPreview(id, false),
       markOpenFor: (sid) => savePreviewOpen(sid, true),
