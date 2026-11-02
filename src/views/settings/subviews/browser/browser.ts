@@ -35,7 +35,7 @@ export async function renderBrowserView(root: HTMLElement): Promise<() => void> 
   if (isRemote()) return () => {};
   wireBrowserSection(root);
   // The info icons only show their text once this is wired.
-  attachTooltips(document.getElementById("app") || document.body, { placement: "above" });
+  attachTooltips(document.body, { placement: "above" });
 
   // Fresh-read + retry: building from the frontend's own settings
   // cache could revert a concurrent daemon-owned write.
