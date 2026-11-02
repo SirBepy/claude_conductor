@@ -5,17 +5,29 @@
 
 describe("Claude Companion UI smoke", () => {
   it("boots the single desktop window's SPA shell (app rail)", async () => {
-    // The Chats window is the only desktop window; its global rail (Jarvis,
-    // Dashboard, Schedule, Settings) is the shell's stable marker. Go to the
-    // Dashboard first: the standalone #app-rail is hidden while a chat's split
-    // strip carries the same group, and the Dashboard never has a strip.
+    // The Chats window is the only desktop window; its global group (Jarvis,
+    // Dashboard, Schedule, Settings) is the shell's stable marker. It lives on
+    // the standalone #app-rail or on the split's strip, one at a time, so look
+    // for whichever is on screen.
+    await browser.waitUntil(
+      () =>
+        browser.execute(() => {
+          const shown = [...document.querySelectorAll(".sp-strip")].find((el) => el.getClientRects().length > 0);
+          return (
+            !!shown &&
+            ['[data-rail-go="dashboard"]', '[data-rail-go="schedule"]', '[data-rail-go="settings"]', "[data-rail-jarvis]"].every(
+              (sel) => !!shown.querySelector(sel),
+            )
+          );
+        }),
+      { timeout: 30000, interval: 300, timeoutMsg: "no on-screen rail carries the global group" },
+    );
+  });
+
+  it("opens the Dashboard in the Chats window's side panel", async () => {
     await browser.execute(() => window.showView("dashboard"));
-    const rail = await $("#app-rail");
-    await rail.waitForDisplayed({ timeout: 30000 });
-    await expect(rail.$('[data-rail-go="dashboard"]')).toExist();
-    await expect(rail.$('[data-rail-go="schedule"]')).toExist();
-    await expect(rail.$('[data-rail-go="settings"]')).toExist();
-    await expect(rail.$("[data-rail-jarvis]")).toExist();
+    const dash = await $(".sp-global-pane .view-dashboard");
+    await dash.waitForDisplayed({ timeout: 15000 });
   });
 
   it("renders the Sessions view sidebar (daemon connected)", async () => {
