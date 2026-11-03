@@ -3,7 +3,7 @@
 //! the read loop beyond the two values the loop latched (`pump_turn_gen`,
 //! `closing_flagged`).
 
-use super::close::{close_stand_down_is_failure_at_eof, finalize_close, CLOSE_FAILED_AWAITING};
+use super::close::{close_in_flight, close_stand_down_is_failure_at_eof, finalize_close, CLOSE_FAILED_AWAITING};
 use crate::daemon::session::{Session, SessionMap};
 use crate::daemon::state::DaemonState;
 use std::sync::Arc;
@@ -77,7 +77,7 @@ pub(crate) async fn run_pump_exit(
         // The turn is over either way - drop the broadcast closing flag
         // before any snapshot below can persist `closing: true`. (No
         // reassignment: the pump loop is done, the flag is never read again.)
-        if closing_flagged {
+        if close_in_flight(&state_for_pump.registry, &pump_session.session_id, closing_flagged) {
             if close_stand_down_is_failure_at_eof(close_confirmed_at_eof) {
                 log::warn!(
                     "daemon: session {} process exited mid-/close without close_session confirmation; chat still open",

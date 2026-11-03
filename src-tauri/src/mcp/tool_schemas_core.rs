@@ -93,10 +93,16 @@ pub fn core_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_CLOSE,
-            "description": "Confirm this chat's /close teardown so the host app ends the session and kills the process at turn end. Call ONLY from the /close skill's final close step, and never on --dont-close or a failed chain.",
+            "description": "Confirm this chat's /close teardown so the host app ends the session and kills the process at turn end. Call ONLY from the /close skill's final close step, and never on --dont-close or a failed chain. With stage \"started\" it instead tells the app the /close skill has begun closing (shows the chat as Closing) and tears nothing down; the final call without a stage is still what confirms.",
             "inputSchema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "stage": {
+                        "type": "string",
+                        "enum": ["started"],
+                        "description": "Set to \"started\" when /close begins its closing phases. Leave it out on the final confirming call."
+                    }
+                }
             }
         }),
     ]

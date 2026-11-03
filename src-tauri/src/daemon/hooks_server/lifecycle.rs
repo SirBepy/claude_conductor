@@ -33,6 +33,21 @@ pub(super) struct SessionEndPayload {
 #[derive(Deserialize, Debug, Default)]
 pub(super) struct CloseConfirmPayload {
     pub session_id: String,
+    /// `"started"` marks the chat Closing without confirming teardown; absent
+    /// is the final confirmation.
+    #[serde(default)]
+    pub stage: Option<String>,
+}
+
+/// Applies one `close_session` call to the registry. `started` only raises the
+/// `closing` row state (returns true if that changed it, so the caller
+/// publishes); anything else is the confirmation that arms teardown at turn end.
+fn apply_close_stage(registry: &crate::sessions::registry::Registry, session_id: &str, stage: Option<&str>) -> bool {
+    if stage == Some("started") {
+        return registry.set_closing(session_id, true);
+    }
+    registry.set_close_requested(session_id);
+    false
 }
 
 /// `/sessions/close-confirm`: the `cc_conductor` `close_session` MCP tool -
@@ -46,10 +61,16 @@ pub(super) async fn on_close_confirm(
     AxState(ctx): AxState<Arc<HookCtx>>,
     Json(payload): Json<CloseConfirmPayload>,
 ) -> impl IntoResponse {
-    log::info!("hook /sessions/close-confirm: session={}", payload.session_id);
+    log::info!(
+        "hook /sessions/close-confirm: session={} stage={}",
+        payload.session_id,
+        payload.stage.as_deref().unwrap_or("confirm")
+    );
     // todo 824 remaining 1: reachable only via the MCP `close_session` tool.
     super::mark_mcp_tool_used(&ctx, &payload.session_id);
-    ctx.state.registry.set_close_requested(&payload.session_id);
+    if apply_close_stage(&ctx.state.registry, &payload.session_id, payload.stage.as_deref()) {
+        crate::daemon::machines::publish_instances_changed(&ctx.state);
+    }
     (StatusCode::OK, Json(json!({"ok": true})))
 }
 
@@ -202,6 +223,22 @@ mod tests {
         // Regression: per-turn `claude -p` fires SessionEnd on turn completion;
         // it must not close the daemon-owned Interactive session.
         assert!(!hook_session_end_should_close(Some(InstanceKind::Interactive)));
+    }
+
+    #[test]
+    fn close_stage_started_marks_closing_without_arming_teardown() {
+        use crate::sessions::registry::Registry;
+        let registry = Registry::new();
+        let settings = std::sync::Mutex::new(crate::types::Settings::default());
+        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-11-03T00:00:00Z");
+
+        assert!(apply_close_stage(&registry, "s", Some("started")), "the row flips to closing");
+        assert!(registry.get("s").unwrap().closing);
+        assert!(!registry.take_close_requested("s"), "started must not confirm teardown");
+        assert!(!apply_close_stage(&registry, "s", Some("started")), "a repeat changes nothing");
+
+        assert!(!apply_close_stage(&registry, "s", None));
+        assert!(registry.take_close_requested("s"), "the final call arms teardown");
     }
 
     #[test]

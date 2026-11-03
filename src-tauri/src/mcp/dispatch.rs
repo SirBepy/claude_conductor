@@ -148,12 +148,20 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             // Fire-and-confirm: the daemon records the close and
             // tears down at turn end (session_id comes from the
             // per-session CC_SESSION_ID env, not tool args).
-            let body = json!({ "session_id": ctx.session_id });
+            let started = ctx.args.get("stage").and_then(|s| s.as_str()) == Some("started");
+            let mut body = json!({ "session_id": ctx.session_id });
+            if started {
+                body["stage"] = json!("started");
+            }
             Some(ctx.relay(
                 "/sessions/close-confirm",
                 body,
                 None,
-                Some("close confirmed; session will end at turn completion"),
+                Some(if started {
+                    "close marked as started; call close_session again without a stage to confirm teardown"
+                } else {
+                    "close confirmed; session will end at turn completion"
+                }),
             ))
         }
         TOOL_SPAWN_CHAT | TOOL_RESPAWN => {

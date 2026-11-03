@@ -17,7 +17,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 mod close;
 mod exit;
 mod turn_boundary;
-use close::{close_stand_down_is_failure, finalize_close, turn_is_close, CLOSE_FAILED_AWAITING};
+use close::{close_in_flight, close_stand_down_is_failure, finalize_close, turn_is_close, CLOSE_FAILED_AWAITING};
 use exit::run_pump_exit;
 use turn_boundary::{TurnAction, TurnBoundary};
 
@@ -473,7 +473,7 @@ pub(crate) async fn run_stdout_pump(
                                 // above) or the close stood down (--dont-close / a failed
                                 // chain never fires the tool) - clear the flag BEFORE the
                                 // snapshot below so it never persists `closing: true`.
-                                if closing_flagged {
+                                if close_in_flight(&state_for_pump.registry, &pump_session.session_id, closing_flagged) {
                                     closing_flagged = false;
                                     let prompt = pump_session.last_prompt.lock().ok()
                                         .map(|p| p.clone()).unwrap_or_default();
