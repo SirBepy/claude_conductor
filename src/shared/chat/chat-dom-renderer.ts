@@ -21,6 +21,7 @@ import { renderQuestionCardHtml } from "./tool-views";
 import { renderPreviewCardHtml, mountPreviewFrame } from "./chat-preview-card";
 import { renderDraftCardHtml, mountDraftCard } from "./chat-draft-card";
 import type { ChatRenderer } from "./chat-renderer";
+import { sweepOldCards } from "./chat-card-turns";
 import { ensureActiveTurnFooter, applyRunningHighlight, processTurnCloseQueue } from "./chat-turn-fold";
 
 // Re-exported for callers still importing scroll helpers from here (ai_todo 598
@@ -126,6 +127,10 @@ export function flushRender(r: ChatRenderer): void {
     groupToolRange(r.messages, r.messageEls, foldStart, r.messages.length, r.activeToolGroups, footer, r.channelMessages);
   }
   applyRunningHighlight(r);
+  // Every path that adds or replaces a row lands here, so this is where a card
+  // that a later turn has now overtaken shrinks. Not animated while a history
+  // replay is building the chat: those cards were never seen at full size.
+  if (touchedEls.length > 0) sweepOldCards(r.messages, r.messageEls, !r.hydrating);
   // Nothing rendered this flush (a redundant trailing-throttle tick, or a
   // turn_usage settle with no pending dirty/appended state): the passes
   // below only ever act on new/changed elements, so there is nothing for

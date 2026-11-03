@@ -174,6 +174,8 @@ export function handleCopyClick(e: MouseEvent): void {
       clone.querySelector(".msg-copy-btn")?.remove();
       // An open detail card lives inside the bubble but is not the message.
       clone.querySelector(".drill-pop")?.remove();
+      // A message card holds its content twice (full and mini form); the full form is the message.
+      clone.querySelector(".mc-mini")?.remove();
       const html = clone.innerHTML;
       const plain = clone.textContent ?? "";
 

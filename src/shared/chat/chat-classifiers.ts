@@ -5,6 +5,7 @@
 import type { ContentBlock } from "../../types/ipc.generated";
 import { blocksToText } from "./content-blocks";
 import type { ChatDetail } from "./chat-details";
+import type { MessageCard } from "./chat-message-kinds";
 
 // Turn-status marker injected via `--append-system-prompt` (see
 // daemon/lifecycle.rs). Claude ends each reply with `<cc-status:done>`,
@@ -178,6 +179,8 @@ export interface RenderedMessage {
   details?: ChatDetail[];
   /** Quick replies a `kind:"message"` offers (see chat-next-actions.ts). */
   nextActions?: string[];
+  /** The kind fields of a `kind:"message"` (chat-message-kinds.ts); absent = a plain bubble. */
+  card?: MessageCard;
   /** Retracted via `update_message`; `text` keeps the original for the tooltip. */
   retracted?: boolean;
   /** Set when a failed send_message's tool_result was is_error:true - stays

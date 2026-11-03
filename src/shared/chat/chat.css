@@ -2,6 +2,7 @@
  * History views. Barrel: the rules live in purpose-scoped modules.
  *  - chat-messages.css:      message bubbles, markdown, tables, sent attachment chips
  *  - chat-messages-user.css:      .msg.user bubble + clamp
+ *  - chat-message-cards.css:    verdict cards for a send_message that declared a kind
  *  - chat-messages-assistant.css: .msg.assistant bubble + streaming/dimmed
  *  - chat-messages-system.css:    .msg.system + compact/meta/retracted/failed pills
  *  - chat-messages-tool.css:      .msg.tool-use/.msg.tool-result/.msg.notification
@@ -28,6 +29,7 @@
 @import "./chat-messages.css";
 @import "./chat-messages-user.css";
 @import "./chat-messages-assistant.css";
+@import "./chat-message-cards.css";
 @import "./chat-messages-system.css";
 @import "./chat-messages-tool.css";
 @import "./chat-messages-markdown.css";

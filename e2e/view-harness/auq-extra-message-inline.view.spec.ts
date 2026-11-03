@@ -67,3 +67,4 @@ test("resolved question card with an extra note - collapsed chip and expanded fu
   await expect(extraText).toContainText("thinking out loud");
   await capture(card, "auq-extra-expanded");
 });
+// Reviewed 2026-11-04 (message cards: a send_message with a declared kind draws as a card and a kindless one is the same bubble as before; this spec's contract is unaffected, and it passed after the change).

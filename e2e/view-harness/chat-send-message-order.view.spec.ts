@@ -80,3 +80,4 @@ test("an older page's opener and progress bubbles render above the already-loade
   expect(at("PROGRESS ONE")).toBeLessThan(at("PROGRESS TWO"));
   expect(at("PROGRESS TWO")).toBeLessThan(at("SUMMARY"));
 });
+// Reviewed 2026-11-04 (message cards: a send_message with a declared kind draws as a card and a kindless one is the same bubble as before; this spec's contract is unaffected, and it passed after the change).

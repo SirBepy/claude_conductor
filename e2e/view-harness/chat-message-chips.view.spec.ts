@@ -133,3 +133,4 @@ test("an interrupted-turn bubble is dimmed but still readable", async ({ page })
   await host.screenshot({ path: `${SHOTS}/chat-message-chips.png` });
 });
 // Reviewed 2026-10-23: the preview-open slug lookup is scoped to the selected chat; the contract asserted here is unchanged.
+// Reviewed 2026-11-04 (message cards: a send_message with a declared kind draws as a card and a kindless one is the same bubble as before; this spec's contract is unaffected, and it passed after the change).

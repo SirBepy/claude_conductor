@@ -27,10 +27,15 @@ export function parseNextActions(input: unknown): string[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
+/** True for a row that starts a turn. Joe's own message starts one; so does a
+ *  question card (its answer is folded into the card, with no user row) and a
+ *  wake or peer turn (a system row with a metaKind). */
+export function startsTurn(m: RenderedMessage): boolean {
+  return m.kind === "user" || m.kind === "question" || (m.kind === "system" && !!m.metaKind);
+}
+
 /** The newest message's chips, if it was sent after the last thing that starts
- *  a turn. Joe's own message starts one; so does a question card (its answer is
- *  folded into the card, with no user row) and a wake or peer turn (a system
- *  row with a metaKind). Only the NEWEST message counts, never the newest one
+ *  a turn (see startsTurn). Only the NEWEST message counts, never the newest one
  *  that has chips: an older proposal must not outlive the message that
  *  replaced it. */
 export function currentTurnNextActions(messages: readonly RenderedMessage[]): string[] {
@@ -39,7 +44,7 @@ export function currentTurnNextActions(messages: readonly RenderedMessage[]): st
     if (m.kind === "message") {
       return m.retracted || m.dimmed || m.failed ? [] : (m.nextActions ?? []);
     }
-    if (m.kind === "user" || m.kind === "question" || (m.kind === "system" && m.metaKind)) return [];
+    if (startsTurn(m)) return [];
   }
   return [];
 }

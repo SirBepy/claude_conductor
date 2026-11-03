@@ -4,6 +4,7 @@ import { escapeHtml } from "../escape-html";
 import { parseFileEdit } from "./file-edits";
 import { keepFilePathsLiteral } from "./file-ref-match";
 import { renderEditWindow } from "./edit-window";
+import { renderMessageCard } from "./chat-message-card";
 import { basename } from "../path-utils";
 import { toolSummary } from "./tool-meta";
 import { elidedRefOf, elidedRowHtml } from "./elided-image";
@@ -314,6 +315,9 @@ export function renderMessage(m: RenderedMessage): string {
       if (m.retracted) {
         return `<div class="msg system retracted-marker"><span class="chat-pill chat-pill--retracted retracted-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-prohibit"></i>Retracted</span></div>`;
       }
+      // A declared kind draws as a card; a message with none (every old
+      // transcript) falls through to the bubble below, byte for byte.
+      if (m.card) return renderMessageCard(m, m.card, (t) => renderTextBlock(t));
       // data-details carries the bodies so drill-links.ts can resolve a later
       // message's `#d:id` against this one straight from the DOM.
       return `<div class="msg assistant${m.dimmed ? " dimmed" : ""}"${m.details?.length ? ` data-details="${escapeHtml(JSON.stringify(m.details))}"` : ""}><button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button>${renderTextBlock(m.text ?? "")}</div>`;

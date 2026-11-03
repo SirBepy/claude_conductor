@@ -86,3 +86,4 @@ test("an id with no todo opens the panel and says so quietly instead of failing"
   await expect(page.locator(".bl-error")).toContainText("pc-9999 is not in this project's backlog");
   expect(errors).toEqual([]);
 });
+// Reviewed 2026-11-04 (message cards: a send_message with a declared kind draws as a card and a kindless one is the same bubble as before; this spec's contract is unaffected, and it passed after the change).
