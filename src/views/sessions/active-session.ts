@@ -194,6 +194,13 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     saveUnreadSet(unread);
   }
 
+  // Move the sidebar highlight now: the statusbar and transcript loads below
+  // can take seconds on a cold chat, and until they finish the list would
+  // keep marking the previous chat as the open one.
+  const sidebarRoot = document.querySelector<HTMLElement>(".view-sessions");
+  const sidebarList = sidebarRoot?.querySelector<HTMLElement>("#sessions-list");
+  if (sidebarList) renderSidebar(sidebarList);
+
   // Clean up prior statusbar timer before wiping the pane.
   if (state.statusbar) {
     state.statusbar.destroy();

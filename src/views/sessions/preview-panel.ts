@@ -69,11 +69,15 @@ class PreviewTab implements RailTabHandle {
     if (this.sel.sessionId === sessionId) return;
     this.closeMenus();
     this.sel.switchTo(sessionId);
+    // Both paths drop the previous chat's page first: while visible, the
+    // list_previews round-trip below can sit behind a busy daemon (a cold chat
+    // load), and the old page would otherwise stay up under the new chat's name.
+    this.sel.clear();
     if (this.deps.isVisible()) {
+      this.renderPending();
       void this.sel.refreshList();
       return;
     }
-    this.sel.clear();
     this.renderEmpty();
     // Baseline only - the chat just switched into may already have older
     // previews; those shouldn't force-open the panel, only a push that
@@ -205,6 +209,15 @@ class PreviewTab implements RailTabHandle {
   private renderEmpty(): void {
     renderHeaderEmpty(this.root);
     renderCanvasEmpty(this.root);
+  }
+
+  /** Blank between a chat switch and the list fetch landing: "No previews yet"
+   *  here would be false for a chat that has some, so show nothing instead. */
+  private renderPending(): void {
+    renderHeaderEmpty(this.root);
+    const nameEl = this.root.querySelector<HTMLElement>(".pv-name");
+    if (nameEl) nameEl.textContent = "";
+    this.root.querySelector<HTMLElement>(".pv-canvas")?.replaceChildren();
   }
 
   // No re-entry guard like chat-preview-card.ts's mountPreviewFrame: this

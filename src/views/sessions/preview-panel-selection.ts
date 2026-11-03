@@ -90,10 +90,14 @@ export class PreviewSelection {
   }
 
   async refreshList(opts: { selectId?: string } = {}): Promise<void> {
+    // A reply that lands after a chat switch belongs to the chat it was asked
+    // for; applying it would show that chat's page under the new one.
+    const scope = this.sessionId;
     try {
       // The session id routes the read: a chat mirrored from a paired machine
       // keeps its previews on that machine, and the daemon forwards there.
-      const list = await invoke<PreviewMeta[]>("list_previews", { sessionId: this.sessionId });
+      const list = await invoke<PreviewMeta[]>("list_previews", { sessionId: scope });
+      if (this.sessionId !== scope) return;
       const all = Array.isArray(list) ? list : [];
       this.snapshots = all.filter((m) => m.session_id === this.sessionId);
       this.snapshots.forEach((s) => this.seenIds.add(s.id));
@@ -147,6 +151,7 @@ export class PreviewSelection {
     }
     const key = this.cacheKey(id, version);
     const cached = this.snapshotCache.get(key);
+    const scope = this.sessionId;
     let next: PreviewSnapshot;
     if (cached && (version !== null || (meta && cached.version === meta.version))) {
       next = cached;
@@ -154,9 +159,10 @@ export class PreviewSelection {
       try {
         next = await invoke<PreviewSnapshot>("get_preview", {
           id,
-          sessionId: this.sessionId,
+          sessionId: scope,
           ...(version !== null ? { version } : {}),
         });
+        if (this.sessionId !== scope) return;
       } catch (err) {
         console.error("[preview-panel] get_preview failed", err);
         // The archived version was dropped between listing and fetching.
