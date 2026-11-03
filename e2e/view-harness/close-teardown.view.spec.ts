@@ -48,7 +48,7 @@ test.describe("view-harness / daemon-authoritative close lifecycle", () => {
     await expect(page.locator('li[data-session-id="idle"]')).not.toHaveClass(/closing/);
   });
 
-  test("portrait rows swap the status dot to st-closing", async ({ page }) => {
+  test("portrait rows swap the status ring to closing", async ({ page }) => {
     await mountSessionsList(page, [
       instance({ session_id: "shutting-down", name: "Closing session", closing: true }),
       instance({ session_id: "idle", name: "Idle session", closing: false }),
@@ -57,8 +57,8 @@ test.describe("view-harness / daemon-authoritative close lifecycle", () => {
 
     // sidebar-rows.ts:172 - closing overrides the normal status colour, and the
     // idle row must keep reading its own pre-closing class.
-    await expect(page.locator('li[data-session-id="shutting-down"] .avatar-status-dot')).toHaveClass(/st-closing/);
-    await expect(page.locator('li[data-session-id="idle"] .avatar-status-dot')).not.toHaveClass(/st-closing/);
+    await expect(page.locator('li[data-session-id="shutting-down"] .avatar-ring circle')).toHaveAttribute("data-tone", "closing");
+    await expect(page.locator('li[data-session-id="idle"] .avatar-ring circle[data-tone="closing"]')).toHaveCount(0);
   });
 
   test("a torn-down session leaves the live list once the daemon reports it ended", async ({ page }) => {

@@ -20,6 +20,10 @@ import type { LeadingExtras } from "./sidebar-row-visuals";
 import { chainRowKey } from "./successor-follow";
 import { GENERIC_MACHINE_ICON, hasPairedMachines, machineIcon, selfMachineLabel } from "./machine-icons";
 import { isWrapUpOnDone } from "./permission-modal";
+import { ringHtml, ringSpecFor } from "./sidebar-ring";
+import type { QuestionRingInfo } from "./sidebar-ring";
+import { questionProgressFor } from "./question-progress";
+import type { PlanStepSnapshot } from "../../types/ipc.generated";
 
 /** Every sidebar row - live session, draft, or parked draft - is built from
  *  this ONE bag of slot values and rendered by the ONE template below, so a
@@ -109,9 +113,13 @@ function buildRowOptions(args: {
   avatarStatusClass: string;
   /** Hover text for `.session-avatar`. "" for every state but close_failed. */
   statusTitle?: string;
-  /** Portrait-only bottom-left dot; differs from `avatarStatusClass` only
-   *  for a closing live session. */
+  /** The `st-*` class the status ring is drawn from; differs from
+   *  `avatarStatusClass` only for a closing live session. */
   dotClass: string;
+  /** The chat's latest `write_plan` steps, for the working ring's arc. */
+  plan?: readonly PlanStepSnapshot[] | null;
+  /** Open question card progress, for the question ring's segments. */
+  question?: QuestionRingInfo | null;
   isAutopilot: boolean;
   /** Whether this row is the selected/active one. Suppresses the frozen row
    *  tint below - active already paints its own background, and resolving
@@ -152,7 +160,8 @@ function buildRowOptions(args: {
     avatarExtras: {
       badgeClass: "is-centred",
       extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount) + wrapUpChipHtml(args.wrapUpOnDone, tipAttr),
-      dotClass: args.dotClass,
+      ringHtml: ringHtml(ringSpecFor(args.dotClass, args.plan, args.question)),
+      warn: args.dotClass === "st-close-failed",
       machineId: args.machine?.id ?? null,
     },
     title: escapeHtml(args.title),
@@ -189,7 +198,7 @@ export function sessionRowOptions(
   const statusTitle = statusClass === "st-close-failed"
     ? stateTooltip(s, ctx.unread, ctx.attention, ctx.question, ctx.rateLimited)
     : "";
-  // Closing overrides the DOT only, not statusClass/.session-avatar - statusDotClass has no closing awareness.
+  // Closing overrides the RING only, not statusClass/.session-avatar - statusDotClass has no closing awareness.
   const dotClass = isClosing ? "st-closing" : statusClass;
   return buildRowOptions({
     identity: {
@@ -198,7 +207,9 @@ export function sessionRowOptions(
       liClasses: `${ctx.isActive ? "active" : ""} ${s.kind === "external" ? "is-external" : ""} ${needsAttention ? "needs-attention" : ""} ${isClosing ? "closing" : ""} ${ctx.rateLimited.has(s.session_id) ? "is-rate-limited" : ""} ${s.machine?.online === false ? "is-machine-offline" : ""} row-portrait`,
       // Explicit key so a /respawn successor lands in its predecessor's own
       // row (keyOf prefers data-row-key over data-session-id).
-      liExtraAttrs: `${ctx.kbdHint} data-row-key="${chainRowKey(s.session_id)}"`,
+      // `data-st` hands the status class to the desktop hover card, which
+      // has only the <li> to go on.
+      liExtraAttrs: `${ctx.kbdHint} data-row-key="${chainRowKey(s.session_id)}" data-st="${dotClass}"`,
     },
     charId: characterForSession(s),
     cwd: s.cwd,
@@ -207,6 +218,8 @@ export function sessionRowOptions(
     avatarStatusClass: statusClass,
     statusTitle,
     dotClass,
+    plan: s.progress?.plan,
+    question: questionProgressFor(s.session_id),
     isAutopilot: !!s.autopilot,
     isActive: ctx.isActive,
     needsAttention,

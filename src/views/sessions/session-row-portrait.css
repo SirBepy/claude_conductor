@@ -32,36 +32,21 @@
   display: none;
 }
 
-/* Status dot, bottom-left of the circle - replaces the removed left-edge row
-   stripes (session-avatar.css) as the sole status signal. rate-limited uses
-   the documented-but-previously-unbound --chat-state-error orange so it reads
-   distinct from the red closing/attention family instead of duplicating it. */
-.sessions-list li.row-portrait .avatar-status-dot {
+/* close_failed keeps a small warning mark bottom-left of the circle: its
+   orange ring is the same colour as rate-limited's, so the glyph is the only
+   spare channel that tells the two apart. The status RING itself lives in
+   sidebar-ring.css. */
+.sessions-list li.row-portrait .avatar-warn {
   position: absolute;
   left: 4px;
   bottom: -2px;
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: 3px;
   border: 2px solid var(--color-surface-alt);
   z-index: 11;
-}
-.sessions-list li.row-portrait .avatar-status-dot.st-working   { background: var(--st-working);   box-shadow: 0 0 4px var(--st-working-glow); }
-.sessions-list li.row-portrait .avatar-status-dot.st-done      { background: var(--st-done);      box-shadow: 0 0 4px var(--st-done-glow); }
-.sessions-list li.row-portrait .avatar-status-dot.st-question  { background: var(--st-question);  box-shadow: 0 0 4px var(--st-question-glow); }
-.sessions-list li.row-portrait .avatar-status-dot.st-waiting        { background: var(--st-waiting);       box-shadow: 0 0 4px var(--st-waiting-glow); }
-.sessions-list li.row-portrait .avatar-status-dot.st-rate-limited   { background: var(--chat-state-error); box-shadow: 0 0 4px var(--chat-state-error-glow); }
-.sessions-list li.row-portrait .avatar-status-dot.st-your-turn { background: var(--st-your-turn); }
-.sessions-list li.row-portrait .avatar-status-dot.st-external  { background: var(--st-external);  box-shadow: 0 0 4px var(--st-external-glow); }
-.sessions-list li.row-portrait .avatar-status-dot.st-attention { background: var(--st-attention); box-shadow: 0 0 4px var(--st-attention-glow); animation: attention-pulse 1.4s ease-in-out infinite; }
-.sessions-list li.row-portrait .avatar-status-dot.st-closing   { background: var(--chat-state-closing); box-shadow: 0 0 4px var(--chat-state-closing-glow); }
-/* Square, not round like every other dot - the shape carries the distinction
-   since the orange fill is already st-rate-limited's colour (chat-state-error
-   above). The ph-warning glyph rides inside at dot scale. */
-.sessions-list li.row-portrait .avatar-status-dot.st-close-failed {
   background: var(--st-close-failed);
   box-shadow: 0 0 4px var(--st-close-failed-glow);
-  border-radius: 3px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -69,7 +54,7 @@
   color: var(--color-surface);
 }
 
-/* The dot is now the sole signal for portrait rows - scoped to .row-portrait
+/* The ring is now the sole status signal for portrait rows - scoped to .row-portrait
    so classic keeps its stripes. 4-class specificity beats .closing.row-entering
    /-exiting (session-avatar.css) so closing-pulse's own animated box-shadow
    can't repaint the stripe over a plain `box-shadow: none`. */

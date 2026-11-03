@@ -35,8 +35,10 @@ test.describe("@shot", () => {
     const avatar = failedRow.locator(".session-avatar");
     await expect(avatar).toHaveClass(/st-close-failed/);
     await expect(avatar).toHaveAttribute("title", CLOSE_FAILED_TIP);
-    await expect(failedRow.locator(".avatar-status-dot")).toHaveClass(/st-close-failed/);
-    await expect(page.locator("li[data-session-id='s-idle'] .avatar-status-dot")).toHaveClass(/st-your-turn/);
+    await expect(failedRow.locator(".avatar-ring circle")).toHaveAttribute("data-tone", "close-failed");
+    await expect(failedRow.locator(".avatar-warn")).toBeVisible();
+    // A finished, already-read chat has no ring at all.
+    await expect(page.locator("li[data-session-id='s-idle'] .avatar-ring")).toHaveCount(0);
 
     console.log(`[tooltip] ${await avatar.getAttribute("title")}`);
     await capture(failedRow.locator(".session-avatar-wrap"), "close-failed-dot");

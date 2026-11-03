@@ -105,6 +105,7 @@ mod tests {
             frozen_needs_continue: false,
             auto_frozen: false,
             held_count: 0,
+            progress: Default::default(),
             local_task_running: false,
             successor_of: None,
             machine: None,

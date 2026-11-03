@@ -13,6 +13,7 @@ import { reconcileList, loadAnimEnabled } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { setRerenderCallback } from "./sidebar-ctx-menu";
 import { attachRowTooltips } from "../../shared/row-tooltip";
+import { attachSidebarHoverCard } from "./sidebar-hover-card";
 import { buildSidebarEntries } from "./sidebar-entries";
 import { ensureMachineIcons } from "./machine-icons";
 import { isRemote } from "../../shared/transport";
@@ -283,7 +284,12 @@ export function renderSidebar(listEl: HTMLElement): void {
     () => renderSidebar(listEl),
   );
   // Delegated, so it survives every reconcile without rebinding per row.
-  attachRowTooltips(listEl);
+  // Desktop only: on the phone a tap shows the tooltip over the list, and
+  // the hover card below has no touch equivalent either.
+  if (!isRemote()) {
+    attachRowTooltips(listEl);
+    attachSidebarHoverCard(listEl);
+  }
   // Resolve hero avatar images to data URLs (idempotent per character id).
   void hydrateCharacterAvatars(listEl);
   void hydrateProjectTechIcons(listEl);
