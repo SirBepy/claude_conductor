@@ -342,6 +342,34 @@ mod tests {
         }
     }
 
+    /// Live, read-only: prints the RAW usage JSON body (never the cookie) for
+    /// the session in `CC_LIVE_SESSION_FILE`, to see which windows the plan
+    /// actually sends (`live_usage_poll` only shows the parsed values, where an
+    /// absent window and a real 0% look the same). Run with
+    /// `cargo test --lib -- --ignored live_usage_raw_shape --nocapture`.
+    #[tokio::test]
+    #[ignore]
+    async fn live_usage_raw_shape() {
+        let path = std::env::var("CC_LIVE_SESSION_FILE").expect("set CC_LIVE_SESSION_FILE");
+        let stored = std::fs::read_to_string(path).unwrap();
+        let key = crate::util::secret_store::unprotect(stored.trim()).unwrap();
+        let key = key.trim();
+        let account = fetch_web_account("https://claude.ai", key).await.unwrap();
+        let org = account.chat_org().expect("no chat org in this session");
+        let body = http_client()
+            .unwrap()
+            .get(format!("https://claude.ai/api/organizations/{}/usage", org.uuid))
+            .header("cookie", format!("sessionKey={key}"))
+            .header("accept", "application/json")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        println!("LIVE RAW {body}");
+    }
+
     #[tokio::test]
     async fn unauthorized_on_401() {
         let mut server = mockito::Server::new_async().await;
