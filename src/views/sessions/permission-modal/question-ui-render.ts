@@ -351,7 +351,6 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
       syncAnswerBar();
 
-      paintAttachmentStrips();
       previews.sync();
       fullscreen.sync();
 
@@ -384,6 +383,10 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     slideFromTab = undefined;
 
     requestAnimationFrame(() => syncMessagesPadding());
+    // The card's rect includes its entry animation's transform, so the sync
+    // above reads it offset; measure again once it has settled in place.
+    host.querySelector<HTMLElement>(".prompt-card, .prompt-collapsed")
+      ?.addEventListener("animationend", () => syncMessagesPadding(), { once: true });
     if (!state.resizeObs && messagesEl && typeof ResizeObserver !== "undefined") {
       const cardEl = host.querySelector<HTMLElement>(".prompt-card, .prompt-collapsed");
       if (cardEl) {
@@ -398,9 +401,10 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
   // The card plays its exit before the bar replaces it. Must match
   // prompt-card-out's duration in permission-modal-shell.css; the timer is only
-  // the fallback for an animationend that never fires (hidden tab, reduced motion).
+  // the fallback for an animationend that never fires (hidden tab).
   const COLLAPSE_MS = 280;
   let collapsing = false;
+  let collapseTimer: number | undefined;
 
   function minimize(): boolean {
     // The phone's back press lands here: it leaves fullscreen first.
@@ -422,18 +426,21 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     const finish = (): void => {
       if (!collapsing) return;
       collapsing = false;
+      window.clearTimeout(collapseTimer);
       // The card may have been answered or swapped out during the exit.
       if (host.isConnected) collapse();
     };
     card.addEventListener("animationend", (e) => { if (e.target === card) finish(); });
-    window.setTimeout(finish, COLLAPSE_MS + 80);
+    collapseTimer = window.setTimeout(finish, COLLAPSE_MS + 80);
     return true;
   }
 
   function expand(): boolean {
     if (collapsing) {
-      // Re-opened mid-exit: stop the exit instead of finishing it.
+      // Re-opened mid-exit: stop the exit instead of finishing it. The timer
+      // goes too, or it would cut a later exit short.
       collapsing = false;
+      window.clearTimeout(collapseTimer);
       host.querySelector(".prompt-card--leaving")?.classList.remove("prompt-card--leaving");
       return true;
     }
@@ -456,7 +463,6 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       ? [focused.selectionStart, focused.selectionEnd] as const
       : null;
     syncAnswerBar();
-    paintAttachmentStrips();
     syncMessagesPadding();
     if (!caret) return;
     const field = bar.querySelector<HTMLTextAreaElement>("textarea");
