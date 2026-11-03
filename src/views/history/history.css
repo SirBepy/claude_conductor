@@ -14,47 +14,6 @@
   padding: 40px;
 }
 
-/* ── Filter bar ───────────────────────────────────────────────────────────── */
-.history-filter-bar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface-alt);
-  overflow-x: auto;
-}
-
-.history-filter-input,
-.history-filter-select {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 6px 8px;
-  color: var(--color-text);
-  font-size: 0.82rem;
-  font-family: inherit;
-  flex-shrink: 0;
-}
-
-.history-filter-input#history-search {
-  flex: 1 1 160px;
-  min-width: 120px;
-}
-
-.history-date-range {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  color: var(--color-text-muted);
-}
-
-.history-date-range input {
-  width: 132px;
-}
-
 .history-layout {
   display: flex;
   min-height: 0;
@@ -264,21 +223,6 @@
 
 /* ── Mobile (phone/remote client) ─────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .view-history .history-filter-bar {
-    flex-wrap: wrap;
-    overflow-x: visible;
-  }
-  .view-history .history-filter-bar > * {
-    flex: 1 1 100%;
-    min-width: 0;
-  }
-  .view-history .history-date-range {
-    flex: 1 1 100%;
-  }
-  .view-history .history-date-range input {
-    flex: 1;
-    width: auto;
-  }
   .view-history .history-layout {
     flex-direction: column;
   }
@@ -289,14 +233,13 @@
     border-bottom: 1px solid var(--color-border);
   }
 
-  /* The attribute decides which pane is shown, so the filter bar + list and
-     the selected chat's content are never both on screen at once. Default
-     (list mode): filters + list visible, chat pane hidden. */
+  /* The attribute decides which pane is shown, so the list and the selected
+     chat's content are never both on screen at once. Default (list mode): list
+     visible, chat pane hidden. */
   .view-history:not([data-mobile-pane="chat"]) .history-pane {
     display: none;
   }
-  /* Chat mode: chat visible, filters + list hidden, back button revealed. */
-  .view-history[data-mobile-pane="chat"] .history-filter-bar,
+  /* Chat mode: chat visible, list hidden, back button revealed. */
   .view-history[data-mobile-pane="chat"] .history-sidebar {
     display: none;
   }

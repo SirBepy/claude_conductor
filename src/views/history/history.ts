@@ -25,33 +25,26 @@ import { hydrateCharacterAvatars } from "../../shared/projects";
 import { characterForSessionId, characterIconUrl, loadSessionCharacters } from "../sessions/session-characters";
 import { SessionHeader } from "../sessions/session-header";
 import { SessionStatusbar } from "../sessions/session-statusbar";
-import { emptyFilters, startOfDayIso, endOfDayIso, historyStatusDotClass, type HistoryFilters } from "./history-helpers";
-import { template, renderList, renderListLoading, renderProjectFilterOptions } from "./history-render";
+import { historyStatusDotClass } from "./history-helpers";
+import { template, renderList, renderListLoading } from "./history-render";
 
 interface HistoryState {
   mountId: number;
   entries: HistoryEntry[];
-  filters: HistoryFilters;
   selectedId: string | null;
   renderer: ChatRenderer | null;
   statusbar: SessionStatusbar | null;
-  // project_id -> display label, accumulated across every fetch this mount so
-  // the dropdown doesn't shrink to "1 option" once the user filters by project.
-  projectOptions: Map<string, string>;
 }
 
 let state: HistoryState = {
   mountId: 0,
   entries: [],
-  filters: emptyFilters(),
   selectedId: null,
   renderer: null,
   statusbar: null,
-  projectOptions: new Map(),
 };
 let nextMountId = 1;
 let _pendingSelect: string | null = null;
-let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Open a specific past session read-only on the next History-view mount. Used
@@ -63,20 +56,16 @@ export function queueHistorySelect(sessionId: string): void {
 }
 
 async function fetchEntries(): Promise<void> {
-  const f = state.filters;
   try {
     state.entries = (await invoke<HistoryEntry[]>("list_history", {
-      projectId: f.projectId,
-      search: f.search.trim() || null,
+      projectId: null,
+      search: null,
       limit: 200,
       offset: 0,
-      modelFilter: f.model,
-      dateFrom: f.dateFrom ? startOfDayIso(f.dateFrom) : null,
-      dateTo: f.dateTo ? endOfDayIso(f.dateTo) : null,
+      modelFilter: null,
+      dateFrom: null,
+      dateTo: null,
     })) || [];
-    for (const e of state.entries) {
-      if (e.project_id) state.projectOptions.set(e.project_id, cwdToProjectName(e.cwd));
-    }
   } catch (err) {
     console.error("[history] list_history failed", err);
     state.entries = [];
@@ -84,10 +73,9 @@ async function fetchEntries(): Promise<void> {
 }
 
 async function selectHistorySession(sessionId: string, pane: HTMLElement): Promise<void> {
-  // Mobile single-pane: reveals the chat pane, hides filter bar + list (mirrors
+  // Mobile single-pane: reveals the chat pane, hides the list (mirrors
   // Sessions' data-mobile-pane toggle; CSS-gated to ≤768px, desktop unaffected).
-  // Without this the filter bar, list, and chat content were all visible at
-  // once on the phone.
+  // Without this the list and chat content were both visible at once on the phone.
   document.querySelector(".view-history")?.setAttribute("data-mobile-pane", "chat");
   const myMount = state.mountId;
   state.selectedId = sessionId;
@@ -221,29 +209,22 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
   state = {
     mountId: myMount,
     entries: [],
-    filters: emptyFilters(),
     selectedId: null,
     renderer: null,
     statusbar: null,
-    projectOptions: new Map(),
   };
 
   render(template(), root);
 
   const listEl = root.querySelector<HTMLElement>("#history-list");
   const pane = root.querySelector<HTMLElement>(".history-pane");
-  const searchInput = root.querySelector<HTMLInputElement>("#history-search");
-  const projectSelect = root.querySelector<HTMLSelectElement>("#history-project-filter");
-  const modelSelect = root.querySelector<HTMLSelectElement>("#history-model-filter");
-  const dateFromInput = root.querySelector<HTMLInputElement>("#history-date-from");
-  const dateToInput = root.querySelector<HTMLInputElement>("#history-date-to");
 
   if (!listEl || !pane) {
     console.error("[history] view template missing expected nodes");
     return () => { /* no-op */ };
   }
 
-  // Mobile back button: return from the chat pane to the filterable list.
+  // Mobile back button: return from the chat pane to the list.
   // Only visible on ≤768px in chat mode (CSS-driven); a no-op on desktop.
   root.querySelector<HTMLButtonElement>("#historyBackBtn")?.addEventListener("click", () => {
     root.querySelector(".view-history")?.setAttribute("data-mobile-pane", "list");
@@ -253,12 +234,11 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
   renderListLoading(listEl);
   await fetchEntries();
   if (state.mountId !== myMount) return () => { /* superseded */ };
-  renderList(listEl, state.entries, state.filters, state.selectedId);
-  if (projectSelect) renderProjectFilterOptions(projectSelect, state.projectOptions, state.filters.projectId);
+  renderList(listEl, state.entries, state.selectedId);
 
   // If a caller queued a specific closed chat (queueHistorySelect), select it now.
   // Otherwise auto-select the most recent session - except on the phone,
-  // which should land on the filterable list first (matches Sessions'
+  // which should land on the list first (matches Sessions'
   // isRemote() gate) rather than jumping straight into a chat.
   const pendingOrFirst = _pendingSelect ?? (isRemote() ? null : state.entries[0]?.session_id ?? null);
   if (pendingOrFirst) {
@@ -271,41 +251,6 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
     }
     void selectHistorySession(pendingOrFirst, pane);
   }
-
-  // Re-query the list with the current filters, showing the loading row while
-  // in flight. Shared by every filter control below.
-  const refetchAndRender = async (): Promise<void> => {
-    const myFetch = state.mountId;
-    renderListLoading(listEl);
-    await fetchEntries();
-    if (state.mountId !== myFetch) return;
-    renderList(listEl, state.entries, state.filters, state.selectedId);
-    if (projectSelect) renderProjectFilterOptions(projectSelect, state.projectOptions, state.filters.projectId);
-  };
-
-  searchInput?.addEventListener("input", () => {
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => {
-      state.filters.search = searchInput.value;
-      void refetchAndRender();
-    }, 250);
-  });
-  projectSelect?.addEventListener("change", () => {
-    state.filters.projectId = projectSelect.value || null;
-    void refetchAndRender();
-  });
-  modelSelect?.addEventListener("change", () => {
-    state.filters.model = modelSelect.value || null;
-    void refetchAndRender();
-  });
-  dateFromInput?.addEventListener("change", () => {
-    state.filters.dateFrom = dateFromInput.value || null;
-    void refetchAndRender();
-  });
-  dateToInput?.addEventListener("change", () => {
-    state.filters.dateTo = dateToInput.value || null;
-    void refetchAndRender();
-  });
 
   listEl.addEventListener("click", (e) => {
     const li = (e.target as HTMLElement).closest<HTMLLIElement>("li[data-session-id]");
@@ -320,7 +265,6 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
   });
 
   return () => {
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
     if (state.renderer) {
       state.renderer.detach();
       state.renderer = null;
