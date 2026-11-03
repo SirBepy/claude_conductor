@@ -5,7 +5,7 @@
 // (percentages, safe-pace, reset), account-selector.ts/overlay.ts handle the
 // HTML for their own (differently-shaped) markup.
 
-import { computeSafePacePct } from "../../shared/formatters";
+import { computeSafePacePct, windowPctOrNull } from "../../shared/formatters";
 import { isApiCreditAccount, type AccountLite } from "../../shared/account-chip";
 
 const SESSION_WINDOW_MS = 5 * 3_600_000;
@@ -18,6 +18,8 @@ export interface OverlayUsageLite {
   weekly_pct: number | null;
   session_resets_at: string | null;
   weekly_resets_at: string | null;
+  /** False when the plan has no 5h limit; undefined reads as limited. */
+  session_limited?: boolean;
 }
 
 export interface OverlayMetric {
@@ -32,6 +34,8 @@ export interface OverlayRow {
   colour: string;
   icon: string;
   hasData: boolean;
+  /** False for a plan with no 5h limit: the dial draws only the weekly ring. */
+  sessionLimited: boolean;
   session: OverlayMetric;
   weekly: OverlayMetric;
 }
@@ -51,6 +55,7 @@ export function buildOverlayRow(
       colour: account.colour,
       icon: account.icon,
       hasData: false,
+      sessionLimited: true,
       session: { pct: null, safePct: null, resetIso: null },
       weekly: { pct: null, safePct: null, resetIso: null },
     };
@@ -64,11 +69,12 @@ export function buildOverlayRow(
     colour: account.colour,
     icon: account.icon,
     hasData: true,
+    sessionLimited: usage.session_limited !== false,
     // resetIso carries the RAW reset timestamp (not weeklyFallback, which only
     // exists to anchor the safe-pace % calc above) - null when the account
     // genuinely has no active weekly reset yet, so the reset popup can skip
     // showing a fabricated countdown for it.
-    session: { pct: usage.session_pct, safePct: sessionSafe, resetIso: usage.session_resets_at },
+    session: { pct: windowPctOrNull(usage.session_pct, usage.session_resets_at), safePct: sessionSafe, resetIso: usage.session_resets_at },
     weekly: { pct: usage.weekly_pct, safePct: weeklySafe, resetIso: usage.weekly_resets_at },
   };
 }

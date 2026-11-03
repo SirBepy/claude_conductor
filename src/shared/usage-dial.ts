@@ -56,7 +56,7 @@ function seg(r: number, w: number, startPct: number, lenPct: number, stroke: str
 }
 
 /**
- * One ring (either the 5h or the 7d), matching the mockup's `ring()` exactly:
+ * One ring (either the 5h or the 7d; a plan with no 5h limit draws only the 7d), matching the mockup's `ring()` exactly:
  * a full-track base, then either a single solid arc (on pace), a faded
  * safe-pace arc under a solid current arc (under pace — solid up to current,
  * ghost out to the safe mark), or a bright current arc under a darker
@@ -102,8 +102,9 @@ export function dialHtml(
   showDisc: boolean,
   scale = 1.2,
 ): string {
-  const outer = ringSvg(OUTER_R, OUTER_W, row.session, settings);
-  const inner = ringSvg(INNER_R, INNER_W, row.weekly, settings);
+  // A plan with no 5h limit draws one ring: the weekly one, on the outer track.
+  const outer = ringSvg(OUTER_R, OUTER_W, row.sessionLimited ? row.session : row.weekly, settings);
+  const inner = row.sessionLimited ? ringSvg(INNER_R, INNER_W, row.weekly, settings) : "";
   const icon = escapeHtml(row.icon);
   // Centre icon carries the account's own colour (identity); the rings carry
   // pace status. Falls back to the CSS neutral when an account has no colour.
@@ -136,7 +137,7 @@ function infoMetricLine(metric: OverlayMetric, settings: ValueColorSettings): st
 function infoHtml(row: OverlayRow, settings: ValueColorSettings): string {
   return `<div class="oc-info">
     <div class="oc-info-nm">${escapeHtml(row.label)}</div>
-    ${infoMetricLine(row.session, settings)}
+    ${row.sessionLimited ? infoMetricLine(row.session, settings) : ""}
     ${infoMetricLine(row.weekly, settings)}
   </div>`;
 }
@@ -166,7 +167,7 @@ function resetPopupRow(label: string, resetIso: string | null): string {
  * with click-to-refresh). Renders "" when neither window has an active reset
  * (e.g. no data yet), so no empty bubble ever shows. */
 function resetPopupHtml(row: OverlayRow): string {
-  const rows = resetPopupRow("5h", row.session.resetIso) + resetPopupRow("7d", row.weekly.resetIso);
+  const rows = (row.sessionLimited ? resetPopupRow("5h", row.session.resetIso) : "") + resetPopupRow("7d", row.weekly.resetIso);
   if (!rows) return "";
   return `<div class="oc-reset-pop">${rows}</div>`;
 }

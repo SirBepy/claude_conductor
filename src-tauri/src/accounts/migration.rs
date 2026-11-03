@@ -211,6 +211,7 @@ mod tests {
         UsageSnapshot {
             captured_at: "2026-07-01T00:00:00Z".into(),
             five_hour: crate::types::WindowUsage { utilization: 12.0, resets_at: "x".into() },
+            five_hour_limited: true,
             seven_day: crate::types::WindowUsage { utilization: 8.0, resets_at: "y".into() },
             extra_usage: None,
             account_id: None,
