@@ -25,7 +25,7 @@
 /* Not `+`: that glyph already means "new chat" on .sessions-fab, and this
    button opens things that already exist. */
 /* --fab-lift is the composer's own height, written by syncLift() only when the
- * FAB's resting box actually intersects it. Without it the 40px circle lands
+ * FAB's resting box actually intersects it. Without it the FAB circle lands
  * on the composer's Send split and wins the hit test at z-index 30. */
 /* --pw-dock-r is a right-docked window's width (pane-windows/manager.ts):
    the FAB rides the chat column's corner, never inside the dock. */
@@ -141,8 +141,6 @@
 @media (max-width: 768px) {
   .fab-dial-fab {
     bottom: calc(var(--fab-lift, 0px) + 12px);
-    width: var(--control-h);
-    height: var(--control-h);
     font-size: 1.25rem;
   }
 

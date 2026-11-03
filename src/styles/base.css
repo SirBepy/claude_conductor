@@ -138,7 +138,7 @@ html body:has(.view-sessions[data-mobile-keyboard]) {
     transform: scale(0.92);
 }
 
-/* Caller-sized 24-28px icon button, unlike the fixed 32px .icon-btn above.
+/* Caller-sized 24-28px icon button, unlike .icon-btn above, which is --control-h.
    Callers add this alongside their own width/height/font-size rule. It sets
    `padding: 0` itself, and the bare `button {}` reset sets none, so a square
    icon button stays the size its caller gave it. */
