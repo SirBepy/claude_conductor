@@ -18,9 +18,8 @@ import type { PreviewController } from "../preview-panel";
 import {
   mountPanel, PANEL_KEYS, PANEL_META, type MountedPanels, type PanelDeps, type PanelHandle, type PanelHost, type PanelHostDeps, type PanelKey,
 } from "../pane-windows/panels";
-import {
-  forgetActive, recallActive, rememberActive, loadFraction, saveFraction, loadGlobalWidth, saveGlobalWidth,
-} from "./memory";
+import { forgetActive, recallActive, rememberActive, loadFraction, saveFraction } from "./memory";
+import { GlobalPanelMount } from "./global-mount";
 import { announceSplitStrip, globalGroupHtml, handleRailClick } from "../../../shared/app-rail";
 import {
   GLOBAL_PANEL_META, getGlobalPanel, onGlobalPanelChange, registerPanelHost, setGlobalPanel, type GlobalPanelView,
@@ -56,13 +55,7 @@ export class SplitPanels implements PanelHost {
    *  `active` without replacing it, so closing it brings back this chat's own
    *  panel, and it follows him across chats instead of being remembered per chat. */
   private global: GlobalPanelView | null = null;
-  private globalRoot: HTMLElement | null = null;
-  private globalTeardown: (() => void) | null = null;
-  private globalSeq = 0;
-  /** The dashboard module keeps one mounted instance in module state, so mounts
-   *  and their teardowns run strictly one after another. */
-  private globalLoad: Promise<void> = Promise.resolve();
-  private globalWidth = loadGlobalWidth();
+  private readonly globalMount: GlobalPanelMount;
   private readonly unsubGlobal: () => void;
   private readonly unsubPopup: () => void;
   private readonly releaseHost: () => void;
@@ -106,6 +99,7 @@ export class SplitPanels implements PanelHost {
     this.body = document.createElement("div");
     this.body.className = "sp-body";
     this.panelEl.append(this.head, this.body);
+    this.globalMount = new GlobalPanelMount(this.body);
     layer.append(this.divider, this.panelEl, this.strip);
 
     this.strip.addEventListener("click", this.onStripClick);
@@ -127,7 +121,7 @@ export class SplitPanels implements PanelHost {
     // A panel opened before this split existed (a tray jump into a freshly
     // built chat view) is waiting for it.
     this.global = getGlobalPanel();
-    if (this.global) this.mountGlobal(this.global);
+    if (this.global) this.globalMount.mount(this.global);
     // Not apply(): its onChange would reach the FAB before it holds this host.
     this.renderStrip();
     this.paint();
@@ -223,7 +217,7 @@ export class SplitPanels implements PanelHost {
     this.unsubGlobal();
     this.unsubPopup();
     this.releaseHost();
-    this.unmountGlobal();
+    this.globalMount.unmount();
     this.resizeObs?.disconnect();
     if (this.storageHandler) window.removeEventListener("storage", this.storageHandler);
     this.unlistenDocked?.();
@@ -263,42 +257,11 @@ export class SplitPanels implements PanelHost {
   private syncGlobal(): void {
     const next = getGlobalPanel();
     if (next === this.global) return;
-    this.unmountGlobal();
+    this.globalMount.unmount();
     this.global = next;
-    if (next) this.mountGlobal(next);
+    if (next) this.globalMount.mount(next);
     this.apply(false);
     this.announce();
-  }
-
-  /** Renders the real view, not a copy. Both bring their own header (title,
-   *  burger, a Chats button); split.css hides what the panel header repeats. */
-  private mountGlobal(view: GlobalPanelView): void {
-    const root = document.createElement("div");
-    root.className = "pw-panel sp-pane sp-global-pane";
-    root.dataset.view = view;
-    this.body.appendChild(root);
-    this.globalRoot = root;
-    const seq = ++this.globalSeq;
-    this.globalLoad = this.globalLoad
-      .then(async () => {
-        // Closed again before its turn came up.
-        if (seq !== this.globalSeq) return;
-        const teardown =
-          view === "dashboard"
-            ? await (await import("../../dashboard/dashboard")).renderDashboard(root)
-            : await (await import("../../schedule/schedule")).renderScheduleView(root);
-        if (seq !== this.globalSeq || this.destroyed) teardown();
-        else this.globalTeardown = teardown;
-      })
-      .catch((err) => console.error("[split-panels] global panel mount failed", err));
-  }
-
-  private unmountGlobal(): void {
-    this.globalSeq++;
-    this.globalTeardown?.();
-    this.globalTeardown = null;
-    this.globalRoot?.remove();
-    this.globalRoot = null;
   }
 
   private ensureMounted(panel: PanelKey): void {
@@ -386,7 +349,7 @@ export class SplitPanels implements PanelHost {
         overlay = true;
         panelW = total - STRIP_W;
       } else {
-        const want = this.global ? this.globalWidth : avail * this.fraction;
+        const want = this.global ? this.globalMount.width : avail * this.fraction;
         panelW = Math.round(Math.min(avail - MIN_CHAT, Math.max(MIN_PANEL, want)));
       }
     }
@@ -499,7 +462,7 @@ export class SplitPanels implements PanelHost {
       const avail = box.width - STRIP_W - DIVIDER_W;
       if (avail <= 0) return;
       const panelW = box.right - STRIP_W - e.clientX - DIVIDER_W / 2;
-      if (global) this.globalWidth = Math.max(0, panelW);
+      if (global) this.globalMount.drag(panelW);
       else this.fraction = Math.min(1, Math.max(0, panelW / avail));
       this.paint();
     };
@@ -513,8 +476,7 @@ export class SplitPanels implements PanelHost {
       // next wider window would honour literally.
       const avail = this.pane.clientWidth - STRIP_W - DIVIDER_W;
       if (global) {
-        if (avail > MIN_PANEL + MIN_CHAT) this.globalWidth = Math.min(avail - MIN_CHAT, Math.max(MIN_PANEL, this.globalWidth));
-        saveGlobalWidth(this.globalWidth);
+        this.globalMount.settle(avail > MIN_PANEL + MIN_CHAT ? { min: MIN_PANEL, max: avail - MIN_CHAT } : null);
         return;
       }
       if (avail > MIN_PANEL + MIN_CHAT) {
