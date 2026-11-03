@@ -71,8 +71,18 @@ function retriggerEnter(el: HTMLElement): void {
 // view just mounted.
 let navTail: Promise<void> | null = null;
 
+// How long a queued navigation may take before the next one stops waiting on it.
+let navTimeoutMs = 10_000;
+
+/** Lets a spec shorten the wait instead of sitting through ten seconds. */
+export function setNavigationTimeoutMs(ms: number): void {
+  navTimeoutMs = ms;
+}
+
 export function navigateTo(name: string): Promise<void> {
-  const run = navTail ? navTail.then(() => navigateNow(name)) : navigateNow(name);
+  const run = navTail
+    ? navTail.then(() => navigateWithTimeout(name))
+    : navigateWithTimeout(name);
   const tail: Promise<void> = run
     .then(() => {}, () => {})
     .then(() => {
@@ -82,7 +92,31 @@ export function navigateTo(name: string): Promise<void> {
   return run;
 }
 
+// Starts navigateNow in the same tick, then stops waiting on it after
+// navTimeoutMs: a render stuck on an IPC call that never answers must not hold
+// every later navigation behind it. The stalled one keeps running, and
+// navigateNow drops its result if it ever finishes (see navGen).
+function navigateWithTimeout(name: string): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      console.warn(`router: navigation to "${name}" did not finish within ${navTimeoutMs} ms; letting the next one proceed`);
+      resolve();
+    }, navTimeoutMs);
+  });
+  const run = navigateNow(name);
+  const clear = () => clearTimeout(timer);
+  run.then(clear, clear);
+  return Promise.race([run, expired]);
+}
+
+// Counts started navigations. Only a navigation that timed out can find it
+// changed after its render settles: it then owns no teardown slot, hash or rail
+// state any more, because a newer navigation already took them over.
+let navGen = 0;
+
 async function navigateNow(name: string): Promise<void> {
+  const gen = ++navGen;
   if (!currentRoot) return;
   // The tray, the overlay card and the cold-start drain call this directly
   // rather than through showView; they land in the Chats window's panel too.
@@ -114,6 +148,10 @@ async function navigateNow(name: string): Promise<void> {
     // the clear and the first lit paint is the white-screen window. The view's
     // own render() call reconciles the DOM in place once it resolves.
     const result = await view(currentRoot);
+    if (gen !== navGen) {
+      if (typeof result === "function") result();
+      return;
+    }
     if (typeof result === "function") currentTeardown = result;
     retriggerEnter(currentRoot);
   } else {
