@@ -290,6 +290,12 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     () => { void changeAccountForSession(sess.session_id, selectSession); },
     (model, effort, effortEditable) => header.setConfig(model, effort, effortEditable),
   );
+  // The settings read above is the first slow await of a chat open. Clicking
+  // another chat during it leaves `pane` owned by that chat, and mountRenderer
+  // has no guard before its own first await, so carrying on would detach the
+  // new chat's renderer or swap this chat's retained transcript (open question
+  // card included) into the new chat's pane.
+  if (state.mountId !== myMount || state.selectedId !== sessionId) return;
   // The header prints model/effort, so its text is also where they get changed;
   // the statusbar still owns the popovers and the set_session_* commit path.
   header.onConfigClick = (which, anchor) => {
