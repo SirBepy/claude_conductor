@@ -37,6 +37,19 @@ export function isSlashChip(chip: string): boolean {
   return chip.startsWith("/");
 }
 
+/** The draft after clicking a text-reply chip. A reply goes above what was
+ *  typed, never over it, and a second click on the same chip must not stack it
+ *  twice. A draft led by a slash command keeps the command first (the daemon
+ *  only runs a prompt as a command when it starts with it), so the reply goes
+ *  on a line below instead of above. */
+export function withReply(draft: string, chip: string): string {
+  if (draft.trim() === "") return chip;
+  if (isSlashChip(draft.trimStart())) {
+    return draft.split("\n").includes(chip) ? draft : `${draft.trimEnd()}\n${chip}`;
+  }
+  return draft.startsWith(chip) ? draft : `${chip}\n${draft}`;
+}
+
 export function nextChips(ctx: NextChipsCtx): string[] {
   if (!ctx.enabled || ctx.hasHeld || !ctx.inst || !turnFinished(ctx.inst)) return [];
   const chips: string[] = [];
