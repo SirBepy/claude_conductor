@@ -4,7 +4,7 @@
 // be cut at 60 characters inside the string itself, so nothing could show the
 // rest), and Stop lives in that block because a phone has no hover.
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const { activityDetail } = await import("../src/shared/chat/tool-meta.ts");
 const { describeActivity, describeActivityFull } = await import("../src/shared/chat/chat-dom-renderer.ts");
@@ -56,6 +56,94 @@ describe("formatElapsed", () => {
     expect(formatElapsed(65_000)).toBe("1:05");
     expect(formatElapsed(3_725_000)).toBe("1:02:05");
     expect(formatElapsed(-5)).toBe("0:00");
+  });
+});
+
+// A chat busy only through background tasks, or whose user message sits outside
+// the loaded history page, has no renderer turn start (0), so the bar's own
+// busy-since is the only clock it has.
+describe("the elapsed clock of a busy chat with no turn start", () => {
+  let pane;
+  const noStart = () => ({
+    lastActivity: null, activityIdle: false, lastProgress: null, lastTodoActivity: null,
+    activeTurnStartedAtMs: 0,
+  });
+  const clock = () => pane.querySelector(".thinking-row .thinking-elapsed").textContent;
+  // Mirrors a chat switch: the pane is torn down and re-initialised, then the
+  // incoming chat's renderer is synced in.
+  const mount = (id, src = noStart()) => {
+    state.selectedId = id;
+    initThinkingBar(pane);
+    syncThinkingBar(src);
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-03T10:00:00Z"));
+    state.pendingNewSession = null;
+    state.heldMessages = null;
+    state.sessions = [
+      { session_id: "chat-a", busy: true },
+      { session_id: "chat-b", busy: false },
+    ];
+    pane = document.createElement("div");
+    pane.innerHTML = thinkingBarHtml();
+  });
+
+  afterEach(() => {
+    // The busy-since map is module state: settle each chat idle so a stamp from
+    // this test cannot leak into the next.
+    state.sessions = [];
+    for (const id of ["chat-a", "chat-b"]) {
+      state.selectedId = id;
+      updateThinkingBar();
+    }
+    initThinkingBar(null);
+    vi.useRealTimers();
+  });
+
+  it("keeps counting from the real start when the chat is left and returned to", () => {
+    mount("chat-a");
+    expect(clock()).toBe("0:00");
+
+    vi.advanceTimersByTime(30_000);
+    mount("chat-b");
+    vi.advanceTimersByTime(10_000);
+    mount("chat-a");
+
+    expect(clock()).toBe("0:40");
+  });
+
+  it("keeps the start across a second sync of the same chat", () => {
+    mount("chat-a");
+    vi.advanceTimersByTime(20_000);
+    syncThinkingBar(noStart());
+
+    expect(clock()).toBe("0:20");
+  });
+
+  it("starts a new clock once the chat has gone idle and then busy again", () => {
+    mount("chat-a");
+    vi.advanceTimersByTime(30_000);
+    state.sessions = [{ session_id: "chat-a", busy: false }, { session_id: "chat-b", busy: false }];
+    updateThinkingBar();
+    vi.advanceTimersByTime(5_000);
+    state.sessions = [{ session_id: "chat-a", busy: true }, { session_id: "chat-b", busy: false }];
+    updateThinkingBar();
+
+    expect(clock()).toBe("0:00");
+  });
+
+  it("keeps each chat's clock apart", () => {
+    mount("chat-a");
+    vi.advanceTimersByTime(30_000);
+    state.sessions = [{ session_id: "chat-a", busy: true }, { session_id: "chat-b", busy: true }];
+    mount("chat-b");
+    vi.advanceTimersByTime(5_000);
+
+    expect(clock()).toBe("0:05");
+    mount("chat-a");
+    expect(clock()).toBe("0:35");
   });
 });
 
