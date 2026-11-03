@@ -3,6 +3,7 @@ import { handleCommitRefClick, handleCommitRefKeydown } from "./commit-refs";
 import { handleDrillClick, handleDrillAnchorClick } from "./drill-links";
 import { handleFileRefClick, handleFileRefContextMenu, handleFileRefKeydown } from "./file-refs";
 import { handleTicketHover, handleTicketHoverOut } from "./ticket-refs";
+import { handleTurnMetaHover, handleTurnMetaHoverOut } from "./turn-meta-hover";
 import { sessionEvents } from "./event-store";
 import { RenderedMessage } from "./chat-transforms";
 import { armLazyDiffEnhance } from "./diff-enhancer";
@@ -352,6 +353,8 @@ export class ChatRenderer {
     this.container.addEventListener("keydown", handleFileRefKeydown);
     this.container.addEventListener("mouseover", handleTicketHover);
     this.container.addEventListener("mouseout", handleTicketHoverOut);
+    this.container.addEventListener("mouseover", handleTurnMetaHover);
+    this.container.addEventListener("mouseout", handleTurnMetaHoverOut);
     this.container.addEventListener("click", createHandleToolChipClick(this));
     this.container.addEventListener("click", createHandlePreviewCardClick(this));
     this.container.addEventListener("click", createHandleDraftCardClick(this));
