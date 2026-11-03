@@ -39,7 +39,7 @@ export type { WaitingOnTarget } from "./turn-waiting-chip";
  *
  *   <div class="turn-footer" data-turn-id="K">
  *     <div class="turn-meta-chips">[tokens][time]</div>   <- first in the DOM, drawn at the right end of the chip line (CSS order)
- *     <div class="tool-strip">...</div>                   <- row 2 (clickable chips)
+ *     <div class="tool-strip">...</div>                   <- clickable chips, left of the meta row on the line
  *     <div class="tool-strip-panel" hidden>...</div>      <- accordion
  *   </div>
  *

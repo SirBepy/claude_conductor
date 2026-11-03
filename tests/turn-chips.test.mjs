@@ -262,7 +262,7 @@ describe("Turn footer DOM integration", () => {
     expect(container.querySelectorAll(".turn-meta-chips").length).toBe(1);
   });
 
-  it("bundles the tool strip INTO the footer, below the meta row", async () => {
+  it("bundles the tool strip INTO the footer, after the meta row in DOM order", async () => {
     const { renderer, container } = await createRenderer();
 
     renderer.handleEvent(makeUserMessage("Do something"));
@@ -273,7 +273,7 @@ describe("Turn footer DOM integration", () => {
 
     const footer = container.querySelector(".turn-footer");
     expect(footer).not.toBeNull();
-    // Meta row is the footer's FIRST row, the strip follows it.
+    // Meta row is the footer's FIRST child, the strip follows it in the DOM (CSS order draws the row at the right end of the line).
     expect(footer.firstElementChild.classList.contains("turn-meta-chips")).toBe(true);
     const strip = footer.querySelector(":scope > .tool-strip");
     expect(strip).not.toBeNull();
@@ -540,6 +540,28 @@ describe("Turn footer DOM integration", () => {
     expect(container.querySelector(".turn-chip--tokens").textContent).toContain("2.5k");
     // One strip, not one per tool cycle.
     expect(container.querySelectorAll(".tool-strip").length).toBe(1);
+  });
+
+  // The CSS keeps a ticking turn's numbers visible (hover-only is for settled
+  // turns), keyed on this class: it must be set while running and gone after
+  // either end of the turn.
+  it("marks the meta row live while the turn runs and clears it on settle or interrupt", async () => {
+    const { renderer, container } = await createRenderer();
+
+    renderer.handleEvent(makeUserMessage("Turn 1"));
+    renderer.handleEvent(makeAssistantMessage("streaming", true));
+    const row = container.querySelector(".turn-meta-chips");
+    expect(row.classList.contains("turn-meta-chips--live")).toBe(true);
+
+    renderer.handleEvent(makeTurnUsage());
+    expect(row.classList.contains("turn-meta-chips--live")).toBe(false);
+
+    renderer.handleEvent(makeUserMessage("Turn 2"));
+    renderer.handleEvent(makeAssistantMessage("partial", true));
+    const second = [...container.querySelectorAll(".turn-meta-chips")].at(-1);
+    expect(second.classList.contains("turn-meta-chips--live")).toBe(true);
+    renderer.handleEvent(makeUserMessage("Turn 3"));
+    expect(second.classList.contains("turn-meta-chips--live")).toBe(false);
   });
 
   it("interrupted turn freezes at its last estimate instead of ticking forever", async () => {
