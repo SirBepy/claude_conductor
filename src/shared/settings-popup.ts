@@ -7,6 +7,8 @@
 // each one in here (showInSettingsPopup) rather than this module importing the
 // router, whose import chain already reaches this file.
 
+import { lockInputToHost } from "./modal-input-lock";
+import { isTextEntryElement } from "./text-entry";
 import { isRemote } from "./transport";
 import { isChatsWindow } from "./window-roles";
 import "./settings-popup.css";
@@ -38,6 +40,7 @@ let teardown: (() => void) | null = null;
 let seq = 0;
 let returnFocus: HTMLElement | null = null;
 let navigateBack: (() => void) | null = null;
+let unlockInput: (() => void) | null = null;
 const listeners = new Set<() => void>();
 
 export function isSettingsPopupOpen(): boolean {
@@ -92,6 +95,8 @@ export function closeSettingsPopup(): void {
   teardown?.();
   teardown = null;
   window.removeEventListener("keydown", onKey);
+  unlockInput?.();
+  unlockInput = null;
   backdrop.remove();
   backdrop = null;
   viewRoot = null;
@@ -101,6 +106,39 @@ export function closeSettingsPopup(): void {
   returnFocus = null;
   if (back?.isConnected) back.focus({ preventScroll: true });
   notify();
+}
+
+/** Locks background input to the backdrop and to whatever a page puts on top of
+ *  it. A popover appended to <body> (the device icon picker) focuses its first
+ *  button the moment it opens, before anything could register it as a host, so
+ *  the lock's focus half would blur it and leave its Arrow keys dead. This
+ *  adopts any later <body> child the focus lands in, ahead of that blur. */
+function lockPopupInput(bd: HTMLElement): () => void {
+  const unlockBackdrop = lockInputToHost(bd);
+  const adopted = new Map<HTMLElement, () => void>();
+  const onFocusIn = (e: FocusEvent): void => {
+    let top: Node | null = e.target instanceof Node ? e.target : null;
+    while (top && top.parentNode !== document.body) top = top.parentNode;
+    if (!(top instanceof HTMLElement) || top === bd || adopted.has(top)) return;
+    if (!(bd.compareDocumentPosition(top) & Node.DOCUMENT_POSITION_FOLLOWING)) return;
+    adopted.set(top, lockInputToHost(top));
+  };
+  const release = (el: HTMLElement): void => {
+    adopted.get(el)?.();
+    adopted.delete(el);
+  };
+  const removals = new MutationObserver(() => {
+    for (const el of [...adopted.keys()]) if (!el.isConnected) release(el);
+  });
+  removals.observe(document.body, { childList: true });
+  // Capture phase on window runs ahead of the lock's own document-level focusin.
+  window.addEventListener("focusin", onFocusIn, true);
+  return () => {
+    window.removeEventListener("focusin", onFocusIn, true);
+    removals.disconnect();
+    for (const el of [...adopted.keys()]) release(el);
+    unlockBackdrop();
+  };
 }
 
 const FOCUSABLE =
@@ -119,7 +157,7 @@ function tabStops(card: HTMLElement): HTMLElement[] {
 function trapTab(e: KeyboardEvent, card: HTMLElement): void {
   const target = e.target instanceof Node ? e.target : null;
   // A modal opened from a page (a confirm, the add-account wizard) sits outside
-  // the card and owns its own Tab order. Focus on <body> is ours to pull back in.
+  // the card and owns its own Tab order.
   if (target && target !== document.body && target !== document.documentElement && !card.contains(target)) return;
   const stops = tabStops(card);
   if (stops.length === 0) {
@@ -151,6 +189,14 @@ function onKey(e: KeyboardEvent): void {
   }
   if (e.key !== "Escape") return;
   e.preventDefault();
+  // Escape in a field first leaves the field (the field's own handler, which
+  // runs before this one, has already reverted an unsaved edit); the next
+  // Escape closes the popup.
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && isTextEntryElement(active) && backdrop?.contains(active)) {
+    active.blur();
+    return;
+  }
   closeSettingsPopup();
 }
 
@@ -178,6 +224,9 @@ function open(): void {
   bd.querySelector(".settings-popup-close")!.addEventListener("click", () => closeSettingsPopup());
   document.body.appendChild(bd);
   backdrop = bd;
+  // The popup leaves the Chats view active, so without the lock the chat's
+  // sessions-context shortcuts (close chat, new chat) keep firing behind it.
+  unlockInput = lockPopupInput(bd);
   window.addEventListener("keydown", onKey);
   bd.querySelector<HTMLElement>(".settings-popup")!.focus({ preventScroll: true });
 }

@@ -257,6 +257,89 @@ test("Tab inside an Add account wizard opened from the popup is left to the wiza
   expect(await page.evaluate(() => !!document.activeElement?.closest(".aaw-overlay"))).toBe(true);
 });
 
+// The popup leaves the active view as "sessions", so without the input lock a sessions-context
+// shortcut (ctrl+n, ctrl+w) would act on the chat dimmed behind it.
+test("a sessions-context shortcut does nothing while the popup is open, and works again once it closes", async ({ page }) => {
+  await mountChats(page);
+  await page.evaluate(async () => {
+    (window as any).__fired = 0;
+    (await import("/shared/shortcuts.ts")).register("new-chat", () => { (window as any).__fired++; });
+  });
+  const fired = () => page.evaluate(() => (window as any).__fired as number);
+
+  await page.keyboard.press("Control+n");
+  expect(await fired()).toBe(1);
+
+  await openFromRail(page);
+  await page.keyboard.press("Control+n");
+  await page.waitForTimeout(100);
+  expect(await fired()).toBe(1);
+
+  await page.keyboard.press("Escape");
+  await expect(popup(page)).toHaveCount(0);
+  await page.keyboard.press("Control+n");
+  expect(await fired()).toBe(2);
+});
+
+test("Escape inside a settings text field blurs it and keeps the popup open; the next Escape closes it", async ({ page }) => {
+  await mountChats(page);
+  await openFromRail(page);
+  await popup(page).evaluate((el) => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = "probe-field";
+    el.appendChild(input);
+  });
+  await page.locator("#probe-field").focus();
+
+  await page.keyboard.press("Escape");
+  await expect(popup(page)).toBeVisible();
+  expect(await page.evaluate(() => document.activeElement?.id === "probe-field")).toBe(false);
+
+  await page.keyboard.press("Escape");
+  await expect(popup(page)).toHaveCount(0);
+});
+
+// The popup's input lock must not swallow input meant for what the popup itself opens.
+test("typing works in the edit account modal opened from the popup, and Escape closes that modal first", async ({ page }) => {
+  await mountChats(page);
+  await openFromRail(page);
+  await page.evaluate(async () => {
+    const m = await import("/views/settings/subviews/accounts/edit-account-modal.ts");
+    void m.openEditAccountModal({
+      id: "acc1", label: "personal", colour: "#57b894", icon: "robot", config_dir: "", chrome_profile_dir: "",
+      email: "", org_uuid: "", subscription_tier: "", created_at: "", fleet_eligible: false, kind: "subscription",
+    } as never);
+  });
+  const label = page.locator("#aem-label");
+  await label.click();
+  await label.press("End");
+  await page.keyboard.type("Z");
+  expect(await label.inputValue()).toMatch(/Z$/);
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".aem-overlay")).toHaveCount(0);
+  await expect(popup(page)).toBeVisible();
+});
+
+test("the device icon picker opened from the popup is keyboard-driven: it takes focus, Arrow keys move it", async ({ page }) => {
+  await mountChats(page, undefined, {
+    ...INVOKE,
+    remote_access_status: { enabled: true },
+    list_remote_devices: [{ id: "d1", name: "Pixel 8", created_at: 1760000000, last_used: 1760100000, kind: "phone" }],
+  });
+  await openFromRail(page);
+  await page.evaluate(async () => (await import("/shared/navigation.ts")).showView("settings-remote-access"));
+  await popup(page).locator(".ra-icon-btn").first().click();
+  const focusedInPicker = () => page.evaluate(() => document.activeElement?.closest(".ra-icon-pop") != null);
+  expect(await focusedInPicker()).toBe(true);
+  const before = await page.evaluate(() => document.activeElement?.getAttribute("data-icon") ?? "auto");
+  await page.keyboard.press("ArrowDown");
+  const after = await page.evaluate(() => document.activeElement?.getAttribute("data-icon") ?? "auto");
+  expect(after).not.toBe(before);
+  expect(await focusedInPicker()).toBe(true);
+});
+
 /** What a click at the centre of `selector` would land on is inside it, so the
  *  popup's backdrop is not covering it. */
 async function expectOnTop(page: Page, selector: string): Promise<void> {
