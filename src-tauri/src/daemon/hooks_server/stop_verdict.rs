@@ -107,6 +107,8 @@ pub(super) fn title_missing(
 /// is mid-chain and something will re-invoke Claude, so silence is fine there.
 /// Same for `done` on a wake-opened turn (todo 607, `opened_by_wake`) - nobody
 /// asked, so `done` owes only the report, not a chat message.
+/// `question` is exempt too: the question card is already the message, and a
+/// bubble beside it would only point at the card.
 /// `mcp_attached` false (todo 824) degrades a missing call to `Inform`
 /// instead of `Block`: the tool itself is unreachable then.
 pub(super) fn missing_requirement_reason(
@@ -120,7 +122,8 @@ pub(super) fn missing_requirement_reason(
     if stop_hook_active == Some(true) {
         return TurnEndVerdict::Ok;
     }
-    let send_required = !opened_by_wake && !matches!(status, Some("working") | Some("waiting"));
+    let send_required =
+        !opened_by_wake && !matches!(status, Some("working") | Some("waiting") | Some("question"));
     let missing = match (has_report, has_send || !send_required) {
         (false, false) => Some(BOTH_MISSING_REASON),
         (false, true) => Some(REPORT_MISSING_REASON),
@@ -189,10 +192,15 @@ mod tests {
     }
 
     #[test]
-    fn question_turn_still_requires_a_message() {
+    fn question_turn_may_stay_silent_because_the_card_is_the_message() {
+        assert_eq!(missing_requirement_reason(None, true, false, Some("question"), false, true), TurnEndVerdict::Ok);
+    }
+
+    #[test]
+    fn a_silent_question_turn_still_owes_a_status_report() {
         assert_eq!(
-            missing_requirement_reason(None, true, false, Some("question"), false, true),
-            TurnEndVerdict::Block(SEND_MISSING_REASON),
+            missing_requirement_reason(None, false, false, Some("question"), false, true),
+            TurnEndVerdict::Block(REPORT_MISSING_REASON),
         );
     }
 

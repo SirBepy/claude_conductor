@@ -53,6 +53,29 @@ fn next_actions_schema() -> Value {
     })
 }
 
+/// Mirrors `hooks_server/messages.rs::KINDS`, which enforces it.
+const SEND_MESSAGE_KINDS: [&str; 12] = [
+    "answer", "report", "blocker", "do_this", "plan", "rating", "correction", "call", "handoff",
+    "artifact", "discovery", "ack",
+];
+
+/// Built from paragraphs so the NEXT ACTIONS rule keeps its place ahead of the
+/// formatting rules, where a skimming model still sees it (pinned in server.rs).
+fn send_message_description() -> String {
+    [
+        "Send Joe a message in the chat window. This is the ONLY way your text reaches him - regular assistant text and tool-call narration are hidden from the chat view entirely. Every message declares its `kind`, and the chat draws each kind differently.",
+        "KINDS, one line each:\n- answer: the reply to something he asked.\n- report: finished work. List `done`, `not_done` and `waiting_on` as short rows.\n- blocker: you are stuck and cannot continue. Lead with why.\n- do_this: something only Joe can do. Put a paste-ready payload in `copy`.\n- plan: the approach, before a long task starts.\n- rating: a judgement or score he asked for.\n- correction: an earlier claim of yours was wrong. Quote it in `was`.\n- call: a decision you made that he may want to overrule.\n- handoff: work passing to another session or person.\n- artifact: a file, preview or link he should open.\n- discovery: a finding that changes the plan.\n- ack: a bare acknowledgement of his message. It is not shown to Joe.",
+        "VERDICT: required for report, answer, blocker, do_this, rating, correction, call and discovery; rejected for plan, handoff, artifact and ack. Lead it with the conclusion, in words a person would say out loud (\"Built, not pushed\", \"Yes\", \"Stuck on auth\"). Avoid category words like \"Report ready\" or \"Plan ready\". Whatever Joe himself must do goes in `your_move`, not in the text.",
+        "NEVER narrate progress. Steps go in `write_plan`: it renders a live checklist in the turn footer and the thinking bar already shows the active step, and a step's `detail` answers \"why is this slow\". Do not send a message that only says work is still running, and do not send one that only points at a question card: the card is the message.",
+        "DO NOT SEND for: peer-session coordination. A clean `list_peers`/`post_message` exchange is invisible plumbing - Joe does not want to hear that another session acked or that there was no overlap. Message him about peers ONLY when it changes what you do (you are holding off a commit, another session owns files you need).",
+        "A turn may end with NO message at all when there is genuinely nothing worth saying - but the turn that finishes the work must always report.",
+        "NEXT ACTIONS: the last send_message of a turn that proposes or finishes work MUST carry `next_actions`, 1 to 3 replies Joe would click next (for example \"/commit\" after a code change, \"Yes, implement this\" after a plan). The app shows them as chips above his input, and a turn without them leaves him typing the obvious. Leave it out only when the message asks Joe a question, reports a blocker, or is not the last one before report_turn_status(done).",
+        "Format: short. The first line of `text` is the headline and later lines render as muted body. Caps on `text`: ack 80 chars, report 200, answer 400, every other kind 300; a longer explanation belongs in `details`, and a message over its cap is rejected. Bullets are encouraged over long sentences; break things up with blank lines rather than writing a dense paragraph. If it is long, Joe will not read it. Put supporting detail (lists, ids, reasons) in `details` instead of the text. Each detail has an id, a label and a markdown body. Link to it in the text as [label](#d:id). Joe clicks the link to see the body. To point at a detail from an earlier message, use the same #d:id link and do not repeat the body.",
+        "Returns the message's ordinal (always 1 - it is now your newest), which update_message uses to revise or retract it later.",
+    ]
+    .join("\n\n")
+}
+
 pub fn coordination_schemas() -> Vec<Value> {
     vec![
         json!({
@@ -103,15 +126,25 @@ pub fn coordination_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_SEND_MESSAGE,
-            "description": "Send Joe a message in the chat window. This is the ONLY way your text reaches him - regular assistant text and tool-call narration are hidden from the chat view entirely.\n\nSEND for: the final result of a turn; a blocker or failure (lead with why); a discovery that changes the plan; a verification outcome (tests/typecheck/build); a commit or deploy landing; a short plan before starting a long task.\n\nDO NOT SEND for: peer-session coordination. A clean `list_peers`/`post_message` exchange is invisible plumbing - Joe does not want to hear that another session acked or that there was no overlap. Message him about peers ONLY when it changes what you do (you are holding off a commit, another session owns files you need).\n\nDO NOT SEND for: step-by-step progress. Use `write_plan` instead - it renders a live step-checklist in the turn footer, which is where in-progress work belongs. Never narrate milestones as chat bubbles.\n\nA turn may end with NO message at all when there is genuinely nothing worth saying - but the turn that finishes the work must always report.\n\nNEXT ACTIONS: the last send_message of a turn that proposes or finishes work MUST carry `next_actions`, 1 to 3 replies Joe would click next (for example \"/commit\" after a code change, \"Yes, implement this\" after a plan). The app shows them as chips above his input, and a turn without them leaves him typing the obvious. Leave it out only when the message asks Joe a question, reports a blocker, or is not the last one before report_turn_status(done).\n\nFormat: short. Bullets are encouraged over long sentences; break things up with blank lines rather than writing a dense paragraph. If it is long, Joe will not read it. Keep the text short. Put supporting detail (lists, ids, reasons) in `details` instead of the text. Each detail has an id, a label and a markdown body. Link to it in the text as [label](#d:id). Joe clicks the link to see the body. To point at a detail from an earlier message, use the same #d:id link and do not repeat the body.\n\nReturns the message's ordinal (always 1 - it is now your newest), which update_message uses to revise or retract it later.",
+            "description": send_message_description(),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "description": "The message to show Joe."},
+                    "kind": {"type": "string", "enum": SEND_MESSAGE_KINDS, "description": "What this message is. Required. See the tool description for what each kind is for."},
+                    "text": {"type": "string", "description": "The message to show Joe. The first line is the headline; any later lines render as muted body. Caps by kind: ack 80, report 200, answer 400, every other kind 300. Longer explanation goes in `details`."},
+                    "verdict": {"type": "string", "maxLength": 40, "description": "The conclusion as a person would say it out loud (\"Built, not pushed\", \"Yes\", \"Stuck\"), at most 40 chars. Required for report, answer, blocker, do_this, rating, correction, call and discovery. Rejected for plan, handoff, artifact and ack."},
+                    "tone": {"type": "string", "enum": ["good", "bad", "neutral"], "description": "Optional colour of the verdict."},
+                    "points": {"type": "array", "maxItems": 6, "items": {"type": "string", "maxLength": 200}, "description": "Optional extra points shown behind a click, at most 6 of 200 chars. Not allowed on ack."},
+                    "done": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 120}, "description": "report only: what got done, at most 8 rows of 120 chars."},
+                    "not_done": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 120}, "description": "report only: what is not done, at most 8 rows of 120 chars."},
+                    "waiting_on": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 120}, "description": "report only: what the work is waiting on, at most 8 rows of 120 chars."},
+                    "your_move": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 120}, "description": "report only: ONLY rows Joe himself must act on, at most 8 of 120 chars. Whatever he must do goes here, not in the text."},
+                    "was": {"type": "string", "maxLength": 100, "description": "correction only: the earlier claim being corrected, at most 100 chars."},
+                    "copy": {"type": "string", "maxLength": 4000, "description": "do_this only: a paste-ready payload (a command, a message), at most 4000 chars."},
                     "details": details_schema(),
                     "next_actions": next_actions_schema()
                 },
-                "required": ["text"]
+                "required": ["kind", "text"]
             }
         }),
         json!({

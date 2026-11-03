@@ -402,6 +402,32 @@ mod tests {
         assert!(update["inputSchema"]["properties"].get("next_actions").is_none());
     }
 
+    #[test]
+    fn send_message_requires_a_kind_and_teaches_the_no_progress_rule() {
+        let resp = dispatch(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#, 27182, "");
+        let tools = resp["result"]["tools"].as_array().unwrap();
+        let send = tools.iter().find(|t| t["name"] == "send_message").unwrap();
+        let schema = &send["inputSchema"];
+
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|r| r == "kind") && required.iter().any(|r| r == "text"));
+        assert_eq!(schema["properties"]["kind"]["enum"].as_array().unwrap().len(), 12);
+        for field in ["verdict", "tone", "points", "done", "not_done", "waiting_on", "your_move", "was", "copy"] {
+            assert!(schema["properties"].get(field).is_some(), "{field} missing from the schema");
+            assert!(!required.iter().any(|r| r == field), "{field} is optional at the schema level");
+        }
+        assert_eq!(schema["properties"]["verdict"]["maxLength"], 40);
+
+        let text = send["description"].as_str().unwrap();
+        for kind in schema["properties"]["kind"]["enum"].as_array().unwrap() {
+            let kind = kind.as_str().unwrap();
+            assert!(text.contains(&format!("- {kind}:")), "description has no line for {kind}");
+        }
+        for phrase in ["NEVER narrate progress", "write_plan", "thinking bar", "why is this slow", "not shown to Joe", "your_move", "Report ready", "only says work is still running", "question card"] {
+            assert!(text.contains(phrase), "description lost: {phrase}");
+        }
+    }
+
     /// todo 963: `TodoWrite` is not in a spawned session's tool list (measured
     /// 2026-09-26 against CLI 2.1.278: `claude -p --input-format=stream-json`
     /// registers `TaskCreate`/`TaskList`/`TaskUpdate` but no `TodoWrite`, and

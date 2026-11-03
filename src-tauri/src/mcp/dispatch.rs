@@ -276,6 +276,14 @@ fn report_status_body(args: &Value, session_id: &str, roots: &[std::path::PathBu
     })
 }
 
+/// Every `send_message` argument the daemon route validates. `next_actions` is
+/// absent on purpose: the route ignores it and the chat reads it from the
+/// tool_use input in the transcript.
+const SEND_MESSAGE_FORWARDED: [&str; 11] = [
+    "details", "kind", "verdict", "tone", "points", "done", "not_done", "waiting_on", "your_move",
+    "was", "copy",
+];
+
 /// Turn status/title, chat messages, and the Your Todos panel.
 fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
     match name {
@@ -290,8 +298,10 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "text": ctx.args["text"],
             });
             // Omit when absent: the receiver's serde default covers a missing key, not null.
-            if let Some(d) = ctx.args.get("details") {
-                body["details"] = d.clone();
+            for key in SEND_MESSAGE_FORWARDED {
+                if let Some(v) = ctx.args.get(key) {
+                    body[key] = v.clone();
+                }
             }
             Some(ctx.relay("/messages/send", body, Some("invalid message"), None))
         }
@@ -404,6 +414,21 @@ mod tests {
         }
         assert_eq!(body["session_id"], json!("s1"));
         assert!(forward_all_args(&json!({"action": "add"}), "s1").get("person").is_none(), "absent stays absent");
+    }
+
+    /// Every `send_message` property but `next_actions` (transcript-only) is
+    /// relayed, so the daemon validates what the schema offers.
+    #[test]
+    fn send_message_forwards_every_validated_schema_property() {
+        let tools = super::super::tool_schemas_coordination::coordination_schemas();
+        let schema = tools.iter().find(|t| t["name"] == TOOL_SEND_MESSAGE).expect("send_message is registered");
+        let props = schema["inputSchema"]["properties"].as_object().unwrap();
+        for key in props.keys().filter(|k| !matches!(k.as_str(), "text" | "next_actions")) {
+            assert!(SEND_MESSAGE_FORWARDED.contains(&key.as_str()), "{key} is never relayed to the daemon");
+        }
+        for key in SEND_MESSAGE_FORWARDED {
+            assert!(props.contains_key(key), "{key} is relayed but absent from the schema");
+        }
     }
 
     /// Every property `dashboard_card` declares reaches the daemon route, and

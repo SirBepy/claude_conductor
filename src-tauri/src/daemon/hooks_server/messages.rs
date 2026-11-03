@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 
+/// `update_message`'s text cap (`send_message` caps per kind, see `text_cap`).
 /// Deliberately NOT `repo_channel::MAX_TEXT_LEN` (2000) - that cap keeps a peer
 /// wake line short inside another session's context; a report meant for Joe has
 /// no such constraint. Sharing it is what produced the 3x-duplicate bug.
@@ -19,7 +20,7 @@ const MAX_MESSAGE_LEN: usize = 8000;
 /// real windowing (anything sent since Joe's second-most-recent message).
 const MAX_ORDINAL: u64 = 64;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub(super) struct SendMessageBody {
     session_id: String,
     // `message` alias: the sibling UpdateMessageBody below has its OWN unrelated
@@ -33,6 +34,30 @@ pub(super) struct SendMessageBody {
     text: String,
     #[serde(default)]
     details: Option<Vec<Detail>>,
+    // Every kind field is optional at decode time: a chat spawned before `kind`
+    // existed sends none, and must learn the field from a clean `ok:false`
+    // listing the kinds, not from a body-decode error. The frontend reads these
+    // from the tool_use input in the transcript; the route only validates them.
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    verdict: Option<String>,
+    #[serde(default)]
+    tone: Option<String>,
+    #[serde(default)]
+    points: Option<Vec<String>>,
+    #[serde(default)]
+    done: Option<Vec<String>>,
+    #[serde(default)]
+    not_done: Option<Vec<String>>,
+    #[serde(default)]
+    waiting_on: Option<Vec<String>>,
+    #[serde(default)]
+    your_move: Option<Vec<String>>,
+    #[serde(default)]
+    was: Option<String>,
+    #[serde(default)]
+    copy: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -87,6 +112,140 @@ fn validate_details(details: &[Detail]) -> Result<(), String> {
     Ok(())
 }
 
+const KINDS: [&str; 12] = [
+    "answer", "report", "blocker", "do_this", "plan", "rating", "correction", "call", "handoff",
+    "artifact", "discovery", "ack",
+];
+const MAX_VERDICT: usize = 40;
+const MAX_POINTS: usize = 6;
+const MAX_POINT: usize = 200;
+const MAX_ROWS: usize = 8;
+const MAX_ROW: usize = 120;
+const MAX_WAS: usize = 100;
+const MAX_COPY: usize = 4000;
+
+/// How long a kind's `text` may be. Past the cap the prose belongs in `details`,
+/// which sits behind a click; the card shows `text` at full size.
+fn text_cap(kind: &str) -> usize {
+    match kind {
+        "ack" => 80,
+        "report" => 200,
+        "answer" => 400,
+        _ => 300,
+    }
+}
+
+/// `plan`, `handoff`, `artifact` and `ack` carry no verdict: their verdicts
+/// tested as filler ("Plan ready"), so the card reads better without one.
+fn takes_verdict(kind: &str) -> bool {
+    !matches!(kind, "plan" | "handoff" | "artifact" | "ack")
+}
+
+fn kind_rejection(got: Option<&str>) -> String {
+    let list = KINDS.join(", ");
+    match got {
+        None => format!(
+            "kind is required: send_message declares what each message is. Resend with kind set to one of: {list}. Most kinds also need a verdict (at most {MAX_VERDICT} chars, the conclusion as a person would say it)."
+        ),
+        Some(k) => format!("kind \"{k}\" is not a kind. Resend with kind set to one of: {list}."),
+    }
+}
+
+fn check_rows(name: &str, rows: &Option<Vec<String>>, max_items: usize, max_len: usize) -> Result<(), String> {
+    let Some(rows) = rows else { return Ok(()) };
+    if rows.len() > max_items {
+        return Err(format!("{name} has {} items, over {max_items}: keep the most important", rows.len()));
+    }
+    for r in rows {
+        let n = r.chars().count();
+        if n > max_len {
+            return Err(format!("a {name} item is {n} chars, over {max_len}: shorten it"));
+        }
+    }
+    Ok(())
+}
+
+/// Mirrors the limits in the `send_message` tool schema; the model may not honour
+/// a schema, so the route enforces them too. Every error names the fix, because
+/// the model reads it as the tool result and retries.
+fn validate_send(body: &SendMessageBody) -> Result<(), String> {
+    let kind = match body.kind.as_deref().map(str::trim) {
+        Some(k) if KINDS.contains(&k) => k,
+        other => return Err(kind_rejection(other)),
+    };
+    let text = body.text.trim();
+    if text.is_empty() {
+        return Err("text must not be empty".to_string());
+    }
+    let (n, cap) = (text.chars().count(), text_cap(kind));
+    if n > cap {
+        return Err(format!("text is {n} chars, over {kind}'s {cap}: move detail into details"));
+    }
+
+    let verdict = body.verdict.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    match (takes_verdict(kind), verdict) {
+        (true, None) => {
+            return Err(format!(
+                "{kind} needs a verdict (at most {MAX_VERDICT} chars): the conclusion as a person would say it out loud, like \"Built, not pushed\""
+            ))
+        }
+        (false, Some(_)) => {
+            return Err(format!("{kind} takes no verdict: remove it, the text carries the message"))
+        }
+        (true, Some(v)) if v.chars().count() > MAX_VERDICT => {
+            return Err(format!(
+                "verdict is {} chars, over {MAX_VERDICT}: say the conclusion shorter",
+                v.chars().count()
+            ))
+        }
+        _ => {}
+    }
+
+    if let Some(t) = body.tone.as_deref() {
+        if !matches!(t, "good" | "bad" | "neutral") {
+            return Err(format!("tone \"{t}\" is not valid: use good, bad or neutral, or leave it out"));
+        }
+    }
+    if kind == "ack" && body.points.is_some() {
+        return Err("ack takes no points: it is a bare acknowledgement".to_string());
+    }
+    check_rows("points", &body.points, MAX_POINTS, MAX_POINT)?;
+
+    let report_rows = [
+        ("done", &body.done),
+        ("not_done", &body.not_done),
+        ("waiting_on", &body.waiting_on),
+        ("your_move", &body.your_move),
+    ];
+    for (name, rows) in report_rows {
+        if rows.is_some() && kind != "report" {
+            return Err(format!("{name} is only for report, not {kind}: remove it"));
+        }
+        check_rows(name, rows, MAX_ROWS, MAX_ROW)?;
+    }
+
+    if let Some(was) = body.was.as_deref() {
+        if kind != "correction" {
+            return Err(format!("was is only for correction, not {kind}: remove it"));
+        }
+        let n = was.chars().count();
+        if n > MAX_WAS {
+            return Err(format!("was is {n} chars, over {MAX_WAS}: quote the earlier claim shorter"));
+        }
+    }
+    if let Some(copy) = body.copy.as_deref() {
+        if kind != "do_this" {
+            return Err(format!("copy is only for do_this, not {kind}: remove it"));
+        }
+        let n = copy.chars().count();
+        if n > MAX_COPY {
+            return Err(format!("copy is {n} chars, over {MAX_COPY}: trim the paste-ready payload"));
+        }
+    }
+    Ok(())
+}
+
+/// An `ok:false` reply carrying the fix; shared by every validation failure.
 fn details_rejection(err: String) -> (StatusCode, Json<serde_json::Value>) {
     (StatusCode::OK, Json(json!({"ok": false, "error": err})))
 }
@@ -98,15 +257,8 @@ pub(super) async fn on_send_message(
     // todo 824 remaining 1: reachable only via the MCP `send_message` tool -
     // mark even a validation-rejected call, since arrival alone is the proof.
     super::mark_mcp_tool_used(&ctx, &body.session_id);
-    let trimmed = body.text.trim();
-    if trimmed.is_empty() {
-        return (StatusCode::OK, Json(json!({"ok": false, "error": "text must not be empty"})));
-    }
-    if trimmed.chars().count() > MAX_MESSAGE_LEN {
-        return (
-            StatusCode::OK,
-            Json(json!({"ok": false, "error": format!("text exceeds {MAX_MESSAGE_LEN} chars")})),
-        );
+    if let Err(e) = validate_send(&body) {
+        return details_rejection(e);
     }
     if let Some(Err(e)) = body.details.as_deref().map(validate_details) {
         return details_rejection(e);
@@ -189,11 +341,44 @@ mod tests {
     }
 
     async fn send_with(details: Vec<serde_json::Value>) -> serde_json::Value {
-        let body: SendMessageBody = serde_json::from_value(
-            json!({"session_id": "s", "text": "hi", "details": details}),
-        )
-        .unwrap();
-        body_json(on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response()).await
+        send_json(json!({
+            "session_id": "s", "text": "hi", "kind": "answer", "verdict": "Yes", "details": details
+        }))
+        .await
+    }
+
+    /// Decodes `v` the way the route does, so a field the struct does not know
+    /// about would fail here rather than slip through.
+    fn body_of(v: serde_json::Value) -> SendMessageBody {
+        serde_json::from_value(v).unwrap()
+    }
+
+    async fn send_json(v: serde_json::Value) -> serde_json::Value {
+        body_json(on_send_message(AxState(ctx()), ValidatedJson(body_of(v))).await.into_response()).await
+    }
+
+    /// A report body that passes; each test overrides one field.
+    fn report(extra: serde_json::Value) -> serde_json::Value {
+        let mut v = json!({"session_id": "s", "kind": "report", "verdict": "Built, not pushed", "text": "Built it."});
+        for (k, val) in extra.as_object().unwrap() {
+            v[k] = val.clone();
+        }
+        v
+    }
+
+    fn error_of(v: &serde_json::Value) -> String {
+        assert_eq!(v["ok"], json!(false), "expected a rejection, got {v}");
+        v["error"].as_str().unwrap().to_string()
+    }
+
+    fn kinded(kind: &str, verdict: Option<&str>, text: &str) -> SendMessageBody {
+        SendMessageBody {
+            session_id: "s".into(),
+            text: text.into(),
+            kind: Some(kind.into()),
+            verdict: verdict.map(Into::into),
+            ..Default::default()
+        }
     }
 
     #[tokio::test]
@@ -235,17 +420,160 @@ mod tests {
 
     #[tokio::test]
     async fn valid_text_route_returns_ok() {
-        let body = SendMessageBody { session_id: "s".into(), text: "Finished the build.".into(), details: None };
+        let body = kinded("report", Some("Built"), "Finished the build.");
         let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(body_json(resp).await, json!({"ok": true, "message": 1}));
     }
 
     #[tokio::test]
-    async fn send_accepts_text_over_the_repo_channel_cap() {
-        let body = SendMessageBody { session_id: "s".into(), text: "x".repeat(4000), details: None };
-        let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
-        assert_eq!(body_json(resp).await["ok"], json!(true));
+    async fn text_caps_are_per_kind_and_the_error_names_the_fix() {
+        // (kind, cap, verdict): ack 80, report 200, answer 400, everything else 300.
+        let cases = [
+            ("ack", 80, None), ("report", 200, Some("v")), ("answer", 400, Some("v")),
+            ("plan", 300, None), ("blocker", 300, Some("v")), ("do_this", 300, Some("v")),
+            ("rating", 300, Some("v")), ("correction", 300, Some("v")), ("call", 300, Some("v")),
+            ("handoff", 300, None), ("artifact", 300, None), ("discovery", 300, Some("v")),
+        ];
+        for (kind, cap, verdict) in cases {
+            let at_cap = kinded(kind, verdict, &"x".repeat(cap));
+            assert!(validate_send(&at_cap).is_ok(), "{kind} at {cap}");
+            let over = validate_send(&kinded(kind, verdict, &"x".repeat(cap + 1))).unwrap_err();
+            assert!(over.contains(&format!("text is {} chars, over {kind}'s {cap}", cap + 1)), "{over}");
+            assert!(over.contains("details"), "{over}");
+        }
+    }
+
+    #[tokio::test]
+    async fn send_rejects_text_far_over_any_cap() {
+        let v = send_json(report(json!({"text": "x".repeat(4000)}))).await;
+        assert!(error_of(&v).contains("text is 4000 chars, over report's 200"));
+    }
+
+    #[tokio::test]
+    async fn a_kindless_send_is_rejected_with_a_message_listing_the_kinds() {
+        // A chat spawned before `kind` existed sends only text; it must decode
+        // and then learn the field from the error.
+        let v = send_json(json!({"session_id": "s", "text": "Finished the build."})).await;
+        let e = error_of(&v);
+        for k in KINDS {
+            assert!(e.contains(k), "{e} should list {k}");
+        }
+        assert!(e.contains("kind is required"));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_kind_is_rejected_with_a_message_listing_the_kinds() {
+        let e = error_of(&send_json(report(json!({"kind": "status"}))).await);
+        assert!(e.contains("\"status\" is not a kind"), "{e}");
+        assert!(e.contains("do_this") && e.contains("ack"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn a_rejected_send_still_counts_as_arriving_but_not_as_sent() {
+        let c = ctx();
+        let body = body_of(json!({"session_id": "s", "text": "no kind"}));
+        let resp = on_send_message(AxState(c.clone()), ValidatedJson(body)).await.into_response();
+        assert_eq!(body_json(resp).await["ok"], json!(false));
+        assert!(c.state.registry.peek_message_sent_gen("s").is_none());
+        assert_eq!(c.state.registry.peek_mcp_tool_used_gen("s"), Some(0), "arrival alone is the MCP proof");
+    }
+
+    #[tokio::test]
+    async fn verdict_is_required_for_the_eight_kinds_that_carry_one() {
+        for kind in ["report", "answer", "blocker", "do_this", "rating", "correction", "call", "discovery"] {
+            let e = validate_send(&kinded(kind, None, "text")).unwrap_err();
+            assert!(e.contains(&format!("{kind} needs a verdict")), "{e}");
+            let blank = validate_send(&kinded(kind, Some("   "), "text")).unwrap_err();
+            assert!(blank.contains("needs a verdict"), "{blank}");
+            assert!(validate_send(&kinded(kind, Some("Yes"), "text")).is_ok(), "{kind}");
+        }
+    }
+
+    #[tokio::test]
+    async fn verdict_is_rejected_for_the_four_kinds_that_test_as_filler() {
+        for kind in ["plan", "handoff", "artifact", "ack"] {
+            let e = validate_send(&kinded(kind, Some("Plan ready"), "text")).unwrap_err();
+            assert!(e.contains(&format!("{kind} takes no verdict")), "{e}");
+            assert!(validate_send(&kinded(kind, None, "text")).is_ok(), "{kind}");
+        }
+    }
+
+    #[tokio::test]
+    async fn verdict_over_forty_chars_is_rejected() {
+        assert!(validate_send(&kinded("report", Some(&"v".repeat(40)), "t")).is_ok());
+        let e = validate_send(&kinded("report", Some(&"v".repeat(41)), "t")).unwrap_err();
+        assert!(e.contains("verdict is 41 chars, over 40"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn tone_must_be_good_bad_or_neutral() {
+        for t in ["good", "bad", "neutral"] {
+            assert_eq!(send_json(report(json!({"tone": t}))).await["ok"], json!(true), "{t}");
+        }
+        let e = error_of(&send_json(report(json!({"tone": "angry"}))).await);
+        assert!(e.contains("tone \"angry\""), "{e}");
+    }
+
+    #[tokio::test]
+    async fn points_are_capped_in_count_and_length_and_banned_on_ack() {
+        let six: Vec<_> = (0..6).map(|_| "p").collect();
+        assert_eq!(send_json(report(json!({"points": six}))).await["ok"], json!(true));
+        let seven: Vec<_> = (0..7).map(|_| "p").collect();
+        assert!(error_of(&send_json(report(json!({"points": seven}))).await).contains("points has 7 items, over 6"));
+        assert_eq!(send_json(report(json!({"points": ["x".repeat(200)]}))).await["ok"], json!(true));
+        assert!(error_of(&send_json(report(json!({"points": ["x".repeat(201)]}))).await).contains("201 chars, over 200"));
+
+        let ack = json!({"session_id": "s", "kind": "ack", "text": "ok", "points": ["p"]});
+        assert!(error_of(&send_json(ack).await).contains("ack takes no points"));
+    }
+
+    #[tokio::test]
+    async fn report_rows_are_capped_and_rejected_on_other_kinds() {
+        for name in ["done", "not_done", "waiting_on", "your_move"] {
+            let eight: Vec<_> = (0..8).map(|_| "r").collect();
+            assert_eq!(send_json(report(json!({ name: eight }))).await["ok"], json!(true), "{name}");
+            let nine: Vec<_> = (0..9).map(|_| "r").collect();
+            let e = error_of(&send_json(report(json!({ name: nine }))).await);
+            assert!(e.contains(&format!("{name} has 9 items, over 8")), "{e}");
+            assert_eq!(send_json(report(json!({ name: ["x".repeat(120)] }))).await["ok"], json!(true));
+            let long = error_of(&send_json(report(json!({ name: ["x".repeat(121)] }))).await);
+            assert!(long.contains("121 chars, over 120"), "{long}");
+
+            let answer = json!({"session_id": "s", "kind": "answer", "verdict": "Yes", "text": "t", name: ["r"]});
+            let e = error_of(&send_json(answer).await);
+            assert!(e.contains(&format!("{name} is only for report, not answer")), "{e}");
+        }
+    }
+
+    #[tokio::test]
+    async fn was_is_correction_only_and_capped_at_100() {
+        let correction = |was: String| json!({
+            "session_id": "s", "kind": "correction", "verdict": "Wrong earlier", "text": "t", "was": was
+        });
+        assert_eq!(send_json(correction("x".repeat(100))).await["ok"], json!(true));
+        assert!(error_of(&send_json(correction("x".repeat(101))).await).contains("was is 101 chars, over 100"));
+        assert!(error_of(&send_json(report(json!({"was": "old"}))).await).contains("was is only for correction, not report"));
+    }
+
+    #[tokio::test]
+    async fn copy_is_do_this_only_and_capped_at_4000() {
+        let do_this = |copy: String| json!({
+            "session_id": "s", "kind": "do_this", "verdict": "Run this", "text": "t", "copy": copy
+        });
+        assert_eq!(send_json(do_this("x".repeat(4000))).await["ok"], json!(true));
+        assert!(error_of(&send_json(do_this("x".repeat(4001))).await).contains("copy is 4001 chars, over 4000"));
+        assert!(error_of(&send_json(report(json!({"copy": "cmd"}))).await).contains("copy is only for do_this, not report"));
+    }
+
+    #[tokio::test]
+    async fn a_full_report_with_every_optional_field_is_accepted() {
+        let v = report(json!({
+            "tone": "good", "points": ["a"], "done": ["d"], "not_done": ["n"],
+            "waiting_on": ["w"], "your_move": ["m"], "next_actions": ["/commit"],
+            "details": [detail("x", "b")],
+        }));
+        assert_eq!(send_json(v).await, json!({"ok": true, "message": 1}));
     }
 
     #[tokio::test]
@@ -290,14 +618,14 @@ mod tests {
     #[tokio::test]
     async fn valid_text_route_records_message_sent_for_current_gen() {
         let c = ctx();
-        let body = SendMessageBody { session_id: "s".into(), text: "Finished the build.".into(), details: None };
+        let body = kinded("report", Some("Built"), "Finished the build.");
         on_send_message(AxState(c.clone()), ValidatedJson(body)).await;
         assert_eq!(c.state.registry.peek_message_sent_gen("s"), Some(0));
     }
 
     #[tokio::test]
     async fn empty_text_route_returns_ok_false_with_error() {
-        let body = SendMessageBody { session_id: "s".into(), text: "   ".into(), details: None };
+        let body = kinded("report", Some("Built"), "   ");
         let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let v = body_json(resp).await;
@@ -308,15 +636,17 @@ mod tests {
     #[tokio::test]
     async fn empty_text_route_does_not_record_message_sent() {
         let c = ctx();
-        let body = SendMessageBody { session_id: "s".into(), text: "   ".into(), details: None };
+        let body = kinded("report", Some("Built"), "   ");
         on_send_message(AxState(c.clone()), ValidatedJson(body)).await;
         assert!(c.state.registry.peek_message_sent_gen("s").is_none());
     }
 
     #[tokio::test]
-    async fn overlong_text_route_returns_ok_false_with_error() {
-        let body = SendMessageBody { session_id: "s".into(), text: "x".repeat(MAX_MESSAGE_LEN + 1), details: None };
-        let resp = on_send_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
+    async fn overlong_update_text_returns_ok_false_with_error() {
+        let body = UpdateMessageBody {
+            session_id: "s".into(), message: 1, text: Some("x".repeat(MAX_MESSAGE_LEN + 1)), retract: false, details: None,
+        };
+        let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
         let v = body_json(resp).await;
         assert_eq!(v["ok"], json!(false));
