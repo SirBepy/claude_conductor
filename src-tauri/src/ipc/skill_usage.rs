@@ -10,15 +10,23 @@ fn today_utc() -> String {
     chrono::Utc::now().format("%Y-%m-%d").to_string()
 }
 
-/// Unix-second cutoff for the 7-day window ending today (start of the oldest
-/// day). Skill events with `timestamp >= cutoff` belong to the window. `0` if
-/// the date math fails, which just widens the window harmlessly.
+/// Unix-second cutoff for the 7-day window ending today: local midnight of the
+/// oldest day, matching the dashboard charts that bucket by local day. A UTC
+/// midnight would cut the first hours off the oldest bar for anyone ahead of
+/// UTC. Skill events with `timestamp >= cutoff` belong to the window. `0` if the
+/// date math fails, which just widens the window harmlessly.
 fn week_cutoff_unix() -> i64 {
-    let today = today_utc();
-    store::week_cutoff_day(&today)
-        .map(|day| format!("{day}T00:00:00Z"))
-        .and_then(|s| crate::storage::usage_store::rfc3339_to_unix(&s).ok())
-        .unwrap_or(0)
+    week_cutoff_at(chrono::Local::now()).unwrap_or(0)
+}
+
+/// `week_cutoff_unix` for an explicit "now", generic over the zone so a test
+/// can pin an offset instead of depending on the machine's own.
+fn week_cutoff_at<Tz: chrono::TimeZone>(now: chrono::DateTime<Tz>) -> Option<i64> {
+    let oldest = now.date_naive().checked_sub_days(chrono::Days::new(6))?;
+    let midnight = oldest.and_hms_opt(0, 0, 0)?;
+    // `earliest` picks the first instant when a DST fold repeats midnight.
+    let start = midnight.and_local_timezone(now.timezone()).earliest()?;
+    Some(start.timestamp())
 }
 
 /// Loads the window's skill events from the SQLite store (the daemon now writes
@@ -106,4 +114,26 @@ pub async fn list_installed_skills(state: State<'_, AppState>) -> Result<Vec<Ins
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::week_cutoff_at;
+    use chrono::{FixedOffset, TimeZone};
+
+    #[test]
+    fn week_cutoff_is_local_midnight_six_days_back() {
+        // 00:30 on 2026-11-03 in UTC+1 is still 2026-11-02 in UTC; the window's
+        // oldest local day is 2026-10-28, which began at 2026-10-27T23:00Z.
+        let plus1 = FixedOffset::east_opt(3600).unwrap();
+        let now = plus1.with_ymd_and_hms(2026, 11, 3, 0, 30, 0).unwrap();
+        let expect = chrono::Utc.with_ymd_and_hms(2026, 10, 27, 23, 0, 0).unwrap().timestamp();
+        assert_eq!(week_cutoff_at(now), Some(expect));
+
+        // Behind UTC the local midnight is later than the UTC one.
+        let minus8 = FixedOffset::west_opt(8 * 3600).unwrap();
+        let now = minus8.with_ymd_and_hms(2026, 11, 3, 20, 0, 0).unwrap();
+        let expect = chrono::Utc.with_ymd_and_hms(2026, 10, 28, 8, 0, 0).unwrap().timestamp();
+        assert_eq!(week_cutoff_at(now), Some(expect));
+    }
 }
