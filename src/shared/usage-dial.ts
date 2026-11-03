@@ -56,7 +56,7 @@ function seg(r: number, w: number, startPct: number, lenPct: number, stroke: str
 }
 
 /**
- * One ring (either the 5h or the 7d; a plan with no 5h limit draws only the 7d), matching the mockup's `ring()` exactly:
+ * One ring (either the 5h or the 7d), matching the mockup's `ring()` exactly:
  * a full-track base, then either a single solid arc (on pace), a faded
  * safe-pace arc under a solid current arc (under pace — solid up to current,
  * ghost out to the safe mark), or a bright current arc under a darker
@@ -102,7 +102,8 @@ export function dialHtml(
   showDisc: boolean,
   scale = 1.2,
 ): string {
-  // A plan with no 5h limit draws one ring: the weekly one, on the outer track.
+  // A plan with no 5h limit draws one ring (the weekly one, on the outer track)
+  // and no 5h text in the hover circle or reset popup.
   const outer = ringSvg(OUTER_R, OUTER_W, row.sessionLimited ? row.session : row.weekly, settings);
   const inner = row.sessionLimited ? ringSvg(INNER_R, INNER_W, row.weekly, settings) : "";
   const icon = escapeHtml(row.icon);
@@ -131,7 +132,7 @@ function infoMetricLine(metric: OverlayMetric, settings: ValueColorSettings): st
 }
 
 /** Hover content shown INSIDE the circle in place of the graph: the account
- * name plus the session/weekly current%/safe% lines (top = session, bottom =
+ * name plus the session/weekly current%/safe% lines (top = session, omitted for a plan with no 5h limit, bottom =
  * weekly). Fades in (and the dial graph fades out) on cell hover — see
  * .oc-info in overlay.css. */
 function infoHtml(row: OverlayRow, settings: ValueColorSettings): string {

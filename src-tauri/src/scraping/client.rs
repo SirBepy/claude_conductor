@@ -198,24 +198,26 @@ struct RawUsage {
     extra_usage: Option<crate::types::ExtraUsage>,
     /// Per-limit list the plan actually enforces (`kind` is "session" for the
     /// 5h window, "weekly_all", ...). Absent on older response shapes.
+    /// Read as a raw value: a reshaped `limits` must degrade to "limited",
+    /// never fail the whole poll the way a typed field would.
     #[serde(default)]
-    limits: Option<Vec<RawLimit>>,
-}
-
-#[derive(Deserialize)]
-struct RawLimit {
-    #[serde(default)]
-    kind: String,
+    limits: Option<serde_json::Value>,
 }
 
 /// Whether the plan enforces a 5h limit. A plan without one answers
 /// `"five_hour": null` AND leaves `session` out of `limits` (read live
 /// 2026-11-03 on a plan after Anthropic dropped the 5h window); an idle plan
 /// that still has one lists `session` with `is_active: false`. A response
-/// with no `limits` list at all counts as limited, so an unfamiliar shape
-/// never hides a ring.
-fn has_five_hour_limit(five_hour: &Option<crate::types::WindowUsage>, limits: &Option<Vec<RawLimit>>) -> bool {
-    five_hour.is_some() || limits.as_ref().map_or(true, |l| l.iter().any(|x| x.kind == "session"))
+/// with no `limits` list at all, or one that is not an array, counts as
+/// limited, so an unfamiliar shape never hides a ring.
+fn has_five_hour_limit(five_hour: &Option<crate::types::WindowUsage>, limits: &Option<serde_json::Value>) -> bool {
+    if five_hour.is_some() {
+        return true;
+    }
+    match limits.as_ref().and_then(|l| l.as_array()) {
+        Some(list) => list.iter().any(|x| x.get("kind").and_then(|k| k.as_str()) == Some("session")),
+        None => true,
+    }
 }
 
 fn idle_window() -> crate::types::WindowUsage {
@@ -384,6 +386,16 @@ mod tests {
         let snap = snapshot_for(r#"{
             "five_hour": null,
             "seven_day": {"utilization": 36.0, "resets_at": "y"}
+        }"#).await;
+        assert!(snap.five_hour_limited);
+    }
+
+    #[tokio::test]
+    async fn a_reshaped_limits_field_does_not_fail_the_poll_and_counts_as_limited() {
+        let snap = snapshot_for(r#"{
+            "five_hour": null,
+            "seven_day": {"utilization": 36.0, "resets_at": "y"},
+            "limits": {"session": {"percent": 0}}
         }"#).await;
         assert!(snap.five_hour_limited);
     }

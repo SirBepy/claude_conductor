@@ -63,14 +63,14 @@ pub fn workflow_schemas() -> Vec<Value> {
     vec![
         json!({
             "name": TOOL_SPAWN_CHAT,
-            "description": "Start a SEPARATE chat alongside this one and send it `prompt` as its first message; returns {ok, session_id}. Both chats then run independently - this one keeps going. Use it to hand off a self-contained piece of work the user will want to read and steer on its own, rather than burying it in this transcript. The prompt lands as a real, visible user message, so it must carry everything the new chat needs; it cannot see this conversation. Inherits this chat's model, effort, account and auto-accept unless overridden; it gets its own character, since it is a separate chat. `cwd` can be this session's own project or a DIFFERENT project the user already has open/known to the app - never an arbitrary path. Call it as many times as the work needs, one call per chat. To REPLACE this chat instead of running beside it, use `respawn`.",
+            "description": "Start a SEPARATE chat alongside this one and send it `prompt` as its first message; returns {ok, session_id}. Both chats then run independently - this one keeps going. Use it to hand off a self-contained piece of work the user will want to read and steer on its own, rather than burying it in this transcript. The prompt lands as a real, visible user message, so it must carry everything the new chat needs; it cannot see this conversation. Inherits this chat's account and auto-accept; its model and effort default to the target project's default (then Settings' default) unless you pass them, never this chat's own; it gets its own character, since it is a separate chat. `cwd` can be this session's own project or a DIFFERENT project the user already has open/known to the app - never an arbitrary path. Call it as many times as the work needs, one call per chat. To REPLACE this chat instead of running beside it, use `respawn`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "cwd": {"type": "string", "description": "Absolute working directory: this session's own cwd, or another project already known to the app."},
                     "prompt": {"type": "string", "description": "The new chat's first message. Carry the full handoff context here - it is what the user reads."},
-                    "model": {"type": "string", "description": "Optional model id/alias. Omit to inherit this session's."},
-                    "effort": {"type": "string", "description": "Optional reasoning effort. Omit to inherit this session's."},
+                    "model": {"type": "string", "description": "Optional model id/alias. Omit to use the project's default."},
+                    "effort": {"type": "string", "description": "Optional reasoning effort. Omit to use the project's default."},
                     "name": {"type": "string", "description": "Optional short label for the new chat."},
                     "machine": {"type": "string", "description": "Label or id (from list_peers) of a paired machine to start this chat on instead of here - use it when the user asks to run something on another one of their machines. If it fails because that machine is offline or unreachable, do not retry blindly or spawn here instead: ask the user to wake that machine and open Conductor on it, then try again. Omit to spawn locally, the default."}
                 },
