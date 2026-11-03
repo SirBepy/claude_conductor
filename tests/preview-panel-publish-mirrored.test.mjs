@@ -35,7 +35,9 @@ async function openMoreMenu(sessionId) {
   document.body.appendChild(root);
   tab = mountPreviewTab(root, { isOpen: () => true, isVisible: () => true, requestOpen() {}, markOpenFor() {} });
   tab.setSessionScope(sessionId);
-  await vi.waitFor(() => expect(root.querySelector(".pv-name")?.textContent).not.toBe("No previews yet"));
+  // The name is blank between the scope change and the page landing, so wait
+  // for the page's own slug rather than for "anything but the empty label".
+  await vi.waitFor(() => expect(root.querySelector(".pv-name")?.textContent).toBe("mock"));
   root.querySelector('[data-act="more"]').click();
   await vi.waitFor(() => expect(document.querySelector(".smore-item")).not.toBeNull());
 }
