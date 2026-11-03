@@ -57,18 +57,17 @@ fn meeting_dot_and_update_badge_coexist() {
 }
 
 #[test]
-fn input_needed_dot_coexists_with_the_other_three() {
-    // Four corners, four independent dots: the new top-left amber dot
-    // must not clobber the meeting (top-right), update (bottom-
-    // right), or dev (bottom-left) dots, or vice versa.
+fn input_needed_dot_coexists_with_the_other_dots_on_a_dev_build() {
+    // Three corners, three independent dots: the top-left amber dot must not
+    // clobber the meeting (top-right) or update (bottom-right) dots, or vice
+    // versa. `dev: true` recolours the whole icon blue before the dots are
+    // stamped, so none of them may be tinted along with it.
     let all = render(&IconCtx { updating: true, in_meeting: true, dev: true, input_needed: true });
     let img = image::load_from_memory(&all).unwrap();
     let input_needed = img.get_pixel(6, 6);
     let meeting = img.get_pixel(SIZE - 6, 6);
     let update = img.get_pixel(SIZE - 6, SIZE - 6);
-    let dev = img.get_pixel(6, SIZE - 6);
     assert_eq!([input_needed[0], input_needed[1], input_needed[2]], [250, 204, 21]);
     assert!(meeting[0] > 150 && meeting[2] < 120, "meeting dot should still be red, got {meeting:?}");
     assert!(update[2] > 150, "update badge should still be blue, got {update:?}");
-    assert!(dev[0] > 150 && dev[1] > 80 && dev[2] < 60, "dev dot should still be orange, got {dev:?}");
 }
