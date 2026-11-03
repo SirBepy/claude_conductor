@@ -2,7 +2,7 @@
 // the shared textarea for the active tab. Split out of question-ui-render.ts.
 
 import {
-  extraMessageZoneHtml, nextArrowDisabled, ownZoneHtml,
+  attachmentsStripHtml, extraMessageZoneHtml, nextArrowDisabled, ownZoneHtml,
 } from "./question-ui-templates";
 import type { QuestionRenderState } from "./question-ui-templates";
 import type { AuqAttachmentsController } from "./attachments";
@@ -25,6 +25,8 @@ export interface AnswerBarDeps {
   syncMessagesPadding: () => void;
   showPasteHint: (bar: HTMLElement, message: string) => void;
   updatePrimaryButton: () => void;
+  /** The strips are rebuilt with the bar, so every rebuild repaints them. */
+  paintAttachmentStrips: () => void;
 }
 
 // Fills + wires the inline answer bar for the active tab: one shared textarea
@@ -34,7 +36,7 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
   const {
     host, questions, hasSummary, totalPanels, freeText, state, auqAttachments,
     slashPopup, answeredAt, notifyDraftChange, syncMessagesPadding, showPasteHint,
-    updatePrimaryButton,
+    updatePrimaryButton, paintAttachmentStrips,
   } = deps;
 
   return function syncAnswerBar(): void {
@@ -56,12 +58,15 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
     const noteSlot = isSummary
       ? host.querySelector<HTMLElement>(`.prompt-panel[data-panel="${questions.length}"] .prompt-summary__note`)
       : null;
-    bar.innerHTML = isSummary ? "" : ownZoneHtml(state.activeTab, freeText, page);
+    // Each step's staged images ride directly above its own box.
+    bar.innerHTML = isSummary
+      ? ""
+      : attachmentsStripHtml(state.activeTab, deps.opts.supportsExtras) + ownZoneHtml(state.activeTab, freeText, page);
     if (noteSlot) {
       const open = state.reviewNoteOpen || state.additionalMessage.trim() !== "";
-      noteSlot.innerHTML = open
+      noteSlot.innerHTML = attachmentsStripHtml(state.activeTab, deps.opts.supportsExtras) + (open
         ? extraMessageZoneHtml(state.additionalMessage, false)
-        : `<button type="button" class="prompt-summary__add-note" data-act="add-note"><i class="ph ph-plus"></i>Add a note</button>`;
+        : `<button type="button" class="prompt-summary__add-note" data-act="add-note"><i class="ph ph-plus"></i>Add a note</button>`);
       noteSlot.querySelector('[data-act="add-note"]')?.addEventListener("click", () => {
         state.reviewNoteOpen = true;
         syncAnswerBar();
@@ -142,5 +147,6 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
     const extraEl = noteSlot?.querySelector<HTMLTextAreaElement>(".prompt-extra-input") ?? null;
     if (ownEl) wireField(ownEl, false);
     if (extraEl) wireField(extraEl, true);
+    paintAttachmentStrips();
   };
 }

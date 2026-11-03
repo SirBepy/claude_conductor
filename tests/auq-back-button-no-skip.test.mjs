@@ -44,6 +44,10 @@ function registerPaneFallback() {
   return fallback;
 }
 
+/** The card plays a short exit (question-ui-render.ts's minimize) before the
+ *  bar replaces it; the press itself is consumed at once. */
+const collapsed = () => vi.waitFor(() => expect(document.querySelector(".prompt-collapsed")).not.toBeNull());
+
 beforeEach(() => {
   document.body.innerHTML = "";
   resetBackButtonForTests();
@@ -51,7 +55,7 @@ beforeEach(() => {
 });
 
 describe("AUQ card vs the phone back button", () => {
-  it("with a focused text field, back blurs it AND collapses the card in the same press", () => {
+  it("with a focused text field, back blurs it AND collapses the card in the same press", async () => {
     const fallback = registerPaneFallback();
     const opts = baseOpts();
     renderQuestionUI(opts);
@@ -64,19 +68,19 @@ describe("AUQ card vs the phone back button", () => {
     handleBack();
 
     expect(document.activeElement).not.toBe(field);
-    expect(document.querySelector(".prompt-collapsed")).not.toBeNull();
+    await collapsed();
     expect(opts.onCancel).not.toHaveBeenCalled();
     expect(opts.onSubmit).not.toHaveBeenCalled();
     expect(fallback).not.toHaveBeenCalled();
   });
 
-  it("back collapses the card to its bar first, then a second press leaves the chat", () => {
+  it("back collapses the card to its bar first, then a second press leaves the chat", async () => {
     const fallback = registerPaneFallback();
     const opts = baseOpts();
     renderQuestionUI(opts);
 
     handleBack();
-    expect(document.querySelector(".prompt-collapsed")).not.toBeNull();
+    await collapsed();
     expect(document.querySelector(".prompt-card")).toBeNull();
     expect(fallback).not.toHaveBeenCalled();
 
@@ -88,14 +92,14 @@ describe("AUQ card vs the phone back button", () => {
 
   // The phone header lost its back arrow (Joe, 2026-10-26): minimize is the
   // one header control that collapses, on phone and desktop alike.
-  it("the header's minimize collapses the card without skipping", () => {
+  it("the header's minimize collapses the card without skipping", async () => {
     const opts = baseOpts();
     renderQuestionUI(opts);
     expect(document.querySelector('[data-act="back"]')).toBeNull();
 
     document.querySelector('[data-act="minimize"]').click();
 
-    expect(document.querySelector(".prompt-collapsed")).not.toBeNull();
+    await collapsed();
     expect(opts.onCancel).not.toHaveBeenCalled();
   });
 

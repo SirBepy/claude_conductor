@@ -169,22 +169,25 @@ describe("AUQ review step", () => {
 });
 
 describe("AUQ Skip on the minimized bar", () => {
-  it("is absent from the open card and skips only from the bar", () => {
+  it("is absent from the open card and skips only from the bar", async () => {
     const opts = baseOpts();
     renderQuestionUI(opts);
     expect(document.querySelector('[data-act="cancel"], [data-act="skip"], [data-act="back"]')).toBeNull();
 
     document.querySelector('[data-act="minimize"]').click();
+    // The card plays a short exit before the bar replaces it.
+    await vi.waitFor(() => expect(document.querySelector(".prompt-collapsed")).not.toBeNull());
     const skip = document.querySelector('.prompt-collapsed [data-act="cancel"]');
     expect(skip.textContent).toBe("Skip");
     skip.click();
     expect(opts.onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("restores from the bar without skipping", () => {
+  it("restores from the bar without skipping", async () => {
     const opts = baseOpts();
     renderQuestionUI(opts);
     document.querySelector('[data-act="minimize"]').click();
+    await vi.waitFor(() => expect(document.querySelector(".prompt-collapsed")).not.toBeNull());
     document.querySelector('.prompt-collapsed [data-act="restore"]').click();
     expect(document.querySelector(".prompt-card")).not.toBeNull();
     expect(opts.onCancel).not.toHaveBeenCalled();

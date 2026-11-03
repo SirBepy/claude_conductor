@@ -133,6 +133,17 @@ function answerFieldHtml(hookClass: string, placeholder: string, value: string, 
   });
 }
 
+// The thumbnail strip sits directly above the answer box it belongs to (Joe,
+// 2026-11-03: below the options it needed a scroll to see). Emitted even while
+// empty (`.composer-attachments:empty` hides it): the paste path patches this
+// node in place instead of re-rendering. Empty string when the card can't take
+// attachments at all.
+export function attachmentsStripHtml(panel: number, supportsExtras: boolean | undefined): string {
+  return supportsExtras
+    ? `<div class="prompt-attachments composer-attachments" data-attach-panel="${panel}"></div>`
+    : "";
+}
+
 // Rendered into the review panel's `.prompt-summary__note` slot (syncAnswerBar).
 export function extraMessageZoneHtml(additionalMessage: string, page = false): string {
   return answerFieldHtml("prompt-extra-input", "Anything else to add...", additionalMessage, page);
@@ -167,16 +178,10 @@ export function panelHtml(
        ${layout === "stage" ? stageHtml(q, qi, opts.sessionId) : ""}
        <div class="prompt-q__opts"${optsStyle}>${optsRowsHtml(q, qi, selections, noneLabel, layout, opts.sessionId, notes, editingLabel)}</div>`
     : "";
-  // Emitted even while empty (`.composer-attachments:empty` hides it) - the
-  // paste path patches this node in place instead of re-rendering.
-  const attachHtml = opts.supportsExtras
-    ? `<div class="prompt-attachments composer-attachments" data-attach-panel="${qi}"></div>`
-    : "";
   return `
     <section class="prompt-panel${isActive ? " is-active" : ""}${layout ? ` prompt-panel--preview-${layout}` : ""}" data-panel="${qi}" style="--dom:${domainVar(q.domain)}">
       ${questionZonesHtml(q)}
       ${pickSect}
-      ${attachHtml}
     </section>
   `;
 }
@@ -220,17 +225,12 @@ export function summaryPanelHtml(
     `;
   }).join("");
 
-  const attachmentsStripHtml = opts.supportsExtras
-    ? `<div class="prompt-attachments composer-attachments" data-attach-panel="${questions.length}"></div>`
-    : "";
-
   return `
     <section class="prompt-panel${isActive ? " is-active" : ""}" data-panel="${questions.length}" style="--dom:var(--color-primary)">
       <div class="prompt-summary" role="tabpanel">
         <div class="prompt-summary__intro">Review your answers before sending:</div>
         ${rows}
         ${opts.supportsExtras ? `<div class="prompt-summary__note"></div>` : ""}
-        ${attachmentsStripHtml}
       </div>
     </section>
   `;

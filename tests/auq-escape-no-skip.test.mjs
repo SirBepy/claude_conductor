@@ -87,13 +87,15 @@ describe("AUQ card Escape handling", () => {
     expect(opts.onCancel).not.toHaveBeenCalled();
   });
 
-  it("leaves the explicit Skip button as the one route to answering nothing", () => {
+  it("leaves the explicit Skip button as the one route to answering nothing", async () => {
     const opts = baseOpts();
     renderQuestionUI(opts);
 
     // Skip lives only on the minimized bar, two deliberate taps away.
     expect(document.querySelector('button[data-act="cancel"]')).toBeNull();
     document.querySelector('[data-act="minimize"]').click();
+    // The card plays a short exit before the bar replaces it.
+    await vi.waitFor(() => expect(document.querySelector(".prompt-collapsed")).not.toBeNull());
     const skipBtn = document.querySelector('.prompt-collapsed button[data-act="cancel"]');
     expect(skipBtn).toBeTruthy();
     expect(skipBtn.textContent.trim()).toBe("Skip");

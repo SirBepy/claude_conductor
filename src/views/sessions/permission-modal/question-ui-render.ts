@@ -73,6 +73,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
   let minimized = false;
   let firstRender = true;
+  let expanding = false;
   // Set by goToTab's review entry for the one render() that follows: that
   // rebuild replaces the track, so the slide has to start from the old panel.
   let slideFromTab: number | undefined;
@@ -125,7 +126,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   const syncAnswerBar = createAnswerBarSync({
     host, opts, questions, hasSummary, totalPanels, freeText, state, auqAttachments,
     slashPopup, answeredAt, notifyDraftChange, syncMessagesPadding, showPasteHint,
-    updatePrimaryButton,
+    updatePrimaryButton, paintAttachmentStrips,
   });
 
   const { isPicked, tickedNotes, wire: wireOptionNotes } = createOptionNotes({
@@ -293,7 +294,9 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       void linkifyTickets(host, opts.cwd ?? undefined);
 
       const card = host.querySelector<HTMLElement>(".prompt-card");
-      if (!firstRender) card?.classList.add("prompt-card--no-anim");
+      // A card coming back from the bar rises out of it instead of snapping in.
+      if (expanding) card?.classList.add("prompt-card--expanding");
+      else if (!firstRender) card?.classList.add("prompt-card--no-anim");
 
       // Flex's auto cross-size is the TALLEST sibling panel's height, so a
       // 2-option question next to a long one rendered as tall as the long
@@ -393,19 +396,52 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
   const refreshAttachments = (): void => { paintAttachmentStrips(); syncMessagesPadding(); };
 
+  // The card plays its exit before the bar replaces it. Must match
+  // prompt-card-out's duration in permission-modal-shell.css; the timer is only
+  // the fallback for an animationend that never fires (hidden tab, reduced motion).
+  const COLLAPSE_MS = 280;
+  let collapsing = false;
+
   function minimize(): boolean {
     // The phone's back press lands here: it leaves fullscreen first.
     if (fullscreen.isOpen()) { fullscreen.close(); return true; }
     if (minimized) return false;
-    minimized = true;
-    render();
+    // A second press mid-exit is still consumed, so back never falls through
+    // to leaving the chat while the card is on its way down.
+    if (collapsing) return true;
+    const card = host.querySelector<HTMLElement>(".prompt-card");
+    const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const collapse = (): void => {
+      minimized = true;
+      render();
+      host.querySelector(".prompt-collapsed")?.classList.add("prompt-collapsed--in");
+    };
+    if (!card || reduced) { collapse(); return true; }
+    collapsing = true;
+    card.classList.add("prompt-card--leaving");
+    const finish = (): void => {
+      if (!collapsing) return;
+      collapsing = false;
+      // The card may have been answered or swapped out during the exit.
+      if (host.isConnected) collapse();
+    };
+    card.addEventListener("animationend", (e) => { if (e.target === card) finish(); });
+    window.setTimeout(finish, COLLAPSE_MS + 80);
     return true;
   }
 
   function expand(): boolean {
+    if (collapsing) {
+      // Re-opened mid-exit: stop the exit instead of finishing it.
+      collapsing = false;
+      host.querySelector(".prompt-card--leaving")?.classList.remove("prompt-card--leaving");
+      return true;
+    }
     if (!minimized) return false;
     minimized = false;
+    expanding = true;
     render();
+    expanding = false;
     return true;
   }
 

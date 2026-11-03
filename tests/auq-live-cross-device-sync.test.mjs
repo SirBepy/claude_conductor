@@ -181,6 +181,8 @@ describe("live poll stops when the card closes", () => {
     expect(callsWhileOpen).toBeGreaterThan(0);
 
     document.querySelector('[data-act="minimize"]').click();
+    // The card plays a short exit before the bar replaces it.
+    await vi.advanceTimersByTimeAsync(400);
     document.querySelector('.prompt-collapsed [data-act="cancel"]').click();
     await vi.advanceTimersByTimeAsync(5000);
 

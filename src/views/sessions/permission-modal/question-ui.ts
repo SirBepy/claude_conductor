@@ -104,6 +104,11 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     panelResizeObs: null,
   };
 
+  // The one answer box on screen: the footer's per-question field, or the
+  // review panel's note field.
+  const answerField = (): HTMLTextAreaElement | null =>
+    host.querySelector<HTMLTextAreaElement>(".prompt-q__other-input, .prompt-extra-input");
+
   // Review-step extra message + pasted-image attachments. Only ever populated
   // when opts.supportsExtras (the async MCP flow) - see QuestionUIOpts doc.
   const auqAttachments = createAuqAttachments({
@@ -112,6 +117,18 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     initial: initialDraft?.attachments,
     initialUploads: initialDraft ? draftUploads.get(initialDraft) : undefined,
     currentPanel: () => state.activeTab,
+    captionBridge: {
+      getDraftText: () => answerField()?.value ?? "",
+      setDraftText: (text) => {
+        const field = answerField();
+        if (!field || field.value === text) return;
+        field.value = text;
+        // The card's own input handlers (freeText, answered dot, draft) key off "input".
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      },
+      getCwd: () => opts.cwd ?? null,
+      send: () => host.querySelector<HTMLButtonElement>('[data-act="primary"]')?.click(),
+    },
     // A full render() would recreate the answer-bar textarea and drop focus/
     // cursor - exactly the class of bug mergeFreshDraft's isTyping guard
     // avoids below. A paste is typed FROM that same field, so patch just the

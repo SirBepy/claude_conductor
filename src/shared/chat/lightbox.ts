@@ -96,9 +96,13 @@ function setVoiceBadge(recording: boolean): void {
   }
 }
 
-export function openLightbox(content: LightboxContent): void {
+/** `bridge` picks whose draft the caption box edits: omitted = the main chat
+ *  composer, `null` = no caption box, an object = that owner (the question card
+ *  passes its own answer field, so a caption typed on its image never lands in
+ *  the chat input hidden behind the card). */
+export function openLightbox(content: LightboxContent, bridge?: LightboxComposerBridge | null): void {
   closeLightbox(); // clears openBridge, so capture below must follow it
-  openBridge = composerBridge;
+  openBridge = bridge === undefined ? composerBridge : bridge;
 
   overlay = document.createElement("div");
   overlay.className = LIGHTBOX_OVERLAY_CLASS;
