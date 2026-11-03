@@ -156,8 +156,11 @@ pub fn mark_entries(
 ) {
     for e in entries.iter_mut() {
         let Some(key) = e.scope_key.as_deref() else { continue };
-        if scopes.contains_key(key) {
-            e.off_here = !enabled_in(scopes, key, project);
+        if let Some(scope) = scopes.get(key) {
+            // A name-only skill outside its projects is still usable by name, so
+            // only Off (and a plugin, which has no name-only level) reads as off.
+            let usable_by_name = !is_plugin_key(key) && scope.elsewhere == Elsewhere::NameOnly;
+            e.off_here = !enabled_in(scopes, key, project) && !usable_by_name;
         } else if is_plugin(&e.source) && user_plugins.get(key) == Some(&Value::Bool(false)) {
             e.menu_hidden = true;
         }
@@ -282,6 +285,21 @@ mod tests {
         }
         mark_entries(&mut entries, &sc, Some("p1"), &user);
         assert!(entries.iter().take(3).all(|e| !e.off_here && !e.menu_hidden));
+    }
+
+    #[test]
+    fn a_name_only_skill_outside_its_projects_is_not_marked_off() {
+        let sc = scopes(&settings_with(json!({
+            "name-only-skill": { "projects": ["p1"], "elsewhere": "name-only" },
+            "off-skill": { "projects": ["p1"] }
+        })));
+        let mut entries = vec![
+            entry("name-only-skill", SlashSource::UserSkill, Some("name-only-skill")),
+            entry("off-skill", SlashSource::UserSkill, Some("off-skill")),
+        ];
+        mark_entries(&mut entries, &sc, Some("p2"), &Map::new());
+        let off: Vec<bool> = entries.iter().map(|e| e.off_here).collect();
+        assert_eq!(off, vec![false, true]);
     }
 
     #[test]
