@@ -300,6 +300,67 @@ test("Escape inside a settings text field blurs it and keeps the popup open; the
   await expect(popup(page)).toHaveCount(0);
 });
 
+// The input lock swallows every key whose target is outside the popup, and with focus on
+// <body> that is every key, Tab included. So the popup must never leave focus resting there.
+const focusInPopupControl = (page: Page) =>
+  page.evaluate(() => {
+    const a = document.activeElement;
+    const card = document.querySelector(".settings-popup");
+    return !!a && !!card && a !== card && card.contains(a);
+  });
+
+test("Escape in a settings text field leaves focus on the popup, so Tab and Shift+Tab still reach its controls", async ({ page }) => {
+  await mountChats(page);
+  await openFromRail(page);
+  await popup(page).evaluate((el) => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = "probe-field";
+    el.appendChild(input);
+  });
+  await page.locator("#probe-field").focus();
+
+  await page.keyboard.press("Escape");
+  await expect(popup(page)).toBeVisible();
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
+
+  await page.keyboard.press("Tab");
+  expect(await focusInPopupControl(page)).toBe(true);
+  await popup(page).evaluate((el) => el.focus());
+  await page.keyboard.press("Shift+Tab");
+  expect(await focusInPopupControl(page)).toBe(true);
+});
+
+test("opening a settings page from the keyboard keeps focus in the popup, so Tab still reaches its controls", async ({ page }) => {
+  await mountChats(page);
+  await openFromRail(page);
+  await popup(page).locator(".kit-nav-row", { hasText: "Appearance" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(popup(page).locator(".view-settings-appearance")).toHaveCount(1);
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
+
+  await page.keyboard.press("Tab");
+  expect(await focusInPopupControl(page)).toBe(true);
+});
+
+test("a settings page that re-renders and drops the focused control keeps focus in the popup", async ({ page }) => {
+  await mountChats(page);
+  await openFromRail(page);
+  await popup(page).evaluate((el) => {
+    const btn = document.createElement("button");
+    btn.id = "probe-btn";
+    btn.textContent = "probe";
+    el.appendChild(btn);
+  });
+  await page.locator("#probe-btn").focus();
+  await popup(page).evaluate(() => document.getElementById("probe-btn")!.remove());
+  await page.waitForTimeout(50);
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
+
+  await page.keyboard.press("Tab");
+  expect(await focusInPopupControl(page)).toBe(true);
+});
+
 // The popup's input lock must not swallow input meant for what the popup itself opens.
 test("typing works in the edit account modal opened from the popup, and Escape closes that modal first", async ({ page }) => {
   await mountChats(page);
