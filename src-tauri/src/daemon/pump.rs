@@ -285,7 +285,15 @@ pub(crate) async fn run_stdout_pump(
                                     }
                                 }
                                 turn_text.clear();
-                                let live_turn = turn.on_result_line() == TurnAction::TurnEnded;
+                                // Taken on EVERY result line so a stale flag never
+                                // outlives the turn it was sent for.
+                                let interrupted = pump_session.take_interrupt_sent();
+                                let action = if interrupted {
+                                    turn.on_interrupted_result_line()
+                                } else {
+                                    turn.on_result_line()
+                                };
+                                let live_turn = action == TurnAction::TurnEnded;
                                 // Keeps `pump_turn_gen`: a replayed result line must
                                 // not strand the live turn it sits inside without one.
                                 pump_turn_gen_captured = false;
@@ -408,7 +416,7 @@ pub(crate) async fn run_stdout_pump(
                                     }
                                 }
                                 log::info!(
-                                    "daemon: session {} turn end: pump_turn_gen={pump_turn_gen} registry_turn_gen={}",
+                                    "daemon: session {} turn end: pump_turn_gen={pump_turn_gen} registry_turn_gen={} action={action:?} interrupted={interrupted}",
                                     pump_session.session_id,
                                     state_for_pump.registry.current_turn_gen(&pump_session.session_id)
                                 );

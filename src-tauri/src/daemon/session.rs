@@ -129,9 +129,24 @@ pub struct Session {
     /// A running process's argv can't change, so a mid-chat flip reaches the
     /// model only as a note appended to the next message.
     pub wrap_up_told: std::sync::atomic::AtomicBool,
+    /// Set when `cancel_turn` wrote an interrupt, consumed by the pump at the
+    /// next `result` line. A `--resume` child whose turn is interrupted before
+    /// its first `stream_event` answers with an eventless `result`, which the
+    /// pump's replay window cannot tell from a replayed history line; this is
+    /// the one fact that does.
+    interrupt_sent: std::sync::atomic::AtomicBool,
 }
 
 impl Session {
+    pub fn note_interrupt_sent(&self) {
+        self.interrupt_sent.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// True once per interrupt: the pump asks at every `result` line.
+    pub fn take_interrupt_sent(&self) -> bool {
+        self.interrupt_sent.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+
     pub fn new(
         session_id: String,
         cwd: PathBuf,
@@ -162,6 +177,7 @@ impl Session {
             stderr_drain: tokio::sync::Mutex::new(None),
             expected_exit: std::sync::atomic::AtomicBool::new(false),
             wrap_up_told: std::sync::atomic::AtomicBool::new(false),
+            interrupt_sent: std::sync::atomic::AtomicBool::new(false),
         })
     }
 }
