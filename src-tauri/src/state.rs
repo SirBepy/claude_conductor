@@ -79,6 +79,10 @@ pub struct AppState {
     /// when the window boots. Value is `dashboard`, `settings-accounts`, or
     /// `account:<id>`.
     pub pending_main_nav: Mutex<Option<String>>,
+    /// True once the Chats window has mounted its `navigate-to-*` listeners
+    /// (set by `take_pending_nav`), so `surface_chats_with_nav` may emit to it
+    /// instead of stashing. Reset when the window is rebuilt.
+    pub chats_nav_ready: AtomicBool,
     /// True while the meeting watcher detects an active meeting (camera/mic in
     /// use, or an allowlisted meeting app producing audio). Read by
     /// `notifications::rules::fire` and the tray tooltip. Always false on
@@ -154,6 +158,7 @@ impl AppState {
             pending_chat_open: Mutex::new(None),
             pending_new_chat: Mutex::new(None),
             pending_main_nav: Mutex::new(None),
+            chats_nav_ready: AtomicBool::new(false),
             meeting_active: Arc::new(AtomicBool::new(false)),
             input_needed: Arc::new(AtomicBool::new(false)),
             known_awaiting_sessions: Arc::new(Mutex::new(None)),
