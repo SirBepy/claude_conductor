@@ -109,3 +109,4 @@ test.describe("view-harness / pr_preview tool call shows a visible card", () => 
     await expect(card).toBeVisible();
   });
 });
+// Reviewed 2026-11-04 (message cards: a send_message with a declared kind draws as a card and a kindless one is the same bubble as before; this spec's contract is unaffected, and it passed after the change).

@@ -25,6 +25,8 @@ export interface PaginatorCallbacks {
   setMessageEls(els: HTMLElement[]): void;
   buildMessageEl(m: RenderedMessage): HTMLElement;
   clampUserMessages(): void;
+  /** Re-derive which message cards are old after rows were prepended. */
+  sweepCards(): void;
   /** Called after a prepend with the number of rows inserted at the front. */
   onShift(n: number): void;
   /**
@@ -546,6 +548,7 @@ export class ChatPaginator {
     linkifyFilePaths(this.container);
     linkifyDrillRefs(this.container);
     this.cb.clampUserMessages();
+    this.cb.sweepCards();
   }
 
   findScroller(): HTMLElement | null {

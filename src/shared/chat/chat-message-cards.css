@@ -1,0 +1,443 @@
+/* Message cards (chat-message-card.ts): a send_message that declared a kind.
+ * Each card is one box holding two forms: the full card (.mc-full) and a one-line
+ * mini card (.mc-mini). `.is-old`, toggled by chat-card-turns.ts once a later
+ * turn has spoken, swaps them by animating grid-template-rows 1fr <-> 0fr, so
+ * the same box quietly gets smaller instead of being replaced.
+ *
+ * Colours come only from theme variables so every theme and mode works. */
+
+.msg.assistant.mc-root {
+  /* The root is a transparent wrapper (the struck "was" line sits above the
+     box, outside it); the .mc-card inside is the box. A card spans the chat
+     column, unlike a bubble that hugs its text. */
+  align-self: stretch;
+  width: auto;
+  max-width: none;
+  margin-right: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.mc-card {
+  --mc-tone: var(--color-text-muted);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  /* Lets the verdict size and the row layout answer to the card's own width
+     (a phone, or a narrow pane), not the window's. */
+  container-type: inline-size;
+  transition: background 0.35s ease, border-color 0.35s ease;
+}
+
+/* Tint is spent only on what needs Joe and on answers, so the eye lands there first. */
+.mc-k-answer {
+  --mc-tone: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-primary) 32%, var(--color-border));
+}
+.mc-k-blocker {
+  --mc-tone: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 11%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-border));
+}
+.mc-k-do_this,
+.mc-k-plan {
+  --mc-tone: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 9%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-warning) 45%, var(--color-border));
+}
+.mc-k-correction {
+  --mc-tone: var(--color-warning);
+}
+.mc-fyi .mc-card {
+  background: transparent;
+}
+/* An old card keeps its box and an answer keeps its tint; the demanding kinds
+   lose theirs, since what they demanded has been overtaken. */
+.mc-root.is-old .mc-k-blocker,
+.mc-root.is-old .mc-k-do_this,
+.mc-root.is-old .mc-k-plan {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+.mc-root.is-old.mc-fyi .mc-card {
+  background: transparent;
+}
+.mc-root.is-old .msg-copy-btn {
+  display: none;
+}
+
+/* The two forms and the swap between them. */
+.mc-fold {
+  display: grid;
+  transition: grid-template-rows 0.35s ease, opacity 0.35s ease, visibility 0s linear 0s;
+}
+.mc-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+.mc-full {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.mc-full .mc-pad {
+  padding: 12px 14px;
+}
+.mc-fyi .mc-full .mc-pad {
+  padding: 9px 13px;
+}
+.mc-mini {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  /* Hidden, not just collapsed: a closed form must not be tabbable or readable. */
+  visibility: hidden;
+}
+.mc-mini .mc-pad {
+  padding: 6px 12px;
+}
+.mc-root.is-old .mc-full {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  /* Visibility flips only once the fade is over, or the text would vanish early. */
+  transition: grid-template-rows 0.35s ease, opacity 0.35s ease, visibility 0s linear 0.35s;
+}
+.mc-root.is-old .mc-mini {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+}
+/* A card that was never seen at full size (a chat just opened, an older page)
+   is old from its first frame, with no shrink to play. */
+.mc-root.mc-still .mc-fold,
+.mc-root.mc-still .mc-card {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mc-fold,
+  .mc-card {
+    transition: none;
+  }
+  .mc-root.is-old .mc-full {
+    transition: none;
+  }
+}
+
+/* Full card. */
+.mc-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mc-tone);
+}
+.mc-label .ph {
+  font-size: 0.85rem;
+}
+.mc-verdict {
+  --mc-w: 1.5rem;
+  margin: 0;
+  font-size: var(--mc-w);
+  font-family: var(--font-heading, inherit);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+}
+.mc-fyi .mc-verdict {
+  --mc-w: 0.95rem;
+  letter-spacing: -0.01em;
+}
+@container (max-width: 480px) {
+  .mc-root:not(.mc-fyi) .mc-verdict {
+    --mc-w: 1.35rem;
+  }
+}
+.mc-t-good {
+  color: var(--color-success);
+}
+.mc-t-bad {
+  color: var(--color-danger);
+}
+.mc-t-warn {
+  color: var(--color-warning);
+}
+.mc-t-neutral {
+  color: var(--color-text);
+}
+.mc-t-muted {
+  color: var(--color-text-muted);
+}
+.mc-head {
+  margin: 6px 0 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.38;
+  overflow-wrap: anywhere;
+}
+.mc-verdict + .mc-head {
+  margin-top: 6px;
+}
+.mc-label + .mc-head {
+  margin-top: 0;
+}
+.mc-fyi .mc-head {
+  margin-top: 2px;
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+.mc-fyi .mc-head--main {
+  font-size: 0.86rem;
+  color: var(--color-text);
+}
+.mc-body {
+  margin: 5px 0 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+.mc-card .copyable-block {
+  margin: 8px 0 0;
+}
+
+/* Rows and their sections. */
+.mc-secs {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 9px;
+}
+.mc-sec {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  gap: 8px;
+  padding: 7px 11px;
+  border-radius: 8px;
+}
+@container (max-width: 480px) {
+  .mc-sec {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+.mc-sec-label {
+  padding-top: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.mc-sec--yours,
+.mc-sec--not {
+  background: color-mix(in srgb, var(--color-warning) 12%, var(--color-surface-alt));
+}
+.mc-sec--yours .mc-sec-label,
+.mc-sec--not .mc-sec-label {
+  color: var(--color-warning);
+}
+.mc-sec--wait {
+  background: color-mix(in srgb, var(--color-secondary) 11%, var(--color-surface-alt));
+}
+.mc-sec--wait .mc-sec-label {
+  color: var(--color-secondary);
+}
+.mc-sec--done {
+  padding-top: 2px;
+  padding-bottom: 0;
+}
+.mc-sec-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.mc-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 2px 0;
+  font-size: 0.86rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+.mc-row > .ph {
+  flex: none;
+  margin-top: 3px;
+  font-size: 0.95rem;
+}
+.mc-row-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mc-row--yours > .ph,
+.mc-row--not > .ph {
+  color: var(--color-warning);
+}
+.mc-row--wait > .ph {
+  color: var(--color-secondary);
+}
+.mc-row--done {
+  color: var(--color-text-muted);
+}
+.mc-row--done > .ph {
+  color: var(--color-success);
+}
+
+/* The closed report: chips of icon and number, no words. */
+.mc-more,
+.mc-points {
+  margin-top: 8px;
+}
+.mc-more > summary,
+.mc-points > summary,
+.mc-mini-d > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.mc-more > summary::-webkit-details-marker,
+.mc-points > summary::-webkit-details-marker,
+.mc-mini-d > summary::-webkit-details-marker {
+  display: none;
+}
+.mc-more > summary:focus-visible,
+.mc-points > summary:focus-visible,
+.mc-mini-d > summary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.mc-chips,
+.mc-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 12px;
+  width: fit-content;
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
+}
+.mc-chips:hover,
+.mc-toggle:hover {
+  color: var(--color-text);
+}
+.mc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mc-chip .ph {
+  font-size: 0.85rem;
+}
+.mc-chip--done .ph {
+  color: var(--color-success);
+}
+.mc-chip--not .ph {
+  color: var(--color-warning);
+}
+.mc-chip--wait .ph {
+  color: var(--color-secondary);
+}
+.mc-caret {
+  font-size: 0.65rem;
+  transition: transform 0.18s;
+}
+.mc-more[open] > summary .mc-caret,
+.mc-points[open] > summary .mc-caret,
+.mc-mini-d[open] > summary .mc-caret {
+  transform: rotate(180deg);
+}
+.mc-drills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 14px;
+  margin-top: 9px;
+  font-size: 0.82rem;
+}
+.mc-points-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.mc-points-list li {
+  overflow-wrap: anywhere;
+}
+
+/* A correction names the claim it replaces, struck through, above its card. */
+.mc-was {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px 4px;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+/* Mini card. */
+.mc-mini-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+.mc-mini-lead {
+  flex: none;
+  font-weight: 700;
+}
+.mc-mini-lead:empty {
+  display: none;
+}
+.mc-mini-head {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+/* Open, the headline wraps in full: nothing in a mini card is unreadable. */
+.mc-mini-d[open] .mc-mini-head {
+  white-space: normal;
+}
+.mc-mini-open {
+  flex: none;
+  font-style: normal;
+  font-size: 0.76rem;
+  color: var(--color-warning);
+}
+.mc-mini-row .mc-caret {
+  flex: none;
+  align-self: center;
+  color: var(--color-text-muted);
+}
+.mc-mini-body {
+  padding: 4px 0 4px;
+}
+@container (max-width: 480px) {
+  /* The amber note drops under the headline instead of squeezing it to nothing. */
+  .mc-mini-row {
+    flex-wrap: wrap;
+  }
+  .mc-mini-head {
+    flex-basis: 40%;
+  }
+  .mc-mini-open {
+    order: 3;
+    flex-basis: 100%;
+  }
+}
