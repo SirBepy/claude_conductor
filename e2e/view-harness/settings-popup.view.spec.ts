@@ -219,6 +219,44 @@ test("Escape on the popup does not close Code mode under it", async ({ page }) =
   await expect(popup(page)).toHaveCount(0);
 });
 
+// The rail's buttons sit in the document behind the dimmed chat, so a Tab that walks off
+// the popup's last control would land on them.
+test("Tab and Shift+Tab cycle inside the popup and never reach the rail behind it", async ({ page }) => {
+  await mountChats(page);
+  await openFromRail(page);
+  const inPopup = () => page.evaluate(() => !!document.activeElement?.closest(".settings-popup"));
+  const focusables = await popup(page).locator("button, input, select, textarea, a[href], [tabindex]:not([tabindex='-1'])").count();
+
+  for (let i = 0; i < focusables + 4; i++) {
+    await page.keyboard.press("Tab");
+    expect(await inPopup(), `Tab #${i + 1} left the popup`).toBe(true);
+  }
+  for (let i = 0; i < focusables + 4; i++) {
+    await page.keyboard.press("Shift+Tab");
+    expect(await inPopup(), `Shift+Tab #${i + 1} left the popup`).toBe(true);
+  }
+
+  // From the card itself (where open() leaves focus) Shift+Tab wraps to the last control.
+  await popup(page).evaluate((el) => el.focus());
+  await page.keyboard.press("Shift+Tab");
+  expect(await inPopup()).toBe(true);
+});
+
+test("Tab inside an Add account wizard opened from the popup is left to the wizard", async ({ page }) => {
+  await mountChats(page);
+  await openFromRail(page);
+  await page.evaluate(async () => (await import("/shared/navigation.ts")).showView("settings-accounts"));
+  await popup(page).locator("#acc-add-btn").click();
+  await page.locator('.aac-kind-choice[data-kind="subscription"]').click();
+  await expectOnTop(page, ".aaw-overlay .wizard");
+  await page.locator(".aaw-overlay .wizard").evaluate((el) => {
+    const first = el.querySelector<HTMLElement>("button, input, select, textarea");
+    first?.focus();
+  });
+  await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => !!document.activeElement?.closest(".aaw-overlay"))).toBe(true);
+});
+
 /** What a click at the centre of `selector` would land on is inside it, so the
  *  popup's backdrop is not covering it. */
 async function expectOnTop(page: Page, selector: string): Promise<void> {
