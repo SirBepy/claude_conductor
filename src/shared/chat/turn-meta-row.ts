@@ -34,21 +34,16 @@ export function buildMetaRow(st: TurnFooterState): void {
   const row = document.createElement("div");
   row.className = "turn-meta-chips";
 
-  // Tokens first, time second (the user-specified order).
+  // Tokens first, time second (the user-specified order). Plain text, not
+  // pills: chat-turn-footer.css right-aligns them and shows them on hover.
   const tokenChip = document.createElement("span");
   tokenChip.className = "turn-chip turn-chip--tokens";
-  const tokenIcon = document.createElement("i");
-  tokenIcon.className = "ph ph-arrow-up";
   const tokenTextNode = document.createTextNode("~0 tok");
-  tokenChip.appendChild(tokenIcon);
   tokenChip.appendChild(tokenTextNode);
 
   const timeChip = document.createElement("span");
   timeChip.className = "turn-chip turn-chip--time";
-  const timeIcon = document.createElement("i");
-  timeIcon.className = "ph ph-timer";
   const timeTextNode = document.createTextNode("0s");
-  timeChip.appendChild(timeIcon);
   timeChip.appendChild(timeTextNode);
 
   row.appendChild(tokenChip);
@@ -78,6 +73,9 @@ export function ensureLiveMetaRow(
   if (st.settled) return;
   if (st.metaRow) return;
   buildMetaRow(st);
+  // A running turn keeps its ticking numbers visible; they only hide behind
+  // hover once the turn settles.
+  st.metaRow!.classList.add("turn-meta-chips--live");
   st.turnStartMs = turnStartMs;
   st.timeTextNode!.nodeValue = formatTurnDuration(Date.now() - turnStartMs);
   st.tickTimer = visibleInterval(() => {
@@ -125,6 +123,7 @@ export function updateLiveTokenEstimate(st: TurnFooterState, text: string): void
  */
 export function settleMetaRow(st: TurnFooterState, totals: TurnUsageTotals): void {
   buildMetaRow(st);
+  st.metaRow!.classList.remove("turn-meta-chips--live");
   st.settled = true;
   st.lastTotals = totals;
   if (st.tickTimer !== null) {
@@ -154,6 +153,7 @@ export function settleMetaRow(st: TurnFooterState, totals: TurnUsageTotals): voi
  */
 export function cancelMetaRow(st: TurnFooterState): void {
   if (st.settled || !st.metaRow) return;
+  st.metaRow.classList.remove("turn-meta-chips--live");
   st.settled = true;
   if (st.tickTimer !== null) {
     st.tickTimer();

@@ -1,10 +1,10 @@
 /* Per-turn footer: meta chips, progress bar, TodoWrite checklist. Split out
  * of chat-tools.css. */
 
-/* ── Per-turn footer: meta row (tokens + time) above the tool chip strip ── */
+/* ── Per-turn footer: one chip line, tokens + time trailing it on the right ── */
 
 /* One wrapping line of chips, no card chrome (user explicitly does not want a
-   box): tokens, time and every tool chip flow together and wrap as one band.
+   box): the tool chips and the meta row (tokens, time) flow together and wrap as one band.
    Full-width members (accordion, screenshots, progress, checklist) break the
    line below it via flex-basis:100%. */
 .turn-footer {
@@ -22,6 +22,10 @@
 .turn-footer > .agent-rail {
   flex-basis: 100%;
   width: 100%;
+  /* Below the meta row (order 1), so the row's tokens/time stay on the chip
+     line instead of dropping under the accordion. DOM order among these is
+     unchanged: they all share the same order value. */
+  order: 2;
 }
 
 /* A turn with no usage and no tools leaves its footer empty - hide the box. */
@@ -66,10 +70,53 @@
   100% { transform: translateX(400%); }
 }
 
+/* Meta row sits at the right end of the chip line (it is the footer's first
+   child in the DOM, so order moves it after the tool strip). */
 .turn-meta-chips {
   display: flex;
   align-items: center;
   gap: 5px;
+  order: 1;
+  margin-left: auto;
+}
+
+/* Tokens and time are plain muted text, not pills, and stay invisible until
+   the turn's bubble or the footer is hovered. Opacity (not display) so the
+   row never reflows when they appear. The hide has a short delay so moving
+   the pointer from the bubble down to the footer does not flicker. The
+   status chip in the same row keeps its normal look and stays visible. */
+.turn-meta-chips > .turn-chip--tokens,
+.turn-meta-chips > .turn-chip--time {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transition: opacity 0.12s 0.15s;
+}
+
+.turn-meta-chips > .turn-chip--tokens + .turn-chip--time::before {
+  content: "\00b7";
+  margin-right: 4px;
+}
+
+.turn-footer:hover > .turn-meta-chips > .turn-chip--tokens,
+.turn-footer:hover > .turn-meta-chips > .turn-chip--time,
+.turn-footer--hot > .turn-meta-chips > .turn-chip--tokens,
+.turn-footer--hot > .turn-meta-chips > .turn-chip--time,
+.turn-meta-chips--live > .turn-chip--tokens,
+.turn-meta-chips--live > .turn-chip--time {
+  opacity: 1;
+  transition-delay: 0s;
+}
+
+/* No hover on touch screens, so the numbers would be unreachable. */
+@media (hover: none) {
+  .turn-meta-chips > .turn-chip--tokens,
+  .turn-meta-chips > .turn-chip--time {
+    opacity: 1;
+  }
 }
 
 .turn-chip {
