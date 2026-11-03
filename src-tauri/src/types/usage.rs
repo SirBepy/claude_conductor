@@ -6,6 +6,12 @@ use serde::{Deserialize, Serialize};
 pub struct UsageSnapshot {
     pub captured_at: String,           // RFC3339 / ISO8601
     pub five_hour: WindowUsage,
+    /// False when the plan has no 5h limit at all (the usage API sends no
+    /// `session` entry in `limits` and a null `five_hour`), as opposed to a
+    /// 5h limit whose window simply is not running (`five_hour` idle at 0%).
+    /// Rows saved before this field existed read as limited.
+    #[serde(default = "default_true")]
+    pub five_hour_limited: bool,
     pub seven_day: WindowUsage,
     #[serde(default)]
     pub extra_usage: Option<ExtraUsage>,
@@ -16,6 +22,10 @@ pub struct UsageSnapshot {
     /// `docs/multi-account/03-per-account-usage.md`).
     #[serde(default)]
     pub account_id: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
@@ -70,6 +80,17 @@ mod tests {
         let parsed: UsageSnapshot = serde_json::from_str(raw).unwrap();
         assert_eq!(parsed.five_hour.utilization, 7.0);
         assert_eq!(parsed.extra_usage.as_ref().unwrap().monthly_limit, Some(8500.0));
+    }
+
+    #[test]
+    fn a_snapshot_saved_before_five_hour_limited_existed_reads_as_limited() {
+        let raw = r#"{
+            "captured_at": "2026-04-19T10:00:00Z",
+            "five_hour": { "utilization": 7.0, "resets_at": "2026-04-19T15:00:00Z" },
+            "seven_day": { "utilization": 4.0, "resets_at": "2026-04-23T23:00:00Z" }
+        }"#;
+        let parsed: UsageSnapshot = serde_json::from_str(raw).unwrap();
+        assert!(parsed.five_hour_limited);
     }
 
     #[test]

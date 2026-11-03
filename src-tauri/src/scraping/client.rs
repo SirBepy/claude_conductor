@@ -196,6 +196,26 @@ struct RawUsage {
     seven_day: Option<crate::types::WindowUsage>,
     #[serde(default)]
     extra_usage: Option<crate::types::ExtraUsage>,
+    /// Per-limit list the plan actually enforces (`kind` is "session" for the
+    /// 5h window, "weekly_all", ...). Absent on older response shapes.
+    #[serde(default)]
+    limits: Option<Vec<RawLimit>>,
+}
+
+#[derive(Deserialize)]
+struct RawLimit {
+    #[serde(default)]
+    kind: String,
+}
+
+/// Whether the plan enforces a 5h limit. A plan without one answers
+/// `"five_hour": null` AND leaves `session` out of `limits` (read live
+/// 2026-11-03 on a plan after Anthropic dropped the 5h window); an idle plan
+/// that still has one lists `session` with `is_active: false`. A response
+/// with no `limits` list at all counts as limited, so an unfamiliar shape
+/// never hides a ring.
+fn has_five_hour_limit(five_hour: &Option<crate::types::WindowUsage>, limits: &Option<Vec<RawLimit>>) -> bool {
+    five_hour.is_some() || limits.as_ref().map_or(true, |l| l.iter().any(|x| x.kind == "session"))
 }
 
 fn idle_window() -> crate::types::WindowUsage {
@@ -254,9 +274,11 @@ pub async fn fetch_usage_for_org(base_url: &str, session_key: &str, org_uuid: Op
     let raw: RawUsage = usage_resp.json().await
         .context("parsing usage").map_err(ScrapeError::Other)?;
 
+    let five_hour_limited = has_five_hour_limit(&raw.five_hour, &raw.limits);
     Ok(UsageSnapshot {
         captured_at: chrono::Utc::now().to_rfc3339(),
         five_hour: raw.five_hour.unwrap_or_else(idle_window),
+        five_hour_limited,
         seven_day: raw.seven_day.unwrap_or_else(idle_window),
         extra_usage: raw.extra_usage,
         // The caller (scheduler) stamps `account_id` once it knows which
@@ -316,6 +338,54 @@ mod tests {
         assert_eq!(snap.five_hour.utilization, 0.0);
         assert_eq!(snap.five_hour.resets_at, "");
         assert_eq!(snap.seven_day.utilization, 94.0);
+    }
+
+    async fn snapshot_for(body: &str) -> UsageSnapshot {
+        let mut server = mockito::Server::new_async().await;
+        let _m1 = server.mock("GET", "/api/organizations")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"[{"uuid":"ORG-1"}]"#)
+            .create_async().await;
+        let _m2 = server.mock("GET", "/api/organizations/ORG-1/usage")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body)
+            .create_async().await;
+        fetch_usage(&server.url(), "sk-abc").await.unwrap()
+    }
+
+    /// Shapes read live 2026-11-03: a plan with no 5h limit has a null
+    /// `five_hour` and no `session` kind; an idle plan that has one lists it
+    /// inactive and still sends a zeroed `five_hour`.
+    #[tokio::test]
+    async fn a_plan_without_a_session_limit_is_not_five_hour_limited() {
+        let snap = snapshot_for(r#"{
+            "five_hour": null,
+            "seven_day": {"utilization": 36.0, "resets_at": "y"},
+            "limits": [{"kind": "weekly_all", "percent": 36, "is_active": true}]
+        }"#).await;
+        assert!(!snap.five_hour_limited);
+    }
+
+    #[tokio::test]
+    async fn an_idle_session_limit_is_still_five_hour_limited() {
+        let snap = snapshot_for(r#"{
+            "five_hour": {"utilization": 0.0, "resets_at": null},
+            "seven_day": {"utilization": 8.0, "resets_at": "y"},
+            "limits": [{"kind": "session", "percent": 0, "is_active": false},
+                       {"kind": "weekly_all", "percent": 8, "is_active": true}]
+        }"#).await;
+        assert!(snap.five_hour_limited);
+    }
+
+    #[tokio::test]
+    async fn a_null_five_hour_with_no_limits_list_counts_as_limited() {
+        let snap = snapshot_for(r#"{
+            "five_hour": null,
+            "seven_day": {"utilization": 36.0, "resets_at": "y"}
+        }"#).await;
+        assert!(snap.five_hour_limited);
     }
 
     /// Live, read-only: polls usage for the chat org of the stored web session

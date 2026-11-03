@@ -420,6 +420,7 @@ mod tests {
         UsageSnapshot {
             captured_at: "2026-07-07T10:00:00Z".into(),
             five_hour: WindowUsage { utilization: 10.0, resets_at: "x".into() },
+            five_hour_limited: true,
             seven_day: WindowUsage { utilization: 5.0, resets_at: "y".into() },
             extra_usage: None,
             account_id: Some(account_id.to_string()),

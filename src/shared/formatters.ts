@@ -166,6 +166,16 @@ export interface ValueColorSettings extends PaceColorSettings {
 }
 
 /**
+ * A window's percent for display, `null` (drawn as a dash) while the window
+ * is not running: the usage API reports an idle 5h window as 0% with no
+ * reset time, and a real running window always carries one. A non-zero
+ * percent is kept even without a reset time, since that is real usage.
+ */
+export function windowPctOrNull(pct: number | null, resetIso: string | null | undefined): number | null {
+  return pct === 0 && !resetIso ? null : pct;
+}
+
+/**
  * Safe-pace percent for a usage window: how far through the window "now" is,
  * i.e. the even-burn line a usage percent is compared against. `null` when
  * there's no reset timestamp to anchor the window (matches the pre-existing

@@ -20,6 +20,8 @@ export interface ExtraUsage {
 export interface UsageSnapshot {
   captured_at: string;
   five_hour: UsageWindow;
+  /** False when the plan has no 5h limit at all; absent on rows saved earlier. */
+  five_hour_limited?: boolean;
   seven_day: UsageWindow;
   extra_usage?: ExtraUsage | null;
   account_id?: string | null;
@@ -32,6 +34,8 @@ export interface UsageRecord {
   weekly_pct: number | null;
   session_resets_at: string | null;
   weekly_resets_at: string | null;
+  /** False when the plan has no 5h limit, so views draw no 5h ring. Undefined reads as limited. */
+  session_limited?: boolean;
   extra_usage: ExtraUsage | null;
   [k: string]: unknown;
 }
@@ -48,6 +52,7 @@ export function toUsageRecord(snap: UsageSnapshot | null | undefined): UsageReco
     weekly_pct: Math.round(snap.seven_day.utilization),
     session_resets_at: snap.five_hour.resets_at || null,
     weekly_resets_at: snap.seven_day.resets_at || null,
+    session_limited: snap.five_hour_limited !== false,
     extra_usage: snap.extra_usage || null,
   };
 }

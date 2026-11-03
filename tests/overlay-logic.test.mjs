@@ -52,6 +52,31 @@ describe("buildOverlayRow", () => {
   });
 });
 
+describe("buildOverlayRow - 5h window states", () => {
+  const weekly = { weekly_pct: 8, weekly_resets_at: "2026-04-27T10:00:00Z" };
+
+  it("reads an idle 5h window (0% and no reset time) as no value, so it draws a dash", () => {
+    const row = buildOverlayRow(work, { ...weekly, session_pct: 0, session_resets_at: null }, NOW);
+    expect(row.session.pct).toBeNull();
+    expect(row.sessionLimited).toBe(true);
+  });
+
+  it("keeps a real 0% on a running window (it carries a reset time)", () => {
+    const row = buildOverlayRow(work, { ...weekly, session_pct: 0, session_resets_at: "2026-04-20T15:00:00Z" }, NOW);
+    expect(row.session.pct).toBe(0);
+  });
+
+  it("flags a plan with no 5h limit so the dial draws one ring", () => {
+    const row = buildOverlayRow(work, { ...weekly, session_pct: 0, session_resets_at: null, session_limited: false }, NOW);
+    expect(row.sessionLimited).toBe(false);
+  });
+
+  it("treats a record without the flag as limited", () => {
+    const row = buildOverlayRow(work, { ...weekly, session_pct: 5, session_resets_at: null }, NOW);
+    expect(row.sessionLimited).toBe(true);
+  });
+});
+
 describe("buildOverlayRows", () => {
   it("maps every account in registry order, independent of usage-map key order", () => {
     const usageByAccount = {
