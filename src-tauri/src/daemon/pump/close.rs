@@ -16,6 +16,20 @@ pub(crate) fn turn_is_close(session: &Session) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether this turn's `closing` row state is still up and needs the turn-end
+/// stand-down/teardown handling: armed by a `/close` prompt (`armed_by_prompt`),
+/// or raised mid-turn by the skill's own `close_session(stage="started")` call,
+/// which only the registry flag records. Without the second arm a chat marked
+/// Closing by the skill would stay Closing forever when its turn ended without
+/// confirming.
+pub(crate) fn close_in_flight(
+    registry: &crate::sessions::registry::Registry,
+    session_id: &str,
+    armed_by_prompt: bool,
+) -> bool {
+    armed_by_prompt || registry.get(session_id).is_some_and(|i| i.closing)
+}
+
 /// Registry `awaiting` value for a `/close` turn that ended without ever
 /// confirming via the `close_session` tool (todo 436): the model deviated
 /// mid-chain rather than the tool call erroring. Reuses `awaiting` (the
@@ -138,6 +152,16 @@ mod tests {
             );
         }
         st
+    }
+
+    #[test]
+    fn close_in_flight_follows_the_prompt_or_the_registry_flag() {
+        let st = state_with_sessions(&["s"]);
+        assert!(!close_in_flight(&st.registry, "s", false));
+        assert!(close_in_flight(&st.registry, "s", true));
+        st.registry.set_closing("s", true);
+        assert!(close_in_flight(&st.registry, "s", false), "skill-raised closing needs turn-end cleanup too");
+        assert!(!close_in_flight(&st.registry, "unknown", false));
     }
 
     fn held_texts(st: &Arc<DaemonState>, sid: &str) -> Vec<String> {

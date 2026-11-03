@@ -622,6 +622,22 @@ mod tests {
         assert_eq!(flag_for(TOOL_SPAWN_CHAT), json!(false));
     }
 
+    /// `stage` is the only thing that tells the daemon "mark Closing" apart from
+    /// "tear down at turn end"; dropping it would make the first call confirm a
+    /// teardown the skill has not reached yet.
+    #[test]
+    fn close_session_relays_stage_started_and_omits_it_otherwise() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let body_for = |args: Value| -> Value {
+            POSTED_BODIES.with(|b| b.borrow_mut().clear());
+            dispatch_tool_with(&rt, &json!(1), TOOL_CLOSE, &args, "sess-1", 1234, fake_http_post);
+            POSTED_BODIES.with(|b| b.borrow()[0].clone())
+        };
+        assert_eq!(body_for(json!({"stage": "started"})), json!({"session_id": "sess-1", "stage": "started"}));
+        assert_eq!(body_for(json!({})), json!({"session_id": "sess-1"}));
+        assert_eq!(body_for(json!({"stage": "bogus"})), json!({"session_id": "sess-1"}), "an unknown stage never reads as started");
+    }
+
     #[test]
     fn dispatch_tool_unknown_name_falls_through_to_unknown_tool_error() {
         let rt = tokio::runtime::Builder::new_current_thread()
