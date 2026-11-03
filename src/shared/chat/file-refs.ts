@@ -10,44 +10,9 @@ import { createMoreMenu } from "../../views/sessions/more-menu-base";
 import { codeModeCanOpenFile, openInCodeMode } from "./code-mode-bridge";
 import { openFileInApp } from "../open-file";
 import { basename, winPath } from "../path-utils";
+import { findFileRefs, type FileRef } from "./file-ref-match";
 
-// Windows drive path or a Unix absolute path with at least 3 segments. The
-// lookbehinds keep a URL (`https://a/b/c`, `://` and `m/a/b/c`) and a path glued
-// to a word from matching; `:` is excluded from the body so the optional
-// `:line[:col]` suffix is explicit and a trailing sentence colon is not eaten.
-// `& ^ % !` join the excluded set because the path can reach `cmd /C code` on
-// Windows, where they are command syntax (the Rust side refuses them too).
-const WIN = String.raw`(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s"'<>|&^%!*?:` + "`" + String.raw`()\[\]{},;]+`;
-const UNIX = String.raw`(?<![\w./:~@-])\/(?:[\w.@+~-]+\/){2,}[\w.@+~-]+`;
-// 9 digits max so the value fits the backend's u32; an overlong number drops
-// the whole suffix (the trailing lookahead forces the backtrack) rather than
-// carrying a truncated line.
-const SUFFIX = String.raw`(?::\d{1,9}(?::\d{1,9})?)?(?!\d)`;
-const PATH_RE = new RegExp(`(?:${WIN}|${UNIX})${SUFFIX}`, "g");
-
-export interface FileRef {
-  path: string;
-  line: number | null;
-  col: number | null;
-  /** Source text as written, including any `:line:col`. */
-  text: string;
-  index: number;
-}
-
-/** Finds paths in plain text; trailing sentence punctuation is not part of one. */
-export function findFileRefs(text: string): FileRef[] {
-  const out: FileRef[] = [];
-  PATH_RE.lastIndex = 0;
-  for (let m = PATH_RE.exec(text); m; m = PATH_RE.exec(text)) {
-    const raw = m[0].replace(/[.\-+~@]+$/, "");
-    const suffix = /^(.*?)(?::(\d+)(?::(\d+))?)?$/.exec(raw)!;
-    const path = suffix[1]!;
-    // A Windows path needs a name after the drive and slash, not just `C:\`.
-    if (/^[A-Za-z]:[\\/]*$/.test(path)) continue;
-    out.push({ path, line: suffix[2] ? Number(suffix[2]) : null, col: suffix[3] ? Number(suffix[3]) : null, text: raw, index: m.index });
-  }
-  return out;
-}
+export { findFileRefs };
 
 function chipFor(ref: FileRef): HTMLElement {
   const chip = document.createElement("span");

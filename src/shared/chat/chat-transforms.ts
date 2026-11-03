@@ -2,6 +2,7 @@ import MarkdownIt from "markdown-it";
 import type { ContentBlock } from "../../types/ipc.generated";
 import { escapeHtml } from "../escape-html";
 import { parseFileEdit } from "./file-edits";
+import { keepFilePathsLiteral } from "./file-ref-match";
 import { renderEditWindow } from "./edit-window";
 import { basename } from "../path-utils";
 import { toolSummary } from "./tool-meta";
@@ -45,6 +46,8 @@ const mdBreaks = new MarkdownIt({
   breaks: true,
 });
 mdBreaks.linkify.tlds("md", false);
+md.use(keepFilePathsLiteral);
+mdBreaks.use(keepFilePathsLiteral);
 
 // Every markdown instance here keeps html:false. Assistant text is not a trust
 // boundary - it is shaped by whatever files, tool results and web pages the

@@ -11,6 +11,7 @@ vi.mock("../src/shared/transport.ts", () => ({ isRemote: () => remote.on }));
 
 const { linkifyFilePaths, findFileRefs, handleFileRefClick, handleFileRefContextMenu } = await import("../src/shared/chat/file-refs.ts");
 const { setCodeModeOpener } = await import("../src/shared/chat/code-mode-bridge.ts");
+const { renderMarkdown } = await import("../src/shared/chat/chat-transforms.ts");
 
 function mount(html, cls = "msg assistant") {
   const root = document.createElement("div");
@@ -93,6 +94,53 @@ describe("linkifyFilePaths", () => {
     expect(chips(fenced)).toEqual([]);
     expect(chips(url)).toEqual([]);
     expect(chips(user)).toEqual([]);
+  });
+});
+
+// The chip is built from rendered text, so whatever markdown does to a path is
+// what the click opens: `\.` used to render as `.`, sending
+// C:\Users\x\.claude\settings.json to the nonexistent C:\Users\x.claude\.
+describe("paths through the real markdown renderer", () => {
+  const rendered = (src, breaks = false) => {
+    const root = mount(renderMarkdown(src, breaks));
+    linkifyFilePaths(root);
+    return root;
+  };
+  const chipPaths = (root) => chips(root).map((c) => c[0]);
+
+  it.each([
+    ["a dot folder", String.raw`C:\Users\x\.claude\settings.json`],
+    ["a leading-underscore folder", String.raw`C:\Users\x\_private\a.txt`],
+    ["a dash after a separator", String.raw`C:\proj\a-b\-c\x.txt`],
+    ["an emphasis-shaped name", String.raw`C:\proj\__init__.txt`],
+    ["forward slashes", "C:/proj/__init__/a_b_c.txt"],
+    ["a Unix path", "/home/joe/__init__/a.txt"],
+  ])("keeps %s intact in the chip", (_label, path) => {
+    expect(chipPaths(rendered(`open ${path}, then save`))).toEqual([path]);
+  });
+
+  it("keeps the path in the message that breaks single newlines too", () => {
+    const path = String.raw`C:\Users\x\.claude\settings.json`;
+    expect(chipPaths(rendered(`open ${path}\nthen save`, true))).toEqual([path]);
+  });
+
+  it("keeps a line suffix and a sentence-ending dot out of the path", () => {
+    const root = rendered(String.raw`See C:\Users\x\.claude\a.ts:12.`);
+    expect(chips(root)).toEqual([[String.raw`C:\Users\x\.claude\a.ts`, "12", "a.ts:12"]]);
+    expect(root.textContent.trim()).toBe("See a.ts:12.");
+  });
+
+  it("still chips a path in an inline code span", () => {
+    const path = String.raw`C:\Users\x\.claude\settings.json`;
+    expect(chipPaths(rendered("open `" + path + "` now"))).toEqual([path]);
+  });
+
+  it("leaves markdown around and away from paths working", () => {
+    const root = mount(renderMarkdown(String.raw`**C:\x\.y\a.txt** and \*literal\* and _soft_ and https://a.com/_b_/c`));
+    expect(root.querySelector("strong").textContent).toBe(String.raw`C:\x\.y\a.txt`);
+    expect(root.querySelector("em").textContent).toBe("soft");
+    expect(root.textContent).toContain("*literal*");
+    expect(root.querySelector("a").getAttribute("href")).toBe("https://a.com/_b_/c");
   });
 });
 
