@@ -169,11 +169,12 @@ async function daemonAwaiting(sessionId) {
   return res;
 }
 
-/** The sidebar's own view: the row's status dot. `st-question` is the "input needed" dot. */
+/** The sidebar's own view: the row's status class, carried as `data-st` on its `<li>` (the status ring
+ * has no element of its own to query). `st-question` is the "input needed" state. */
 async function rowDot(sessionId) {
   return browser.execute((id) => {
-    const dot = document.querySelector(`#sessions-list li[data-session-id="${id}"] .avatar-status-dot`);
-    return dot ? dot.className : null;
+    const li = document.querySelector(`#sessions-list li[data-session-id="${id}"]`);
+    return li ? li.dataset.st || null : null;
   }, sessionId);
 }
 
