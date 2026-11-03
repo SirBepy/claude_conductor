@@ -387,6 +387,15 @@ mod tests {
         let required = send["inputSchema"]["required"].as_array().unwrap();
         assert!(!required.iter().any(|r| r == "next_actions"), "next_actions is optional");
 
+        // The fill rate hangs on the wording: the instruction names the exact
+        // moment (the last message before report_turn_status(done)) and sits
+        // ahead of the formatting paragraph, where a skimming model still sees it.
+        let prop_text = n["description"].as_str().unwrap();
+        assert!(prop_text.contains("LAST send_message") && prop_text.contains("report_turn_status(done)"));
+        let tool_text = send["description"].as_str().unwrap();
+        let at = tool_text.find("next_actions").expect("send_message description names next_actions");
+        assert!(at < tool_text.find("Format: short.").unwrap(), "the next_actions rule comes before the formatting rules");
+
         // An edit keeps the chips through the frontend's `...prev` spread, so the
         // edit tool must not invite new ones.
         let update = find("update_message");
