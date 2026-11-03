@@ -210,18 +210,6 @@ fn resolve_takeover_model_effort(manual_pid: u32, state: &AppState) -> (String, 
 
 const FALLBACK_MODEL: &str = "sonnet";
 const FALLBACK_EFFORT: &str = "high";
-const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
-
-/// Same normalisation as the frontend's `modelFamilyFromId`: persisted
-/// defaults may hold a full model id, but spawns take a family.
-fn model_family(id: &str) -> String {
-    let lower = id.to_lowercase();
-    ["fable", "opus", "sonnet", "haiku"]
-        .into_iter()
-        .find(|f| lower.contains(f))
-        .map(str::to_string)
-        .unwrap_or_else(|| id.to_string())
-}
 
 fn takeover_choice(
     extra: &serde_json::Map<String, Value>,
@@ -243,21 +231,16 @@ fn takeover_choice(
         }
     }
 
-    let (project_model, project_effort) = if cwd_key.is_empty() {
-        (None, None)
-    } else {
-        crate::settings::identity::resolve_project_chat_defaults(projects, std::path::Path::new(cwd_key))
-    };
-    let global = |key: &str| extra.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
-    let model = project_model
-        .or_else(|| global("defaultModel").map(str::to_string))
-        .map(|m| model_family(&m))
-        .unwrap_or_else(|| FALLBACK_MODEL.to_string());
-    let effort = project_effort
-        .filter(|e| EFFORTS.contains(&e.as_str()))
-        .or_else(|| global("defaultEffort").filter(|e| EFFORTS.contains(e)).map(str::to_string))
-        .unwrap_or_else(|| FALLBACK_EFFORT.to_string());
-    (model, effort)
+    let (model, effort) = crate::settings::identity::resolve_default_chat_choice(
+        extra,
+        // An unknown cwd has no project to match; skip the project lookup.
+        if cwd_key.is_empty() { &[] } else { projects },
+        std::path::Path::new(cwd_key),
+    );
+    (
+        model.unwrap_or_else(|| FALLBACK_MODEL.to_string()),
+        effort.unwrap_or_else(|| FALLBACK_EFFORT.to_string()),
+    )
 }
 
 /// Respond to a pending permission request from the MCP server.

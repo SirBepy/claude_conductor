@@ -15,7 +15,7 @@ use crate::daemon::state::DaemonState;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use super::{spawn_chat, FALLBACK_EFFORT, FALLBACK_MODEL};
+use super::spawn_chat;
 
 /// `spawn_chat`'s optional `machine`: label or id of a paired peer, or
 /// omitted/self for "spawn locally" (today's behaviour, byte-identical).
@@ -135,14 +135,14 @@ pub(crate) async fn spawn_chat_or_forward(
         return json!({"ok": false, "error": "respawn cannot target another machine - use spawn_chat instead"});
     }
     let inherited = crate::sessions::chat_config::get(caller_session_id).unwrap_or_default();
-    let model = model
-        .filter(|m| !m.is_empty())
-        .unwrap_or(if inherited.model.is_empty() { FALLBACK_MODEL } else { &inherited.model })
-        .to_string();
-    let effort = effort
-        .filter(|e| !e.is_empty())
-        .unwrap_or(if inherited.effort.is_empty() { FALLBACK_EFFORT } else { &inherited.effort })
-        .to_string();
+    // The target path lives on the peer, so the caller's own project supplies
+    // the default (falling back to the requested path if the caller is gone).
+    let project_cwd = state
+        .registry
+        .get(caller_session_id)
+        .map(|c| c.cwd)
+        .unwrap_or_else(|| std::path::PathBuf::from(cwd));
+    let (model, effort) = super::resolve_model_effort(state, &project_cwd, model, effort, &inherited, false);
     let peer_params = json!({"cwd": cwd, "prompt": prompt, "model": model, "effort": effort, "name": name});
 
     let client = match crate::daemon::machines::client_for(state, &peer).await {

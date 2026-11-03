@@ -156,6 +156,37 @@ pub fn resolve_project_chat_defaults(
     )
 }
 
+const CHAT_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+
+/// Same normalisation as the frontend's `modelFamilyFromId`: persisted
+/// defaults may hold a full model id, but spawns take a family.
+pub fn model_family(id: &str) -> String {
+    let lower = id.to_lowercase();
+    ["fable", "opus", "sonnet", "haiku"]
+        .into_iter()
+        .find(|f| lower.contains(f))
+        .map(str::to_string)
+        .unwrap_or_else(|| id.to_string())
+}
+
+/// The model family and effort a chat started fresh in `path` opens on, each
+/// half on its own: the project's own default, then Settings'
+/// `defaultModel`/`defaultEffort` (`extra`), else `None` so the caller picks
+/// its own fallback. An effort outside the valid set counts as unset.
+pub fn resolve_default_chat_choice(
+    extra: &serde_json::Map<String, serde_json::Value>,
+    projects: &[crate::types::ProjectConfig],
+    path: &std::path::Path,
+) -> (Option<String>, Option<String>) {
+    let (project_model, project_effort) = resolve_project_chat_defaults(projects, path);
+    let global = |key: &str| extra.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
+    let model = project_model.or_else(|| global("defaultModel").map(str::to_string)).map(|m| model_family(&m));
+    let effort = project_effort
+        .filter(|e| CHAT_EFFORTS.contains(&e.as_str()))
+        .or_else(|| global("defaultEffort").filter(|e| CHAT_EFFORTS.contains(e)).map(str::to_string));
+    (model, effort)
+}
+
 /// The ticket tracker set on the project owning `path` (or its parent repo).
 /// `None` means unset, not "off" - the caller falls back to the git remote.
 pub fn resolve_project_tracker(

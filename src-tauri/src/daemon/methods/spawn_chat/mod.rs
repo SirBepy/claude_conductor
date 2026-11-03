@@ -4,8 +4,9 @@
 //! tagged. Guards instead: `cwd` must be either the caller's own working
 //! directory or a project already in `Settings.projects` (never an arbitrary
 //! path), and `respawn` at most once per turn (two would hand the caller off
-//! to two successors); plain `spawn_chat` siblings are unlimited. It inherits the caller's own model/effort/
-//! account, plus the character on the `respawn` path only. Auto-accept is
+//! to two successors); plain `spawn_chat` siblings are unlimited. It inherits the caller's own account;
+//! model/effort and the character are inherited on the `respawn` path only (a
+//! plain sibling opens on the project's default model/effort). Auto-accept is
 //! inherited per `session_registration::spawned_auto_accept`.
 //!
 //! Cross-machine spawn forwarding (`resolve_machine`, `spawn_chat_for_peer`,
@@ -29,9 +30,8 @@ mod todo;
 pub(crate) use forward::{resolve_machine, spawn_chat_or_forward};
 pub use todo::register_todo_chat_rpc;
 
-/// Used only when the caller has no recorded `chat_config` at all (a session
-/// that predates the config file, or one whose record was lost). A real
-/// respawn always inherits.
+/// Used only when no explicit value, inherited respawn value, or project or
+/// Settings default exists.
 pub(crate) const FALLBACK_MODEL: &str = "sonnet";
 pub(crate) const FALLBACK_EFFORT: &str = "medium";
 
@@ -65,6 +65,36 @@ pub(crate) fn release_turn_slot(caller_session_id: &str) {
     }
 }
 
+/// Model and effort for a spawn, each half on its own: an explicit argument
+/// wins; else `respawn` keeps the caller's own (it continues the same work);
+/// else the target project's default, then Settings' default, then the
+/// fallback. A plain sibling is a new job, so it does not inherit the
+/// caller's model/effort, which may have been raised for that caller's task.
+pub(super) fn resolve_model_effort(
+    state: &Arc<DaemonState>,
+    project_cwd: &std::path::Path,
+    model: Option<&str>,
+    effort: Option<&str>,
+    inherited: &crate::sessions::chat_config::ChatConfig,
+    respawn: bool,
+) -> (String, String) {
+    let settings = state.settings.snapshot();
+    let (default_model, default_effort) =
+        crate::settings::identity::resolve_default_chat_choice(&settings.extra, &settings.projects, project_cwd);
+    let pick = |explicit: Option<&str>, inherited: &str, default: Option<String>, fallback: &str| {
+        explicit
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+            .or_else(|| Some(inherited.to_string()).filter(|v| respawn && !v.is_empty()))
+            .or(default)
+            .unwrap_or_else(|| fallback.to_string())
+    };
+    (
+        pick(model, &inherited.model, default_model, FALLBACK_MODEL),
+        pick(effort, &inherited.effort, default_effort, FALLBACK_EFFORT),
+    )
+}
+
 /// Spawns a new Interactive session in the caller's own project - or another
 /// project the user already has registered - and sends `prompt` as its first
 /// turn. The prompt lands as a real, visible user message - the whole point
@@ -95,14 +125,7 @@ pub(crate) async fn spawn_chat(
     }
 
     let inherited = crate::sessions::chat_config::get(caller_session_id).unwrap_or_default();
-    let model = model
-        .filter(|m| !m.is_empty())
-        .unwrap_or(if inherited.model.is_empty() { FALLBACK_MODEL } else { &inherited.model })
-        .to_string();
-    let effort = effort
-        .filter(|e| !e.is_empty())
-        .unwrap_or(if inherited.effort.is_empty() { FALLBACK_EFFORT } else { &inherited.effort })
-        .to_string();
+    let (model, effort) = resolve_model_effort(state, &target_cwd, model, effort, &inherited, respawn);
     let account_id = Some(inherited.account_id.clone()).filter(|a| !a.is_empty());
 
     let params = StartSessionParams {
@@ -271,6 +294,59 @@ mod tests {
         let r = spawn_chat(&state, "sess-1", elsewhere, "carry on", None, None, None, false).await;
         let err = r.expect_err("foreign cwd must be rejected");
         assert!(err.contains("own working directory"), "{err}");
+    }
+
+    fn state_with_defaults(project_model: Option<&str>, global_model: Option<&str>) -> Arc<DaemonState> {
+        let mut settings = Settings::default();
+        let mut p = project("C:\\proj-a");
+        p.default_model = project_model.map(str::to_string);
+        settings.projects = vec![p];
+        if let Some(m) = global_model {
+            settings.extra.insert("defaultModel".into(), json!(m));
+        }
+        DaemonState::new(new_session_map(), SettingsCache::new(settings))
+    }
+
+    fn caller_config() -> crate::sessions::chat_config::ChatConfig {
+        crate::sessions::chat_config::ChatConfig {
+            model: "opus".into(),
+            effort: "max".into(),
+            ..Default::default()
+        }
+    }
+
+    /// A plain sibling must not wear the caller's raised model/effort: it
+    /// opens on the project default (per half), then Settings', then fallback.
+    #[test]
+    fn a_plain_spawn_uses_the_project_default_not_the_callers_model() {
+        let state = state_with_defaults(Some("haiku"), Some("fable"));
+        let cwd = std::path::Path::new("C:\\proj-a");
+        let (m, e) = resolve_model_effort(&state, cwd, None, None, &caller_config(), false);
+        assert_eq!((m.as_str(), e.as_str()), ("haiku", FALLBACK_EFFORT));
+
+        let state = state_with_defaults(None, Some("fable"));
+        let (m, _) = resolve_model_effort(&state, cwd, None, None, &caller_config(), false);
+        assert_eq!(m, "fable");
+
+        let state = state_with_defaults(None, None);
+        let (m, e) = resolve_model_effort(&state, cwd, None, None, &caller_config(), false);
+        assert_eq!((m.as_str(), e.as_str()), (FALLBACK_MODEL, FALLBACK_EFFORT));
+    }
+
+    #[test]
+    fn respawn_keeps_the_callers_model_and_effort() {
+        let state = state_with_defaults(Some("haiku"), None);
+        let cwd = std::path::Path::new("C:\\proj-a");
+        let (m, e) = resolve_model_effort(&state, cwd, None, None, &caller_config(), true);
+        assert_eq!((m.as_str(), e.as_str()), ("opus", "max"));
+    }
+
+    #[test]
+    fn an_explicit_model_wins_over_every_default() {
+        let state = state_with_defaults(Some("haiku"), None);
+        let cwd = std::path::Path::new("C:\\proj-a");
+        let (m, _) = resolve_model_effort(&state, cwd, Some("sonnet"), Some("low"), &caller_config(), false);
+        assert_eq!(m, "sonnet");
     }
 
     fn project(path: &str) -> crate::types::ProjectConfig {
