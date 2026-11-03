@@ -39,6 +39,13 @@ impl SignalSource for WindowsSignalSource {
     }
     fn mic_in_use(&self) -> bool {
         consent_store_in_use("microphone")
+            || match active_capture_pids() {
+                Ok(pids) => !pids.is_empty(),
+                Err(e) => {
+                    log::warn!("meeting: capture session scan failed: {e}");
+                    false
+                }
+            }
     }
     fn meeting_app_audio_active(&self, allow: &[String]) -> bool {
         if allow.is_empty() {
@@ -193,9 +200,21 @@ fn last_used_stop_is_zero(key_path: &str) -> bool {
 
 /// PIDs that currently have an ACTIVE audio render session on the default endpoint.
 fn active_audio_pids() -> Result<Vec<u32>, String> {
+    active_session_pids(false)
+}
+
+/// PIDs that currently have an ACTIVE audio capture session on the default
+/// microphone. Needed because the ConsentStore registry keys stopped updating
+/// after the Oct 2026 Windows updates (a Google Meet call in Brave left no
+/// trace there, verified 2026-11-03), so the registry alone misses browser calls.
+fn active_capture_pids() -> Result<Vec<u32>, String> {
+    active_session_pids(true)
+}
+
+fn active_session_pids(capture: bool) -> Result<Vec<u32>, String> {
     use windows::core::Interface;
     use windows::Win32::Media::Audio::{
-        eConsole, eRender, AudioSessionStateActive, IAudioSessionControl2,
+        eCapture, eConsole, eRender, AudioSessionStateActive, IAudioSessionControl2,
         IAudioSessionEnumerator, IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator,
     };
     use windows::Win32::System::Com::{
@@ -210,7 +229,7 @@ fn active_audio_pids() -> Result<Vec<u32>, String> {
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
         let device = enumerator
-            .GetDefaultAudioEndpoint(eRender, eConsole)
+            .GetDefaultAudioEndpoint(if capture { eCapture } else { eRender }, eConsole)
             .map_err(|e| e.to_string())?;
         let mgr: IAudioSessionManager2 =
             device.Activate(CLSCTX_ALL, None).map_err(|e| e.to_string())?;
@@ -274,4 +293,21 @@ fn pid_name_map() -> HashMap<u32, String> {
         let _ = windows::Win32::Foundation::CloseHandle(snapshot);
     }
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Live check against the real default mic: `cargo test --lib -- --ignored
+    /// live_capture_sessions --nocapture` while a Meet call is up must list the
+    /// browser's pid. Ignored because the result depends on the machine's state.
+    #[test]
+    #[ignore]
+    fn live_capture_sessions() {
+        let pids = active_capture_pids().expect("capture scan");
+        let names = pid_name_map();
+        let shown: Vec<_> = pids.iter().map(|p| (p, names.get(p).cloned())).collect();
+        println!("active capture sessions: {shown:?}");
+    }
 }
