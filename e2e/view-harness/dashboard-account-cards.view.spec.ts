@@ -54,6 +54,31 @@ test("in a 400px container the account cards stack one per row and no ring leave
   expect(b.ringOverflow).toBeLessThanOrEqual(0);
 });
 
+// Three accounts in a ~600px container: the grid's column floor used to be 160px, so it
+// picked three columns of ~190px while a card needs 214px, and every ring poked out.
+const THREE = {
+  ...INVOKE,
+  list_accounts: [
+    ...INVOKE.list_accounts,
+    { id: "acc-3", label: "Side", icon: "user", colour: "#10b981" },
+  ],
+  get_usage_map: { ...INVOKE.get_usage_map, "acc-3": snap(70, 35) },
+};
+
+for (const width of [520, 600, 660]) {
+  test(`three accounts in a ${width}px container keep every ring inside its card`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await mountView(page, { view: "dashboard", invoke: THREE });
+    const list = await cards(page);
+    expect(list).toHaveLength(3);
+    for (const c of list) expect(c.ringOverflow).toBeLessThanOrEqual(0);
+    const widths = await page
+      .locator(".dash-acard")
+      .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
+    for (const w of widths) expect(w).toBeGreaterThanOrEqual(214);
+  });
+}
+
 test("in a 900px container two cards still share a row", async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 800 });
   await mountView(page, { view: "dashboard", invoke: INVOKE });
