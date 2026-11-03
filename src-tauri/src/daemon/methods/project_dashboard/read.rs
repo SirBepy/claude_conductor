@@ -1,10 +1,10 @@
-//! The dashboard's read RPCs. All four are reachable from the phone (`P` in
+//! The dashboard's read RPCs. All five are reachable from the phone (`P` in
 //! `TRANSPORT_TABLE`, for its Projects tab) and never from a paired machine:
 //! they expose local file paths, git state and transcript contents, which the
 //! phone already reads piecemeal through its list_* methods.
 
 use super::gather::gather;
-use super::{history, layout, parse, snapshot, to_json, IdOnly};
+use super::{closed_chats, history, layout, parse, snapshot, to_json, IdOnly};
 use crate::daemon::rpc::Router;
 use crate::daemon::state::DaemonState;
 use crate::project_dashboard::DashboardTargetRef;
@@ -43,6 +43,23 @@ pub(super) fn register_read(router: &mut Router, state: Arc<DaemonState>) {
             async move {
                 let p: TargetParams = parse(params)?;
                 to_json(&history::history(&state, p.target).await?)
+            }
+        });
+    }
+    {
+        let state = state.clone();
+        router.register("dashboard_closed_chats", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P {
+                    target: DashboardTargetRef,
+                    #[serde(default)]
+                    offset: u32,
+                    limit: u32,
+                }
+                let p: P = parse(params)?;
+                to_json(&closed_chats::closed_chats(&state, p.target, p.offset, p.limit).await?)
             }
         });
     }

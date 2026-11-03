@@ -21,7 +21,7 @@ describe("Chats card", () => {
     const root = await mount({ kind: "project", id: "p1" });
     expect(rowsText(root)).toEqual(["ask-a", "work-a", "work-b", "wait-a", "Phone question sheet peek"]);
     expect(root.querySelectorAll('[data-pd-card="chats"] .pd-row.is-gap')).toHaveLength(0);
-    expect(label(root).textContent).toBe("Recently closed");
+    expect(label(root).textContent.trim()).toBe("Recently closed");
     expect(root.querySelector('[data-pd-pager="chats"] .pd-pg-n').textContent).toBe("1/2");
 
     // The pager pages the live chats only; the closed ones stay under them.
@@ -40,11 +40,87 @@ describe("Chats card", () => {
     expect(root.querySelector('[data-pd-card="chats"] [data-pd-all-history]').title).toBe("History");
   });
 
-  it("drops the Recently closed label when there are no live chats above it", async () => {
+  it("keeps the Recently closed label, and the History button on it, when there are no live chats", async () => {
     dash.snapshot = projectSnapshot({ chats_running: [], chats_recent: recent(2) });
     const root = await mount({ kind: "project", id: "p1" });
     expect(rowsText(root)).toEqual(["old-0", "old-1"]);
-    expect(label(root)).toBeNull();
+    expect(label(root).textContent.trim()).toBe("Recently closed");
+    expect(label(root).querySelector("[data-pd-all-history]")).not.toBeNull();
+  });
+
+  it("puts History on the Recently closed line, not in the Chats heading, and shows none without closed chats", async () => {
+    dash.snapshot = projectSnapshot({ chats_running: mixedChats().slice(0, 1), chats_recent: recent(2) });
+    const root = await mount({ kind: "project", id: "p1" });
+    expect(root.querySelector('[data-pd-card="chats"] .pd-h [data-pd-all-history]')).toBeNull();
+    expect(label(root).querySelector("[data-pd-all-history]")).not.toBeNull();
+
+    document.body.innerHTML = '<div id="test-modal-slot"></div>';
+    dash.snapshot = projectSnapshot({ chats_running: mixedChats().slice(0, 1), chats_recent: [] });
+    const bare = await mount({ kind: "project", id: "p1" });
+    expect(bare.querySelector("[data-pd-all-history]")).toBeNull();
+  });
+});
+
+describe("History modal", () => {
+  const modal = () => document.getElementById("test-modal-slot");
+  const day = (daysAgo, n) => Date.now() - daysAgo * 86_400_000 - n * 60_000;
+  const closed = (n) => Array.from({ length: n }, (_, i) => ({
+    session_id: `c-${i}`, title: `closed ${i}`, status: "ended", repo_cwd: "C:/Projects/conductor", at_ms: day(Math.floor(i / 2), i),
+  }));
+  const open = async (root) => {
+    root.querySelector("[data-pd-all-history]").click();
+    await vi.waitFor(() => expect(modal().querySelectorAll(".pd-row").length).toBeGreaterThan(0));
+  };
+  const titles = () => [...modal().querySelectorAll(".pd-row .pd-t")].map((n) => n.textContent);
+
+  it("opens this project's closed chats under day headings, asking for the project's own target", async () => {
+    dash.snapshot = projectSnapshot({ chats_recent: closed(3) });
+    dash.closed = closed(5);
+    const root = await mount({ kind: "project", id: "p1" });
+    await open(root);
+    expect(modal().querySelector("h3").textContent).toBe("Historyclaude_usage_in_taskbar");
+    expect(titles()).toEqual(["closed 0", "closed 1", "closed 2", "closed 3", "closed 4"]);
+    expect([...modal().querySelectorAll(".pd-sub")].map((n) => n.textContent)).toEqual(["Today", "Yesterday", expect.any(String)]);
+    expect(invoke).toHaveBeenCalledWith("dashboard_closed_chats", { target: { kind: "project", id: "p1" }, offset: 0, limit: 31 });
+    expect(modal().querySelector("[data-pd-older]")).toBeNull();
+  });
+
+  it("pages older chats in only while there are some, never repeating a row", async () => {
+    dash.snapshot = projectSnapshot({ chats_recent: closed(3) });
+    dash.closed = closed(34);
+    const root = await mount({ kind: "project", id: "p1" });
+    await open(root);
+    expect(titles()).toHaveLength(30);
+    modal().querySelector("[data-pd-older]").click();
+    await vi.waitFor(() => expect(titles()).toHaveLength(34));
+    expect(new Set(titles()).size).toBe(34);
+    expect(invoke).toHaveBeenLastCalledWith("dashboard_closed_chats", expect.objectContaining({ offset: 30 }));
+    expect(modal().querySelector("[data-pd-older]")).toBeNull();
+  });
+
+  it("closes, then opens the clicked chat read-only", async () => {
+    dash.snapshot = projectSnapshot({ chats_recent: closed(3) });
+    dash.closed = closed(2);
+    const root = await mount({ kind: "project", id: "p1" });
+    await open(root);
+    modal().querySelectorAll(".pd-row")[1].click();
+    expect(modal().querySelector(".pd-modal")).toBeNull();
+  });
+
+  it("says so when the page could not load, instead of an empty list", async () => {
+    dash.snapshot = projectSnapshot({ chats_recent: closed(3) });
+    const root = await mount({ kind: "project", id: "p1" });
+    const answer = invoke.getMockImplementation();
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "dashboard_closed_chats") throw new Error("boom");
+      return answer(cmd, args);
+    });
+    try {
+      root.querySelector("[data-pd-all-history]").click();
+      await vi.waitFor(() => expect(modal().querySelector(".pd-mbody").textContent).toContain("Could not load the history"));
+    } finally {
+      invoke.mockImplementation(answer);
+    }
   });
 });
 

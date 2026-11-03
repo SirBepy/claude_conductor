@@ -5,7 +5,7 @@
 //! methods to a phone or a paired machine.
 
 use crate::project_dashboard::{
-    CardResult, DashboardHistory, DashboardListRow, DashboardSnapshot, DashboardTargetRef, GroupDef, Scope,
+    CardResult, DashChatRow, DashboardHistory, DashboardListRow, DashboardSnapshot, DashboardTargetRef, GroupDef, Scope,
 };
 use crate::state::AppState;
 use tauri::State;
@@ -106,6 +106,19 @@ pub async fn dashboard_history(
 ) -> Result<DashboardHistory, String> {
     let target = serde_json::to_value(target).map_err(|e| e.to_string())?;
     let v = client(&state).await?.dashboard_history(target).await.map_err(|e| e.to_string())?;
+    serde_json::from_value(v).map_err(|e| e.to_string())
+}
+
+/// One page of a target's ended chats, newest first (the History modal).
+#[tauri::command]
+pub async fn dashboard_closed_chats(
+    target: DashboardTargetRef,
+    offset: u32,
+    limit: u32,
+    state: State<'_, AppState>,
+) -> Result<Vec<DashChatRow>, String> {
+    let target = serde_json::to_value(target).map_err(|e| e.to_string())?;
+    let v = client(&state).await?.dashboard_closed_chats(target, offset, limit).await.map_err(|e| e.to_string())?;
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 

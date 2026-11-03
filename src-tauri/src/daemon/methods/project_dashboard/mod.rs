@@ -6,6 +6,7 @@
 //! `cards::dashboard_card_tool` directly, with no Router in scope.
 
 pub(crate) mod cards;
+mod closed_chats;
 mod gather;
 mod history;
 mod layout;
@@ -206,6 +207,7 @@ mod tests {
         "dashboard_list_targets",
         "dashboard_snapshot",
         "dashboard_history",
+        "dashboard_closed_chats",
         "dashboard_gallery_image",
     ];
 

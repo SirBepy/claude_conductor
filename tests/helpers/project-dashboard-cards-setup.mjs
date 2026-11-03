@@ -12,11 +12,13 @@ globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16);
 
 // What the mocked ipc answers with. A test reassigns a field; `resetDashboard`
 // restores the defaults before each test.
-export const dash = { snapshot: projectSnapshot(), historyResult: history() };
+// `closed` is every ended chat the History modal can page through, newest first.
+export const dash = { snapshot: projectSnapshot(), historyResult: history(), closed: [] };
 
 vi.mock("../../src/shared/ipc.ts", () => ({
-  invoke: vi.fn(async (cmd) => {
+  invoke: vi.fn(async (cmd, args) => {
     if (cmd === "dashboard_snapshot") return dash.snapshot;
+    if (cmd === "dashboard_closed_chats") return dash.closed.slice(args.offset, args.offset + args.limit);
     if (cmd === "dashboard_history") return dash.historyResult;
     if (cmd === "dashboard_gallery_image") return "data:image/png;base64,AAAA";
     return null;
@@ -62,5 +64,6 @@ export function resetDashboard() {
   document.body.innerHTML = '<div id="test-modal-slot"></div>';
   dash.snapshot = projectSnapshot();
   dash.historyResult = history();
+  dash.closed = [];
   vi.clearAllMocks();
 }

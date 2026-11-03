@@ -75,6 +75,15 @@ export function whenLabel(ms: number, nowMs: number = Date.now()): string {
   return `${date} ${hm}`;
 }
 
+/** The heading a past row sits under in a day-grouped list: "Today",
+ * "Yesterday", else the weekday and date ("Sat 31 Oct"). */
+export function dayLabel(ms: number, nowMs: number = Date.now()): string {
+  const { days, date } = whenParts(ms, nowMs);
+  if (days === 0) return "Today";
+  if (days === -1) return "Yesterday";
+  return date;
+}
+
 /** `s` trimmed and cut to `n` characters plus an ellipsis. Lives here, not in
  * schedule-format.ts, because that module and schedule-state.ts import each
  * other, so a dependency-light caller (the Home schedule widget's logic) can't

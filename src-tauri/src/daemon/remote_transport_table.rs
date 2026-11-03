@@ -491,6 +491,9 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("dashboard_list_targets", P),
     ("dashboard_snapshot", P),
     ("dashboard_history", P),
+    // One page of a target's ended chats behind the History modal: the same
+    // titles dashboard_snapshot already lists, only further back.
+    ("dashboard_closed_chats", P),
     // Lazy data URL of one image listed by dashboard_history. The id encodes a
     // transcript path and offset; `history_scan::read_image` canonicalises it,
     // refuses anything but a .jsonl inside the Claude projects folder, and

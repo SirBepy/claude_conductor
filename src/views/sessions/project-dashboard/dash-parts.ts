@@ -38,7 +38,8 @@ export interface DashActions {
   /** In the app's own Files window. */
   openFile(path: string): void;
   openUrl(url: string): void;
-  openAllHistory(): void;
+  /** Every ended chat of this dashboard's project or group, in a modal. */
+  openHistoryModal(): void;
   /** Clipboard, with a toast naming `what` was copied. */
   copyText(text: string, what: string): void;
   toggleTodo(todo: DashTodo): void;

@@ -1,6 +1,6 @@
 // The Chats section: one list. Live chats first (the sidebar's own segment
 // order, paged in fours), then the three most recently ended ones in muted
-// text. The heading's History button opens every past chat.
+// text. The History button on the closed rows' label opens every past chat in a modal.
 import { html, nothing, type TemplateResult } from "lit-html";
 import { CHAT_GROUPS, chatGroupOf, shortAgo } from "./format";
 import { card, dot, hidden, icon, quiet, repoTag, row, type DashCtx, type DotKind } from "./dash-parts";
@@ -37,9 +37,11 @@ export function chats(c: DashCtx): TemplateResult | typeof nothing {
   const { slice, pager } = pageSlice(c, "chats", sorted);
   const past = c.snap.chats_recent.slice(0, RECENT_ROWS);
   // The groups keep the sidebar's order as one unbroken list; the dot says which one a row is in.
-  const divider = slice.length && past.length ? [html`<div class="pd-sub" data-pd-past-label>${PAST_LABEL}</div>`] : [];
+  // The label always leads the closed rows, since History opens from its line and a project
+  // with no live chat still needs that way in. With no closed row there is no history to open.
+  const divider = past.length ? [html`<div class="pd-sub pd-subbar" data-pd-past-label><span>${PAST_LABEL}</span><span class="grow"></span>
+    <button type="button" class="pd-ib sm" title="History" data-pd-all-history
+      @click=${() => c.act.openHistoryModal()}><i class="ph ph-clock-counter-clockwise"></i></button></div>`] : [];
   const body = [...slice.map((r) => liveRow(c, r)), ...divider, ...past.map((r) => pastRow(c, r))];
-  const trailing = html`${pager}<button type="button" class="pd-ib sm" title="History" data-pd-all-history
-    @click=${() => c.act.openAllHistory()}><i class="ph ph-clock-counter-clockwise"></i></button>`;
-  return card("Chats", body.length ? body : [quiet("No chats yet")], { id: "chats", trailing });
+  return card("Chats", body.length ? body : [quiet("No chats yet")], { id: "chats", trailing: pager });
 }

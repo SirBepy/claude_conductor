@@ -832,6 +832,8 @@ export class HttpTransport implements Transport {
       case "dashboard_snapshot":
       case "dashboard_history":
         return this.rpc<T>(command, { target: args.target });
+      case "dashboard_closed_chats":
+        return this.rpc<T>(command, { target: args.target, offset: args.offset, limit: args.limit });
       case "dashboard_gallery_image":
       case "dashboard_card_refresh":
         return this.rpc<T>(command, { id: args.id });
