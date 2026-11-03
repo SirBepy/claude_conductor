@@ -1,7 +1,7 @@
 // asserts: src/views/sessions/next-chips.ts
 import { describe, expect, it } from "vitest";
 
-const { nextChips } = await import("../src/views/sessions/next-chips.ts");
+const { nextChips, withReply } = await import("../src/views/sessions/next-chips.ts");
 
 const done = { awaiting: "done", busy: false, closing: false, ended_at: null, frozen: false, kind: "interactive" };
 const ctx = (over = {}, inst = {}) => ({ enabled: true, wrapUp: false, hasHeld: false, inst: { ...done, ...inst }, ...over });
@@ -70,5 +70,26 @@ describe("nextChips", () => {
 
   it("offers nothing without a registry row (a draft)", () => {
     expect(nextChips({ enabled: true, wrapUp: false, hasHeld: false, inst: undefined })).toEqual([]);
+  });
+});
+
+describe("withReply", () => {
+  it("fills an empty box with the reply", () => {
+    expect(withReply("", "Yes, implement this")).toBe("Yes, implement this");
+    expect(withReply("  \n", "Yes, implement this")).toBe("Yes, implement this");
+  });
+
+  it("puts a reply above typed text, once", () => {
+    const once = withReply("also add tests", "Yes, implement this");
+    expect(once).toBe("Yes, implement this\nalso add tests");
+    expect(withReply(once, "Yes, implement this")).toBe(once);
+  });
+
+  it("keeps a leading slash command first so it still runs as a command", () => {
+    const once = withReply("/commit ", "Yes, implement this");
+    expect(once.startsWith("/commit")).toBe(true);
+    expect(once).toBe("/commit\nYes, implement this");
+    expect(withReply(once, "Yes, implement this")).toBe(once);
+    expect(withReply("/commit fix typo", "Yes, implement this")).toBe("/commit fix typo\nYes, implement this");
   });
 });

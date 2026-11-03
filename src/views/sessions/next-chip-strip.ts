@@ -6,7 +6,7 @@ import { currentTurnNextActions } from "../../shared/chat/chat-next-actions";
 import { state } from "./state";
 import { isWrapUpOnDone, onWrapUpChange } from "./permission-modal/gating";
 import { withCommand } from "./project-dashboard/format";
-import { isSlashChip, nextChips } from "./next-chips";
+import { isSlashChip, nextChips, withReply } from "./next-chips";
 import "./next-chips.css";
 
 let _lastPane: HTMLElement | null = null;
@@ -27,12 +27,9 @@ function onChipClick(chip: string, shift: boolean): void {
     // The daemon only treats a prompt as a command when it starts with it, so
     // the command goes first and what was typed stays after it as arguments.
     composer.setDraftText(withCommand(draft, chip), false);
-  } else if (draft.trim() === "") {
-    composer.setDraftText(chip, false);
-  } else if (!draft.startsWith(chip)) {
-    // A reply goes above what was typed, never over it; a second click on the
-    // same chip must not stack it twice.
-    composer.setDraftText(`${chip}\n${draft}`, false);
+  } else {
+    const next = withReply(draft, chip);
+    if (next !== draft) composer.setDraftText(next, false);
   }
 }
 
