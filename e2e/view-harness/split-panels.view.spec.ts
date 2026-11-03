@@ -562,6 +562,23 @@ test("the tray's route into the dashboard opens the panel instead of replacing t
   expect(await page.evaluate(async () => (await import("/shared/navigation.ts")).getActiveView())).toBe("sessions");
 });
 
+test("Dashboard from the rail still opens after a window that mounted phone-narrow is widened", async ({ page }) => {
+  // Mounted at 700px the chat view picked the pane windows, so no split exists
+  // to host a panel; widening alone never remounts it.
+  await mountPane(page, GLOBAL_MOCKS, 700, true, "blank");
+  await page.evaluate(async () => {
+    (await import("/shared/navigation.ts")).setActiveView("sessions");
+    (await import("/shared/app-rail.ts")).mountAppRail();
+  });
+  await expect(page.locator(".sp-strip:not(#app-rail)")).toHaveCount(0);
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  await page.locator('#app-rail [data-rail-go="dashboard"]').click();
+
+  await expect(page.locator("#app .view-dashboard")).toHaveCount(1);
+  expect(await page.evaluate(async () => (await import("/shared/navigation.ts")).getActiveView())).toBe("dashboard");
+});
+
 test("the dashboard's account cards stack in the 400px panel, with no ring past its card's edge", async ({ page }) => {
   const at = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
   const snap = (five: number, seven: number) => ({

@@ -23,6 +23,7 @@ const COMPACT_QUERY = "(max-width: 768px)";
 
 let open: GlobalPanelView | null = null;
 let hosts = 0;
+let paneWindowHosts = 0;
 const listeners = new Set<() => void>();
 
 export function getGlobalPanel(): GlobalPanelView | null {
@@ -41,25 +42,40 @@ export function onGlobalPanelChange(fn: () => void): () => void {
   return () => listeners.delete(fn);
 }
 
-/** A split that can show the panel is mounted. Counted rather than flagged:
- *  the new chat view mounts its split before the old one is destroyed. */
-export function registerPanelHost(): () => void {
-  hosts++;
+/** A counter that goes up for as long as something is mounted and comes back
+ *  down once, whichever order a second mount and the first one's teardown run
+ *  in (the new chat view mounts its split before the old one is destroyed). */
+function counted(up: () => void, down: () => void): () => void {
+  up();
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    hosts--;
+    down();
   };
 }
 
-/** Whether a route into `view` lands in the panel. A window narrow enough that
- *  the chat view mounts the phone-style pane windows has no split to show it
- *  in, so it keeps the full-screen view; once a split is mounted it always
- *  wins, even if the window is later dragged narrow (fab-dial.ts's rule too). */
+/** A split that can show the panel is mounted. */
+export function registerPanelHost(): () => void {
+  return counted(() => hosts++, () => hosts--);
+}
+
+/** The chat view mounted the phone-style pane windows instead of a split. It
+ *  never remounts on a resize, so it keeps choosing the full-screen view even
+ *  after the window is widened past the compact width. */
+export function registerPaneWindowsHost(): () => void {
+  return counted(() => paneWindowHosts++, () => paneWindowHosts--);
+}
+
+/** Whether a route into `view` lands in the panel. Once a split is mounted it
+ *  always wins, even if the window is later dragged narrow (fab-dial.ts's rule
+ *  too). With only pane windows mounted there is no split to show it in, so the
+ *  full-screen view opens whatever the width now is. With no chat view at all,
+ *  the width decides, since the chat view that mounts next will match it. */
 export function opensInGlobalPanel(view: string): view is GlobalPanelView {
   if (view !== "dashboard" && view !== "schedule") return false;
   if (!isChatsWindow()) return false;
   if (hosts > 0) return true;
+  if (paneWindowHosts > 0) return false;
   return !(typeof window.matchMedia === "function" && window.matchMedia(COMPACT_QUERY).matches);
 }

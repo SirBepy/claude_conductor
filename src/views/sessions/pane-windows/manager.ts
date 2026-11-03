@@ -9,6 +9,7 @@ import { invoke } from "../../../shared/ipc";
 import { listen } from "../../../shared/events";
 import { registerOverlayBack } from "../../../shared/back-button";
 import type { RailTabDeps } from "../rail-panel";
+import { registerPaneWindowsHost } from "../../../shared/global-panel";
 import { loadPopped, savePopped, saveOpen as savePreviewOpen, loadOpen as loadPreviewOpen } from "../rail-panel";
 import type { PreviewController } from "../preview-panel";
 import { PaneWindowManager } from "../../../../vendor/tauri_kit/frontend/pane-windows/manager";
@@ -31,6 +32,7 @@ export class PaneWindows implements PanelHost {
   private storageHandler: ((e: StorageEvent) => void) | null = null;
   private unlistenDocked: (() => void) | null = null;
   private destroyed = false;
+  private readonly releaseHost = registerPaneWindowsHost();
   /** Whether Preview was on screen after the last render; its body only
    *  fetches when it comes into view (or on a push), so the edge matters. */
   private previewShown = false;
@@ -160,6 +162,7 @@ export class PaneWindows implements PanelHost {
 
   destroy(): void {
     this.destroyed = true;
+    this.releaseHost();
     if (this.storageHandler) window.removeEventListener("storage", this.storageHandler);
     this.unlistenDocked?.();
     this.mgr.destroy();
