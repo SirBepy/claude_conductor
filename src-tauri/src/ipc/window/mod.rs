@@ -92,6 +92,13 @@ fn attach_hide_to_tray_with(
     on_hidden: impl Fn(&AppHandle) + Send + 'static,
 ) {
     webview_visibility::attach(window);
+    if cfg!(debug_assertions) {
+        // The exe's embedded icon is the production one, so a dev build swaps
+        // in the blue one for the taskbar and Alt-Tab.
+        if let Ok(icon) = tauri::image::Image::from_bytes(&crate::tray::icon_render::dev_window_icon()) {
+            let _ = window.set_icon(icon);
+        }
+    }
     let w = window.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {

@@ -1,7 +1,7 @@
 //! Renders the 32x32 tray icon as RGBA PNG bytes: the app's own icon, plus a
 //! small red "in a meeting" dot (top-right), the existing blue update badge
-//! (bottom-right), an amber "a session needs you" dot (top-left), and/or the
-//! dev-build dot (bottom-left) stamped on top.
+//! (bottom-right), and/or an amber "a session needs you" dot (top-left)
+//! stamped on top. A dev build's icon is recoloured blue first.
 
 use image::{ImageEncoder, Rgba, RgbaImage};
 use std::sync::OnceLock;
@@ -22,9 +22,9 @@ fn app_icon() -> &'static RgbaImage {
 pub struct IconCtx {
     pub updating: bool,
     pub in_meeting: bool,
-    /// True for a debug (`cargo tauri dev`) build. Paints a small dot so a
-    /// dev instance is visually distinguishable from the installed app when
-    /// both run at once (2026-07-16 incident).
+    /// True for a debug (`cargo tauri dev`) build. Recolours the whole icon
+    /// blue so a dev instance is visually distinguishable from the installed
+    /// app when both run at once (2026-07-16 incident).
     pub dev: bool,
     /// True while any live session's registry `awaiting` is "question" - a
     /// chat is waiting on Joe. Paints the top-left dot.
@@ -76,16 +76,30 @@ fn paint_meeting_dot(img: &mut RgbaImage) {
     paint_dot(img, SIZE as f32 - 6.0, 6.0, 4.0, MEETING_COLOR);
 }
 
-/// Bottom-left dot: always shown on a debug (`cargo tauri dev`) build, so it
-/// never gets confused with the installed app in the tray or taskbar preview.
-fn paint_dev_dot(img: &mut RgbaImage) {
-    const DEV_COLOR: [u8; 3] = [255, 140, 0];
-    paint_dot(img, 6.0, SIZE as f32 - 6.0, 4.0, DEV_COLOR);
+/// Swaps red and blue on every pixel, so the orange app icon becomes a blue
+/// one with its shading intact. A dev build wears this everywhere (tray,
+/// taskbar) so it can never be mistaken for the installed app; a corner dot
+/// was too easy to miss at 32px (2026-11-03).
+fn swap_to_blue(img: &mut RgbaImage) {
+    for px in img.pixels_mut() {
+        px.0.swap(0, 2);
+    }
+}
+
+/// The app icon in the dev-build blue, as PNG bytes for a window's taskbar
+/// icon. Larger than the tray's 32px so the taskbar and Alt-Tab stay sharp.
+pub fn dev_window_icon() -> Vec<u8> {
+    const BYTES: &[u8] = include_bytes!("../../icons/128x128.png");
+    let mut img = image::load_from_memory(BYTES)
+        .expect("embedded window icon is a valid image")
+        .to_rgba8();
+    swap_to_blue(&mut img);
+    encode_png(&img)
 }
 
 /// Top-left dot: a live session is awaiting input. Amber/yellow,
-/// deliberately distinct from the orange dev dot (255,140,0) and the red
-/// meeting dot (220,60,60) - Joe picked this over red specifically so it
+/// deliberately distinct from the red meeting dot (220,60,60) and the blue
+/// update badge - Joe picked this over red specifically so it
 /// doesn't clash with the meeting dot when both show at once.
 fn paint_input_needed_dot(img: &mut RgbaImage) {
     const INPUT_NEEDED_COLOR: [u8; 3] = [250, 204, 21];
@@ -94,9 +108,10 @@ fn paint_input_needed_dot(img: &mut RgbaImage) {
 
 pub fn render(ctx: &IconCtx) -> Vec<u8> {
     let mut img = app_icon().clone();
+    // Tint before the dots so the red meeting dot keeps its colour.
+    if ctx.dev { swap_to_blue(&mut img); }
     if ctx.in_meeting { paint_meeting_dot(&mut img); }
     if ctx.updating { paint_update_badge(&mut img); }
-    if ctx.dev { paint_dev_dot(&mut img); }
     if ctx.input_needed { paint_input_needed_dot(&mut img); }
     encode_png(&img)
 }
@@ -123,6 +138,27 @@ mod tests {
         let img = image::load_from_memory(&bytes).unwrap().to_rgba8();
         let px = img.get_pixel(6, 6).0;
         assert_eq!([px[0], px[1], px[2]], [250, 204, 21]);
+    }
+
+    /// The app icon is warm (red above blue); a dev build must flip that so
+    /// the icon reads blue, while a normal build stays untouched.
+    fn mean_red_minus_blue(bytes: &[u8]) -> f32 {
+        let img = image::load_from_memory(bytes).unwrap().to_rgba8();
+        let (mut sum, mut n) = (0.0_f32, 0.0_f32);
+        for p in img.pixels().filter(|p| p.0[3] > 200) {
+            sum += p.0[0] as f32 - p.0[2] as f32;
+            n += 1.0;
+        }
+        sum / n
+    }
+
+    #[test]
+    fn dev_build_icon_is_blue_and_normal_build_is_not() {
+        let normal = render(&ctx(false));
+        let dev = render(&IconCtx { dev: true, ..ctx(false) });
+        assert!(mean_red_minus_blue(&normal) > 10.0, "app icon should be warm");
+        assert!(mean_red_minus_blue(&dev) < -10.0, "dev icon should be blue");
+        assert!(mean_red_minus_blue(&dev_window_icon()) < -10.0, "dev window icon should be blue");
     }
 
     #[test]

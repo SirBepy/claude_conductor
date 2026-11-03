@@ -79,6 +79,7 @@ fn spawn_attachment_gc() {
 /// at boot (`watch_autostart_setting_changes` keeps it in sync afterward).
 fn sync_autostart_on_boot(app: &tauri::AppHandle) {
     use tauri_plugin_autostart::ManagerExt;
+    if !autostart_may_touch_os_entry() { return; }
     let autostart_mgr = app.autolaunch();
     let state = app.state::<AppState>();
     let desired = state.settings.lock().unwrap().autostart;
@@ -89,9 +90,19 @@ fn sync_autostart_on_boot(app: &tauri::AppHandle) {
     };
 }
 
+/// The OS autostart entry (HKCU Run on Windows) is one per user and the plugin
+/// writes the CURRENT exe's path into it. A dev build or the live-verify rig's
+/// private copy that wrote it would be the exe Windows launches at the next
+/// boot, showing a dev window that points at a dead localhost:1420
+/// (2026-11-03). Only a non-dev build may own the entry.
+fn autostart_may_touch_os_entry() -> bool {
+    !(cfg!(debug_assertions) || cfg!(dev))
+}
+
 /// Keep the OS autostart entry in sync with the `autostart` setting for the
 /// rest of the app's lifetime.
 fn watch_autostart_setting_changes(app: &tauri::AppHandle) {
+    if !autostart_may_touch_os_entry() { return; }
     let h = app.clone();
     app.listen("settings-changed", move |event| {
         use tauri_plugin_autostart::ManagerExt;
