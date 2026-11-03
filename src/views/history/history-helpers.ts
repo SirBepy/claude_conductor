@@ -4,31 +4,6 @@ import { characterForSessionId, characterIconUrl } from "../sessions/session-cha
 import { markerToStatusClass } from "../../shared/status-icons";
 import type { HistoryEntry } from "../../types/ipc.generated";
 
-export interface HistoryFilters {
-  search: string;
-  projectId: string | null;
-  model: string | null;
-  dateFrom: string | null;
-  dateTo: string | null;
-}
-
-export function emptyFilters(): HistoryFilters {
-  return { search: "", projectId: null, model: null, dateFrom: null, dateTo: null };
-}
-
-/** Local midnight -> RFC3339, so a date filter is inclusive of the user's
- * whole calendar day rather than a UTC-shifted slice of it. */
-export function startOfDayIso(dateStr: string): string {
-  return new Date(`${dateStr}T00:00:00`).toISOString();
-}
-export function endOfDayIso(dateStr: string): string {
-  return new Date(`${dateStr}T23:59:59.999`).toISOString();
-}
-
-export function hasActiveFilters(f: HistoryFilters): boolean {
-  return !!(f.search || f.projectId || f.model || f.dateFrom || f.dateTo);
-}
-
 export function dateBucket(secs: number | bigint | null | undefined): string {
   if (!secs) return "Unknown date";
   const n = typeof secs === "bigint" ? Number(secs) : secs;

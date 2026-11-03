@@ -3,9 +3,9 @@
 // Menu structure:
 //   GENERAL  (greyed label)
 //     New chat        (relocated from #view-more-host)
-//     History         (relocated from #view-more-host)
-//     Preview         (relocated from #view-more-host; toggles the HTML preview panel)
-//     Scheduled       (opens the standalone `session-schedule` window)
+//     History         (phone only; relocated from #view-more-host)
+//     Preview         (phone only; relocated from #view-more-host; toggles the HTML preview panel)
+//     Scheduled       (phone only; opens the standalone `session-schedule` window)
 //     When done ▸     (Sleep / Shutdown submenu; amber chip on parent when armed)
 //   ──────
 //   THIS CHAT  (greyed label; only when a session or draft is selected)
@@ -128,27 +128,34 @@ const viewMenu = createMoreMenu<[]>({
     genLabel.textContent = "General";
     menu.appendChild(genLabel);
 
-    // Relocate New chat + History + Preview-toggle buttons (but NOT the sort select).
+    // Relocate New chat (but NOT the sort select). History, Preview and Scheduled
+    // are only here on the phone: the desktop has the project dashboard's History
+    // button, the chat tool strip's Preview tab and the right rail's Schedule icon,
+    // and the phone has none of those yet.
     if (host) {
       const newBtn = host.querySelector("#newSessionBtn");
-      const histBtn = host.querySelector("#historyBtn");
-      const previewBtn = host.querySelector("#previewToggleBtn");
       if (newBtn) menu.appendChild(newBtn);
-      if (histBtn) menu.appendChild(histBtn);
-      if (previewBtn) menu.appendChild(previewBtn);
+      if (isRemote()) {
+        const histBtn = host.querySelector("#historyBtn");
+        const previewBtn = host.querySelector("#previewToggleBtn");
+        if (histBtn) menu.appendChild(histBtn);
+        if (previewBtn) menu.appendChild(previewBtn);
+      }
     }
 
-    // Scheduled: opens the standalone calendar window (open_schedule_window
-    // builds/focuses the `session-schedule` window). Works from either window
-    // since it's a plain backend command, not an in-window route.
-    const schedBtn = document.createElement("button");
-    schedBtn.className = "smore-item";
-    schedBtn.innerHTML = `<i class="ph ph-calendar-dots"></i><span>Scheduled</span>`;
-    schedBtn.addEventListener("click", () => {
-      openSchedule();
-      close();
-    });
-    menu.appendChild(schedBtn);
+    if (isRemote()) {
+      // Scheduled: opens the standalone calendar window (open_schedule_window
+      // builds/focuses the `session-schedule` window). Works from either window
+      // since it's a plain backend command, not an in-window route.
+      const schedBtn = document.createElement("button");
+      schedBtn.className = "smore-item";
+      schedBtn.innerHTML = `<i class="ph ph-calendar-dots"></i><span>Scheduled</span>`;
+      schedBtn.addEventListener("click", () => {
+        openSchedule();
+        close();
+      });
+      menu.appendChild(schedBtn);
+    }
 
     // ── When done ▸ submenu parent ─────────────────────────────────────────
     // No daemon RPC for get/arm/cancel_when_done (todo 1007): the hydrate read
