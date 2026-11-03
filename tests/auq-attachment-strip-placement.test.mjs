@@ -16,6 +16,7 @@ vi.mock("tauri-plugin-clipboard-api", () => ({
 
 const { renderQuestionUI } = await import("../src/views/sessions/permission-modal/question-ui.ts");
 const { closeLightbox, setLightboxComposerBridge } = await import("../src/shared/chat/lightbox.ts");
+const { expandActiveCard } = await import("../src/views/sessions/permission-modal/question-state.ts");
 
 function baseOpts(overrides = {}) {
   return {
@@ -127,6 +128,26 @@ describe("AUQ card minimize animation", () => {
     vi.advanceTimersByTime(400);
     expect(document.querySelector(".prompt-collapsed.prompt-collapsed--in")).toBeTruthy();
     expect(document.querySelector(".prompt-card")).toBeNull();
+  });
+
+  it("a cancelled exit leaves no timer behind to cut the next exit short", () => {
+    vi.useFakeTimers();
+    renderQuestionUI(baseOpts({ id: "p-1", sessionId: "s-1" }));
+
+    document.querySelector('[data-act="minimize"]').click();
+    vi.advanceTimersByTime(200);
+    // Re-announcing the question mid-exit cancels it.
+    expandActiveCard({ id: "p-1" });
+    expect(document.querySelector(".prompt-card--leaving")).toBeNull();
+
+    // The second exit starts 200ms into the first one's 360ms fallback timer.
+    document.querySelector('[data-act="minimize"]').click();
+    vi.advanceTimersByTime(200);
+    expect(document.querySelector(".prompt-collapsed")).toBeNull();
+    expect(document.querySelector(".prompt-card--leaving")).toBeTruthy();
+
+    vi.advanceTimersByTime(400);
+    expect(document.querySelector(".prompt-collapsed")).toBeTruthy();
   });
 
   it("rises back out of the bar when restored", () => {

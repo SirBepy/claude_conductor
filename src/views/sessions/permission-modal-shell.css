@@ -1,6 +1,8 @@
 /* ── Prompt card (permission + question relay) ────────────────────────────
  * Floating card anchored just above the active composer. Host placement:
- *   - .prompt-card-host--composer: inside .session-composer, bottom: 100%.
+ *   - .prompt-card-host--composer: inside .session-composer, bottom: 100%
+ *     (an open desktop question card instead covers the composer, see the
+ *     :has(.prompt-pager) block below).
  *   - .prompt-card-host--pane: inside .session-pane (read-only, no composer).
  *   - .prompt-card-host--viewport: fixed at viewport bottom (no pane mounted).
  */
