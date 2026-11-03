@@ -16,8 +16,9 @@
     --fs-micro: 0.72rem;
 
     /* One height for every single-line control (text field, select, composer,
-     * send chip, status strip) so neighbours line up; 44px on phones is the
-     * touch-target floor. A control sizes from this, never from its own px. */
+     * send chip, icon button) so neighbours line up; 44px on phones is the
+     * touch-target floor. A control sizes from this or --control-h-sm, never
+     * from its own px. */
     --control-h: 36px;
 
     /* The one small size: chips, pills and tiny buttons that sit in or beside

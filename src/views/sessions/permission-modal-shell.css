@@ -298,7 +298,7 @@
  * question it asks about instead of in the header, and the footer is just the
  * answer box whose arrow is Next/Submit (question-ui-answer-bar.ts), so the
  * Next/Submit button is hidden while the box is up. Skip lives only in the
- * collapsed bar. The negative block margins keep its 32px box from growing
+ * collapsed bar. The negative block margins keep its --control-h box from growing
  * the band past the text's one-line height; the auto left margin pins it
  * right, and after a domain chip (which already takes the auto margin) it
  * sits flush beside it. Review has no box and keeps its Submit button. */
@@ -379,23 +379,6 @@
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) .prompt-card__title,
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) [data-act="ask"] {
     display: none;
-  }
-  /* Ask sits on the question it asks about instead of in the header. The
-     negative block margins keep its 32px box from growing the band past the
-     text's one-line height. Auto left margin pins it right; after a domain
-     chip (which already takes the auto margin) it sits flush beside it. */
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn {
-    display: grid;
-    flex-shrink: 0;
-    width: var(--control-h);
-    height: var(--control-h);
-    margin: calc((22px - var(--control-h)) / 2) -6px calc((22px - var(--control-h)) / 2) auto;
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-domain ~ .prompt-ask__btn {
-    margin-left: 0;
-  }
-  #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn i {
-    font-size: 1.15rem;
   }
   #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) {
     height: 52px;

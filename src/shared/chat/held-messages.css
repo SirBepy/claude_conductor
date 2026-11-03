@@ -1,8 +1,8 @@
 /* Held-messages chip (inline on the working bar) + floating dropdown.
    Uses the app's existing surface/border/primary tokens. */
 
-/* The working bar is the positioning anchor for the dropdown (its own
-   position: relative lives in sessions.css) and hosts the chip slot. */
+/* The working bar anchors the dropdown below (its position: relative lives in
+   sessions.css) and hosts the chip slot. */
 
 /* When the bar is shown only to host held messages (Claude not actually
    working), drop the pulsing dot + italic so it doesn't read as "thinking". */
