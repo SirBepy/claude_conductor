@@ -23,11 +23,14 @@ import {
 import type { Question, QuestionDraft, QuestionRequestedPayload } from "./types";
 import { rerenderSidebar } from "./index";
 import { dropIfAlreadyAnswered } from "./answered-gate";
+import { setLiveQuestionProgress } from "../question-progress";
 
 /** Mirror per-question answered/unanswered progress into the chat transcript's
  *  question card while the floating card is still being answered. No-op for a
  *  prompt with no session, or when its session isn't the one on screen. */
 function syncQuestionProgress(sessionId: string | undefined, promptId: string, questions: Question[], draft: QuestionDraft): void {
+  // The sidebar ring reads this for ANY chat with a card, selected or not.
+  if (sessionId && setLiveQuestionProgress(sessionId, promptId, questions, draft)) rerenderSidebar();
   if (!sessionId || state.selectedId !== sessionId) return;
   const liveAnswered = questions.map((q, i) =>
     isQuestionAnswered(q, draft.freeText.get(i) ?? "", draft.selections.get(i))
@@ -81,6 +84,9 @@ export async function showQuestionCard(
     return;
   }
 
+  // Seed the ring now so a restored draft shows its answered segments before
+  // the first edit.
+  if (payload.session_id) setLiveQuestionProgress(payload.session_id, payload.id, questions, initialDraft);
   renderQuestionUI({
     id: payload.id,
     sessionId: payload.session_id,

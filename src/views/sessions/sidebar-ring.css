@@ -1,0 +1,63 @@
+/* Status ring on a sidebar avatar (sidebar-ring.ts). Replaces the old
+   bottom-left dot: shape = how far, colour = which state.
+   Geometry: a 50-unit viewBox sized to the 50px portrait circle (--row-h 52px
+   minus the 2px row border), drawn from 12 o'clock clockwise. It sits at
+   z-index 6, under the project badge (10) and the dot-era corner markers (11),
+   so the stretch that crosses the badge's notch stays hidden behind it. */
+.sessions-list li.row-portrait .avatar-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  aspect-ratio: 1;
+  z-index: 6;
+  pointer-events: none;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+.avatar-ring circle {
+  fill: none;
+  stroke-width: 3.5;
+  stroke: var(--ring-color, var(--st-working));
+}
+.avatar-ring circle[data-tone="working"]      { --ring-color: var(--st-working);      --ring-glow: var(--st-working-glow); }
+.avatar-ring circle[data-tone="question"]     { --ring-color: var(--st-question);     --ring-glow: var(--st-question-glow); }
+.avatar-ring circle[data-tone="done"]         { --ring-color: var(--st-done);         --ring-glow: var(--st-done-glow); }
+.avatar-ring circle[data-tone="waiting"]      { --ring-color: var(--st-waiting);      --ring-glow: var(--st-waiting-glow); }
+/* rate-limited reuses the documented orange the old dot used, not the red
+   --st-rate-limited, so it reads apart from the question ring. */
+.avatar-ring circle[data-tone="rate-limited"] { --ring-color: var(--chat-state-error); --ring-glow: var(--chat-state-error-glow); }
+.avatar-ring circle[data-tone="external"]     { --ring-color: var(--st-external);     --ring-glow: var(--st-external-glow); }
+.avatar-ring circle[data-tone="attention"]    { --ring-color: var(--st-attention);    --ring-glow: var(--st-attention-glow); }
+.avatar-ring circle[data-tone="close-failed"] { --ring-color: var(--st-close-failed); --ring-glow: var(--st-close-failed-glow); }
+.avatar-ring circle[data-tone="closing"]      { --ring-color: var(--chat-state-closing); --ring-glow: var(--chat-state-closing-glow); }
+
+/* The unfilled part of a plan arc or an unanswered question segment. */
+.avatar-ring circle.is-track {
+  stroke: color-mix(in srgb, var(--color-text) 16%, transparent);
+}
+
+/* One rhythm for every pulsing ring: the current question segment and a
+   needs-permission ring share the old attention-pulse's 1.4s. */
+.avatar-ring circle.is-pulse {
+  animation: ring-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ring-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; filter: drop-shadow(0 0 3px var(--ring-glow)); }
+}
+
+/* "Working, no plan": a solid ring that breathes slowly. Deliberately gentler
+   than the question pulse (Joe, 2026-11-03: the rotating arc was too loud). */
+.avatar-ring circle.is-glow {
+  animation: ring-glow 3.2s ease-in-out infinite;
+}
+@keyframes ring-glow {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; filter: drop-shadow(0 0 2px var(--ring-glow)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-ring circle.is-pulse,
+  .avatar-ring circle.is-glow { animation: none; }
+}

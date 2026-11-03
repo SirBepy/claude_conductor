@@ -1,4 +1,5 @@
 use super::registry::Registry;
+use crate::types::{Instance, PlanStepSnapshot};
 
 impl Registry {
     /// Set the self-reported turn status. `None` clears it (e.g. when a new
@@ -161,6 +162,9 @@ impl Registry {
         {
             let mut guard = self.inner.lock().unwrap();
             if let Some(i) = guard.get_mut(session_id) {
+                if i.busy != busy {
+                    note_busy_flip(i, busy);
+                }
                 i.busy = busy;
                 if busy {
                     i.turn_gen = i.turn_gen.wrapping_add(1);
@@ -189,6 +193,9 @@ impl Registry {
         let mut guard = self.inner.lock().unwrap();
         let Some(i) = guard.get_mut(session_id) else { return false };
         let changed = !i.busy || i.awaiting.is_some();
+        if !i.busy {
+            note_busy_flip(i, true);
+        }
         i.busy = true;
         i.awaiting = None;
         i.last_event_at = Some(chrono::Utc::now().to_rfc3339());
@@ -234,6 +241,9 @@ impl Registry {
         let mut guard = self.inner.lock().unwrap();
         if let Some(i) = guard.get_mut(session_id) {
             if i.turn_gen == gen {
+                if i.busy {
+                    note_busy_flip(i, false);
+                }
                 i.busy = false;
                 return true;
             }
@@ -293,6 +303,30 @@ impl Registry {
             }
         }
         false
+    }
+
+    /// Store the plan a chat just wrote with `write_plan` so the sidebar ring
+    /// and hover card can read it off `Instance.progress`. Returns true only
+    /// if the stored plan actually changed (the caller publishes
+    /// `instances_changed` on true; a re-sent identical plan stays quiet).
+    pub fn set_plan(&self, session_id: &str, plan: Option<Vec<PlanStepSnapshot>>) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(i) = guard.get_mut(session_id) else { return false };
+        if i.progress.plan == plan {
+            return false;
+        }
+        i.progress.plan = plan;
+        true
+    }
+}
+
+/// A busy/idle flip restarts the row's timer, and opening a turn drops the
+/// previous turn's plan: a plan belongs to the turn that wrote it, so a chat
+/// that does not call `write_plan` again must not keep showing the last one.
+fn note_busy_flip(i: &mut Instance, now_busy: bool) {
+    i.progress.state_since = Some(chrono::Utc::now().to_rfc3339());
+    if now_busy {
+        i.progress.plan = None;
     }
 }
 
@@ -638,5 +672,79 @@ mod tests {
     fn set_held_count_unknown_session_is_noop() {
         let registry = Registry::new();
         assert!(!registry.set_held_count("ghost", 1));
+    }
+
+    // --- Sidebar progress ---------------------------------------------------
+
+    fn plan(steps: &[(&str, &str)]) -> Option<Vec<PlanStepSnapshot>> {
+        Some(steps.iter().map(|(t, s)| PlanStepSnapshot { text: (*t).into(), status: (*s).into() }).collect())
+    }
+
+    #[test]
+    fn set_plan_reports_a_change_only_when_the_plan_differs() {
+        let registry = Registry::new();
+        registry.record_interactive_session("s1", Path::new("/tmp/x"), &fresh_settings(), "2026-01-01T00:00:00Z");
+
+        assert!(registry.set_plan("s1", plan(&[("a", "active")])));
+        assert!(!registry.set_plan("s1", plan(&[("a", "active")])), "an identical re-send must not republish");
+        assert!(registry.set_plan("s1", plan(&[("a", "done")])));
+        assert!(!registry.set_plan("nope", plan(&[("a", "done")])), "unknown session");
+    }
+
+    #[test]
+    fn opening_a_turn_drops_the_last_turns_plan_and_stamps_the_time() {
+        let registry = Registry::new();
+        registry.record_interactive_session("s1", Path::new("/tmp/x"), &fresh_settings(), "2026-01-01T00:00:00Z");
+        registry.set_plan("s1", plan(&[("a", "done")]));
+        assert!(registry.get("s1").unwrap().progress.state_since.is_none());
+
+        registry.set_busy("s1", true);
+
+        let i = registry.get("s1").unwrap();
+        assert!(i.progress.plan.is_none(), "a plan belongs to the turn that wrote it");
+        assert!(i.progress.state_since.is_some());
+    }
+
+    #[test]
+    fn the_timer_restarts_on_a_real_flip_not_on_a_repeated_set() {
+        let registry = Registry::new();
+        registry.record_interactive_session("s1", Path::new("/tmp/x"), &fresh_settings(), "2026-01-01T00:00:00Z");
+        registry.set_busy("s1", true);
+        let first = registry.get("s1").unwrap().progress.state_since;
+
+        // Another set_busy(true) while already busy bumps the generation but is
+        // not a new state, so "turn 4m" must not reset to zero.
+        registry.set_busy("s1", true);
+        assert_eq!(registry.get("s1").unwrap().progress.state_since, first);
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        registry.set_busy("s1", false);
+        assert_ne!(registry.get("s1").unwrap().progress.state_since, first, "going idle restarts the timer");
+    }
+
+    #[test]
+    fn a_plan_written_mid_turn_survives_the_turn_ending() {
+        let registry = Registry::new();
+        registry.record_interactive_session("s1", Path::new("/tmp/x"), &fresh_settings(), "2026-01-01T00:00:00Z");
+        registry.set_busy("s1", true);
+        registry.set_plan("s1", plan(&[("a", "done"), ("b", "pending")]));
+
+        registry.set_busy("s1", false);
+
+        let kept = registry.get("s1").unwrap().progress.plan.unwrap();
+        assert_eq!(kept.len(), 2, "the hover card shows where a finished chat got to");
+    }
+
+    #[test]
+    fn mark_turn_live_also_flips_the_timer_and_clears_the_plan() {
+        let registry = Registry::new();
+        registry.record_interactive_session("s1", Path::new("/tmp/x"), &fresh_settings(), "2026-01-01T00:00:00Z");
+        registry.set_plan("s1", plan(&[("a", "done")]));
+
+        assert!(registry.mark_turn_live("s1"));
+
+        let i = registry.get("s1").unwrap();
+        assert!(i.progress.plan.is_none());
+        assert!(i.progress.state_since.is_some());
     }
 }

@@ -15,6 +15,8 @@ import "./sessions-mobile.css";
 import "./project-rail.css";
 import "./session-list.css";
 import "./session-row-portrait.css";
+import "./sidebar-ring.css";
+import "./sidebar-hover-card.css";
 import "./rate-limit-banner.css";
 import "./session-ctx-menu.css";
 import "./session-avatar.css";

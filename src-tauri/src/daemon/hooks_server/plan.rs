@@ -8,6 +8,7 @@
 //! reason this route holds anything at all.
 
 use super::validated_json::ValidatedJson;
+use crate::types::PlanStepSnapshot;
 use super::HookCtx;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
@@ -71,6 +72,18 @@ pub(super) async fn on_write_plan(
     match validate_steps(&body.steps) {
         Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
         Ok(active) => {
+            // The sidebar ring and hover card read the plan off the Instance,
+            // so keep the latest one and tell every surface when it changed.
+            if !body.session_id.is_empty() {
+                let snapshot = body
+                    .steps
+                    .iter()
+                    .map(|s| PlanStepSnapshot { text: s.text.trim().to_string(), status: s.status.clone() })
+                    .collect();
+                if ctx.state.registry.set_plan(&body.session_id, Some(snapshot)) {
+                    crate::daemon::machines::publish_instances_changed(&ctx.state);
+                }
+            }
             // Deliver any comment Joe queued on a step this very call reports
             // `active` - the one moment the hard constraint (never stdin,
             // never early, never late) is satisfiable in one shot. Skipped for
@@ -256,5 +269,48 @@ mod tests {
         let resp = write_plan_json(c, body("s1", vec![step("  a  ", "active")])).await;
 
         assert_eq!(resp["comments"]["a"], serde_json::json!("note"));
+    }
+
+    // --- Sidebar progress ---------------------------------------------------
+
+    fn registered(ctx: &Arc<HookCtx>, session_id: &str) {
+        let settings = std::sync::Mutex::new(Settings::default());
+        ctx.state.registry.record_interactive_session(
+            session_id,
+            std::path::Path::new("/tmp/x"),
+            &settings,
+            "2026-01-01T00:00:00Z",
+        );
+    }
+
+    /// The ring and hover card read the plan off the Instance, so a plan the
+    /// chat writes has to land there with the same trimmed step text the
+    /// checklist keys on.
+    #[tokio::test]
+    async fn a_written_plan_is_kept_on_the_instance() {
+        let c = ctx();
+        registered(&c, "s1");
+
+        write_plan_json(c.clone(), body("s1", vec![step("  a  ", "done"), step("b", "active")])).await;
+
+        let plan = c.state.registry.get("s1").unwrap().progress.plan.unwrap();
+        assert_eq!(plan.len(), 2);
+        assert_eq!((plan[0].text.as_str(), plan[0].status.as_str()), ("a", "done"));
+        assert_eq!((plan[1].text.as_str(), plan[1].status.as_str()), ("b", "active"));
+    }
+
+    /// An invalid plan is rejected loudly, so it must not replace the last
+    /// good one the sidebar is showing.
+    #[tokio::test]
+    async fn a_rejected_plan_leaves_the_previous_one_in_place() {
+        let c = ctx();
+        registered(&c, "s1");
+        write_plan_json(c.clone(), body("s1", vec![step("a", "active")])).await;
+
+        let resp = write_plan_json(c.clone(), body("s1", vec![step("x", "in_progress")])).await;
+
+        assert_eq!(resp["ok"], serde_json::json!(false));
+        let plan = c.state.registry.get("s1").unwrap().progress.plan.unwrap();
+        assert_eq!(plan[0].text, "a");
     }
 }

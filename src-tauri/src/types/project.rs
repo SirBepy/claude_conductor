@@ -235,6 +235,36 @@ pub struct Instance {
     /// registry itself (a registry row is always locally hosted).
     #[serde(default)]
     pub machine: Option<MachineRef>,
+    /// What the sidebar row shows beyond the status flags: the latest
+    /// `write_plan` checklist and when the row last changed busy/idle.
+    #[serde(default)]
+    pub progress: SessionProgress,
+}
+
+/// One step of the plan a chat wrote with `write_plan`, as the sidebar ring
+/// and hover card read it. `status` is `pending` | `active` | `done` | `skipped`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct PlanStepSnapshot {
+    pub text: String,
+    pub status: String,
+}
+
+/// Progress details that ride `Instance` so every window, the phone and a
+/// paired peer's mirror of this row all see them without a second fetch.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct SessionProgress {
+    /// The latest `write_plan` call of the CURRENT turn; cleared when a new
+    /// turn opens, because a plan belongs to the turn that wrote it. `None` for
+    /// a chat that never wrote one. `TodoWrite` checklists never reach the
+    /// daemon, so they are not here.
+    #[serde(default)]
+    pub plan: Option<Vec<PlanStepSnapshot>>,
+    /// RFC3339 of the last busy/idle flip: how long the row has been working
+    /// (turn timer) or waiting/done. `None` until the first flip this run.
+    #[serde(default)]
+    pub state_since: Option<String>,
 }
 
 /// Shape served to the webview. Same as `Instance` for now; kept as a
@@ -404,6 +434,7 @@ mod tests {
             frozen_needs_continue: false,
             auto_frozen: false,
             held_count: 0,
+            progress: Default::default(),
             local_task_running: false,
             successor_of: None,
             machine: None,

@@ -129,8 +129,12 @@ export interface LeadingExtras {
   badgeClass?: string;
   /** Markup appended inside the wrapper, after the badge (the scheduled corner). */
   extra?: string;
-  /** Portrait-only status dot class (`st-*`), rendered bottom-left on the circle. */
-  dotClass?: string;
+  /** The status ring markup (`ringHtml`), "" when the row has no ring. It
+   *  replaced the old bottom-left dot as the portrait row's status signal. */
+  ringHtml?: string;
+  /** True for a close_failed row: the ring's orange collides with
+   *  rate-limited, so a warning glyph is the one spare channel left. */
+  warn?: boolean;
   /** Set only for a session mirrored in from a paired peer machine (multi-
    *  machine federation); undefined/null for every locally-hosted row. */
   machineId?: string | null;
@@ -152,15 +156,14 @@ export function leadingVisual(
 ): string {
   const badge = projBadgeHtml(cwd, `session-proj-badge${extras.badgeClass ? ` ${extras.badgeClass}` : ""}`, extras.machineId);
   // close_failed shares its orange with st-rate-limited (sessions.css), so the
-  // dot alone can't read as distinct - a glyph is the only spare channel left.
-  const dotGlyph = extras.dotClass === "st-close-failed" ? `<i class="ph-bold ph-warning"></i>` : "";
-  const dot = extras.dotClass ? `<span class="avatar-status-dot ${extras.dotClass}">${dotGlyph}</span>` : "";
+  // ring alone can't read as distinct - a glyph is the only spare channel left.
+  const ring = (extras.ringHtml ?? "") + (extras.warn ? `<span class="avatar-warn"><i class="ph-bold ph-warning"></i></span>` : "");
   const titleAttr = statusTitle ? ` title="${escapeHtml(statusTitle)}"` : "";
   if (!charId) {
     const avatarHtml = `<span class="session-avatar session-avatar--placeholder ${statusClass}"${titleAttr}>
           <i class="ph ph-chat-circle-dots"></i>
         </span>`;
-    return avatarWrap(avatarHtml, badge + dot + (extras.extra ?? ""));
+    return avatarWrap(avatarHtml, badge + ring + (extras.extra ?? ""));
   }
   const id = escapeHtml(charId);
   const url = characterIconUrl(charId);
@@ -173,5 +176,5 @@ export function leadingVisual(
           <img class="char-avatar session-char-backdrop" data-character-id="${id}"${preload} alt="" aria-hidden="true">
           <img class="char-avatar session-char-img" data-character-id="${id}"${preload} alt="${id}">
         </span>`;
-  return avatarWrap(avatarHtml, badge + dot + (extras.extra ?? ""));
+  return avatarWrap(avatarHtml, badge + ring + (extras.extra ?? ""));
 }

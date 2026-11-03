@@ -87,6 +87,8 @@ fn emit_ipc_types() {
     out.push_str(&decl::<Avatar>());
     out.push_str(&decl::<ProjectConfig>());
     out.push_str(&decl::<MachineRef>());
+    out.push_str(&decl::<PlanStepSnapshot>());
+    out.push_str(&decl::<SessionProgress>());
     out.push_str(&decl::<Instance>());
     out.push_str(&decl::<ProjectGroup>());
     out.push_str(&decl::<WorktreeSummary>());

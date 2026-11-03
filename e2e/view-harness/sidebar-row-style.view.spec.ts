@@ -102,20 +102,16 @@ test.describe("view-harness / chat row style", () => {
     expect(box.battery).toBe(box.art);
   });
 
-  test("portrait status dot renders bottom-left, replacing the left-edge stripe", async ({ page }) => {
+  test("the status ring replaces the dot and the left-edge stripe on a portrait row", async ({ page }) => {
     await mountSessions(page);
     const row = page.locator("#sessions-list li[data-session-id]").first();
     await row.evaluate((li) => li.classList.add("needs-attention", "is-rate-limited"));
 
-    const dot = row.locator(".avatar-status-dot");
-    await expect(dot).toBeVisible();
-    const dotBox = await dot.evaluate((el) => el.getBoundingClientRect());
-    const avatarBox = await row.locator(".session-avatar").evaluate((el) => el.getBoundingClientRect());
-    expect(dotBox.left).toBeLessThan(avatarBox.left + avatarBox.width / 2);
-    expect(dotBox.bottom).toBeGreaterThan(avatarBox.top + avatarBox.height / 2);
+    // No dot any more: the ring on the avatar edge is the status signal.
+    await expect(row.locator(".avatar-status-dot")).toHaveCount(0);
 
-    // The dot replaces the stripe: needs-attention/rate-limited no longer paint
-    // a left-edge box-shadow/::before on portrait rows.
+    // needs-attention/rate-limited no longer paint a left-edge box-shadow/::before
+    // on portrait rows.
     const stripes = await row.evaluate((li) => {
       const s = getComputedStyle(li);
       const before = getComputedStyle(li, "::before");
