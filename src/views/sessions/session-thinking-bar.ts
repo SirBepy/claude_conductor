@@ -43,7 +43,11 @@ export function wireThinkingBar(pane: HTMLElement, onStop: () => void): void {
 }
 
 let _src: ThinkingBarSource | null = null;
-let _busySince = 0;
+// When each chat's current busy stretch began, by session id. Per session and
+// only written on the idle-to-busy edge, because the bar is re-synced on every
+// chat switch and a single global stamp restarted the clock each time a
+// still-busy chat was returned to.
+const _busySinceById = new Map<string, number>();
 let _elapsedTick: (() => void) | null = null;
 let _progressN: number | null = null;
 let _progressM: number = 0;
@@ -121,7 +125,6 @@ export function syncThinkingBar(src: ThinkingBarSource | null): void {
   // Kept by reference: the live renderer mutates its detail and turn start as
   // events arrive, and the bar reads them at paint time instead of a callback each.
   _src = src;
-  _busySince = Date.now();
   _activity = src?.lastActivity ?? null;
   _activityIdle = src?.activityIdle ?? false;
   _progressN = src?.lastProgress?.n ?? null;
@@ -181,11 +184,9 @@ export function updateThinkingBar(): void {
   const busy = isCurrentSessionBusy();
   // Rising edge = a fresh turn, so silence is measured from here rather than
   // from whatever the previous turn last said.
-  if (busy && !_wasBusy) {
-    _lastEventAt = Date.now();
-    _busySince = Date.now();
-  }
+  if (busy && !_wasBusy) _lastEventAt = Date.now();
   _wasBusy = busy;
+  trackBusySince(busy);
   if (busy && _silenceTick === null) {
     _silenceTick = visibleInterval(updateThinkingBar, 5000);
   } else if (!busy && _silenceTick !== null) {
@@ -245,12 +246,31 @@ export function updateThinkingBar(): void {
   state.heldMessages?.renderChip();
 }
 
+/** Stamps the selected chat's busy-since the first time it is seen busy and
+ *  drops it once it is seen idle. Other chats whose session row says they went
+ *  idle while away are dropped too, so their next turn gets a fresh stamp; a
+ *  key with no session row (a pending placeholder) is left alone. */
+function trackBusySince(busy: boolean): void {
+  const id = state.selectedId;
+  if (id) {
+    if (!busy) _busySinceById.delete(id);
+    else if (!_busySinceById.has(id)) _busySinceById.set(id, Date.now());
+  }
+  for (const known of _busySinceById.keys()) {
+    if (known !== id && state.sessions.some(s => s.session_id === known) && !isSessionActive(known)) {
+      _busySinceById.delete(known);
+    }
+  }
+}
+
 function paintElapsed(): void {
   const bar = _pane?.querySelector<HTMLElement>(".session-thinking");
   if (!bar) return;
-  // The renderer's own turn start survives a chat switch; _busySince is the
-  // fallback while a first turn has produced no event yet.
-  const start = _src?.activeTurnStartedAtMs || _busySince;
+  // The renderer's own turn start survives a chat switch; the per-chat
+  // busy-since is the fallback while a turn has no recorded start of its own.
+  const start = _src?.activeTurnStartedAtMs
+    || (state.selectedId ? _busySinceById.get(state.selectedId) : undefined)
+    || Date.now();
   const text = _wasBusy ? formatElapsed(Date.now() - start) : "";
   for (const n of bar.querySelectorAll<HTMLElement>(".thinking-elapsed")) n.textContent = text;
 }
