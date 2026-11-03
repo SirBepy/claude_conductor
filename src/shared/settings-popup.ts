@@ -103,10 +103,53 @@ export function closeSettingsPopup(): void {
   notify();
 }
 
+const FOCUSABLE =
+  'a[href], button, input:not([type="hidden"]), select, textarea, [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
+
+/** Tab stops in DOM order. A hidden control (the Back button on the settings
+ *  index) has no client rects, so it drops out without a separate check. */
+function tabStops(card: HTMLElement): HTMLElement[] {
+  return [...card.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (el) => !el.matches(":disabled") && el.getClientRects().length > 0,
+  );
+}
+
+/** Keeps Tab / Shift+Tab inside the card: the chat and the rail behind the
+ *  backdrop are still in the document, so the browser would walk onto them. */
+function trapTab(e: KeyboardEvent, card: HTMLElement): void {
+  const target = e.target instanceof Node ? e.target : null;
+  // A modal opened from a page (a confirm, the add-account wizard) sits outside
+  // the card and owns its own Tab order. Focus on <body> is ours to pull back in.
+  if (target && target !== document.body && target !== document.documentElement && !card.contains(target)) return;
+  const stops = tabStops(card);
+  if (stops.length === 0) {
+    e.preventDefault();
+    card.focus({ preventScroll: true });
+    return;
+  }
+  const first = stops[0]!;
+  const last = stops[stops.length - 1]!;
+  const active = document.activeElement;
+  const outside = !(active instanceof Node) || !card.contains(active) || active === card;
+  if (e.shiftKey && (outside || active === first)) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && (outside || active === last)) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 /** Window bubble phase, so a modal opened from a page (a confirm, the add-account
  *  wizard) that handles Escape on `document` gets it first and claims it. */
 function onKey(e: KeyboardEvent): void {
-  if (e.key !== "Escape" || e.defaultPrevented) return;
+  if (e.defaultPrevented) return;
+  if (e.key === "Tab") {
+    const card = backdrop?.querySelector<HTMLElement>(".settings-popup");
+    if (card) trapTab(e, card);
+    return;
+  }
+  if (e.key !== "Escape") return;
   e.preventDefault();
   closeSettingsPopup();
 }
