@@ -6,13 +6,13 @@ import {
   pickAvailableIcon,
   prefillLabel,
   tierLabel,
-  formatElapsed,
   isLoginTimedOut,
   describeLoginOutcome,
   formatTokenExpiry,
   formatRefreshExpiry,
   buildIdentitySurface,
 } from "../src/views/settings/subviews/accounts/wizard-logic.ts";
+import { formatElapsed } from "../src/shared/time.ts";
 
 describe("pickAvailableIcon", () => {
   it("returns the first pool entry when nothing is used", () => {

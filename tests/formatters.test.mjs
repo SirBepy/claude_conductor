@@ -3,7 +3,22 @@
 
 import { describe, it, expect } from "vitest";
 import { pctColor, getPaceColor, fmtPct, valueColor } from "../src/shared/formatters.ts";
-import { hourToMs } from "../src/shared/time.ts";
+import { hourToMs, formatElapsed } from "../src/shared/time.ts";
+
+describe("formatElapsed", () => {
+  it("prints zero and clamps a negative span to 0:00", () => {
+    expect(formatElapsed(0)).toBe("0:00");
+    expect(formatElapsed(-1)).toBe("0:00");
+    expect(formatElapsed(-3_600_000)).toBe("0:00");
+  });
+
+  it("stays m:ss up to 59:59 and switches to h:mm:ss at the hour", () => {
+    expect(formatElapsed(3_599_999)).toBe("59:59");
+    expect(formatElapsed(3_600_000)).toBe("1:00:00");
+    expect(formatElapsed(3_725_000)).toBe("1:02:05");
+    expect(formatElapsed(10 * 3_600_000 + 59_000)).toBe("10:00:59");
+  });
+});
 
 describe("pctColor", () => {
   it("returns dim for null/undefined", () => {

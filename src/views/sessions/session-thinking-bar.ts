@@ -3,6 +3,7 @@ import { visibleInterval } from "../../shared/visible-interval";
 import { escapeHtml } from "../../shared/escape-html";
 import type { ActivityDetail } from "../../shared/chat/tool-meta";
 import { refreshNextChips } from "./next-chip-strip";
+import { formatElapsed } from "../../shared/time";
 
 /** The bar's markup, one copy for the established pane and the draft pane. The
  *  line is a button (it opens the detail block, the only route to Stop on a
@@ -242,15 +243,6 @@ export function updateThinkingBar(): void {
   renderDetail(bar, busy, showStop);
   paintElapsed();
   state.heldMessages?.renderChip();
-}
-
-/** m:ss, or h:mm:ss once a turn passes the hour. */
-export function formatElapsed(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const s = String(total % 60).padStart(2, "0");
-  const m = Math.floor(total / 60) % 60;
-  const h = Math.floor(total / 3600);
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
 function paintElapsed(): void {
