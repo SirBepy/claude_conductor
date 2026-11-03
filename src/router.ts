@@ -61,7 +61,28 @@ function retriggerEnter(el: HTMLElement): void {
   el.classList.add("v-enter");
 }
 
-export async function navigateTo(name: string): Promise<void> {
+// One navigation at a time. A view renders async and only hands back its
+// teardown once that settles, so a second navigation arriving mid-render would
+// find no teardown to run and mount a second copy of the view over the first,
+// whose teardown is then lost (two chat splits, each answering the Dashboard
+// panel). A navigation that arrives while another is still running waits for
+// it; one that arrives with none running starts in the same tick, because
+// callers like openProjectDashboard call showView and then use the pane the
+// view just mounted.
+let navTail: Promise<void> | null = null;
+
+export function navigateTo(name: string): Promise<void> {
+  const run = navTail ? navTail.then(() => navigateNow(name)) : navigateNow(name);
+  const tail: Promise<void> = run
+    .then(() => {}, () => {})
+    .then(() => {
+      if (navTail === tail) navTail = null;
+    });
+  navTail = tail;
+  return run;
+}
+
+async function navigateNow(name: string): Promise<void> {
   if (!currentRoot) return;
   // The tray, the overlay card and the cold-start drain call this directly
   // rather than through showView; they land in the Chats window's panel too.

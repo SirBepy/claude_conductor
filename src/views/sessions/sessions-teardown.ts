@@ -34,6 +34,11 @@ export function setChatHeartbeatDispose(dispose: (() => void) | null): void {
  */
 export function teardownState(): void {
   unwatchCurrentExternalSession();
+  // The split subscribes to the global panel and holds a panel host for as long
+  // as it lives, so a mount left behind would answer the next Dashboard open
+  // alongside the new one, each fighting over the dashboard's module state.
+  state.fabDial?.destroy();
+  state.fabDial = null;
   setPaneRef(null);
   initThinkingBar(null);
   if (state.unlistenInstances) {
