@@ -119,25 +119,28 @@ fn attach_hide_to_tray_with(
 /// Shared body for the `open_dashboard*` commands below. The Chats window is
 /// the app's one desktop window (Home, Schedule and Settings are screens inside
 /// it, reached from its rail), so every "open the dashboard" request surfaces
-/// it and routes it to `pending`. A live window gets `event`/`payload`; a window
-/// that must be built first gets `pending` stashed in `AppState.pending_main_nav`
-/// for its boot to drain through `take_pending_nav`, since a freshly built
-/// webview cannot reliably catch an event emitted before its listeners mount.
+/// it and routes it to `pending`. A window whose listeners are mounted gets
+/// `event`/`payload`; one that is missing or still loading gets `pending`
+/// stashed in `AppState.pending_main_nav` for its boot to drain through
+/// `take_pending_nav`, since a webview cannot catch an event emitted before its
+/// listeners mount.
 fn surface_chats_with_nav(
     app: &AppHandle,
     event: &str,
     payload: impl serde::Serialize + Clone,
     pending: String,
 ) {
-    match nav_route(app.get_webview_window(chats::CHATS_WINDOW_LABEL).is_some()) {
+    let Some(state) = app.try_state::<crate::state::AppState>() else {
+        let _ = chats::open_chats_window(app.clone());
+        return;
+    };
+    let exists = app.get_webview_window(chats::CHATS_WINDOW_LABEL).is_some();
+    match route_nav(&state.pending_main_nav, &state.chats_nav_ready, exists, pending) {
         NavRoute::EmitToLiveWindow => {
             let _ = chats::open_chats_window(app.clone());
             let _ = app.emit_to(chats::CHATS_WINDOW_LABEL, event, payload);
         }
-        NavRoute::StashThenBuild => {
-            if let Some(state) = app.try_state::<crate::state::AppState>() {
-                stash_pending_nav(&state.pending_main_nav, pending);
-            }
+        NavRoute::StashForBoot => {
             let _ = chats::open_chats_window(app.clone());
         }
     }
@@ -147,23 +150,41 @@ fn surface_chats_with_nav(
 #[derive(Debug, PartialEq)]
 enum NavRoute {
     EmitToLiveWindow,
-    StashThenBuild,
+    StashForBoot,
 }
 
-/// A window that does not exist yet cannot catch an event, so its nav goes in
-/// the stash instead. Split out so that decision is testable: `AppHandle` is
-/// the `Wry` runtime, and no mock app can stand in for it.
-fn nav_route(chats_window_exists: bool) -> NavRoute {
-    if chats_window_exists {
-        NavRoute::EmitToLiveWindow
-    } else {
-        NavRoute::StashThenBuild
+/// A window that does not exist yet, or exists but has not mounted its
+/// `navigate-to-*` listeners, cannot catch an event, so its nav goes in the
+/// stash instead (last request wins: the window only ever drains one).
+/// `listeners_ready` flips inside `drain_pending_nav` under the same lock the
+/// stash is written under, so a nav lands either in the stash before the boot
+/// drain reads it or on a window already marked ready, never in the gap
+/// between. Split out so that decision is testable: `AppHandle` is the `Wry`
+/// runtime, and no mock app can stand in for it.
+fn route_nav(
+    slot: &std::sync::Mutex<Option<String>>,
+    listeners_ready: &std::sync::atomic::AtomicBool,
+    chats_window_exists: bool,
+    pending: String,
+) -> NavRoute {
+    let mut guard = slot.lock().unwrap();
+    if chats_window_exists && listeners_ready.load(Ordering::SeqCst) {
+        return NavRoute::EmitToLiveWindow;
     }
+    *guard = Some(pending);
+    NavRoute::StashForBoot
 }
 
-/// Last request wins: the window only ever drains one.
-fn stash_pending_nav(slot: &std::sync::Mutex<Option<String>>, pending: String) {
-    *slot.lock().unwrap() = Some(pending);
+/// The boot-time drain of the stash. The Chats window calls it right after
+/// registering its `navigate-to-*` listeners, so reaching here is also the
+/// signal that live emits are safe from now on.
+pub(crate) fn drain_pending_nav(
+    slot: &std::sync::Mutex<Option<String>>,
+    listeners_ready: &std::sync::atomic::AtomicBool,
+) -> Option<String> {
+    let mut guard = slot.lock().unwrap();
+    listeners_ready.store(true, Ordering::SeqCst);
+    guard.take()
 }
 
 // `(async)`: can build `session-chats` - see the module doc's deadlock rule.
@@ -297,15 +318,30 @@ mod tests {
     }
 
     #[test]
-    fn a_nav_for_a_chats_window_that_does_not_exist_is_stashed_not_emitted() {
-        use super::{nav_route, stash_pending_nav, NavRoute};
-        assert_eq!(nav_route(false), NavRoute::StashThenBuild);
-        assert_eq!(nav_route(true), NavRoute::EmitToLiveWindow);
+    fn a_nav_is_stashed_until_the_chats_window_has_mounted_its_listeners() {
+        use super::{drain_pending_nav, route_nav, NavRoute};
+        use std::sync::atomic::AtomicBool;
 
         let slot = std::sync::Mutex::new(None);
-        stash_pending_nav(&slot, "settings-accounts".to_string());
+        let ready = AtomicBool::new(false);
+
+        // No window yet.
+        assert_eq!(route_nav(&slot, &ready, false, "settings-accounts".into()), NavRoute::StashForBoot);
         assert_eq!(slot.lock().unwrap().as_deref(), Some("settings-accounts"));
-        stash_pending_nav(&slot, "account:a1".to_string());
-        assert_eq!(slot.lock().unwrap().take().as_deref(), Some("account:a1"), "the later request replaces the earlier");
+
+        // Window exists but is still loading: an emit would be lost.
+        assert_eq!(route_nav(&slot, &ready, true, "account:a1".into()), NavRoute::StashForBoot);
+        assert_eq!(slot.lock().unwrap().as_deref(), Some("account:a1"), "the later request replaces the earlier");
+
+        // Boot drains the stash and marks the listeners live.
+        assert_eq!(drain_pending_nav(&slot, &ready).as_deref(), Some("account:a1"));
+        assert_eq!(drain_pending_nav(&slot, &ready), None, "drained once");
+
+        // Now an emit reaches a listener, and nothing is stashed.
+        assert_eq!(route_nav(&slot, &ready, true, "dashboard".into()), NavRoute::EmitToLiveWindow);
+        assert!(slot.lock().unwrap().is_none());
+
+        // A closed-and-rebuilt window is not ready again until its own boot.
+        assert_eq!(route_nav(&slot, &ready, false, "dashboard".into()), NavRoute::StashForBoot);
     }
 }

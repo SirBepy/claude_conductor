@@ -27,6 +27,10 @@ pub fn surface_chats(w: &tauri::WebviewWindow) {
 /// alive (`ipc::ready`) - a finished page load alone can be WebView2's own
 /// error page.
 fn build_chats_window(app: &AppHandle) -> Result<(), String> {
+    // A rebuilt webview has no listeners until its own boot drains the nav stash.
+    if let Some(state) = app.try_state::<crate::state::AppState>() {
+        state.chats_nav_ready.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
     let window = tauri::WebviewWindowBuilder::new(
         app,
         CHATS_WINDOW_LABEL,

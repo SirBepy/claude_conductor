@@ -72,8 +72,7 @@ pub async fn frontend_ready(app: AppHandle, window: tauri::Window) {
 pub async fn take_pending_nav(app: AppHandle) -> Option<String> {
     use tauri::Manager;
     let state = app.try_state::<crate::state::AppState>()?;
-    let nav = state.pending_main_nav.lock().unwrap().take();
-    nav
+    crate::ipc::window::drain_pending_nav(&state.pending_main_nav, &state.chats_nav_ready)
 }
 
 /// Heartbeat for the Chats window's renderer-crash watchdog; catches a WebView2
