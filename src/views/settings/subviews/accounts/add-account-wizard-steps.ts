@@ -8,7 +8,8 @@
 
 import { escapeHtml } from "../../../../shared/escape-html";
 import type { OauthAccountInfo } from "../../../../shared/api";
-import { tierLabel, formatElapsed } from "./wizard-logic";
+import { tierLabel } from "./wizard-logic";
+import { formatElapsed } from "../../../../shared/time";
 import { renderAppearancePicker } from "./appearance-picker";
 
 export type Step = "create" | "cookie" | "login" | "finalize";

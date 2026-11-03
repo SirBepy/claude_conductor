@@ -95,14 +95,6 @@ export function tierLabel(tier: string | null | undefined): string {
     .join(" ") || tier;
 }
 
-/** "83000" ms -> "1:23". */
-export function formatElapsed(elapsedMs: number): string {
-  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
 export function isLoginTimedOut(elapsedMs: number): boolean {
   return elapsedMs >= LOGIN_TIMEOUT_MS;
 }

@@ -9,9 +9,10 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 const { activityDetail } = await import("../src/shared/chat/tool-meta.ts");
 const { describeActivity, describeActivityFull } = await import("../src/shared/chat/chat-dom-renderer.ts");
 const {
-  initThinkingBar, formatElapsed, syncThinkingBar, thinkingBarHtml, wireThinkingBar, updateThinkingBar,
+  initThinkingBar, syncThinkingBar, thinkingBarHtml, wireThinkingBar, updateThinkingBar,
 } = await import("../src/views/sessions/session-thinking-bar.ts");
 const { state } = await import("../src/views/sessions/state.ts");
+const { formatElapsed } = await import("../src/shared/time.ts");
 
 const COMMAND = 'cat permission-modal-track.css; sed -n 295,325p permission-modal-track.css; rg -n "prompt-card" src/views/sessions -g "*.css" | head -40';
 

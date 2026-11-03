@@ -11,6 +11,7 @@ import { fmtResetDisplay, valueColor, computeSafePacePct, formatRelativeMinutes 
 import type { ValueColorSettings } from "../../shared/formatters";
 import type { Account, AuthState, UsageRecord } from "../../shared/api";
 import { navigateTo } from "../../router";
+import { formatElapsed } from "../../shared/time";
 
 const SESSION_WINDOW_MS = 5 * 3_600_000;
 const WEEKLY_WINDOW_MS = 7 * 24 * 3_600_000;
@@ -57,13 +58,6 @@ function ringConicGradient(stops: Array<[number, number, string]>, track: string
 
 // ── Time-stack formatting ────────────────────────────────────────────────—
 
-function fmtCountdown(ms: number): string {
-  const clamped = Math.max(0, ms);
-  const m = Math.floor(clamped / 60_000);
-  const s = Math.floor((clamped % 60_000) / 1000);
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
 /** The bare duration/countdown text + near/hot state for a reset - shared by
  * the initial render and the live tick so both compute it identically. */
 function timeBigText(diffMs: number): { text: string; near: boolean; hot: boolean } {
@@ -72,7 +66,7 @@ function timeBigText(diffMs: number): { text: string; near: boolean; hot: boolea
   // Ring time-stack shows bare "4h 30m" / "12m" with no "resets in" prose, so
   // strip the shared formatter's "in " prefix (same pattern as
   // sessions/preview-panel.ts's relative-time formatting).
-  const text = near ? fmtCountdown(diffMs) : formatRelativeMinutes(diffMs).replace(/^in /, "");
+  const text = near ? formatElapsed(diffMs) : formatRelativeMinutes(diffMs).replace(/^in /, "");
   return { text, near, hot };
 }
 
