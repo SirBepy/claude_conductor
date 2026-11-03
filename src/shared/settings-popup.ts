@@ -41,6 +41,7 @@ let seq = 0;
 let returnFocus: HTMLElement | null = null;
 let navigateBack: (() => void) | null = null;
 let unlockInput: (() => void) | null = null;
+let focusKeeper: MutationObserver | null = null;
 const listeners = new Set<() => void>();
 
 export function isSettingsPopupOpen(): boolean {
@@ -97,6 +98,8 @@ export function closeSettingsPopup(): void {
   window.removeEventListener("keydown", onKey);
   unlockInput?.();
   unlockInput = null;
+  focusKeeper?.disconnect();
+  focusKeeper = null;
   backdrop.remove();
   backdrop = null;
   viewRoot = null;
@@ -191,10 +194,11 @@ function onKey(e: KeyboardEvent): void {
   e.preventDefault();
   // Escape in a field first leaves the field (the field's own handler, which
   // runs before this one, has already reverted an unsaved edit); the next
-  // Escape closes the popup.
+  // Escape closes the popup. Focus goes to the card, not to <body>: the input
+  // lock swallows every key aimed at <body>, so Tab would be dead from there.
   const active = document.activeElement;
   if (active instanceof HTMLElement && isTextEntryElement(active) && backdrop?.contains(active)) {
-    active.blur();
+    backdrop.querySelector<HTMLElement>(".settings-popup")?.focus({ preventScroll: true });
     return;
   }
   closeSettingsPopup();
@@ -228,5 +232,13 @@ function open(): void {
   // sessions-context shortcuts (close chat, new chat) keep firing behind it.
   unlockInput = lockPopupInput(bd);
   window.addEventListener("keydown", onKey);
-  bd.querySelector<HTMLElement>(".settings-popup")!.focus({ preventScroll: true });
+  const card = bd.querySelector<HTMLElement>(".settings-popup")!;
+  card.focus({ preventScroll: true });
+  // A page swap or a page's own re-render that removes the focused control drops
+  // focus to <body> without any focus event, where the lock would eat Tab. The
+  // observer callback runs right after the removal, before any key can arrive.
+  focusKeeper = new MutationObserver(() => {
+    if (document.activeElement === document.body) card.focus({ preventScroll: true });
+  });
+  focusKeeper.observe(card, { childList: true, subtree: true });
 }
