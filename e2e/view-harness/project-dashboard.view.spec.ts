@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 // Reviewed 2026-10-28: a dashboard file row and the PLAN.md link now open the app's Files window instead of VS Code, and the file menu adds Open; this spec asserts neither the open command nor that menu, so its contract is unaffected. Passed after the change.
 // Reviewed 2026-10-27 (dash-cards.ts gained a segmented-bar branch, drawn only for a card whose result carries `segments`; this spec's fixtures carry none, and it passed unchanged).
-// asserts: src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/dashboard-page.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/dash-sections.ts, src/views/sessions/project-dashboard/dash-cards.ts, src/views/sessions/project-dashboard/dash-reports.ts, src/views/sessions/project-dashboard/dash-header.ts, src/views/sessions/project-dashboard/dash-modals.ts, src/views/sessions/project-dashboard/dash-menu.ts, src/views/sessions/project-dashboard/dash-chats.ts, src/views/sessions/project-dashboard/dash-usage.ts, src/views/sessions/project-dashboard/dash-todo-chart.ts, src/views/sessions/project-dashboard/dash-line-chart.ts, src/views/sessions/project-dashboard/dash-motion.ts, src/views/sessions/project-dashboard/quick-track.ts, src/views/sessions/project-dashboard/paging.ts, src/views/sessions/session-header.ts, src/views/sessions/pending-pane.ts, src/views/sessions/session-controls.ts, src/views/sessions/state.ts
+// asserts: src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/dashboard-page.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/dash-sections.ts, src/views/sessions/project-dashboard/dash-cards.ts, src/views/sessions/project-dashboard/dash-reports.ts, src/views/sessions/project-dashboard/dash-header.ts, src/views/sessions/project-dashboard/dash-modals.ts, src/views/sessions/project-dashboard/dash-menu.ts, src/views/sessions/project-dashboard/dash-chats.ts, src/views/sessions/project-dashboard/dash-history-modal.ts, src/views/sessions/project-dashboard/dash-usage.ts, src/views/sessions/project-dashboard/dash-todo-chart.ts, src/views/sessions/project-dashboard/dash-line-chart.ts, src/views/sessions/project-dashboard/dash-motion.ts, src/views/sessions/project-dashboard/quick-track.ts, src/views/sessions/project-dashboard/paging.ts, src/views/sessions/session-header.ts, src/views/sessions/pending-pane.ts, src/views/sessions/session-controls.ts, src/views/sessions/state.ts
 import { capture, fireEvent, mountSessionsList, sessionInstance, waitForStableBox } from "./harness";
 import { expectIconButtonsCentred } from "./icon-centering";
 import {
@@ -26,6 +26,8 @@ interface Backend {
   snapshots: Record<string, unknown>;
   histories: Record<string, unknown>;
   shots: string[];
+  /** Ended chats the History modal pages through, by target id, newest first. */
+  closed?: Record<string, unknown[]>;
 }
 
 /** Answers the dashboard_* commands from one fixture set. The harness mock only
@@ -50,6 +52,11 @@ async function fakeDashboardBackend(page: Page, backend: Backend): Promise<void>
             case "dashboard_list_targets": return answer(JSON.parse(JSON.stringify(b.list)));
             case "dashboard_snapshot": return answer(b.snapshots[key]);
             case "dashboard_history": return answer(b.histories[key]);
+            case "dashboard_closed_chats": {
+              const rows = (b.closed?.[key] ?? []) as unknown[];
+              const offset = Number(args?.offset ?? 0);
+              return answer(rows.slice(offset, offset + Number(args?.limit ?? 0)));
+            }
             case "dashboard_gallery_image": return answer(b.shots[Number(String(args?.id).replace("img-", ""))] ?? b.shots[0]);
             case "dashboard_card_refresh":
             case "dashboard_card_set_enabled":
@@ -65,9 +72,10 @@ async function fakeDashboardBackend(page: Page, backend: Backend): Promise<void>
   }, backend);
 }
 
-async function mountWithDashboard(page: Page, invoke: Record<string, unknown> = {}): Promise<void> {
+async function mountWithDashboard(page: Page, invoke: Record<string, unknown> = {}, closed?: Backend["closed"]): Promise<void> {
   await page.setViewportSize({ width: 1032, height: 1340 });
   await fakeDashboardBackend(page, {
+    closed,
     list: LIST_ROWS,
     snapshots: { "p-conductor": conductorSnapshot(), "g-zirtue": zirtueSnapshot() },
     histories: { "p-conductor": conductorHistory(), "g-zirtue": zirtueHistory() },
@@ -361,6 +369,28 @@ test.describe("view-harness / project dashboard", () => {
     await expect(page.locator(".pd-lightbox img")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.locator(".pd-lightbox")).toHaveCount(0);
+    await modal.locator(".btn-primary").click();
+    await expect(modal).toHaveCount(0);
+  });
+
+  test("the History button on the Recently closed line opens every closed chat of the project in a modal", async ({ page }) => {
+    const day = 86_400_000;
+    const titles = ["Auto-do todos run", "Taskbar click dashboard", "File chip paths", "Quick reply chips", "Phone sheet peek", "Hidden chats owner", "Publish guard"];
+    const closed = titles.map((title, i) => ({
+      session_id: `h-${i}`, title, status: "ended", repo_cwd: CONDUCTOR_CWD, at_ms: Date.now() - Math.floor(i / 2) * day - (i + 1) * 600_000,
+    }));
+    await mountWithDashboard(page, {}, { "p-conductor": closed });
+    await openPageFrom(page, "s-q");
+    const chats = card(page, "chats");
+    await expect(chats.locator(".pd-h [data-pd-all-history]")).toHaveCount(0);
+    await chats.locator("[data-pd-past-label] [data-pd-all-history]").click();
+    const modal = page.locator(".pd-modal");
+    await expect(modal.locator("h3")).toContainText("History");
+    await expect(modal.locator(".pd-row")).toHaveCount(titles.length);
+    await expect(modal.locator(".pd-sub").first()).toHaveText("Today");
+    await expect(modal.locator("[data-pd-older]")).toHaveCount(0);
+    await page.waitForTimeout(350); // open morph
+    await capture(page, "history-modal");
     await modal.locator(".btn-primary").click();
     await expect(modal).toHaveCount(0);
   });

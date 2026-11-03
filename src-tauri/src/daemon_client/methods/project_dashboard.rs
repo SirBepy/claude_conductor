@@ -54,6 +54,10 @@ impl PersistentClient {
         self.call("dashboard_history", json!({"target": target})).await
     }
 
+    pub async fn dashboard_closed_chats(&self, target: Value, offset: u32, limit: u32) -> Result<Value, ClientError> {
+        self.call("dashboard_closed_chats", json!({"target": target, "offset": offset, "limit": limit})).await
+    }
+
     pub async fn dashboard_gallery_image(&self, id: &str) -> Result<Value, ClientError> {
         self.call("dashboard_gallery_image", json!({"id": id})).await
     }

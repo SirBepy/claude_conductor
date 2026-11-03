@@ -15,6 +15,7 @@ import { state } from "../state";
 import type { DashActions, DashCtx } from "./dash-parts";
 import { withCommand } from "./format";
 import { openReportsModal, showImageOverlay } from "./dash-reports";
+import { openHistoryModal } from "./dash-history-modal";
 import { copy, openProjectMenu } from "./dash-menu";
 import type { CardResult, DashTodo, RepoRef } from "./types";
 import type { UsageRange } from "./dash-usage";
@@ -151,7 +152,7 @@ export function makeActions(host: ActionHost): DashActions {
     openHistory: (sessionId) => { void openHistory(sessionId); },
     openFile: (path) => openFileWindow(path),
     openUrl: (url) => { void api.openExternal(url).catch((err) => showToast(`Could not open the link: ${String(err)}`)); },
-    openAllHistory: () => showView("history"),
+    openHistoryModal: () => openHistoryModal(host),
     copyText: (text, what) => copy(text, what),
     toggleTodo: (todo: DashTodo) => {
       const wasDone = host.ctx().doneTodos.has(todo.id);

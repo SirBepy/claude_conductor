@@ -115,6 +115,11 @@
 
 /* Project config popups (project-config.ts): the project name trails the title. */
 .pd-modal-sub { margin-left: 8px; font-weight: 400; color: var(--sb-muted, var(--color-text-muted)); }
+
+/* History modal: a row leads with its chat's character, sized to the 16px lead slot of .pd-ic. */
+.pd-char { flex: none; width: 16px; height: 16px; border-radius: 50%; object-fit: cover; }
+.pd-history .pd-sub:first-child { margin-top: 0; }
+.pd-more { padding: 10px 0 2px; }
 .pd-config-body { padding: 12px 16px 16px; overflow-y: auto; }
 .pd-rename-input { width: 100%; box-sizing: border-box; }
 .pd-modal .modal-body:has(.pd-rename-input) { padding: 14px 16px; }
