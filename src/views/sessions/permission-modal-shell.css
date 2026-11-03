@@ -64,6 +64,63 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* Minimize: the card sinks toward the composer edge it grew from while the
+ * bar takes its place (question-ui-render.ts's minimize() waits for this
+ * animation, COLLAPSE_MS there must match the 0.28s). Two classes so it beats
+ * .prompt-card--no-anim. `forwards` holds the last frame until the swap. */
+.prompt-card.prompt-card--leaving {
+  animation: prompt-card-out 0.28s ease-in forwards;
+  pointer-events: none;
+}
+@keyframes prompt-card-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(28px) scale(0.97); }
+}
+/* Restore: the card rises out of the bar's spot. */
+.prompt-card.prompt-card--expanding {
+  animation: prompt-card-rise 0.28s ease-out;
+}
+@keyframes prompt-card-rise {
+  from { opacity: 0; transform: translateY(28px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .prompt-card.prompt-card--leaving,
+  .prompt-card.prompt-card--expanding {
+    animation: none;
+  }
+}
+
+/* An open question card replaces the chat input instead of floating over the
+ * transcript above it (Joe, 2026-11-03): it anchors to the composer's bottom
+ * edge and the composer's own controls hide behind it, so there is one text
+ * box on screen. Minimizing swaps the card for the bar, which is back to
+ * `bottom: 100%`, and that uncovers the composer again. The phone has its own
+ * fullscreen version of this in the max-width block below. :has(.pager) picks
+ * question cards - the permission card's header has none. */
+@media (min-width: 769px) {
+  #prompt-card-host.prompt-card-host--composer:has(.prompt-card .prompt-pager) {
+    bottom: 0;
+    min-height: 100%;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+  /* Grows to the composer's height when the card is the shorter of the two,
+   * so no composer edge peeks out around it. */
+  #prompt-card-host.prompt-card-host--composer .prompt-card:has(.prompt-pager) {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+  #prompt-card-host.prompt-card-host--composer .prompt-card:has(.prompt-pager) .prompt-card__body {
+    flex-grow: 1;
+  }
+  .session-composer:has(> #prompt-card-host.prompt-card-host--composer .prompt-card .prompt-pager) > :not(#prompt-card-host) {
+    visibility: hidden;
+  }
+}
+
 /* Drag-down-to-peek handle (drag-handle.ts). Hidden by default - only shown
  * at the mobile breakpoint below, so the gesture is inert on desktop with no
  * JS width check needed (pointerdown never lands on a display:none element). */

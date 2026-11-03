@@ -15,6 +15,7 @@ import { invoke } from "../../../shared/ipc";
 import { blobToBase64, resolveClipboardAttachments } from "../../../shared/chat/composer-attachments";
 import { mimeToIcon } from "../../../shared/chat/attachment-hydrator";
 import { openLightbox } from "../../../shared/chat/lightbox";
+import type { LightboxComposerBridge } from "../../../shared/chat/lightbox";
 import { decorateAttachmentChip, markAttachmentPop } from "../../../shared/chat/attachment-chip";
 import { imageMimeFromPath } from "../../../shared/image-mime";
 import { downscaleImage } from "./image-downscale";
@@ -56,6 +57,9 @@ export interface AuqAttachmentsOpts {
   /** Panel index the card is currently showing, read at attach time so an
    *  image stays on the step it was pasted into. */
   currentPanel?: () => number;
+  /** Whose text the image preview's caption box edits. The card hands in its
+   *  own answer field; left unset, the preview would edit the main chat input. */
+  captionBridge?: LightboxComposerBridge | null;
   /** Called after every mutation (attach/remove) to trigger a re-render. */
   onChange: () => void;
 }
@@ -283,7 +287,7 @@ export function createAuqAttachments(opts: AuqAttachmentsOpts): AuqAttachmentsCo
         const img = document.createElement("img");
         img.src = `data:${a.mime};base64,${a.data}`;
         img.alt = a.filename;
-        img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }));
+        img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }, opts.captionBridge));
         div.appendChild(img);
       } else if (!(isImage && a.uploading)) {
         // An image still being read stays a bare tile under the upload spinner.

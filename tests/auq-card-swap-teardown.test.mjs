@@ -42,6 +42,8 @@ function baseOpts(overrides = {}) {
 // the live card's own DOM, routing through the same closure Escape used to reach.
 function clickSkip() {
   document.querySelector('[data-act="minimize"]').click();
+  // The card plays a short exit before the bar replaces it (fake timers here).
+  vi.advanceTimersByTime(400);
   document.querySelector('.prompt-collapsed [data-act="cancel"]').click();
 }
 

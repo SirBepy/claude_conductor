@@ -5,7 +5,7 @@
 
 import { isElNearBottom } from "../../../shared/chat/chat-dom-renderer";
 import type { AuqAttachmentsController } from "./attachments";
-import { PEEK_SETTLED_EVENT, peekOffset } from "./drag-handle";
+import { PEEK_SETTLED_EVENT } from "./drag-handle";
 import type { QuestionRenderState } from "./question-ui-templates";
 
 export interface QuestionCardLayout {
@@ -56,11 +56,14 @@ export function createQuestionCardLayout(
     // someone who scrolled up to reread earlier messages back down every
     // keystroke.
     const wasNearBottom = isElNearBottom(messagesEl);
-    // Only the part of a peeked card still on screen covers the chat, so a
-    // peek uncovers the latest messages instead of an empty band. Peeking is
-    // the permission card's, and a question card's on the --viewport fallback
-    // host; the phone's fullscreen question page has no handle.
-    const covered = Math.max(0, card.offsetHeight - peekOffset(card));
+    // Measured as the card's overlap with the transcript, not its height: an
+    // open question card sits over the composer too, so only the part above the
+    // composer hides messages. A peek moves the card by transform, which the
+    // rect already reflects, so a peeked card uncovers the latest messages
+    // instead of leaving an empty band. Peeking is the permission card's, and
+    // a question card's on the --viewport fallback host; the phone's
+    // fullscreen question page has no handle.
+    const covered = Math.max(0, messagesEl.getBoundingClientRect().bottom - card.getBoundingClientRect().top);
     messagesEl.style.paddingBottom = `${covered + 12}px`;
     if (wasNearBottom) messagesEl.scrollTop = messagesEl.scrollHeight - messagesEl.clientHeight;
   };

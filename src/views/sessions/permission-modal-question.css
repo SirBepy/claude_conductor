@@ -216,7 +216,14 @@
  * Attachment chip styles (.attachment/.rm/etc.) come from composer.css's
  * .composer-attachments rules, already global. */
 .prompt-attachments {
-  margin-top: 4px;
+  /* Sits right above its answer box (footer or review note); the top margin
+   * clears the remove buttons that poke 6px above a thumbnail. */
+  margin: 8px 0 8px;
+  /* Many images scroll inside the strip rather than growing the card until the
+   * options list is squeezed out. */
+  max-height: 184px;
+  overflow-y: auto;
+  padding-top: 6px;
 }
 /* Transient feedback for a paste that couldn't attach - see
  * question-ui-render.ts's showPasteHint. */
@@ -279,6 +286,18 @@
    * only .prompt-card reasserts it, so without this the bar and its restore
    * caret are both inert. */
   pointer-events: auto;
+}
+/* minimize() sets this class once per collapse, so a later re-render of the bar
+ * does not replay it. Rises out of the composer edge the card just sank toward. */
+.prompt-collapsed.prompt-collapsed--in {
+  animation: prompt-collapsed-in 0.28s ease-out;
+}
+@keyframes prompt-collapsed-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .prompt-collapsed.prompt-collapsed--in { animation: none; }
 }
 .prompt-collapsed__q {
   font-size: 0.88rem;
