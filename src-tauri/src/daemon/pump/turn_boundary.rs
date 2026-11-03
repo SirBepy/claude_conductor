@@ -60,6 +60,23 @@ impl TurnBoundary {
         action
     }
 
+    /// A `result` line that arrives after `cancel_turn` wrote an interrupt. A
+    /// `--resume` child interrupted before its first `stream_event` answers
+    /// with an eventless `result` that `on_result_line` would take for a
+    /// history replay; the interrupt is the one fact that says it ended the
+    /// live turn, and no later line will end it. The replay window shuts here
+    /// because the live turn has now happened.
+    pub(crate) fn on_interrupted_result_line(&mut self) -> TurnAction {
+        match self.on_result_line() {
+            TurnAction::ReplayedResult => {
+                self.replaying = false;
+                self.ended_once = true;
+                TurnAction::TurnEnded
+            }
+            other => other,
+        }
+    }
+
     pub(crate) fn is_live(&self) -> bool {
         self.live
     }
@@ -153,6 +170,44 @@ mod tests {
         assert!(turn.is_idle_after_a_turn());
         turn.on_stream_event();
         assert!(!turn.is_idle_after_a_turn(), "the next turn closes the window again");
+    }
+
+    /// Session e33c1286, 2026-11-01T01:42:57Z: a send reached a chat the `/close`
+    /// teardown had just killed, so it respawned with `--resume`, and a Stop
+    /// click interrupted the new child two seconds later, before its first
+    /// `stream_event`. The eventless `result` that answered the interrupt read
+    /// as a replayed history line, `turn end: pump_turn_gen=3
+    /// registry_turn_gen=3` was logged, and `busy` stayed true until the
+    /// 20-minute watchdog because no second result line was ever coming.
+    #[test]
+    fn an_interrupt_that_beats_the_first_stream_event_ends_the_turn_of_a_resumed_child() {
+        let registry = registry_with_session();
+        let mut turn = TurnBoundary::new(true);
+
+        registry.set_busy("s", true);
+        let pump_gen = registry.current_turn_gen("s");
+
+        assert_eq!(turn.on_interrupted_result_line(), TurnAction::TurnEnded);
+        assert!(registry.set_busy_false_if_gen("s", pump_gen));
+        assert!(!registry.get("s").unwrap().busy);
+        assert!(turn.is_idle_after_a_turn(), "the interrupted turn counts as a real turn that ended");
+    }
+
+    /// The replay window shuts for good once the interrupt has answered: the
+    /// next eventless result is a genuine turn end, not an opening replay.
+    #[test]
+    fn the_interrupt_answer_shuts_the_replay_window() {
+        let mut turn = TurnBoundary::new(true);
+        assert_eq!(turn.on_interrupted_result_line(), TurnAction::TurnEnded);
+        assert_eq!(turn.on_result_line(), TurnAction::TurnEnded);
+    }
+
+    /// Without an interrupt the opening replay is still swallowed: the new
+    /// path must not turn every resumed child's first result into a turn end.
+    #[test]
+    fn a_resumed_child_with_no_interrupt_still_swallows_its_replayed_result() {
+        let mut turn = TurnBoundary::new(true);
+        assert_eq!(turn.on_result_line(), TurnAction::ReplayedResult);
     }
 
     fn registry_with_session() -> Registry {

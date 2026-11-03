@@ -264,6 +264,7 @@ pub async fn cancel_turn(map: &SessionMap, session_id: &str) -> Result<(), Lifec
     let mut stdin = session.stdin.lock().await;
     stdin.write_all(&line).await?;
     stdin.flush().await?;
+    session.note_interrupt_sent();
     // The held-answer rescue (todo 926) reaches the daemon only through here, so
     // this line is what tells a rescued wedge apart from one that self-resolved.
     log::info!("daemon: cancel_turn sent an interrupt to session {session_id}");
@@ -398,6 +399,24 @@ mod tests {
         let map = new_session_map();
         let r = cancel_turn(&map, "nope").await;
         assert!(matches!(r, Err(LifecycleError::NotFound(_))));
+    }
+
+    /// The pump reads this at the next `result` line to tell an interrupted
+    /// turn that never streamed from a `--resume` history replay.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cancel_turn_leaves_the_session_flagged_for_the_pump() {
+        use crate::daemon::session_test_support::spawn_fake_session;
+        let map = new_session_map();
+        let mut child = spawn_fake_session(&map, "flag-s").await;
+        let session = map.get("flag-s").unwrap().clone();
+        assert!(!session.take_interrupt_sent(), "nothing flagged before an interrupt");
+
+        cancel_turn(&map, "flag-s").await.unwrap();
+
+        assert!(session.take_interrupt_sent(), "cancel_turn must flag the session");
+        assert!(!session.take_interrupt_sent(), "the flag is consumed by the first read");
+        let _ = child.kill().await;
     }
 
     #[tokio::test]
