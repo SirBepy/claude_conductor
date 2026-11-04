@@ -92,10 +92,11 @@ pub async fn frontend_ping(app: AppHandle, raf_tick: u64) {
     }
 }
 
-/// Writes a webview `[perf]` line (src/shared/perf.ts) to the app log. Release
-/// builds have no devtools, so without this a slow chat open on the installed
-/// app leaves no trace of which phase was slow. Capped so a runaway caller
-/// cannot flood the log with one giant line.
+/// Writes a webview diagnostic line (src/shared/perf.ts) to the app log: the
+/// `[perf]` phase and long-task lines, and the `[chrome]` pane-state lines from
+/// the chat-pane watchdog. Release builds have no devtools, so without this a
+/// slow chat open or a broken pane on the installed app leaves no trace.
+/// Capped so a runaway caller cannot flood the log with one giant line.
 #[tauri::command]
 pub async fn log_webview_perf(window: tauri::Window, line: String) {
     log::warn!(target: "webview_perf", "[{}] {}", window.label(), clip_log_line(&line));

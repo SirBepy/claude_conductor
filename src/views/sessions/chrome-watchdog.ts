@@ -43,12 +43,17 @@ function snapshot(view: HTMLElement, pane: HTMLElement): ChromeSnapshot {
     }
   }
   const composer = pane.querySelector<HTMLElement>(".session-composer");
-  const input = pane.querySelector<HTMLElement>(".composer-textarea:not(#prompt-card-host *)");
+  // Scoped to the main composer: the same .composer-textarea class is also stamped on the
+  // todo step-note editor inside a transcript row, which comes first in DOM order.
+  const input = composer?.querySelector<HTMLElement>(".composer-textarea:not(#prompt-card-host *)");
   const inputRect = input?.getBoundingClientRect();
   const msgs = pane.querySelector<HTMLElement>(".session-messages");
   return {
-    // getClientRects is empty for a pane hidden by display:none (another view on top), where a zero-height input is expected.
-    hasComposer: !!composer && view.isConnected && pane.getClientRects().length > 0,
+    // A pane that is not on screen has a zero-height or hidden input by design: display:none
+    // (another view on top) empties getClientRects, and the phone's list mode parks the pane
+    // with visibility:hidden plus a transform, which leaves the rects non-empty.
+    hasComposer: !!composer && view.isConnected && pane.getClientRects().length > 0
+      && getComputedStyle(pane).visibility !== "hidden",
     composerInputVisible: !!input && !!inputRect && inputRect.height > 0 && getComputedStyle(input).visibility !== "hidden",
     composerInputBottom: inputRect?.bottom ?? 0,
     viewportHeight: window.innerHeight,
