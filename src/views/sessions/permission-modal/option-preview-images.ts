@@ -1,4 +1,4 @@
-// Local images in an option's `preview` HTML. The preview frame is a sandboxed
+// Local images in a question's or an option's `preview` HTML. The preview frame is a sandboxed
 // srcdoc under a CSP of `img-src 'self' data: blob:`, so a file: <img> renders
 // broken. Each one is read through `read_image_file` (the same command the
 // status bar uses for agent-surfaced paths) and swapped for a data: URL.

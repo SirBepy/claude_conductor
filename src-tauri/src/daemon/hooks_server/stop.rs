@@ -107,7 +107,7 @@ pub(super) async fn on_stop(
             .map(|s| s.mcp_miss_streak.load(Ordering::Relaxed))
             .unwrap_or(0);
         let mcp_attached = mcp_is_attached(mcp_config_written, miss_streak);
-        let question_card_posted = ctx.state.registry.question_posted_this_turn(&session_id, gen);
+        let question_card_posted = question_card_is_up(&ctx.state, &session_id, gen).await;
         let verdict = missing_requirement_reason(
             payload.stop_hook_active,
             has_current_report,
@@ -237,6 +237,13 @@ pub(super) async fn on_stop(
     (StatusCode::OK, Json(json!({"ok": true})))
 }
 
+/// A `question` status is backed when a card went up this turn, or an earlier
+/// turn's card is still open (a parked or durable one): either way Joe has
+/// something to answer, so the turn must not be told to post a second card.
+async fn question_card_is_up(state: &crate::daemon::state::DaemonState, session_id: &str, gen: u64) -> bool {
+    state.registry.question_posted_this_turn(session_id, gen) || state.session_has_pending_question(session_id).await
+}
+
 /// Registry half of the Stop-time settle. Returns whether busy was cleared, so
 /// the caller can mirror it to the on-disk chat state (kept out of here so
 /// tests never touch the real data dir).
@@ -329,6 +336,17 @@ mod tests {
         let row = state.registry.get("s").unwrap();
         assert!(!row.busy);
         assert_ne!(row.awaiting.as_deref(), Some("question"));
+    }
+
+    /// A card left open from an earlier turn backs a `question` status this turn,
+    /// so the Stop hook must not tell the chat to post a duplicate.
+    #[tokio::test]
+    async fn an_older_open_question_card_counts_as_a_card_up_this_turn() {
+        let (state, gen) = state_with_busy_turn("s");
+        assert!(!question_card_is_up(&state, "s", gen).await);
+        state.add_prompt("q1", "question-requested", json!({"session_id": "s", "seq": 1}), true).await;
+        assert!(question_card_is_up(&state, "s", gen).await);
+        assert!(!question_card_is_up(&state, "other", gen).await);
     }
 
     #[tokio::test]
