@@ -22,8 +22,9 @@ export class ComposerStrayInput {
 
   /** Where input that landed on no editable element belongs, or null to leave
    * the event alone. An open question card owns its own free-text field and
-   * floats over the composer, so it wins; the composer is the fallback. */
-  private target(): HTMLTextAreaElement | null {
+   * floats over the composer, so it wins; the composer is the fallback.
+   * `opensNote` lets a keystroke open the review step's closed note box. */
+  private target(opensNote: boolean): HTMLTextAreaElement | null {
     const textarea = this.cb.getTextarea();
     if (this.cb.isDisabled() || !textarea || textarea.disabled) return null;
     // A modal's focused control (e.g. askConfirm's Cancel button) is
@@ -33,9 +34,17 @@ export class ComposerStrayInput {
     // Code mode covers the chat: typing there must not land in a hidden box.
     if (textarea.closest(".code-mode-on")) return null;
     if (isFormControlElement(document.activeElement)) return null;
-    const cardInput = document.querySelector<HTMLTextAreaElement>(
-      `#${QUESTION_CARD_HOST_ID} .prompt-q__other-input, #${QUESTION_CARD_HOST_ID} .prompt-extra-input`,
-    );
+    const cardFieldSelector =
+      `#${QUESTION_CARD_HOST_ID} .prompt-q__other-input, #${QUESTION_CARD_HOST_ID} .prompt-extra-input`;
+    let cardInput = document.querySelector<HTMLTextAreaElement>(cardFieldSelector);
+    // The review step has no text box until "Add a note" is tapped, so a
+    // typed character opens it (its click handler is synchronous) instead of
+    // falling through to the composer behind the card. Space is left alone:
+    // it is not a note's first character, and it presses a focused Submit.
+    if (!cardInput && opensNote) {
+      document.querySelector<HTMLButtonElement>(`#${QUESTION_CARD_HOST_ID} [data-act="add-note"]`)?.click();
+      cardInput = document.querySelector<HTMLTextAreaElement>(cardFieldSelector);
+    }
     return cardInput ?? textarea;
   }
 
@@ -50,7 +59,7 @@ export class ComposerStrayInput {
   private onKeydown = (e: KeyboardEvent): void => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key.length !== 1) return;
-    const target = this.target();
+    const target = this.target(e.key.trim() !== "");
     if (!target) return;
     target.focus();
     this.insert(target, e.key);
@@ -60,9 +69,9 @@ export class ComposerStrayInput {
   // Paste half of onKeydown's type-anywhere behaviour: that handler skips
   // modifier chords, and the browser drops a paste with no editable focused.
   private onPaste = (e: ClipboardEvent): void => {
-    const target = this.target();
+    const target = this.target(false);
     if (!target) return;
-    const text = e.clipboardData?.getData("text/plain") ?? "";
+    const text =e.clipboardData?.getData("text/plain") ?? "";
     const hasFile = clipboardHasFile(e.clipboardData);
     // Focusing mid-event doesn't redirect the default action (it was already
     // bound to <body>), so this handler has to place the payload itself.
