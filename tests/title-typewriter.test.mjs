@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-const { typeSwap, titleShown, titleTarget } = await import("../src/shared/title-typewriter.ts");
+const { typeSwap, titleShown, titleTarget, cancelTitleSwap } = await import("../src/shared/title-typewriter.ts");
 const { reconcileList } = await import("../src/views/sessions/sidebar-anim.ts");
 
 globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 16);
@@ -58,6 +58,37 @@ describe("typeSwap", () => {
     vi.runAllTimers();
     expect(el.textContent).toBe("Alpha gamma");
     expect(titleTarget(el)).toBe("Alpha gamma");
+  });
+
+  it("a burst of same-target calls does not stall the swap in flight", () => {
+    const el = span("New chat");
+    typeSwap(el, "Fix login bug");
+    // instances-changed fires every few ms while streaming; each re-asserts the
+    // title the header is already heading to.
+    for (let i = 0; i < 100; i++) {
+      vi.advanceTimersByTime(10);
+      typeSwap(el, "Fix login bug");
+    }
+    expect(el.textContent).toBe("Fix login bug");
+  });
+
+  it("an outright set cancels a swap still typing", () => {
+    const el = span("New chat");
+    typeSwap(el, "Alpha beta gamma");
+    vi.advanceTimersByTime(300);
+    typeSwap(el, "Other", { animate: false });
+    vi.runAllTimers();
+    expect(el.textContent).toBe("Other");
+  });
+
+  it("cancelTitleSwap stops the timer and leaves the text", () => {
+    const el = span("New chat");
+    typeSwap(el, "Alpha beta");
+    vi.advanceTimersByTime(30);
+    const frozen = el.textContent;
+    cancelTitleSwap(el);
+    vi.runAllTimers();
+    expect(el.textContent).toBe(frozen);
   });
 
   it("leaves an unchanged title untouched", () => {

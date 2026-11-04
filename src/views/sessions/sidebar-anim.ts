@@ -1,4 +1,4 @@
-import { titleShown, titleTarget, typeSwap } from "../../shared/title-typewriter";
+import { cancelTitleSwap, titleShown, titleTarget, typeSwap } from "../../shared/title-typewriter";
 
 export const LS_ANIM = "cc_sidebar_animations";
 
@@ -134,6 +134,7 @@ function updateNode(kept: HTMLLIElement, html: string, animEnabled: boolean): vo
   const oldTitleEl = kept.querySelector<HTMLElement>(TITLE_SEL);
   const oldTarget = oldTitleEl ? titleTarget(oldTitleEl) : null;
   const oldShown = oldTitleEl ? titleShown(oldTitleEl) : null;
+  if (oldTitleEl) cancelTitleSwap(oldTitleEl);
   kept.className = fresh.className;
   kept.innerHTML = fresh.innerHTML;
   // The innerHTML swap above holds the final title already; retype it from what

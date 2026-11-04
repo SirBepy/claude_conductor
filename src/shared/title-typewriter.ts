@@ -47,6 +47,14 @@ export function titleShown(el: HTMLElement): string {
   return runs.get(el)?.shown ?? (el.textContent ?? "").replace(EMPTY_HOLD, "");
 }
 
+/** Stops a swap in flight and leaves whatever is on screen. For an element the
+ *  caller is about to detach, so its timer does not keep painting a dead node. */
+export function cancelTitleSwap(el: HTMLElement): void {
+  const run = runs.get(el);
+  if (run?.timer) clearTimeout(run.timer);
+  runs.delete(el);
+}
+
 function commonPrefixLength(a: string, b: string): number {
   let i = 0;
   while (i < a.length && i < b.length && a[i] === b[i]) i++;
@@ -64,6 +72,9 @@ function commonPrefixLength(a: string, b: string): number {
  */
 export function typeSwap(el: HTMLElement, next: string, opts: { from?: string; animate?: boolean } = {}): void {
   const prev = runs.get(el);
+  // The pane header calls this on every instances-changed with the title it
+  // already has; a burst of those must not re-arm the timer and stall the swap.
+  if (prev && prev.target === next && opts.from === undefined && opts.animate !== false) return;
   if (prev?.timer) clearTimeout(prev.timer);
   const start = opts.from ?? prev?.shown ?? titleShown(el);
 

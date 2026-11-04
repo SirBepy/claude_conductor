@@ -1,4 +1,5 @@
 import { escapeHtml } from "../../shared/escape-html";
+import { typeSwap } from "../../shared/title-typewriter";
 import { modelLabel as shortModelName } from "../../shared/model-name";
 import { modelRankIcon } from "./sidebar-row-visuals";
 import { projBadgeHtml, wrapUpTooltip } from "./sidebar-row-visuals";
@@ -167,7 +168,9 @@ export class SessionHeader {
     });
   }
 
-  setTitle(text: string): void { this._titleEl.textContent = text; }
+  /** Sets the title outright. Goes through the typewriter module so a swap still
+   *  typing on this element is cancelled instead of painting over the new text. */
+  setTitle(text: string): void { typeSwap(this._titleEl, text, { animate: false }); }
 
   /** Fades the title and project line in again. A draft calls it as it becomes
    *  its chat, so the project name it opened on hands over to the chat's name. */
