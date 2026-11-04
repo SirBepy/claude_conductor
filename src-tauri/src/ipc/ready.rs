@@ -167,6 +167,11 @@ fn reload(app: &AppHandle, label: &str, url: &str) {
     let Some(w) = app.get_webview_window(label) else { return };
     let full = app_url(url);
     log::warn!("{label}: no ready heartbeat; reloading -> {full}");
+    // Only the chats window owns the nav-ready flag; see `reload_chats` in the
+    // heartbeat watchdog for why it is cleared before the navigate.
+    if label == crate::ipc::window::CHATS_WINDOW_LABEL {
+        crate::ipc::window::mark_chats_nav_listeners_gone(app);
+    }
     if let Ok(parsed) = full.parse::<tauri::Url>() {
         let _ = w.navigate(parsed);
     }

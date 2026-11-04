@@ -351,4 +351,46 @@ mod tests {
         // A closed-and-rebuilt window is not ready again until its own boot.
         assert_eq!(route_nav(&slot, &ready, false, "dashboard".into()), NavRoute::StashForBoot);
     }
+
+    #[test]
+    fn a_reloaded_chats_window_is_not_ready_again_until_its_own_boot() {
+        use super::{chats::nav_listeners_gone, drain_pending_nav, route_nav, NavRoute};
+        use std::sync::atomic::AtomicBool;
+
+        let slot = std::sync::Mutex::new(None);
+        let ready = AtomicBool::new(false);
+        drain_pending_nav(&slot, &ready);
+        assert_eq!(route_nav(&slot, &ready, true, "a".into()), NavRoute::EmitToLiveWindow);
+
+        // The window is navigated in place: the new page has no listeners yet.
+        nav_listeners_gone(&ready);
+        assert_eq!(route_nav(&slot, &ready, true, "b".into()), NavRoute::StashForBoot);
+        assert_eq!(drain_pending_nav(&slot, &ready).as_deref(), Some("b"));
+    }
+
+    /// `AppHandle` is the `Wry` runtime and no mock app can stand in for it, so
+    /// the two in-place reload paths cannot be driven here. Pin their wiring in
+    /// the source instead, the way the second-launch test does for `lib.rs`.
+    fn fn_body<'a>(src: &'a str, sig: &str) -> &'a str {
+        let start = src.find(sig).unwrap_or_else(|| panic!("{sig} not found"));
+        let rest = &src[start..];
+        &rest[..rest.find("\n}").expect("fn end")]
+    }
+
+    #[test]
+    fn every_in_place_chats_reload_clears_the_nav_ready_flag_before_navigating() {
+        let watchdog = fn_body(include_str!("../../bootstrap/watchdogs.rs"), "fn reload_chats(");
+        let gate = fn_body(include_str!("../ready.rs"), "fn reload(");
+        for (name, body) in [("watchdogs::reload_chats", watchdog), ("ready::reload", gate)] {
+            let mark = body
+                .find("mark_chats_nav_listeners_gone(")
+                .unwrap_or_else(|| panic!("{name} never clears chats_nav_ready"));
+            let navigate = body.find(".navigate(").unwrap_or_else(|| panic!("{name} no longer navigates"));
+            assert!(mark < navigate, "{name} must clear the flag before navigating, or a fast boot's drain is overwritten");
+        }
+        assert!(
+            gate.contains("CHATS_WINDOW_LABEL"),
+            "ready::reload serves every window; only the chats window owns the flag"
+        );
+    }
 }

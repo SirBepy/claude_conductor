@@ -11,6 +11,22 @@ pub const CHATS_WINDOW_LABEL: &str = "session-chats";
 /// watchdog or the ready gate has to reload it.
 pub const CHATS_WINDOW_URL: &str = "index.html?chatswindow=1#sessions";
 
+/// A freshly built or navigated chats webview has no `navigate-to-*` listeners
+/// until its own boot drains the nav stash (`take_pending_nav` flips the flag
+/// back). Clears the flag so a nav that arrives in between is stashed rather than
+/// emitted to nobody. Call it BEFORE the build or `navigate`: a fast boot's drain
+/// would otherwise be overwritten and leave the flag false for good.
+pub(crate) fn nav_listeners_gone(chats_nav_ready: &std::sync::atomic::AtomicBool) {
+    chats_nav_ready.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// `nav_listeners_gone` on the app's own flag; a no-op before `AppState` exists.
+pub(crate) fn mark_chats_nav_listeners_gone(app: &AppHandle) {
+    if let Some(state) = app.try_state::<crate::state::AppState>() {
+        nav_listeners_gone(&state.chats_nav_ready);
+    }
+}
+
 /// Show + focus an already-built chats window.
 pub fn surface_chats(w: &tauri::WebviewWindow) {
     super::activation::before_show(w.app_handle(), w.label());
@@ -27,10 +43,7 @@ pub fn surface_chats(w: &tauri::WebviewWindow) {
 /// alive (`ipc::ready`) - a finished page load alone can be WebView2's own
 /// error page.
 fn build_chats_window(app: &AppHandle) -> Result<(), String> {
-    // A rebuilt webview has no listeners until its own boot drains the nav stash.
-    if let Some(state) = app.try_state::<crate::state::AppState>() {
-        state.chats_nav_ready.store(false, std::sync::atomic::Ordering::SeqCst);
-    }
+    mark_chats_nav_listeners_gone(app);
     let window = tauri::WebviewWindowBuilder::new(
         app,
         CHATS_WINDOW_LABEL,
