@@ -1,9 +1,10 @@
 // Held messages: while Claude is busy on a turn, follow-up messages are not
-// sent immediately. They're "held" (staged) per session, shown as an inline
-// chip on the working bar, and flushed as ONE bundled user message either when
-// Claude finishes cleanly or when the user forces it via "Send now".
+// sent immediately. They're "held" (staged) per session, shown as a count
+// badge on the composer's Send button, and flushed as ONE bundled user message
+// either when Claude finishes cleanly or when the user forces it via the
+// list's "Interrupt & send".
 //
-// This controller owns the per-session held set and renders the chip + a
+// This controller owns the per-session held set and renders the badge + a
 // floating dropdown of editable rows. It is a singleton (stored on
 // `state.heldMessages`); the active pane re-`attach()`es it on every mount so
 // the held set survives session switches, and is ALSO mirrored to localStorage
@@ -42,7 +43,7 @@ const SEND_NOW_IDLE_TIMEOUT_MS = 20_000;
  * send/interrupt closures are rebuilt on each session switch. */
 export interface HeldAttach {
   sessionId: string;
-  /** Right-hand slot inside `.session-thinking` where the chip renders. */
+  /** Slot inside the composer's `.composer-send-wrap` where the count badge renders. */
   chipSlot: HTMLElement;
   /** `.session-thinking` (position: relative) — anchors the floating dropdown. */
   anchor: HTMLElement;

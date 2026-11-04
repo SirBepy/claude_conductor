@@ -85,6 +85,37 @@ describe("HeldMessages — staging + chip", () => {
     expect(chipSlot.querySelector(".held-chip").getAttribute("aria-label")).toContain("2 messages waiting");
   });
 
+  it("finds the badge slot again after the composer rebuilds its send wrap", () => {
+    const shell = document.createElement("div");
+    const anchor = document.createElement("div");
+    const wrap = document.createElement("div");
+    wrap.className = "composer-send-wrap";
+    wrap.innerHTML = `<span class="held-chip-slot"></span>`;
+    shell.append(anchor, wrap);
+    document.body.appendChild(shell);
+    const held = new HeldMessages();
+    held.attach({
+      sessionId: "sess-A",
+      chipSlot: wrap.querySelector(".held-chip-slot"),
+      anchor,
+      send: vi.fn(async () => {}),
+      interrupt: vi.fn(async () => {}),
+      getDraftBlocks: () => [],
+      isDraftEmpty: () => true,
+      isComposing: () => false,
+      clearComposer: vi.fn(),
+      getIsBusy: () => true,
+      onChange: () => held.renderChip(),
+    });
+    held.stage(textBlocks("one"));
+    held.renderChip();
+
+    // Composer.render() on setSessionId replaces the whole send wrap.
+    wrap.innerHTML = `<span class="held-chip-slot"></span>`;
+    held.renderChip();
+    expect(wrap.querySelector(".held-count").textContent).toBe("1");
+  });
+
   it("keeps Interrupt & send out of the badge and inside the opened list", () => {
     const { held, chipSlot, anchor } = makeHarness();
     held.stage(textBlocks("one"));
