@@ -256,7 +256,9 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
   const pending = _pendingSelect;
   await fetchEntries(pending);
   if (state.mountId !== myMount) return () => { /* superseded */ };
-  _pendingSelect = null;
+  // Only the queue this mount read is consumed: a queueHistorySelect that
+  // landed while fetchEntries was awaiting belongs to the next mount.
+  if (_pendingSelect === pending) _pendingSelect = null;
   renderList(listEl, state.entries, state.selectedId);
 
   // If a caller queued a specific closed chat (queueHistorySelect), select it now.
