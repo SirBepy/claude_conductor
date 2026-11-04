@@ -122,6 +122,21 @@ export function weeklyWindow(history: UsageRecord[]): WindowState {
   };
 }
 
+// ── Plan without a 5h window ───────────────────────────────────────────────
+
+/** The latest record decides: a plan that gains or loses its 5h limit follows its
+ *  current state, and older rows of a limit-free plan only carry the flat 0% the
+ *  backend reports for the absent window. */
+export function planHasNoSessionWindow(history: UsageRecord[]): boolean {
+  return history[history.length - 1]?.session_limited === false;
+}
+
+const NO_SESSION_WINDOW_HTML = `<div class="v-empty">
+  <i class="ph ph-clock-countdown v-empty-icon"></i>
+  <div class="v-empty-title">No 5h limit on this plan</div>
+  <div class="v-empty-hint">Only the weekly window is limited, see the weekly widgets.</div>
+</div>`;
+
 // ── Widget mount: shared render for the 4 session/weekly x chart/bars combos ──
 
 function mountUsageWidget(
@@ -141,6 +156,10 @@ function mountUsageWidget(
         <div class="v-empty-title">No history recorded yet</div>
         <div class="v-empty-hint">Data appears after the first successful refresh.</div>
       </div>`;
+      return;
+    }
+    if (metric === "session" && planHasNoSessionWindow(history)) {
+      root.innerHTML = NO_SESSION_WINDOW_HTML;
       return;
     }
     const win = metric === "session" ? sessionWindow(history) : weeklyWindow(history);
