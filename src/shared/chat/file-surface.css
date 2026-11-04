@@ -274,7 +274,7 @@
   min-height: 0;
   width: 100%;
   border: 0;
-  background: #15151e;
+  background: var(--color-background, #15151e);
 }
 
 .fs-loading,

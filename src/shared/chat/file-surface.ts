@@ -602,7 +602,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     }
     if (token !== state.token) return;
     if (isHtml(file.path)) {
-      await mountHtmlFrame(token, text);
+      if (!(await mountHtmlFrame(token, text))) return;
     } else {
       setBody(`<div class="fs-md pr-modal-body-content">${renderMarkdown(markdownForDisplay(text))}</div>`);
     }
@@ -612,16 +612,20 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
 
   /** The page in the Preview panel's sandbox (opaque-origin iframe, staged by
    *  `render_preview_doc`). A relative stylesheet or image next to the file
-   *  does not resolve there: the document has no base URL. */
-  async function mountHtmlFrame(token: number, text: string): Promise<void> {
+   *  does not resolve there: the document has no base URL. Resolves true while
+   *  the frame is still the body's content: the Source toggle swaps the body
+   *  without bumping the token, so a render in flight must check the frame
+   *  itself before it replaces what the reader switched to. */
+  async function mountHtmlFrame(token: number, text: string): Promise<boolean> {
     setBody(`<iframe class="fs-html-frame" sandbox="allow-scripts" title="Rendered page"></iframe>`);
     const frame = el.body.querySelector<HTMLIFrameElement>(".fs-html-frame")!;
     try {
       const src = await invoke<string>("render_preview_doc", { html: buildPreviewDocumentHtml(text, { zoom: true }) });
-      if (token === state.token) frame.src = src;
+      if (token === state.token && frame.isConnected) frame.src = src;
     } catch (err) {
-      if (token === state.token) setBody(`<div class="fs-error">Page failed to render: ${escapeHtml(String(err))}</div>`);
+      if (token === state.token && frame.isConnected) setBody(`<div class="fs-error">Page failed to render: ${escapeHtml(String(err))}</div>`);
     }
+    return token === state.token && frame.isConnected;
   }
 
   // A relative link in rendered markdown would navigate the app's own window;
