@@ -44,21 +44,23 @@ let state: HistoryState = {
   statusbar: null,
 };
 let nextMountId = 1;
-let _pendingSelect: string | null = null;
+let _pendingSelect: { sessionId: string; projectId: string | null } | null = null;
 
 /**
  * Open a specific past session read-only on the next History-view mount. Used
  * by the chats-window cross-window open request and the project dashboard's
- * closed-chat rows.
+ * closed-chat rows. `projectId` is the Claude project-dir slug
+ * (`HistoryEntry.project_id`); neither caller has it, so the mount learns it
+ * from the opened entry when omitted.
  */
-export function queueHistorySelect(sessionId: string): void {
-  _pendingSelect = sessionId;
+export function queueHistorySelect(sessionId: string, projectId: string | null = null): void {
+  _pendingSelect = { sessionId, projectId };
 }
 
-async function fetchEntries(): Promise<void> {
+async function listHistory(projectId: string | null): Promise<HistoryEntry[] | null> {
   try {
-    state.entries = (await invoke<HistoryEntry[]>("list_history", {
-      projectId: null,
+    return (await invoke<HistoryEntry[]>("list_history", {
+      projectId,
       search: null,
       limit: 200,
       offset: 0,
@@ -68,8 +70,25 @@ async function fetchEntries(): Promise<void> {
     })) || [];
   } catch (err) {
     console.error("[history] list_history failed", err);
-    state.entries = [];
+    return null;
   }
+}
+
+/**
+ * The left list follows the opened chat's project, not every project's newest
+ * 200. A caller that only knows the session id gets one unscoped read to find
+ * the entry, then one scoped read; if the entry is not among the newest 200 the
+ * unscoped list stays rather than showing nothing.
+ */
+async function fetchEntries(pending: { sessionId: string; projectId: string | null } | null): Promise<void> {
+  const scopeId = pending?.projectId ?? null;
+  const first = await listHistory(scopeId);
+  state.entries = first ?? [];
+  if (!pending || scopeId || !first) return;
+  const projectId = first.find((e) => e.session_id === pending.sessionId)?.project_id;
+  if (!projectId || first.every((e) => e.project_id === projectId)) return;
+  const scoped = await listHistory(projectId);
+  if (scoped) state.entries = scoped;
 }
 
 async function selectHistorySession(sessionId: string, pane: HTMLElement): Promise<void> {
@@ -232,17 +251,20 @@ export async function renderHistoryView(root: HTMLElement): Promise<() => void> 
 
   void loadSessionCharacters();
   renderListLoading(listEl);
-  await fetchEntries();
+  // Cleared only after the superseded check: a mount that loses the race must
+  // leave the queue for the mount that replaced it.
+  const pending = _pendingSelect;
+  await fetchEntries(pending);
   if (state.mountId !== myMount) return () => { /* superseded */ };
+  _pendingSelect = null;
   renderList(listEl, state.entries, state.selectedId);
 
   // If a caller queued a specific closed chat (queueHistorySelect), select it now.
   // Otherwise auto-select the most recent session - except on the phone,
   // which should land on the list first (matches Sessions'
   // isRemote() gate) rather than jumping straight into a chat.
-  const pendingOrFirst = _pendingSelect ?? (isRemote() ? null : state.entries[0]?.session_id ?? null);
+  const pendingOrFirst = pending?.sessionId ?? (isRemote() ? null : state.entries[0]?.session_id ?? null);
   if (pendingOrFirst) {
-    if (_pendingSelect) _pendingSelect = null;
     const li = listEl.querySelector<HTMLLIElement>(`li[data-session-id="${CSS.escape(pendingOrFirst)}"]`);
     if (li) {
       listEl.querySelectorAll("li[data-session-id]").forEach((el) => el.classList.remove("active"));
