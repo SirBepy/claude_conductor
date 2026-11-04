@@ -17,6 +17,7 @@ import { attachQuestionSwipe } from "./question-swipe";
 import { attachOptionPreviews } from "./option-previews";
 import { rebuildKeepingFrames } from "./preview-frame-keeper";
 import { createPreviewFullscreen } from "./preview-fullscreen";
+import { createCollapseController } from "./question-ui-collapse";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqSlashPopupController } from "./slash-popup";
 import { ASK_OPEN_EVENT, askContextText } from "../ask-open-event";
@@ -399,58 +400,10 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
   const refreshAttachments = (): void => { paintAttachmentStrips(); syncMessagesPadding(); };
 
-  // The card plays its exit before the bar replaces it. Must match
-  // prompt-card-out's duration in permission-modal-shell.css; the timer is only
-  // the fallback for an animationend that never fires (hidden tab).
-  const COLLAPSE_MS = 280;
-  let collapsing = false;
-  let collapseTimer: number | undefined;
-
-  function minimize(): boolean {
-    // The phone's back press lands here: it leaves fullscreen first.
-    if (fullscreen.isOpen()) { fullscreen.close(); return true; }
-    if (minimized) return false;
-    // A second press mid-exit is still consumed, so back never falls through
-    // to leaving the chat while the card is on its way down.
-    if (collapsing) return true;
-    const card = host.querySelector<HTMLElement>(".prompt-card");
-    const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const collapse = (): void => {
-      minimized = true;
-      render();
-      host.querySelector(".prompt-collapsed")?.classList.add("prompt-collapsed--in");
-    };
-    if (!card || reduced) { collapse(); return true; }
-    collapsing = true;
-    card.classList.add("prompt-card--leaving");
-    const finish = (): void => {
-      if (!collapsing) return;
-      collapsing = false;
-      window.clearTimeout(collapseTimer);
-      // The card may have been answered or swapped out during the exit.
-      if (host.isConnected) collapse();
-    };
-    card.addEventListener("animationend", (e) => { if (e.target === card) finish(); });
-    collapseTimer = window.setTimeout(finish, COLLAPSE_MS + 80);
-    return true;
-  }
-
-  function expand(): boolean {
-    if (collapsing) {
-      // Re-opened mid-exit: stop the exit instead of finishing it. The timer
-      // goes too, or it would cut a later exit short.
-      collapsing = false;
-      window.clearTimeout(collapseTimer);
-      host.querySelector(".prompt-card--leaving")?.classList.remove("prompt-card--leaving");
-      return true;
-    }
-    if (!minimized) return false;
-    minimized = false;
-    expanding = true;
-    render();
-    expanding = false;
-    return true;
-  }
+  const { minimize, expand } = createCollapseController({
+    host, fullscreen, isMinimized: () => minimized, setMinimized: (v) => { minimized = v; },
+    setExpanding: (v) => { expanding = v; }, render: () => render(),
+  });
 
   // The answer bar's markup is picked from the viewport when it is built, so a
   // 768px crossing with the card open rebuilds it. The typed text survives in
