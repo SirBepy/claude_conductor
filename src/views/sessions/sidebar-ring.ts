@@ -16,7 +16,7 @@ export type RingSpec =
   | { kind: "plan"; done: number; total: number }
   /** One segment per question: answered ones solid, the current one pulses,
    *  the rest dim. A single question is one full ring and pulses whole. */
-  | { kind: "segments"; total: number; answered: number };
+  | { kind: "segments"; total: number; answered: number; tone?: RingTone };
 
 export interface QuestionRingInfo { total: number; answered: number }
 
@@ -38,7 +38,13 @@ export function ringSpecFor(
 ): RingSpec {
   switch (dotClass) {
     case "st-closing": return { kind: "solid", tone: "closing" };
-    case "st-attention": return { kind: "solid", tone: "attention", pulse: true };
+    case "st-attention":
+      // A question card waiting on permission still has N questions: a whole
+      // pulsing ring means exactly one, so a multi-question card keeps its segments.
+      if (question && question.total > 1) {
+        return { kind: "segments", total: question.total, answered: Math.min(question.answered, question.total), tone: "attention" };
+      }
+      return { kind: "solid", tone: "attention", pulse: true };
     case "st-question":
       if (question && question.total > 0) {
         return { kind: "segments", total: question.total, answered: Math.min(question.answered, question.total) };
@@ -63,10 +69,23 @@ const CIRC = 2 * Math.PI * R;
 /** Space between question segments, in circumference units. */
 const SEGMENT_GAP = 4.5;
 
+// Keep in step with the animation durations in sidebar-ring.css.
+const PULSE_MS = 1400;
+const GLOW_MS = 3200;
+
+/** A sidebar rebuild replaces the SVG, which would restart its animation from
+ *  0 and read as a sudden jump. A negative delay of (page clock mod period)
+ *  starts every fresh element at the phase the old one had reached. */
+function phaseStyle(cls: string): string {
+  const period = cls.includes("is-pulse") ? PULSE_MS : cls.includes("is-glow") ? GLOW_MS : 0;
+  if (!period) return "";
+  return ` style="animation-delay:-${Math.round(performance.now() % period)}ms"`;
+}
+
 function circle(len: number, offset: number, cls: string, tone: RingTone): string {
   // The dash array draws `len` then leaves the rest of the circle empty;
   // the negative offset slides the drawn stretch to its start angle.
-  return `<circle class="${cls}" data-tone="${tone}" cx="25" cy="25" r="${R}" stroke-dasharray="${len.toFixed(2)} ${(CIRC - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"/>`;
+  return `<circle class="${cls}" data-tone="${tone}" cx="25" cy="25" r="${R}" stroke-dasharray="${len.toFixed(2)} ${(CIRC - len).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"${phaseStyle(cls)}/>`;
 }
 
 /** Markup for the ring, or "" for `none`. Sits inside `.session-avatar-wrap`
@@ -85,7 +104,7 @@ export function ringHtml(spec: RingSpec): string {
     body = circle(CIRC, 0, "ring-seg is-track", tone);
     if (spec.done > 0) body += circle(CIRC * (spec.done / spec.total), 0, "ring-seg", tone);
   } else {
-    tone = "question";
+    tone = spec.tone ?? "question";
     cls += " is-segments";
     const gap = spec.total === 1 ? 0 : SEGMENT_GAP;
     const seg = CIRC / spec.total;
