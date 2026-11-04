@@ -18,6 +18,7 @@ use crate::project_dashboard::{
 use crate::sessions::user_todos::TodoState;
 use crate::sessions::{scheduled_items, user_todos};
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::Arc;
 
 const RECENT_CHATS: usize = 6;
@@ -98,15 +99,20 @@ fn read_stored(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: us
     }
 }
 
-/// The newest ended chats across the repos. Asks each repo for extra rows to
-/// cover the live chats that will be filtered back out.
-fn recent_chats(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: usize) -> Vec<DashChatRow> {
-    let Some(projects_dir) = crate::tokens::claude_projects_dir() else { return Vec::new() };
-    let limit = (RECENT_CHATS + live_in_target).min(40) as u32;
-    let mut rows: Vec<DashChatRow> = Vec::new();
+/// The ended chats of every repo as dashboard rows, unsorted across repos:
+/// each repo is read `depth` deep, then the live chats are dropped. Shared by
+/// the snapshot's recent list and the History modal's pages so the two cannot
+/// disagree about what counts as an ended chat.
+pub(super) fn ended_rows(
+    repos: &[RepoRef],
+    projects_dir: &Path,
+    live_ids: &HashSet<String>,
+    depth: u32,
+) -> Vec<DashChatRow> {
+    let mut rows = Vec::new();
     for repo in repos {
-        let slug = project_dir_slug(&projects_dir, &repo.cwd);
-        let entries = crate::ipc::chat::history::collect_history(&projects_dir, Some(slug), None, limit, 0, None, None, None);
+        let slug = project_dir_slug(projects_dir, &repo.cwd);
+        let entries = crate::ipc::chat::history::collect_history(projects_dir, Some(slug), None, depth, 0, None, None, None);
         rows.extend(entries.into_iter().filter(|e| !live_ids.contains(&e.session_id)).map(|e| DashChatRow {
             session_id: e.session_id,
             title: e.title,
@@ -115,7 +121,32 @@ fn recent_chats(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: u
             at_ms: e.ended_at.unwrap_or(e.started_at) * 1000,
         }));
     }
-    rows.sort_by(|a, b| b.at_ms.cmp(&a.at_ms));
+    rows
+}
+
+/// Newest first; equal times fall back to the session id so the card's rows
+/// and the History modal's first page agree on ties.
+pub(super) fn sort_newest_first(rows: &mut [DashChatRow]) {
+    rows.sort_by(|a, b| b.at_ms.cmp(&a.at_ms).then_with(|| a.session_id.cmp(&b.session_id)));
+}
+
+/// The newest ended chats across the repos. Asks each repo for extra rows to
+/// cover the live chats that will be filtered back out.
+fn recent_chats(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: usize) -> Vec<DashChatRow> {
+    let Some(projects_dir) = crate::tokens::claude_projects_dir() else { return Vec::new() };
+    recent_chats_in(&projects_dir, repos, live_ids, live_in_target)
+}
+
+/// `recent_chats` over an explicit projects dir, so a test can point it at a fixture.
+pub(super) fn recent_chats_in(
+    projects_dir: &Path,
+    repos: &[RepoRef],
+    live_ids: &HashSet<String>,
+    live_in_target: usize,
+) -> Vec<DashChatRow> {
+    let depth = (RECENT_CHATS + live_in_target).min(40) as u32;
+    let mut rows = ended_rows(repos, projects_dir, live_ids, depth);
+    sort_newest_first(&mut rows);
     rows.truncate(RECENT_CHATS);
     rows
 }
