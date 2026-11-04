@@ -652,4 +652,37 @@ mod tests {
         assert_eq!(v["ok"], json!(false));
         assert!(v["error"].as_str().unwrap().contains("8000"));
     }
+
+    // The daemon stores no kind, so a revision cannot look up its target's card
+    // cap: update_message accepts up to MAX_MESSAGE_LEN whatever it replaces, and
+    // the tool description tells the model to keep a revised card as short as the
+    // original. This pins that decision; a stored-kind cap would change it.
+    #[tokio::test]
+    async fn update_text_is_not_held_to_the_per_kind_card_caps() {
+        let report_cap = text_cap("report");
+        let long = "x".repeat(MAX_MESSAGE_LEN);
+        assert!(long.chars().count() > report_cap);
+        let body = UpdateMessageBody {
+            session_id: "s".into(), message: 1, text: Some(long), retract: false, details: None,
+        };
+        let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
+        assert_eq!(body_json(resp).await["ok"], json!(true));
+    }
+
+    // The schema file declares the same 12 kinds for the tool's `enum`. Neither
+    // module can import the other's constant (`mcp::tool_schemas_coordination`
+    // and `hooks_server::messages` are both private to their parents), so read the
+    // schema source and compare: a kind added to one list only fails here instead
+    // of the schema offering a kind this route rejects.
+    #[test]
+    fn schema_kind_enum_matches_the_route_kind_list() {
+        const SCHEMA_SRC: &str = include_str!("../../mcp/tool_schemas_coordination.rs");
+        let from = SCHEMA_SRC
+            .find("const SEND_MESSAGE_KINDS")
+            .expect("schema file declares SEND_MESSAGE_KINDS");
+        let block = &SCHEMA_SRC[from..];
+        let list = &block[block.find("= [").unwrap()..block.find("];").unwrap()];
+        let schema_kinds: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
+        assert_eq!(schema_kinds, KINDS);
+    }
 }
