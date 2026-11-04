@@ -226,6 +226,13 @@ fn user_turn_text(v: &serde_json::Value) -> String {
     }
 }
 
+/// True for the bookkeeping user turn a question-card answer is stored as
+/// (`<auq-answer id="..."/>User answered ...`). Shared by the AI title freeze
+/// and `user_prompt_label` so neither can title a chat from that tag.
+fn is_auq_answer_text(text: &str) -> bool {
+    text.trim_start().starts_with("<auq-answer")
+}
+
 /// Turn-boundary predicate for the AI title freeze. Drops the harness's
 /// bookkeeping user turns (`[Request interrupted by user]`, which can never
 /// carry a reply, and `<auq-answer/>`, which continues the turn that asked),
@@ -234,7 +241,7 @@ fn user_turn_text(v: &serde_json::Value) -> String {
 pub(crate) fn is_titleable_user_turn(v: &serde_json::Value) -> bool {
     if !is_real_user_turn(v) { return false; }
     let t = user_turn_text(v);
-    !t.starts_with("[Request interrupted by user]") && !t.starts_with("<auq-answer")
+    !t.starts_with("[Request interrupted by user]") && !is_auq_answer_text(&t)
 }
 
 /// Concatenated text of an `assistant` message's text blocks, or None if the
@@ -349,6 +356,9 @@ pub(crate) fn user_prompt_label(msg: &serde_json::Value, max_chars: usize) -> Op
         _ => return None,
     };
     if text.starts_with(crate::types::chat::DAEMON_META_SENTINEL) { return None }
+    // A schedule-started chat answers its first question card before any real
+    // prompt exists; that answer is not a topic.
+    if is_auq_answer_text(&text) { return None }
     // A Jarvis-relayed message (todo 682) is real, titleable content -
     // unlike the meta sentinel above, strip rather than exclude, or the raw
     // marker becomes the chat title.
@@ -535,6 +545,26 @@ mod tests {
         let body = [sentinel_line, r#"{"type":"user","message":{"role":"user","content":"build me a thing"}}"#.to_string()].join("\n");
         std::fs::write(&path, body).unwrap();
         assert_eq!(first_user_prompt(&path, 60).as_deref(), Some("build me a thing"));
+    }
+
+    #[test]
+    fn first_user_prompt_skips_an_auq_answer_turn_after_a_daemon_meta_turn() {
+        // A schedule-started chat opens with a daemon-meta turn, and its first
+        // question card is answered before any real prompt lands. The answer
+        // is bookkeeping, so the title must be the real prompt that follows.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let meta = user_line(&format!("{}[schedule] fire", crate::types::chat::DAEMON_META_SENTINEL));
+        let auq = user_line("<auq-answer id=\"a34b5b4a-bd3a-4280-b2df-686a9ae6dcbe\"/>User answered the question(s):\nQ: pick one\nA: first");
+        let real = user_line("build me a thing");
+        std::fs::write(&path, [meta, auq, real].join("\n")).unwrap();
+        assert_eq!(first_user_prompt(&path, 60).as_deref(), Some("build me a thing"));
+    }
+
+    #[test]
+    fn user_prompt_label_refuses_an_auq_answer_in_text_block_form() {
+        let msg = serde_json::json!({"role":"user","content":[{"type":"text","text":"<auq-answer/>User answered the question(s)"}]});
+        assert_eq!(user_prompt_label(&msg, 60), None);
     }
 
     #[test]
