@@ -53,6 +53,18 @@ export function tilePictureHtml(opt: QuestionOption, sessionId?: string): string
     : "";
 }
 
+export function hasQuestionPreview(q: Question | undefined): boolean {
+  return typeof q?.preview === "string" && q.preview.trim() !== "";
+}
+
+/** The question's own picture, at the top of its panel. Unlike a tile it picks
+ *  nothing, so the whole picture opens fullscreen (the corner icon is only the
+ *  cue, like the stage's). Empty string when the question has none. */
+export function questionPictureHtml(q: Question, qi: number, sessionId?: string): string {
+  if (!hasQuestionPreview(q)) return "";
+  return `<div class="prompt-qpic" data-qpic="${qi}" role="button" tabindex="-1" title="View fullscreen" aria-label="View the picture fullscreen">${frameHtml(q.preview!, "prompt-qpic__frame", sessionId)}<i class="ph ph-arrows-out prompt-qpic__expand" aria-hidden="true"></i></div>`;
+}
+
 /** The stage's picture is filled by sync(), not here, so a rebuild loads it
  *  once with the right option instead of loading a placeholder first. */
 export function stageHtml(q: Question, qi: number, sessionId?: string): string {
@@ -94,6 +106,8 @@ export interface OptionPreviewsDeps {
   choose: (qi: number, label: string) => void;
   /** Opens option `label` of question `qi` fullscreen. */
   expand: (qi: number, label: string) => void;
+  /** Opens question `qi`'s own picture fullscreen. */
+  expandQuestion: (qi: number) => void;
   /** The chat the question belongs to: routes local-image reads to the machine
    *  hosting it and keys the image cache. */
   sessionId?: string;
@@ -105,7 +119,7 @@ export interface OptionPreviews {
 }
 
 export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
-  const { host, questions, selections, choose, expand, sessionId } = deps;
+  const { host, questions, selections, choose, expand, expandQuestion, sessionId } = deps;
   const viewing = new Map<number, string>();
   const lastPick = new Map<number, string>();
   let hover: { qi: number; label: string } | null = null;
@@ -166,6 +180,8 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
   function refreshFrames(): void {
     questions.forEach((q, qi) => {
       const opts = previewedOptions(q);
+      const qframe = host.querySelector<HTMLIFrameElement>(`.prompt-qpic[data-qpic="${qi}"] .prompt-qpic__frame`);
+      if (qframe && hasQuestionPreview(q)) qframe.srcdoc = previewDocument(inlineLocalImages(q.preview!, sessionId));
       host.querySelectorAll<HTMLInputElement>(`.prompt-panel[data-panel="${qi}"] .prompt-opt > input`).forEach((input) => {
         const opt = opts.find((o) => o.label === input.dataset.label);
         const frame = input.closest(".prompt-opt")?.querySelector<HTMLIFrameElement>(".prompt-opt__frame");
@@ -181,7 +197,10 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
     sync();
   }
 
-  const fragments = questions.flatMap((q) => previewedOptions(q).map((o) => o.preview!));
+  const fragments = questions.flatMap((q) => [
+    ...(hasQuestionPreview(q) ? [q.preview!] : []),
+    ...previewedOptions(q).map((o) => o.preview!),
+  ]);
   void prefetchLocalImages(fragments, sessionId).then((landed) => { if (landed) refreshFrames(); });
 
   function stageFor(qi: number): HTMLElement | null {
@@ -221,6 +240,14 @@ export function attachOptionPreviews(deps: OptionPreviewsDeps): OptionPreviews {
   // A tile picture elsewhere is left alone so the label picks the option.
   host.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
+    const qpic = target.closest<HTMLElement>(".prompt-qpic");
+    if (qpic) {
+      e.preventDefault();
+      e.stopPropagation();
+      const qi = Number(qpic.dataset.qpic);
+      if (Number.isFinite(qi)) expandQuestion(qi);
+      return;
+    }
     const pic = target.closest<HTMLElement>(".prompt-opt__expand");
     const hit = pic ? null : target.closest<HTMLElement>(".prompt-stage__hit");
     if (!pic && !hit) return;

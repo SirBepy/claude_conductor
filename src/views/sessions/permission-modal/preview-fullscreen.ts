@@ -13,6 +13,11 @@
 // and the top bar's text toggle floats the option's description over the
 // bottom of the preview.
 //
+// A question's own picture (Question.preview) opens the same overlay in
+// "plain" mode: the canvas with zoom and pan and the close button, none of the
+// option paging or Select bar, since the picture belongs to the question and
+// picks nothing.
+//
 // The overlay lives on <body>, not in the card host, because every card
 // render() rebuilds the host's innerHTML and would wipe it.
 
@@ -20,7 +25,7 @@ import { escapeHtml } from "../../../shared/escape-html";
 import { setupImageZoomPan } from "../../../shared/chat/image-zoom-pan";
 import { previewDocument } from "./option-preview-doc";
 import { inlineLocalImages } from "./option-preview-images";
-import { previewedOptions } from "./option-previews";
+import { hasQuestionPreview, previewedOptions } from "./option-previews";
 import type { Question, Selection } from "./types";
 import "../permission-modal-preview-fullscreen.css";
 
@@ -59,6 +64,8 @@ export interface PreviewFullscreenDeps {
 
 export interface PreviewFullscreen {
   open: (qi: number, label?: string) => void;
+  /** Opens question `qi`'s own picture, with no option paging. */
+  openQuestion: (qi: number) => void;
   close: () => void;
   isOpen: () => boolean;
   /** Repaints the bar from the live selections (a pick from another device). */
@@ -84,6 +91,7 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
   let returnFocus: Element | null = null;
   let stripFor = -1;
   let textOn = readTextPref();
+  let plain = false;
 
   const options = () => previewedOptions(questions[qi]!);
 
@@ -160,8 +168,9 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
   function paintFrame(): void {
     if (!root) return;
     const opt = options()[idx];
-    if (!opt) return;
-    const key = `${qi}\u0000${opt.label}`;
+    const html = plain ? questions[qi]?.preview : opt?.preview;
+    if (!html) return;
+    const key = plain ? `${qi}\u0000#question` : `${qi}\u0000${opt!.label}`;
     if (key === shownKey) return;
     shownKey = key;
     disposeZoom?.();
@@ -171,7 +180,7 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
     const canvas = document.createElement("div");
     canvas.className = "auq-fs__canvas";
     canvas.innerHTML = `<iframe class="auq-fs__frame" sandbox="" tabindex="-1" aria-hidden="true"></iframe>`;
-    canvas.querySelector<HTMLIFrameElement>(".auq-fs__frame")!.srcdoc = previewDocument(inlineLocalImages(opt.preview!, sessionId));
+    canvas.querySelector<HTMLIFrameElement>(".auq-fs__frame")!.srcdoc = previewDocument(inlineLocalImages(html, sessionId));
     view.prepend(canvas);
     scale = 1;
     disposeZoom = setupImageZoomPan(canvas, view, (s) => { scale = s; });
@@ -188,8 +197,22 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
     ).join("");
   }
 
+  function syncPlain(): void {
+    const q = questions[qi];
+    if (!root || !q || !hasQuestionPreview(q)) { close(); return; }
+    paintFrame();
+    const setText = (sel: string, value: string) => {
+      const el = root!.querySelector<HTMLElement>(sel);
+      if (el && el.textContent !== value) el.textContent = value;
+    };
+    setText(".auq-fs__qcount", questions.length > 1 ? `${qi + 1}/${questions.length}` : "");
+    setText(".auq-fs__qtext", q.header || q.question);
+    root.querySelector<HTMLElement>(".auq-fs__qtext")!.title = q.question;
+  }
+
   function sync(): void {
     if (!root) return;
+    if (plain) { syncPlain(); return; }
     const q = questions[qi];
     const opts = options();
     if (!q || !opts.length) { close(); return; }
@@ -300,12 +323,9 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
   // (arrow paging, Escape blur) and the composer's.
   const onKey = (e: KeyboardEvent) => {
     if (!root || e.altKey || e.ctrlKey || e.metaKey) return;
-    const keys: Record<string, () => void> = {
-      Escape: close,
-      ArrowLeft: () => step(-1),
-      ArrowRight: () => step(1),
-      Enter: select,
-    };
+    const keys: Record<string, () => void> = plain
+      ? { Escape: close }
+      : { Escape: close, ArrowLeft: () => step(-1), ArrowRight: () => step(1), Enter: select };
     const fn = keys[e.key];
     if (!fn) return;
     e.stopPropagation();
@@ -315,17 +335,36 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
     fn();
   };
 
-  function open(target: number, label?: string): void {
-    if (!hasPreviews(questions[target])) return;
+  function mount(): HTMLElement {
     if (!root) {
       returnFocus = document.activeElement;
       root = build();
       document.body.appendChild(root);
       window.addEventListener("keydown", onKey, true);
     }
+    return root;
+  }
+
+  function open(target: number, label?: string): void {
+    if (!hasPreviews(questions[target])) return;
+    const el = mount();
+    plain = false;
+    el.classList.remove(`${PREVIEW_FULLSCREEN_CLASS}--plain`);
     goToTab(target);
     show(target, label);
-    root.querySelector<HTMLButtonElement>('[data-fs="select"]')?.focus();
+    el.querySelector<HTMLButtonElement>('[data-fs="select"]')?.focus();
+  }
+
+  function openQuestion(target: number): void {
+    if (!hasQuestionPreview(questions[target])) return;
+    const el = mount();
+    plain = true;
+    el.classList.add(`${PREVIEW_FULLSCREEN_CLASS}--plain`);
+    goToTab(target);
+    qi = target;
+    shownKey = "";
+    sync();
+    el.querySelector<HTMLButtonElement>('[data-fs="close"]')?.focus();
   }
 
   function close(): void {
@@ -335,11 +374,12 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
     window.removeEventListener("keydown", onKey, true);
     root.remove();
     root = null;
+    plain = false;
     shownKey = "";
     stripFor = -1;
     if (returnFocus instanceof HTMLElement && returnFocus.isConnected) returnFocus.focus();
     returnFocus = null;
   }
 
-  return { open, close, isOpen: () => root !== null, sync };
+  return { open, openQuestion, close, isOpen: () => root !== null, sync };
 }

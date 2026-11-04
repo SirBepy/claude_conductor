@@ -209,7 +209,8 @@
  * tile only from its corner button. */
 .prompt-stage__hit { cursor: zoom-in; }
 .prompt-opt__expand,
-.prompt-stage__expand {
+.prompt-stage__expand,
+.prompt-qpic__expand {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -230,3 +231,9 @@
   pointer-events: auto;
 }
 .prompt-opt__expand:hover { opacity: 1; color: var(--color-text); }
+
+/* A question's own picture: no options to page or pick, so the bar and the
+ * option-only buttons go and the picture gets the whole screen. */
+.auq-fs--plain .auq-fs__bar,
+.auq-fs--plain [data-fs="back"],
+.auq-fs--plain .auq-fs__text-toggle { display: none; }
