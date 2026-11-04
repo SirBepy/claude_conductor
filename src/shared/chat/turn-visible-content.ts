@@ -7,8 +7,8 @@ import { isRawViewEnabled } from "./message-filter-pref";
 import type { ChatRenderer } from "./chat-renderer";
 
 /** True if the open turn has produced anything the user would see - real
- *  assistant text, send_message, a user/question row, or an interrupted
- *  notice. Tool calls/results and TodoWrite don't count. */
+ *  assistant text, a non-ack send_message, a user/question row, or an
+ *  interrupted notice. Tool calls/results and TodoWrite don't count. */
 export function turnProducedVisibleContent(r: ChatRenderer): boolean {
   if (r.activeTurnStart === null) return false;
   for (let i = r.activeTurnStart; i < r.messages.length; i++) {
@@ -26,7 +26,10 @@ export function turnProducedVisibleContent(r: ChatRenderer): boolean {
         if ((r.sessionId ? isRawViewEnabled(r.sessionId) : false) && blocksToText(m.content ?? []).trim()) return true;
         break;
       case "message":
-        if (!m.failed) return true;
+        // An ack renders as hidden narration, so it is not on screen. A
+        // retracted message still draws its "Retracted" pill, which is why
+        // this does not reuse isVisibleMessage (that one drops retracted too).
+        if (!m.failed && m.card?.kind !== "ack") return true;
         break;
       case "user":
       case "question":
