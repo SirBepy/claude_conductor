@@ -32,7 +32,14 @@ async function mountFiles(page: Page, files: Disk["files"], first: string): Prom
     w.__TAURI__.core.invoke = (cmd, args) => {
       const path = (args?.path as string | undefined)?.replace(/\\/g, "/") ?? "";
       const f = disk.files[path];
-      if (cmd === "render_preview_doc") { (window as unknown as { __staged: string[] }).__staged.push(String(args?.html)); return Promise.resolve("about:blank"); }
+      if (cmd === "render_preview_doc") {
+        (window as unknown as { __staged: string[] }).__staged.push(String(args?.html));
+        // A slow stage that then fails: the reader may toggle to Source meanwhile.
+        if ((window as unknown as { __stageFailsAfterMs?: number }).__stageFailsAfterMs) {
+          return new Promise((_, rej) => setTimeout(() => rej(new Error("stage down")), (window as unknown as { __stageFailsAfterMs: number }).__stageFailsAfterMs));
+        }
+        return Promise.resolve("about:blank");
+      }
       if (cmd === "stat_text_file") return f ? Promise.resolve({ mtime_us: f.mtime, writable: f.writable }) : Promise.reject(new Error("file not found"));
       if (cmd === "read_text_file") return f ? Promise.resolve({ content: f.content, truncated: false }) : Promise.reject(new Error("file not found"));
       if (cmd === "write_text_file") {
@@ -224,6 +231,25 @@ test.describe("view-harness / file editor", () => {
     await page.locator("#fw-test .fs-md-btn").click();
     await expect(page.locator("#fw-test .cm-content")).toContainText("deck-marker");
     await expect(frame).toHaveCount(0);
+  });
+
+  test("a page still staging when the reader toggles to Source does not replace the editor with its failure card", async ({ page }) => {
+    const html = "C:/Projects/alpha/deck.html";
+    await mountFiles(page, {
+      [FILE]: { content: "x", mtime: 1, writable: true },
+      [html]: { content: "<h1>Slow deck</h1>", mtime: 1, writable: true },
+    }, FILE);
+    await page.evaluate((p) => {
+      const w = window as unknown as { __stageFailsAfterMs: number; __ccListeners: Map<string, Set<(e: unknown) => void>> };
+      w.__stageFailsAfterMs = 600;
+      w.__ccListeners.get("file-window-open")?.forEach((cb) => cb({ payload: { path: p, line: null } }));
+    }, html);
+    await expect(page.locator("#fw-test .fs-html-frame")).toBeVisible();
+    await page.locator("#fw-test .fs-md-btn").click();
+    await expect(page.locator("#fw-test .cm-content")).toContainText("Slow deck");
+    await page.waitForTimeout(900);
+    await expect(page.locator("#fw-test .cm-content")).toContainText("Slow deck");
+    await expect(page.locator("#fw-test .fs-error")).toHaveCount(0);
   });
 
   test("reopening a rendered markdown file shows a chat's later edit", async ({ page }) => {
