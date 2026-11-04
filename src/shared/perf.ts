@@ -27,6 +27,11 @@ function report(line: string): void {
   }
 }
 
+/** A non-perf diagnostic line that must still reach the app log (see report). */
+export function reportWebviewDiag(line: string): void {
+  report(line);
+}
+
 function armObserver(): void {
   if (observerArmed) return;
   observerArmed = true;
