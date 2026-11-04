@@ -53,7 +53,9 @@ fn next_actions_schema() -> Value {
     })
 }
 
-/// Mirrors `hooks_server/messages.rs::KINDS`, which enforces it.
+/// Mirrors `hooks_server/messages.rs::KINDS`, which enforces it. Neither module
+/// can see the other's constant, so a test in messages.rs reads this declaration
+/// and fails when the two lists differ.
 const SEND_MESSAGE_KINDS: [&str; 12] = [
     "answer", "report", "blocker", "do_this", "plan", "rating", "correction", "call", "handoff",
     "artifact", "discovery", "ack",
@@ -149,7 +151,7 @@ pub fn coordination_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_UPDATE_MESSAGE,
-            "description": "Revise or retract a message you already sent Joe, instead of sending a second near-identical one. If you catch yourself about to re-send the same point reworded, call this instead.\n\nAddressing: `message` counts BACKWARDS through your own send_message bubbles - 1 is your newest, 2 the one before it. Sending a new message shifts every ordinal up by one.\n\nWindow: you can only reach messages sent since Joe's second-most-recent message. Anything older is out of reach and the call is ignored.\n\n`details` replaces the message's details when given.\n\nEdit (pass `text`) swaps the bubble silently in place, no trace. Retract (pass `retract: true`) replaces it with a thin struck 'Retracted' line.\n\nAfter Joe interrupts you, every bubble from the cancelled turn is dimmed automatically. Retract the ones that are now false, and re-state the ones that are still true via `text` - either clears the dim.",
+            "description": "Revise or retract a message you already sent Joe, instead of sending a second near-identical one. If you catch yourself about to re-send the same point reworded, call this instead.\n\nAddressing: `message` counts BACKWARDS through your own send_message bubbles - 1 is your newest, 2 the one before it. Sending a new message shifts every ordinal up by one.\n\nWindow: you can only reach messages sent since Joe's second-most-recent message. Anything older is out of reach and the call is ignored.\n\nA revision is not held to the per-kind `text` caps send_message enforces, because the daemon does not store a message's kind (it accepts up to 8000 chars). Keep a revised card as short as the one it replaces; long prose belongs in `details`.\n\n`details` replaces the message's details when given.\n\nEdit (pass `text`) swaps the bubble silently in place, no trace. Retract (pass `retract: true`) replaces it with a thin struck 'Retracted' line.\n\nAfter Joe interrupts you, every bubble from the cancelled turn is dimmed automatically. Retract the ones that are now false, and re-state the ones that are still true via `text` - either clears the dim.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -162,4 +164,22 @@ pub fn coordination_schemas() -> Vec<Value> {
             }
         }),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The daemon stores no kind, so update_message cannot enforce send_message's
+    // card caps; the description is the only place the model learns that.
+    #[test]
+    fn update_message_description_states_it_is_not_held_to_the_card_caps() {
+        let schemas = coordination_schemas();
+        let update = schemas.iter().find(|s| s["name"] == TOOL_UPDATE_MESSAGE).unwrap();
+        let text = update["description"].as_str().unwrap();
+        assert!(
+            text.contains("not held to the per-kind `text` caps"),
+            "update_message description lost the revision-cap note"
+        );
+    }
 }
