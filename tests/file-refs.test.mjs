@@ -135,6 +135,26 @@ describe("paths through the real markdown renderer", () => {
     expect(chipPaths(rendered("open `" + path + "` now"))).toEqual([path]);
   });
 
+  // A path inside `_..._` / `__...__` emphasis must not carry the closing run.
+  it.each([
+    ["_see /usr/local/bin_ now", "em", "/usr/local/bin"],
+    ["_/usr/local/bin_", "em", "/usr/local/bin"],
+    [String.raw`_C:\x\a.txt_`, "em", String.raw`C:\x\a.txt`],
+    [String.raw`__C:\x\a.txt__`, "strong", String.raw`C:\x\a.txt`],
+  ])("renders %s emphasised and chips the path without the closing underscore", (src, tag, path) => {
+    const root = rendered(src);
+    expect(root.querySelector(tag)).not.toBeNull();
+    expect(chipPaths(root)).toEqual([path]);
+  });
+
+  it("keeps real underscores inside and after a path's name", () => {
+    for (const path of [String.raw`C:\proj\__init__.txt`, "/home/joe/__init__/a.txt", String.raw`C:\proj\a_b\c_d.txt`]) {
+      const root = rendered(`open ${path}, then save`);
+      expect(chipPaths(root)).toEqual([path]);
+      expect(root.querySelector("strong, em")).toBeNull();
+    }
+  });
+
   it("leaves markdown around and away from paths working", () => {
     const root = mount(renderMarkdown(String.raw`**C:\x\.y\a.txt** and \*literal\* and _soft_ and https://a.com/_b_/c`));
     expect(root.querySelector("strong").textContent).toBe(String.raw`C:\x\.y\a.txt`);
@@ -147,6 +167,69 @@ describe("paths through the real markdown renderer", () => {
 describe("findFileRefs", () => {
   it("does not treat a bare drive as a path", () => {
     expect(findFileRefs(String.raw`C:\ and D:/`)).toEqual([]);
+  });
+
+  it("drops a trailing underscore run but keeps one inside the name", () => {
+    expect(findFileRefs(String.raw`see C:\x\a.txt__ now`).map((r) => r.path)).toEqual([String.raw`C:\x\a.txt`]);
+    expect(findFileRefs(String.raw`see C:\proj\__init__.txt now`).map((r) => r.path)).toEqual([String.raw`C:\proj\__init__.txt`]);
+  });
+});
+
+// A space ends a path in prose, so `C:\Program Files\x.txt` chipped as the
+// nonexistent `C:\Program`. Only an inline code span that is nothing but the
+// path can say the space belongs to it.
+describe("a path with a space in an inline code span", () => {
+  const codeChips = (code) => {
+    const root = mount("<p></p>");
+    root.querySelector("p").append(Object.assign(document.createElement("code"), { textContent: code }));
+    linkifyFilePaths(root);
+    return { root, found: chips(root) };
+  };
+
+  it("chips the whole span as one path and sends it to open_file_window", () => {
+    const path = String.raw`C:\Program Files\app\x.txt`;
+    const { root, found } = codeChips(path);
+    expect(found).toEqual([[path, null, "x.txt"]]);
+    expect(root.querySelectorAll(".file-ref")).toHaveLength(1);
+    const e = new MouseEvent("click", { bubbles: true, cancelable: true });
+    root.querySelector(".file-ref .file-ref-name").dispatchEvent(e);
+    handleFileRefClick(e);
+    expect(invokeMock).toHaveBeenCalledWith("open_file_window", { path, line: null });
+  });
+
+  it("keeps parentheses, forward slashes, a line suffix and a Unix form", () => {
+    expect(codeChips(String.raw`C:\Program Files (x86)\a\b.txt:12`).found).toEqual([
+      [String.raw`C:\Program Files (x86)\a\b.txt`, "12", "b.txt:12"],
+    ]);
+    expect(codeChips("C:/My Docs/notes/a.md").found.map((c) => c[0])).toEqual(["C:/My Docs/notes/a.md"]);
+    expect(codeChips("/home/joe/My Projects/a.txt").found.map((c) => c[0])).toEqual(["/home/joe/My Projects/a.txt"]);
+  });
+
+  it("does not turn a command into one chip, the path in it still chips alone", () => {
+    expect(codeChips(String.raw`cat C:\x\a.txt | head`).found.map((c) => c[0])).toEqual([String.raw`C:\x\a.txt`]);
+    expect(codeChips(String.raw`C:\x\a.txt | head`).found.map((c) => c[0])).toEqual([String.raw`C:\x\a.txt`]);
+    expect(codeChips(String.raw`C:\x\run.exe --verbose`).found.map((c) => c[0])).toEqual([String.raw`C:\x\run.exe`]);
+    expect(codeChips("/usr/bin/env python").found.map((c) => c[0])).toEqual(["/usr/bin/env"]);
+    expect(codeChips("/usr/bin/env python /home/joe/p/a.py").found.map((c) => c[0])).toEqual(["/usr/bin/env", "/home/joe/p/a.py"]);
+  });
+
+  it("never carries & ^ % ! into a whole-span chip", () => {
+    for (const bad of String.raw`C:\Program Files\a&calc.exe|C:\Program Files\a^b.txt|C:\Program Files\%TEMP%\a.ts|C:\Program Files\a!b.txt`.split("|")) {
+      const { found } = codeChips(bad);
+      expect(found.some((c) => /[&^%!]/.test(c[0]))).toBe(false);
+    }
+  });
+
+  it("still cuts prose at the space", () => {
+    const root = mount(String.raw`<p>see C:\Users\x\a.txt and more words, and C:\Program Files\x.txt</p>`);
+    linkifyFilePaths(root);
+    expect(chips(root).map((c) => c[0])).toEqual([String.raw`C:\Users\x\a.txt`, String.raw`C:\Program`]);
+  });
+
+  it("leaves a span with markup inside it to the prose matcher", () => {
+    const root = mount(String.raw`<p><code>C:\Program Files\<b>x</b>.txt</code></p>`);
+    linkifyFilePaths(root);
+    expect(chips(root).map((c) => c[0])).toEqual([String.raw`C:\Program`]);
   });
 });
 

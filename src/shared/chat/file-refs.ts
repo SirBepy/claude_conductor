@@ -10,7 +10,7 @@ import { createMoreMenu } from "../../views/sessions/more-menu-base";
 import { codeModeCanOpenFile, openInCodeMode } from "./code-mode-bridge";
 import { openFileInApp } from "../open-file";
 import { basename, winPath } from "../path-utils";
-import { findFileRefs, type FileRef } from "./file-ref-match";
+import { findFileRefs, wholeSpanFileRef, type FileRef } from "./file-ref-match";
 
 export { findFileRefs };
 
@@ -50,7 +50,12 @@ export function linkifyFilePaths(root: HTMLElement): void {
     });
     const hits: Array<{ node: Text; refs: FileRef[] }> = [];
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      const refs = findFileRefs(n.nodeValue ?? "");
+      const value = n.nodeValue ?? "";
+      // An inline code span holding only a path is the one place a space can sit
+      // inside the path; the prose matcher would cut it at the space.
+      const parent = n.parentElement;
+      const whole = parent?.tagName === "CODE" && parent.childNodes.length === 1 ? wholeSpanFileRef(value) : null;
+      const refs = whole ? [whole] : findFileRefs(value);
       if (refs.length) hits.push({ node: n as Text, refs });
     }
     for (const { node, refs } of hits) {
