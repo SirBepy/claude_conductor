@@ -202,9 +202,24 @@ test.describe("view-harness / AUQ keyboard navigation", () => {
     expect(await page.evaluate(() => document.activeElement?.getAttribute("data-act"))).toBe("primary");
     await expect(card.locator('[data-act="add-note"]')).toBeVisible();
 
+    // composer-stray-input.ts owns type-anywhere: the card sits over a composer.
+    await page.evaluate(async () => {
+      const mod = await import("/shared/chat/composer-stray-input.ts");
+      const box = document.createElement("textarea");
+      box.id = "fake-composer";
+      document.body.appendChild(box);
+      new mod.ComposerStrayInput({
+        getTextarea: () => box,
+        isDisabled: () => false,
+        handlePaste: () => {},
+      }).mount();
+      (document.activeElement as HTMLElement | null)?.blur();
+    });
+
     await page.keyboard.type("hello");
     const note = card.locator(".prompt-extra-input");
     await expect(note).toHaveValue("hello");
+    await expect(page.locator("#fake-composer")).not.toHaveValue(/hello/);
     await expect(card.locator('[data-act="add-note"]')).toHaveCount(0);
   });
 
