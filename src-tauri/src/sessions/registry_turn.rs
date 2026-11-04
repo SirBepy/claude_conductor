@@ -168,6 +168,20 @@ impl Registry {
             .unwrap_or(false)
     }
 
+    /// True when an `ask_user_question` card was posted this turn, surfaced or
+    /// not (the unsurfaced case is blocked separately by
+    /// `question_undelivered_this_turn`). The Stop hook uses it to tell a real
+    /// card from a model that merely reported `question` and asked in plain
+    /// text, which the chat never renders.
+    pub fn question_posted_this_turn(&self, session_id: &str, turn_gen: u64) -> bool {
+        self.question_posted
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .map(|p| p.turn_gen == turn_gen)
+            .unwrap_or(false)
+    }
+
     /// Record what the Stop hook says this session is still doing. Stores
     /// `Idle` explicitly so an absent entry can mean `Unknown`; `mark_ended`
     /// owns eviction. Also mirrors the sleep-safety half onto `Instance` -
@@ -391,6 +405,19 @@ mod tests {
         registry.mark_question_posted("s", 1, false);
         assert!(registry.question_undelivered_this_turn("s", 1));
         assert!(!registry.question_undelivered_this_turn("s", 2), "stale gen must not block");
+    }
+
+    #[test]
+    fn question_posted_this_turn_counts_any_post_from_this_turn_only() {
+        let registry = Registry::new();
+        assert!(!registry.question_posted_this_turn("s", 1), "no post at all");
+        registry.mark_question_posted("s", 1, true);
+        assert!(registry.question_posted_this_turn("s", 1), "surfaced post counts");
+        registry.mark_question_posted("s", 1, false);
+        assert!(registry.question_posted_this_turn("s", 1), "unsurfaced post still counts");
+        assert!(!registry.question_posted_this_turn("s", 2), "an earlier turn's card is not this turn's");
+        registry.take_reported_status_if_gen("s", 1);
+        assert!(!registry.question_posted_this_turn("s", 1), "must not outlive its turn");
     }
 
     #[test]

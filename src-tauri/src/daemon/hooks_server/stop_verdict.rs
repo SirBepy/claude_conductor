@@ -107,8 +107,10 @@ pub(super) fn title_missing(
 /// is mid-chain and something will re-invoke Claude, so silence is fine there.
 /// Same for `done` on a wake-opened turn (todo 607, `opened_by_wake`) - nobody
 /// asked, so `done` owes only the report, not a chat message.
-/// `question` is exempt too: the question card is already the message, and a
-/// bubble beside it would only point at the card.
+/// `question` is exempt too, but only when `question_card_posted` (the registry
+/// saw an `ask_user_question` card this turn): the card is already the message,
+/// and a bubble beside it would only point at the card. Without a card the
+/// status is just the model's claim, so the message is still owed.
 /// `mcp_attached` false (todo 824) degrades a missing call to `Inform`
 /// instead of `Block`: the tool itself is unreachable then.
 pub(super) fn missing_requirement_reason(
@@ -118,12 +120,20 @@ pub(super) fn missing_requirement_reason(
     status: Option<&str>,
     opened_by_wake: bool,
     mcp_attached: bool,
+    question_card_posted: bool,
 ) -> TurnEndVerdict {
     if stop_hook_active == Some(true) {
         return TurnEndVerdict::Ok;
     }
-    let send_required =
-        !opened_by_wake && !matches!(status, Some("working") | Some("waiting") | Some("question"));
+    // `question` only excuses the message when a card really went up: the status
+    // is the model's own claim, and a question asked in plain assistant text is
+    // rendered nowhere.
+    let silent_ok = match status {
+        Some("working") | Some("waiting") => true,
+        Some("question") => question_card_posted,
+        _ => false,
+    };
+    let send_required = !opened_by_wake && !silent_ok;
     let missing = match (has_report, has_send || !send_required) {
         (false, false) => Some(BOTH_MISSING_REASON),
         (false, true) => Some(REPORT_MISSING_REASON),
@@ -145,68 +155,83 @@ mod tests {
 
     #[test]
     fn report_present_send_absent_blocks_with_send_reason() {
-        assert_eq!(missing_requirement_reason(None, true, false, DONE, false, true), TurnEndVerdict::Block(SEND_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, true, false, DONE, false, true, false), TurnEndVerdict::Block(SEND_MISSING_REASON));
     }
 
     #[test]
     fn report_absent_send_present_blocks_with_report_reason() {
-        assert_eq!(missing_requirement_reason(None, false, true, DONE, false, true), TurnEndVerdict::Block(REPORT_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, false, true, DONE, false, true, false), TurnEndVerdict::Block(REPORT_MISSING_REASON));
     }
 
     #[test]
     fn both_absent_blocks_with_combined_reason() {
-        assert_eq!(missing_requirement_reason(None, false, false, DONE, false, true), TurnEndVerdict::Block(BOTH_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, false, false, DONE, false, true, false), TurnEndVerdict::Block(BOTH_MISSING_REASON));
     }
 
     #[test]
     fn both_present_does_not_block() {
-        assert_eq!(missing_requirement_reason(None, true, true, DONE, false, true), TurnEndVerdict::Ok);
+        assert_eq!(missing_requirement_reason(None, true, true, DONE, false, true, false), TurnEndVerdict::Ok);
     }
 
     #[test]
     fn stop_hook_active_true_never_blocks_even_with_both_missing() {
-        assert_eq!(missing_requirement_reason(Some(true), false, false, DONE, false, true), TurnEndVerdict::Ok);
+        assert_eq!(missing_requirement_reason(Some(true), false, false, DONE, false, true, false), TurnEndVerdict::Ok);
     }
 
     #[test]
     fn stop_hook_active_false_still_enforces() {
-        assert_eq!(missing_requirement_reason(Some(false), false, false, DONE, false, true), TurnEndVerdict::Block(BOTH_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(Some(false), false, false, DONE, false, true, false), TurnEndVerdict::Block(BOTH_MISSING_REASON));
     }
 
     #[test]
     fn mid_chain_working_turn_may_stay_silent() {
-        assert_eq!(missing_requirement_reason(None, true, false, Some("working"), false, true), TurnEndVerdict::Ok);
+        assert_eq!(missing_requirement_reason(None, true, false, Some("working"), false, true, false), TurnEndVerdict::Ok);
     }
 
     #[test]
     fn mid_chain_waiting_turn_may_stay_silent() {
-        assert_eq!(missing_requirement_reason(None, true, false, Some("waiting"), false, true), TurnEndVerdict::Ok);
+        assert_eq!(missing_requirement_reason(None, true, false, Some("waiting"), false, true, false), TurnEndVerdict::Ok);
     }
 
     #[test]
     fn a_silent_working_turn_still_owes_a_status_report() {
         assert_eq!(
-            missing_requirement_reason(None, false, false, Some("working"), false, true),
+            missing_requirement_reason(None, false, false, Some("working"), false, true, false),
             TurnEndVerdict::Block(REPORT_MISSING_REASON),
         );
     }
 
     #[test]
     fn question_turn_may_stay_silent_because_the_card_is_the_message() {
-        assert_eq!(missing_requirement_reason(None, true, false, Some("question"), false, true), TurnEndVerdict::Ok);
+        assert_eq!(missing_requirement_reason(None, true, false, Some("question"), false, true, true), TurnEndVerdict::Ok);
+    }
+
+    /// The model's own `question` status is not proof of a card: asking in
+    /// plain assistant text renders nowhere, so the turn would end unread.
+    #[test]
+    fn question_status_without_a_posted_card_still_owes_a_message() {
+        assert_eq!(
+            missing_requirement_reason(None, true, false, Some("question"), false, true, false),
+            TurnEndVerdict::Block(SEND_MISSING_REASON),
+        );
+    }
+
+    #[test]
+    fn question_status_without_a_card_is_not_blocked_on_the_stop_hook_retry() {
+        assert_eq!(missing_requirement_reason(Some(true), true, false, Some("question"), false, true, false), TurnEndVerdict::Ok);
     }
 
     #[test]
     fn a_silent_question_turn_still_owes_a_status_report() {
         assert_eq!(
-            missing_requirement_reason(None, false, false, Some("question"), false, true),
+            missing_requirement_reason(None, false, false, Some("question"), false, true, true),
             TurnEndVerdict::Block(REPORT_MISSING_REASON),
         );
     }
 
     #[test]
     fn unreported_status_defaults_to_requiring_a_message() {
-        assert_eq!(missing_requirement_reason(None, true, false, None, false, true), TurnEndVerdict::Block(SEND_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, true, false, None, false, true, false), TurnEndVerdict::Block(SEND_MISSING_REASON));
     }
 
     #[test]
@@ -214,13 +239,13 @@ mod tests {
         // todo 607: a peer-channel/Jarvis/scheduled wake that resolves to
         // "nothing to do" has nobody to answer - report still required, but
         // `done` no longer compels a chat message.
-        assert_eq!(missing_requirement_reason(None, true, false, DONE, true, true), TurnEndVerdict::Ok);
+        assert_eq!(missing_requirement_reason(None, true, false, DONE, true, true, false), TurnEndVerdict::Ok);
     }
 
     #[test]
     fn wake_opened_turn_still_owes_a_status_report() {
         assert_eq!(
-            missing_requirement_reason(None, false, false, DONE, true, true),
+            missing_requirement_reason(None, false, false, DONE, true, true, false),
             TurnEndVerdict::Block(REPORT_MISSING_REASON),
         );
     }
@@ -230,7 +255,7 @@ mod tests {
         // Unchanged: opened_by_wake=false is the default path every existing
         // `DONE` test above already covers, restated here for contrast with
         // the wake-opened cases.
-        assert_eq!(missing_requirement_reason(None, true, false, DONE, false, true), TurnEndVerdict::Block(SEND_MISSING_REASON));
+        assert_eq!(missing_requirement_reason(None, true, false, DONE, false, true, false), TurnEndVerdict::Block(SEND_MISSING_REASON));
     }
 
     /// A transcript line list written to a temp file; `title_missing` reads it
@@ -280,27 +305,27 @@ mod tests {
     // a non-blocking, softened note instead.
     #[test]
     fn mcp_not_attached_informs_instead_of_blocking_on_send() {
-        assert_eq!(missing_requirement_reason(None, true, false, DONE, false, false), TurnEndVerdict::Inform(MCP_UNAVAILABLE_REASON));
+        assert_eq!(missing_requirement_reason(None, true, false, DONE, false, false, false), TurnEndVerdict::Inform(MCP_UNAVAILABLE_REASON));
     }
 
     #[test]
     fn mcp_not_attached_informs_instead_of_blocking_on_report() {
-        assert_eq!(missing_requirement_reason(None, false, true, DONE, false, false), TurnEndVerdict::Inform(MCP_UNAVAILABLE_REASON));
+        assert_eq!(missing_requirement_reason(None, false, true, DONE, false, false, false), TurnEndVerdict::Inform(MCP_UNAVAILABLE_REASON));
     }
 
     #[test]
     fn mcp_not_attached_informs_instead_of_blocking_on_both() {
-        assert_eq!(missing_requirement_reason(None, false, false, DONE, false, false), TurnEndVerdict::Inform(MCP_UNAVAILABLE_REASON));
+        assert_eq!(missing_requirement_reason(None, false, false, DONE, false, false, false), TurnEndVerdict::Inform(MCP_UNAVAILABLE_REASON));
     }
 
     #[test]
     fn mcp_not_attached_still_silent_when_nothing_missing() {
-        assert_eq!(missing_requirement_reason(None, true, true, DONE, false, false), TurnEndVerdict::Ok);
+        assert_eq!(missing_requirement_reason(None, true, true, DONE, false, false, false), TurnEndVerdict::Ok);
     }
 
     #[test]
     fn mcp_not_attached_stop_hook_active_still_never_blocks() {
-        assert_eq!(missing_requirement_reason(Some(true), false, false, DONE, false, false), TurnEndVerdict::Ok);
+        assert_eq!(missing_requirement_reason(Some(true), false, false, DONE, false, false, false), TurnEndVerdict::Ok);
     }
 
     // todo 824: `mcp_is_attached` combines the spawn-time proxy with the live
