@@ -261,10 +261,20 @@ pub async fn cancel_turn(map: &SessionMap, session_id: &str) -> Result<(), Lifec
     });
     let mut line = serde_json::to_vec(&msg).expect("serialize");
     line.push(b'\n');
-    let mut stdin = session.stdin.lock().await;
-    stdin.write_all(&line).await?;
-    stdin.flush().await?;
+    // Flagged before the stdin lock and the write: the pump reads `result` lines
+    // concurrently, and one already in the pipe would otherwise be judged without
+    // the interrupt it answers. A write that fails takes the flag back, since no
+    // interrupt reached the child and the next real result is not its answer.
     session.note_interrupt_sent();
+    let mut stdin = session.stdin.lock().await;
+    let written = match stdin.write_all(&line).await {
+        Ok(()) => stdin.flush().await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = written {
+        session.take_interrupt_sent();
+        return Err(e.into());
+    }
     // The held-answer rescue (todo 926) reaches the daemon only through here, so
     // this line is what tells a rescued wedge apart from one that self-resolved.
     log::info!("daemon: cancel_turn sent an interrupt to session {session_id}");
@@ -417,6 +427,60 @@ mod tests {
         assert!(session.take_interrupt_sent(), "cancel_turn must flag the session");
         assert!(!session.take_interrupt_sent(), "the flag is consumed by the first read");
         let _ = child.kill().await;
+    }
+
+    /// The pump reads the flag at every `result` line while this task is still
+    /// parked on the stdin lock or the write: a flag set only afterwards lets a
+    /// result that is already in the pipe be judged without it.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cancel_turn_flags_the_session_before_the_interrupt_is_written() {
+        use crate::daemon::session_test_support::spawn_fake_session;
+        let map = new_session_map();
+        let mut child = spawn_fake_session(&map, "order-s").await;
+        let session = map.get("order-s").unwrap().clone();
+
+        let held = session.stdin.lock().await;
+        let task = {
+            let map = map.clone();
+            tokio::spawn(async move { cancel_turn(&map, "order-s").await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(
+            session.take_interrupt_sent(),
+            "the flag must be set before the write, which is still blocked on the stdin lock"
+        );
+
+        drop(held);
+        task.await.unwrap().unwrap();
+        let _ = child.kill().await;
+    }
+
+    /// An interrupt that never reached the child must not leave a flag behind:
+    /// the next real `result` line would be judged as the interrupt's answer.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_failed_interrupt_write_leaves_no_flag_behind() {
+        use crate::daemon::session_test_support::spawn_fake_session;
+        let map = new_session_map();
+        let mut child = spawn_fake_session(&map, "dead-s").await;
+        let session = map.get("dead-s").unwrap().clone();
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+
+        // The first write after the reader is gone may still land in the pipe
+        // buffer, so keep going until one fails.
+        let mut failed = false;
+        for _ in 0..50 {
+            session.take_interrupt_sent();
+            if cancel_turn(&map, "dead-s").await.is_err() {
+                failed = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(failed, "writing to a dead child never failed");
+        assert!(!session.take_interrupt_sent(), "a failed write must not leave the flag set");
     }
 
     #[tokio::test]
