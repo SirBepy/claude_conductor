@@ -111,6 +111,13 @@
   transition-delay: 0s;
 }
 
+/* A running turn's elapsed time already ticks in the status bar below the
+   chat; showing it here too would be the same seconds twice. The settled time
+   returns on hover once the turn ends. */
+.turn-meta-chips--live > .turn-chip--time {
+  display: none;
+}
+
 /* No hover on touch screens, so the numbers would be unreachable. */
 @media (hover: none) {
   .turn-meta-chips > .turn-chip--tokens,

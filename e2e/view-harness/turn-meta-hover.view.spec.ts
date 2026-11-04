@@ -53,6 +53,32 @@ async function mountChat(page: Page): Promise<void> {
 const opacityOf = (page: Page, sel: string): Promise<number> =>
   page.locator(sel).first().evaluate((el) => Number(getComputedStyle(el).opacity));
 
+test("a running turn shows tokens but not the elapsed time the status bar already ticks", async ({ page }) => {
+  const events: unknown[] = [
+    { type: "user_message", content: [{ type: "text", text: "do the thing" }], timestamp: 0, remote_echo: false, author_session_id: null },
+    { type: "tool_use", tool_name: "Bash", input: { command: "git log -1" }, id: "b1", timestamp: 0, parent_tool_use_id: null },
+    // A usage line mid-turn: a busy chat reloaded here resumes the ticking row.
+    {
+      type: "turn_usage", input_tokens: 100, output_tokens: 900, cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0, total_cost_usd: 0, duration_ms: 5_000, has_thinking: false, model: "m",
+    },
+  ];
+  await mountView(page, {
+    view: "sessions",
+    invoke: {
+      ...SESSIONS_BASE_INVOKE,
+      list_instances: [sessionInstance({ session_id: "s1", busy: true })],
+      get_active_sessions: [sessionInstance({ session_id: "s1", busy: true })],
+      load_history_page: { events, oldest_seq: 0, newest_seq: 0, has_more: false },
+    },
+  });
+  await page.locator('#sessions-list li[data-session-id="s1"]').click();
+  const row = page.locator("#session-pane .session-messages .turn-meta-chips--live");
+  await row.waitFor();
+  await expect(row.locator(".turn-chip--tokens")).toBeVisible();
+  await expect(row.locator(".turn-chip--time")).toBeHidden();
+});
+
 test("tokens and time are hidden at rest, shown on bubble hover, right of the tool chips", async ({ page }) => {
   await mountChat(page);
   const footer = page
