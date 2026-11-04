@@ -167,6 +167,10 @@ impl Registry {
                 }
                 i.busy = busy;
                 if busy {
+                    // Every set_busy(true) opens a turn (the gen bump below), also
+                    // one queued onto a turn that never went idle, where no flip
+                    // fires `note_busy_flip`. A plan belongs to the turn that wrote it.
+                    i.progress.plan = None;
                     i.turn_gen = i.turn_gen.wrapping_add(1);
                     i.last_event_at = Some(chrono::Utc::now().to_rfc3339());
                     opened = Some(i.turn_gen);
@@ -720,6 +724,25 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(5));
         registry.set_busy("s1", false);
         assert_ne!(registry.get("s1").unwrap().progress.state_since, first, "going idle restarts the timer");
+    }
+
+    /// A message queued onto a turn that never goes idle opens a new turn
+    /// (`turn_gen` bumps) without a busy flip, so the old flip-only clear left
+    /// the previous plan's ring and hover steps on the row.
+    #[test]
+    fn a_new_turn_that_never_went_idle_drops_the_previous_plan() {
+        let registry = Registry::new();
+        registry.record_interactive_session("s1", Path::new("/tmp/x"), &fresh_settings(), "2026-01-01T00:00:00Z");
+        registry.set_busy("s1", true);
+        registry.set_plan("s1", plan(&[("a", "done"), ("b", "active")]));
+        let since = registry.get("s1").unwrap().progress.state_since;
+
+        registry.set_busy("s1", true);
+
+        let i = registry.get("s1").unwrap();
+        assert!(i.progress.plan.is_none(), "the second turn has written no plan of its own yet");
+        assert_eq!(i.progress.state_since, since, "still the same busy stretch, so the timer keeps running");
+        assert!(registry.set_plan("s1", plan(&[("c", "active")])), "the new turn can write its own plan");
     }
 
     #[test]

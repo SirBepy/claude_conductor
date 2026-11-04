@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { computeQuestionProgress } from "../src/views/sessions/question-progress.ts";
+import {
+  computeQuestionProgress,
+  pruneLiveQuestionProgress,
+  setLiveQuestionProgress,
+} from "../src/views/sessions/question-progress.ts";
 
 const draft = (freeText = [], selections = []) => ({
   freeText: new Map(freeText),
@@ -33,5 +37,20 @@ describe("computeQuestionProgress", () => {
   it("joins a pick and typed text for one question", () => {
     const p = computeQuestionProgress(qs, draft([[0, "note"]], [[0, "A"]]));
     expect(p.answers[0]).toBe("A + note");
+  });
+});
+
+describe("pruneLiveQuestionProgress", () => {
+  it("drops the mirrored progress of sessions that are no longer listed and keeps the rest", () => {
+    setLiveQuestionProgress("open", "p1", qs, undefined);
+    setLiveQuestionProgress("closed", "p2", qs, undefined);
+
+    pruneLiveQuestionProgress(["open"]);
+
+    // setLiveQuestionProgress reports whether the entry moved: false for a kept
+    // entry re-recorded unchanged, true for one that was dropped and is new again.
+    expect(setLiveQuestionProgress("open", "p1", qs, undefined)).toBe(false);
+    expect(setLiveQuestionProgress("closed", "p2", qs, undefined)).toBe(true);
+    pruneLiveQuestionProgress([]);
   });
 });
