@@ -27,19 +27,54 @@ export interface FileRef {
   index: number;
 }
 
+function refFrom(raw: string, index: number): FileRef | null {
+  const suffix = /^(.*?)(?::(\d+)(?::(\d+))?)?$/.exec(raw)!;
+  const path = suffix[1]!;
+  // A Windows path needs a name after the drive and slash, not just `C:\`.
+  if (/^[A-Za-z]:[\\/]*$/.test(path)) return null;
+  return { path, line: suffix[2] ? Number(suffix[2]) : null, col: suffix[3] ? Number(suffix[3]) : null, text: raw, index };
+}
+
 /** Finds paths in plain text; trailing sentence punctuation is not part of one. */
 export function findFileRefs(text: string): FileRef[] {
   const out: FileRef[] = [];
   PATH_RE.lastIndex = 0;
   for (let m = PATH_RE.exec(text); m; m = PATH_RE.exec(text)) {
-    const raw = m[0].replace(/[.\-+~@]+$/, "");
-    const suffix = /^(.*?)(?::(\d+)(?::(\d+))?)?$/.exec(raw)!;
-    const path = suffix[1]!;
-    // A Windows path needs a name after the drive and slash, not just `C:\`.
-    if (/^[A-Za-z]:[\\/]*$/.test(path)) continue;
-    out.push({ path, line: suffix[2] ? Number(suffix[2]) : null, col: suffix[3] ? Number(suffix[3]) : null, text: raw, index: m.index });
+    // A closing `_` of `_C:\a\b.txt_` emphasis is not part of the path. Cost: a
+    // file whose name really ends in `_` loses it, a rarer case than Claude
+    // wrapping a path in underscores; `__init__.txt` is safe since the dot
+    // follows the `_`. Looking for an unmatched opener instead would keep that
+    // file, with more logic than the case earns.
+    const raw = m[0].replace(/[.\-+~@_]+$/, "");
+    const ref = refFrom(raw, m.index);
+    if (ref) out.push(ref);
   }
   return out;
+}
+
+// Same exclusions as WIN/UNIX (`& ^ % !` stay out for `cmd /C code`), except a
+// space and `()` are allowed: `C:\Program Files (x86)\a.txt`. The Rust side
+// allows parentheses and refuses only & | ^ % < > " and line breaks.
+const WHOLE_WIN = String.raw`[A-Za-z]:[\\/][^"'<>|&^%!*?:` + "`" + String.raw`\[\]{},;\t\r\n]+`;
+const WHOLE_UNIX = String.raw`\/(?:[\w.@+~ -]+\/){2,}[\w.@+~ -]+`;
+const WHOLE_RE = new RegExp(`^(?:${WHOLE_WIN}|${WHOLE_UNIX})${SUFFIX}$`);
+
+/** The inline-code span `text` when the whole of it is ONE path that contains a
+ *  space (`C:\Program Files\x.txt`), else null. Prose cannot do this: `see
+ *  C:\foo and bar.txt` is not told apart from a folder named `foo and bar.txt`,
+ *  but a code span holding only a path is unambiguous. Only a space inside a
+ *  folder name counts, so a command (`/usr/bin/env python`, `C:\x\run.exe --v`,
+ *  `C:\x\a.txt | head`) is left to the prose matcher, which chips its path alone. */
+export function wholeSpanFileRef(text: string): FileRef | null {
+  const raw = text.trim();
+  if (!raw.includes(" ") || !WHOLE_RE.test(raw)) return null;
+  const body = raw.replace(/:\d+(?::\d+)?$/, "");
+  // The final segment has no space: `C:\My Dir` or `/usr/bin/env python` could
+  // as well be a path followed by an argument.
+  if (/ /.test(body.slice(Math.max(body.lastIndexOf("\\"), body.lastIndexOf("/"))))) return null;
+  // A token after a space that opens like a flag or a second path is a command.
+  if (raw.split(" ").slice(1).some((t) => /^[-/\\]/.test(t))) return null;
+  return refFrom(raw, text.indexOf(raw));
 }
 
 /** Markdown leaves a file path as written. Unguarded, `\.` and `\_` are escapes
