@@ -6,7 +6,7 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 8px;
-  height: 36px;
+  height: var(--control-h);
   padding: 0 8px 0 10px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-background);
@@ -25,7 +25,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
+  height: var(--control-h);
   min-height: 0;
   flex: none;
   padding: 0 4px 0 10px;

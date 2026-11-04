@@ -711,7 +711,9 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 9px;
+  box-sizing: border-box;
+  height: var(--control-h-sm);
+  padding: 0 9px;
   font: inherit;
   font-size: 0.74rem;
   font-style: normal;
@@ -792,7 +794,12 @@
 
 .thinking-copy {
   flex: none;
-  padding: 2px 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: var(--control-h-sm);
+  padding: 0 6px;
   background: none;
   border: 0;
   border-radius: 4px;
@@ -829,7 +836,9 @@
   align-items: center;
   gap: 6px;
   margin-top: 10px;
-  padding: 4px 11px;
+  box-sizing: border-box;
+  min-height: var(--control-h);
+  padding: 0 11px;
   font: inherit;
   font-size: 0.76rem;
   color: var(--color-text);
@@ -845,7 +854,6 @@
     --thinking-line-h: var(--control-h);
   }
   .thinking-stop-turn {
-    min-height: 40px;
     padding: 0 14px;
     font-size: 0.85rem;
   }

@@ -419,10 +419,10 @@
   .composer-row--tall .composer-attach-in {
     display: none;
   }
+  /* Size comes from .icon-btn (--control-h, 44px here); a shorter box than Send
+     beside it was the last off-scale control in the wrapped composer. */
   .composer-row--tall .composer-attach {
     display: flex;
-    width: 44px;
-    height: 30px;
   }
   /* 20px was the smallest target in the chat, perched on a corner. */
   .composer-attachments .rm {

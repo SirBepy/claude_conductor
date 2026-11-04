@@ -59,7 +59,7 @@
 .vs-wrap:focus-visible .vs-thumb { outline: 2px solid var(--color-primary); outline-offset: 3px; }
 .vs-stops { display: grid; grid-template-columns: repeat(var(--n), 1fr); }
 .vs-stop {
-  background: none; border: 0; padding: 2px 0; font: inherit; font-size: 11px; text-align: center;
+  background: none; border: 0; padding: 0; height: var(--control-h-sm); font: inherit; font-size: 11px; text-align: center;
   color: var(--color-text-muted); cursor: pointer; min-width: 0; white-space: nowrap;
 }
 .vs-stop:hover { color: var(--color-text); }
@@ -68,7 +68,7 @@
 
 /* Back to the default: only while the project is pinned to something else. */
 .ps-revert {
-  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; width: var(--control-h-sm); height: var(--control-h-sm); padding: 0;
   background: none; border: 0; border-radius: 4px; color: var(--color-text-muted); font-size: 14px; cursor: pointer;
   opacity: 0; pointer-events: none; transform: rotate(40deg); transition: opacity 0.2s ease, transform 0.25s ease, color 0.15s;
 }

@@ -77,9 +77,11 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
+  height: var(--control-h-sm);
   padding: 0 2px 0 8px;
-  border: 1px solid var(--color-border);
+  /* An inset ring, not a border: a border would make the 24px buttons and field
+     inside it overflow the 24px bar by 2px. */
+  box-shadow: inset 0 0 0 1px var(--color-border);
   border-radius: 6px;
   background: var(--color-background);
 }
@@ -92,6 +94,8 @@
    this single-class rule would lose to. */
 .fs-search-input {
   width: 140px;
+  height: var(--control-h-sm);
+  padding: 0;
   border: none;
   background: none;
   color: var(--color-text);
@@ -117,8 +121,8 @@
 }
 
 .fs-tb {
-  width: 28px;
-  height: 28px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   min-width: 0;
   min-height: 0;
   padding: 0;
@@ -134,7 +138,7 @@
 
 .fs-search .fs-tb {
   width: 22px;
-  height: 20px;
+  height: var(--control-h-sm);
   font-size: 12px;
 }
 

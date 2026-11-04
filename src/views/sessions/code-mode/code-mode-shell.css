@@ -19,8 +19,8 @@
 }
 
 .cm-ib {
-  width: 28px;
-  height: 28px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   min-width: 0;
   min-height: 0;
   padding: 0;
@@ -70,7 +70,7 @@
   gap: 8px;
   min-width: 0;
   max-width: 720px;
-  height: 32px;
+  height: var(--control-h);
   min-height: 0;
   padding: 0 14px 0 8px;
   border: 1px solid var(--color-border);
