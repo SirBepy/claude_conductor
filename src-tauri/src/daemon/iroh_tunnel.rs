@@ -312,7 +312,16 @@ async fn serve_connection(conn: iroh::endpoint::Connection, target_port: u16, li
         let (mut send, mut recv) = match accepted {
             Ok(pair) => pair,
             Err(e) => {
-                log::debug!("iroh tunnel: connection closed: {e}");
+                // Info, with the path QUIC was on (`*` = selected): a phone that
+                // keeps dropping needs the log to say whether it rode the relay
+                // or a direct address when the connection died.
+                let paths = conn
+                    .paths()
+                    .iter()
+                    .map(|p| format!("{}{}", if p.is_selected() { "*" } else { "" }, p.remote_addr()))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                log::info!("iroh tunnel: connection from {} closed: {e} paths=[{paths}]", conn.remote_id());
                 return;
             }
         };

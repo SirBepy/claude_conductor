@@ -72,9 +72,20 @@ pub fn mark_live_for_test(port: u16) {
     LIVE_PORTS.write().expect("live ports").insert(port);
 }
 
-/// Upper bound on dialing the PC. Without one, a connect attempt made while
+/// Upper bound on ONE dial of the PC. Without one, a connect attempt made while
 /// iroh still holds pre-sleep network state hangs the WebView request forever.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// Short on purpose: a Pixel 7 measured a fresh endpoint dialing in 272ms while
+/// the stale one burned 15s per try, so a slow first dial is retried on a fresh
+/// endpoint rather than waited out.
+const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(6);
+
+/// Dials per `connection()` call. Every attempt after the first runs on a
+/// freshly bound endpoint (`Tunnel::rebind`).
+const DIAL_ATTEMPTS: u32 = 2;
+
+/// Upper bound on binding a replacement endpoint. Binding is local socket
+/// setup, so only a wedged runtime reaches this.
+const REBIND_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Opening a stream is local bookkeeping and only waits when the peer's
 /// concurrent-stream limit is used up - a busy connection, not a dead one, so
@@ -109,7 +120,8 @@ const NETWORK_CHANGES_UNDER_LOCK: u128 = 2;
 const fn max_lock_held_ms() -> u128 {
     NETWORK_CHANGES_UNDER_LOCK * NETWORK_CHANGE_TIMEOUT.as_millis()
         + REMOTE_INFO_TIMEOUT.as_millis()
-        + CONNECT_TIMEOUT.as_millis()
+        + DIAL_ATTEMPTS as u128 * ATTEMPT_TIMEOUT.as_millis()
+        + (DIAL_ATTEMPTS as u128 - 1) * REBIND_TIMEOUT.as_millis()
         + WATCHDOG_TICK.as_millis()
         + 1_000
 }
@@ -144,7 +156,7 @@ impl RunningTunnel {
         for task in &self.tasks {
             task.abort();
         }
-        self.tunnel.endpoint.close().await;
+        self.tunnel.endpoint().close().await;
     }
 }
 
@@ -176,15 +188,11 @@ pub async fn start_iroh_tunnel(
     // The old PC's tunnel stays up until the new one is bound, so a failed
     // switch leaves the phone on a working tunnel instead of none.
     let bind_started = Instant::now();
-    let endpoint = Endpoint::builder(presets::N0)
-        .alpns(vec![ALPN.to_vec()])
-        .bind()
-        .await
-        .map_err(|e| {
-            let msg = format!("iroh bind failed: {e}");
-            error!("{}", msg);
-            msg
-        })?;
+    let endpoint = bind_endpoint().await.map_err(|e| {
+        let msg = format!("iroh bind failed: {e}");
+        error!("{}", msg);
+        msg
+    })?;
     info!("iroh bound in {}ms", bind_started.elapsed().as_millis());
     let candidates = port_candidates(&remote_id, legacy.unwrap_or(false));
     // A candidate held by an old tunnel is freed first, so the new PC still
@@ -198,9 +206,13 @@ pub async fn start_iroh_tunnel(
     info!("iroh tunnel listener successfully bound on 127.0.0.1:{}", port);
     // A bare EndpointAddr (id only, no direct addrs) makes each connect() go
     // through the N0 preset's pkarr lookup, matching the desktop's ticket.
-    let tunnel = Arc::new(Tunnel::new(endpoint, remote_id.into()));
+    let tunnel = Arc::new(Tunnel::new(endpoint, remote_id.into(), Box::new(|| Box::pin(bind_endpoint()))));
     running.insert(remote_id, RunningTunnel::spawn(listener, port, tunnel));
     Ok(port)
+}
+
+async fn bind_endpoint() -> Result<Endpoint, String> {
+    Endpoint::builder(presets::N0).alpns(vec![ALPN.to_vec()]).bind().await.map_err(|e| e.to_string())
 }
 
 async fn shut_down_all(running: &mut std::collections::HashMap<EndpointId, RunningTunnel>) {
@@ -229,13 +241,19 @@ async fn bind_loopback(candidates: &[u16]) -> Result<(TcpListener, u16), String>
 /// The shared QUIC connection to the PC, dialed lazily and redialed whenever
 /// it closes or gets invalidated.
 struct Tunnel {
-    endpoint: Endpoint,
+    /// Swapped by `rebind`; read through `endpoint()` so no guard is held across an await.
+    endpoint: std::sync::Mutex<Endpoint>,
+    rebuild: Rebuild,
     remote: EndpointAddr,
     conn: Mutex<Option<Connection>>,
     /// Wall-clock seconds of the last gap check. Starts at "now" so a fresh
     /// tunnel's first dial is not mistaken for a wake-up.
     last_alive: AtomicU64,
 }
+
+/// Binds a replacement endpoint. A parameter, not a hard-coded `bind_endpoint`,
+/// so tests rebind offline (`presets::Minimal`).
+type Rebuild = Box<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Endpoint, String>> + Send>> + Send + Sync>;
 
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
@@ -252,8 +270,36 @@ fn path_summary(paths: &[(bool, TransportAddr)]) -> String {
 }
 
 impl Tunnel {
-    fn new(endpoint: Endpoint, remote: EndpointAddr) -> Self {
-        Self { endpoint, remote, conn: Mutex::new(None), last_alive: AtomicU64::new(now_secs()) }
+    fn new(endpoint: Endpoint, remote: EndpointAddr, rebuild: Rebuild) -> Self {
+        Self {
+            endpoint: std::sync::Mutex::new(endpoint),
+            rebuild,
+            remote,
+            conn: Mutex::new(None),
+            last_alive: AtomicU64::new(now_secs()),
+        }
+    }
+
+    fn endpoint(&self) -> Endpoint {
+        self.endpoint.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    /// Replaces the endpoint with a freshly bound one. A stale endpoint keeps
+    /// timing out against the PC after the relay path flaps (Pixel 7, 2026-10-30:
+    /// four 15s timeouts, then a 14s dial, against 272ms on a fresh endpoint), and
+    /// `network_change` alone did not cure it. The old one closes in the background
+    /// so its shutdown never counts against the connection lock.
+    async fn rebind(&self) {
+        let started = Instant::now();
+        match tokio::time::timeout(REBIND_TIMEOUT, (self.rebuild)()).await {
+            Ok(Ok(fresh)) => {
+                let old = std::mem::replace(&mut *self.endpoint.lock().unwrap_or_else(|p| p.into_inner()), fresh);
+                tokio::spawn(async move { old.close().await });
+                info!("rebound a fresh iroh endpoint in {}ms", started.elapsed().as_millis());
+            }
+            Ok(Err(e)) => warn!("rebind failed after {}ms: {e}", started.elapsed().as_millis()),
+            Err(_) => warn!("rebind timed out after {}s", REBIND_TIMEOUT.as_secs()),
+        }
     }
 
     /// Returns the length of the gap when the process was frozen or the phone
@@ -279,7 +325,7 @@ impl Tunnel {
     /// `Endpoint::network_change` bounded by `NETWORK_CHANGE_TIMEOUT`, so a stalled
     /// iroh actor cannot stretch the connection lock past `RESUME_GAP`.
     async fn network_change(&self) {
-        if tokio::time::timeout(NETWORK_CHANGE_TIMEOUT, self.endpoint.network_change()).await.is_err() {
+        if tokio::time::timeout(NETWORK_CHANGE_TIMEOUT, self.endpoint().network_change()).await.is_err() {
             warn!("network_change did not return within {}ms", NETWORK_CHANGE_TIMEOUT.as_millis());
         }
     }
@@ -287,7 +333,7 @@ impl Tunnel {
     /// Whether iroh already holds state for the PC (a warm redial), as opposed
     /// to a cold lookup. Bounded: it waits on iroh's remote-state actor.
     async fn remote_known(&self) -> bool {
-        tokio::time::timeout(REMOTE_INFO_TIMEOUT, self.endpoint.remote_info(self.remote.id))
+        tokio::time::timeout(REMOTE_INFO_TIMEOUT, self.endpoint().remote_info(self.remote.id))
             .await
             .ok()
             .flatten()
@@ -321,20 +367,31 @@ impl Tunnel {
         }
         let warm = self.remote_known().await;
         let started = Instant::now();
-        let conn = match tokio::time::timeout(CONNECT_TIMEOUT, self.endpoint.connect(self.remote.clone(), ALPN)).await {
-            Ok(Ok(conn)) => conn,
-            Ok(Err(e)) => {
-                warn!("tunnel connect failed after {}ms warm={warm}: {e}", started.elapsed().as_millis());
-                *guard = None;
-                self.network_change().await;
-                return Err(e.into());
+        let mut dialed = None;
+        let mut last_err: BoxError = "no dial attempted".into();
+        for attempt in 1..=DIAL_ATTEMPTS {
+            match tokio::time::timeout(ATTEMPT_TIMEOUT, self.endpoint().connect(self.remote.clone(), ALPN)).await {
+                Ok(Ok(conn)) => {
+                    dialed = Some(conn);
+                    break;
+                }
+                Ok(Err(e)) => {
+                    warn!("tunnel connect {attempt}/{DIAL_ATTEMPTS} failed after {}ms warm={warm}: {e}", started.elapsed().as_millis());
+                    last_err = e.into();
+                }
+                Err(_) => {
+                    warn!("tunnel connect {attempt}/{DIAL_ATTEMPTS} timed out after {}s warm={warm}", ATTEMPT_TIMEOUT.as_secs());
+                    last_err = "tunnel connect timed out".into();
+                }
             }
-            Err(_) => {
-                warn!("tunnel connect timed out after {}s warm={warm}", CONNECT_TIMEOUT.as_secs());
-                *guard = None;
-                self.network_change().await;
-                return Err("tunnel connect timed out".into());
+            if attempt < DIAL_ATTEMPTS {
+                self.rebind().await;
             }
+        }
+        let Some(conn) = dialed else {
+            *guard = None;
+            self.network_change().await;
+            return Err(last_err);
         };
         let paths: Vec<(bool, TransportAddr)> =
             conn.paths().iter().map(|p| (p.is_selected(), p.remote_addr().clone())).collect();
@@ -477,7 +534,7 @@ mod tests {
         let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
         let port = listener.local_addr().expect("addr").port();
-        let running = RunningTunnel::spawn(listener, port, Arc::new(Tunnel::new(client, server)));
+        let running = RunningTunnel::spawn(listener, port, Arc::new(Tunnel::new(client, server, minimal_rebuild())));
         assert!(is_tunnel_port(port));
         running.shutdown().await;
         assert!(!is_tunnel_port(port));
@@ -521,7 +578,10 @@ mod tests {
     fn worst_case_lock_held_stays_under_the_resume_gap() {
         let held = max_lock_held_ms();
         assert!(held < RESUME_GAP.as_millis(), "lock held up to {held}ms against a {}ms resume gap", RESUME_GAP.as_millis());
-        assert!(held >= CONNECT_TIMEOUT.as_millis() + REMOTE_INFO_TIMEOUT.as_millis(), "every await under the lock is counted");
+        assert!(
+            held >= ATTEMPT_TIMEOUT.as_millis() * DIAL_ATTEMPTS as u128 + REMOTE_INFO_TIMEOUT.as_millis(),
+            "every await under the lock is counted"
+        );
     }
 
     #[test]
@@ -572,9 +632,58 @@ mod tests {
         let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
         let port = listener.local_addr().expect("addr").port();
-        let tunnel = Arc::new(Tunnel::new(client, server));
+        let tunnel = Arc::new(Tunnel::new(client, server, minimal_rebuild()));
         tokio::spawn(accept_loop(listener, tunnel.clone()));
         (tunnel, port)
+    }
+
+    fn minimal_rebuild() -> Rebuild {
+        Box::new(|| Box::pin(async { Endpoint::builder(presets::Minimal).bind().await.map_err(|e| e.to_string()) }))
+    }
+
+    /// A dead endpoint fails every dial at once. The retry must run on a freshly
+    /// bound one, or a flapped relay path keeps timing out until the tunnel is
+    /// rebuilt by hand.
+    #[tokio::test]
+    async fn a_failed_dial_is_retried_on_a_freshly_bound_endpoint() {
+        let (server, accepted) = pong_server().await;
+        let dead = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        dead.close().await;
+        let rebinds = Arc::new(AtomicUsize::new(0));
+        let counter = rebinds.clone();
+        let rebuild: Rebuild = Box::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Endpoint::builder(presets::Minimal).bind().await.map_err(|e| e.to_string()) })
+        });
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let tunnel = Arc::new(Tunnel::new(dead, server, rebuild));
+        tokio::spawn(accept_loop(listener, tunnel.clone()));
+        ping(port).await;
+        assert_eq!(rebinds.load(Ordering::SeqCst), 1, "one rebind for the one failed dial");
+        assert_eq!(accepted.load(Ordering::SeqCst), 1);
+    }
+
+    /// With every attempt failing, the caller gets an error rather than a hang.
+    #[tokio::test]
+    async fn every_dial_failing_surfaces_an_error_after_one_rebind_per_retry() {
+        let (server, _) = pong_server().await;
+        let dead = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        dead.close().await;
+        let rebinds = Arc::new(AtomicUsize::new(0));
+        let counter = rebinds.clone();
+        // The replacement is closed too, so attempt 2 fails as well.
+        let rebuild: Rebuild = Box::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async {
+                let e = Endpoint::builder(presets::Minimal).bind().await.map_err(|e| e.to_string())?;
+                e.close().await;
+                Ok(e)
+            })
+        });
+        let tunnel = Tunnel::new(dead, server, rebuild);
+        assert!(tunnel.connection().await.is_err());
+        assert_eq!(rebinds.load(Ordering::SeqCst), (DIAL_ATTEMPTS - 1) as usize);
     }
 
     async fn ping(port: u16) {
