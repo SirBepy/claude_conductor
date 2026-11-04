@@ -174,6 +174,40 @@ test.describe("view-harness / AUQ keyboard navigation", () => {
     expect(await focusedLabel(page)).toBe("C");
   });
 
+  test("typing on the review step opens the note box and types into it", async ({ page }) => {
+    await mountView(page);
+    await page.evaluate(async () => {
+      const mod = await import("/views/sessions/permission-modal/question-ui.ts");
+      mod.renderQuestionUI({
+        questions: [
+          { question: "Which approach?", header: "Approach", options: [{ label: "A" }, { label: "B" }] },
+          { question: "Which features?", header: "Features", options: [{ label: "X" }, { label: "Y" }] },
+        ],
+        titleIcon: "ph-chat-circle-dots",
+        submitLabel: "Submit",
+        submitIcon: "ph-paper-plane-right",
+        cancelLabel: "Skip",
+        supportsExtras: true,
+        onSubmit: () => {},
+        onCancel: () => {},
+      });
+    });
+    const card = page.locator(".prompt-card");
+    await card.locator(".prompt-card__answer-bar textarea").focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => activeTab(page)).toBe(1);
+    await page.keyboard.press("Enter");
+    await expect.poll(() => activeTab(page)).toBe(2);
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("data-act"))).toBe("primary");
+    await expect(card.locator('[data-act="add-note"]')).toBeVisible();
+
+    await page.keyboard.type("hello");
+    const note = card.locator(".prompt-extra-input");
+    await expect(note).toHaveValue("hello");
+    await expect(card.locator('[data-act="add-note"]')).toHaveCount(0);
+  });
+
   test("typing on an option writes into the answer box", async ({ page }) => {
     await mountView(page);
     await openCard(page);
