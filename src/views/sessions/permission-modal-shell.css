@@ -375,8 +375,10 @@
   /* Overhangs the header's 22px text line evenly top and bottom. */
   margin: calc((22px - var(--control-h)) / 2) -6px calc((22px - var(--control-h)) / 2) auto;
 }
-#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-domain ~ .prompt-ask__btn {
-  margin-left: 0;
+/* In the solo band's head row the button is not overhanging a text line, so it
+ * takes a plain right-pinned margin; the row's min-height holds the band's size. */
+#prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__head .prompt-ask__btn {
+  margin: -4px -6px -4px auto;
 }
 #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn i {
   font-size: 1.15rem;
