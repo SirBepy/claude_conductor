@@ -70,17 +70,20 @@ function render(li: HTMLElement, sessionId: string): void {
 function show(li: HTMLElement, sessionId: string): void {
   currentSession = sessionId;
   render(li, sessionId);
-  // Context % is a daemon computation, so it loads after the card is up and
-  // the card re-renders in place only if the pointer is still on this row.
-  if (!ctxStatusCache.has(sessionId)) {
-    void invoke<ContextStatus | null>("context_status", { sessionId })
-      .then((r) => {
-        if (!r) return;
-        ctxStatusCache.set(sessionId, r);
-        if (currentSession === sessionId && li.isConnected) render(li, sessionId);
-      })
-      .catch(() => { /* no transcript yet: the line just stays absent */ });
-  }
+  // Context % is a daemon computation, so it loads after the card is up. The
+  // cached value is only the instant first paint: the statusbar refreshes that
+  // shared cache for the selected chat alone, so a background chat's entry
+  // would otherwise stay frozen at its first hover. The card re-renders in
+  // place only when the number moved and the pointer is still on this row.
+  const shown = contextPct(sessionId);
+  void invoke<ContextStatus | null>("context_status", { sessionId })
+    .then((r) => {
+      if (!r) return;
+      ctxStatusCache.set(sessionId, r);
+      if (r.pct_used === shown) return;
+      if (currentSession === sessionId && li.isConnected) render(li, sessionId);
+    })
+    .catch(() => { /* no transcript yet: the line just stays absent */ });
 }
 
 export function attachSidebarHoverCard(listEl: HTMLElement): void {

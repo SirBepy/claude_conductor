@@ -134,6 +134,28 @@ test.describe("view-harness / sidebar status ring", () => {
     await expect(card).toBeHidden();
   });
 
+  test("hovering a chat again shows its current context %, not the one from the first hover", async ({ page }) => {
+    await mountSessions(page);
+    const box = (await row(page, "s-plan").boundingBox())!;
+    const card = page.locator(".cc-row-card");
+    await page.mouse.move(box.x + 6, box.y + box.height / 2);
+    await expect(card.locator(".hc-ctx")).toContainText("34%");
+    await page.mouse.move(box.x + 6, box.y + 400);
+    await expect(card).toBeHidden();
+
+    // The chat kept working in the background: the daemon now reports more context used.
+    await page.evaluate(() => {
+      const core = (window as unknown as { __TAURI__: { core: { invoke: (c: string, a?: unknown) => Promise<unknown> } } }).__TAURI__.core;
+      const orig = core.invoke;
+      core.invoke = (cmd, args) => cmd === "context_status"
+        ? Promise.resolve({ model: "claude-opus-5", window: 1_000_000, occupancy: 510_000, remaining: 490_000, pct_used: 51, pct_left: 49 })
+        : orig(cmd, args);
+    });
+    await page.mouse.move(box.x + 6, box.y + box.height / 2);
+    await expect(card).toBeVisible();
+    await expect(card.locator(".hc-ctx")).toContainText("51%");
+  });
+
   test("hovering the row's own tooltip anchor does not also open the card", async ({ page }) => {
     await mountSessions(page);
     await row(page, "s-plan").locator(".session-row-title-text").hover();
