@@ -2,6 +2,8 @@
 // "frozen" once the JS main thread blocks ~5s, and the stack that caused it is
 // long gone by the time anyone looks - so phases register themselves here and a
 // longtask observer names whichever ones were open when the block happened.
+// Also the one door from the webview to the app log (reportWebviewDiag), used
+// by the chat-pane chrome watchdog for its `[chrome]` lines.
 
 import { invoke } from "./ipc";
 import { isRemote } from "./transport";
