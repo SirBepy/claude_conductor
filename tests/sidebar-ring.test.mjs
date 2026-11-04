@@ -42,6 +42,12 @@ describe("ringSpecFor", () => {
       expect(ringSpecFor(cls, null, null)).toEqual({ kind: "solid", tone });
     }
   });
+  it("keeps one segment per question when a question card is in the permission state", () => {
+    expect(ringSpecFor("st-attention", null, { total: 6, answered: 0 })).toEqual({ kind: "segments", total: 6, answered: 0, tone: "attention" });
+  });
+  it("keeps the whole pulsing ring for a single question awaiting permission", () => {
+    expect(ringSpecFor("st-attention", null, { total: 1, answered: 0 })).toEqual({ kind: "solid", tone: "attention", pulse: true });
+  });
   it("draws nothing for an unknown class", () => {
     expect(ringSpecFor("st-mystery", PLAN, null)).toEqual({ kind: "none" });
   });
@@ -75,6 +81,17 @@ describe("ringHtml", () => {
     const html = ringHtml({ kind: "plan", done: 1, total: 2 });
     const arc = html.match(/stroke-dasharray="([\d.]+) ([\d.]+)"/g)[1].match(/[\d.]+/g).map(Number);
     expect(arc[0] / (arc[0] + arc[1])).toBeCloseTo(0.5, 2);
+  });
+  it("colours attention segments by their own tone", () => {
+    const html = ringHtml({ kind: "segments", total: 3, answered: 0, tone: "attention" });
+    expect(count(html, /data-tone="attention"/g)).toBe(3);
+  });
+  it("starts a rebuilt pulse mid-cycle so a sidebar refresh does not restart it", () => {
+    const delay = (html) => Number(html.match(/animation-delay:-(\d+)ms/)[1]);
+    const html = ringHtml({ kind: "segments", total: 1, answered: 0 });
+    expect(delay(html)).toBeLessThan(1400);
+    expect(ringHtml({ kind: "plan", done: 1, total: 2 })).not.toContain("animation-delay");
+    expect(delay(ringHtml({ kind: "solid", tone: "working", glow: true }))).toBeLessThan(3200);
   });
   it("marks a working-no-plan ring as glowing, not as the question pulse", () => {
     const html = ringHtml({ kind: "solid", tone: "working", glow: true });
