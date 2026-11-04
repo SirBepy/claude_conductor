@@ -14,7 +14,7 @@ export interface PreviewStage {
 
 /** Builds the stage into `canvas`. Returns null if the markup did not land. */
 export function mountPreviewStage(canvas: HTMLElement, deviceWidth: DeviceWidth, html: string): PreviewStage | null {
-  canvas.innerHTML = `<div class="pv-frame" data-w="${deviceWidth}"><div class="pv-stage"><iframe class="pv-iframe" sandbox="allow-scripts"></iframe></div></div>`;
+  canvas.innerHTML = `<div class="pv-frame" data-w="${deviceWidth}"><div class="pv-stage"><iframe class="pv-iframe" sandbox="allow-scripts" allow="fullscreen"></iframe></div></div>`;
   const iframe = canvas.querySelector<HTMLIFrameElement>(".pv-iframe");
   const stage = canvas.querySelector<HTMLElement>(".pv-stage");
   if (!iframe || !stage) return null;
