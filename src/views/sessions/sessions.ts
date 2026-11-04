@@ -31,6 +31,7 @@ import { selectSession, updateHeaderAvatarStatus } from "./active-session";
 import { state, resetState } from "./state";
 import { initThinkingBar, updateThinkingBar } from "./session-thinking-bar";
 import { sessionSubtitle } from "./sessions-helpers";
+import { typeSwap } from "../../shared/title-typewriter";
 import { refreshSessions, closeCtxMenu } from "./sidebar";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { getTransport } from "../../shared/transport";
@@ -317,10 +318,7 @@ export async function renderDetachedSession(
       const sess = state.sessions.find((s) => s.session_id === state.selectedId);
       if (sess) {
         const titleEl = pane.querySelector<HTMLElement>(".session-header .title");
-        if (titleEl) {
-          const newTitle = sessionSubtitle(sess);
-          if (titleEl.textContent !== newTitle) titleEl.textContent = newTitle;
-        }
+        if (titleEl) typeSwap(titleEl, sessionSubtitle(sess));
         updateHeaderAvatarStatus(pane, sess);
         pane.classList.toggle("is-rate-limited", isBlocked(sess));
         state.composer?.refreshBlockedState();

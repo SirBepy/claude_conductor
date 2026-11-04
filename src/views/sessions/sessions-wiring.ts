@@ -7,6 +7,7 @@ import { renderSidebar, refreshSessions, forceRefreshScheduledCounts } from "./s
 import { loadSessionCharacters, characterForSessionId } from "./session-characters";
 import { resetCharacterCaches } from "../../shared/characters";
 import { api } from "../../shared/api";
+import { typeSwap } from "../../shared/title-typewriter";
 import { rateLimitBanner, isBlocked } from "../../shared/chat/rate-limit-banner";
 import { mountUsageDials } from "./usage-dials";
 import { sessionEvents } from "../../shared/chat/event-store";
@@ -267,10 +268,7 @@ export async function wireInstancesChangedListener(
       const sess = state.sessions.find((s) => s.session_id === state.selectedId);
       if (sess) {
         const titleEl = pane.querySelector<HTMLElement>(".session-header .title");
-        if (titleEl) {
-          const newTitle = sessionSubtitle(sess);
-          if (titleEl.textContent !== newTitle) titleEl.textContent = newTitle;
-        }
+        if (titleEl) typeSwap(titleEl, sessionSubtitle(sess));
         updateHeaderAvatarStatus(pane, sess);
         pane.classList.toggle("is-rate-limited", isBlocked(sess));
         state.composer?.refreshBlockedState();
