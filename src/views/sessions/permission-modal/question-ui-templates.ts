@@ -66,12 +66,23 @@ export function questionZonesHtml(q: Question): string {
         </span>
       </div>`
     : "";
+  const askBtn = `<button type="button" class="icon-btn-sq prompt-icon-btn prompt-ask__btn" data-act="ask-inline" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button>`;
+  // No context row to carry the chip: chip and Ask get their own row above the
+  // text, so a long question keeps the full band width instead of being squeezed
+  // into a narrow column between them (phone).
+  if (!context) {
+    return `
+    <div class="prompt-zone prompt-zone--ask prompt-zone--ask-solo">
+      <div class="prompt-ask__head">${domainChipHtml(q.domain)}${askBtn}</div>
+      <div class="prompt-ask__text prompt-q__text">${renderMarkdown(ask)}</div>
+    </div>
+  `;
+  }
   return `
     ${ctxZone}
     <div class="prompt-zone prompt-zone--ask">
       <div class="prompt-ask__text prompt-q__text">${renderMarkdown(ask)}</div>
-      ${context ? "" : domainChipHtml(q.domain)}
-      <button type="button" class="icon-btn-sq prompt-icon-btn prompt-ask__btn" data-act="ask-inline" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button>
+      ${askBtn}
     </div>
   `;
 }

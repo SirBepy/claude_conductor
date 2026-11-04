@@ -61,6 +61,12 @@ test("a terse question shows the domain chip in the ask band", async ({ page }) 
   expect(chipBox!.x).toBeGreaterThan(askBox!.x);
   expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(askBox!.x + askBox!.width + 1);
 
+  // Chip (and Ask) sit in a row ABOVE the question text, not in columns beside
+  // it, so the text keeps the band's full width.
+  const textBox = (await card.locator(".prompt-zone--ask .prompt-ask__text").boundingBox())!;
+  expect(chipBox!.y + chipBox!.height).toBeLessThanOrEqual(textBox.y + 1);
+  expect(textBox.width).toBeGreaterThan(askBox!.width - 60);
+
   await card.screenshot({
     path: ".for_bepy/screenshots/_specs/auq-domain-chip-terse.png",
   });
