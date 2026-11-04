@@ -18,6 +18,7 @@ import { buildSidebarEntries } from "./sidebar-entries";
 import { ensureMachineIcons } from "./machine-icons";
 import { isRemote } from "../../shared/transport";
 import { saveCachedInstances } from "./instances-cache";
+import { pruneLiveQuestionProgress } from "./question-progress";
 export { closeCtxMenu, openDraftCtxMenu, openCtxMenu } from "./sidebar-ctx-menu";
 
 let sidebarListEl: HTMLElement | null = null;
@@ -247,6 +248,7 @@ export async function refreshSessions(): Promise<boolean> {
 
     saveUnreadSet(unread);
     state.sessions = next;
+    pruneLiveQuestionProgress(next.map((s) => s.session_id));
     if (isRemote()) saveCachedInstances(next);
     updateFaviconBadge(next, unread);
     return true;

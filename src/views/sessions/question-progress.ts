@@ -48,6 +48,14 @@ export function setLiveQuestionProgress(
   return prev?.promptId !== promptId || prev.progress.answered !== next.answered || prev.progress.total !== next.total;
 }
 
+/** Drop the mirrored progress of every session not in `listedIds`. The sidebar
+ *  calls this with each fresh instance list, so a closed chat's entry (which
+ *  nothing else removes) does not sit in `live` for the page's lifetime. */
+export function pruneLiveQuestionProgress(listedIds: Iterable<string>): void {
+  const keep = new Set(listedIds);
+  for (const id of live.keys()) if (!keep.has(id)) live.delete(id);
+}
+
 /** Progress for a chat with a question waiting, or null when none is parked.
  *  The live card wins; a card nobody has opened yet falls back to the parked
  *  prompt (and the draft saved when its chat was switched away from). */
