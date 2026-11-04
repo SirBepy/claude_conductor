@@ -41,6 +41,9 @@ const EXEMPT = [
   "input.ra-name-input",
   // Segments inside a segmented switch: the switch itself (.view-toggle, .tp-seg) is measured and is control-h.
   ".view-toggle button", ".tp-seg button",
+  // A two-line list row (title over a caption) that happens to be a <button>; the picker's project rows are
+  // <li>s of the same shape and never measured.
+  "button.wt-picker-choice",
 ].join(", ");
 
 interface Offender { sig: string; h: number }
@@ -98,6 +101,59 @@ for (const [label, size] of [["desktop", { width: 1200, height: 900 }], ["phone"
       await page.locator("#sessions-list li[data-session-id]").first().click();
       await page.locator("#session-pane .session-composer").first().waitFor();
       await waitForPaneSettled(page);
+      const { bad } = await offenders(page);
+      expect(summarise(bad)).toEqual([]);
+    });
+
+    // A modal body is a flex column holding a field above a long scrolling list. With enough rows the field
+    // becomes a shrink candidate, so this uses far more rows than fit: a short list never exposes it.
+    test("project picker: search field and footer stay full height beside a long list", async ({ page }) => {
+      const projects = Array.from({ length: 60 }, (_, i) => ({
+        id: `proj-${i}`, path: `C:/Projects/app-${i}`, name: `app-${i}`, parent_segment: null,
+        avatar: { kind: "none" }, tokens_7d: 0, live: 0, any_automated: false, last_active_at: null,
+        path_exists: true, worktrees: [], last_worktree_path: null, last_start_folder_rel: null,
+      }));
+      await mountView(page, {
+        invoke: {
+          ...INVOKE, list_project_groups: projects, project_last_activity_at: 0, count_ai_todos: 0,
+          list_claude_md_scopes: [{ rel_path: "", label: "Repo root", nested: false }], list_worktree_details: [],
+          get_accounts_setup_prompt_state: { shouldShow: false },
+          list_machines: { self: { machine_id: "m0", label: "Desktop", os: "windows" }, peers: [{ machine_id: "m1", label: "mac", os: "macos" }] },
+        },
+      });
+      await page.evaluate(() => {
+        void (window as unknown as { __startNewSession: () => Promise<void> }).__startNewSession();
+      });
+      await page.waitForSelector(".project-picker-row");
+      await page.waitForTimeout(800);
+      const { want, bad } = await offenders(page);
+      expect(summarise(bad)).toEqual([]);
+      const search = (await page.locator("#project-picker-search").boundingBox())!;
+      expect(Math.round(search.height)).toBe(want);
+    });
+
+    test("worktree picker: every field and button stays full height beside a long worktree list", async ({ page }) => {
+      const wts = Array.from({ length: 40 }, (_, i) => ({ path: `C:/repo/wt-${i}`, name: `wt-${i}`, tokens_7d: 0, live: 0, last_active_at: null, path_exists: true }));
+      const project = {
+        id: "proj1", path: "C:/repo", name: "repo", parent_segment: null, avatar: { kind: "none" }, tokens_7d: 0, live: 0,
+        any_automated: false, last_active_at: null, path_exists: true, worktrees: wts, last_worktree_path: null, last_start_folder_rel: null,
+      };
+      await mountView(page, {
+        invoke: {
+          ...INVOKE, list_project_groups: [project], project_last_activity_at: 0, count_ai_todos: 0,
+          list_claude_md_scopes: [{ rel_path: "", label: "Repo root", nested: false }],
+          list_worktree_details: wts.map((w) => ({ path: w.path, name: w.name, branch: w.name, last_commit_at: null, stale: false, stale_reason: null })),
+          get_accounts_setup_prompt_state: { shouldShow: false },
+        },
+      });
+      await page.evaluate(() => {
+        void (window as unknown as { __startNewSession: () => Promise<void> }).__startNewSession();
+      });
+      await page.locator(".project-picker-row").click();
+      await page.locator(".loc-chip").click();
+      await page.waitForSelector(".wt-picker-modal");
+      await page.waitForFunction(() => !document.querySelector(".wt-picker-modal")?.classList.contains("modal-card-morph-hidden"));
+      await page.waitForTimeout(800);
       const { bad } = await offenders(page);
       expect(summarise(bad)).toEqual([]);
     });

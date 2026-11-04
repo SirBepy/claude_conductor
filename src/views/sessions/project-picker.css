@@ -37,11 +37,14 @@
   color: var(--color-text-muted, #8a8aa0);
   border: 1px solid var(--color-border, #2e2e40);
   border-radius: 6px;
-  padding: 4px 8px;
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
   font-size: 0.95rem;
   cursor: pointer;
   display: flex;
   align-items: center;
+  justify-content: center;
   line-height: 1;
 }
 .project-picker-options-btn:hover,
@@ -107,6 +110,10 @@
   min-height: 0;
 }
 .project-picker-search {
+  /* Height comes from the global field rule (--control-h). The field sits in a
+     column body next to a long scrolling list, so without this it is a shrink
+     candidate and collapses to a sliver on a phone. */
+  flex-shrink: 0;
   padding: 8px 10px;
   background: var(--color-surface-alt, #15151e);
   color: var(--color-text);
