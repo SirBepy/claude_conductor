@@ -2,6 +2,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import type { PlanStepSnapshot } from "../../types/ipc.generated";
 import { STATIC_CHIPS } from "./statusline-catalog";
 import type { QuestionProgress } from "./question-progress";
+import { truncate } from "./project-dashboard/format";
 import { planProgress } from "./sidebar-ring";
 import type { RingTone } from "./sidebar-ring";
 
@@ -43,8 +44,10 @@ const TONE_VAR: Record<RingTone | "idle", string> = {
   closing: "var(--chat-state-closing)", idle: "var(--st-your-turn)",
 };
 
-/** "just now", "4m", "1h 12m", "3d". Minutes are enough for a sidebar glance. */
-export function formatElapsed(ms: number): string {
+/** "just now", "4m", "1h 12m", "3d". Minutes are enough for a sidebar glance.
+ *  Named apart from shared/time.ts `formatElapsed` (m:ss), which a wrong
+ *  auto-import would silently swap in. */
+export function formatCompactElapsed(ms: number): string {
   const mins = Math.floor(Math.max(0, ms) / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m`;
@@ -57,7 +60,7 @@ function timerText(kind: StateLine["timer"], since: string | null | undefined, n
   if (!kind || !since) return "";
   const t = Date.parse(since);
   if (Number.isNaN(t)) return "";
-  const el = formatElapsed(now - t);
+  const el = formatCompactElapsed(now - t);
   if (kind === "turn") return el === "just now" ? "just started" : `turn ${el}`;
   if (kind === "waiting") return el === "just now" ? "just now" : `waiting ${el}`;
   return el === "just now" ? "just now" : `${el} ago`;
@@ -75,10 +78,6 @@ function planWindow(plan: readonly PlanStepSnapshot[]): { rows: PlanStepSnapshot
 
 function row(kind: "done" | "now" | "todo", icon: string, label: string, aside = ""): string {
   return `<div class="hc-row is-${kind}"><i class="ph ${icon}"></i><span class="hc-label">${escapeHtml(label)}</span>${aside ? `<span class="hc-aside">${escapeHtml(aside)}</span>` : ""}</div>`;
-}
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 
 function planBlock(plan: readonly PlanStepSnapshot[]): string {
