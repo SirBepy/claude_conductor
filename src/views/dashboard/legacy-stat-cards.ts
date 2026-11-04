@@ -67,8 +67,9 @@ export function legacyStatCardsHtml(history: UsageRecord[]): string {
     ),
   );
 
-  return `
-    <div class="stat-cards">
+  // A plan without a 5h limit has no session window to show; its 0% is the
+  // backend's stand-in for the absent window, not a reading.
+  const sessionCard = latest.session_limited === false ? "" : `
       <div class="stat-card home-card">
         <div class="stat-label label">Session (5h)</div>
         <div class="ring-wrap">
@@ -84,7 +85,10 @@ export function legacyStatCardsHtml(history: UsageRecord[]): string {
           </div>
         </div>
         ${renderReset(sessionReset, SESSION_WINDOW_MS)}
-      </div>
+      </div>`;
+
+  return `
+    <div class="stat-cards">${sessionCard}
       <div class="stat-card home-card">
         <div class="stat-label label">Weekly (7d)</div>
         <div class="ring-wrap">
