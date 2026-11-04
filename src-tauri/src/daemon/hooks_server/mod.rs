@@ -176,8 +176,14 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/sessions/close-confirm", post(lifecycle::on_close_confirm))
         .route("/hooks/stop", post(stop::on_stop))
         .route("/mcp/announce", post(stop::on_mcp_announce))
-        .route("/hooks/preview", post(preview::on_preview_push))
-        .route("/hooks/preview-render", post(preview_render::on_preview_render))
+        .route(
+            "/hooks/preview",
+            post(preview::on_preview_push).layer(axum::extract::DefaultBodyLimit::max(crate::daemon::preview::PREVIEW_BODY_BYTES)),
+        )
+        .route(
+            "/hooks/preview-render",
+            post(preview_render::on_preview_render).layer(axum::extract::DefaultBodyLimit::max(crate::daemon::preview::PREVIEW_BODY_BYTES)),
+        )
         .route("/hooks/preview-render/:id", get(preview_render::on_preview_render_get))
         .route("/permissions/request", post(permission::on_permission_request))
         .route("/questions/request", post(question::on_question_request))

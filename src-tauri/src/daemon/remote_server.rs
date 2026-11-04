@@ -259,7 +259,10 @@ fn build_router(ctx: Arc<RemoteCtx>) -> Router {
         // Preview-panel iframe staging (todo 715): POST is bearer-gated here;
         // the paired GET below is public because an <iframe src> can't carry
         // the header, and self-authenticates via `?token=` instead.
-        .route("/api/preview-render", post(on_preview_render))
+        .route(
+            "/api/preview-render",
+            post(on_preview_render).layer(DefaultBodyLimit::max(crate::daemon::preview::PREVIEW_BODY_BYTES)),
+        )
         .route_layer(middleware::from_fn_with_state(ctx.clone(), auth_mw));
 
     // /api/health is unauthenticated (connectivity probe, reveals nothing).

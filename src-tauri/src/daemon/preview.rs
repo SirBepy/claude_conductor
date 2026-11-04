@@ -53,9 +53,18 @@ pub const PREVIEW_SOURCE_CHAT_CARD: &str = "chat_card";
 /// evicted first when a genuinely NEW slug would push the count over this.
 pub const MAX_HISTORY: usize = 30;
 
-/// Reject a push whose `html` exceeds this many bytes (~2MB). Guards against
-/// an unbounded payload bloating the persisted JSON file / in-app iframe.
-pub const MAX_HTML_BYTES: usize = 2 * 1024 * 1024;
+/// Reject a push whose `html` exceeds this many bytes (8MiB). Sized for a
+/// narrated test report with its video inlined (1280px, 10fps is ~6.7MB).
+/// Guards against an unbounded payload bloating the persisted JSON file /
+/// in-app iframe; the version store is separately bounded by
+/// `MAX_STORE_HTML_BYTES`.
+pub const MAX_HTML_BYTES: usize = 8 * 1024 * 1024;
+
+/// HTTP body cap for every route a page's html travels in (push, render
+/// staging). Above [`MAX_HTML_BYTES`] because the body is JSON (escapes grow
+/// it) and the staged document adds the page wrapper; axum's 2 MiB default
+/// would otherwise refuse a page the cap allows.
+pub const PREVIEW_BODY_BYTES: usize = MAX_HTML_BYTES * 2;
 
 /// A single pushed preview, full content included. Persisted verbatim.
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
@@ -495,6 +504,16 @@ mod tests {
         assert_ne!(id1, id2);
         let listed = list_at(&path);
         assert_eq!(listed.len(), 2, "two absent-slug pushes must both append, never replace each other");
+    }
+
+    #[test]
+    fn a_page_over_two_mib_and_under_the_cap_is_stored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        let big = "x".repeat(3 * 1024 * 1024);
+        push_at(&path, "Report".into(), None, big, "terminal".into(), None).unwrap();
+        assert_eq!(list_at(&path).len(), 1);
+        assert!(PREVIEW_BODY_BYTES > MAX_HTML_BYTES, "routes must accept every page the cap allows");
     }
 
     #[test]
