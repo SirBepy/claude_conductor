@@ -320,6 +320,17 @@ mod tests {
         assert_eq!(row.awaiting.as_deref(), Some("question"));
     }
 
+    /// The turn that kept a `question` status after the one block (no card ever
+    /// went up) must not leave the row reading input needed.
+    #[tokio::test]
+    async fn stop_with_a_question_report_and_no_open_card_does_not_settle_to_question() {
+        let (state, gen) = state_with_busy_turn("s");
+        assert!(settle_at_stop(&state, "s", gen, "question", TurnActivity::Idle).await);
+        let row = state.registry.get("s").unwrap();
+        assert!(!row.busy);
+        assert_ne!(row.awaiting.as_deref(), Some("question"));
+    }
+
     #[tokio::test]
     async fn a_late_stop_leaves_a_newer_turns_busy_alone() {
         let (state, old_gen) = state_with_busy_turn("s");

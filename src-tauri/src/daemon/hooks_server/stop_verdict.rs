@@ -12,6 +12,10 @@ pub(super) const SEND_MISSING_REASON: &str = "Call the send_message tool before 
 /// the daemon takes the card, so a card that surfaced NOWHERE looks identical
 /// to a delivered one and the turn ends waiting for an answer nobody can give.
 pub(super) const QUESTION_UNDELIVERED_REASON: &str = "Your ask_user_question card was accepted but never surfaced - this session is not in the app's live registry, so no window, sidebar row or phone ever showed it and no answer can ever arrive. Do NOT end the turn waiting on it: ask the same question as plain text through send_message instead, and carry on from the user's reply.";
+/// Status `question` means "Joe must answer something", and the only place he
+/// can answer is a card. Asking in chat text leaves him reading a paragraph and
+/// typing a reply the app has no row, ring or notification for.
+pub(super) const QUESTION_NEEDS_CARD_REASON: &str = "You reported status 'question' but no ask_user_question card is up, so Joe has nothing to answer: your chat text is not where he answers, and he is never expected to read a message and type a reply. If you need his input, call ask_user_question now with the real question and its options, then end the turn with report_turn_status question. If you do not actually need an answer, call send_message with your summary and report_turn_status with status done instead.";
 pub(super) const BOTH_MISSING_REASON: &str = "Before ending your turn, call BOTH tools: report_turn_status (required every turn, even a tool-only one with no chat reply; it requires a 'status' argument - one of done|question|waiting|working, calling it with no arguments will fail) and send_message (the ONLY channel Joe sees - your assistant text and tool-call narration are not rendered in the chat at all; send him a terse, self-contained summary of what happened this turn).";
 /// todo 824: shown instead of a block when this session's MCP transport
 /// isn't attached, so report_turn_status/send_message are unreachable and
@@ -110,7 +114,8 @@ pub(super) fn title_missing(
 /// `question` is exempt too, but only when `question_card_posted` (the registry
 /// saw an `ask_user_question` card this turn): the card is already the message,
 /// and a bubble beside it would only point at the card. Without a card the
-/// status is just the model's claim, so the message is still owed.
+/// status is just the model's claim, so the turn is blocked once with
+/// `QUESTION_NEEDS_CARD_REASON` (call the tool, or report done).
 /// `mcp_attached` false (todo 824) degrades a missing call to `Inform`
 /// instead of `Block`: the tool itself is unreachable then.
 pub(super) fn missing_requirement_reason(
@@ -125,14 +130,21 @@ pub(super) fn missing_requirement_reason(
     if stop_hook_active == Some(true) {
         return TurnEndVerdict::Ok;
     }
-    // `question` only excuses the message when a card really went up: the status
-    // is the model's own claim, and a question asked in plain assistant text is
-    // rendered nowhere.
-    let silent_ok = match status {
-        Some("working") | Some("waiting") => true,
-        Some("question") => question_card_posted,
-        _ => false,
-    };
+    // `question` is the model's own claim, and a question asked in plain
+    // assistant text is rendered nowhere: with no card the turn cannot end on it.
+    // The one block `stop_hook_active` allows is spent here, and the retry then
+    // passes, where the row settles without input needed (`settled_awaiting_for`
+    // drops a `question` report that no open card backs). An unattached MCP
+    // transport cannot call `ask_user_question` either, so it only informs.
+    if status == Some("question") && !question_card_posted {
+        return if mcp_attached {
+            TurnEndVerdict::Block(QUESTION_NEEDS_CARD_REASON)
+        } else {
+            TurnEndVerdict::Inform(MCP_UNAVAILABLE_REASON)
+        };
+    }
+    // Past the guard above, a `question` status has its card, which is the message.
+    let silent_ok = matches!(status, Some("working") | Some("waiting") | Some("question"));
     let send_required = !opened_by_wake && !silent_ok;
     let missing = match (has_report, has_send || !send_required) {
         (false, false) => Some(BOTH_MISSING_REASON),
@@ -207,13 +219,40 @@ mod tests {
     }
 
     /// The model's own `question` status is not proof of a card: asking in
-    /// plain assistant text renders nowhere, so the turn would end unread.
+    /// plain assistant text renders nowhere, so the turn is blocked once and
+    /// told to call `ask_user_question`, whether or not it also sent a message.
     #[test]
-    fn question_status_without_a_posted_card_still_owes_a_message() {
+    fn question_status_without_a_posted_card_is_blocked_and_told_to_ask_with_a_card() {
+        for has_send in [false, true] {
+            assert_eq!(
+                missing_requirement_reason(None, true, has_send, Some("question"), false, true, false),
+                TurnEndVerdict::Block(QUESTION_NEEDS_CARD_REASON),
+                "has_send={has_send}",
+            );
+        }
+        // A wake-opened turn has nobody to answer unless a card is up, so the
+        // message exemption does not rescue it either.
         assert_eq!(
-            missing_requirement_reason(None, true, false, Some("question"), false, true, false),
-            TurnEndVerdict::Block(SEND_MISSING_REASON),
+            missing_requirement_reason(None, true, false, Some("question"), true, true, false),
+            TurnEndVerdict::Block(QUESTION_NEEDS_CARD_REASON),
         );
+    }
+
+    /// A session whose MCP tools are unreachable cannot post a card, so it
+    /// keeps the non-blocking note rather than an unsatisfiable loop.
+    #[test]
+    fn question_status_without_a_card_only_informs_when_mcp_is_not_attached() {
+        assert_eq!(
+            missing_requirement_reason(None, true, false, Some("question"), false, false, false),
+            TurnEndVerdict::Inform(MCP_UNAVAILABLE_REASON),
+        );
+    }
+
+    /// A chat that already sent its message and then reports done after the
+    /// block is the exit the reason offers: it must pass on the retry.
+    #[test]
+    fn done_after_the_question_block_passes() {
+        assert_eq!(missing_requirement_reason(Some(true), true, true, DONE, false, true, false), TurnEndVerdict::Ok);
     }
 
     #[test]
