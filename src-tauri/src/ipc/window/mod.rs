@@ -54,6 +54,31 @@ pub(crate) fn test_title(base: &str) -> String {
     }
 }
 
+/// In debug builds give a window the blue dev icon for its taskbar and Alt-Tab
+/// entry; release builds do nothing. The exe's embedded icon is the production
+/// orange one, so any window built without this call can be mistaken for the
+/// installed app. Call it from every builder that leaves the window a taskbar
+/// entry (the overlay sets `skip_taskbar`, so it has none); a test pins the
+/// call sites.
+pub(crate) fn apply_dev_window_icon(window: &tauri::WebviewWindow) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+    // Recolouring decodes and re-encodes a PNG, so do it once per process.
+    static ICON: std::sync::OnceLock<Option<tauri::image::Image<'static>>> =
+        std::sync::OnceLock::new();
+    let icon = ICON.get_or_init(|| {
+        tauri::image::Image::from_bytes(&crate::tray::icon_render::dev_window_icon())
+            .map_err(|e| log::warn!("dev window icon did not decode: {e}"))
+            .ok()
+    });
+    if let Some(icon) = icon {
+        if let Err(e) = window.set_icon(icon.clone()) {
+            log::warn!("set_icon failed for window {}: {e}", window.label());
+        }
+    }
+}
+
 /// What closing a window does.
 #[derive(Debug, PartialEq)]
 enum ClosePolicy {
@@ -92,13 +117,7 @@ fn attach_hide_to_tray_with(
     on_hidden: impl Fn(&AppHandle) + Send + 'static,
 ) {
     webview_visibility::attach(window);
-    if cfg!(debug_assertions) {
-        // The exe's embedded icon is the production one, so a dev build swaps
-        // in the blue one for the taskbar and Alt-Tab.
-        if let Ok(icon) = tauri::image::Image::from_bytes(&crate::tray::icon_render::dev_window_icon()) {
-            let _ = window.set_icon(icon);
-        }
-    }
+    apply_dev_window_icon(window);
     let w = window.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -366,6 +385,38 @@ mod tests {
         nav_listeners_gone(&ready);
         assert_eq!(route_nav(&slot, &ready, true, "b".into()), NavRoute::StashForBoot);
         assert_eq!(drain_pending_nav(&slot, &ready).as_deref(), Some("b"));
+    }
+
+    /// A real window cannot be built in `cargo test` (`AppHandle` is the `Wry`
+    /// runtime), so pin the wiring in the source: every builder that gives a
+    /// window a taskbar entry must call `apply_dev_window_icon`, or that window
+    /// keeps the production orange icon in a dev build. The overlay is exempt
+    /// because `skip_taskbar(true)` leaves it no taskbar or Alt-Tab entry.
+    #[test]
+    fn every_window_builder_with_a_taskbar_entry_applies_the_dev_icon() {
+        let hide_to_tray = fn_body(include_str!("mod.rs"), "fn attach_hide_to_tray_with(");
+        let detached = fn_body(include_str!("../chat/lifecycle.rs"), "pub async fn detach_window(");
+        let jarvis = fn_body(include_str!("jarvis.rs"), "tauri::WebviewWindowBuilder::new(");
+        for (name, body) in [
+            ("attach_hide_to_tray_with (chats, code, file, preview, schedule)", hide_to_tray),
+            ("detach_window (session-*)", detached),
+            ("jarvis window", jarvis),
+        ] {
+            assert!(
+                body.contains("apply_dev_window_icon("),
+                "{name} never calls apply_dev_window_icon"
+            );
+        }
+        assert!(
+            include_str!("../overlay_window.rs").contains(".skip_taskbar(true)"),
+            "the overlay is exempt from the dev icon only while it has no taskbar entry"
+        );
+    }
+
+    #[test]
+    fn the_dev_window_icon_decodes_as_a_tauri_image() {
+        tauri::image::Image::from_bytes(&crate::tray::icon_render::dev_window_icon())
+            .expect("a window icon set_icon would reject is silently dropped in a dev build");
     }
 
     /// `AppHandle` is the `Wry` runtime and no mock app can stand in for it, so

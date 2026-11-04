@@ -39,7 +39,7 @@ pub async fn detach_window(session_id: String, app: AppHandle) -> Result<(), Str
     // Shown + focused only once the frontend reports it's actually alive
     // (`ipc::ready`) - a finished page load alone can be WebView2's own
     // error page.
-    tauri::WebviewWindowBuilder::new(
+    let window = tauri::WebviewWindowBuilder::new(
         &app,
         &label,
         tauri::WebviewUrl::App(url.clone().into()),
@@ -52,6 +52,7 @@ pub async fn detach_window(session_id: String, app: AppHandle) -> Result<(), Str
     .visible(false)
     .build()
     .map_err(|e| e.to_string())?;
+    crate::ipc::window::apply_dev_window_icon(&window);
     crate::ipc::ready::watch(&app, &label, &url);
     Ok(())
 }

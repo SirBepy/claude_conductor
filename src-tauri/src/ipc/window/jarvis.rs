@@ -67,12 +67,13 @@ pub async fn open_jarvis_window(app: AppHandle) -> Result<(), String> {
     };
 
     let url = format!("index.html#detached?session={}", session_id);
-    tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.clone().into()))
+    let window = tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.clone().into()))
         .title(super::test_title("Jarvis"))
         .inner_size(800.0, 600.0)
         .visible(false)
         .build()
         .map_err(|e| e.to_string())?;
+    super::apply_dev_window_icon(&window);
     crate::ipc::ready::watch(&app, label, &url);
     Ok(())
 }
