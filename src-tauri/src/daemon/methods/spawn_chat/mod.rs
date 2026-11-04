@@ -233,6 +233,21 @@ pub(crate) fn resolve_target_cwd(
     ))
 }
 
+/// Model and effort for a spawn forwarded from a paired machine. The caller
+/// sends them only when it named them, so a missing one resolves here against
+/// THIS machine's project default for `cwd`, the same as a local plain spawn.
+fn peer_model_effort(state: &Arc<DaemonState>, cwd: &str, params: &Value) -> (String, String) {
+    let explicit = |key: &str| params.get(key).and_then(Value::as_str);
+    resolve_model_effort(
+        state,
+        std::path::Path::new(cwd),
+        explicit("model"),
+        explicit("effort"),
+        &crate::sessions::chat_config::ChatConfig::default(),
+        false,
+    )
+}
+
 /// Registers the peer-facing half of `spawn_chat` on the shared RPC router
 ///: reached only via `remote_transport_table::TRANSPORT_TABLE`'s `M`-only entry,
 /// so only a paired peer machine's forwarded call ever lands here. Always
@@ -246,10 +261,9 @@ pub fn register_spawn_chat_rpc(router: &mut Router, state: Arc<DaemonState>) {
             let p = params.unwrap_or(Value::Null);
             let cwd = p.get("cwd").and_then(Value::as_str).unwrap_or_default();
             let prompt = p.get("prompt").and_then(Value::as_str).unwrap_or_default();
-            let model = p.get("model").and_then(Value::as_str).unwrap_or(FALLBACK_MODEL);
-            let effort = p.get("effort").and_then(Value::as_str).unwrap_or(FALLBACK_EFFORT);
+            let (model, effort) = peer_model_effort(&state, cwd, &p);
             let name = p.get("name").and_then(Value::as_str);
-            match forward::spawn_chat_for_peer(&state, cwd, prompt, model, effort, name, None).await {
+            match forward::spawn_chat_for_peer(&state, cwd, prompt, &model, &effort, name, None).await {
                 Ok(session_id) => Ok(json!({"ok": true, "session_id": session_id})),
                 Err(e) => Err(RpcError::invalid_params(e)),
             }
@@ -347,6 +361,23 @@ mod tests {
         let cwd = std::path::Path::new("C:\\proj-a");
         let (m, _) = resolve_model_effort(&state, cwd, Some("sonnet"), Some("low"), &caller_config(), false);
         assert_eq!(m, "sonnet");
+    }
+
+    /// A forwarded spawn that names no model/effort opens on the TARGET
+    /// machine's project default, not on the fallback and not on whatever the
+    /// calling machine would have picked.
+    #[test]
+    fn a_forwarded_spawn_without_model_or_effort_takes_this_machines_project_default() {
+        let state = state_with_defaults(Some("haiku"), None);
+        let (m, e) = peer_model_effort(&state, "C:\\proj-a", &json!({"cwd": "C:\\proj-a", "prompt": "p"}));
+        assert_eq!((m.as_str(), e.as_str()), ("haiku", FALLBACK_EFFORT));
+    }
+
+    #[test]
+    fn a_forwarded_spawn_with_explicit_model_and_effort_keeps_them() {
+        let state = state_with_defaults(Some("haiku"), None);
+        let (m, e) = peer_model_effort(&state, "C:\\proj-a", &json!({"model": "opus", "effort": "high"}));
+        assert_eq!((m.as_str(), e.as_str()), ("opus", "high"));
     }
 
     fn project(path: &str) -> crate::types::ProjectConfig {
