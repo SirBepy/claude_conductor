@@ -43,21 +43,33 @@ describe("option preview local images", () => {
     expect(mod.inlineLocalImages(frag)).toBe(frag);
   });
 
-  it("keeps the src when the read fails or returns a non-image", async () => {
+  it("swaps a failed or non-image read for the 'Picture unavailable' tile, never a broken src", async () => {
     const frag = `<img src="file:///C:/x/a.png">`;
-    impl = async () => { throw new Error("unknown command"); };
-    expect(await mod.prefetchLocalImages([frag])).toBe(false);
-    expect(mod.inlineLocalImages(frag)).toBe(frag);
+    impl = async () => { throw new Error("outside every project root"); };
+    // Resolves true: the frames must repaint to show the tile.
+    expect(await mod.prefetchLocalImages([frag])).toBe(true);
+    const shown = mod.inlineLocalImages(frag);
+    expect(shown).not.toContain("file:///");
+    expect(shown).toMatch(/^<img src="data:image\/svg\+xml,/);
+    expect(decodeURIComponent(shown)).toContain("Picture unavailable");
     mod.clearLocalImageCache();
     impl = async () => ({ mime: "text/plain", base64: "QUJD" });
     await mod.prefetchLocalImages([frag]);
-    expect(mod.inlineLocalImages(frag)).toBe(frag);
+    expect(mod.inlineLocalImages(frag)).toContain("Picture%20unavailable");
   });
 
-  it("retries a path whose earlier read failed", async () => {
+  it("the tile works inside a single-quoted src too", async () => {
+    const frag = `<img src='file:///C:/x/q.png'>`;
+    impl = async () => { throw new Error("nope"); };
+    await mod.prefetchLocalImages([frag]);
+    const shown = mod.inlineLocalImages(frag);
+    expect(shown).toMatch(/^<img src='data:image\/svg\+xml,[^']*'>$/);
+  });
+
+  it("retries a path whose earlier read failed, and the retry replaces the tile with the picture", async () => {
     const frag = `<img src="file:///C:/x/late.png">`;
     impl = async () => { throw new Error("not written yet"); };
-    expect(await mod.prefetchLocalImages([frag])).toBe(false);
+    expect(await mod.prefetchLocalImages([frag])).toBe(true);
     impl = async () => ({ mime: "image/png", base64: "QUJD" });
     expect(await mod.prefetchLocalImages([frag])).toBe(true);
     expect(mod.inlineLocalImages(frag)).toContain("data:image/png;base64,QUJD");

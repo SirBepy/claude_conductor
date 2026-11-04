@@ -132,6 +132,7 @@ export function extractQuestions(input: unknown): Question[] | null {
       header: typeof q.header === "string" ? q.header : undefined,
       domain: DOMAINS.has(q.domain as string) ? (q.domain as QuestionDomain) : undefined,
       multiSelect: q.multiSelect === true,
+      preview: typeof q.preview === "string" && q.preview.trim() ? q.preview : undefined,
       options: Array.isArray(q.options)
         ? (q.options as unknown[]).flatMap((o) => {
             if (!o || typeof o !== "object") return [];

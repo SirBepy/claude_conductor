@@ -63,6 +63,11 @@ export interface Question {
   domain?: QuestionDomain;
   multiSelect?: boolean;
   options?: QuestionOption[];
+  /** One picture of what the question is about, shown above its text. Same
+   *  sandboxed-frame HTML as an option's `preview`, but it belongs to the
+   *  question, so it fits a question whose options all look alike ("is this
+   *  good, or do you want to change something?"). Never required. */
+  preview?: string;
 }
 
 export interface QuestionRequestedPayload {

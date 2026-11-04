@@ -25,6 +25,20 @@ fn allowed(list: &[&str]) -> String {
 /// runaway paste before it rides every pending-prompt snapshot.
 const MAX_PREVIEW_BYTES: usize = 64 * 1024;
 
+/// The question's own `preview`: optional, never required, but when present it
+/// must be a non-empty string under the same cap as an option's.
+fn question_preview_problems(q: &Value, n: usize) -> Vec<String> {
+    match q.get("preview").filter(|p| !p.is_null()) {
+        None => Vec::new(),
+        Some(Value::String(s)) if s.trim().is_empty() => vec![format!("question {n}: preview is empty, leave it out instead")],
+        Some(Value::String(s)) if s.len() > MAX_PREVIEW_BYTES => {
+            vec![format!("question {n}: preview is {} bytes, over the {MAX_PREVIEW_BYTES}-byte cap", s.len())]
+        }
+        Some(Value::String(_)) => Vec::new(),
+        Some(_) => vec![format!("question {n}: preview must be a string of HTML")],
+    }
+}
+
 /// Option-level `preview` problems. A `ux` question exists to compare looks,
 /// so every one of its options must show one (Joe, 2026-10-17: "whenever
 /// youre asking something visual, you always show me the visual options").
@@ -66,6 +80,7 @@ pub fn normalize(questions: &Value) -> Result<Value, String> {
 
     let mut problems: Vec<String> = Vec::new();
     let mut preview_issues: Vec<String> = Vec::new();
+    let mut question_preview_issues: Vec<String> = Vec::new();
     let mut out: Vec<Value> = Vec::with_capacity(items.len());
     for (qi, item) in items.iter().enumerate() {
         let mut q = item.clone();
@@ -108,11 +123,12 @@ pub fn normalize(questions: &Value) -> Result<Value, String> {
             }
         }
         // After domain normalization, so "UX" is held to the ux rule too.
+        question_preview_issues.extend(question_preview_problems(&q, n));
         preview_issues.extend(preview_problems(&q, n));
         out.push(q);
     }
 
-    if problems.is_empty() && preview_issues.is_empty() {
+    if problems.is_empty() && preview_issues.is_empty() && question_preview_issues.is_empty() {
         return Ok(Value::Array(out));
     }
     let mut hints: Vec<&str> = Vec::new();
@@ -129,6 +145,12 @@ fragment using the app's own classes and CSS variables (it renders with the app'
 loaded, scripts never run); a question about behaviour rather than looks takes another domain",
         );
     }
+    if !question_preview_issues.is_empty() {
+        hints.push(
+            "a question's own `preview` is optional: one HTML fragment (or <img> of a screenshot) showing what the question is about; leave it out when there is nothing to show",
+        );
+    }
+    problems.extend(question_preview_issues);
     problems.extend(preview_issues);
     Err(format!(
         "{}. Nothing was shown to the user - {}. Fix the value(s) and call ask_user_question again.",
@@ -235,6 +257,34 @@ mod tests {
         assert!(normalize(&not_string).unwrap_err().contains("preview must be a string"));
         let huge = json!([{"question": "Which?", "options": [{"label": "A", "preview": "x".repeat(MAX_PREVIEW_BYTES + 1)}]}]);
         assert!(normalize(&huge).unwrap_err().contains("byte cap"));
+    }
+
+    #[test]
+    fn a_question_level_preview_is_optional_and_passes_through_on_any_domain() {
+        let q = json!([
+            {"question": "Is this good?", "domain": "ux", "preview": "<b>the header</b>",
+             "options": [{"label": "Good", "preview": "<i>a</i>"}, {"label": "Change", "preview": "<i>b</i>"}]},
+            {"question": "Fine?", "preview": "<b>x</b>", "options": [{"label": "Yes"}]}
+        ]);
+        assert_eq!(normalize(&q).unwrap(), q);
+    }
+
+    #[test]
+    fn a_question_level_preview_does_not_satisfy_the_ux_option_rule() {
+        let q = json!([{"question": "Which?", "domain": "ux", "preview": "<b>x</b>", "options": [{"label": "A"}]}]);
+        assert!(normalize(&q).unwrap_err().contains("question 1 option 1: a ux question needs a preview"));
+    }
+
+    #[test]
+    fn a_bad_question_level_preview_is_rejected_without_the_ux_or_badge_hint() {
+        for bad in [json!(3), json!("  "), json!("x".repeat(MAX_PREVIEW_BYTES + 1))] {
+            let q = json!([{"question": "Which?", "preview": bad, "options": [{"label": "A"}]}]);
+            let err = normalize(&q).unwrap_err();
+            assert!(err.contains("question 1: preview"), "{err}");
+            assert!(err.contains("Nothing was shown to the user"), "{err}");
+            assert!(!err.contains("ux question compares"), "{err}");
+            assert!(!err.contains("fixed enum tokens"), "{err}");
+        }
     }
 
     #[test]

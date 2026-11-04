@@ -99,6 +99,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   const previews = attachOptionPreviews({
     host, questions, selections, choose: (qi, label) => applyPick(qi, label, true, true),
     expand: (qi, label) => fullscreen.open(qi, label),
+    expandQuestion: (qi) => fullscreen.openQuestion(qi),
     sessionId: opts.sessionId,
   });
   const { showPasteHint, paintAttachmentStrips, syncMessagesPadding, positionTrack } =

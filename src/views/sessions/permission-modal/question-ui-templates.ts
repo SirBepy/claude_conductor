@@ -7,7 +7,7 @@ import { escapeHtml } from "../../../shared/escape-html";
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
 import { composerFieldHtml } from "../../../shared/chat/composer-field";
 import { splitAsk } from "./question-state";
-import { previewLayout, previewedOptions, stageHtml, tilePictureHtml } from "./option-previews";
+import { previewLayout, previewedOptions, questionPictureHtml, stageHtml, tilePictureHtml } from "./option-previews";
 import type { PreviewLayout } from "./option-previews";
 import { BADGE_META, DOMAIN_META } from "./types";
 import type { AuqAttachmentsController } from "./attachments";
@@ -191,6 +191,7 @@ export function panelHtml(
     : "";
   return `
     <section class="prompt-panel${isActive ? " is-active" : ""}${layout ? ` prompt-panel--preview-${layout}` : ""}" data-panel="${qi}" style="--dom:${domainVar(q.domain)}">
+      ${questionPictureHtml(q, qi, opts.sessionId)}
       ${questionZonesHtml(q)}
       ${pickSect}
     </section>
