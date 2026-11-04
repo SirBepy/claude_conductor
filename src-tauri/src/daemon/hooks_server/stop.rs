@@ -107,7 +107,16 @@ pub(super) async fn on_stop(
             .map(|s| s.mcp_miss_streak.load(Ordering::Relaxed))
             .unwrap_or(0);
         let mcp_attached = mcp_is_attached(mcp_config_written, miss_streak);
-        let verdict = missing_requirement_reason(payload.stop_hook_active, has_current_report, has_current_send, status, opened_by_wake, mcp_attached);
+        let question_card_posted = ctx.state.registry.question_posted_this_turn(&session_id, gen);
+        let verdict = missing_requirement_reason(
+            payload.stop_hook_active,
+            has_current_report,
+            has_current_send,
+            status,
+            opened_by_wake,
+            mcp_attached,
+            question_card_posted,
+        );
         let mcp_tool_used_this_turn =
             ctx.state.registry.peek_mcp_tool_used_gen(&session_id).map(|g| g == gen).unwrap_or(false);
         let update = streak_update(payload.stop_hook_active, &verdict, mcp_tool_used_this_turn);
