@@ -100,6 +100,24 @@ export function handleQuestionCardKey(e: KeyboardEvent, deps: QuestionKeyboardDe
       page(e.key === "ArrowLeft" ? -1 : 1);
       return true;
     }
+    // Typing on the review step means "add a note": review has no text box
+    // until "Add a note" is tapped, so a printable key (not Space, which still
+    // presses a focused Submit) opens it and hands focus over before the
+    // keypress fires, so the character itself lands in the note.
+    if (isReview() && e.key.length === 1 && e.key !== " " && !e.altKey
+      && (target === document.body || (target instanceof HTMLButtonElement && host.contains(target)))) {
+      const addNote = host.querySelector<HTMLButtonElement>('[data-act="add-note"]');
+      if (addNote) {
+        addNote.click();
+        return true;
+      }
+      const noteField = host.querySelector<HTMLTextAreaElement>(".prompt-extra-input");
+      if (noteField) {
+        noteField.focus();
+        noteField.selectionStart = noteField.selectionEnd = noteField.value.length;
+        return true;
+      }
+    }
     if (!(target instanceof HTMLTextAreaElement)) return false;
     // An option's note box sits inside the option list already; Tab there moves on normally.
     if (target.classList.contains("prompt-opt__note-input")) return false;
