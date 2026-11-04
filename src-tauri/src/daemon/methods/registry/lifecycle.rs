@@ -20,8 +20,7 @@ pub(crate) async fn restart_live_session(state: &Arc<DaemonState>, caller: &str,
         return false;
     }
     let was_busy = crate::daemon::lifecycle::is_busy(state, session_id);
-    let was_asked = state.list_prompts().await.iter()
-        .any(|v| v["payload"]["session_id"].as_str() == Some(session_id));
+    let was_asked = crate::daemon::lifecycle::has_open_prompt(state, session_id).await;
     match crate::daemon::lifecycle::restart_session(state, session_id).await {
         Ok(_) => {
             if was_busy || was_asked {
@@ -38,6 +37,19 @@ pub(crate) async fn restart_live_session(state: &Arc<DaemonState>, caller: &str,
             false
         }
     }
+}
+
+/// A model/effort pick on a live chat. Only a chat actively working (mid-turn,
+/// no question card open) is respawned now and nudged with "continue", since its
+/// turn dies with the child. An idle chat, or one parked on a question card
+/// (the child is just waiting, nothing is running), keeps its child: the pick
+/// is already in the registry and `lifecycle::refresh_stale_launch` applies it
+/// when Joe next sends, so no unwanted "continue" turn is spent on it.
+/// Returns whether it respawned.
+async fn apply_launch_change(state: &Arc<DaemonState>, caller: &str, session_id: &str) -> bool {
+    let working = crate::daemon::lifecycle::is_busy(state, session_id)
+        && !crate::daemon::lifecycle::has_open_prompt(state, session_id).await;
+    working && restart_live_session(state, caller, session_id).await
 }
 
 pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
@@ -93,9 +105,9 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 state.registry.set_effort(&p.session_id, &p.effort);
                 crate::sessions::chat_config::record(&p.session_id, "", &p.effort);
 
-                // Effort is launch-only like model - restart so it actually
-                // applies instead of silently no-op'ing on a live session.
-                let restarted = restart_live_session(&state, "set_session_effort", &p.session_id).await;
+                // Effort is launch-only like model, so a live child needs a
+                // respawn to apply it - now if mid-turn, else at the next send.
+                let restarted = apply_launch_change(&state, "set_session_effort", &p.session_id).await;
 
                 crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
@@ -113,10 +125,27 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 state.registry.set_model(&p.session_id, &p.model);
                 crate::sessions::chat_config::record(&p.session_id, &p.model, "");
 
-                let restarted = restart_live_session(&state, "set_session_model", &p.session_id).await;
+                let restarted = apply_launch_change(&state, "set_session_model", &p.session_id).await;
 
                 crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
+                Ok(json!({"ok": true, "restarted": restarted}))
+            }
+        });
+    }
+    // The desktop's send path calls this before writing, so it can re-attach
+    // its chat bridge when the respawn moved the child to a new broadcast channel.
+    {
+        let state = state.clone();
+        router.register("refresh_stale_launch", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let p: SessionId = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let restarted = crate::daemon::lifecycle::refresh_stale_launch(&state, &p.session_id).await;
+                if restarted {
+                    crate::daemon::machines::publish_instances_changed(&state);
+                }
                 Ok(json!({"ok": true, "restarted": restarted}))
             }
         });

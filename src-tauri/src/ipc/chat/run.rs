@@ -193,6 +193,19 @@ async fn send_message_daemon(
 ) -> Result<String, String> {
     super::daemon_bridge::ensure_attached(app, session_id).await.ok();
 
+    // A model/effort pick made while the chat was idle is applied here, on the
+    // message that follows it. Its own try: a mirrored chat is refreshed by its
+    // host's send, and a failure must not cost the send itself.
+    if !mirrored {
+        let refreshed = match state.client().await {
+            Some(client) => client.refresh_stale_launch(session_id).await.unwrap_or(false),
+            None => false,
+        };
+        if refreshed {
+            super::daemon_bridge::reattach(app, session_id).await?;
+        }
+    }
+
     // First attempt.
     let first = {
         let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;

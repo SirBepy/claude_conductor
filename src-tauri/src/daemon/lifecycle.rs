@@ -49,6 +49,61 @@ pub fn refuse_if_busy(
     Ok(())
 }
 
+/// Whether a question card for `session_id` is open: its child is parked on the
+/// answer, running nothing.
+pub(crate) async fn has_open_prompt(state: &crate::daemon::state::DaemonState, session_id: &str) -> bool {
+    state.list_prompts().await.iter()
+        .any(|v| v["payload"]["session_id"].as_str() == Some(session_id))
+}
+
+/// Model and effort are launch-only CLI flags, so a live child keeps the pair it
+/// was spawned with. Empty means the same default `respawn_interactive` spawns
+/// with, so a registry row that never recorded either does not read as a change.
+fn launch_differs(live_model: &str, live_effort: &str, want_model: &str, want_effort: &str) -> bool {
+    let model = |m: &str| if m.is_empty() { "opus".to_string() } else { m.to_string() };
+    let effort = |e: &str| if e.is_empty() { "high".to_string() } else { e.to_string() };
+    model(live_model) != model(want_model) || effort(live_effort) != effort(want_effort)
+}
+
+/// Does `session_id`'s live child run a different model/effort than the
+/// registry now holds, i.e. a pick was made that only a respawn can apply.
+/// Derived from the two records rather than stored as a flag, so picking the
+/// original value back cancels the pending change and a daemon restart cannot
+/// lose it.
+pub(crate) fn launch_is_stale(state: &crate::daemon::state::DaemonState, session_id: &str) -> bool {
+    let Some(live) = state.sessions.get(session_id) else { return false };
+    let Some(inst) = state.registry.get(session_id) else { return false };
+    launch_differs(&live.model, &live.effort, &inst.model, &inst.effort)
+}
+
+/// Respawn `session_id` with the registry's model/effort if its live child is
+/// stale (see [`launch_is_stale`]). Called by a user send BEFORE the write, so
+/// the picked model takes effect on that message without a "continue" turn.
+/// Returns whether it respawned, which also means the child has a new broadcast
+/// channel the caller's subscribers must re-attach to. A failed respawn is
+/// logged and reported as `false`: the send then falls to its NotFound respawn.
+pub(crate) async fn refresh_stale_launch(
+    state: &std::sync::Arc<crate::daemon::state::DaemonState>,
+    session_id: &str,
+) -> bool {
+    if !launch_is_stale(state, session_id) {
+        return false;
+    }
+    // A turn running with no card open would be killed by this, and the send
+    // behind it is about to be refused as busy anyway.
+    if is_busy(state, session_id) && !has_open_prompt(state, session_id).await {
+        return false;
+    }
+    log::info!("daemon: {session_id} runs a stale model/effort, respawning before the next send");
+    match restart_session(state, session_id).await {
+        Ok(_) => true,
+        Err(e) => {
+            log::warn!("daemon: stale-launch respawn failed for {session_id}: {e}");
+            false
+        }
+    }
+}
+
 /// `Err(ApiCreditBlocked)` when `account_id` is an API-credit account whose
 /// cached Console status says it is out of credit or at its spend limit. An
 /// account with no status (a subscription account, or one not polled yet)
@@ -228,6 +283,23 @@ mod tests {
 
         let r = send_message_with_respawn(&state, "blocked-sid", "hi", false).await;
         assert!(matches!(r, Err(LifecycleError::ApiCreditBlocked(_))), "{r:?}");
+    }
+
+    #[test]
+    fn launch_differs_reads_empty_as_the_spawn_default() {
+        assert!(!launch_differs("opus", "high", "opus", "high"));
+        assert!(!launch_differs("opus", "high", "", ""), "an unrecorded pair respawns as opus/high");
+        assert!(launch_differs("opus", "high", "sonnet", "high"), "a model pick is a change");
+        assert!(launch_differs("opus", "high", "opus", "max"), "an effort pick is a change");
+        assert!(!launch_differs("sonnet", "low", "sonnet", "low"), "picking the original back cancels it");
+    }
+
+    #[test]
+    fn launch_is_stale_is_false_without_a_live_child() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("s", std::path::Path::new("/tmp/x"), "p", "2026-11-04T00:00:00Z");
+        state.registry.set_model_effort("s", "sonnet", "low");
+        assert!(!launch_is_stale(&state, "s"), "no live child means the next spawn already uses the pick");
     }
 
     #[test]
