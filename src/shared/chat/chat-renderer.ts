@@ -276,11 +276,18 @@ export class ChatRenderer {
     // none of its own (a retry notice, "Waiting for your answer") drops it, the
     // idle re-set of the same label keeps it. Set before the same-label early
     // return so the bar's opened block never describes the previous tool.
+    const prevDetail = this.lastActivityDetail;
     if (a === null) this.lastActivityDetail = null;
     else if (opts.detail !== undefined) this.lastActivityDetail = opts.detail;
     else if (a !== this.lastActivity) this.lastActivityDetail = null;
     const idle = !!opts.idle;
-    if (this.lastActivity === a && this.activityIdle === idle) return;
+    // Two tool calls can share a label (a Bash description) with different
+    // commands: the bar's opened block shows the detail, so a detail-only change
+    // must still notify. Compared by content because each tool_use builds a new
+    // object, and the bar's own key guard skips a repaint of identical text.
+    const detailChanged = prevDetail?.tool !== this.lastActivityDetail?.tool
+      || prevDetail?.text !== this.lastActivityDetail?.text;
+    if (this.lastActivity === a && this.activityIdle === idle && !detailChanged) return;
     this.lastActivity = a;
     this.activityIdle = idle;
     // Suppressed during history replay; the final activity is fired once when

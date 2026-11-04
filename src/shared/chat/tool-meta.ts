@@ -154,12 +154,20 @@ export function toolSummary(tool: string, input: unknown): { icon: string; tool:
  *  tool's real argument, uncut (toolSummary's target is capped for a one-line row). */
 export interface ActivityDetail {
   tool: string;
-  /** The full command, path, pattern or URL; null when the tool has no such argument. */
+  /** The full command, path, pattern or URL; null when the tool has no such argument.
+   *  Never cut here: the bar's Copy button copies this string, so only the
+   *  display (capActivityText) may shorten it. */
   text: string | null;
 }
 
 // A Bash command can be a pasted script; the bar's open block scrolls past this.
 const DETAIL_MAX = 2000;
+
+/** The opened block's display form of a detail: a pasted script is cut so the
+ *  block stays a block, while the detail itself keeps the whole command. */
+export function capActivityText(text: string): string {
+  return text.length > DETAIL_MAX ? text.slice(0, DETAIL_MAX) + "…" : text;
+}
 
 /** The uncut counterpart of toolSummary's target, for the working bar's opened block. */
 export function activityDetail(tool: string, input: unknown): ActivityDetail {
@@ -192,7 +200,7 @@ export function activityDetail(tool: string, input: unknown): ActivityDetail {
   })();
   return {
     tool: toolSummary(tool, input).tool,
-    text: text ? (text.length > DETAIL_MAX ? text.slice(0, DETAIL_MAX) + "…" : text) : null,
+    text: text || null,
   };
 }
 

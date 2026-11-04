@@ -6,10 +6,10 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-const { activityDetail } = await import("../src/shared/chat/tool-meta.ts");
+const { activityDetail, capActivityText } = await import("../src/shared/chat/tool-meta.ts");
 const { describeActivity, describeActivityFull } = await import("../src/shared/chat/chat-dom-renderer.ts");
 const {
-  initThinkingBar, syncThinkingBar, thinkingBarHtml, wireThinkingBar, updateThinkingBar,
+  initThinkingBar, syncThinkingBar, thinkingBarHtml, wireThinkingBar, updateThinkingBar, setThinkingActivity,
 } = await import("../src/views/sessions/session-thinking-bar.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 const { formatElapsed } = await import("../src/shared/time.ts");
@@ -42,10 +42,13 @@ describe("activity label and detail", () => {
     expect(activityDetail("Task", { description: "x" }).text).toBeNull();
   });
 
-  it("caps an enormous command so the opened block stays a block", () => {
+  it("keeps an enormous command whole in the detail and cuts only its display form", () => {
     const text = activityDetail("Bash", { command: "x".repeat(5000) }).text;
-    expect(text.length).toBeLessThan(2100);
-    expect(text.endsWith("…")).toBe(true);
+    expect(text.length).toBe(5000);
+    const shown = capActivityText(text);
+    expect(shown.length).toBeLessThan(2100);
+    expect(shown.endsWith("…")).toBe(true);
+    expect(capActivityText("short")).toBe("short");
   });
 });
 
@@ -228,6 +231,56 @@ describe("the opened block", () => {
     expect(pane.querySelector(".session-thinking").classList.contains("is-open")).toBe(false);
     expect(pane.querySelector(".thinking-main").disabled).toBe(true);
     expect(pane.querySelector(".thinking-detail").hidden).toBe(true);
+  });
+
+  it("copies a 5000-character command whole while the block shows it cut", async () => {
+    const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
+    const renderer = new ChatRenderer(document.createElement("div"));
+    renderer.onActivityUpdate = (activity, idle) => setThinkingActivity(activity, idle);
+    syncThinkingBar(renderer);
+    pane.querySelector(".thinking-main").click();
+    const command = "echo " + "x".repeat(4995);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+
+    try {
+      renderer.setActivity("Running: big", { detail: activityDetail("Bash", { command }) });
+      expect(pane.querySelector(".thinking-cmd code").textContent.length).toBeLessThan(2100);
+
+      pane.querySelector(".thinking-copy").click();
+
+      expect(writeText).toHaveBeenCalledWith(command);
+      expect(command.length).toBe(5000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows the second command when two tool calls share one label", async () => {
+    const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
+    const renderer = new ChatRenderer(document.createElement("div"));
+    renderer.onActivityUpdate = (activity, idle) => setThinkingActivity(activity, idle);
+    syncThinkingBar(renderer);
+    pane.querySelector(".thinking-main").click();
+
+    const label = "Running: Read the CSS";
+    renderer.setActivity(label, { detail: { tool: "Bash", text: "cat a.css" } });
+    expect(pane.querySelector(".thinking-cmd code").textContent).toBe("cat a.css");
+
+    renderer.setActivity(label, { detail: { tool: "Bash", text: "cat b.css" } });
+    expect(pane.querySelector(".thinking-cmd code").textContent).toBe("cat b.css");
+  });
+
+  it("does not notify when the same label and an equal detail arrive again", async () => {
+    const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
+    const renderer = new ChatRenderer(document.createElement("div"));
+    const seen = vi.fn();
+    renderer.onActivityUpdate = seen;
+
+    renderer.setActivity("Running: x", { detail: { tool: "Bash", text: "cat a.css" } });
+    renderer.setActivity("Running: x", { detail: { tool: "Bash", text: "cat a.css" } });
+
+    expect(seen).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a selection alive: an unchanged detail is not redrawn on the next event", () => {

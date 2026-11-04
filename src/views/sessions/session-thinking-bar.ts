@@ -1,7 +1,7 @@
 import { state } from "./state";
 import { visibleInterval } from "../../shared/visible-interval";
 import { escapeHtml } from "../../shared/escape-html";
-import type { ActivityDetail } from "../../shared/chat/tool-meta";
+import { capActivityText, type ActivityDetail } from "../../shared/chat/tool-meta";
 import { refreshNextChips } from "./next-chip-strip";
 import { formatElapsed } from "../../shared/time";
 
@@ -295,7 +295,7 @@ function renderDetail(bar: HTMLElement, busy: boolean, showStop: boolean): void 
   host.dataset.key = key;
   host.innerHTML =
     (d?.text
-      ? `<div class="thinking-cmd"><code>${escapeHtml(d.text)}</code><button type="button" class="thinking-copy" title="Copy"><i class="ph ph-copy"></i></button></div>`
+      ? `<div class="thinking-cmd"><code>${escapeHtml(capActivityText(d.text))}</code><button type="button" class="thinking-copy" title="Copy"><i class="ph ph-copy"></i></button></div>`
       : "") +
     `<div class="thinking-meta">` +
     (d ? `<span><i class="ph ph-wrench"></i>${escapeHtml(d.tool)}</span>` : "") +
