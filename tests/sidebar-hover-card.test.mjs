@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildHoverCardHtml, formatElapsed } from "../src/views/sessions/sidebar-hover-card-html.ts";
+import { buildHoverCardHtml, formatCompactElapsed } from "../src/views/sessions/sidebar-hover-card-html.ts";
 import { STATIC_CHIPS } from "../src/views/sessions/statusline-catalog.ts";
 
 const NOW = Date.parse("2026-11-03T12:00:00Z");
@@ -9,16 +9,16 @@ const MIN = 60_000;
 const base = { title: "Wiring the driver", project: "claude_usage_in_taskbar", st: "st-working", plan: null, question: null, stateSince: null, contextPct: null, now: NOW };
 const plan = (...statuses) => statuses.map((status, i) => ({ text: `step ${i + 1}`, status }));
 
-describe("formatElapsed", () => {
+describe("formatCompactElapsed", () => {
   it("reads minutes, then hours, then days", () => {
-    expect(formatElapsed(20_000)).toBe("just now");
-    expect(formatElapsed(4 * MIN)).toBe("4m");
-    expect(formatElapsed(72 * MIN)).toBe("1h 12m");
-    expect(formatElapsed(120 * MIN)).toBe("2h");
-    expect(formatElapsed(50 * 60 * MIN)).toBe("2d");
+    expect(formatCompactElapsed(20_000)).toBe("just now");
+    expect(formatCompactElapsed(4 * MIN)).toBe("4m");
+    expect(formatCompactElapsed(72 * MIN)).toBe("1h 12m");
+    expect(formatCompactElapsed(120 * MIN)).toBe("2h");
+    expect(formatCompactElapsed(50 * 60 * MIN)).toBe("2d");
   });
   it("never goes negative on a clock skew", () => {
-    expect(formatElapsed(-5 * MIN)).toBe("just now");
+    expect(formatCompactElapsed(-5 * MIN)).toBe("just now");
   });
 });
 
@@ -45,6 +45,20 @@ describe("buildHoverCardHtml", () => {
     // Only the first unanswered question is the current one.
     expect(html.match(/is-now/g)).toHaveLength(1);
     expect(html.match(/is-todo/g)).toHaveLength(1);
+  });
+
+  it("cuts a long question label and answer with an ellipsis and leaves short ones whole", () => {
+    const question = {
+      questions: [{ question: "q", header: "H".repeat(60) }, { question: "Short?", header: "Short" }],
+      answers: ["A".repeat(40), "Yes"], total: 2, answered: 2,
+    };
+    const html = buildHoverCardHtml({ ...base, st: "st-question", question });
+    expect(html).toContain(`${"H".repeat(34)}…`);
+    expect(html).not.toContain("H".repeat(35));
+    expect(html).toContain(`${"A".repeat(22)}…`);
+    expect(html).not.toContain("A".repeat(23));
+    expect(html).toContain(">Short<");
+    expect(html).toContain(">Yes<");
   });
 
   it("windows a long plan around the active step and says how many are hidden", () => {
