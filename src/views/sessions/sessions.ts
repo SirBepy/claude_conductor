@@ -66,6 +66,7 @@ import {
 import { armSetupStallTimer, disarmSetupStallTimer, initialLoadAndRestore } from "./sessions-initial-load";
 import { setInstancesPollTimer, setChatHeartbeatDispose, teardownState } from "./sessions-teardown";
 import { leaveDashboardPage } from "./project-dashboard/dashboard-page";
+import { startChromeWatchdog } from "./chrome-watchdog";
 export {
   queueHistoryResume,
   queueSessionSelect,
@@ -238,8 +239,10 @@ export async function renderSessionsView(root: HTMLElement): Promise<() => void>
   })();
 
   const teardownDocumentListeners = wireDocumentListeners(pane, listEl, myMount);
+  const teardownChromeWatchdog = startChromeWatchdog(view, pane);
 
   return () => {
+    teardownChromeWatchdog();
     leaveDashboardPage(false);
     teardownDocumentListeners();
     if (unlistenDragEnter) { try { unlistenDragEnter(); } catch { /* ignore */ } unlistenDragEnter = null; }
