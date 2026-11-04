@@ -161,6 +161,10 @@ pub(super) async fn send_message(
     // the pump's `mark_turn_live` fired off the CLI's first live stdout line,
     // leaving the exact race todo 873 closed for desktop still open on the
     // phone's send path (todo 885).
+    // A model/effort pick made while the chat was idle lands on this message.
+    // Before the busy bump: the respawn's teardown would clear it. The phone's
+    // stream follows the new child by itself (`remote_ws_pump`).
+    crate::daemon::lifecycle::refresh_stale_launch(&ctx.state, &id).await;
     crate::daemon::methods::permission::settle_answered_questions(&ctx.state, &id, &body.text).await;
     ctx.state.registry.set_awaiting(&id, None);
     ctx.state.registry.set_busy(&id, true);

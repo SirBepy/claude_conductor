@@ -224,6 +224,14 @@ impl PersistentClient {
         Ok(res.get("restarted").and_then(Value::as_bool).unwrap_or(false))
     }
 
+    /// Respawns the session's live process when a model/effort pick is still
+    /// waiting for it (see `lifecycle::refresh_stale_launch`). True means the
+    /// child now has a new broadcast channel the caller must re-attach to.
+    pub async fn refresh_stale_launch(&self, session_id: &str) -> Result<bool, ClientError> {
+        let res = self.call("refresh_stale_launch", json!({"session_id": session_id})).await?;
+        Ok(res.get("restarted").and_then(Value::as_bool).unwrap_or(false))
+    }
+
     pub async fn set_auto_accept(&self, session_id: &str, value: bool) -> Result<(), ClientError> {
         self.call("set_auto_accept", json!({"session_id": session_id, "value": value})).await?;
         Ok(())
