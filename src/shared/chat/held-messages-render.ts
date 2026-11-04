@@ -47,6 +47,13 @@ export class HeldMessagesRender {
   renderChip(): void {
     const a = this.host.getAttached();
     if (!a || !a.chipSlot) return;
+    // The slot lives inside the composer's send wrap, which Composer.render()
+    // rebuilds on every setSessionId (a placeholder swapping to its real id), so
+    // the element captured at attach() can be a detached node by now.
+    if (!a.chipSlot.isConnected) {
+      const live = a.anchor?.parentElement?.querySelector<HTMLElement>(".composer-send-wrap .held-chip-slot");
+      if (live) a.chipSlot = live;
+    }
     const items = this.host.itemsForActive();
     if (items.length === 0) {
       a.chipSlot.innerHTML = "";
