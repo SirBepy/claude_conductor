@@ -10,8 +10,30 @@
 
 /* Placeholder shown only while a fresh pending pane's statusbar is still
    loading (mountPendingStatusbar's two awaits) - see pending-pane-mount.ts. */
-.session-statusbar-skeleton {
+.session-statusbar-host .session-statusbar-skeleton {
   height: 32px;
+  box-sizing: border-box;
+  /* Same frame as the real bar, so the swap changes only the contents: the
+     shared .v-skeleton block would draw a rounded, edge-to-edge shimmer. */
+  border-radius: 0;
+  animation: none;
+  background: var(--color-surface-alt);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.session-statusbar-skeleton::before {
+  content: "";
+  width: 96px;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--color-surface-alt) 25%, var(--color-surface) 50%, var(--color-surface-alt) 75%);
+  background-size: 200% 100%;
+  animation: v-shimmer 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-statusbar-skeleton::before { animation: none; }
 }
 
 .session-statusbar {
