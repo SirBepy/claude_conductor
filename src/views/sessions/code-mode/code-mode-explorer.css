@@ -45,7 +45,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
+  height: var(--control-h-sm);
   min-height: 0;
   margin-left: -6px;
   padding: 0 6px;

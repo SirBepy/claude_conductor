@@ -37,12 +37,12 @@
 /* padding: 0 here and on .pd-pg: the bare button rule's 7px 16px would push
    the glyph off centre. */
 .pd-ib {
-  width: 32px; height: 32px; display: grid; place-items: center; flex: none;
+  width: var(--control-h); height: var(--control-h); display: grid; place-items: center; flex: none;
   padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--sb-muted, var(--color-text-muted));
   cursor: pointer; font-size: 16px;
 }
 .pd-ib:hover { background: var(--color-surface-alt); color: var(--color-text); }
-.pd-ib.sm { width: 24px; height: 24px; font-size: 14px; border-radius: 6px; }
+.pd-ib.sm { width: var(--control-h-sm); height: var(--control-h-sm); font-size: 14px; border-radius: 6px; }
 .pd-ib:disabled { cursor: default; opacity: 0.6; }
 .pd-ib.is-spinning i { animation: icon-btn-spin 0.8s linear infinite; }
 
@@ -73,7 +73,7 @@
 .pd-qa-track.fade-l { mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent); }
 .pd-qa-track.fade-l.fade-r { mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent); }
 .pd-chip {
-  flex: none; white-space: nowrap; display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 6px; cursor: pointer;
+  flex: none; white-space: nowrap; display: inline-flex; align-items: center; box-sizing: border-box; height: var(--control-h-sm); padding: 0 8px; border-radius: 6px; cursor: pointer;
   border: 0; background: transparent; color: var(--sb-muted, var(--color-text-muted));
   font: 12.5px/18px var(--font-mono, monospace); transition: color 0.15s ease, background-color 0.15s ease;
 }
@@ -183,7 +183,7 @@
 /* Card pager: a quiet "2/4" with carets in the section heading, never a fold row. */
 .pd-pager { display: inline-flex; align-items: center; gap: 1px; font-weight: 400; }
 .pd-pg {
-  width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
+  width: var(--control-h-sm); height: var(--control-h-sm); display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px;
   background: transparent; color: var(--sb-muted, var(--color-text-muted)); font-size: 12px; cursor: pointer;
 }
 .pd-pg:hover:not(:disabled) { background: var(--color-surface-alt); color: var(--color-text); }
@@ -198,7 +198,7 @@
   .pd-head { gap: 10px; }
   .pd-face { width: 24px; height: 24px; font-size: 18px; }
   .pd-titles h3 { font-size: 16px; }
-  .pd-ib.sm, .pd-pg { width: 32px; height: 32px; }
+  .pd-ib.sm, .pd-pg { width: var(--control-h); height: var(--control-h); }
   .pd-row { padding-top: 8px; padding-bottom: 8px; }
   .pd-m { max-width: 38%; }
 }
