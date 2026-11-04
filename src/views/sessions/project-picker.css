@@ -219,7 +219,7 @@
    signal that real data has landed, so a shared class would let that
    selector match a skeleton placeholder instead. */
 .project-picker-search-skeleton {
-  height: 34px;
+  height: var(--control-h); /* the search field it stands in for */
   border-radius: 6px;
 }
 .project-picker-skeleton-row {

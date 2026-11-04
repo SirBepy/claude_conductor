@@ -1,4 +1,4 @@
-// asserts: src/styles/tokens.css, src/styles/base.css, src/styles/inputs.css, src/styles/color-picker.css, src/styles/settings-sections.css
+// asserts: src/styles/tokens.css, src/styles/base.css, src/styles/inputs.css, src/styles/color-picker.css, src/styles/settings-sections.css, src/views/sessions/project-picker.css, src/views/sessions/worktree-picker.css
 import { expect, test, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
 
