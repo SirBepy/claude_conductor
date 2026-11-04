@@ -278,7 +278,13 @@ pub fn save(path: &Path, settings: &Settings) -> Result<()> {
     // Write-temp-then-rename: a crash or kill mid-write truncates the temp
     // file, never `path` itself, so it can't produce the same torn-file
     // shape `load` has to salvage from.
-    let tmp_path = path.with_extension(format!("json.tmp-{}", std::process::id()));
+    //
+    // The counter makes the name unique per call: the pid alone is shared by
+    // every thread of this process, so two concurrent saves wrote and renamed
+    // the same temp file and the loser's rename failed, dropping its save.
+    static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_path = path.with_extension(format!("json.tmp-{}-{seq}", std::process::id()));
     std::fs::write(&tmp_path, raw)
         .with_context(|| format!("writing settings to {tmp_path:?}"))?;
     std::fs::rename(&tmp_path, path)
@@ -385,6 +391,42 @@ mod tests {
         let path = dir.path().join("nope.json");
         let s = load(&path);
         assert_eq!(s, Settings::default());
+    }
+
+    /// Saves from separate threads of one process used to share a single
+    /// `settings.json.tmp-<pid>`: the first rename moved it away and the next
+    /// writer's rename failed with "cannot find the file", dropping that save.
+    #[test]
+    fn concurrent_saves_in_one_process_all_land_and_leave_no_temp_files() {
+        const THREADS: usize = 8;
+        const SAVES_PER_THREAD: usize = 40;
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let barrier = std::sync::Barrier::new(THREADS);
+        let failures: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..THREADS)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let settings = Settings::default();
+                        barrier.wait();
+                        (0..SAVES_PER_THREAD)
+                            .filter_map(|_| save(&path, &settings).err().map(|e| format!("{e:#}")))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+        });
+        assert!(failures.is_empty(), "{} saves failed, first: {:?}", failures.len(), failures.first());
+        let raw = std::fs::read_to_string(&path).unwrap();
+        serde_json::from_str::<Settings>(&raw).expect("final settings.json must parse");
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp-"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left behind: {leftovers:?}");
     }
 
     #[test]
