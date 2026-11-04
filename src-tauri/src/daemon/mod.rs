@@ -61,6 +61,7 @@ pub mod spawn_self;
 pub mod start_tokens;
 pub mod state;
 pub mod stt;
+pub mod subchats;
 pub mod transport_common;
 
 #[cfg(windows)]

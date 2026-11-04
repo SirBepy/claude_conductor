@@ -24,6 +24,7 @@ vi.mock("../src/views/sessions/permission-modal", () => ({
   setAutoAccept: () => {},
   autoAcceptParked: () => {},
   isWrapUpOnDone: () => false,
+  isSubchatsOn: () => false,
   setWrapUpOnDone: () => {},
 }));
 vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({

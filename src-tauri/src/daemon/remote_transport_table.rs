@@ -107,6 +107,12 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // weaker than start_session.
     ("set_wrap_up_on_done", PM),
     ("list_wrap_up_on_done", PM),
+    // Same class again: it steers the chat's own system prompt and, when turned
+    // on, moves the chat's recorded model to Opus (what set_session_model already
+    // lets a peer do). The API-credit refusal is checked daemon-side, so a peer
+    // or phone cannot use it to reach that account kind.
+    ("set_subchats_on", PM),
+    ("list_subchats_on", PM),
     // Read-only transcript paging - the chat pane's own render path, so a
     // peer machine mirroring a session needs it too.
     ("load_history_page", PM),
@@ -780,7 +786,7 @@ mod tests {
         for m in [
             "list_pending_prompts", "confirm_question_rendered", "get_skipped_question_marks",
             "set_session_effort", "set_session_model", "set_auto_accept", "list_auto_accept",
-            "set_wrap_up_on_done", "list_wrap_up_on_done",
+            "set_wrap_up_on_done", "list_wrap_up_on_done", "set_subchats_on", "list_subchats_on",
             "freeze_session", "unfreeze_session", "paste_attachment", "read_attachment",
             "transcript_stats", "load_history", "context_status",
             "instance_token_stats", "chat_drain",

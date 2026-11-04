@@ -32,6 +32,14 @@ pub async fn list_wrap_up_on_done() -> Vec<String> {
     crate::sessions::chat_config::list_wrap_up_on_done()
 }
 
+/// Session ids with "Use subchats" on; seeds the menu toggle on launch like
+/// `list_wrap_up_on_done`. Read-only local file read (writes go through
+/// `set_subchats_on`, which forwards to the daemon as the sole writer).
+#[tauri::command]
+pub async fn list_subchats_on() -> Vec<String> {
+    crate::sessions::chat_config::list_subchats_on()
+}
+
 /// A chat's durable busy/last-reconciled marker (`sessions::chat_state`). Lets
 /// a freshly-opened window (no in-memory dedup state yet) judge whether a
 /// cached session may have moved on without it. None if never recorded.

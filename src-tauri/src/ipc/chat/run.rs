@@ -315,6 +315,20 @@ pub async fn set_wrap_up_on_done(
     Ok(())
 }
 
+/// Persist a chat's "Use subchats" toggle. Forwarded to the daemon, which owns
+/// the API-credit refusal and the move to Opus at high effort; a refusal comes
+/// back as the `Err` text.
+#[tauri::command]
+pub async fn set_subchats_on(
+    session_id: String,
+    value: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.set_subchats_on(&session_id, value).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn cancel_turn(
     session_id: String,

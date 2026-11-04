@@ -50,6 +50,13 @@ pub struct PersistedInteractive {
     /// `#[serde(default)]` for pre-existing snapshots.
     #[serde(default)]
     pub worker_of: Option<String>,
+    /// Main chat this session is a hidden sub of, if any. Whitelisted here or a
+    /// sub silently turns back into a normal sidebar chat on every restart.
+    #[serde(default)]
+    pub subchat_of: Option<String>,
+    /// A sub that called its finish tool: idle and hidden, can be continued.
+    #[serde(default)]
+    pub subchat_finished: bool,
     /// User-frozen flag (Chat menu's Freeze/Unfreeze toggle). Must survive a
     /// daemon restart same as every other Interactive field here - freeze
     /// never implies `ended_at`, so a frozen session stays in this snapshot.
@@ -106,6 +113,8 @@ pub fn save_snapshot(registry: &Registry, path: &Path) {
             awaiting: i.awaiting,
             jarvis: i.jarvis,
             worker_of: i.worker_of,
+            subchat_of: i.subchat_of,
+            subchat_finished: i.subchat_finished,
             frozen: i.frozen,
             frozen_needs_continue: i.frozen_needs_continue,
             auto_frozen: i.auto_frozen,
@@ -211,6 +220,12 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         if s.worker_of.is_some() {
             registry.set_worker_of(&s.session_id, s.worker_of.clone());
         }
+        if s.subchat_of.is_some() {
+            registry.set_subchat_of(&s.session_id, s.subchat_of.clone());
+        }
+        if s.subchat_finished {
+            registry.set_subchat_finished(&s.session_id, true);
+        }
         if s.frozen {
             registry.set_frozen(&s.session_id, true);
         }
@@ -286,6 +301,8 @@ mod tests {
             awaiting: None,
             jarvis: false,
             worker_of: None,
+            subchat_of: None,
+            subchat_finished: false,
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,
@@ -294,6 +311,46 @@ mod tests {
         let added = populate_registry(&registry, sessions);
         assert_eq!(added, 0);
         assert!(registry.get("ghost").is_none());
+    }
+
+    // PersistedInteractive is a whitelist: without these fields a sub turns back
+    // into a visible sidebar chat on every daemon restart.
+    #[test]
+    fn subchat_link_and_finished_flag_survive_a_snapshot_roundtrip() {
+        let registry = Registry::new();
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path().to_path_buf();
+        let path = tmp.path().join("snap.json");
+
+        registry.upsert_interactive("sub-1", &cwd, "proj-x", "2026-11-04T00:00:00Z");
+        registry.set_subchat_of("sub-1", Some("main-1".into()));
+        registry.set_subchat_finished("sub-1", true);
+        registry.upsert_interactive("plain", &cwd, "proj-x", "2026-11-04T00:00:00Z");
+
+        save_snapshot(&registry, &path);
+        let restored = Registry::new();
+        populate_registry(&restored, load_snapshot(&path));
+        let sub = restored.get("sub-1").expect("sub restored");
+        assert_eq!(sub.subchat_of.as_deref(), Some("main-1"));
+        assert!(sub.subchat_finished);
+        let plain = restored.get("plain").expect("plain restored");
+        assert_eq!(plain.subchat_of, None);
+        assert!(!plain.subchat_finished);
+    }
+
+    #[test]
+    fn snapshot_written_before_subchats_existed_still_loads() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("snap.json");
+        std::fs::write(
+            &path,
+            r#"[{"session_id":"old","cwd":"C:/x","project_id":"p","name":null,"model":"","effort":"","started_at":"2026-05-13T00:00:00Z"}]"#,
+        )
+        .unwrap();
+        let loaded = load_snapshot(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].subchat_of, None);
+        assert!(!loaded[0].subchat_finished);
     }
 
     #[test]

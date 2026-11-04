@@ -105,6 +105,46 @@ export function setWrapUpOnDone(sessionId: string, value: boolean): void {
   );
 }
 
+// ── Use subchats (per-session) ──────────────────────────────────────────────
+//
+// Same shape as wrap-up: the daemon reads the persisted flag to add the mode's
+// prompt to the model's system prompt, so this map only answers "is it on?" when
+// a menu renders. Unlike wrap-up the daemon can REFUSE the flip (an API-credit
+// chat), so the optimistic write is rolled back and the refusal rethrown.
+
+const _subchatsOn = new Map<string, boolean>();
+
+/** Seed the in-memory set from the persisted store. Call once at startup. */
+export async function hydrateSubchatsOn(): Promise<void> {
+  try {
+    const ids = await invoke<string[]>("list_subchats_on");
+    _subchatsOn.clear();
+    for (const id of ids ?? []) _subchatsOn.set(id, true);
+  } catch (e) {
+    console.warn("[subchats-on] hydrate failed:", e);
+  }
+}
+
+export function isSubchatsOn(sessionId: string | undefined | null): boolean {
+  if (!sessionId) return false;
+  return _subchatsOn.get(sessionId) === true;
+}
+
+/** Resolves once the daemon accepted the flip; rejects with the daemon's reason
+ *  after restoring the previous value when it refused. */
+export async function setSubchatsOn(sessionId: string, value: boolean): Promise<void> {
+  const before = isSubchatsOn(sessionId);
+  if (value) _subchatsOn.set(sessionId, true);
+  else _subchatsOn.delete(sessionId);
+  try {
+    await invoke("set_subchats_on", { sessionId, value });
+  } catch (e) {
+    if (before) _subchatsOn.set(sessionId, true);
+    else _subchatsOn.delete(sessionId);
+    throw e;
+  }
+}
+
 // Stale-question guard: an id explicitly superseded by its own replacement
 // (todo 833's ghost-swap) must not inject its answer. A sibling merely
 // existing (todo 860) is NOT supersession - only markQuestionSuperseded is.

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
 // asserts: src/views/sessions/active-session.ts, src/views/sessions/permission-modal/resurface.ts
 // Reviewed 2026-11-03: selectSession now returns when the chat was switched away during the statusbar settings read; this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-30: active-session.ts gained an empty .next-chip-slot above the composer (quick reply chips) - additive, no change to this spec's contract; the full view suite passed.

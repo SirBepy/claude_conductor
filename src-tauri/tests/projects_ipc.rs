@@ -25,6 +25,8 @@ fn sample_project(id: &str, path: &str) -> ProjectConfig {
         keep_running_in_gaming_mode: false,
         default_model: None,
         default_effort: None,
+        subchat_check: Default::default(),
+        subchat_writers: Default::default(),
     }
 }
 

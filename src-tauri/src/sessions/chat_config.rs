@@ -44,6 +44,17 @@ pub struct ChatConfig {
     /// an in-memory flag would reset to the config value and skip the retraction.
     #[serde(default)]
     pub wrap_up_told: bool,
+    /// Per-chat "Use subchats" mode: this chat hands jobs Joe names to hidden
+    /// child chats. Same lifecycle as `wrap_up_on_done` (argv system prompt at
+    /// spawn, a note on the first message after a mid-chat flip). Written only
+    /// via `set_subchats_on`.
+    #[serde(default)]
+    pub subchats_on: bool,
+    /// What the chat's model was last told about `subchats_on`. Persisted for
+    /// the same reason as `wrap_up_told`: a resumed history that holds the ON
+    /// prompt must still receive the retraction after the toggle went OFF.
+    #[serde(default)]
+    pub subchats_told: bool,
     /// The registry account this chat was spawned under. Mirrors model/effort:
     /// recorded alongside them at spawn time so a CLOSED chat's history view
     /// can still show which account ran it. Empty for chats that predate
@@ -119,6 +130,11 @@ impl ChatConfig {
     /// value (baked into argv) or an earlier told ON that was never retracted.
     pub fn wrap_up_told_at_spawn(&self) -> bool {
         self.wrap_up_on_done || self.wrap_up_told
+    }
+
+    /// Same as [`Self::wrap_up_told_at_spawn`], for the subchats mode.
+    pub fn subchats_told_at_spawn(&self) -> bool {
+        self.subchats_on || self.subchats_told
     }
 }
 
@@ -328,9 +344,98 @@ fn list_wrap_up_on_done_at(path: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Set (or clear) a chat's "Use subchats" flag. Preserves everything else on
+/// the entry. Best-effort, never panics.
+pub fn set_subchats_on(session_id: &str, value: bool) {
+    let Some(path) = config_path() else { return };
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    set_subchats_on_at(&path, session_id, value);
+}
+
+/// Record what the chat's model was last told about the subchats mode.
+pub fn set_subchats_told(session_id: &str, value: bool) {
+    let Some(path) = config_path() else { return };
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    set_subchats_told_at(&path, session_id, value);
+}
+
+/// Session ids that currently have the subchats mode on. The frontend menu
+/// toggle seeds its in-memory set from this on launch.
+pub fn list_subchats_on() -> Vec<String> {
+    let Some(path) = config_path() else { return Vec::new() };
+    list_subchats_on_at(&path)
+}
+
+fn set_subchats_on_at(path: &Path, session_id: &str, value: bool) {
+    if session_id.is_empty() {
+        return;
+    }
+    let mut map = load_map(path);
+    map.entry(session_id.to_string()).or_default().subchats_on = value;
+    write_atomic(path, &map);
+}
+
+fn set_subchats_told_at(path: &Path, session_id: &str, value: bool) {
+    if session_id.is_empty() {
+        return;
+    }
+    let mut map = load_map(path);
+    let entry = map.entry(session_id.to_string()).or_default();
+    if entry.subchats_told == value {
+        return;
+    }
+    entry.subchats_told = value;
+    write_atomic(path, &map);
+}
+
+fn list_subchats_on_at(path: &Path) -> Vec<String> {
+    load_map(path)
+        .into_iter()
+        .filter(|(_, c)| c.subchats_on)
+        .map(|(id, _)| id)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subchats_on_round_trips_lists_and_is_independent_of_wrap_up() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        record_at(&path, "sess-1", "opus", "high");
+        set_wrap_up_on_done_at(&path, "sess-1", true);
+        set_subchats_on_at(&path, "sess-1", true);
+        let got = get_at(&path, "sess-1").unwrap();
+        assert!(got.subchats_on && got.wrap_up_on_done);
+        assert_eq!(got.model, "opus", "model preserved across a subchats write");
+        assert_eq!(list_subchats_on_at(&path), vec!["sess-1".to_string()]);
+        set_subchats_on_at(&path, "sess-1", false);
+        assert!(list_subchats_on_at(&path).is_empty());
+        assert!(get_at(&path, "sess-1").unwrap().wrap_up_on_done, "clearing subchats must not clear wrap-up");
+    }
+
+    #[test]
+    fn subchats_told_persists_and_old_files_default_to_false() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        std::fs::write(&path, r#"{"sess-1":{"model":"opus","wrap_up_on_done":false}}"#).unwrap();
+        let old = get_at(&path, "sess-1").unwrap();
+        assert!(!old.subchats_on && !old.subchats_told, "missing fields default to false");
+        set_subchats_told_at(&path, "sess-1", true);
+        let got = get_at(&path, "sess-1").unwrap();
+        assert!(got.subchats_told && got.subchats_told_at_spawn());
+        assert!(!got.wrap_up_told, "the two told flags are separate");
+    }
+
+    #[test]
+    fn set_subchats_on_empty_session_id_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        set_subchats_on_at(&path, "", true);
+        assert!(!path.exists(), "no file written for empty session id");
+    }
 
     #[test]
     fn round_trips_model_and_effort() {

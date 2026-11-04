@@ -88,6 +88,41 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
     router.register("list_wrap_up_on_done", move |_params, _ctx| {
         async move { Ok(json!(crate::sessions::chat_config::list_wrap_up_on_done())) }
     });
+    // Persist a chat's "Use subchats" toggle. Same sole-writer shape as
+    // set_wrap_up_on_done, plus two rules the daemon owns (`subchats::apply_set_on`):
+    // an API-credit chat is refused, and turning it on moves the chat to Opus at
+    // high effort through the registry (applied at its next send, never killing a
+    // running turn).
+    {
+        let state = state.clone();
+        router.register("set_subchats_on", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { session_id: String, value: bool }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let applied = crate::daemon::subchats::apply_set_on(
+                    &state,
+                    &p.session_id,
+                    p.value,
+                    &crate::accounts::load_registry(),
+                    crate::sessions::chat_config::set_subchats_on,
+                )?;
+                if let Some((model, effort)) = applied {
+                    crate::sessions::chat_config::record(&p.session_id, &model, &effort);
+                    crate::daemon::machines::publish_instances_changed(&state);
+                    crate::sessions::persistence::save_snapshot_default(&state.registry);
+                }
+                Ok(json!({"ok": true}))
+            }
+        });
+    }
+    // Session ids with the subchats mode on, so a freshly-launched client seeds
+    // its menu-toggle state. Read-only; mirrors `list_wrap_up_on_done`.
+    router.register("list_subchats_on", move |_params, _ctx| {
+        async move { Ok(json!(crate::sessions::chat_config::list_subchats_on())) }
+    });
     // Read-only; mirrors the desktop `get_chat_state` Tauri command so a
     // remote/phone client can seed the same unread-vs-stale judgement a
     // freshly-opened desktop window would.
