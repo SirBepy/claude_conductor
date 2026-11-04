@@ -376,9 +376,10 @@
   margin: calc((22px - var(--control-h)) / 2) -6px calc((22px - var(--control-h)) / 2) auto;
 }
 /* In the solo band's head row the button is not overhanging a text line, so it
- * takes a plain right-pinned margin; the row's min-height holds the band's size. */
+ * drops the auto margin (the chip, or the row's justify-content, pins the pair
+ * right) and keeps only the vertical overhang trim. */
 #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__head .prompt-ask__btn {
-  margin: -4px -6px -4px auto;
+  margin: -4px -6px -4px 0;
 }
 #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card:has(.prompt-card__header .prompt-pager) .prompt-ask__btn i {
   font-size: 1.15rem;

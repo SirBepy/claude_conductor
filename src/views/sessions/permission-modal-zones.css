@@ -77,8 +77,8 @@
   line-height: 1.35;
   color: var(--color-text);
 }
-/* No context row: the band stacks, with a head row (chip left, Ask right)
- * above the question text. */
+/* No context row: the band stacks, with a head row (chip then Ask, pinned to
+ * the right like the chip on a context row) above the question text. */
 .prompt-zone--ask-solo {
   flex-direction: column;
   align-items: stretch;
@@ -87,6 +87,7 @@
 .prompt-ask__head {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   min-height: 24px;
 }

@@ -66,6 +66,8 @@ test("a terse question shows the domain chip in the ask band", async ({ page }) 
   const textBox = (await card.locator(".prompt-zone--ask .prompt-ask__text").boundingBox())!;
   expect(chipBox!.y + chipBox!.height).toBeLessThanOrEqual(textBox.y + 1);
   expect(textBox.width).toBeGreaterThan(askBox!.width - 60);
+  // ...and right-aligned, like the chip on a context row.
+  expect(chipBox!.x).toBeGreaterThan(askBox!.x + askBox!.width / 2);
 
   await card.screenshot({
     path: ".for_bepy/screenshots/_specs/auq-domain-chip-terse.png",
