@@ -1,7 +1,7 @@
 import { base64ToUtf8 } from "./chat-transforms";
 import { openLightbox } from "./lightbox";
 import { chipToLightboxContent } from "./attachment-hydrator";
-import { showView } from "../navigation";
+import { openSkillDetail } from "../open-skill-detail";
 import { openInCodeMode, type PrCommit } from "./code-mode-bridge";
 
 let tableOverlay: HTMLDivElement | null = null;
@@ -86,8 +86,7 @@ export function handleSlashClick(e: MouseEvent): void {
   const target = span.dataset.skillTarget;
   if (!target) return;
   e.preventDefault();
-  (window as unknown as { skillDetailTarget?: string }).skillDetailTarget = target;
-  showView("skill-detail");
+  openSkillDetail(target);
 }
 
 export function handlePrPreviewClick(e: MouseEvent): void {
