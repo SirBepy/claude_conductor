@@ -162,6 +162,7 @@ export function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
       shortcuts.unregister(`open-chat-${i}`);
     }
     shortcuts.unregister("close-chat");
+    shortcuts.unregister("toggle-wrap-up-on-done");
     shortcuts.unregister("project-dashboard");
     for (let i = 1; i <= MODEL_SLOTS; i++) shortcuts.unregister(`set-model-${i}`);
     shortcuts.unregister("effort-up");
