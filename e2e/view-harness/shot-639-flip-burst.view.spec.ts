@@ -56,6 +56,8 @@ async function mountAndStage(page: Page): Promise<void> {
   await textarea.fill("interrupt and take this instead");
   await textarea.press("Enter");
 
+  // Interrupt & send lives in the list the count badge on Send opens.
+  await page.locator("#session-pane .held-chip").click();
   await expect(page.locator("#session-pane .held-send-now")).toBeVisible();
 }
 

@@ -15,7 +15,6 @@ export function thinkingBarHtml(): string {
     `<div class="thinking-row">` +
     `<button type="button" class="thinking-main" aria-expanded="false" disabled>` +
     `<span class="thinking-text"></span><i class="ph ph-caret-up thinking-caret"></i></button>` +
-    `<span class="held-chip-slot"></span>` +
     `<span class="thinking-slot"><span class="thinking-elapsed"></span>` +
     `<button type="button" class="thinking-pause-btn" title="Stop turn" hidden><i class="ph ph-stop-circle"></i>Stop</button></span>` +
     `</div></div>`
@@ -212,7 +211,7 @@ export function updateThinkingBar(): void {
   const cancelBtn = pane.querySelector<HTMLButtonElement>(".cancel-btn");
   if (cancelBtn) cancelBtn.toggleAttribute("hidden", !busy);
   const pauseBtn = pane.querySelector<HTMLButtonElement>(".thinking-pause-btn");
-  // While messages are held the chip's "Send now" is the interrupt, so Stop
+  // While messages are held the list's "Interrupt & send" is the interrupt, so Stop
   // would be a second, competing way to end the same turn.
   const showStop = busy && !hasHeld;
   if (pauseBtn) pauseBtn.toggleAttribute("hidden", !showStop);

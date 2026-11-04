@@ -409,6 +409,7 @@ export class Composer {
               <i class="ph ph-paper-plane-right"></i>
             </button>
             <span class="composer-send-ring" aria-hidden="true"></span>
+            <span class="held-chip-slot"></span>
           </div>
         </div>
       </div>

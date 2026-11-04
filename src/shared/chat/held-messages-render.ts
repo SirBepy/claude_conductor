@@ -54,21 +54,18 @@ export class HeldMessagesRender {
       return;
     }
     const n = items.length;
+    // A count badge on the corner of Send; the list it opens carries the
+    // Interrupt & send action, so the working bar stays a single quiet line.
+    const label = `${n} ${n === 1 ? "message" : "messages"} waiting. ${this.expanded ? "Hide" : "Show"} them`;
     a.chipSlot.innerHTML = `
-      <button class="held-chip" type="button" title="Show unsent messages">
-        <span class="held-count">${n}</span> ${n === 1 ? "message" : "messages"} waiting
-        <i class="ph ph-caret-${this.expanded ? "up" : "down"}"></i>
+      <button class="held-chip" type="button" title="${label}" aria-label="${label}" aria-expanded="${this.expanded}">
+        <span class="held-count">${n}</span>
       </button>
-      <button class="held-send-now" type="button" title="Cancels the running turn, and any subagents with it, to send right now. Without this the message still reaches Claude at its next step.">Interrupt &amp; send</button>
     `;
     a.chipSlot.querySelector<HTMLButtonElement>(".held-chip")?.addEventListener("click", (e) => {
       e.stopPropagation();
       this.expanded = !this.expanded;
       this.renderChip();
-    });
-    a.chipSlot.querySelector<HTMLButtonElement>(".held-send-now")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void this.host.sendNow();
     });
     if (this.expanded) this.renderDropdown();
     else this.closeDropdown();
@@ -89,10 +86,22 @@ export class HeldMessagesRender {
     this.closeDropdown();
     const dd = document.createElement("div");
     dd.className = "held-dropdown";
+    const head = document.createElement("div");
+    head.className = "held-dropdown-head";
     const title = document.createElement("div");
     title.className = "held-dropdown-title";
-    title.textContent = "Unsent — these send as one message";
-    dd.appendChild(title);
+    title.textContent = "Unsent - these send as one message";
+    const sendNow = document.createElement("button");
+    sendNow.type = "button";
+    sendNow.className = "held-send-now";
+    sendNow.title = "Cancels the running turn, and any subagents with it, to send right now. Without this the message still reaches Claude at its next step.";
+    sendNow.textContent = "Interrupt & send";
+    sendNow.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void this.host.sendNow();
+    });
+    head.append(title, sendNow);
+    dd.appendChild(head);
     const rows = document.createElement("div");
     rows.className = "held-rows";
     for (const item of items) {
