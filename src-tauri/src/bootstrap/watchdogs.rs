@@ -98,6 +98,9 @@ pub(super) fn spawn_heartbeat_watchdog(app: &tauri::AppHandle) {
 fn reload_chats(w: &tauri::WebviewWindow) {
     let url = crate::ipc::ready::app_url(CHATS_WINDOW_URL);
     log::warn!("chats webview heartbeat stale; reloading -> {url}");
+    // The reloaded page has no `navigate-to-*` listeners until its boot drains
+    // the nav stash, so a nav in between must be stashed, not emitted to nobody.
+    crate::ipc::window::mark_chats_nav_listeners_gone(w.app_handle());
     if let Ok(parsed) = url.parse::<tauri::Url>() {
         let _ = w.navigate(parsed);
     }
