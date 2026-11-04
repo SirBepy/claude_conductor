@@ -194,6 +194,8 @@ pub fn upsert_project_for_cwd(
         keep_running_in_gaming_mode: false,
         default_model: None,
         default_effort: None,
+        subchat_check: Default::default(),
+        subchat_writers: Default::default(),
     });
     settings.bump_generation();
     (id, true)
@@ -242,6 +244,8 @@ pub fn upsert_project_with_id_for_cwd(
         keep_running_in_gaming_mode: false,
         default_model: None,
         default_effort: None,
+        subchat_check: Default::default(),
+        subchat_writers: Default::default(),
     });
     settings.bump_generation();
 }

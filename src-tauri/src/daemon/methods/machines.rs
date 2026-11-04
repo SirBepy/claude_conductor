@@ -289,6 +289,8 @@ mod tests {
             keep_running_in_gaming_mode: false,
             default_model: None,
             default_effort: None,
+            subchat_check: Default::default(),
+            subchat_writers: Default::default(),
         });
         let state = DaemonState::new(new_session_map(), SettingsCache::new(settings));
         state.init_machines(dir.path().to_path_buf());

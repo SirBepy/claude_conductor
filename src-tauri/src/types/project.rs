@@ -83,6 +83,35 @@ pub struct ProjectConfig {
     /// Effort a new chat in this project opens on; `None` follows the global default.
     #[serde(default)]
     pub default_effort: Option<String>,
+    /// What a sub of a "Use subchats" chat must show before it can finish.
+    #[serde(default)]
+    pub subchat_check: SubchatCheck,
+    /// How subs that edit files share this project's tree.
+    #[serde(default)]
+    pub subchat_writers: SubchatWriters,
+}
+
+/// Project setting "Check a sub's work". `FactsAndReviewer` is the default:
+/// a sub that changed files must run a fresh reviewer subagent on its own diff
+/// before it can finish.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub enum SubchatCheck {
+    #[default]
+    FactsAndReviewer,
+    FactsOnly,
+}
+
+/// Project setting "Subs changing files". `OneAtATime` is the default: one
+/// writing sub per project, the next one queues.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub enum SubchatWriters {
+    #[default]
+    OneAtATime,
+    WorktreeEach,
 }
 
 /// Which paired peer machine an `Instance` row is mirrored from, and
@@ -229,6 +258,16 @@ pub struct Instance {
     /// sidebar moves the user onto the successor instead of stranding them.
     #[serde(default)]
     pub successor_of: Option<String>,
+    /// Set on a hidden sub of a "Use subchats" chat, to that main chat's id.
+    /// `None` for every ordinary session. A separate field from `worker_of` on
+    /// purpose: Jarvis's wake-on-every-state routing keys on `worker_of`, and a
+    /// sub must not wake its parent.
+    #[serde(default)]
+    pub subchat_of: Option<String>,
+    /// True once a sub called its finish tool: idle and hidden, it keeps its
+    /// row and context and wakes on a follow-up. Never implies `ended_at`.
+    #[serde(default)]
+    pub subchat_finished: bool,
     /// Set only for a row mirrored in from a paired peer machine (multi-
     /// machine federation) - `None` means this session lives on THIS
     /// daemon. Stamped by `daemon::machines::all_instances`, never by the
@@ -338,10 +377,23 @@ mod tests {
             keep_running_in_gaming_mode: false,
             default_model: Some("sonnet".into()),
             default_effort: Some("high".into()),
+            subchat_check: SubchatCheck::FactsOnly,
+            subchat_writers: SubchatWriters::WorktreeEach,
         };
         let raw = serde_json::to_string(&p).unwrap();
+        assert!(raw.contains(r#""subchat_check":"facts_only""#) && raw.contains(r#""subchat_writers":"worktree_each""#));
         let back: ProjectConfig = serde_json::from_str(&raw).unwrap();
         assert_eq!(p, back);
+    }
+
+    // A settings.json written before the subchat settings existed must keep
+    // loading with the contract's defaults, or every project would be lost.
+    #[test]
+    fn project_config_without_subchat_fields_still_loads_with_defaults() {
+        let raw = r#"{"id":"abc","path":"C:/x/y","name":"Y","created_at":"2026-04-21T00:00:00Z"}"#;
+        let p: ProjectConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(p.subchat_check, SubchatCheck::FactsAndReviewer);
+        assert_eq!(p.subchat_writers, SubchatWriters::OneAtATime);
     }
 
     #[test]
@@ -437,6 +489,8 @@ mod tests {
             progress: Default::default(),
             local_task_running: false,
             successor_of: None,
+            subchat_of: Some("main-1".into()),
+            subchat_finished: true,
             machine: None,
         };
         let raw = serde_json::to_string(&i).unwrap();

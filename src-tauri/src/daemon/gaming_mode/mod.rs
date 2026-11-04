@@ -296,6 +296,8 @@ mod tests {
             autopilot: false,
             jarvis,
             worker_of: None,
+            subchat_of: None,
+            subchat_finished: false,
             closing: false,
             turn_gen: 0,
             last_event_at: None,

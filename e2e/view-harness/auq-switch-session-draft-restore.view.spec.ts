@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
 // Reviewed 2026-10-08: index.ts's confirmQuestionRendered calls now also thread the prompt's sessionId (multi-machine prompt routing, docs/multi-machine.md) - additive, no UI-behavior change for this spec's contract.
 // Reviewed 2026-10-20: index.ts gained a `hydrateWrapUpOnDone()` call at install time and re-exports isWrapUpOnDone/setWrapUpOnDone - additive, no change to this spec's AUQ contract.
 // Reviewed 2026-10-08: index.ts gained a `secret-requested` prompt route and queue (the request_secret MCP tool's masked-value card) alongside the existing permission/question routes - additive, no change to this spec's AUQ contract.

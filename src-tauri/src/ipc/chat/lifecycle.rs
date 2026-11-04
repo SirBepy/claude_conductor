@@ -431,6 +431,8 @@ mod tests {
             keep_running_in_gaming_mode: false,
             default_model: model.map(str::to_string),
             default_effort: effort.map(str::to_string),
+            subchat_check: Default::default(),
+            subchat_writers: Default::default(),
         }]
     }
 

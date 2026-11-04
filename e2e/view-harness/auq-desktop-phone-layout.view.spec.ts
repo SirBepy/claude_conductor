@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
 // Reviewed 2026-11-02: the question card's header ask button now takes --control-h and its nav arrows --control-h-sm; this spec asserts the layout and passes.
 // Reviewed 2026-11-01: the review panel supplies its own top gap now that the card body has none (assertion in the review-step test).
 // Reviewed 2026-10-31: the context box and ask band run edge to edge on desktop too (new test below); the chip moved back to the context row.

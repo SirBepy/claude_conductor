@@ -13,6 +13,8 @@ import {
   autoAcceptParked,
   isWrapUpOnDone,
   setWrapUpOnDone,
+  isSubchatsOn,
+  setSubchatsOn,
   rerenderSidebar,
 } from "./permission-modal";
 import { refreshWrapUpIndicator } from "./session-header";
@@ -42,6 +44,12 @@ export interface ChatMenuCtx {
    *  is no draft-time parking equivalent of `autoAcceptParked`, since nothing
    *  here gates a live permission event. */
   wrapUpOnDoneOn: boolean;
+  /** "Use subchats" (per-session): the chat hands jobs Joe names to hidden
+   *  child chats. Menu-only: no header badge or shortcut. */
+  subchatsOn: boolean;
+  /** Why the mode cannot be turned ON for this chat (an API-credit account).
+   *  Set means the item is disabled while off; turning it off always works. */
+  subchatsBlockedReason?: string;
   isHidden: boolean;
   /** Jarvis-flagged sessions always auto-accept (Part A) - the toggle is
    *  disabled for them so flipping it off can't silently stall the fleet. */
@@ -241,6 +249,28 @@ export function buildConfigureItems(ctx: ChatMenuCtx): ItemDesc[] {
       disabledReason: isDraft
         ? "Available once the chat starts"
         : (!sessionId ? "No session" : undefined),
+    },
+    {
+      icon: "tree-structure",
+      label: "Use subchats",
+      isOn: ctx.subchatsOn,
+      checkDot: ctx.subchatsOn,
+      run: isDraft || !sessionId || (!ctx.subchatsOn && ctx.subchatsBlockedReason)
+        ? undefined
+        : async () => {
+            const next = !isSubchatsOn(sessionId);
+            try {
+              await setSubchatsOn(sessionId, next);
+            } catch (err) {
+              // The daemon is the authority: it refuses what the menu could not
+              // know to hide (e.g. an account moved to API credit meanwhile).
+              alert(`Could not turn subchats ${next ? "on" : "off"}: ${err}`);
+            }
+            rerenderSidebar();
+          },
+      disabledReason: isDraft
+        ? "Available once the chat starts"
+        : (!sessionId ? "No session" : (ctx.subchatsOn ? undefined : ctx.subchatsBlockedReason)),
     },
     {
       icon: "eye",

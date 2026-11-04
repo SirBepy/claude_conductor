@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
 // Reviewed 2026-11-02 (later): the question card's header buttons now size from --control-h / --control-h-sm; glyph centring is unchanged and this spec passes.
 // Reviewed 2026-11-02: .icon-btn is now var(--control-h) square (36px, 44px on a phone) instead of 32px / 44px; this spec asserts glyph centring, not size, and passes.
 // Reviewed 2026-10-31: the question card's context box and ask band now run edge to edge on desktop too and the domain chip is back on the context row - this spec's contract is unchanged and it passes.

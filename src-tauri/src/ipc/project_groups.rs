@@ -387,6 +387,8 @@ mod build_groups_tests {
             keep_running_in_gaming_mode: false,
             default_model: None,
             default_effort: None,
+            subchat_check: Default::default(),
+            subchat_writers: Default::default(),
         }];
         let groups = build_groups(&projects, &history, &[], 0);
         assert_eq!(groups.len(), 1);
@@ -445,6 +447,8 @@ mod build_groups_tests {
             autopilot: false,
             jarvis: false,
             worker_of: None,
+            subchat_of: None,
+            subchat_finished: false,
             closing: false,
             turn_gen: 0,
             last_event_at: None,
@@ -489,6 +493,8 @@ mod build_groups_tests {
             autopilot: false,
             jarvis: false,
             worker_of: None,
+            subchat_of: None,
+            subchat_finished: false,
             closing: false,
             turn_gen: 0,
             last_event_at: None,

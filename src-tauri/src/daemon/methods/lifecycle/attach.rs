@@ -251,6 +251,8 @@ mod relay_tests {
             autopilot: false,
             jarvis: false,
             worker_of: None,
+            subchat_of: None,
+            subchat_finished: false,
             closing: false,
             turn_gen: 0,
             last_event_at: None,

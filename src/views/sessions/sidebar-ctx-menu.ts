@@ -13,7 +13,8 @@ import {
   isMirrored,
 } from "./sessions-helpers";
 import { loadAnimEnabled, markSessionExiting } from "./sidebar-anim";
-import { isAutoAccept, isWrapUpOnDone } from "./permission-modal";
+import { isAutoAccept, isWrapUpOnDone, isSubchatsOn } from "./permission-modal";
+import { subchatsBlockedReason } from "./subchats-gate";
 import { closeNeedsConfirm } from "./close-chat";
 import {
   buildChatMenuBlock,
@@ -59,6 +60,7 @@ export function openDraftCtxMenu(
     readOnly: false,
     autoAcceptOn: false,
     wrapUpOnDoneOn: false,
+    subchatsOn: false,
     isHidden: false,
     isJarvis: false,
     isFrozen: false,
@@ -105,6 +107,8 @@ export function openCtxMenu(
     readOnly: sess.kind === "external" || sess.kind === "automated",
     autoAcceptOn: isAutoAccept(sessionId),
     wrapUpOnDoneOn: isWrapUpOnDone(sessionId),
+    subchatsOn: isSubchatsOn(sessionId),
+    subchatsBlockedReason: subchatsBlockedReason(sess.account_id),
     isHidden,
     isJarvis: sess.jarvis === true,
     isFrozen: sess.frozen === true,

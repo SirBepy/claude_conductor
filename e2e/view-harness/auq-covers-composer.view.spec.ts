@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
 // asserts: src/views/sessions/permission-modal-shell.css, src/views/sessions/permission-modal-question.css, src/views/sessions/permission-modal/question-ui-render.ts, src/views/sessions/permission-modal/question-ui-answer-bar.ts
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";

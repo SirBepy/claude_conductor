@@ -31,6 +31,7 @@ import {
   needsHumanApproval,
   hydrateAutoAccept,
   hydrateWrapUpOnDone,
+  hydrateSubchatsOn,
   isAutoAccept,
   isForSelectedSession,
   markLatestQuestion,
@@ -52,6 +53,8 @@ export {
   setAutoAccept,
   isWrapUpOnDone,
   setWrapUpOnDone,
+  isSubchatsOn,
+  setSubchatsOn,
   setSelectedSessionId,
   getSelectedSessionId,
   clearPendingPrompt,
@@ -386,6 +389,7 @@ export function installPermissionModalListener(): void {
   // Tauri event bus) still hydrates its gate.
   void hydrateAutoAccept();
   void hydrateWrapUpOnDone();
+  void hydrateSubchatsOn();
 
   // Registered on both transports below - catches a stale card the same way
   // on desktop, phone, and a detached window (own module realm, own listener).

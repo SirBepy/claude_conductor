@@ -242,6 +242,11 @@ impl PersistentClient {
         Ok(())
     }
 
+    pub async fn set_subchats_on(&self, session_id: &str, value: bool) -> Result<(), ClientError> {
+        self.call("set_subchats_on", json!({"session_id": session_id, "value": value})).await?;
+        Ok(())
+    }
+
     pub async fn register_historical(&self, session_id: &str, cwd: &str, account_id: &str) -> Result<(), ClientError> {
         self.call("register_historical", json!({"session_id": session_id, "cwd": cwd, "account_id": account_id})).await?;
         Ok(())

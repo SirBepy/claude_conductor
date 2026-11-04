@@ -142,6 +142,25 @@ impl Registry {
         }
     }
 
+    /// Mark this session as a hidden sub of the main chat `parent`. `None`
+    /// clears it ("Move to sidebar"). Kept apart from `set_worker_of` so Jarvis's
+    /// wake routing never sees a sub. No-op if session is unknown.
+    pub fn set_subchat_of(&self, session_id: &str, parent: Option<String>) {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            i.subchat_of = parent;
+        }
+    }
+
+    /// Flag a sub as finished (idle and hidden, still continuable). No-op if
+    /// session is unknown.
+    pub fn set_subchat_finished(&self, session_id: &str, finished: bool) {
+        let mut guard = self.inner.lock().unwrap();
+        if let Some(i) = guard.get_mut(session_id) {
+            i.subchat_finished = finished;
+        }
+    }
+
     /// Record that this session took over from `predecessor` (the `respawn`
     /// MCP tool). Write-once at spawn time; nothing ever clears it, so the
     /// link survives the predecessor being marked ended a moment later.

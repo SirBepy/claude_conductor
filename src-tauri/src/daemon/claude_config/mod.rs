@@ -15,7 +15,10 @@ mod gc;
 mod hook_settings;
 mod mcp_config;
 
-pub(crate) use args::{append_system_prompt, base_claude_args, turn_nonce, WRAP_UP_ON_DONE_OFF_NOTE, WRAP_UP_ON_DONE_PROMPT};
+pub(crate) use args::{
+    append_system_prompt, base_claude_args, turn_nonce, SUBCHATS_MAIN_OFF_NOTE, SUBCHATS_MAIN_PROMPT, SUBCHAT_SUB_PROMPT,
+    WRAP_UP_ON_DONE_OFF_NOTE, WRAP_UP_ON_DONE_PROMPT,
+};
 pub(crate) use gc::gc_temp_files;
 pub(crate) use hook_settings::{daemon_hook_port, write_hook_settings};
 pub(crate) use mcp_config::write_mcp_config;

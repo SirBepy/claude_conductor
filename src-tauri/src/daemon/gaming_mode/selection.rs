@@ -94,6 +94,8 @@ mod tests {
             autopilot: false,
             jarvis,
             worker_of: None,
+            subchat_of: None,
+            subchat_finished: false,
             closing: false,
             turn_gen: 0,
             last_event_at: None,
@@ -129,6 +131,8 @@ mod tests {
             keep_running_in_gaming_mode: keep_running,
             default_model: None,
             default_effort: None,
+            subchat_check: Default::default(),
+            subchat_writers: Default::default(),
         }
     }
 
