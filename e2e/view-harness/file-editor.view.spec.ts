@@ -27,10 +27,12 @@ async function mountFiles(page: Page, files: Disk["files"], first: string): Prom
     };
     const disk: Disk = { files, writes: [], conflictNext: false };
     w.__disk = disk;
+    (window as unknown as { __staged: string[] }).__staged = [];
     const orig = w.__TAURI__.core.invoke;
     w.__TAURI__.core.invoke = (cmd, args) => {
       const path = (args?.path as string | undefined)?.replace(/\\/g, "/") ?? "";
       const f = disk.files[path];
+      if (cmd === "render_preview_doc") { (window as unknown as { __staged: string[] }).__staged.push(String(args?.html)); return Promise.resolve("about:blank"); }
       if (cmd === "stat_text_file") return f ? Promise.resolve({ mtime_us: f.mtime, writable: f.writable }) : Promise.reject(new Error("file not found"));
       if (cmd === "read_text_file") return f ? Promise.resolve({ content: f.content, truncated: false }) : Promise.reject(new Error("file not found"));
       if (cmd === "write_text_file") {
@@ -202,6 +204,26 @@ test.describe("view-harness / file editor", () => {
     await expect(body).not.toContainText("claim note");
     await page.locator("#fw-test .fs-md-btn").click();
     await expect(page.locator("#fw-test .cm-content")).toContainText("<!-- claim note -->");
+  });
+
+  test("an html file opens as a rendered page in the preview sandbox, Source shows the editor", async ({ page }) => {
+    const html = "C:/Projects/alpha/deck.html";
+    await mountFiles(page, {
+      [FILE]: { content: "x\n", mtime: 1, writable: true },
+      [html]: { content: "<h1 id=\"deck-marker\">Status deck</h1>\n", mtime: 1, writable: true },
+    }, FILE);
+    await page.evaluate((p) => {
+      const w = window as unknown as { __ccListeners: Map<string, Set<(e: unknown) => void>> };
+      w.__ccListeners.get("file-window-open")?.forEach((cb) => cb({ payload: { path: p, line: null } }));
+    }, html);
+    const frame = page.locator("#fw-test .fs-html-frame");
+    await expect(frame).toBeVisible();
+    await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+    const staged = await page.evaluate(() => (window as unknown as { __staged: string[] }).__staged);
+    expect(staged.some((h) => h.includes("deck-marker"))).toBe(true);
+    await page.locator("#fw-test .fs-md-btn").click();
+    await expect(page.locator("#fw-test .cm-content")).toContainText("deck-marker");
+    await expect(frame).toHaveCount(0);
   });
 
   test("reopening a rendered markdown file shows a chat's later edit", async ({ page }) => {

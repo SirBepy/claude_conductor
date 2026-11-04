@@ -23,6 +23,7 @@ import {
 import type { FileEditView } from "./file-edits";
 import type { FileEditor, EditorStatus } from "./file-editor";
 import { renderMarkdown } from "./chat-transforms";
+import { buildPreviewDocumentHtml } from "../../views/sessions/preview-panel-document";
 import type { TextFileData } from "../../types/ipc.generated";
 
 export interface SurfaceFile {
@@ -149,6 +150,15 @@ let preferredRendered = true;
 function isMarkdown(path: string): boolean {
   const lang = langFromPath(path);
   return lang === "markdown" || lang === "mdx";
+}
+
+function isHtml(path: string): boolean {
+  return langFromPath(path) === "html";
+}
+
+/** Files that open as a rendered page, with a Source toggle back to the editor. */
+function hasRenderedView(path: string): boolean {
+  return isMarkdown(path) || isHtml(path);
 }
 
 let editorModule: Promise<typeof import("./file-editor")> | null = null;
@@ -473,7 +483,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     el.fullBtn.classList.toggle("fs-hidden", !file.gitDiff);
     el.fullBtn.classList.toggle("fs-on", state.full);
     el.fullBtn.setAttribute("aria-pressed", String(state.full));
-    const md = !isDiff && isMarkdown(file.path);
+    const md = !isDiff && hasRenderedView(file.path);
     el.mdBtn.classList.toggle("fs-hidden", !md);
     el.mdBtn.innerHTML = `<i class="ph ${state.rendered ? "ph-code" : "ph-eye"}"></i>`;
     el.mdBtn.title = state.rendered ? "Show source" : "Show rendered";
@@ -517,8 +527,8 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
 
   async function renderFileBody(token: number): Promise<void> {
     const file = state.file!;
-    if (isMarkdown(file.path) && state.rendered) {
-      await renderMarkdownBody(token, file);
+    if (hasRenderedView(file.path) && state.rendered) {
+      await renderRenderedBody(token, file);
       return;
     }
     const diskPath = diskPathOf(file);
@@ -564,7 +574,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     revealLine();
   }
 
-  async function renderMarkdownBody(token: number, file: SurfaceFile): Promise<void> {
+  async function renderRenderedBody(token: number, file: SurfaceFile): Promise<void> {
     const diskPath = diskPathOf(file);
     // What the editor holds, typed-but-unsaved included, beats the disk copy.
     let text = diskPath && editorModule ? (await loadEditor()).unsavedText(diskPath) : null;
@@ -591,8 +601,27 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
       truncated = state.loaded!.truncated;
     }
     if (token !== state.token) return;
-    setBody(`<div class="fs-md pr-modal-body-content">${renderMarkdown(markdownForDisplay(text))}</div>`);
+    if (isHtml(file.path)) {
+      await mountHtmlFrame(token, text);
+    } else {
+      setBody(`<div class="fs-md pr-modal-body-content">${renderMarkdown(markdownForDisplay(text))}</div>`);
+    }
+    if (token !== state.token) return;
     if (truncated) el.body.appendChild(truncationNotice());
+  }
+
+  /** The page in the Preview panel's sandbox (opaque-origin iframe, staged by
+   *  `render_preview_doc`). A relative stylesheet or image next to the file
+   *  does not resolve there: the document has no base URL. */
+  async function mountHtmlFrame(token: number, text: string): Promise<void> {
+    setBody(`<iframe class="fs-html-frame" sandbox="allow-scripts" title="Rendered page"></iframe>`);
+    const frame = el.body.querySelector<HTMLIFrameElement>(".fs-html-frame")!;
+    try {
+      const src = await invoke<string>("render_preview_doc", { html: buildPreviewDocumentHtml(text, { zoom: true }) });
+      if (token === state.token) frame.src = src;
+    } catch (err) {
+      if (token === state.token) setBody(`<div class="fs-error">Page failed to render: ${escapeHtml(String(err))}</div>`);
+    }
   }
 
   // A relative link in rendered markdown would navigate the app's own window;
@@ -727,7 +756,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     // the caret from someone typing in it, so the same file keeps its editor.
     const diskPath = diskPathOf(file);
     const keepEditor = !!state.editor && diskPath !== null && state.editor.diskPath === diskPath
-      && state.view === "file" && !(isMarkdown(file.path) && state.rendered);
+      && state.view === "file" && !(hasRenderedView(file.path) && state.rendered);
     state.diffMode = preferredDiffMode;
     state.full = preferredFull;
     if (!sameFile) {

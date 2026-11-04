@@ -112,7 +112,7 @@
 .pd-act:hover { color: var(--color-text); }
 
 /* The Past results modal is wider than the settings-style modals. */
-#modal-host .modal-card.pd-modal.wide { width: min(900px, 94vw); }
+#modal-host .modal-card.pd-modal.wide { width: min(720px, 94vw); }
 
 /* Project config popups (project-config.ts): the project name trails the title. */
 .pd-modal-sub { margin-left: 8px; font-weight: 400; color: var(--sb-muted, var(--color-text-muted)); }

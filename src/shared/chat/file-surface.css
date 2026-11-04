@@ -262,6 +262,21 @@
   max-width: 880px;
 }
 
+/* A rendered HTML file: the frame fills the body and the page scrolls itself. */
+.fs-body:has(> .fs-html-frame) {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.fs-html-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #15151e;
+}
+
 .fs-loading,
 .fs-error {
   color: var(--color-text-muted);
