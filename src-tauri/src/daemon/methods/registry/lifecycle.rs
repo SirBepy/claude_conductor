@@ -185,12 +185,13 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 if inst.frozen {
                     return Ok(json!({"ok": true}));
                 }
-                // Same busy/asked signal `set_session_model` uses to decide the
+                // Same busy/asked signal `restart_live_session` uses to decide the
                 // kill cancelled real work, not just an already-idle process -
-                // remembered so unfreeze knows to auto-continue.
+                // remembered so unfreeze knows to auto-continue. A card counts
+                // here (unlike a model pick) because freezing drops the parked
+                // question with the process.
                 let was_busy = inst.busy;
-                let was_asked = state.list_prompts().await.iter()
-                    .any(|v| v["payload"]["session_id"].as_str() == Some(p.session_id.as_str()));
+                let was_asked = crate::daemon::lifecycle::has_open_prompt(&state, &p.session_id).await;
                 crate::daemon::lifecycle::kill_and_wait_for_teardown(&state, &p.session_id).await;
                 state.registry.set_frozen(&p.session_id, true);
                 state.registry.set_frozen_needs_continue(&p.session_id, was_busy || was_asked);

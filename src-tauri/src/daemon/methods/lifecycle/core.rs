@@ -223,23 +223,25 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 if live.is_none() && !respawn_for_peer {
                     return Err(err_to_rpc(LifecycleError::NotFound(p.session_id.clone())));
                 }
-                // Refusing beats writing into a live child (todo 873): the bump
-                // below would strand the running turn's own result line on the
-                // old gen, latching `busy` until the 20-minute watchdog. After
-                // the map lookup, so a dead child still gets its -32004 respawn.
-                if live.is_some() {
-                    lifecycle::refuse_if_busy(&state, &p.session_id).map_err(err_to_rpc)?;
-                }
                 // A paired machine sending into a chat hosted here has no
                 // desktop pipe to call `refresh_stale_launch` first, so the host
                 // applies a pending model/effort pick itself. A local caller did
-                // it already (and must re-attach to the new child).
+                // it already (and must re-attach to the new child). Ahead of the
+                // busy refusal below so a parked-question chat takes the same
+                // path as it does from the desktop.
                 let live = if live.is_some() && matches!(ctx.transport, Transport::PeerMachine(_)) {
                     lifecycle::refresh_stale_launch(&state, &p.session_id).await;
                     map.get(&p.session_id).map(|s| s.clone())
                 } else {
                     live
                 };
+                // Refusing beats writing into a live child: the bump
+                // below would strand the running turn's own result line on the
+                // old gen, latching `busy` until the 20-minute watchdog. After
+                // the map lookup, so a dead child still gets its -32004 respawn.
+                if live.is_some() {
+                    lifecycle::refuse_if_busy(&state, &p.session_id).map_err(err_to_rpc)?;
+                }
                 // Bump turn_gen (set_busy) BEFORE the write - a warm child can
                 // emit its first stream_event before this fn resumes past the
                 // write's own .await (todo 525 root cause 1).

@@ -202,7 +202,9 @@ async fn send_message_daemon(
             None => false,
         };
         if refreshed {
-            super::daemon_bridge::reattach(app, session_id).await?;
+            if let Err(e) = super::daemon_bridge::reattach(app, session_id).await {
+                log::warn!("send_message: re-attach after a model/effort respawn failed for {session_id}: {e}");
+            }
         }
     }
 
