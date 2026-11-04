@@ -51,11 +51,10 @@ pub(crate) fn resolve_machine(
 /// `spawn_chat` forwarded FROM a paired peer machine: the caller's own
 /// session lives on the OTHER daemon, so there is no local registry entry to
 /// validate a same-cwd guard against, and no per-session `chat_config` to
-/// inherit from - the peer already resolved model/effort against ITS OWN
-/// caller before forwarding (see `spawn_chat_or_forward`), so `model`/
-/// `effort` arrive pre-resolved, never blank. `cwd` existing on THIS machine
-/// is `spawn_session`'s own `LifecycleError::CwdMissing` check - no separate
-/// validation needed here.
+/// inherit from. `model`/`effort` arrive already resolved by the RPC handler
+/// (`peer_model_effort`): the caller's explicit values, else THIS machine's
+/// project default. `cwd` existing on THIS machine is `spawn_session`'s own
+/// `LifecycleError::CwdMissing` check - no separate validation needed here.
 pub(crate) async fn spawn_chat_for_peer(
     state: &Arc<DaemonState>,
     cwd: &str,
@@ -96,12 +95,14 @@ pub(crate) async fn spawn_chat_for_peer(
 
 /// `spawn_chat`/`respawn` MCP tools' full body, local or cross-machine:
 /// resolves `machine` and either spawns here (today's `spawn_chat`, untouched)
-/// or forwards to the peer's own `spawn_chat` RPC method. Model/effort
-/// inheritance from the caller's `chat_config` is resolved HERE in both
-/// branches (never on the peer), since only this daemon knows the calling
-/// session. Returns a full hooks-server body (`{"ok": ...}`) rather than
-/// `Result`, so a peer-communication failure's numeric code (reused from
-/// `machines::forward`'s consts) can ride alongside the message.
+/// or forwards to the peer's own `spawn_chat` RPC method. A local spawn
+/// resolves model/effort here; a forwarded one sends only what the caller
+/// named and lets the peer apply its own project default (a plain spawn never
+/// inherits the caller's `chat_config`, and `respawn` is refused across
+/// machines, so there is nothing else to carry). Returns a full hooks-server
+/// body (`{"ok": ...}`) rather than `Result`, so a peer-communication
+/// failure's numeric code (reused from `machines::forward`'s consts) can ride
+/// alongside the message.
 pub(crate) async fn spawn_chat_or_forward(
     state: &Arc<DaemonState>,
     caller_session_id: &str,
@@ -134,16 +135,14 @@ pub(crate) async fn spawn_chat_or_forward(
         // LOCAL registry snapshot) - only a same-machine spawn can respawn.
         return json!({"ok": false, "error": "respawn cannot target another machine - use spawn_chat instead"});
     }
-    let inherited = crate::sessions::chat_config::get(caller_session_id).unwrap_or_default();
-    // The target path lives on the peer, so the caller's own project supplies
-    // the default (falling back to the requested path if the caller is gone).
-    let project_cwd = state
-        .registry
-        .get(caller_session_id)
-        .map(|c| c.cwd)
-        .unwrap_or_else(|| std::path::PathBuf::from(cwd));
-    let (model, effort) = super::resolve_model_effort(state, &project_cwd, model, effort, &inherited, false);
-    let peer_params = json!({"cwd": cwd, "prompt": prompt, "model": model, "effort": effort, "name": name});
+    // The target path lives on the peer, so the peer's own project default is
+    // the right one: model/effort ride along only when the caller named them.
+    let mut peer_params = json!({"cwd": cwd, "prompt": prompt, "name": name});
+    for (key, value) in [("model", model), ("effort", effort)] {
+        if let Some(v) = value.filter(|v| !v.is_empty()) {
+            peer_params[key] = json!(v);
+        }
+    }
 
     let client = match crate::daemon::machines::client_for(state, &peer).await {
         Ok(c) => c,
@@ -332,5 +331,78 @@ mod tests {
             assert_eq!(result["ok"], false);
             assert_eq!(result["code"], json!(crate::daemon::machines::forward::ERR_MACHINE_OFFLINE), "{result:?}");
         }
+    }
+
+    /// Paired peer whose `direct_url` is a local mock server, with a caller
+    /// session registered and a Settings-wide default model that the CALLER's
+    /// project would resolve to. Returns the state and the mock server.
+    async fn forwarding_fixture() -> (Arc<DaemonState>, mockito::ServerGuard) {
+        let server = mockito::Server::new_async().await;
+        let mut settings = Settings::default();
+        settings.extra.insert("defaultModel".into(), json!("haiku"));
+        settings.extra.insert("defaultEffort".into(), json!("low"));
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(settings));
+        state.init_machines(tempfile::tempdir().unwrap().path().to_path_buf());
+        state.machines.get().unwrap().ensure_self();
+        state.machines.get().unwrap().upsert_peer(PeerMachine {
+            machine_id: "peer-id".into(),
+            label: "Mac Mini".into(),
+            os: "macos".into(),
+            iroh_id: None,
+            direct_url: Some(server.url()),
+            token: "tok".into(),
+            reverse_device_id: None,
+            added_at: 0,
+            icon: None,
+        });
+        state.registry.upsert_interactive("sess-fwd", std::path::Path::new("."), "proj-x", "2026-11-04T00:00:00Z");
+        (state, server)
+    }
+
+    /// The target machine owns the default for a spawn it receives, so a call
+    /// that names no model/effort must reach it without either key. Sending the
+    /// caller's resolved default instead pinned the peer to a model chosen by
+    /// the wrong machine's project settings.
+    #[tokio::test]
+    async fn a_forwarded_spawn_without_model_or_effort_sends_neither() {
+        let (state, mut server) = forwarding_fixture().await;
+        let rpc = server
+            .mock("POST", "/api/rpc")
+            .match_body(mockito::Matcher::Json(json!({
+                "method": "spawn_chat",
+                "params": {"cwd": ".", "prompt": "carry on", "name": null}
+            })))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(json!({"ok": true, "session_id": "peer-sess"}).to_string())
+            .create_async()
+            .await;
+        let result =
+            spawn_chat_or_forward(&state, "sess-fwd", ".", "carry on", None, None, None, false, Some("Mac Mini")).await;
+        assert_eq!(result["ok"], true, "{result:?}");
+        assert_eq!(result["machine"], "Mac Mini");
+        rpc.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn a_forwarded_spawn_with_explicit_model_and_effort_sends_exactly_those() {
+        let (state, mut server) = forwarding_fixture().await;
+        let rpc = server
+            .mock("POST", "/api/rpc")
+            .match_body(mockito::Matcher::Json(json!({
+                "method": "spawn_chat",
+                "params": {"cwd": ".", "prompt": "carry on", "name": null, "model": "opus", "effort": "high"}
+            })))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(json!({"ok": true, "session_id": "peer-sess"}).to_string())
+            .create_async()
+            .await;
+        let result = spawn_chat_or_forward(
+            &state, "sess-fwd", ".", "carry on", Some("opus"), Some("high"), None, false, Some("Mac Mini"),
+        )
+        .await;
+        assert_eq!(result["ok"], true, "{result:?}");
+        rpc.assert_async().await;
     }
 }
