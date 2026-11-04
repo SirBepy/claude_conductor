@@ -308,7 +308,7 @@ export function wirePendingComposer(
   // still starts the session normally.
   if (!state.heldMessages) state.heldMessages = new HeldMessages();
   const thinkingBar = pane.querySelector<HTMLElement>(".session-thinking");
-  const chipSlot = pane.querySelector<HTMLElement>(".held-chip-slot");
+  const chipSlot = pane.querySelector<HTMLElement>(".composer-send-wrap .held-chip-slot");
   if (thinkingBar && chipSlot) {
     state.heldMessages.attach({
       sessionId: placeholderId,

@@ -211,7 +211,7 @@ describe("the opened block", () => {
     expect(pane.querySelector(".thinking-stop-turn")).not.toBeNull();
   });
 
-  it("shows no Stop anywhere while messages are held, since Send now is the interrupt", () => {
+  it("shows no Stop anywhere while messages are held, since Interrupt & send is the interrupt", () => {
     state.heldMessages = { hasItemsForActive: () => true, renderChip: () => {}, attach: () => {} };
     syncThinkingBar(source());
     pane.querySelector(".thinking-main").click();

@@ -106,7 +106,7 @@ describe("Held messages while busy (ai_todo 90, client-side only, no billed send
     const countEl = await $(".held-chip-slot .held-chip .held-count");
     await countEl.waitForExist({ timeout: 5000 });
     expect(await countEl.getText()).toBe("1");
-    expect(await (await $(".held-chip-slot .held-chip")).getText()).toContain("message waiting");
+    expect(await (await $(".held-chip-slot .held-chip")).getAttribute("aria-label")).toContain("message waiting");
   });
 
   it("dropdown shows the staged row; a second stage bumps the count; clearing a row drops it", async () => {
@@ -141,7 +141,7 @@ describe("Held messages while busy (ai_todo 90, client-side only, no billed send
 
   it("Send now assembles the remaining held item into ONE payload without sending it", async () => {
     const before = await msgCounts();
-    await (await $(".held-chip-slot .held-send-now")).click();
+    await (await $(".held-dropdown .held-send-now")).click();
 
     await browser.waitUntil(async () => (await drainCallsPeek()) > 0,
       { timeout: 5000, timeoutMsg: "Send now never reached the intercepted invoke" });

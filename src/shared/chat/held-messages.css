@@ -1,8 +1,8 @@
-/* Held-messages chip (inline on the working bar) + floating dropdown.
+/* Held-messages count badge (on the Send button) + floating dropdown.
    Uses the app's existing surface/border/primary tokens. */
 
-/* The working bar anchors the dropdown below (its position: relative lives in
-   sessions.css) and hosts the chip slot. */
+/* The working bar anchors the dropdown (its position: relative lives in
+   sessions.css). */
 
 /* When the bar is shown only to host held messages (Claude not actually
    working), drop the pulsing dot + italic so it doesn't read as "thinking". */
@@ -21,12 +21,15 @@
   padding-right: 3px;
 }
 
+/* The count badge rides the top-right corner of Send (the slot lives inside
+   .composer-send-wrap, which is position: relative). The ring around the badge
+   uses the page background so it reads as cut out of the button beneath. */
 .held-chip-slot {
-  margin-left: auto;
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 1;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
 }
 .held-chip-slot:empty {
   display: none;
@@ -35,31 +38,31 @@
 .held-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  background: var(--color-primary);
+  border: 2px solid var(--color-background);
   border-radius: 999px;
-  padding: 3px 10px;
-  font-size: 0.74rem;
+  color: var(--color-background);
+  font-size: 0.66rem;
+  font-weight: 700;
   font-style: normal;
-  color: var(--color-text);
+  line-height: 1;
   cursor: pointer;
 }
-.held-chip:hover {
-  border-color: var(--color-primary);
+.held-chip:hover,
+.held-chip[aria-expanded="true"] {
+  filter: brightness(1.12);
 }
-.held-chip .held-count {
-  background: var(--color-primary);
-  color: #fff;
-  font-weight: 700;
-  border-radius: 999px;
-  padding: 0 6px;
-  font-size: 0.7rem;
-  line-height: 1.5;
-}
-.held-chip .ph {
-  font-size: 0.7rem;
-  color: var(--color-text-muted);
+
+.held-dropdown-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .held-send-now {

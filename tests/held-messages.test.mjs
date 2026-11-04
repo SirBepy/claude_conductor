@@ -77,12 +77,23 @@ describe("HeldMessages — staging + chip", () => {
     expect(held.hasItemsForActive()).toBe(true);
     held.renderChip();
     expect(chipSlot.querySelector(".held-count").textContent).toBe("1");
-    expect(chipSlot.textContent).toContain("message waiting");
+    expect(chipSlot.querySelector(".held-chip").getAttribute("aria-label")).toContain("1 message waiting");
 
     held.stage(textBlocks("two"));
     held.renderChip();
     expect(chipSlot.querySelector(".held-count").textContent).toBe("2");
-    expect(chipSlot.textContent).toContain("messages waiting");
+    expect(chipSlot.querySelector(".held-chip").getAttribute("aria-label")).toContain("2 messages waiting");
+  });
+
+  it("keeps Interrupt & send out of the badge and inside the opened list", () => {
+    const { held, chipSlot, anchor } = makeHarness();
+    held.stage(textBlocks("one"));
+    held.renderChip();
+    expect(chipSlot.querySelector(".held-send-now")).toBeNull();
+    expect(anchor.querySelector(".held-send-now")).toBeNull();
+
+    chipSlot.querySelector(".held-chip").dispatchEvent(new window.Event("click"));
+    expect(anchor.querySelector(".held-dropdown .held-send-now").textContent).toBe("Interrupt & send");
   });
 
   it("keeps held sets separate per session", () => {

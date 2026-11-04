@@ -1,5 +1,5 @@
 /* Per-chat scheduled-message chip + dropdown. Sibling slot to
-   .session-thinking (not inside it — held-messages owns that bar's chipSlot
+   .session-thinking (not inside it - held-messages owns that bar's dropdown anchor
    and this must never fight it for the same DOM). */
 
 .scheduled-chip-slot {
