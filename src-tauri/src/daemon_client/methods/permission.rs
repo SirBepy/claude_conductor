@@ -103,6 +103,12 @@ impl PersistentClient {
         Ok(result.as_array().map(|a| a.iter().filter_map(|v| v.as_i64()).collect()).unwrap_or_default())
     }
 
+    /// A main chat's stored sub cards, oldest first, as the JSON the daemon
+    /// stores them in.
+    pub async fn list_subchat_cards(&self, session_id: &str) -> Result<Value, ClientError> {
+        self.call("list_subchat_cards", json!({ "session_id": session_id })).await
+    }
+
     /// Resolves a pending `request_secret` prompt. Unlike
     /// `respond_permission`/`respond_question`, the daemon's `respond_secret`
     /// RPC takes no `session_id` param: the prompt's owning session already

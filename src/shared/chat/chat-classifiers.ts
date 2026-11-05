@@ -6,6 +6,7 @@ import type { ContentBlock } from "../../types/ipc.generated";
 import { blocksToText } from "./content-blocks";
 import type { ChatDetail } from "./chat-details";
 import type { MessageCard } from "./chat-message-kinds";
+import type { SubCardEntry } from "./subchat-cards";
 
 // Turn-status marker injected via `--append-system-prompt` (see
 // daemon/lifecycle.rs). Claude ends each reply with `<cc-status:done>`,
@@ -181,6 +182,11 @@ export interface RenderedMessage {
   nextActions?: string[];
   /** The kind fields of a `kind:"message"` (chat-message-kinds.ts); absent = a plain bubble. */
   card?: MessageCard;
+  /** Set on a `kind:"message"` row that is a sub's card in its main chat
+   *  (subchat-cards.ts). It is not the main agent speaking, so the main chat's
+   *  own bookkeeping (quick replies, `update_message` ordinals, "this turn
+   *  spoke") skips it. */
+  subCard?: SubCardEntry;
   /** Retracted via `update_message`; `text` keeps the original for the tooltip. */
   retracted?: boolean;
   /** Set when a failed send_message's tool_result was is_error:true - stays

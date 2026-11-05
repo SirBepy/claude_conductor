@@ -360,6 +360,7 @@ pub fn run() {
             ipc::respond_secret,
             ipc::confirm_question_rendered,
             ipc::get_skipped_question_marks,
+            ipc::list_subchat_cards,
             ipc::list_pending_prompts,
             ipc::list_slash_commands,
             ipc::enable_skill_here,

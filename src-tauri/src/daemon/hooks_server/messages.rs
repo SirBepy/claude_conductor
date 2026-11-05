@@ -280,6 +280,25 @@ fn details_rejection(err: String) -> (StatusCode, Json<serde_json::Value>) {
     (StatusCode::OK, Json(json!({"ok": false, "error": err})))
 }
 
+/// A sub's `blocker` also shows in its main chat's window; every other kind
+/// stays in the sub, which nobody reads. Nothing here wakes the main agent or
+/// enters its transcript: it is a card-log append the chat renders itself.
+fn draw_sub_blocker(ctx: &HookCtx, body: &SendMessageBody) {
+    if body.kind.as_deref().map(str::trim) != Some("blocker") {
+        return;
+    }
+    crate::daemon::subchats::card_log::on_blocker(
+        &ctx.state,
+        &body.session_id,
+        crate::daemon::subchats::card_log::BlockerCard {
+            text: body.text.trim().to_string(),
+            verdict: body.verdict.as_deref().unwrap_or("").trim().to_string(),
+            tone: body.tone.clone(),
+            points: body.points.clone().unwrap_or_default(),
+        },
+    );
+}
+
 pub(super) async fn on_send_message(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<SendMessageBody>,
@@ -295,6 +314,7 @@ pub(super) async fn on_send_message(
     }
     let gen = ctx.state.registry.current_turn_gen(&body.session_id);
     ctx.state.registry.mark_message_sent(&body.session_id, gen);
+    draw_sub_blocker(&ctx, &body);
     log::debug!("session {} sent a message", body.session_id);
     (StatusCode::OK, Json(json!({"ok": true, "message": 1})))
 }
@@ -409,6 +429,34 @@ mod tests {
             verdict: verdict.map(Into::into),
             ..Default::default()
         }
+    }
+
+    /// A sub's blocker reaches its main chat's card log through the real route,
+    /// and a progress message from the same sub does not.
+    #[tokio::test]
+    async fn a_sub_blocker_is_drawn_in_the_main_chat_and_another_kind_is_not() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let c = ctx();
+        for id in ["blk-main", "blk-sub"] {
+            c.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        }
+        c.state.registry.set_subchat_of("blk-sub", Some("blk-main".into()));
+        let send = |v: serde_json::Value| {
+            let c = c.clone();
+            async move { body_json(on_send_message(AxState(c), ValidatedJson(body_of(v))).await.into_response()).await }
+        };
+        let ok = send(json!({"session_id": "blk-sub", "kind": "blocker", "verdict": "Blocked", "text": "No design file"})).await;
+        assert_eq!(ok["ok"], json!(true), "{ok}");
+        let ok = send(json!({"session_id": "blk-sub", "kind": "answer", "verdict": "Yes", "text": "progress"})).await;
+        assert_eq!(ok["ok"], json!(true), "{ok}");
+        let cards = crate::daemon::subchats::card_log::read("blk-main");
+        assert_eq!(cards.len(), 1, "only the blocker is drawn: {cards:?}");
+        assert_eq!((cards[0].kind.as_str(), cards[0].text.as_str()), ("blocker", "No design file"));
+        // A chat that is not a sub draws nothing anywhere.
+        let ok = send(json!({"session_id": "blk-main", "kind": "blocker", "verdict": "Blocked", "text": "mine"})).await;
+        assert_eq!(ok["ok"], json!(true));
+        assert_eq!(crate::daemon::subchats::card_log::read("blk-main").len(), 1);
+        assert!(crate::daemon::subchats::card_log::read("blk-sub").is_empty());
     }
 
     #[tokio::test]

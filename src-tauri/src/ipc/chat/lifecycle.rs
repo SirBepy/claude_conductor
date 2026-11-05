@@ -356,6 +356,14 @@ pub async fn get_skipped_question_marks(
         .map_err(|e| e.to_string())
 }
 
+/// A main chat's sub cards (`daemon::subchats::card_log`), fetched once per
+/// session attach and merged into the transcript client-side by timestamp.
+#[tauri::command]
+pub async fn list_subchat_cards(session_id: String, state: State<'_, AppState>) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.list_subchat_cards(&session_id).await.map_err(|e| e.to_string())
+}
+
 /// Every prompt the daemon still has open (`{ id, event, payload }` records).
 /// `spawn_pending_prompt_poll` pushes each id once, so a webview that lost its
 /// in-memory park needs this pull side to rebuild the card.

@@ -22,6 +22,7 @@ const SEE_ONLY: &[&str] = &[
     "list_auto_accept",
     "list_wrap_up_on_done",
     "list_subchats_on",
+    "list_subchat_cards",
     "load_history_page",
     "load_event_detail",
     "load_history",

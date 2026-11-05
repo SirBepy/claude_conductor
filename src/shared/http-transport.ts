@@ -512,6 +512,8 @@ export class HttpTransport implements Transport {
         const delivered = typeof res === "object" && res !== null ? res.delivered === true : res === true;
         return delivered as T;
       }
+      case "list_subchat_cards":
+        return this.rpc<T>("list_subchat_cards", { session_id: args.sessionId ?? args.session_id });
       case "get_skipped_question_marks":
         return this.rpc<T>("get_skipped_question_marks", {
           session_id: args.sessionId ?? args.session_id,

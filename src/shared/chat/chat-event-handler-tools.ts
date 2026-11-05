@@ -7,6 +7,7 @@ import type { ChatEvent } from "../../types/ipc.generated";
 import { parseDetails } from "./chat-details";
 import { parseNextActions } from "./chat-next-actions";
 import { parseMessageCard } from "./chat-message-kinds";
+import { SUBCARD_TOOL, subCardRow } from "./subchat-cards";
 import { eventToRenderedMessage } from "./chat-event-to-message";
 import { parseFileEdit } from "./file-edits";
 import {
@@ -63,6 +64,12 @@ export function handleToolUseEvent(
   ts: number,
 ): EventOutcome {
   if (tryHandleQuestionToolUse(r, ev, ts)) return { touched: true, coalesce: false };
+  // A sub's card in this main chat (subchat-cards.ts), merged in as an event.
+  if (ev.tool_name === SUBCARD_TOOL) {
+    const row = subCardRow(ev);
+    if (row) r.messages.push(row);
+    return { touched: row !== null, coalesce: false };
+  }
   // Explicit inbox message: the AI's opt-in way to surface a chat bubble
   // (vs. narration tool calls, hidden by default - see message-filter-pref.ts).
   if (ev.tool_name === "mcp__cc_conductor__send_message" && !ev.parent_tool_use_id) {

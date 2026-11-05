@@ -59,9 +59,10 @@ export function createAnswerBarSync(deps: AnswerBarDeps): () => void {
       ? host.querySelector<HTMLElement>(`.prompt-panel[data-panel="${questions.length}"] .prompt-summary__note`)
       : null;
     // Each step's staged images ride directly above its own box.
+    // A daemon card has no model to read a typed answer: its options are the answer.
     bar.innerHTML = isSummary
       ? ""
-      : attachmentsStripHtml(state.activeTab, deps.opts.supportsExtras) + ownZoneHtml(state.activeTab, freeText, page);
+      : attachmentsStripHtml(state.activeTab, deps.opts.supportsExtras) + (deps.opts.daemonCard ? "" : ownZoneHtml(state.activeTab, freeText, page));
     if (noteSlot) {
       const open = state.reviewNoteOpen || state.additionalMessage.trim() !== "";
       noteSlot.innerHTML = attachmentsStripHtml(state.activeTab, deps.opts.supportsExtras) + (open

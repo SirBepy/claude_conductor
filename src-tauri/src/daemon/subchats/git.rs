@@ -9,11 +9,11 @@ use std::path::Path;
 /// Tools whose `input` names a file the sub wrote. `Bash` writes (`sed -i`,
 /// redirects) are invisible here on purpose: parsing shell for writes would be a
 /// guess, and the spec scopes "itself" to these inputs.
-const EDIT_TOOLS: [&str; 4] = ["Edit", "Write", "NotebookEdit", "MultiEdit"];
+pub(super) const EDIT_TOOLS: [&str; 4] = ["Edit", "Write", "NotebookEdit", "MultiEdit"];
 
 /// Blocking git run with the console hidden on Windows. `None` when git could
 /// not be started at all; `(success, raw stdout)` otherwise.
-fn run_git(cwd: &Path, args: &[&str]) -> Option<(bool, Vec<u8>)> {
+pub(super) fn run_git(cwd: &Path, args: &[&str]) -> Option<(bool, Vec<u8>)> {
     let mut cmd = std::process::Command::new("git");
     cmd.arg("-C").arg(cwd).args(args);
     crate::util::process::hide_console(&mut cmd);

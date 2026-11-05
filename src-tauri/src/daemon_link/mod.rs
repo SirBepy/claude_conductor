@@ -334,6 +334,12 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "api_credit_status_changed" => {
             let _ = app.emit("api-credit-status-changed", params);
         }
+        // A sub drew a card in its main chat (`daemon::subchats::card_log`).
+        // Pure forward; payload is `{ session_id, card }`. The open chat places the
+        // card itself, and a chat opened later reads the stored log.
+        "subchat_card" => {
+            let _ = app.emit("subchat-card", params);
+        }
         // Character turn sound: the daemon fires this when an in-app chat finishes
         // a turn (done / plain-text question) or surfaces an AskUserQuestion. We
         // map it to the existing notification path so it resolves the session

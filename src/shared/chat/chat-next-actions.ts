@@ -41,7 +41,7 @@ export function startsTurn(m: RenderedMessage): boolean {
 export function currentTurnNextActions(messages: readonly RenderedMessage[]): string[] {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]!;
-    if (m.kind === "message") {
+    if (m.kind === "message" && !m.subCard) {
       return m.retracted || m.dimmed || m.failed ? [] : (m.nextActions ?? []);
     }
     if (startsTurn(m)) return [];
