@@ -1105,11 +1105,13 @@ pub async fn on_moved(state: &Arc<DaemonState>, sub_id: &str, info: WorktreeInfo
                 info.target
             ),
             points: Vec::new(),
+            cause: Cause::Other,
         },
         Landing::Nothing => Blocked {
             verdict: "Moved with its worktree",
             text: format!("It is a normal chat now. Its branch has nothing {} lacks. {where_it_is}", info.target),
             points: Vec::new(),
+            cause: Cause::Other,
         },
     };
     let tone = if blocker.verdict == "Moved with its worktree" { "neutral" } else { "bad" };
