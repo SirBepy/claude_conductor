@@ -100,7 +100,12 @@ Omit that line entirely when the question was purely informational. Never write 
 /// that nothing here sets `--permission-prompt-tool`/`--permission-mode`/
 /// `--dangerously-skip-permissions`, which would let a tool absent from
 /// `ALLOWED_TOOLS` run anyway instead of needing `DENIED_TOOLS`.
-fn cli_args(prompt: &str, resume: Option<&str>, new_session_id: &str) -> Vec<String> {
+///
+/// `persist` false adds `--no-session-persistence`: the run leaves no session
+/// file, so it never shows in a history list and cannot be resumed. Ask keeps its
+/// sessions (a follow-up resumes them); a one-shot job that only returns text,
+/// like the decisions checkup, does not.
+fn cli_args(prompt: &str, resume: Option<&str>, new_session_id: &str, persist: bool) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         prompt.to_string(),
@@ -126,6 +131,9 @@ fn cli_args(prompt: &str, resume: Option<&str>, new_session_id: &str) -> Vec<Str
             args.push(new_session_id.to_string());
         }
     }
+    if !persist {
+        args.push("--no-session-persistence".to_string());
+    }
     args
 }
 
@@ -139,7 +147,7 @@ pub async fn ask(
     new_session_id: &str,
 ) -> Result<AskAnswer> {
     let prompt = build_prompt(question, transcript, cwd);
-    run_readonly("Ask", &prompt, resume, new_session_id, None).await
+    run_readonly("Ask", &prompt, resume, new_session_id, None, true).await
 }
 
 /// Runs one read-only sonnet `claude -p` job with a caller-built `prompt` and
@@ -147,12 +155,15 @@ pub async fn ask(
 /// (subscription accounts only, the billing gate, Read/Grep/Glob and nothing
 /// that writes or reaches the network). `account_id` pins the account the job
 /// bills, else the default one is used; `what` names the caller in errors.
+/// `persist` false leaves no session behind (see `cli_args`), which is only
+/// right for a caller that never resumes.
 pub async fn run_readonly(
     what: &str,
     prompt: &str,
     resume: Option<&str>,
     new_session_id: &str,
     account_id: Option<&str>,
+    persist: bool,
 ) -> Result<AskAnswer> {
     let account = match account_id {
         Some(id) => {
@@ -177,7 +188,7 @@ pub async fn run_readonly(
     let run_dir = crate::settings::paths::ensure_data_dir().context("resolve app-data dir")?;
 
     let mut cmd = tokio::process::Command::new(crate::util::claude_bin::program());
-    cmd.args(cli_args(prompt, resume, new_session_id));
+    cmd.args(cli_args(prompt, resume, new_session_id, persist));
     cmd.current_dir(&run_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -313,7 +324,7 @@ mod tests {
 
     #[test]
     fn built_args_deny_web_tools_and_carry_no_permission_bypass() {
-        let args = cli_args("q", None, "sid");
+        let args = cli_args("q", None, "sid", true);
 
         let disallowed_idx = args.iter().position(|a| a == "--disallowedTools").unwrap();
         let disallowed = &args[disallowed_idx + 1];
@@ -334,11 +345,21 @@ mod tests {
 
     #[test]
     fn built_args_resume_vs_fresh_session() {
-        let fresh = cli_args("q", None, "new-sid");
+        let fresh = cli_args("q", None, "new-sid", true);
         assert!(fresh.windows(2).any(|w| w == ["--session-id".to_string(), "new-sid".to_string()]));
 
-        let resumed = cli_args("q", Some("old-sid"), "new-sid");
+        let resumed = cli_args("q", Some("old-sid"), "new-sid", true);
         assert!(resumed.windows(2).any(|w| w == ["--resume".to_string(), "old-sid".to_string()]));
+    }
+
+    /// Ask resumes its sessions, so they are kept. A checkup never resumes, and
+    /// its sessions showed up in the global History as "You are a checkup reader".
+    #[test]
+    fn only_a_job_that_never_resumes_asks_the_cli_to_keep_no_session() {
+        let flag = "--no-session-persistence".to_string();
+        assert!(!cli_args("q", None, "sid", true).contains(&flag));
+        assert!(!cli_args("q", Some("old"), "sid", true).contains(&flag));
+        assert!(cli_args("q", None, "sid", false).contains(&flag));
     }
 
     #[test]

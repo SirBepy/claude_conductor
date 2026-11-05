@@ -163,7 +163,7 @@ pub(crate) async fn raise(state: &Arc<DaemonState>, parent: &str) {
             "Close with subs running".to_string(),
             question,
             vec![
-                CardOption::new(WAIT_FOR_THEM, "Close this chat when the last one finishes"),
+                CardOption::new(WAIT_FOR_THEM, "Close this chat when the last one finishes. Closing it again asks again, so you can change your mind"),
                 CardOption::new(CLOSE_THEM_TOO, "End them now, then close"),
                 CardOption::new(KEEP_IT_OPEN, "Do not close"),
             ],
@@ -550,6 +550,46 @@ mod tests {
         assert!(!st.registry.get(&main).unwrap().closing);
         // Closing the parent closed the finished subs with it.
         assert!(until(|| subs.iter().all(|s| st.registry.get(s).unwrap().ended_at.is_some())).await);
+    }
+
+    /// The `/close` turn that raised the card is still running when Joe picks, and its
+    /// own turn end used to stand the Closing row down, so the wait vanished from the
+    /// row the moment it began. A waiting chat keeps its flag through that turn end.
+    #[tokio::test]
+    async fn the_turn_that_raised_the_card_does_not_clear_a_wait_picked_before_it_ended() {
+        let _data = TempDataDir::new();
+        let st = state();
+        let (main, _subs) = family(&st, "cl-turn", &[("a", false)]);
+        assert!(request_close(&st, &main));
+        let id = card_id(&st, KIND).await.unwrap();
+        answer(&st, &id, WAIT_FOR_THEM).await;
+        assert!(until(|| is_waiting(&main)).await);
+        // The pump asks this at the turn's end, with the prompt-armed flag set for a /close turn.
+        assert!(!crate::daemon::pump::close::close_in_flight(&st.registry, &main, true), "a wait is not a stalled /close");
+        assert!(st.registry.get(&main).unwrap().closing, "the row still reads Closing");
+        // Without a wait the same turn end still stands a stalled /close down.
+        let (other, _) = family(&st, "cl-turn-other", &[]);
+        assert!(crate::daemon::pump::close::close_in_flight(&st.registry, &other, true));
+    }
+
+    /// Joe can close again to change his mind: the card asks again, and the card
+    /// says so.
+    #[tokio::test]
+    async fn the_card_says_how_to_cancel_a_wait_and_closing_again_asks_again() {
+        let _data = TempDataDir::new();
+        let st = state();
+        let (main, _) = family(&st, "cl-cancel", &[("a", false)]);
+        assert!(request_close(&st, &main));
+        let id = card_id(&st, KIND).await.unwrap();
+        let p = st.list_prompts().await.into_iter().find(|p| p["id"] == id.as_str()).unwrap();
+        let wait = &p["payload"]["questions"][0]["options"][0];
+        assert_eq!(wait["label"], WAIT_FOR_THEM);
+        assert!(wait["description"].as_str().unwrap().contains("Closing it again asks again"), "{wait}");
+        answer(&st, &id, WAIT_FOR_THEM).await;
+        assert!(until(|| is_waiting(&main)).await);
+        assert!(request_close(&st, &main), "held again");
+        assert!(!is_waiting(&main), "the wait is off until Joe picks again");
+        assert!(card_id(&st, KIND).await.is_some(), "and he is asked again");
     }
 
     /// Joe picked "Wait for them", then the last running sub ends by a path that

@@ -542,12 +542,28 @@ fn update_branch(sub_id: &str, info: &WorktreeInfo) -> Update {
 
 // ---- landing ----------------------------------------------------------------------------
 
+/// What stopped a merge, which decides who can do something about it
+/// (`merge_followup`): the sub can resolve a conflict, only Joe can clear the main
+/// checkout.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Cause {
+    /// The sub's commits conflict with the target.
+    Conflict,
+    /// The main checkout has uncommitted changes in files the merge would change.
+    DirtyOverlap,
+    /// The main checkout is on another branch than the sub started from.
+    BranchSwitched,
+    #[default]
+    Other,
+}
+
 /// Why a merge did not happen, in the words of the card.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Blocked {
     pub verdict: &'static str,
     pub text: String,
     pub points: Vec<String>,
+    pub cause: Cause,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -560,11 +576,18 @@ pub enum Landing {
 }
 
 fn blocked(verdict: &'static str, text: String, points: Vec<String>) -> Landing {
-    Landing::Blocked(Blocked { verdict, text, points })
+    Landing::Blocked(Blocked { verdict, text, points, cause: Cause::Other })
+}
+
+fn caused(cause: Cause, landing: Landing) -> Landing {
+    match landing {
+        Landing::Blocked(b) => Landing::Blocked(Blocked { cause, ..b }),
+        other => other,
+    }
 }
 
 fn conflict_landing(info: &WorktreeInfo, files: Vec<String>) -> Landing {
-    blocked(
+    caused(Cause::Conflict, blocked(
         "Merge conflict",
         format!(
             "Its commits conflict with {t}. Nothing was merged, and its worktree keeps every commit. Tell the sub to bring branch {b} up to date with {t} (git rebase {t}), resolve the conflict in these files, commit, and finish again: it merges when it finishes.",
@@ -572,7 +595,7 @@ fn conflict_landing(info: &WorktreeInfo, files: Vec<String>) -> Landing {
             b = info.branch
         ),
         files,
-    )
+    ))
 }
 
 /// Merges the sub's commits into the target branch the main checkout has
@@ -588,7 +611,7 @@ fn land_with(sub_id: &str, info: &WorktreeInfo, between: &mut dyn FnMut(usize)) 
     }
     let now = current_branch(repo);
     if now.as_deref() != Some(info.target.as_str()) {
-        return blocked(
+        return caused(Cause::BranchSwitched, blocked(
             "Not merged",
             format!(
                 "The main checkout is on {} now, but this sub started from {t}. Nothing was merged. Its commits are safe on branch {b} in its worktree: switch the main checkout back to {t}, then tell the sub to finish again.",
@@ -597,7 +620,7 @@ fn land_with(sub_id: &str, info: &WorktreeInfo, between: &mut dyn FnMut(usize)) 
                 b = info.branch
             ),
             Vec::new(),
-        );
+        ));
     }
     if !branch_exists(wt, &info.branch) {
         return blocked("Not merged", format!("Branch {} no longer exists, so there is nothing to merge.", info.branch), Vec::new());
@@ -626,14 +649,14 @@ fn land_with(sub_id: &str, info: &WorktreeInfo, between: &mut dyn FnMut(usize)) 
         let overlap: Vec<String> =
             changed.into_iter().filter(|name| dirty.contains(&path_key(&format!("{top}/{name}")))).collect();
         if !overlap.is_empty() {
-            return blocked(
+            return caused(Cause::DirtyOverlap, blocked(
                 "Not merged",
                 format!(
                     "The main checkout has uncommitted changes in files this sub also changed, so the merge was refused and nothing there was touched. Commit or move those changes, then tell the sub to finish again: it merges when it finishes. Its commits are safe on branch {}.",
                     info.branch
                 ),
                 overlap,
-            );
+            ));
         }
         // `--no-overwrite-ignore`: the dirty check above cannot see a file git ignores
         // (a `.env`), and without the flag a sub that committed one with `add -f`
@@ -702,12 +725,29 @@ fn report(state: &Arc<DaemonState>, sub_id: &str, root: Option<&Path>, b: &Block
     }
 }
 
-/// Lands the sub's commits and draws the `blocker` card when that is refused.
+/// Lands the sub's commits. A refusal is handed to `merge_followup`, which tells
+/// the sub or asks Joe on a card, and returns the `blocker` card to draw (if any).
 pub fn land_and_report(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo) -> Landing {
     let landing = land(sub_id, info);
-    if let Landing::Blocked(b) = &landing {
-        report(state, sub_id, None, b);
+    match &landing {
+        Landing::Blocked(b) => {
+            if let Some(card) = super::merge_followup::on_blocked(state, sub_id, info, b) {
+                report(state, sub_id, None, &card);
+            }
+        }
+        _ => super::merge_followup::on_landed(sub_id),
     }
+    landing
+}
+
+/// [`land_and_report`] as a merge in its own right (a retry Joe asked for): counted
+/// like the one `defer` runs, so a gate that asks meanwhile waits for it.
+pub(super) fn land_counted(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo) -> Landing {
+    let key = project_key(Path::new(&info.repo));
+    begin_merge(&key);
+    let landing = land_and_report(state, sub_id, info);
+    end_merge(&key);
+    super::writers::sweep(state);
     landing
 }
 
@@ -722,14 +762,22 @@ pub(super) fn defer(state: &Arc<DaemonState>, sub_id: &str, rest: fn(&Arc<Daemon
     // Counted before the thread starts, so a gate that asks in between waits.
     begin_merge(&key);
     let (state, id) = (state.clone(), sub_id.to_string());
+    // The thread has no runtime of its own, and what follows a landing (the sub
+    // waiting behind this one, a close waiting on the last sub, the cards) spawns
+    // tasks onto the one that called `on_finished`. Without it entering here those
+    // spawns found no runtime and did nothing until the 60 second tick.
+    let runtime = tokio::runtime::Handle::try_current().ok();
     let work = move || {
+        let _enter = runtime.as_ref().map(|h| h.enter());
         land_and_report(&state, &id, &info);
         end_merge(&key);
         super::writers::sweep(&state);
         rest(&state, &id);
     };
+    // Tests wait for the thread, so what they assert on is settled; the work itself
+    // runs where production runs it.
     #[cfg(test)]
-    work();
+    let _ = std::thread::spawn(work).join();
     #[cfg(not(test))]
     {
         let spawned = std::thread::Builder::new().name("subchat-merge".into()).spawn(work);
@@ -754,6 +802,7 @@ fn update_blocker(info: &WorktreeInfo, update: Update) -> Option<Blocked> {
             verdict: "Not up to date",
             text: format!("Its branch could not be brought up to date with {}: {why}. It carries on from where it was, and its worktree keeps every commit.", info.target),
             points: Vec::new(),
+            cause: Cause::Other,
         }),
     }
 }
@@ -773,6 +822,11 @@ pub async fn before_continue(state: &Arc<DaemonState>, sub_id: &str) {
     .await
     .unwrap_or(None);
     if let Some(b) = blocker {
+        // The sub was just told about this very conflict and is continuing to
+        // resolve it, so a card saying "tell the sub" would only repeat itself.
+        if b.cause == Cause::Conflict && super::merge_followup::unresolved(sub_id) {
+            return;
+        }
         report(state, sub_id, None, &b);
     }
 }
@@ -789,6 +843,7 @@ pub async fn before_launch(state: &Arc<DaemonState>, sub_id: &str) -> Result<(),
             verdict: "Worktree setup failed",
             text: format!("Its worktree at {} could not be set up: {why}. The sub was not started.", info.path),
             points: Vec::new(),
+            cause: Cause::Other,
         };
         report(state, sub_id, None, &b);
         return Err(format!("its worktree could not be set up: {why}"));
@@ -975,6 +1030,7 @@ pub(super) fn on_ended(state: &Arc<DaemonState>, sub_id: &str) {
                 verdict: "Worktree kept",
                 text: format!("Its worktree was kept at {} on branch {}: {why}. Nothing was deleted.", info.path, info.branch),
                 points: Vec::new(),
+                cause: Cause::Other,
             };
             report(&state, &id, None, &b);
             // The card goes to the main chat's window, which is often the thing

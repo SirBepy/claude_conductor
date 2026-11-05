@@ -33,6 +33,7 @@ pub mod held;
 pub(crate) mod jsonfile;
 mod reply;
 pub mod joe_message;
+pub mod merge_followup;
 pub mod pause;
 pub mod project;
 mod resume;

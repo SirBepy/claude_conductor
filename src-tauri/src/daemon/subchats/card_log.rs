@@ -433,6 +433,9 @@ fn sum_text(s: &SumFacts) -> String {
     if s.unpushed > 0 {
         parts.push(format!("{} not pushed", s.unpushed));
     }
+    if s.not_merged > 0 {
+        parts.push(format!("{} not merged", s.not_merged));
+    }
     if s.unknown_subs > 0 {
         parts.push(format!("{} sub{} unknown", s.unknown_subs, plural(s.unknown_subs)));
     }
@@ -443,10 +446,16 @@ fn plural(n: u32) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
-/// The "all finished" card, when every live sub of `parent` is finished and no
-/// card was already drawn for this exact set of reports. A continued sub that
-/// finishes again has a new round, so it makes a new set; a sub still running
-/// blocks the card.
+/// The "all finished" card: drawn once, when the last running sub of `parent`
+/// finishes, for the batch of reports since the previous such card. Only that
+/// batch is summed, so a long-lived main chat does not report its whole history
+/// each time, and a continued sub that finishes again starts a batch of its own.
+///
+/// A report counts once its finish card is in the log, so the card waits for the
+/// sub whose card thread has not landed yet: that thread calls this again right
+/// after storing its card and draws it, which is also why no set is ever drawn
+/// twice. A sub whose merge was refused is named in the totals as not merged and
+/// its commits are left out of them, and the card's tone says so.
 fn all_finished_entry(state: &DaemonState, root: &Path, parent: &str) -> Option<CardEntry> {
     let subs: Vec<Instance> = state
         .registry
@@ -458,33 +467,29 @@ fn all_finished_entry(state: &DaemonState, root: &Path, parent: &str) -> Option<
         return None;
     }
     let log = read_in(root, parent);
-    // A report counts once its card is in the log, so a sub whose card thread has
-    // not landed yet makes this key differ from the one its card will make: the
-    // card drawn without it is followed by a corrected one instead of standing.
-    let mut pairs: Vec<String> = subs
-        .iter()
-        .map(|i| {
-            let round = finish::read_record_in(root, &i.session_id).map_or(0, |r| r.round);
-            let card_id = format!("finish-{}-{round}", i.session_id);
-            let counted = log.iter().any(|e| e.id == card_id);
-            format!("{}:{round}:{}", i.session_id, if counted { "card" } else { "pending" })
-        })
-        .collect();
-    pairs.sort();
-    let key = pairs.join(",");
-    if log.iter().rev().find(|e| e.kind == KIND_ALL_FINISHED).and_then(|e| e.set_key.as_deref()) == Some(key.as_str()) {
+    let waiting_for_a_card = subs.iter().any(|i| {
+        let round = finish::read_record_in(root, &i.session_id).map_or(0, |r| r.round);
+        round > 0 && !log.iter().any(|e| e.id == format!("finish-{}-{round}", i.session_id))
+    });
+    if waiting_for_a_card {
         return None;
     }
-    // Each sub's latest finish card is where its facts were stored.
-    let latest: Vec<Option<&Facts>> = subs
-        .iter()
-        .map(|i| {
-            log.iter()
-                .rev()
-                .find(|e| e.kind == KIND_FINISH && e.sub_id.as_deref() == Some(i.session_id.as_str()))
-                .and_then(|e| e.facts.as_ref())
-        })
-        .collect();
+    let since = log.iter().rposition(|e| e.kind == KIND_ALL_FINISHED).map_or(0, |i| i + 1);
+    // Each live sub's latest report in the batch, in the order the subs finished.
+    let mut batch: Vec<&CardEntry> = Vec::new();
+    for e in log[since..].iter().filter(|e| e.kind == KIND_FINISH) {
+        let Some(id) = e.sub_id.as_deref() else { continue };
+        if !subs.iter().any(|i| i.session_id == id) {
+            continue;
+        }
+        batch.retain(|b| b.sub_id.as_deref() != Some(id));
+        batch.push(e);
+    }
+    if batch.is_empty() {
+        return None;
+    }
+    let key = batch.iter().map(|e| e.id.as_str()).collect::<Vec<_>>().join(",");
+    let latest: Vec<Option<&Facts>> = batch.iter().map(|e| e.facts.as_ref()).collect();
     let sum = facts::sum(&latest);
     let n = sum.subs;
     Some(CardEntry {
@@ -494,7 +499,7 @@ fn all_finished_entry(state: &DaemonState, root: &Path, parent: &str) -> Option<
         kind: KIND_ALL_FINISHED.into(),
         verdict: if n == 1 { "1 sub finished".into() } else { format!("All {n} subs finished") },
         // Code can say what failed or is left over, never that the work is right.
-        tone: (sum.tests_failed > 0 || sum.uncommitted > 0).then(|| "bad".to_string()),
+        tone: (sum.tests_failed > 0 || sum.uncommitted > 0 || sum.not_merged > 0).then(|| "bad".to_string()),
         text: sum_text(&sum),
         sum: Some(sum),
         set_key: Some(key),

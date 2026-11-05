@@ -14,7 +14,7 @@ use crate::types::chat::ChatEvent;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-mod close;
+pub(crate) mod close;
 mod exit;
 mod turn_boundary;
 use close::{close_in_flight, close_stand_down_is_failure, finalize_close, turn_is_close, CLOSE_FAILED_AWAITING};

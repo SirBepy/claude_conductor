@@ -70,6 +70,8 @@ pub(crate) async fn run_pump_exit(
         // undelivered comment stays visibly parked; this just stops the
         // backend store from leaking it into an unrelated later turn.
         state_for_pump.clear_step_comments(&pump_session.session_id).await;
+        // A process that died mid-commit never reaches its PostToolUse release.
+        state_for_pump.release_commit_locks_held_by(&pump_session.session_id);
         // /close's Phase 6 script also kills the `claude -p` child, which can
         // take the process down BEFORE its result line flushes - so a close the
         // `close_session` MCP tool confirmed must also be honored on EOF, not

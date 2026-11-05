@@ -182,6 +182,31 @@ mod tests {
         assert_eq!(reg.get("main").unwrap().name.as_deref(), Some("Main Title"));
     }
 
+    /// The second end-to-end run left a mode-on main chat titled "New chat" for good.
+    /// Nothing here is to blame: only a row with a parent is fixed, so a main chat and a
+    /// respawn successor take their titles from the transcript like any chat. (The rig's
+    /// daemon never received the Stop hook that writes the title, which is installed
+    /// globally against the production port.)
+    #[test]
+    fn a_mode_on_main_chat_and_a_respawn_successor_are_titled_like_any_chat() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let reg = Registry::new();
+        reg.upsert_interactive("main", std::path::Path::new("/tmp/x"), "proj", "2026-05-22T00:00:00Z");
+        reg.upsert_interactive("next", std::path::Path::new("/tmp/x"), "proj", "2026-05-22T00:00:00Z");
+        crate::sessions::chat_config::set_subchats_on("main", true);
+        reg.set_successor_of("next", "main");
+        assert!(!crate::daemon::subchats::name_is_fixed(&reg, "main"));
+        assert!(!crate::daemon::subchats::name_is_fixed(&reg, "next"));
+        let dir = tempdir().unwrap();
+        let (a, b) = (dir.path().join("main.jsonl"), dir.path().join("next.jsonl"));
+        std::fs::write(&a, assistant_title_jsonl("CV site work")).unwrap();
+        std::fs::write(&b, assistant_title_jsonl("CV site work, continued")).unwrap();
+        let mut mtimes = HashMap::new();
+        assert!(refresh_overrides(&reg, &[("main".into(), a), ("next".into(), b)], &mut mtimes));
+        assert_eq!(reg.get("main").unwrap().name.as_deref(), Some("CV site work"));
+        assert_eq!(reg.get("next").unwrap().name.as_deref(), Some("CV site work, continued"));
+    }
+
     #[test]
     fn close_override_beats_ai_milestone_title_live() {
         let reg = Registry::new();

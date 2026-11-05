@@ -47,6 +47,10 @@ pub(super) async fn on_stop(
         payload.transcript_path.as_deref().unwrap_or("-"),
     );
 
+    // The turn is over, so no commit call of this session is still running.
+    if let Some(id) = payload.session_id.as_deref() {
+        super::commit_lock::release_held_by(&ctx.state, id);
+    }
     let Some(transcript_path) = payload.transcript_path.clone() else {
         return (StatusCode::OK, Json(json!({"ok": true, "reason": "no transcript"})));
     };
@@ -425,6 +429,16 @@ mod tests {
         state.registry.set_busy(sid, true);
         let gen = state.registry.current_turn_gen(sid);
         (state, gen)
+    }
+
+    /// The turn ending means no commit call of the session is still running.
+    #[tokio::test]
+    async fn a_turn_ending_frees_a_commit_lock_the_session_left_behind() {
+        let ctx = announce_ctx();
+        assert!(ctx.state.try_acquire_commit_lock("tree", "s1"));
+        let payload = StopPayload { session_id: Some("s1".to_string()), ..Default::default() };
+        let _ = on_stop(AxState(ctx.clone()), Json(payload)).await;
+        assert!(ctx.state.try_acquire_commit_lock("tree", "s2"));
     }
 
     #[tokio::test]
