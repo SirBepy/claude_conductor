@@ -1,5 +1,5 @@
 import type { Instance } from "../../types/ipc.generated";
-import { parkedAskersFor } from "./permission-modal/gating";
+import { isQuietPrompt, parkedAskersFor } from "./permission-modal/gating";
 import { questionProgressFor } from "./question-progress";
 import { sessionSubtitle } from "./sessions-helpers";
 import { planProgress } from "./sidebar-ring";
@@ -41,6 +41,8 @@ function askingIds(main: Instance, subs: readonly Instance[]): Set<string> {
   const out = new Set<string>();
   for (const { askerId, prompt } of parkedAskersFor(main.session_id)) {
     if (prompt.kind === "question" && prompt.answered) continue;
+    // A quiet card (a decisions checkup) is not a question for Joe: no red dot.
+    if (isQuietPrompt(prompt)) continue;
     out.add(askerId);
   }
   // A finished sub is frozen and idle, so a stale `awaiting` on it is not a live ask.

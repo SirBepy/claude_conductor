@@ -45,10 +45,15 @@ impl DaemonState {
     /// every "a prompt just resolved, should `awaiting` clear now" call site
     /// must make before clearing, instead of assuming the one that just
     /// resolved was the only one open.
+    ///
+    /// A quiet daemon card (`subchats::cards::raise_quiet_card`, a decisions
+    /// checkup) never counts: nothing is waiting on Joe for it, so it must not hold
+    /// `awaiting` at "question" nor mark an answered question's sibling.
     pub async fn session_has_pending_question(&self, session_id: &str) -> bool {
         self.pending_prompts.lock().await.values().any(|v| {
             v["event"].as_str() == Some("question-requested")
                 && v["payload"]["session_id"].as_str() == Some(session_id)
+                && !is_quiet(v)
         })
     }
 
@@ -224,7 +229,12 @@ impl DaemonState {
 }
 
 fn any_prompt_for(prompts: &HashMap<String, Value>, session_id: &str) -> bool {
-    prompts.values().any(|v| v["payload"]["session_id"].as_str() == Some(session_id))
+    prompts.values().any(|v| v["payload"]["session_id"].as_str() == Some(session_id) && !is_quiet(v))
+}
+
+/// A prompt record whose card asks for no attention (`raise_quiet_card`).
+pub(crate) fn is_quiet(record: &Value) -> bool {
+    record["payload"]["quiet"].as_bool() == Some(true)
 }
 
 #[cfg(test)]

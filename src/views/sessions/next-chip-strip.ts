@@ -4,7 +4,7 @@
 import { getSettings } from "../../shared/state";
 import { currentTurnNextActions } from "../../shared/chat/chat-next-actions";
 import { state } from "./state";
-import { isWrapUpOnDone, onWrapUpChange } from "./permission-modal/gating";
+import { isSubchatsOn, isWrapUpOnDone, onSubchatsChange, onWrapUpChange } from "./permission-modal/gating";
 import { withCommand } from "./project-dashboard/format";
 import { isSlashChip, nextChips, withReply } from "./next-chips";
 import "./next-chips.css";
@@ -14,6 +14,8 @@ let _lastPane: HTMLElement | null = null;
 // A flip of "Wrap up when done" changes the chip set without any instance
 // update, so the strip listens for it directly.
 onWrapUpChange(() => { if (_lastPane) refreshNextChips(_lastPane); });
+// The same for the subchats mode: turning it on takes the built-in /close away.
+onSubchatsChange(() => { if (_lastPane) refreshNextChips(_lastPane); });
 
 function onChipClick(chip: string, shift: boolean): void {
   const composer = state.composer;
@@ -43,9 +45,11 @@ export function refreshNextChips(pane: HTMLElement): void {
   const id = state.selectedId;
   // The renderer can still be the previous chat's for a beat after a switch.
   const renderer = id && state.renderer?.sessionId === id ? state.renderer : null;
+  const inst = id ? state.sessions.find((s) => s.session_id === id) : undefined;
   const chips = nextChips({
     enabled: getSettings().nextActionChips !== false,
-    inst: id ? state.sessions.find((s) => s.session_id === id) : undefined,
+    inst,
+    role: inst?.subchat_of ? "sub" : isSubchatsOn(id) ? "main" : undefined,
     wrapUp: isWrapUpOnDone(id),
     hasHeld: !!state.heldMessages?.hasItemsForActive(),
     nextActions: renderer ? currentTurnNextActions(renderer.messages) : [],

@@ -160,7 +160,7 @@ mod tests {
         /// latches on until the 20-minute watchdog force-clears it.
         #[tokio::test]
         async fn live_rejection_clears_busy_when_gen_matches() {
-            let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+            let _guard = crate::util::env_lock();
             let dir = tempfile::tempdir().unwrap();
             std::env::set_var("CC_DATA_DIR", dir.path());
 
@@ -201,7 +201,7 @@ mod tests {
         /// a late/replayed result line everywhere else.
         #[tokio::test]
         async fn stale_rejection_does_not_clear_a_newer_turns_busy() {
-            let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+            let _guard = crate::util::env_lock();
             let dir = tempfile::tempdir().unwrap();
             std::env::set_var("CC_DATA_DIR", dir.path());
 

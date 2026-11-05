@@ -62,8 +62,9 @@ pub struct FinishRecord {
     pub waiting_on: Vec<String>,
     #[serde(default)]
     pub your_move: Vec<String>,
-    /// The `tool_use` id of the reviewer subagent run, when the sub ran one.
-    /// Stored as given; the reviewer requirement that reads it is a later step.
+    /// The `tool_use` id of the reviewer subagent run, only when the sub passed
+    /// one. Normally `None`: a model cannot see tool_use ids, so the daemon finds
+    /// the reviewer in the transcript itself.
     #[serde(default)]
     pub reviewer_tool_use_id: Option<String>,
     /// `HEAD` of the sub's repo when it finished. The head at spawn is recorded
@@ -134,6 +135,42 @@ fn required_rows(body: &Value, key: &str) -> Result<Vec<String>, String> {
         ));
     }
     Ok(rows)
+}
+
+/// Every field and its limit on one line, for a sub that called the tool with
+/// the wrong shape (the tool is deferred, so a sub often calls it before its
+/// schema is loaded). Mirrors the schema in `mcp::tool_schemas_subchat` and the
+/// caps in `hooks_server::messages`.
+pub const FIELD_LIMITS: &str = "Fields: verdict (required, at most 40 chars, the conclusion as a person says it), text (required, at most 200 chars, one or two lines for Joe), decided and ruled_out (required lists, at most 8 rows of 200 chars each, [\"nothing\"] is a valid answer); optional: tone (good, bad or neutral), done, not_done, waiting_on, your_move (lists, at most 8 rows of 120 chars), points (at most 6 rows of 200 chars).";
+
+/// The required fields a call left out, named together in one refusal so a sub
+/// fixes them in one retry instead of meeting them one by one. A field present
+/// with the wrong type is not missing: [`FinishArgs::parse`] names that fix.
+pub fn missing_fields(body: &Value) -> Option<String> {
+    let blank_text = |key: &str| match body.get(key) {
+        None | Some(Value::Null) => true,
+        Some(Value::String(s)) => s.trim().is_empty(),
+        Some(_) => false,
+    };
+    let empty_rows = |key: &str| match body.get(key) {
+        None | Some(Value::Null) => true,
+        Some(Value::Array(items)) => items.iter().all(|i| i.as_str().is_some_and(|s| s.trim().is_empty())),
+        Some(_) => false,
+    };
+    let mut missing: Vec<&str> = Vec::new();
+    if blank_text("verdict") {
+        missing.push("verdict");
+    }
+    // `message` is accepted as another name for `text` (see `FinishArgs::parse`).
+    if blank_text("text") && blank_text("message") {
+        missing.push("text");
+    }
+    for key in ["decided", "ruled_out"] {
+        if empty_rows(key) {
+            missing.push(key);
+        }
+    }
+    (!missing.is_empty()).then(|| format!("finish_subchat is missing {}. Send them all in one call. {FIELD_LIMITS}", missing.join(", ")))
 }
 
 impl FinishArgs {
@@ -207,15 +244,17 @@ pub fn has_background_work(activity: TurnActivity) -> bool {
 /// edit after it, which needs the review run again.
 fn review_refusal(gap: &super::facts::ReviewGap) -> String {
     use super::facts::ReviewGap::*;
+    // A model cannot see a tool_use id, so none is asked for: the app finds the
+    // subagent call itself, the last one after the last edit.
     let what = match gap {
-        NotNamed => "you changed files, and this project requires a fresh reviewer's check of your own diff before you finish, but you named none.".to_string(),
-        NotInTranscript => "reviewer_tool_use_id matches no tool call in your transcript. Copy the id of the Agent call itself.".to_string(),
-        NotASubagent(tool) => format!("reviewer_tool_use_id names a {tool:?} call, which is not a subagent. Pass the tool_use id of the Agent call that ran the reviewer."),
+        NotNamed => "you changed files, and this project requires a fresh subagent to review your own diff after your last edit, but none ran after it.".to_string(),
+        NotInTranscript => "reviewer_tool_use_id matches no tool call in your transcript. Leave it out: the app finds your reviewer itself.".to_string(),
+        NotASubagent(tool) => format!("reviewer_tool_use_id names a {tool:?} call, which is not a subagent. Leave it out: the app finds your reviewer itself."),
         BeforeLastEdit => "your reviewer started before your last edit, so it did not see the code you are finishing with.".to_string(),
-        NoResult => "your reviewer has not returned a result (it is still running, failed, or returned nothing).".to_string(),
+        NoResult => "your reviewer has not returned a result (the subagent is still running in the background, was refused, failed, or returned nothing).".to_string(),
     };
     format!(
-        "{what} Run a fresh subagent with the Agent tool and no shared context: give it the diff or the paths you changed and ask it to find real problems. Wait for its result, fix what it finds, commit, and call finish_subchat again with reviewer_tool_use_id set to that Agent call's tool_use id. A fix after the review is an edit after it, so run the review again after any fix. Do not tell the reviewer to approve, and do not resume an earlier subagent. If the job is purely visual, finish without a reviewer by asking the main chat to set review false in the brief."
+        "{what} Run a fresh subagent with the Agent tool on your diff after your last edit, in the foreground (run_in_background false) so its result lands in your transcript: give it the diff or the paths you changed and ask it to find real problems, with no shared context. Wait for its result, fix what it finds, commit, then call finish_subchat again without reviewer_tool_use_id. If a hook refused the subagent call, do what the hook says and run it again. A fix after the review is an edit after it, so run the review again after any fix. Do not tell the reviewer to approve, and do not resume an earlier subagent. If the job is purely visual, finish without a reviewer by asking the main chat to set review false in the brief."
     )
 }
 
@@ -329,7 +368,7 @@ pub const FINISH_DROPPED_DIRTY_NUDGE: &str = "Your finish_subchat call was not a
 /// Said to a sub whose finish was dropped at commit because an edit landed after
 /// its reviewer ran (an Edit later in the same assistant message as the call).
 /// Constant, so it is safe as `is_meta` text.
-pub const FINISH_DROPPED_REVIEW_NUDGE: &str = "Your finish_subchat call was not accepted, because you edited files after your reviewer ran. Run a fresh reviewer subagent on your final diff, fix what it finds, commit, then call finish_subchat again with that Agent call's tool_use id as reviewer_tool_use_id.";
+pub const FINISH_DROPPED_REVIEW_NUDGE: &str = "Your finish_subchat call was not accepted, because you edited files after your reviewer ran. Run a fresh subagent on your final diff in the foreground, fix what it finds, commit, then call finish_subchat again.";
 
 /// [`commit_finish`] with the data dir and the transcript injected, so tests
 /// write to a tempdir and read a scratch transcript.
@@ -493,9 +532,46 @@ mod tests {
         let st = state();
         let sub = make_sub(&st, "rv-none", &root);
         let e = request_finish_with(&st, &sub, args(), Some(tp)).await.unwrap_err();
-        assert!(e.contains("requires a fresh reviewer") && e.contains("reviewer_tool_use_id") && e.contains("Agent"), "{e}");
+        assert!(e.contains("fresh subagent") && e.contains("after your last edit") && e.contains("Agent"), "{e}");
+        assert!(e.contains("foreground"), "the result must land in the transcript: {e}");
+        // A model cannot see a tool_use id, so the refusal never asks for one.
+        assert!(!e.contains("Copy the id") && !e.contains("with reviewer_tool_use_id set"), "{e}");
+        assert!(e.contains("without reviewer_tool_use_id"), "{e}");
         assert!(!super::super::runtime::runtime().finish_pending(&sub), "a refusal parks nothing");
         assert!(!e.contains('\u{2014}'));
+    }
+
+    /// The daemon finds the reviewer: the last subagent call after the last edit.
+    #[tokio::test]
+    async fn the_daemon_finds_the_reviewer_without_an_id() {
+        let _data = super::super::TempDataDir::new();
+        let (_dir, root, tp) = committed_edit();
+        append_lines(&tp, &[agent_use("some-id-the-model-never-sees", "Agent"), tool_result("some-id-the-model-never-sees", false, "No problems.")]);
+        let st = state();
+        let sub = make_sub(&st, "rv-auto", &root);
+        assert!(request_finish_with(&st, &sub, args(), Some(tp)).await.is_ok());
+        assert!(super::super::runtime::runtime().finish_pending(&sub));
+    }
+
+    /// First real run: a read-only sub's only Edit was refused by the write guard, and
+    /// the gate still said "you changed files" and ran the sub through a reviewer.
+    #[tokio::test]
+    async fn a_refused_edit_does_not_make_a_read_only_sub_owe_a_reviewer() {
+        let _data = super::super::TempDataDir::new();
+        let (dir, root) = super::super::git::test_repo::init();
+        let tp = super::super::git::test_repo::fixture_transcript(
+            dir.path(),
+            super::super::git::test_repo::REFUSED_EDIT_FIXTURE,
+            &root.join("index.html"),
+            2,
+            &[],
+            false,
+        );
+        let st = state();
+        let sub = make_sub(&st, "rv-refused", &root);
+        let r = request_finish_with(&st, &sub, args(), Some(tp)).await;
+        assert!(r.is_ok(), "{r:?}");
+        assert!(super::super::runtime::runtime().finish_pending(&sub));
     }
 
     #[tokio::test]

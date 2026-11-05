@@ -483,6 +483,24 @@ export class SessionStatusbar {
     if (this.modelEffort.setReadOnlyEffort(readOnly)) this.render();
   }
 
+  /** Follows the registry's model and effort for the chat on screen. They change
+   *  outside this bar: turning "Use subchats" on moves the chat to Opus at high
+   *  effort in the registry (applied at its next send), and a draft's pick is
+   *  replaced by what the daemon actually started. Empty values are skipped, since
+   *  a row that never recorded either says nothing. */
+  syncModelEffort(model: string | null | undefined, effort: string | null | undefined): void {
+    let changed = false;
+    if (model && this.modelEffort.sessionModel !== model) {
+      this.modelEffort.sessionModel = model;
+      changed = true;
+    }
+    if (effort && this.modelEffort.effort !== effort) {
+      this.modelEffort.effort = effort;
+      changed = true;
+    }
+    if (changed) this.render();
+  }
+
   /** Switches the model chip from draft-local editing to live editing once the
    *  real agent process has spawned (a draft's onModelChange must not survive
    *  into the started session, or picking a model would only update local

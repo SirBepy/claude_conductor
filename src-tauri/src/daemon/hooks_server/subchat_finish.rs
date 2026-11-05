@@ -8,7 +8,7 @@
 use super::messages::{validate_report, ReportFields};
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
-use crate::daemon::subchats::finish::{request_finish, FinishArgs};
+use crate::daemon::subchats::finish::{missing_fields, request_finish, FinishArgs};
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -19,6 +19,11 @@ fn refusal(error: String) -> (StatusCode, Json<Value>) {
 
 /// Decode and validate one call, before anything is looked up or checked on disk.
 fn parse_and_validate(body: &Value) -> Result<FinishArgs, String> {
+    // First, and all at once: a sub that called the tool before loading its schema
+    // sends an empty or wrong-named body, and one refusal per field costs a retry each.
+    if let Some(missing) = missing_fields(body) {
+        return Err(missing);
+    }
     let args = FinishArgs::parse(body)?;
     validate_report(ReportFields {
         text: args.text.clone().unwrap_or_default(),
@@ -104,8 +109,34 @@ mod tests {
         body.as_object_mut().unwrap().remove("verdict");
         let v = call(&c, body).await;
         assert_eq!(v["ok"], json!(false));
-        assert!(v["error"].as_str().unwrap().contains("needs a verdict"), "{v}");
+        assert!(v["error"].as_str().unwrap().contains("missing verdict"), "{v}");
         assert!(!crate::daemon::subchats::runtime::runtime().finish_pending(&sub));
+    }
+
+    /// The tool is deferred, so a sub calls it before its schema is loaded: an
+    /// empty body, or one with invented names (`summary`). The first refusal names
+    /// every missing field and the limits, so one retry fixes it; four refusals
+    /// of one field each is what the first real run hit.
+    #[tokio::test]
+    async fn the_first_refusal_names_every_missing_field_at_once_with_the_limits() {
+        let c = ctx();
+        let sub = make_sub(&c, "route-allmissing");
+        for body in [json!({"session_id": sub}), json!({"session_id": sub, "summary": "Edit was refused"})] {
+            let v = call(&c, body).await;
+            assert_eq!(v["ok"], json!(false));
+            let e = v["error"].as_str().unwrap();
+            for field in ["verdict", "text", "decided", "ruled_out"] {
+                assert!(e.contains(field), "{field} named in one go: {e}");
+            }
+            assert!(e.contains("40 chars") && e.contains("200 chars") && e.contains("[\"nothing\"]"), "the limits ride along: {e}");
+        }
+        // Only what is missing is named.
+        let mut body = good(&sub);
+        body.as_object_mut().unwrap().remove("ruled_out");
+        body.as_object_mut().unwrap().remove("text");
+        let e = call(&c, body).await["error"].as_str().unwrap().to_string();
+        assert!(e.contains("missing text, ruled_out"), "{e}");
+        assert!(!e.contains("missing verdict") && !e.contains("verdict,"), "{e}");
     }
 
     #[tokio::test]
@@ -114,10 +145,10 @@ mod tests {
         let sub = make_sub(&c, "route-malformed");
         for (patch, needle) in [
             (json!({"decided": "text"}), "decided must be a list of strings"),
-            (json!({"decided": []}), "decided is required"),
-            (json!({"ruled_out": null}), "ruled_out is required"),
+            (json!({"decided": []}), "missing decided"),
+            (json!({"ruled_out": null}), "missing ruled_out"),
             (json!({"done": [1, 2]}), "done must be a list of strings"),
-            (json!({"text": ""}), "text must not be empty"),
+            (json!({"text": ""}), "missing text"),
             (json!({"verdict": "x".repeat(41)}), "over 40"),
             (json!({"text": "x".repeat(201)}), "over report's 200"),
             (json!({"tone": "loud"}), "tone"),

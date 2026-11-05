@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05 (hidden subs): sidebar.ts now keeps a sub out of the unread marking and the favicon count; this spec's cached rows carry no subchat_of and it asserts the cache-first paint only, so its contract is unaffected and it passed after the change.
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 // asserts: src/views/sessions/sessions-initial-load.ts, src/views/sessions/sidebar.ts

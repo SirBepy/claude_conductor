@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 import type { Question } from "../../src/views/sessions/permission-modal/types";

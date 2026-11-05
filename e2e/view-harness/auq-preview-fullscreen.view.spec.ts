@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-29: question cards now re-expand from their collapsed bar on re-open/re-announce, a parked question is shown only while the daemon still lists it, and an already-answered one is dropped (answered-gate.ts) - this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-27: types.ts's QuestionDraft gained an optional per-option `notes` map (AUQ option notes) - additive, no change to this spec's contract.
 import { test, expect, type Page } from "@playwright/test";

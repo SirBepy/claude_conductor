@@ -100,8 +100,8 @@ pub(crate) const SUBCHATS_MAIN_OFF_NOTE: &str = "Subchats mode is now OFF for th
 /// names it as the end of the job rather than as a suggestion.
 pub(crate) const SUBCHAT_SUB_PROMPT: &str = "You are a sub: a hidden child chat that another chat (your main chat) spawned for one job. Your brief is the whole task, and the main chat does not see this conversation. Rules: \
 Ask Joe only through ask_user_question, only at a real fork where the best path is not clear, or once for a final stamp when the result needs his judgement (taste, product). His answer appears on a card in the main chat's window. Do not ask about direction when the best path is clear. \
-Taste, product and real decisions end on a final stamp: call ask_user_question with final_stamp set to true, a picture of the result as the question's own preview, and your own options (for example \"Good\" and \"Change something\"). The app adds the facts under the picture itself, so do not write them. After Joe picks \"Good\", call finish_subchat. A code fix whose tests pass and that a fresh reviewer checked finishes on its own with no stamp. final_stamp works only for a sub. If you ran a reviewer, pass its tool_use id as reviewer_tool_use_id. \
-When the job is done, call the finish_subchat tool. That is how you end: /close does not apply to you, so do not run it. finish_subchat replaces the rule to call send_message and report_turn_status before ending a turn: you owe neither. It is refused while files you edited are uncommitted (commit your own files by path first) or while your own background work is running. If you changed files, a fresh reviewer must check your work before you finish: run a subagent with the Agent tool and no shared context, hand it your diff or the paths you changed, and ask it for real problems, never to approve, and never resume an earlier subagent. Fix what it finds and commit; run a new reviewer only if you edit again afterwards. finish_subchat is refused unless reviewer_tool_use_id names that Agent call and its result came back after your last edit. A brief with review false, a job that changed no files, and a project set to facts only need no reviewer. If your brief says you are read-only, your Edit, Write and NotebookEdit calls are refused: finish and say the job needs writing, and the main chat sends you a follow-up that allows it. Only one sub edits files at a time in a project: if an edit is refused because another sub holds the slot, do not look for another way to write the file. Read and plan, or end your turn, and you are sent a message when the slot is yours. \
+Taste, product and real decisions end on a final stamp: call ask_user_question with final_stamp set to true, a picture of the result as the question's own preview, and your own options (for example \"Good\" and \"Change something\"). The app adds the facts under the picture itself, so do not write them. After Joe picks \"Good\", call finish_subchat. A code fix whose tests pass and that a fresh reviewer checked finishes on its own with no stamp. final_stamp works only for a sub. \
+When the job is done, call the finish_subchat tool. That is how you end: /close does not apply to you, so do not run it. finish_subchat is a deferred tool, so load its schema first with ToolSearch (query select:mcp__cc_conductor__finish_subchat) before the first call. Its required fields are verdict (at most 40 chars), text (at most 200 chars), decided and ruled_out (lists of at most 8 rows of 200 chars, [\"nothing\"] is a valid answer); a refusal names every field you left out. finish_subchat replaces the rule to call send_message and report_turn_status before ending a turn: you owe neither. It is refused while files you edited are uncommitted (commit your own files by path first) or while your own background work is running. If you changed files, a fresh reviewer must check your work before you finish: after your last edit, run a fresh subagent with the Agent tool and no shared context, in the foreground (run_in_background false) so its result lands in your transcript, hand it your diff or the paths you changed, and ask it for real problems, never to approve, and never resume an earlier subagent. A hook may refuse a subagent's first try (a dispatch preamble check): follow what the hook says and run it again. Fix what it finds and commit; run a new reviewer only if you edit again afterwards. Then call finish_subchat. The app finds your reviewer in your transcript itself: you cannot see tool_use ids, so do not look for one and leave reviewer_tool_use_id out. finish_subchat is refused unless such a subagent returned after your last edit. A brief with review false, a job that changed no files, and a project set to facts only need no reviewer. If your brief says you are read-only, your Edit, Write and NotebookEdit calls are refused: finish and say the job needs writing, and the main chat sends you a follow-up that allows it. Only one sub edits files at a time in a project: if an edit is refused because another sub holds the slot, do not look for another way to write the file. Read and plan, or end your turn, and you are sent a message when the slot is yours. \
 Do not push, unless Joe asked you to run a push gate. \
 The main chat keeps a decisions log, and you may be shown its current entries as data. If one of your finish_subchat decided rows replaces an entry in it, start that row with replaces D3: (use the entry's own id). \
 Do not send progress messages. \
@@ -472,11 +472,27 @@ mod tests {
         assert!(p.contains("Agent tool and no shared context") && p.contains("never to approve"));
         assert!(p.contains("never resume an earlier subagent"));
         assert!(p.contains("run a new reviewer only if you edit again afterwards"));
-        assert!(p.contains("reviewer_tool_use_id names that Agent call"));
+        // The model cannot see tool_use ids: the prompt must not ask it to name one.
+        assert!(p.contains("you cannot see tool_use ids") && p.contains("leave reviewer_tool_use_id out"));
+        assert!(!p.contains("names that Agent call") && !p.contains("pass its tool_use id"));
+        assert!(p.contains("in the foreground (run_in_background false) so its result lands in your transcript"));
         assert!(p.contains("review false") && p.contains("facts only"));
         assert!(p.contains("read-only, your Edit, Write and NotebookEdit calls are refused"));
         assert!(p.contains("holds the slot") && p.contains("do not look for another way to write the file"));
         assert!(!p.contains('\\') && !p.contains("  "));
+    }
+
+    /// First real run: subs called the deferred `finish_subchat` before loading its
+    /// schema, got empty-argument errors, guessed `summary`, and met each validation
+    /// in turn. The prompt says how to call it, with the required fields and caps.
+    #[test]
+    fn the_sub_prompt_says_how_to_call_the_deferred_finish_tool() {
+        let p = SUBCHAT_SUB_PROMPT;
+        assert!(p.contains("deferred tool") && p.contains("ToolSearch (query select:mcp__cc_conductor__finish_subchat)"), "{p}");
+        for needle in ["verdict (at most 40 chars)", "text (at most 200 chars)", "decided and ruled_out", "a refusal names every field you left out"] {
+            assert!(p.contains(needle), "{needle}");
+        }
+        assert!(p.contains("A hook may refuse a subagent's first try") && p.contains("follow what the hook says"), "{p}");
     }
 
     #[test]

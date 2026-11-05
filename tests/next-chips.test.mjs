@@ -71,6 +71,33 @@ describe("nextChips", () => {
   it("offers nothing without a registry row (a draft)", () => {
     expect(nextChips({ enabled: true, wrapUp: false, hasHeld: false, inst: undefined })).toEqual([]);
   });
+
+  // First real run: a main chat showed /close although its prompt says never to
+  // close by itself, and the same chip sat in a sub's in-place view.
+  describe("a main chat and a sub", () => {
+    it("hides the built-in /close in a main chat but keeps its replies", () => {
+      expect(nextChips(ctx({ role: "main" }))).toEqual([]);
+      expect(nextChips(ctx({ role: "main", nextActions: ["Yes, spawn it", "/commit"] }))).toEqual(["Yes, spawn it", "/commit"]);
+    });
+
+    it("shows /close in a main chat when its own latest reply asks for it", () => {
+      expect(nextChips(ctx({ role: "main", nextActions: ["/close", "Go"] }))).toEqual(["/close", "Go"]);
+      expect(nextChips(ctx({ role: "main", nextActions: ["Go", "/CLOSE now"] }))).toEqual(["/close", "Go"]);
+    });
+
+    it("still respects wrap-up, even for a main chat that asked", () => {
+      expect(nextChips(ctx({ role: "main", wrapUp: true, nextActions: ["/close"] }))).toEqual([]);
+    });
+
+    it("never offers /close in a sub's view, whatever it wrote", () => {
+      expect(nextChips(ctx({ role: "sub" }))).toEqual([]);
+      expect(nextChips(ctx({ role: "sub", nextActions: ["/close", "Go"] }))).toEqual(["Go"]);
+    });
+
+    it("leaves an ordinary chat exactly as it was", () => {
+      expect(nextChips(ctx({ role: undefined }))).toEqual(["/close"]);
+    });
+  });
 });
 
 describe("withReply", () => {

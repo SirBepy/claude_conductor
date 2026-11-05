@@ -393,8 +393,29 @@ export function clearPendingPromptById(id: string): void {
  *  sub has no row of its own to mark. */
 export function pendingPromptSessionIds(): Set<string> {
   const out = new Set<string>();
+  for (const [askerId, prompt] of _pendingPrompts) {
+    // A quiet card (a decisions checkup) waits for Joe to look, not for his answer:
+    // no attention marker, no "input needed" ring, no red dot.
+    if (isQuietPrompt(prompt)) continue;
+    out.add(displayIdOf(prompt.payload) ?? askerId);
+  }
+  return out;
+}
+
+/** Every chat that has any prompt parked in its window, quiet ones included. For
+ *  housekeeping that must reach a card whatever its volume, such as dropping the
+ *  cards of a chat that is gone. */
+export function parkedDisplayIds(): Set<string> {
+  const out = new Set<string>();
   for (const [askerId, prompt] of _pendingPrompts) out.add(displayIdOf(prompt.payload) ?? askerId);
   return out;
+}
+
+/** True for a daemon card that asks for no attention (`quiet` on the payload,
+ *  stamped by the daemon's `raise_quiet_card`). It sorts behind every other card of
+ *  its chat and gets no red dot of its own. */
+export function isQuietPrompt(prompt: { payload: object }): boolean {
+  return (prompt.payload as { quiet?: boolean }).quiet === true;
 }
 
 /** The asking sessions that hold a parked slot (a sub's own id, not its main

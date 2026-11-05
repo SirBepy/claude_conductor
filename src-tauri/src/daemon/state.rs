@@ -19,6 +19,7 @@ use tokio::sync::{oneshot, Mutex, Notify};
 mod commit_lock;
 mod pending_questions;
 mod prompts;
+pub(crate) use prompts::is_quiet;
 mod step_comments;
 pub mod subagents;
 

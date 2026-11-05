@@ -148,6 +148,87 @@ test.describe("quick reply chips written by the model", () => {
   });
 });
 
+// First real subchats run: the built-in /close chip showed in a main chat, whose prompt
+// says never to close by itself, and again inside a sub's in-place view, where /close
+// does not apply. A main chat gets it only when its own latest reply asks for it.
+for (const [label, size] of [["desktop", { width: 1280, height: 800 }], ["phone", { width: 393, height: 852 }]] as const) {
+  test.describe(`quick reply chips in a main chat and a sub (${label})`, () => {
+    const MAIN = sessionInstance({ session_id: "main", name: "CV redesign", pid: 101, awaiting: "done" });
+    const SUB = sessionInstance({ session_id: "sub-1", name: "Footer", pid: 102, subchat_of: "main", awaiting: "done", subchat_finished: true });
+    const PLAIN = sessionInstance({ session_id: "plain", name: "Plain chat", pid: 103, awaiting: "done" });
+    const asks = transcript(userEvent("plan it"), sendMessageEvent("Spawn the header?", ["Yes, spawn it", "/close"]));
+
+    async function mountFamily(page: Page, history: unknown = EMPTY_TRANSCRIPT): Promise<void> {
+      await page.setViewportSize(size);
+      const rows = [MAIN, SUB, PLAIN];
+      await mountView(page, {
+        view: "sessions",
+        invoke: {
+          ...SESSIONS_BASE_INVOKE,
+          list_instances: rows,
+          get_active_sessions: rows,
+          list_subchats_on: ["main"],
+          load_history_page: history,
+          get_session_drafts: { composer: null, auq: null, held: [], held_updated_at: null },
+          send_message: null,
+          list_auto_accept: [],
+        },
+      });
+      await page.locator("#sessions-list li[data-session-id]").first().waitFor();
+      // The mode flags hydrate after boot and redraw the strip.
+      await page.waitForTimeout(250);
+    }
+    const open = async (page: Page, id: string) => {
+      await page.evaluate(() => document.querySelector(".view-sessions")?.setAttribute("data-mobile-pane", "list"));
+      await page.locator(`#sessions-list li[data-session-id="${id}"]`).click();
+      await page.locator("#session-pane .session-composer").first().waitFor();
+    };
+
+    test("a main chat shows no /close of its own, but a plain chat still does", async ({ page }) => {
+      await mountFamily(page);
+      await open(page, "main");
+      await expect(chip(page)).toHaveCount(0);
+      await open(page, "plain");
+      await expect(chip(page)).toHaveText(["/close"]);
+    });
+
+    test("a main chat shows /close when its own latest reply asks for it", async ({ page }) => {
+      await mountFamily(page, asks);
+      await open(page, "main");
+      await expect(chip(page)).toHaveText(["/close", "Yes, spawn it"]);
+    });
+
+    test("a main chat keeps the model's replies without the /close it did not ask for", async ({ page }) => {
+      await mountFamily(page, transcript(userEvent("plan it"), sendMessageEvent("Spawn the header?", ["Yes, spawn it"])));
+      await open(page, "main");
+      await expect(chip(page)).toHaveText(["Yes, spawn it"]);
+    });
+
+    test("a sub's in-place view never shows /close, even when the sub asked for it", async ({ page }) => {
+      await mountFamily(page, asks);
+      await open(page, "main");
+      await page.locator("#session-pane .session-header .sub-count-btn").click();
+      await page.locator('.sub-list-popover .sub-row[data-sub-id="sub-1"]').click();
+      await expect(page.locator("#session-pane .session-header .sub-back-btn")).toBeVisible();
+      await expect(chip(page)).toHaveText(["Yes, spawn it"]);
+    });
+
+    test("turning the mode on takes the /close chip away at once", async ({ page }) => {
+      await mountFamily(page);
+      await open(page, "plain");
+      await expect(chip(page)).toHaveText(["/close"]);
+      await page.evaluate(async () => {
+        const gating = await import("/views/sessions/permission-modal/gating.ts");
+        const w = window as unknown as { __TAURI__: { core: { invoke: (c: string, a?: unknown) => Promise<unknown> } } };
+        const orig = w.__TAURI__.core.invoke;
+        w.__TAURI__.core.invoke = (cmd, args) => (cmd === "set_subchats_on" ? Promise.resolve(null) : orig(cmd, args));
+        await gating.setSubchatsOn("plain", true);
+      });
+      await expect(chip(page)).toHaveCount(0);
+    });
+  });
+}
+
 test.describe("quick reply chips on the phone", () => {
   test.use({ viewport: { width: 390, height: 780 } });
 

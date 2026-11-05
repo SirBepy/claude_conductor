@@ -598,7 +598,7 @@ pub(crate) fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     let ids = record_finish_in(&root, &parent, &who, &record, &today());
     log::info!("subchats: {sub_id} added {} decision log entries to {parent}", ids.len());
     write_digest_in(&root, &who, &record);
-    super::checkup::after_finish(state, &parent);
+    super::checkup::after_finish(state, &parent, record.round);
 }
 
 // ---- the /close digest feed -----------------------------------------------

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
 // Reviewed 2026-11-02 (later): the question card's header buttons now size from --control-h / --control-h-sm; glyph centring is unchanged and this spec passes.
 // Reviewed 2026-11-02: .icon-btn is now var(--control-h) square (36px, 44px on a phone) instead of 32px / 44px; this spec asserts glyph centring, not size, and passes.

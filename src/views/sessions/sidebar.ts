@@ -9,7 +9,7 @@ import {
   isSubchat,
 } from "./sessions-helpers";
 import { state, windowIdOf } from "./state";
-import { pendingPromptSessionIds, clearPendingPrompt } from "./permission-modal";
+import { parkedDisplayIds, clearPendingPrompt } from "./permission-modal";
 import { reconcileList, loadAnimEnabled } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { setRerenderCallback } from "./sidebar-ctx-menu";
@@ -192,7 +192,7 @@ export async function refreshSessions(): Promise<boolean> {
 
     // GC: drop parked permission/question prompts for dead sessions (e.g. the
     // chat was closed before the user switched back to answer).
-    for (const id of pendingPromptSessionIds()) {
+    for (const id of parkedDisplayIds()) {
       if (!liveIds.has(id)) clearPendingPrompt(id);
     }
 

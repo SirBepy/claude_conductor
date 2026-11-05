@@ -10,6 +10,7 @@ import { retainChat } from "./chat-pane-cache";
 import { mountPendingChrome, mountPendingStatusbar, attachPendingRenderer, changePendingAccount } from "./pending-pane-mount";
 import { mountDraftDashboard, unmountDraftDashboard } from "./project-dashboard/draft-dashboard";
 import { wirePendingComposer } from "./pending-pane-composer";
+import { decorateSubchatHeader } from "./subchat-view";
 
 let _pendingHeader: SessionHeader | null = null;
 
@@ -103,6 +104,15 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
   });
   if (realCharId) void hydrateCharacterAvatars(pane);
   void hydrateProjectTechIcons(pane);
+  // The draft's header was built as a draft's, so it never ran the subchats dressing
+  // a chat opened from the sidebar gets: no sub count once the chat has subs, and no
+  // data-sub-of for syncSubchatChrome to compare. Imported lazily because
+  // active-session sits above this module in the import graph.
+  void import("./active-session").then(({ subchatNavFor }) => {
+    if (_pendingHeader !== h || state.selectedId !== sessionId) return;
+    const live = state.sessions.find((s) => s.session_id === sessionId);
+    if (live) decorateSubchatHeader(h, live, subchatNavFor(pane));
+  });
 
   const messagesEl = pane.querySelector<HTMLElement>(".session-messages");
   const renderer = state.renderer;

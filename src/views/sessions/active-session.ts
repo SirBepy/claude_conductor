@@ -24,7 +24,7 @@ import { snapshotActiveCardDraftIn } from "./permission-modal/question-state";
 import { savePendingPromptDraft } from "./permission-modal/gating";
 import { expandActiveCard, hasActiveCardForSession } from "./permission-modal/question-state";
 import { SessionHeader, projectDashboardOpener } from "./session-header";
-import { decorateSubchatHeader } from "./subchat-view";
+import { decorateSubchatHeader, type SubchatNav } from "./subchat-view";
 import { closeCodeMode } from "./code-mode/code-mode";
 import { setCodeModeChatProvider } from "./code-mode/entry";
 import { applyHeaderMerge } from "./mobile-header-merge";
@@ -151,6 +151,20 @@ registerCta("pickup", {
   },
 });
 
+/** How the sub list and a sub's back arrow open a chat in `pane`. Shared with the
+ *  draft pane, whose header is promoted in place when its first message starts the
+ *  chat (pending-pane.ts), so a started draft gets the same sub count and the same
+ *  navigation a chat opened from the sidebar has. */
+export function subchatNavFor(pane: HTMLElement): SubchatNav {
+  return {
+    open: (id) => selectSession(id, pane),
+    reopen: async (id) => {
+      setActiveSession(null);
+      await selectSession(id, pane);
+    },
+  };
+}
+
 export async function selectSession(sessionId: string, pane: HTMLElement): Promise<void> {
   // Mobile single-pane: opening a chat reveals the chat pane (CSS only acts on
   // this attribute inside the ≤768px media query, so desktop is unaffected).
@@ -270,13 +284,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   // A sub read in place gets its back arrow and "Move to sidebar"; a chat with
   // subs gets their count. Before the header is in the pane, so the phone's
   // header merge below sees the finished slots.
-  decorateSubchatHeader(header, sess, {
-    open: (id) => selectSession(id, pane),
-    reopen: async (id) => {
-      setActiveSession(null);
-      await selectSession(id, pane);
-    },
-  });
+  decorateSubchatHeader(header, sess, subchatNavFor(pane));
   pane.insertBefore(header.el, pane.firstChild);
   // This header is rebuilt per session, so the phone's relocated back / ⋮ have
   // to be re-homed into the fresh one (todo 702).

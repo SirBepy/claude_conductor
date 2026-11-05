@@ -322,6 +322,10 @@ pub async fn move_family(state: &Arc<DaemonState>, old: &str, new: &str) {
 pub async fn carry_to_successor(state: &Arc<DaemonState>, predecessor: &str, successor: &str) {
     if crate::sessions::chat_config::get(predecessor).is_some_and(|c| c.subchats_on) {
         crate::sessions::chat_config::set_subchats_on(successor, true);
+        // Every client keeps the set of mode-on chats in memory and lists the
+        // successor under Main chats only from it; the registry row it is shown
+        // from says nothing about the mode.
+        super::publish_mode_changed(state);
     }
     move_family(state, predecessor, successor).await;
 }
@@ -737,9 +741,17 @@ mod tests {
         crate::daemon::subchats::joe_message::note_sent(&main, "fix the footer", false, None);
         std::fs::write(crate::daemon::subchats::decisions::log_path(&main), "# decisions\n").unwrap();
         successor(&st, &main, "cl-move-next");
+        let mut rx = st.notifier.subscribe();
 
         carry_to_successor(&st, &main, "cl-move-next").await;
 
+        // First real run: the successor had the mode in chat-config, and the sidebar still
+        // listed it under Input Needed until a reload, because clients are never told.
+        let mut told = false;
+        while let Ok(frame) = rx.try_recv() {
+            told |= frame["method"] == "subchats_on_changed";
+        }
+        assert!(told, "clients re-read the set of mode-on chats when a successor takes the mode");
         assert_eq!(st.registry.get(&subs[0]).unwrap().subchat_of.as_deref(), Some("cl-move-next"));
         assert_eq!(
             crate::sessions::chat_config::get(&subs[0]).unwrap().subchat.unwrap().parent,
