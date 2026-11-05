@@ -737,6 +737,83 @@ mod tests {
         assert_eq!(read_in(root.path(), &main).iter().filter(|e| e.kind == KIND_ALL_FINISHED).count(), 2);
     }
 
+    /// The first real runs showed "All 2 ... 4 ... 8 ... 9 ... 21 ... 28 subs finished" on one
+    /// main chat: each card counted every sub it had ever had. A card counts the batch
+    /// since the previous one.
+    #[test]
+    fn the_all_finished_card_counts_the_batch_since_the_last_card_not_the_lifetime() {
+        let st = state();
+        let root = tempfile::tempdir().unwrap();
+        let (main, first) = world(&st, "batch", Path::new("."), &["a", "b"]);
+        finish_sub(&st, root.path(), &first[0], 1);
+        let done = finish_sub(&st, root.path(), &first[1], 1);
+        assert_eq!(done.iter().find(|e| e.kind == KIND_ALL_FINISHED).unwrap().verdict, "All 2 subs finished");
+
+        // Three more subs in the same main chat; the first two are still there, finished.
+        let mut later = Vec::new();
+        for n in ["c", "d", "e"] {
+            let id = format!("batch-{n}");
+            st.registry.upsert_interactive(&id, Path::new("."), "proj", "2026-11-05T00:00:00Z");
+            st.registry.set_subchat_of(&id, Some(main.clone()));
+            st.registry.set_name(&id, n.to_string());
+            later.push(id);
+        }
+        finish_sub(&st, root.path(), &later[0], 1);
+        finish_sub(&st, root.path(), &later[1], 1);
+        assert_eq!(read_in(root.path(), &main).iter().filter(|e| e.kind == KIND_ALL_FINISHED).count(), 1, "one sub is still running");
+        let done = finish_sub(&st, root.path(), &later[2], 1);
+        let all = done.iter().find(|e| e.kind == KIND_ALL_FINISHED).expect("the last running sub finished");
+        assert_eq!(all.verdict, "All 3 subs finished", "not All 5");
+        assert_eq!(all.sum.as_ref().unwrap().subs, 3);
+        // Drawn once: asking again with nothing new says nothing.
+        assert!(all_finished_entry(&st, root.path(), &main).is_none());
+        assert!(draw_finish_at(root.path(), &st, &later[2], None).iter().all(|e| e.kind != KIND_ALL_FINISHED));
+    }
+
+    fn stored_finish(st: &Arc<DaemonState>, root: &Path, sub: &str, facts: Facts) {
+        record(root, sub, 1, "Done");
+        let inst = st.registry.get(sub).unwrap();
+        let entry = CardEntry {
+            id: format!("finish-{sub}-1"),
+            ts: now_ms(),
+            parent_id: inst.subchat_of.clone().unwrap(),
+            kind: KIND_FINISH.into(),
+            sub_id: Some(sub.to_string()),
+            sub_name: Some(sub_name(&inst)),
+            round: Some(1),
+            verdict: "Done".into(),
+            facts: Some(facts),
+            ..CardEntry::default()
+        };
+        assert!(store_and_announce(st, root, &entry));
+        st.registry.set_subchat_finished(sub, true);
+    }
+
+    /// One sub's merge was refused. The card must not say the work is in: its commits
+    /// are not counted as landed, "1 not merged" is stated, and the tone shows it.
+    #[test]
+    fn a_sub_whose_merge_was_refused_is_named_and_its_commits_are_not_counted_as_landed() {
+        let st = state();
+        let root = tempfile::tempdir().unwrap();
+        let (main, subs) = world(&st, "unmerged", Path::new("."), &["landed", "refused"]);
+        stored_finish(&st, root.path(), &subs[0], Facts { commits: Some(1), files_changed: Some(2), merged: Some(true), ..Facts::default() });
+        stored_finish(&st, root.path(), &subs[1], Facts { commits: Some(3), files_changed: Some(5), merged: Some(false), ..Facts::default() });
+        let all = all_finished_entry(&st, root.path(), &main).expect("both subs are finished");
+        let sum = all.sum.as_ref().unwrap();
+        assert_eq!((sum.commits, sum.files_changed, sum.not_merged), (1, 2, 1), "only what landed is counted: {sum:?}");
+        assert!(all.text.contains("1 not merged"), "{}", all.text);
+        assert_eq!(all.tone.as_deref(), Some("bad"), "the card does not claim all is fine");
+        // The same two subs, both landed, are not marked.
+        let st2 = state();
+        let root2 = tempfile::tempdir().unwrap();
+        let (main2, subs2) = world(&st2, "merged", Path::new("."), &["x", "y"]);
+        for s in &subs2 {
+            stored_finish(&st2, root2.path(), s, Facts { commits: Some(1), files_changed: Some(1), merged: Some(true), ..Facts::default() });
+        }
+        let ok = all_finished_entry(&st2, root2.path(), &main2).unwrap();
+        assert!(ok.tone.is_none() && !ok.text.contains("not merged"), "{ok:?}");
+    }
+
     #[test]
     fn a_new_sub_still_running_blocks_the_all_finished_card() {
         let st = state();
