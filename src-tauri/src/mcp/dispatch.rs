@@ -150,8 +150,8 @@ fn request_secret_result(id: &Value, posted: Result<Value, String>) -> Value {
 }
 
 /// The optional `spawn_chat` fields a chat with Use subchats on briefs a sub with.
-const SUBCHAT_BRIEF_KEYS: [&str; 11] = [
-    "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "after", "review", "gate",
+const SUBCHAT_BRIEF_KEYS: [&str; 12] = [
+    "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "after", "review", "gate", "plain",
 ];
 
 /// Session lifecycle: end this one, spawn a sibling chat, or hand off to a

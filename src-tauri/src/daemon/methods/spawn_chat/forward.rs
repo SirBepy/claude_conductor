@@ -414,6 +414,51 @@ mod tests {
         assert!(err.contains("gate: true"), "the error tells the main chat the one thing to change: {err}");
     }
 
+    /// A state that knows `dir` as a project, so a spawn aimed at it passes the
+    /// cwd allowlist.
+    fn state_knowing(dir: &std::path::Path) -> Arc<DaemonState> {
+        let mut settings = Settings::default();
+        let raw = json!({ "id": "sib", "path": dir, "name": "sib", "created_at": "2026-11-05T00:00:00Z" });
+        settings.projects.push(serde_json::from_value(raw).unwrap());
+        DaemonState::new(new_session_map(), SettingsCache::new(settings))
+    }
+
+    #[tokio::test]
+    async fn a_mode_on_chat_spawns_a_sub_in_another_known_project_and_refuses_an_unknown_one() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (hub, sibling) = (missing_dir(), missing_dir());
+        let state = state_knowing(&sibling);
+        caller_in(&state, "hub", &hub);
+        crate::sessions::chat_config::set_subchats_on("hub", true);
+        let r = spawn_as(&state, "hub", &sibling, &full_brief(), false, None, Some("api"), "").await;
+        let err = r["error"].as_str().unwrap();
+        assert!(err.contains("cwd does not exist"), "the guards passed and the spawn reached the sibling's folder: {err}");
+        let r = spawn_as(&state, "hub", &missing_dir(), &full_brief(), false, None, Some("api"), "").await;
+        assert!(r["error"].as_str().unwrap().contains("already knows"), "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn plain_true_from_a_mode_on_chat_is_an_ordinary_spawn_that_needs_a_prompt() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (hub, sibling) = (missing_dir(), missing_dir());
+        let state = state_knowing(&sibling);
+        caller_in(&state, "hub", &hub);
+        crate::sessions::chat_config::set_subchats_on("hub", true);
+        let plain = SubchatArgs { plain: Some(true), ..Default::default() };
+        let r = spawn_as(&state, "hub", &sibling, &plain, false, None, None, "  ").await;
+        assert!(r["error"].as_str().unwrap().starts_with("prompt is required"), "{r:?}");
+        let r = spawn_as(&state, "hub", &sibling, &plain, false, None, None, "look at the admin panel").await;
+        assert!(r["error"].as_str().unwrap().contains("cwd does not exist"), "no brief was demanded: {r:?}");
+        assert!(crate::sessions::chat_config::sub_session_ids().is_empty(), "no sub was made");
+    }
+
+    #[test]
+    fn a_gate_for_another_project_is_named_after_its_folder() {
+        let (hub, admin) = (std::path::Path::new("/work/hub"), std::path::Path::new("/work/zng-admin"));
+        assert_eq!(super::super::default_gate_name(hub, hub), "Gate");
+        assert_eq!(super::super::default_gate_name(hub, admin), "Gate: zng-admin");
+    }
+
     #[tokio::test]
     async fn a_plain_spawn_still_needs_a_prompt() {
         let state = test_state();

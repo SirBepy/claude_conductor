@@ -173,8 +173,9 @@ pub fn resolve_tier(model: Option<&str>, effort: Option<&str>) -> Result<(String
     Ok((model, effort))
 }
 
-/// A sub stays in its main chat's project. `target` is the already-resolved
-/// spawn directory, `caller_cwd` the main chat's own.
+/// "Move into main chat" only adopts a chat from the main chat's own project.
+/// `target` is the chat's directory, `caller_cwd` the main chat's own. A fresh
+/// sub is not held to this: `plan` lets it run in any project the app knows.
 pub fn check_same_project(caller_cwd: &std::path::Path, target: &std::path::Path) -> Result<(), String> {
     if project_key(caller_cwd) == project_key(target) {
         return Ok(());
@@ -182,14 +183,25 @@ pub fn check_same_project(caller_cwd: &std::path::Path, target: &std::path::Path
     Err(other_project_refusal(caller_cwd))
 }
 
-/// In mode-on every local spawn becomes a sub, so there is no spawn the main
-/// chat can make for another project. The only ways out are Joe's.
+/// Adopting a chat from another project is Joe's call to make from that chat.
 fn other_project_refusal(caller_cwd: &std::path::Path) -> String {
     format!(
         "Subs run in this chat's own project ({}) only. To work in another project, ask Joe to start a chat there, or to turn off Use subchats for this chat.",
         caller_cwd.display()
     )
 }
+
+/// A sub's folder must be this chat's own or a project the app already knows,
+/// never an arbitrary path (the same allowlist as a plain `spawn_chat`).
+fn unknown_project_refusal(caller_cwd: &std::path::Path, requested: &str) -> String {
+    format!(
+        "A sub runs in this chat's own project ({}) or a project Conductor already knows, and {requested} is neither. Ask Joe to open that project in Conductor first, or pass plain=true to open an ordinary chat there instead.",
+        caller_cwd.display()
+    )
+}
+
+/// Said when `plain: true` comes with a field that only a sub has.
+pub const PLAIN_WITH_SUB_FIELDS: &str = "plain: true opens an ordinary chat, so gate and after (which only a sub has) must be left out. Drop them, or drop plain to start a sub.";
 
 /// `Err` when `caller` is itself a sub: it may neither spawn nor respawn.
 pub fn refuse_sub_caller(state: &DaemonState, caller: &str) -> Result<(), String> {
@@ -226,26 +238,35 @@ pub fn plan(
         }
         return Ok(None);
     }
+    // An ordinary chat: the normal spawn path applies its own project allowlist
+    // and account rules, exactly as for a chat with the mode off.
+    if args.plain == Some(true) {
+        let has_after = args.after.as_deref().is_some_and(|a| !a.trim().is_empty());
+        if gate || has_after {
+            return Err(PLAIN_WITH_SUB_FIELDS.to_string());
+        }
+        return Ok(None);
+    }
     // The mode refuses an API-credit chat when it is turned on, but the account
     // can change under a chat that already has it on.
     let account = Some(inherited.account_id.as_str()).filter(|a| !a.is_empty());
     if let Some(reason) = super::refusal_for_account(account, accounts) {
         return Err(reason.to_string());
     }
-    // Before the brief: a thin brief aimed at another project should hear that
-    // the project is the problem, since filling in the brief would not help.
-    // `resolve_target_cwd` only fails for a directory that is neither this
-    // chat's own nor a known project, which for a sub is the same refusal.
+    // Before the brief: a thin brief aimed at an unknown folder should hear that
+    // the folder is the problem, since filling in the brief would not help. A sub
+    // may run in a project other than its main chat's: every later step (writer
+    // slot, worktree, checks, gate push) reads the sub's own folder, and its
+    // cards route by parent id, so only the allowlist matters here.
     let target = crate::daemon::methods::spawn_chat::resolve_target_cwd(
         &caller.cwd,
         std::path::Path::new(cwd),
         &state.settings.snapshot().projects,
     )
-    .map_err(|_| other_project_refusal(&caller.cwd))?;
-    check_same_project(&caller.cwd, &target)?;
+    .map_err(|_| unknown_project_refusal(&caller.cwd, cwd))?;
     let mut brief = if gate {
         let brief = gate_brief(prompt, caller_id)?;
-        refuse_second_gate(state, caller_id)?;
+        refuse_second_gate(state, caller_id, &target)?;
         brief
     } else {
         let brief = validate(name, args, caller_id)?;
@@ -307,12 +328,15 @@ fn refuse_duplicate_name(state: &DaemonState, parent: &str, name: Option<&str>) 
     ))
 }
 
-/// A parent has one gate at a time: two would race on the same push and on the
-/// repo's writer slot. `Err` names the running one.
-fn refuse_second_gate(state: &DaemonState, parent: &str) -> Result<(), String> {
-    match running_subs(&state.registry, parent).into_iter().find(|i| super::is_gate(&i.session_id)) {
+/// A parent has one gate per project at a time: two would race on the same push
+/// and on the repo's writer slot. Gates in different projects push different
+/// repos, so a hub chat may run one in each. `Err` names the running one.
+fn refuse_second_gate(state: &DaemonState, parent: &str, target: &std::path::Path) -> Result<(), String> {
+    let key = project_key(target);
+    let same_project = |i: &Instance| project_key(&i.cwd) == key;
+    match running_subs(&state.registry, parent).into_iter().find(|i| super::is_gate(&i.session_id) && same_project(i)) {
         Some(running) => Err(format!(
-            "This chat already has a gate sub running ({}). A push has one gate at a time: wait for it to finish, or hand Joe's request to it with the subchat tool.",
+            "This chat already has a gate sub running for this project ({}). A push has one gate at a time: wait for it to finish, or hand Joe's request to it with the subchat tool.",
             label(&running)
         )),
         None => Ok(()),
@@ -592,50 +616,121 @@ mod tests {
         assert!(plan_as(&st, "holder-b", &on(), Some("n"), &complete()).is_err());
     }
 
-    #[test]
-    fn a_cwd_outside_the_main_chats_project_is_refused() {
-        let st = state();
-        row(&st, "main");
-        let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
-        let err = plan(&st, "main", &on(), elsewhere, None, None, None, Some("n"), &complete(), &[]).err().expect("refused");
-        assert!(err.contains("own project"), "{err}");
+    fn elsewhere() -> &'static str {
+        if cfg!(windows) { "C:\\Windows" } else { "/etc" }
+    }
+
+    /// A state that knows one extra project, `dir`, besides the caller's own folder.
+    fn state_knowing(dir: &std::path::Path) -> Arc<DaemonState> {
+        let mut settings = Settings::default();
+        let raw = serde_json::json!({ "id": "other", "path": dir, "name": "other", "created_at": "2026-11-05T00:00:00Z" });
+        settings.projects.push(serde_json::from_value::<crate::types::ProjectConfig>(raw).unwrap());
+        DaemonState::new(new_session_map(), SettingsCache::new(settings))
+    }
+
+    fn plan_in(st: &DaemonState, parent: &str, dir: &std::path::Path, prompt: Option<&str>, name: Option<&str>, args: &SubchatArgs) -> Result<Option<SubPlan>, String> {
+        plan(st, parent, &on(), &dir.to_string_lossy(), prompt, None, None, name, args, &[])
     }
 
     #[test]
-    fn the_project_refusal_points_at_ways_out_that_exist() {
+    fn a_cwd_that_is_neither_the_main_chats_nor_a_known_project_is_refused() {
         let st = state();
         row(&st, "main");
-        let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
-        for hit in [
-            plan(&st, "main", &on(), elsewhere, None, None, None, Some("n"), &complete(), &[]).err().unwrap(),
-            check_same_project(std::path::Path::new("/a"), std::path::Path::new("/b")).unwrap_err(),
-        ] {
-            // In mode-on every local spawn becomes a sub, so "start a normal
-            // chat without the subchats fields" would send the caller nowhere.
-            assert!(!hit.contains("normal chat"), "{hit}");
-            assert!(hit.contains("Joe") && hit.contains("Use subchats"), "{hit}");
-        }
+        let err = plan(&st, "main", &on(), elsewhere(), None, None, None, Some("n"), &complete(), &[]).err().expect("refused");
+        assert!(err.contains("already knows"), "{err}");
     }
 
     #[test]
-    fn a_thin_brief_aimed_at_another_project_gets_the_project_error_first() {
+    fn the_unknown_project_refusal_points_at_ways_out_that_exist() {
         let st = state();
         row(&st, "main");
-        let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
-        let err = plan(&st, "main", &on(), elsewhere, None, None, None, None, &SubchatArgs::default(), &[])
+        let hit = plan(&st, "main", &on(), elsewhere(), None, None, None, Some("n"), &complete(), &[]).err().unwrap();
+        assert!(hit.contains("Joe") && hit.contains("plain=true"), "{hit}");
+        // Adoption keeps its own-project rule, with the Joe-only way out.
+        let adopt = check_same_project(std::path::Path::new("/a"), std::path::Path::new("/b")).unwrap_err();
+        assert!(adopt.contains("Joe") && adopt.contains("Use subchats"), "{adopt}");
+    }
+
+    #[test]
+    fn a_thin_brief_aimed_at_an_unknown_folder_gets_the_project_error_first() {
+        let st = state();
+        row(&st, "main");
+        let err = plan(&st, "main", &on(), elsewhere(), None, None, None, None, &SubchatArgs::default(), &[])
             .err()
             .expect("refused");
-        assert!(err.contains("own project"), "{err}");
+        assert!(err.contains("already knows"), "{err}");
         assert!(!err.contains("done_when"), "the brief error must not win: {err}");
     }
 
     #[test]
-    fn a_known_but_different_project_is_refused_for_a_sub() {
+    fn adopting_a_chat_from_a_different_project_is_still_refused() {
         let caller = std::path::PathBuf::from(if cfg!(windows) { "C:\\proj-a" } else { "/proj-a" });
         let other = std::path::PathBuf::from(if cfg!(windows) { "C:\\proj-b" } else { "/proj-b" });
         assert!(check_same_project(&caller, &caller).is_ok());
         let err = check_same_project(&caller, &other).unwrap_err();
         assert!(err.contains("own project"), "{err}");
+    }
+
+    // ── a sub in another known project ─────────────────────────────────────
+
+    #[test]
+    fn a_sub_may_run_in_another_known_project() {
+        let other = tempfile::tempdir().unwrap();
+        let st = state_knowing(other.path());
+        row(&st, "xp-main");
+        let p = plan_in(&st, "xp-main", other.path(), None, Some("api"), &complete()).unwrap().expect("a sub in the other project");
+        assert_eq!(p.parent, "xp-main", "its cards still route to the main chat");
+    }
+
+    #[test]
+    fn a_sub_in_another_project_still_cannot_reach_an_unknown_folder() {
+        let other = tempfile::tempdir().unwrap();
+        let st = state_knowing(other.path());
+        row(&st, "xp-allow");
+        let err = plan(&st, "xp-allow", &on(), elsewhere(), None, None, None, Some("n"), &complete(), &[]).err().expect("refused");
+        assert!(err.contains("already knows"), "{err}");
+    }
+
+    /// `after` is keyed by the parent's sub names, so a sub in one project can wait
+    /// on a sub in another.
+    #[test]
+    fn after_orders_subs_across_projects() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let other = tempfile::tempdir().unwrap();
+        let st = state_knowing(other.path());
+        row(&st, "xp-after");
+        sub_row(&st, "xp-after-a", "xp-after", "migrate");
+        let waits = plan_in(&st, "xp-after", other.path(), None, Some("api"), &after_args("migrate")).unwrap().unwrap();
+        assert_eq!(waits.hold.as_ref().map(|h| h.target_name.as_str()), Some("migrate"));
+    }
+
+    // ── plain: true ────────────────────────────────────────────────────────
+
+    fn plain() -> SubchatArgs {
+        SubchatArgs { plain: Some(true), ..Default::default() }
+    }
+
+    #[test]
+    fn plain_true_opens_an_ordinary_chat_in_any_known_project_without_a_brief() {
+        let other = tempfile::tempdir().unwrap();
+        let st = state_knowing(other.path());
+        row(&st, "pl-main");
+        assert!(plan_in(&st, "pl-main", other.path(), Some("look at this"), None, &plain()).unwrap().is_none(), "other project");
+        assert!(plan_in(&st, "pl-main", &cwd(), Some("look at this"), None, &plain()).unwrap().is_none(), "own project");
+        // Without plain the same thin call is still refused for its brief.
+        assert!(plan_in(&st, "pl-main", other.path(), Some("look at this"), None, &SubchatArgs::default()).is_err());
+    }
+
+    #[test]
+    fn plain_true_with_gate_or_after_is_refused() {
+        let st = state();
+        row(&st, "pl-bad");
+        for args in [
+            SubchatArgs { plain: Some(true), gate: Some(true), ..Default::default() },
+            SubchatArgs { plain: Some(true), after: Some("x".into()), ..Default::default() },
+        ] {
+            assert_eq!(plan_in(&st, "pl-bad", &cwd(), Some("p"), None, &args).err().unwrap(), PLAIN_WITH_SUB_FIELDS);
+        }
     }
 
     #[test]
@@ -754,6 +849,21 @@ mod tests {
         plan_gate(&st, "g-three", &on(), Some(GATE_PROMPT), &gate_args()).unwrap().expect("a separate parent");
         st.registry.set_subchat_finished("g-two-first", true);
         plan_gate(&st, "g-two", &on(), Some(GATE_PROMPT), &gate_args()).unwrap().expect("the first one finished");
+    }
+
+    #[test]
+    fn a_gate_in_another_project_is_not_blocked_by_a_running_gate_elsewhere() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let other = tempfile::tempdir().unwrap();
+        let st = state_knowing(other.path());
+        row(&st, "g-xp");
+        running_gate(&st, "g-xp", "g-xp-first");
+        // The running gate sits in the caller's folder, so a second one there is refused...
+        let err = plan_gate(&st, "g-xp", &on(), Some(GATE_PROMPT), &gate_args()).err().expect("same project");
+        assert!(err.contains("already has a gate sub running"), "{err}");
+        // ...but another repo is a separate push with its own slot.
+        let p = plan(&st, "g-xp", &on(), &other.path().to_string_lossy(), Some(GATE_PROMPT), None, None, None, &gate_args(), &[]).unwrap();
+        assert!(p.is_some(), "a gate for the other project");
     }
 
     #[test]
