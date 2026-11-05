@@ -458,6 +458,14 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // client - a paired phone can create exactly one folder, under the
     // desktop's own projects root, never an arbitrary path on disk.
     ("create_project_folder", P),
+    // "Add a project from GitHub" in the new-chat picker. The phone sends a
+    // search string and an `owner/repo`, never a path: the clone lands in
+    // `<projects root>/<repo>` (resolved server-side like the row above),
+    // `full_name` is charset-checked, and a `gh` login is only ever used to
+    // look up that account's own stored token (daemon/methods/github_repos.rs).
+    // Not `M`: a peer machine's own `gh` accounts are not this daemon's to offer.
+    ("github_search_repos", P),
+    ("github_clone_repo", P),
     ("list_project_servers", P),
     ("list_claude_md_scopes", P),
     // Cross-surface draft sync: composer text, AUQ answers, held messages.
@@ -666,7 +674,7 @@ mod tests {
             "list_branch_files",
             "get_git_info", "get_git_dirty", "get_commit_sync", "get_commit_history",
             "push_commits", "list_project_files", "chat_drains", "instance_token_stats", "chat_drain",
-            "create_project_folder", "list_project_servers",
+            "create_project_folder", "github_search_repos", "github_clone_repo", "list_project_servers",
             "list_claude_md_scopes",
             "get_session_drafts", "set_composer_draft", "clear_composer_draft",
             "set_auq_draft", "clear_auq_draft", "add_held_message",

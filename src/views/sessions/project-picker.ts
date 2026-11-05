@@ -41,6 +41,7 @@ import {
   type AddProjectDeps,
   renderNoMatches,
 } from "./project-picker/add-project";
+import { newGithubFlow, resetGithub, handleGithubKey } from "./project-picker/github-add";
 
 export type SortChoice = "name" | "recent" | "todos";
 export const SORT_STORAGE_KEY = "claude_companion_sessions_modal_sort";
@@ -207,7 +208,7 @@ export function openProjectPickerModal(
     // Stored root wins over the inference; see projects-root.ts. Read once per
     // open, refreshed when the user repoints it. Shared with add-project.ts
     // the same way (object, see its AddProjectState doc).
-    const addProjectState: AddProjectState = { projectsRootStored: null };
+    const addProjectState: AddProjectState = { projectsRootStored: null, github: newGithubFlow() };
     applyStoredRoot(settingsRead.cached);
 
     const persistFavorites = (next: FavoriteSlots): void => {
@@ -435,6 +436,7 @@ export function openProjectPickerModal(
               .value=${filter}
               @input=${(e: Event) => {
                 filter = (e.target as HTMLInputElement).value;
+                resetGithub(addProjectState.github);
                 selectedIdx = 0;
                 renderModal();
               }}
@@ -450,6 +452,16 @@ export function openProjectPickerModal(
                     return;
                   }
                 }
+                // The GitHub search lives in the empty-results state; it takes
+                // Escape (back to the actions), Enter (start / pick) and the
+                // arrows before the local list's own handling below.
+                if (handleGithubKey(
+                  e,
+                  filter.trim(),
+                  machineField.machineId === null && computeRows().length === 0,
+                  addProjectState,
+                  addProjectDeps,
+                )) return;
                 if (e.key === "Escape") {
                   if (filter !== "") {
                     e.preventDefault();

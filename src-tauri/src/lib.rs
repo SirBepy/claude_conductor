@@ -419,6 +419,8 @@ pub fn run() {
             ipc::rename_machine,
             ipc::set_machine_profile,
             ipc::browser_status,
+            ipc::github_search_repos,
+            ipc::github_clone_repo,
             ipc::list_machines,
             ipc::list_machine_projects,
             ipc::list_machine_accounts,

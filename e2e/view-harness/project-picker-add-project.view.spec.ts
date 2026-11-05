@@ -70,8 +70,98 @@ test.describe("view-harness / add a project inline", () => {
 
     await expect(page.locator(".pp-inline-actions")).toHaveCount(1);
     await expect(page.locator(".pp-act").first()).toContainText('Create "side-quest"');
-    await expect(page.locator(".pp-act").nth(1)).toContainText("Browse for a folder");
+    await expect(page.locator(".pp-act", { hasText: "Browse for a folder" })).toHaveCount(1);
     await expect(page.locator(".project-picker-empty")).toHaveCount(0);
+  });
+
+  // "Add a project from GitHub" (mockup approved 2026-11-05): a third action in
+  // the same empty state. The daemon does the gh work, so the harness answers
+  // the two RPCs and the spec drives the real rows and keys.
+  test.describe("search GitHub", () => {
+    const MINE = {
+      status: "ok", failed_accounts: 0,
+      items: [
+        { full_name: "SirBepy/hubbub", description: "Group chat", private: false, account: "SirBepy", stars: null, on_disk: null },
+        { full_name: "SirBepy/hubbub-api", description: "Backend", private: true, account: "SirBepy", stars: null, on_disk: "C:\\code\\hubbub-api" },
+      ],
+    };
+
+    test("the third action row appears between Create and Browse for a searchable term", async ({ page }) => {
+      await openPicker(page);
+      await page.locator("#project-picker-search").fill("hub");
+
+      await expect(page.locator(".pp-act")).toHaveCount(3);
+      await expect(page.locator(".pp-act").nth(1)).toContainText('Search GitHub for "hub"');
+    });
+
+    test("an owner/repo term is searchable even though it is not a folder name", async ({ page }) => {
+      await openPicker(page);
+      await page.locator("#project-picker-search").fill("SirBepy/hubbub");
+
+      await expect(page.locator(".pp-act", { hasText: "Search GitHub" })).toHaveCount(1);
+      await expect(page.locator(".pp-act", { hasText: "Create" })).toHaveCount(0);
+    });
+
+    test("a path-shaped term offers no GitHub row", async ({ page }) => {
+      await openPicker(page);
+      await page.locator("#project-picker-search").fill("../evil");
+
+      await expect(page.locator(".pp-act", { hasText: "Search GitHub" })).toHaveCount(0);
+    });
+
+    test("clicking the row lists the dev's repos, and Escape steps back to the actions", async ({ page }) => {
+      await openPicker(page, { github_search_repos: MINE });
+      await page.locator("#project-picker-search").fill("hub");
+
+      await page.locator(".pp-act", { hasText: "Search GitHub" }).click();
+
+      await expect(page.locator("[data-gh-row]")).toHaveCount(2);
+      await expect(page.locator(".pp-gh-chip--disk")).toHaveCount(1);
+      const calls = await invokeCalls(page);
+      expect(calls.find((c) => c.cmd === "github_search_repos")!.args).toEqual({ query: "hub", scope: "mine" });
+
+      await page.locator("#project-picker-search").press("Escape");
+      await expect(page.locator(".project-picker-modal")).toHaveCount(1);
+      await expect(page.locator(".pp-act", { hasText: "Search GitHub" })).toHaveCount(1);
+    });
+
+    test("Enter in the empty state searches, then Enter again clones the first repo and resolves the picker", async ({ page }) => {
+      await openPicker(page, {
+        github_search_repos: MINE,
+        github_clone_repo: { path: "C:\\Users\\tecno\\Desktop\\Projects\\hubbub", name: "hubbub" },
+      });
+      const search = page.locator("#project-picker-search");
+      await search.fill("hub");
+      await search.press("Enter");
+      await page.waitForSelector("[data-gh-row]");
+
+      await search.press("Enter");
+
+      await expect(page.locator(".project-picker-modal")).toHaveCount(0);
+      const calls = await invokeCalls(page);
+      expect(calls.find((c) => c.cmd === "github_clone_repo")!.args).toEqual({ fullName: "SirBepy/hubbub", account: "SirBepy" });
+    });
+
+    test("typing again drops the results instead of leaving a stale list", async ({ page }) => {
+      await openPicker(page, { github_search_repos: MINE });
+      const search = page.locator("#project-picker-search");
+      await search.fill("hub");
+      await page.locator(".pp-act", { hasText: "Search GitHub" }).click();
+      await page.waitForSelector("[data-gh-row]");
+
+      await search.fill("hubb");
+
+      await expect(page.locator("[data-gh-row]")).toHaveCount(0);
+      await expect(page.locator(".pp-act", { hasText: 'Search GitHub for "hubb"' })).toHaveCount(1);
+    });
+
+    test("gh not signed in explains how to fix it", async ({ page }) => {
+      await openPicker(page, { github_search_repos: { status: "not_signed_in", items: [], failed_accounts: 0 } });
+      await page.locator("#project-picker-search").fill("hub");
+      await page.locator(".pp-act", { hasText: "Search GitHub" }).click();
+
+      await expect(page.locator(".pp-gh-state")).toContainText("gh auth login");
+    });
   });
 
   test("the Create row shows the inferred projects root, with no setting configured", async ({ page }) => {
