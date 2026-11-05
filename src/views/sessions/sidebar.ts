@@ -8,7 +8,7 @@ import {
   scheduledPendingPlaceholderIds,
   isSubchat,
 } from "./sessions-helpers";
-import { state } from "./state";
+import { state, windowIdOf } from "./state";
 import { pendingPromptSessionIds, clearPendingPrompt } from "./permission-modal";
 import { reconcileList, loadAnimEnabled } from "./sidebar-anim";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
@@ -201,7 +201,7 @@ export async function refreshSessions(): Promise<boolean> {
     // no row to badge, and its result reaches Joe as a card in the main chat.
     for (const s of next) {
       const wasBusy = state.prevBusyMap.get(s.session_id);
-      if (wasBusy === true && !s.busy && s.session_id !== state.selectedId && !isSubchat(s)) {
+      if (wasBusy === true && !s.busy && s.session_id !== windowIdOf(state.selectedId) && !isSubchat(s)) {
         unread.add(s.session_id);
       }
     }

@@ -20,7 +20,7 @@ import {
   isSubchat,
 } from "./sessions-helpers";
 import { renderProjectRail } from "./project-rail";
-import { state } from "./state";
+import { state, windowIdOf } from "./state";
 import { isRemote } from "../../shared/transport";
 import { pendingPromptSessionIds, isSubchatsOn } from "./permission-modal";
 import { mainChatInfo } from "./main-chat";
@@ -64,7 +64,10 @@ export function buildSidebarEntries(
   // The viewed chat's parked prompt is already shown as a card; don't also flag
   // its row with the attention alarm (backgrounded parked prompts still badge).
   const attention = pendingPromptSessionIds();
-  if (state.selectedId) attention.delete(state.selectedId);
+  // A sub read in place is shown in its main chat's window, so the main chat is the
+  // open row: its parked cards are already on screen.
+  const openRowId = windowIdOf(state.selectedId);
+  if (openRowId) attention.delete(openRowId);
   // Registry-backed only (see deriveQuestionSet): one source of truth for the
   // question flag, covering background sessions too.
   const question = deriveQuestionSet(listSessions);
@@ -221,7 +224,7 @@ export function buildSidebarEntries(
       for (const s of group) {
         const i = sessionIndex++;
         kbdOrderIds[i] = s.session_id;
-        const isActive = s.session_id === state.selectedId;
+        const isActive = s.session_id === openRowId;
         const kbdHint = i < 9 ? ` data-kbd-hint="${i + 1}"` : "";
         entries.push({
           key: chainRowKey(s.session_id),
@@ -274,7 +277,7 @@ export function buildSidebarEntries(
     });
     if (!hiddenCollapsed) {
       for (const s of hiddenSessions) {
-        const isActive = s.session_id === state.selectedId;
+        const isActive = s.session_id === openRowId;
         entries.push({
           key: chainRowKey(s.session_id),
           html: renderSidebarRow(sessionRowOptions(s, {

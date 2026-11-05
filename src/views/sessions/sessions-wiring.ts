@@ -19,6 +19,7 @@ import { freezePane } from "./pane-freeze";
 import { visibleInterval } from "../../shared/visible-interval";
 import { startHiddenSessionsSync } from "./hidden-sessions-sync";
 import { startMachineProfileSync } from "./machine-icons";
+import { installSubchatRequestListeners, syncSubchatChrome, viewedSubsMainId } from "./subchat-view";
 
 /** Ambient Tauri event API surface, as declared on `Window.__TAURI__` in
  * shared/ipc.ts. Threaded through the wiring helpers below instead of each
@@ -211,6 +212,9 @@ export async function wireInstancesChangedListener(
     // See reconcileEndedSessions for why previousIds is snapshotted before
     // the refresh and why eviction is gated on `refreshed`.
     const previousIds = new Set(state.sessions.map((s) => s.session_id));
+    // Read before the refresh drops the row: if the sub on screen ends, the pane
+    // goes back to its main chat rather than to the empty state.
+    const viewedSubMain = viewedSubsMainId();
     const refreshed = await refreshSessions();
     if (state.mountId !== myMount) return;
     reconcileEndedSessions(previousIds, refreshed);
@@ -267,7 +271,13 @@ export async function wireInstancesChangedListener(
     // recolour the header avatar's status ring (busy -> done, etc.).
     if (state.selectedId && !state.pendingNewSession) {
       const sess = state.sessions.find((s) => s.session_id === state.selectedId);
-      if (sess) {
+      // A sub moved to the sidebar (from this window or another) is the same pane
+      // under a header that no longer matches: build it again as an ordinary chat.
+      if (sess && syncSubchatChrome(sess) === "rebuild") {
+        setActiveSession(null);
+        await selectSession(sess.session_id, pane);
+        if (state.mountId !== myMount) return;
+      } else if (sess) {
         const titleEl = pane.querySelector<HTMLElement>(".session-header .title");
         if (titleEl) typeSwap(titleEl, sessionSubtitle(sess));
         updateHeaderAvatarStatus(pane, sess);
@@ -285,12 +295,18 @@ export async function wireInstancesChangedListener(
       state.selectedId &&
       !state.sessions.find((s) => s.session_id === state.selectedId)
     ) {
-      if (state.renderer) state.renderer.detach();
-      state.renderer = null;
-      state.composer?.destroy();
-      state.composer = null;
-      setActiveSession(null);
-      pane.innerHTML = paneEmptyStateHtml(state.daemonConnected, state.daemonSetupStalled);
+      if (viewedSubMain && state.sessions.some((s) => s.session_id === viewedSubMain)) {
+        // The sub on screen ended: its main chat is still there to go back to.
+        await selectSession(viewedSubMain, pane);
+        if (state.mountId !== myMount) return;
+      } else {
+        if (state.renderer) state.renderer.detach();
+        state.renderer = null;
+        state.composer?.destroy();
+        state.composer = null;
+        setActiveSession(null);
+        pane.innerHTML = paneEmptyStateHtml(state.daemonConnected, state.daemonSetupStalled);
+      }
     }
     // If the selected session's kind changed (e.g. Interactive -> External
     // after "Open in Terminal"), re-render to show the correct read-only UI.
@@ -349,6 +365,16 @@ export async function wireInstancesChangedListener(
       state.heldMessages?.markDelivered(sid, payload.ids ?? []);
     },
   );
+  // A daemon card's "Open it" / "Open the log" (the stalled-sub and checkup
+  // cards) reach this window as notifier events; the window showing the card's
+  // main chat opens the sub in place or the file viewer.
+  state.unlistenSubchat = await installSubchatRequestListeners({
+    open: (id) => selectSession(id, pane),
+    reopen: async (id) => {
+      setActiveSession(null);
+      await selectSession(id, pane);
+    },
+  });
   // Poll fallback: the daemon->app notifier is lossy under pipe backpressure,
   // so a dropped instances_changed frame used to freeze a row's busy/awaiting
   // until an unrelated event happened to fire another broadcast. This heals

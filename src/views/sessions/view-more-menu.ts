@@ -24,7 +24,7 @@ import {
   whenDoneMenuHtml,
   whenDoneAction,
 } from "./when-done";
-import { state } from "./state";
+import { state, windowIdOf } from "./state";
 import {
   buildChatMenuBlock,
   closeActiveChatSubmenu,
@@ -275,14 +275,15 @@ const viewMenu = createMoreMenu<[]>({
           // genuinely rate-limited, closing, or needing input.
           const unread = loadUnreadSet();
           const attention = pendingPromptSessionIds();
-          if (state.selectedId) attention.delete(state.selectedId);
+          const openRowId = windowIdOf(state.selectedId);
+          if (openRowId) attention.delete(openRowId);
           const question = deriveQuestionSet(hiddenSessions);
           for (const id of pendingPromptSessionIds()) question.add(id);
           const rateLimited = new Set(hiddenSessions.filter(isBlocked).map((s) => s.session_id));
           const closing = new Set(hiddenSessions.filter((s) => s.closing).map((s) => s.session_id));
           sub.innerHTML = `<ul class="sessions-list smore-hidden-list">${hiddenSessions
             .map((s) => renderSidebarRow(sessionRowOptions(s, {
-              isActive: s.session_id === state.selectedId,
+              isActive: s.session_id === openRowId,
               unread, attention, question, rateLimited, closing,
               sort, drainMap: new Map(), scheduledCountMap: new Map(), kbdHint: "",
             })))

@@ -317,6 +317,16 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "preview" => {
             let _ = app.emit("preview", params);
         }
+        // A stalled-sub or stopped-sub card's "Open it" (`subchats::stall`), and the
+        // checkup card's "Open the log" (`subchats::checkup`). Pure forwards: the
+        // main chat's window opens the sub in place / the file viewer, and only the
+        // window showing `display_session_id` acts on them.
+        "subchat_open_requested" => {
+            let _ = app.emit("subchat-open-requested", params);
+        }
+        "subchat_log_open_requested" => {
+            let _ = app.emit("subchat-log-open-requested", params);
+        }
         // "permission_request" and "question_request" are intentionally NOT handled
         // here. Both are delivered via the reliable `list_pending_prompts` poll (see
         // `spawn_pending_prompt_poll`) because the broadcast can silently drop frames

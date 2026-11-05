@@ -2,7 +2,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { invoke } from "../../shared/ipc";
 import { sessionEvents } from "../../shared/chat/event-store";
 import type { Instance } from "../../types/ipc.generated";
-import { state, setActiveSession } from "./state";
+import { state, setActiveSession, windowIdOf } from "./state";
 import { getSettings } from "../../shared/state";
 import {
   projectName,
@@ -24,6 +24,7 @@ import { snapshotActiveCardDraftIn } from "./permission-modal/question-state";
 import { savePendingPromptDraft } from "./permission-modal/gating";
 import { expandActiveCard, hasActiveCardForSession } from "./permission-modal/question-state";
 import { SessionHeader, projectDashboardOpener } from "./session-header";
+import { decorateSubchatHeader } from "./subchat-view";
 import { closeCodeMode } from "./code-mode/code-mode";
 import { setCodeModeChatProvider } from "./code-mode/entry";
 import { applyHeaderMerge } from "./mobile-header-merge";
@@ -161,8 +162,9 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     // sidebar click): nothing remounts, so a question card left collapsed by an
     // earlier minimize or back press has to be brought back here, and a prompt
     // the window never surfaced is looked up the same way a fresh open does.
-    if (hasActiveCardForSession(sessionId)) expandActiveCard({ sessionId });
-    else if (!replayPendingPrompt(sessionId)) void rehydrateAndReplay(sessionId);
+    const windowId = windowIdOf(sessionId) ?? sessionId;
+    if (hasActiveCardForSession(windowId)) expandActiveCard({ sessionId: windowId });
+    else if (!replayPendingPrompt(windowId)) void rehydrateAndReplay(windowId);
     return;
   }
   // Snapshot any in-progress AUQ answer before the pane is replaced, so it
@@ -170,7 +172,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   if (state.selectedId) {
     // The card in this chat's window may be a hidden sub's: its draft belongs
     // to the sub's own parked slot, not the main chat's.
-    const snap = snapshotActiveCardDraftIn(state.selectedId);
+    const snap = snapshotActiveCardDraftIn(windowIdOf(state.selectedId) ?? state.selectedId);
     if (snap) savePendingPromptDraft(snap.askerId, snap.draft);
     // Scroll position must be read BEFORE the pane's DOM is replaced below - a
     // detached transcript reports scrollTop 0.
@@ -265,6 +267,16 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     `  <div class="session-composer"></div>`,
     `</div>`,
   ].join("");
+  // A sub read in place gets its back arrow and "Move to sidebar"; a chat with
+  // subs gets their count. Before the header is in the pane, so the phone's
+  // header merge below sees the finished slots.
+  decorateSubchatHeader(header, sess, {
+    open: (id) => selectSession(id, pane),
+    reopen: async (id) => {
+      setActiveSession(null);
+      await selectSession(id, pane);
+    },
+  });
   pane.insertBefore(header.el, pane.firstChild);
   // This header is rebuilt per session, so the phone's relocated back / ⋮ have
   // to be re-homed into the fresh one (todo 702).
@@ -360,12 +372,15 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
 
   // If this chat parked a permission/question prompt while it was in the
   // background, surface it now that the pane (and composer anchor) is mounted.
-  if (!replayPendingPrompt(sessionId)) {
+  // A sub's pane is its main chat's window, so it is the main chat's cards (the
+  // sub's own among them) that belong on screen.
+  const windowId = windowIdOf(sessionId) ?? sessionId;
+  if (!replayPendingPrompt(windowId)) {
     // Nothing parked locally. The park does NOT survive a window rebuild (each
     // window is its own module realm) and the daemon push fires each id once,
     // so ask the daemon directly before concluding there's nothing to show -
     // otherwise the card is gone for good while the turn still waits on it.
-    void rehydrateAndReplay(sessionId);
+    void rehydrateAndReplay(windowId);
   }
 }
 

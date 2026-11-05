@@ -136,7 +136,7 @@ pub async fn send_message(
     app: AppHandle,
 ) -> Result<String, String> {
     let prompt = blocks_to_prompt_text(&blocks);
-    let (model, effort, account_id, mirrored) = {
+    let (model, effort, account_id, mirrored, wakes_sub) = {
         let inst = state
             .cached_instances
             .lock()
@@ -160,13 +160,27 @@ pub async fn send_message(
                 } else {
                     ("opus".to_string(), "high".to_string())
                 };
-                (model, effort, i.account_id.clone(), i.machine.is_some())
+                // A finished or frozen sub has no child: the daemon wakes it with a new
+                // one, whose broadcast channel this window is not attached to yet.
+                let wakes_sub = i.subchat_of.is_some() && (i.subchat_finished || i.frozen);
+                (model, effort, i.account_id.clone(), i.machine.is_some(), wakes_sub)
             }
-            None => ("opus".to_string(), "high".to_string(), None, false),
+            None => ("opus".to_string(), "high".to_string(), None, false, false),
         }
     };
 
-    send_message_daemon(&session_id, &cwd, &prompt, &model, &effort, account_id.as_deref(), mirrored, &state, &app).await
+    let sent = send_message_daemon(&session_id, &cwd, &prompt, &model, &effort, account_id.as_deref(), mirrored, &state, &app).await;
+    if wakes_sub && sent.is_ok() {
+        // Reseed first: the attach is keyed on the row's channel epoch, which the
+        // wake just bumped and the cache has not heard about yet.
+        if let Some(client) = state.client().await {
+            crate::daemon_link::fetch_and_reseed_instances(&client, &state).await;
+        }
+        if let Err(e) = super::daemon_bridge::reattach(&app, &session_id).await {
+            log::warn!("send_message: re-attach after waking sub {session_id} failed: {e}");
+        }
+    }
+    sent
 }
 
 /// Whether a failed first send may be answered by respawning the chat through
@@ -327,6 +341,14 @@ pub async fn set_subchats_on(
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.set_subchats_on(&session_id, value).await.map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// "Move to sidebar" on a sub read in place. Forwarded to the daemon, which owns
+/// the registry row and the stored brief it clears.
+#[tauri::command]
+pub async fn move_sub_to_sidebar(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.move_sub_to_sidebar(&session_id).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

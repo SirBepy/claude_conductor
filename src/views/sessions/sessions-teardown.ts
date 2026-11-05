@@ -53,6 +53,10 @@ export function teardownState(): void {
     try { state.unlistenHeldDelivered(); } catch { /* ignore */ }
     state.unlistenHeldDelivered = null;
   }
+  if (state.unlistenSubchat) {
+    try { state.unlistenSubchat(); } catch { /* ignore */ }
+    state.unlistenSubchat = null;
+  }
   if (instancesPollTimer !== null) {
     instancesPollTimer();
     instancesPollTimer = null;

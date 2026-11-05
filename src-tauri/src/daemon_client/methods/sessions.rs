@@ -247,6 +247,11 @@ impl PersistentClient {
         Ok(())
     }
 
+    pub async fn move_sub_to_sidebar(&self, session_id: &str) -> Result<(), ClientError> {
+        self.call("move_sub_to_sidebar", json!({"session_id": session_id})).await?;
+        Ok(())
+    }
+
     pub async fn register_historical(&self, session_id: &str, cwd: &str, account_id: &str) -> Result<(), ClientError> {
         self.call("register_historical", json!({"session_id": session_id, "cwd": cwd, "account_id": account_id})).await?;
         Ok(())
