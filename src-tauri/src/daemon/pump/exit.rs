@@ -31,6 +31,9 @@ pub(crate) async fn run_pump_exit(
         .get(&pump_session.session_id)
         .map(|i| matches!(i.kind, crate::sessions::kinds::InstanceKind::Interactive))
         .unwrap_or(false);
+    // Read before the clear below: a sub that died mid-turn is told apart from one
+    // that died idle by this.
+    let was_busy = state_for_pump.registry.get(&pump_session.session_id).is_some_and(|i| i.busy);
     if is_interactive {
         // Clear busy in case the process exited mid-turn without a result line.
         if state_for_pump.registry.set_busy_false_if_gen(&pump_session.session_id, pump_turn_gen) {
@@ -115,22 +118,31 @@ pub(crate) async fn run_pump_exit(
     if let Some(ref p) = pump_session.hook_settings_path {
         let _ = std::fs::remove_file(p);
     }
-    report_nonzero_exit(&pump_session, child.wait().await.ok()).await;
+    let exit = report_nonzero_exit(&pump_session, child.wait().await.ok()).await;
+    // A hidden sub has no row and no reader, so a death that nothing else
+    // surfaces gets a card. After the wait so the card can quote the last error.
+    if is_interactive {
+        crate::daemon::subchats::turn_end::on_process_died(&state_for_pump, &pump_session, was_busy, exit);
+    }
 }
 
 /// A `claude -p` turn exits 0. Anything else means the CLI died on us, and its
 /// stdout carried no result line, so without this the chat shows nothing at all.
 /// Replay the stderr tail as a notification so the failure names itself (expired
 /// login, MCP init failure, a panic) instead of reading as a frozen chat.
-async fn report_nonzero_exit(session: &Arc<Session>, status: Option<std::process::ExitStatus>) {
+/// Returns what it learned, for a hidden sub's card.
+async fn report_nonzero_exit(
+    session: &Arc<Session>,
+    status: Option<std::process::ExitStatus>,
+) -> Option<crate::daemon::subchats::turn_end::ExitInfo> {
     let code = match status {
-        Some(s) if s.success() => return,
+        Some(s) if s.success() => return None,
         Some(s) => s.code(),
-        None => return,
+        None => return None,
     };
     // A kill we asked for is not a crash worth reporting.
     if session.expected_exit.load(std::sync::atomic::Ordering::SeqCst) {
-        return;
+        return None;
     }
     // The fatal line is the LAST thing the child writes, so the tail is only
     // trustworthy once the drain task has seen EOF. Bounded: a child that never
@@ -162,6 +174,7 @@ async fn report_nonzero_exit(session: &Arc<Session>, status: Option<std::process
         session,
         crate::types::chat::ChatEvent::Notification { kind: "process_error".into(), body },
     );
+    Some(crate::daemon::subchats::turn_end::ExitInfo { code, stderr_tail: tail })
 }
 
 #[cfg(test)]

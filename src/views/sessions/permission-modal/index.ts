@@ -29,6 +29,7 @@ import { cancelAuqPush } from "./auq-draft-sync";
 import {
   allowPermission,
   autoAllowIfRemembered,
+  deferPendingPrompt,
   displayIdOf,
   needsHumanApproval,
   hydrateAutoAccept,
@@ -64,7 +65,7 @@ export {
   pendingPromptSessionIds,
 } from "./gating";
 export { dismissQuestionCard } from "./question-ui";
-export { autoAcceptParked, replayPendingPrompt, rehydratePendingPrompts, rehydrateAndReplay, reopenPendingPrompt, surfaceNextForDisplay } from "./resurface";
+export { autoAcceptParked, replayPendingPrompt, rehydratePendingPrompts, rehydrateAndReplay, reopenPendingPrompt, surfaceNextForDisplay, surfaceParkedPrompt } from "./resurface";
 import { surfaceNextForDisplay } from "./resurface";
 export { showQuestionCard };
 
@@ -232,6 +233,18 @@ export function handlePermissionRequested(payload: PermissionRequestedPayload): 
     // of mounting it over the chat now on screen.
     if (!stillSelected() && payload.session_id) {
       storePendingPrompt(payload.session_id, { kind: "permission", payload });
+      rerenderSidebar();
+      return;
+    }
+    // The window already shows ANOTHER asker's question: mounting this card would
+    // tear it down under Joe's hands (ensureHost), half-typed answers and all.
+    // Held behind it instead, as a second question is, with a chip in the picker
+    // and a turn to be shown when the card in front is done. A slot already
+    // occupied for this asker keeps today's behaviour, since a slot holds one prompt.
+    const onScreen = getActiveCardAsker();
+    if (payload.session_id && onScreen && onScreen !== payload.session_id && !peekPendingPrompt(payload.session_id)) {
+      deferPendingPrompt(payload.session_id, { kind: "permission", payload });
+      refreshActiveCardAskers();
       rerenderSidebar();
       return;
     }

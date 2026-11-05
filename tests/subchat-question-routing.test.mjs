@@ -316,6 +316,170 @@ describe("answering and skipping a sub's card", () => {
     expect(renderCalls.at(-1).sessionId).toBe(b);
   });
 
+  describe("a Skip on a sub that is mid-turn", () => {
+    it("reaches the sub through the daemon's held list when no chat composer is mounted", async () => {
+      const main = fresh("main"); const sub = fresh("sub");
+      const opts = await mountSubCard(main, sub);
+      const normal = invokeMock.getMockImplementation();
+      invokeMock.mockImplementation((cmd, ...rest) =>
+        cmd === "send_message" ? Promise.reject(new Error("SESSION_BUSY: sub is mid-turn")) : normal(cmd, ...rest));
+      const savedHeld = state.heldMessages;
+      state.heldMessages = null; // the dashboard page: no chat composer, so no held-message queue object
+      try {
+        await opts.onCancel();
+      } finally {
+        state.heldMessages = savedHeld;
+        invokeMock.mockImplementation(normal);
+      }
+      expect(sent("add_held_message")).toEqual([{ sessionId: sub, blocks: [{ type: "text", text: submit.SUB_SKIP_MESSAGE }] }]);
+      expect(document.body.textContent).not.toContain("Skip notice failed");
+    });
+
+    it("goes onto the open composer's queue when there is one, and not onto the daemon's twice", async () => {
+      const main = fresh("main"); const sub = fresh("sub");
+      const opts = await mountSubCard(main, sub);
+      const normal = invokeMock.getMockImplementation();
+      invokeMock.mockImplementation((cmd, ...rest) =>
+        cmd === "send_message" ? Promise.reject(new Error("SESSION_BUSY: x")) : normal(cmd, ...rest));
+      const stageFor = vi.fn(() => true);
+      const savedHeld = state.heldMessages;
+      state.heldMessages = { stageFor };
+      try {
+        await opts.onCancel();
+      } finally {
+        state.heldMessages = savedHeld;
+        invokeMock.mockImplementation(normal);
+      }
+      expect(stageFor).toHaveBeenCalledTimes(1);
+      expect(sent("add_held_message")).toHaveLength(0);
+    });
+  });
+
+  describe("a permission prompt that arrives behind another asker's open card", () => {
+    const perm = (main, asker, id) => ({
+      id, tool_name: "Bash", input: { command: "ls" }, session_id: asker, display_session_id: main, sub_name: `name-${asker}`,
+    });
+    const cardUp = (id, asker, main) =>
+      qs.setActiveCard({ id, sessionId: asker, displayId: main, teardown: () => {}, getDraft: () => ({}), expand: () => true });
+
+    it("is held back instead of tearing the question card down, and is offered in the picker", async () => {
+      const main = fresh("main"); const a = fresh("a"); const b = fresh("b"); const qa = fresh("qa");
+      listen([main, a, b]);
+      gating.setSelectedSessionId(main);
+      idx.handleQuestionRequested(subQ(main, a, qa, 2));
+      await flush();
+      cardUp(qa, a, main);
+      idx.handlePermissionRequested(perm(main, b, "pb"));
+      await flush();
+      expect(showPermissionCardSpy).not.toHaveBeenCalled();
+      expect(gating.peekPendingPrompt(b)?.kind).toBe("permission");
+      const chips = askers.askerChips(main, a);
+      expect(chips.map((c) => [c.askerId, c.blocking === true])).toEqual([[b, true], [a, false]]);
+      expect(chips.find((c) => c.askerId === a)?.active).toBe(true);
+    });
+
+    it("shows once the card in front is done", async () => {
+      const main = fresh("main"); const a = fresh("a"); const b = fresh("b"); const qa = fresh("qa");
+      listen([main, a, b]);
+      gating.setSelectedSessionId(main);
+      idx.handleQuestionRequested(subQ(main, a, qa, 1));
+      await flush();
+      cardUp(qa, a, main);
+      idx.handlePermissionRequested(perm(main, b, "pb"));
+      await flush();
+      expect(showPermissionCardSpy).not.toHaveBeenCalled();
+      // Joe answers a's card: it is torn down before onSubmit runs.
+      qs.setActiveCard(null);
+      await renderCalls.at(-1).onSubmit({ "Q1?": "A" }, { additionalMessage: "", attachments: [] });
+      await flush();
+      expect(showPermissionCardSpy).toHaveBeenCalledTimes(1);
+      expect(showPermissionCardSpy.mock.calls[0][0].id).toBe("pb");
+    });
+
+    it("picking its chip brings it up and leaves the question's slot and draft to come back", async () => {
+      const main = fresh("main"); const a = fresh("a"); const b = fresh("b"); const qa = fresh("qa");
+      listen([main, a, b]);
+      gating.setSelectedSessionId(main);
+      idx.handleQuestionRequested(subQ(main, a, qa, 2));
+      await flush();
+      const questionOpts = renderCalls.at(-1);
+      cardUp(qa, a, main);
+      idx.handlePermissionRequested(perm(main, b, "pb"));
+      await flush();
+      expect(showPermissionCardSpy).not.toHaveBeenCalled();
+      questionOpts.onPickAsker(b);
+      await flush();
+      expect(showPermissionCardSpy).toHaveBeenCalledTimes(1);
+      expect(gating.peekPendingPrompt(a)?.payload.id).toBe(qa);
+      // The question was pushed aside for it, so it returns on its own.
+      qs.setActiveCard(null);
+      gating.clearPendingPromptById("pb");
+      idx.surfaceNextForDisplay(main);
+      await flush();
+      expect(renderCalls.at(-1).sessionId).toBe(a);
+    });
+
+    it("the main chat's own permission is held back too, and still comes up when the sub's card is done", async () => {
+      const main = fresh("main"); const a = fresh("a"); const qa = fresh("qa");
+      listen([main, a]);
+      gating.setSelectedSessionId(main);
+      idx.handleQuestionRequested(subQ(main, a, qa, 1));
+      await flush();
+      cardUp(qa, a, main);
+      idx.handlePermissionRequested({ id: "pm", tool_name: "Bash", input: { command: "ls" }, session_id: main });
+      await flush();
+      expect(showPermissionCardSpy).not.toHaveBeenCalled();
+      qs.setActiveCard(null);
+      gating.clearPendingPromptById(qa); // the sub's slot is gone once the daemon resolves it
+      idx.surfaceNextForDisplay(main);
+      await flush();
+      expect(showPermissionCardSpy.mock.calls.map((c) => c[0].id)).toEqual(["pm"]);
+    });
+
+    it("still replaces nothing and parks nothing when no question card is up", async () => {
+      const main = fresh("main"); const b = fresh("b");
+      listen([main, b]);
+      gating.setSelectedSessionId(main);
+      idx.handlePermissionRequested(perm(main, b, "pb2"));
+      await flush();
+      expect(showPermissionCardSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("a parked asker the daemon no longer lists", () => {
+    it("hands the window to the next parked asker instead of leaving it empty", async () => {
+      const main = fresh("main"); const a = fresh("a"); const b = fresh("b"); const qa = fresh("qa"); const qb = fresh("qb");
+      listen([main, a, b]);
+      gating.setSelectedSessionId("somewhere-else");
+      idx.handleQuestionRequested(subQ(main, a, qa, 1));
+      idx.handleQuestionRequested(subQ(main, b, qb, 2));
+      // a was answered on the phone while Joe was away; the daemon lists only b.
+      transportCall.mockResolvedValue([{ id: qb, event: "question-requested", payload: subQ(main, b, qb, 2) }]);
+      gating.setSelectedSessionId(main);
+      expect(idx.replayPendingPrompt(main)).toBe(true);
+      for (let i = 0; i < 6; i++) await flush();
+      expect(renderCalls).toHaveLength(1);
+      expect(renderCalls[0].sessionId).toBe(b);
+    });
+
+    it("walks past several in a row and falls back to the daemon when none is left parked", async () => {
+      const main = fresh("main"); const a = fresh("a"); const b = fresh("b"); const c = fresh("c");
+      const qa = fresh("qa"); const qb = fresh("qb"); const qc = fresh("qc");
+      listen([main, a, b, c]);
+      gating.setSelectedSessionId("somewhere-else");
+      idx.handleQuestionRequested(subQ(main, a, qa, 1));
+      idx.handleQuestionRequested(subQ(main, b, qb, 2));
+      idx.handleQuestionRequested(subQ(main, c, qc, 3));
+      transportCall.mockResolvedValue([{ id: qc, event: "question-requested", payload: subQ(main, c, qc, 3) }]);
+      gating.setSelectedSessionId(main);
+      idx.replayPendingPrompt(main);
+      for (let i = 0; i < 10; i++) await flush();
+      expect(renderCalls.at(-1).sessionId).toBe(c);
+      expect(gating.peekPendingPrompt(a)).toBeNull();
+      expect(gating.peekPendingPrompt(b)).toBeNull();
+    });
+  });
+
   it("a card for another asker arriving while one is on screen parks instead of replacing it", async () => {
     const main = fresh("main"); const a = fresh("a"); const b = fresh("b");
     listen([main, a, b]);

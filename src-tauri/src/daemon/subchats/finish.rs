@@ -244,6 +244,13 @@ pub(crate) async fn request_finish_with(
     if has_background_work(state.registry.turn_activity(sub_id)) {
         return Err("your own background work is still running (a build, a subagent, a watcher or a scheduled wake). Stopping now would kill it. Wait for it to finish, or stop it, then call finish_subchat again.".to_string());
     }
+    // A sub that finishes with its own question card still open leaves Joe a
+    // card whose asker has declared itself done. `ask_user_question` can return
+    // to the sub unconfirmed while the durable card stays queued for the main
+    // chat, so this is reachable, and the right move is to end the turn and wait.
+    if crate::daemon::lifecycle::has_open_prompt(state, sub_id).await {
+        return Err("you have a question or permission card still open for Joe, and finishing now would leave it with nobody to answer. Do not call finish_subchat: end your turn and carry on when his answer arrives, then call finish_subchat.".to_string());
+    }
     let cwd = inst.cwd.clone();
     let own_dirty = match transcript {
         Some(t) => tokio::task::spawn_blocking(move || super::git::own_uncommitted(&t, &cwd))
@@ -253,7 +260,7 @@ pub(crate) async fn request_finish_with(
     };
     if !own_dirty.is_empty() {
         return Err(format!(
-            "you have uncommitted edits to your own files: {}. Commit them (by path, only these files), then call finish_subchat again.",
+            "you have uncommitted edits to your own files: {}. Commit them (by path, only these files, in the repo each one belongs to: a submodule is its own repo), then call finish_subchat again.",
             list_files(&own_dirty)
         ));
     }
@@ -281,15 +288,25 @@ pub(crate) async fn request_finish_with(
 /// Commits a pending finish at turn end. `session` is the live child to stop;
 /// `None` at EOF, when it already exited. Returns whether the sub finished.
 pub fn commit_finish(state: &Arc<DaemonState>, sub_id: &str, session: Option<&Arc<Session>>) -> bool {
-    commit_finish_at(None, state, sub_id, session)
+    let transcript = crate::context_status::resolve_transcript(&state.registry, sub_id);
+    commit_finish_at(None, state, sub_id, session, transcript)
 }
 
-/// [`commit_finish`] with the data dir injected, so tests write to a tempdir.
+/// Said to a sub whose finish was dropped at commit because it edited files after
+/// calling `finish_subchat` (an Edit in the same assistant message as the call is
+/// not seen by the check at the call). Constant, never built from anything the sub
+/// wrote, so it is safe as `is_meta` text. The sub did call finish, so
+/// [`super::NUDGE_TEXT`] ("you did not call it") would be false.
+pub const FINISH_DROPPED_DIRTY_NUDGE: &str = "Your finish_subchat call was not accepted, because files you edited are uncommitted. Commit your own edits, by path and only your files, then call finish_subchat again.";
+
+/// [`commit_finish`] with the data dir and the transcript injected, so tests
+/// write to a tempdir and read a scratch transcript.
 pub(crate) fn commit_finish_at(
     root: Option<&Path>,
     state: &Arc<DaemonState>,
     sub_id: &str,
     session: Option<&Arc<Session>>,
+    transcript: Option<PathBuf>,
 ) -> bool {
     let rt = super::runtime::runtime();
     let Some(mut record) = rt.take_pending_finish(sub_id) else { return false };
@@ -299,9 +316,22 @@ pub(crate) fn commit_finish_at(
     }
     // The Stop hook just refreshed this verdict. Work started after the call
     // would die with the process, and the CLI wakes the sub when it ends, so
-    // dropping the request here costs one more finish call and nothing else.
+    // dropping the request here costs one more finish call and nothing else: the
+    // woken turn's own end goes through the Stop sequence, which blocks a sub that
+    // has not finished.
     if has_background_work(state.registry.turn_activity(sub_id)) {
         log::info!("subchats: {sub_id} finish dropped, background work is running; it will be woken when that ends");
+        return false;
+    }
+    // The call's own check ran mid-turn, so an Edit later in the same assistant
+    // message was not in the transcript yet. Look again now the turn is over; the
+    // sub is nudged with the reason, because the Stop hook already let this turn
+    // end and nothing else would tell it.
+    let own_dirty = transcript.map(|t| super::git::own_uncommitted(&t, &inst.cwd)).unwrap_or_default();
+    if !own_dirty.is_empty() {
+        log::info!("subchats: {sub_id} finish dropped, uncommitted edits: {}", list_files(&own_dirty));
+        rt.set_nudge_text(sub_id, FINISH_DROPPED_DIRTY_NUDGE);
+        rt.set_nudge_due(sub_id);
         return false;
     }
     let owned_root = root.map(Path::to_path_buf).or_else(|| crate::settings::paths::data_dir().ok());
@@ -480,7 +510,7 @@ mod tests {
                 ..FinishRecord::default()
             },
         );
-        assert!(commit_finish_at(Some(data.path()), &st, &sub, None));
+        assert!(commit_finish_at(Some(data.path()), &st, &sub, None, None));
         let row = st.registry.get(&sub).unwrap();
         assert!(row.subchat_finished, "the row is marked finished");
         assert!(row.ended_at.is_none() && row.end_reason.is_none(), "finish is not an end");
@@ -503,7 +533,7 @@ mod tests {
         for expected in [1u32, 2] {
             super::super::runtime::runtime()
                 .set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
-            assert!(commit_finish_at(Some(data.path()), &st, &sub, None));
+            assert!(commit_finish_at(Some(data.path()), &st, &sub, None, None));
             assert_eq!(read_record_in(data.path(), &sub).unwrap().round, expected);
         }
     }
@@ -516,7 +546,7 @@ mod tests {
         super::super::runtime::runtime()
             .set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
         st.registry.set_turn_activity(&sub, TurnActivity::Working);
-        assert!(!commit_finish_at(Some(data.path()), &st, &sub, None));
+        assert!(!commit_finish_at(Some(data.path()), &st, &sub, None, None));
         assert!(!st.registry.get(&sub).unwrap().subchat_finished);
         assert!(read_record_in(data.path(), &sub).is_none());
     }
@@ -525,7 +555,72 @@ mod tests {
     fn commit_without_a_pending_request_does_nothing() {
         let st = state();
         let sub = make_sub(&st, "nopending", Path::new("."));
-        assert!(!commit_finish_at(None, &st, &sub, None));
+        assert!(!commit_finish_at(None, &st, &sub, None, None));
         assert!(!st.registry.get(&sub).unwrap().subchat_finished);
+    }
+
+    #[tokio::test]
+    async fn finish_is_refused_while_the_sub_has_its_own_question_card_open() {
+        let st = state();
+        let dir = tempfile::tempdir().unwrap();
+        let sub = make_sub(&st, "openq", dir.path());
+        st.add_prompt("q-open", "question-requested", json!({"session_id": sub, "seq": 1}), true).await;
+        let e = request_finish(&st, &sub, args()).await.unwrap_err();
+        assert!(e.contains("still open") && e.contains("end your turn"), "names the fix: {e}");
+        assert!(!super::super::runtime::runtime().finish_pending(&sub), "a refusal parks nothing");
+        // A permission card waiting on Joe is the same.
+        st.remove_prompt("q-open").await;
+        st.add_prompt("p-open", "permission-requested", json!({"session_id": sub}), false).await;
+        assert!(request_finish(&st, &sub, args()).await.is_err());
+        // Once it is answered the finish goes through, and a daemon card ABOUT the
+        // sub (its session_id is the main chat's) never blocks it.
+        st.remove_prompt("p-open").await;
+        st.add_prompt("stall", "question-requested", json!({"session_id": "openq-main", "sub_id": sub, "daemon_card": true}), true).await;
+        assert!(request_finish(&st, &sub, args()).await.is_ok());
+    }
+
+    #[test]
+    fn a_finish_with_an_edit_in_the_same_message_is_dropped_at_commit_and_the_sub_is_told() {
+        let (dir, root) = super::super::git::test_repo::init();
+        let late = root.join("late.txt");
+        std::fs::write(&late, "x").unwrap();
+        // The transcript now holds the Write, which the call-time check did not see.
+        let tp = super::super::git::test_repo::transcript(dir.path(), &[("Write", &late)]);
+        let st = state();
+        let sub = make_sub(&st, "lateedit", &root);
+        let data = tempfile::tempdir().unwrap();
+        let rt = super::super::runtime::runtime();
+        rt.set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
+        assert!(!commit_finish_at(Some(data.path()), &st, &sub, None, Some(tp.clone())));
+        assert!(!st.registry.get(&sub).unwrap().subchat_finished);
+        assert!(read_record_in(data.path(), &sub).is_none());
+        assert!(rt.take_nudge_due(&sub), "the sub is told, since nothing else will");
+        assert_eq!(rt.take_nudge_text(&sub), Some(FINISH_DROPPED_DIRTY_NUDGE));
+        // Committed, the same finish goes through.
+        super::super::git::test_repo::git(&root, &["add", "late.txt"]);
+        super::super::git::test_repo::git(&root, &["commit", "-q", "-m", "late"]);
+        rt.set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
+        assert!(commit_finish_at(Some(data.path()), &st, &sub, None, Some(tp)));
+    }
+
+    #[test]
+    fn the_dirty_nudge_text_says_the_sub_did_call_finish_and_carries_no_dash() {
+        assert!(FINISH_DROPPED_DIRTY_NUDGE.contains("was not accepted") && FINISH_DROPPED_DIRTY_NUDGE.contains("finish_subchat"));
+        assert!(!FINISH_DROPPED_DIRTY_NUDGE.contains('\u{2014}'));
+    }
+
+    /// Item 12: a finish dropped because background work started after the call
+    /// tells the sub nothing at that moment, and the sub recovers through the
+    /// Stop sequence once the work ends and wakes it, not by sitting finished-looking.
+    #[test]
+    fn a_finish_dropped_for_background_work_leaves_the_sub_unfinished_with_no_stale_nudge() {
+        let st = state();
+        let sub = make_sub(&st, "bgdrop", Path::new("."));
+        let rt = super::super::runtime::runtime();
+        rt.set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
+        st.registry.set_turn_activity(&sub, TurnActivity::WaitingOnProcess);
+        assert!(!commit_finish_at(None, &st, &sub, None, None));
+        assert!(!rt.take_nudge_due(&sub), "the woken turn's own Stop hook does the telling");
+        assert_eq!(rt.stage(&sub), super::super::runtime::SubStage::Fresh, "the next unfinished end starts the block-nudge-card sequence");
     }
 }

@@ -112,6 +112,11 @@ async function surfaceParkedQuestion(
     return;
   }
   if (recs && !recs.some((r) => r.id === pending.payload.id)) {
+    // Another asker still parked in this window is the next card. Rehydrating
+    // would bail on it (a parked asker may hold a live draft, so it never
+    // re-parks over one), leaving the window with nothing until Joe re-selects
+    // the chat. Replaying picks it, and checks it against the daemon the same way.
+    if (replayPendingPrompt(displayId)) return;
     await rehydrateAndReplay(displayId);
     return;
   }
@@ -119,7 +124,12 @@ async function surfaceParkedQuestion(
 }
 
 /** Shared tail of replay/reopen: render the parked prompt's card, applying the
- *  arrival path's auto-accept / remembered-rule shortcuts. */
+ *  arrival path's auto-accept / remembered-rule shortcuts. Also what the asker
+ *  picker calls to bring a held-back permission up. */
+export function surfaceParkedPrompt(pending: PendingPrompt, reopened = false): void {
+  surfacePending(pending, reopened);
+}
+
 function surfacePending(pending: PendingPrompt, reopened = false): void {
   if (pending.kind === "question") {
     void showQuestionCard(pending.payload, pending.draft, { reopened });

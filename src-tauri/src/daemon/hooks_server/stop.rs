@@ -592,6 +592,22 @@ mod tests {
         assert!(!runtime().finish_pending(&sub), "work started after the call: the finish is dropped, nothing is killed");
     }
 
+    /// A finish dropped because background work started after the call tells the
+    /// sub nothing then. It recovers when that work ends and the CLI wakes it: the
+    /// woken turn is an unfinished end like any other, so it is blocked and told
+    /// to call `finish_subchat`. The dropped finish must not have spent the block.
+    #[tokio::test]
+    async fn a_sub_whose_finish_was_dropped_for_background_work_is_blocked_when_it_wakes_unfinished() {
+        use crate::daemon::subchats::finish::FinishRecord;
+        let (st, sub) = state_with_sub("stop-droprecover");
+        runtime().set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Working, None).await, None, "the turn ends quietly");
+        assert!(!runtime().finish_pending(&sub));
+        assert_eq!(runtime().stage(&sub), SubStage::Fresh);
+        // The background job ends, the CLI wakes the sub, and it stops without finishing.
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, Some("done")).await, Some(SUB_NOT_FINISHED_REASON));
+    }
+
     /// 015b8b4f: a `question` status with no card is blocked. For a sub that
     /// block names the card, and it is the sub's one block.
     #[tokio::test]

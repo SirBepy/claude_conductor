@@ -37,7 +37,6 @@ pub use resume::{continue_sub, end_sub, nudge, request_nudge, ContinueError, NUD
 /// Env var that marks a sub's MCP child, so `finish_subchat` is listed for it
 /// and for no other chat. Read by `mcp::server`, written by `write_mcp_config`.
 pub const SUB_ENV: &str = "CC_SUBCHAT";
-
 mod routing;
 pub use routing::{
     display_session_id, is_sub_session, stamp_prompt_routing, sub_task, UNCONFIRMED_NOTE,
@@ -55,9 +54,14 @@ pub const PARENT_POST_REFUSAL: &str = "A sub does not message its main chat: the
 /// `target` list or its `to`) names that sub's own parent. Broadcasts and posts
 /// to anyone else (siblings, unrelated chats) pass: subs keep the repo channel
 /// to coordinate on shared files.
+///
+/// Compares each id trimmed, because `repo_channel_wake::resolve_targets` trims
+/// before it looks a target up: comparing the raw string let `" main"` pass this
+/// guard and still wake the parent. Session ids are exact (no case folding), the
+/// same as that lookup.
 pub fn parent_post_refusal(state: &DaemonState, caller: &str, addressed: &[String]) -> Option<&'static str> {
     let parent = state.registry.get(caller)?.subchat_of?;
-    addressed.iter().any(|id| *id == parent).then_some(PARENT_POST_REFUSAL)
+    addressed.iter().any(|id| id.trim() == parent).then_some(PARENT_POST_REFUSAL)
 }
 
 /// The one hook point for "a sub just finished". Fired by
@@ -481,6 +485,8 @@ mod tests {
         let to = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert!(parent_post_refusal(&st, "s", &to(&["m"])).is_some());
         assert!(parent_post_refusal(&st, "s", &to(&["sib", "m"])).is_some(), "one parent among many still refuses");
+        assert!(parent_post_refusal(&st, "s", &to(&[" m"])).is_some(), "a padded id still reaches the parent after the lookup trims it");
+        assert!(parent_post_refusal(&st, "s", &to(&["m\n"])).is_some());
         assert!(parent_post_refusal(&st, "s", &to(&["sib"])).is_none(), "a sibling is fine");
         assert!(parent_post_refusal(&st, "s", &to(&["x"])).is_none());
         assert!(parent_post_refusal(&st, "s", &[]).is_none(), "a broadcast names nobody");
