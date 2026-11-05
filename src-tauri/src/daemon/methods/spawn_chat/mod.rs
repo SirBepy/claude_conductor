@@ -155,6 +155,50 @@ pub(crate) async fn spawn_chat(
         .map_err(|e| e.to_string())?;
     let sid = session.session_id.clone();
 
+    let first_message = sub.as_ref().map(|p| p.first_message.clone()).unwrap_or_else(|| prompt.to_string());
+    // Lazy: nothing is written to the child until `adopt_spawned` awaits it, after
+    // the row is registered and marked.
+    let first_send = async { lifecycle::send_message(&session, &first_message, false).await.map_err(|e| e.to_string()) };
+    let spawned = Spawned {
+        sid: &sid,
+        cwd: &target_cwd,
+        model: &model,
+        effort: &effort,
+        account_id: &session.account_id,
+    };
+    adopt_spawned(state, &spawned, caller_session_id, name, respawn, &inherited, &mut sub, first_send).await?;
+    Ok(sid)
+}
+
+/// The facts about a freshly spawned child that registering it needs.
+struct Spawned<'a> {
+    sid: &'a str,
+    cwd: &'a std::path::Path,
+    model: &'a str,
+    effort: &'a str,
+    account_id: &'a str,
+}
+
+/// Everything `spawn_chat` does once the child exists: register its row, link
+/// it to the caller (successor or spawner, or the sub's parent), then send the
+/// first message through `first_send`. Split out so the registration order and
+/// the failed-send cleanup can be tested without a real `claude` child.
+///
+/// A hidden sub whose first send fails is ended: its row is hidden everywhere
+/// and counts as running, so left alone it would hold one of the parent's five
+/// slots forever while the parent gets an error and retries. An ordinary chat
+/// stays as it was, since Joe can see and close it.
+async fn adopt_spawned(
+    state: &Arc<DaemonState>,
+    spawned: &Spawned<'_>,
+    caller_session_id: &str,
+    name: Option<&str>,
+    respawn: bool,
+    inherited: &crate::sessions::chat_config::ChatConfig,
+    sub: &mut Option<crate::daemon::subchats::spawn::SubPlan>,
+    first_send: impl std::future::Future<Output = Result<(), String>>,
+) -> Result<(), String> {
+    let sid = spawned.sid;
     // Respawn only: character is keyed by session id and never survives a fresh
     // id, so the successor would otherwise reroll a different avatar
     // mid-handoff. A `spawn_chat` sibling is a separate chat and must NOT wear
@@ -172,48 +216,63 @@ pub(crate) async fn spawn_chat(
     );
     crate::daemon::session_registration::register_new_session(
         state,
-        &sid,
-        &target_cwd,
-        &model,
-        &effort,
-        &session.account_id,
+        sid,
+        spawned.cwd,
+        spawned.model,
+        spawned.effort,
+        spawned.account_id,
         &now,
         auto_accept,
         character_id.as_deref(),
         false,
     );
     if let Some(n) = name {
-        state.registry.set_name(&sid, n.to_string());
+        state.registry.set_name(sid, n.to_string());
     }
     if respawn {
         // Before the successor link is visible: following that link is what
         // re-attaches the pane, and attach reconciles the held set from this
         // store, so the queue has to be under the new id by then.
-        if state.draft_store.move_held(caller_session_id, &sid) > 0 {
+        if state.draft_store.move_held(caller_session_id, sid) > 0 {
             crate::daemon::methods::drafts::sync_held_count(state, caller_session_id);
-            crate::daemon::methods::drafts::sync_held_count(state, &sid);
+            crate::daemon::methods::drafts::sync_held_count(state, sid);
         }
-        state.registry.set_successor_of(&sid, caller_session_id);
+        state.registry.set_successor_of(sid, caller_session_id);
         // Durable twin of the registry link: the snapshot drops the caller the
         // moment it ends, and the successor's transcript chain must still
         // resolve after that.
-        crate::sessions::chat_config::set_predecessor(&sid, caller_session_id);
+        crate::sessions::chat_config::set_predecessor(sid, caller_session_id);
         state.registry.set_close_requested(caller_session_id);
     } else {
-        crate::sessions::chat_config::set_spawned_by(&sid, caller_session_id);
+        crate::sessions::chat_config::set_spawned_by(sid, caller_session_id);
     }
     if let Some(plan) = sub.as_mut() {
-        crate::daemon::subchats::spawn::mark_as_sub(state, &sid, plan);
+        crate::daemon::subchats::spawn::mark_as_sub(state, sid, plan);
     }
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
-    let first_message = sub.as_ref().map(|p| p.first_message.as_str()).unwrap_or(prompt);
-    lifecycle::send_message(&session, first_message, false).await.map_err(|e| e.to_string())?;
-    state.registry.set_awaiting(&sid, None);
-    state.registry.set_busy(&sid, true);
-    crate::sessions::chat_state::set_busy(&sid, true);
-    crate::daemon::machines::publish_instances_changed(&state);
-    Ok(sid)
+    if let Err(e) = first_send.await {
+        if sub.is_some() {
+            end_orphaned_sub(state, sid).await;
+        }
+        return Err(e);
+    }
+    state.registry.set_awaiting(sid, None);
+    state.registry.set_busy(sid, true);
+    crate::sessions::chat_state::set_busy(sid, true);
+    crate::daemon::machines::publish_instances_changed(state);
+    Ok(())
+}
+
+/// Closes a sub whose first message never reached its child: stops the child
+/// (there may be none) and marks the row ended, so it stops counting as running.
+async fn end_orphaned_sub(state: &Arc<DaemonState>, sid: &str) {
+    // NotFound just means the child is already gone.
+    let _ = lifecycle::end_session(&state.sessions, sid).await;
+    let now = chrono::Utc::now().to_rfc3339();
+    state.registry.mark_ended(sid, crate::types::EndReason::Manual, &now);
+    crate::daemon::machines::publish_instances_changed(state);
+    crate::sessions::persistence::save_snapshot_default(&state.registry);
 }
 
 /// Resolves `spawn_chat`'s `cwd` guard: accepts either the caller's own
@@ -327,6 +386,85 @@ mod tests {
         let r = spawn_chat(&state, "sess-1", elsewhere, "carry on", None, None, None, false, None).await;
         let err = r.expect_err("foreign cwd must be rejected");
         assert!(err.contains("own working directory"), "{err}");
+    }
+
+    /// A caller with Use subchats on, and a plan for one sub of it.
+    fn sub_plan_for(state: &Arc<DaemonState>, parent: &str) -> crate::daemon::subchats::spawn::SubPlan {
+        state.registry.upsert_interactive(parent, std::path::Path::new("."), "proj-x", "2026-11-05T00:00:00Z");
+        let cfg = crate::sessions::chat_config::ChatConfig { subchats_on: true, ..Default::default() };
+        let args = crate::daemon::subchats::SubchatArgs {
+            task: Some("t".into()),
+            goal: Some("g".into()),
+            done_when: Some("d".into()),
+            writes: Some(false),
+            ..Default::default()
+        };
+        crate::daemon::subchats::spawn::plan(
+            state, parent, &cfg, ".", None, None, None, Some("job"), &args, &[],
+        )
+        .unwrap()
+        .expect("a sub plan")
+    }
+
+    async fn adopt(
+        state: &Arc<DaemonState>,
+        parent: &str,
+        sid: &str,
+        sub: &mut Option<crate::daemon::subchats::spawn::SubPlan>,
+        send: Result<(), String>,
+    ) -> Result<(), String> {
+        let spawned = Spawned {
+            sid,
+            cwd: std::path::Path::new("."),
+            model: "sonnet",
+            effort: "high",
+            account_id: "",
+        };
+        let inherited = crate::sessions::chat_config::ChatConfig::default();
+        adopt_spawned(state, &spawned, parent, None, false, &inherited, sub, async { send }).await
+    }
+
+    #[tokio::test]
+    async fn a_spawned_sub_is_marked_as_one_and_counts_as_running() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let plan = sub_plan_for(&state, "main-ok");
+        let mut sub = Some(plan);
+        adopt(&state, "main-ok", "sub-ok", &mut sub, Ok(())).await.unwrap();
+        let inst = state.registry.get("sub-ok").unwrap();
+        assert_eq!(inst.subchat_of.as_deref(), Some("main-ok"));
+        assert!(inst.end_reason.is_none());
+        assert!(crate::sessions::chat_config::sub_session_ids().contains("sub-ok"));
+        assert_eq!(crate::daemon::subchats::spawn::running_subs(&state.registry, "main-ok").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_first_send_ends_a_hidden_sub_so_it_stops_holding_a_slot() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let plan = sub_plan_for(&state, "main-bad");
+        let mut sub = Some(plan);
+        let err = adopt(&state, "main-bad", "sub-bad", &mut sub, Err("pipe closed".into()))
+            .await
+            .expect_err("the send failed");
+        assert_eq!(err, "pipe closed");
+        let inst = state.registry.get("sub-bad").unwrap();
+        assert!(inst.end_reason.is_some() && inst.ended_at.is_some(), "the orphan is ended");
+        assert!(
+            crate::daemon::subchats::spawn::running_subs(&state.registry, "main-bad").is_empty(),
+            "an ended sub no longer counts toward the parent's five"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_first_send_leaves_an_ordinary_chat_open() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        state.registry.upsert_interactive("plain-caller", std::path::Path::new("."), "proj-x", "2026-11-05T00:00:00Z");
+        let mut sub = None;
+        adopt(&state, "plain-caller", "plain-new", &mut sub, Err("pipe closed".into())).await.expect_err("failed");
+        let inst = state.registry.get("plain-new").unwrap();
+        assert!(inst.end_reason.is_none(), "a visible chat is Joe's to close, as before");
     }
 
     fn state_with_defaults(project_model: Option<&str>, global_model: Option<&str>) -> Arc<DaemonState> {

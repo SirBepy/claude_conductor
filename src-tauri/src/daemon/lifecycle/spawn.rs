@@ -1,7 +1,6 @@
 use crate::chat::billing::{check_metered_billing, check_metered_billing_api_credit};
 use crate::daemon::claude_config::{
-    append_system_prompt, base_claude_args, write_hook_settings, write_mcp_config, SUBCHATS_MAIN_PROMPT,
-    WRAP_UP_ON_DONE_PROMPT,
+    append_system_prompt, base_claude_args, write_hook_settings, write_mcp_config, WRAP_UP_ON_DONE_PROMPT,
 };
 use crate::daemon::pump::run_stdout_pump;
 use crate::daemon::session::Session;
@@ -147,14 +146,15 @@ pub async fn spawn_session_as(
     );
     let settings = state.settings.snapshot();
     let (browser, browser_script) = (settings.claude_browser_enabled(), settings.claude_browser_script_tool());
-    let sub_parent = crate::daemon::subchats::launch_parent(state, &session_id, sub_parent);
+    // Read off the registry row and chat-config, so a relaunch keeps the role.
+    let role = crate::daemon::subchats::role_launch(state, &session_id, sub_parent);
     let mcp_config_path = write_mcp_config(
         &turn_id,
         &session_id,
         is_jarvis,
         browser,
         browser_script,
-        sub_parent.is_some(),
+        role.is_sub(),
         connectors,
     );
     let skills = {
@@ -192,12 +192,9 @@ pub async fn spawn_session_as(
         crate::sessions::chat_config::set_wrap_up_told(&session_id, true);
     }
     if wrap_up_cfg.subchats_on {
-        append_system_prompt(&mut args, SUBCHATS_MAIN_PROMPT);
         crate::sessions::chat_config::set_subchats_told(&session_id, true);
     }
-    if let Some(parent) = &sub_parent {
-        crate::daemon::subchats::append_sub_prompt(&mut args, &crate::daemon::subchats::parent_label(state, parent));
-    }
+    role.append_prompts(&mut args);
     // Also true when the toggle is now off but a resumed history still holds
     // the ON note, so the next message retracts it.
     let wrap_up_at_spawn = wrap_up_cfg.wrap_up_told_at_spawn();

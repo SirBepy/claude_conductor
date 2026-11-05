@@ -255,6 +255,8 @@ mod tests {
 
     #[tokio::test]
     async fn mark_session_ended_drops_the_closed_chats_ask_threads() {
+        // The ask store lives under the data dir, which other tests repoint.
+        let _data = crate::daemon::subchats::TempDataDir::new();
         let sid = "lifecycle-test-ask-drop-4b7e";
         let thread = crate::ask::store::AskThread::new("t1".into(), 1);
         crate::ask::store::save(sid, &[thread]).unwrap();
@@ -307,6 +309,7 @@ mod tests {
     // RPC handler - so a crashed chat must keep its Ask threads.
     #[tokio::test]
     async fn registry_mark_ended_alone_does_not_touch_ask_threads() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
         let sid = "lifecycle-test-ask-keep-crash-2f9a";
         let thread = crate::ask::store::AskThread::new("t1".into(), 1);
         crate::ask::store::save(sid, &[thread]).unwrap();

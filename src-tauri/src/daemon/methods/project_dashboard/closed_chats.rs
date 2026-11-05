@@ -106,7 +106,30 @@ mod tests {
     }
 
     #[test]
+    fn a_hidden_sub_is_neither_a_recent_chat_nor_in_a_history_page() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let tmp = tempfile::tempdir().unwrap();
+        write_chat(tmp.path(), "/fixture/r", "chat", 1_000);
+        // Newer than the real chat, so a missing exclusion shows up at the top.
+        write_chat(tmp.path(), "/fixture/r", "running-sub", 3_000);
+        write_chat(tmp.path(), "/fixture/r", "ended-sub", 2_000);
+        crate::daemon::subchats::store_sub_brief("running-sub", "chat");
+        crate::daemon::subchats::store_sub_brief("ended-sub", "chat");
+        let repos = [repo("/fixture/r")];
+        let live = HashSet::new();
+
+        let recent: Vec<_> = super::super::snapshot::recent_chats_in(tmp.path(), &repos, &live, 0)
+            .into_iter().map(|r| r.session_id).collect();
+        let page: Vec<_> = closed_page(tmp.path(), &repos, &live, 10, 0, 10)
+            .into_iter().map(|r| r.session_id).collect();
+
+        assert_eq!(recent, ["chat"]);
+        assert_eq!(page, ["chat"]);
+    }
+
+    #[test]
     fn the_snapshots_recent_rows_equal_the_first_modal_page_for_one_projects_dir() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
         let tmp = tempfile::tempdir().unwrap();
         // "bbb" (first repo) and "aaa" (second repo) tie on time, so the card
         // and the modal's first page only agree if both break the tie by id.
