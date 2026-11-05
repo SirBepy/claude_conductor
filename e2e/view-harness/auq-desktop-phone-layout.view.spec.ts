@@ -130,6 +130,8 @@ test.describe("view-harness / desktop question card in the phone layout", () => 
       });
       expect(overflow.codeRight).toBeLessThanOrEqual(overflow.zoneRight);
       expect(overflow.scroll).toBeLessThanOrEqual(1);
+
+      await page.locator(".prompt-card").screenshot({ path: `${SHOTS}/question-card-wrapped-${name.replace(/\W+/g, "-")}.png` });
     });
   }
 
