@@ -2,7 +2,8 @@
 // 2026-09-26). Replaces the old "New project…" / "Open in new folder…"
 // footer pair: both said "folder" and one said "new" while the other meant
 // "existing", so neither label distinguished them. Typing a name that
-// matches nothing now offers both, with the name already filled in.
+// matches nothing offers Create, Search GitHub (github-add.ts) and Browse, with
+// the name already filled in.
 //
 // The projects root shown in the Create row uses wording L2 - the path
 // itself is the control on desktop, so there is no label to word
@@ -112,8 +113,8 @@ export async function browseForProject(deps: AddProjectDeps): Promise<void> {
   deps.finish({ path: picked, name, machineId: null });
 }
 
-// The empty-results state carries both add-a-project routes, with the typed
-// term already filled into Create. A search that matches nothing is exactly
+// The empty-results state carries every add-a-project route (Create, Search
+// GitHub, Browse), with the typed term already filled into the first two. A search that matches nothing is exactly
 // the moment "this project isn't here yet" becomes true, so the offer lands
 // there instead of in two permanent footer buttons.
 export function renderNoMatches(filter: string, state: AddProjectState, deps: AddProjectDeps): TemplateResult {
@@ -129,8 +130,9 @@ export function renderNoMatches(filter: string, state: AddProjectState, deps: Ad
   const noProjects = (deps.getLocalProjects() ?? []).length === 0;
   // The phone has no native folder-picker (pick_folder is Tauri-only), so
   // Browse never renders remotely, and Create needs a server-resolvable
-  // root before it can do anything - with neither, an invalid/empty typed
-  // term leaves nothing actionable to offer (todo 1058).
+  // root before it can do anything - a typed term that is neither a folder
+  // name nor GitHub-searchable (an empty or path-shaped one) leaves nothing
+  // actionable to offer.
   if (isRemote() && !validName && !canSearchGithub) {
     return html`<li class="project-picker-empty">${noProjects ? "No projects yet. Type a name to create one." : "No matches"}</li>`;
   }
