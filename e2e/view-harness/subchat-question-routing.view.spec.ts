@@ -255,6 +255,57 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(card(page).locator(".prompt-from")).toContainText("Review session code");
     });
 
+    test("opening the main chat shows the next sub's card when the first parked one was answered elsewhere", async ({ page }) => {
+      // Two subs parked on main while Joe was away. sub-a was answered on the phone, so the
+      // daemon lists only sub-b. The window used to be left with no card until he re-selected
+      // the chat, because the rehydrate that should have found sub-b bails while one is parked.
+      const a = subPrompt("sub-a", 1);
+      const b = subPrompt("sub-b", 2);
+      await mount(page, size, [b]);
+      await openChat(page, "solo");
+      await fireEvent(page, "question-requested", [a, b]);
+      await expect(card(page)).toHaveCount(0);
+      await expect(page.locator('#sessions-list li[data-session-id="main"]')).toHaveAttribute("data-st", "st-attention");
+      await openChat(page, "main");
+      await expect(card(page)).toHaveCount(1);
+      await expect(card(page).locator(".prompt-from")).toContainText("Fix login test");
+      await expect(card(page).locator(".prompt-panel")).toHaveCount(3);
+    });
+
+    test("a sub's permission prompt waits behind another sub's open question, is offered as a chip, and the draft survives", async ({ page }) => {
+      const qa = subPrompt("sub-a", 2);
+      await mount(page, size, [qa]);
+      await openChat(page, "main");
+      await fireEvent(page, "question-requested", [qa]);
+      await expect(card(page).locator(".prompt-panel")).toHaveCount(3);
+      const yes = card(page).locator('.prompt-panel[data-panel="0"] input[data-label="Yes"]');
+      await yes.click();
+      await expect(yes).toBeChecked();
+
+      await fireEvent(page, "permission-requested", [
+        { id: "perm-b", tool_name: "Bash", input: { command: "ls" }, session_id: "sub-b", display_session_id: "main", sub_name: "Fix login test" },
+      ]);
+      // The question card was not replaced: same panels, same pick, no permission card.
+      await expect(card(page).locator(".prompt-card__title")).not.toContainText("Permission requested");
+      await expect(card(page).locator(".prompt-panel")).toHaveCount(3);
+      await expect(yes).toBeChecked();
+      expect(await chipNames(page)).toEqual(["Fix login test", "Review session code"]);
+      await expect(chips(page).first()).toHaveAttribute("title", /waiting for permission/);
+      expect((await calls(page, "respond_permission")).length).toBe(0);
+
+      await chips(page).filter({ hasText: "Fix login test" }).click();
+      await expect(card(page).locator(".prompt-card__title")).toContainText("Permission requested");
+      await expect(card(page).locator(".prompt-from")).toContainText("Fix login test");
+      await card(page).locator('[data-act="allow"]').click();
+      await expect.poll(async () => (await calls(page, "respond_permission")).length).toBe(1);
+      expect((await calls(page, "respond_permission"))[0]).toMatchObject({ id: "perm-b", sessionId: "sub-b", behavior: "allow" });
+
+      // The daemon resolves it, and the question card returns with its half-answered draft.
+      await fireEvent(page, "prompt-resolved", [{ id: "perm-b", durable: true }]);
+      await expect(card(page).locator(".prompt-panel")).toHaveCount(3);
+      await expect(card(page).locator('.prompt-panel[data-panel="0"] input[data-label="Yes"]')).toBeChecked();
+    });
+
     test("regression: a normal chat's and a Jarvis worker's question behave as they always did", async ({ page }) => {
       const workerPrompt = ownPrompt("worker", 1);
       await mount(page, size, [ownPrompt("solo", 2), workerPrompt]);

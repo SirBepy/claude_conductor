@@ -298,8 +298,9 @@ export function pagerHtml(
 export function askersStripHtml(chips: AskerChip[] | null | undefined): string {
   if (!chips || chips.length < 2) return "";
   const items = chips.map((c) => {
-    const icon = c.isMain ? "ph-chat-circle-text" : "ph-tree-structure";
-    return `<button type="button" class="prompt-asker${c.active ? " is-active" : ""}" data-asker="${escapeHtml(c.askerId)}" aria-pressed="${c.active}" title="${escapeHtml(c.label)}: ${c.count} ${c.count === 1 ? "question" : "questions"}"><i class="ph ${icon}"></i><span class="prompt-asker__name">${escapeHtml(c.label)}</span><span class="prompt-asker__count">${c.count}</span></button>`;
+    const icon = c.blocking ? "ph-shield-warning" : c.isMain ? "ph-chat-circle-text" : "ph-tree-structure";
+    const what = c.blocking ? "waiting for permission" : `${c.count} ${c.count === 1 ? "question" : "questions"}`;
+    return `<button type="button" class="prompt-asker${c.active ? " is-active" : ""}" data-asker="${escapeHtml(c.askerId)}" aria-pressed="${c.active}" title="${escapeHtml(c.label)}: ${what}"><i class="ph ${icon}"></i><span class="prompt-asker__name">${escapeHtml(c.label)}</span><span class="prompt-asker__count">${c.count}</span></button>`;
   }).join("");
   return `<div class="prompt-askers" role="group" aria-label="Chats with a question">${items}</div>`;
 }

@@ -219,7 +219,14 @@ impl Registry {
     pub fn mark_turn_live(&self, session_id: &str) -> bool {
         let mut guard = self.inner.lock().unwrap();
         let Some(i) = guard.get_mut(session_id) else { return false };
-        let changed = !i.busy || i.awaiting.is_some();
+        // A finished sub whose child is answering a new turn is running again,
+        // however the turn was started (a continue, the generic `send_message`, a
+        // schedule, a late card answer). Clearing it here, where the pump sees the
+        // turn go live, covers every path at once and never fires for a send that
+        // failed before the child spoke; otherwise the sub runs flagged finished
+        // and the stuck sweep, the cap and the nudge all skip it.
+        let was_finished = std::mem::take(&mut i.subchat_finished);
+        let changed = !i.busy || i.awaiting.is_some() || was_finished;
         if !i.busy {
             note_busy_flip(i, true);
         }
@@ -586,6 +593,40 @@ mod tests {
         let registry = Registry::new();
         assert!(!registry.mark_turn_live("ghost"));
         assert!(registry.get("ghost").is_none());
+    }
+
+    /// The generic `send_message` RPC (a Skip line, a late card answer), a
+    /// schedule fire and a wake all open a turn without `continue_sub`, which is
+    /// the only caller that cleared the flag. The pump's `mark_turn_live` is where
+    /// every one of them lands.
+    #[test]
+    fn a_finished_sub_whose_child_answers_a_generic_send_is_running_again() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("sub", Path::new("/tmp/x"), &settings, "2026-11-05T00:00:00Z");
+        registry.set_subchat_of("sub", Some("main".into()));
+        registry.set_subchat_finished("sub", true);
+        // What core.rs's `send_message` does before the write: awaiting cleared, busy set.
+        registry.set_awaiting("sub", None);
+        registry.set_busy("sub", true);
+        assert!(registry.get("sub").unwrap().subchat_finished, "nothing has answered yet, so the send could still fail");
+        // The respawned child's first live stream event.
+        assert!(registry.mark_turn_live("sub"), "a flag change is a change to publish");
+        let row = registry.get("sub").unwrap();
+        assert!(!row.subchat_finished, "running again, so the stuck sweep, the cap and the nudge all see it");
+        assert!(row.busy);
+    }
+
+    #[test]
+    fn a_send_that_fails_before_the_child_speaks_leaves_a_finished_sub_finished() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("sub", Path::new("/tmp/x"), &settings, "2026-11-05T00:00:00Z");
+        registry.set_subchat_of("sub", Some("main".into()));
+        registry.set_subchat_finished("sub", true);
+        registry.set_busy("sub", true);
+        registry.set_busy("sub", false); // the RPC's failure path
+        assert!(registry.get("sub").unwrap().subchat_finished);
     }
 
     #[test]

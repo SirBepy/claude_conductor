@@ -213,6 +213,38 @@ pub async fn withdraw_card(state: &Arc<DaemonState>, card_id: &str) -> bool {
     true
 }
 
+/// Takes down every open prompt that belongs to a sub that has ended: its own
+/// question and permission cards (durable ones included, which an EOF sweep
+/// leaves alone on purpose) and every daemon card about it. Nothing is left to
+/// answer them to, and an answer would be sent to a chat that is gone. Returns
+/// how many came down.
+pub async fn drop_prompts_of_sub(state: &Arc<DaemonState>, sub_id: &str) -> usize {
+    let mine: Vec<(String, String)> = state
+        .list_prompts()
+        .await
+        .into_iter()
+        .filter(|p| {
+            let payload = &p["payload"];
+            payload["session_id"].as_str() == Some(sub_id)
+                || (payload["daemon_card"].as_bool() == Some(true) && payload["sub_id"].as_str() == Some(sub_id))
+        })
+        .filter_map(|p| Some((p["id"].as_str()?.to_string(), p["payload"]["session_id"].as_str()?.to_string())))
+        .collect();
+    for (card_id, session_id) in &mine {
+        // Dropping the sender is what resolves a daemon card's handle.
+        state.pending.lock().await.remove(card_id);
+        state.remove_prompt(card_id).await;
+        state.clear_question_awaiting_if_no_others_pending(session_id).await;
+        state
+            .notifier
+            .publish("question_expired", json!({ "session_id": session_id, "id": card_id }));
+    }
+    if !mine.is_empty() {
+        crate::daemon::machines::publish_instances_changed(state);
+    }
+    mine.len()
+}
+
 /// The id of an open raised card of `kind` about `sub_id`, if there is one. A
 /// site calls it before raising so a sub never has two of the same card.
 pub async fn open_card_for(state: &Arc<DaemonState>, kind: &str, sub_id: &str) -> Option<String> {

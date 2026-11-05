@@ -86,6 +86,15 @@ fn restore(state: &DaemonState, sub_id: &str, prior: Prior) {
 /// is finished (process gone) or frozen. The caller owns the text: step 6 passes
 /// Joe's words verbatim. A failed send leaves the sub as it was found.
 pub async fn continue_sub(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> Result<(), ContinueError> {
+    // One continue per sub at a time. The `Busy` check in `prepare_continue` needs
+    // a live child, and the respawn window has none, so two calls inside it both
+    // pass. The loser would then fail its own send and run a `set_busy(false)` on
+    // the turn the winner started: the hazard `refuse_if_busy` exists for
+    // (`methods/lifecycle/core.rs`). Refused as `Busy`, the caller holds its
+    // message for the sub's next step like any other busy send.
+    let _claim = super::runtime::runtime()
+        .begin_continue(sub_id)
+        .ok_or_else(|| ContinueError::Busy(sub_id.to_string()))?;
     let prior = prepare_continue(state, sub_id)?;
     // A model or effort picked while the sub sat idle lands on this message.
     lifecycle::refresh_stale_launch(state, sub_id).await;
@@ -94,14 +103,18 @@ pub async fn continue_sub(state: &Arc<DaemonState>, sub_id: &str, text: &str) ->
     state.registry.set_awaiting(sub_id, None);
     state.registry.set_busy(sub_id, true);
     crate::sessions::chat_state::set_busy(sub_id, true);
+    let gen = state.registry.current_turn_gen(sub_id);
     match lifecycle::send_message_with_respawn(state, sub_id, text, false).await {
         Ok(()) => {
             crate::daemon::machines::publish_instances_changed(state);
             Ok(())
         }
         Err(e) => {
-            state.registry.set_busy(sub_id, false);
-            crate::sessions::chat_state::set_busy(sub_id, false);
+            // Only the turn this call opened: a newer one (a wake, a peer's
+            // send) is not ours to clear.
+            if state.registry.set_busy_false_if_gen(sub_id, gen) {
+                crate::sessions::chat_state::set_busy(sub_id, false);
+            }
             restore(state, sub_id, prior);
             Err(ContinueError::Send(e))
         }
@@ -134,11 +147,26 @@ pub async fn request_nudge(state: &Arc<DaemonState>, sub_id: &str) -> Result<(),
     rt.set_stage(sub_id, super::runtime::SubStage::Nudged);
     let live_and_busy = state.sessions.contains_key(sub_id) && lifecycle::is_busy(state, sub_id);
     if live_and_busy {
-        rt.set_nudge_due(sub_id);
-        lifecycle::cancel_turn(&state.sessions, sub_id).await?;
-        return Ok(());
+        return defer_nudge_until_turn_ends(sub_id, lifecycle::cancel_turn(&state.sessions, sub_id)).await;
     }
     nudge(state, sub_id, NUDGE_TEXT).await
+}
+
+/// Arms the nudge for the turn end the interrupt will cause. Armed before the
+/// interrupt is written, because the result line can land first; disarmed when
+/// the write fails, since no interrupt reached the child and the next, unrelated
+/// turn end would otherwise fire "you ended your turn without finishing" at it.
+async fn defer_nudge_until_turn_ends(
+    sub_id: &str,
+    interrupt: impl std::future::Future<Output = Result<(), LifecycleError>>,
+) -> Result<(), LifecycleError> {
+    let rt = super::runtime::runtime();
+    rt.set_nudge_due(sub_id);
+    if let Err(e) = interrupt.await {
+        rt.disarm_nudge(sub_id);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Joe's "End it": the sub is closed for good (unlike finish, which keeps the
@@ -153,6 +181,16 @@ pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
     super::runtime::runtime().reset(sub_id);
     if ended {
         crate::daemon::machines::publish_instances_changed(state);
+        // Its cards would otherwise keep showing, and answering one would send to
+        // a chat that no longer exists. Detached because dropping them is async
+        // and this stays callable from sync code; with no runtime there are no
+        // prompts to drop either.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let (state, sub) = (state.clone(), sub_id.to_string());
+            handle.spawn(async move {
+                super::cards::drop_prompts_of_sub(&state, &sub).await;
+            });
+        }
     }
     ended
 }
@@ -252,6 +290,89 @@ mod tests {
         let _ = request_nudge(&st, &id).await;
         assert_eq!(super::super::runtime::runtime().stage(&id), super::super::runtime::SubStage::Nudged);
         assert!(!super::super::runtime::runtime().take_nudge_due(&id), "an idle sub is nudged now, not deferred");
+    }
+
+    #[tokio::test]
+    async fn a_second_continue_while_one_is_in_flight_is_refused_and_touches_nothing() {
+        let st = state();
+        let id = sub(&st, "claim");
+        st.registry.set_subchat_finished(&id, true);
+        let rt = super::super::runtime::runtime();
+        let held = rt.begin_continue(&id).expect("free to claim");
+        assert!(rt.begin_continue(&id).is_none(), "the claim is exclusive");
+        let err = continue_sub(&st, &id, "second").await.unwrap_err();
+        assert!(matches!(err, ContinueError::Busy(_)), "{err:?}");
+        let row = st.registry.get(&id).unwrap();
+        assert!(row.subchat_finished && !row.busy, "the refused call must not clear the flag or open a turn");
+        drop(held);
+        let err = continue_sub(&st, &id, "after").await.unwrap_err();
+        assert!(reached_the_spawn(&err), "once the claim is released a continue goes through to the send: {err:?}");
+    }
+
+    #[tokio::test]
+    async fn a_failed_continue_releases_its_claim() {
+        let st = state();
+        let id = sub(&st, "claim-fail");
+        assert!(continue_sub(&st, &id, "x").await.is_err());
+        assert!(super::super::runtime::runtime().begin_continue(&id).is_some(), "an early return must not leave the sub claimed");
+    }
+
+    #[tokio::test]
+    async fn a_failed_interrupt_leaves_no_nudge_armed_for_the_next_turn_end() {
+        let rt = super::super::runtime::runtime();
+        let ok = defer_nudge_until_turn_ends("nd-ok", async { Ok(()) }).await;
+        assert!(ok.is_ok());
+        assert!(rt.take_nudge_due("nd-ok"), "a delivered interrupt leaves it armed for the result line it causes");
+        let failed = defer_nudge_until_turn_ends("nd-fail", async { Err(LifecycleError::NotFound("nd-fail".into())) }).await;
+        assert!(failed.is_err());
+        assert!(!rt.take_nudge_due("nd-fail"), "no interrupt reached the child, so a later turn end owes it no nudge");
+    }
+
+    async fn card_ids(st: &Arc<DaemonState>) -> Vec<String> {
+        let mut ids: Vec<String> = st.list_prompts().await.iter().filter_map(|p| p["id"].as_str().map(str::to_string)).collect();
+        ids.sort();
+        ids
+    }
+
+    async fn add_cards_for(st: &Arc<DaemonState>, sub: &str, other_sub: &str) {
+        let main = st.registry.get(sub).unwrap().subchat_of.unwrap();
+        // The sub's own durable question and its permission prompt.
+        st.add_prompt("q-own", "question-requested", serde_json::json!({"session_id": sub, "seq": 1}), true).await;
+        st.add_prompt("p-own", "permission-requested", serde_json::json!({"session_id": sub, "seq": 2}), false).await;
+        // A daemon card about the sub (session_id is the main chat's) and one about its sibling.
+        st.add_prompt("stall-own", "question-requested", serde_json::json!({"session_id": main, "sub_id": sub, "daemon_card": true, "seq": 3}), true).await;
+        st.add_prompt("stall-other", "question-requested", serde_json::json!({"session_id": main, "sub_id": other_sub, "daemon_card": true, "seq": 4}), true).await;
+        st.add_prompt("q-other", "question-requested", serde_json::json!({"session_id": other_sub, "seq": 5}), true).await;
+    }
+
+    #[tokio::test]
+    async fn dropping_a_subs_prompts_takes_its_own_cards_and_cards_about_it_and_no_one_elses() {
+        let st = state();
+        let id = sub(&st, "drop");
+        let other = "drop-other-sub".to_string();
+        st.registry.upsert_interactive(&other, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        st.registry.set_subchat_of(&other, Some("drop-main".into()));
+        add_cards_for(&st, &id, &other).await;
+        assert_eq!(super::super::cards::drop_prompts_of_sub(&st, &id).await, 3);
+        assert_eq!(card_ids(&st).await, ["q-other", "stall-other"]);
+    }
+
+    #[tokio::test]
+    async fn ending_a_sub_drops_its_cards_so_none_is_left_to_answer_to_a_chat_that_is_gone() {
+        let st = state();
+        let id = sub(&st, "endcards");
+        let other = "endcards-other-sub".to_string();
+        st.registry.upsert_interactive(&other, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        st.registry.set_subchat_of(&other, Some("endcards-main".into()));
+        add_cards_for(&st, &id, &other).await;
+        assert!(end_sub(&st, &id));
+        for _ in 0..200 {
+            if card_ids(&st).await == ["q-other", "stall-other"] {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("the ended sub's cards are still listed: {:?}", card_ids(&st).await);
     }
 
     #[test]

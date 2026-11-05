@@ -276,6 +276,29 @@ export function storePendingPrompt(sessionId: string, prompt: PendingPrompt): vo
   _pendingPrompts.set(sessionId, prompt);
 }
 
+// Prompts held back ON PURPOSE in a window that shows one card at a time: a
+// permission that arrived while another asker's question was open, or a question
+// pushed aside for one. A parked slot alone cannot say this, because a card that
+// is on screen is parked too, and so is one Joe has just answered while the
+// daemon's resolve poll catches up. Only these come back by themselves when the
+// window frees up and get a place in the asker picker.
+const _deferredPromptIds = new Set<string>();
+
+/** Parks `prompt` behind the card now on screen, to surface when it is done. */
+export function deferPendingPrompt(sessionId: string, prompt: PendingPrompt): void {
+  storePendingPrompt(sessionId, prompt);
+  _deferredPromptIds.add(prompt.payload.id);
+}
+
+/** Marks an already-parked prompt as pushed aside (see {@link deferPendingPrompt}). */
+export function markPromptDeferred(id: string): void {
+  _deferredPromptIds.add(id);
+}
+
+export function isDeferredPrompt(id: string): boolean {
+  return _deferredPromptIds.has(id);
+}
+
 /** Every parked slot whose card shows in `displayId`'s window: its own and each
  *  sub's. */
 export function parkedAskersFor(displayId: string): Array<{ askerId: string; prompt: PendingPrompt }> {
@@ -323,7 +346,10 @@ export function savePendingPromptDraft(sessionId: string, draft: QuestionDraft):
 /** Returns and removes the parked prompt for a session, if any. */
 export function takePendingPrompt(sessionId: string): PendingPrompt | null {
   const p = _pendingPrompts.get(sessionId) ?? null;
-  if (p) _pendingPrompts.delete(sessionId);
+  if (p) {
+    _pendingPrompts.delete(sessionId);
+    _deferredPromptIds.delete(p.payload.id);
+  }
   return p;
 }
 
@@ -339,8 +365,13 @@ export function peekPendingPrompt(sessionId: string): PendingPrompt | null {
  *  needs: it walks `pendingPromptSessionIds()`, which are display ids, and a
  *  closed main chat takes its subs' parked cards with it. */
 export function clearPendingPrompt(sessionId: string): void {
+  const own = _pendingPrompts.get(sessionId);
+  if (own) _deferredPromptIds.delete(own.payload.id);
   _pendingPrompts.delete(sessionId);
-  for (const { askerId } of parkedAskersFor(sessionId)) _pendingPrompts.delete(askerId);
+  for (const { askerId, prompt } of parkedAskersFor(sessionId)) {
+    _deferredPromptIds.delete(prompt.payload.id);
+    _pendingPrompts.delete(askerId);
+  }
 }
 
 /** Remove whichever parked prompt carries this prompt id, if any. Keyed by the
@@ -351,6 +382,7 @@ export function clearPendingPromptById(id: string): void {
   for (const [sessionId, prompt] of _pendingPrompts) {
     if (prompt.payload.id === id) {
       _pendingPrompts.delete(sessionId);
+      _deferredPromptIds.delete(id);
       return;
     }
   }

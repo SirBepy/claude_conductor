@@ -116,16 +116,47 @@ pub fn edited_files(transcript: &Path, cwd: &Path) -> Vec<String> {
     out
 }
 
+/// Top of the repo that holds `file`, asked of git from the file's nearest
+/// existing folder (a deleted file's folder may be gone too). `None` outside any
+/// repo.
+fn repo_top_of(file: &str) -> Option<String> {
+    let mut dir = Path::new(file).parent()?;
+    while !dir.is_dir() {
+        dir = dir.parent()?;
+    }
+    toplevel(dir)
+}
+
+fn toplevel(dir: &Path) -> Option<String> {
+    let (ok, top) = run_git(dir, &["rev-parse", "--show-toplevel"])?;
+    let top = text(&top);
+    (ok && !top.is_empty()).then_some(top)
+}
+
 /// The files the sub edited that git still reports as uncommitted. Empty when
-/// `cwd` is not a repo or the transcript names nothing, so a missing signal
-/// never refuses a finish.
+/// the transcript names nothing or no edited file sits in a repo, so a missing
+/// signal never refuses a finish.
+///
+/// Each file is checked in the repo that actually holds it, not in the sub's
+/// `cwd` repo: a submodule or nested repo is invisible to its parent's status,
+/// which lists the submodule's own path and never the file inside it, so an
+/// uncommitted edit under `vendor/tauri_kit` would otherwise let a sub finish.
 pub fn own_uncommitted(transcript: &Path, cwd: &Path) -> Vec<String> {
     let edited = edited_files(transcript, cwd);
     if edited.is_empty() {
         return Vec::new();
     }
-    let Some(dirty) = dirty_keys(cwd) else { return Vec::new() };
-    edited.into_iter().filter(|p| dirty.contains(&path_key(p))).collect()
+    // One status per repo, however many of its files were edited.
+    let mut dirty_by_repo: std::collections::HashMap<String, Option<Vec<String>>> = std::collections::HashMap::new();
+    let mut dirty_files = Vec::new();
+    for file in edited {
+        let Some(top) = repo_top_of(&file) else { continue };
+        let dirty = dirty_by_repo.entry(top.clone()).or_insert_with(|| dirty_keys(Path::new(&top)));
+        if dirty.as_ref().is_some_and(|keys| keys.contains(&path_key(&file))) {
+            dirty_files.push(file);
+        }
+    }
+    dirty_files
 }
 
 #[cfg(test)]
@@ -228,6 +259,56 @@ mod tests {
         assert_eq!(own_uncommitted(&tp, &root).len(), 1);
         git(&root, &["add", "base.txt"]);
         assert_eq!(own_uncommitted(&tp, &root).len(), 1, "staged is still uncommitted");
+    }
+
+    /// The parent's status lists a submodule as ONE path and never the files
+    /// inside it, so `vendor/tauri_kit` could hold a sub's uncommitted work with
+    /// the finish check seeing a clean tree. An inner repo committed into the
+    /// parent is the same shape to git as a submodule checkout.
+    fn parent_with_submodule() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let (dir, root) = init();
+        let inner = root.join("vendor").join("lib");
+        std::fs::create_dir_all(&inner).unwrap();
+        git(&inner, &["init", "-q"]);
+        git(&inner, &["config", "user.email", "t@example.com"]);
+        git(&inner, &["config", "user.name", "t"]);
+        git(&inner, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(inner.join("a.txt"), "a\n").unwrap();
+        git(&inner, &["add", "a.txt"]);
+        git(&inner, &["commit", "-q", "-m", "inner"]);
+        git(&root, &["add", "vendor/lib"]);
+        git(&root, &["commit", "-q", "-m", "add the submodule"]);
+        (dir, root, inner)
+    }
+
+    #[test]
+    fn an_uncommitted_edit_inside_a_submodule_is_named() {
+        let (dir, root, inner) = parent_with_submodule();
+        std::fs::write(inner.join("a.txt"), "changed\n").unwrap();
+        std::fs::write(inner.join("new.txt"), "n").unwrap();
+        let parent_view = dirty_keys(&root).unwrap();
+        assert!(
+            !parent_view.iter().any(|k| k.ends_with("/a.txt") || k.ends_with("/new.txt")),
+            "premise: the parent's status never lists a file inside the submodule: {parent_view:?}"
+        );
+        let tp = transcript(dir.path(), &[("Edit", &inner.join("a.txt")), ("Write", &inner.join("new.txt"))]);
+        let got = own_uncommitted(&tp, &root);
+        assert_eq!(got.len(), 2, "both files are named: {got:?}");
+        assert!(got.iter().any(|p| path_key(p) == path_key(&inner.join("a.txt").to_string_lossy())));
+    }
+
+    #[test]
+    fn a_committed_submodule_edit_and_a_parent_file_are_checked_each_in_their_own_repo() {
+        let (dir, root, inner) = parent_with_submodule();
+        std::fs::write(inner.join("a.txt"), "changed\n").unwrap();
+        git(&inner, &["add", "a.txt"]);
+        git(&inner, &["commit", "-q", "-m", "edit inside"]);
+        let outer = root.join("outer.txt");
+        std::fs::write(&outer, "o").unwrap();
+        let tp = transcript(dir.path(), &[("Edit", &inner.join("a.txt")), ("Write", &outer)]);
+        let got = own_uncommitted(&tp, &root);
+        assert_eq!(got.len(), 1, "only the parent's untracked file is still uncommitted: {got:?}");
+        assert_eq!(path_key(&got[0]), path_key(&outer.to_string_lossy()));
     }
 
     #[test]

@@ -51,8 +51,8 @@ pub async fn sweep(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> {
         if inst.subchat_of.is_none() || inst.ended_at.is_some() || inst.subchat_finished || inst.frozen {
             continue;
         }
-        // No live child: either it exited (the EOF handler owns that) or it was
-        // never started. Nothing is hung.
+        // No live child: either it exited (the EOF handler and `sweep_dead` own
+        // that) or it was never started. Nothing is hung.
         if !(env.is_live)(&id) {
             continue;
         }
@@ -87,6 +87,56 @@ pub async fn sweep(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> {
     carded
 }
 
+const NO_PROCESS_NOTE: &str =
+    "Its process is not running and it never called finish_subchat. The app may have been restarted while it worked.";
+
+/// Raises a card for every sub that has no live child, never finished and was
+/// not ended: its process died while the daemon was down (a restart wipes every
+/// child, and the exit handler that would have carded it died too), or the exit
+/// handler missed it. Returns the ids carded.
+///
+/// A sub can be childless for good reasons for a moment (a respawn after a model
+/// pick or a continue), so it must stay childless for [`DEAD_GRACE`] across two
+/// sweeps first, and a sub with a send in flight (`busy`) is never judged. Its own
+/// question card waiting on Joe also exempts it: the answer will wake it. The
+/// card is raised only while the main chat exists, because a card needs a window
+/// to show in; a sub whose main chat is gone is the orphan promotion's (spec
+/// section 9, step 8).
+pub async fn sweep_dead(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> {
+    use super::turn_end::DEAD_GRACE;
+    let rt = runtime();
+    let mut carded = Vec::new();
+    for inst in state.registry.list() {
+        let id = inst.session_id.clone();
+        let Some(parent) = inst.subchat_of.clone() else { continue };
+        if inst.ended_at.is_some() || inst.subchat_finished || inst.frozen {
+            continue;
+        }
+        if (env.is_live)(&id) {
+            rt.clear_childless(&id);
+            continue;
+        }
+        if inst.busy || !matches!(inst.kind, crate::sessions::kinds::InstanceKind::Interactive) {
+            continue;
+        }
+        if !state.registry.get(&parent).is_some_and(|p| p.ended_at.is_none()) {
+            continue;
+        }
+        if rt.death_carded(&id) || crate::daemon::lifecycle::has_open_prompt(state, &id).await {
+            continue;
+        }
+        let since = rt.note_childless(&id, env.now);
+        if env.now.signed_duration_since(since) < DEAD_GRACE {
+            continue;
+        }
+        if stall::raise_noted(state, &id, Stall::Unfinished, Some(NO_PROCESS_NOTE)).await.is_some() {
+            rt.mark_death_carded(&id);
+            carded.push(id);
+        }
+    }
+    carded
+}
+
 /// The production sweep, called from the busy watchdog's tick.
 pub async fn sweep_now(state: &Arc<DaemonState>, now: DateTime<Utc>, resumed_at: Option<DateTime<Utc>>) {
     let mtime = |i: &Instance| file_mtime(state, i);
@@ -95,6 +145,9 @@ pub async fn sweep_now(state: &Arc<DaemonState>, now: DateTime<Utc>, resumed_at:
     let carded = sweep(state, &env).await;
     for id in carded {
         log::warn!("subchats: sub {id} has been silent for over {}m, raised a card", STUCK_AFTER.num_minutes());
+    }
+    for id in sweep_dead(state, &env).await {
+        log::warn!("subchats: sub {id} has no running process and never finished, raised a card");
     }
 }
 
@@ -226,6 +279,112 @@ mod tests {
         st2.registry.set_busy("plain", true);
         let carded = run(&st2, 60).await;
         assert!(!carded.contains(&"plain".to_string()));
+    }
+
+    // ── a sub with no process ───────────────────────────────────────────────
+
+    async fn run_dead(st: &Arc<DaemonState>, live: bool, seconds_from_now: i64) -> Vec<String> {
+        let is_live = move |_: &str| live;
+        let env = Env {
+            now: Utc::now() + chrono::Duration::seconds(seconds_from_now),
+            resumed_at: None,
+            transcript_mtime: &no_mtime,
+            is_live: &is_live,
+        };
+        sweep_dead(st, &env).await
+    }
+
+    fn idle_sub(tag: &str) -> (Arc<DaemonState>, String) {
+        let (st, sub) = busy_sub(tag);
+        st.registry.set_busy(&sub, false);
+        (st, sub)
+    }
+
+    #[tokio::test]
+    async fn a_sub_with_no_process_that_never_finished_gets_a_card_after_the_grace() {
+        let (st, sub) = idle_sub("dead-basic");
+        assert!(run_dead(&st, false, 0).await.is_empty(), "first sight only starts the clock: it may be mid-respawn");
+        assert!(run_dead(&st, false, 20).await.is_empty(), "still inside the grace");
+        assert_eq!(run_dead(&st, false, 60).await, [sub.clone()]);
+        let cards = st.list_prompts().await;
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0]["payload"]["card_kind"], "subchat_unfinished");
+        assert_eq!(cards[0]["payload"]["display_session_id"], "dead-basic-main");
+        let text = cards[0]["payload"]["questions"][0]["question"].as_str().unwrap();
+        assert!(text.contains("not running") && text.contains("restarted"), "{text}");
+        assert!(run_dead(&st, false, 120).await.is_empty(), "one card per death, not one per tick");
+    }
+
+    #[tokio::test]
+    async fn answering_the_card_does_not_raise_it_again_but_a_new_death_does() {
+        let (st, sub) = idle_sub("dead-answered");
+        run_dead(&st, false, 0).await;
+        assert_eq!(run_dead(&st, false, 60).await.len(), 1);
+        let id = st.list_prompts().await[0]["id"].as_str().unwrap().to_string();
+        crate::daemon::methods::permission::respond_question_inner(&st, &id, serde_json::json!({}), true).await;
+        assert!(run_dead(&st, false, 120).await.is_empty(), "Skip leaves the sub as it is, and the same death stays carded");
+        // It was brought back (a child seen live) and died again.
+        assert!(run_dead(&st, true, 130).await.is_empty());
+        run_dead(&st, false, 140).await;
+        assert_eq!(run_dead(&st, false, 200).await, [sub]);
+    }
+
+    #[tokio::test]
+    async fn a_live_child_a_send_in_flight_and_a_returning_child_are_never_dead() {
+        let (st, _sub) = idle_sub("dead-live");
+        assert!(run_dead(&st, true, 0).await.is_empty());
+        assert!(run_dead(&st, true, 500).await.is_empty());
+        // A respawn that finished inside the grace: the clock restarts.
+        let (st, _sub) = idle_sub("dead-respawn");
+        run_dead(&st, false, 0).await;
+        run_dead(&st, true, 30).await;
+        assert!(run_dead(&st, false, 70).await.is_empty(), "70s after the FIRST sighting, but only 0s childless since the child went");
+        // busy means a send is in flight.
+        let (st, sub) = idle_sub("dead-busy");
+        st.registry.set_busy(&sub, true);
+        run_dead(&st, false, 0).await;
+        assert!(run_dead(&st, false, 300).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn finished_ended_frozen_waiting_and_parentless_subs_are_left_alone() {
+        for (tag, mutate) in [
+            ("dead-fin", 0),
+            ("dead-end", 1),
+            ("dead-frz", 2),
+            ("dead-q", 3),
+            ("dead-noparent", 4),
+        ] {
+            let (st, sub) = idle_sub(tag);
+            match mutate {
+                0 => {
+                    st.registry.set_subchat_finished(&sub, true);
+                }
+                1 => {
+                    st.registry.mark_ended(&sub, crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
+                }
+                2 => {
+                    st.registry.set_frozen(&sub, true);
+                }
+                3 => {
+                    st.add_prompt("q-dead", "question-requested", serde_json::json!({"session_id": sub, "seq": 1}), true).await;
+                }
+                _ => {
+                    st.registry.mark_ended(&format!("{tag}-main"), crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
+                }
+            }
+            run_dead(&st, false, 0).await;
+            assert!(run_dead(&st, false, 300).await.is_empty(), "{tag}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_normal_chat_is_never_judged_dead() {
+        let (st, _sub) = idle_sub("dead-plain");
+        st.registry.upsert_interactive("plain-dead", std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        run_dead(&st, false, 0).await;
+        let carded = run_dead(&st, false, 300).await;
+        assert!(!carded.contains(&"plain-dead".to_string()));
     }
 
     #[tokio::test]

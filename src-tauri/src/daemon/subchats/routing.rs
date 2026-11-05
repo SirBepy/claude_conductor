@@ -11,10 +11,18 @@ use serde_json::{json, Value};
 /// What a sub is told when its question reached no client. The generic wording
 /// ("re-send via send_message") would be wrong here: a sub's chat has no sidebar
 /// row, so a plain message would reach nobody.
-pub const UNCONFIRMED_NOTE: &str = "Could not confirm any client actually received this question \
-within the timeout window, so it may not have reached Joe. Do not re-send it with send_message: your \
-chat is hidden, so nobody would read it. Do not wait any longer on this call. Finish the part of the \
-job that does not need his answer, and say in your final report what you were blocked on.";
+///
+/// It also fires whenever no client confirmed in the window (the app closed, the
+/// main chat's row not loaded yet), while the durable card stays queued and shows
+/// as soon as Joe opens the main chat. So the sub is told the card is still
+/// there, to end its turn, and that finishing is refused while it is open. The
+/// old wording said to finish what did not need his answer and report the block,
+/// which sent the sub off to finish with a question still waiting.
+pub const UNCONFIRMED_NOTE: &str = "Could not confirm any client actually received this question within the timeout window, so it may \
+not have shown yet. The card is still queued for Joe and appears as soon as he opens the main chat. Do \
+not re-send it with send_message: your chat is hidden, so nobody would read it. Do not call \
+finish_subchat while the card is open, because that is refused. End your turn now without finishing, \
+and carry on when his answer arrives as a new message.";
 
 /// The chat whose window shows `session_id`'s cards: its parent when it is a
 /// sub, else the session itself. A Jarvis worker has no `subchat_of`, so it
@@ -167,5 +175,17 @@ mod tests {
     #[test]
     fn unconfirmed_note_does_not_send_a_sub_to_a_chat_nobody_reads() {
         assert!(UNCONFIRMED_NOTE.contains("Do not re-send it with send_message"));
+    }
+
+    #[test]
+    fn unconfirmed_note_keeps_the_card_alive_and_tells_the_sub_to_end_its_turn_not_finish() {
+        let n = UNCONFIRMED_NOTE;
+        assert!(n.contains("still queued for Joe"), "the card has not gone anywhere: {n}");
+        assert!(n.contains("End your turn now without finishing"), "{n}");
+        assert!(n.contains("carry on when his answer arrives"), "{n}");
+        assert!(n.contains("finish_subchat") && n.contains("refused"), "{n}");
+        assert!(!n.contains("Finish the part of the job"), "the old advice sent the sub off to finish: {n}");
+        assert!(!n.contains("final report"), "{n}");
+        assert!(!n.contains('\u{2014}'));
     }
 }

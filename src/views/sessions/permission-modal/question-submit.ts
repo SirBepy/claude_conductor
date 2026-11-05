@@ -19,13 +19,15 @@ import {
   savePendingPromptDraft,
   clearPendingPromptById,
   markPendingPromptAnswered,
+  markPromptDeferred,
+  peekPendingPrompt,
   selectionGuard,
   isForSelectedSession,
   gateDiag,
 } from "./gating";
 import { askerChips } from "./askers";
 import type { Question, QuestionDraft, QuestionRequestedPayload } from "./types";
-import { rerenderSidebar, surfaceNextForDisplay } from "./index";
+import { rerenderSidebar, surfaceNextForDisplay, surfaceParkedPrompt } from "./index";
 import { dropIfAlreadyAnswered } from "./answered-gate";
 import { setLiveQuestionProgress } from "../question-progress";
 
@@ -66,9 +68,24 @@ async function tellSubSkipped(sid: string): Promise<void> {
   try {
     await invoke("send_message", { sessionId: sid, cwd: resolveCwdForSession(sid) ?? ".", blocks });
   } catch (e) {
-    if (isSessionBusyError(e) && state.heldMessages?.stageFor(sid, blocks)) return;
+    if (isSessionBusyError(e) && (await holdWhileBusy(sid, blocks))) return;
     console.warn("[perm-relay] send_message (skip notice) failed:", e);
     showToast(`Skip notice failed: ${e}`);
+  }
+}
+
+/** Queues a line for a chat that is mid-turn, on whichever page is open. The
+ *  held-message queue object only exists once a chat composer has mounted, and a
+ *  Skip pressed from the dashboard page has none: the daemon's own held list
+ *  takes the line then, and delivers it at the sub's next step. */
+async function holdWhileBusy(sid: string, blocks: ContentBlock[]): Promise<boolean> {
+  if (state.heldMessages?.stageFor(sid, blocks)) return true;
+  try {
+    await invoke("add_held_message", { sessionId: sid, blocks });
+    return true;
+  } catch (e) {
+    console.warn("[perm-relay] add_held_message (skip notice) failed:", e);
+    return false;
   }
 }
 
@@ -82,7 +99,11 @@ function pickAsker(fromAskerId: string, toAskerId: string): void {
   const target = takePendingPrompt(toAskerId);
   if (!target) return;
   if (target.kind !== "question") {
-    storePendingPrompt(toAskerId, target);
+    // A held-back permission: it takes the window, and the question card it
+    // displaces keeps its slot and its saved draft, to come back when it is done.
+    const from = peekPendingPrompt(fromAskerId);
+    if (from) markPromptDeferred(from.payload.id);
+    surfaceParkedPrompt(target);
     return;
   }
   void showQuestionCard(target.payload, target.draft);
@@ -262,7 +283,7 @@ export async function showQuestionCard(
           // A backgrounded session still mid-turn refuses the write (todo 873).
           // The answer belongs on its held queue, not in a failure toast: the
           // idle sweep in sidebar.ts sends it the moment that turn ends.
-          if (isSessionBusyError(e) && state.heldMessages?.stageFor(sid, [...answerBlocks, ...cardExtraBlocks])) {
+          if (isSessionBusyError(e) && (await holdWhileBusy(sid, [...answerBlocks, ...cardExtraBlocks]))) {
             clearQuestionDraft(payload.id);
             return;
           }

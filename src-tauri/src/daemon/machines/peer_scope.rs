@@ -87,9 +87,27 @@ pub(crate) fn is_view_only(state: &DaemonState, machine_id: &str) -> bool {
     state.machines.get().is_some_and(|r| !r.can_drive(machine_id))
 }
 
-/// Whether `machine_id` started `session_id` on this machine.
+/// Whether `machine_id` started `session_id` on this machine, or started the main
+/// chat it is a hidden sub of. A sub is spawned here by its main chat, never over
+/// the peer's own RPC, so it carries no stamp of its own; without this a
+/// view-only peer that started a main chat could not see or answer its subs'
+/// cards, which is the whole point of a main chat.
 pub(crate) fn started_by(session_id: &str, machine_id: &str) -> bool {
-    crate::sessions::chat_config::get(session_id).is_some_and(|c| c.started_by_machine == machine_id)
+    owned_by(machine_id, session_id, crate::sessions::chat_config::get)
+}
+
+/// [`started_by`] with the config lookup passed in, so tests never touch the
+/// real chat-config.json.
+fn owned_by(
+    machine_id: &str,
+    session_id: &str,
+    config: impl Fn(&str) -> Option<crate::sessions::chat_config::ChatConfig>,
+) -> bool {
+    let Some(cfg) = config(session_id) else { return false };
+    cfg.started_by_machine == machine_id
+        || cfg
+            .subchat
+            .is_some_and(|brief| config(&brief.parent).is_some_and(|p| p.started_by_machine == machine_id))
 }
 
 /// The chat a call acts on: the owning session of a named prompt for a
@@ -181,6 +199,36 @@ mod tests {
 
     async fn check(state: &DaemonState, method: &str, params: &Value, machine_id: &str) -> Result<(), String> {
         check_with(state, method, params, machine_id, is_own).await
+    }
+
+    fn config_of(started_by: &str, parent: Option<&str>) -> crate::sessions::chat_config::ChatConfig {
+        let mut cfg = crate::sessions::chat_config::ChatConfig::default();
+        cfg.started_by_machine = started_by.to_string();
+        cfg.subchat = parent.map(|p| {
+            serde_json::from_str(&format!(r#"{{"parent":"{p}","task":"t","goal":"g","done_when":"d"}}"#)).unwrap()
+        });
+        cfg
+    }
+
+    /// A sub is spawned on this machine by its main chat, so it has no
+    /// `started_by_machine` of its own. A view-only peer that started the main
+    /// chat still has to see and answer its subs' cards.
+    #[test]
+    fn a_sub_belongs_to_the_machine_that_started_its_main_chat() {
+        let table = |id: &str| match id {
+            "main-mac" => Some(config_of("mac", None)),
+            "main-desktop" => Some(config_of("", None)),
+            "sub-of-mac" => Some(config_of("", Some("main-mac"))),
+            "sub-of-desktop" => Some(config_of("", Some("main-desktop"))),
+            "plain" => Some(config_of("", None)),
+            _ => None,
+        };
+        assert!(owned_by("mac", "main-mac", table));
+        assert!(owned_by("mac", "sub-of-mac", table), "its main chat is the peer's");
+        assert!(!owned_by("mac", "sub-of-desktop", table), "a desktop chat's sub stays the desktop's");
+        assert!(!owned_by("mac", "plain", table));
+        assert!(!owned_by("mac", "unknown", table));
+        assert!(!owned_by("other", "sub-of-mac", table), "another peer gains nothing");
     }
 
     #[tokio::test]

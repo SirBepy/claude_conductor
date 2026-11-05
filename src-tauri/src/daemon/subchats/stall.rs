@@ -31,16 +31,21 @@ impl Stall {
         }
     }
 
-    fn question(self, who: &str) -> String {
-        match self {
-            Stall::Unfinished => format!(
+    fn question(self, who: &str, note: Option<&str>) -> String {
+        match (self, note) {
+            // The process is gone, so no nudge was ever involved: say what is known.
+            (Stall::Unfinished, Some(note)) => format!(
+                "**{who}** stopped before it finished.\n\n{note}\n\nWhat should happen to it?"
+            ),
+            (Stall::Unfinished, None) => format!(
                 "**{who}** ended its turn without finishing, and a nudge did not get it to.\n\nWhat should happen to it?"
             ),
-            Stall::Stuck => format!(
+            (Stall::Stuck, _) => format!(
                 "**{who}** has written nothing for a while and is not waiting on a question or a background job.\n\nWhat should happen to it?"
             ),
         }
     }
+
 }
 
 /// How the card names the sub. Its title is the best label the registry has;
@@ -57,6 +62,12 @@ fn label(state: &DaemonState, sub_id: &str) -> String {
 /// Raises the stalled-sub card in the main chat's window unless this sub
 /// already has one open for the same cause. Returns the card id when one went up.
 pub async fn raise(state: &Arc<DaemonState>, sub_id: &str, stall: Stall) -> Option<String> {
+    raise_noted(state, sub_id, stall, None).await
+}
+
+/// [`raise`] with a sentence of what is known, for a stall whose cause the
+/// daemon saw itself (a process that died, with its last error).
+pub async fn raise_noted(state: &Arc<DaemonState>, sub_id: &str, stall: Stall, note: Option<&str>) -> Option<String> {
     let parent = state.registry.get(sub_id)?.subchat_of?;
     if cards::open_card_for(state, stall.card_kind(), sub_id).await.is_some() {
         return None;
@@ -66,7 +77,7 @@ pub async fn raise(state: &Arc<DaemonState>, sub_id: &str, stall: Stall) -> Opti
         display_session_id: parent.clone(),
         sub_id: Some(sub_id.to_string()),
         header: stall.header().to_string(),
-        question: stall.question(&label(state, sub_id)),
+        question: stall.question(&label(state, sub_id), note),
         options: vec![
             CardOption::new(OPEN_IT, "Read it where it stopped"),
             CardOption::new(NUDGE_AGAIN, "Remind it how to finish"),

@@ -164,6 +164,8 @@ export interface AskerChip {
   /** True for the main chat's own question, shown with a chat icon. */
   isMain: boolean;
   active: boolean;
+  /** A permission prompt held behind the card now up, not a question. */
+  blocking?: boolean;
 }
 
 export interface QuestionUIOpts {

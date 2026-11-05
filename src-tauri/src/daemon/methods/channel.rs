@@ -607,6 +607,42 @@ mod tests {
         );
     }
 
+    /// `resolve_targets` trims each id before the lookup, so a padded `" main"`
+    /// reached the parent while the guard compared the raw string and let it by.
+    #[tokio::test]
+    async fn a_sub_cannot_wake_its_parent_with_a_padded_target() {
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        for id in ["pad-main", "pad-sub", "pad-sib"] {
+            state.registry.upsert_interactive(id, std::path::Path::new("."), "proj-pad", "2026-11-05T00:00:00Z");
+        }
+        state.registry.set_subchat_of("pad-sub", Some("pad-main".into()));
+        for padded in [" pad-main", "pad-main ", "\tpad-main\n"] {
+            let target = vec![padded.to_string()];
+            let r = post_message_at(Some(dir.path()), &state, "pad-sub", "wake up", Some(&target));
+            assert!(r.is_err(), "{padded:?} must be refused like the bare id");
+        }
+        let queues = state.repo_channel_wakes.lock().unwrap();
+        assert!(queues.get("pad-main").is_none(), "the main agent was never woken");
+        drop(queues);
+        // A padded sibling is still a legitimate post.
+        let sib = vec![" pad-sib ".to_string()];
+        assert!(post_message_at(Some(dir.path()), &state, "pad-sub", "fyi", Some(&sib)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_sub_cannot_message_its_parent_directly_with_a_padded_to() {
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        for id in ["padto-main", "padto-sub"] {
+            state.registry.upsert_interactive(id, std::path::Path::new("."), "proj-padto", "2026-11-05T00:00:00Z");
+        }
+        state.registry.set_subchat_of("padto-sub", Some("padto-main".into()));
+        let v = post_message_or_forward_at(Some(dir.path()), &state, "padto-sub", "hi", None, Some("  padto-main ")).await;
+        assert_eq!(v["ok"], false, "{v}");
+        assert!(state.repo_channel_wakes.lock().unwrap().get("padto-main").is_none());
+    }
+
     fn mirrored_instance(session_id: &str) -> crate::types::Instance {
         use crate::sessions::kinds::InstanceKind;
         crate::types::Instance {

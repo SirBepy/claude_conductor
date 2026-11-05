@@ -42,6 +42,20 @@ struct Entry {
     /// yet. A new sub starts undelivered, and `reset` (a continue, a finish)
     /// starts a new stretch.
     decisions_delivered: bool,
+    /// Text for the next due nudge when it is not [`super::NUDGE_TEXT`]: a finish
+    /// dropped at commit has to say why, since the sub did call `finish_subchat`.
+    nudge_text: Option<&'static str>,
+    /// First sweep that found this sub with no live child and no finish. A card
+    /// goes up only if it is still childless a grace period later, so a respawn
+    /// in progress is not mistaken for a death.
+    childless_since: Option<chrono::DateTime<chrono::Utc>>,
+    /// A "its process died" card was already raised for this stretch without a
+    /// child, so the sweep and the exit handler do not both raise one and Joe's
+    /// answer to it is not asked again every tick.
+    death_carded: bool,
+    /// A `continue_sub` is between its checks and its send. The respawn window
+    /// has no live child, so the `Busy` check cannot see a second caller.
+    continuing: bool,
 }
 
 #[derive(Default)]
@@ -108,6 +122,52 @@ impl Runtime {
         self.with(sub_id, |e| !std::mem::replace(&mut e.decisions_delivered, true))
     }
 
+    /// Arms the next due nudge with its own wording (see `Entry::nudge_text`).
+    pub fn set_nudge_text(&self, sub_id: &str, text: &'static str) {
+        self.with(sub_id, |e| e.nudge_text = Some(text));
+    }
+
+    pub fn take_nudge_text(&self, sub_id: &str) -> Option<&'static str> {
+        self.with(sub_id, |e| e.nudge_text.take())
+    }
+
+    /// Drops a nudge that was armed for a turn end that will never come.
+    pub fn disarm_nudge(&self, sub_id: &str) {
+        self.with(sub_id, |e| {
+            e.nudge_due = false;
+            e.nudge_text = None;
+        });
+    }
+
+    /// Records that the sub has no live child and returns when that was first
+    /// seen, so the caller can wait out a grace period.
+    pub fn note_childless(&self, sub_id: &str, now: chrono::DateTime<chrono::Utc>) -> chrono::DateTime<chrono::Utc> {
+        self.with(sub_id, |e| *e.childless_since.get_or_insert(now))
+    }
+
+    /// A live child was seen: the sub is not dead, and a later death is a new one.
+    pub fn clear_childless(&self, sub_id: &str) {
+        self.with(sub_id, |e| {
+            e.childless_since = None;
+            e.death_carded = false;
+        });
+    }
+
+    pub fn death_carded(&self, sub_id: &str) -> bool {
+        self.with(sub_id, |e| e.death_carded)
+    }
+
+    pub fn mark_death_carded(&self, sub_id: &str) {
+        self.with(sub_id, |e| e.death_carded = true);
+    }
+
+    /// Claims the sub for one `continue_sub`. `None` while another holds it. The
+    /// claim lasts until the guard drops, which covers the respawn window.
+    pub fn begin_continue(&'static self, sub_id: &str) -> Option<ContinueGuard> {
+        let claimed = self.with(sub_id, |e| !std::mem::replace(&mut e.continuing, true));
+        claimed.then(|| ContinueGuard { runtime: self, sub_id: sub_id.to_string() })
+    }
+
     /// A sub that goes on with its life (continued, finished for good, ended)
     /// starts its sequence over, and is shown the decisions log again.
     pub fn reset(&self, sub_id: &str) {
@@ -115,7 +175,23 @@ impl Runtime {
             e.stage = SubStage::Fresh;
             e.nudge_due = false;
             e.decisions_delivered = false;
+            e.nudge_text = None;
+            e.childless_since = None;
+            e.death_carded = false;
         });
+    }
+}
+
+/// Releases the sub's `continue_sub` claim on drop, so an early return or a
+/// failed send never leaves it held.
+pub struct ContinueGuard {
+    runtime: &'static Runtime,
+    sub_id: String,
+}
+
+impl Drop for ContinueGuard {
+    fn drop(&mut self) {
+        self.runtime.with(&self.sub_id, |e| e.continuing = false);
     }
 }
 

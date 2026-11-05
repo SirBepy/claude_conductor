@@ -8,14 +8,17 @@
  */
 
 import { state } from "../state";
-import { parkedAskersFor } from "./gating";
+import { isDeferredPrompt, parkedAskersFor } from "./gating";
 import { queuedQuestionsFor } from "./index";
 import type { AskerChip, QuestionRequestedPayload } from "./types";
 
 export interface OpenAsker {
   askerId: string;
-  /** Questions this asker has open: its slot's, plus its queued siblings'. */
+  /** Questions this asker has open: its slot's, plus its queued siblings'. A
+   *  permission held behind another card counts as one. */
   count: number;
+  /** A permission prompt held behind another asker's open card, not a question. */
+  blocking?: boolean;
   /** Whether the slot itself holds an unanswered question, as opposed to only
    *  siblings queued behind an answered one. */
   slotOpen: boolean;
@@ -46,7 +49,22 @@ function seqOf(askerId: string, payload: QuestionRequestedPayload): number {
 export function openAskersFor(displayId: string): OpenAsker[] {
   const out: OpenAsker[] = [];
   for (const { askerId, prompt } of parkedAskersFor(displayId)) {
-    if (prompt.kind !== "question") continue;
+    if (prompt.kind !== "question") {
+      // A permission held back behind another card is one more thing waiting on
+      // Joe, so it gets a chip. One that merely sits parked because its card is on
+      // screen, or was just answered, does not.
+      if (isDeferredPrompt(prompt.payload.id)) {
+        out.push({
+          askerId,
+          count: 1,
+          blocking: true,
+          slotOpen: true,
+          seq: seqOf(askerId, prompt.payload as unknown as QuestionRequestedPayload),
+          payload: prompt.payload as unknown as QuestionRequestedPayload,
+        });
+      }
+      continue;
+    }
     const slotOpen = !prompt.answered;
     const queued = queuedQuestionsFor(askerId);
     const count = (slotOpen ? questionsIn(prompt.payload) : 0) + queued.reduce((n, q) => n + questionsIn(q), 0);
@@ -99,6 +117,7 @@ export function askerChips(displayId: string, activeAskerId: string): AskerChip[
     count: a.count,
     isMain: a.askerId === displayId,
     active: a.askerId === activeAskerId,
+    ...(a.blocking ? { blocking: true } : {}),
   }));
 }
 
@@ -118,9 +137,10 @@ export function nextParkedAskerFor(displayId: string): string | null {
   return parked[0]!.askerId;
 }
 
-/** Whether anything but the window's own chat has a prompt parked there. Only
- *  then does a window hold several askers, which is when finishing one card
- *  should bring up the next. */
+/** Whether anything but the window's own chat has a prompt parked there, or a
+ *  prompt was held back on purpose behind the card now up (a permission, or a
+ *  question pushed aside for one). Only then does a window hold several askers,
+ *  which is when finishing one card should bring up the next. */
 export function hasSubPromptsIn(displayId: string): boolean {
-  return parkedAskersFor(displayId).some((p) => p.askerId !== displayId);
+  return parkedAskersFor(displayId).some((p) => p.askerId !== displayId || isDeferredPrompt(p.prompt.payload.id));
 }
