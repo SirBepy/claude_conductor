@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: chat-message-cards.css gained the .passed-row rule only; no card rule changed - this spec's contract is unchanged and it passes.
 // asserts: src/shared/chat/subchat-cards.ts, src/shared/chat/chat-subchat-card.ts, src/shared/chat/chat-message-cards.css, src/views/sessions/permission-modal/question-submit.ts, src/views/sessions/permission-modal/question-ui-answer-bar.ts, src/views/sessions/permission-modal/question-ui-templates.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

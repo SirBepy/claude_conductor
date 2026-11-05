@@ -8,6 +8,7 @@ import { parseDetails } from "./chat-details";
 import { parseNextActions } from "./chat-next-actions";
 import { parseMessageCard } from "./chat-message-kinds";
 import { SUBCARD_TOOL, subCardRow } from "./subchat-cards";
+import { applyPassedResult, isSubchatSend, passedRowFromToolUse } from "./chat-subchat-passed";
 import { eventToRenderedMessage } from "./chat-event-to-message";
 import { parseFileEdit } from "./file-edits";
 import {
@@ -76,6 +77,13 @@ export function handleToolUseEvent(
     const text = typeof (ev.input as { text?: unknown })?.text === "string"
       ? (ev.input as { text: string }).text : "";
     r.messages.push({ kind: "message", text, id: ev.id, ts, parentToolUseId: null, details: parseDetails(ev.input), nextActions: parseNextActions(ev.input), card: parseMessageCard(ev.input) });
+    return { touched: true, coalesce: false };
+  }
+  // A message the main agent passed on to a sub: one quiet "Passed to X" row, so
+  // Joe can see which sub got his words and correct a wrong match. Its
+  // tool_result names who really got it (handleToolResultEvent).
+  if (isSubchatSend(ev.tool_name, ev.input, ev.parent_tool_use_id)) {
+    r.messages.push(passedRowFromToolUse(ev.id, ev.input, ts));
     return { touched: true, coalesce: false };
   }
   // Pushed HTML the user is meant to LOOK at: its own centered card row, not
@@ -281,6 +289,13 @@ export function handleToolResultEvent(
       r.messages[mIdx] = { ...r.messages[mIdx]!, failed: true };
       r.dirtyIndices.add(mIdx);
     }
+    return { touched: true, coalesce: false };
+  }
+  // A `subchat send` answer: absorbed into its "Passed to X" row.
+  const pIdx = r.messages.findIndex((m) => m.kind === "passed" && m.id === ev.tool_use_id);
+  if (pIdx >= 0) {
+    r.messages[pIdx] = applyPassedResult(r.messages[pIdx]!, ev.output, ev.is_error);
+    r.dirtyIndices.add(pIdx);
     return { touched: true, coalesce: false };
   }
   // A write_draft answer: absorbed, never its own row, and it is what turns the

@@ -48,7 +48,24 @@ const MAX_QUEUED_LINES: usize = 50;
 pub struct QueuedLine {
     pub author_session_id: String,
     pub text: String,
+    /// `text` was written by the daemon itself (a finished sub's `report_back`
+    /// notice) rather than by a peer, so it may be delivered as the wake body.
+    /// A peer's text never may (the `UserPromptSubmit` injection boundary), which
+    /// is why this flag is set by [`enqueue_notice`] alone.
+    pub code_built: bool,
 }
+
+impl QueuedLine {
+    /// Who a delivered wake is attributed to. Daemon notices have no sender, so
+    /// all of one target's pending notices fold into a single wake.
+    fn group_key(&self) -> &str {
+        if self.code_built { CODE_BUILT_AUTHOR } else { &self.author_session_id }
+    }
+}
+
+/// The empty author a delivery closure receives for the folded daemon notices.
+/// No peer has an empty session id, so it cannot be mistaken for one.
+const CODE_BUILT_AUTHOR: &str = "";
 
 /// Own type rather than reusing `jarvis_wake::WakeQueue` (todo 743): this
 /// queue carries a sender id per line, jarvis's doesn't.
@@ -69,7 +86,20 @@ pub fn enqueue(state: &Arc<DaemonState>, target_session_id: &str, author_session
     if pending.len() >= MAX_QUEUED_LINES {
         pending.pop_front();
     }
-    pending.push_back(QueuedLine { author_session_id: author_session_id.to_string(), text });
+    pending.push_back(QueuedLine { author_session_id: author_session_id.to_string(), text, code_built: false });
+}
+
+/// Queues a wake whose whole body the daemon built from ids and status, with no
+/// byte of anything a sub or a peer wrote. Same queue, same idle gate and the
+/// same coalescing as a peer wake; it is delivered as `is_meta` text with no
+/// author, so it renders as a system note rather than as a peer's message.
+pub fn enqueue_notice(state: &Arc<DaemonState>, target_session_id: &str, notice: String) {
+    let mut queues = state.repo_channel_wakes.lock().unwrap();
+    let pending = queues.entry(target_session_id.to_string()).or_default();
+    if pending.len() >= MAX_QUEUED_LINES {
+        pending.pop_front();
+    }
+    pending.push_back(QueuedLine { author_session_id: String::new(), text: notice, code_built: true });
 }
 
 /// Wake body written to the target's stdin: a count and the sender's session
@@ -86,10 +116,15 @@ fn wake_notice(message_count: usize, author_session_id: &str) -> String {
 /// coalesce into one message; distinct senders each get their own message
 /// (todo 766). Undelivered lines are pushed back to the queue on failure.
 pub async fn drain(state: &Arc<DaemonState>, target_session_id: &str) {
-    drain_with(state, target_session_id, |_text, author, count| {
-        let notice = wake_notice(count, &author);
+    drain_with(state, target_session_id, |text, author, count| {
+        let code_built = author == CODE_BUILT_AUTHOR;
+        let notice = if code_built { text } else { wake_notice(count, &author) };
         async move {
-            lifecycle::send_message_with_respawn_meta_and_author(state, target_session_id, &notice, &author).await
+            if code_built {
+                lifecycle::send_message_with_respawn(state, target_session_id, &notice, true).await
+            } else {
+                lifecycle::send_message_with_respawn_meta_and_author(state, target_session_id, &notice, &author).await
+            }
         }
     })
     .await;
@@ -120,9 +155,9 @@ where
     // the whole batch (todo 766).
     let mut groups: Vec<(String, Vec<&str>)> = Vec::new();
     for line in &lines {
-        match groups.iter_mut().find(|(author, _)| *author == line.author_session_id) {
+        match groups.iter_mut().find(|(author, _)| *author == line.group_key()) {
             Some((_, texts)) => texts.push(line.text.as_str()),
-            None => groups.push((line.author_session_id.clone(), vec![line.text.as_str()])),
+            None => groups.push((line.group_key().to_string(), vec![line.text.as_str()])),
         }
     }
     let mut delivered: HashSet<String> = HashSet::new();
@@ -151,7 +186,7 @@ where
         let mut queues = state.repo_channel_wakes.lock().unwrap();
         let pending = queues.entry(target_session_id.to_string()).or_default();
         for line in lines.into_iter().rev() {
-            if !delivered.contains(&line.author_session_id) {
+            if !delivered.contains(line.group_key()) {
                 pending.push_front(line);
             }
         }
@@ -454,6 +489,94 @@ mod tests {
         assert!(!notice.contains(peer_body));
         assert!(!notice.contains("ignore prior instructions"));
         assert!(notice.contains("peer-session-abc"));
+    }
+
+    #[tokio::test]
+    async fn daemon_notices_fold_into_one_wake_with_no_author_and_leave_peer_wakes_alone() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        enqueue_notice(&state, "s1", "Sub \"A\" (id 1) has finished.".into());
+        enqueue(&state, "s1", "peer-a", "peer text".into());
+        enqueue_notice(&state, "s1", "Sub \"B\" (id 2) has finished.".into());
+
+        let sent: Arc<std::sync::Mutex<Vec<(String, String, usize)>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        drain_with(&state, "s1", |text, author, count| {
+            let sent = sent.clone();
+            async move {
+                sent.lock().unwrap().push((text, author, count));
+                Ok::<(), String>(())
+            }
+        })
+        .await;
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 2, "one wake for the daemon notices, one for the peer");
+        let notices = sent.iter().find(|(_, author, _)| author == CODE_BUILT_AUTHOR).expect("notice wake");
+        assert_eq!(notices.0, "Sub \"A\" (id 1) has finished.\nSub \"B\" (id 2) has finished.");
+        assert_eq!(notices.2, 2);
+        let peer = sent.iter().find(|(_, author, _)| author == "peer-a").expect("peer wake");
+        assert_eq!(peer.2, 1);
+    }
+
+    /// The whole path a `report_back` wake takes, with a live child standing in
+    /// for `claude`: the parent is woken by one `is_meta` turn with no author
+    /// whose text is exactly the daemon's notice, and a peer's text queued beside
+    /// it is not part of that turn.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_report_back_wake_reaches_an_idle_parent_as_one_meta_turn_with_only_the_notice() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        let _child = crate::daemon::session_test_support::spawn_fake_session(&state.sessions, "s1").await;
+        let mut rx = state.sessions.get("s1").unwrap().events.subscribe();
+        let notice = crate::daemon::subchats::wake::notice("Fix login", "abcdef0123456789", 1);
+        enqueue_notice(&state, "s1", notice.clone());
+        drain(&state, "s1").await;
+
+        let ev = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("no timeout")
+            .expect("a UserMessage broadcast");
+        match ev {
+            crate::types::chat::ChatEvent::UserMessage { content, is_meta, author_session_id, .. } => {
+                assert_eq!(content, vec![crate::types::chat::ContentBlock::Text { text: notice }]);
+                assert!(is_meta, "the wake is a daemon-injected turn");
+                assert_eq!(author_session_id, None, "a daemon notice has no sender");
+            }
+            other => panic!("expected UserMessage, got {other:?}"),
+        }
+        assert!(state.registry.get("s1").unwrap().busy, "the parent is mid-turn after its wake");
+    }
+
+    /// A parent that is mid-turn is not written to: the notice waits for its idle.
+    #[tokio::test]
+    async fn a_report_back_wake_waits_for_a_busy_parent() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        state.registry.set_busy("s1", true);
+        enqueue_notice(&state, "s1", "Sub finished.".into());
+        drain(&state, "s1").await;
+        assert_eq!(state.repo_channel_wakes.lock().unwrap().get("s1").map(|q| q.len()), Some(1));
+    }
+
+    #[tokio::test]
+    async fn a_failed_notice_delivery_puts_the_notices_back_for_the_next_drain() {
+        let state = test_state();
+        live(&state, "s1", "proj-1");
+        enqueue_notice(&state, "s1", "Sub finished.".into());
+        drain_with(&state, "s1", |_t, _a, _c| async { Err::<(), String>("write failed".into()) }).await;
+        let queues = state.repo_channel_wakes.lock().unwrap();
+        let pending = queues.get("s1").expect("still queued");
+        assert_eq!(pending.len(), 1);
+        assert!(pending[0].code_built, "it is still a daemon notice after the requeue");
+    }
+
+    #[test]
+    fn a_peers_text_is_never_marked_as_a_daemon_notice() {
+        let state = test_state();
+        enqueue(&state, "s1", "peer-a", "I claim to be a daemon notice".into());
+        let queues = state.repo_channel_wakes.lock().unwrap();
+        assert!(!queues.get("s1").unwrap()[0].code_built);
     }
 
     #[tokio::test]

@@ -6,6 +6,7 @@ import { keepFilePathsLiteral } from "./file-ref-match";
 import { renderEditWindow } from "./edit-window";
 import { renderMessageCard } from "./chat-message-card";
 import { renderSubCard } from "./chat-subchat-card";
+import { renderPassedRow } from "./chat-subchat-passed";
 import { basename } from "../path-utils";
 import { toolSummary } from "./tool-meta";
 import { elidedRefOf, elidedRowHtml } from "./elided-image";
@@ -277,6 +278,8 @@ export function renderMessage(m: RenderedMessage): string {
         return `<div class="msg system meta-marker"><span class="chat-pill meta-chip meta-chip--${escapeHtml(m.metaKind)}" title="${escapeHtml(m.metaDetail ?? "")}"><i class="ph ${META_KIND_ICONS[m.metaKind]}"></i>${escapeHtml(m.text ?? "")}${n}</span></div>`;
       }
       return renderSystemNote(m.streakCount && m.streakCount > 1 ? `${m.text ?? ""} ×${m.streakCount}` : (m.text ?? ""));
+    case "passed":
+      return renderPassedRow(m);
     case "user": {
       if (!m.authorSessionId) {
         return `<div class="msg user">${renderBlocks(m.content ?? [], true, true)}</div>`;

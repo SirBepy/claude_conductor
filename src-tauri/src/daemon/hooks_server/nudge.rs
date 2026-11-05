@@ -200,11 +200,16 @@ pub(super) async fn on_tool_batch(
     let mut delivered_ids: Vec<u64> = Vec::new();
     let mut messages: Vec<String> = Vec::new();
     let mut delivered_blocks: Vec<ContentBlock> = Vec::new();
+    let mut typed: Vec<String> = Vec::new();
     for (id, text, blocks) in claimed {
         delivered_ids.push(id);
         messages.push(text);
+        // The raw words, before the slash-command augmentation above: this is
+        // what a main chat copies on to a sub if Joe's follow-up was this one.
+        typed.extend(item_text(&blocks));
         delivered_blocks.extend(blocks);
     }
+    crate::daemon::subchats::joe_message::note_delivered(&q.session_id, &typed);
     // The common case by volume: nothing queued means EMPTY stdout, never an
     // envelope wrapping an empty string (same rule as `prompt-submit`).
     if messages.is_empty() {
@@ -329,6 +334,21 @@ mod tests {
         assert_eq!(c.state.draft_store.held_count("s1"), 0, "delivered items must not stay queued");
         // A second batch in the same turn must not re-deliver what it already got.
         assert_eq!(call(&c, "s1", "{}").await, "");
+    }
+
+    /// A follow-up Joe typed while a main chat was working reaches it through
+    /// this hook, and it is then the message `subchat send` copies on to a sub.
+    #[tokio::test]
+    async fn a_delivered_held_message_becomes_joes_latest_for_subchat_send_without_the_mention_block() {
+        let c = ctx();
+        c.state.draft_store.add_held("nd-main", vec![text("do the same for signup\n<file:C:/pics/a.png>")]);
+        let out = call(&c, "nd-main", "{}").await;
+        assert!(out.contains("do the same for signup"));
+        assert_eq!(
+            crate::daemon::subchats::joe_message::latest("nd-main").as_deref(),
+            Some("do the same for signup\n<file:C:/pics/a.png>"),
+            "the raw words, with the image mention"
+        );
     }
 
     // todo 926: the live pane never showed a delivered held message because

@@ -442,6 +442,28 @@
   }
 }
 
+/* "Passed to X": the one quiet line where the main agent sent Joe's message on
+   to a sub (chat-subchat-passed.ts). No box and no buttons, so a run of
+   follow-ups does not read as a stack of cards; it only has to be glanceable
+   enough to catch a wrong match. */
+.msg.passed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding: 2px 12px;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  background: transparent;
+}
+.msg.passed-row b {
+  font-weight: 500;
+  color: var(--color-text);
+}
+.msg.passed-row--failed {
+  font-style: italic;
+}
+
 /* A sub's card in its main chat: which job spoke, then the facts code read from
    git and the transcript. The chips are the existing .mc-chip; the details open
    to the words behind each one. */

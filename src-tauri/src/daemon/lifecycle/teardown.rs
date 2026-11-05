@@ -111,6 +111,9 @@ async fn send_message_inner(
     if let Ok(mut lp) = session.last_prompt.lock() {
         *lp = text.to_string();
     }
+    // What `subchat send` copies to a sub word for word when this chat is a
+    // main chat: only a message Joe typed counts, anything else clears it.
+    crate::daemon::subchats::joe_message::note_sent(&session.session_id, text, is_meta, author_session_id);
     // Neither marker is something the CLI itself persists; embedding one in
     // the text is the only way it survives into its own transcript. Meta MUST
     // lead when both are present: `chat::parser`/`tokens::title` do a plain
@@ -493,6 +496,30 @@ mod tests {
         let map = new_session_map();
         let r = cancel_turn(&map, "nope").await;
         assert!(matches!(r, Err(LifecycleError::NotFound(_))));
+    }
+
+    /// `subchat send` copies Joe's latest message to a sub, so the send path
+    /// must record exactly what he typed and nothing the daemon injected.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn only_a_message_joe_typed_becomes_the_one_a_main_chat_passes_on() {
+        use crate::daemon::session_test_support::spawn_fake_session;
+        use crate::daemon::subchats::joe_message;
+        let map = new_session_map();
+        let mut child = spawn_fake_session(&map, "joe-msg-s").await;
+        let session = map.get("joe-msg-s").unwrap().clone();
+
+        let typed = "fix the footer\n<file:C:/pics/shot.png>";
+        send_message(&session, typed, false).await.unwrap();
+        assert_eq!(joe_message::latest("joe-msg-s").as_deref(), Some(typed));
+
+        send_message(&session, "Sub finished.", true).await.unwrap();
+        assert_eq!(joe_message::latest("joe-msg-s"), None, "a wake is not Joe typing");
+
+        send_message(&session, typed, false).await.unwrap();
+        send_message_with_author(&session, "from jarvis", "jarvis-1").await.unwrap();
+        assert_eq!(joe_message::latest("joe-msg-s"), None, "an authored relay is not Joe typing");
+        let _ = child.kill().await;
     }
 
     /// The pump reads this at the next `result` line to tell an interrupted

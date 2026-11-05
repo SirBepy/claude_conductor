@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: prependEvents folds a subchat send result into its passed row and absorbs that result; every other event is handled as before - this spec's contract is unchanged and it passes.
 import { test, expect, type Page } from "@playwright/test";
 // asserts: src/shared/chat/event-store-pagination.ts, src/shared/chat/chat-pagination.ts
 import { assistantMsg, mountSessionsList, sessionInstance, userMsg } from "./harness";

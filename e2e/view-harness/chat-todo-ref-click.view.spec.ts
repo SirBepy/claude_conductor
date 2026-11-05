@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: renderMessage gained a "passed" row kind (the quiet "Passed to X" line); every other kind renders as before - this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/backlog-panel/backlog-panel.ts, src/views/sessions/backlog-panel/todo-ref-click.ts, src/views/sessions/backlog-panel/backlog-open-event.ts, src/shared/chat/markdown-highlight.ts
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";

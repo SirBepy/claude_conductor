@@ -3,6 +3,7 @@ import { parseDetails } from "./chat-details";
 import { parseNextActions } from "./chat-next-actions";
 import { parseMessageCard } from "./chat-message-kinds";
 import { subCardRow } from "./subchat-cards";
+import { isSubchatSend, passedRowFromToolUse } from "./chat-subchat-passed";
 import {
   type RenderedMessage,
   isCompactUserMessage,
@@ -177,6 +178,12 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
         const text = typeof (ev.input as { text?: unknown })?.text === "string"
           ? (ev.input as { text: string }).text : "";
         return { kind: "message", text, id: ev.id, ts, parentToolUseId: null, details: parseDetails(ev.input), nextActions: parseNextActions(ev.input), card: parseMessageCard(ev.input) };
+      }
+      // Mirrors chat-event-handler-tools.ts's `subchat send` special-case: the
+      // quiet "Passed to X" row. Its tool_result is folded in by
+      // chat-pagination.ts's prependEvents.
+      if (isSubchatSend(ev.tool_name, ev.input, ev.parent_tool_use_id)) {
+        return passedRowFromToolUse(ev.id, ev.input, ts);
       }
       // Mirrors chat-event-handler.ts's AUQ special-case (builtin or MCP ask
       // channel, see isAskQuestionTool) so a question renders the same card on

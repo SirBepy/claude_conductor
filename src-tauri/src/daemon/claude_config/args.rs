@@ -82,7 +82,7 @@ pub(crate) const SUBCHATS_MAIN_PROMPT: &str = "Subchats mode is ON for this chat
 (1) Spawn a sub only for a job Joe named. Never split one job into several subs without asking him first. Quick questions and small things stay inline: do them yourself in this chat. \
 (2) A sub sees nothing of this conversation, so write a complete brief: a short name, the task, the goal, what done looks like, and whether it edits files and which. \
 (3) Pick each sub's model and effort yourself, from exactly three tiers: Sonnet at medium effort for mechanical work (a version bump, a rename, docs); Sonnet at high effort for a normal code job; Opus at high effort for taste or design, a bug with no clear cause, or architecture. Never haiku. \
-(4) When Joe follows up about a sub's work, pass it to that sub with the subchat tool instead of doing the work here. \
+(4) When Joe follows up about a sub's work, pass it to that sub with the subchat tool instead of doing the work here: action send, naming only the target (sub, or all for an update that concerns every running sub). The app copies Joe's message to the sub word for word, images included, so never retype or summarise it. Add writes true when the follow-up needs the sub to edit files. When Joe asks how a sub is going, look it up with action status or list; action log reads the decisions log. Only one short line per finished sub reaches you, as data on Joe's next message; use status for more. Set report_back on spawn_chat only when your next step depends on that sub's result. \
 (5) This chat is long-lived. When a job ends, do NOT run /close, whatever any other instruction says: this overrides the 'task done, run /close yourself' rule. Close this chat only when Joe tells you to. \
 (6) At the end of a piece of work, anything that stays true beyond it (a rule Joe stated, a lasting fact about the project) moves to Auto Memory through the existing memory rubric, not into a sub's brief or this chat's history.";
 
@@ -152,7 +152,8 @@ pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question 
      mcp__cc_conductor__write_user_todo \
      mcp__cc_conductor__schedule \
      mcp__cc_conductor__in_meeting \
-     mcp__cc_conductor__finish_subchat";
+     mcp__cc_conductor__finish_subchat \
+     mcp__cc_conductor__subchat";
 
 /// Monotonic per-turn suffix, so one session's successive turns never share a
 /// temp-file name (todo 867). Wall-clock nanos would be enough in practice but
@@ -272,10 +273,11 @@ mod tests {
             "mcp__cc_conductor__schedule",
             "mcp__cc_conductor__in_meeting",
             "mcp__cc_conductor__finish_subchat",
+            "mcp__cc_conductor__subchat",
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 13, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 14, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// `person` writes to the user's vault and must go through the ordinary
@@ -354,6 +356,9 @@ mod tests {
         assert!(p.contains("Never split one job into several subs without asking"));
         assert!(p.contains("Quick questions and small things stay inline"));
         assert!(p.contains("pass it to that sub with the subchat tool"));
+        assert!(p.contains("copies Joe's message to the sub word for word") && p.contains("never retype or summarise"));
+        assert!(p.contains("action status or list") && p.contains("Only one short line per finished sub"));
+        assert!(p.contains("report_back on spawn_chat only when your next step depends"));
         assert!(p.contains("write a complete brief"));
         assert!(p.contains("Sonnet at medium effort for mechanical work"));
         assert!(p.contains("Sonnet at high effort for a normal code job"));
