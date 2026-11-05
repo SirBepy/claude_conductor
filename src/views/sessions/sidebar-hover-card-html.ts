@@ -24,7 +24,7 @@ export interface HoverCardInput {
   /** A Use-subchats main chat's subs (main-chat.ts `hoverRows`). A non-empty
    *  list replaces the chat's own state and plan blocks: one chat has no single
    *  state once it has subs asking, working and finished. */
-  subs?: ReadonlyArray<{ name: string; kind: SubKind; progress: string }>;
+  subs?: ReadonlyArray<{ name: string; kind: SubKind; progress: string; tier?: string }>;
 }
 
 interface StateLine { label: string; tone: RingTone | "idle"; timer: "turn" | "waiting" | "ago" | null }
@@ -112,7 +112,7 @@ const SUB_DOT_TONE: Record<SubKind, string> = {
 
 function subsBlock(subs: NonNullable<HoverCardInput["subs"]>): string {
   return subs.map((s) =>
-    `<div class="hc-subrow is-${s.kind}"><span class="hc-dot" style="background:${SUB_DOT_TONE[s.kind]}"></span><span class="hc-label">${escapeHtml(s.name)}</span><span class="hc-aside">${escapeHtml(s.progress)}</span></div>`,
+    `<div class="hc-subrow is-${s.kind}"><span class="hc-dot" style="background:${SUB_DOT_TONE[s.kind]}"></span><span class="hc-label">${escapeHtml(s.name)}${s.tier ? `<span class="hc-tier">${escapeHtml(s.tier)}</span>` : ""}</span><span class="hc-aside">${escapeHtml(s.progress)}</span></div>`,
   ).join("");
 }
 

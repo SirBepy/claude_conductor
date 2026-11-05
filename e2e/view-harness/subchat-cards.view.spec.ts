@@ -1,5 +1,6 @@
 // Reviewed 2026-11-05: subchat-cards.ts accepts a fifth card kind, when_done (the machine answered a sub's question); finish, blocker and all-finished cards draw as before and this spec passes.
 // Reviewed 2026-11-05: chat-message-cards.css gained the .passed-row rule only; no card rule changed - this spec's contract is unchanged and it passes.
+// Reviewed 2026-11-05: a finish card names the tier the sub ran at beside its name, and the reviewer chip says "no reviewer" instead of "none"; every other card and chip is unchanged and this spec passes.
 // asserts: src/shared/chat/subchat-cards.ts, src/shared/chat/chat-subchat-card.ts, src/shared/chat/chat-message-cards.css, src/views/sessions/permission-modal/question-submit.ts, src/views/sessions/permission-modal/question-ui-answer-bar.ts, src/views/sessions/permission-modal/question-ui-templates.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
@@ -116,6 +117,16 @@ for (const vp of [{ name: "desktop", width: 900 }, { name: "phone", width: 390 }
       await capture(chat(page), `subcards-open-${vp.name}`);
     });
 
+    test("a finish card names the tier it ran at, quietly, beside the sub's name", async ({ page }) => {
+      const tiered = card("c-tier", T0 + 50 * MIN, { model: "claude-sonnet-4-5", effort: "high" });
+      await mountChat(page, vp.width, page1, [tiered]);
+      const sub = chat(page).locator('.mc-root[data-sub-card="1"]');
+      await expect(sub.locator(".mc-full .mc-sub .mc-sub-name")).toHaveText("Header");
+      await expect(sub.locator(".mc-full .mc-sub .mc-sub-tier")).toHaveText("Sonnet high");
+      await expectNoOverflow(page);
+      await capture(chat(page), `subcards-tier-${vp.name}`);
+    });
+
     test("a worktree sub's card says whether its commits landed, and fits the width", async ({ page }) => {
       const landed = card("c-merged", T0 + 50 * MIN, { facts: facts({ merged: true, merged_into: "master" }) });
       await mountChat(page, vp.width, page1, [landed]);
@@ -143,7 +154,7 @@ for (const vp of [{ name: "desktop", width: 900 }, { name: "phone", width: 390 }
       }) });
       await mountChat(page, vp.width, page1, [{ ...unknown, ts: T0 + 50 * MIN }]);
       const summary = chat(page).locator(".mc-root[data-sub-card] .mc-full .mc-facts > summary");
-      expect((await summary.innerText()).replace(/\s+/g, " ").trim()).toBe("? ? ? unknown none");
+      expect((await summary.innerText()).replace(/\s+/g, " ").trim()).toBe("? ? ? unknown no reviewer");
       await summary.click();
       await expect(chat(page).locator(".mc-root[data-sub-card] .mc-full .mc-facts-list")).toContainText("Last test run: unknown");
       await capture(chat(page), `subcards-unknown-${vp.name}`);

@@ -79,7 +79,7 @@ fn counters_path(root: &Path) -> PathBuf {
 }
 
 fn load_counters(root: &Path) -> Counters {
-    std::fs::read_to_string(counters_path(root)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    super::jsonfile::read_or_keep(&counters_path(root))
 }
 
 fn save_counters(root: &Path, c: &Counters) {
@@ -651,6 +651,18 @@ mod tests {
         assert!(!should_run(1, first, at(8)), "day 8 is past the window");
         assert!(!should_run(2, first, at(1)), "only the 1st, then every 5th");
         assert!(should_run(5, first, at(1)));
+    }
+
+    /// A damaged counters file restarts the counts, but its bytes are kept aside
+    /// instead of being replaced silently by the next write.
+    #[test]
+    fn a_damaged_counters_file_is_kept_aside_before_the_next_write() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("subchats")).unwrap();
+        std::fs::write(counters_path(root.path()), "{ \"parents\": half").unwrap();
+        assert!(register_finish_in(root.path(), "a", at(0)), "counts restart at one");
+        let kept = std::fs::read_to_string(counters_path(root.path()).with_file_name("checkups.json.bad")).unwrap();
+        assert_eq!(kept, "{ \"parents\": half");
     }
 
     #[test]

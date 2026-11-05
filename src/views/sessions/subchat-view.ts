@@ -14,8 +14,9 @@ import { getTransport } from "../../shared/transport";
 import { showToast } from "../../shared/toast";
 import { openFileRef } from "../../shared/chat/file-refs";
 import type { Instance } from "../../types/ipc.generated";
+import { tierLabel } from "../../shared/model-name";
 import { state, windowIdOf } from "./state";
-import { isSubchat, sessionSubtitle } from "./sessions-helpers";
+import { isMirrored, isSubchat, sessionSubtitle } from "./sessions-helpers";
 import type { SessionHeader } from "./session-header";
 import { SubListButton } from "./sub-list";
 import { clearPendingPrompt } from "./permission-modal/gating";
@@ -65,9 +66,12 @@ function restoreMainScroll(mainId: string): void {
   requestAnimationFrame(() => { el.scrollTop = memo.top; });
 }
 
-/** "Subchat of Auth refactor, finished, can continue". */
+/** "Subchat of Auth refactor, Sonnet high, finished, can continue". The tier is
+ *  the sub's current one, so it follows a change made from the model picker. */
 export function subMetaText(sub: Instance, main: Instance | undefined): string {
   const parts = [`Subchat of ${main ? sessionSubtitle(main) : "its main chat"}`];
+  const tier = tierLabel(sub.model, sub.effort);
+  if (tier) parts.push(tier);
   if (sub.closing) parts.push("closing");
   else if (sub.subchat_finished) parts.push("finished, can continue");
   else if (sub.progress?.waiting_for) parts.push(sub.progress.waiting_for);
@@ -156,13 +160,16 @@ export function decorateSubchatHeader(header: SessionHeader, sess: Instance, nav
   back.addEventListener("click", () => { void backToMain(sess, nav); });
   header.leadSlot.prepend(back);
 
-  const move = document.createElement("button");
-  move.type = "button";
-  move.className = "sub-move-btn";
-  move.title = "Turn this into an ordinary chat in the sidebar";
-  move.innerHTML = `<i class="ph ph-arrow-square-out"></i><span>Move to sidebar</span>`;
-  move.addEventListener("click", () => { void moveSubToSidebar(sess.session_id, nav); });
-  header.trailSlot.prepend(move);
+  // A sub mirrored in from a paired machine is moved on its host, never from here.
+  if (!isMirrored(sess)) {
+    const move = document.createElement("button");
+    move.type = "button";
+    move.className = "sub-move-btn";
+    move.title = "Turn this into an ordinary chat in the sidebar";
+    move.innerHTML = `<i class="ph ph-arrow-square-out"></i><span>Move to sidebar</span>`;
+    move.addEventListener("click", () => { void moveSubToSidebar(sess.session_id, nav); });
+    header.trailSlot.prepend(move);
+  }
 }
 
 /** Follows an instances update for the chat on screen. "rebuild" means its role

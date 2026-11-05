@@ -53,6 +53,13 @@ pub struct CardEntry {
     /// Which finish of a continued sub this is.
     #[serde(default)]
     pub round: Option<u32>,
+    /// The model and effort the sub ran this round at. The card is a record of one
+    /// report, so it keeps the tier it was written under even after Joe changes it;
+    /// the chat prints them as a quiet "Sonnet high" beside the sub's name.
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
     #[serde(default)]
     pub verdict: String,
     #[serde(default)]
@@ -220,12 +227,25 @@ pub(crate) fn on_blocker_at(
     sub_id: &str,
     card: BlockerCard,
 ) -> Option<CardEntry> {
+    let parent = state.registry.get(sub_id)?.subchat_of.clone()?;
+    on_blocker_in(root, state, &parent, sub_id, card)
+}
+
+/// [`on_blocker_at`] for a sub that no longer names its main chat in the
+/// registry: one just moved to the sidebar still has something to say to the
+/// window it left, so the caller passes the chat it had.
+pub(crate) fn on_blocker_in(
+    root: &Path,
+    state: &Arc<DaemonState>,
+    parent: &str,
+    sub_id: &str,
+    card: BlockerCard,
+) -> Option<CardEntry> {
     let inst = state.registry.get(sub_id)?;
-    let parent = inst.subchat_of.clone()?;
     let entry = CardEntry {
         id: format!("blocker-{}", uuid::Uuid::new_v4()),
         ts: now_ms(),
-        parent_id: parent,
+        parent_id: parent.to_string(),
         kind: KIND_BLOCKER.into(),
         sub_id: Some(sub_id.to_string()),
         sub_name: Some(sub_name(&inst)),
@@ -236,6 +256,11 @@ pub(crate) fn on_blocker_at(
         ..CardEntry::default()
     };
     store_and_announce(state, root, &entry).then_some(entry)
+}
+
+pub fn on_blocker_for(state: &Arc<DaemonState>, parent: &str, sub_id: &str, card: BlockerCard) -> Option<CardEntry> {
+    let root = crate::settings::paths::data_dir().ok()?;
+    on_blocker_in(&root, state, parent, sub_id, card)
 }
 
 /// Draws the card that tells Joe when-done answered a sub's question for him.
@@ -357,6 +382,8 @@ pub(crate) fn draw_finish_at(
         sub_id: Some(sub_id.to_string()),
         sub_name: Some(sub_name(&inst)),
         round: Some(record.round),
+        model: Some(inst.model.clone()).filter(|m| !m.is_empty()),
+        effort: Some(inst.effort.clone()).filter(|e| !e.is_empty()),
         verdict: if record.verdict.is_empty() { "Finished".into() } else { record.verdict.clone() },
         tone: record.tone.clone(),
         text: record.text.clone(),
@@ -570,6 +597,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut rx = st.notifier.subscribe();
 
+        st.registry.set_model_effort(&subs[0], "sonnet", "high");
         record(root.path(), &subs[0], 1, "Built, not pushed");
         st.registry.set_subchat_finished(&subs[0], true);
         let drawn = draw_finish_at(root.path(), &st, &subs[0], Some(tp));
@@ -577,6 +605,7 @@ mod tests {
         let finish = drawn.iter().find(|e| e.kind == KIND_FINISH).expect("finish card drawn");
         assert_eq!(finish.parent_id, main);
         assert_eq!(finish.sub_name.as_deref(), Some("header"));
+        assert_eq!((finish.model.as_deref(), finish.effort.as_deref()), (Some("sonnet"), Some("high")), "the tier shows on the card");
         assert_eq!(finish.verdict, "Built, not pushed");
         let facts = finish.facts.as_ref().unwrap();
         assert_eq!(facts.commits, Some(1), "from git, not from the sub's words");

@@ -23,11 +23,13 @@ use std::sync::{Arc, Mutex};
 pub const KIND: &str = "subchat_close";
 pub const WAIT_FOR_THEM: &str = "Wait for them";
 pub const CLOSE_THEM_TOO: &str = "Close them too";
+/// The close pick when no sub is running and only unmerged worktree commits are at stake.
+pub const CLOSE_ANYWAY: &str = "Close anyway";
 pub const KEEP_IT_OPEN: &str = "Keep it open";
 
 /// What a held close says to whoever asked (the `close_session` tool result, so
 /// the model does not tell Joe the chat closed).
-pub const HELD_NOTE: &str = "This chat still has running subs, so it is not closing yet. Joe has been asked on a card whether to wait for them, close them too, or keep this chat open. End your turn now and do not call close_session again.";
+pub const HELD_NOTE: &str = "This chat still has running subs or subs with unmerged commits, so it is not closing yet. Joe has been asked on a card whether to wait, close anyway, or keep this chat open. End your turn now and do not call close_session again.";
 
 #[derive(Default)]
 struct Entry {
@@ -78,13 +80,16 @@ pub fn live_successor(state: &DaemonState, predecessor: &str) -> Option<String> 
 }
 
 /// Whether closing `parent` needs Joe's approval: it is a live main chat with a
-/// running sub and is not a `respawn` predecessor, whose subs move instead.
+/// running sub, or with a worktree sub (finished or not) whose commits are not
+/// merged, and is not a `respawn` predecessor, whose subs move instead. The second
+/// case is the one a finished sub used to slip through: closing ends it, its tree
+/// is kept, and the "Worktree kept" card lands in a window that is closing.
 pub fn needs_approval(state: &DaemonState, parent: &str) -> bool {
     let Some(inst) = state.registry.get(parent) else { return false };
     if inst.ended_at.is_some() || super::is_sub(&inst) {
         return false;
     }
-    if running_subs(&state.registry, parent).is_empty() {
+    if running_subs(&state.registry, parent).is_empty() && super::worktree::unmerged_subs(state, parent).is_empty() {
         return false;
     }
     live_successor(state, parent).is_none()
@@ -126,24 +131,45 @@ fn names(subs: &[Instance]) -> String {
 pub(crate) async fn raise(state: &Arc<DaemonState>, parent: &str) {
     let running = running_subs(&state.registry, parent);
     let n = running.len();
-    let card = RaisedCard {
-        kind: KIND,
-        display_session_id: parent.to_string(),
-        sub_id: None,
-        header: "Close with subs running".to_string(),
-        question: format!(
-            "Closing this chat has {n} sub{} still running: {}.\n\nWhat should happen to {} first?",
+    let unmerged = super::worktree::unmerged_subs(state, parent);
+    let unmerged_line = (!unmerged.is_empty()).then(|| {
+        let listed = unmerged.iter().map(|(name, commits)| format!("**{name}** ({commits})")).collect::<Vec<_>>().join(", ");
+        format!(
+            "{} sub{} unmerged commits: {listed}. Closing leaves them on their branches in their worktrees, and no window will say so.",
+            unmerged.len(),
+            if unmerged.len() == 1 { " has" } else { "s have" },
+        )
+    });
+    let (header, question, options) = if running.is_empty() {
+        (
+            "Close with unmerged work".to_string(),
+            format!("{}\n\nClose anyway?", unmerged_line.unwrap_or_default()),
+            vec![
+                CardOption::new(CLOSE_ANYWAY, "Their branches and worktrees stay on disk"),
+                CardOption::new(KEEP_IT_OPEN, "Do not close"),
+            ],
+        )
+    } else {
+        let mut question = format!(
+            "Closing this chat has {n} sub{} still running: {}.",
             if n == 1 { "" } else { "s" },
             names(&running),
-            if n == 1 { "it" } else { "them" },
-        ),
-        options: vec![
-            CardOption::new(WAIT_FOR_THEM, "Close this chat when the last one finishes"),
-            CardOption::new(CLOSE_THEM_TOO, "End them now, then close"),
-            CardOption::new(KEEP_IT_OPEN, "Do not close"),
-        ],
-        domain: None,
+        );
+        if let Some(line) = unmerged_line {
+            question.push_str(&format!("\n\n{line}"));
+        }
+        question.push_str(&format!("\n\nWhat should happen to {} first?", if n == 1 { "it" } else { "them" }));
+        (
+            "Close with subs running".to_string(),
+            question,
+            vec![
+                CardOption::new(WAIT_FOR_THEM, "Close this chat when the last one finishes"),
+                CardOption::new(CLOSE_THEM_TOO, "End them now, then close"),
+                CardOption::new(KEEP_IT_OPEN, "Do not close"),
+            ],
+        )
     };
+    let card = RaisedCard { kind: KIND, display_session_id: parent.to_string(), sub_id: None, header, question, options, domain: None };
     match cards::raise_card(state, card).await {
         Ok(handle) => {
             let (state, parent) = (state.clone(), parent.to_string());
@@ -161,7 +187,7 @@ pub(crate) async fn raise(state: &Arc<DaemonState>, parent: &str) {
 pub(crate) async fn apply_answer(state: &Arc<DaemonState>, parent: &str, answer: CardAnswer) {
     match answer {
         CardAnswer::Picked(pick) if pick == WAIT_FOR_THEM => wait(state, parent).await,
-        CardAnswer::Picked(pick) if pick == CLOSE_THEM_TOO => close_them_too(state, parent).await,
+        CardAnswer::Picked(pick) if pick == CLOSE_THEM_TOO || pick == CLOSE_ANYWAY => close_them_too(state, parent).await,
         _ => keep_open(state, parent),
     }
 }

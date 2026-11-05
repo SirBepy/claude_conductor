@@ -491,6 +491,45 @@ mod answer_bridge_tests {
         assert!(crate::daemon::subchats::decisions::read_log("wd2-main").is_some_and(|l| l.contains("Navy")));
     }
 
+    /// `auto_by: "when_done"` makes an answer count as the machine's: no decision is
+    /// logged and a card announces it. Only the desktop pipe may say so, since a phone
+    /// or a paired machine claiming it would make Joe's own answer vanish from the log.
+    #[tokio::test]
+    async fn only_the_desktop_pipe_can_mark_an_answer_as_when_dones() {
+        use crate::daemon::rpc::{ConnectionContext, Request, Router, Transport};
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = state_with_idle_session("tg-main");
+        let mut router = Router::new();
+        register_responders(&mut router, state.clone());
+        let cases = [
+            ("local", Transport::Local, true),
+            ("phone", Transport::Phone, false),
+            ("peer", Transport::PeerMachine("m1".into()), false),
+        ];
+        for (tag, transport, counts_as_auto) in cases {
+            let (main, sub, q) = (format!("tg-main-{tag}"), format!("tg-sub-{tag}"), format!("tg-q-{tag}"));
+            state.registry.upsert_interactive(&main, Path::new("/tmp/x"), "proj", "2026-11-05T00:00:00Z");
+            state.registry.upsert_interactive(&sub, Path::new("/tmp/x"), "proj", "2026-11-05T00:00:00Z");
+            state.registry.set_subchat_of(&sub, Some(main.clone()));
+            state.add_prompt(&q, "question-requested", sub_question_payload(&sub), true).await;
+            let (tx, _rx) = tokio::sync::mpsc::channel(16);
+            let mut ctx = ConnectionContext::new(tx);
+            ctx.remote = matches!(transport, Transport::Phone);
+            ctx.transport = transport;
+            let req = Request {
+                jsonrpc: "2.0".into(),
+                id: json!(1),
+                method: "respond_question".into(),
+                params: Some(json!({"request_id": q, "answers": {"Which header colour?": "Teal"}, "auto_by": "when_done"})),
+            };
+            let resp = router.dispatch(req, ctx).await;
+            assert!(resp.error.is_none(), "{tag}: {resp:?}");
+            let logged = crate::daemon::subchats::decisions::read_log(&main).is_some_and(|l| l.contains("Teal"));
+            let carded = !crate::daemon::subchats::card_log::read(&main).is_empty();
+            assert_eq!((logged, carded), (!counts_as_auto, counts_as_auto), "{tag}: when-done's mark honoured only on the desktop pipe");
+        }
+    }
+
     #[tokio::test]
     async fn when_done_answering_an_ordinary_chats_question_or_skipping_draws_nothing() {
         let _data = crate::daemon::subchats::TempDataDir::new();

@@ -117,8 +117,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // its timeline. A peer machine mirroring the chat renders the same pane, so PM.
     ("list_subchat_cards", PM),
     // Phone only: the phone reads a sub in place from the main chat's header and
-    // needs the way out too. A paired peer never sees a sub (`visible_for_peers`
-    // hides it, and a sub is never mirrored), so it has no row to move.
+    // needs the way out too. Sub rows do reach a paired peer's mirror (remote lists
+    // keep them and the client hides them, so a mirrored main chat's cards and
+    // prompts still route), but turning a sub into a chat is its host's decision, so
+    // this is refused from a peer. The client hides "Move to sidebar" on a mirrored
+    // chat (`isMirrored`) so the refusal is never what Joe finds out by clicking.
     ("move_sub_to_sidebar", P),
     // Read-only transcript paging - the chat pane's own render path, so a
     // peer machine mirroring a session needs it too.

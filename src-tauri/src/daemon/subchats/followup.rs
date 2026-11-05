@@ -184,13 +184,6 @@ pub fn settle_many(sub_id: &str, item_ids: &[u64]) {
     }
 }
 
-/// Claims the text behind a draft-store item for a card.
-pub(crate) fn claim(sub_id: &str, item_id: u64) -> bool {
-    let entry = entry_of(sub_id, item_id);
-    forget_link(sub_id, item_id);
-    claim_entry(sub_id, &entry)
-}
-
 fn quoted(text: &str) -> String {
     let shown: String = text.chars().take(CARD_TEXT_CAP).collect();
     let cut = if text.chars().count() > CARD_TEXT_CAP { "\n> (cut here, the rest was too long for this card)" } else { "" };

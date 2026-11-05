@@ -70,6 +70,13 @@ describe("Use subchats menu item", () => {
     expect(labels.indexOf("Use subchats")).toBe(labels.indexOf("Wrap up when done") + 1);
   });
 
+  it("is not offered to a sub, which cannot have subs of its own", () => {
+    expect(find(buildConfigureItems(ctx({ isSub: true })))).toBeUndefined();
+    expect(find(buildConfigureItems(ctx({ isSub: false })))).toBeDefined();
+    const labels = buildConfigureItems(ctx({ isSub: true })).map((i) => i.label);
+    expect(labels).toContain("Wrap up when done");
+  });
+
   it("shows its on state as the check dot", () => {
     expect(find(buildConfigureItems(ctx({ subchatsOn: true }))).checkDot).toBe(true);
     expect(find(buildConfigureItems(ctx({ subchatsOn: false }))).checkDot).toBe(false);

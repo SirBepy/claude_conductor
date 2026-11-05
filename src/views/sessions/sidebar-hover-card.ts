@@ -6,8 +6,7 @@ import { cwdToProjectName, sessionSubtitle } from "./sessions-helpers";
 import { ctxStatusCache } from "./session-statusbar-helpers";
 import { questionProgressFor } from "./question-progress";
 import { buildHoverCardHtml } from "./sidebar-hover-card-html";
-import { mainChatInfo } from "./main-chat";
-import { isSubchatsOn } from "./permission-modal/gating";
+import { mainChatInfo, showsSubs } from "./main-chat";
 
 /** Desktop-only hover card for a sidebar row: plan steps or question list,
  *  a state line with a timer, and the context %. The phone gets none (Joe,
@@ -56,7 +55,7 @@ function render(li: HTMLElement, sessionId: string): void {
   if (!s) return hideHoverCard();
   const el = ensureCard();
   // Read fresh on every render so the rows track the subs while the card is up.
-  const main = isSubchatsOn(sessionId) ? mainChatInfo(s, state.sessions) : null;
+  const main = showsSubs(sessionId, state.sessions) ? mainChatInfo(s, state.sessions) : null;
   el.innerHTML = buildHoverCardHtml({
     subs: main?.hoverRows,
     title: sessionSubtitle(s),

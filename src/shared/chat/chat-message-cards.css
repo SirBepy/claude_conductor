@@ -478,6 +478,13 @@
 .mc-sub .ph {
   font-size: 0.85rem;
 }
+.mc-sub-tier::before {
+  content: "\00b7";
+  margin-right: 5px;
+}
+.mc-sub-tier {
+  opacity: 0.8;
+}
 .mc-sub-name--mini {
   font-weight: 500;
   color: var(--color-text-muted);

@@ -1,5 +1,6 @@
 import type { Instance } from "../../types/ipc.generated";
-import { isQuietPrompt, parkedAskersFor } from "./permission-modal/gating";
+import { tierLabel } from "../../shared/model-name";
+import { isQuietPrompt, isSubchatsOn, parkedAskersFor } from "./permission-modal/gating";
 import { questionProgressFor } from "./question-progress";
 import { sessionSubtitle } from "./sessions-helpers";
 import { planProgress } from "./sidebar-ring";
@@ -15,6 +16,12 @@ export interface SubStatus {
   kind: SubKind;
   /** "2 of 5 answered", "step 3 of 6", "finished": the hover card's right column. */
   progress: string;
+  /** The model and effort it runs at, "Sonnet high", quiet beside its name. Empty
+   *  when the row carries no model. */
+  tier: string;
+  /** Being closed. It reads green like a finished one, but it is not finished yet:
+   *  the work it was doing may still be settling. */
+  closing: boolean;
 }
 
 /** What a main chat's sidebar row shows about the subs behind it. A main chat
@@ -79,17 +86,26 @@ export function mainChatInfo(main: Instance, sessions: readonly Instance[]): Mai
         : s.progress?.waiting_for
           ? "queued"
           : "working";
-    return { id: s.session_id, name: sessionSubtitle(s), kind, progress: progressText(s, kind) };
+    return { id: s.session_id, name: sessionSubtitle(s), kind, progress: progressText(s, kind), tier: tierLabel(s.model, s.effort), closing: !!s.closing };
   }).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 
   const ownAsking = asking.has(main.session_id);
   const hoverRows = ownAsking
-    ? [{ id: main.session_id, name: "This chat", kind: "asking" as const, progress: progressText(main, "asking") }, ...subs]
+    ? [{ id: main.session_id, name: "This chat", kind: "asking" as const, progress: progressText(main, "asking"), tier: "", closing: false }, ...subs]
     : subs;
   return {
     subs,
     askingDots: subs.filter((s) => s.kind === "asking").length + (ownAsking ? 1 : 0),
     hoverRows,
-    allFinished: subs.length > 0 && subs.every((s) => s.kind === "finished"),
+    // A closing sub is not finished yet, so the ring stays off green until it is gone.
+    allFinished: subs.length > 0 && subs.every((s) => s.kind === "finished" && !s.closing),
   };
+}
+
+/** Whether a chat carries a sub summary on its row: the mode is on, or it still has
+ *  subs from before it was turned off. Turning the mode off only stops new spawns;
+ *  running subs stay tied to the chat, so their dots, count and hover must stay too.
+ *  Which group the row sits in is decided by the mode alone. */
+export function showsSubs(sessionId: string, sessions: readonly Instance[]): boolean {
+  return isSubchatsOn(sessionId) || sessions.some((s) => s.subchat_of === sessionId);
 }

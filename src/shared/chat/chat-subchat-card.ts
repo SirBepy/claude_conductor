@@ -5,6 +5,7 @@
 // chips a final-stamp question card carries (permission-modal/question-ui-templates.ts).
 
 import { escapeHtml } from "../escape-html";
+import { tierLabel } from "../model-name";
 import { renderMessageCard, type CardExtras, type RenderText } from "./chat-message-card";
 import type { RenderedMessage } from "./chat-classifiers";
 import type { SubCardEntry, SubFacts, SubSumFacts } from "./subchat-cards";
@@ -45,7 +46,7 @@ function testChip(f: SubFacts): Chip {
 
 function reviewerChip(f: SubFacts): Chip {
   if (f.reviewer?.state === "ran") return { tone: "done", icon: "ph-eye", value: "ran", title: "A fresh reviewer ran after the last edit" };
-  if (f.reviewer?.state === "none") return { tone: "wait", icon: "ph-eye-slash", value: "none", title: "No reviewer" };
+  if (f.reviewer?.state === "none") return { tone: "wait", icon: "ph-eye-slash", value: "no reviewer", title: "No reviewer" };
   return { tone: "wait", icon: "ph-eye", value: "unknown", title: "Reviewer: unknown" };
 }
 
@@ -153,6 +154,7 @@ export function renderSubCard(m: RenderedMessage, entry: SubCardEntry, text: Ren
   } else {
     extras = {
       tag: entry.sub_name || "Subchat",
+      tagNote: tierLabel(entry.model, entry.effort) || undefined,
       extraHtml: entry.kind === "finish" ? (entry.facts ? factsHtml(entry.facts) : detailsHtml([{ tone: "wait", icon: "ph-question", value: "unknown", title: "No facts were stored for this report" }], ["No facts were stored for this report: unknown"])) : "",
     };
   }
