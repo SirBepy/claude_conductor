@@ -97,6 +97,9 @@ pub(crate) async fn run_pump_exit(
             finalize_close(&state_for_pump, &pump_session);
             crate::sessions::persistence::save_snapshot_default(&state_for_pump.registry);
         }
+        // Same race for a sub's `finish_subchat`: the process died before its
+        // result line flushed, and the finish it accepted still stands.
+        crate::daemon::subchats::turn_end::on_process_exit(&state_for_pump, &pump_session);
     } else {
         let now = chrono::Utc::now().to_rfc3339();
         state_for_pump.registry.mark_ended(&pump_session.session_id, crate::types::EndReason::ProcessGone, &now);

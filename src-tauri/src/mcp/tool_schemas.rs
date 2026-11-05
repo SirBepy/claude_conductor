@@ -32,7 +32,10 @@ pub use super::tool_schemas_workflow::{
 /// `browser` gates the `browser_*` tools the same way: Playwright MCP's own
 /// schemas plus `browser_target`, listed only while Settings' "Claude's
 /// browser" switch is on, and `browser_script` adds the run-code tool.
-pub fn tool_list_response(id: &Value, is_jarvis: bool, browser: bool, browser_script: bool) -> Value {
+///
+/// `subchat_sub` gates `finish_subchat` the same way: it is advertised only to
+/// a hidden sub (`CC_SUBCHAT`), because it ends the chat that calls it.
+pub fn tool_list_response(id: &Value, is_jarvis: bool, browser: bool, browser_script: bool, subchat_sub: bool) -> Value {
     let mut tools = super::tool_schemas_core::core_schemas();
     tools.extend(super::tool_schemas_coordination::coordination_schemas());
     tools.extend(super::tool_schemas_workflow::workflow_schemas());
@@ -42,6 +45,9 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool, browser: bool, browser_sc
     }
     if browser {
         tools.extend(crate::daemon::browser::tool_schemas(browser_script));
+    }
+    if subchat_sub {
+        tools.extend(super::tool_schemas_subchat::subchat_schemas());
     }
 
     json!({

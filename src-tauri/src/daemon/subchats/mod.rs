@@ -16,6 +16,22 @@ use crate::daemon::claude_config::{append_system_prompt, SUBCHAT_SUB_PROMPT};
 use crate::daemon::rpc::RpcError;
 use crate::daemon::state::DaemonState;
 use crate::types::Instance;
+use std::sync::Arc;
+
+pub mod cards;
+pub mod finish;
+pub(crate) mod git;
+mod resume;
+pub(crate) mod runtime;
+pub mod stall;
+pub mod stuck;
+pub mod turn_end;
+
+pub use resume::{continue_sub, end_sub, nudge, request_nudge, ContinueError, NUDGE_TEXT};
+
+/// Env var that marks a sub's MCP child, so `finish_subchat` is listed for it
+/// and for no other chat. Read by `mcp::server`, written by `write_mcp_config`.
+pub const SUB_ENV: &str = "CC_SUBCHAT";
 
 mod routing;
 pub use routing::{
@@ -25,6 +41,50 @@ pub use routing::{
 /// Whether `inst` is a hidden sub of some main chat.
 pub fn is_sub(inst: &Instance) -> bool {
     inst.subchat_of.is_some()
+}
+
+/// What a sub is told when its `post_message` names its own main chat.
+pub const PARENT_POST_REFUSAL: &str = "A sub does not message its main chat: the post would wake the main agent and spend its context. If you need Joe, ask on a card with ask_user_question; when the job is done, call finish_subchat. Posts to other chats still work.";
+
+/// `Some(reason)` when `caller` is a sub and `addressed` (a `post_message`
+/// `target` list or its `to`) names that sub's own parent. Broadcasts and posts
+/// to anyone else (siblings, unrelated chats) pass: subs keep the repo channel
+/// to coordinate on shared files.
+pub fn parent_post_refusal(state: &DaemonState, caller: &str, addressed: &[String]) -> Option<&'static str> {
+    let parent = state.registry.get(caller)?.subchat_of?;
+    addressed.iter().any(|id| *id == parent).then_some(PARENT_POST_REFUSAL)
+}
+
+/// The one hook point for "a sub just finished". Fired by
+/// [`finish::commit_finish`] after the record is stored, `subchat_finished` is
+/// set and the process is stopped. The parent-side cards, the one line back,
+/// the `after` chain and the decisions log all hang off this function, so each
+/// adds its call here rather than into the finish path.
+///
+/// Synchronous on purpose: it runs inside the pump's result handler, where an
+/// inline `.await` that can respawn a child makes the pump future
+/// self-referential (`jarvis_wake::spawn_drain` documents it). A step that
+/// needs async work spawns it from here.
+pub fn on_finished(_state: &Arc<DaemonState>, sub_id: &str) {
+    log::debug!("subchats: on_finished {sub_id}");
+    #[cfg(test)]
+    test_support::record_finished(sub_id);
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::Mutex;
+
+    static FINISHED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    pub fn record_finished(sub_id: &str) {
+        FINISHED.lock().unwrap_or_else(|p| p.into_inner()).push(sub_id.to_string());
+    }
+
+    /// Every sub id `on_finished` has fired for in this test process.
+    pub fn finished_calls() -> Vec<String> {
+        FINISHED.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
 }
 
 /// Why the mode refuses an `ApiCredit` account. Subs inherit the parent's
@@ -110,8 +170,14 @@ pub fn sub_prompt(parent_label: &str) -> String {
     format!("{SUBCHAT_SUB_PROMPT} Your main chat is \"{parent_label}\".")
 }
 
-/// Adds [`sub_prompt`] to a spawn's `--append-system-prompt`.
+/// Adds [`sub_prompt`] to a spawn's `--append-system-prompt`. Idempotent: the
+/// spawn path (`lifecycle::spawn_session`) calls it for every spawn and respawn
+/// of a sub, since a resumed child rebuilds its argv and would otherwise lose
+/// the rules, and a caller that already added it must not double them.
 pub fn append_sub_prompt(args: &mut [String], parent_label: &str) {
+    if args.iter().any(|a| a.contains(SUBCHAT_SUB_PROMPT)) {
+        return;
+    }
     append_system_prompt(args, &sub_prompt(parent_label));
 }
 
@@ -126,15 +192,18 @@ pub fn launch_parent(state: &DaemonState, session_id: &str, explicit: Option<&st
         .or_else(|| state.registry.get(session_id).and_then(|i| i.subchat_of))
 }
 
-/// How the sub prompt names the main chat: its title, else a plain description.
+/// How a sub's prompt names its main chat: the chat's title, else its folder
+/// name, else a plain "main chat". A label for the model to read, not an id.
 pub fn parent_label(state: &DaemonState, parent_id: &str) -> String {
     state
         .registry
         .get(parent_id)
-        .and_then(|i| i.name)
-        .map(|n| n.trim().to_string())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "the main chat".to_string())
+        .and_then(|p| {
+            p.name
+                .filter(|n| !n.trim().is_empty())
+                .or_else(|| p.cwd.file_name().map(|n| n.to_string_lossy().into_owned()))
+        })
+        .unwrap_or_else(|| "main chat".to_string())
 }
 
 /// Points `CC_DATA_DIR` at a scratch dir for one test, so a test that writes
@@ -287,9 +356,45 @@ mod tests {
         assert_eq!(launch_parent(&st, "sub", None).as_deref(), Some("main"));
         assert_eq!(launch_parent(&st, "fresh", Some("main")).as_deref(), Some("main"), "first spawn has no row yet");
         assert_eq!(parent_label(&st, "main"), "CV redesign");
-        assert_eq!(parent_label(&st, "ghost"), "the main chat");
         st.registry.set_subchat_of("sub", None);
         assert_eq!(launch_parent(&st, "sub", None), None, "Move to sidebar drops the sub marking");
+    }
+
+    #[test]
+    fn append_sub_prompt_is_idempotent_so_every_respawn_can_call_it() {
+        let mut args = vec!["--append-system-prompt".to_string(), "base".to_string()];
+        append_sub_prompt(&mut args, "CV redesign");
+        let once = args[1].clone();
+        append_sub_prompt(&mut args, "CV redesign");
+        assert_eq!(args[1], once, "a second call must not double the rules");
+    }
+
+    #[test]
+    fn parent_label_prefers_the_title_then_the_folder_then_a_plain_name() {
+        let st = state();
+        st.registry.upsert_interactive("m", std::path::Path::new("C:/work/cv-site"), "proj", "2026-11-05T00:00:00Z");
+        assert_eq!(parent_label(&st, "m"), "cv-site");
+        st.registry.set_name("m", "CV redesign".to_string());
+        assert_eq!(parent_label(&st, "m"), "CV redesign");
+        assert_eq!(parent_label(&st, "gone"), "main chat");
+    }
+
+    #[test]
+    fn parent_post_refusal_names_only_the_subs_own_parent() {
+        let st = state();
+        for id in ["m", "s", "sib", "x"] {
+            st.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        }
+        st.registry.set_subchat_of("s", Some("m".into()));
+        st.registry.set_subchat_of("sib", Some("m".into()));
+        let to = |ids: &[&str]| ids.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(parent_post_refusal(&st, "s", &to(&["m"])).is_some());
+        assert!(parent_post_refusal(&st, "s", &to(&["sib", "m"])).is_some(), "one parent among many still refuses");
+        assert!(parent_post_refusal(&st, "s", &to(&["sib"])).is_none(), "a sibling is fine");
+        assert!(parent_post_refusal(&st, "s", &to(&["x"])).is_none());
+        assert!(parent_post_refusal(&st, "s", &[]).is_none(), "a broadcast names nobody");
+        assert!(parent_post_refusal(&st, "m", &to(&["s"])).is_none(), "the parent may post to its sub");
+        assert!(parent_post_refusal(&st, "x", &to(&["m"])).is_none(), "a chat that is not a sub may post to anyone");
     }
 
     #[test]

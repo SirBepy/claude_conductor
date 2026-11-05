@@ -245,6 +245,36 @@ fn validate_send(body: &SendMessageBody) -> Result<(), String> {
     Ok(())
 }
 
+/// The parts of a `report` that `finish_subchat` carries. Validated with
+/// `send_message`'s own limits so the two tools cannot drift on what a report is.
+#[derive(Default)]
+pub(super) struct ReportFields {
+    pub text: String,
+    pub verdict: Option<String>,
+    pub tone: Option<String>,
+    pub points: Option<Vec<String>>,
+    pub done: Option<Vec<String>>,
+    pub not_done: Option<Vec<String>>,
+    pub waiting_on: Option<Vec<String>>,
+    pub your_move: Option<Vec<String>>,
+}
+
+/// `validate_send` for a message of kind `report` built from `f`.
+pub(super) fn validate_report(f: ReportFields) -> Result<(), String> {
+    validate_send(&SendMessageBody {
+        text: f.text,
+        kind: Some("report".to_string()),
+        verdict: f.verdict,
+        tone: f.tone,
+        points: f.points,
+        done: f.done,
+        not_done: f.not_done,
+        waiting_on: f.waiting_on,
+        your_move: f.your_move,
+        ..SendMessageBody::default()
+    })
+}
+
 /// An `ok:false` reply carrying the fix; shared by every validation failure.
 fn details_rejection(err: String) -> (StatusCode, Json<serde_json::Value>) {
     (StatusCode::OK, Json(json!({"ok": false, "error": err})))

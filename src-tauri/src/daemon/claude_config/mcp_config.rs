@@ -19,7 +19,8 @@ use std::path::PathBuf;
 /// adds `CC_BROWSER_SCRIPT=1`, which also lists the run-code tool.
 ///
 /// `subchat` adds `CC_SUBCHAT=1` for a hidden sub, the same way `is_jarvis`
-/// does for Jarvis: the MCP child reads it to list sub-only tools.
+/// does for Jarvis: the MCP child reads it to list `finish_subchat`, which no
+/// other chat is offered.
 pub(crate) fn write_mcp_config(
     turn_id: &str,
     tracking_id: &str,
@@ -64,7 +65,7 @@ fn write_mcp_config_inner(
         env["CC_JARVIS"] = serde_json::json!("1");
     }
     if subchat {
-        env["CC_SUBCHAT"] = serde_json::json!("1");
+        env[crate::daemon::subchats::SUB_ENV] = serde_json::json!("1");
     }
     if browser {
         env["CC_BROWSER"] = serde_json::json!("1");

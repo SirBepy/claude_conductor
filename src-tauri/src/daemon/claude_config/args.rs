@@ -97,7 +97,7 @@ pub(crate) const SUBCHATS_MAIN_OFF_NOTE: &str = "Subchats mode is now OFF for th
 /// names it as the end of the job rather than as a suggestion.
 pub(crate) const SUBCHAT_SUB_PROMPT: &str = "You are a sub: a hidden child chat that another chat (your main chat) spawned for one job. Your brief is the whole task, and the main chat does not see this conversation. Rules: \
 Ask Joe only through ask_user_question, only at a real fork where the best path is not clear, or once for a final stamp when the result needs his judgement (taste, product). His answer appears on a card in the main chat's window. Do not ask about direction when the best path is clear. \
-When the job is done, call the finish_subchat tool. That is how you end: /close does not apply to you, so do not run it. \
+When the job is done, call the finish_subchat tool. That is how you end: /close does not apply to you, so do not run it. finish_subchat replaces the rule to call send_message and report_turn_status before ending a turn: you owe neither. It is refused while files you edited are uncommitted (commit your own files by path first) or while your own background work is running. \
 Do not push, unless Joe asked you to run a push gate. \
 Do not send progress messages. \
 Keep write_plan current, since Joe sees your plan when he hovers over you.";
@@ -148,7 +148,8 @@ pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question 
      mcp__cc_conductor__write_draft \
      mcp__cc_conductor__write_user_todo \
      mcp__cc_conductor__schedule \
-     mcp__cc_conductor__in_meeting";
+     mcp__cc_conductor__in_meeting \
+     mcp__cc_conductor__finish_subchat";
 
 /// Monotonic per-turn suffix, so one session's successive turns never share a
 /// temp-file name (todo 867). Wall-clock nanos would be enough in practice but
@@ -267,10 +268,11 @@ mod tests {
             "mcp__cc_conductor__write_user_todo",
             "mcp__cc_conductor__schedule",
             "mcp__cc_conductor__in_meeting",
+            "mcp__cc_conductor__finish_subchat",
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 12, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 13, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// `person` writes to the user's vault and must go through the ordinary
@@ -379,5 +381,12 @@ mod tests {
         assert!(p.contains("Do not send progress messages"));
         assert!(p.contains("Keep write_plan current"));
         assert!(!p.contains('\\') && !p.contains("  "));
+    }
+
+    #[test]
+    fn subchat_sub_prompt_says_finish_replaces_the_per_turn_send_message_duty() {
+        let p = SUBCHAT_SUB_PROMPT;
+        assert!(p.contains("finish_subchat replaces the rule to call send_message and report_turn_status"));
+        assert!(p.contains("uncommitted") && p.contains("background work"));
     }
 }
