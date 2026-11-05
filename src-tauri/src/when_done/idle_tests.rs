@@ -218,3 +218,38 @@ fn a_mirrored_prompt_is_never_auto_resolved_by_this_machine() {
     assert!(!is_mirrored_prompt(&instances, &serde_json::json!({"id": "r2", "session_id": "local"})));
     assert!(!is_mirrored_prompt(&instances, &serde_json::json!({"id": "r3"})));
 }
+
+fn sub(session_id: &str, busy: bool) -> Instance {
+    let mut i = instance(session_id, busy, false);
+    i.subchat_of = Some("main".into());
+    i
+}
+
+/// A running sub holds the sleep back like any busy chat. A finished one does not,
+/// even if its last turn left a "working" status or a task flag on the row: it has
+/// no process, so there is no work in flight to protect.
+#[test]
+fn a_running_sub_holds_the_run_and_a_finished_one_does_not() {
+    let main = instance("main", false, false);
+    assert!(!all_sessions_idle(&[main.clone(), sub("running", true)]), "a busy sub is work in flight");
+
+    let mut finished = sub("done", false);
+    finished.subchat_finished = true;
+    assert!(all_sessions_idle(&[main.clone(), finished.clone()]));
+
+    finished.awaiting = Some("working".into());
+    finished.local_task_running = true;
+    assert!(instance_is_idle(&finished), "a stale status on a finished sub is not work");
+    assert!(all_sessions_idle(&[main, finished]));
+}
+
+/// The same row, running: that status does hold the run.
+#[test]
+fn the_same_status_on_a_sub_that_has_not_finished_still_holds_the_run() {
+    let mut running = sub("run", false);
+    running.awaiting = Some("working".into());
+    assert!(!instance_is_idle(&running));
+    running.awaiting = None;
+    running.local_task_running = true;
+    assert!(!instance_is_idle(&running));
+}

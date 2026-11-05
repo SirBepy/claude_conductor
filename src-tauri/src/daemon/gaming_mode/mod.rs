@@ -49,6 +49,22 @@ half-done commit or push, end with a short stopping note saying where you stoppe
 
 pub const RESUME_MESSAGE: &str = "Gaming mode is off. Resume from your stopping note.";
 
+/// The extra park text for a hidden sub of a main chat. A sub that
+/// finishes while parked would be stopped for good by the daemon, and its
+/// resume message would find a finished job instead of the one it stopped in.
+pub const SUB_PARK_NOTE: &str = "You are a sub of a main chat: do not call finish_subchat now, even if the job \
+is nearly done. Stop at a clean point and say where you stopped; the daemon will not ask you to finish while \
+gaming mode is on, and it will tell you when to resume.";
+
+/// The park text for a session: a sub also hears that it must not finish.
+pub fn park_message(sub: bool) -> String {
+    if sub {
+        format!("{PARK_MESSAGE} {SUB_PARK_NOTE}")
+    } else {
+        PARK_MESSAGE.to_string()
+    }
+}
+
 /// One session gaming mode parked, enough to respawn-and-message it again on
 /// resume even across a daemon restart (`cwd` is required by
 /// `ScheduledKind::Message`'s own respawn path).
@@ -56,6 +72,32 @@ pub const RESUME_MESSAGE: &str = "Gaming mode is off. Resume from your stopping 
 pub struct PausedSession {
     pub session_id: String,
     pub cwd: String,
+    /// A hidden sub of a main chat (`Instance::subchat_of`). Recorded because the
+    /// park message differs, and `#[serde(default)]` keeps a file written before
+    /// this field loading.
+    #[serde(default)]
+    pub sub: bool,
+}
+
+/// Writes a gaming-mode file with exactly `ids` parked (and mode off when empty),
+/// for a test of something that reads [`is_parked`]. The caller holds a scratch
+/// data dir.
+#[cfg(test)]
+pub(crate) fn set_file_for_test(ids: &[&str]) {
+    save_file(&GamingModeFile {
+        on: !ids.is_empty(),
+        paused_sessions: ids.iter().map(|id| PausedSession { session_id: id.to_string(), ..Default::default() }).collect(),
+        ..Default::default()
+    });
+}
+
+/// Whether gaming mode is on and has parked `session_id`. A parked sub's turn
+/// ends on a stopping note, not a `finish_subchat`: the Stop hook, the stuck
+/// sweep and the ceiling all read this to leave it alone. Gaming mode does not
+/// freeze the row, so `Instance::frozen` cannot tell them.
+pub fn is_parked(session_id: &str) -> bool {
+    let file = load_file();
+    file.on && file.paused_sessions.iter().any(|s| s.session_id == session_id)
 }
 
 /// One server_supervisor entry gaming mode stopped, enough to restart it by
@@ -184,7 +226,7 @@ pub fn turn_on(
     save_file(&file);
 
     for s in &targets {
-        exec.queue_message(&s.session_id, &s.cwd, PARK_MESSAGE);
+        exec.queue_message(&s.session_id, &s.cwd, &park_message(s.sub));
     }
     for p in &stop_targets {
         if let Err(e) = exec.supervisor_stop(&p.id) {
@@ -388,7 +430,13 @@ mod tests {
             self.calls.lock().unwrap().push("docker_desktop_start".into());
         }
         fn queue_message(&self, session_id: &str, _cwd: &str, prompt: &str) {
-            let tag = if prompt == PARK_MESSAGE { "park" } else { "resume" };
+            let tag = if prompt == PARK_MESSAGE {
+                "park"
+            } else if prompt == park_message(true) {
+                "park-sub"
+            } else {
+                "resume"
+            };
             self.calls.lock().unwrap().push(format!("queue_message({session_id},{tag})"));
         }
     }
@@ -418,7 +466,7 @@ mod tests {
             // actually landed, not just that turn_on returned a summary.
             let persisted = load_file();
             assert!(persisted.on);
-            assert_eq!(persisted.paused_sessions, vec![PausedSession { session_id: "s1".into(), cwd: "C:/proj/proj-a".into() }]);
+            assert_eq!(persisted.paused_sessions, vec![PausedSession { session_id: "s1".into(), cwd: "C:/proj/proj-a".into(), sub: false }]);
             assert_eq!(persisted.stopped_procs, vec![StoppedProc { id: "frontend:dev".into() }]);
             assert_eq!(persisted.stopped_containers, vec!["abc123".to_string()]);
             assert!(persisted.docker_desktop_was_running);
@@ -508,6 +556,34 @@ mod tests {
             assert!(off_exec.calls().contains(&"queue_message(s1,resume)".to_string()));
             assert!(!load_file().on);
         });
+    }
+
+    #[test]
+    fn a_busy_sub_is_parked_with_a_message_telling_it_not_to_finish_and_resumed_on_the_way_out() {
+        with_isolated_data_dir(|| {
+            let mut sub = instance("sub1", "proj-a", InstanceKind::Interactive, false, false);
+            sub.subchat_of = Some("main1".into());
+            let main = instance("main1", "proj-a", InstanceKind::Interactive, false, false);
+            let exec = FakeExecutor::default();
+            turn_on(&[main, sub], &[], &exec);
+            assert!(exec.calls().contains(&"queue_message(sub1,park-sub)".to_string()), "{:?}", exec.calls());
+            assert!(exec.calls().contains(&"queue_message(main1,park)".to_string()), "a main chat hears the plain park text");
+            assert!(park_message(true).contains("finish_subchat"), "the sub is told not to finish");
+            assert!(!park_message(false).contains("finish_subchat"));
+            assert!(is_parked("sub1") && is_parked("main1") && !is_parked("other"));
+
+            let off = FakeExecutor::default();
+            turn_off(&off);
+            assert!(off.calls().contains(&"queue_message(sub1,resume)".to_string()), "the sub is woken again");
+            assert!(!is_parked("sub1"), "once gaming mode is off nothing is parked");
+        });
+    }
+
+    #[test]
+    fn a_file_written_before_the_sub_field_still_loads() {
+        let old = r#"{"on":true,"paused_sessions":[{"session_id":"s1","cwd":"C:/p"}]}"#;
+        let file: GamingModeFile = serde_json::from_str(old).unwrap();
+        assert!(!file.paused_sessions[0].sub);
     }
 
     #[test]

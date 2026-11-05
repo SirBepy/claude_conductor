@@ -76,6 +76,15 @@ pub(super) async fn on_close_confirm(
     if ctx.state.registry.get(&payload.session_id).is_some_and(|i| crate::daemon::subchats::is_sub(&i)) {
         return (StatusCode::OK, Json(json!({"ok": false, "error": SUB_CLOSE_REFUSAL})));
     }
+    // The confirmation is what arms teardown. A chat with running subs is not
+    // closed on the model's word: Joe is asked on a card, and the model is told
+    // so, so it does not announce a close that has not happened. `started` only
+    // raises the Closing row state, which is the very state "Wait for them" shows.
+    if payload.stage.as_deref() != Some("started")
+        && crate::daemon::subchats::closing::request_close(&ctx.state, &payload.session_id)
+    {
+        return (StatusCode::OK, Json(json!({"ok": false, "error": crate::daemon::subchats::closing::HELD_NOTE})));
+    }
     if apply_close_stage(&ctx.state.registry, &payload.session_id, payload.stage.as_deref()) {
         crate::daemon::machines::publish_instances_changed(&ctx.state);
     }

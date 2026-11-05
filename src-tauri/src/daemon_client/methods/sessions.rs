@@ -179,9 +179,11 @@ impl PersistentClient {
             .ok_or_else(|| ClientError::Rpc { code: -32000, message: "clear_jarvis_context: no session_id in result".into() })
     }
 
-    pub async fn mark_session_ended(&self, session_id: &str) -> Result<(), ClientError> {
-        self.call("mark_session_ended", json!({"session_id": session_id})).await?;
-        Ok(())
+    /// Returns true when the daemon held the close instead of ending the chat:
+    /// it has running subs and Joe is being asked on a card.
+    pub async fn mark_session_ended(&self, session_id: &str) -> Result<bool, ClientError> {
+        let res = self.call("mark_session_ended", json!({"session_id": session_id})).await?;
+        Ok(res.get("held").and_then(Value::as_bool).unwrap_or(false))
     }
 
     pub async fn externalize_session(&self, session_id: &str) -> Result<(), ClientError> {

@@ -25,6 +25,8 @@ use std::sync::{Arc, Mutex};
 pub const KIND_FINISH: &str = "finish";
 pub const KIND_BLOCKER: &str = "blocker";
 pub const KIND_ALL_FINISHED: &str = "all_finished";
+/// When-done answered a sub's question with the first option while Joe was away.
+pub const KIND_WHEN_DONE: &str = "when_done";
 
 /// The notifier frame a drawn card is announced on. The chat re-reads the log
 /// when it sees one for its own id, so a dropped frame costs a refresh at most.
@@ -212,6 +214,76 @@ pub(crate) fn on_blocker_at(
         ..CardEntry::default()
     };
     store_and_announce(state, root, &entry).then_some(entry)
+}
+
+/// Draws the card that tells Joe when-done answered a sub's question for him.
+/// When-done auto-answers with the first option so the machine can sleep, and
+/// the answer would otherwise leave no trace in the window Joe reads. Goes
+/// through the card log rather than `raise_card`, since a question card waits
+/// for an answer that never comes. `None` when `sub_id` is not a sub.
+pub fn on_when_done_answer(state: &Arc<DaemonState>, sub_id: &str, question: &str, answer: &str) -> Option<CardEntry> {
+    let root = crate::settings::paths::data_dir().ok()?;
+    on_when_done_answer_at(&root, state, sub_id, question, answer)
+}
+
+pub(crate) fn on_when_done_answer_at(
+    root: &Path,
+    state: &Arc<DaemonState>,
+    sub_id: &str,
+    question: &str,
+    answer: &str,
+) -> Option<CardEntry> {
+    let inst = state.registry.get(sub_id)?;
+    let parent = inst.subchat_of.clone()?;
+    let entry = CardEntry {
+        id: format!("when-done-{}", uuid::Uuid::new_v4()),
+        ts: now_ms(),
+        parent_id: parent,
+        kind: KIND_WHEN_DONE.into(),
+        sub_id: Some(sub_id.to_string()),
+        sub_name: Some(sub_name(&inst)),
+        verdict: "When-done answered".into(),
+        tone: Some("neutral".into()),
+        text: format!("While you were away, when-done answered the question \"{question}\" with its first option: {answer}."),
+        ..CardEntry::default()
+    };
+    store_and_announce(state, root, &entry).then_some(entry)
+}
+
+/// Moves a main chat's cards to the chat that took over (`respawn`), rewriting
+/// each entry's `parent_id`. Re-runnable: an entry the destination already holds
+/// is skipped, so a move that stopped half way finishes on the next call without
+/// doubling a card.
+pub fn move_log(old_parent: &str, new_parent: &str) {
+    if let Ok(root) = crate::settings::paths::data_dir() {
+        move_log_in(&root, old_parent, new_parent);
+    }
+}
+
+pub(crate) fn move_log_in(root: &Path, old_parent: &str, new_parent: &str) {
+    if old_parent == new_parent {
+        return;
+    }
+    let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let (Some(from), Some(_)) = (log_path(root, old_parent), log_path(root, new_parent)) else { return };
+    if !from.exists() {
+        return;
+    }
+    let held: std::collections::HashSet<String> = read_in(root, new_parent).into_iter().map(|e| e.id).collect();
+    for mut entry in read_in(root, old_parent) {
+        if held.contains(&entry.id) {
+            continue;
+        }
+        entry.parent_id = new_parent.to_string();
+        if let Err(e) = append(root, &entry) {
+            // Leave the old file in place: the next run finishes the move.
+            log::warn!("subchats: could not move card {} to {new_parent}: {e}", entry.id);
+            return;
+        }
+    }
+    if let Err(e) = std::fs::remove_file(&from) {
+        log::warn!("subchats: moved {old_parent}'s cards but could not remove the old file: {e}");
+    }
 }
 
 /// The hook `subchats::on_finished` calls. The card needs git and a transcript

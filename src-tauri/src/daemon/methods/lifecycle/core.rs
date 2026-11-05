@@ -366,9 +366,16 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
             async move {
                 let p: SessionIdOnly = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                // A main chat with running subs is not closed on a click: Joe is
+                // asked on a card (menu Close, Ctrl+W, the phone and `/clear` all
+                // arrive here), and the caller is told it was held.
+                if crate::daemon::subchats::closing::request_close(&state, &p.session_id) {
+                    return Ok(json!({"ok": true, "held": true}));
+                }
                 lifecycle::end_session(&map, &p.session_id).await.map_err(err_to_rpc)?;
                 let now = chrono::Utc::now().to_rfc3339();
                 state.registry.mark_ended(&p.session_id, EndReason::Manual, &now);
+                crate::daemon::subchats::closing::settle_family(&state, &p.session_id).await;
                 crate::daemon::machines::publish_instances_changed(&state);
                 crate::sessions::persistence::save_snapshot_default(&state.registry);
                 Ok(json!({"ok": true}))

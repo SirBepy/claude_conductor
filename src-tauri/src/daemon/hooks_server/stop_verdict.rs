@@ -122,6 +122,9 @@ pub(super) enum SubTurnEnd {
     Nudge,
     /// Joe gets a card: open it, nudge again, end it.
     Card,
+    /// The same card, raised without blocking the turn, because the sub has no MCP
+    /// transport and so cannot finish or ask.
+    CardNoTransport,
 }
 
 /// Everything the sub decision reads, gathered by `stop.rs`.
@@ -129,9 +132,9 @@ pub(super) enum SubTurnEnd {
 pub(super) struct SubTurnFacts {
     /// A `finish_subchat` call this turn was accepted, so the turn is meant to end.
     pub finishing: bool,
-    /// A pending question or permission card, background work, a freeze (which
-    /// also covers a gaming-mode park and a rate limit): the turn ends without
-    /// being unfinished business.
+    /// A pending question or permission card, background work, or a pause (a
+    /// freeze, a gaming-mode park, a rate limit; see `subchats::pause`): the turn
+    /// ends without being unfinished business.
     pub exempt: bool,
     pub stop_hook_active: bool,
     /// The sub reported `question` but no card is up (015b8b4f's rule). It gets
@@ -150,8 +153,16 @@ pub(super) struct SubTurnFacts {
 /// `Allow` for a finishing or exempt turn resets the sequence: the sub is doing
 /// something legitimate, so a later unfinished end starts from the top.
 pub(super) fn sub_turn_end(stage: SubStage, f: SubTurnFacts) -> (SubStage, SubTurnEnd) {
-    if f.finishing || f.exempt || !f.mcp_attached {
+    if f.finishing || f.exempt {
         return (SubStage::Fresh, SubTurnEnd::Allow);
+    }
+    // With the transport down neither `finish_subchat` nor `ask_user_question` can
+    // be called, so a block or a nudge would demand what the sub cannot do. Letting
+    // the turn end silently would leave Joe nothing to see, though, so he gets the
+    // card at once. The stage goes to Nudged so a later unfinished end is a card
+    // again, as in the normal sequence.
+    if !f.mcp_attached {
+        return (SubStage::Nudged, SubTurnEnd::CardNoTransport);
     }
     match stage {
         // `stop_hook_active` set on a first end means something else already
@@ -255,11 +266,22 @@ mod tests {
             for f in [
                 SubTurnFacts { finishing: true, ..facts() },
                 SubTurnFacts { exempt: true, ..facts() },
-                SubTurnFacts { mcp_attached: false, ..facts() },
+                SubTurnFacts { exempt: true, mcp_attached: false, ..facts() },
             ] {
                 assert_eq!(sub_turn_end(stage, f), (SubStage::Fresh, SubTurnEnd::Allow), "{stage:?} {f:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_sub_with_no_mcp_transport_gets_a_card_and_is_never_blocked_or_nudged() {
+        let down = SubTurnFacts { mcp_attached: false, ..facts() };
+        for stage in [SubStage::Fresh, SubStage::Blocked, SubStage::Nudged] {
+            assert_eq!(sub_turn_end(stage, down), (SubStage::Nudged, SubTurnEnd::CardNoTransport), "{stage:?}");
+        }
+        // A block text would tell a sub to call tools it cannot reach.
+        let retry = SubTurnFacts { stop_hook_active: true, ..down };
+        assert_eq!(sub_turn_end(SubStage::Fresh, retry).1, SubTurnEnd::CardNoTransport);
     }
 
     #[test]

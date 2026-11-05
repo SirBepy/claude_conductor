@@ -290,8 +290,8 @@ fn report_send_verdict(
 /// child, so it goes up at once.
 ///
 /// Exempt, so the turn simply ends: a `finish_subchat` this turn, a pending
-/// question or permission card, background work, and a freeze (a user freeze, a
-/// gaming-mode park and a rate limit all set it).
+/// question or permission card, background work, and a pause (`subchats::pause`:
+/// a freeze, a gaming-mode park, a rate limit).
 async fn sub_stop(
     state: &Arc<crate::daemon::state::DaemonState>,
     sub_id: &str,
@@ -313,11 +313,12 @@ async fn sub_stop(
         rt.take_pending_finish(sub_id);
         finishing = false;
     }
-    let frozen = state.registry.get(sub_id).is_some_and(|i| i.frozen);
+    let now = chrono::Utc::now().timestamp();
+    let paused = state.registry.get(sub_id).is_some_and(|i| crate::daemon::subchats::pause::is_paused(&i, now));
     let card_waiting = crate::daemon::lifecycle::has_open_prompt(state, sub_id).await;
     let facts = SubTurnFacts {
         finishing,
-        exempt: background || frozen || card_waiting,
+        exempt: background || paused || card_waiting,
         stop_hook_active: stop_hook_active == Some(true),
         question_without_card: status == Some("question") && !question_card_posted,
         mcp_attached,
@@ -340,6 +341,14 @@ async fn sub_stop(
             let (state, sub) = (state.clone(), sub_id.to_string());
             tokio::spawn(async move {
                 stall::raise(&state, &sub, Stall::Unfinished).await;
+            });
+            None
+        }
+        SubTurnEnd::CardNoTransport => {
+            log::warn!("hook /hooks/stop: sub {sub_id} ended a turn with no MCP transport, raising a card without blocking it");
+            let (state, sub) = (state.clone(), sub_id.to_string());
+            tokio::spawn(async move {
+                stall::raise_noted(&state, &sub, Stall::Unfinished, Some(stall::NO_TRANSPORT_NOTE)).await;
             });
             None
         }
@@ -560,7 +569,7 @@ mod tests {
         let (st, sub) = state_with_sub("stop-p");
         st.add_prompt("p1", "permission-requested", json!({"session_id": sub}), false).await;
         assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, None).await, None);
-        // A freeze: the user's, a gaming-mode park and a rate limit all set `frozen`.
+        // A freeze: the user's, and the auto-freeze a rate-limit rejection sets.
         let (st, sub) = state_with_sub("stop-frz");
         st.registry.set_frozen(&sub, true);
         st.registry.set_auto_frozen(&sub, true);
@@ -618,10 +627,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_sub_without_a_reachable_mcp_transport_is_not_blocked() {
+    async fn a_sub_without_a_reachable_mcp_transport_is_not_blocked_but_gets_a_card() {
         let (st, sub) = state_with_sub("stop-nomcp");
         let r = sub_stop(&st, &sub, Some(false), TurnActivity::Idle, None, false, false).await;
         assert_eq!(r, None, "finish_subchat is unreachable, so demanding it is an unsatisfiable loop");
+        let cards = wait_for_a_card(&st).await;
+        assert_eq!(cards.len(), 1, "a silent sub with no way to speak must not sit unseen");
+        assert_eq!(cards[0]["payload"]["card_kind"], "subchat_unfinished");
+        assert_eq!(cards[0]["payload"]["display_session_id"], "stop-nomcp-main");
+        let text = cards[0]["payload"]["questions"][0]["question"].as_str().unwrap();
+        assert!(text.contains("link to the daemon's tools is down"), "{text}");
+        assert!(!runtime().take_nudge_due(&sub), "a nudge asks for what it cannot do");
+        // Asking again while the card is open adds nothing.
+        sub_stop(&st, &sub, Some(false), TurnActivity::Idle, None, false, false).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(st.list_prompts().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_gaming_mode_park_and_a_rate_limit_exempt_a_sub_from_the_stop_rule() {
+        // A parked sub ends on a stopping note, not a finish: no freeze is set.
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = state_with_sub("stop-park");
+        crate::daemon::gaming_mode::set_file_for_test(&[&sub]);
+        assert!(!st.registry.get(&sub).unwrap().frozen, "gaming mode freezes nothing");
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, Some("done")).await, None);
+        assert_eq!(runtime().stage(&sub), SubStage::Fresh, "an exempt end does not advance the sequence");
+        assert!(st.list_prompts().await.is_empty());
+        crate::daemon::gaming_mode::set_file_for_test(&[]);
+        assert!(stop(&st, &sub, false, TurnActivity::Idle, Some("done")).await.is_some(), "blocked again once the park is over");
+
+        // An account that is blocked until a reset still ahead, though this sub was not rejected itself.
+        let (st, sub) = state_with_sub("stop-rate");
+        st.registry.set_account(&sub, "acct");
+        st.registry.set_rate_limited_for_account("acct", chrono::Utc::now().timestamp() + 600, "five_hour");
+        assert!(!st.registry.get(&sub).unwrap().frozen);
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, Some("done")).await, None);
+        assert_eq!(runtime().stage(&sub), SubStage::Fresh);
     }
 
     #[test]

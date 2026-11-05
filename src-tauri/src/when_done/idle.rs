@@ -58,7 +58,11 @@ pub(super) fn log_comment(line: &str) {
 /// poller and a pending scheduled wake into the same `"waiting"`, and only the
 /// poller dies when the machine sleeps.
 pub(super) fn instance_is_idle(i: &crate::types::Instance) -> bool {
-    !i.busy && i.awaiting.as_deref() != Some("working") && !i.local_task_running
+    // A finished sub has no process: it waits, frozen, to be continued. Whatever
+    // status its last turn left on the row is not work in flight, so it never
+    // holds the sleep back. A sub still running is judged like any chat: it is
+    // busy while it works, which is what holds the run.
+    i.subchat_finished || (!i.busy && i.awaiting.as_deref() != Some("working") && !i.local_task_running)
 }
 
 /// True when every live (not-ended) session is idle. An empty list (after

@@ -134,6 +134,19 @@ describe("mainChatInfo", () => {
     expect(mainChatInfo(main, [main, sub("a", { subchat_finished: true, busy: false }), sub("b")]).allFinished).toBe(false);
   });
 
+  it("does not call a frozen or rate-limited sub working", () => {
+    const later = BigInt(Math.floor(Date.now() / 1000) + 3600);
+    const earlier = BigInt(Math.floor(Date.now() / 1000) - 3600);
+    const sessions = [
+      main,
+      sub("frozen", { frozen: true }),
+      sub("limited", { rate_limited_resets_at: later }),
+      sub("old-limit", { rate_limited_resets_at: earlier }),
+    ];
+    const byId = Object.fromEntries(mainChatInfo(main, sessions).subs.map((s) => [s.id, s.progress]));
+    expect(byId).toMatchObject({ frozen: "paused", limited: "rate limited", "old-limit": "working" });
+  });
+
   it("ignores another chat's subs", () => {
     expect(mainChatInfo(main, [main, sub("x", { subchat_of: "other" })]).subs).toHaveLength(0);
   });

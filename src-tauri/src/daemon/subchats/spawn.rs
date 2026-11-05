@@ -99,7 +99,7 @@ pub fn running_subs(registry: &Registry, parent: &str) -> Vec<Instance> {
         .collect()
 }
 
-fn label(i: &Instance) -> String {
+pub(super) fn label(i: &Instance) -> String {
     i.name
         .as_deref()
         .map(str::trim)

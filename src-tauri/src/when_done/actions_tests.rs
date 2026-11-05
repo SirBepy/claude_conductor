@@ -6,6 +6,20 @@ use serde_json::json;
 // serde_json::Value, so it can be unit-tested without the engine task,
 // AppState, or the daemon.
 
+// A sub is admitted to the armed set through its parent, so its own question
+// (session_id = the sub, the card shows in the main chat) is auto-answered while
+// the sub's parent runs. The daemon half, the card that names the answer, is
+// tested in `daemon::subchats::card_log` and `daemon::methods::permission`.
+#[test]
+fn a_subs_question_is_in_scope_once_the_sub_joined_through_its_armed_parent() {
+    use std::collections::HashSet;
+    let armed: HashSet<String> = ["main".to_string(), "sub".to_string()].into_iter().collect();
+    let sub_question = json!({"id": "q1", "session_id": "sub", "display_session_id": "main"});
+    assert!(prompt_in_armed_scope(&armed, &sub_question));
+    let main_only: HashSet<String> = ["main".to_string()].into_iter().collect();
+    assert!(!prompt_in_armed_scope(&main_only, &sub_question), "a sub that never joined is left pending for Joe");
+}
+
 #[test]
 fn picks_the_first_option_label_per_question() {
     let questions = json!([

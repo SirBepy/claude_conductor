@@ -72,7 +72,7 @@ pub fn prepare_continue(state: &Arc<DaemonState>, sub_id: &str) -> Result<Prior,
     Ok(prior)
 }
 
-fn restore(state: &DaemonState, sub_id: &str, prior: Prior) {
+pub(crate) fn restore(state: &DaemonState, sub_id: &str, prior: Prior) {
     if prior.finished {
         state.registry.set_subchat_finished(sub_id, true);
     }
@@ -119,6 +119,38 @@ pub async fn continue_sub(state: &Arc<DaemonState>, sub_id: &str, text: &str) ->
             Err(ContinueError::Send(e))
         }
     }
+}
+
+/// What a scheduled message may do to its target, when that target may be a sub
+/// (a sub's own `this_chat` schedule, a rate-limit resume, gaming mode's resume).
+/// `schedule_fire::fire_message` checks nothing about `ended_at`, and respawning
+/// an ended sub would start a billed child for a row nobody can see or close.
+///
+/// - An ended sub, or one whose row is gone but whose brief remains (the row
+///   leaves the snapshot when it ends): refused, naming why.
+/// - A finished sub: continued through [`prepare_continue`], the same door
+///   `continue_sub` uses, so the finished flag clears and its sequence restarts.
+///   The [`Prior`] comes back so a failed send puts the sub back as it was.
+/// - Anything else, a plain chat included: untouched.
+pub(crate) fn before_scheduled_fire(state: &Arc<DaemonState>, target: &str) -> Result<Option<Prior>, String> {
+    let Some(inst) = state.registry.get(target) else {
+        let was_a_sub = crate::sessions::chat_config::get(target).is_some_and(|c| c.subchat.is_some());
+        return if was_a_sub { Err(ended_sub_refusal(target)) } else { Ok(None) };
+    };
+    if !super::is_sub(&inst) {
+        return Ok(None);
+    }
+    if inst.ended_at.is_some() || inst.end_reason.is_some() {
+        return Err(ended_sub_refusal(target));
+    }
+    if !inst.subchat_finished {
+        return Ok(None);
+    }
+    prepare_continue(state, target).map(Some).map_err(|e| e.to_string())
+}
+
+fn ended_sub_refusal(sub_id: &str) -> String {
+    format!("{sub_id} is a sub that ended with its main chat; a scheduled message does not bring it back")
 }
 
 /// The daemon's own message to a sub (`NUDGE_TEXT`). `is_meta` so it reads as a
@@ -181,6 +213,8 @@ pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
     super::runtime::runtime().reset(sub_id);
     if ended {
         crate::daemon::machines::publish_instances_changed(state);
+        // A main chat waiting for its last running sub may close now.
+        super::closing::on_sub_settled(state, sub_id);
         // Its cards would otherwise keep showing, and answering one would send to
         // a chat that no longer exists. Detached because dropping them is async
         // and this stays callable from sync code; with no runtime there are no

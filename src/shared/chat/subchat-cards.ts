@@ -48,7 +48,8 @@ export interface SubSumFacts {
   unknown_subs: number;
 }
 
-export type SubCardKind = "finish" | "blocker" | "all_finished";
+/** `when_done`: the machine answered a sub's question with its first option while Joe was away. */
+export type SubCardKind = "finish" | "blocker" | "all_finished" | "when_done";
 
 export interface SubCardEntry {
   id: string;
@@ -72,7 +73,7 @@ export interface SubCardEntry {
   set_key?: string | null;
 }
 
-const KINDS: readonly string[] = ["finish", "blocker", "all_finished"];
+const KINDS: readonly string[] = ["finish", "blocker", "all_finished", "when_done"];
 
 /** Keeps the entries that can be drawn. A reply that is not a list (an older
  *  daemon, a failed call, a test double) is no cards. */

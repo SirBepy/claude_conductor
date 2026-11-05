@@ -67,8 +67,13 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
             async move {
                 let p: SessionId = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                // The second half of a close: held exactly when `end_session` was.
+                if crate::daemon::subchats::closing::request_close(&state, &p.session_id) {
+                    return Ok(json!({"ok": true, "held": true}));
+                }
                 let now = chrono::Utc::now().to_rfc3339();
                 state.registry.mark_ended(&p.session_id, EndReason::Manual, &now);
+                crate::daemon::subchats::closing::settle_family(&state, &p.session_id).await;
                 // Fallback close path (External sessions, or end_session already
                 // gone) - drop here too so it isn't the only route that leaks.
                 crate::ask::store::drop_for_chat(&p.session_id);

@@ -269,6 +269,10 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
         // populate_registry skips a chat whose project folder is gone.
         let interrupted = interrupted.into_iter().filter(|id| state.registry.get(id).is_some()).collect();
         resume_interrupted::spawn_resumes(state.clone(), interrupted);
+        // A main chat that ended while the daemon was down is not in the snapshot,
+        // so its subs come back pointing at nothing. Settle them now rather than
+        // hide them until the first tick.
+        crate::daemon::subchats::closing::heal_orphans(&state).await;
     }
 
     // Re-track any external `claude` terminal sessions that were already

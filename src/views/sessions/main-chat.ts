@@ -53,6 +53,9 @@ function progressText(s: Instance, kind: SubKind): string {
   }
   if (s.closing) return "closing";
   if (kind === "finished") return "finished";
+  // A paused sub is neither working nor stuck, and "working" would be false.
+  if (s.frozen) return "paused";
+  if (s.rate_limited_resets_at != null && Number(s.rate_limited_resets_at) * 1000 > Date.now()) return "rate limited";
   const p = planProgress(s.progress?.plan);
   // The step being worked is the one after the last done: "step 3 of 6" while two are done.
   return p ? `step ${Math.min(p.done + 1, p.total)} of ${p.total}` : "working";

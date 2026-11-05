@@ -219,6 +219,18 @@ describe("what the chips say", () => {
     expect(el.querySelector(".mc-full .mc-facts-list").textContent).toContain("a.ts, b.ts");
   });
 
+  it("a when-done card names the sub and what the machine answered, with no fact chips", async () => {
+    const text = 'While you were away, when-done answered the question "Which colour?" with its first option: Teal.';
+    const el = await render({
+      id: "wd-1", ts: T0 + MIN, parent_id: "main", kind: "when_done", sub_id: "sub-header", sub_name: "Header",
+      verdict: "When-done answered", tone: "neutral", text,
+    });
+    expect(el.querySelector(".mc-full .mc-sub-name").textContent).toBe("Header");
+    expect(el.querySelector(".mc-full .mc-verdict").textContent).toBe("When-done answered");
+    expect(el.textContent).toContain("Teal");
+    expect(el.querySelector(".mc-facts")).toBeNull();
+  });
+
   it("the all-finished card states a count and is never green", async () => {
     const sum = { subs: 3, commits: 5, files_changed: 12, uncommitted: 0, unpushed: 1, tests_passed: 2, tests_failed: 0, tests_unknown: 1, reviewed: 1, unreviewed: 2, unknown_subs: 1 };
     const el = await render({ id: "all-1", ts: T0 + MIN, parent_id: "main", kind: "all_finished", verdict: "All 3 subs finished", text: "5 commits", sum, tone: null });

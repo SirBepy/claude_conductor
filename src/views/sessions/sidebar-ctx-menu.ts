@@ -15,7 +15,7 @@ import {
 import { loadAnimEnabled, markSessionExiting } from "./sidebar-anim";
 import { isAutoAccept, isWrapUpOnDone, isSubchatsOn } from "./permission-modal";
 import { subchatsBlockedReason } from "./subchats-gate";
-import { closeNeedsConfirm } from "./close-chat";
+import { closeNeedsApproval, closeNeedsConfirm } from "./close-chat";
 import {
   buildChatMenuBlock,
   closeActiveChatSubmenu,
@@ -132,7 +132,8 @@ export function openCtxMenu(
   const closeBtn = block.querySelector<HTMLButtonElement>(".smore-item.smore-danger");
   if (closeBtn) {
     closeBtn.addEventListener("click", () => {
-      if (closeNeedsConfirm(sessionId)) return;
+      // A main chat with a running sub is held for Joe's card, so it stays.
+      if (closeNeedsConfirm(sessionId) || closeNeedsApproval(sessionId)) return;
       const listEl = anchor.closest<HTMLElement>("#sessions-list");
       if (listEl && loadAnimEnabled()) markSessionExiting(listEl, sessionId);
     }, true);

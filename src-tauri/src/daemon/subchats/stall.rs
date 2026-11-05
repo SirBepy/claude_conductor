@@ -48,6 +48,12 @@ impl Stall {
 
 }
 
+/// Said on the card for a sub whose MCP transport is down. It cannot call
+/// `finish_subchat` or ask a question, which is why it ended its turn silent, and
+/// a nudge asks for what it cannot do.
+pub const NO_TRANSPORT_NOTE: &str =
+    "Its link to the daemon's tools is down, so it cannot call finish_subchat or ask you anything. Nudging it will not help.";
+
 /// How the card names the sub. Its title is the best label the registry has;
 /// the real task line arrives with the spawn brief (a later step).
 fn label(state: &DaemonState, sub_id: &str) -> String {
@@ -102,6 +108,10 @@ pub async fn raise_noted(state: &Arc<DaemonState>, sub_id: &str, stall: Stall, n
 /// except the daemon's own nudge text.
 pub(crate) async fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, parent: &str, answer: CardAnswer) {
     let CardAnswer::Picked(choice) = answer else { return };
+    // The window to open belongs to the sub's parent now, which is not the one
+    // that raised the card when a `respawn` moved the sub since.
+    let live_parent = state.registry.get(sub_id).and_then(|i| i.subchat_of).unwrap_or_else(|| parent.to_string());
+    let parent = live_parent.as_str();
     match choice.as_str() {
         OPEN_IT => {
             // Opening a sub in place is the main chat window's job (step 7); this
