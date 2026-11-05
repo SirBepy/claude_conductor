@@ -21,6 +21,7 @@ import { isMirrored } from "./sessions-helpers";
 import { state } from "./state";
 import { mountPreviewStage } from "./preview-canvas";
 import { applyPreviewTemplate } from "./preview-panel-document";
+import { SharedBar, renderKindTag } from "./shared-mockup-bar";
 import "../../shared/chat/caret-popup/popup.css";
 import "../../shared/chat/composer.css";
 
@@ -39,17 +40,29 @@ class PreviewTab implements RailTabHandle {
    *  DOM is never innerHTML-rebuilt (renderIframe/renderHeader
    *  only touch their own sub-elements), so there's no per-render remount. */
   private composer: PvComposerHandle | null = null;
+  /** The shared mockup's row of subs and controls popover. */
+  private bar: SharedBar;
 
   constructor(root: HTMLElement, deps: RailTabDeps) {
     this.root = root;
     this.deps = deps;
     this.sel = new PreviewSelection(deps, {
-      renderHeader: () => renderHeader(this.root, this.sel),
+      renderHeader: () => {
+        renderHeader(this.root, this.sel);
+        renderKindTag(this.root, this.sel.selected, this.sel.snapshots.some((s) => s.shared), this.sel.sessionId);
+        this.bar.render(this.sel.selected);
+      },
       renderPage: () => void this.renderIframe(),
       renderEmpty: () => this.renderEmpty(),
     });
 
     renderShell(this.root);
+    this.bar = new SharedBar(this.root, {
+      frame: () => this.root.querySelector<HTMLIFrameElement>(".pv-iframe"),
+      scope: () => this.sel.sessionId,
+      dedicatedOf: (ownerId) => this.sel.snapshots.filter((s) => !s.shared && s.session_id === ownerId),
+      open: (id) => void this.sel.selectSnapshot(id),
+    });
     this.composer = mountPvComposer(this.root, this.pvComposerDeps());
     this.root.addEventListener("click", (e) => this.onClick(e));
     void this.subscribeLive();
@@ -105,6 +118,7 @@ class PreviewTab implements RailTabHandle {
     }
     this.composer?.destroy();
     this.composer = null;
+    this.bar.destroy();
     closePvHistory();
   }
 
@@ -200,6 +214,11 @@ class PreviewTab implements RailTabHandle {
       case "more": togglePvMoreMenu(actBtn as HTMLButtonElement, this.pvMoreMenuDeps()); return;
       case "previews": togglePvPicker("previews", actBtn, this.pvPickerDeps()); return;
       case "versions": togglePvPicker("versions", actBtn, this.pvPickerDeps()); return;
+      case "back": {
+        const shared = this.sel.snapshots.find((s) => s.shared);
+        if (shared) void this.sel.selectSnapshot(shared.id);
+        return;
+      }
       default: return;
     }
   }
@@ -207,6 +226,8 @@ class PreviewTab implements RailTabHandle {
   // ── Rendering ────────────────────────────────────────────────────────────
 
   private renderEmpty(): void {
+    this.bar.render(null);
+    renderKindTag(this.root, null, false, null);
     renderHeaderEmpty(this.root);
     renderCanvasEmpty(this.root);
   }
@@ -214,6 +235,8 @@ class PreviewTab implements RailTabHandle {
   /** Blank between a chat switch and the list fetch landing: "No previews yet"
    *  here would be false for a chat that has some, so show nothing instead. */
   private renderPending(): void {
+    this.bar.render(null);
+    renderKindTag(this.root, null, false, null);
     renderHeaderEmpty(this.root);
     const nameEl = this.root.querySelector<HTMLElement>(".pv-name");
     if (nameEl) nameEl.textContent = "";
@@ -230,6 +253,8 @@ class PreviewTab implements RailTabHandle {
     if (!canvas) return;
     const stage = mountPreviewStage(canvas, this.deviceWidth, selected.html);
     if (!stage) return;
+    // A fresh document starts from the shell's defaults, so what Joe changed is applied again.
+    stage.iframe.addEventListener("load", () => this.bar.replay());
     await stage.ready;
   }
 }

@@ -37,10 +37,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use ts_rs::TS;
 
+mod shared;
 mod versions;
 // Only `methods/preview.rs`'s scope test reads a store file directly.
 #[cfg(test)]
 pub(crate) use versions::get_view_at;
+pub use shared::{run as run_shared_mockup, Control, Part, SharedMockup};
 pub use versions::{get_view, PreviousVersion, PreviewVersionMeta, KEEP_PREVIOUS_VERSIONS, MAX_STORE_HTML_BYTES};
 use versions::{flush_archive, sweep_archive, trim_to_budget};
 
@@ -101,6 +103,11 @@ pub struct PreviewSnapshot {
     #[serde(default)]
     #[ts(skip)]
     pub previous: Vec<PreviousVersion>,
+    /// Set for a shared mockup (pc-1620): `html` is then the composed page and
+    /// this holds the shell, the parts and their controls. `None` is an ordinary
+    /// (dedicated) preview, which is every entry written before this existed.
+    #[serde(default)]
+    pub shared: Option<SharedMockup>,
 }
 
 /// Metadata-only projection for the history rail (`list_previews`) - omits
@@ -122,6 +129,9 @@ pub struct PreviewMeta {
     /// pushed once, and for any entry a peer running an older build mirrors in.
     #[serde(default)]
     pub versions: Vec<PreviewVersionMeta>,
+    /// A shared mockup (`PreviewSnapshot::shared` is set); the picker groups on it.
+    #[serde(default)]
+    pub shared: bool,
 }
 
 impl From<&PreviewSnapshot> for PreviewMeta {
@@ -143,6 +153,7 @@ impl From<&PreviewSnapshot> for PreviewMeta {
                 .filter(|p| p.session_id == s.session_id)
                 .map(|p| PreviewVersionMeta { version: p.version, created_at: p.created_at.clone() })
                 .collect(),
+            shared: s.shared.is_some(),
         }
     }
 }
@@ -261,6 +272,8 @@ pub(crate) fn push_at(
             );
             existing.previous.truncate(KEEP_PREVIOUS_VERSIONS);
             existing.source = source;
+            // A plain push owns the slug now; the old shell must not recompose over it.
+            existing.shared = None;
             existing.version += 1;
             let id = existing.id.clone();
             trim_to_budget(&mut list);
@@ -281,6 +294,7 @@ pub(crate) fn push_at(
             created_at: now_rfc3339(),
             published: None,
             previous: Vec::new(),
+            shared: None,
         });
         save(path, &mut list);
         return Ok(id);
@@ -301,6 +315,7 @@ pub(crate) fn push_at(
         created_at: now_rfc3339(),
         published: None,
         previous: Vec::new(),
+        shared: None,
     });
     save(path, &mut list);
     Ok(id)

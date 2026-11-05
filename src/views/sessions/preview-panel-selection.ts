@@ -11,6 +11,7 @@ import { invoke } from "../../shared/ipc";
 import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
 import { PREVIEW_SOURCE_CHAT_CARD } from "../../shared/chat/chat-preview-card";
 import { versionsOf } from "./preview-panel-history";
+import { inFamily, scopeRoot } from "./shared-mockup-scope";
 import type { RailTabDeps } from "./rail-panel";
 
 /** What the selection asks the tab to draw. */
@@ -32,9 +33,9 @@ export class PreviewSelection {
    *  same one, was in view: the push never moves the view (see onLivePush), so
    *  the pickers carry a dot until the pushed page is opened. */
   readonly unseenIds = new Set<string>();
-  /** Only previews pushed with this session_id are shown. Set by
-   *  state.ts's setActiveSession on every chat switch; null before any
-   *  chat is selected. */
+  /** Only previews of this chat and of its subs are shown (a sub in view
+   *  covers its whole family). Set by state.ts's setActiveSession on every
+   *  chat switch; null before any chat is selected. */
   sessionId: string | null = null;
   /** Full-html snapshots already fetched this session, keyed by id and version
    *  (`cacheKey`), so revisiting a chat (or a window-focus refetch) never
@@ -73,12 +74,12 @@ export class PreviewSelection {
     if (!this.sessionId) return;
     let all: PreviewMeta[];
     try {
-      all = await invoke<PreviewMeta[]>("list_previews", { sessionId: this.sessionId });
+      all = await invoke<PreviewMeta[]>("list_previews", { sessionId: scopeRoot(this.sessionId) });
     } catch (err) {
       console.error("[preview-panel] checkForUnseen failed", err);
       return;
     }
-    const scoped = (Array.isArray(all) ? all : []).filter((m) => m.session_id === this.sessionId);
+    const scoped = (Array.isArray(all) ? all : []).filter((m) => inFamily(m.session_id, this.sessionId));
     const unseen = scoped.filter((m) => !this.seenIds.has(m.id));
     scoped.forEach((m) => this.seenIds.add(m.id));
     // Same carve-out as onLivePush: a show_preview push is already on screen
@@ -96,16 +97,16 @@ export class PreviewSelection {
     try {
       // The session id routes the read: a chat mirrored from a paired machine
       // keeps its previews on that machine, and the daemon forwards there.
-      const list = await invoke<PreviewMeta[]>("list_previews", { sessionId: scope });
+      const list = await invoke<PreviewMeta[]>("list_previews", { sessionId: scopeRoot(scope) });
       if (this.sessionId !== scope) return;
       const all = Array.isArray(list) ? list : [];
-      this.snapshots = all.filter((m) => m.session_id === this.sessionId);
+      this.snapshots = all.filter((m) => inFamily(m.session_id, this.sessionId));
       this.snapshots.forEach((s) => this.seenIds.add(s.id));
       // The list now covers only this chat, so only this chat's cached
       // snapshots can be judged gone; another chat's stay until it is revisited.
       const listed = new Map(all.map((m) => [m.id, m]));
       for (const [key, cached] of this.snapshotCache) {
-        if (cached.session_id !== this.sessionId) continue;
+        if (!inFamily(cached.session_id, this.sessionId)) continue;
         const meta = listed.get(cached.id);
         const archived = meta && versionsOf(meta).some((v) => v.version === cached.version);
         if (!meta || (cached.version !== meta.version && !archived)) this.snapshotCache.delete(key);
@@ -159,7 +160,7 @@ export class PreviewSelection {
       try {
         next = await invoke<PreviewSnapshot>("get_preview", {
           id,
-          sessionId: scope,
+          sessionId: scopeRoot(scope),
           ...(version !== null ? { version } : {}),
         });
         if (this.sessionId !== scope) return;
@@ -188,7 +189,7 @@ export class PreviewSelection {
    * never switches the view (Joe, 2026-08-03). */
   onLivePush(meta: PreviewMeta | undefined): void {
     if (!meta) return;
-    if (meta.session_id !== this.sessionId) {
+    if (!inFamily(meta.session_id, this.sessionId)) {
       if (meta.session_id && meta.source !== PREVIEW_SOURCE_CHAT_CARD) this.deps.markOpenFor(meta.session_id);
       return;
     }

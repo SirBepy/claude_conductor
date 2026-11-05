@@ -9,12 +9,13 @@ use serde_json::{json, Value};
 
 pub const TOOL_FINISH_SUBCHAT: &str = "finish_subchat";
 pub const TOOL_SUBCHAT: &str = "subchat";
+pub const TOOL_SHARED_MOCKUP: &str = "shared_mockup";
 
 /// The main chat's side: look up its subs and pass a message to one. Short on
 /// purpose, like `write_user_todo`: it is listed for every chat, so its
 /// description is paid for on every turn of chats that never use the mode.
 pub fn chat_schemas() -> Vec<Value> {
-    vec![json!({
+    vec![shared_mockup_schema(), json!({
         "name": TOOL_SUBCHAT,
         "description": "Only for a chat with Use subchats on: look up its subs and pass them a message (refuses with the fix when this chat has no subs, and from a sub). `list`: each sub's name, status, tier and task. `status` needs sub: its verdict, summary, facts and progress. `log`: the decisions log. `send` needs sub, or all=true for every running sub (an outside update such as a pasted Slack message). `send` passes Joe's latest message to the sub word for word, with his images; you only pick the target, never retype or summarise it. Set `text` only when Joe sent nothing to copy and you have an instruction of your own. `writes`=true when the follow-up needs the sub to edit files. A finished sub is woken with its context; a busy one gets it at its next step. A sub is found by exact name, then unique prefix, then id.",
         "inputSchema": {
@@ -29,6 +30,46 @@ pub fn chat_schemas() -> Vec<Value> {
             "required": ["action"]
         }
     })]
+}
+
+
+/// One page a main chat and its subs build together. Listed for every chat; the
+/// daemon refuses with the fix when the caller has no right to the action.
+fn shared_mockup_schema() -> Value {
+    json!({
+        "name": TOOL_SHARED_MOCKUP,
+        "description": "One shared mockup page per main chat that its subs each add controls to; use it instead of every sub pushing its own show_preview page. `create` (the main chat only, once, before or as it hands out jobs): slug, title, shell = the page html with one EMPTY element per sub's region, e.g. <div data-part=\"header\"></div> (double quotes, nothing inside). `part` (a sub, or the main chat): part = a region id of the shell, html = that region's content, css, controls. Omit slug and a sub finds its main chat's page. A sub writes only its own region. The panel shows a row of the subs that added controls; Joe opens one sub's controls and the page changes at once, with no reload. controls = [{id, label, kind, options, default}] with at most 8: kind \"select\" is a choice between 2 to 12 options (a native dropdown), kind \"switch\" is a plain yes/no (default true or false). Never express a choice as several switches or as buttons in the html. A control sets data-<id>=\"<value>\" on your region's root element (a switch is \"on\" or \"off\"), so style it in css, which applies only inside your region and is scoped with @scope: write `:scope[data-style=\"ember\"] h3 {...}` for rules that depend on the attribute, and the plain `h3 {...}` for the rest. No script is needed. Pushing a part again replaces it; omit controls to keep the old ones. For one chat's own exploration use show_preview instead, and say why in its title."
+        ,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["create", "part"]},
+                "slug": {"type": "string", "description": "The mockup's name. create: required. part: optional, defaults to the main chat's newest shared mockup."},
+                "title": {"type": "string", "description": "create: the panel title."},
+                "shell": {"type": "string", "description": "create: the page html with one empty element per region, each carrying data-part=\"<id>\". Ids are lowercase letters, digits, - or _."},
+                "part": {"type": "string", "description": "part: the region id from the shell that this part fills."},
+                "html": {"type": "string", "description": "part: the region's content."},
+                "css": {"type": "string", "description": "part: css for this region only. Use :scope[data-<control id>=\"<value>\"] for rules that follow a control."},
+                "controls": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "description": "part: this region's controls. Omitted keeps the earlier ones, [] clears them.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string", "description": "Lowercase letters, digits, - or _. Becomes the data-<id> attribute."},
+                            "label": {"type": "string", "description": "What Joe reads, at most 40 chars."},
+                            "kind": {"type": "string", "enum": ["select", "switch"]},
+                            "options": {"type": "array", "items": {"type": "string"}, "description": "select only: 2 to 12 values."},
+                            "default": {"description": "select: one of the options. switch: true or false."}
+                        },
+                        "required": ["id", "label", "kind"]
+                    }
+                }
+            },
+            "required": ["action"]
+        }
+    })
 }
 
 fn rows(max_len: u32, what: &str) -> Value {
@@ -65,7 +106,8 @@ mod tests {
 
     #[test]
     fn the_subchat_tool_takes_an_action_and_defaults_to_copying_joes_message() {
-        let s = &chat_schemas()[0];
+        let all = chat_schemas();
+        let s = all.iter().find(|t| t["name"] == TOOL_SUBCHAT).unwrap();
         assert_eq!(s["name"], TOOL_SUBCHAT);
         let props = s["inputSchema"]["properties"].as_object().unwrap();
         for k in ["action", "sub", "all", "writes", "text"] {
@@ -78,6 +120,20 @@ mod tests {
         assert!(d.contains("word for word") && d.contains("never retype"), "{d}");
         assert!(!d.contains('\u{2014}'));
         assert!(d.chars().count() < 1100, "listed for every chat, so it stays short");
+    }
+
+    #[test]
+    fn shared_mockup_is_listed_for_every_chat_and_names_the_control_convention() {
+        let all = chat_schemas();
+        let s = all.iter().find(|t| t["name"] == TOOL_SHARED_MOCKUP).expect("listed for every chat");
+        let d = s["description"].as_str().unwrap();
+        for needle in ["data-part", "select", "switch", ":scope", "show_preview", "own region"] {
+            assert!(d.contains(needle), "description must mention {needle}: {d}");
+        }
+        assert!(!d.contains('\u{2014}'));
+        let kinds = &s["inputSchema"]["properties"]["controls"]["items"]["properties"]["kind"]["enum"];
+        assert_eq!(kinds, &json!(["select", "switch"]), "no chip or button kind exists");
+        assert_eq!(s["inputSchema"]["properties"]["action"]["enum"], json!(["create", "part"]));
     }
 
     #[test]

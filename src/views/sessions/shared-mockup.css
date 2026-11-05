@@ -1,0 +1,235 @@
+/* The shared mockup: the row of subs under the preview header and the
+   draggable controls popover. Controls follow the mockup convention: a choice is
+   a native dropdown with its label small above it, a yes/no is a switch. */
+
+.pv-shared {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.pv-shared[hidden],
+.pv-back[hidden],
+.pv-kind[hidden] {
+  display: none;
+}
+.pv-shared > .ph-tree-structure {
+  font-size: 15px;
+  color: var(--color-text-muted);
+}
+
+.pvs-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px 2px 3px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-background);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pvs-chip:hover {
+  border-color: var(--color-text-muted);
+}
+.pvs-chip.open {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
+  background: var(--color-surface-alt);
+}
+/* A sub that has added nothing yet: dashed, not clickable. */
+.pvs-chip.idle {
+  border-style: dashed;
+  color: var(--color-text-muted);
+  cursor: default;
+}
+.pvs-chip.idle:hover {
+  border-color: var(--color-border);
+}
+/* A sub added controls after the page was first looked at. It never moves the page. */
+.pvs-chip.fresh::after {
+  content: "new";
+  position: absolute;
+  top: -7px;
+  right: -4px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: var(--color-primary);
+  color: var(--color-background);
+  font-size: 9px;
+  font-weight: 700;
+}
+.pv-snap-meta .pvs-dot.sub-dot {
+  flex-basis: 16px;
+  width: 16px;
+  height: 16px;
+  font-size: 7px;
+}
+.pvs-dot.sub-dot {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  font-size: 8px;
+}
+
+/* ── Header: back arrow and the owner tag ─────────────────────────────── */
+
+.pv-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.pv-kind b {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.pv-kind.shared i {
+  color: var(--color-primary);
+}
+
+/* ── Controls popover ─────────────────────────────────────────────────── */
+
+.pvs-pop {
+  position: absolute;
+  z-index: 4;
+  width: 210px;
+  padding: 0 12px 12px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.pvs-grip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  margin: 0 -12px;
+  color: var(--color-text-muted);
+  cursor: grab;
+  touch-action: none;
+}
+.pvs-grip:active {
+  cursor: grabbing;
+}
+.pvs-x {
+  position: absolute;
+  right: 6px;
+  top: 3px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.pvs-x:hover {
+  background: var(--color-background);
+  color: var(--color-text);
+}
+.pvs-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin-top: 2px;
+}
+.pvs-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pvs-field > span {
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+.pvs-field select {
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.pvs-tg {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.pvs-sw {
+  position: relative;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  background: var(--color-border);
+  transition: background 0.15s;
+}
+.pvs-sw::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--color-text);
+  transition: left 0.15s;
+}
+.pvs-tg.on .pvs-sw {
+  background: var(--color-primary);
+}
+.pvs-tg.on .pvs-sw::after {
+  left: 15px;
+  background: var(--color-background);
+}
+/* The quiet way from a sub's controls to its own dedicated mockups. */
+.pvs-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 7px 2px 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.pvs-link:hover {
+  color: var(--color-text);
+}
+.pvs-link .ph-caret-right {
+  margin-left: auto;
+  font-size: 10px;
+}
