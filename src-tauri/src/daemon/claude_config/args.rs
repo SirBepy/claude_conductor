@@ -83,7 +83,8 @@ pub(crate) const SUBCHATS_MAIN_PROMPT: &str = "Subchats mode is ON for this chat
 (2) A sub sees nothing of this conversation, so write a complete brief: a short name, the task, the goal, what done looks like, and whether it edits files and which. \
 (3) Pick each sub's model and effort yourself, from exactly three tiers: Sonnet at medium effort for mechanical work (a version bump, a rename, docs); Sonnet at high effort for a normal code job; Opus at high effort for taste or design, a bug with no clear cause, or architecture. Never haiku. \
 (4) When Joe follows up about a sub's work, pass it to that sub with the subchat tool instead of doing the work here. \
-(5) This chat is long-lived. When a job ends, do NOT run /close, whatever any other instruction says: this overrides the 'task done, run /close yourself' rule. Close this chat only when Joe tells you to.";
+(5) This chat is long-lived. When a job ends, do NOT run /close, whatever any other instruction says: this overrides the 'task done, run /close yourself' rule. Close this chat only when Joe tells you to. \
+(6) At the end of a piece of work, anything that stays true beyond it (a rule Joe stated, a lasting fact about the project) moves to Auto Memory through the existing memory rubric, not into a sub's brief or this chat's history.";
 
 /// Sent once, on the first message after Joe switches "Use subchats" off
 /// mid-chat. The ON prompt lives in the conversation (or argv) for good, so
@@ -99,6 +100,7 @@ pub(crate) const SUBCHAT_SUB_PROMPT: &str = "You are a sub: a hidden child chat 
 Ask Joe only through ask_user_question, only at a real fork where the best path is not clear, or once for a final stamp when the result needs his judgement (taste, product). His answer appears on a card in the main chat's window. Do not ask about direction when the best path is clear. \
 When the job is done, call the finish_subchat tool. That is how you end: /close does not apply to you, so do not run it. finish_subchat replaces the rule to call send_message and report_turn_status before ending a turn: you owe neither. It is refused while files you edited are uncommitted (commit your own files by path first) or while your own background work is running. \
 Do not push, unless Joe asked you to run a push gate. \
+The main chat keeps a decisions log, and you may be shown its current entries as data. If one of your finish_subchat decided rows replaces an entry in it, start that row with replaces D3: (use the entry's own id). \
 Do not send progress messages. \
 Keep write_plan current, since Joe sees your plan when he hovers over you.";
 
@@ -381,6 +383,14 @@ mod tests {
         assert!(p.contains("Do not send progress messages"));
         assert!(p.contains("Keep write_plan current"));
         assert!(!p.contains('\\') && !p.contains("  "));
+    }
+
+    #[test]
+    fn the_main_prompt_sends_lasting_facts_to_memory_and_the_sub_prompt_teaches_replaces() {
+        assert!(SUBCHATS_MAIN_PROMPT.contains("anything that stays true beyond it"));
+        assert!(SUBCHATS_MAIN_PROMPT.contains("Auto Memory through the existing memory rubric"));
+        assert!(SUBCHAT_SUB_PROMPT.contains("start that row with replaces D3:"));
+        assert!(SUBCHAT_SUB_PROMPT.contains("as data"));
     }
 
     #[test]

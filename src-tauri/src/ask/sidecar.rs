@@ -138,9 +138,34 @@ pub async fn ask(
     resume: Option<&str>,
     new_session_id: &str,
 ) -> Result<AskAnswer> {
-    let account = crate::accounts::resolve_default_account()
-        .map_err(|e| anyhow!("no account configured for Ask: {e}"))?;
-    crate::accounts::refuse_api_credit(&account, "Ask").map_err(|e| anyhow!("{e}"))?;
+    let prompt = build_prompt(question, transcript, cwd);
+    run_readonly("Ask", &prompt, resume, new_session_id, None).await
+}
+
+/// Runs one read-only sonnet `claude -p` job with a caller-built `prompt` and
+/// returns its final text. Everything `ask` guarantees holds for any caller
+/// (subscription accounts only, the billing gate, Read/Grep/Glob and nothing
+/// that writes or reaches the network). `account_id` pins the account the job
+/// bills, else the default one is used; `what` names the caller in errors.
+pub async fn run_readonly(
+    what: &str,
+    prompt: &str,
+    resume: Option<&str>,
+    new_session_id: &str,
+    account_id: Option<&str>,
+) -> Result<AskAnswer> {
+    let account = match account_id {
+        Some(id) => {
+            let default_id = crate::settings::paths::settings_file()
+                .ok()
+                .map(|p| crate::settings::load(&p))
+                .and_then(|s| s.default_account_id);
+            crate::accounts::resolve_account(Some(id), default_id.as_deref())
+        }
+        None => crate::accounts::resolve_default_account(),
+    }
+    .map_err(|e| anyhow!("no account configured for {what}: {e}"))?;
+    crate::accounts::refuse_api_credit(&account, what).map_err(|e| anyhow!("{e}"))?;
     crate::accounts::drift::check(&account).map_err(|e| anyhow!("{e}"))?;
     crate::accounts::credentials::check_now(&account).map_err(|e| anyhow!("{e}"))?;
     let spawn_env = crate::accounts::env::SpawnEnv::for_account(&account.config_dir);
@@ -150,10 +175,9 @@ pub async fn ask(
     // Run in the app-data dir, never the repo, so a stray CLAUDE.md can't be
     // picked up as instructions for a question that only needed to read.
     let run_dir = crate::settings::paths::ensure_data_dir().context("resolve app-data dir")?;
-    let prompt = build_prompt(question, transcript, cwd);
 
     let mut cmd = tokio::process::Command::new(crate::util::claude_bin::program());
-    cmd.args(cli_args(&prompt, resume, new_session_id));
+    cmd.args(cli_args(prompt, resume, new_session_id));
     cmd.current_dir(&run_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -188,10 +212,10 @@ pub async fn ask(
         return Err(anyhow!("claude exited {:?}: {}", status.code(), stderr_out.trim()));
     }
     let result = result
-        .ok_or_else(|| anyhow!("Ask got no result from claude: {}", stderr_out.trim()))?;
+        .ok_or_else(|| anyhow!("{what} got no result from claude: {}", stderr_out.trim()))?;
     let text = result.text.trim().to_string();
     if result.is_error || text.is_empty() {
-        return Err(anyhow!("Ask produced an empty answer: {}", stderr_out.trim()));
+        return Err(anyhow!("{what} produced an empty answer: {}", stderr_out.trim()));
     }
     Ok(AskAnswer {
         text,
