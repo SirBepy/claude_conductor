@@ -243,7 +243,9 @@ pub fn after_state(state: &DaemonState, target_id: &str) -> AfterState {
     if target.ended_at.is_some() || target.end_reason.is_some() {
         return AfterState::Blocked("it was ended before it finished".to_string());
     }
-    if !target.subchat_finished {
+    // Its commits did not land and that is still being handled: a job that builds
+    // on them would build on the wrong code.
+    if !target.subchat_finished || super::merge_followup::unresolved(target_id) {
         return AfterState::Pending;
     }
     match finish::read_record(target_id) {

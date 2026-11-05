@@ -250,11 +250,14 @@ pub struct GateBase<'a> {
 }
 
 /// Whether a gate pushed: the upstream moved since it started and now holds
-/// `head`. `None` when either end of the comparison is unknown (no upstream
-/// before or after), because "not pushed" would then be a guess.
+/// `head`. With no upstream tracking ref at either end (a branch pushed without
+/// `-u`), the remote is asked for its copy of the branch instead: a tip that is
+/// `head` says pushed. `None` when that cannot say either (no remote, branch not
+/// on it, remote unreachable), because "not pushed" would then be a guess.
 fn gate_pushed(cwd: &Path, base: &GateBase, head: &str) -> Option<bool> {
-    let before = base.upstream_before?;
-    let now = git::upstream(cwd)?;
+    let (Some(before), Some(now)) = (base.upstream_before, git::upstream(cwd)) else {
+        return (git::remote_branch_tip(cwd)? == head).then_some(true);
+    };
     if now == before {
         return Some(false);
     }
@@ -855,6 +858,11 @@ pub struct SumFacts {
     /// Subs with no stored facts at all, or whose git figures were unknown.
     #[serde(default)]
     pub unknown_subs: u32,
+    /// Worktree subs whose commits did not land in the target branch. Their
+    /// commits and files are left out of the totals above, since the totals say
+    /// what is in the branch.
+    #[serde(default)]
+    pub not_merged: u32,
 }
 
 /// `None` stands for a sub whose card (and so facts) was never stored.
@@ -866,12 +874,16 @@ pub fn sum(per_sub: &[Option<&Facts>]) -> SumFacts {
             s.tests_unknown += 1;
             continue;
         };
-        match (f.commits, f.files_changed) {
-            (Some(c), Some(n)) => {
-                s.commits += c;
-                s.files_changed += n;
+        if f.merged == Some(false) {
+            s.not_merged += 1;
+        } else {
+            match (f.commits, f.files_changed) {
+                (Some(c), Some(n)) => {
+                    s.commits += c;
+                    s.files_changed += n;
+                }
+                _ => s.unknown_subs += 1,
             }
-            _ => s.unknown_subs += 1,
         }
         s.uncommitted += f.uncommitted.unwrap_or(0);
         if f.pushed == Some(false) {
@@ -1031,12 +1043,38 @@ mod tests {
     }
 
     #[test]
-    fn a_gate_pushed_chip_is_unknown_when_either_end_of_the_comparison_is_missing() {
-        let (_dir, root, _remote) = tracked_repo();
-        assert_eq!(compute(&gate_inputs(&root, None)).pushed, None, "no upstream recorded at the start");
+    fn a_gate_pushed_chip_is_unknown_when_neither_the_upstream_nor_the_remote_can_say() {
         let (_d2, bare_root) = init();
         let any = git::head(&bare_root).unwrap();
-        assert_eq!(compute(&gate_inputs(&bare_root, Some(&any))).pushed, None, "no upstream now: a guess would mislead");
+        assert_eq!(compute(&gate_inputs(&bare_root, None)).pushed, None, "no upstream and no remote");
+        assert_eq!(compute(&gate_inputs(&bare_root, Some(&any))).pushed, None, "no upstream now and no remote: a guess would mislead");
+    }
+
+    /// The first real run: the gate pushed `HEAD:refs/heads/<branch>` without `-u`, so
+    /// no tracking ref ever existed and the chip read "unknown".
+    #[test]
+    fn a_gate_that_pushed_without_an_upstream_is_found_by_asking_the_remote() {
+        let (_dir, root) = init();
+        let remote = tempfile::tempdir().unwrap();
+        run(remote.path(), &["init", "-q", "--bare"]);
+        run(&root, &["remote", "add", "origin", &remote.path().to_string_lossy()]);
+        let branch = git::run_git(&root, &["symbolic-ref", "--short", "HEAD"]).map(|(_, o)| String::from_utf8_lossy(&o).trim().to_string()).unwrap();
+        assert_eq!(git::upstream(&root), None, "the premise: nothing tracks the remote");
+        assert_eq!(compute(&gate_inputs(&root, None)).pushed, None, "nothing pushed yet: the remote has no such branch");
+        run(&root, &["push", "-q", "origin", &format!("HEAD:refs/heads/{branch}")]);
+        assert_eq!(git::upstream(&root), None, "pushing without -u sets no upstream");
+        assert_eq!(compute(&gate_inputs(&root, None)).pushed, Some(true));
+        commit_file(&root, "later.txt", "unpushed\n");
+        assert_eq!(compute(&gate_inputs(&root, None)).pushed, None, "the remote holds an older tip: not a claim of either");
+    }
+
+    #[test]
+    fn an_unreachable_remote_leaves_a_gates_pushed_chip_unknown() {
+        let (_dir, root) = init();
+        let gone = tempfile::tempdir().unwrap();
+        let path = gone.path().join("not-a-repo");
+        run(&root, &["remote", "add", "origin", &path.to_string_lossy()]);
+        assert_eq!(compute(&gate_inputs(&root, None)).pushed, None);
     }
 
     #[test]

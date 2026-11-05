@@ -73,7 +73,7 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "effort": {"type": "string", "description": "Optional reasoning effort. Omit to use the project's default. A sub: omitted is high."},
                     "name": {"type": "string", "description": "Optional short label for the new chat."},
                     "machine": {"type": "string", "description": "Label or id (from list_peers) of a paired machine to start this chat on instead of here - use it when the user asks to run something on another one of their machines. If it fails because that machine is offline or unreachable, do not retry blindly or spawn here instead: ask the user to wake that machine and open Conductor on it, then try again. Omit to spawn locally, the default."},
-                    "task": {"type": "string", "description": "Use subchats only: the job, one or two sentences."},
+                    "task": {"type": "string", "description": "Use subchats only: the job as one short line, under 80 characters. It is the sub's title on Joe's cards, and only its first line is shown, cut at about 80 characters. Put detail in goal and done_when."},
                     "goal": {"type": "string", "description": "Use subchats only: what the job is for."},
                     "done_when": {"type": "string", "description": "Use subchats only: what makes it finished."},
                     "writes": {"type": "boolean", "description": "Use subchats only: true if the sub edits files, false if it is read-only (a read-only sub has Edit and Write refused). Only one sub edits files at a time in a project: a second writer is queued and starts when the first finishes, and the result says so."},

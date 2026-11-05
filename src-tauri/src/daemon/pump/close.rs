@@ -29,11 +29,13 @@ pub(crate) fn close_in_flight(
 ) -> bool {
     // A chat that picked "Wait for them" on the close-with-subs card shows
     // Closing until its last sub ends; a turn it runs meanwhile is not a stalled
-    // /close, and standing the row down would cancel the wait on screen.
-    armed_by_prompt
-        || registry
-            .get(session_id)
-            .is_some_and(|i| i.closing && !crate::daemon::subchats::closing::is_waiting(session_id))
+    // /close, and standing the row down would cancel the wait on screen. That holds
+    // for the /close turn that raised the card too: Joe can pick before it ends, and
+    // the turn's own end must not clear what he just chose.
+    if crate::daemon::subchats::closing::is_waiting(session_id) {
+        return false;
+    }
+    armed_by_prompt || registry.get(session_id).is_some_and(|i| i.closing)
 }
 
 /// Registry `awaiting` value for a `/close` turn that ended without ever

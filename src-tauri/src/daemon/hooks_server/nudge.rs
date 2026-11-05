@@ -179,8 +179,12 @@ pub(super) async fn on_tool_batch(
     if q.session_id.is_empty() {
         return (StatusCode::OK, String::new());
     }
+    // A tool batch resolving means the session's earlier tool calls are over, so a
+    // commit lock it still holds (its commit call was denied by another hook, and
+    // the PostToolUse release never ran) is a leak.
+    super::commit_lock::release_held_by(&ctx.state, &q.session_id);
 
-    let held = ctx.state.draft_store.get(&q.session_id).held;
+    let held =ctx.state.draft_store.get(&q.session_id).held;
     let session = ctx.state.sessions.get(&q.session_id).map(|s| s.clone());
     let project_dir = session.as_ref().map(|s| s.cwd.as_path());
     // Consume before serving. A turn that received the text has, by
@@ -316,6 +320,17 @@ mod tests {
             .await
             .into_response();
         body_text(resp).await
+    }
+
+    /// A commit another hook denied never reaches PostToolUse, so the tool batch it
+    /// was part of is the next sign the session's commit call is over.
+    #[tokio::test]
+    async fn a_tool_batch_frees_a_commit_lock_the_session_left_behind() {
+        let c = ctx();
+        assert!(c.state.try_acquire_commit_lock("tree", "s1"));
+        assert!(!c.state.try_acquire_commit_lock("tree", "s2"));
+        call(&c, "s1", "{}").await;
+        assert!(c.state.try_acquire_commit_lock("tree", "s2"));
     }
 
     #[tokio::test]

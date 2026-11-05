@@ -77,6 +77,58 @@ pub fn upstream(cwd: &Path) -> Option<String> {
     (ok && !sha.is_empty()).then_some(sha)
 }
 
+/// How long a remote may take to answer [`remote_branch_tip`].
+const REMOTE_ASK_LIMIT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// The commit the current branch has on its remote, asked of the remote itself
+/// (`git ls-remote`), for a branch with no upstream tracking ref to read it from.
+/// The remote is the branch's configured one, else `origin`, else the only one.
+/// `None` when there is no remote, the branch is not on it, or it did not answer
+/// within [`REMOTE_ASK_LIMIT`]: an unreachable remote is unknown, never "not pushed".
+/// Blocking and networked, so callers run it off the pump thread.
+pub fn remote_branch_tip(cwd: &Path) -> Option<String> {
+    let (ok, out) = run_git(cwd, &["symbolic-ref", "--short", "-q", "HEAD"])?;
+    let branch = text(&out);
+    if !ok || branch.is_empty() {
+        return None;
+    }
+    let (_, out) = run_git(cwd, &["config", "--get", &format!("branch.{branch}.remote")])?;
+    let mut remote = text(&out);
+    if remote.is_empty() {
+        let (ok, out) = run_git(cwd, &["remote"])?;
+        let remotes: Vec<String> = text(&out).lines().map(str::to_string).collect();
+        if !ok || remotes.is_empty() {
+            return None;
+        }
+        remote = if remotes.iter().any(|r| r == "origin") { "origin".to_string() } else { remotes[0].clone() };
+    }
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("-C").arg(cwd).args(["ls-remote", "--heads", &remote, &format!("refs/heads/{branch}")]);
+    // A remote that wants a login must fail, not open a prompt or a credential window.
+    cmd.env("GIT_TERMINAL_PROMPT", "0").env("GCM_INTERACTIVE", "never");
+    cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+    crate::util::process::hide_console(&mut cmd);
+    let mut child = cmd.spawn().ok()?;
+    let deadline = std::time::Instant::now() + REMOTE_ASK_LIMIT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(40)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    if !status.success() {
+        return None;
+    }
+    let mut raw = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut raw).ok()?;
+    raw.split_whitespace().next().map(str::to_string)
+}
+
 /// Whether `ancestor` is reachable from `descendant` (or equal to it).
 pub fn is_ancestor(cwd: &Path, ancestor: &str, descendant: &str) -> Option<bool> {
     let (ok, _) = run_git(cwd, &["merge-base", "--is-ancestor", ancestor, descendant])?;

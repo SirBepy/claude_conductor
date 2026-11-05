@@ -47,11 +47,20 @@ pub fn sub_task(session_id: &str) -> Option<String> {
     task_line(cfg.subchat.as_ref())
 }
 
-/// The brief's task, trimmed. A blank one is `None`, because the card would
-/// otherwise draw an empty line under the header.
+/// Longest task line a card shows, in characters.
+const TASK_LINE_MAX: usize = 80;
+
+/// The first line of the brief's task, cut to [`TASK_LINE_MAX`] characters with an
+/// ellipsis. The sub keeps the whole text in its first message; the card is one
+/// line under a header, and a brief's opening paragraph is not a title. A blank
+/// task is `None`, because the card would otherwise draw an empty line.
 fn task_line(brief: Option<&super::SubchatBrief>) -> Option<String> {
-    let task = brief?.task.trim();
-    (!task.is_empty()).then(|| task.to_string())
+    let first = brief?.task.lines().map(str::trim).find(|l| !l.is_empty())?;
+    if first.chars().count() <= TASK_LINE_MAX {
+        return Some(first.to_string());
+    }
+    let cut: String = first.chars().take(TASK_LINE_MAX - 1).collect();
+    Some(format!("{}\u{2026}", cut.trim_end()))
 }
 
 /// Adds the routing fields to a prompt payload in place. `display_session_id`
@@ -99,6 +108,22 @@ mod tests {
         assert_eq!(task_line(Some(&brief)), None, "a blank task draws nothing");
         brief.task = "  Redesign the CV header ".into();
         assert_eq!(task_line(Some(&brief)).as_deref(), Some("Redesign the CV header"));
+    }
+
+    /// The first run showed a brief's opening paragraph as the card's task line.
+    #[test]
+    fn the_task_line_is_the_first_line_cut_at_eighty_characters_with_an_ellipsis() {
+        let mut brief: crate::daemon::subchats::SubchatBrief = serde_json::from_value(json!({})).unwrap();
+        brief.task = "Redesign the CV header\nKeep the grid. Ask Joe on a question card (the ask_user_question tool, domain ux) before changing colours.".into();
+        assert_eq!(task_line(Some(&brief)).as_deref(), Some("Redesign the CV header"), "only the first line");
+        brief.task = "\n\n  Second line wins when the first is blank\nthird".into();
+        assert_eq!(task_line(Some(&brief)).as_deref(), Some("Second line wins when the first is blank"));
+        brief.task = "Ask Joe on a question card (the ask_user_question tool, domain ux) before you change anything about the header".into();
+        let line = task_line(Some(&brief)).unwrap();
+        assert_eq!(line.chars().count(), TASK_LINE_MAX, "{line}");
+        assert!(line.ends_with('\u{2026}') && line.starts_with("Ask Joe on a question card"), "{line}");
+        brief.task = "x".repeat(TASK_LINE_MAX);
+        assert_eq!(task_line(Some(&brief)).unwrap(), "x".repeat(TASK_LINE_MAX), "exactly at the cap is not cut");
     }
 
     #[test]

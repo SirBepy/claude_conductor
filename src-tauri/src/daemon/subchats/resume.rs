@@ -226,6 +226,7 @@ pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
     }
     super::runtime::runtime().reset(sub_id);
     super::ceiling::forget_stored(sub_id);
+    super::merge_followup::forget(sub_id);
     if ended {
         crate::daemon::machines::publish_instances_changed(state);
         // A main chat waiting for its last running sub closes from the registry's
