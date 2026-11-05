@@ -10,6 +10,8 @@ import type { DeviceWidth } from "./preview-panel-more-menu";
 export interface PreviewStage {
   /** Settles once the document is staged (or the failure card replaced the stage). */
   ready: Promise<void>;
+  /** The frame, so the caller can post into it once the document has loaded. */
+  iframe: HTMLIFrameElement;
 }
 
 /** Builds the stage into `canvas`. Returns null if the markup did not land. */
@@ -40,5 +42,5 @@ export function mountPreviewStage(canvas: HTMLElement, deviceWidth: DeviceWidth,
       `;
     }
   })();
-  return { ready };
+  return { ready, iframe };
 }

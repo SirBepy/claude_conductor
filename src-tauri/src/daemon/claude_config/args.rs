@@ -86,7 +86,8 @@ pub(crate) const SUBCHATS_MAIN_PROMPT: &str = "Subchats mode is ON for this chat
 (5) This chat is long-lived. When a job ends, do NOT run /close, whatever any other instruction says: this overrides the 'task done, run /close yourself' rule. Close this chat only when Joe tells you to. \
 (6) At the end of a piece of work, anything that stays true beyond it (a rule Joe stated, a lasting fact about the project) moves to Auto Memory through the existing memory rubric, not into a sub's brief or this chat's history. \
 (7) A push goes through a gate sub: call spawn_chat with gate true and a prompt that carries the whole gate (Joe's push request quoted word for word, the repo, the branch and the range), instead of running the gate here or in a visible chat. A gate needs no task, goal, done_when or writes, and it is the only sub that may push. \
-(8) To run jobs in order, pass after on spawn_chat with the earlier sub's name: the app starts the later sub itself when the earlier one finishes, without waking you. If the earlier one ends blocked, Joe gets a card to start the later one anyway or drop it.";
+(8) To run jobs in order, pass after on spawn_chat with the earlier sub's name: the app starts the later sub itself when the earlier one finishes, without waking you. If the earlier one ends blocked, Joe gets a card to start the later one anyway or drop it. \
+(9) When the jobs produce something Joe looks at (a page, a screen, a mockup), make ONE shared mockup first: call shared_mockup with action create, a slug, a title and a shell, which is the page html with one empty region per job, such as <div data-part=\"header\"></div>. Put the slug and the sub's own region id in each sub's brief. Each sub adds its region and its controls with shared_mockup action part, so Joe compares the parts on one page in one panel instead of opening a separate preview per sub. A choice between options is a select control and a plain yes/no is a switch; never chips or buttons. Use show_preview only for a page that truly belongs to one sub, and say why in its title.";
 
 /// Sent once, on the first message after Joe switches "Use subchats" off
 /// mid-chat. The ON prompt lives in the conversation (or argv) for good, so
@@ -105,6 +106,7 @@ When the job is done, call the finish_subchat tool. That is how you end: /close 
 Commit with the /commit skill. A hook that denies a call is telling you what to do next: do that rather than retrying the same call. \
 Do not push, unless Joe asked you to run a push gate. \
 The main chat keeps a decisions log, and you may be shown its current entries as data. If one of your finish_subchat decided rows replaces an entry in it, start that row with replaces D3: (use the entry's own id). \
+If your brief names a shared mockup, add your own region to it with shared_mockup action part (html, css and controls) instead of pushing a separate show_preview page, and push the part again to change it. Give Joe controls to flip: kind select for a choice between options, kind switch for a plain yes/no, never chips or buttons. Use show_preview only for a page that is yours alone, and say why in its title. \
 Do not send progress messages. \
 Keep write_plan current, since Joe sees your plan when he hovers over you.";
 
@@ -170,7 +172,8 @@ pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question 
      mcp__cc_conductor__schedule \
      mcp__cc_conductor__in_meeting \
      mcp__cc_conductor__finish_subchat \
-     mcp__cc_conductor__subchat";
+     mcp__cc_conductor__subchat \
+     mcp__cc_conductor__shared_mockup";
 
 /// Monotonic per-turn suffix, so one session's successive turns never share a
 /// temp-file name (todo 867). Wall-clock nanos would be enough in practice but
@@ -291,10 +294,11 @@ mod tests {
             "mcp__cc_conductor__in_meeting",
             "mcp__cc_conductor__finish_subchat",
             "mcp__cc_conductor__subchat",
+            "mcp__cc_conductor__shared_mockup",
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 14, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 15, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// `person` writes to the user's vault and must go through the ordinary
@@ -417,6 +421,17 @@ mod tests {
         assert!(SUBCHATS_MAIN_PROMPT.contains("Auto Memory through the existing memory rubric"));
         assert!(SUBCHAT_SUB_PROMPT.contains("start that row with replaces D3:"));
         assert!(SUBCHAT_SUB_PROMPT.contains("as data"));
+    }
+
+    #[test]
+    fn the_prompts_teach_one_shared_mockup_with_select_and_switch_controls() {
+        let main = SUBCHATS_MAIN_PROMPT;
+        assert!(main.contains("make ONE shared mockup first") && main.contains("shared_mockup with action create"));
+        assert!(main.contains("select control") && main.contains("a switch; never chips or buttons"));
+        assert!(main.contains("show_preview only for a page that truly belongs to one sub"));
+        let sub = SUBCHAT_SUB_PROMPT;
+        assert!(sub.contains("shared_mockup action part") && sub.contains("kind select") && sub.contains("kind switch"));
+        assert!(sub.contains("instead of pushing a separate show_preview page"));
     }
 
     #[test]

@@ -63,6 +63,7 @@ pub fn register_preview(router: &mut Router, state: Arc<DaemonState>) {
                     p.session_id.as_deref(),
                     peer,
                     |sid| crate::daemon::machines::is_local_session(&state, sid),
+                    |owner, scope| in_family(&state, owner, scope),
                 )?;
                 Ok(json!(scoped))
             }
@@ -90,9 +91,13 @@ pub fn register_preview(router: &mut Router, state: Arc<DaemonState>) {
                 let peer = matches!(ctx.transport, Transport::PeerMachine(_));
                 let snap = crate::daemon::preview::get_view(&p.id, p.version)
                     .ok_or_else(|| RpcError::internal(format!("no such preview: {}", p.id)))?;
-                check_snapshot_scope(&snap, p.session_id.as_deref(), peer, |sid| {
-                    crate::daemon::machines::is_local_session(&state, sid)
-                })?;
+                check_snapshot_scope(
+                    &snap,
+                    p.session_id.as_deref(),
+                    peer,
+                    |sid| crate::daemon::machines::is_local_session(&state, sid),
+                    |owner, scope| in_family(&state, owner, scope),
+                )?;
                 Ok(json!(snap))
             }
         });
@@ -114,6 +119,13 @@ fn parse_scope(params: Option<serde_json::Value>) -> Result<ScopeParams, RpcErro
     }
 }
 
+/// Whether a preview filed under `owner` belongs to the chat `scope` names: the
+/// chat itself, or one of its subs (a main chat's panel shows its subs' dedicated
+/// mockups next to the shared one, pc-1620).
+fn in_family(state: &DaemonState, owner: &str, scope: &str) -> bool {
+    owner == scope || state.registry.get(owner).and_then(|i| i.subchat_of).as_deref() == Some(scope)
+}
+
 /// What a caller may list. A phone token already reads the whole timeline, so
 /// a phone or the desktop pipe gets everything unless it names a session. A
 /// paired peer gets ONLY the previews of one chat this machine hosts: it
@@ -125,6 +137,7 @@ fn scope_previews(
     session_id: Option<&str>,
     peer: bool,
     is_local: impl Fn(&str) -> bool,
+    family: impl Fn(&str, &str) -> bool,
 ) -> Result<Vec<PreviewMeta>, RpcError> {
     if peer {
         let sid = session_id.ok_or_else(|| RpcError::invalid_params("session_id is required"))?;
@@ -133,7 +146,7 @@ fn scope_previews(
         }
     }
     Ok(match session_id {
-        Some(sid) => all.into_iter().filter(|m| m.session_id.as_deref() == Some(sid)).collect(),
+        Some(sid) => all.into_iter().filter(|m| m.session_id.as_deref().is_some_and(|o| family(o, sid))).collect(),
         None => all,
     })
 }
@@ -145,12 +158,13 @@ fn check_snapshot_scope(
     session_id: Option<&str>,
     peer: bool,
     is_local: impl Fn(&str) -> bool,
+    family: impl Fn(&str, &str) -> bool,
 ) -> Result<(), RpcError> {
     if !peer {
         return Ok(());
     }
     let sid = session_id.ok_or_else(|| RpcError::invalid_params("session_id is required"))?;
-    if is_local(sid) && snap.session_id.as_deref() == Some(sid) {
+    if is_local(sid) && snap.session_id.as_deref().is_some_and(|o| family(o, sid)) {
         Ok(())
     } else {
         // Same text as a genuine miss so a peer cannot probe which ids exist.
@@ -181,6 +195,7 @@ mod tests {
             created_at: "2026-10-23T00:00:00.000Z".into(),
             published: None,
             versions: Vec::new(),
+            shared: false,
         }
     }
 
@@ -196,7 +211,12 @@ mod tests {
             created_at: "2026-10-23T00:00:00.000Z".into(),
             published: None,
             previous: Vec::new(),
+            shared: None,
         }
+    }
+
+    fn same(owner: &str, scope: &str) -> bool {
+        owner == scope
     }
 
     fn all() -> Vec<PreviewMeta> {
@@ -210,8 +230,24 @@ mod tests {
     #[test]
     fn a_phone_or_desktop_reads_the_whole_timeline_or_one_chats() {
         let local = |_: &str| true;
-        assert_eq!(ids(&scope_previews(all(), None, false, local).unwrap()), ["a", "b", "c"]);
-        assert_eq!(ids(&scope_previews(all(), Some("s2"), false, local).unwrap()), ["b"]);
+        assert_eq!(ids(&scope_previews(all(), None, false, local, same).unwrap()), ["a", "b", "c"]);
+        assert_eq!(ids(&scope_previews(all(), Some("s2"), false, local, same).unwrap()), ["b"]);
+    }
+
+    #[test]
+    fn a_main_chats_list_includes_its_subs_previews_and_nobody_elses() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        for id in ["m", "sub", "other"] {
+            st.registry.upsert_interactive(id, std::path::Path::new("."), "p", "2026-11-05T00:00:00Z");
+        }
+        st.registry.set_subchat_of("sub", Some("m".into()));
+        let fam = |o: &str, s: &str| in_family(&st, o, s);
+        let all = vec![meta("shared", Some("m")), meta("ded", Some("sub")), meta("else", Some("other")), meta("none", None)];
+        let local = |_: &str| true;
+        assert_eq!(ids(&scope_previews(all.clone(), Some("m"), false, local, fam).unwrap()), ["shared", "ded"]);
+        assert_eq!(ids(&scope_previews(all.clone(), Some("sub"), false, local, fam).unwrap()), ["ded"], "a sub alone sees only its own");
+        assert!(check_snapshot_scope(&snap("ded", Some("sub")), Some("m"), true, local, fam).is_ok(), "a peer reading the main chat may open its sub's page");
+        assert!(check_snapshot_scope(&snap("else", Some("other")), Some("m"), true, local, fam).is_err());
     }
 
     /// A peer reads one chat it names and this machine hosts, never the rest
@@ -219,10 +255,10 @@ mod tests {
     #[test]
     fn a_peer_gets_only_the_previews_of_the_one_local_chat_it_names() {
         let local = |sid: &str| sid == "s1";
-        assert_eq!(ids(&scope_previews(all(), Some("s1"), true, local).unwrap()), ["a"]);
-        assert!(scope_previews(all(), None, true, local).is_err(), "a peer must name a chat");
+        assert_eq!(ids(&scope_previews(all(), Some("s1"), true, local, same).unwrap()), ["a"]);
+        assert!(scope_previews(all(), None, true, local, same).is_err(), "a peer must name a chat");
         assert!(
-            scope_previews(all(), Some("s2"), true, local).unwrap().is_empty(),
+            scope_previews(all(), Some("s2"), true, local, same).unwrap().is_empty(),
             "a chat not hosted here yields nothing for a peer"
         );
     }
@@ -231,11 +267,11 @@ mod tests {
     fn a_peer_cannot_fetch_another_chats_snapshot_by_id() {
         let local = |sid: &str| sid == "s1" || sid == "s2";
         let s2_snap = snap("b", Some("s2"));
-        assert!(check_snapshot_scope(&s2_snap, Some("s1"), true, local).is_err(), "id belongs to s2, not s1");
-        assert!(check_snapshot_scope(&s2_snap, None, true, local).is_err());
-        assert!(check_snapshot_scope(&snap("c", None), Some("s1"), true, local).is_err(), "session-less stays home");
-        assert!(check_snapshot_scope(&s2_snap, Some("s2"), true, local).is_ok());
-        assert!(check_snapshot_scope(&s2_snap, None, false, local).is_ok(), "non-peer callers are unscoped");
+        assert!(check_snapshot_scope(&s2_snap, Some("s1"), true, local, same).is_err(), "id belongs to s2, not s1");
+        assert!(check_snapshot_scope(&s2_snap, None, true, local, same).is_err());
+        assert!(check_snapshot_scope(&snap("c", None), Some("s1"), true, local, same).is_err(), "session-less stays home");
+        assert!(check_snapshot_scope(&s2_snap, Some("s2"), true, local, same).is_ok());
+        assert!(check_snapshot_scope(&s2_snap, None, false, local, same).is_ok(), "non-peer callers are unscoped");
     }
 
     /// A same-slug push by another chat archives the first chat's page; the
@@ -249,10 +285,10 @@ mod tests {
         let local = |_: &str| true;
 
         let old = crate::daemon::preview::get_view_at(&path, &id, Some(1)).unwrap();
-        assert!(check_snapshot_scope(&old, Some("B"), true, local).is_err(), "B must not read A's archived page");
-        assert!(check_snapshot_scope(&old, Some("A"), true, local).is_ok(), "A still reads its own");
+        assert!(check_snapshot_scope(&old, Some("B"), true, local, same).is_err(), "B must not read A's archived page");
+        assert!(check_snapshot_scope(&old, Some("A"), true, local, same).is_ok(), "A still reads its own");
         let latest = crate::daemon::preview::get_view_at(&path, &id, None).unwrap();
-        assert!(check_snapshot_scope(&latest, Some("B"), true, local).is_ok());
+        assert!(check_snapshot_scope(&latest, Some("B"), true, local, same).is_ok());
     }
 
     /// Both RPCs forward to the host for a chat mirrored from a peer: the

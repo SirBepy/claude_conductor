@@ -38,6 +38,7 @@ mod question;
 mod relay;
 mod schedule;
 mod secret;
+mod shared_mockup;
 mod spawn_chat;
 mod stop;
 mod stop_verdict;
@@ -218,6 +219,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/hooks/prompt-submit", post(user_todos::on_prompt_submit))
         .route("/hooks/tool-batch", post(nudge::on_tool_batch))
         .route("/hooks/publish-gate", post(publish_gate::on_publish_gate))
+        .route("/hooks/shared-mockup", post(shared_mockup::on_shared_mockup).layer(axum::extract::DefaultBodyLimit::max(crate::daemon::preview::PREVIEW_BODY_BYTES)))
         .route("/subchats/finish", post(subchat_finish::on_finish_subchat))
         .route("/subchats/tool", post(subchat_tool::on_subchat))
         .route("/hooks/sub-write-guard", post(subchat_write_guard::on_sub_write_guard))

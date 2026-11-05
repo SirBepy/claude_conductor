@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: the preview panel gained the shared-mockup row, popover and a grouped picker (only for a shared preview); this spec has none, its contract is unchanged and it passes.
 // asserts: src/views/sessions/backlog-panel/backlog-panel.ts, src/views/sessions/backlog-panel/backlog-drag.ts, src/views/sessions/backlog-panel/backlog-render.ts, src/views/sessions/backlog-panel/backlog-panel.css, src/views/sessions/split-panels/split.ts
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";

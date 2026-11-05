@@ -204,7 +204,7 @@ mod tests {
         TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
         TOOL_DASHBOARD_CARD, TOOL_IN_MEETING, TOOL_PR_PREVIEW, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
     };
-    use super::super::tool_schemas_subchat::TOOL_SUBCHAT;
+    use super::super::tool_schemas_subchat::{TOOL_SHARED_MOCKUP, TOOL_SUBCHAT};
 
     thread_local! {
         // Records every URL `fake_http_post` was called with, since some
@@ -333,7 +333,7 @@ mod tests {
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 23);
+        assert_eq!(tools.len(), 24);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -475,7 +475,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 27, "23 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 28, "24 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -642,6 +642,7 @@ mod tests {
             (TOOL_FLEET_STATUS, "/jarvis/fleet-status"),
             (TOOL_RESPOND_WORKER_PROMPT, "/jarvis/respond-worker-prompt"),
             (TOOL_SUBCHAT, "/subchats/tool"),
+            (TOOL_SHARED_MOCKUP, "/hooks/shared-mockup"),
         ];
         for (name, expected_path) in cases {
             POSTED_URLS.with(|u| u.borrow_mut().clear());

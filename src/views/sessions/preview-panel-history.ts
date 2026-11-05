@@ -7,6 +7,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { formatRelativeMinutes } from "../../shared/formatters";
 import { PopoverShell } from "./statusbar-popover-shell";
 import type { PreviewMeta } from "../../types/ipc.generated";
+import { ownerTag } from "./shared-mockup-scope";
 
 export interface PvPickerDeps {
   /** This chat's previews, newest first. */
@@ -48,14 +49,25 @@ export function closePvHistory(): void {
 
 function previewsHtml(deps: PvPickerDeps): string {
   const selectedId = deps.getSelectedId();
-  const rows = deps.getSnapshots().map((s) => {
+  const snapshots = deps.getSnapshots();
+  const row = (s: PreviewMeta): string => {
     const sel = selectedId === s.id ? " sel" : "";
+    // A sub's dedicated page says whose it is; the main chat's own needs no tag.
+    const tag = s.shared ? null : ownerTag(s.session_id);
+    const icon = s.shared ? `<i class="ph ph-tree-structure"></i> ` : tag ? `<i class="ph ph-lock-simple"></i> ` : "";
+    const meta = tag
+      ? `${tag.avatarHtml}${escapeHtml(tag.name)}`
+      : `<span class="pv-dot ${sourceDotClass(s.source)}"></span>${agoText(s.created_at)}`;
     return `<button type="button" class="pv-snap${sel}" data-id="${escapeHtml(s.id)}">
-      <div class="pv-snap-title">${escapeHtml(s.title || s.slug)}</div>
-      <div class="pv-snap-meta"><span class="pv-dot ${sourceDotClass(s.source)}"></span>${agoText(s.created_at)}</div>
+      <div class="pv-snap-title">${icon}${escapeHtml(s.title || s.slug)}</div>
+      <div class="pv-snap-meta">${meta}</div>
     </button>`;
-  }).join("");
-  return `<div class="pv-hist-lbl">Previews</div>${rows}`;
+  };
+  // With no shared mockup the list keeps its single "Previews" heading.
+  if (!snapshots.some((s) => s.shared)) return `<div class="pv-hist-lbl">Previews</div>${snapshots.map(row).join("")}`;
+  const dedicated = snapshots.filter((s) => !s.shared);
+  return `<div class="pv-hist-lbl">Shared</div>${snapshots.filter((s) => s.shared).map(row).join("")}`
+    + (dedicated.length ? `<div class="pv-hist-lbl">Dedicated</div>${dedicated.map(row).join("")}` : "");
 }
 
 function versionsHtml(deps: PvPickerDeps): string {

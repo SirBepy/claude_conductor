@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use super::dispatch::forward_all_args;
 use super::relay::Ctx;
-use super::tool_schemas_subchat::{TOOL_FINISH_SUBCHAT, TOOL_SUBCHAT};
+use super::tool_schemas_subchat::{TOOL_FINISH_SUBCHAT, TOOL_SHARED_MOCKUP, TOOL_SUBCHAT};
 
 /// Only advertised to a sub's `tools/list` (`CC_SUBCHAT`), but a `tools/call`
 /// for a never-listed tool still lands here, so the daemon route re-checks that
@@ -26,6 +26,15 @@ pub(super) fn subchat_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             "/subchats/tool",
             forward_all_args(ctx.args, ctx.session_id),
             Some("subchat refused"),
+            None,
+        )),
+        // One page that the main chat creates and its subs add regions to; the
+        // daemon route holds the role checks. Listed for every chat for the
+        // same reason as `subchat`: the tool list is fixed at process start.
+        TOOL_SHARED_MOCKUP => Some(ctx.relay(
+            "/hooks/shared-mockup",
+            forward_all_args(ctx.args, ctx.session_id),
+            Some("shared_mockup refused"),
             None,
         )),
         _ => None,

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: the preview panel gained the shared-mockup row, popover and a grouped picker (only for a shared preview); this spec has none, its contract is unchanged and it passes.
 import { test, expect, type Page } from "@playwright/test";
 import { mountSessionsLayout, mountView, fireEvent, capture } from "./harness";
 

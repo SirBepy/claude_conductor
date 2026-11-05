@@ -21,15 +21,18 @@ export function renderCanvasEmpty(root: HTMLElement): void {
 export function renderShell(root: HTMLElement): void {
   root.innerHTML = `
       <header class="pv-head">
+        <button type="button" class="icon-btn pv-back" data-act="back" title="Back to the shared mockup" hidden><i class="ph ph-arrow-left"></i></button>
         <button type="button" class="pv-pick pv-pick-name" data-act="previews" title="Switch preview" data-single>
           <i class="ph ph-monitor-play"></i><span class="pv-name">No previews yet</span><i class="ph-fill ph-caret-down pv-tri"></i>
         </button>
         <button type="button" class="pv-pick pv-pick-ver" data-act="versions" title="Switch version" hidden>
           <span class="pv-ver">Latest</span><i class="ph-fill ph-caret-down pv-tri"></i>
         </button>
+        <span class="pv-kind" hidden></span>
         <span class="pv-grow"></span>
         <button type="button" class="icon-btn" data-act="more" title="More options"><i class="ph ph-dots-three-vertical"></i></button>
       </header>
+      <div class="pv-shared" hidden></div>
       <div class="pv-body">
         <div class="pv-canvas"></div>
       </div>
