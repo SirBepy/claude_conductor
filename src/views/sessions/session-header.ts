@@ -168,6 +168,14 @@ export class SessionHeader {
     });
   }
 
+  /** Left of the avatar. Empty on the desktop; the phone's list-back joins it, so a
+   *  sub's own back arrow shares it (subchat-view.ts hides the list-back there). */
+  get leadSlot(): HTMLElement { return this.el.querySelector<HTMLElement>(".session-header-lead")!; }
+
+  /** Right end of the header: the sub count, or "Move to sidebar" on a sub. The
+   *  phone's live ⋮ joins it. */
+  get trailSlot(): HTMLElement { return this.el.querySelector<HTMLElement>(".session-header-trail")!; }
+
   /** Sets the title outright. Goes through the typewriter module so a swap still
    *  typing on this element is cancelled instead of painting over the new text. */
   setTitle(text: string): void { typeSwap(this._titleEl, text, { animate: false }); }

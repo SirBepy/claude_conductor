@@ -33,6 +33,9 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
   machines_changed: "machines-changed",
   api_credit_status_changed: "api-credit-status-changed",
   subchat_card: "subchat-card",
+  // The main chat's window opens a sub, or the decisions log, from a daemon card.
+  subchat_open_requested: "subchat-open-requested",
+  subchat_log_open_requested: "subchat-log-open-requested",
   // Same snake/kebab spelling, so this one is easy to mistake for already
   // wired up. Found by todo 946's own check (`tests/
   // notifier-event-registration-contract.test.mjs`): `preview-panel.ts` already

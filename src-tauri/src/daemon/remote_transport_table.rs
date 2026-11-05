@@ -116,6 +116,10 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Read-only: a main chat's stored sub cards, which the chat pane merges into
     // its timeline. A peer machine mirroring the chat renders the same pane, so PM.
     ("list_subchat_cards", PM),
+    // Phone only: the phone reads a sub in place from the main chat's header and
+    // needs the way out too. A paired peer never sees a sub (`visible_for_peers`
+    // hides it, and a sub is never mirrored), so it has no row to move.
+    ("move_sub_to_sidebar", P),
     // Read-only transcript paging - the chat pane's own render path, so a
     // peer machine mirroring a session needs it too.
     ("load_history_page", PM),
@@ -895,6 +899,15 @@ mod tests {
             assert!(allowed(m, &Transport::Phone), "{m} must be callable by the phone");
             assert!(!allowed(m, &peer), "{m} must not be callable by a peer machine");
         }
+    }
+
+    /// Reading a sub in place is a phone surface too, so its way out must reach
+    /// the phone. A peer machine never holds a sub, so it gets no row.
+    #[test]
+    fn move_sub_to_sidebar_is_phone_only_and_send_message_stays_open_to_both() {
+        assert!(allowed("move_sub_to_sidebar", &Transport::Phone));
+        assert!(!allowed("move_sub_to_sidebar", &Transport::PeerMachine("x".into())));
+        assert!(allowed("send_message", &Transport::Phone));
     }
 
     /// The Android push handle is enrolled by the phone only.

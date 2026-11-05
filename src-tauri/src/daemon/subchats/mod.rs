@@ -25,6 +25,7 @@ pub mod decisions;
 pub mod facts;
 pub mod finish;
 pub(crate) mod git;
+mod reply;
 mod resume;
 pub(crate) mod runtime;
 pub mod stall;
@@ -32,6 +33,7 @@ pub mod stamp;
 pub mod stuck;
 pub mod turn_end;
 
+pub use reply::{move_to_sidebar, route_send, MoveError};
 pub use resume::{continue_sub, end_sub, nudge, request_nudge, ContinueError, NUDGE_TEXT};
 
 /// Env var that marks a sub's MCP child, so `finish_subchat` is listed for it

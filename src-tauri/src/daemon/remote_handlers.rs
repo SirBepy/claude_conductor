@@ -159,6 +159,19 @@ pub(super) async fn send_message(
     if let Err(e) = crate::daemon::lifecycle::refuse_if_api_credit_blocked(&ctx.state, &id) {
         return (StatusCode::PAYMENT_REQUIRED, e.to_string()).into_response();
     }
+    // A reply typed into a sub opened in the main chat's window: the phone's
+    // half of core.rs's routing through `continue_sub`, which clears the sub's
+    // finished flag and freeze before the respawn.
+    if let Some(done) = crate::daemon::subchats::route_send(&ctx.state, &id, &body.text).await {
+        return match done {
+            Ok(()) => StatusCode::OK.into_response(),
+            Err(crate::daemon::subchats::ContinueError::NotFound(_))
+            | Err(crate::daemon::subchats::ContinueError::Send(crate::daemon::lifecycle::LifecycleError::NotFound(_))) => {
+                (StatusCode::NOT_FOUND, "no such session").into_response()
+            }
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        };
+    }
     // Set busy BEFORE the write, mirroring core.rs's desktop `send_message` RPC
     // (todo 525 root cause 1: a warm child can emit its first `stream_event`
     // before this fn resumes past the write's own `.await`). Without this the

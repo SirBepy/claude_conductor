@@ -1,0 +1,169 @@
+/* The main chat's header count and its sub list (sub-list.ts), and the sub
+   read-in-place chrome (subchat-view.ts). Measures follow the mockup's scenes 7
+   and 8. */
+
+/* Count icon: as quiet as the other header controls, no fill until hovered or open. */
+.sub-count-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sub-count-btn:hover,
+.sub-count-btn.on {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+/* The header's right-hand slot holds the count (and, on the phone, the live ⋮).
+   Pushed to the right edge only while it has something in it. */
+.session-header-trail:not(:empty) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.sub-list-popover {
+  width: 340px;
+  max-width: calc(100vw - 16px);
+  padding: 6px;
+  border-radius: 10px;
+}
+.sub-list-head {
+  margin: 6px 8px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.sub-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border-radius: 7px;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+.sub-row:hover,
+.sub-row:focus-visible {
+  background: var(--color-surface-alt);
+}
+.sub-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.sub-name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sub-status {
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sub-move {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.sub-move:hover,
+.sub-move:focus-visible {
+  background: var(--color-background);
+  color: var(--color-text);
+}
+
+/* The avatar stand-in: initials inside the sidebar ring's own SVG. */
+.sub-dot {
+  position: relative;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-surface-alt);
+  display: grid;
+  place-items: center;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.sub-dot .avatar-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+.sub-dot .avatar-ring circle {
+  stroke-width: 4;
+}
+
+/* A sub read in place: the arrow back to its main chat leads the header, and
+   "Move to sidebar" sits at the right. */
+.sub-back-btn {
+  flex-shrink: 0;
+}
+.sub-move-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sub-move-btn:hover {
+  background: var(--color-surface-alt);
+}
+/* "Finish replaces the wrap-up flag": a sub ends through its own finish tool. */
+.session-header.is-sub-view .wrap-up-btn {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* The phone's list-back stays in the DOM (the header merge relocates it) but a
+     sub has its own back arrow, so two arrows never sit side by side. */
+  .session-header.is-sub-view .session-header-lead #sessionsBackBtn {
+    display: none;
+  }
+  /* The label would crowd a 44px-button row; the icon and the title say it. */
+  .sub-move-btn span {
+    display: none;
+  }
+  .sub-move-btn {
+    width: var(--control-h-sm);
+    justify-content: center;
+    padding: 0;
+  }
+}

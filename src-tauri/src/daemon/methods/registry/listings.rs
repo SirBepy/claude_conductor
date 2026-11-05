@@ -118,6 +118,24 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+    // "Move to sidebar" on a sub read in place: it becomes an ordinary chat for
+    // good (`subchats::move_to_sidebar` lists what that clears).
+    {
+        let state = state.clone();
+        router.register("move_sub_to_sidebar", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { session_id: String }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                crate::daemon::subchats::move_to_sidebar(&state, &p.session_id)
+                    .await
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                Ok(json!({"ok": true}))
+            }
+        });
+    }
     // Session ids with the subchats mode on, so a freshly-launched client seeds
     // its menu-toggle state. Read-only; mirrors `list_wrap_up_on_done`.
     router.register("list_subchats_on", move |_params, _ctx| {

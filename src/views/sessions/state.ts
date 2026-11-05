@@ -75,6 +75,9 @@ export interface SessionsState {
    *  echoes an injected message back on its stream, so this is the only thing
    *  that puts it in the transcript. */
   unlistenHeldDelivered: (() => void) | null;
+  /** Unsubscribe for the daemon cards' "open this sub" / "open the log" requests
+   *  (subchat-view.ts). */
+  unlistenSubchat: (() => void) | null;
   pendingNewSession: PendingNewSession | null;
   parkedDrafts: ParkedDraft[];
   statusbar: SessionStatusbar | null;
@@ -132,6 +135,7 @@ export function createInitialState(mountId: number): SessionsState {
     unlistenInstances: null,
     unlistenScheduled: null,
     unlistenHeldDelivered: null,
+    unlistenSubchat: null,
     pendingNewSession: null,
     parkedDrafts: [],
     statusbar: null,
@@ -198,12 +202,26 @@ function cwdForSession(id: string | null): string | null {
   return s?.cwd ? String(s.cwd) : null;
 }
 
+/**
+ * The chat whose window `id` is read in. A hidden sub opened in place is shown in
+ * its main chat's window, so the sidebar marks the main chat's row and the
+ * prompt gate treats the main chat as on screen: the sub's own cards (their
+ * `display_session_id` is the main chat) and the main chat's show together,
+ * which keeps "selected" and the display id from disagreeing. Any other id is
+ * its own window. A sub whose main chat is not in the list reads as itself.
+ */
+export function windowIdOf(id: string | null): string | null {
+  if (!id) return id;
+  const parent = state.sessions.find((s) => s.session_id === id)?.subchat_of;
+  return parent && state.sessions.some((s) => s.session_id === parent) ? parent : id;
+}
+
 export function setActiveSession(id: string | null): void {
   state.selectedId = id;
   noteSelectedChat(id);
   // Armed from the start of a dashboard open, not only once it is mounted.
   if (id) state.onChatActivated?.();
-  setSelectedSessionId(id);
+  setSelectedSessionId(windowIdOf(id));
   state.previewController?.setSessionScope(id);
   state.fabDial?.setSessionScope(id, cwdForSession(id));
   if (id && !isPendingSessionId(id)) {
