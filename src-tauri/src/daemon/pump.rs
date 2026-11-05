@@ -17,7 +17,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 pub(crate) mod close;
 mod exit;
 mod turn_boundary;
-use close::{close_in_flight, close_stand_down_is_failure, finalize_close, turn_is_close, CLOSE_FAILED_AWAITING};
+use close::{close_in_flight, close_stand_down_is_failure, ended_already, finalize_close, turn_is_close, CLOSE_FAILED_AWAITING};
 use exit::run_pump_exit;
 use turn_boundary::{TurnAction, TurnBoundary};
 
@@ -498,7 +498,8 @@ pub(crate) async fn run_stdout_pump(
                                         .registry
                                         .get(&pump_session.session_id)
                                         .is_some_and(|i| i.awaiting.as_deref() == Some("question"));
-                                    if close_stand_down_is_failure(&prompt, close_confirmed, activity, question_pending) {
+                                    let closed = close_confirmed || ended_already(&state_for_pump.registry, &pump_session.session_id);
+                                    if close_stand_down_is_failure(&prompt, closed, activity, question_pending) {
                                         log::warn!(
                                             "daemon: session {} /close armed but never confirmed via close_session tool; chat still open",
                                             pump_session.session_id
