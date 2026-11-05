@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: a closing main chat with a running sub now stays in Main chats (it is the Wait for them choice); the closing test here uses a finished sub, everything else holds.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: main-chat.ts's progress text says paused or rate limited for a frozen or rate-limited sub instead of working; this spec's subs are neither, so its contract holds and it passes.
 // Reviewed 2026-11-05: main-chat.ts and the hover card gained a "queued" kind for a sub held for the writer slot; this spec has no queued sub, so asking/working/finished rows are unchanged, and it passed after the change. The queued row is covered in subchat-writer-slot.view.spec.ts.
@@ -225,7 +226,9 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
     });
 
     test("closing and hiding both take a main chat out of the group", async ({ page }) => {
-      await mount(page, size, [chat("main", "CV redesign", 101, { closing: true }), ...SUBS.slice(0, 1)]);
+      // Every sub finished: a close in progress is on its way out. (While a sub still runs, the daemon's
+      // closing flag is the "Wait for them" choice, and the chat stays in the group: subchat-second-run.)
+      await mount(page, size, [chat("main", "CV redesign", 101, { closing: true }), SUBS[3]!]);
       expect(await headerTexts(page)).not.toContain("Main chats");
       expect(await headerTexts(page)).toContain("Closing");
     });
