@@ -6,6 +6,7 @@ import {
   saveUnreadSet,
   scheduledCountsBySession,
   scheduledPendingPlaceholderIds,
+  isSubchat,
 } from "./sessions-helpers";
 import { state } from "./state";
 import { pendingPromptSessionIds, clearPendingPrompt } from "./permission-modal";
@@ -196,10 +197,11 @@ export async function refreshSessions(): Promise<boolean> {
     }
 
     // Mark unread for sessions that just finished a busy turn (busy true->false)
-    // and are not currently open/selected.
+    // and are not currently open/selected. A hidden sub is never unread: it has
+    // no row to badge, and its result reaches Joe as a card in the main chat.
     for (const s of next) {
       const wasBusy = state.prevBusyMap.get(s.session_id);
-      if (wasBusy === true && !s.busy && s.session_id !== state.selectedId) {
+      if (wasBusy === true && !s.busy && s.session_id !== state.selectedId && !isSubchat(s)) {
         unread.add(s.session_id);
       }
     }
@@ -250,7 +252,8 @@ export async function refreshSessions(): Promise<boolean> {
     state.sessions = next;
     pruneLiveQuestionProgress(next.map((s) => s.session_id));
     if (isRemote()) saveCachedInstances(next);
-    updateFaviconBadge(next, unread);
+    // The badge counts chats the user can open, so subs stay out of it.
+    updateFaviconBadge(next.filter((s) => !isSubchat(s)), unread);
     return true;
   } catch (err) {
     console.error("[sessions] list_instances failed", err);

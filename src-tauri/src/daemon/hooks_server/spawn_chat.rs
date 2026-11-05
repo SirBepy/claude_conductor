@@ -7,6 +7,7 @@
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::spawn_chat as spawn_chat_method;
+use crate::daemon::subchats::SubchatArgs;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -15,7 +16,10 @@ use std::sync::Arc;
 pub(super) struct SpawnChatBody {
     session_id: String,
     cwd: String,
-    prompt: String,
+    /// Optional for a subchats-mode caller, whose brief fields replace it. A
+    /// plain spawn still needs one, which `spawn_chat_or_forward` enforces.
+    #[serde(default)]
+    prompt: Option<String>,
     #[serde(default)]
     model: Option<String>,
     #[serde(default)]
@@ -30,6 +34,9 @@ pub(super) struct SpawnChatBody {
     /// here; omitted/self spawns locally (today's behaviour, unchanged).
     #[serde(default)]
     machine: Option<String>,
+    /// The subchats brief fields; every spawn but a mode-on chat's ignores them.
+    #[serde(flatten)]
+    brief: SubchatArgs,
 }
 
 pub(super) async fn on_spawn_chat(
@@ -42,12 +49,13 @@ pub(super) async fn on_spawn_chat(
         &ctx.state,
         &body.session_id,
         &body.cwd,
-        &body.prompt,
+        body.prompt.as_deref().unwrap_or_default(),
         body.model.as_deref(),
         body.effort.as_deref(),
         body.name.as_deref(),
         body.respawn,
         body.machine.as_deref(),
+        &body.brief,
     )
     .await;
     (StatusCode::OK, Json(result))
@@ -75,12 +83,13 @@ mod tests {
         let body = SpawnChatBody {
             session_id: "ghost".to_string(),
             cwd: ".".to_string(),
-            prompt: "carry on".to_string(),
+            prompt: Some("carry on".to_string()),
             model: None,
             effort: None,
             name: None,
             respawn: false,
             machine: None,
+            brief: SubchatArgs::default(),
         };
         let resp = on_spawn_chat(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);

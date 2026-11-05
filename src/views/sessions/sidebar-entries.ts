@@ -17,6 +17,7 @@ import {
   isSegCollapsed,
   resetSegCollapse,
   isJarvisOrWorker,
+  isSubchat,
 } from "./sessions-helpers";
 import { renderProjectRail } from "./project-rail";
 import { state } from "./state";
@@ -49,10 +50,13 @@ export function buildSidebarEntries(
   // A respawn predecessor is dropped here, not in state.sessions: it is still
   // a real live session everything else (event store, pane, teardown) must
   // keep seeing - it just no longer owns a row (see successor-follow.ts).
+  // A hidden sub (Use subchats) is dropped the same way: this one list feeds
+  // every row, the Ctrl+N order, the question/closing/rate-limit sets and the
+  // project rail, so filtering here hides a sub from all of them at once.
   recordChainLinks(state.sessions);
   const superseded = supersededPredecessors(state.sessions);
   const listSessions = state.sessions.filter(
-    (s) => !isJarvisOrWorker(s) && !superseded.has(s.session_id),
+    (s) => !isJarvisOrWorker(s) && !isSubchat(s) && !superseded.has(s.session_id),
   );
   // The viewed chat's parked prompt is already shown as a card; don't also flag
   // its row with the attention alarm (backgrounded parked prompts still badge).

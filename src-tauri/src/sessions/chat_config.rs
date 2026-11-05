@@ -86,6 +86,12 @@ pub struct ChatConfig {
     /// only via `set_spawned_by`.
     #[serde(default)]
     pub spawned_by: String,
+    /// The brief this chat was spawned with as a hidden sub of a main chat.
+    /// Present for as long as the chat is a sub, including after it ended,
+    /// which the registry (it drops an ended chat) cannot say. Written only via
+    /// `set_subchat`.
+    #[serde(default)]
+    pub subchat: Option<crate::daemon::subchats::SubchatBrief>,
 }
 
 /// Serialize read-modify-write within a process. Cross-process integrity comes
@@ -247,6 +253,39 @@ fn parent_in(c: ChatConfig) -> Option<String> {
     [c.predecessor, c.spawned_by].into_iter().find(|p| !p.is_empty())
 }
 
+/// Record (or clear) the brief that makes `session_id` a hidden sub. Preserves
+/// everything else on the entry. Best-effort, never panics.
+pub fn set_subchat(session_id: &str, brief: Option<crate::daemon::subchats::SubchatBrief>) {
+    let Some(path) = config_path() else { return };
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    set_subchat_at(&path, session_id, brief);
+}
+
+/// Ids of every chat that is a sub, live or ended. History lists read this to
+/// keep subs out of the past-chats list, since their transcripts exist on disk
+/// like any other chat's.
+pub fn sub_session_ids() -> std::collections::HashSet<String> {
+    let Some(path) = config_path() else { return Default::default() };
+    sub_session_ids_at(&path)
+}
+
+fn set_subchat_at(path: &Path, session_id: &str, brief: Option<crate::daemon::subchats::SubchatBrief>) {
+    if session_id.is_empty() {
+        return;
+    }
+    let mut map = load_map(path);
+    map.entry(session_id.to_string()).or_default().subchat = brief;
+    write_atomic(path, &map);
+}
+
+fn sub_session_ids_at(path: &Path) -> std::collections::HashSet<String> {
+    load_map(path)
+        .into_iter()
+        .filter(|(_, c)| c.subchat.is_some())
+        .map(|(id, _)| id)
+        .collect()
+}
+
 fn set_spawned_by_at(path: &Path, session_id: &str, parent: &str) {
     if session_id.is_empty() || parent.is_empty() {
         return;
@@ -399,6 +438,33 @@ fn list_subchats_on_at(path: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn brief(parent: &str) -> crate::daemon::subchats::SubchatBrief {
+        serde_json::from_str(&format!(r#"{{"parent":"{parent}","task":"t","goal":"g","done_when":"d"}}"#)).unwrap()
+    }
+
+    #[test]
+    fn a_sub_brief_round_trips_survives_other_writes_and_marks_the_chat_as_a_sub() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        record_at(&path, "sub-1", "sonnet", "high");
+        set_subchat_at(&path, "sub-1", Some(brief("main-1")));
+        set_spawned_by_at(&path, "sub-1", "main-1");
+        record_at(&path, "plain", "opus", "high");
+        assert_eq!(get_at(&path, "sub-1").unwrap().subchat.unwrap().parent, "main-1");
+        assert_eq!(get_at(&path, "sub-1").unwrap().model, "sonnet", "brief write keeps the model");
+        assert_eq!(sub_session_ids_at(&path), ["sub-1".to_string()].into_iter().collect());
+        set_subchat_at(&path, "sub-1", None);
+        assert!(sub_session_ids_at(&path).is_empty(), "clearing the brief makes it an ordinary chat again");
+    }
+
+    #[test]
+    fn an_old_config_file_without_the_subchat_key_loads_as_no_sub() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("chat-config.json");
+        std::fs::write(&path, r#"{"old":{"model":"opus","effort":"high"}}"#).unwrap();
+        assert!(get_at(&path, "old").unwrap().subchat.is_none());
+    }
 
     #[test]
     fn subchats_on_round_trips_lists_and_is_independent_of_wrap_up() {

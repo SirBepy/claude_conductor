@@ -30,7 +30,7 @@ import {
   closeActiveChatSubmenu,
   type ChatMenuCtx,
 } from "./chat-menu";
-import { loadHiddenSessions, loadHiddenProjects, isJarvisOrWorker, loadSort, loadUnreadSet, deriveQuestionSet, isMirrored } from "./sessions-helpers";
+import { loadHiddenSessions, loadHiddenProjects, isJarvisOrWorker, isSubchat, loadSort, loadUnreadSet, deriveQuestionSet, isMirrored } from "./sessions-helpers";
 import { isAutoAccept, isWrapUpOnDone, isSubchatsOn, pendingPromptSessionIds } from "./permission-modal";
 import { subchatsBlockedReason } from "./subchats-gate";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
@@ -216,7 +216,7 @@ const viewMenu = createMoreMenu<[]>({
     // FAB to collide with, so this stays phone-only; sidebar-entries.ts
     // still renders both inline there, byte-unchanged.
     if (isRemote()) {
-      const listSessions = state.sessions.filter((s) => !isJarvisOrWorker(s));
+      const listSessions = state.sessions.filter((s) => !isJarvisOrWorker(s) && !isSubchat(s));
 
       const filterBtn = document.createElement("button");
       filterBtn.className = "smore-item smore-has-sub";

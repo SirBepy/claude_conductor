@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 use super::spawn_chat;
+use crate::daemon::subchats::SubchatArgs;
 
 /// `spawn_chat`'s optional `machine`: label or id of a paired peer, or
 /// omitted/self for "spawn locally" (today's behaviour, byte-identical).
@@ -93,6 +94,10 @@ pub(crate) async fn spawn_chat_for_peer(
     Ok(sid)
 }
 
+/// `prompt` is optional on the wire only so a subchats-mode chat can send its
+/// brief fields instead; every other spawn still has to carry one.
+const PROMPT_REQUIRED: &str = "prompt is required: it is the new chat's first message. Only a chat with Use subchats on may leave it out, by filling in task, goal, done_when and writes instead.";
+
 /// `spawn_chat`/`respawn` MCP tools' full body, local or cross-machine:
 /// resolves `machine` and either spawns here (today's `spawn_chat`, untouched)
 /// or forwards to the peer's own `spawn_chat` RPC method. A local spawn
@@ -103,6 +108,10 @@ pub(crate) async fn spawn_chat_for_peer(
 /// body (`{"ok": ...}`) rather than `Result`, so a peer-communication
 /// failure's numeric code (reused from `machines::forward`'s consts) can ride
 /// alongside the message.
+///
+/// A local, non-respawn spawn from a chat with Use subchats on becomes a hidden
+/// sub when `subchats::spawn::plan` says so; `sub_args` are its brief fields,
+/// ignored by every other spawn.
 pub(crate) async fn spawn_chat_or_forward(
     state: &Arc<DaemonState>,
     caller_session_id: &str,
@@ -113,7 +122,13 @@ pub(crate) async fn spawn_chat_or_forward(
     name: Option<&str>,
     respawn: bool,
     machine: Option<&str>,
+    sub_args: &SubchatArgs,
 ) -> Value {
+    // Before the machine is resolved, so a sub cannot reach past depth 1 by
+    // naming one.
+    if let Err(e) = crate::daemon::subchats::spawn::refuse_sub_caller(state, caller_session_id) {
+        return json!({"ok": false, "error": e});
+    }
     let resolved = match state.machines.get() {
         // No machine registry at all (federation never initialised): `machine`
         // can only ever mean "local".
@@ -124,11 +139,40 @@ pub(crate) async fn spawn_chat_or_forward(
         },
     };
     let Some(peer) = resolved else {
-        return match spawn_chat(state, caller_session_id, cwd, prompt, model, effort, name, respawn).await {
+        // A subchats-mode caller's plain spawn makes a hidden sub. A `machine`
+        // spawn (below) and a respawn stay what they always were.
+        let plan = if respawn {
+            None
+        } else {
+            let inherited = crate::sessions::chat_config::get(caller_session_id).unwrap_or_default();
+            let prompt_text = Some(prompt).filter(|p| !p.trim().is_empty());
+            match crate::daemon::subchats::spawn::plan(
+                state,
+                caller_session_id,
+                &inherited,
+                cwd,
+                prompt_text,
+                model,
+                effort,
+                name,
+                sub_args,
+                &crate::accounts::load_registry(),
+            ) {
+                Ok(plan) => plan,
+                Err(e) => return json!({"ok": false, "error": e}),
+            }
+        };
+        if plan.is_none() && prompt.trim().is_empty() {
+            return json!({"ok": false, "error": PROMPT_REQUIRED});
+        }
+        return match spawn_chat(state, caller_session_id, cwd, prompt, model, effort, name, respawn, plan).await {
             Ok(sid) => json!({"ok": true, "session_id": sid}),
             Err(e) => json!({"ok": false, "error": e}),
         };
     };
+    if prompt.trim().is_empty() {
+        return json!({"ok": false, "error": PROMPT_REQUIRED});
+    }
     if respawn {
         // Closing the caller and handing off across a machine boundary would
         // strand the successor link (`successor_of` resolves through the
@@ -195,6 +239,116 @@ mod tests {
         registry
     }
 
+    /// A folder that does not exist: a spawn that clears every guard then fails
+    /// inside `spawn_session` (`cwd does not exist`) before any `claude` child
+    /// starts, so these tests can tell "the guards passed" from "a guard refused"
+    /// without launching anything.
+    fn missing_dir() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("cc-subchats-missing-{}", uuid::Uuid::new_v4()))
+    }
+
+    fn caller_in(state: &DaemonState, id: &str, dir: &std::path::Path) {
+        state.registry.upsert_interactive(id, dir, "proj-x", "2026-11-05T00:00:00Z");
+    }
+
+    fn full_brief() -> SubchatArgs {
+        SubchatArgs {
+            task: Some("t".into()),
+            goal: Some("g".into()),
+            done_when: Some("d".into()),
+            writes: Some(false),
+            ..Default::default()
+        }
+    }
+
+    async fn spawn_as(state: &Arc<DaemonState>, id: &str, dir: &std::path::Path, args: &SubchatArgs, respawn: bool, machine: Option<&str>, name: Option<&str>, prompt: &str) -> Value {
+        spawn_chat_or_forward(state, id, &dir.to_string_lossy(), prompt, None, None, name, respawn, machine, args).await
+    }
+
+    #[tokio::test]
+    async fn mode_off_ignores_the_brief_fields_and_takes_the_normal_path() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let dir = missing_dir();
+        caller_in(&state, "plain", &dir);
+        // Thin brief, no name: a mode-on chat would be refused for it.
+        let r = spawn_as(&state, "plain", &dir, &SubchatArgs::default(), false, None, None, "carry on").await;
+        assert!(r["error"].as_str().unwrap().contains("cwd does not exist"), "{r:?}");
+        let r = spawn_as(&state, "plain", &dir, &full_brief(), false, None, Some("n"), "carry on").await;
+        assert!(r["error"].as_str().unwrap().contains("cwd does not exist"), "{r:?}");
+        assert!(crate::sessions::chat_config::sub_session_ids().is_empty());
+        assert_eq!(state.registry.list().len(), 1, "no row was made");
+    }
+
+    #[tokio::test]
+    async fn mode_on_refuses_a_thin_brief_naming_every_missing_field() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let dir = missing_dir();
+        caller_in(&state, "main", &dir);
+        crate::sessions::chat_config::set_subchats_on("main", true);
+        let r = spawn_as(&state, "main", &dir, &SubchatArgs::default(), false, None, None, "").await;
+        assert_eq!(r["ok"], false);
+        let err = r["error"].as_str().unwrap();
+        for f in ["name", "task", "goal", "done_when", "writes"] {
+            assert!(err.contains(f), "{f} not named: {err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn mode_on_with_a_complete_brief_gets_past_every_guard_without_a_prompt() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let dir = missing_dir();
+        caller_in(&state, "main", &dir);
+        crate::sessions::chat_config::set_subchats_on("main", true);
+        let r = spawn_as(&state, "main", &dir, &full_brief(), false, None, Some("header"), "").await;
+        let err = r["error"].as_str().unwrap();
+        assert!(err.contains("cwd does not exist"), "must reach spawn_session, not a brief/prompt refusal: {err}");
+    }
+
+    #[tokio::test]
+    async fn a_machine_spawn_and_a_respawn_stay_normal_even_in_mode_on() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        state.init_machines(tempfile::tempdir().unwrap().path().to_path_buf());
+        state.machines.get().unwrap().ensure_self();
+        let dir = missing_dir();
+        caller_in(&state, "main", &dir);
+        crate::sessions::chat_config::set_subchats_on("main", true);
+        let r = spawn_as(&state, "main", &dir, &SubchatArgs::default(), false, Some("Ghost Box"), None, "go").await;
+        assert!(r["error"].as_str().unwrap().contains("Ghost Box"), "machine resolution ran, not brief validation: {r:?}");
+        let r = spawn_as(&state, "main", &dir, &SubchatArgs::default(), true, None, None, "go").await;
+        assert!(r["error"].as_str().unwrap().contains("cwd does not exist"), "a respawn is not a sub: {r:?}");
+    }
+
+    #[tokio::test]
+    async fn a_sub_cannot_spawn_respawn_or_reach_a_machine() {
+        let state = test_state();
+        let dir = missing_dir();
+        caller_in(&state, "main", &dir);
+        caller_in(&state, "sub", &dir);
+        state.registry.set_subchat_of("sub", Some("main".into()));
+        for (respawn, machine) in [(false, None), (true, None), (false, Some("Anywhere"))] {
+            let r = spawn_as(&state, "sub", &dir, &full_brief(), respawn, machine, Some("n"), "go").await;
+            assert_eq!(r["ok"], false);
+            assert_eq!(
+                r["error"].as_str().unwrap(),
+                crate::daemon::subchats::spawn::DEPTH_REFUSAL,
+                "respawn={respawn} machine={machine:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_plain_spawn_still_needs_a_prompt() {
+        let state = test_state();
+        let dir = missing_dir();
+        caller_in(&state, "plain", &dir);
+        let r = spawn_as(&state, "plain", &dir, &SubchatArgs::default(), false, None, None, "  ").await;
+        assert!(r["error"].as_str().unwrap().starts_with("prompt is required"), "{r:?}");
+    }
+
     #[test]
     fn resolve_machine_none_or_blank_stays_local() {
         let registry = machine_registry_with_a_peer();
@@ -258,7 +412,7 @@ mod tests {
         state.registry.upsert_interactive("sess-no-registry", std::path::Path::new("."), "proj-x", "2026-08-18T00:00:00Z");
         let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
         let result =
-            spawn_chat_or_forward(&state, "sess-no-registry", elsewhere, "carry on", None, None, None, false, None).await;
+            spawn_chat_or_forward(&state, "sess-no-registry", elsewhere, "carry on", None, None, None, false, None, &Default::default()).await;
         assert_eq!(result["ok"], false);
         assert!(
             result["error"].as_str().unwrap().contains("own working directory"),
@@ -273,7 +427,7 @@ mod tests {
         state.machines.get().unwrap().ensure_self();
         state.registry.upsert_interactive("sess-unknown-machine", std::path::Path::new("."), "proj-x", "2026-08-18T00:00:00Z");
         let result =
-            spawn_chat_or_forward(&state, "sess-unknown-machine", ".", "carry on", None, None, None, false, Some("Ghost Box")).await;
+            spawn_chat_or_forward(&state, "sess-unknown-machine", ".", "carry on", None, None, None, false, Some("Ghost Box"), &Default::default()).await;
         assert_eq!(result["ok"], false);
         assert!(result["error"].as_str().unwrap().contains("Ghost Box"));
     }
@@ -296,7 +450,7 @@ mod tests {
         });
         state.registry.upsert_interactive("sess-1", std::path::Path::new("."), "proj-x", "2026-08-18T00:00:00Z");
         let result =
-            spawn_chat_or_forward(&state, "sess-1", ".", "carry on", None, None, None, true, Some("Mac Mini")).await;
+            spawn_chat_or_forward(&state, "sess-1", ".", "carry on", None, None, None, true, Some("Mac Mini"), &Default::default()).await;
         assert_eq!(result["ok"], false);
         assert!(result["error"].as_str().unwrap().contains("respawn"));
     }
@@ -325,7 +479,7 @@ mod tests {
         // call must reach the peer too rather than be refused locally.
         for _ in 0..2 {
             let result = spawn_chat_or_forward(
-                &state, "sess-unreachable-peer", ".", "carry on", None, None, None, false, Some("Mac Mini"),
+                &state, "sess-unreachable-peer", ".", "carry on", None, None, None, false, Some("Mac Mini"), &Default::default(),
             )
             .await;
             assert_eq!(result["ok"], false);
@@ -378,7 +532,7 @@ mod tests {
             .create_async()
             .await;
         let result =
-            spawn_chat_or_forward(&state, "sess-fwd", ".", "carry on", None, None, None, false, Some("Mac Mini")).await;
+            spawn_chat_or_forward(&state, "sess-fwd", ".", "carry on", None, None, None, false, Some("Mac Mini"), &Default::default()).await;
         assert_eq!(result["ok"], true, "{result:?}");
         assert_eq!(result["machine"], "Mac Mini");
         rpc.assert_async().await;
@@ -399,7 +553,7 @@ mod tests {
             .create_async()
             .await;
         let result = spawn_chat_or_forward(
-            &state, "sess-fwd", ".", "carry on", Some("opus"), Some("high"), None, false, Some("Mac Mini"),
+            &state, "sess-fwd", ".", "carry on", Some("opus"), Some("high"), None, false, Some("Mac Mini"), &Default::default(),
         )
         .await;
         assert_eq!(result["ok"], true, "{result:?}");

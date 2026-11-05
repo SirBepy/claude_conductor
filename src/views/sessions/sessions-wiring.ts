@@ -2,7 +2,7 @@ import { selectSession, updateHeaderAvatarStatus } from "./active-session";
 import { carrySessionSettings, applyAccountMove, repointHeaderCharacter } from "./active-session-account";
 import { state, setActiveSession, loadLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
-import { sessionSubtitle, paneEmptyStateHtml } from "./sessions-helpers";
+import { sessionSubtitle, paneEmptyStateHtml, isSubchat } from "./sessions-helpers";
 import { renderSidebar, refreshSessions, forceRefreshScheduledCounts } from "./sidebar";
 import { loadSessionCharacters, characterForSessionId } from "./session-characters";
 import { resetCharacterCaches } from "../../shared/characters";
@@ -236,7 +236,8 @@ export async function wireInstancesChangedListener(
 
     // Ensure every newly-appeared live session gets a character assigned.
     // Track ensured ids so we don't re-call on every subsequent event.
-    const liveSessions = state.sessions.filter((s) => !s.ended_at && !s.end_reason);
+    // A hidden sub shows no avatar, so it must not take a character from the pool.
+    const liveSessions = state.sessions.filter((s) => !s.ended_at && !s.end_reason && !isSubchat(s));
     const newOnes = liveSessions.filter((s) => !ensuredSessionIds.has(s.session_id));
     if (newOnes.length > 0) {
       for (const s of newOnes) {

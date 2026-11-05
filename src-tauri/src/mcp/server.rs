@@ -657,6 +657,31 @@ mod tests {
         assert_eq!(flag_for(TOOL_SPAWN_CHAT), json!(false));
     }
 
+    /// The subchats brief must reach the daemon: it is what a mode-on chat's
+    /// spawn is validated against. Only the keys the model sent travel, and
+    /// `respawn` never carries any.
+    #[test]
+    fn spawn_chat_relays_the_subchats_brief_and_respawn_does_not() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let args = json!({
+            "cwd": ".", "name": "header", "task": "t", "goal": "g", "done_when": "d",
+            "writes": true, "files": ["a.ts"], "review": false,
+        });
+        let body_for = |name: &str| -> Value {
+            POSTED_BODIES.with(|b| b.borrow_mut().clear());
+            dispatch_tool_with(&rt, &json!(1), name, &args, "sess-1", 1234, fake_http_post);
+            POSTED_BODIES.with(|b| b.borrow()[0].clone())
+        };
+        let spawn = body_for(TOOL_SPAWN_CHAT);
+        assert_eq!(spawn["task"], json!("t"));
+        assert_eq!(spawn["writes"], json!(true));
+        assert_eq!(spawn["files"], json!(["a.ts"]));
+        assert_eq!(spawn["review"], json!(false));
+        assert!(spawn.get("report_back").is_none(), "an unsent key is not relayed as null");
+        assert!(spawn["prompt"].is_null(), "prompt is optional now");
+        assert!(body_for(TOOL_RESPAWN).get("task").is_none());
+    }
+
     /// `stage` is the only thing that tells the daemon "mark Closing" apart from
     /// "tear down at turn end"; dropping it would make the first call confirm a
     /// teardown the skill has not reached yet.
