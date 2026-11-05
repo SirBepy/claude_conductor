@@ -127,6 +127,34 @@
 .session-model-battery i { font-size: 1rem; line-height: 1; }
 .sessions-list li.active .session-model-battery { color: var(--color-background); opacity: 0.85; }
 
+/* A main chat (Use subchats): "3x" stands where the battery would, and a red
+   dot per sub asking Joe follows the project name and heads the group. The
+   dots are the needs-input red at rest and never animate: the ring already
+   pulses, and several pulsing dots would shout over it. */
+.session-sub-count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-text-muted);
+}
+.sessions-list li.active .session-sub-count { color: var(--color-background); opacity: 0.85; }
+.ask-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 6px;
+  flex: 0 0 auto;
+}
+.session-group-header .ask-dots { vertical-align: middle; margin-left: 8px; }
+.ask-dot {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--chat-state-needs-input);
+  box-shadow: 0 0 4px var(--chat-state-needs-input-glow);
+}
+
 /* Frozen-chat marker: bare snowflake, same slot/sizing as the battery above.
    --auto reuses the "waiting" hue since a rate-limit auto-freeze IS a
    waiting state (see sessions.css's --chat-state-waiting). */

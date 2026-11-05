@@ -22,7 +22,10 @@ import {
 import { renderProjectRail } from "./project-rail";
 import { state } from "./state";
 import { isRemote } from "../../shared/transport";
-import { pendingPromptSessionIds } from "./permission-modal";
+import { pendingPromptSessionIds, isSubchatsOn } from "./permission-modal";
+import { mainChatInfo } from "./main-chat";
+import type { MainChatInfo } from "./main-chat";
+import { askingDotsHtml } from "./sidebar-row-visuals";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { renderSidebarRow, sessionRowOptions, draftRowOptions, parkedRowOptions } from "./sidebar-rows";
 import { chainRowKey, recordChainLinks, supersededPredecessors } from "./successor-follow";
@@ -179,10 +182,19 @@ export function buildSidebarEntries(
   // also show the clock badge.
   const scheduledIds = new Set(scheduledCountMap.keys());
 
-  const SEGMENT_LABELS = ["Input Needed", "Done", "In Progress", "Closing", "Waiting for Reset", "Waiting", "Scheduled", "Remote"];
-  const segmented: Map<number, typeof sorted> = new Map([[0, []], [1, []], [2, []], [3, []], [4, []], [5, []], [6, []], [7, []]]);
+  // A chat with Use subchats on carries a summary of its subs (dots, "3x", ring,
+  // hover) and sits in its own group. state.sessions, not listSessions: the list
+  // above has already dropped the subs this reads.
+  const mainInfo = new Map<string, MainChatInfo>();
+  for (const s of listSessions) {
+    if (isSubchatsOn(s.session_id)) mainInfo.set(s.session_id, mainChatInfo(s, state.sessions));
+  }
+  const MAIN_SEG = 8;
+  const SEGMENT_LABELS = ["Input Needed", "Done", "In Progress", "Closing", "Waiting for Reset", "Waiting", "Scheduled", "Remote", "Main chats"];
+  const segmented: Map<number, typeof sorted> = new Map([[0, []], [1, []], [2, []], [3, []], [4, []], [5, []], [6, []], [7, []], [MAIN_SEG, []]]);
+  const mainIds = new Set(mainInfo.keys());
   for (const s of sorted) {
-    segmented.get(sessionSegment(s, unread, attention, question, closing, rateLimited, scheduledIds))!.push(s);
+    segmented.get(sessionSegment(s, unread, attention, question, closing, rateLimited, scheduledIds, mainIds))!.push(s);
   }
 
   // Same order as the data-kbd-hint badges below, so Ctrl+N always opens the
@@ -195,10 +207,14 @@ export function buildSidebarEntries(
     }
     const segCollapsed = isSegCollapsed(seg);
     const chevronCls = segCollapsed ? "ph-caret-right" : "ph-caret-down";
+    // The dots outlive a collapse: hiding the rows must not hide what wants Joe.
+    const headerDots = seg === MAIN_SEG
+      ? askingDotsHtml(group.reduce((n, s) => n + (mainInfo.get(s.session_id)?.askingDots ?? 0), 0))
+      : "";
     entries.push({
       key: `__seg:${seg}__`,
       html: `<li class="session-group-header session-group-seg-toggle" data-seg-toggle="${seg}" data-row-key="__seg:${seg}__">
-        <i class="ph ${chevronCls}" style="margin-right:4px;font-size:10px;vertical-align:middle"></i>${SEGMENT_LABELS[seg]}
+        <i class="ph ${chevronCls}" style="margin-right:4px;font-size:10px;vertical-align:middle"></i>${SEGMENT_LABELS[seg]}${headerDots}
       </li>`,
     });
     if (!segCollapsed) {
@@ -211,6 +227,7 @@ export function buildSidebarEntries(
           key: chainRowKey(s.session_id),
           html: renderSidebarRow(sessionRowOptions(s, {
             isActive, unread, attention, question, rateLimited, closing, sort, drainMap, scheduledCountMap, kbdHint,
+            mainChat: mainInfo.get(s.session_id),
           })),
         });
       }
@@ -218,8 +235,9 @@ export function buildSidebarEntries(
   };
 
   // "Waiting" (5) renders right after "In Progress" (2). "Closing" (3) alone
-  // defers to just above Hidden - see the renderSeg(3) call below.
-  for (const seg of [0, 1, 2, 5, 4, 6, 7]) {
+  // defers to just above Hidden - see the renderSeg(3) call below. Main chats
+  // lead, above Input Needed.
+  for (const seg of [MAIN_SEG, 0, 1, 2, 5, 4, 6, 7]) {
     renderSeg(seg);
   }
 
@@ -261,6 +279,7 @@ export function buildSidebarEntries(
           key: chainRowKey(s.session_id),
           html: renderSidebarRow(sessionRowOptions(s, {
             isActive, unread, attention, question, rateLimited, closing, sort, drainMap, scheduledCountMap, kbdHint: "",
+            mainChat: mainInfo.get(s.session_id),
           })),
         });
       }

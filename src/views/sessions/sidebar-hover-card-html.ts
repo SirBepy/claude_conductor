@@ -20,6 +20,10 @@ export interface HoverCardInput {
   /** Context window used, 0-100, or null while unknown / not yet fetched. */
   contextPct: number | null;
   now: number;
+  /** A Use-subchats main chat's subs (main-chat.ts `hoverRows`). A non-empty
+   *  list replaces the chat's own state and plan blocks: one chat has no single
+   *  state once it has subs asking, working and finished. */
+  subs?: ReadonlyArray<{ name: string; kind: "asking" | "working" | "finished"; progress: string }>;
 }
 
 interface StateLine { label: string; tone: RingTone | "idle"; timer: "turn" | "waiting" | "ago" | null }
@@ -101,10 +105,28 @@ function questionBlock(q: QuestionProgress): string {
   }).join("");
 }
 
+const SUB_DOT_TONE: Record<"asking" | "working" | "finished", string> = {
+  asking: TONE_VAR.question, working: TONE_VAR.working, finished: TONE_VAR.done,
+};
+
+function subsBlock(subs: NonNullable<HoverCardInput["subs"]>): string {
+  return subs.map((s) =>
+    `<div class="hc-subrow is-${s.kind}"><span class="hc-dot" style="background:${SUB_DOT_TONE[s.kind]}"></span><span class="hc-label">${escapeHtml(s.name)}</span><span class="hc-aside">${escapeHtml(s.progress)}</span></div>`,
+  ).join("");
+}
+
 /** The desktop hover card for one sidebar row. Everything shown comes from
  *  the row's own state; nothing here is fetched except `contextPct`, which the
  *  caller fills in lazily. */
 export function buildHoverCardHtml(i: HoverCardInput): string {
+  const ctxHtml = i.contextPct === null
+    ? ""
+    : `<div class="hc-meta"><span class="hc-ctx" title="${escapeHtml(STATIC_CHIPS.context_pct.tooltip)}"><i class="ph ${STATIC_CHIPS.context_pct.icon}"></i>${Math.round(i.contextPct)}%</span></div>`;
+  if (i.subs && i.subs.length > 0) {
+    return `<div class="hc-title">${escapeHtml(i.title)}</div>
+<div class="hc-sub">${escapeHtml(i.project)}</div>
+${subsBlock(i.subs)}${ctxHtml}`;
+  }
   const line = STATE_LINES[i.st] ?? { label: "", tone: "idle" as const, timer: null };
   const timer = timerText(line.timer, i.stateSince, i.now);
   const colour = TONE_VAR[line.tone];
@@ -124,12 +146,8 @@ export function buildHoverCardHtml(i: HoverCardInput): string {
     list = planBlock(i.plan!);
   }
 
-  const ctx = i.contextPct === null
-    ? ""
-    : `<div class="hc-meta"><span class="hc-ctx" title="${escapeHtml(STATIC_CHIPS.context_pct.tooltip)}"><i class="ph ${STATIC_CHIPS.context_pct.icon}"></i>${Math.round(i.contextPct)}%</span></div>`;
-
   return `<div class="hc-title">${escapeHtml(i.title)}</div>
 <div class="hc-sub">${escapeHtml(i.project)}</div>
 <div class="hc-state"><span class="hc-dot" style="background:${colour}"></span>${escapeHtml(line.label)}${timer ? `<span class="hc-timer">${escapeHtml(timer)}</span>` : ""}</div>
-${heading ? `<div class="hc-heading">${escapeHtml(heading)}</div>` : ""}${progress}${list}${ctx}`;
+${heading ? `<div class="hc-heading">${escapeHtml(heading)}</div>` : ""}${progress}${list}${ctxHtml}`;
 }

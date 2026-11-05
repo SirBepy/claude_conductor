@@ -1,0 +1,81 @@
+import type { Instance } from "../../types/ipc.generated";
+import { parkedAskersFor } from "./permission-modal/gating";
+import { questionProgressFor } from "./question-progress";
+import { sessionSubtitle } from "./sessions-helpers";
+import { planProgress } from "./sidebar-ring";
+
+/** Red asks for Joe, yellow is working, green is finished or closing. */
+export type SubKind = "asking" | "working" | "finished";
+
+export interface SubStatus {
+  id: string;
+  name: string;
+  kind: SubKind;
+  /** "2 of 5 answered", "step 3 of 6", "finished": the hover card's right column. */
+  progress: string;
+}
+
+/** What a main chat's sidebar row shows about the subs behind it. A main chat
+ *  has no state of its own to colour a ring with (one sub can be asking while
+ *  another works and a third closes), so the row reports counts instead. */
+export interface MainChatInfo {
+  /** Every sub, asking first, then working, then finished. */
+  subs: SubStatus[];
+  /** Red dots: one per asking sub, plus one for the main chat's own question. */
+  askingDots: number;
+  /** Rows the hover lists: the subs, plus this chat when it asks. */
+  hoverRows: SubStatus[];
+  /** At least one sub exists and every one has finished. */
+  allFinished: boolean;
+}
+
+const KIND_ORDER: Record<SubKind, number> = { asking: 0, working: 1, finished: 2 };
+
+/** Ids with a card waiting in `mainId`'s window: the parked slots (a sub's card
+ *  is parked under the sub's own id, shown in its main chat), plus the registry's
+ *  `awaiting` for an asker whose card this window has not seen yet (the phone
+ *  between two polls). A slot already marked answered is not asking. */
+function askingIds(main: Instance, subs: readonly Instance[]): Set<string> {
+  const out = new Set<string>();
+  for (const { askerId, prompt } of parkedAskersFor(main.session_id)) {
+    if (prompt.kind === "question" && prompt.answered) continue;
+    out.add(askerId);
+  }
+  // A finished sub is frozen and idle, so a stale `awaiting` on it is not a live ask.
+  for (const s of [main, ...subs]) if (s.awaiting === "question" && !s.subchat_finished) out.add(s.session_id);
+  return out;
+}
+
+function progressText(s: Instance, kind: SubKind): string {
+  if (kind === "asking") {
+    const q = questionProgressFor(s.session_id);
+    return q && q.total > 0 ? `${q.answered} of ${q.total} answered` : "needs your input";
+  }
+  if (s.closing) return "closing";
+  if (kind === "finished") return "finished";
+  const p = planProgress(s.progress?.plan);
+  // The step being worked is the one after the last done: "step 3 of 6" while two are done.
+  return p ? `step ${Math.min(p.done + 1, p.total)} of ${p.total}` : "working";
+}
+
+/** The sub rows of one main chat. `sessions` is the full unfiltered list
+ *  (`state.sessions`): the sidebar's own list drops the subs. */
+export function mainChatInfo(main: Instance, sessions: readonly Instance[]): MainChatInfo {
+  const subInstances = sessions.filter((s) => s.subchat_of === main.session_id);
+  const asking = askingIds(main, subInstances);
+  const subs: SubStatus[] = subInstances.map((s) => {
+    const kind: SubKind = asking.has(s.session_id) ? "asking" : s.subchat_finished || s.closing ? "finished" : "working";
+    return { id: s.session_id, name: sessionSubtitle(s), kind, progress: progressText(s, kind) };
+  }).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
+
+  const ownAsking = asking.has(main.session_id);
+  const hoverRows = ownAsking
+    ? [{ id: main.session_id, name: "This chat", kind: "asking" as const, progress: progressText(main, "asking") }, ...subs]
+    : subs;
+  return {
+    subs,
+    askingDots: subs.filter((s) => s.kind === "asking").length + (ownAsking ? 1 : 0),
+    hoverRows,
+    allFinished: subs.length > 0 && subs.every((s) => s.kind === "finished"),
+  };
+}

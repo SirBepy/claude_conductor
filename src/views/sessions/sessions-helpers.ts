@@ -231,6 +231,9 @@ export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<st
  *  process this app didn't spawn, terminal or channel bridge - wins over
  *  every other state; the row's own dot still shows the real state. NOT
  *  `is_remote`, which only means "reached over remote transport").
+ *  8=Main chats (Use subchats on): above Input Needed and never left for another
+ *  state, so a main chat's Ctrl+N number holds while a sub asks. Only external
+ *  and closing rank above it, as they do any chat; Hidden is a separate list.
  *  Closing wins over Scheduled; auto_frozen wins over plain rate-limited (it
  *  already has a resume queued, see rate_limit.rs). `frozen` is a row chip
  *  now (`frozenChipHtml`), not a segment - see sidebar-row-visuals.ts. */
@@ -242,9 +245,11 @@ export function sessionSegment(
   closing: Set<string>,
   rateLimited: ReadonlySet<string> = new Set(),
   scheduled: ReadonlySet<string> = new Set(),
+  mainChats: ReadonlySet<string> = new Set(),
 ): number {
   if (s.kind === "external" || s.kind === "automated") return 7;
   if (closing.has(s.session_id)) return 3;
+  if (mainChats.has(s.session_id)) return 8;
   if (s.auto_frozen) return 6;
   if (rateLimited.has(s.session_id)) return 4;
   const priority = statusPriority(s, unread, attention, question);

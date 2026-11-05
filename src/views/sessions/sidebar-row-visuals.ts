@@ -78,6 +78,22 @@ export function projBadgeHtml(cwd: string | null, cls: string, machineId?: strin
   return `<span class="${cls}"><span class="proj-face" data-proj-face="${escapeHtml(cwd)}"${machineAttr}><i class="ph ph-folder"></i></span></span>`;
 }
 
+/** Red dots for the subs asking Joe something, one each (the main chat's own
+ *  question included). Shared by a Main chats row and the group's header, where
+ *  they keep showing while the group is collapsed. "" for none. */
+export function askingDotsHtml(count: number): string {
+  if (count <= 0) return "";
+  const label = `${count} waiting on you`;
+  return `<span class="ask-dots" role="img" aria-label="${label}">${'<i class="ask-dot"></i>'.repeat(count)}</span>`;
+}
+
+/** "3x": how many subs a main chat has, running and finished, standing where the
+ *  model battery would. No word: a bare count is the quietest thing that still
+ *  says "this one has subs behind it". */
+export function subCountHtml(count: number): string {
+  return `<span class="session-sub-count">${count}x</span>`;
+}
+
 /** Frozen-chat marker: a bare snowflake in the chips slot (same slot as
  *  `modelBatteryHtml`), plus `frozenRowClass` tinting the whole row - replaces
  *  the old uppercase text chip, which ate into a portrait row's one text line

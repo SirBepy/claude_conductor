@@ -15,12 +15,15 @@ import {
   heldCornerHtml,
   modelBatteryHtml,
   wrapUpChipHtml,
+  askingDotsHtml,
+  subCountHtml,
 } from "./sidebar-row-visuals";
 import type { LeadingExtras } from "./sidebar-row-visuals";
 import { chainRowKey } from "./successor-follow";
 import { GENERIC_MACHINE_ICON, hasPairedMachines, machineIcon, selfMachineLabel } from "./machine-icons";
 import { isWrapUpOnDone } from "./permission-modal";
-import { ringHtml, ringSpecFor } from "./sidebar-ring";
+import { ringHtml, ringSpecFor, mainChatRingSpec } from "./sidebar-ring";
+import type { MainChatInfo } from "./main-chat";
 import type { QuestionRingInfo } from "./sidebar-ring";
 import { questionProgressFor } from "./question-progress";
 import type { PlanStepSnapshot } from "../../types/ipc.generated";
@@ -51,6 +54,8 @@ export interface RowOptions {
   machineBadge: string;
   /** Portrait's secondary slot: model battery + drain chip, for every row kind. */
   portraitSecondary: string;
+  /** A main chat's red dots, one per sub asking Joe, after the project name. */
+  subDots?: string;
 }
 
 /** The one `<li>` template for the whole sidebar list. A titled row is two
@@ -62,8 +67,8 @@ export function renderSidebarRow(o: RowOptions): string {
   const text = o.title
     ? `<span class="session-row-title"><span class="session-row-title-text" data-tip="${o.title}">${o.title}</span>${o.badges}</span>
               ${chips}
-              <span class="session-row-project"><span class="proj-name">${o.projectLabel}</span>${o.machineBadge}</span>`
-    : `<span class="session-row-project"><span class="proj-name">${o.projectLabel}</span>${o.badges}${o.machineBadge}</span>
+              <span class="session-row-project"><span class="proj-name">${o.projectLabel}</span>${o.machineBadge}${o.subDots ?? ""}</span>`
+    : `<span class="session-row-project"><span class="proj-name">${o.projectLabel}</span>${o.badges}${o.machineBadge}${o.subDots ?? ""}</span>
               ${chips}`;
   return `<li data-${o.idAttr}="${escapeHtml(o.id)}"${o.liExtraAttrs} class="${o.liClasses}">
             ${leadingVisual(o.charId, o.statusClass, o.cwd, o.avatarExtras, o.statusTitle)}
@@ -145,6 +150,9 @@ function buildRowOptions(args: {
   /** A live session hosted on this daemon (machine null), as opposed to a
    *  draft/parked row, which runs nowhere yet and never gets a machine mark. */
   isLocalSession?: boolean;
+  /** Set for a chat with Use subchats on (the Main chats group): its subs'
+   *  summary replaces the plan arc, the battery and the ring's state colours. */
+  mainChat?: MainChatInfo | null;
 }): RowOptions {
   const tipAttr = "data-tip";
   const badges = args.isAutopilot ? `<span class="autopilot-badge" ${tipAttr}="Autopilot active">autopilot</span>` : "";
@@ -160,7 +168,9 @@ function buildRowOptions(args: {
     avatarExtras: {
       badgeClass: "is-centred",
       extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount) + wrapUpChipHtml(args.wrapUpOnDone, tipAttr),
-      ringHtml: ringHtml(ringSpecFor(args.dotClass, args.plan, args.question)),
+      ringHtml: ringHtml(args.mainChat
+        ? mainChatRingSpec(args.dotClass, args.question, args.mainChat.allFinished)
+        : ringSpecFor(args.dotClass, args.plan, args.question)),
       warn: args.dotClass === "st-close-failed",
       machineId: args.machine?.id ?? null,
     },
@@ -168,7 +178,10 @@ function buildRowOptions(args: {
     projectLabel: escapeHtml(args.projectLabel),
     badges,
     machineBadge: machineBadgeHtml(args.machine, !!args.isLocalSession),
-    portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${modelBatteryHtml(args.model)}${args.drainChip}`,
+    // A main chat with subs shows "3x" where the model battery sits; one with
+    // none yet keeps its battery.
+    portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${args.mainChat && args.mainChat.subs.length > 0 ? subCountHtml(args.mainChat.subs.length) : modelBatteryHtml(args.model)}${args.drainChip}`,
+    subDots: args.mainChat ? askingDotsHtml(args.mainChat.askingDots) : "",
   };
 }
 
@@ -186,6 +199,8 @@ export function sessionRowOptions(
     drainMap: Map<string, number>;
     scheduledCountMap: Map<string, number>;
     kbdHint: string;
+    /** This chat's subs summary when it has Use subchats on, else absent. */
+    mainChat?: MainChatInfo | null;
   },
 ): RowOptions {
   const needsAttention = ctx.attention.has(s.session_id);
@@ -232,6 +247,7 @@ export function sessionRowOptions(
     drainChip,
     machine: s.machine,
     isLocalSession: true,
+    mainChat: ctx.mainChat,
   });
 }
 
