@@ -150,27 +150,9 @@
   stroke-width: 4;
 }
 
-/* A sub read in place: the arrow back to its main chat leads the header, and
-   "Move to sidebar" sits at the right. */
+/* A sub read in place: the arrow back to its main chat leads the header. */
 .sub-back-btn {
   flex-shrink: 0;
-}
-.sub-move-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: var(--control-h-sm);
-  padding: 0 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: none;
-  color: var(--color-text);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-.sub-move-btn:hover {
-  background: var(--color-surface-alt);
 }
 /* "Finish replaces the wrap-up flag": a sub ends through its own finish tool. */
 .session-header.is-sub-view .wrap-up-btn {
@@ -182,14 +164,5 @@
      sub has its own back arrow, so two arrows never sit side by side. */
   .session-header.is-sub-view .session-header-lead #sessionsBackBtn {
     display: none;
-  }
-  /* The label would crowd a 44px-button row; the icon and the title say it. */
-  .sub-move-btn span {
-    display: none;
-  }
-  .sub-move-btn {
-    width: var(--control-h-sm);
-    justify-content: center;
-    padding: 0;
   }
 }

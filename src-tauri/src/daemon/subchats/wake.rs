@@ -22,7 +22,7 @@ const NAME_CAP: usize = 40;
 /// The name the notice shows. A sub's name is what the main chat gave it at
 /// spawn, but it is still kept to plain characters: the notice is the one place
 /// a name enters `is_meta` text.
-fn safe_name(name: &str) -> String {
+pub(super) fn safe_name(name: &str) -> String {
     let kept: String = name
         .chars()
         .map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | ':' | '(' | ')' | '/' | '#') { c } else { ' ' })

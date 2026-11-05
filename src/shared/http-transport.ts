@@ -478,6 +478,17 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("move_sub_to_sidebar", {
           session_id: args.session_id ?? args.sessionId,
         });
+      // "Move into main chat" and its picker default: phone rows in
+      // remote_transport_table.rs; unmapped, the phone's menu item would throw.
+      case "move_chat_into_main":
+        return this.rpc<T>("move_chat_into_main", {
+          session_id: args.session_id ?? args.sessionId,
+          main_id: args.main_id ?? args.mainId,
+        });
+      case "former_main_chat":
+        return this.rpc<T>("former_main_chat", {
+          session_id: args.session_id ?? args.sessionId,
+        });
       case "cancel_turn":
         return this.rpc<T>("cancel_turn", {
           session_id: args.sessionId ?? args.session_id,

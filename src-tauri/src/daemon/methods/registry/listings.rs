@@ -138,6 +138,38 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+    // The reverse, from the sidebar chat's menu: turns an ordinary chat into a sub of
+    // the main chat Joe picked (`subchats::adopt` lists what that sets and refuses).
+    {
+        let state = state.clone();
+        router.register("move_chat_into_main", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { session_id: String, main_id: String }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                crate::daemon::subchats::adopt::move_into_main(&state, &p.session_id, &p.main_id)
+                    .await
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                Ok(json!({"ok": true}))
+            }
+        });
+    }
+    // The picker's default: the main chat this chat last drew a card in, or null.
+    {
+        let state = state.clone();
+        router.register("former_main_chat", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P { session_id: String }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                Ok(json!(crate::daemon::subchats::adopt::former_main_chat(&state, &p.session_id)))
+            }
+        });
+    }
     // Session ids with the subchats mode on, so a freshly-launched client seeds
     // its menu-toggle state. Read-only; mirrors `list_wrap_up_on_done`.
     router.register("list_subchats_on", move |_params, _ctx| {

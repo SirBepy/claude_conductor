@@ -254,6 +254,16 @@ impl PersistentClient {
         Ok(())
     }
 
+    pub async fn move_chat_into_main(&self, session_id: &str, main_id: &str) -> Result<(), ClientError> {
+        self.call("move_chat_into_main", json!({"session_id": session_id, "main_id": main_id})).await?;
+        Ok(())
+    }
+
+    pub async fn former_main_chat(&self, session_id: &str) -> Result<Option<String>, ClientError> {
+        let v = self.call("former_main_chat", json!({"session_id": session_id})).await?;
+        Ok(v.as_str().map(str::to_string))
+    }
+
     pub async fn register_historical(&self, session_id: &str, cwd: &str, account_id: &str) -> Result<(), ClientError> {
         self.call("register_historical", json!({"session_id": session_id, "cwd": cwd, "account_id": account_id})).await?;
         Ok(())

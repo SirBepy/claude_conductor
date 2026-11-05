@@ -198,6 +198,37 @@ export function buildChatItems(ctx: ChatMenuCtx): ItemDesc[] {
         ? "Not available until the chat starts"
         : (!sessionId ? "No session" : (ctx.readOnly ? "Only available for interactive chats" : undefined)),
     },
+    // Rare and deliberate, so it lives here and not on a button: a sub turns into an
+    // ordinary chat, and an ordinary chat can go back under a main chat.
+    ctx.isSub
+      ? {
+          icon: "arrow-square-out",
+          label: "Move to sidebar",
+          run: isDraft || !sessionId || ctx.mirrored
+            ? undefined
+            : async () => {
+                const { subchatNavFor } = await import("./active-session");
+                const { moveSubToSidebar } = await import("./subchat-view");
+                const pane = document.querySelector<HTMLElement>("#session-pane");
+                if (pane) await moveSubToSidebar(sessionId, subchatNavFor(pane));
+              },
+          disabledReason: isDraft ? "Not available until the chat starts" : (ctx.mirrored ? NOT_ON_THIS_MACHINE : undefined),
+        }
+      : {
+          icon: "arrow-square-in",
+          label: "Move into main chat",
+          run: isDraft || !sessionId || ctx.readOnly || ctx.mirrored || ctx.subchatsOn
+            ? undefined
+            : async () => {
+                const { openMoveIntoMain } = await import("./move-into-main");
+                await openMoveIntoMain(sessionId);
+              },
+          disabledReason: isDraft
+            ? "Not available until the chat starts"
+            : (ctx.readOnly ? "Only available for interactive chats"
+              : (ctx.mirrored ? NOT_ON_THIS_MACHINE
+                : (ctx.subchatsOn ? "A main chat cannot be a sub. Turn Use subchats off first." : undefined))),
+        },
     {
       icon: "git-diff",
       label: "View changes",

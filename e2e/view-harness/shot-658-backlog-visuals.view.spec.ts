@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: http-transport.ts gained move_chat_into_main and former_main_chat cases - additive, and this is the mocked-invoke harness, so it never executes here.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: http-transport.ts's clear_session now returns whether the daemon held the close (a boolean) instead of the raw RPC result; nothing this spec asserts reads it, and it passes.
 // Reviewed 2026-10-29: question cards now re-expand from their collapsed bar on re-open/re-announce, a parked question is shown only while the daemon still lists it, and an already-answered one is dropped (answered-gate.ts) - this spec's contract is unchanged and it passes.

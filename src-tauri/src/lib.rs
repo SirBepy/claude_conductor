@@ -292,6 +292,8 @@ pub fn run() {
             ipc::set_wrap_up_on_done,
             ipc::set_subchats_on,
             ipc::move_sub_to_sidebar,
+            ipc::move_chat_into_main,
+            ipc::former_main_chat,
             ipc::cancel_turn,
             ipc::clear_session,
             ipc::paste_image,

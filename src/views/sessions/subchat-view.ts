@@ -16,7 +16,7 @@ import { openFileRef } from "../../shared/chat/file-refs";
 import type { Instance } from "../../types/ipc.generated";
 import { tierLabel } from "../../shared/model-name";
 import { state, windowIdOf } from "./state";
-import { isMirrored, isSubchat, sessionSubtitle } from "./sessions-helpers";
+import { isSubchat, sessionSubtitle } from "./sessions-helpers";
 import type { SessionHeader } from "./session-header";
 import { SubListButton, subInitials } from "./sub-list";
 import { clearPendingPrompt } from "./permission-modal/gating";
@@ -162,16 +162,8 @@ export function decorateSubchatHeader(header: SessionHeader, sess: Instance, nav
   back.addEventListener("click", () => { void backToMain(sess, nav); });
   header.leadSlot.prepend(back);
 
-  // A sub mirrored in from a paired machine is moved on its host, never from here.
-  if (!isMirrored(sess)) {
-    const move = document.createElement("button");
-    move.type = "button";
-    move.className = "sub-move-btn";
-    move.title = "Turn this into an ordinary chat in the sidebar";
-    move.innerHTML = `<i class="ph ph-arrow-square-out"></i><span>Move to sidebar</span>`;
-    move.addEventListener("click", () => { void moveSubToSidebar(sess.session_id, nav); });
-    header.trailSlot.prepend(move);
-  }
+  // "Move to sidebar" is in the chat menu (chat-menu-items.ts), not a header button:
+  // Joe once clicked it by accident and it is not a move he makes often.
 }
 
 /** Follows an instances update for the chat on screen. "rebuild" means its role
