@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+// Reviewed 2026-11-05: project-settings.ts gained a Subchats group (a heading and two selects, no divider lines of its own beyond the existing group rule); the .ps-line rows this spec measures are untouched, and it passed after the change.
 // Reviewed 2026-11-02: settings rows and the shortcut Rebind button now size from --control-h; this spec asserts divider lines, not heights, and passes.
 // Reviewed 2026-10-30: project-config/project-settings.ts (formerly automation.ts, its Automation section is gone) lays its rows out as .ps-line (label + toggle) instead of the Settings .option rows; the popup test below checks the new rows for dividers. Passed after the change.
 import path from "node:path";

@@ -273,6 +273,9 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
         // so its subs come back pointing at nothing. Settle them now rather than
         // hide them until the first tick.
         crate::daemon::subchats::closing::heal_orphans(&state).await;
+        // Subs held for their project's writer slot when the daemon stopped:
+        // their rows are back, so the queue is too, and its head starts.
+        crate::daemon::subchats::writers::restore(&state);
     }
 
     // Re-track any external `claude` terminal sessions that were already

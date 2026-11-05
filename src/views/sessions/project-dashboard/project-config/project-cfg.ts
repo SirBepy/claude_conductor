@@ -1,4 +1,4 @@
-import type { TicketTracker } from "../../../../types/ipc.generated";
+import type { SubchatCheck, SubchatWriters, TicketTracker } from "../../../../types/ipc.generated";
 
 /** The slice of a `list_projects` row the settings rows read. */
 export interface ProjectCfg {
@@ -10,4 +10,6 @@ export interface ProjectCfg {
   keep_running_in_gaming_mode?: boolean;
   default_model?: string | null;
   default_effort?: string | null;
+  subchat_check?: SubchatCheck;
+  subchat_writers?: SubchatWriters;
 }

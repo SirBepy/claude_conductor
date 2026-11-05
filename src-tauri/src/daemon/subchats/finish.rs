@@ -202,6 +202,23 @@ pub fn has_background_work(activity: TurnActivity) -> bool {
     )
 }
 
+/// What a refused finish tells the sub about its missing review. Each text names
+/// the fix. They all end the same way because a fix made after the review is an
+/// edit after it, which needs the review run again.
+fn review_refusal(gap: &super::facts::ReviewGap) -> String {
+    use super::facts::ReviewGap::*;
+    let what = match gap {
+        NotNamed => "you changed files, and this project requires a fresh reviewer's check of your own diff before you finish, but you named none.".to_string(),
+        NotInTranscript => "reviewer_tool_use_id matches no tool call in your transcript. Copy the id of the Agent call itself.".to_string(),
+        NotASubagent(tool) => format!("reviewer_tool_use_id names a {tool:?} call, which is not a subagent. Pass the tool_use id of the Agent call that ran the reviewer."),
+        BeforeLastEdit => "your reviewer started before your last edit, so it did not see the code you are finishing with.".to_string(),
+        NoResult => "your reviewer has not returned a result (it is still running, failed, or returned nothing).".to_string(),
+    };
+    format!(
+        "{what} Run a fresh subagent with the Agent tool and no shared context: give it the diff or the paths you changed and ask it to find real problems. Wait for its result, fix what it finds, commit, and call finish_subchat again with reviewer_tool_use_id set to that Agent call's tool_use id. A fix after the review is an edit after it, so run the review again after any fix. Do not tell the reviewer to approve, and do not resume an earlier subagent. If the job is purely visual, finish without a reviewer by asking the main chat to set review false in the brief."
+    )
+}
+
 fn list_files(files: &[String]) -> String {
     let shown: Vec<&str> = files.iter().take(MAX_NAMED_FILES).map(String::as_str).collect();
     let more = files.len().saturating_sub(MAX_NAMED_FILES);
@@ -252,17 +269,27 @@ pub(crate) async fn request_finish_with(
         return Err("you have a question or permission card still open for Joe, and finishing now would leave it with nobody to answer. Do not call finish_subchat: end your turn and carry on when his answer arrives, then call finish_subchat.".to_string());
     }
     let cwd = inst.cwd.clone();
-    let own_dirty = match transcript {
-        Some(t) => tokio::task::spawn_blocking(move || super::git::own_uncommitted(&t, &cwd))
-            .await
-            .unwrap_or_default(),
-        None => Vec::new(),
+    let reviewer_id = args.reviewer_tool_use_id.clone();
+    let brief = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat);
+    let review_required = super::project::review_required(super::project::check_mode(state, &inst.cwd), brief.as_ref());
+    let (own_dirty, gap) = match transcript {
+        Some(t) => tokio::task::spawn_blocking(move || {
+            let dirty = super::git::own_uncommitted(&t, &cwd);
+            let gap = if review_required { super::facts::review_gap(&t, reviewer_id.as_deref()) } else { None };
+            (dirty, gap)
+        })
+        .await
+        .unwrap_or_default(),
+        None => (Vec::new(), None),
     };
     if !own_dirty.is_empty() {
         return Err(format!(
             "you have uncommitted edits to your own files: {}. Commit them (by path, only these files, in the repo each one belongs to: a submodule is its own repo), then call finish_subchat again.",
             list_files(&own_dirty)
         ));
+    }
+    if let Some(gap) = gap {
+        return Err(review_refusal(&gap));
     }
     let rows = |v: Option<Vec<String>>| v.unwrap_or_default();
     let record = FinishRecord {
@@ -299,6 +326,11 @@ pub fn commit_finish(state: &Arc<DaemonState>, sub_id: &str, session: Option<&Ar
 /// [`super::NUDGE_TEXT`] ("you did not call it") would be false.
 pub const FINISH_DROPPED_DIRTY_NUDGE: &str = "Your finish_subchat call was not accepted, because files you edited are uncommitted. Commit your own edits, by path and only your files, then call finish_subchat again.";
 
+/// Said to a sub whose finish was dropped at commit because an edit landed after
+/// its reviewer ran (an Edit later in the same assistant message as the call).
+/// Constant, so it is safe as `is_meta` text.
+pub const FINISH_DROPPED_REVIEW_NUDGE: &str = "Your finish_subchat call was not accepted, because you edited files after your reviewer ran. Run a fresh reviewer subagent on your final diff, fix what it finds, commit, then call finish_subchat again with that Agent call's tool_use id as reviewer_tool_use_id.";
+
 /// [`commit_finish`] with the data dir and the transcript injected, so tests
 /// write to a tempdir and read a scratch transcript.
 pub(crate) fn commit_finish_at(
@@ -327,12 +359,24 @@ pub(crate) fn commit_finish_at(
     // message was not in the transcript yet. Look again now the turn is over; the
     // sub is nudged with the reason, because the Stop hook already let this turn
     // end and nothing else would tell it.
-    let own_dirty = transcript.map(|t| super::git::own_uncommitted(&t, &inst.cwd)).unwrap_or_default();
+    let own_dirty = transcript.as_deref().map(|t| super::git::own_uncommitted(t, &inst.cwd)).unwrap_or_default();
     if !own_dirty.is_empty() {
         log::info!("subchats: {sub_id} finish dropped, uncommitted edits: {}", list_files(&own_dirty));
         rt.set_nudge_text(sub_id, FINISH_DROPPED_DIRTY_NUDGE);
         rt.set_nudge_due(sub_id);
         return false;
+    }
+    // The same for the reviewer: a commit after the call can leave no dirty file
+    // and still sit after the review.
+    let brief = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat);
+    let review_required = super::project::review_required(super::project::check_mode(state, &inst.cwd), brief.as_ref());
+    if review_required {
+        if let Some(gap) = transcript.as_deref().and_then(|t| super::facts::review_gap(t, record.reviewer_tool_use_id.as_deref())) {
+            log::info!("subchats: {sub_id} finish dropped, review gap: {gap:?}");
+            rt.set_nudge_text(sub_id, FINISH_DROPPED_REVIEW_NUDGE);
+            rt.set_nudge_due(sub_id);
+            return false;
+        }
     }
     let owned_root = root.map(Path::to_path_buf).or_else(|| crate::settings::paths::data_dir().ok());
     let previous_round = owned_root.as_deref().and_then(|r| read_record_in(r, sub_id)).map_or(0, |p| p.round);
@@ -378,6 +422,166 @@ mod tests {
         st.registry.upsert_interactive(&sub, cwd, "proj", "2026-11-05T00:00:00Z");
         st.registry.set_subchat_of(&sub, Some(parent));
         sub
+    }
+
+    /// Transcript lines, one JSON object each, added after what is already there.
+    fn append_lines(path: &Path, lines: &[Value]) {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        for l in lines {
+            writeln!(f, "\n{l}").unwrap();
+        }
+    }
+
+    fn agent_use(id: &str, tool: &str) -> Value {
+        json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": id, "name": tool, "input": {}}]}})
+    }
+
+    fn tool_result(id: &str, is_error: bool, text: &str) -> Value {
+        json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": id, "is_error": is_error, "content": text}]}})
+    }
+
+    /// A scratch repo whose one committed file `a.txt` is the sub's own edit, with a
+    /// transcript of that single Write. Nothing is uncommitted, so only the reviewer
+    /// rule can refuse a finish.
+    fn committed_edit() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let (dir, root) = super::super::git::test_repo::init();
+        let file = root.join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+        super::super::git::test_repo::git(&root, &["add", "a.txt"]);
+        super::super::git::test_repo::git(&root, &["commit", "-q", "-m", "a"]);
+        let tp = super::super::git::test_repo::transcript(dir.path(), &[("Write", &file)]);
+        (dir, root, tp)
+    }
+
+    fn with_reviewer(id: Option<&str>) -> FinishArgs {
+        FinishArgs { reviewer_tool_use_id: id.map(str::to_string), ..args() }
+    }
+
+    fn state_with_check(root: &Path, check: &str) -> Arc<DaemonState> {
+        let mut settings = Settings::default();
+        let raw = json!({"id": "pj", "path": root, "name": "p", "created_at": "2026-11-05T00:00:00Z", "subchat_check": check});
+        settings.projects.push(serde_json::from_value(raw).unwrap());
+        DaemonState::new(new_session_map(), SettingsCache::new(settings))
+    }
+
+    #[tokio::test]
+    async fn a_sub_that_changed_files_cannot_finish_without_a_reviewer() {
+        let _data = super::super::TempDataDir::new();
+        let (_dir, root, tp) = committed_edit();
+        let st = state();
+        let sub = make_sub(&st, "rv-none", &root);
+        let e = request_finish_with(&st, &sub, args(), Some(tp)).await.unwrap_err();
+        assert!(e.contains("requires a fresh reviewer") && e.contains("reviewer_tool_use_id") && e.contains("Agent"), "{e}");
+        assert!(!super::super::runtime::runtime().finish_pending(&sub), "a refusal parks nothing");
+        assert!(!e.contains('\u{2014}'));
+    }
+
+    #[tokio::test]
+    async fn a_reviewer_that_ran_before_the_last_edit_does_not_count() {
+        let _data = super::super::TempDataDir::new();
+        let (_dir, root, tp) = committed_edit();
+        append_lines(&tp, &[agent_use("rev-early", "Agent"), tool_result("rev-early", false, "fine")]);
+        // An edit after the review, committed so only the review rule can refuse.
+        let late = root.join("b.txt");
+        std::fs::write(&late, "y").unwrap();
+        super::super::git::test_repo::git(&root, &["add", "b.txt"]);
+        super::super::git::test_repo::git(&root, &["commit", "-q", "-m", "b"]);
+        append_lines(
+            &tp,
+            &[json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "e2", "name": "Write", "input": {"file_path": late.to_string_lossy()}}]}})],
+        );
+        let st = state();
+        let sub = make_sub(&st, "rv-early", &root);
+        let e = request_finish_with(&st, &sub, with_reviewer(Some("rev-early")), Some(tp)).await.unwrap_err();
+        assert!(e.contains("started before your last edit"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn a_reviewer_id_that_is_not_a_subagent_call_is_refused() {
+        let _data = super::super::TempDataDir::new();
+        let (_dir, root, tp) = committed_edit();
+        append_lines(&tp, &[agent_use("a-read", "Read"), tool_result("a-read", false, "file text")]);
+        let st = state();
+        let sub = make_sub(&st, "rv-notagent", &root);
+        let e = request_finish_with(&st, &sub, with_reviewer(Some("a-read")), Some(tp.clone())).await.unwrap_err();
+        assert!(e.contains("not a subagent") && e.contains("Read"), "{e}");
+        // An id that matches nothing at all.
+        let e = request_finish_with(&st, &sub, with_reviewer(Some("ghost")), Some(tp)).await.unwrap_err();
+        assert!(e.contains("matches no tool call"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn a_reviewer_with_no_result_or_an_error_result_does_not_count() {
+        let _data = super::super::TempDataDir::new();
+        let (_dir, root, tp) = committed_edit();
+        append_lines(&tp, &[agent_use("rev-run", "Agent")]);
+        let st = state();
+        let sub = make_sub(&st, "rv-noresult", &root);
+        let e = request_finish_with(&st, &sub, with_reviewer(Some("rev-run")), Some(tp.clone())).await.unwrap_err();
+        assert!(e.contains("has not returned a result"), "{e}");
+        append_lines(&tp, &[tool_result("rev-run", true, "agent crashed")]);
+        let e = request_finish_with(&st, &sub, with_reviewer(Some("rev-run")), Some(tp)).await.unwrap_err();
+        assert!(e.contains("has not returned a result"), "an error result is not a review: {e}");
+    }
+
+    #[tokio::test]
+    async fn a_reviewer_after_the_last_edit_lets_the_finish_through_with_either_tool_name() {
+        let _data = super::super::TempDataDir::new();
+        for (tag, tool) in [("rv-agent", "Agent"), ("rv-task", "Task")] {
+            let (_dir, root, tp) = committed_edit();
+            append_lines(&tp, &[agent_use("rev", tool), tool_result("rev", false, "Found nothing wrong.")]);
+            let st = state();
+            let sub = make_sub(&st, tag, &root);
+            assert!(request_finish_with(&st, &sub, with_reviewer(Some("rev")), Some(tp)).await.is_ok(), "{tool}");
+            assert!(super::super::runtime::runtime().finish_pending(&sub));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_gate_sub_finishes_without_a_reviewer_whatever_it_edited() {
+        let _data = super::super::TempDataDir::new();
+        let (_dir, root, tp) = committed_edit();
+        let st = state();
+        let sub = make_sub(&st, "rv-gate", &root);
+        // A gate's brief says writes with no files, and a reviewer has nothing of its own to read.
+        let brief: super::super::SubchatBrief =
+            serde_json::from_str(r#"{"parent":"rv-gate-main","gate":true,"writes":true,"files":[]}"#).unwrap();
+        crate::sessions::chat_config::set_subchat(&sub, Some(brief));
+        assert!(request_finish_with(&st, &sub, args(), Some(tp)).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_sub_that_changed_no_files_needs_no_reviewer() {
+        let _data = super::super::TempDataDir::new();
+        let (dir, root) = super::super::git::test_repo::init();
+        let tp = super::super::git::test_repo::transcript(dir.path(), &[("Read", &root.join("base.txt"))]);
+        let st = state();
+        let sub = make_sub(&st, "rv-noedit", &root);
+        assert!(request_finish_with(&st, &sub, args(), Some(tp)).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn facts_only_and_review_false_each_waive_the_reviewer() {
+        let _data = super::super::TempDataDir::new();
+        // The project says "Facts only".
+        let (_dir, root, tp) = committed_edit();
+        let st = state_with_check(&root, "facts_only");
+        let sub = make_sub(&st, "rv-factsonly", &root);
+        assert!(request_finish_with(&st, &sub, args(), Some(tp)).await.is_ok(), "facts only");
+        // The brief says review: false, in a project that asks for a reviewer.
+        let (_dir2, root2, tp2) = committed_edit();
+        let st2 = state_with_check(&root2, "facts_and_reviewer");
+        let sub2 = make_sub(&st2, "rv-nobrief", &root2);
+        let mut brief: super::super::SubchatBrief =
+            serde_json::from_str(r#"{"parent":"rv-nobrief-main","review":false}"#).unwrap();
+        crate::sessions::chat_config::set_subchat(&sub2, Some(brief.clone()));
+        assert!(request_finish_with(&st2, &sub2, args(), Some(tp2.clone())).await.is_ok(), "review false");
+        // With the brief back on, the same project asks again.
+        brief.review = true;
+        crate::sessions::chat_config::set_subchat(&sub2, Some(brief));
+        super::super::runtime::runtime().reset(&sub2);
+        assert!(request_finish_with(&st2, &sub2, args(), Some(tp2)).await.is_err());
     }
 
     fn args() -> FinishArgs {
@@ -483,10 +687,13 @@ mod tests {
         std::fs::write(root.join("peers.txt"), "y").unwrap();
         std::fs::write(root.join("base.txt"), "peer edit\n").unwrap();
         let tp = super::super::git::test_repo::transcript(dir.path(), &[("Write", &mine)]);
+        append_lines(&tp, &[agent_use("rev-peer", "Agent"), tool_result("rev-peer", false, "No problems found.")]);
         let st = state();
         let sub = make_sub(&st, "peer", &root);
+        let mut a = args();
+        a.reviewer_tool_use_id = Some("rev-peer".into());
         assert!(
-            request_finish_with(&st, &sub, args(), Some(tp)).await.is_ok(),
+            request_finish_with(&st, &sub, a, Some(tp)).await.is_ok(),
             "a peer's dirty file must not refuse the finish"
         );
         assert!(super::super::runtime::runtime().finish_pending(&sub));
@@ -599,7 +806,17 @@ mod tests {
         // Committed, the same finish goes through.
         super::super::git::test_repo::git(&root, &["add", "late.txt"]);
         super::super::git::test_repo::git(&root, &["commit", "-q", "-m", "late"]);
+        // Committed, but no reviewer ran after that edit: dropped for that, and the
+        // sub is told so with the review wording, not the dirty one.
         rt.set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
+        assert!(!commit_finish_at(Some(data.path()), &st, &sub, None, Some(tp.clone())));
+        assert_eq!(rt.take_nudge_text(&sub), Some(FINISH_DROPPED_REVIEW_NUDGE));
+        rt.take_nudge_due(&sub);
+        append_lines(&tp, &[agent_use("rev-late", "Agent"), tool_result("rev-late", false, "Looks right.")]);
+        rt.set_pending_finish(
+            &sub,
+            FinishRecord { sub_id: sub.clone(), reviewer_tool_use_id: Some("rev-late".into()), ..FinishRecord::default() },
+        );
         assert!(commit_finish_at(Some(data.path()), &st, &sub, None, Some(tp)));
     }
 

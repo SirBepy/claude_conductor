@@ -175,7 +175,19 @@ pub(crate) async fn spawn_chat_or_forward(
                     "queued": true,
                     "note": format!("Registered, not started: it starts by itself when {target} finishes, without waking you. If {target} ends blocked, Joe gets a card to start it anyway or drop it."),
                 }),
-                None => json!({"ok": true, "session_id": sid}),
+                None => {
+                    let mut result = json!({"ok": true, "session_id": sid});
+                    // A sub held for its project's writer slot says so in the result,
+                    // so the main chat can tell Joe it is waiting.
+                    if let (Some(note), Some(obj)) =
+                        (crate::daemon::subchats::writers::spawn_note(state, &sid), result.as_object_mut())
+                    {
+                        if let Some(note) = note.as_object() {
+                            obj.extend(note.clone());
+                        }
+                    }
+                    result
+                }
             },
             Err(e) => json!({"ok": false, "error": e}),
         };

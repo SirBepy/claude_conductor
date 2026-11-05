@@ -171,7 +171,7 @@ fn parked(sub_id: &str) -> bool {
     PARKED.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id))
 }
 
-fn set_parked(sub_id: &str, on: bool) {
+pub(crate) fn set_parked(sub_id: &str, on: bool) {
     let mut g = PARKED.lock().unwrap_or_else(|e| e.into_inner());
     let set = g.get_or_insert_with(HashSet::new);
     if on {
@@ -279,11 +279,28 @@ pub(crate) fn register_row(
     plan: &mut SubPlan,
 ) -> Result<String, String> {
     let target = plan.hold.clone().ok_or_else(|| "this sub has nothing to wait for".to_string())?;
+    let reason = format!("waiting for {}", target.target_name);
+    register_held_row(state, caller_session_id, name, inherited, spec, plan, uuid::Uuid::new_v4().to_string(), reason, Some(target))
+}
+
+/// The row, the brief and the hold under the id `sid`. `target` is the sub a wait
+/// is for; `None` is a hold some other rule owns (the writer queue), which
+/// [`release_ready`] leaves alone.
+pub(crate) fn register_held_row(
+    state: &Arc<DaemonState>,
+    caller_session_id: &str,
+    name: Option<&str>,
+    inherited: &ChatConfig,
+    spec: LaunchSpec,
+    plan: &mut SubPlan,
+    sid: String,
+    reason: String,
+    target: Option<HoldPlan>,
+) -> Result<String, String> {
     if !spec.cwd.exists() {
         return Err(lifecycle::LifecycleError::CwdMissing(spec.cwd.clone()).to_string());
     }
     let account = spec.account_id.clone().unwrap_or_default();
-    let sid = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let auto_accept = crate::daemon::session_registration::spawned_auto_accept(
         inherited.auto_accept,
@@ -302,9 +319,9 @@ pub(crate) fn register_row(
         state,
         Held {
             sub_id: sid.clone(),
-            reason: format!("waiting for {}", target.target_name),
-            after: Some(target.target_id),
-            after_name: target.target_name,
+            reason,
+            after: target.as_ref().map(|t| t.target_id.clone()),
+            after_name: target.map(|t| t.target_name).unwrap_or_default(),
             launch: spec,
         },
     )
@@ -407,7 +424,7 @@ fn orphaned(state: &DaemonState, sub_id: &str) -> bool {
     }
 }
 
-enum Why {
+pub(crate) enum Why {
     TargetBlocked { target: String, why: String },
     LaunchFailed(String),
 }
@@ -415,7 +432,7 @@ enum Why {
 /// Boxed because the card's answer can raise another card (a "Try again" that
 /// fails), which makes this future contain itself; the compiler cannot prove such
 /// a future is `Send` unless the cycle goes through a trait object.
-fn raise_decision(state: &Arc<DaemonState>, held: &Held, why: Why) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
+pub(crate) fn raise_decision(state: &Arc<DaemonState>, held: &Held, why: Why) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
     let (state, held) = (state.clone(), held.clone());
     Box::pin(async move { raise_decision_now(&state, &held, why).await })
 }

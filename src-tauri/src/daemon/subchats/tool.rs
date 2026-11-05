@@ -194,7 +194,8 @@ fn real_facts(state: &Arc<DaemonState>, i: &Instance) -> Option<Facts> {
             .and_then(|e| e.facts.clone());
     }
     let transcript = crate::context_status::resolve_transcript(&state.registry, &i.session_id);
-    Some(card_log::sub_facts(i, None, &log, transcript.as_deref()))
+    let check = super::project::check_mode(state, &i.cwd);
+    Some(card_log::sub_facts(i, check, None, &log, transcript.as_deref()))
 }
 
 fn list(subs: &[Instance]) -> Value {
@@ -224,6 +225,9 @@ fn status(state: &Arc<DaemonState>, subs: &[Instance], query: &str, facts: Facts
     if let Some(b) = brief_of(&sub.session_id) {
         out["task"] = json!(flat(&b.task, TASK_CAP));
         out["writes"] = json!(b.writes);
+    }
+    if sub.progress.waiting_for.is_some() {
+        out["waiting"] = json!("waiting for the writer slot: only one sub changes files at a time in this project");
     }
     if let Some(r) = finish::read_record(&sub.session_id) {
         out["round"] = json!(r.round);
@@ -260,8 +264,8 @@ fn log_action(parent: &str) -> Value {
 }
 
 /// Records on the sub's brief that a follow-up needs it to edit files. The
-/// writer slot (step 10, "One at a time") reads `SubchatBrief.writes`; this is
-/// the only place a follow-up flips it. Nothing here queues or refuses.
+/// writer slot (`writers`) reads `SubchatBrief.writes`; this is the only place a
+/// follow-up flips it. The caller then asks the slot for it (`writers::request_slot`).
 fn record_writes(sub_id: &str) {
     if let Some(mut brief) = brief_of(sub_id) {
         if !brief.writes {
@@ -277,7 +281,7 @@ fn is_live_busy(state: &DaemonState, sub_id: &str) -> bool {
 
 /// Puts `text` in the sub's held queue, where it reaches the running turn at its
 /// next step (`hooks_server::nudge`). Returns the held item id.
-fn hold(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> u64 {
+pub(super) fn hold(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> u64 {
     let (id, _) = state.draft_store.add_held(sub_id, vec![ContentBlock::Text { text: text.to_string() }]);
     crate::daemon::methods::drafts::sync_held_count(state, sub_id);
     id
@@ -403,6 +407,7 @@ where
     }
     let writes = args["writes"].as_bool() == Some(true);
     let (mut passed, mut held, mut failed) = (Vec::new(), Vec::new(), Vec::new());
+    let mut waiting_for_writer: Vec<(String, String)> = Vec::new();
     for sub in &targets {
         let name = label(sub);
         if status_word(sub) == "ended" {
@@ -415,6 +420,11 @@ where
         }
         if writes {
             record_writes(&sub.session_id);
+            // One sub changes files at a time: this one takes the slot or queues
+            // for it, and the main chat is told which, so Joe hears it is waiting.
+            if let super::writers::SlotOutcome::Queued { behind, .. } = super::writers::request_slot(state, &sub.session_id) {
+                waiting_for_writer.push((name.clone(), behind));
+            }
         }
         match deliver(state, sub, &text, &resume).await {
             Ok(d) => {
@@ -439,6 +449,14 @@ where
     }
     if !failed.is_empty() {
         out["failed"] = json!(failed);
+    }
+    if !waiting_for_writer.is_empty() {
+        out["queued_for_writer"] = json!(waiting_for_writer.iter().map(|(sub, behind)| json!({"sub": sub, "behind": behind})).collect::<Vec<_>>());
+        out["queued_note"] = json!(waiting_for_writer
+            .iter()
+            .map(|(sub, behind)| super::writers::send_note(sub, behind))
+            .collect::<Vec<_>>()
+            .join(" "));
     }
     out
 }
@@ -807,6 +825,44 @@ mod tests {
         let other = call(&st, &main, json!({"action": "send", "sub": "Header"}), &sent).await;
         assert_eq!(other["ok"], json!(true), "the same message may go to a different sub");
         assert_eq!(sent.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_writes_follow_up_for_a_second_writer_tells_the_main_chat_it_is_queued() {
+        let _d = super::super::TempDataDir::new();
+        let (_repo, root) = super::super::git::test_repo::init();
+        let st = state();
+        let main = "tool-queue-main".to_string();
+        st.registry.upsert_interactive(&main, &root, "proj", "2026-11-05T00:00:00Z");
+        crate::sessions::chat_config::set_subchats_on(&main, true);
+        let sent: Sent = Arc::new(Mutex::new(Vec::new()));
+        for (id, name) in [("tool-queue-a", "Footer"), ("tool-queue-b", "Header")] {
+            st.registry.upsert_interactive(id, &root, "proj", "2026-11-05T00:00:00Z");
+            st.registry.set_subchat_of(id, Some(main.clone()));
+            st.registry.set_name(id, name.to_string());
+            let brief: super::super::SubchatBrief =
+                serde_json::from_str(&format!(r#"{{"parent":"{main}","task":"t","goal":"g","done_when":"d"}}"#)).unwrap();
+            crate::sessions::chat_config::set_subchat(id, Some(brief));
+        }
+        joe_message::note_sent(&main, "edit it", false, None);
+        let first = call(&st, &main, json!({"action": "send", "sub": "Footer", "writes": true}), &sent).await;
+        assert_eq!(first["ok"], json!(true));
+        assert!(first.get("queued_for_writer").is_none(), "the first writer takes the free slot: {first}");
+        let second = call(&st, &main, json!({"action": "send", "sub": "Header", "writes": true}), &sent).await;
+        assert_eq!(second["ok"], json!(true), "the message still reaches it: {second}");
+        assert_eq!(second["queued_for_writer"][0]["sub"], json!("Header"));
+        assert_eq!(second["queued_for_writer"][0]["behind"], json!("Footer"));
+        let note = second["queued_note"].as_str().unwrap();
+        assert!(note.contains("queued for the writer slot behind Footer") && note.contains("Tell Joe"), "{note}");
+        // The list and the status show it as queued, with the reason.
+        let list = call(&st, &main, json!({"action": "list"}), &sent).await;
+        let header = list["subs"].as_array().unwrap().iter().find(|r| r["name"] == "Header").unwrap();
+        assert_eq!(header["status"], json!("queued"));
+        let status = call(&st, &main, json!({"action": "status", "sub": "Header"}), &sent).await;
+        assert_eq!(status["status"], json!("queued"));
+        assert!(status["waiting"].as_str().unwrap().contains("writer slot"), "{status}");
+        super::super::writers::release(&st, "tool-queue-a");
+        super::super::writers::release(&st, "tool-queue-b");
     }
 
     #[tokio::test]

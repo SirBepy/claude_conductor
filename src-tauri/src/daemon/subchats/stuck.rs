@@ -164,6 +164,9 @@ pub async fn sweep_now(state: &Arc<DaemonState>, now: DateTime<Utc>, resumed_at:
     // The tick is also the backstop that starts a held sub whose wait ended
     // without an event reaching it.
     super::held::sweep(state).await;
+    // The writer slot's safety net: a holder or waiter ended by a path that did
+    // not release it stops blocking the next sub.
+    super::writers::sweep(state);
 }
 
 #[cfg(test)]

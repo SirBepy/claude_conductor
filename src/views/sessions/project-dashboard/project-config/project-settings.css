@@ -13,6 +13,8 @@
 .ps-field > .ps-label { display: flex; align-items: center; }
 .ps-label-row { display: flex; align-items: center; justify-content: space-between; }
 .ps-label[title] { cursor: help; }
+/* A group's own heading: small and quiet, so the two Subchats rows read as one block. */
+.ps-group-title { font-size: var(--fs-micro); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); }
 
 .view-project-settings .inline-select,
 .view-project-settings .inline-input {

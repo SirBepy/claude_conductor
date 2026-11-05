@@ -333,6 +333,9 @@ struct Scan {
     results: std::collections::HashMap<String, (usize, bool, String)>,
     /// tool_use id -> line index
     uses: std::collections::HashMap<String, usize>,
+    /// tool_use id -> the tool's name, so a reviewer id can be checked to name a
+    /// subagent call and not, say, a Read.
+    use_names: std::collections::HashMap<String, String>,
 }
 
 fn block_text(content: &Value) -> String {
@@ -354,6 +357,7 @@ fn scan_transcript(path: &Path) -> Option<Scan> {
         tests: Vec::new(),
         results: std::collections::HashMap::new(),
         uses: std::collections::HashMap::new(),
+        use_names: std::collections::HashMap::new(),
     };
     for (idx, line) in raw.lines().enumerate() {
         if !line.contains("tool_use") && !line.contains("tool_result") {
@@ -367,6 +371,7 @@ fn scan_transcript(path: &Path) -> Option<Scan> {
                     let name = b["name"].as_str().unwrap_or("");
                     if let Some(id) = b["id"].as_str() {
                         scan.uses.insert(id.to_string(), idx);
+                        scan.use_names.insert(id.to_string(), name.to_string());
                     }
                     if git::EDIT_TOOLS.contains(&name) {
                         scan.last_edit = Some(idx);
@@ -436,9 +441,13 @@ impl Scan {
         let Some(&used_at) = self.uses.get(id) else {
             return ReviewerFact::none("the named reviewer run is not in the transcript");
         };
+        if !SUBAGENT_TOOLS.contains(&self.use_names.get(id).map(String::as_str).unwrap_or("")) {
+            return ReviewerFact::none("the named reviewer run is not a subagent call");
+        }
         // A reviewer that read the code before the last edit says nothing about
-        // the code that shipped.
-        if self.last_edit.is_some_and(|e| e > used_at) {
+        // the code that shipped. Level counts as before: an edit and a review
+        // started in one assistant message cannot have seen each other.
+        if self.last_edit.is_some_and(|e| e >= used_at) {
             return ReviewerFact::none("the reviewer ran before the last edit");
         }
         match self.results.get(id) {
@@ -447,6 +456,52 @@ impl Scan {
             }
             _ => ReviewerFact::none("the reviewer has not returned a result"),
         }
+    }
+}
+
+/// Tool names under which the CLI runs a subagent (`Task` is the older name).
+const SUBAGENT_TOOLS: [&str; 2] = ["Agent", "Task"];
+
+/// Why a sub that changed files has not shown a review of its own diff. Each
+/// variant maps to a refusal that names its fix (`finish::request_finish`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewGap {
+    /// No `reviewer_tool_use_id` was passed.
+    NotNamed,
+    /// The id matches no tool call in the transcript.
+    NotInTranscript,
+    /// The id names a call to this tool, which is not a subagent.
+    NotASubagent(String),
+    /// The subagent started at or before the sub's last edit, so it read older code.
+    BeforeLastEdit,
+    /// The subagent has no result yet, or returned an error or nothing.
+    NoResult,
+}
+
+/// Whether the sub, which edited files, has a fresh subagent's result for its
+/// own diff after its last edit. `None` is "nothing owed": the sub made no edit
+/// or the review is in order. An unreadable transcript is also `None`, because a
+/// finish that can never be accepted would trap the sub, and the chip says
+/// "unknown" for it.
+///
+/// What this cannot see: whether the subagent really started with no shared
+/// context (a subagent resumed from an earlier one, or told to approve, reads
+/// the same), and edits made through Bash.
+pub fn review_gap(transcript: &Path, reviewer_tool_use_id: Option<&str>) -> Option<ReviewGap> {
+    let scan = scan_transcript(transcript)?;
+    let last_edit = scan.last_edit?;
+    let Some(id) = reviewer_tool_use_id else { return Some(ReviewGap::NotNamed) };
+    let Some(&used_at) = scan.uses.get(id) else { return Some(ReviewGap::NotInTranscript) };
+    let name = scan.use_names.get(id).map(String::as_str).unwrap_or("");
+    if !SUBAGENT_TOOLS.contains(&name) {
+        return Some(ReviewGap::NotASubagent(name.to_string()));
+    }
+    if last_edit >= used_at {
+        return Some(ReviewGap::BeforeLastEdit);
+    }
+    match scan.results.get(id) {
+        Some((_, false, text)) if !text.trim().is_empty() => None,
+        _ => Some(ReviewGap::NoResult),
     }
 }
 
@@ -797,6 +852,45 @@ mod tests {
         assert_eq!(compute(&i).reviewer.state, "none");
         i.reviewer_tool_use_id = None;
         assert_eq!(compute(&i).reviewer.state, "none");
+    }
+
+    #[test]
+    fn the_chip_and_the_finish_rule_agree_on_what_counts_as_a_review() {
+        let (dir, root) = init();
+        let edit_then = |rest: Vec<Value>| {
+            let mut lines = vec![edit("e1", &root.join("base.txt"))];
+            lines.extend(rest);
+            write_transcript(dir.path(), &lines)
+        };
+        let subagent = |id: &str, tool: &str| assistant(json!([{"type": "tool_use", "id": id, "name": tool, "input": {}}]));
+        // A Read call named as the reviewer is neither a chip's "ran" nor a gate pass.
+        let tp = edit_then(vec![subagent("r", "Read"), result("r", false, "text")]);
+        assert_eq!(review_gap(&tp, Some("r")), Some(ReviewGap::NotASubagent("Read".into())));
+        let mut i = inputs(&root, Some(&tp), None);
+        i.reviewer_tool_use_id = Some("r");
+        assert_eq!(compute(&i).reviewer.state, "none");
+        // A subagent after the edit with a result passes both.
+        let tp = edit_then(vec![subagent("r", "Agent"), result("r", false, "ok")]);
+        assert_eq!(review_gap(&tp, Some("r")), None);
+        let mut i = inputs(&root, Some(&tp), None);
+        i.reviewer_tool_use_id = Some("r");
+        assert_eq!(compute(&i).reviewer.state, "ran");
+        assert_eq!(review_gap(&tp, None), Some(ReviewGap::NotNamed));
+        // No edit at all: nothing is owed, named or not.
+        let no_edit = write_transcript(dir.path(), &[shell("b", "ls")]);
+        assert_eq!(review_gap(&no_edit, None), None);
+        // An edit in the same message as the review cannot have been reviewed.
+        let same = write_transcript(
+            dir.path(),
+            &[
+                assistant(json!([
+                    {"type": "tool_use", "id": "e", "name": "Edit", "input": {"file_path": root.join("base.txt").to_string_lossy()}},
+                    {"type": "tool_use", "id": "r", "name": "Agent", "input": {}}
+                ])),
+                result("r", false, "ok"),
+            ],
+        );
+        assert_eq!(review_gap(&same, Some("r")), Some(ReviewGap::BeforeLastEdit));
     }
 
     #[test]

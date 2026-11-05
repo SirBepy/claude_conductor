@@ -5,7 +5,7 @@ import type { Account } from "../../../../shared/api";
 import { accountIconBadgeHtml, isApiCreditAccount } from "../../../../shared/account-chip";
 import { invoke } from "../../../../shared/ipc";
 import { forgetTicketTracker } from "../../../../shared/chat/ticket-refs";
-import type { TrackerInfo } from "../../../../types/ipc.generated";
+import type { SubchatCheck, SubchatWriters, TrackerInfo } from "../../../../types/ipc.generated";
 import type { ProjectCfg } from "./project-cfg";
 import "../../../../shared/account-chip.css";
 
@@ -143,6 +143,71 @@ export function renderGamingModeRow(cwd: string): Promise<void> {
     onToast: "Exempt from gaming mode.",
     offToast: "Parked by gaming mode like any other project.",
     what: "gaming mode setting",
+  });
+}
+
+interface ProjectSelectRow<V extends string> {
+  selectId: string;
+  field: "subchat_check" | "subchat_writers";
+  /** [stored value, label]; the first is the default a project without the field gets. */
+  options: ReadonlyArray<readonly [V, string]>;
+  toast: string;
+  /** Names the setting in the failure log and toast. */
+  what: string;
+}
+
+/** A `<select>` bound to one enum on this project's config. A project with no
+ *  config yet is created on first change via `ensureProject`. A stored value
+ *  outside the offered list shows the default, which is what the daemon uses. */
+async function renderProjectSelectRow<V extends string>(cwd: string, row: ProjectSelectRow<V>): Promise<void> {
+  const select = document.getElementById(row.selectId) as HTMLSelectElement | null;
+  if (!cwd || !select) return;
+  const projects = (await api.listProjects()) as unknown as ProjectCfg[];
+  const proj = projects.find((p) => p.path === cwd);
+  const stored = proj?.[row.field] as V | undefined;
+  const current = row.options.some(([v]) => v === stored) ? stored : row.options[0]![0];
+  select.innerHTML = row.options
+    .map(([v, label]) => `<option value="${v}"${v === current ? " selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("");
+  select.onchange = () => {
+    void (async () => {
+      select.disabled = true;
+      try {
+        const id = proj?.id ?? (await api.ensureProject(cwd)).id;
+        await api.updateProject(id, { [row.field]: select.value });
+        showToast(row.toast);
+      } catch (e) {
+        console.error(`[project-settings] update ${row.what} failed`, e);
+        showToast(`Could not update ${row.what}: ${e}`);
+      } finally {
+        select.disabled = false;
+        await renderProjectSelectRow(cwd, row);
+      }
+    })();
+  };
+}
+
+/** "Check a sub's work": what a sub must show before it can finish. Read when a
+ *  sub finishes, so it applies to the next finish without a restart. */
+export function renderSubchatCheckRow(cwd: string): Promise<void> {
+  return renderProjectSelectRow<SubchatCheck>(cwd, {
+    selectId: "subchatCheckSelect",
+    field: "subchat_check",
+    options: [["facts_and_reviewer", "Facts and a reviewer"], ["facts_only", "Facts only"]],
+    toast: "Subs here are checked the new way from their next finish.",
+    what: "sub check setting",
+  });
+}
+
+/** "Subs changing files": how subs that edit files share this project's tree.
+ *  Read when a sub is spawned or asks to write. */
+export function renderSubchatWritersRow(cwd: string): Promise<void> {
+  return renderProjectSelectRow<SubchatWriters>(cwd, {
+    selectId: "subchatWritersSelect",
+    field: "subchat_writers",
+    options: [["one_at_a_time", "One at a time"], ["worktree_each", "Worktree each"]],
+    toast: "Subs changing files updated for new jobs.",
+    what: "sub file setting",
   });
 }
 

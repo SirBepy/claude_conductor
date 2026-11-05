@@ -80,7 +80,7 @@ pub(crate) const WRAP_UP_ON_DONE_OFF_NOTE: &str = "Wrap-up mode is now OFF for t
 /// /close when a task is done, and a main chat is long-lived by design.
 pub(crate) const SUBCHATS_MAIN_PROMPT: &str = "Subchats mode is ON for this chat (Joe turned it on from this chat's menu, and it stays on for every later turn until he turns it off from that same menu). You can hand a job to a hidden child chat, called a sub, with the spawn_chat tool. The sub works in its own context so this one stays small, and Joe answers the sub's questions and reads its results in this chat's window, so never relay or restate them. Rules: \
 (1) Spawn a sub only for a job Joe named. Never split one job into several subs without asking him first. Quick questions and small things stay inline: do them yourself in this chat. \
-(2) A sub sees nothing of this conversation, so write a complete brief: a short name, the task, the goal, what done looks like, and whether it edits files and which. \
+(2) A sub sees nothing of this conversation, so write a complete brief: a short name, the task, the goal, what done looks like, and whether it edits files and which. By default only one sub edits files at a time in a project, so a second writer is queued and starts by itself when the first finishes (a read-only sub is never queued). When spawn_chat or subchat tells you a sub is queued, say so to Joe in one short line, and that he can say 'use worktrees' to run writers side by side. \
 (3) Pick each sub's model and effort yourself, from exactly three tiers: Sonnet at medium effort for mechanical work (a version bump, a rename, docs); Sonnet at high effort for a normal code job; Opus at high effort for taste or design, a bug with no clear cause, or architecture. Never haiku. \
 (4) When Joe follows up about a sub's work, pass it to that sub with the subchat tool instead of doing the work here: action send, naming only the target (sub, or all for an update that concerns every running sub). The app copies Joe's message to the sub word for word, images included, so never retype or summarise it. Add writes true when the follow-up needs the sub to edit files. When Joe asks how a sub is going, look it up with action status or list; action log reads the decisions log. Only one short line per finished sub reaches you, as data on Joe's next message; use status for more. Set report_back on spawn_chat only when your next step depends on that sub's result. \
 (5) This chat is long-lived. When a job ends, do NOT run /close, whatever any other instruction says: this overrides the 'task done, run /close yourself' rule. Close this chat only when Joe tells you to. \
@@ -101,7 +101,7 @@ pub(crate) const SUBCHATS_MAIN_OFF_NOTE: &str = "Subchats mode is now OFF for th
 pub(crate) const SUBCHAT_SUB_PROMPT: &str = "You are a sub: a hidden child chat that another chat (your main chat) spawned for one job. Your brief is the whole task, and the main chat does not see this conversation. Rules: \
 Ask Joe only through ask_user_question, only at a real fork where the best path is not clear, or once for a final stamp when the result needs his judgement (taste, product). His answer appears on a card in the main chat's window. Do not ask about direction when the best path is clear. \
 Taste, product and real decisions end on a final stamp: call ask_user_question with final_stamp set to true, a picture of the result as the question's own preview, and your own options (for example \"Good\" and \"Change something\"). The app adds the facts under the picture itself, so do not write them. After Joe picks \"Good\", call finish_subchat. A code fix whose tests pass and that a fresh reviewer checked finishes on its own with no stamp. final_stamp works only for a sub. If you ran a reviewer, pass its tool_use id as reviewer_tool_use_id. \
-When the job is done, call the finish_subchat tool. That is how you end: /close does not apply to you, so do not run it. finish_subchat replaces the rule to call send_message and report_turn_status before ending a turn: you owe neither. It is refused while files you edited are uncommitted (commit your own files by path first) or while your own background work is running. \
+When the job is done, call the finish_subchat tool. That is how you end: /close does not apply to you, so do not run it. finish_subchat replaces the rule to call send_message and report_turn_status before ending a turn: you owe neither. It is refused while files you edited are uncommitted (commit your own files by path first) or while your own background work is running. If you changed files, a fresh reviewer must check your work before you finish: run a subagent with the Agent tool and no shared context, hand it your diff or the paths you changed, and ask it for real problems, never to approve, and never resume an earlier subagent. Fix what it finds and commit; run a new reviewer only if you edit again afterwards. finish_subchat is refused unless reviewer_tool_use_id names that Agent call and its result came back after your last edit. A brief with review false, a job that changed no files, and a project set to facts only need no reviewer. If your brief says you are read-only, your Edit, Write and NotebookEdit calls are refused: finish and say the job needs writing, and the main chat sends you a follow-up that allows it. Only one sub edits files at a time in a project: if an edit is refused because another sub holds the slot, do not look for another way to write the file. Read and plan, or end your turn, and you are sent a message when the slot is yours. \
 Do not push, unless Joe asked you to run a push gate. \
 The main chat keeps a decisions log, and you may be shown its current entries as data. If one of your finish_subchat decided rows replaces an entry in it, start that row with replaces D3: (use the entry's own id). \
 Do not send progress messages. \
@@ -429,6 +429,16 @@ mod tests {
     }
 
     #[test]
+    fn the_main_prompt_tells_the_chat_to_say_when_a_writer_is_queued_and_offers_worktrees() {
+        let p = SUBCHATS_MAIN_PROMPT;
+        assert!(p.contains("only one sub edits files at a time in a project"));
+        assert!(p.contains("a second writer is queued and starts by itself when the first finishes"));
+        assert!(p.contains("tells you a sub is queued, say so to Joe"));
+        assert!(p.contains("'use worktrees'"));
+        assert!(!p.contains('\\') && !p.contains("  "));
+    }
+
+    #[test]
     fn the_gate_prompt_pushes_only_when_asked_voids_the_trailing_close_and_ends_in_finish() {
         let p = SUBCHAT_GATE_PROMPT;
         assert!(p.contains("You are a gate sub"));
@@ -445,6 +455,20 @@ mod tests {
         // It replaces the generic sub prompt rather than adding to it, so the two
         // never disagree about pushing.
         assert!(!p.contains("Do not push, unless Joe asked you to run a push gate"));
+    }
+
+    #[test]
+    fn the_sub_prompt_states_the_reviewer_rule_the_read_only_guard_and_the_slot() {
+        let p = SUBCHAT_SUB_PROMPT;
+        assert!(p.contains("a fresh reviewer must check your work before you finish"));
+        assert!(p.contains("Agent tool and no shared context") && p.contains("never to approve"));
+        assert!(p.contains("never resume an earlier subagent"));
+        assert!(p.contains("run a new reviewer only if you edit again afterwards"));
+        assert!(p.contains("reviewer_tool_use_id names that Agent call"));
+        assert!(p.contains("review false") && p.contains("facts only"));
+        assert!(p.contains("read-only, your Edit, Write and NotebookEdit calls are refused"));
+        assert!(p.contains("holds the slot") && p.contains("do not look for another way to write the file"));
+        assert!(!p.contains('\\') && !p.contains("  "));
     }
 
     #[test]
