@@ -173,6 +173,12 @@ describe("findFileRefs", () => {
     expect(findFileRefs(String.raw`see C:\x\a.txt__ now`).map((r) => r.path)).toEqual([String.raw`C:\x\a.txt`]);
     expect(findFileRefs(String.raw`see C:\proj\__init__.txt now`).map((r) => r.path)).toEqual([String.raw`C:\proj\__init__.txt`]);
   });
+
+  it("keeps the closing underscores of a dunder folder or file name", () => {
+    expect(findFileRefs("see /repo/src/__tests__ now").map((r) => r.path)).toEqual(["/repo/src/__tests__"]);
+    expect(findFileRefs(String.raw`see C:\proj\__pycache__ now`).map((r) => r.path)).toEqual([String.raw`C:\proj\__pycache__`]);
+    expect(findFileRefs("see /repo/src/__mocks__.").map((r) => r.path)).toEqual(["/repo/src/__mocks__"]);
+  });
 });
 
 // A space ends a path in prose, so `C:\Program Files\x.txt` chipped as the

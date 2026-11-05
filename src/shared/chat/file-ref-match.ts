@@ -43,9 +43,15 @@ export function findFileRefs(text: string): FileRef[] {
     // A closing `_` of `_C:\a\b.txt_` emphasis is not part of the path. Cost: a
     // file whose name really ends in `_` loses it, a rarer case than Claude
     // wrapping a path in underscores; `__init__.txt` is safe since the dot
-    // follows the `_`. Looking for an unmatched opener instead would keep that
-    // file, with more logic than the case earns.
-    const raw = m[0].replace(/[.\-+~@_]+$/, "");
+    // follows the `_`. A last segment that opens with as many underscores as the
+    // path closes with (`/repo/src/__tests__`, `__pycache__`) is a dunder name,
+    // not emphasis, so it keeps them.
+    let raw = m[0].replace(/[.\-+~@]+$/, "");
+    const closing = /_+$/.exec(raw)?.[0].length ?? 0;
+    if (closing) {
+      const opening = /^_*/.exec(raw.slice(Math.max(raw.lastIndexOf("/"), raw.lastIndexOf("\\")) + 1))![0].length;
+      if (opening < closing) raw = raw.replace(/[.\-+~@_]+$/, "");
+    }
     const ref = refFrom(raw, m.index);
     if (ref) out.push(ref);
   }
