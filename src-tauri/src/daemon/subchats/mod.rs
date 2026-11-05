@@ -17,6 +17,11 @@ use crate::daemon::rpc::RpcError;
 use crate::daemon::state::DaemonState;
 use crate::types::Instance;
 
+mod routing;
+pub use routing::{
+    display_session_id, is_sub_session, stamp_prompt_routing, sub_task, UNCONFIRMED_NOTE,
+};
+
 /// Whether `inst` is a hidden sub of some main chat.
 pub fn is_sub(inst: &Instance) -> bool {
     inst.subchat_of.is_some()

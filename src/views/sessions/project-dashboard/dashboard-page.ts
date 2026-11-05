@@ -6,7 +6,7 @@
 import { isPendingSessionId } from "../../../shared/chat/pending-session-id";
 import { isRemote } from "../../../shared/transport";
 import { dismountActivePane, selectSession } from "../active-session";
-import { snapshotActiveCardDraft } from "../permission-modal/question-ui";
+import { snapshotActiveCardDraftIn } from "../permission-modal/question-state";
 import { savePendingPromptDraft } from "../permission-modal/gating";
 import { dismissQuestionCard } from "../permission-modal";
 import { resumeDraft } from "../pending-flow";
@@ -76,8 +76,8 @@ export async function openDashboardPage(cwd: string, projectId: string | null = 
     if (open) {
       // Same hand-off selectSession does when switching away: keep an unanswered
       // question's draft and take its card off the screen.
-      const draft = snapshotActiveCardDraft(open);
-      if (draft) savePendingPromptDraft(open, draft);
+      const snap = snapshotActiveCardDraftIn(open);
+      if (snap) savePendingPromptDraft(snap.askerId, snap.draft);
     }
     dismissQuestionCard();
     state.dashboardOpen = true;

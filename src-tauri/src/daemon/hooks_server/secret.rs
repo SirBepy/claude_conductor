@@ -66,7 +66,7 @@ pub(super) async fn on_secret_request(
         }
     }
 
-    let payload = json!({
+    let mut payload = json!({
         "id": body.id,
         "session_id": body.session_id,
         "label": body.label,
@@ -74,6 +74,7 @@ pub(super) async fn on_secret_request(
         "key": body.key,
         "temporary": body.temporary,
     });
+    crate::daemon::subchats::stamp_prompt_routing(&ctx.state, &mut payload, body.session_id.as_deref());
     let (tx, rx) = tokio::sync::oneshot::channel::<Value>();
     ctx.state.pending.lock().await.insert(body.id.clone(), tx);
     ctx.state.add_prompt(&body.id, "secret-requested", payload.clone(), false).await;
@@ -237,6 +238,34 @@ mod tests {
             state.registry.get("s1").unwrap().awaiting.is_none(),
             "answering clears 'needs input', same as permission.rs"
         );
+    }
+
+    /// A sub's secret card shows in its parent's window; the answer still goes
+    /// to the sub, so `session_id` stays the asker.
+    #[tokio::test]
+    async fn a_subs_secret_prompt_displays_on_its_parent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path().join("session-cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let state = state_with_session("sub", &cwd);
+        let settings = std::sync::Mutex::new(Settings::default());
+        state.registry.record_interactive_session("main", &cwd, &settings, "2026-08-18T00:00:00Z");
+        state.registry.set_subchat_of("sub", Some("main".into()));
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+
+        let handle = tokio::spawn(async move {
+            on_secret_request(AxState(ctx), ValidatedJson(secret_body("p1", "sub", "secrets.env")))
+                .await
+                .into_response()
+        });
+        await_pending(&state, "p1").await;
+        let payload = state.list_prompts().await[0]["payload"].clone();
+        assert_eq!(payload["session_id"], "sub");
+        assert_eq!(payload["display_session_id"], "main");
+
+        let tx = state.pending.lock().await.remove("p1").unwrap();
+        tx.send(json!({"ok": true})).unwrap();
+        handle.await.unwrap();
     }
 
     /// The `temporary` flag rides the prompt payload to the card and to

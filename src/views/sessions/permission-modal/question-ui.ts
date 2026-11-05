@@ -311,9 +311,11 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     setActiveCard({
       id: opts.id,
       sessionId: opts.sessionId,
+      displayId: opts.displayId ?? opts.sessionId,
       teardown,
       getDraft: currentDraft,
       expand: () => renderer.expand(),
+      refreshAskers: () => renderer.refreshAskers(),
     });
   }
 

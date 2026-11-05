@@ -11,6 +11,8 @@ export interface PromptQueue<T extends { id: string }> {
   takeById(sessionId: string, id: string): T | null;
   /** Shift the oldest queued payload and hand it to `dispatch`. No-op on an empty queue. */
   promote(sessionId: string): void;
+  /** What is queued behind `sessionId`'s slot, oldest first. Read-only. */
+  all(sessionId: string): readonly T[];
 }
 
 export function createPromptQueue<T extends { id: string }>(dispatch: (payload: T) => void): PromptQueue<T> {
@@ -37,6 +39,9 @@ export function createPromptQueue<T extends { id: string }>(dispatch: (payload: 
     promote(sessionId) {
       const next = remove(sessionId, 0);
       if (next) dispatch(next);
+    },
+    all(sessionId) {
+      return queues.get(sessionId) ?? [];
     },
   };
 }

@@ -97,6 +97,8 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   // name plus target file already say what is being asked. The header names
   // the asking chat instead.
   const asker = sessionLabel(payload.session_id);
+  // A hidden sub has no row of its own to look up; the daemon sends its name.
+  if (payload.sub_name) asker.name = payload.sub_name;
   const title = `
     <span class="prompt-card__title">
       <i class="ph ph-lock-key"></i>

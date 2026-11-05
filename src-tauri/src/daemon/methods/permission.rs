@@ -245,6 +245,14 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
             // question_request frames and hung AskUserQuestion turns).
             async move {
                 let mut prompts = state.list_prompts().await;
+                // Re-read each prompt's display chat from the registry, so a reload
+                // or the phone sees where a sub's card belongs now (the stored copy
+                // was stamped when the prompt posted, before any respawn, rename or
+                // promotion to the sidebar).
+                for p in prompts.iter_mut() {
+                    let sid = p["payload"]["session_id"].as_str().map(str::to_string);
+                    crate::daemon::subchats::stamp_prompt_routing(&state, &mut p["payload"], sid.as_deref());
+                }
                 // Merge in every paired peer's mirrored prompts - EXCEPT
                 // when the caller is itself a peer machine (`Transport::PeerMachine`).
                 // One-hop rule, same guard `MirrorState::instances`/`set_instances`
@@ -510,6 +518,30 @@ mod list_pending_prompts_tests {
         assert_eq!(ids.len(), 2, "expected both the local and the mirrored prompt: {ids:?}");
         assert!(ids.contains(&"local-1"));
         assert!(ids.contains(&"mirrored-1"));
+    }
+
+    /// A reload or the phone reads cards only from the listing, so it must
+    /// carry where a sub's card belongs, read from the registry now rather than
+    /// from the copy stamped when the prompt posted.
+    #[tokio::test]
+    async fn listing_names_a_subs_display_chat_even_when_the_stored_copy_predates_it() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        for id in ["main", "sub", "solo"] {
+            state.registry.record_interactive_session(id, std::path::Path::new("/tmp/x"), &settings, "2026-11-05T00:00:00Z");
+        }
+        state.registry.set_subchat_of("sub", Some("main".into()));
+        state.registry.set_name("sub", "Fix login test".to_string());
+        state.add_prompt("q-sub", "question-requested", json!({"session_id": "sub"}), true).await;
+        state.add_prompt("q-solo", "question-requested", json!({"session_id": "solo"}), true).await;
+
+        let result = dispatch_with(state, Transport::Local).await;
+        let list = result.as_array().unwrap();
+        let payload = |id: &str| list.iter().find(|p| p["id"] == id).unwrap()["payload"].clone();
+        assert_eq!(payload("q-sub")["display_session_id"], "main");
+        assert_eq!(payload("q-sub")["sub_name"], "Fix login test");
+        assert_eq!(payload("q-solo")["display_session_id"], "solo");
+        assert!(payload("q-solo").get("sub_name").is_none());
     }
 
     /// One-hop rule: a peer machine calling `list_pending_prompts` on

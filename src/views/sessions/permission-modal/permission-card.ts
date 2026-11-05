@@ -7,7 +7,8 @@ import { buildRule, describeRule, isDestructive, withAddedRule } from "../permis
 import { clearHost, ensureHost, renderCardShell } from "./host";
 import { extractQuestions, formatAnswersAsMessage, renderQuestionUI } from "./question-ui";
 import { clearActivePermissionCardIfCurrent, setActivePermissionCard } from "./question-state";
-import { resolveCwdForSession, storePendingPrompt } from "./gating";
+import { displayIdOf, resolveCwdForSession, storePendingPrompt } from "./gating";
+import { fromChipHtml } from "./question-ui-templates";
 import { isAskQuestionTool } from "../../../shared/chat/tool-meta";
 import { renderQuestionCardHtml } from "../../../shared/chat/tool-views";
 import type { RenderedMessage } from "../../../shared/chat/chat-transforms";
@@ -16,6 +17,14 @@ import type { PermissionRequestedPayload, QuestionDraft } from "./types";
 // Deliberately not "User skipped the question." - that exact string once
 // reached claude even after a real submit (2026-08-18 incident).
 const FALLBACK_DISMISS_MESSAGE = "User dismissed the question without answering.";
+
+/** A hidden sub's permission card shows in its main chat's window, so it says
+ *  whose tool call this is. Undefined for every other chat. */
+function subLabel(payload: PermissionRequestedPayload): { name: string } | undefined {
+  const shownOn = displayIdOf(payload);
+  if (!shownOn || shownOn === payload.session_id) return undefined;
+  return { name: payload.sub_name || "Subchat" };
+}
 
 export function showPermissionCard(payload: PermissionRequestedPayload, restoredDraft?: QuestionDraft): void {
   // Park the prompt while it's on screen so a chat switch-and-back re-surfaces
@@ -31,6 +40,8 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
     renderQuestionUI({
       id: payload.id,
       sessionId: payload.session_id,
+      displayId: displayIdOf(payload),
+      from: subLabel(payload),
       questions,
       initialDraft: restoredDraft,
       cwd: resolveCwdForSession(payload.session_id),
@@ -124,6 +135,7 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
       Permission requested
     </span>
     <span class="prompt-card__tool"><code>${escapeHtml(payload.tool_name)}</code></span>
+    ${fromChipHtml(subLabel(payload)?.name)}
   `;
   const body = `
     <details class="prompt-card__details">

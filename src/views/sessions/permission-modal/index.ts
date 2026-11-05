@@ -20,7 +20,8 @@ import { getTransport } from "../../../shared/transport";
 import { visibleInterval } from "../../../shared/visible-interval";
 import { reconcilePendingPrompts } from "./remote-prompt-poll";
 import { confirmQuestionRendered, dismissQuestionCard, extractQuestions } from "./question-ui";
-import { expandActiveCard, getActiveCardId, isActiveCardId } from "./question-state";
+import { expandActiveCard, getActiveCardAsker, getActiveCardId, isActiveCardId, refreshActiveCardAskers } from "./question-state";
+import { state } from "../state";
 import { showPermissionCard } from "./permission-card";
 import { showSecretCard, dismissSecretCard } from "./secret-card";
 import { clearQuestionDraft } from "./draft-persistence";
@@ -28,6 +29,7 @@ import { cancelAuqPush } from "./auq-draft-sync";
 import {
   allowPermission,
   autoAllowIfRemembered,
+  displayIdOf,
   needsHumanApproval,
   hydrateAutoAccept,
   hydrateWrapUpOnDone,
@@ -39,7 +41,7 @@ import {
   storePendingPrompt,
   clearPendingPromptById,
   peekPendingPrompt,
-  pendingPromptSessionIds,
+  pendingPromptAskerIds,
   selectionGuard,
 } from "./gating";
 import type { PermissionRequestedPayload, QuestionRequestedPayload, SecretRequestedPayload } from "./types";
@@ -61,7 +63,8 @@ export {
   pendingPromptSessionIds,
 } from "./gating";
 export { dismissQuestionCard } from "./question-ui";
-export { autoAcceptParked, replayPendingPrompt, rehydratePendingPrompts, rehydrateAndReplay, reopenPendingPrompt } from "./resurface";
+export { autoAcceptParked, replayPendingPrompt, rehydratePendingPrompts, rehydrateAndReplay, reopenPendingPrompt, surfaceNextForDisplay } from "./resurface";
+import { surfaceNextForDisplay } from "./resurface";
 export { showQuestionCard };
 
 // Sidebar re-render is injected rather than statically imported: a direct
@@ -99,6 +102,13 @@ export function rerenderSidebar(): void {
 // exactly as a fresh event would.
 const _queuedSiblingQuestions = createPromptQueue<QuestionRequestedPayload>((p) => handleQuestionRequested(p));
 
+/** What is queued behind `askerId`'s slot, for the asker picker's counts. Read at
+ *  call time by askers.ts: that module sits in this file's import cycle, so a
+ *  registration call made while this module evaluates would reach it too early. */
+export function queuedQuestionsFor(askerId: string): readonly QuestionRequestedPayload[] {
+  return _queuedSiblingQuestions.all(askerId);
+}
+
 /** Queue a still-open sibling behind whichever prompt already owns this
  *  session's slot, instead of clobbering it. No-op if already queued.
  *  Exported for resurface.ts's rehydration/reopen paths, which hit the same
@@ -119,7 +129,7 @@ export function takeQueuedSiblingQuestionById(sessionId: string, id: string): Qu
  *  `id` - captured before clearPendingPromptById removes it, so the right
  *  sibling queue can be drained. */
 function findSessionForPendingId(id: string): string | null {
-  for (const sid of pendingPromptSessionIds()) {
+  for (const sid of pendingPromptAskerIds()) {
     if (peekPendingPrompt(sid)?.payload.id === id) return sid;
   }
   return null;
@@ -151,7 +161,7 @@ export function handleSecretRequested(payload: SecretRequestedPayload): void {
       return;
     }
   }
-  if (!isForSelectedSession(sid)) {
+  if (!isForSelectedSession(displayIdOf(payload))) {
     if (sid) {
       storePendingPrompt(sid, { kind: "secret", payload });
       rerenderSidebar();
@@ -165,10 +175,15 @@ export function handleSecretRequested(payload: SecretRequestedPayload): void {
 }
 
 /** A permission tool fired. Allow (auto-accept / remembered rule), park (a
- *  backgrounded chat), or surface the card (the focused chat). */
-function handlePermissionRequested(payload: PermissionRequestedPayload): void {
+ *  backgrounded chat), or surface the card (the focused chat). Exported so unit
+ *  tests can drive the gate without a Tauri event round-trip. */
+export function handlePermissionRequested(payload: PermissionRequestedPayload): void {
   console.info("[perm-relay] frontend received permission-requested", { tool: payload.tool_name, session: payload.session_id, ...gateDiag() });
-  if (!isForSelectedSession(payload.session_id)) {
+  // Where the card shows is the display chat; whether it is auto-allowed is the
+  // ASKER's own setting. A sub's prompt must never ride its main chat's
+  // auto-accept (that mode is deliberately not handed to chats it starts), so
+  // every isAutoAccept below keys on payload.session_id and never on this.
+  if (!isForSelectedSession(displayIdOf(payload))) {
     if (payload.session_id) {
       // Auto-accept is on for this backgrounded chat: allow NOW rather than
       // parking, so no "needs attention" dot appears for a prompt that will
@@ -265,19 +280,24 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
       queueSiblingQuestion(sid, payload);
       // Not shown/parked yet, but genuinely delivered here (queued) - the
       // daemon's on_question_request wait must not time out over this.
-      confirmQuestionRendered(payload.id, payload.session_id);
+      if (hasSurface(payload)) confirmQuestionRendered(payload.id, payload.session_id);
+      refreshActiveCardAskers();
       rerenderSidebar();
       console.warn("[perm-gate] QUEUED sibling question-requested behind an open slot", { eventSessionId: sid, ...gateDiag() });
       return;
     }
   }
-  if (!isForSelectedSession(sid)) {
+  if (!isForSelectedSession(displayIdOf(payload))) {
     if (sid) {
       storePendingPrompt(sid, { kind: "question", payload });
       // A parked prompt is a genuine delivery, just like the shown-card branch
       // in question-ui.ts - the backgrounded chat WILL see it via its sidebar
       // marker, so on_question_request must not time out and report false.
-      confirmQuestionRendered(payload.id, payload.session_id);
+      // A sub's card parks on its main chat's row, so it is only delivered while
+      // that row exists: with none, nothing could ever show it, and acking it
+      // would leave the sub waiting on an answer nobody can give.
+      if (hasSurface(payload)) confirmQuestionRendered(payload.id, payload.session_id);
+      else console.warn("[perm-gate] NOT confirming sub question: its main chat has no row to mark", { eventSessionId: sid, displayId: displayIdOf(payload) });
       rerenderSidebar();
       console.warn("[perm-gate] PARKED question-requested for backgrounded chat", { eventSessionId: sid, ...gateDiag() });
     } else {
@@ -285,13 +305,37 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
     }
     return;
   }
+  // The window already shows ANOTHER asker's card (a sub's, while this one is the
+  // main chat's or a second sub's): mounting this one would replace a card Joe may
+  // be mid-answer on. Park it instead and let the picker offer it.
+  const onScreen = getActiveCardAsker();
+  if (sid && onScreen && onScreen !== sid) {
+    storePendingPrompt(sid, { kind: "question", payload });
+    confirmQuestionRendered(payload.id, payload.session_id);
+    refreshActiveCardAskers();
+    rerenderSidebar();
+    return;
+  }
   void showQuestionCard(payload);
+}
+
+/** Whether a parked question has somewhere for Joe to see it. A chat's own
+ *  prompt parks on its own row (today's behaviour, Jarvis workers included); a
+ *  hidden sub has no row, so its card parks on its main chat's, which exists only
+ *  while that chat is in the list. */
+function hasSurface(payload: QuestionRequestedPayload): boolean {
+  const shownOn = displayIdOf(payload);
+  if (!shownOn || shownOn === payload.session_id) return true;
+  return state.sessions.some((s) => s.session_id === shownOn);
 }
 
 /** A durable resolve is always genuine; a non-durable one for the id ON
  *  SCREEN can be a `claude -p` EOF poll-tick race mid-edit, so it's left alone. */
 export function handlePromptResolved(id: string, durable = false): void {
   const sid = findSessionForPendingId(id);
+  // Read before the slot is cleared: the window that showed this prompt is the
+  // one that may now owe Joe its next card.
+  const shownOn = sid ? displayIdOf(peekPendingPrompt(sid)?.payload ?? {}) : undefined;
   clearPendingPromptById(id);
   const isActive = isActiveCardId(id);
   if (durable || !isActive) clearQuestionDraft(id);
@@ -307,6 +351,10 @@ export function handlePromptResolved(id: string, durable = false): void {
   // Same freed-slot reasoning, for a queued secret request instead of a sibling question.
   if (sid) _queuedSecrets.promote(sid);
   rerenderSidebar();
+  // Another chat's count in the picker just changed, and if nothing is on screen
+  // any more the window's next waiting card should come up on its own.
+  refreshActiveCardAskers();
+  if (shownOn && (durable || !isActive)) surfaceNextForDisplay(shownOn);
 }
 
 /** On regaining visibility/focus, reconcile against the daemon's CURRENT
@@ -317,7 +365,7 @@ async function reconcileKnownPromptsOnRegainedVisibility(): Promise<void> {
   const known = new Set<string>();
   const activeId = getActiveCardId();
   if (activeId) known.add(activeId);
-  for (const sid of pendingPromptSessionIds()) {
+  for (const sid of pendingPromptAskerIds()) {
     const id = peekPendingPrompt(sid)?.payload.id;
     if (id) known.add(id);
   }

@@ -143,12 +143,13 @@ pub(super) async fn ask_human(
             });
         }
     }
-    let payload = json!({
+    let mut payload = json!({
         "id": id,
         "tool_name": tool_name,
         "input": input,
         "session_id": session_id,
     });
+    crate::daemon::subchats::stamp_prompt_routing(state, &mut payload, session_id);
     let (tx, rx) = tokio::sync::oneshot::channel::<Value>();
     state.pending.lock().await.insert(id.to_string(), tx);
     state.add_prompt(id, "permission-requested", payload.clone(), false).await;
@@ -268,6 +269,42 @@ mod tests {
             "answering hands the turn back to claude - the row returns to In Progress"
         );
         assert!(state.registry.get("s1").unwrap().busy, "the turn itself never stopped");
+    }
+
+    /// A sub's tool-permission card shows in its parent's window. The answer
+    /// still resolves the sub's own oneshot, so `session_id` stays the asker.
+    #[tokio::test]
+    async fn a_subs_permission_prompt_displays_on_its_parent_and_a_normal_chats_on_itself() {
+        let state = state_with_busy_session("sub");
+        let settings = std::sync::Mutex::new(Settings::default());
+        state.registry.record_interactive_session("main", Path::new("/tmp/x"), &settings, "2026-08-18T00:00:00Z");
+        state.registry.record_interactive_session("solo", Path::new("/tmp/x"), &settings, "2026-08-18T00:00:00Z");
+        state.registry.set_subchat_of("sub", Some("main".into()));
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+
+        let sub_ctx = ctx.clone();
+        let sub = tokio::spawn(async move {
+            on_permission_request(AxState(sub_ctx), ValidatedJson(perm_body("sub"))).await;
+        });
+        await_pending(&state, "p1").await;
+        let mut solo_body = perm_body("solo");
+        solo_body.id = "p2".into();
+        let solo = tokio::spawn(async move {
+            on_permission_request(AxState(ctx), ValidatedJson(solo_body)).await;
+        });
+        await_pending(&state, "p2").await;
+
+        let prompts = state.list_prompts().await;
+        let by_id = |id: &str| prompts.iter().find(|p| p["id"] == id).unwrap()["payload"].clone();
+        assert_eq!(by_id("p1")["session_id"], "sub");
+        assert_eq!(by_id("p1")["display_session_id"], "main");
+        assert_eq!(by_id("p2")["display_session_id"], "solo", "a normal chat displays on itself");
+
+        for id in ["p1", "p2"] {
+            state.pending.lock().await.remove(id).unwrap().send(json!({"behavior": "allow"})).unwrap();
+        }
+        sub.await.unwrap();
+        solo.await.unwrap();
     }
 
     /// The clear must not stomp a real end-of-turn status: a late-resuming
