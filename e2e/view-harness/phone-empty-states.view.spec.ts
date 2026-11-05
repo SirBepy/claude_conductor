@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
 // Reviewed 2026-11-05: sidebar-entries.ts now builds a chat's sub summary from "has subs" instead of the mode alone; no row here has subs, so the empty states are unchanged and this spec passes.
 // Reviewed 2026-11-05 (hidden subs): sidebar-entries.ts now drops a row with subchat_of from the list; this spec asserts the empty-state copy of a list with no rows at all, so its contract is unaffected and it passed after the change.
 // Reviewed 2026-11-01: pending-pane-mount.ts now builds the working bar through the shared thinkingBarHtml(); this spec asserts empty-state copy only and passes.

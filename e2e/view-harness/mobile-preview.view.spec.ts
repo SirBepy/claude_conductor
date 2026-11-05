@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 // Reviewed 2026-10-29: session-header.ts gained playTextSwap() (a draft's title crossfade on its first send); this spec never calls it, so its contract is unaffected.
 // Reviewed 2026-10-22: session-header.ts lost its `.code-mode-btn` (Code mode moved to the FAB menu) and its model/effort became icons; this spec asserts only the lead/trail slots, avatar, title and `.meta-proj`, so its contract is unaffected.

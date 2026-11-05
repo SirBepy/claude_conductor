@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
 // Reviewed 2026-11-05: main-chat.ts gained a tier and a closing flag per sub, and sidebar-entries.ts builds the summary from "has subs"; a quiet card still draws no dot and this spec passes.
 // asserts: src/views/sessions/permission-modal/index.ts, src/views/sessions/permission-modal/gating.ts, src/views/sessions/permission-modal/prompt-queue.ts, src/views/sessions/permission-modal/resurface.ts, src/views/sessions/main-chat.ts, src/views/sessions/sidebar-entries.ts
 import { test, expect, type Page } from "@playwright/test";

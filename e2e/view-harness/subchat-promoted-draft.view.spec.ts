@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
 // Reviewed 2026-11-05: sub-list.ts and subchat-view.ts: the row names the tier, a mirrored chat has no Move buttons, and the header line carries the tier; a promoted draft's header and count are unchanged and this spec passes.
 // asserts: src/views/sessions/pending-pane.ts, src/views/sessions/subchat-view.ts, src/views/sessions/sub-list.ts, src/views/sessions/sessions-wiring.ts, src/views/sessions/session-statusbar.ts, src/views/sessions/active-session.ts
 import { test, expect, type Page } from "@playwright/test";
