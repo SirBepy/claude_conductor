@@ -78,8 +78,10 @@ const chat = (page: Page) => page.locator("#session-pane .session-messages");
 const heads = (page: Page) =>
   chat(page).locator(".msg.mc-root").evaluateAll((els) => els.map((e) => (e.querySelector(".mc-full .mc-head, .mc-full .mc-verdict") as HTMLElement | null)?.textContent?.trim() ?? ""));
 
+// Polled, because on the phone the chat pane is still sliding in when the card has
+// just appeared, and every card reads 26px past the edge until that settles.
 async function expectNoOverflow(page: Page): Promise<void> {
-  const over = await page.evaluate(() => {
+  await expect.poll(() => page.evaluate(() => {
     const host = document.querySelector<HTMLElement>("#session-pane .session-messages")!;
     const vw = document.documentElement.clientWidth;
     const bad: string[] = [];
@@ -91,8 +93,7 @@ async function expectNoOverflow(page: Page): Promise<void> {
       if (r.width > 0 && r.right > vw + 1) bad.push(`${el.className || el.tagName} right ${Math.round(r.right)}>${vw}`);
     }
     return bad;
-  });
-  expect(over).toEqual([]);
+  })).toEqual([]);
 }
 
 for (const vp of [{ name: "desktop", width: 900 }, { name: "phone", width: 390 }]) {
