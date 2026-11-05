@@ -187,6 +187,10 @@ pub async fn sweep(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> {
         if inst.ended_at.is_some() || inst.subchat_finished {
             continue;
         }
+        // A sub queued behind another has not run, so there is nothing to count.
+        if super::held::is_held(&id) {
+            continue;
+        }
         // A sub waiting on Joe is not working, so his thinking time is not its busy time.
         let waiting = crate::daemon::lifecycle::has_open_prompt(state, &id).await;
         let counting = inst.busy && !waiting && !super::pause::is_paused(&inst, now_ts);
@@ -337,6 +341,35 @@ mod tests {
         let labels: Vec<&str> =
             card["payload"]["questions"][0]["options"].as_array().unwrap().iter().map(|o| o["label"].as_str().unwrap()).collect();
         assert_eq!(labels, [KEEP_GOING, STOP_IT]);
+    }
+
+    #[tokio::test]
+    async fn a_sub_queued_behind_another_is_never_over_the_ceiling() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = busy_sub("ceil-held");
+        crate::daemon::subchats::held::hold(
+            &st,
+            crate::daemon::subchats::held::Held {
+                sub_id: sub.clone(),
+                reason: "waiting for header".into(),
+                after: Some("ceil-held-target".into()),
+                after_name: "header".into(),
+                launch: crate::daemon::subchats::held::LaunchSpec {
+                    cwd: std::path::PathBuf::from("."),
+                    model: "sonnet".into(),
+                    effort: "high".into(),
+                    account_id: None,
+                    first_message: "go".into(),
+                },
+            },
+        )
+        .unwrap();
+        let base = Utc::now();
+        // Figures that would card a running sub at once: it has not run.
+        assert!(tick(&st, base, 0, 10_000).await.is_empty());
+        assert!(the_card(&st).await.is_none());
+        crate::daemon::subchats::held::release(&st, &sub);
+        assert_eq!(tick(&st, base, 1, 10_000).await, [sub], "released, the ordinary ceiling applies again");
     }
 
     #[tokio::test]

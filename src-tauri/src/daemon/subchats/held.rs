@@ -496,6 +496,11 @@ where
     Fut: Future<Output = Result<(), String>>,
 {
     for entry in all() {
+        // A row that ended or vanished while queued never starts: forget its recipe.
+        if state.registry.get(&entry.sub_id).is_none_or(|i| i.ended_at.is_some()) {
+            release(state, &entry.sub_id);
+            continue;
+        }
         if orphaned(state, &entry.sub_id) {
             log::info!("subchats: held sub {} has no main chat left, dropping it", entry.sub_id);
             drop_held(state, &entry.sub_id);
@@ -1049,6 +1054,31 @@ mod tests {
         assert!(row.ended_at.is_some(), "ended, never run");
         assert_eq!(row.subchat_of.as_deref(), Some("crash-main"), "and not promoted to a sidebar chat");
         assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn ending_a_queued_sub_forgets_its_recipe_so_it_can_never_start_later() {
+        let _d = TempDataDir::new();
+        let st = state();
+        hold_behind(&st, "en-main", "en-held", "footer", "en-target", "header");
+        assert!(super::super::resume::end_sub(&st, "en-held"));
+        assert!(!is_held("en-held"));
+        assert!(st.registry.get("en-held").unwrap().progress.waiting_for.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_queued_row_that_ended_by_another_path_is_forgotten_not_started() {
+        let _d = TempDataDir::new();
+        let st = state();
+        sub_of(&st, "ex-main", "ex-target", "header");
+        st.registry.set_subchat_finished("ex-target", true);
+        hold_behind(&st, "ex-main", "ex-held", "footer", "ex-target", "header");
+        st.registry.mark_ended("ex-held", crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
+        let seen = calls();
+        release_ready(&st, launcher(&seen)).await;
+        assert!(seen.lock().unwrap().is_empty(), "an ended sub is never launched");
+        assert!(!is_held("ex-held"));
+        assert!(cards_of_kind(&st).await.is_empty(), "and Joe is not asked about it");
     }
 
     #[test]
