@@ -113,6 +113,18 @@ export function setWrapUpOnDone(sessionId: string, value: boolean): void {
 // chat), so the optimistic write is rolled back and the refusal rethrown.
 
 const _subchatsOn = new Map<string, boolean>();
+const _subchatsListeners = new Set<() => void>();
+
+/** Run `cb` after the set of mode-on chats changes. The sidebar's Main chats
+ *  group is built from it, so it must redraw on a menu flip and when the boot
+ *  hydrate lands, neither of which is an `instances_changed` the list reacts to. */
+export function onSubchatsChange(cb: () => void): void {
+  _subchatsListeners.add(cb);
+}
+
+function notifySubchatsChange(): void {
+  for (const cb of _subchatsListeners) cb();
+}
 
 /** Seed the in-memory set from the persisted store. Call once at startup. */
 export async function hydrateSubchatsOn(): Promise<void> {
@@ -120,6 +132,7 @@ export async function hydrateSubchatsOn(): Promise<void> {
     const ids = await invoke<string[]>("list_subchats_on");
     _subchatsOn.clear();
     for (const id of ids ?? []) _subchatsOn.set(id, true);
+    notifySubchatsChange();
   } catch (e) {
     console.warn("[subchats-on] hydrate failed:", e);
   }
@@ -136,11 +149,13 @@ export async function setSubchatsOn(sessionId: string, value: boolean): Promise<
   const before = isSubchatsOn(sessionId);
   if (value) _subchatsOn.set(sessionId, true);
   else _subchatsOn.delete(sessionId);
+  notifySubchatsChange();
   try {
     await invoke("set_subchats_on", { sessionId, value });
   } catch (e) {
     if (before) _subchatsOn.set(sessionId, true);
     else _subchatsOn.delete(sessionId);
+    notifySubchatsChange();
     throw e;
   }
 }

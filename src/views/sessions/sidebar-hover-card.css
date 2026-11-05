@@ -36,3 +36,9 @@
   font-size: 0.68rem;
 }
 .cc-row-card .hc-ctx { display: inline-flex; align-items: center; gap: 3px; }
+
+/* A main chat's card (Use subchats): one row per sub, its dot (red asking,
+   yellow working, green finished) and how far it has got. */
+.cc-row-card .hc-subrow { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
+.cc-row-card .hc-subrow .hc-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-row-card .hc-subrow .hc-aside { color: var(--color-text-muted); max-width: none; flex: 0 0 auto; white-space: nowrap; }

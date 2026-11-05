@@ -462,6 +462,16 @@ export class HttpTransport implements Transport {
         });
       case "list_auto_accept":
         return this.rpc<T>("list_auto_accept", null);
+      // The phone's Main chats group is built from this set, and the menu flip
+      // writes it; both are PM in remote_transport_table.rs, but unmapped here
+      // they fell to RemoteUnavailableError and the group never formed.
+      case "set_subchats_on":
+        return this.rpc<T>("set_subchats_on", {
+          session_id: args.session_id ?? args.sessionId,
+          value: args.value,
+        });
+      case "list_subchats_on":
+        return this.rpc<T>("list_subchats_on", null);
       case "cancel_turn":
         return this.rpc<T>("cancel_turn", {
           session_id: args.sessionId ?? args.session_id,

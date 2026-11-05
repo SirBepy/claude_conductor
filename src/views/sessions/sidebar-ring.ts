@@ -63,6 +63,21 @@ export function ringSpecFor(
   }
 }
 
+/** The ring of a Use-subchats main chat. It draws the main agent's own work, not
+ *  its subs' (a sub's progress already has its dot and hover row): a plain
+ *  working ring with no plan arc, and green once every sub has finished. A
+ *  question or permission wait, a close and the error states draw as they do on
+ *  any chat, so a parked card still reads `st-attention`. */
+export function mainChatRingSpec(
+  dotClass: string,
+  question: QuestionRingInfo | null | undefined,
+  allSubsFinished: boolean,
+): RingSpec {
+  if (dotClass === "st-working") return { kind: "solid", tone: "working", glow: true };
+  if (allSubsFinished && (dotClass === "st-your-turn" || dotClass === "st-done")) return { kind: "solid", tone: "done" };
+  return ringSpecFor(dotClass, null, question);
+}
+
 // viewBox is 50 units for the 50px avatar; r leaves half the 3.5 stroke inside.
 const R = 23.25;
 const CIRC = 2 * Math.PI * R;
