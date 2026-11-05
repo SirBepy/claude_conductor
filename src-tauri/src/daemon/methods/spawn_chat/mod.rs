@@ -163,7 +163,7 @@ pub(crate) async fn spawn_chat(
     let name = name.or(gate_name.as_deref());
 
     // A writing sub that gets its own worktree (`subchats::worktree`) runs there,
-    // not in the main chat's folder. The tree is added now, so a failure reaches
+    // not in the target project's own checkout. The tree is added now, so a failure reaches
     // the main chat as this call's error; the sub's setup runs at its launch.
     let sub_id = uuid::Uuid::new_v4().to_string();
     let tree = plan_worktree(state, &mut sub, &mut target_cwd, &sub_id).await?;
