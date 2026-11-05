@@ -77,9 +77,9 @@ export function newestFinishedFirst(
 export function subListHtml(
   subs: readonly SubStatus[],
   sessions: readonly Instance[],
+  canMove = true,
   finishedAt: ReadonlyMap<string, number> = new Map(),
   closesWhenSubsFinish = false,
-  canMove = true,
 ): string {
   const byId = new Map(sessions.map((s) => [s.session_id, s]));
   const running = subs.filter((s) => s.kind !== "finished");
@@ -179,7 +179,7 @@ export class SubListButton {
   private openList(subs: readonly SubStatus[], sessions: readonly Instance[], waiting = false): void {
     if (!this.btn) return;
     const main = sessions.find((s) => s.session_id === this.mainId);
-    this.shell.open(this.btn, subListHtml(subs, sessions, this.finishedAt, waiting, !isMirrored(main)), {
+    this.shell.open(this.btn, subListHtml(subs, sessions, !isMirrored(main), this.finishedAt, waiting), {
       className: "sub-list-popover",
       onClose: () => this.btn?.classList.remove("on"),
       wire: (el) => {

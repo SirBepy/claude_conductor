@@ -58,7 +58,7 @@ describe("the sub list's Finished order", () => {
   });
 
   it("renders Finished in that order and the waiting note at the top", () => {
-    const html = subListHtml(rows, [...byId.values()], new Map([["a", 1], ["b", 2], ["c", 3], ["d", 4]]), true);
+    const html = subListHtml(rows, [...byId.values()], true, new Map([["a", 1], ["b", 2], ["c", 3], ["d", 4]]), true);
     expect(html.indexOf("sub-list-note")).toBeLessThan(html.indexOf("Finished"));
     const ids = [...html.matchAll(/data-sub-id="(\w+)"/g)].map((m) => m[1]);
     expect(ids).toEqual(["d", "c", "b", "a"]);
