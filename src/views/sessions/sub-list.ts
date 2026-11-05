@@ -7,8 +7,10 @@
 import "./sub-list.css";
 import { escapeHtml } from "../../shared/escape-html";
 import type { Instance } from "../../types/ipc.generated";
+import { fetchSubCards } from "../../shared/chat/subchat-cards";
 import { mainChatInfo, type SubStatus } from "./main-chat";
 import { isMirrored } from "./sessions-helpers";
+import { CLOSES_WHEN_SUBS_FINISH } from "./sidebar-row-visuals";
 import { planProgress, ringHtml, type RingSpec } from "./sidebar-ring";
 import { PopoverShell } from "./statusbar-popover-shell";
 
@@ -50,14 +52,42 @@ function rowHtml(sub: SubStatus, inst: Instance | undefined, canMove: boolean): 
   </div>`;
 }
 
+/** Finished subs, the one that finished last first. `finishedAt` holds the time of each
+ *  sub's latest finish card (the log outlives a restart); a sub without one falls back
+ *  to the instance's last busy/idle flip, and one with neither keeps the order it came
+ *  in, newest started last, so it sorts after the ones that are dated. */
+export function newestFinishedFirst(
+  rows: readonly SubStatus[],
+  byId: ReadonlyMap<string, Instance>,
+  finishedAt: ReadonlyMap<string, number> = new Map(),
+): SubStatus[] {
+  const at = (s: SubStatus): number => {
+    const card = finishedAt.get(s.id);
+    if (card !== undefined) return card;
+    const flip = Date.parse(byId.get(s.id)?.progress?.state_since ?? "");
+    return Number.isNaN(flip) ? 0 : flip;
+  };
+  return rows
+    .map((row, i) => ({ row, i, t: at(row) }))
+    .sort((a, b) => b.t - a.t || b.i - a.i)
+    .map((e) => e.row);
+}
+
 /** The popover body. Asking subs sit with the running ones: they are not done. */
-export function subListHtml(subs: readonly SubStatus[], sessions: readonly Instance[], canMove = true): string {
+export function subListHtml(
+  subs: readonly SubStatus[],
+  sessions: readonly Instance[],
+  finishedAt: ReadonlyMap<string, number> = new Map(),
+  closesWhenSubsFinish = false,
+  canMove = true,
+): string {
   const byId = new Map(sessions.map((s) => [s.session_id, s]));
   const running = subs.filter((s) => s.kind !== "finished");
-  const finished = subs.filter((s) => s.kind === "finished");
+  const finished = newestFinishedFirst(subs.filter((s) => s.kind === "finished"), byId, finishedAt);
   const section = (label: string, rows: readonly SubStatus[]): string =>
     rows.length ? `<h5 class="sub-list-head">${label}</h5>${rows.map((s) => rowHtml(s, byId.get(s.id), canMove)).join("")}` : "";
-  return section("Running", running) + section("Finished", finished);
+  const note = closesWhenSubsFinish ? `<p class="sub-list-note">${escapeHtml(CLOSES_WHEN_SUBS_FINISH)}</p>` : "";
+  return note + section("Running", running) + section("Finished", finished);
 }
 
 /** The count icon in a main chat's header and the list behind it. Owns its button:
@@ -66,6 +96,8 @@ export function subListHtml(subs: readonly SubStatus[], sessions: readonly Insta
 export class SubListButton {
   private btn: HTMLButtonElement | null = null;
   private readonly shell = new PopoverShell();
+  /** When each sub last finished, from the main chat's card log (see `newestFinishedFirst`). */
+  private finishedAt: ReadonlyMap<string, number> = new Map();
 
   constructor(
     private readonly slot: HTMLElement,
@@ -94,11 +126,12 @@ export class SubListButton {
     }
     if (!this.btn) this.btn = this.createButton();
     const n = info.subs.length;
-    this.btn.innerHTML = `<i class="ph ph-tree-structure"></i>${n}`;
-    this.btn.title = `${n} subchat${n === 1 ? "" : "s"}`;
+    const waiting = info.closesWhenSubsFinish;
+    this.btn.innerHTML = `<i class="ph ph-tree-structure"></i>${n}${waiting ? '<i class="ph ph-hourglass-medium sub-close-wait"></i>' : ""}`;
+    this.btn.title = `${n} subchat${n === 1 ? "" : "s"}${waiting ? `. ${CLOSES_WHEN_SUBS_FINISH}` : ""}`;
     this.btn.setAttribute("aria-label", this.btn.title);
     this.btn.classList.toggle("on", this.shell.isOpen);
-    if (this.shell.isOpen) this.openList(info.subs, sessions);
+    if (this.shell.isOpen) this.openList(info.subs, sessions, waiting);
   }
 
   destroy(): void {
@@ -124,21 +157,29 @@ export class SubListButton {
       return;
     }
     this.btn?.classList.add("on");
-    this.openFromState();
+    void this.openFromState();
   }
 
-  /** The popover reads the latest list on each open, not the one `update` saw. */
-  private openFromState(): void {
+  /** The popover reads the latest list on each open, not the one `update` saw, and
+   *  the finish times first, so Finished is in order from the first paint. */
+  private async openFromState(): Promise<void> {
+    const cards = await fetchSubCards(this.mainId);
+    const times = new Map<string, number>();
+    for (const c of cards) if (c.kind === "finish" && c.sub_id) times.set(c.sub_id, Math.max(times.get(c.sub_id) ?? 0, c.ts));
+    this.finishedAt = times;
+    // Closed again while the cards were coming: nothing to open.
+    if (!this.btn?.classList.contains("on")) return;
     const sessions = this.getSessions();
     const main = sessions.find((s) => s.session_id === this.mainId);
     if (!main) return;
-    this.openList(mainChatInfo(main, sessions).subs, sessions);
+    const info = mainChatInfo(main, sessions);
+    this.openList(info.subs, sessions, info.closesWhenSubsFinish);
   }
 
-  private openList(subs: readonly SubStatus[], sessions: readonly Instance[]): void {
+  private openList(subs: readonly SubStatus[], sessions: readonly Instance[], waiting = false): void {
     if (!this.btn) return;
     const main = sessions.find((s) => s.session_id === this.mainId);
-    this.shell.open(this.btn, subListHtml(subs, sessions, !isMirrored(main)), {
+    this.shell.open(this.btn, subListHtml(subs, sessions, this.finishedAt, waiting, !isMirrored(main)), {
       className: "sub-list-popover",
       onClose: () => this.btn?.classList.remove("on"),
       wire: (el) => {

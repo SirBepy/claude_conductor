@@ -126,6 +126,8 @@ function sumChips(s: SubSumFacts): Chip[] {
     { tone: s.unreviewed > 0 ? "wait" : "done", icon: "ph-eye", value: `${s.reviewed}/${s.subs}`, title: `A reviewer ran after the last edit for ${s.reviewed} of ${plural(s.subs, "sub")}` },
   ];
   if (s.unpushed > 0) chips.push({ tone: "wait", icon: "ph-cloud-slash", value: `${s.unpushed} not pushed`, title: `${s.unpushed} not pushed` });
+  const unmerged = s.not_merged ?? 0;
+  if (unmerged > 0) chips.push({ tone: "not", icon: "ph-git-merge", value: `${unmerged} not merged`, title: `${plural(unmerged, "sub")} not merged: its commits are not in the target branch and are left out of the commit and file counts` });
   return chips;
 }
 
@@ -139,6 +141,7 @@ function sumWords(s: SubSumFacts): string[] {
   out.push(`${s.uncommitted} uncommitted in the files the subs edited`);
   out.push(`A reviewer ran after the last edit for ${s.reviewed} of ${s.subs}`);
   if (s.unpushed > 0) out.push(`${s.unpushed} not pushed`);
+  if ((s.not_merged ?? 0) > 0) out.push(`${s.not_merged} not merged: ${s.not_merged === 1 ? "its commits are" : "their commits are"} not in the target branch and left out of the totals`);
   if (s.unknown_subs > 0) out.push(`${plural(s.unknown_subs, "sub")} with figures the daemon could not read, left out of the totals`);
   return out;
 }

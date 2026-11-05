@@ -130,7 +130,22 @@ export function buildSidebarEntries(
   // Rendered purely off the daemon-broadcast Instance.closing flag: the
   // daemon sets it itself the moment a /close turn starts, so every window
   // shows the Closing segment.
-  const closing = new Set(listSessions.filter((s) => s.closing).map((s) => s.session_id));
+  // A chat with Use subchats on carries a summary of its subs (dots, "3x", ring,
+  // hover) and sits in its own group. state.sessions, not listSessions: the list
+  // above has already dropped the subs this reads.
+  const mainInfo = new Map<string, MainChatInfo>();
+  const mainIds = new Set<string>();
+  for (const s of listSessions) {
+    if (!showsSubs(s.session_id, state.sessions)) continue;
+    mainInfo.set(s.session_id, mainChatInfo(s, state.sessions));
+    if (isSubchatsOn(s.session_id)) mainIds.add(s.session_id);
+  }
+  // A main chat that picked "Wait for them" is flagged closing by the daemon but is not
+  // on its way out until its subs end: it keeps its place in Main chats (on the phone
+  // too, where the collapsed Closing group would otherwise swallow it) and says so quietly.
+  const closing = new Set(
+    listSessions.filter((s) => s.closing && !mainInfo.get(s.session_id)?.closesWhenSubsFinish).map((s) => s.session_id),
+  );
   // Only fetch token-drain data when the user is actually sorting by it. Fire
   // the (debounced) async refresh in the background; render now with whatever
   // drainMap already holds so render never blocks on the IPC.
@@ -185,18 +200,6 @@ export function buildSidebarEntries(
   // also show the clock badge.
   const scheduledIds = new Set(scheduledCountMap.keys());
 
-  // A chat with Use subchats on, or with subs left from before it was turned off,
-  // carries a summary of its subs (dots, "3x", ring, hover). Only the mode puts it
-  // in its own group: a chat turned off mid-run keeps its subs tied to it but sits
-  // where its state says. state.sessions, not listSessions: the list above has
-  // already dropped the subs this reads.
-  const mainInfo = new Map<string, MainChatInfo>();
-  const mainIds = new Set<string>();
-  for (const s of listSessions) {
-    if (!showsSubs(s.session_id, state.sessions)) continue;
-    mainInfo.set(s.session_id, mainChatInfo(s, state.sessions));
-    if (isSubchatsOn(s.session_id)) mainIds.add(s.session_id);
-  }
   const MAIN_SEG = 8;
   const SEGMENT_LABELS = ["Input Needed", "Done", "In Progress", "Closing", "Waiting for Reset", "Waiting", "Scheduled", "Remote", "Main chats"];
   const segmented: Map<number, typeof sorted> = new Map([[0, []], [1, []], [2, []], [3, []], [4, []], [5, []], [6, []], [7, []], [MAIN_SEG, []]]);

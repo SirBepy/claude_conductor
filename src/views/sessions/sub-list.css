@@ -38,6 +38,14 @@
   padding: 6px;
   border-radius: 10px;
 }
+.sub-list-note {
+  margin: 4px 8px 6px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.sub-close-wait {
+  font-size: 13px;
+}
 .sub-list-head {
   margin: 6px 8px 2px;
   font-size: 11px;

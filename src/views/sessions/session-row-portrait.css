@@ -138,6 +138,15 @@
   color: var(--color-text-muted);
 }
 .sessions-list li.active .session-sub-count { color: var(--color-background); opacity: 0.85; }
+/* A main chat that picked "Wait for them": a muted hourglass, nothing louder. */
+.session-close-wait {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.9rem;
+  line-height: 1;
+  color: var(--color-text-muted);
+}
+.sessions-list li.active .session-close-wait { color: var(--color-background); opacity: 0.85; }
 .ask-dots {
   display: inline-flex;
   align-items: center;

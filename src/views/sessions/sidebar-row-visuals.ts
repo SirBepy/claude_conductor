@@ -87,6 +87,17 @@ export function askingDotsHtml(count: number): string {
   return `<span class="ask-dots" role="img" aria-label="${label}">${'<i class="ask-dot"></i>'.repeat(count)}</span>`;
 }
 
+/** The words for a main chat that picked "Wait for them", shared by the row's mark and
+ *  the header's so the surfaces never disagree. */
+export const CLOSES_WHEN_SUBS_FINISH = "Closing when its subs finish. Close it again to change your mind.";
+
+/** The quiet mark on a main chat that picked "Wait for them": an hourglass where the
+ *  chips sit, with the sentence as its tooltip. "" when the chat is not waiting. */
+export function closeWaitChipHtml(on: boolean | undefined, tipAttr: "title" | "data-tip"): string {
+  if (!on) return "";
+  return `<span class="session-close-wait" ${tipAttr}="${CLOSES_WHEN_SUBS_FINISH}" role="img" aria-label="${CLOSES_WHEN_SUBS_FINISH}"><i class="ph ph-hourglass-medium"></i></span>`;
+}
+
 /** "3x": how many subs a main chat has, running and finished, standing where the
  *  model battery would. No word: a bare count is the quietest thing that still
  *  says "this one has subs behind it". */

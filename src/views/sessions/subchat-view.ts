@@ -18,7 +18,7 @@ import { tierLabel } from "../../shared/model-name";
 import { state, windowIdOf } from "./state";
 import { isMirrored, isSubchat, sessionSubtitle } from "./sessions-helpers";
 import type { SessionHeader } from "./session-header";
-import { SubListButton } from "./sub-list";
+import { SubListButton, subInitials } from "./sub-list";
 import { clearPendingPrompt } from "./permission-modal/gating";
 import { refreshSessions, renderSidebar } from "./sidebar";
 
@@ -155,6 +155,8 @@ export function decorateSubchatHeader(header: SessionHeader, sess: Instance, nav
   header.el.classList.add("is-sub-view");
   header.onProjectClick = null;
   header.setMeta(subMetaText(sess, main));
+  // The list shows a sub as its initials in a ring; the header's avatar says the same.
+  header.setAvatarInitials(subInitials(sessionSubtitle(sess)));
 
   const back = iconButton("icon-btn sub-back-btn", "ph-arrow-left", `Back to ${mainName}`);
   back.addEventListener("click", () => { void backToMain(sess, nav); });
