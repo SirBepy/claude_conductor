@@ -70,6 +70,13 @@ pub fn latest(session_id: &str) -> Option<String> {
     lock().get(session_id).map(|s| s.text.clone())
 }
 
+/// Drops the slot for `session_id`. A `respawn` calls it for both ends: the
+/// predecessor's message belongs to a turn that is over, and the successor's first
+/// message is the handoff its predecessor wrote, which Joe did not type.
+pub fn forget(session_id: &str) {
+    lock().remove(session_id);
+}
+
 /// Whether the latest message already went to `sub_id`.
 pub fn already_passed(session_id: &str, sub_id: &str) -> bool {
     lock().get(session_id).is_some_and(|s| s.passed_to.contains(sub_id))

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: main-chat.ts's progress text says paused or rate limited for a frozen or rate-limited sub instead of working; this spec's subs are neither, so its contract holds and it passes.
 // asserts: src/views/sessions/sidebar-entries.ts, src/views/sessions/sidebar-rows.ts, src/views/sessions/sidebar-ring.ts, src/views/sessions/main-chat.ts, src/views/sessions/sidebar-hover-card.ts, src/views/sessions/sidebar-hover-card-html.ts, src/views/sessions/permission-modal/gating.ts
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, mountViewPhone, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

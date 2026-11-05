@@ -64,6 +64,7 @@ pub async fn move_to_sidebar(state: &Arc<DaemonState>, sub_id: &str) -> Result<(
     if !is_sub(&inst) {
         return Err(MoveError::NotASub(sub_id.to_string()));
     }
+    let parent = inst.subchat_of.clone();
     state.registry.set_subchat_of(sub_id, None);
     state.registry.set_subchat_finished(sub_id, false);
     crate::sessions::chat_config::set_subchat(sub_id, None);
@@ -71,6 +72,10 @@ pub async fn move_to_sidebar(state: &Arc<DaemonState>, sub_id: &str) -> Result<(
     withdraw_cards_about(state, sub_id).await;
     crate::sessions::persistence::save_snapshot_default(&state.registry);
     crate::daemon::machines::publish_instances_changed(state);
+    // A main chat waiting on "Wait for them" may have just lost its last running sub.
+    if let Some(parent) = parent {
+        super::closing::after_leaving(state, &parent);
+    }
     Ok(())
 }
 

@@ -303,6 +303,43 @@ pub fn drain(session_id: &str, served: &Served) {
     }
 }
 
+/// Moves `old_parent`'s queue to the chat that took over (`respawn`): the waiting
+/// entries and the per-sub marks both. The marks point into the decisions log,
+/// which moves with the chat under the same ids (`decisions::move_log`), so they
+/// stay true. Merges into a queue the destination already has rather than
+/// replacing it, keeping one entry per `(sub, round)` and the newest mark per sub,
+/// and removes the old file last, so a move that stopped half way can be run again.
+pub fn move_queue(old_parent: &str, new_parent: &str) {
+    if let Some(root) = decisions::data_root() {
+        move_queue_in(&root, old_parent, new_parent);
+    }
+}
+
+pub(crate) fn move_queue_in(root: &Path, old_parent: &str, new_parent: &str) {
+    if old_parent == new_parent {
+        return;
+    }
+    let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let old = read_lines(root, old_parent);
+    if old.is_empty() {
+        let _ = std::fs::remove_file(path_in(root, old_parent));
+        return;
+    }
+    let mut merged = read_lines(root, new_parent);
+    for line in old {
+        let held = matches!(&line, Line::Entry(e) if merged.iter().any(|m| matches!(m, Line::Entry(x) if x.sub_id == e.sub_id && x.round == e.round)));
+        if !held {
+            merged.push(line);
+        }
+    }
+    match write_lines(root, new_parent, merged) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(path_in(root, old_parent));
+        }
+        Err(e) => log::warn!("subchats: could not move {old_parent}'s line back to {new_parent}: {e}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -483,5 +520,27 @@ mod tests {
         st.registry.upsert_interactive("back-none", Path::new("."), "proj", "2026-11-05T00:00:00Z");
         assert!(queue_in(dir.path(), &st, "back-none").is_none());
         assert!(queue_in(dir.path(), &st, "ghost").is_none());
+    }
+
+    #[test]
+    fn a_respawn_moves_the_queue_and_marks_and_a_second_run_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = state();
+        let (main, sub) = finished(dir.path(), &st, "back-move", "header", "Done", "did it", 1);
+        queue_in(dir.path(), &st, &sub).expect("queued");
+        let before = peek_in(dir.path(), &main).unwrap().text;
+        assert!(before.contains("header"));
+        move_queue_in(dir.path(), &main, "back-move-next");
+        assert!(peek_in(dir.path(), &main).is_none(), "nothing left under the old chat");
+        let moved = peek_in(dir.path(), "back-move-next").expect("the line follows the chat");
+        assert_eq!(moved.text, before);
+        assert!(read_lines(dir.path(), "back-move-next").iter().any(|l| matches!(l, Line::Mark { .. })), "the marks move too");
+        move_queue_in(dir.path(), &main, "back-move-next");
+        assert_eq!(peek_in(dir.path(), "back-move-next").unwrap().text, before, "re-running adds nothing");
+        // Merging into a queue that already has the same entry keeps one.
+        std::fs::write(path_in(dir.path(), "back-dup-old"), std::fs::read_to_string(path_in(dir.path(), "back-move-next")).unwrap()).unwrap();
+        move_queue_in(dir.path(), "back-dup-old", "back-move-next");
+        let entries = read_lines(dir.path(), "back-move-next").into_iter().filter(|l| matches!(l, Line::Entry(_))).count();
+        assert_eq!(entries, 1);
     }
 }
