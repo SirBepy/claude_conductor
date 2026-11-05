@@ -312,6 +312,10 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Visual settings (theme, colors) so the phone mirrors the desktop appearance.
     // set_settings is deliberately NOT here (phone must not mutate desktop settings).
     ("get_settings", P),
+    // Read-only: the PC app's release version and build date, for the phone's
+    // Settings > About. Nothing a paired phone could not already learn from the
+    // app it installs; P, not PM, because a peer machine has no About page.
+    ("get_version_info", P),
     // Read-only filesystem scan of the slash-command/skill dirs so the phone's
     // `/` autocomplete popup populates like desktop's (was always empty otherwise).
     // Guarded by reject_unknown(project_dir) in registry.rs when project_dir is set.

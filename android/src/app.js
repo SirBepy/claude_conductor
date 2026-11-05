@@ -127,6 +127,29 @@
     return window.__TAURI_INTERNALS__.invoke(cmd, args);
   }
 
+  // This APK's own version. The daemon-served SPA cannot reach it (no Tauri
+  // global once we navigate away), so every handoff URL carries it as `shellv`
+  // and the SPA keeps it for Settings > About. Null when the bridge is absent
+  // or the call fails: the SPA then shows the phone version as unknown.
+  const shellVersionPromise = (async () => {
+    try {
+      const v = await window.__TAURI_INTERNALS__.invoke("plugin:app|version");
+      return typeof v === "string" && v ? v : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  // The one place the shell leaves for the daemon-served SPA. `navigating` is
+  // set before the version lookup so no retry loop fires while it resolves.
+  async function handoff(url) {
+    navigating = true;
+    const target = new URL(url);
+    const version = await shellVersionPromise;
+    if (version) target.searchParams.set("shellv", version);
+    window.location.href = target.toString();
+  }
+
   // Before per-endpoint ports every PC shared 127.0.0.1:27184. The PC paired
   // then keeps that origin (`legacy`), so its rc_token survives the upgrade;
   // any other PC gets the port src-tauri derives from its endpoint id.
@@ -179,8 +202,7 @@
       rememberIroh(endpointId);
       const target = new URL(`http://127.0.0.1:${port}/`);
       if (pairCode) target.searchParams.set("pair", pairCode);
-      navigating = true;
-      window.location.href = target.toString();
+      await handoff(target.toString());
     } catch (err) {
       console.error("iroh tunnel failed:", err);
       const errMsg = (err && err.message) ? err.message : String(err);
@@ -218,8 +240,7 @@
     setConnecting(true);
     const healthy = await checkHealth(baseUrl);
     if (healthy) {
-      navigating = true;
-      window.location.href = navigateTo ?? baseUrl;
+      await handoff(navigateTo ?? baseUrl);
       return;
     }
     setConnecting(false);
@@ -317,8 +338,7 @@
     activeAbortController = null;
     if (token.cancelled) return false;
     if (healthy) {
-      navigating = true;
-      window.location.href = navigateTo ?? baseUrl;
+      await handoff(navigateTo ?? baseUrl);
       return true;
     }
     return false;
@@ -334,8 +354,7 @@
       if (token.cancelled) return false;
       const target = new URL(`http://127.0.0.1:${port}/`);
       if (pairCode) target.searchParams.set("pair", pairCode);
-      navigating = true;
-      window.location.href = target.toString();
+      await handoff(target.toString());
       return true;
     } catch (err) {
       console.error("iroh tunnel failed:", err);

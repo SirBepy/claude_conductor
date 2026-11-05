@@ -9,6 +9,8 @@ import { api, type UpdateState } from "../../../../shared/api";
 import { getSettings } from "../../../../shared/state";
 import { updateSettings } from "../../../../shared/settings-update";
 import { settingsHeader } from "../../ui";
+import { isRemote } from "../../../../shared/transport";
+import { readShellVersion } from "../../../../shared/shell-version";
 
 // Same on every platform: the release publishes a signed darwin-aarch64
 // updater entry, so the Mac installs in-app like Windows does.
@@ -40,6 +42,27 @@ export function deriveUpdateDeps(state: UpdateState): AboutUpdateDeps {
     };
   }
   return { statusText: "Up to date" };
+}
+
+/** On the phone the kit's version line is the PC's, so both ends are named
+ *  here: which PC build answers, and which app build the phone itself runs. */
+export function phoneVersionLines(pcVersion: string, shellVersion: string | null): { pc: string; phone: string } {
+  const label = (v: string) => (/^\d/.test(v) ? `v${v}` : v);
+  return {
+    pc: label(pcVersion),
+    phone: shellVersion ? label(shellVersion) : "Not reported - update the app from Google Play",
+  };
+}
+
+function phoneVersions(pcVersion: string) {
+  const lines = phoneVersionLines(pcVersion, readShellVersion());
+  return html`
+    <div class="kit-section">
+      <div class="kit-section-title">Versions</div>
+      <div class="settings-caption">PC app: <span class="about-pc-version">${lines.pc}</span></div>
+      <div class="settings-caption">Phone app: <span class="about-phone-version">${lines.phone}</span></div>
+    </div>
+  `;
 }
 
 export async function renderAboutView(root: HTMLElement): Promise<() => void> {
@@ -102,6 +125,7 @@ export async function renderAboutView(root: HTMLElement): Promise<() => void> {
           ${settingsHeader("About & updates")}
           <div class="view-body">
             ${page.render()}
+            ${isRemote() ? phoneVersions(versionInfo.version) : ""}
           </div>
         </div>
       `,
