@@ -60,6 +60,9 @@ function factChips(f: SubFacts): Chip[] {
     testChip(f),
     reviewerChip(f),
   ];
+  const into = f.merged_into ?? "its target";
+  if (f.merged === true) chips.push({ tone: "done", icon: "ph-git-merge", value: "merged", title: `Merged into ${into}` });
+  else if (f.merged === false) chips.push({ tone: "not", icon: "ph-git-merge", value: "not merged", title: `Not merged into ${into}` });
   if (f.pushed === false) chips.push({ tone: "wait", icon: "ph-cloud-slash", value: "not pushed", title: "Not pushed" });
   else if (f.pushed === true) chips.push({ tone: "done", icon: "ph-cloud-check", value: "pushed", title: "Pushed" });
   return chips;
@@ -95,6 +98,9 @@ function factWords(f: SubFacts): string[] {
   if (r?.state === "ran") out.push(`Fresh reviewer, after the last edit: ${escapeHtml(r.text ?? "")}`);
   else if (r?.state === "none") out.push(`No reviewer${r.note ? ` (${escapeHtml(r.note)})` : ""}`);
   else out.push("Reviewer: unknown");
+  const into = escapeHtml(f.merged_into ?? "its target branch");
+  if (f.merged === true) out.push(`Merged into ${into}`);
+  else if (f.merged === false) out.push(`Not merged into ${into}: its commits are still on the sub's own branch`);
   if (f.pushed === false) out.push("Not pushed");
   else if (f.pushed === true) out.push("Pushed");
   return out;

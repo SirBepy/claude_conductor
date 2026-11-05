@@ -130,6 +130,12 @@ pub struct Facts {
     pub reviewer: ReviewerFact,
     #[serde(default)]
     pub head: Option<String>,
+    /// A worktree sub only: the branch its commits are merged into, and whether
+    /// they are in it now. `merged` is `None` when the sub made no commits.
+    #[serde(default)]
+    pub merged_into: Option<String>,
+    #[serde(default)]
+    pub merged: Option<bool>,
 }
 
 mod gitx {

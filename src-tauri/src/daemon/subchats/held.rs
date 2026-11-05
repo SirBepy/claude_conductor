@@ -349,6 +349,9 @@ pub async fn launch_held(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), S
         return Err("it has been ended".to_string());
     }
     let parent = inst.subchat_of.clone().ok_or_else(|| "it is no longer a sub".to_string())?;
+    // A worktree sub's tree is set up and caught up to its target first; a failure
+    // has drawn its own blocker card and stops the launch.
+    super::worktree::before_launch(state, sub_id).await?;
     // Its facts count from now, not from the day it was queued: the sub it waited
     // for committed in between, and those commits are not this job's.
     if let Some(mut brief) = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat) {

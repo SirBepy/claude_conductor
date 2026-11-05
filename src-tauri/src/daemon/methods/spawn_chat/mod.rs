@@ -131,7 +131,7 @@ pub(crate) async fn spawn_chat(
         .ok_or_else(|| format!("unknown caller session: {caller_session_id}"))?;
 
     let requested = std::path::PathBuf::from(cwd);
-    let target_cwd = resolve_target_cwd(&caller.cwd, &requested, &state.settings.snapshot().projects)?;
+    let mut target_cwd = resolve_target_cwd(&caller.cwd, &requested, &state.settings.snapshot().projects)?;
 
     if respawn && !claim_turn_slot(state, caller_session_id) {
         return Err("this session already respawned during the current turn - one respawn per turn".to_string());
@@ -147,6 +147,18 @@ pub(crate) async fn spawn_chat(
     // its list row and `after` find it by.
     let name = name.or_else(|| sub.as_ref().filter(|p| p.brief.gate).map(|_| GATE_DEFAULT_NAME));
 
+    // A writing sub that gets its own worktree (`subchats::worktree`) runs there,
+    // not in the main chat's folder. The tree is added now, so a failure reaches
+    // the main chat as this call's error; the sub's setup runs at its launch.
+    let sub_id = uuid::Uuid::new_v4().to_string();
+    let tree = plan_worktree(state, &mut sub, &mut target_cwd, &sub_id).await?;
+    // A spawn that fails after its worktree was made must not leave it behind.
+    let discard_tree = |tree: &Option<crate::daemon::subchats::WorktreeInfo>| {
+        if let Some(info) = tree {
+            crate::daemon::subchats::worktree::discard(info);
+        }
+    };
+
     // A sub that must wait for another (`after`) gets its row and its recipe now
     // and its child later, from `subchats::held`.
     if let Some(plan) = sub.as_mut().filter(|p| p.hold.is_some()) {
@@ -157,7 +169,26 @@ pub(crate) async fn spawn_chat(
             account_id: account_id.clone(),
             first_message: plan.first_message.clone(),
         };
-        return crate::daemon::subchats::held::register(state, caller_session_id, name, &inherited, spec, plan).await;
+        let registered = crate::daemon::subchats::held::register(state, caller_session_id, name, &inherited, spec, plan).await;
+        if registered.is_err() {
+            discard_tree(&tree);
+        }
+        return registered;
+    }
+    if let (Some(plan), Some(_)) = (sub.as_mut(), tree.as_ref()) {
+        let spec = crate::daemon::subchats::held::LaunchSpec {
+            cwd: target_cwd.clone(),
+            model: model.clone(),
+            effort: effort.clone(),
+            account_id: account_id.clone(),
+            first_message: plan.first_message.clone(),
+        };
+        let registered =
+            crate::daemon::subchats::worktree::register_and_start(state, caller_session_id, name, &inherited, spec, plan, sub_id).await;
+        if registered.is_err() {
+            discard_tree(&tree);
+        }
+        return registered;
     }
 
     // The writer slot (`subchats::writers`): a sub that edits files either takes a
@@ -226,6 +257,29 @@ pub(crate) async fn spawn_chat(
     };
     adopt_spawned(state, &spawned, caller_session_id, name, respawn, &inherited, &mut sub, first_send).await?;
     Ok(sid)
+}
+
+/// A writing sub's own worktree: when the brief and the project call for one,
+/// adds it, records it in the brief, tells the sub about it in its first message
+/// and moves `target_cwd` into it. Anything else (no sub, a read-only sub, a gate,
+/// a folder that cannot have one) leaves all three alone, so an ordinary chat's
+/// spawn is exactly what it was.
+async fn plan_worktree(
+    state: &Arc<DaemonState>,
+    sub: &mut Option<crate::daemon::subchats::spawn::SubPlan>,
+    target_cwd: &mut std::path::PathBuf,
+    sub_id: &str,
+) -> Result<Option<crate::daemon::subchats::WorktreeInfo>, String> {
+    let Some(plan) = sub.as_mut() else { return Ok(None) };
+    let (st, brief, cwd, id) = (state.clone(), plan.brief.clone(), target_cwd.clone(), sub_id.to_string());
+    let planned = tokio::task::spawn_blocking(move || crate::daemon::subchats::worktree::plan_spawn(&st, &brief, &cwd, &id))
+        .await
+        .map_err(|e| e.to_string())??;
+    let Some(prepared) = planned else { return Ok(None) };
+    plan.brief.worktree_at = Some(prepared.info.clone());
+    plan.first_message.push_str(&crate::daemon::subchats::worktree::first_message_note(&prepared));
+    *target_cwd = std::path::PathBuf::from(&prepared.info.cwd);
+    Ok(Some(prepared.info))
 }
 
 /// The facts about a freshly spawned child that registering it needs.
@@ -473,6 +527,65 @@ mod tests {
         )
         .unwrap()
         .expect("a sub plan")
+    }
+
+    /// A `worktree_each` project at a real scratch repo, a main chat in it with
+    /// Use subchats on, and a plan for one sub of it that `writes` or not.
+    fn tree_fixture(
+        parent: &str,
+        writes: bool,
+    ) -> (tempfile::TempDir, std::path::PathBuf, Arc<DaemonState>, crate::daemon::subchats::spawn::SubPlan) {
+        let (dir, root) = crate::daemon::subchats::git::test_repo::init();
+        let mut settings = Settings::default();
+        let raw = json!({
+            "id": "p1", "path": root, "name": "p", "created_at": "2026-11-05T00:00:00Z",
+            "subchat_writers": "worktree_each",
+        });
+        settings.projects.push(serde_json::from_value(raw).unwrap());
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(settings));
+        state.registry.upsert_interactive(parent, &root, "proj-x", "2026-11-05T00:00:00Z");
+        let cfg = crate::sessions::chat_config::ChatConfig { subchats_on: true, ..Default::default() };
+        let args = crate::daemon::subchats::SubchatArgs {
+            task: Some("t".into()),
+            goal: Some("g".into()),
+            done_when: Some("d".into()),
+            writes: Some(writes),
+            files: writes.then(|| vec!["a.txt".to_string()]),
+            ..Default::default()
+        };
+        let plan = crate::daemon::subchats::spawn::plan(&state, parent, &cfg, &root.to_string_lossy(), None, None, None, Some("job"), &args, &[])
+            .unwrap()
+            .expect("a sub plan");
+        (dir, root, state, plan)
+    }
+
+    #[tokio::test]
+    async fn a_writing_sub_in_a_worktree_each_project_moves_into_its_worktree() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (_d, root, state, plan) = tree_fixture("tree-main", true);
+        let mut sub = Some(plan);
+        let mut cwd = root.clone();
+        let tree = plan_worktree(&state, &mut sub, &mut cwd, "0123456789ab").await.unwrap().expect("a worktree");
+        assert_eq!(cwd, std::path::PathBuf::from(&tree.cwd), "the sub runs in its tree");
+        assert_ne!(crate::util::same_dir(&cwd, &root), true);
+        let plan = sub.unwrap();
+        assert_eq!(plan.brief.worktree_at.as_ref(), Some(&tree), "the path is recorded in the brief that gets stored");
+        assert!(plan.first_message.contains("own git worktree") && plan.first_message.contains(&tree.branch), "{}", plan.first_message);
+    }
+
+    #[tokio::test]
+    async fn a_read_only_sub_and_a_spawn_with_no_sub_plan_are_untouched() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (_d, root, state, plan) = tree_fixture("ro-main", false);
+        let mut cwd = root.clone();
+        let mut ro = Some(plan);
+        assert!(plan_worktree(&state, &mut ro, &mut cwd, "ro0123456789").await.unwrap().is_none());
+        assert_eq!(cwd, root, "a read-only sub stays on the main checkout");
+        assert!(ro.unwrap().brief.worktree_at.is_none());
+        // A mode-off chat and a Jarvis worker reach spawn_chat with no sub plan at all.
+        assert!(plan_worktree(&state, &mut None, &mut cwd, "plain0123456").await.unwrap().is_none());
+        assert_eq!(cwd, root);
+        assert!(!root.join(".claude").exists(), "no worktree folder was made");
     }
 
     async fn adopt(

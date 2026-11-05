@@ -33,6 +33,9 @@ export interface SubFacts {
   /** Why uncommitted is unknown, when the daemon knows why. */
   uncommitted_note?: string | null;
   pushed?: boolean | null;
+  /** A sub in its own worktree only: the branch its commits merge into, and whether they are in it. */
+  merged_into?: string | null;
+  merged?: boolean | null;
   test?: SubTestFact;
   reviewer?: SubReviewerFact;
   head?: string | null;
