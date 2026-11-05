@@ -43,6 +43,8 @@ import {
   createHandleDraftCardClick,
 } from "./chat-renderer-click-handlers";
 import { applySkipMarks, findQuestionIndexById } from "./chat-question-card";
+import { fetchSubCards, mergeSubCards, normalizeCards, subCardEvent, type SubCardEntry } from "./subchat-cards";
+import { getTransport } from "../transport";
 
 export interface SessionMeta {
   model: string | null;
@@ -253,6 +255,13 @@ export class ChatRenderer {
   // when replay finishes. Live events (after hydration) animate normally.
   hydrating = false;
   paginator: ChatPaginator;
+  /** Every sub card known for this chat (stored ones plus live arrivals), by
+   *  time. They are merged into the events by timestamp, never held in the event store. */
+  subCardPool: SubCardEntry[] = [];
+  /** Ids of the pool cards already placed in the timeline, so a card is drawn once
+   *  however it arrives: a load, an older page, or the live frame. */
+  subCardsPlaced = new Set<string>();
+  private unsubscribeCards: (() => void) | null = null;
   // Pauses `.rainbow-keyword`'s animation off-screen (todo 185). The Mutation-
   // Observer auto-observes each new `.msg`, so no call site needs to know.
   private animObserver: IntersectionObserver | null = null;
@@ -383,6 +392,7 @@ export class ChatRenderer {
       clampUserMessages: () => clampUserMessages(this.messages, this.messageEls),
       // Rows from an older page were never seen at full size: no shrink animation.
       sweepCards: () => sweepOldCards(this.messages, this.messageEls, false),
+      mergeSubCards: (events) => mergeSubCards(events, this.subCardPool, this.subCardsPlaced, this.sessionId !== null && sessionEvents.hasMore(this.sessionId)),
       foldClosedRange: (start, end, usage, tsSpanMs) => foldClosedRange(this, start, end, usage, tsSpanMs),
       // Prepend: every tracked index moves down the transcript by n.
       onShift: (n) => this.remapIndices((i) => i + n),
@@ -400,6 +410,8 @@ export class ChatRenderer {
     this.meta = { model: null, inputTokens: 0, hasThinking: false, totalCostUsd: 0, hasUsage: false };
     this._cumulative = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, turns: 0, costUsd: 0 };
     this.channelMessages = undefined;
+    this.subCardPool = [];
+    this.subCardsPlaced.clear();
     this.fileEdits = [];
     this.lastActivity = null;
     this.lastActivityDetail = null;
@@ -528,6 +540,7 @@ export class ChatRenderer {
     // Skip marks and the real repo-channel backlog, both fetched once per
     // hydrate alongside the history page.
     const sides = startSideFetches(sid);
+    const cardsFetch = fetchSubCards(sid);
     const events = await timedPhase(sid, "history-page", sessionEvents.loadInitial(sid, cwd));
     // The two side fetches go over the daemon pipe, whose calls have no
     // timeout, so they get a short grace past the history page and no more:
@@ -541,7 +554,16 @@ export class ChatRenderer {
       this.paginator.skipMarks = [];
       this.channelMessages = undefined;
     }
-    await bulkLoadEvents(this, [...events], opts);
+    // The sub cards ride the same short grace as the side fetches: a stuck pipe
+    // paints the chat without them, and they are placed in place when they land.
+    const cards = await raceCards(cardsFetch);
+    if (this.sessionId !== sid) return;
+    if (cards) this.addSubCards(cards);
+    // Cleared right before the merge, so a card that arrived live while the page
+    // was loading is placed by this load rather than lost with the rows it wiped.
+    this.subCardsPlaced.clear();
+    const merged = mergeSubCards([...events], this.subCardPool, this.subCardsPlaced, sessionEvents.hasMore(sid));
+    await bulkLoadEvents(this, merged, opts);
     // A newer load superseded this one while it yielded: it owns the DOM and
     // the paginator, and installing here would hook the observer twice.
     if (this.sessionId !== sid || this._loadSeq !== seq) return;
@@ -554,6 +576,34 @@ export class ChatRenderer {
         if (this.sessionId === sid && this._loadSeq === seq) this.applyLateSides(answer);
       });
     }
+    if (!cards) {
+      void cardsFetch.then((late) => {
+        if (this.sessionId !== sid || this._loadSeq !== seq) return;
+        const fresh = late.filter((c) => !this.subCardPool.some((p) => p.id === c.id));
+        // Their place in the timeline depends on their neighbours, so a late set
+        // reloads the page from the cached events instead of splicing rows in.
+        if (fresh.length > 0) { this.addSubCards(fresh); void this.loadFromStore(cwd, opts); }
+      });
+    }
+  }
+
+  /** Adds cards to the pool, once each, kept in time order. */
+  private addSubCards(cards: readonly SubCardEntry[]): void {
+    const known = new Set(this.subCardPool.map((c) => c.id));
+    const fresh = cards.filter((c) => !known.has(c.id));
+    if (fresh.length === 0) return;
+    this.subCardPool = [...this.subCardPool, ...fresh].sort((a, b) => a.ts - b.ts);
+  }
+
+  /** A `subchat-card` frame: a sub of this chat drew a card just now. */
+  private onSubCardFrame(payload: { session_id?: string; card?: unknown } | null | undefined): void {
+    if (!payload || payload.session_id !== this.sessionId) return;
+    const [card] = normalizeCards([payload.card]);
+    if (!card) return;
+    this.addSubCards([card]);
+    if (this.subCardsPlaced.has(card.id)) return;
+    this.subCardsPlaced.add(card.id);
+    this.handleLive(subCardEvent(card));
   }
 
   private applyLateSides([marks, channelMessages]: SideAnswer): void {
@@ -577,6 +627,7 @@ export class ChatRenderer {
       try { this.unsubscribeTail(); } catch { /* ignore */ }
       this.unsubscribeTail = null;
     }
+    this.dropCardListener();
     this.paginator.remove();
     this.paginator.resetTurnCarry();
     this.removeAnimObserver();
@@ -622,6 +673,29 @@ export class ChatRenderer {
     this.unsubscribeTail = sessionEvents.subscribeTranscriptTail(sessionId, (sigs) => {
       this.onTranscriptTail(sigs);
     });
+    this.listenForSubCards();
+  }
+
+  private dropCardListener(): void {
+    if (!this.unsubscribeCards) return;
+    try { this.unsubscribeCards(); } catch { /* ignore */ }
+    this.unsubscribeCards = null;
+  }
+
+  /** One listener per attached chat. A frame for another chat is ignored in the
+   *  handler, so a retained renderer needs no re-arming when the chat changes. */
+  private listenForSubCards(): void {
+    this.dropCardListener();
+    let cancelled = false;
+    this.unsubscribeCards = () => { cancelled = true; };
+    void getTransport()
+      .listen<{ session_id?: string; card?: unknown }>("subchat-card", (p) => this.onSubCardFrame(p))
+      .then((off) => {
+        // Detached or re-armed before the listener existed: undo it at once.
+        if (cancelled) { try { off(); } catch { /* ignore */ } return; }
+        this.unsubscribeCards = off;
+      })
+      .catch(() => { /* no transport (a test double): the stored cards still load */ });
   }
 
   /** Delegates to chat-resync.ts. Kept as a method so tests can drive the
@@ -778,4 +852,16 @@ export class ChatRenderer {
     wrap.appendChild(btn);
     last.appendChild(wrap);
   }
+}
+
+/** The card fetch, or null when it is slower than the open should wait. */
+async function raceCards(fetch: Promise<SubCardEntry[]>): Promise<SubCardEntry[] | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = Symbol("late");
+  const got = await Promise.race([
+    fetch,
+    new Promise<typeof late>((resolve) => { timer = setTimeout(() => resolve(late), 500); }),
+  ]);
+  clearTimeout(timer);
+  return got === late ? null : got;
 }

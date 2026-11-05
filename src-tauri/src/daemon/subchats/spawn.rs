@@ -51,6 +51,11 @@ impl SubPlan {
 /// before the cap slot is released, so the sub is never uncounted in between.
 pub fn mark_as_sub(state: &DaemonState, sid: &str, plan: &mut SubPlan) {
     state.registry.set_subchat_of(sid, Some(plan.parent.clone()));
+    // Before the sub's first message is sent, so every commit it makes lands
+    // after this head: the base its facts count from (`facts.rs`).
+    if let Some(inst) = state.registry.get(sid) {
+        plan.brief.git_head_at_spawn = super::git::head(&inst.cwd);
+    }
     crate::sessions::chat_config::set_subchat(sid, Some(plan.brief.clone()));
     plan.release_slot();
 }
@@ -472,6 +477,7 @@ mod tests {
         assert_eq!(inst.subchat_of.as_deref(), Some("holder-b"));
         let stored = crate::sessions::chat_config::get("new-sub").unwrap().subchat.expect("brief stored");
         assert_eq!((stored.parent.as_str(), stored.task.as_str(), stored.writes), ("holder-b", "t", false));
+        assert_eq!(stored.git_head_at_spawn, super::super::git::head(&inst.cwd), "the base the facts count from is stored");
         assert!(crate::sessions::chat_config::sub_session_ids().contains("new-sub"));
         // The row counts now and the reservation is gone: 1 running + 4 in flight
         // fills the cap, so a double-counted slot would refuse the fourth plan.

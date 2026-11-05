@@ -97,6 +97,6 @@ export function openCounts(card: MessageCard): { yours: number; notDone: number;
 }
 
 /** A message that draws a visible row: a card or a legacy bubble, but not an ack. */
-export function isVisibleMessage(m: { kind: string; card?: MessageCard; failed?: boolean; retracted?: boolean }): boolean {
-  return m.kind === "message" && !m.failed && !m.retracted && m.card?.kind !== "ack";
+export function isVisibleMessage(m: { kind: string; card?: MessageCard; failed?: boolean; retracted?: boolean; subCard?: unknown }): boolean {
+  return m.kind === "message" && !m.failed && !m.retracted && !m.subCard && m.card?.kind !== "ack";
 }

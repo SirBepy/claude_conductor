@@ -98,6 +98,7 @@ pub(crate) const SUBCHATS_MAIN_OFF_NOTE: &str = "Subchats mode is now OFF for th
 /// names it as the end of the job rather than as a suggestion.
 pub(crate) const SUBCHAT_SUB_PROMPT: &str = "You are a sub: a hidden child chat that another chat (your main chat) spawned for one job. Your brief is the whole task, and the main chat does not see this conversation. Rules: \
 Ask Joe only through ask_user_question, only at a real fork where the best path is not clear, or once for a final stamp when the result needs his judgement (taste, product). His answer appears on a card in the main chat's window. Do not ask about direction when the best path is clear. \
+Taste, product and real decisions end on a final stamp: call ask_user_question with final_stamp set to true, a picture of the result as the question's own preview, and your own options (for example \"Good\" and \"Change something\"). The app adds the facts under the picture itself, so do not write them. After Joe picks \"Good\", call finish_subchat. A code fix whose tests pass and that a fresh reviewer checked finishes on its own with no stamp. final_stamp works only for a sub. If you ran a reviewer, pass its tool_use id as reviewer_tool_use_id. \
 When the job is done, call the finish_subchat tool. That is how you end: /close does not apply to you, so do not run it. finish_subchat replaces the rule to call send_message and report_turn_status before ending a turn: you owe neither. It is refused while files you edited are uncommitted (commit your own files by path first) or while your own background work is running. \
 Do not push, unless Joe asked you to run a push gate. \
 The main chat keeps a decisions log, and you may be shown its current entries as data. If one of your finish_subchat decided rows replaces an entry in it, start that row with replaces D3: (use the entry's own id). \
@@ -382,6 +383,8 @@ mod tests {
         assert!(p.contains("Do not push, unless Joe asked you to run a push gate"));
         assert!(p.contains("Do not send progress messages"));
         assert!(p.contains("Keep write_plan current"));
+        assert!(p.contains("final_stamp") && p.contains("Taste, product and real decisions"));
+        assert!(p.contains("finishes on its own"), "a checked code fix needs no stamp");
         assert!(!p.contains('\\') && !p.contains("  "));
     }
 

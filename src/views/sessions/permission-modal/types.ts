@@ -1,3 +1,4 @@
+import type { SubFacts } from "../../../shared/chat/subchat-cards";
 /** Where a prompt's card shows, stamped by the daemon (subchats/routing.rs).
  *  `session_id` is always the asker and the answer target. For a hidden sub,
  *  `display_session_id` is its main chat, whose window shows the card. Absent
@@ -85,6 +86,13 @@ export interface Question {
 export interface QuestionRequestedPayload extends PromptRouting {
   id: string;
   questions: Question | Question[];
+  /** Raised by the daemon for its own code (a stalled sub, a close approval),
+   *  not asked by a model: its answer goes to daemon code alone, so the card has
+   *  no free-text box and no answer path posts a message to the chat it shows in. */
+  daemon_card?: boolean;
+  /** Set by the daemon on a sub's final-stamp question: the facts it read from
+   *  git and the sub's transcript, shown as chips under the picture. */
+  final_stamp?: { sub_id?: string; facts: SubFacts };
   /** Set by the daemon's builtin-AskUserQuestion hard-block fallback
    *  (hooks_server/question.rs) when the model ignored the redirect to the
    *  MCP tool - never present on the normal path. */
@@ -193,6 +201,11 @@ export interface QuestionUIOpts {
    *  draws no strip. */
   askers?: () => AskerChip[] | null;
   onPickAsker?: (askerId: string) => void;
+  /** A card the daemon raised for its own code. Draws no free-text box: there is
+   *  no model to read one, and the answer is one of the card's options. */
+  daemonCard?: boolean;
+  /** A sub's final stamp: the fact chips drawn under the question's picture. */
+  finalStamp?: { facts: SubFacts };
   /** Set on a hidden sub's card: Joe does not read the sub, so the card names it
    *  and its one-line job. `task` is omitted while the daemon has none. */
   from?: { name?: string; task?: string };

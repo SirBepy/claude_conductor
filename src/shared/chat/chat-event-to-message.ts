@@ -2,6 +2,7 @@ import type { ContentBlock, ChatEvent } from "../../types/ipc.generated";
 import { parseDetails } from "./chat-details";
 import { parseNextActions } from "./chat-next-actions";
 import { parseMessageCard } from "./chat-message-kinds";
+import { subCardRow } from "./subchat-cards";
 import {
   type RenderedMessage,
   isCompactUserMessage,
@@ -167,6 +168,8 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
       return { kind: "assistant", content: ev.content, streaming: ev.streaming, ts };
     }
     case "tool_use":
+      // A sub's card merged into this main chat (subchat-cards.ts).
+      if (ev.tool_name === "cc_subchat_card") return subCardRow(ev);
       // Mirrors chat-event-handler.ts's live-path special-case so a send_message
       // call renders as a bubble on the older-page (scrollback) path too,
       // instead of hidden narration (see project_quiet_mode_chat_architecture).

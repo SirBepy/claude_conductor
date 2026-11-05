@@ -123,6 +123,17 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
     router.register("list_subchats_on", move |_params, _ctx| {
         async move { Ok(json!(crate::sessions::chat_config::list_subchats_on())) }
     });
+    // A main chat's sub cards (verdicts, blockers, "all finished"), oldest
+    // first. The chat merges them into its own transcript by timestamp.
+    router.register("list_subchat_cards", move |params, _ctx| {
+        async move {
+            #[derive(serde::Deserialize)]
+            struct P { session_id: String }
+            let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+            Ok(json!(crate::daemon::subchats::card_log::read(&p.session_id)))
+        }
+    });
     // Read-only; mirrors the desktop `get_chat_state` Tauri command so a
     // remote/phone client can seed the same unread-vs-stale judgement a
     // freshly-opened desktop window would.

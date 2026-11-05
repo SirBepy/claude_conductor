@@ -27,6 +27,9 @@ export interface PaginatorCallbacks {
   clampUserMessages(): void;
   /** Re-derive which message cards are old after rows were prepended. */
   sweepCards(): void;
+  /** Splices a main chat's sub cards into an older page by timestamp. Absent
+   *  for a paginator that has none. */
+  mergeSubCards?(events: ChatEvent[]): ChatEvent[];
   /** Called after a prepend with the number of rows inserted at the front. */
   onShift(n: number): void;
   /**
@@ -72,7 +75,7 @@ export function resolveOrdinalIn(messages: RenderedMessage[], n: number): number
       if (++boundaries >= 2) return -1;
       continue;
     }
-    if (m.kind === "message" && !m.retracted && ++seen === n) return i;
+    if (m.kind === "message" && !m.retracted && !m.subCard && ++seen === n) return i;
   }
   return -1;
 }
@@ -173,7 +176,7 @@ export class ChatPaginator {
       return;
     }
 
-    this.prependEvents(older);
+    this.prependEvents(this.cb.mergeSubCards ? this.cb.mergeSubCards(older) : older);
     if (this.cb.getSessionId() !== sid) return;
 
     if (scroller) {

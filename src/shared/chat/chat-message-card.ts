@@ -15,6 +15,15 @@ export type RenderText = (markdown: string) => string;
 
 type Tone = "good" | "bad" | "warn" | "neutral";
 
+/** What a sub's card adds to the common card: the sub's name (so Joe knows which
+ *  job spoke), the fact chips under it, and a fixed verdict colour for a card
+ *  whose verdict code, not a model, wrote. */
+export interface CardExtras {
+  tag?: string;
+  extraHtml?: string;
+  tone?: Tone;
+}
+
 interface KindStyle {
   icon: string;
   label: string;
@@ -58,13 +67,14 @@ function reportVerdictHtml(card: MessageCard, verdict: string): string {
   return `${span("good", verdict.slice(0, at + 1))} ${span("warn", verdict.slice(at + 2))}`;
 }
 
-function verdictHtml(card: MessageCard, verdict: string): string {
+function verdictHtml(card: MessageCard, verdict: string, extras?: CardExtras): string {
+  if (extras?.tone) return span(extras.tone, verdict);
   return card.kind === "report" ? reportVerdictHtml(card, verdict) : span(toneOf(card), verdict);
 }
 
 /** The mini card's verdict is one colour: it is a label for a row, not a headline. */
-function miniVerdictHtml(card: MessageCard, verdict: string): string {
-  const tone: Tone = card.kind === "report" ? (openCounts(card).total === 0 ? "good" : "warn") : toneOf(card);
+function miniVerdictHtml(card: MessageCard, verdict: string, extras?: CardExtras): string {
+  const tone: Tone = extras?.tone ?? (card.kind === "report" ? (openCounts(card).total === 0 ? "good" : "warn") : toneOf(card));
   return span(tone, verdict);
 }
 
@@ -124,13 +134,19 @@ function copyBlockHtml(copy: string): string {
   return `<div class="copyable-block code-card"><pre>${escapeHtml(copy)}</pre><button class="copy-btn" aria-label="Copy"><i class="ph ph-copy"></i></button></div>`;
 }
 
-function fullHtml(m: RenderedMessage, card: MessageCard, text: RenderText): string {
+/** The sub's name above its card: a quiet line with the subchat icon. */
+function subTagHtml(tag: string): string {
+  return `<div class="mc-sub"><i class="ph ph-tree-structure" aria-hidden="true"></i><span class="mc-sub-name">${escapeHtml(tag)}</span></div>`;
+}
+
+function fullHtml(m: RenderedMessage, card: MessageCard, text: RenderText, extras?: CardExtras): string {
   const style = KIND_STYLE[card.kind];
   const head = headlineOf(m.text ?? "");
   const body = bodyOf(m.text ?? "");
   const parts: string[] = [];
+  if (extras?.tag) parts.push(subTagHtml(extras.tag));
   if (style) parts.push(`<div class="mc-label"><i class="ph ${style.icon}" aria-hidden="true"></i>${style.label}</div>`);
-  if (card.verdict) parts.push(`<p class="mc-verdict">${verdictHtml(card, card.verdict)}</p>`);
+  if (card.verdict) parts.push(`<p class="mc-verdict">${verdictHtml(card, card.verdict, extras)}</p>`);
   if (head) parts.push(`<div class="mc-head${card.verdict ? "" : " mc-head--main"}">${text(head)}</div>`);
   if (body) parts.push(`<div class="mc-body">${text(body)}</div>`);
   if (card.copy) parts.push(copyBlockHtml(card.copy));
@@ -146,6 +162,7 @@ function fullHtml(m: RenderedMessage, card: MessageCard, text: RenderText): stri
     }
   }
   if (card.points?.length) parts.push(pointsDetailsHtml(card.points, text));
+  if (extras?.extraHtml) parts.push(extras.extraHtml);
   return parts.join("");
 }
 
@@ -155,18 +172,21 @@ function miniOpenText(card: MessageCard): string {
   return [yours > 0 ? "your move" : "", notDone > 0 ? `${notDone} not done` : "", waiting > 0 ? `${waiting} waiting` : ""].filter(Boolean).join(", ");
 }
 
-function miniHtml(m: RenderedMessage, card: MessageCard, text: RenderText): string {
+function miniHtml(m: RenderedMessage, card: MessageCard, text: RenderText, extras?: CardExtras): string {
   const style = KIND_STYLE[card.kind];
   const head = headlineOf(m.text ?? "");
   const body = bodyOf(m.text ?? "");
   // A kind with no verdict (plan, handoff, artifact) names itself instead, so the row is not an unlabelled sentence.
-  const lead = card.verdict ? miniVerdictHtml(card, card.verdict) : style ? `<span class="mc-t-muted">${style.label}</span>` : "";
+  const verdictLead = card.verdict ? miniVerdictHtml(card, card.verdict, extras) : style ? `<span class="mc-t-muted">${style.label}</span>` : "";
+  // The name stays in the one-line form: a shrunken sub card must still say which job it is.
+  const lead = extras?.tag ? `<span class="mc-sub-name mc-sub-name--mini">${escapeHtml(extras.tag)}</span> ${verdictLead}` : verdictLead;
   const open = card.kind === "report" ? miniOpenText(card) : "";
   const inner: string[] = [];
   if (body) inner.push(`<div class="mc-body">${text(body)}</div>`);
   if (card.copy) inner.push(copyBlockHtml(card.copy));
   if (card.points?.length) inner.push(`<ul class="mc-points-list">${card.points.map((p) => `<li>${text(p)}</li>`).join("")}</ul>`);
   if (card.kind === "report") inner.push(`<div class="mc-secs">${reportSections(card, text, true)}</div>`, drillRowHtml(m));
+  if (extras?.extraHtml) inner.push(extras.extraHtml);
   // Always a <details>, even with nothing behind the row: opening it un-truncates the headline.
   const summary = `<summary class="mc-mini-row"><b class="mc-mini-lead">${lead}</b><span class="mc-mini-head">${escapeHtml(plainInline(head))}</span>${open ? `<em class="mc-mini-open">${open}</em>` : ""}${caret}</summary>`;
   return `<details class="mc-mini-d">${summary}${inner.length ? `<div class="mc-mini-body">${inner.join("")}</div>` : ""}</details>`;
@@ -177,7 +197,7 @@ const fold = (cls: string, inner: string) => `<div class="mc-fold ${cls}"><div c
 
 /** The root keeps `msg assistant` and `data-details`: drill-links.ts, the copy
  *  button and `injectCta` all find a bubble by those. */
-export function renderMessageCard(m: RenderedMessage, card: MessageCard, text: RenderText): string {
+export function renderMessageCard(m: RenderedMessage, card: MessageCard, text: RenderText, extras?: CardExtras): string {
   const dim = m.dimmed ? " dimmed" : "";
   const details = m.details?.length ? ` data-details="${escapeHtml(JSON.stringify(m.details))}"` : "";
   if (card.kind === "ack") {
@@ -187,12 +207,12 @@ export function renderMessageCard(m: RenderedMessage, card: MessageCard, text: R
   const was = card.was ? `<div class="mc-was"><i class="ph ph-arrow-elbow-down-right" aria-hidden="true"></i><s>${escapeHtml(card.was)}</s></div>` : "";
   const classes = `msg assistant mc-root${FYI.has(card.kind) ? " mc-fyi" : ""}${dim}`;
   return (
-    `<div class="${classes}" data-card-kind="${card.kind}"${details}>` +
+    `<div class="${classes}" data-card-kind="${card.kind}"${extras ? ` data-sub-card="1"` : ""}${details}>` +
     was +
     `<div class="mc-card mc-k-${card.kind}">` +
     `<button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button>` +
-    fold("mc-full", fullHtml(m, card, text)) +
-    fold("mc-mini", miniHtml(m, card, text)) +
+    fold("mc-full", fullHtml(m, card, text, extras)) +
+    fold("mc-mini", miniHtml(m, card, text, extras)) +
     `</div></div>`
   );
 }

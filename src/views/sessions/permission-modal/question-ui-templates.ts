@@ -1,3 +1,4 @@
+import { factsHtml } from "../../../shared/chat/chat-subchat-card";
 // Pure HTML builders for the AUQ question card, split out of
 // question-ui-render.ts (ai_todo 600) so the stateful half stays under the
 // project's ~300-line file-size guidance. No DOM reads/writes, no closures -
@@ -192,6 +193,7 @@ export function panelHtml(
   return `
     <section class="prompt-panel${isActive ? " is-active" : ""}${layout ? ` prompt-panel--preview-${layout}` : ""}" data-panel="${qi}" style="--dom:${domainVar(q.domain)}">
       ${questionPictureHtml(q, qi, opts.sessionId)}
+      ${qi === 0 && opts.finalStamp ? `<div class="prompt-stamp-facts">${factsHtml(opts.finalStamp.facts)}</div>` : ""}
       ${questionZonesHtml(q)}
       ${pickSect}
     </section>

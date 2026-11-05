@@ -18,14 +18,17 @@ use crate::daemon::state::DaemonState;
 use crate::types::Instance;
 use std::sync::Arc;
 
+pub mod card_log;
 pub mod cards;
 pub mod checkup;
 pub mod decisions;
+pub mod facts;
 pub mod finish;
 pub(crate) mod git;
 mod resume;
 pub(crate) mod runtime;
 pub mod stall;
+pub mod stamp;
 pub mod stuck;
 pub mod turn_end;
 
@@ -73,6 +76,7 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     test_support::record_finished(sub_id);
     // The decisions log and, from it, the checkup counter.
     decisions::on_finished(state, sub_id);
+    card_log::on_finished(state, sub_id);
 }
 
 #[cfg(test)]

@@ -196,6 +196,14 @@ pub(crate) async fn respond_question_inner(
     if !skipped {
         crate::daemon::subchats::decisions::record_card_answer(state, request_id, &answers).await;
     }
+    // A card the daemon raised for its own code (stuck sub, close approval)
+    // shows in a main chat that never asked it: the answer belongs to daemon
+    // code alone. Read before `settle_prompt` removes the payload.
+    let daemon_card = state
+        .list_prompts()
+        .await
+        .iter()
+        .any(|p| p["id"].as_str() == Some(request_id) && p["payload"]["daemon_card"].as_bool() == Some(true));
     let tx = state.pending.lock().await.remove(request_id);
     let delivered = match tx {
         Some(tx) => {
@@ -205,12 +213,15 @@ pub(crate) async fn respond_question_inner(
         None => false,
     };
     settle_prompt(state, request_id, true).await;
-    if !skipped && !delivered {
+    // A daemon card that was withdrawn first must not wake the chat it showed in
+    // (the answer would have no model to go to), and a Skip leaves no mark or
+    // `question_skipped` row in a transcript that never held the card.
+    if !skipped && !delivered && !daemon_card {
         if let Some(sid) = session_id.as_deref() {
             bridge_to_followup_turn(state, sid);
         }
     }
-    if skipped {
+    if skipped && !daemon_card {
         if let Some(sid) = session_id.as_deref() {
             record_skip(state, sid, request_id);
         }
@@ -473,6 +484,24 @@ mod answer_bridge_tests {
     fn a_malformed_marker_does_not_hide_the_real_one_after_it() {
         assert_eq!(auq_answer_ids("<auq-answer id=\"abc <auq-answer id=\"real\"/>"), ["real"]);
         assert_eq!(auq_answer_ids("<auq-answer id=\"\"/> <auq-answer id=\"b\"/>"), ["b"]);
+    }
+
+    /// A daemon card shows in a main chat that never asked it. Its answer going
+    /// undelivered (the card was withdrawn first) must not open a follow-up turn
+    /// on that chat, which would wake the main agent.
+    #[tokio::test]
+    async fn an_undelivered_daemon_card_never_bridges_to_the_chat_it_shows_in() {
+        let state = state_with_idle_session("s");
+        state.registry.set_awaiting("s", Some("question".into()));
+        state
+            .add_prompt("d1", "question-requested", json!({"session_id": "s", "daemon_card": true}), true)
+            .await;
+        assert!(!respond_question_inner(&state, "d1", json!({"q": "End it"}), false).await);
+        assert_ne!(state.registry.get("s").unwrap().awaiting.as_deref(), Some("working"), "no turn was bridged");
+        // The same undelivered answer on a model's card still bridges, as before.
+        state.add_prompt("m1", "question-requested", json!({"session_id": "s"}), true).await;
+        assert!(!respond_question_inner(&state, "m1", json!({}), false).await);
+        assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some("working"));
     }
 
     #[tokio::test]

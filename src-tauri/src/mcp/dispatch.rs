@@ -89,11 +89,18 @@ fn prompt_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 Ok(q) => q,
                 Err(reason) => return Some(tool_error_result(ctx.id, &reason)),
             };
-            let body = json!({
+            let mut body = json!({
                 "id": request_id,
                 "questions": questions,
                 "session_id": ctx.session_id,
             });
+            // Only sent when set, so an ordinary question's body is unchanged.
+            if ctx.args["final_stamp"].as_bool() == Some(true) {
+                body["final_stamp"] = json!(true);
+                if let Some(id) = ctx.args["reviewer_tool_use_id"].as_str() {
+                    body["reviewer_tool_use_id"] = json!(id);
+                }
+            }
             Some(ctx.relay("/questions/request", body, None, None))
         }
         TOOL_REQUEST_SECRET => {

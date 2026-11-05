@@ -5,6 +5,7 @@ import { parseFileEdit } from "./file-edits";
 import { keepFilePathsLiteral } from "./file-ref-match";
 import { renderEditWindow } from "./edit-window";
 import { renderMessageCard } from "./chat-message-card";
+import { renderSubCard } from "./chat-subchat-card";
 import { basename } from "../path-utils";
 import { toolSummary } from "./tool-meta";
 import { elidedRefOf, elidedRowHtml } from "./elided-image";
@@ -317,6 +318,7 @@ export function renderMessage(m: RenderedMessage): string {
       }
       // A declared kind draws as a card; a message with none (every old
       // transcript) falls through to the bubble below, byte for byte.
+      if (m.card && m.subCard) return renderSubCard(m, m.subCard, (t) => renderTextBlock(t));
       if (m.card) return renderMessageCard(m, m.card, (t) => renderTextBlock(t));
       // data-details carries the bodies so drill-links.ts can resolve a later
       // message's `#d:id` against this one straight from the DOM.

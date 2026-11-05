@@ -53,12 +53,18 @@ pub(super) async fn set_question_awaiting(state: &Arc<DaemonState>, session_id: 
     changed
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub(super) struct QuestRequestBody {
     id: String,
     questions: Value,
     #[serde(default)]
     session_id: Option<String>,
+    /// Set by a sub that is ending a job on Joe's judgement. See
+    /// `subchats::stamp`.
+    #[serde(default)]
+    final_stamp: bool,
+    #[serde(default)]
+    reviewer_tool_use_id: Option<String>,
 }
 
 /// True if `input` is a well-formed AskUserQuestion-shaped tool call (used by
@@ -179,11 +185,25 @@ pub(super) async fn on_question_request(
     if let Some(sid) = body.session_id.as_deref() {
         super::mark_mcp_tool_used(&ctx, sid);
     }
-    let payload = json!({
+    let mut payload = json!({
         "id": body.id,
         "questions": body.questions,
         "session_id": body.session_id,
     });
+    if body.final_stamp {
+        // Refused before anything is posted or registered: a non-sub's stamp
+        // would show facts for a chat that has no brief to check them against.
+        match crate::daemon::subchats::stamp::final_stamp_payload(
+            &ctx.state,
+            body.session_id.as_deref().unwrap_or(""),
+            body.reviewer_tool_use_id.as_deref(),
+        )
+        .await
+        {
+            Ok(stamp) => payload["final_stamp"] = stamp,
+            Err(note) => return (StatusCode::OK, Json(json!({ "acknowledged": false, "note": note }))),
+        }
+    }
     // Registered BEFORE the post so a confirmation that races in fast (a
     // client already polling) can never land before there's a waiter to hit.
     let confirm_rx = ctx.state.register_render_confirm(&body.id).await;
@@ -525,6 +545,7 @@ mod tests {
                 id: id.to_string(),
                 questions: json!([{ "question": "Tabs or spaces?" }]),
                 session_id: Some(sid.to_string()),
+                ..Default::default()
             };
             let resp = on_question_request(AxState(ctx.clone()), ValidatedJson(body)).await.into_response();
             let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
@@ -599,6 +620,7 @@ mod tests {
             id: "q1".to_string(),
             questions: json!([{ "question": "Tabs or spaces?" }]),
             session_id: Some("s1".to_string()),
+            ..Default::default()
         };
         let confirmer_state = state.clone();
         let confirmer = tokio::spawn(async move {
@@ -637,6 +659,7 @@ mod tests {
             id: "q2".to_string(),
             questions: json!([{ "question": "Tabs or spaces?" }]),
             session_id: Some("s1".to_string()),
+            ..Default::default()
         };
         let confirmer_state = state.clone();
         let confirmer = tokio::spawn(async move {
@@ -675,5 +698,29 @@ mod tests {
         let ctx = Arc::new(HookCtx { state });
         let decision = ask_question_decision(&ctx, json!({ "tool_input": {} })).await;
         assert_eq!(decision["hookSpecificOutput"]["permissionDecision"], "deny");
+    }
+
+    /// `final_stamp` from a chat that is not a sub is refused before anything is
+    /// posted: no card, no pending prompt, no awaiting state.
+    #[tokio::test]
+    async fn final_stamp_from_a_non_sub_is_refused_and_posts_nothing() {
+        let ctx = Arc::new(HookCtx {
+            state: DaemonState::new(new_session_map(), SettingsCache::new(Settings::default())),
+        });
+        ctx.state.registry.upsert_interactive("plain", std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        let body = QuestRequestBody {
+            id: "q-stamp".to_string(),
+            questions: json!([{ "question": "Good?" }]),
+            session_id: Some("plain".to_string()),
+            final_stamp: true,
+            ..Default::default()
+        };
+        let resp = on_question_request(AxState(ctx.clone()), ValidatedJson(body)).await.into_response();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["acknowledged"], json!(false));
+        assert!(v["note"].as_str().unwrap().contains("only for a sub"), "{v}");
+        assert!(ctx.state.list_prompts().await.is_empty(), "nothing was posted");
+        assert_ne!(ctx.state.registry.get("plain").unwrap().awaiting.as_deref(), Some("question"));
     }
 }

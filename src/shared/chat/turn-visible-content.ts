@@ -29,7 +29,8 @@ export function turnProducedVisibleContent(r: ChatRenderer): boolean {
         // An ack renders as hidden narration, so it is not on screen. A
         // retracted message still draws its "Retracted" pill, which is why
         // this does not reuse isVisibleMessage (that one drops retracted too).
-        if (!m.failed && m.card?.kind !== "ack") return true;
+        // A sub's card is not this turn speaking.
+        if (!m.failed && !m.subCard && m.card?.kind !== "ack") return true;
         break;
       case "user":
       case "question":

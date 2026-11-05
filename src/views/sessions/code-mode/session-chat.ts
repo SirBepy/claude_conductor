@@ -11,7 +11,7 @@ function latestMessage(renderer: ChatRenderer | null): string {
   const msgs = renderer?.messages ?? [];
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i]!;
-    if (m.kind === "message" && m.text) return m.text.replace(/\s+/g, " ").trim();
+    if (m.kind === "message" && !m.subCard && m.text) return m.text.replace(/\s+/g, " ").trim();
   }
   return "";
 }

@@ -136,6 +136,7 @@ export async function showQuestionCard(
   const askerId = payload.session_id;
   const shownOn = displayIdOf(payload);
   const fromSub = isSubPrompt(payload);
+  const daemonCard = payload.daemon_card === true;
   renderQuestionUI({
     id: payload.id,
     sessionId: payload.session_id,
@@ -155,7 +156,9 @@ export async function showQuestionCard(
     cancelLabel: "Skip",
     // Only this flow delivers an extra message / pasted images to Claude -
     // the built-in-tool flow in permission-card.ts settles via deny.message.
-    supportsExtras: true,
+    supportsExtras: !daemonCard,
+    daemonCard,
+    finalStamp: payload.final_stamp,
     // Lives on the PROMPT PAYLOAD (question.rs), never the model's tool_use
     // input - the one place this is actually readable.
     degradedBuiltin: payload.degraded_builtin === true,
@@ -180,6 +183,22 @@ export async function showQuestionCard(
       // so localStorage is the only surviving draft. Cleared per-branch below.
       void clearAuqPush(payload.session_id, payload.id);
       const sid = payload.session_id;
+      // A daemon card answers daemon code and nothing else. Its `session_id` is
+      // the main chat it shows in, so every branch below (the answer message, the
+      // extras, the chat's composer draft and held queue) would reach that chat's
+      // model. It settles the card and stops, whether or not the oneshot was still
+      // there: a card withdrawn before the click has no model to tell.
+      if (daemonCard) {
+        try {
+          await invoke("respond_question", { id: payload.id, sessionId: payload.session_id, answers, skipped: false });
+        } catch (e) {
+          console.warn("respond_question (daemon card) failed:", e);
+          clearPendingPromptById(payload.id);
+          rerenderSidebar();
+        }
+        clearQuestionDraft(payload.id);
+        return;
+      }
       // Settle the daemon card + learn whether a live oneshot was resolved:
       // delivered=true means the answer already reached the model in-band.
       // `=== true`, never truthiness: the daemon's raw envelope would
