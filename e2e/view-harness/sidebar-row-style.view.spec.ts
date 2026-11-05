@@ -42,10 +42,11 @@ test.describe("view-harness / chat row style", () => {
     const row = page.locator("#sessions-list li[data-session-id]").first();
 
     await expect(row).toHaveClass(/row-portrait/);
-    // The title is the bold first line (tooltip keeps the full text once it
-    // ellipsizes); the project name is the small line under it.
+    // The title is the bold first line (the hover card keeps the full text once
+    // it ellipsizes, so no tip of its own on desktop); the project name is the
+    // small line under it.
     await expect(row.locator(".session-row-title-text")).toHaveText("Session card round six chips");
-    await expect(row.locator(".session-row-title-text")).toHaveAttribute("data-tip", "Session card round six chips");
+    await expect(row.locator(".session-row-title-text")).not.toHaveAttribute("data-tip", /.*/);
     await expect(row.locator(".proj-name")).toHaveText("claude_usage_in_taskbar");
     const [title, project] = await Promise.all([
       row.locator(".session-row-title").boundingBox(),

@@ -65,8 +65,11 @@ export interface RowOptions {
  *  placeholder heading (d153323b). */
 export function renderSidebarRow(o: RowOptions): string {
   const chips = `<span class="session-chips">${o.portraitSecondary}</span>`;
+  // Desktop's hover card already shows the full title; only the phone, which
+  // has no card, keeps the small tip for an ellipsized title.
+  const titleTip = isRemote() ? ` data-tip="${o.title}"` : "";
   const text = o.title
-    ? `<span class="session-row-title"><span class="session-row-title-text" data-tip="${o.title}">${o.title}</span>${o.badges}</span>
+    ? `<span class="session-row-title"><span class="session-row-title-text"${titleTip}>${o.title}</span>${o.badges}</span>
               ${chips}
               <span class="session-row-project"><span class="proj-name">${o.projectLabel}</span>${o.machineBadge}${o.subDots ?? ""}</span>`
     : `<span class="session-row-project"><span class="proj-name">${o.projectLabel}</span>${o.badges}${o.machineBadge}${o.subDots ?? ""}</span>
