@@ -99,7 +99,7 @@ export function attachSidebarHoverCard(listEl: HTMLElement): void {
 
   listEl.addEventListener("mouseover", (e) => {
     const target = e.target as HTMLElement;
-    // A row's own [data-tip] anchors (title, battery, badges) keep their small
+    // A row's own [data-tip] anchors (battery, badges) keep their small
     // tip; the card waits for the pointer to rest on plain row space.
     if (target.closest("[data-tip]")) { hideHoverCard(); return; }
     const li = target.closest<HTMLElement>("li[data-session-id]");

@@ -116,7 +116,7 @@ test.describe("view-harness / sidebar status ring", () => {
 
   test("hovering a working row opens the card with its plan, the turn timer and the context %", async ({ page }) => {
     await mountSessions(page);
-    // Off the [data-tip] anchors (title, battery): the card waits for plain row space.
+    // Off the [data-tip] anchors (battery, badges): the card waits for plain row space.
     const box = (await row(page, "s-plan").boundingBox())!;
     await page.mouse.move(box.x + 6, box.y + box.height / 2);
 
@@ -156,9 +156,16 @@ test.describe("view-harness / sidebar status ring", () => {
     await expect(card.locator(".hc-ctx")).toContainText("51%");
   });
 
-  test("hovering the row's own tooltip anchor does not also open the card", async ({ page }) => {
+  test("hovering the title opens the card and no second small tooltip", async ({ page }) => {
     await mountSessions(page);
     await row(page, "s-plan").locator(".session-row-title-text").hover();
+    await expect(page.locator(".cc-row-card")).toBeVisible();
+    await expect(page.locator(".cc-row-tip:visible")).toHaveCount(0);
+  });
+
+  test("hovering the model battery keeps its small tip and does not also open the card", async ({ page }) => {
+    await mountSessions(page);
+    await row(page, "s-plan").locator(".session-model-battery").hover();
     await page.waitForTimeout(600);
     await expect(page.locator(".cc-row-card")).toBeHidden();
   });
