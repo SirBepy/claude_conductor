@@ -33,11 +33,17 @@ pub fn is_sub_session(state: &DaemonState, session_id: &str) -> bool {
 }
 
 /// The one-line task a sub was given, shown on its card because Joe does not
-/// read the sub. The brief is stored by the spawn path, which this lane cannot
-/// see yet, so this answers `None` until the orchestrator wires it. The card
-/// omits the line for `None`.
-pub fn sub_task(_session_id: &str) -> Option<String> {
-    None
+/// read the sub. `None` for a chat with no stored brief; the card omits the line.
+pub fn sub_task(session_id: &str) -> Option<String> {
+    let cfg = crate::sessions::chat_config::get(session_id)?;
+    task_line(cfg.subchat.as_ref())
+}
+
+/// The brief's task, trimmed. A blank one is `None`, because the card would
+/// otherwise draw an empty line under the header.
+fn task_line(brief: Option<&super::SubchatBrief>) -> Option<String> {
+    let task = brief?.task.trim();
+    (!task.is_empty()).then(|| task.to_string())
 }
 
 /// Adds the routing fields to a prompt payload in place. `display_session_id`
@@ -75,6 +81,16 @@ mod tests {
 
     fn chat(state: &DaemonState, id: &str) {
         state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+    }
+
+    #[test]
+    fn the_task_line_comes_from_the_brief_and_a_blank_one_is_omitted() {
+        let mut brief: crate::daemon::subchats::SubchatBrief = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(task_line(None), None, "no brief, no line");
+        brief.task = "   ".into();
+        assert_eq!(task_line(Some(&brief)), None, "a blank task draws nothing");
+        brief.task = "  Redesign the CV header ".into();
+        assert_eq!(task_line(Some(&brief)).as_deref(), Some("Redesign the CV header"));
     }
 
     #[test]
