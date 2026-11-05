@@ -168,7 +168,10 @@ pub(super) async fn on_session_start(
         }
         if let Some(path) = transcript_path_opt {
             if let Some(name) = poll_first_user_prompt(&path).await {
-                if state.registry.set_name(&sid, name) { changed = true; }
+                // A sub's first prompt is its brief, and its name was given at spawn.
+                if !crate::daemon::subchats::name_is_fixed(&state.registry, &sid) && state.registry.set_name(&sid, name) {
+                    changed = true;
+                }
             }
         }
         if changed {

@@ -22,11 +22,21 @@
 //!
 //! One card per crossing: while a sub's card is up it raises no other, and
 //! answering moves the ceiling up so the same crossing never draws a second.
+//!
+//! What a restart must not forget is stored per sub in
+//! `<data_dir>/subchats/<sub_id>.ceiling.json`: the raised limits, and where the
+//! current round starts in the transcript. Without it, "Keep going" would be asked
+//! again after every restart for a sub already past 300 calls.
+//!
+//! A round is one stretch of work between a spawn or a continue and the next
+//! finish. A continued sub is a new job, so its call count starts at the continue
+//! (the transcript offset recorded then), not at the sub's first message.
 
 use super::cards::{self, CardAnswer, CardOption, RaisedCard};
 use crate::daemon::state::DaemonState;
 use crate::types::Instance;
 use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
@@ -49,6 +59,8 @@ pub const STOP_IT: &str = "Stop it";
 #[derive(Default, Clone, Debug)]
 pub struct Cursor {
     path: Option<PathBuf>,
+    /// Where this round starts in the transcript: bytes before it are not counted.
+    floor: u64,
     offset: u64,
     last_id: Option<String>,
     calls: u64,
@@ -79,15 +91,100 @@ impl Default for Entry {
 
 static TABLE: Mutex<Option<HashMap<String, Entry>>> = Mutex::new(None);
 
-fn with_entry<R>(sub_id: &str, f: impl FnOnce(&mut Entry) -> R) -> R {
-    let mut guard = TABLE.lock().unwrap_or_else(|p| p.into_inner());
-    f(guard.get_or_insert_with(HashMap::new).entry(sub_id.to_string()).or_default())
+/// What survives a restart of one entry.
+#[derive(Serialize, Deserialize, Default, PartialEq, Debug)]
+struct Saved {
+    #[serde(default)]
+    calls_limit: u64,
+    #[serde(default)]
+    busy_limit_secs: i64,
+    #[serde(default)]
+    start_offset: u64,
 }
 
+fn saved_path(root: &std::path::Path, sub_id: &str) -> PathBuf {
+    root.join("subchats").join(format!("{}.ceiling.json", super::decisions::file_stem(sub_id)))
+}
+
+impl Entry {
+    fn from_saved(saved: Saved) -> Self {
+        let mut e = Entry::default();
+        if saved.calls_limit >= CALLS_STEP {
+            e.calls_limit = saved.calls_limit;
+        }
+        if saved.busy_limit_secs >= BUSY_STEP.num_seconds() {
+            e.busy_limit = Duration::seconds(saved.busy_limit_secs);
+        }
+        e.cursor = Cursor { floor: saved.start_offset, offset: saved.start_offset, ..Cursor::default() };
+        e
+    }
+
+    fn to_saved(&self) -> Saved {
+        Saved { calls_limit: self.calls_limit, busy_limit_secs: self.busy_limit.num_seconds(), start_offset: self.cursor.floor }
+    }
+}
+
+fn load(sub_id: &str) -> Entry {
+    let saved = super::decisions::data_root()
+        .and_then(|root| std::fs::read_to_string(saved_path(&root, sub_id)).ok())
+        .and_then(|raw| serde_json::from_str::<Saved>(&raw).ok());
+    saved.map_or_else(Entry::default, Entry::from_saved)
+}
+
+/// Writes the entry's limits and round start, or removes the file when they are
+/// the defaults, so only a sub that has something to remember has a file.
+fn save(sub_id: &str, entry: &Entry) {
+    let Some(root) = super::decisions::data_root() else { return };
+    let path = saved_path(&root, sub_id);
+    let saved = entry.to_saved();
+    let defaults = Saved { calls_limit: CALLS_STEP, busy_limit_secs: BUSY_STEP.num_seconds(), start_offset: 0 };
+    if saved == defaults {
+        let _ = std::fs::remove_file(&path);
+        return;
+    }
+    let written = serde_json::to_string(&saved).map_err(std::io::Error::other).and_then(|json| crate::util::write_json_atomic(&path, &json));
+    if let Err(e) = written {
+        log::warn!("subchats: could not store the ceiling for {sub_id}: {e}");
+    }
+}
+
+fn with_entry<R>(sub_id: &str, f: impl FnOnce(&mut Entry) -> R) -> R {
+    let mut guard = TABLE.lock().unwrap_or_else(|p| p.into_inner());
+    f(guard.get_or_insert_with(HashMap::new).entry(sub_id.to_string()).or_insert_with(|| load(sub_id)))
+}
+
+/// The sub is gone for good: its bookkeeping and its stored limits go with it.
 fn forget(sub_id: &str) {
     if let Some(map) = TABLE.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
         map.remove(sub_id);
     }
+    if let Some(root) = super::decisions::data_root() {
+        let _ = std::fs::remove_file(saved_path(&root, sub_id));
+    }
+}
+
+/// [`forget`] for the other modules: the sub was ended.
+pub(super) fn forget_stored(sub_id: &str) {
+    forget(sub_id);
+}
+
+/// A finished sub was continued: its next stretch is a new job. The call count,
+/// the busy clock and both limits start over, counting from `start_offset` (the
+/// transcript's length now), so a sub continued many times does not reach the
+/// ceiling on the sum of its rounds.
+pub fn start_round(sub_id: &str, start_offset: u64) {
+    with_entry(sub_id, |e| {
+        *e = Entry::from_saved(Saved { calls_limit: CALLS_STEP, busy_limit_secs: BUSY_STEP.num_seconds(), start_offset });
+        save(sub_id, e);
+    });
+}
+
+/// [`start_round`] from the sub's transcript as it stands.
+pub fn on_continued(state: &DaemonState, sub_id: &str) {
+    let len = crate::context_status::resolve_transcript(&state.registry, sub_id)
+        .and_then(|path| std::fs::metadata(path).ok())
+        .map_or(0, |m| m.len());
+    start_round(sub_id, len);
 }
 
 /// Counts the model calls in `appended` (whole lines of a transcript) into
@@ -116,13 +213,13 @@ pub fn count_calls(appended: &str, cursor: &mut Cursor) {
 /// the running total, or `None` when the file cannot be read. A file that shrank
 /// or was swapped starts over. A trailing partial line waits for the next tick.
 pub fn read_calls(path: &std::path::Path, cursor: &mut Cursor) -> Option<u64> {
-    if cursor.path.as_deref() != Some(path) {
-        *cursor = Cursor { path: Some(path.to_path_buf()), ..Cursor::default() };
-    }
     let mut file = std::fs::File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
-    if len < cursor.offset {
-        *cursor = Cursor { path: Some(path.to_path_buf()), ..Cursor::default() };
+    if cursor.path.as_deref() != Some(path) || len < cursor.offset {
+        // A new file, or one that shrank: start over from the round's first byte,
+        // or from the top when the file is shorter than that (it was replaced).
+        let floor = if len >= cursor.floor { cursor.floor } else { 0 };
+        *cursor = Cursor { path: Some(path.to_path_buf()), floor, offset: floor, ..Cursor::default() };
     }
     if len > cursor.offset {
         file.seek(SeekFrom::Start(cursor.offset)).ok()?;
@@ -194,13 +291,18 @@ pub async fn sweep(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> {
         // A sub waiting on Joe is not working, so his thinking time is not its busy time.
         let waiting = crate::daemon::lifecycle::has_open_prompt(state, &id).await;
         let counting = inst.busy && !waiting && !super::pause::is_paused(&inst, now_ts);
+        // The first look at a long transcript reads all of it. Do that on a copy of
+        // the cursor with the table free, so no other sub's bookkeeping waits.
+        let mut cursor = with_entry(&id, |e| e.cursor.clone());
+        let read = (env.calls)(&inst, &mut cursor);
         let due = with_entry(&id, |e| {
+            e.cursor = cursor;
             let elapsed = e.last_tick.map_or(Duration::zero(), |t| (env.now - t).max(Duration::zero()).min(MAX_TICK));
             e.last_tick = Some(env.now);
             if counting {
                 e.busy += elapsed;
             }
-            let calls = (env.calls)(&inst, &mut e.cursor).unwrap_or(e.cursor.calls);
+            let calls = read.unwrap_or(e.cursor.calls);
             if e.carded || (calls < e.calls_limit && e.busy < e.busy_limit) {
                 return None;
             }
@@ -277,6 +379,7 @@ pub(crate) fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, answer: CardA
             e.busy_limit = e.busy_limit + BUSY_STEP;
         }
         e.carded = false;
+        save(sub_id, e);
     });
 }
 
@@ -465,6 +568,7 @@ mod tests {
 
     #[tokio::test]
     async fn keep_going_raises_the_ceiling_by_the_same_amount_and_the_next_crossing_is_a_new_card() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
         let (st, sub) = busy_sub("ceil-keep");
         let base = Utc::now();
         tick(&st, base, 0, 300).await;
@@ -476,8 +580,103 @@ mod tests {
         assert!(the_card(&st).await.is_some(), "a genuinely new card, since the first was answered");
     }
 
+    /// What a daemon restart does to the table: the in-memory entry is gone.
+    fn simulate_restart(sub_id: &str) {
+        if let Some(map) = TABLE.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+            map.remove(sub_id);
+        }
+    }
+
+    #[tokio::test]
+    async fn keep_going_survives_a_daemon_restart() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = busy_sub("ceil-restart");
+        let base = Utc::now();
+        tick(&st, base, 0, 300).await;
+        answer_card(&st, Some(KEEP_GOING)).await;
+        simulate_restart(&sub);
+        assert!(tick(&st, base, 5, 301).await.is_empty(), "Joe said keep going; a restart must not ask again at 300");
+        assert!(the_card(&st).await.is_none());
+        simulate_restart(&sub);
+        assert_eq!(tick(&st, base, 6, 600).await, [sub], "the raised ceiling of 600 is still the one that fires");
+    }
+
+    /// A sub continued after it finished is on a new job, so its 300 calls count
+    /// from the continue. Counted from its first message, a sub continued a few
+    /// times would be carded for work Joe already saw finish.
+    #[tokio::test]
+    async fn a_continued_sub_counts_its_calls_from_the_continue_and_keeps_the_count_across_a_restart() {
+        use std::io::Write;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = busy_sub("ceil-round");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let append = |from: usize, n: usize| {
+            let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
+            for i in from..from + n {
+                writeln!(f, "{}", line(&format!("msg_{i}"), "")).unwrap();
+            }
+        };
+        let read = |_: &Instance, c: &mut Cursor| read_calls(&path, c);
+        let base = Utc::now();
+        let sweep_at = |minute: i64| {
+            let (st, read) = (st.clone(), &read);
+            async move { sweep(&st, &Env { now: base + Duration::minutes(minute), calls: read }).await }
+        };
+
+        // Round one ran 400 calls and finished; Joe continues the sub.
+        append(0, 400);
+        start_round(&sub, std::fs::metadata(&path).unwrap().len());
+        assert!(sweep_at(0).await.is_empty(), "400 calls from the last round are not this round's");
+
+        append(400, 100);
+        assert!(sweep_at(1).await.is_empty());
+        simulate_restart(&sub);
+        assert!(sweep_at(2).await.is_empty(), "after a restart the round still starts at the continue");
+        assert_eq!(with_entry(&sub, |e| e.cursor.calls), 100, "the count did not fall back to 0 or jump to the lifetime 500");
+
+        append(500, 200);
+        assert_eq!(sweep_at(3).await, [sub.clone()], "300 calls into this round");
+    }
+
+    #[test]
+    fn a_stopped_sub_leaves_no_stored_limits_behind() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let root = crate::daemon::subchats::decisions::data_root().unwrap();
+        start_round("ceil-forget", 1234);
+        assert!(saved_path(&root, "ceil-forget").exists());
+        forget("ceil-forget");
+        assert!(!saved_path(&root, "ceil-forget").exists());
+        // A round that starts at the top with default limits has nothing to remember.
+        start_round("ceil-nothing", 0);
+        assert!(!saved_path(&root, "ceil-nothing").exists());
+    }
+
+    #[tokio::test]
+    async fn the_transcript_is_read_without_holding_the_table_lock() {
+        let (st, _sub) = busy_sub("ceil-lock");
+        let free_at_some_point = std::sync::atomic::AtomicBool::new(false);
+        let read = |_: &Instance, c: &mut Cursor| {
+            // The first look at a long transcript reads all of it, and the tick must
+            // not make every other sub's bookkeeping wait for that. Another test's
+            // brief hold of the table is not ours, so try a few times.
+            for _ in 0..200 {
+                if TABLE.try_lock().is_ok() {
+                    free_at_some_point.store(true, Ordering::SeqCst);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            c.calls = 5;
+            Some(5)
+        };
+        sweep(&st, &Env { now: Utc::now(), calls: &read }).await;
+        assert!(free_at_some_point.load(Ordering::SeqCst), "the table lock was held across the transcript read");
+    }
+
     #[tokio::test]
     async fn keep_going_after_an_overshoot_clears_the_figure_instead_of_asking_again_at_once() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
         let (st, sub) = busy_sub("ceil-over");
         let base = Utc::now();
         tick(&st, base, 0, 650).await;
@@ -487,6 +686,7 @@ mod tests {
 
     #[tokio::test]
     async fn skip_keeps_the_sub_going_and_stop_ends_it() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
         let (st, sub) = busy_sub("ceil-skip");
         let base = Utc::now();
         tick(&st, base, 0, 300).await;
@@ -503,6 +703,7 @@ mod tests {
 
     #[tokio::test]
     async fn busy_time_crossing_is_re_armed_by_keep_going_too() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
         let (st, _sub) = busy_sub("ceil-time-keep");
         let base = Utc::now();
         for m in 0..=180 {

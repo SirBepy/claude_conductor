@@ -477,7 +477,8 @@ pub(crate) async fn run_stdout_pump(
                                         &state_for_pump,
                                         &pump_session,
                                         pump_turn_gen,
-                                    );
+                                    )
+                                    .await;
                                 }
                                 // Stand-down/hygiene: the turn ended, so the closing
                                 // segment either resolved into `ended` (finalize_close

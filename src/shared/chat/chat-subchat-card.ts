@@ -27,6 +27,9 @@ const caret = `<i class="ph ph-caret-down mc-caret" aria-hidden="true"></i>`;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const UNKNOWN = "?";
 
+/** ", <why>" when the daemon said why a figure is unknown, else nothing. */
+const why = (note?: string | null) => (note ? `, ${note}` : "");
+
 /** What a count is measured from, in the chip's own words. */
 function sinceWords(f: SubFacts): string {
   return f.since === "last report" ? "its last report" : "it started";
@@ -36,6 +39,7 @@ function testChip(f: SubFacts): Chip {
   const t = f.test;
   if (t?.state === "passed") return { tone: t.stale ? "wait" : "done", icon: "ph-test-tube", value: t.stale ? "passed, old" : "passed", title: t.stale ? "Last test run passed, before the last edit" : "Last test run passed" };
   if (t?.state === "failed") return { tone: "not", icon: "ph-test-tube", value: "failed", title: "Last test run failed" };
+  if (t?.command) return { tone: "wait", icon: "ph-test-tube", value: "unknown", title: "Last test run: result unknown, its output showed no pass or fail line" };
   return { tone: "wait", icon: "ph-test-tube", value: "unknown", title: "No test run found: unknown" };
 }
 
@@ -50,9 +54,9 @@ function factChips(f: SubFacts): Chip[] {
   const files = f.files_changed ?? null;
   const dirty = f.uncommitted ?? null;
   const chips: Chip[] = [
-    { tone: commits === null ? "wait" : commits > 0 ? "done" : "wait", icon: "ph-git-commit", value: commits === null ? UNKNOWN : String(commits), title: commits === null ? "Commits: unknown" : plural(commits, "commit") },
-    { tone: files === null ? "wait" : files > 0 ? "done" : "wait", icon: "ph-file", value: files === null ? UNKNOWN : String(files), title: files === null ? "Files changed: unknown" : `${plural(files, "file")} changed` },
-    { tone: dirty === null ? "wait" : dirty === 0 ? "done" : "not", icon: "ph-warning", value: dirty === null ? UNKNOWN : String(dirty), title: dirty === null ? "Uncommitted files: unknown" : `${dirty} of its own ${dirty === 1 ? "file" : "files"} uncommitted` },
+    { tone: commits === null ? "wait" : commits > 0 ? "done" : "wait", icon: "ph-git-commit", value: commits === null ? UNKNOWN : String(commits), title: commits === null ? `Commits: unknown${why(f.commits_note)}` : plural(commits, "commit") },
+    { tone: files === null ? "wait" : files > 0 ? "done" : "wait", icon: "ph-file", value: files === null ? UNKNOWN : String(files), title: files === null ? `Files changed: unknown${why(f.commits_note)}` : `${plural(files, "file")} changed` },
+    { tone: dirty === null ? "wait" : dirty === 0 ? "done" : "not", icon: "ph-warning", value: dirty === null ? UNKNOWN : String(dirty), title: dirty === null ? `Uncommitted files: unknown${why(f.uncommitted_note)}` : `${dirty} of its own ${dirty === 1 ? "file" : "files"} uncommitted` },
     testChip(f),
     reviewerChip(f),
   ];
@@ -67,7 +71,7 @@ const code = (t: string) => `<code>${escapeHtml(t)}</code>`;
 function factWords(f: SubFacts): string[] {
   const out: string[] = [];
   const commits = f.commits ?? null;
-  if (commits === null) out.push("Commits: unknown, the daemon could not read git for this job");
+  if (commits === null) out.push(`Commits: unknown${f.commits_note ? `, ${escapeHtml(f.commits_note)}` : ", the daemon could not read git for this job"}`);
   else {
     const scope = f.scoped ? ", counting only commits that touch files it edited" : "";
     out.push(`${plural(commits, "commit")} since ${sinceWords(f)}${scope}`);
@@ -75,13 +79,15 @@ function factWords(f: SubFacts): string[] {
   const files = f.files_changed ?? null;
   if (files !== null) out.push(`${plural(files, "file")} changed (+${f.insertions ?? 0} -${f.deletions ?? 0})`);
   const dirty = f.uncommitted ?? null;
-  if (dirty === null) out.push("Uncommitted files: unknown");
+  if (dirty === null) out.push(`Uncommitted files: unknown${why(f.uncommitted_note ? escapeHtml(f.uncommitted_note) : null)}`);
   else if (dirty === 0) out.push("Nothing uncommitted in the files it edited");
   else out.push(`${dirty} of its own ${dirty === 1 ? "file is" : "files are"} uncommitted: ${escapeHtml((f.uncommitted_files ?? []).join(", "))}`);
   const t = f.test;
   if (t?.state === "passed" || t?.state === "failed") {
     const how = `${t.state}${t.summary ? `: ${escapeHtml(t.summary)}` : ""}`;
     out.push(`Last test run ${t.command ? code(t.command) + " " : ""}${how}${t.stale ? ", but it ran before the last edit" : ""}`);
+  } else if (t?.command) {
+    out.push(`Last test run ${code(t.command)}: result unknown, its output showed no pass or fail line${t.summary ? ` (${escapeHtml(t.summary)})` : ""}`);
   } else {
     out.push("Last test run: unknown, no test command found in its transcript");
   }

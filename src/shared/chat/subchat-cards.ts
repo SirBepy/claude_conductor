@@ -26,8 +26,12 @@ export interface SubFacts {
   insertions?: number | null;
   deletions?: number | null;
   scoped?: boolean;
+  /** Why commits and files are unknown, when the daemon knows why. */
+  commits_note?: string | null;
   uncommitted?: number | null;
   uncommitted_files?: string[];
+  /** Why uncommitted is unknown, when the daemon knows why. */
+  uncommitted_note?: string | null;
   pushed?: boolean | null;
   test?: SubTestFact;
   reviewer?: SubReviewerFact;

@@ -16,6 +16,8 @@ import type { SessionConfig } from "../../shared/effort-presets";
 import { isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
 import { refreshWrapUpIndicator, projectDashboardOpener } from "./session-header";
 import { openDashboardPage } from "./project-dashboard/dashboard-page";
+import { backToMain } from "./subchat-view";
+import { isSubchat } from "./sessions-helpers";
 
 // ── Shared pane + pending state ───────────────────────────────────────────────
 // Written by sessions.ts via the setters below; read by the control functions.
@@ -200,6 +202,15 @@ export function closeFocusedChat(): void {
   if (!id) return;
   if (state.pendingNewSession?.placeholderId === id) {
     closeFocusedDraft();
+    return;
+  }
+  // Ctrl+W in a sub's view means "leave", not "end this job": the sub's work and
+  // context are the main chat's, and closing it would drop both with no note.
+  // Closing a sub on purpose is the header menu's Close.
+  const open = state.sessions.find((s) => s.session_id === id);
+  const pane = _pane;
+  if (open && isSubchat(open) && pane) {
+    void backToMain(open, { open: (mainId) => selectSession(mainId, pane) });
     return;
   }
   void closeChatWithConfirm(id);

@@ -118,6 +118,11 @@ fn append(root: &Path, entry: &CardEntry) -> std::io::Result<()> {
 /// Returns whether it was new.
 fn store_and_announce(state: &DaemonState, root: &Path, entry: &CardEntry) -> bool {
     let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    store_locked(state, root, entry)
+}
+
+/// [`store_and_announce`] for a caller that already holds [`LOG_LOCK`].
+fn store_locked(state: &DaemonState, root: &Path, entry: &CardEntry) -> bool {
     if read_in(root, &entry.parent_id).iter().any(|e| e.id == entry.id) {
         return false;
     }
@@ -357,8 +362,12 @@ pub(crate) fn draw_finish_at(
     if store_and_announce(state, root, &finish_entry) {
         drawn.push(finish_entry);
     }
+    // After this sub's own card is stored, and under the log lock from the read to
+    // the write: a sibling's thread that stored its card first is then in the sum,
+    // and two threads cannot both find the set undrawn and each draw it.
+    let _guard = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(all) = all_finished_entry(state, root, &parent) {
-        if store_and_announce(state, root, &all) {
+        if store_locked(state, root, &all) {
             drawn.push(all);
         }
     }
@@ -412,13 +421,21 @@ fn all_finished_entry(state: &DaemonState, root: &Path, parent: &str) -> Option<
     if subs.is_empty() || subs.iter().any(|i| !i.subchat_finished) {
         return None;
     }
+    let log = read_in(root, parent);
+    // A report counts once its card is in the log, so a sub whose card thread has
+    // not landed yet makes this key differ from the one its card will make: the
+    // card drawn without it is followed by a corrected one instead of standing.
     let mut pairs: Vec<String> = subs
         .iter()
-        .map(|i| format!("{}:{}", i.session_id, finish::read_record_in(root, &i.session_id).map_or(0, |r| r.round)))
+        .map(|i| {
+            let round = finish::read_record_in(root, &i.session_id).map_or(0, |r| r.round);
+            let card_id = format!("finish-{}-{round}", i.session_id);
+            let counted = log.iter().any(|e| e.id == card_id);
+            format!("{}:{round}:{}", i.session_id, if counted { "card" } else { "pending" })
+        })
         .collect();
     pairs.sort();
     let key = pairs.join(",");
-    let log = read_in(root, parent);
     if log.iter().rev().find(|e| e.kind == KIND_ALL_FINISHED).and_then(|e| e.set_key.as_deref()) == Some(key.as_str()) {
         return None;
     }
@@ -517,9 +534,13 @@ mod tests {
     }
 
     fn finish_sub(st: &Arc<DaemonState>, root: &Path, sub: &str, round: u32) -> Vec<CardEntry> {
+        finish_sub_with(st, root, sub, round, None)
+    }
+
+    fn finish_sub_with(st: &Arc<DaemonState>, root: &Path, sub: &str, round: u32, transcript: Option<PathBuf>) -> Vec<CardEntry> {
         record(root, sub, round, "Built, not pushed");
         st.registry.set_subchat_finished(sub, true);
-        draw_finish_at(root, st, sub, None)
+        draw_finish_at(root, st, sub, transcript)
     }
 
     #[test]
@@ -683,13 +704,66 @@ mod tests {
         assert!(!st.registry.get(&subs[1]).unwrap().subchat_finished);
     }
 
+    /// Both subs have finished, but b's card thread is slower than a's: a's draw
+    /// runs before b's finish card is stored. The card a draws then counts b as
+    /// unknown, and b's own draw must put it right.
+    #[test]
+    fn an_all_finished_card_that_understated_a_slower_sub_is_corrected_when_its_card_lands() {
+        let st = state();
+        let root = tempfile::tempdir().unwrap();
+        let (main, subs) = world(&st, "late", Path::new("."), &["a", "b"]);
+        for s in &subs {
+            record(root.path(), s, 1, "Built");
+            st.registry.set_subchat_finished(s, true);
+        }
+        draw_finish_at(root.path(), &st, &subs[0], None);
+        draw_finish_at(root.path(), &st, &subs[1], None);
+        let cards = read_in(root.path(), &main);
+        let last = cards.iter().rev().find(|e| e.kind == KIND_ALL_FINISHED).expect("an all-finished card");
+        // A sub with a stored finish card has facts and counts as unreviewed here; one
+        // with none counts as nothing at all, so 2 means both cards were in the sum.
+        assert_eq!(last.sum.as_ref().unwrap().unreviewed, 2, "the latest all-finished card counts both subs: {last:?}");
+    }
+
+    #[test]
+    fn finishes_drawn_at_the_same_moment_never_leave_two_cards_for_one_set() {
+        let st = state();
+        let root = tempfile::tempdir().unwrap();
+        let names = ["a", "b", "c", "d", "e", "f"];
+        let (main, subs) = world(&st, "race", Path::new("."), &names);
+        for s in &subs {
+            record(root.path(), s, 1, "Built");
+            st.registry.set_subchat_finished(s, true);
+        }
+        let threads: Vec<_> = subs
+            .iter()
+            .map(|s| {
+                let (st, root, s) = (st.clone(), root.path().to_path_buf(), s.clone());
+                std::thread::spawn(move || draw_finish_at(&root, &st, &s, None))
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let cards = read_in(root.path(), &main);
+        let all: Vec<&CardEntry> = cards.iter().filter(|e| e.kind == KIND_ALL_FINISHED).collect();
+        let mut keys: Vec<&str> = all.iter().filter_map(|e| e.set_key.as_deref()).collect();
+        let before = keys.len();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), before, "one card per set of reports, however the threads interleave");
+        assert_eq!(all.last().unwrap().sum.as_ref().unwrap().unreviewed, 6, "the last card counts every sub");
+    }
+
     #[test]
     fn the_second_report_of_a_continued_sub_counts_since_its_previous_report() {
         let _data = crate::daemon::subchats::TempDataDir::new();
-        let (_dir, repo) = init();
+        let (dir, repo) = init();
         let st = state();
         let root = tempfile::tempdir().unwrap();
         let (main, subs) = world(&st, "round", &repo, &["a"]);
+        // The sub's own edits are what scope its counts: without them the whole range is a peer's too.
+        let tp = transcript(dir.path(), &[("Write", &repo.join("one.txt")), ("Write", &repo.join("two.txt"))]);
         crate::daemon::subchats::store_sub_brief(&subs[0], &main);
         let mut brief = crate::sessions::chat_config::get(&subs[0]).unwrap().subchat.unwrap();
         brief.git_head_at_spawn = crate::daemon::subchats::git::head(&repo);
@@ -699,11 +773,11 @@ mod tests {
             run(&repo, &["add", n]);
             run(&repo, &["commit", "-q", "-m", n]);
             if n == "one.txt" {
-                finish_sub(&st, root.path(), &subs[0], 1);
+                finish_sub_with(&st, root.path(), &subs[0], 1, Some(tp.clone()));
                 st.registry.set_subchat_finished(&subs[0], false);
             }
         }
-        let drawn = finish_sub(&st, root.path(), &subs[0], 2);
+        let drawn = finish_sub_with(&st, root.path(), &subs[0], 2, Some(tp));
         let facts = drawn[0].facts.as_ref().unwrap();
         assert_eq!(facts.since, facts::SINCE_LAST_REPORT);
         assert_eq!(facts.commits, Some(1), "only the commit made after the first report");

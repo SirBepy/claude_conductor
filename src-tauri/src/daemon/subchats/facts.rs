@@ -6,14 +6,24 @@
 //! sub did:
 //! - Commits and the diffstat count the range from a base head to `HEAD`, limited
 //!   to commits that touch files the sub itself edited (its transcript's Edit and
-//!   Write inputs). With no edited files known the whole range counts, and
-//!   `scoped` says so.
+//!   Write inputs). With no edited file to limit the range by, the commits are
+//!   unknown with a note saying why, because in a shared tree every commit in the
+//!   range would be credited to the sub, a peer's included.
 //! - Uncommitted is only the sub's own edited files git still reports dirty. A
 //!   peer's dirty file never counts (memory `project_concurrent_autopilot_on_master`).
+//!   A sub that ran the shell and edited nothing with the Edit tools may have
+//!   written files with `sed -i` or a redirect, which the transcript cannot name,
+//!   so its uncommitted count is unknown with a note.
 //!
 //! Anything that cannot be read is `None` or an `unknown` state, and the chips
 //! say "unknown". A sub that claims "tests pass" is never believed: the test
-//! result is the last test-looking shell call's own exit status.
+//! state comes from the last test-looking shell call's own output (a failure
+//! marker beats a clean exit status, which a pipe replaces with `tail`'s) and from
+//! its exit status only when the command's status was the suite's own.
+//!
+//! A reviewer is a fresh subagent: a call counts only if it is an `Agent` or
+//! `Task` tool_use ([`SUBAGENT_TOOLS`]), read by [`reviewer_fact_from_transcript`] for
+//! the chip and by [`review_gap`] for the finish check.
 //!
 //! A continued sub's second finish counts SINCE ITS PREVIOUS REPORT, not since
 //! spawn: Joe is reading the new card for what changed this round, and the
@@ -97,12 +107,19 @@ pub struct Facts {
     /// sub edited; false when the whole range was counted.
     #[serde(default)]
     pub scoped: bool,
+    /// Why `commits` and the diffstat are unknown, in words a chip can show. Set
+    /// when the figures could not be attributed to this sub.
+    #[serde(default)]
+    pub commits_note: Option<String>,
     /// How many of the sub's own edited files are still uncommitted. `None` is unknown.
     #[serde(default)]
     pub uncommitted: Option<u32>,
     /// Up to a few of their names, for the opened words.
     #[serde(default)]
     pub uncommitted_files: Vec<String>,
+    /// Why `uncommitted` is unknown, in words a chip can show.
+    #[serde(default)]
+    pub uncommitted_note: Option<String>,
     /// `Some(false)` is "not pushed". `None` when there is nothing to push or
     /// the repo has no remote to compare with.
     #[serde(default)]
@@ -245,17 +262,36 @@ pub fn compute(i: &Inputs) -> Facts {
     let edited: Vec<String> = i.transcript.map(|t| git::edited_files(t, i.cwd)).unwrap_or_default();
     let mut facts = Facts { since: i.since.to_string(), head: head.clone(), ..Facts::default() };
 
+    let scan = i.transcript.and_then(scan_transcript);
+    // The shell is invisible to the edit list: a sub that wrote files with `sed -i`
+    // or a redirect has nothing in `edited`, so its own files cannot be counted.
+    let shell_only = edited.is_empty() && scan.as_ref().is_some_and(|s| s.shell_used);
+
     if let (Some(base), Some(head)) = (i.base, head.as_deref()) {
         let paths = gitx::repo_relative(i.cwd, &edited);
-        facts.scoped = !paths.is_empty();
-        facts.commits = gitx::commits_between(i.cwd, base, head, &paths);
-        if let Some((files, ins, del)) = gitx::diffstat_between(i.cwd, base, head, &paths) {
-            facts.files_changed = Some(files);
-            facts.insertions = Some(ins);
-            facts.deletions = Some(del);
-        }
-        if facts.commits.unwrap_or(0) > 0 {
-            facts.pushed = gitx::is_pushed(i.cwd, head);
+        if paths.is_empty() {
+            // The tree is shared with peer chats. With no file of this sub's own to
+            // limit the range by, every commit in it would be credited to the sub,
+            // and a green number nobody can vouch for is worse than "?".
+            facts.commits_note = Some(
+                if edited.is_empty() {
+                    "it edited no files with the Edit or Write tools, so another chat's commits in this tree cannot be told apart from its own"
+                } else {
+                    "the files it edited are outside this repo, so another chat's commits here cannot be told apart from its own"
+                }
+                .to_string(),
+            );
+        } else {
+            facts.scoped = true;
+            facts.commits = gitx::commits_between(i.cwd, base, head, &paths);
+            if let Some((files, ins, del)) = gitx::diffstat_between(i.cwd, base, head, &paths) {
+                facts.files_changed = Some(files);
+                facts.insertions = Some(ins);
+                facts.deletions = Some(del);
+            }
+            if facts.commits.unwrap_or(0) > 0 {
+                facts.pushed = gitx::is_pushed(i.cwd, head);
+            }
         }
     }
     if let (Some(gate), Some(head)) = (&i.gate, head.as_deref()) {
@@ -263,6 +299,9 @@ pub fn compute(i: &Inputs) -> Facts {
     }
 
     match (i.transcript, git::dirty_keys(i.cwd)) {
+        (Some(_), Some(_)) if shell_only => {
+            facts.uncommitted_note = Some("this sub only used the shell, so its files can't be tracked".to_string());
+        }
         (Some(t), Some(_)) => {
             let own = git::own_uncommitted(t, i.cwd);
             facts.uncommitted = Some(own.len() as u32);
@@ -276,7 +315,7 @@ pub fn compute(i: &Inputs) -> Facts {
         _ => {}
     }
 
-    match i.transcript.and_then(scan_transcript) {
+    match scan {
         Some(scan) => {
             facts.test = scan.test_fact();
             facts.reviewer = if !i.review_required {
@@ -336,6 +375,8 @@ struct Scan {
     /// tool_use id -> the tool's name, so a reviewer id can be checked to name a
     /// subagent call and not, say, a Read.
     use_names: std::collections::HashMap<String, String>,
+    /// The sub ran at least one shell command.
+    shell_used: bool,
 }
 
 fn block_text(content: &Value) -> String {
@@ -358,6 +399,7 @@ fn scan_transcript(path: &Path) -> Option<Scan> {
         results: std::collections::HashMap::new(),
         uses: std::collections::HashMap::new(),
         use_names: std::collections::HashMap::new(),
+        shell_used: false,
     };
     for (idx, line) in raw.lines().enumerate() {
         if !line.contains("tool_use") && !line.contains("tool_result") {
@@ -377,6 +419,7 @@ fn scan_transcript(path: &Path) -> Option<Scan> {
                         scan.last_edit = Some(idx);
                     }
                     if matches!(name, "Bash" | "PowerShell") {
+                        scan.shell_used = true;
                         if let (Some(cmd), Some(id)) = (b["input"]["command"].as_str(), b["id"].as_str()) {
                             if looks_like_test(cmd) {
                                 scan.tests.push((idx, cmd.to_string(), id.to_string()));
@@ -395,6 +438,17 @@ fn scan_transcript(path: &Path) -> Option<Scan> {
         }
     }
     Some(scan)
+}
+
+/// The reviewer chip for `reviewer_tool_use_id` read straight from a transcript.
+/// The one check for "did a fresh reviewer run on the final code": `compute`
+/// uses it for the chip and `finish_subchat` uses it to refuse a finish. `unknown`
+/// when the transcript cannot be read.
+pub fn reviewer_fact_from_transcript(transcript: &Path, reviewer_tool_use_id: Option<&str>) -> ReviewerFact {
+    match scan_transcript(transcript) {
+        Some(scan) => scan.reviewer_fact(reviewer_tool_use_id),
+        None => ReviewerFact::unknown(),
+    }
 }
 
 fn one_line(text: &str, max: usize) -> String {
@@ -420,6 +474,93 @@ fn outcome_line(output: &str) -> Option<String> {
         .map(|l| one_line(l, MAX_SUMMARY))
 }
 
+/// The run of ASCII numerals that ends `text`, as a number.
+fn trailing_count(text: &str) -> Option<u64> {
+    let run: String = text.chars().rev().take_while(char::is_ascii_digit).collect::<Vec<_>>().into_iter().rev().collect();
+    run.parse().ok()
+}
+
+/// The first number after `needle` in `haystack`, when there is one.
+fn number_after(haystack: &str, needle: &str) -> Option<u64> {
+    let at = haystack.find(needle)? + needle.len();
+    let run: String = haystack[at..].chars().skip_while(|c| !c.is_ascii_digit()).take_while(char::is_ascii_digit).collect();
+    run.parse().ok()
+}
+
+/// Whether `lower` has `<N> <word>` with N above zero ("1 failed", "31 passed").
+fn has_nonzero_count_before(lower: &str, word: &str) -> bool {
+    let mut rest = lower;
+    while let Some(at) = rest.find(word) {
+        if trailing_count(&rest[..at]).is_some_and(|n| n > 0) {
+            return true;
+        }
+        rest = &rest[at + word.len()..];
+    }
+    false
+}
+
+/// Whether `output` says something failed. Conservative on purpose: a false
+/// "passed" is the bug this exists for, and a false "failed" only costs a look.
+fn has_failure_marker(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    if lower.contains("test result: failed")
+        || lower.contains("could not compile")
+        || lower.contains("panicked at")
+        || lower.lines().any(|l| l.trim() == "failures:")
+    {
+        return true;
+    }
+    // `FAIL` / `FAILED` opening a line is vitest, jest, pytest and go.
+    if output.lines().map(str::trim_start).any(|l| l.starts_with("FAIL") || l.starts_with("--- FAIL")) {
+        return true;
+    }
+    // "N failed" with N above zero ("1 failed", "2 failed | 30 passed").
+    if has_nonzero_count_before(&lower, " failed") {
+        return true;
+    }
+    // A non-zero exit code the tool printed ("exit code 1").
+    ["exit code", "exited with code", "exit status"].iter().any(|needle| {
+        let mut rest = lower.as_str();
+        while let Some(at) = rest.find(needle) {
+            rest = &rest[at..];
+            if number_after(rest, needle).is_some_and(|n| n > 0) {
+                return true;
+            }
+            rest = &rest[needle.len()..];
+        }
+        false
+    })
+}
+
+/// Whether `output` says the suite passed.
+fn has_pass_marker(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    lower.contains("test result: ok")
+        || lower.contains("all tests passed")
+        || output.lines().any(|l| l.starts_with("ok ") || l.starts_with("ok\t"))
+        || has_nonzero_count_before(&lower, " passed")
+}
+
+/// Whether the tool's exit status was the test command's own: one command, or an
+/// `&&` chain that ends in it. A pipe reports the last stage's status (`tail`'s),
+/// and `;` or `||` report whatever ran last.
+fn exit_status_is_the_suites(command: &str) -> bool {
+    !command.contains(['|', ';', '\n'])
+}
+
+/// A test run's state from its own output, not from the exit status alone.
+/// `failed` on the tool's error flag or any failure marker; `passed` on a pass
+/// marker or a clean exit that was the suite's own; `unknown` otherwise.
+fn judge_test(command: &str, is_error: bool, output: &str) -> &'static str {
+    if is_error || has_failure_marker(output) {
+        "failed"
+    } else if has_pass_marker(output) || exit_status_is_the_suites(command) {
+        "passed"
+    } else {
+        "unknown"
+    }
+}
+
 impl Scan {
     fn test_fact(&self) -> TestFact {
         // The last test-looking call that actually returned: one still running
@@ -429,7 +570,7 @@ impl Scan {
         };
         let (_, is_error, output) = &self.results[id];
         TestFact {
-            state: if *is_error { "failed" } else { "passed" }.into(),
+            state: judge_test(cmd, *is_error, output).into(),
             command: Some(one_line(cmd, 80)),
             summary: outcome_line(output),
             stale: self.last_edit.is_some_and(|e| e > *idx),
@@ -640,16 +781,6 @@ mod tests {
         assert!(f.scoped);
         assert_eq!(f.commits, Some(1), "only the commit touching the sub's own file");
         assert_eq!(f.files_changed, Some(1));
-    }
-
-    #[test]
-    fn with_no_known_edits_the_whole_range_counts_and_says_it_is_not_scoped() {
-        let (_dir, root) = init();
-        let base = git::head(&root).unwrap();
-        commit_file(&root, "x.txt", "x\n");
-        let f = compute(&inputs(&root, None, Some(&base)));
-        assert!(!f.scoped);
-        assert_eq!(f.commits, Some(1));
     }
 
     #[test]
@@ -901,6 +1032,131 @@ mod tests {
         i.review_required = false;
         let r = compute(&i).reviewer;
         assert_eq!((r.state.as_str(), r.note.as_deref()), ("none", Some("not required for this job")));
+    }
+
+    fn tool_use(id: &str, name: &str, input: Value) -> Value {
+        assistant(json!([{"type": "tool_use", "id": id, "name": name, "input": input}]))
+    }
+
+    fn reviewer_with(tool: &str, command_or_empty: &str) -> ReviewerFact {
+        let (dir, root) = init();
+        let input = if command_or_empty.is_empty() { json!({}) } else { json!({"command": command_or_empty}) };
+        let tp = write_transcript(
+            dir.path(),
+            &[edit("e1", &root.join("base.txt")), tool_use("rev1", tool, input), result("rev1", false, "all fine, nothing found")],
+        );
+        let mut i = inputs(&root, Some(&tp), None);
+        i.reviewer_tool_use_id = Some("rev1");
+        compute(&i).reviewer
+    }
+
+    #[test]
+    fn a_shell_call_named_as_the_reviewer_is_not_a_reviewer() {
+        // `echo ok` has an id, comes after the last edit and returns text, which was
+        // all the old check asked. A reviewer is a fresh subagent.
+        for tool in ["Bash", "PowerShell", "Read", "Edit"] {
+            let r = reviewer_with(tool, "echo ok");
+            assert_eq!(r.state, "none", "{tool} is not a subagent: {r:?}");
+            assert!(r.note.unwrap().contains("not a subagent"), "the chip says why");
+        }
+        assert_eq!(reviewer_with("Agent", "").state, "ran", "the Agent tool is a subagent");
+        assert_eq!(reviewer_with("Task", "").state, "ran", "an older CLI calls it Task");
+    }
+
+    #[test]
+    fn the_shared_reviewer_check_reads_the_transcript_the_same_way() {
+        let (dir, root) = init();
+        let tp = write_transcript(
+            dir.path(),
+            &[
+                edit("e1", &root.join("base.txt")),
+                tool_use("sh", "Bash", json!({"command": "echo ok"})),
+                result("sh", false, "ok"),
+                tool_use("ag", "Agent", json!({"prompt": "review"})),
+                result("ag", false, "No problems."),
+            ],
+        );
+        assert_eq!(reviewer_fact_from_transcript(&tp, Some("sh")).state, "none");
+        assert_eq!(reviewer_fact_from_transcript(&tp, Some("ag")).state, "ran");
+        assert_eq!(reviewer_fact_from_transcript(&tp, None).state, "none");
+        assert_eq!(reviewer_fact_from_transcript(&dir.path().join("missing.jsonl"), Some("ag")).state, "unknown");
+    }
+
+    fn test_state_of(cmd: &str, is_error: bool, output: &str) -> TestFact {
+        let (dir, root) = init();
+        let tp = write_transcript(dir.path(), &[shell("t1", cmd), result("t1", is_error, output)]);
+        compute(&inputs(&root, Some(&tp), None)).test
+    }
+
+    #[test]
+    fn a_failing_suite_run_through_a_pipe_is_failed_not_passed() {
+        let t = test_state_of(
+            "cargo test --lib 2>&1 | tail -5",
+            false,
+            "running 12 tests\ntest result: FAILED. 11 passed; 1 failed; 0 ignored",
+        );
+        assert_eq!(t.state, "failed", "the exit status was tail's, the summary line is the truth: {t:?}");
+        assert!(t.summary.unwrap().contains("FAILED"));
+        for output in [
+            "Test Files  1 failed | 4 passed (5)\n      Tests  2 failed | 30 passed (32)",
+            " FAIL  tests/a.test.mjs > it works\nAssertionError",
+            "failures:\n    a::b\n",
+            "error: could not compile `app` due to 2 previous errors",
+            "thread 'x' panicked at src/lib.rs:1:1",
+            "Process finished with exit code 1",
+        ] {
+            assert_eq!(test_state_of("pnpm vitest run | tail -20", false, output).state, "failed", "{output}");
+        }
+    }
+
+    #[test]
+    fn passed_needs_a_pass_marker_or_a_clean_unpiped_exit() {
+        let ok = "running 4 tests\ntest result: ok. 4 passed; 0 failed; 0 ignored";
+        assert_eq!(test_state_of("cargo test --lib 2>&1 | tail -5", false, ok).state, "passed", "a pass marker, even through a pipe");
+        assert_eq!(test_state_of("pnpm vitest run | tail", false, "Tests  31 passed (31)").state, "passed");
+        assert_eq!(test_state_of("cargo test --lib", false, "").state, "passed", "unpiped, exit 0");
+        assert_eq!(test_state_of("cd app && cargo test", false, "").state, "passed", "&& keeps the test's own status");
+        // The exit status was some other command's, or no output says anything.
+        assert_eq!(test_state_of("cargo test --lib 2>&1 | tail -5", false, "").state, "unknown");
+        assert_eq!(test_state_of("cargo test --lib 2>&1 | tail -5", false, "Finished dev profile").state, "unknown");
+        assert_eq!(test_state_of("cargo test --lib; echo done", false, "done").state, "unknown", "echo's status, not the suite's");
+        assert_eq!(test_state_of("cargo test --lib || true", false, "").state, "unknown");
+        // A zero failure count is not a failure.
+        assert_eq!(test_state_of("cargo test", false, "test result: ok. 12 passed; 0 failed").state, "passed");
+        assert_eq!(test_state_of("cargo test", true, "test result: ok. 12 passed").state, "failed", "the tool's own error flag still wins");
+    }
+
+    #[test]
+    fn a_sub_that_edited_nothing_is_not_credited_with_a_peers_commit() {
+        let (dir, root) = init();
+        let base = git::head(&root).unwrap();
+        commit_file(&root, "peers.txt", "p\n");
+        // Only reads and a shell call: no Edit or Write to scope the range by.
+        let tp = write_transcript(dir.path(), &[shell("s1", "ls"), result("s1", false, "a b")]);
+        let f = compute(&inputs(&root, Some(&tp), Some(&base)));
+        assert_eq!((f.commits, f.files_changed, f.insertions, f.deletions), (None, None, None, None));
+        assert!(!f.scoped);
+        assert!(f.commits_note.as_deref().unwrap().contains("another chat"), "{:?}", f.commits_note);
+        // No transcript at all is the same: nothing says which commits were its own.
+        let f = compute(&inputs(&root, None, Some(&base)));
+        assert_eq!(f.commits, None);
+        assert!(f.commits_note.is_some());
+    }
+
+    #[test]
+    fn a_shell_only_sub_shows_uncommitted_as_unknown_not_a_green_zero() {
+        let (dir, root) = init();
+        std::fs::write(root.join("by-shell.txt"), "written by sed -i or a redirect").unwrap();
+        let tp = write_transcript(dir.path(), &[shell("s1", "echo x > by-shell.txt"), result("s1", false, "")]);
+        let f = compute(&inputs(&root, Some(&tp), None));
+        assert_eq!(f.uncommitted, None);
+        assert!(f.uncommitted_note.as_deref().unwrap().contains("only used the shell"), "{:?}", f.uncommitted_note);
+        // A sub that ran no shell and edited nothing is a plain zero.
+        let tp = write_transcript(dir.path(), &[tool_use("r1", "Read", json!({"file_path": "x"})), result("r1", false, "x")]);
+        assert_eq!(compute(&inputs(&root, Some(&tp), None)).uncommitted, Some(0));
+        // Edit-tool edits make the count trustworthy even when the sub also used the shell.
+        let tp = write_transcript(dir.path(), &[shell("s1", "ls"), result("s1", false, ""), edit("e1", &root.join("by-shell.txt"))]);
+        assert_eq!(compute(&inputs(&root, Some(&tp), None)).uncommitted, Some(1));
     }
 
     #[test]

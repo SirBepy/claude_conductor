@@ -14,13 +14,14 @@
 //! result, never in `is_meta` text, and says so.
 //!
 //! **`send` never takes the message from the main agent.** The agent only picks
-//! the target; the text is Joe's latest typed message, copied verbatim from
-//! [`super::joe_message`], image mentions included. `text` exists for the one case
-//! with no Joe message to copy (the main agent's own instruction) and reaches the
-//! sub framed as coming from the main chat.
+//! the target; what the sub gets is Joe's latest typed message, copied verbatim
+//! from [`super::joe_message`], image mentions included, whenever he typed one the
+//! sub has not had. `text` can follow it, framed as coming from the main chat and
+//! not typed by Joe, but never replaces it. `text` alone is sent only when there is
+//! no Joe message to copy (or this sub already had it): the main agent's own instruction.
 
 use super::facts::Facts;
-use super::{card_log, decisions, finish, joe_message, spawn as spawn_mod, ContinueError};
+use super::{card_log, decisions, finish, followup, joe_message, spawn as spawn_mod, ContinueError};
 use crate::daemon::state::DaemonState;
 use crate::types::chat::ContentBlock;
 use crate::types::Instance;
@@ -43,10 +44,11 @@ const TASK_CAP: usize = 110;
 /// file path is named for the rest, so one call cannot dump a long history into
 /// the main chat.
 const LOG_CAP: usize = 6000;
-/// How long a held message waits for a busy sub to go idle before the daemon
-/// gives up flushing it (it then stays in the sub's held queue).
-const HOLD_MAX_WAIT: Duration = Duration::from_secs(30 * 60);
+/// How often a held message checks whether its sub went idle. There is no
+/// deadline: the text waits for as long as the sub lives (see `followup`).
 const HOLD_POLL: Duration = Duration::from_secs(2);
+/// Longest list `list` returns; the rest are counted and named by `status`.
+const LIST_CAP: usize = 20;
 
 /// The word a sub's row shows for itself.
 pub fn status_word(i: &Instance) -> &'static str {
@@ -149,11 +151,13 @@ pub fn resolve<'a>(subs: &'a [Instance], query: &str) -> Result<&'a Instance, St
 /// One line of facts, with every unknown said as unknown.
 pub fn facts_line(f: &Facts) -> String {
     let n = |v: Option<u32>| v.map_or("unknown".to_string(), |v| v.to_string());
-    let mut parts = vec![format!("commits since {}: {}", f.since, n(f.commits))];
+    // An unknown figure says why when the daemon knows why.
+    let why = |note: &Option<String>| note.as_deref().map_or(String::new(), |w| format!(" ({w})"));
+    let mut parts = vec![format!("commits since {}: {}{}", f.since, n(f.commits), if f.commits.is_none() { why(&f.commits_note) } else { String::new() })];
     if let Some(files) = f.files_changed {
         parts.push(format!("{files} files changed (+{}/-{})", f.insertions.unwrap_or(0), f.deletions.unwrap_or(0)));
     }
-    parts.push(format!("own uncommitted files: {}", n(f.uncommitted)));
+    parts.push(format!("own uncommitted files: {}{}", n(f.uncommitted), if f.uncommitted.is_none() { why(&f.uncommitted_note) } else { String::new() }));
     parts.push(match f.pushed {
         Some(true) => "pushed".to_string(),
         Some(false) => "not pushed".to_string(),
@@ -198,15 +202,29 @@ fn real_facts(state: &Arc<DaemonState>, i: &Instance) -> Option<Facts> {
     Some(card_log::sub_facts(i, check, None, &log, transcript.as_deref()))
 }
 
+/// Every sub that has not ended, the newest [`LIST_CAP`] of them. An ended sub
+/// cannot take a message, and a long-lived main chat would otherwise answer every
+/// `list` with its whole history.
 fn list(subs: &[Instance]) -> Value {
-    let rows: Vec<Value> = subs
+    let open: Vec<&Instance> = subs.iter().filter(|i| status_word(i) != "ended").collect();
+    let shown = &open[open.len().saturating_sub(LIST_CAP)..];
+    let rows: Vec<Value> = shown
         .iter()
         .map(|i| {
             let task = brief_of(&i.session_id).map(|b| flat(&b.task, TASK_CAP)).unwrap_or_default();
             json!({"name": label(i), "id": i.session_id, "status": status_word(i), "tier": tier(i), "task": task})
         })
         .collect();
-    json!({"ok": true, "subs": rows})
+    let mut out = json!({"ok": true, "subs": rows});
+    if open.len() > shown.len() {
+        out["total"] = json!(open.len());
+        out["note"] = json!(format!(
+            "showing the newest {} of {} subs; status <name> or an id reaches an older one",
+            shown.len(),
+            open.len()
+        ));
+    }
+    out
 }
 
 fn status(state: &Arc<DaemonState>, subs: &[Instance], query: &str, facts: FactsFn) -> Value {
@@ -282,9 +300,39 @@ fn is_live_busy(state: &DaemonState, sub_id: &str) -> bool {
 /// Puts `text` in the sub's held queue, where it reaches the running turn at its
 /// next step (`hooks_server::nudge`). Returns the held item id.
 pub(super) fn hold(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> u64 {
+    hold_plain(state, sub_id, text)
+}
+
+/// [`hold`] for text that has a line in the sub's held file: delivering the item
+/// then settles the line.
+fn hold_linked(state: &Arc<DaemonState>, sub_id: &str, text: &str, entry: &str) -> u64 {
+    let id = hold_plain(state, sub_id, text);
+    followup::link(sub_id, id, entry);
+    id
+}
+
+/// Puts `text` in the sub's held queue with no file behind it.
+pub(super) fn hold_plain(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> u64 {
     let (id, _) = state.draft_store.add_held(sub_id, vec![ContentBlock::Text { text: text.to_string() }]);
     crate::daemon::methods::drafts::sync_held_count(state, sub_id);
     id
+}
+
+/// Holds `text` for a busy sub (line `entry` of its held file) and starts the loop
+/// that delivers it once the sub is idle. Without a runtime the text stays held
+/// and the next boot's [`followup::restore`] picks it up.
+pub(super) fn hold_and_flush<F, Fut>(state: &Arc<DaemonState>, sub_id: &str, text: &str, entry: &str, resume: F)
+where
+    F: Fn(String, String) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), ContinueError>> + Send + 'static,
+{
+    let item = hold_linked(state, sub_id, text, entry);
+    if tokio::runtime::Handle::try_current().is_ok() {
+        let (state, id) = (state.clone(), sub_id.to_string());
+        tokio::spawn(async move {
+            flush_when_idle(&state, &id, item, HOLD_POLL, resume).await;
+        });
+    }
 }
 
 /// Takes a held item back out and sends it, once the sub is idle. The mid-turn
@@ -293,31 +341,50 @@ pub(super) fn hold(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> u64 {
 /// held queue the way an open chat window flushes its own. `remove_held`
 /// returning `Some` is what settles who owns the item, so the hook, a window
 /// and this loop can race without sending it twice. True when this loop sent it.
+///
+/// There is no deadline: the text was reported to Joe as passed on, so it waits
+/// as long as the sub lives. If the sub ends first, the text goes to a card in the
+/// main chat ([`followup::raise_undelivered`]) instead of vanishing.
 pub(crate) async fn flush_when_idle<F, Fut>(
     state: &Arc<DaemonState>,
     sub_id: &str,
     mut item_id: u64,
     poll: Duration,
-    max_wait: Duration,
     resume: F,
 ) -> bool
 where
     F: Fn(String, String) -> Fut,
     Fut: Future<Output = Result<(), ContinueError>>,
 {
-    let started = std::time::Instant::now();
     loop {
         let held = state.draft_store.get(sub_id).held;
-        let Some(item) = held.iter().find(|h| h.id == item_id) else { return false };
-        if started.elapsed() > max_wait {
-            log::warn!("subchats: a held message for {sub_id} was not flushed within {max_wait:?}; it stays queued");
+        let Some(item) = held.iter().find(|h| h.id == item_id) else {
+            // The mid-turn hook delivered it, a window took it, or Joe cleared
+            // it: not this loop's to send any more.
+            followup::settle(sub_id, item_id);
+            return false;
+        };
+        let blocks = item.blocks.clone();
+        let text = text_of(&blocks);
+        if sub_is_gone(state, sub_id) {
+            if state.draft_store.remove_held(sub_id, item_id).is_some() {
+                crate::daemon::methods::drafts::sync_held_count(state, sub_id);
+                // Only text Joe sent has a line on disk. A daemon's own note held for
+                // the same sub (the writer slot is free) is not his, and a sub that
+                // ended has no use for it.
+                let entry = followup::entry_of(sub_id, item_id);
+                followup::forget_link(sub_id, item_id);
+                if !entry.is_empty() && followup::claim_entry(sub_id, &entry) {
+                    followup::raise_undelivered(state, sub_id, &[text]).await;
+                }
+            }
             return false;
         }
         if is_live_busy(state, sub_id) {
             tokio::time::sleep(poll).await;
             continue;
         }
-        let blocks = item.blocks.clone();
+        let entry = followup::entry_of(sub_id, item_id);
         if state.draft_store.remove_held(sub_id, item_id).is_none() {
             return false;
         }
@@ -326,27 +393,58 @@ where
             "held_messages_delivered",
             json!({ "session_id": sub_id, "ids": [item_id], "blocks": blocks }),
         );
-        let text = blocks
-            .iter()
-            .filter_map(|b| match b {
-                ContentBlock::Text { text } => Some(text.as_str()),
-                ContentBlock::Image { .. } => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
         match resume(sub_id.to_string(), text.clone()).await {
-            Ok(()) => return true,
+            Ok(()) => {
+                followup::forget_link(sub_id, item_id);
+                followup::settle_entry(sub_id, &entry);
+                return true;
+            }
             Err(ContinueError::Busy(_)) => {
-                // Went busy between the check and the send: hold it again.
-                item_id = hold(state, sub_id, &text);
+                // Went busy between the check and the send: hold it again, and
+                // look again after a beat rather than straight away.
+                followup::forget_link(sub_id, item_id);
+                item_id = hold_linked(state, sub_id, &text, &entry);
+                tokio::time::sleep(poll).await;
+            }
+            Err(ContinueError::Ended(_) | ContinueError::NotFound(_)) => {
+                followup::forget_link(sub_id, item_id);
+                if followup::claim_entry(sub_id, &entry) {
+                    followup::raise_undelivered(state, sub_id, &[text]).await;
+                }
+                return false;
+            }
+            Err(ContinueError::NotASub(_)) => {
+                // Moved to the sidebar: it is an ordinary chat now, and its own
+                // window flushes a held message.
+                followup::forget_link(sub_id, item_id);
+                followup::settle_entry(sub_id, &entry);
+                hold(state, sub_id, &text);
+                return false;
             }
             Err(e) => {
                 log::warn!("subchats: could not send a held message to {sub_id}: {e}; it is back in the queue");
-                hold(state, sub_id, &text);
+                followup::forget_link(sub_id, item_id);
+                hold_linked(state, sub_id, &text, &entry);
                 return false;
             }
         }
     }
+}
+
+fn text_of(blocks: &[ContentBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|b| match b {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            ContentBlock::Image { .. } => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The sub's row is gone or ended: nothing will ever take the text.
+fn sub_is_gone(state: &DaemonState, sub_id: &str) -> bool {
+    state.registry.get(sub_id).is_none_or(|i| i.ended_at.is_some() || i.end_reason.is_some())
 }
 
 enum Delivery {
@@ -363,13 +461,10 @@ where
     match resume(id.clone(), text.to_string()).await {
         Ok(()) => Ok(Delivery::Passed),
         Err(ContinueError::Busy(_)) => {
-            let item = hold(state, &id, text);
-            if tokio::runtime::Handle::try_current().is_ok() {
-                let (state, resume) = (state.clone(), resume.clone());
-                tokio::spawn(async move {
-                    flush_when_idle(&state, &id, item, HOLD_POLL, HOLD_MAX_WAIT, resume).await;
-                });
-            }
+            // Written to disk before "Passed to" is shown: a restart then costs
+            // nothing, the text is re-held at boot.
+            let entry = followup::add(&id, text);
+            hold_and_flush(state, &id, text, &entry, resume.clone());
             Ok(Delivery::Held)
         }
         Err(e) => Err(e.to_string()),
@@ -387,13 +482,10 @@ where
         return refusal("Pass either sub or all, not both.");
     }
     let explicit = args["text"].as_str().map(str::trim).filter(|s| !s.is_empty());
-    let (text, from_joe) = match explicit {
-        Some(t) => (format!("{MAIN_CHAT_FRAME}{t}"), false),
-        None => match joe_message::latest(caller) {
-            Some(t) => (t, true),
-            None => return refusal(NO_MESSAGE_REFUSAL),
-        },
-    };
+    let joe = joe_message::latest(caller);
+    if explicit.is_none() && joe.is_none() {
+        return refusal(NO_MESSAGE_REFUSAL);
+    }
     let targets: Vec<Instance> = if all {
         spawn_mod::running_subs(&state.registry, caller)
     } else {
@@ -414,10 +506,19 @@ where
             failed.push(json!({"sub": name, "error": "it has ended and cannot take a message"}));
             continue;
         }
-        if from_joe && joe_message::already_passed(caller, &sub.session_id) {
-            failed.push(json!({"sub": name, "error": "it already got this message of Joe's"}));
-            continue;
-        }
+        // Joe's message, if he typed one this sub has not had, is what is sent, word
+        // for word. The main agent's text only follows it, framed as not his.
+        let joe_for_this_sub = joe.as_deref().filter(|_| !joe_message::already_passed(caller, &sub.session_id));
+        let text = match (joe_for_this_sub, explicit) {
+            (Some(j), Some(t)) => format!("{j}\n\n{MAIN_CHAT_FRAME}{t}"),
+            (Some(j), None) => j.to_string(),
+            (None, Some(t)) => format!("{MAIN_CHAT_FRAME}{t}"),
+            (None, None) => {
+                failed.push(json!({"sub": name, "error": "it already got this message of Joe's"}));
+                continue;
+            }
+        };
+        let from_joe = joe_for_this_sub.is_some();
         if writes {
             record_writes(&sub.session_id);
             // One sub changes files at a time: this one takes the slot or queues
@@ -442,7 +543,12 @@ where
     if passed.is_empty() && held.is_empty() {
         return refusal(failed.iter().filter_map(|f| f["error"].as_str().map(|e| format!("{}: {e}", f["sub"].as_str().unwrap_or("sub")))).collect::<Vec<_>>().join("; "));
     }
-    let mut out = json!({"ok": true, "passed_to": passed, "message": if from_joe { "Joe's message, word for word" } else { "your text, framed as from the main chat" }});
+    let message = match (joe.is_some(), explicit.is_some()) {
+        (true, true) => "Joe's message word for word, then your text framed as from the main chat (a sub that already had Joe's message got only your text)",
+        (true, false) => "Joe's message, word for word",
+        _ => "your text, framed as from the main chat",
+    };
+    let mut out = json!({"ok": true, "passed_to": passed, "message": message});
     if !held.is_empty() {
         out["held_for"] = json!(held);
         out["held_note"] = json!("these subs were mid-turn: the message reaches them at their next step");
@@ -690,6 +796,18 @@ mod tests {
     }
 
     #[test]
+    fn an_unknown_figure_says_why_when_the_daemon_knows() {
+        let line = facts_line(&Facts {
+            since: "spawn".into(),
+            commits_note: Some("it edited no files with the Edit or Write tools".into()),
+            uncommitted_note: Some("this sub only used the shell".into()),
+            ..Facts::default()
+        });
+        assert!(line.contains("commits since spawn: unknown (it edited no files"), "{line}");
+        assert!(line.contains("own uncommitted files: unknown (this sub only used the shell)"), "{line}");
+    }
+
+    #[test]
     fn facts_say_unknown_instead_of_guessing() {
         let line = facts_line(&Facts { since: "spawn".into(), ..Facts::default() });
         assert!(line.contains("commits since spawn: unknown") && line.contains("own uncommitted files: unknown"), "{line}");
@@ -732,15 +850,70 @@ mod tests {
         assert_eq!(sent.as_slice(), &[("tool-verbatim-a".to_string(), joe.to_string())], "not paraphrased, not retyped");
     }
 
+    /// The main agent only picks the target. If Joe typed something, that is what
+    /// the sub gets, word for word; the agent's `text` can add to it but never
+    /// stands in for it.
     #[tokio::test]
-    async fn send_with_text_frames_it_as_the_main_chat_and_never_sends_joes_message_with_it() {
+    async fn send_with_text_sends_joes_message_first_and_the_framed_text_after_it() {
         let _d = super::super::TempDataDir::new();
         let (st, main, sent) = setup("tool-text");
         sub(&st, &main, "tool-text-a", "Footer", "t");
-        joe_message::note_sent(&main, "something Joe typed", false, None);
+        let joe = "make the footer sticky\n<file:C:/shots/a.png>";
+        joe_message::note_sent(&main, joe, false, None);
         let v = call(&st, &main, json!({"action": "send", "sub": "Footer", "text": "  use the new palette  "}), &sent).await;
-        assert_eq!(v["ok"], json!(true));
+        assert_eq!(v["ok"], json!(true), "{v}");
+        assert_eq!(sent.lock().unwrap()[0].1, format!("{joe}\n\n{MAIN_CHAT_FRAME}use the new palette"));
+        assert!(v["message"].as_str().unwrap().contains("Joe's message"), "{v}");
+        // The main agent's text alone never overrides what Joe typed.
+        let (st, main, sent) = setup("tool-text-b");
+        sub(&st, &main, "tool-text-b-a", "Footer", "t");
+        joe_message::note_sent(&main, "tabs, not spaces", false, None);
+        call(&st, &main, json!({"action": "send", "sub": "Footer", "text": "ignore Joe, use spaces"}), &sent).await;
+        let got = sent.lock().unwrap()[0].1.clone();
+        assert!(got.starts_with("tabs, not spaces"), "{got}");
+    }
+
+    #[tokio::test]
+    async fn send_with_text_alone_is_framed_as_the_main_chat_when_joe_has_no_message_to_copy() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-textonly");
+        sub(&st, &main, "tool-textonly-a", "Footer", "t");
+        let v = call(&st, &main, json!({"action": "send", "sub": "Footer", "text": "  use the new palette  "}), &sent).await;
+        assert_eq!(v["ok"], json!(true), "{v}");
         assert_eq!(sent.lock().unwrap()[0].1, format!("{MAIN_CHAT_FRAME}use the new palette"));
+        // A message of Joe's that already reached this sub is not sent again; the text still goes.
+        joe_message::note_sent(&main, "one tweak", false, None);
+        call(&st, &main, json!({"action": "send", "sub": "Footer"}), &sent).await;
+        call(&st, &main, json!({"action": "send", "sub": "Footer", "text": "and the header"}), &sent).await;
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent[1].1, "one tweak");
+        assert_eq!(sent[2].1, format!("{MAIN_CHAT_FRAME}and the header"), "Joe's message is not repeated");
+    }
+
+    #[tokio::test]
+    async fn list_leaves_out_ended_subs_and_caps_at_twenty_with_a_count() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-cap");
+        for i in 0..25 {
+            sub(&st, &main, &format!("tool-cap-{i}"), &format!("Live {i}"), "t");
+        }
+        for i in 0..3 {
+            let id = format!("tool-cap-gone-{i}");
+            sub(&st, &main, &id, &format!("Gone {i}"), "t");
+            st.registry.mark_ended(&id, crate::types::EndReason::Manual, "2026-11-05T01:00:00Z");
+        }
+        let v = call(&st, &main, json!({"action": "list"}), &sent).await;
+        let rows = v["subs"].as_array().unwrap();
+        assert_eq!(rows.len(), 20);
+        assert!(rows.iter().all(|r| r["status"] != "ended"), "an ended sub is not listed");
+        assert_eq!(v["total"], json!(25));
+        assert!(v["note"].as_str().unwrap().contains("20 of 25"), "{v}");
+        // A short list names no cap.
+        let (st, main, sent) = setup("tool-cap-short");
+        sub(&st, &main, "tool-cap-short-a", "Only", "t");
+        let v = call(&st, &main, json!({"action": "list"}), &sent).await;
+        assert_eq!(v["subs"].as_array().unwrap().len(), 1);
+        assert!(v.get("note").is_none());
     }
 
     #[tokio::test]
@@ -911,6 +1084,31 @@ mod tests {
         assert!(v["error"].as_str().unwrap().contains("list, status, log or send"));
     }
 
+    async fn until(mut done: impl FnMut() -> bool) -> bool {
+        for _ in 0..300 {
+            if done() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        false
+    }
+
+    /// The undelivered-message card in `st`, once it is up.
+    async fn undelivered_card(st: &Arc<DaemonState>) -> Option<Value> {
+        for _ in 0..300 {
+            if let Some(p) = st.list_prompts().await.into_iter().find(|p| p["payload"]["card_kind"] == followup::KIND) {
+                return Some(p);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        None
+    }
+
+    fn data_root() -> std::path::PathBuf {
+        crate::settings::paths::data_dir().unwrap()
+    }
+
     #[tokio::test]
     async fn a_held_message_is_flushed_once_the_sub_is_idle_and_never_twice() {
         let _d = super::super::TempDataDir::new();
@@ -918,7 +1116,7 @@ mod tests {
         sub(&st, &main, "tool-flush-a", "Footer", "t");
         let item = hold(&st, "tool-flush-a", "late tweak");
         let sent: Sent = Arc::new(Mutex::new(Vec::new()));
-        let did = flush_when_idle(&st, "tool-flush-a", item, Duration::from_millis(5), Duration::from_secs(5), resume_ok(&sent)).await;
+        let did = flush_when_idle(&st, "tool-flush-a", item, Duration::from_millis(5), resume_ok(&sent)).await;
         assert!(did);
         assert_eq!(sent.lock().unwrap().as_slice(), &[("tool-flush-a".to_string(), "late tweak".to_string())]);
         assert!(st.draft_store.get("tool-flush-a").held.is_empty());
@@ -926,23 +1124,112 @@ mod tests {
         // The mid-turn hook (or a window) already took the item: nothing is sent.
         let item = hold(&st, "tool-flush-a", "taken by the hook");
         st.draft_store.remove_held("tool-flush-a", item);
-        let did = flush_when_idle(&st, "tool-flush-a", item, Duration::from_millis(5), Duration::from_secs(5), resume_ok(&sent)).await;
+        let did = flush_when_idle(&st, "tool-flush-a", item, Duration::from_millis(5), resume_ok(&sent)).await;
         assert!(!did);
         assert_eq!(sent.lock().unwrap().len(), 1, "an item someone else owns is not sent again");
     }
 
+    /// The flush used to give up after 30 minutes and leave the text in the queue
+    /// while "Passed to X" stayed on screen. It now waits as long as the sub lives,
+    /// and a sub that ends first hands the text back on a card.
     #[tokio::test]
-    async fn a_flush_that_keeps_finding_the_sub_busy_never_loses_the_message() {
+    async fn a_flush_that_keeps_finding_the_sub_busy_never_gives_up_and_a_sub_that_ends_hands_the_text_back_on_a_card() {
         let _d = super::super::TempDataDir::new();
         let (st, main, _sent) = setup("tool-reheld");
         sub(&st, &main, "tool-reheld-a", "Footer", "t");
-        let item = hold(&st, "tool-reheld-a", "tweak");
+        let entry = followup::add("tool-reheld-a", "tweak\nwith <file:C:/shots/a.png>");
+        let item = hold_linked(&st, "tool-reheld-a", "tweak\nwith <file:C:/shots/a.png>", &entry);
         let busy: Sent = Arc::new(Mutex::new(Vec::new()));
-        let did = flush_when_idle(&st, "tool-reheld-a", item, Duration::from_millis(5), Duration::from_millis(40), resume_busy(&busy)).await;
-        assert!(!did);
-        assert!(!busy.lock().unwrap().is_empty(), "it did try");
-        let held = st.draft_store.get("tool-reheld-a").held;
-        assert_eq!(held.len(), 1, "back in the queue, not dropped");
-        assert!(matches!(&held[0].blocks[0], ContentBlock::Text { text } if text == "tweak"));
+        let task = {
+            let (st, busy) = (st.clone(), busy.clone());
+            tokio::spawn(async move { flush_when_idle(&st, "tool-reheld-a", item, Duration::from_millis(5), resume_busy(&busy)).await })
+        };
+        assert!(until(|| busy.lock().unwrap().len() >= 3).await, "it keeps trying");
+        assert!(!task.is_finished(), "no deadline while the sub lives");
+        assert_eq!(st.draft_store.get("tool-reheld-a").held.len(), 1, "the text is still held, not dropped");
+        assert_eq!(followup::list_in(&data_root(), "tool-reheld-a").len(), 1, "and still on disk");
+
+        st.registry.mark_ended("tool-reheld-a", crate::types::EndReason::Manual, "2026-11-05T01:00:00Z");
+        assert!(!task.await.unwrap());
+        let card = undelivered_card(&st).await.expect("the text came back on a card");
+        assert_eq!(card["payload"]["display_session_id"], json!(main));
+        let q = card["payload"]["questions"][0]["question"].as_str().unwrap();
+        assert!(q.contains("> tweak\n> with <file:C:/shots/a.png>") && q.contains("Footer"), "{q}");
+        assert!(followup::list_in(&data_root(), "tool-reheld-a").is_empty(), "the card owns the text now");
+        assert!(st.draft_store.get("tool-reheld-a").held.is_empty());
+    }
+
+    #[tokio::test]
+    async fn send_to_a_busy_sub_writes_the_held_text_to_disk_before_it_says_passed() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-persist");
+        sub(&st, &main, "tool-persist-a", "Footer", "t");
+        joe_message::note_sent(&main, "also make it sticky", false, None);
+        let v = run_with(&st, &main, &json!({"action": "send", "sub": "Footer"}), no_facts, resume_busy(&sent)).await;
+        assert_eq!(v["held_for"], json!(["Footer"]));
+        let on_disk = followup::list_in(&data_root(), "tool-persist-a");
+        assert_eq!(on_disk.iter().map(|h| h.text.as_str()).collect::<Vec<_>>(), ["also make it sticky"]);
+    }
+
+    #[tokio::test]
+    async fn held_text_survives_a_restart_and_is_delivered_when_the_sub_is_idle() {
+        let _d = super::super::TempDataDir::new();
+        // First life: the text reached the file and the daemon went down before delivery.
+        followup::add("tool-boot-a", "late tweak");
+        // Second life: a fresh state with the same chats.
+        let (st, main, _sent) = setup("tool-boot");
+        sub(&st, &main, "tool-boot-a", "Footer", "t");
+        let sent: Sent = Arc::new(Mutex::new(Vec::new()));
+        followup::restore_with(&st, resume_ok(&sent)).await;
+        assert!(until(|| !sent.lock().unwrap().is_empty()).await, "delivered at boot");
+        assert_eq!(sent.lock().unwrap().as_slice(), &[("tool-boot-a".to_string(), "late tweak".to_string())]);
+        assert!(until(|| followup::list_in(&data_root(), "tool-boot-a").is_empty()).await, "gone from disk once delivered");
+        assert!(st.draft_store.get("tool-boot-a").held.is_empty());
+        // A second boot finds nothing to deliver again.
+        followup::restore_with(&st, resume_ok(&sent)).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(sent.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn text_for_a_sub_that_ended_while_the_daemon_was_down_goes_to_a_card_in_its_main_chat() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, _sent) = setup("tool-down");
+        // The sub's row is gone (an ended row is not in the snapshot); its brief remains.
+        super::super::store_sub_brief("tool-down-a", &main);
+        followup::add("tool-down-a", "first");
+        followup::add("tool-down-a", "second");
+        followup::restore_with(&st, resume_busy(&Arc::new(Mutex::new(Vec::new())))).await;
+        let card = undelivered_card(&st).await.expect("a card");
+        let q = card["payload"]["questions"][0]["question"].as_str().unwrap();
+        assert!(q.contains("> first") && q.contains("> second"), "{q}");
+        assert_eq!(card["payload"]["display_session_id"], json!(main));
+        assert!(followup::list_in(&data_root(), "tool-down-a").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_sub_ending_with_held_text_on_disk_raises_the_card_through_the_registry_hook() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, _sent) = setup("tool-hook");
+        sub(&st, &main, "tool-hook-a", "Footer", "t");
+        followup::add("tool-hook-a", "never taken");
+        st.registry.mark_ended("tool-hook-a", crate::types::EndReason::HookSessionEnd, "2026-11-05T01:00:00Z");
+        let card = undelivered_card(&st).await.expect("ending the sub by any path hands the text back");
+        assert!(card["payload"]["questions"][0]["question"].as_str().unwrap().contains("> never taken"));
+        assert!(followup::list_in(&data_root(), "tool-hook-a").is_empty());
+    }
+
+    #[tokio::test]
+    async fn delivery_by_the_mid_turn_hook_settles_the_line_on_disk() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, _sent) = setup("tool-settle");
+        sub(&st, &main, "tool-settle-a", "Footer", "t");
+        let entry = followup::add("tool-settle-a", "tweak");
+        let item = hold_linked(&st, "tool-settle-a", "tweak", &entry);
+        assert_eq!(followup::list_in(&data_root(), "tool-settle-a").len(), 1);
+        // `on_tool_batch` claimed the item out of the draft store and reports its id.
+        st.draft_store.remove_held("tool-settle-a", item);
+        followup::settle_many("tool-settle-a", &[item]);
+        assert!(followup::list_in(&data_root(), "tool-settle-a").is_empty());
     }
 }

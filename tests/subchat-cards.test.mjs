@@ -207,6 +207,25 @@ describe("what the chips say", () => {
     expect(words).toContain("No reviewer (no reviewer ran)");
   });
 
+  it("an unknown figure says why in the chip's title and in its words, when the daemon knows why", async () => {
+    const commitsNote = "it edited no files with the Edit or Write tools, so another chat's commits in this tree cannot be told apart from its own";
+    const dirtyNote = "this sub only used the shell, so its files can't be tracked";
+    const el = await render(card("c5", T0 + MIN, { facts: facts({
+      commits: null, files_changed: null, uncommitted: null, scoped: false,
+      commits_note: commitsNote, uncommitted_note: dirtyNote,
+      test: { state: "unknown", command: "cargo test --lib 2>&1 | tail -5", summary: "Finished dev profile" },
+    }) }));
+    const titles = [...el.querySelectorAll(".mc-full .mc-facts .mc-chip")].map((c) => c.getAttribute("title"));
+    expect(titles[0]).toContain(`Commits: unknown, ${commitsNote}`);
+    expect(titles[2]).toContain(`Uncommitted files: unknown, ${dirtyNote}`);
+    expect(titles[3]).toContain("result unknown");
+    const words = el.querySelector(".mc-full .mc-facts-list").textContent;
+    expect(words).toContain(`Commits: unknown, ${commitsNote}`);
+    expect(words).toContain(`Uncommitted files: unknown, ${dirtyNote}`);
+    expect(words).toContain("result unknown, its output showed no pass or fail line");
+    expect(words).not.toContain("0 uncommitted");
+  });
+
   it("a card with no stored facts says so instead of drawing none", async () => {
     const el = await render(card("c3", T0 + MIN, { facts: null }));
     expect(el.querySelector(".mc-full .mc-facts-list").textContent).toContain("unknown");

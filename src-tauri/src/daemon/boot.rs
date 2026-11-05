@@ -276,6 +276,9 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
         // Subs held for their project's writer slot when the daemon stopped:
         // their rows are back, so the queue is too, and its head starts.
         crate::daemon::subchats::writers::restore(&state);
+        // Text Joe's follow-ups left for busy subs was written to disk before
+        // "Passed to" showed; give each a way to reach its sub again.
+        crate::daemon::subchats::followup::restore(&state).await;
     }
 
     // Re-track any external `claude` terminal sessions that were already

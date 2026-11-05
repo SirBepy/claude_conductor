@@ -86,6 +86,13 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle, armed: &HashSet<String
 /// that was idle then (or a prompt with no session id) never gets a blind
 /// approval, since nobody chose to let it run unattended.
 pub(super) fn prompt_in_armed_scope(armed: &HashSet<String>, payload: &serde_json::Value) -> bool {
+    // A card the daemon raised (a ceiling, a stuck sub, a close approval, an
+    // undelivered message) carries the main chat's id, so it would pass the check
+    // below. Its first option is not a harmless default ("Keep going" raises a
+    // ceiling), and Joe is the one who decides those.
+    if payload.get("daemon_card").and_then(|v| v.as_bool()) == Some(true) {
+        return false;
+    }
     payload
         .get("session_id")
         .and_then(|v| v.as_str())

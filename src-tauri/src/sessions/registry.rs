@@ -78,6 +78,12 @@ pub struct Registry {
     /// (todo 824 remaining 1). Positive proof the MCP transport is alive this
     /// turn, independent of whether report_turn_status/send_message landed.
     pub(super) mcp_tool_used_gen: Mutex<HashMap<String, u64>>,
+    /// Called with the session id each time `mark_ended` flips a row to ended.
+    /// Every close path (the menu, SessionEnd, a process exit, `close_session`)
+    /// ends in `mark_ended`, so this is the one place a daemon-side reaction to
+    /// "a chat ended" (a waiting parent closing once its last sub is gone) can
+    /// hang without each path remembering to call it.
+    pub(super) ended_hook: Mutex<Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>>,
 }
 
 impl Registry {
@@ -94,7 +100,14 @@ impl Registry {
             builtin_ask_attempts: Mutex::new(HashMap::new()),
             pending_turn_gen: Mutex::new(HashMap::new()),
             mcp_tool_used_gen: Mutex::new(HashMap::new()),
+            ended_hook: Mutex::new(None),
         }
+    }
+
+    /// Installs the callback `mark_ended` fires. The daemon sets it once at
+    /// construction; a bare registry (tests, the app process) has none.
+    pub fn set_ended_hook(&self, hook: std::sync::Arc<dyn Fn(&str) + Send + Sync>) {
+        *self.ended_hook.lock().unwrap_or_else(|p| p.into_inner()) = Some(hook);
     }
 
     /// Late-set `is_remote` after `upsert_interactive`, when `start_session`

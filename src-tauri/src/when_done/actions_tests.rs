@@ -20,6 +20,25 @@ fn a_subs_question_is_in_scope_once_the_sub_joined_through_its_armed_parent() {
     assert!(!prompt_in_armed_scope(&main_only, &sub_question), "a sub that never joined is left pending for Joe");
 }
 
+// A card the daemon raises (a ceiling, a stuck sub, a close approval) carries the
+// main chat's id as its `session_id`, so the armed set admits it. Its first option
+// is not a harmless default: "Keep going" raises a ceiling, "Open it" does nothing
+// useful, and a close approval's first option is "Wait for them". Joe decides those.
+#[test]
+fn a_card_the_daemon_raised_is_never_auto_answered() {
+    use std::collections::HashSet;
+    let armed: HashSet<String> = ["main".to_string()].into_iter().collect();
+    for kind in ["subchat_ceiling", "subchat_stuck", "subchat_close", "subchat_unfinished"] {
+        let card = json!({"id": "c1", "session_id": "main", "display_session_id": "main", "daemon_card": true, "card_kind": kind});
+        assert!(!prompt_in_armed_scope(&armed, &card), "{kind} stays for Joe");
+    }
+    // A model's own question in the same chat is still answered.
+    let own = json!({"id": "q1", "session_id": "main"});
+    assert!(prompt_in_armed_scope(&armed, &own));
+    let not_a_daemon_card = json!({"id": "q2", "session_id": "main", "daemon_card": false});
+    assert!(prompt_in_armed_scope(&armed, &not_a_daemon_card));
+}
+
 #[test]
 fn picks_the_first_option_label_per_question() {
     let questions = json!([

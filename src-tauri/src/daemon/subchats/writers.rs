@@ -531,7 +531,6 @@ async fn wake(state: &Arc<DaemonState>, sub_id: &str) {
         sub_id,
         item,
         std::time::Duration::from_secs(2),
-        std::time::Duration::from_secs(30 * 60),
         move |id, text| {
             let state = owner.clone();
             async move { resume::nudge(&state, &id, &text).await.map_err(ContinueError::Send) }

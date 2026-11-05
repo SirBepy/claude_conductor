@@ -174,7 +174,7 @@ impl DaemonState {
         settings: SettingsCache,
         db: Option<Arc<std::sync::Mutex<StorageManager>>>,
     ) -> Arc<Self> {
-        Arc::new(Self {
+        let state = Arc::new(Self {
             sessions,
             registry: Arc::new(Registry::new()),
             settings,
@@ -204,7 +204,15 @@ impl DaemonState {
             step_comments: Arc::new(Mutex::new(HashMap::new())),
             api_credit: crate::daemon::api_credit::ApiCreditHub::new(),
             meeting: Arc::new(crate::daemon::meeting_monitor::MeetingMonitor::new()),
-        })
+        });
+        // Weak, because the registry lives inside the state it would point back at.
+        let weak = Arc::downgrade(&state);
+        state.registry.set_ended_hook(Arc::new(move |sid| {
+            if let Some(state) = weak.upgrade() {
+                crate::daemon::subchats::on_chat_ended(&state, sid);
+            }
+        }));
+        state
     }
 
     /// Loads (or mints) this daemon's machine registry from `app_data`.
