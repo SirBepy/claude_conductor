@@ -107,6 +107,7 @@ async fn post_fire_and_forget_question(
     if let Value::Object(map) = &mut payload {
         map.insert("seq".to_string(), json!(ctx.state.next_prompt_seq()));
     }
+    crate::daemon::subchats::stamp_prompt_routing(&ctx.state, &mut payload, session_id);
     // Checked BEFORE add_prompt below records THIS card, so it reflects an
     // OLDER question left open, not this one. Without this, an unanswered
     // question just sits silently while the model moves on to a new one; when
@@ -138,6 +139,10 @@ async fn post_fire_and_forget_question(
     );
     subs
 }
+
+const UNCONFIRMED_NOTE: &str = "Could not confirm any client actually received this question within the \
+timeout window - it may not have reached the user at all. Do not wait any longer on this call. \
+Re-send the same question as a plain-text message via send_message right now instead.";
 
 /// Well above the normal poll+emit+render round trip (well under 2s, todo
 /// 735's feasibility trace), but short enough that "no client attached" - a
@@ -193,15 +198,14 @@ pub(super) async fn on_question_request(
             "[perm-relay] question {} not confirmed shown/parked within {:?}; acknowledging false",
             body.id, RENDER_CONFIRM_TIMEOUT
         );
-        return (
-            StatusCode::OK,
-            Json(json!({
-                "acknowledged": false,
-                "note": "Could not confirm any client actually received this question within the \
-timeout window - it may not have reached the user at all. Do not wait any longer on this call. \
-Re-send the same question as a plain-text message via send_message right now instead.",
-            })),
-        );
+        // A sub's chat has no sidebar row, so the generic "re-send via
+        // send_message" advice would send its question to a chat nobody reads.
+        let is_sub = body
+            .session_id
+            .as_deref()
+            .is_some_and(|s| crate::daemon::subchats::is_sub_session(&ctx.state, s));
+        let note = if is_sub { crate::daemon::subchats::UNCONFIRMED_NOTE } else { UNCONFIRMED_NOTE };
+        return (StatusCode::OK, Json(json!({ "acknowledged": false, "note": note })));
     }
     (StatusCode::OK, Json(json!({ "acknowledged": true, "note": fire_and_forget_note("this tool") })))
 }
@@ -446,6 +450,90 @@ mod tests {
         let prompts = state.list_prompts().await;
         assert_eq!(prompts.len(), 1);
         assert_eq!(prompts[0]["payload"]["has_older_pending"], serde_json::Value::Null);
+    }
+
+    fn register(state: &Arc<DaemonState>, id: &str) {
+        let settings = std::sync::Mutex::new(Settings::default());
+        state.registry.record_interactive_session(id, std::path::Path::new("/tmp/x"), &settings, "2026-11-05T00:00:00Z");
+    }
+
+    /// A sub's question card shows in its parent's window while the answer
+    /// target stays the sub; a normal chat's card shows on itself and carries
+    /// no sub labels.
+    #[tokio::test]
+    async fn a_subs_question_displays_on_its_parent_and_a_normal_chats_on_itself() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+        for id in ["main", "sub", "solo"] {
+            register(&state, id);
+        }
+        state.registry.set_subchat_of("sub", Some("main".into()));
+        state.registry.set_name("sub", "Fix login test".to_string());
+        for id in ["sub", "solo"] {
+            state.registry.record_builtin_ask_attempt(id);
+            state.registry.record_builtin_ask_attempt(id);
+            ask_question_decision(&ctx, ask_body(id)).await;
+        }
+
+        let prompts = state.list_prompts().await;
+        let payload_of = |sid: &str| prompts.iter().find(|p| p["payload"]["session_id"] == sid).unwrap()["payload"].clone();
+        let sub = payload_of("sub");
+        assert_eq!(sub["display_session_id"], "main");
+        assert_eq!(sub["sub_name"], "Fix login test");
+        let solo = payload_of("solo");
+        assert_eq!(solo["display_session_id"], "solo");
+        assert!(solo.get("sub_name").is_none() && solo.get("sub_task").is_none());
+    }
+
+    /// The live frame the app and phone receive carries the same routing as
+    /// the stored prompt, not only the listing.
+    #[tokio::test]
+    async fn the_published_question_frame_carries_the_display_chat() {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+        register(&state, "main");
+        register(&state, "sub");
+        state.registry.set_subchat_of("sub", Some("main".into()));
+        state.registry.record_builtin_ask_attempt("sub");
+        state.registry.record_builtin_ask_attempt("sub");
+        let mut rx = state.notifier.subscribe();
+        ask_question_decision(&ctx, ask_body("sub")).await;
+        // A tracked session also publishes instances_changed first; skip to the card frame.
+        let frame = loop {
+            let f = rx.recv().await.expect("question_request published");
+            if f["method"] == "question_request" {
+                break f;
+            }
+        };
+        assert_eq!(frame["params"]["display_session_id"], "main");
+    }
+
+    /// An unconfirmed sub question must not tell the sub to re-send through
+    /// send_message: its chat is hidden, so Joe would never read it.
+    #[tokio::test(start_paused = true)]
+    async fn an_unconfirmed_sub_question_is_not_told_to_resend_via_send_message() {
+        use axum::response::IntoResponse;
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+        register(&state, "main");
+        register(&state, "sub");
+        register(&state, "solo");
+        state.registry.set_subchat_of("sub", Some("main".into()));
+        let mut notes = Vec::new();
+        for (id, sid) in [("q-sub", "sub"), ("q-solo", "solo")] {
+            let body = QuestRequestBody {
+                id: id.to_string(),
+                questions: json!([{ "question": "Tabs or spaces?" }]),
+                session_id: Some(sid.to_string()),
+            };
+            let resp = on_question_request(AxState(ctx.clone()), ValidatedJson(body)).await.into_response();
+            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(v["acknowledged"], false);
+            notes.push(v["note"].as_str().unwrap().to_string());
+        }
+        assert!(notes[0].contains("Do not re-send it with send_message"), "sub: {}", notes[0]);
+        assert!(notes[1].contains("Re-send the same question as a plain-text message"), "normal chat keeps today's note");
     }
 
     /// Piece 1: two sessions must not share an attempt budget.

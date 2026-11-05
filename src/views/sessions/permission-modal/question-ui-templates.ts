@@ -11,7 +11,7 @@ import { previewLayout, previewedOptions, questionPictureHtml, stageHtml, tilePi
 import type { PreviewLayout } from "./option-previews";
 import { BADGE_META, DOMAIN_META } from "./types";
 import type { AuqAttachmentsController } from "./attachments";
-import type { AuqAttachment, OptionBadge, Question, QuestionDomain, QuestionUIOpts, Selection } from "./types";
+import type { AskerChip, AuqAttachment, OptionBadge, Question, QuestionDomain, QuestionUIOpts, Selection } from "./types";
 
 /** Fields the renderer mutates that question-ui.ts also reads/writes
  *  directly (initial clamp, teardown, draft snapshots). One shared box. */
@@ -288,6 +288,31 @@ export function pagerHtml(
     ${dotsHtml}
     <button type="button" class="icon-btn-sq prompt-icon-btn" data-nav="1" ${nextDisabled ? "disabled" : ""}><i class="ph ph-caret-right"></i></button>
   </span>`;
+}
+
+/** The picker across chats that have a question open in this window: one chip per
+ *  asker with its question count, the active one marked. Empty for a lone asker,
+ *  because a chat's own card needs no picker. */
+export function askersStripHtml(chips: AskerChip[] | null | undefined): string {
+  if (!chips || chips.length < 2) return "";
+  const items = chips.map((c) => {
+    const icon = c.isMain ? "ph-chat-circle-text" : "ph-tree-structure";
+    return `<button type="button" class="prompt-asker${c.active ? " is-active" : ""}" data-asker="${escapeHtml(c.askerId)}" aria-pressed="${c.active}" title="${escapeHtml(c.label)}: ${c.count} ${c.count === 1 ? "question" : "questions"}"><i class="ph ${icon}"></i><span class="prompt-asker__name">${escapeHtml(c.label)}</span><span class="prompt-asker__count">${c.count}</span></button>`;
+  }).join("");
+  return `<div class="prompt-askers" role="group" aria-label="Chats with a question">${items}</div>`;
+}
+
+/** The header chip naming the sub that asked. Left out while the picker already
+ *  names every asker. */
+export function fromChipHtml(name: string | undefined): string {
+  if (!name) return "";
+  return `<span class="prompt-from" title="Asked by this subchat"><i class="ph ph-tree-structure"></i><span class="prompt-from__name">${escapeHtml(name)}</span></span>`;
+}
+
+/** The sub's one-line job, under the header. Nothing when the daemon has none. */
+export function fromTaskHtml(task: string | undefined): string {
+  const text = task?.trim();
+  return text ? `<div class="prompt-from-task" title="${escapeHtml(text)}">${escapeHtml(text)}</div>` : "";
 }
 
 export function collapsedHtml(

@@ -6,7 +6,7 @@ import { escapeHtml } from "../../../shared/escape-html";
 import { handleTicketHover, handleTicketHoverOut, linkifyTickets } from "../../../shared/chat/ticket-refs";
 import { renderCardShell } from "./host";
 import {
-  collapsedHtml, nextArrowDisabled, pagerHtml, panelHtml, summaryPanelHtml,
+  askersStripHtml, collapsedHtml, fromChipHtml, fromTaskHtml, nextArrowDisabled, pagerHtml, panelHtml, summaryPanelHtml,
 } from "./question-ui-templates";
 import type { QuestionRenderState } from "./question-ui-templates";
 import { focusActivePanel } from "./question-keyboard";
@@ -59,6 +59,9 @@ export interface QuestionCardRenderer {
   minimize: () => boolean;
   /** Re-opens a collapsed card. Returns false when it was already open. */
   expand: () => boolean;
+  /** Repaints the asker picker (and the header's sub chip that yields to it) in
+   *  place, for when another chat's question arrived or was settled. */
+  refreshAskers: () => void;
   /** Rebuilds the answer bar for the other side of the 768px breakpoint. */
   onViewportCrossing: () => void;
   /** Card teardown: drops the fullscreen preview, which lives outside the host. */
@@ -283,15 +286,23 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
       // Same header on phone and desktop (Joe, 2026-10-26): minimize sits far
       // right on both, and Skip lives on the minimized bar (collapsedHtml).
       const titleHtml = `<span class="prompt-card__title"><i class="ph ${titleIcon}"></i></span>`;
-      const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${olderPendingBadge}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="ask" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button><button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
+      // The picker already names every asker, so the sub's own name chip only
+      // shows while it is the lone asker in this window.
+      const chips = opts.askers?.() ?? null;
+      const subChip = chips && chips.length > 1 ? "" : fromChipHtml(opts.from?.name);
+      const headerHtml = `${titleHtml}${pagerHtml(totalPanels, hasSummary, questions, answeredAt, state.activeTab)}<span class="prompt-head__spacer"></span>${opts.rightChipHtml ?? ""}${subChip}${olderPendingBadge}${degradedBadge}<button type="button" class="icon-btn-sq prompt-icon-btn" data-act="ask" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button><button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize"><i class="ph ph-minus"></i></button>`;
       const panelsHtml = questions.map((q, qi) => panelHtml(q, qi, state.activeTab, selections, noneLabel, opts, notes.get(qi), state.editingNote?.qi === qi ? state.editingNote.label : null)).join("")
         + (hasSummary ? summaryPanelHtml(questions, state.activeTab, answeredAt, answerPreview, opts, auqAttachments, tickedNotes) : "");
       // The CTA class is baked in here, not only toggled after: .btn transitions
       // `all`, so adding it after insertion animated the button's width.
       const footerHtml = `<button type="button" class="btn btn-primary${isReviewTab() ? " prompt-submit-cta" : ""}" data-act="primary"></button>`;
       rebuildKeepingFrames(host, () => {
-        host.innerHTML = renderCardShell(headerHtml, `<div class="prompt-track-viewport"><div class="prompt-track">${panelsHtml}</div></div>`, footerHtml);
+        host.innerHTML = renderCardShell(headerHtml, `<div class="prompt-track-viewport"><div class="prompt-track">${panelsHtml}</div></div>`, footerHtml, {
+          topHtml: askersStripHtml(chips),
+          afterHeaderHtml: fromTaskHtml(opts.from?.task),
+        });
       });
+      wireAskers();
 
       void linkifyTickets(host, opts.cwd ?? undefined);
 
@@ -401,6 +412,46 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
 
   const refreshAttachments = (): void => { paintAttachmentStrips(); syncMessagesPadding(); };
 
+  function wireAskers(): void {
+    host.querySelectorAll<HTMLButtonElement>(".prompt-asker").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.asker;
+        if (id && !btn.classList.contains("is-active")) opts.onPickAsker?.(id);
+      });
+    });
+  }
+
+  // Patches the picker in place: a full render() would rebuild the answer box
+  // under Joe's cursor just because another chat asked something.
+  const refreshAskers = (): void => {
+    if (minimized || !opts.askers) return;
+    const card = host.querySelector<HTMLElement>(".prompt-card");
+    if (!card) return;
+    const html = askersStripHtml(opts.askers());
+    const current = card.querySelector<HTMLElement>(":scope > .prompt-askers");
+    if (html) {
+      const tpl = document.createElement("template");
+      tpl.innerHTML = html;
+      const next = tpl.content.firstElementChild;
+      if (next) {
+        if (current) current.replaceWith(next);
+        else card.querySelector(".prompt-card__handle")?.after(next);
+      }
+    } else {
+      current?.remove();
+    }
+    const head = card.querySelector(".prompt-card__header");
+    const chip = head?.querySelector(".prompt-from");
+    if (html) chip?.remove();
+    else if (!chip && opts.from?.name) {
+      const tpl = document.createElement("template");
+      tpl.innerHTML = fromChipHtml(opts.from.name);
+      const el = tpl.content.firstElementChild;
+      if (el) head?.querySelector(".prompt-head__spacer")?.after(el);
+    }
+    wireAskers();
+  };
+
   const { minimize, expand } = createCollapseController({
     host, fullscreen, isMinimized: () => minimized, setMinimized: (v) => { minimized = v; },
     setExpanding: (v) => { expanding = v; }, render: () => render(),
@@ -425,5 +476,5 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     field.setSelectionRange(caret[0], caret[1]);
   };
 
-  return { render, goToTab, togglePick, refreshAttachments, minimize, expand, onViewportCrossing, dispose: fullscreen.close };
+  return { render, goToTab, togglePick, refreshAttachments, refreshAskers, minimize, expand, onViewportCrossing, dispose: fullscreen.close };
 }

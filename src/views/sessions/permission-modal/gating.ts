@@ -201,6 +201,9 @@ export function selectionGuard(): () => boolean {
   };
 }
 
+/** Whether a card for `eventSessionId` shows now. Callers pass the prompt's
+ *  DISPLAY id (`displayIdOf`), not its asker: a hidden sub is never selected, its
+ *  main chat is. Auto-accept is the opposite and stays keyed on the asker. */
 export function isForSelectedSession(eventSessionId: string | undefined): boolean {
   if (!eventSessionId) return false;
   if (_selectedSessionId === eventSessionId) return true;
@@ -239,10 +242,33 @@ export type PendingPrompt =
   // which runs generically across every PendingPrompt kind.
   | { kind: "secret"; payload: SecretRequestedPayload; draft?: QuestionDraft };
 
+// Keyed by the ASKER (`payload.session_id`): each asking chat keeps its own slot
+// and sibling queue, which is also what an answer is sent to. What changes for a
+// hidden sub is only WHERE its card shows, the main chat named by
+// `display_session_id`, so everything that asks "which chat is waiting on Joe"
+// (the gate, the sidebar marker, replay) goes through `displayIdOf`.
 const _pendingPrompts = new Map<string, PendingPrompt>();
+
+/** The chat whose window shows this prompt's card: a sub's main chat, else the
+ *  asker itself. An older daemon or a peer machine sends no display id, which
+ *  reads as "the asker", so every non-sub prompt (a Jarvis worker's too) routes
+ *  exactly as before. */
+export function displayIdOf(p: { session_id?: string; display_session_id?: string }): string | undefined {
+  return p.display_session_id || p.session_id;
+}
 
 export function storePendingPrompt(sessionId: string, prompt: PendingPrompt): void {
   _pendingPrompts.set(sessionId, prompt);
+}
+
+/** Every parked slot whose card shows in `displayId`'s window: its own and each
+ *  sub's. */
+export function parkedAskersFor(displayId: string): Array<{ askerId: string; prompt: PendingPrompt }> {
+  const out: Array<{ askerId: string; prompt: PendingPrompt }> = [];
+  for (const [askerId, prompt] of _pendingPrompts) {
+    if (displayIdOf(prompt.payload) === displayId) out.push({ askerId, prompt });
+  }
+  return out;
 }
 
 // Prompt ids the user already answered or skipped, kept even after the slot
@@ -293,8 +319,13 @@ export function peekPendingPrompt(sessionId: string): PendingPrompt | null {
   return _pendingPrompts.get(sessionId) ?? null;
 }
 
+/** Drops the slot `sessionId` asked from, and every slot whose card shows in
+ *  `sessionId`'s window. The second half is what the sidebar's dead-chat sweep
+ *  needs: it walks `pendingPromptSessionIds()`, which are display ids, and a
+ *  closed main chat takes its subs' parked cards with it. */
 export function clearPendingPrompt(sessionId: string): void {
   _pendingPrompts.delete(sessionId);
+  for (const { askerId } of parkedAskersFor(sessionId)) _pendingPrompts.delete(askerId);
 }
 
 /** Remove whichever parked prompt carries this prompt id, if any. Keyed by the
@@ -310,10 +341,19 @@ export function clearPendingPromptById(id: string): void {
   }
 }
 
-/** Session ids with a parked prompt - the sidebar marks these as needing
- *  attention. */
+/** Chats with a parked prompt in their window - the sidebar marks these as
+ *  needing attention. A sub's parked card counts for its main chat, since the
+ *  sub has no row of its own to mark. */
 export function pendingPromptSessionIds(): Set<string> {
-  return new Set(_pendingPrompts.keys());
+  const out = new Set<string>();
+  for (const [askerId, prompt] of _pendingPrompts) out.add(displayIdOf(prompt.payload) ?? askerId);
+  return out;
+}
+
+/** The asking sessions that hold a parked slot (a sub's own id, not its main
+ *  chat's). For code that must reach a slot by its prompt id. */
+export function pendingPromptAskerIds(): string[] {
+  return [..._pendingPrompts.keys()];
 }
 
 /** Diagnostic snapshot of the gate's current ids. Logged when a prompt is

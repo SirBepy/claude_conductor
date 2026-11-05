@@ -11,17 +11,21 @@ import type { ContentBlock } from "../../../types/ipc.generated";
 import { clearQuestionDraft, saveQuestionDraft } from "./draft-persistence";
 import { scheduleAuqPush, clearAuqPush, fetchFreshestAuqDraft } from "./auq-draft-sync";
 import {
+  displayIdOf,
   isLatestQuestion,
   resolveCwdForSession,
   storePendingPrompt,
+  takePendingPrompt,
+  savePendingPromptDraft,
   clearPendingPromptById,
   markPendingPromptAnswered,
   selectionGuard,
   isForSelectedSession,
   gateDiag,
 } from "./gating";
+import { askerChips } from "./askers";
 import type { Question, QuestionDraft, QuestionRequestedPayload } from "./types";
-import { rerenderSidebar } from "./index";
+import { rerenderSidebar, surfaceNextForDisplay } from "./index";
 import { dropIfAlreadyAnswered } from "./answered-gate";
 import { setLiveQuestionProgress } from "../question-progress";
 
@@ -42,6 +46,48 @@ function syncQuestionProgress(sessionId: string | undefined, promptId: string, q
  *  of order and the isLatestQuestion drop below must not fire. */
 export interface ShowQuestionCardOpts { reopened?: boolean }
 
+/** What a hidden sub is told when Joe skips its card. A skip normally sends the
+ *  model nothing, which is fine for a chat Joe is reading, but the sub's turn
+ *  ended when the card posted and nobody reads the sub: without a line it would
+ *  sit idle for good. */
+export const SUB_SKIP_MESSAGE = "Joe skipped this. Pick the safest default, or finish and report it as blocked.";
+
+/** True when this card was asked by a hidden sub and shows in its main chat. */
+function isSubPrompt(payload: QuestionRequestedPayload): boolean {
+  const shownOn = displayIdOf(payload);
+  return !!shownOn && !!payload.session_id && shownOn !== payload.session_id;
+}
+
+/** Deliver the skip line straight to the sub, never through the main chat: the
+ *  main agent is not woken and its transcript gains nothing. A sub still
+ *  mid-turn holds it on its queue, like an answer does. */
+async function tellSubSkipped(sid: string): Promise<void> {
+  const blocks: ContentBlock[] = [{ type: "text", text: SUB_SKIP_MESSAGE }];
+  try {
+    await invoke("send_message", { sessionId: sid, cwd: resolveCwdForSession(sid) ?? ".", blocks });
+  } catch (e) {
+    if (isSessionBusyError(e) && state.heldMessages?.stageFor(sid, blocks)) return;
+    console.warn("[perm-relay] send_message (skip notice) failed:", e);
+    showToast(`Skip notice failed: ${e}`);
+  }
+}
+
+/** The picker's click: park the card on screen with its draft, then show the
+ *  chosen asker's. The parked slot keeps the half-typed answers, so switching
+ *  back finds them. */
+function pickAsker(fromAskerId: string, toAskerId: string): void {
+  if (fromAskerId === toAskerId) return;
+  const draft = snapshotActiveCardDraft(fromAskerId);
+  if (draft) savePendingPromptDraft(fromAskerId, draft);
+  const target = takePendingPrompt(toAskerId);
+  if (!target) return;
+  if (target.kind !== "question") {
+    storePendingPrompt(toAskerId, target);
+    return;
+  }
+  void showQuestionCard(target.payload, target.draft);
+}
+
 // Exported for resurface.ts (split out of this file, ai_todo 517).
 export async function showQuestionCard(
   payload: QuestionRequestedPayload,
@@ -60,7 +106,7 @@ export async function showQuestionCard(
     // a card for a chat that is not on screen. Callers check the selection at
     // their own moment, which a later await of theirs can outlive; the park
     // above is what shows the card when that chat is opened again.
-    if (!isForSelectedSession(payload.session_id)) {
+    if (!isForSelectedSession(displayIdOf(payload))) {
       console.warn("[perm-gate] DROPPED question card mount for a chat that is not selected (parked)", { eventSessionId: payload.session_id, ...gateDiag() });
       rerenderSidebar();
       return;
@@ -87,10 +133,20 @@ export async function showQuestionCard(
   // Seed the ring now so a restored draft shows its answered segments before
   // the first edit.
   if (payload.session_id) setLiveQuestionProgress(payload.session_id, payload.id, questions, initialDraft);
+  const askerId = payload.session_id;
+  const shownOn = displayIdOf(payload);
+  const fromSub = isSubPrompt(payload);
   renderQuestionUI({
     id: payload.id,
     sessionId: payload.session_id,
+    displayId: shownOn,
     questions,
+    // Joe does not read the sub, so its card names it and its one-line job.
+    from: fromSub
+      ? { name: payload.sub_name || state.sessions.find((s) => s.session_id === askerId)?.name?.trim() || "Subchat", task: payload.sub_task }
+      : undefined,
+    askers: askerId && shownOn ? () => askerChips(shownOn, askerId) : undefined,
+    onPickAsker: askerId ? (to) => pickAsker(askerId, to) : undefined,
     initialDraft,
     cwd: resolveCwdForSession(payload.session_id),
     titleIcon: "ph-chat-circle-dots",
@@ -117,6 +173,9 @@ export async function showQuestionCard(
       // gate needs this flag to tell "answered, poll hasn't caught up" apart
       // from "still genuinely open" by more than id-inequality alone.
       if (payload.session_id) markPendingPromptAnswered(payload.session_id, payload.id);
+      // Several chats can have a card in this window (a sub per card): the next
+      // one comes up now, not after the daemon's resolve poll.
+      if (shownOn) surfaceNextForDisplay(shownOn);
       // NOT cleared here (ai_todo 820): the card tears down before this runs,
       // so localStorage is the only surviving draft. Cleared per-branch below.
       void clearAuqPush(payload.session_id, payload.id);
@@ -205,6 +264,7 @@ export async function showQuestionCard(
       // a submit does, same stale-vs-open ambiguity while the resolve poll
       // hasn't caught up yet.
       if (payload.session_id) markPendingPromptAnswered(payload.session_id, payload.id);
+      if (shownOn) surfaceNextForDisplay(shownOn);
       clearQuestionDraft(payload.id);
       void clearAuqPush(payload.session_id, payload.id);
       try {
@@ -214,6 +274,8 @@ export async function showQuestionCard(
         clearPendingPromptById(payload.id);
         rerenderSidebar();
       }
+      // Only a sub's Skip says anything: every other chat's stays silent.
+      if (fromSub && payload.session_id) await tellSubSkipped(payload.session_id);
     },
   });
 }

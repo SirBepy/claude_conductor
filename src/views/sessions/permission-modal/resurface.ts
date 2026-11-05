@@ -6,7 +6,8 @@
  */
 
 import { getTransport } from "../../../shared/transport";
-import { findPendingPromptsForSession } from "./remote-prompt-poll";
+import { findPendingPromptsDisplayedOn, findPendingPromptsForSession } from "./remote-prompt-poll";
+import { hasSubPromptsIn, nextParkedAskerFor } from "./askers";
 import { extractQuestions } from "./question-ui";
 import { fetchFreshestAuqDraft } from "./auq-draft-sync";
 import {
@@ -14,14 +15,16 @@ import {
   autoAllowIfRemembered,
   needsHumanApproval,
   isAutoAccept,
+  isForSelectedSession,
   markLatestQuestion,
   markQuestionSuperseded,
+  parkedAskersFor,
   storePendingPrompt,
   takePendingPrompt,
   peekPendingPrompt,
   selectionGuard,
 } from "./gating";
-import { expandActiveCard, getActiveCardId } from "./question-state";
+import { expandActiveCard, getActiveCardId, hasAnyCardUp } from "./question-state";
 import { dropIfAlreadyAnswered } from "./answered-gate";
 import type { PendingPrompt } from "./gating";
 import { state } from "../state";
@@ -66,15 +69,29 @@ export function autoAcceptParked(sessionId: string): void {
  * Called from selectSession AFTER the pane is mounted so the card anchors over
  * the right composer.
  */
-export function replayPendingPrompt(sessionId: string): boolean {
-  const pending = takePendingPrompt(sessionId);
-  if (!pending) return false;
+export function replayPendingPrompt(displayId: string): boolean {
+  // `displayId` is the chat now on screen. A hidden sub's card parks under the
+  // sub's own id but shows in its main chat's window, so the slot to surface is
+  // picked across every asker displayed here (the first by the picker's order).
+  const askerId = nextParkedAskerFor(displayId);
+  const pending = askerId ? takePendingPrompt(askerId) : null;
+  if (!askerId || !pending) return false;
   rerenderSidebar(); // clear the attention marker now that we're surfacing it
   // A parked question is a memory of what the daemon once held: it may have
   // been answered or expired since, so it is only shown if the daemon agrees.
-  if (pending.kind === "question") void surfaceParkedQuestion(sessionId, pending);
+  if (pending.kind === "question") void surfaceParkedQuestion(displayId, askerId, pending);
   else surfacePending(pending);
   return true;
+}
+
+/** Bring up the window's next waiting card once nothing is on screen: after Joe
+ *  answers or skips one of several askers' cards, the next slides in instead of
+ *  leaving him an empty composer and a sidebar marker. Acts only when a hidden sub
+ *  has something parked in this window, so a chat's own lone parked prompt keeps
+ *  waiting for a switch-back exactly as it always did. */
+export function surfaceNextForDisplay(displayId: string): void {
+  if (!isForSelectedSession(displayId) || hasAnyCardUp() || !hasSubPromptsIn(displayId)) return;
+  replayPendingPrompt(displayId);
 }
 
 /** Show a parked question only if the daemon still lists it. A fetch that
@@ -82,19 +99,20 @@ export function replayPendingPrompt(sessionId: string): boolean {
  *  evidence the question went away. When the daemon dropped it, look for
  *  whatever IS pending for the chat instead. */
 async function surfaceParkedQuestion(
-  sessionId: string,
+  displayId: string,
+  askerId: string,
   pending: Extract<PendingPrompt, { kind: "question" }>,
 ): Promise<void> {
   const stillSelected = selectionGuard();
-  const recs = await fetchPendingPromptsForSession(sessionId);
+  const recs = await fetchPendingPromptsForSession(askerId);
   if (!stillSelected()) {
     // Switched away mid-fetch: keep the park for the next switch-back.
-    if (!peekPendingPrompt(sessionId)) storePendingPrompt(sessionId, pending);
+    if (!peekPendingPrompt(askerId)) storePendingPrompt(askerId, pending);
     rerenderSidebar();
     return;
   }
   if (recs && !recs.some((r) => r.id === pending.payload.id)) {
-    await rehydrateAndReplay(sessionId);
+    await rehydrateAndReplay(displayId);
     return;
   }
   surfacePending(pending);
@@ -205,21 +223,38 @@ async function applyRehydration(
 /** Ask the DAEMON what it is still waiting on for `sessionId` and re-park it.
  *  The push path sends each id once, so a park lost with its webview is never
  *  re-sent - pull instead. No-op if already parked (may hold a live draft). */
-export async function rehydratePendingPrompts(sessionId: string): Promise<boolean> {
-  if (!sessionId || peekPendingPrompt(sessionId)) return false;
-  const recs = await fetchPendingPromptsForSession(sessionId);
+export async function rehydratePendingPrompts(displayId: string): Promise<boolean> {
+  if (!displayId || parkedAskersFor(displayId).length) return false;
+  let prompts: unknown;
+  try {
+    prompts = await getTransport().call("list_pending_prompts");
+  } catch (e) {
+    console.warn("[perm-gate] list_pending_prompts fetch failed:", e);
+    return false;
+  }
   // A card surfaced (live event) while the fetch was in flight: its snapshot is
   // older than that slot, so parking from it would overwrite or duplicate it.
-  if (peekPendingPrompt(sessionId)) return false;
-  return applyRehydration(sessionId, recs);
+  if (parkedAskersFor(displayId).length) return false;
+  // Everything shown in this window, each asker re-parked under its own id so
+  // its slot, sibling queue and answer target stay per asker.
+  const byAsker = new Map<string, ReturnType<typeof findPendingPromptsForSession>>();
+  for (const rec of findPendingPromptsDisplayedOn(prompts, displayId)) {
+    const askerId = rec.payload.session_id ?? displayId;
+    byAsker.set(askerId, [...(byAsker.get(askerId) ?? []), rec]);
+  }
+  let parked = false;
+  for (const [askerId, recs] of byAsker) {
+    if (await applyRehydration(askerId, recs)) parked = true;
+  }
+  return parked;
 }
 
 /** Rehydrate from the daemon, then replay - but only if the user is still on
  *  `sessionId` once the fetch lands. Opening another chat mid-fetch leaves the
  *  prompt parked (sidebar dot) instead of replaying it over the new chat. */
-export async function rehydrateAndReplay(sessionId: string): Promise<void> {
+export async function rehydrateAndReplay(displayId: string): Promise<void> {
   const stillSelected = selectionGuard();
-  if (await rehydratePendingPrompts(sessionId) && stillSelected()) replayPendingPrompt(sessionId);
+  if (await rehydratePendingPrompts(displayId) && stillSelected()) replayPendingPrompt(displayId);
 }
 
 /** Rebuild an answerable payload from the transcript alone. The daemon's prompt

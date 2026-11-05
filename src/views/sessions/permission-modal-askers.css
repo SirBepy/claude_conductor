@@ -1,0 +1,81 @@
+/* Question card for a hidden sub: the picker across the chats that have a
+ * question open in this window, and the sub's name and one-line job. Quiet at
+ * rest: muted chips, a hairline under the strip, the count in a small pill. */
+
+.prompt-askers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.prompt-asker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.prompt-asker:hover {
+  color: var(--color-text);
+  background: var(--color-surface-alt);
+}
+.prompt-asker.is-active {
+  color: var(--color-text);
+  border-color: var(--color-border);
+  background: var(--color-surface-alt);
+}
+.prompt-asker__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prompt-asker__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--color-background);
+  color: var(--color-text);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.prompt-from {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+.prompt-from__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-from-task {
+  flex-shrink: 0;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

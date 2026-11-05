@@ -5,6 +5,7 @@ import "../permission-modal-badges.css";
 import "../permission-modal-zones.css";
 import "../permission-modal-track.css";
 import "../permission-modal-previews.css";
+import "../permission-modal-askers.css";
 import { attachDragHandle } from "./drag-handle";
 import { dismissPermissionCard, dismissQuestionCard } from "./question-state";
 import { isMobileViewport } from "../../../shared/mobile-viewport";
@@ -95,11 +96,19 @@ export function clearHost(): void {
 
 // .prompt-card__answer-bar sits inside the footer row (flex:1, next to
 // Skip/Next) - stable mount point for question-ui-render.ts's syncAnswerBar().
-export function renderCardShell(titleHtml: string, bodyHtml: string, footerHtml: string): string {
+export function renderCardShell(
+  titleHtml: string,
+  bodyHtml: string,
+  footerHtml: string,
+  // Question cards only: the asker picker above the header, and a sub's task line below it.
+  extras: { topHtml?: string; afterHeaderHtml?: string } = {},
+): string {
   return `
     <div class="prompt-card" role="dialog" aria-modal="false">
       <div class="prompt-card__handle" aria-hidden="true"></div>
+      ${extras.topHtml ?? ""}
       <div class="prompt-card__header">${titleHtml}</div>
+      ${extras.afterHeaderHtml ?? ""}
       <div class="prompt-card__body">${bodyHtml}</div>
       <div class="prompt-card__footer">
         <div class="prompt-card__answer-bar"></div>

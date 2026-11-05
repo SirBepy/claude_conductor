@@ -1,17 +1,29 @@
-export interface PermissionRequestedPayload {
+/** Where a prompt's card shows, stamped by the daemon (subchats/routing.rs).
+ *  `session_id` is always the asker and the answer target. For a hidden sub,
+ *  `display_session_id` is its main chat, whose window shows the card. Absent
+ *  (older daemon, peer machine) or equal to `session_id` for every other chat,
+ *  Jarvis workers included, which then behave as they always did. */
+export interface PromptRouting {
+  session_id?: string;
+  display_session_id?: string;
+  /** A sub's row name, for the card's "from" line. Only present for a sub. */
+  sub_name?: string;
+  /** The one-line job a sub was given. Absent until the spawn path stores it. */
+  sub_task?: string;
+}
+
+export interface PermissionRequestedPayload extends PromptRouting {
   id: string;
   tool_name: string;
   input: unknown;
-  session_id?: string;
 }
 
 /** The `request_secret` MCP tool's blocking prompt: asks Joe to
  *  paste a value that gets written straight to a key=value file, never
  *  surfaced to the model. `file` is the daemon-resolved absolute path;
  *  `key` is the line within it the value gets saved under. */
-export interface SecretRequestedPayload {
+export interface SecretRequestedPayload extends PromptRouting {
   id: string;
-  session_id?: string;
   label: string;
   file: string;
   key: string;
@@ -70,10 +82,9 @@ export interface Question {
   preview?: string;
 }
 
-export interface QuestionRequestedPayload {
+export interface QuestionRequestedPayload extends PromptRouting {
   id: string;
   questions: Question | Question[];
-  session_id?: string;
   /** Set by the daemon's builtin-AskUserQuestion hard-block fallback
    *  (hooks_server/question.rs) when the model ignored the redirect to the
    *  MCP tool - never present on the normal path. */
@@ -135,11 +146,26 @@ export interface QuestionDraft {
 
 export type OptionNotes = Map<number, Map<string, string>>;
 
+/** One chip of the picker on a card: a chat (a sub, or the main chat itself)
+ *  with a question open in the same window, and how many questions it has. */
+export interface AskerChip {
+  /** The asking session, which is also the answer target. */
+  askerId: string;
+  label: string;
+  count: number;
+  /** True for the main chat's own question, shown with a chat icon. */
+  isMain: boolean;
+  active: boolean;
+}
+
 export interface QuestionUIOpts {
   /** Prompt id, so the card can be torn down externally (expiry / resolved elsewhere). */
   id?: string;
   /** Session the prompt belongs to - used to scope draft snapshots. */
   sessionId?: string;
+  /** The chat whose window shows this card, when it is not `sessionId`: a hidden
+   *  sub's card shows in its main chat. */
+  displayId?: string;
   questions: Question[];
   titleIcon: string;
   rightChipHtml?: string;
@@ -162,6 +188,14 @@ export interface QuestionUIOpts {
    *  it's clear it isn't a duplicate of one just answered, it's a different
    *  question that was left open while something else was going on. */
   hasOlderPending?: boolean;
+  /** The picker between chats with a question open in this window. Read on every
+   *  render, so it follows arrivals and answers. `null` or fewer than two chips
+   *  draws no strip. */
+  askers?: () => AskerChip[] | null;
+  onPickAsker?: (askerId: string) => void;
+  /** Set on a hidden sub's card: Joe does not read the sub, so the card names it
+   *  and its one-line job. `task` is omitted while the daemon has none. */
+  from?: { name?: string; task?: string };
   onSubmit: (
     answers: Answers,
     extras: { additionalMessage: string; attachments: AuqAttachment[] },

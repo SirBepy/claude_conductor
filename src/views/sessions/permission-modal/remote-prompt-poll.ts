@@ -77,6 +77,17 @@ export type PendingPromptRecord =
   | { kind: "permission"; id: string; payload: PermissionRequestedPayload }
   | { kind: "secret"; id: string; payload: SecretRequestedPayload };
 
+/** Every still-open prompt whose card shows in `displayId`'s window, in snapshot
+ *  order: that chat's own, and each hidden sub's (`display_session_id`). A
+ *  payload with no display id displays on its asker, as before. */
+export function findPendingPromptsDisplayedOn(
+  prompts: unknown,
+  displayId: string,
+): PendingPromptRecord[] {
+  if (!Array.isArray(prompts) || !displayId) return [];
+  return findPendingPromptsMatching(prompts, (p) => (p.display_session_id || p.session_id) === displayId);
+}
+
 /** Every still-open prompt for `sessionId`, in snapshot order. Stateless unlike
  *  {@link reconcilePendingPrompts} - no "already emitted" memory - so a lost
  *  card can be rebuilt on demand however many times it takes. */
@@ -85,13 +96,19 @@ export function findPendingPromptsForSession(
   sessionId: string,
 ): PendingPromptRecord[] {
   if (!Array.isArray(prompts) || !sessionId) return [];
+  return findPendingPromptsMatching(prompts, (p) => p.session_id === sessionId);
+}
+
+function findPendingPromptsMatching(
+  prompts: unknown[],
+  matches: (payload: { session_id?: unknown; display_session_id?: unknown }) => boolean,
+): PendingPromptRecord[] {
   const out: PendingPromptRecord[] = [];
   for (const raw of prompts) {
     const p = raw as StoredPrompt;
     const id = typeof p?.id === "string" ? p.id : undefined;
     if (!id || p.payload == null) continue;
-    const payload = p.payload as { session_id?: unknown };
-    if (payload.session_id !== sessionId) continue;
+    if (!matches(p.payload as { session_id?: unknown; display_session_id?: unknown })) continue;
     const event = typeof p.event === "string" ? p.event : "";
     if (event === "question-requested") {
       out.push({ kind: "question", id, payload: p.payload as QuestionRequestedPayload });

@@ -20,7 +20,7 @@ import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/p
 import { api } from "../../shared/api";
 import { changeCharacterForSession, changeAccountForSession } from "./active-session-account";
 import { isAutoAccept, isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar, replayPendingPrompt, rehydrateAndReplay, pendingPromptSessionIds, dismissQuestionCard } from "./permission-modal";
-import { snapshotActiveCardDraft } from "./permission-modal/question-ui";
+import { snapshotActiveCardDraftIn } from "./permission-modal/question-state";
 import { savePendingPromptDraft } from "./permission-modal/gating";
 import { expandActiveCard, hasActiveCardForSession } from "./permission-modal/question-state";
 import { SessionHeader, projectDashboardOpener } from "./session-header";
@@ -168,8 +168,10 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   // Snapshot any in-progress AUQ answer before the pane is replaced, so it
   // survives the session switch even if another session also gets an AUQ.
   if (state.selectedId) {
-    const draft = snapshotActiveCardDraft(state.selectedId);
-    if (draft) savePendingPromptDraft(state.selectedId, draft);
+    // The card in this chat's window may be a hidden sub's: its draft belongs
+    // to the sub's own parked slot, not the main chat's.
+    const snap = snapshotActiveCardDraftIn(state.selectedId);
+    if (snap) savePendingPromptDraft(snap.askerId, snap.draft);
     // Scroll position must be read BEFORE the pane's DOM is replaced below - a
     // detached transcript reports scrollTop 0.
     backgroundRetainedChat(state.selectedId);

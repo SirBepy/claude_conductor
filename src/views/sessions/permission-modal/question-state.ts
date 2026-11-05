@@ -161,11 +161,17 @@ export function extractQuestions(input: unknown): Question[] | null {
 // touching module state directly.
 export interface ActiveQuestionCard {
   id: string;
+  /** The asker, which is also where the answer goes. */
   sessionId?: string;
+  /** The chat whose window shows the card: a sub's main chat, else the asker. */
+  displayId?: string;
   teardown: () => void;
   getDraft: () => QuestionDraft;
   /** Re-opens the card if it is collapsed to its bar; false when already open. */
   expand: () => boolean;
+  /** Repaints the asker picker in place after another chat's question arrived
+   *  or was settled, without rebuilding the card under a typing cursor. */
+  refreshAskers?: () => void;
 }
 
 let activeCard: ActiveQuestionCard | null = null;
@@ -208,13 +214,35 @@ export function isActiveCardId(id: string): boolean {
 export function expandActiveCard(match: { id?: string; sessionId?: string } = {}): boolean {
   if (!activeCard) return false;
   if (match.id !== undefined && activeCard.id !== match.id) return false;
-  if (match.sessionId !== undefined && activeCard.sessionId !== match.sessionId) return false;
+  if (match.sessionId !== undefined && !cardIsInWindowOf(activeCard, match.sessionId)) return false;
   return activeCard.expand();
 }
 
-/** True when the live card (open or collapsed) belongs to `sessionId`. */
+/** A card belongs to a chat's window when that chat asked it or, for a hidden
+ *  sub's card, is the main chat that shows it. */
+function cardIsInWindowOf(card: ActiveQuestionCard, sessionId: string): boolean {
+  return card.sessionId === sessionId || card.displayId === sessionId;
+}
+
+/** True when the live card (open or collapsed) shows in `sessionId`'s window. */
 export function hasActiveCardForSession(sessionId: string): boolean {
-  return activeCard?.sessionId === sessionId;
+  return activeCard !== null && cardIsInWindowOf(activeCard, sessionId);
+}
+
+/** The session the live card's answer goes to, or null if no card is up. */
+export function getActiveCardAsker(): string | null {
+  return activeCard?.sessionId ?? null;
+}
+
+/** True while any card (a question, or a permission/secret/replay card) is up,
+ *  so code that wants to surface the next one never mounts over it. */
+export function hasAnyCardUp(): boolean {
+  return activeCard !== null || activePermissionCardTeardown !== null;
+}
+
+/** Repaint the live card's asker picker, if it has one. */
+export function refreshActiveCardAskers(): void {
+  activeCard?.refreshAskers?.();
 }
 
 /** The currently-displayed card's prompt id, or null if none. Used by the
@@ -240,6 +268,15 @@ export function snapshotActiveCardDraft(sessionId: string, promptId?: string): Q
   const draft = activeCard.getDraft();
   snapshotSource.set(draft, activeCard.id);
   return draft;
+}
+
+/** The live card showing in `windowId`'s window (its own, or a sub's), with the
+ *  asker its draft belongs to. Leaving the chat saves the draft under that
+ *  asker's parked slot, not under the main chat's. */
+export function snapshotActiveCardDraftIn(windowId: string): { askerId: string; draft: QuestionDraft } | null {
+  if (!activeCard?.sessionId || !cardIsInWindowOf(activeCard, windowId)) return null;
+  const draft = snapshotActiveCardDraft(activeCard.sessionId);
+  return draft ? { askerId: activeCard.sessionId, draft } : null;
 }
 
 // ── Permission-card teardown registry ───────────────────────────────────────
