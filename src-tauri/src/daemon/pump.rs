@@ -468,6 +468,17 @@ pub(crate) async fn run_stdout_pump(
                                 if close_confirmed {
                                     finalize_close(&state_for_pump, &pump_session);
                                 }
+                                // A sub's turn is over: commit a `finish_subchat` it called
+                                // (stop the process, keep the row) or send the daemon's one
+                                // nudge. A no-op for every chat that is not a sub, and for a
+                                // replayed history line.
+                                if live_turn {
+                                    crate::daemon::subchats::turn_end::on_turn_end(
+                                        &state_for_pump,
+                                        &pump_session,
+                                        pump_turn_gen,
+                                    );
+                                }
                                 // Stand-down/hygiene: the turn ended, so the closing
                                 // segment either resolved into `ended` (finalize_close
                                 // above) or the close stood down (--dont-close / a failed

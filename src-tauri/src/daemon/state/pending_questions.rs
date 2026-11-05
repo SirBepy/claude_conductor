@@ -17,8 +17,13 @@ pub(crate) fn pending_questions_path(app_data: &Path) -> PathBuf {
     app_data.join(format!("pending-questions{suffix}.json"))
 }
 
+/// A daemon-raised card (`subchats::cards`) is `durable` so the EOF sweep leaves
+/// it be, but is never written to disk: its answer is handled by a task in this
+/// process, which a restart ends, so a restored copy could never be answered.
 pub(super) fn is_durable_question(v: &Value) -> bool {
-    v["event"].as_str() == Some("question-requested") && v["durable"].as_bool() == Some(true)
+    v["event"].as_str() == Some("question-requested")
+        && v["durable"].as_bool() == Some(true)
+        && v["payload"]["daemon_card"].as_bool() != Some(true)
 }
 
 fn seq_of(v: &Value) -> u64 {

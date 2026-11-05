@@ -12,6 +12,7 @@ use crate::daemon::preview::PREVIEW_SOURCE_CHAT_CARD;
 
 use super::dispatch_browser::browser_tools;
 use super::dispatch_jarvis::jarvis_tools;
+use super::dispatch_subchat::subchat_tools;
 use super::relay::{http_post, Ctx, HttpPost};
 use super::server::{mcp_error, question_args, tool_error_result, tool_result, waiting_target};
 use super::tool_schemas::{
@@ -58,6 +59,7 @@ pub(super) fn dispatch_tool_with(
         .or_else(|| user_facing_tools(&ctx, name))
         .or_else(|| jarvis_tools(&ctx, name))
         .or_else(|| browser_tools(&ctx, name))
+        .or_else(|| subchat_tools(&ctx, name))
         .unwrap_or_else(|| mcp_error(id, -32601, "unknown tool"))
 }
 
@@ -158,10 +160,13 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             if started {
                 body["stage"] = json!("started");
             }
+            // `Some` fallback so a daemon `ok:false` (a sub is told to use
+            // finish_subchat) reaches the model as an error instead of being
+            // swallowed by the fixed success text.
             Some(ctx.relay(
                 "/sessions/close-confirm",
                 body,
-                None,
+                Some("close_session refused"),
                 Some(if started {
                     "close marked as started; call close_session again without a stage to confirm teardown"
                 } else {
@@ -403,7 +408,7 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
 /// the rest as one flattened object. A hand-kept key list here drifted from
 /// the tool's schema once and silently dropped `person`/`platform`; copying
 /// what arrived cannot. Absent keys stay absent, never an explicit null.
-fn forward_all_args(args: &Value, session_id: &str) -> Value {
+pub(super) fn forward_all_args(args: &Value, session_id: &str) -> Value {
     let mut body = args.as_object().cloned().unwrap_or_default();
     body.insert("session_id".to_string(), json!(session_id));
     Value::Object(body)

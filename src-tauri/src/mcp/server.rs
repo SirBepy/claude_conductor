@@ -127,6 +127,7 @@ pub fn run_stdio() {
     let is_jarvis = std::env::var("CC_JARVIS").is_ok();
     let browser = std::env::var("CC_BROWSER").is_ok();
     let browser_script = std::env::var("CC_BROWSER_SCRIPT").is_ok();
+    let subchat_sub = std::env::var(crate::daemon::subchats::SUB_ENV).is_ok();
 
     announce_attached(port, session_id.clone());
 
@@ -162,7 +163,7 @@ pub fn run_stdio() {
                 }
             }),
             "notifications/initialized" => continue,
-            "tools/list" => tool_list_response(&id, is_jarvis, browser, browser_script),
+            "tools/list" => tool_list_response(&id, is_jarvis, browser, browser_script, subchat_sub),
             "tools/call" => {
                 let name = req["params"]["name"].as_str().unwrap_or("");
                 let arguments = req["params"]["arguments"].clone();
@@ -246,7 +247,7 @@ mod tests {
                     "serverInfo": {"name": "cc_conductor", "version": "0.1.0"}
                 }
             }),
-            "tools/list" => tool_list_response(&id, is_jarvis, false, false),
+            "tools/list" => tool_list_response(&id, is_jarvis, false, false, false),
             "tools/call" => {
                 let name = req["params"]["name"].as_str().unwrap_or("");
                 let arguments = req["params"]["arguments"].clone();
@@ -484,8 +485,8 @@ mod tests {
     /// the base set gains exactly Playwright's tools, minus the withheld one.
     #[test]
     fn tools_list_browser_adds_the_playwright_tools() {
-        let base = tool_list_response(&json!(1), false, false, false)["result"]["tools"].as_array().unwrap().len();
-        let resp = tool_list_response(&json!(1), false, true, false);
+        let base = tool_list_response(&json!(1), false, false, false, false)["result"]["tools"].as_array().unwrap().len();
+        let resp = tool_list_response(&json!(1), false, true, false, false);
         let tools = resp["result"]["tools"].as_array().unwrap();
         let browser: Vec<&str> = tools
             .iter()
@@ -498,12 +499,56 @@ mod tests {
         assert!(browser.contains(&"browser_target"));
         assert!(browser.contains(&"browser_take_screenshot"));
         assert!(!browser.contains(&"browser_run_code_unsafe"));
-        let scripted = tool_list_response(&json!(1), false, true, true);
+        let scripted = tool_list_response(&json!(1), false, true, true, false);
         let names: Vec<&str> = scripted["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str()).collect();
         assert!(names.contains(&"browser_run_code_unsafe"), "the opt-in adds the run-code tool");
         assert_eq!(names.len(), tools.len() + 1);
-        let off = tool_list_response(&json!(1), false, false, true);
+        let off = tool_list_response(&json!(1), false, false, true, false);
         assert_eq!(off["result"]["tools"].as_array().unwrap().len(), base, "the opt-in alone lists nothing");
+    }
+
+    /// `finish_subchat` ends the chat that calls it, so it is listed for a sub
+    /// (`CC_SUBCHAT`) and for nobody else.
+    #[test]
+    fn finish_subchat_is_listed_only_for_a_sub() {
+        let names = |sub: bool| -> Vec<String> {
+            tool_list_response(&json!(1), false, false, false, sub)["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|t| t["name"].as_str().map(str::to_string))
+                .collect()
+        };
+        let (plain, sub) = (names(false), names(true));
+        assert!(!plain.iter().any(|n| n == "finish_subchat"), "a normal chat must not see it");
+        assert!(sub.iter().any(|n| n == "finish_subchat"));
+        assert_eq!(sub.len(), plain.len() + 1, "a sub gains exactly the one tool");
+    }
+
+    #[test]
+    fn finish_subchat_routes_to_the_finish_route_with_every_argument() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        POSTED_URLS.with(|u| u.borrow_mut().clear());
+        POSTED_BODIES.with(|b| b.borrow_mut().clear());
+        let args = json!({"verdict": "Done", "text": "ok", "decided": ["nothing"], "ruled_out": ["nothing"], "reviewer_tool_use_id": "toolu_1"});
+        dispatch_tool_with(&rt, &json!(1), "finish_subchat", &args, "sub-1", 1234, fake_http_post);
+        let posted = POSTED_URLS.with(|u| u.borrow().clone());
+        assert!(posted.iter().any(|u| u.ends_with("/subchats/finish")), "posted {posted:?}");
+        let body = POSTED_BODIES.with(|b| b.borrow()[0].clone());
+        assert_eq!(body["reviewer_tool_use_id"], json!("toolu_1"));
+        assert_eq!(body["decided"], json!(["nothing"]));
+        assert_eq!(body["session_id"], json!("sub-1"));
+    }
+
+    #[test]
+    fn a_daemon_refusal_of_close_session_reaches_the_model_as_an_error() {
+        fn refusing_post(_rt: &tokio::runtime::Runtime, _url: &str, _body: Value) -> Result<Value, String> {
+            Ok(json!({"ok": false, "error": "call finish_subchat instead"}))
+        }
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let resp = dispatch_tool_with(&rt, &json!(1), "close_session", &json!({}), "sub-1", 1234, refusing_post);
+        assert_eq!(resp["result"]["isError"], json!(true));
+        assert_eq!(resp["result"]["content"][0]["text"], json!("call finish_subchat instead"));
     }
 
     #[test]

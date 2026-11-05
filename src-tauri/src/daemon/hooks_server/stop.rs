@@ -2,8 +2,8 @@
 //! and records them on a background task.
 
 use super::stop_verdict::{
-    missing_requirement_reason, mcp_is_attached, streak_update, title_missing, StreakUpdate, TurnEndVerdict,
-    QUESTION_UNDELIVERED_REASON, TITLE_MISSING_REASON,
+    missing_requirement_reason, mcp_is_attached, streak_update, sub_turn_end, title_missing, StreakUpdate, SubTurnEnd,
+    SubTurnFacts, TurnEndVerdict, QUESTION_UNDELIVERED_REASON, TITLE_MISSING_REASON,
 };
 use super::HookCtx;
 use crate::settings::paths;
@@ -108,7 +108,27 @@ pub(super) async fn on_stop(
             .unwrap_or(0);
         let mcp_attached = mcp_is_attached(mcp_config_written, miss_streak);
         let question_card_posted = question_card_is_up(&ctx.state, &session_id, gen).await;
-        let verdict = missing_requirement_reason(
+        // A sub owes `finish_subchat` instead of the report/send pair, so it
+        // takes its own sequence (block once, nudge once, then a card) and the
+        // verdict below passes for it.
+        let is_sub = ctx.state.registry.get(&session_id).is_some_and(|i| crate::daemon::subchats::is_sub(&i));
+        if is_sub {
+            if let Some(reason) = sub_stop(
+                &ctx.state,
+                &session_id,
+                payload.stop_hook_active,
+                activity,
+                status,
+                question_card_posted,
+                mcp_attached,
+            )
+            .await
+            {
+                return (StatusCode::OK, Json(json!({"decision": "block", "reason": reason})));
+            }
+        }
+        let verdict = report_send_verdict(
+            is_sub,
             payload.stop_hook_active,
             has_current_report,
             has_current_send,
@@ -138,7 +158,7 @@ pub(super) async fn on_stop(
             TurnEndVerdict::Ok => {
                 let report_title = reported.as_ref().filter(|r| r.turn_gen == gen).and_then(|r| r.title.as_deref());
                 let tp = std::path::Path::new(&transcript_path);
-                if title_missing(payload.stop_hook_active, has_current_report, status, report_title, opened_by_wake, mcp_attached, tp) {
+                if !is_sub && title_missing(payload.stop_hook_active, has_current_report, status, report_title, opened_by_wake, mcp_attached, tp) {
                     log::info!("hook /hooks/stop: blocking {session_id} - chat has no title yet");
                     return (StatusCode::OK, Json(json!({"decision": "block", "reason": TITLE_MISSING_REASON})));
                 }
@@ -235,6 +255,95 @@ pub(super) async fn on_stop(
     });
 
     (StatusCode::OK, Json(json!({"ok": true})))
+}
+
+/// The per-turn `report_turn_status` + `send_message` duty. A sub is excused:
+/// `finish_subchat` replaces it, and `sub_stop` enforces that instead.
+#[allow(clippy::too_many_arguments)]
+fn report_send_verdict(
+    is_sub: bool,
+    stop_hook_active: Option<bool>,
+    has_report: bool,
+    has_send: bool,
+    status: Option<&str>,
+    opened_by_wake: bool,
+    mcp_attached: bool,
+    question_card_posted: bool,
+) -> TurnEndVerdict {
+    if is_sub {
+        return TurnEndVerdict::Ok;
+    }
+    missing_requirement_reason(
+        stop_hook_active,
+        has_report,
+        has_send,
+        status,
+        opened_by_wake,
+        mcp_attached,
+        question_card_posted,
+    )
+}
+
+/// The Stop hook's half of a sub's turn end: records what the turn owes and
+/// returns the block text when the one block should be spent. The nudge goes
+/// out once the turn is over (`subchats::turn_end`); the card needs no idle
+/// child, so it goes up at once.
+///
+/// Exempt, so the turn simply ends: a `finish_subchat` this turn, a pending
+/// question or permission card, background work, and a freeze (a user freeze, a
+/// gaming-mode park and a rate limit all set it).
+async fn sub_stop(
+    state: &Arc<crate::daemon::state::DaemonState>,
+    sub_id: &str,
+    stop_hook_active: Option<bool>,
+    activity: crate::sessions::registry_turn::TurnActivity,
+    status: Option<&str>,
+    question_card_posted: bool,
+    mcp_attached: bool,
+) -> Option<&'static str> {
+    use crate::daemon::subchats::finish::has_background_work;
+    use crate::daemon::subchats::runtime::runtime;
+    use crate::daemon::subchats::stall::{self, Stall};
+    let rt = runtime();
+    let background = has_background_work(activity);
+    // A finish accepted earlier this turn is dropped if background work has
+    // started since: stopping the process would kill it.
+    let mut finishing = rt.finish_pending(sub_id);
+    if finishing && background {
+        rt.take_pending_finish(sub_id);
+        finishing = false;
+    }
+    let frozen = state.registry.get(sub_id).is_some_and(|i| i.frozen);
+    let card_waiting = crate::daemon::lifecycle::has_open_prompt(state, sub_id).await;
+    let facts = SubTurnFacts {
+        finishing,
+        exempt: background || frozen || card_waiting,
+        stop_hook_active: stop_hook_active == Some(true),
+        question_without_card: status == Some("question") && !question_card_posted,
+        mcp_attached,
+    };
+    let (next, outcome) = sub_turn_end(rt.stage(sub_id), facts);
+    rt.set_stage(sub_id, next);
+    match outcome {
+        SubTurnEnd::Allow => None,
+        SubTurnEnd::Block(reason) => {
+            log::info!("hook /hooks/stop: blocking sub {sub_id} - ended a turn without finish_subchat");
+            Some(reason)
+        }
+        SubTurnEnd::Nudge => {
+            log::info!("hook /hooks/stop: sub {sub_id} still unfinished after the block, nudging once the turn is over");
+            rt.set_nudge_due(sub_id);
+            None
+        }
+        SubTurnEnd::Card => {
+            log::warn!("hook /hooks/stop: sub {sub_id} still unfinished after the nudge, raising a card");
+            let (state, sub) = (state.clone(), sub_id.to_string());
+            tokio::spawn(async move {
+                stall::raise(&state, &sub, Stall::Unfinished).await;
+            });
+            None
+        }
+    }
 }
 
 /// A `question` status is backed when a card went up this turn, or an earlier
@@ -370,6 +479,142 @@ mod tests {
             settle_at_stop(&state, "s", gen, "done", activity).await;
             assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some(want), "{activity:?}");
         }
+    }
+
+    // ── a sub's turn end ────────────────────────────────────────────────────
+
+    use crate::daemon::subchats::runtime::{runtime, SubStage};
+    use crate::daemon::hooks_server::stop_verdict::{QUESTION_NEEDS_CARD_REASON, SUB_NOT_FINISHED_REASON};
+
+    fn state_with_sub(tag: &str) -> (Arc<DaemonState>, String) {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = Mutex::new(Settings::default());
+        let (main, sub) = (format!("{tag}-main"), format!("{tag}-sub"));
+        for id in [&main, &sub] {
+            state.registry.record_interactive_session(id, std::path::Path::new("/tmp/x"), &settings, "2026-11-05T00:00:00Z");
+        }
+        state.registry.set_subchat_of(&sub, Some(main));
+        (state, sub)
+    }
+
+    async fn stop(
+        st: &Arc<DaemonState>,
+        sub: &str,
+        active: bool,
+        activity: TurnActivity,
+        status: Option<&str>,
+    ) -> Option<&'static str> {
+        sub_stop(st, sub, Some(active), activity, status, false, true).await
+    }
+
+    async fn wait_for_a_card(st: &Arc<DaemonState>) -> Vec<serde_json::Value> {
+        for _ in 0..200 {
+            let cards = st.list_prompts().await;
+            if !cards.is_empty() {
+                return cards;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Vec::new()
+    }
+
+    #[tokio::test]
+    async fn a_sub_that_ends_a_turn_unfinished_is_blocked_once_then_nudged_then_carded() {
+        let (st, sub) = state_with_sub("stop-seq");
+        // First end: the one block, with text a sub can act on.
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, Some("done")).await, Some(SUB_NOT_FINISHED_REASON));
+        assert_eq!(runtime().stage(&sub), SubStage::Blocked);
+        // The CLI re-fires Stop with stop_hook_active after a block: no second block, a nudge is due.
+        assert_eq!(stop(&st, &sub, true, TurnActivity::Idle, Some("done")).await, None);
+        assert_eq!(runtime().stage(&sub), SubStage::Nudged);
+        assert!(runtime().take_nudge_due(&sub), "the daemon nudges once the turn is over");
+        assert!(st.list_prompts().await.is_empty(), "no card yet");
+        // The nudged turn also ends unfinished: now Joe gets the card.
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, Some("done")).await, None);
+        let cards = wait_for_a_card(&st).await;
+        assert_eq!(cards.len(), 1, "exactly one card");
+        assert_eq!(cards[0]["payload"]["card_kind"], "subchat_unfinished");
+        assert_eq!(cards[0]["payload"]["display_session_id"], "stop-seq-main");
+        assert!(!runtime().take_nudge_due(&sub), "the card path sends no further nudge");
+    }
+
+    #[tokio::test]
+    async fn the_sub_block_text_leaves_out_the_per_turn_send_message_duty() {
+        assert!(SUB_NOT_FINISHED_REASON.contains("finish_subchat"));
+        assert!(!SUB_NOT_FINISHED_REASON.contains("send_message") && !SUB_NOT_FINISHED_REASON.contains("report_turn_status"));
+    }
+
+    #[tokio::test]
+    async fn a_pending_question_background_work_and_a_freeze_do_not_block_a_sub() {
+        // Background work, each of the three kinds.
+        for (i, a) in [TurnActivity::Working, TurnActivity::WaitingOnProcess, TurnActivity::WaitingOnSchedule].into_iter().enumerate() {
+            let (st, sub) = state_with_sub(&format!("stop-bg{i}"));
+            assert_eq!(stop(&st, &sub, false, a, Some("working")).await, None, "{a:?}");
+            assert_eq!(runtime().stage(&sub), SubStage::Fresh, "an exempt end does not advance the sequence");
+        }
+        // A pending question.
+        let (st, sub) = state_with_sub("stop-q");
+        st.add_prompt("q1", "question-requested", json!({"session_id": sub, "seq": 1}), true).await;
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, Some("question")).await, None);
+        // A pending permission prompt.
+        let (st, sub) = state_with_sub("stop-p");
+        st.add_prompt("p1", "permission-requested", json!({"session_id": sub}), false).await;
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, None).await, None);
+        // A freeze: the user's, a gaming-mode park and a rate limit all set `frozen`.
+        let (st, sub) = state_with_sub("stop-frz");
+        st.registry.set_frozen(&sub, true);
+        st.registry.set_auto_frozen(&sub, true);
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, None).await, None);
+        assert_eq!(runtime().stage(&sub), SubStage::Fresh);
+    }
+
+    #[tokio::test]
+    async fn exemption_after_a_block_starts_the_sequence_over() {
+        let (st, sub) = state_with_sub("stop-reset");
+        assert!(stop(&st, &sub, false, TurnActivity::Idle, None).await.is_some());
+        assert_eq!(runtime().stage(&sub), SubStage::Blocked);
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Working, None).await, None);
+        assert_eq!(runtime().stage(&sub), SubStage::Fresh);
+        assert!(stop(&st, &sub, false, TurnActivity::Idle, None).await.is_some(), "blocked once again, not nudged");
+    }
+
+    #[tokio::test]
+    async fn a_finishing_sub_ends_its_turn_unblocked_but_background_work_cancels_the_finish() {
+        use crate::daemon::subchats::finish::FinishRecord;
+        let (st, sub) = state_with_sub("stop-fin");
+        runtime().set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, None).await, None);
+        assert!(runtime().finish_pending(&sub), "left for the pump to commit");
+
+        let (st, sub) = state_with_sub("stop-finbg");
+        runtime().set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Working, None).await, None);
+        assert!(!runtime().finish_pending(&sub), "work started after the call: the finish is dropped, nothing is killed");
+    }
+
+    /// 015b8b4f: a `question` status with no card is blocked. For a sub that
+    /// block names the card, and it is the sub's one block.
+    #[tokio::test]
+    async fn a_sub_reporting_question_with_no_card_gets_the_card_text_as_its_one_block() {
+        let (st, sub) = state_with_sub("stop-qnocard");
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, Some("question")).await, Some(QUESTION_NEEDS_CARD_REASON));
+        assert_eq!(stop(&st, &sub, true, TurnActivity::Idle, Some("question")).await, None, "the retry is not blocked again");
+    }
+
+    #[tokio::test]
+    async fn a_sub_without_a_reachable_mcp_transport_is_not_blocked() {
+        let (st, sub) = state_with_sub("stop-nomcp");
+        let r = sub_stop(&st, &sub, Some(false), TurnActivity::Idle, None, false, false).await;
+        assert_eq!(r, None, "finish_subchat is unreachable, so demanding it is an unsatisfiable loop");
+    }
+
+    #[test]
+    fn a_normal_chat_still_owes_report_and_send_but_a_sub_does_not() {
+        use crate::daemon::hooks_server::stop_verdict::BOTH_MISSING_REASON;
+        let normal = report_send_verdict(false, None, false, false, Some("done"), false, true, false);
+        assert_eq!(normal, TurnEndVerdict::Block(BOTH_MISSING_REASON), "unchanged for every chat that is not a sub");
+        let sub = report_send_verdict(true, None, false, false, Some("done"), false, true, false);
+        assert_eq!(sub, TurnEndVerdict::Ok);
     }
 
     #[tokio::test]

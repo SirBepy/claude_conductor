@@ -30,7 +30,11 @@ pub fn spawn(state: Arc<DaemonState>) {
         let mut clock = SweepClock::default();
         loop {
             ticker.tick().await;
-            sweep(&state, &mut clock, chrono::Utc::now());
+            let now = chrono::Utc::now();
+            sweep(&state, &mut clock, now);
+            // The stuck-sub card rides this tick instead of a thread of its own.
+            // After `sweep`, which has just recorded any suspend gap.
+            crate::daemon::subchats::stuck::sweep_now(&state, now, clock.resumed_at).await;
         }
     });
 }

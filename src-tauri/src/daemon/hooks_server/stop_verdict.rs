@@ -104,6 +104,67 @@ pub(super) fn title_missing(
         && crate::tokens::curated_or_ai_title(transcript, 60).is_none()
 }
 
+/// What a sub is told when its turn ends unfinished. Only what it should act on:
+/// the per-turn `report_turn_status`/`send_message` duty does not apply to a sub,
+/// so this never mentions either.
+pub(super) const SUB_NOT_FINISHED_REASON: &str = "You ended your turn without calling finish_subchat. If the job is done, commit your own edits and call finish_subchat now. If you need Joe, call ask_user_question. Otherwise keep working.";
+
+pub(super) use crate::daemon::subchats::runtime::SubStage;
+
+/// What the Stop hook does about a sub's turn end.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum SubTurnEnd {
+    /// Let the turn end.
+    Allow,
+    /// Spend the one block `stop_hook_active` allows.
+    Block(&'static str),
+    /// The daemon sends one nudge once the turn is over.
+    Nudge,
+    /// Joe gets a card: open it, nudge again, end it.
+    Card,
+}
+
+/// Everything the sub decision reads, gathered by `stop.rs`.
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct SubTurnFacts {
+    /// A `finish_subchat` call this turn was accepted, so the turn is meant to end.
+    pub finishing: bool,
+    /// A pending question or permission card, background work, a freeze (which
+    /// also covers a gaming-mode park and a rate limit): the turn ends without
+    /// being unfinished business.
+    pub exempt: bool,
+    pub stop_hook_active: bool,
+    /// The sub reported `question` but no card is up (015b8b4f's rule). It gets
+    /// its own block text, since the fix is a card, not a finish.
+    pub question_without_card: bool,
+    /// `finish_subchat` and `ask_user_question` are reachable. When the MCP
+    /// transport is down neither can be called, so there is nothing to demand.
+    pub mcp_attached: bool,
+}
+
+/// The sub half of the turn-end decision, and the stage it leaves the sub in.
+/// A sub ending a turn without finishing and with nothing pending is blocked
+/// once, then nudged once by the daemon, then Joe gets a card (spec section 9).
+/// Pure so the whole sequence is testable without a session.
+///
+/// `Allow` for a finishing or exempt turn resets the sequence: the sub is doing
+/// something legitimate, so a later unfinished end starts from the top.
+pub(super) fn sub_turn_end(stage: SubStage, f: SubTurnFacts) -> (SubStage, SubTurnEnd) {
+    if f.finishing || f.exempt || !f.mcp_attached {
+        return (SubStage::Fresh, SubTurnEnd::Allow);
+    }
+    match stage {
+        // `stop_hook_active` set on a first end means something else already
+        // spent the block (the undelivered-question block), so go on to the nudge.
+        SubStage::Fresh if !f.stop_hook_active => {
+            let reason = if f.question_without_card { QUESTION_NEEDS_CARD_REASON } else { SUB_NOT_FINISHED_REASON };
+            (SubStage::Blocked, SubTurnEnd::Block(reason))
+        }
+        SubStage::Fresh | SubStage::Blocked => (SubStage::Nudged, SubTurnEnd::Nudge),
+        SubStage::Nudged => (SubStage::Nudged, SubTurnEnd::Card),
+    }
+}
+
 /// `Some(true)` means a prior Stop already blocked this turn, so never block again.
 /// Pure so it stays testable without a live Session/ChildStdin.
 ///
@@ -164,6 +225,48 @@ mod tests {
     use super::*;
 
     const DONE: Option<&str> = Some("done");
+
+    // ── a sub's turn end ────────────────────────────────────────────────────
+
+    fn facts() -> SubTurnFacts {
+        SubTurnFacts { mcp_attached: true, ..SubTurnFacts::default() }
+    }
+
+    #[test]
+    fn a_sub_is_blocked_once_then_nudged_once_then_carded() {
+        let (s, a) = sub_turn_end(SubStage::Fresh, facts());
+        assert_eq!((s, a), (SubStage::Blocked, SubTurnEnd::Block(SUB_NOT_FINISHED_REASON)));
+        let retry = SubTurnFacts { stop_hook_active: true, ..facts() };
+        assert_eq!(sub_turn_end(SubStage::Blocked, retry), (SubStage::Nudged, SubTurnEnd::Nudge));
+        assert_eq!(sub_turn_end(SubStage::Nudged, facts()), (SubStage::Nudged, SubTurnEnd::Card));
+        // Joe's "nudge again" leaves the stage Nudged, so the next unfinished end is a card again.
+        assert_eq!(sub_turn_end(SubStage::Nudged, facts()).1, SubTurnEnd::Card);
+    }
+
+    #[test]
+    fn a_first_end_that_already_has_stop_hook_active_goes_straight_to_the_nudge() {
+        let f = SubTurnFacts { stop_hook_active: true, ..facts() };
+        assert_eq!(sub_turn_end(SubStage::Fresh, f), (SubStage::Nudged, SubTurnEnd::Nudge));
+    }
+
+    #[test]
+    fn every_exemption_allows_and_resets_whatever_the_stage() {
+        for stage in [SubStage::Fresh, SubStage::Blocked, SubStage::Nudged] {
+            for f in [
+                SubTurnFacts { finishing: true, ..facts() },
+                SubTurnFacts { exempt: true, ..facts() },
+                SubTurnFacts { mcp_attached: false, ..facts() },
+            ] {
+                assert_eq!(sub_turn_end(stage, f), (SubStage::Fresh, SubTurnEnd::Allow), "{stage:?} {f:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_question_status_without_a_card_gets_the_card_text_not_the_finish_text() {
+        let f = SubTurnFacts { question_without_card: true, ..facts() };
+        assert_eq!(sub_turn_end(SubStage::Fresh, f).1, SubTurnEnd::Block(QUESTION_NEEDS_CARD_REASON));
+    }
 
     #[test]
     fn report_present_send_absent_blocks_with_send_reason() {

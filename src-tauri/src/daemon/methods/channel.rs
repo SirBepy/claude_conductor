@@ -179,6 +179,9 @@ pub(crate) fn post_message_at(
     if text.trim().is_empty() {
         return Err("message text is empty".to_string());
     }
+    if let Some(refusal) = crate::daemon::subchats::parent_post_refusal(state, session_id, target.unwrap_or(&[])) {
+        return Err(refusal.to_string());
+    }
     let project_id = caller_project(state, session_id)?;
     let author = display_name(state, session_id);
 
@@ -263,6 +266,9 @@ pub(crate) async fn post_message_or_forward_at(
     }
     if to_id == session_id {
         return json!({"ok": false, "error": "cannot target your own session"});
+    }
+    if let Some(refusal) = crate::daemon::subchats::parent_post_refusal(state, session_id, &[to_id.to_string()]) {
+        return json!({"ok": false, "error": refusal});
     }
     if state.registry.get(session_id).is_none() {
         return json!({"ok": false, "error": format!("unknown session: {session_id}")});
@@ -699,6 +705,54 @@ mod tests {
         let v = post_message_or_forward(&state, "s1", "hi", None, Some("s1")).await;
         assert_eq!(v["ok"], false);
         assert!(v["error"].as_str().unwrap().contains("own session"));
+    }
+
+    /// A parent, its sub, a sibling sub and an unrelated chat, one project.
+    fn sub_fixture() -> Arc<DaemonState> {
+        let state = test_state();
+        for id in ["main", "sub", "sibling", "other"] {
+            state.registry.upsert_interactive(id, std::path::Path::new("."), "proj-sub", "2026-11-05T00:00:00Z");
+        }
+        state.registry.set_subchat_of("sub", Some("main".into()));
+        state.registry.set_subchat_of("sibling", Some("main".into()));
+        state
+    }
+
+    #[tokio::test]
+    async fn a_sub_cannot_post_to_its_parent_by_to_or_by_target() {
+        let state = sub_fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let v = post_message_or_forward_at(Some(dir.path()), &state, "sub", "hi", None, Some("main")).await;
+        assert_eq!(v["ok"], false);
+        let msg = v["error"].as_str().unwrap();
+        assert!(msg.contains("ask_user_question") && msg.contains("finish_subchat"), "{msg}");
+
+        let target = vec!["main".to_string()];
+        let v = post_message_or_forward_at(Some(dir.path()), &state, "sub", "hi", Some(&target), None).await;
+        assert_eq!(v["ok"], false);
+        assert!(state.repo_channel_wakes.lock().unwrap().get("main").is_none(), "the parent must not be woken");
+    }
+
+    #[tokio::test]
+    async fn a_sub_can_still_post_to_a_sibling_to_an_unrelated_chat_and_to_everyone() {
+        let state = sub_fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let v = post_message_or_forward_at(Some(dir.path()), &state, "sub", "touching a.ts", None, Some("sibling")).await;
+        assert_eq!(v["ok"], true, "{v}");
+        let v = post_message_or_forward_at(Some(dir.path()), &state, "sub", "touching b.ts", None, Some("other")).await;
+        assert_eq!(v["ok"], true, "{v}");
+        let broadcast = post_message_or_forward_at(Some(dir.path()), &state, "sub", "FYI", None, None).await;
+        assert_eq!(broadcast["ok"], true, "a broadcast wakes nobody, the parent included: {broadcast}");
+    }
+
+    #[tokio::test]
+    async fn the_parent_and_ordinary_chats_post_to_each_other_unchanged() {
+        let state = sub_fixture();
+        let dir = tempfile::tempdir().unwrap();
+        let v = post_message_or_forward_at(Some(dir.path()), &state, "main", "hi", None, Some("sub")).await;
+        assert_eq!(v["ok"], true, "{v}");
+        let v = post_message_or_forward_at(Some(dir.path()), &state, "other", "hi", None, Some("main")).await;
+        assert_eq!(v["ok"], true, "{v}");
     }
 
     #[tokio::test]

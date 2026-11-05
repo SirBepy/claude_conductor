@@ -1,0 +1,372 @@
+//! Cards the daemon itself raises for Joe: a stalled sub, a parent that cannot
+//! close with subs running, a sub past its ceiling, a checkup finding. One
+//! function, [`raise_card`], so every later step uses the same path.
+//!
+//! A raised card is an ordinary question card to everything that renders and
+//! lists it: it goes through `DaemonState::add_prompt`, so it shows in the
+//! pending-prompt listing, survives a chat switch and a frontend reload through
+//! the parked store, and drives the same ring and push as a model's question.
+//! What differs is who answers. A model's `ask_user_question` parks an
+//! `ask_user_question` hook on `DaemonState::pending`; this registers a oneshot
+//! in the same map, so `respond_question_inner` resolves it exactly as it
+//! resolves a model's, returns `delivered: true`, and the card's submit path
+//! then sends no answer message. Daemon code awaits [`CardHandle::answer`]; no
+//! model is woken and nothing enters any transcript.
+//!
+//! Restart: a raised card is never persisted (`pending_questions::is_durable_question`
+//! skips it), because its responder is a task in this process and could not be
+//! rebuilt. A card raised before a restart is therefore DROPPED, and each
+//! raising site re-derives it from state on its next tick (the stuck sweep
+//! still sees the stalled sub, a close attempt asks again). Re-raising from the
+//! store would hand Joe a card whose answer no code is waiting for.
+
+use crate::daemon::state::DaemonState;
+use serde_json::{json, Value};
+use std::sync::Arc;
+use tokio::sync::oneshot;
+
+/// The three actions Joe gets on a stalled or unfinished sub.
+pub const OPEN_IT: &str = "Open it";
+pub const NUDGE_AGAIN: &str = "Nudge again";
+pub const END_IT: &str = "End it";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CardOption {
+    pub label: String,
+    pub description: String,
+}
+
+impl CardOption {
+    pub fn new(label: &str, description: &str) -> Self {
+        Self { label: label.to_string(), description: description.to_string() }
+    }
+}
+
+/// What to put in front of Joe. `kind` names the raising site (`subchat_stuck`,
+/// `subchat_unfinished`, later `close_approval` ...) and rides the payload so a
+/// site can find its own open card again.
+#[derive(Clone, Debug)]
+pub struct RaisedCard {
+    pub kind: &'static str,
+    /// The main chat whose window shows the card. Also the payload's
+    /// `session_id`: a daemon card has no asking model, so there is no separate
+    /// answer target, and every layer keyed on `session_id` (ring, awaiting
+    /// state, parked store) already lands on the chat Joe is reading.
+    pub display_session_id: String,
+    /// The sub the card is about, when there is one.
+    pub sub_id: Option<String>,
+    /// Short label on the card (the chip beside the domain), a few words.
+    pub header: String,
+    pub question: String,
+    pub options: Vec<CardOption>,
+    pub domain: Option<&'static str>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CardAnswer {
+    /// The label of the option Joe chose, or his free text for "Other".
+    Picked(String),
+    /// Joe skipped the card. Nothing is done, and the raising site decides
+    /// whether to ask again.
+    Skipped,
+    /// The card left without an answer: withdrawn by code, or its prompt was
+    /// swept. The sender dropped, so no answer will ever come.
+    Withdrawn,
+}
+
+/// Reads the `{"answers": {question: label | [labels]}}` the responder sends.
+/// An empty answer set is a skip: the card's Skip button sends `{}`.
+pub fn parse_answer(resolved: &Value) -> CardAnswer {
+    let Some(answers) = resolved["answers"].as_object().filter(|a| !a.is_empty()) else {
+        return CardAnswer::Skipped;
+    };
+    let first = answers.values().next().cloned().unwrap_or(Value::Null);
+    match first {
+        Value::String(s) if !s.trim().is_empty() => CardAnswer::Picked(s),
+        Value::Array(items) => {
+            let joined: Vec<&str> = items.iter().filter_map(Value::as_str).collect();
+            if joined.is_empty() {
+                CardAnswer::Skipped
+            } else {
+                CardAnswer::Picked(joined.join(", "))
+            }
+        }
+        _ => CardAnswer::Skipped,
+    }
+}
+
+/// The way back from a raised card. Awaiting it is optional: a site that does
+/// not care about the answer can drop the handle, and the card still shows.
+pub struct CardHandle {
+    pub card_id: String,
+    rx: oneshot::Receiver<Value>,
+}
+
+impl CardHandle {
+    pub async fn answer(self) -> CardAnswer {
+        match self.rx.await {
+            Ok(resolved) => parse_answer(&resolved),
+            Err(_) => CardAnswer::Withdrawn,
+        }
+    }
+
+    /// Runs `act` with the answer on a detached task. The card is already on
+    /// screen when this returns, and the task ends when Joe answers or the card
+    /// is withdrawn.
+    pub fn on_answer<F, Fut>(self, act: F)
+    where
+        F: FnOnce(CardAnswer) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        tokio::spawn(async move {
+            let answer = self.answer().await;
+            act(answer).await;
+        });
+    }
+}
+
+fn question_json(card: &RaisedCard) -> Value {
+    let options: Vec<Value> = card
+        .options
+        .iter()
+        .map(|o| json!({"label": o.label, "description": o.description}))
+        .collect();
+    let mut q = json!({
+        "question": card.question,
+        "header": card.header,
+        "multiSelect": false,
+        "options": options,
+    });
+    if let Some(d) = card.domain {
+        q["domain"] = json!(d);
+    }
+    q
+}
+
+/// Posts `card` to Joe in `display_session_id`'s window and returns the handle
+/// its answer arrives on. `Err` when that chat is unknown or has ended, since a
+/// card for it would have nowhere to show.
+pub async fn raise_card(state: &Arc<DaemonState>, card: RaisedCard) -> Result<CardHandle, String> {
+    let display = card.display_session_id.clone();
+    match state.registry.get(&display) {
+        Some(inst) if inst.ended_at.is_none() => {}
+        _ => return Err(format!("cannot raise a card: chat {display} is unknown or has ended")),
+    }
+    let card_id = uuid::Uuid::new_v4().to_string();
+    let (tx, rx) = oneshot::channel();
+    // Registered before the prompt is visible, so an answer that races in
+    // right away finds its responder.
+    state.pending.lock().await.insert(card_id.clone(), tx);
+
+    let mut payload = json!({
+        "id": card_id,
+        "questions": [question_json(&card)],
+        "session_id": display,
+        // Where the card shows. Equal to `session_id` for every card raised
+        // here; the field exists so the frontend's routing reads one name for
+        // a sub's own question (display = parent) and for these.
+        "display_session_id": display,
+        "sub_id": card.sub_id,
+        "card_kind": card.kind,
+        // Tells the card its answer is handled by the daemon: it has no model
+        // to hand a free-text note to, so it renders without the extras box.
+        "daemon_card": true,
+        "seq": state.next_prompt_seq(),
+    });
+    // An older card still open in this chat: same hint a model's question
+    // gets, so a second card reads as a newer one rather than a duplicate.
+    if state.session_has_pending_question(&display).await {
+        payload["has_older_pending"] = json!(true);
+    }
+    // `durable` keeps `expire_prompts_for_session` from sweeping it at the next
+    // EOF of the chat; persistence is separately refused for a daemon card.
+    state.add_prompt(&card_id, "question-requested", payload.clone(), true).await;
+    state.fire_blocked_prompt(Some(&display), &card_id);
+    state.registry.set_awaiting(&display, Some("question".into()));
+    crate::daemon::machines::publish_instances_changed(state);
+    state.notifier.publish("question_request", payload);
+    state
+        .notifier
+        .publish("turn_sound", json!({ "session_id": display, "awaiting": "question" }));
+    log::info!(
+        "subchats: raised {} card {card_id} in {display} for sub {:?}",
+        card.kind,
+        card.sub_id
+    );
+    Ok(CardHandle { card_id, rx })
+}
+
+/// Takes a still-open raised card down without an answer (the stall resolved on
+/// its own). Its handle resolves as [`CardAnswer::Withdrawn`]. Returns whether
+/// the card was open.
+pub async fn withdraw_card(state: &Arc<DaemonState>, card_id: &str) -> bool {
+    let Some(session_id) = state.prompt_session_id(card_id).await else { return false };
+    // Dropping the sender is what resolves the handle.
+    state.pending.lock().await.remove(card_id);
+    state.remove_prompt(card_id).await;
+    if state.clear_question_awaiting_if_no_others_pending(&session_id).await {
+        crate::daemon::machines::publish_instances_changed(state);
+    }
+    state
+        .notifier
+        .publish("question_expired", json!({ "session_id": session_id, "id": card_id }));
+    true
+}
+
+/// The id of an open raised card of `kind` about `sub_id`, if there is one. A
+/// site calls it before raising so a sub never has two of the same card.
+pub async fn open_card_for(state: &Arc<DaemonState>, kind: &str, sub_id: &str) -> Option<String> {
+    state
+        .list_prompts()
+        .await
+        .into_iter()
+        .find(|p| {
+            p["payload"]["daemon_card"].as_bool() == Some(true)
+                && p["payload"]["card_kind"].as_str() == Some(kind)
+                && p["payload"]["sub_id"].as_str() == Some(sub_id)
+        })
+        .and_then(|p| p["id"].as_str().map(str::to_string))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::methods::permission::respond_question_inner;
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::types::Settings;
+
+    fn state_with_chat(id: &str) -> Arc<DaemonState> {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        st.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        st
+    }
+
+    fn card(display: &str, sub: Option<&str>) -> RaisedCard {
+        RaisedCard {
+            kind: "subchat_stuck",
+            display_session_id: display.to_string(),
+            sub_id: sub.map(str::to_string),
+            header: "Sub stalled".into(),
+            question: "The header sub has gone quiet. What now?".into(),
+            options: vec![
+                CardOption::new(OPEN_IT, "Read it where it stopped"),
+                CardOption::new(NUDGE_AGAIN, "Send it a reminder"),
+                CardOption::new(END_IT, "Stop it for good"),
+            ],
+            domain: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_raised_card_is_listed_as_a_question_card_with_the_display_field() {
+        let st = state_with_chat("main");
+        let h = raise_card(&st, card("main", Some("sub-1"))).await.unwrap();
+        let listed = st.list_prompts().await;
+        assert_eq!(listed.len(), 1);
+        let p = &listed[0];
+        assert_eq!(p["event"], "question-requested", "the normal question path renders it");
+        assert_eq!(p["id"], h.card_id.as_str());
+        assert_eq!(p["payload"]["display_session_id"], "main");
+        assert_eq!(p["payload"]["session_id"], "main");
+        assert_eq!(p["payload"]["sub_id"], "sub-1");
+        assert_eq!(p["payload"]["daemon_card"], true);
+        let q = &p["payload"]["questions"][0];
+        assert_eq!(q["question"], "The header sub has gone quiet. What now?");
+        assert_eq!(q["options"].as_array().unwrap().len(), 3);
+        assert_eq!(st.registry.get("main").unwrap().awaiting.as_deref(), Some("question"), "the ring shows needs input");
+    }
+
+    #[tokio::test]
+    async fn the_answer_reaches_daemon_code_and_no_model_is_involved() {
+        let st = state_with_chat("main");
+        let h = raise_card(&st, card("main", Some("sub-1"))).await.unwrap();
+        let id = h.card_id.clone();
+        let question = "The header sub has gone quiet. What now?";
+        // The card's submit path: respond_question, then (only when not
+        // delivered) a send_message carrying the answer to a model.
+        let mut answers = serde_json::Map::new();
+        answers.insert(question.to_string(), json!(NUDGE_AGAIN));
+        let delivered = respond_question_inner(&st, &id, Value::Object(answers), false).await;
+        assert!(delivered, "delivered: true is what stops the card sending an answer message to a chat");
+        assert_eq!(h.answer().await, CardAnswer::Picked(NUDGE_AGAIN.to_string()));
+        assert!(st.list_prompts().await.is_empty(), "the card is settled");
+        let row = st.registry.get("main").unwrap();
+        assert_ne!(row.awaiting.as_deref(), Some("working"), "no follow-up turn was bridged for a model");
+        assert!(st.sessions.is_empty(), "no session received anything");
+    }
+
+    #[tokio::test]
+    async fn skip_resolves_as_skipped() {
+        let st = state_with_chat("main");
+        let h = raise_card(&st, card("main", None)).await.unwrap();
+        assert!(respond_question_inner(&st, &h.card_id, json!({}), true).await);
+        assert_eq!(h.answer().await, CardAnswer::Skipped);
+    }
+
+    #[tokio::test]
+    async fn withdrawing_a_card_takes_it_down_and_resolves_its_handle() {
+        let st = state_with_chat("main");
+        let h = raise_card(&st, card("main", Some("sub-1"))).await.unwrap();
+        assert!(withdraw_card(&st, &h.card_id).await);
+        assert!(st.list_prompts().await.is_empty());
+        assert_ne!(st.registry.get("main").unwrap().awaiting.as_deref(), Some("question"));
+        assert_eq!(h.answer().await, CardAnswer::Withdrawn);
+        assert!(!withdraw_card(&st, "nope").await);
+    }
+
+    #[tokio::test]
+    async fn raising_for_an_unknown_or_ended_chat_is_an_error() {
+        let st = state_with_chat("main");
+        assert!(raise_card(&st, card("ghost", None)).await.is_err());
+        st.registry.mark_ended("main", crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
+        assert!(raise_card(&st, card("main", None)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn open_card_for_finds_only_the_same_kind_and_sub() {
+        let st = state_with_chat("main");
+        let h = raise_card(&st, card("main", Some("sub-1"))).await.unwrap();
+        assert_eq!(open_card_for(&st, "subchat_stuck", "sub-1").await.as_deref(), Some(h.card_id.as_str()));
+        assert_eq!(open_card_for(&st, "subchat_stuck", "sub-2").await, None);
+        assert_eq!(open_card_for(&st, "subchat_unfinished", "sub-1").await, None);
+    }
+
+    #[tokio::test]
+    async fn a_second_card_in_the_chat_is_marked_as_having_an_older_one() {
+        let st = state_with_chat("main");
+        raise_card(&st, card("main", Some("sub-1"))).await.unwrap();
+        raise_card(&st, card("main", Some("sub-2"))).await.unwrap();
+        let listed = st.list_prompts().await;
+        assert_eq!(listed[0]["payload"].get("has_older_pending"), None);
+        assert_eq!(listed[1]["payload"]["has_older_pending"], true);
+        assert!(listed[0]["payload"]["seq"].as_u64() < listed[1]["payload"]["seq"].as_u64());
+    }
+
+    #[test]
+    fn parse_answer_reads_a_label_a_multi_pick_and_a_skip() {
+        assert_eq!(parse_answer(&json!({"answers": {"q": "End it"}})), CardAnswer::Picked("End it".into()));
+        assert_eq!(parse_answer(&json!({"answers": {"q": ["a", "b"]}})), CardAnswer::Picked("a, b".into()));
+        assert_eq!(parse_answer(&json!({"answers": {}})), CardAnswer::Skipped);
+        assert_eq!(parse_answer(&json!({"answers": {"q": ""}})), CardAnswer::Skipped);
+        assert_eq!(parse_answer(&json!({})), CardAnswer::Skipped);
+    }
+
+    #[tokio::test]
+    async fn a_raised_card_is_not_persisted_so_a_restart_drops_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = state_with_chat("main");
+        st.init_pending_questions(dir.path()).await;
+        raise_card(&st, card("main", Some("sub-1"))).await.unwrap();
+        // A model's durable question in the same chat is persisted; ours is not.
+        st.add_prompt("model-q", "question-requested", json!({"session_id": "main", "seq": 99}), true).await;
+        let file = dir.path().join(format!("pending-questions{}.json", crate::daemon::instance::instance_suffix()));
+        let raw = std::fs::read_to_string(file).unwrap();
+        let ids: Vec<String> = serde_json::from_str::<Vec<Value>>(&raw)
+            .unwrap()
+            .iter()
+            .map(|v| v["id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids, ["model-q"], "only the model's card is on disk");
+    }
+}
