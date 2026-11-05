@@ -17,6 +17,7 @@ import {
   wrapUpChipHtml,
   askingDotsHtml,
   subCountHtml,
+  closeWaitChipHtml,
 } from "./sidebar-row-visuals";
 import type { LeadingExtras } from "./sidebar-row-visuals";
 import { chainRowKey } from "./successor-follow";
@@ -180,7 +181,7 @@ function buildRowOptions(args: {
     machineBadge: machineBadgeHtml(args.machine, !!args.isLocalSession),
     // A main chat with subs shows "3x" where the model battery sits; one with
     // none yet keeps its battery.
-    portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${args.mainChat && args.mainChat.subs.length > 0 ? subCountHtml(args.mainChat.subs.length) : modelBatteryHtml(args.model)}${args.drainChip}`,
+    portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${closeWaitChipHtml(args.mainChat?.closesWhenSubsFinish, tipAttr)}${args.mainChat && args.mainChat.subs.length > 0 ? subCountHtml(args.mainChat.subs.length) : modelBatteryHtml(args.model)}${args.drainChip}`,
     subDots: args.mainChat ? askingDotsHtml(args.mainChat.askingDots) : "",
   };
 }

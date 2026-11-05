@@ -36,6 +36,10 @@ export interface MainChatInfo {
   hoverRows: SubStatus[];
   /** At least one sub exists and every one has finished. */
   allFinished: boolean;
+  /** Joe picked "Wait for them" on the close card: the daemon flags the chat
+   *  `closing` and closes it when its last running sub ends. It stays in Main chats
+   *  (it is not on its way out yet) with a quiet note, on every surface. */
+  closesWhenSubsFinish: boolean;
 }
 
 const KIND_ORDER: Record<SubKind, number> = { asking: 0, working: 1, queued: 2, finished: 3 };
@@ -89,16 +93,21 @@ export function mainChatInfo(main: Instance, sessions: readonly Instance[]): Mai
     return { id: s.session_id, name: sessionSubtitle(s), kind, progress: progressText(s, kind), tier: tierLabel(s.model, s.effort), closing: !!s.closing };
   }).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 
+  // `closing` with a sub still running can only be the wait: a close with running subs
+  // is held behind the card, and a plain close with none moves the row to Closing.
+  const closesWhenSubsFinish = !!main.closing && subInstances.some((s) => !s.subchat_finished && !s.ended_at);
   const ownAsking = asking.has(main.session_id);
-  const hoverRows = ownAsking
-    ? [{ id: main.session_id, name: "This chat", kind: "asking" as const, progress: progressText(main, "asking"), tier: "", closing: false }, ...subs]
-    : subs;
+  const ownRows: SubStatus[] = [];
+  if (ownAsking) ownRows.push({ id: main.session_id, name: "This chat", kind: "asking", progress: progressText(main, "asking"), tier: "", closing: false });
+  if (closesWhenSubsFinish) ownRows.push({ id: main.session_id, name: "This chat", kind: "finished", progress: "closing when subs finish", tier: "", closing: false });
+  const hoverRows = [...ownRows, ...subs];
   return {
     subs,
     askingDots: subs.filter((s) => s.kind === "asking").length + (ownAsking ? 1 : 0),
     hoverRows,
     // A closing sub is not finished yet, so the ring stays off green until it is gone.
     allFinished: subs.length > 0 && subs.every((s) => s.kind === "finished" && !s.closing),
+    closesWhenSubsFinish,
   };
 }
 

@@ -244,6 +244,16 @@ export class SessionHeader {
     }
   }
 
+  /** Letters a character-less chat shows in its avatar instead of "?": a sub has no
+   *  character, and the sub list stands initials in for one. Survives `setAvatar`. */
+  private _initials: string | null = null;
+
+  setAvatarInitials(initials: string | null): void {
+    this._initials = initials;
+    const placeholder = this._wrap.querySelector<HTMLElement>(".session-header-char-placeholder");
+    if (placeholder) placeholder.textContent = initials ?? "?";
+  }
+
   setAvatar(charId: string | null, url: string | null, status: string, cwd?: string | null, machineId?: string | null): void {
     const badge = projBadgeHtml(cwd ?? null, "session-header-proj-badge", machineId);
     if (charId) {
@@ -257,7 +267,7 @@ export class SessionHeader {
       ].join("");
     } else {
       this._wrap.innerHTML = [
-        `<div class="session-header-avatar session-header-char-placeholder header-char-clickable ${escapeHtml(status)}" title="Change character" role="button" tabindex="0">?</div>`,
+        `<div class="session-header-avatar session-header-char-placeholder header-char-clickable ${escapeHtml(status)}" title="Change character" role="button" tabindex="0">${escapeHtml(this._initials ?? "?")}</div>`,
         badge,
       ].join("");
     }

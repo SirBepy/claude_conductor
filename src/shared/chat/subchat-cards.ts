@@ -53,6 +53,8 @@ export interface SubSumFacts {
   reviewed: number;
   unreviewed: number;
   unknown_subs: number;
+  /** Worktree subs whose commits did not land; absent on a card an older build drew. */
+  not_merged?: number;
 }
 
 /** `when_done`: the machine answered a sub's question with its first option while Joe was away. */
