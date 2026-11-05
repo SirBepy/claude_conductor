@@ -35,6 +35,10 @@ pub fn spawn(state: Arc<DaemonState>) {
             // The stuck-sub card rides this tick instead of a thread of its own.
             // After `sweep`, which has just recorded any suspend gap.
             crate::daemon::subchats::stuck::sweep_now(&state, now, clock.resumed_at).await;
+            // The same tick counts each sub's model calls and busy time against its
+            // ceiling, and settles the subs of a main chat that ended without asking.
+            crate::daemon::subchats::ceiling::sweep_now(&state, now).await;
+            crate::daemon::subchats::closing::heal_orphans(&state).await;
         }
     });
 }

@@ -138,9 +138,14 @@ pub(crate) fn died_note_if_unnoticed(
     exit: Option<&ExitInfo>,
 ) -> Option<String> {
     let inst = state.registry.get(sub_id)?;
-    // Finished and ended are done; frozen covers a user freeze, a gaming-mode
-    // park and a rate limit, each of which stops the child on purpose.
-    if !super::is_sub(&inst) || expected_exit || inst.ended_at.is_some() || inst.subchat_finished || inst.frozen {
+    // Finished and ended are done; paused covers a freeze, a gaming-mode park and a
+    // rate limit, which stop the child on purpose or leave it unable to go on.
+    if !super::is_sub(&inst)
+        || expected_exit
+        || inst.ended_at.is_some()
+        || inst.subchat_finished
+        || super::pause::is_paused(&inst, chrono::Utc::now().timestamp())
+    {
         return None;
     }
     let rt = runtime();

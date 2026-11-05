@@ -10,16 +10,28 @@ export function closeNeedsConfirm(sessionId: string): boolean {
   return state.sessions.find((s) => s.session_id === sessionId)?.busy === true;
 }
 
+/** True when this is a main chat with a sub still running. The daemon holds such
+ *  a close and asks on a card (wait for them, close them too, keep it open), so a
+ *  caller must not start an irreversible close UI (the row's exit animation, the
+ *  character's death cue) before that answer. Finished subs do not count. */
+export function closeNeedsApproval(sessionId: string): boolean {
+  return state.sessions.some((s) => s.subchat_of === sessionId && !s.subchat_finished && !s.ended_at);
+}
+
 async function performClose(sessionId: string): Promise<void> {
   const sess = state.sessions.find((s) => s.session_id === sessionId);
   // Closing cue: play the session character's "death" slot (best-effort;
-  // per-slot toggle + mute enforced in the Rust command).
-  if (sess) {
+  // per-slot toggle + mute enforced in the Rust command). Not while the close
+  // may be held: the chat is not dying yet.
+  if (sess && !closeNeedsApproval(sessionId)) {
     const charId = characterForSession(sess);
     if (charId) void api.playCharacterSlot(charId, "death").catch(() => { /* best-effort */ });
   }
   try {
-    await invoke<void>("clear_session", { sessionId });
+    // True when the daemon held the close for Joe's answer on the card. The chat
+    // is then still open, so nothing below may treat it as closed.
+    const held = await invoke<boolean | void>("clear_session", { sessionId });
+    if (held === true) return;
     document.dispatchEvent(new CustomEvent("cc:session-closed", { detail: { sessionId } }));
   } catch (err) {
     console.error("[sessions] close chat failed", err);

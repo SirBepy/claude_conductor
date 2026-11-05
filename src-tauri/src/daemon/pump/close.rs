@@ -27,7 +27,13 @@ pub(crate) fn close_in_flight(
     session_id: &str,
     armed_by_prompt: bool,
 ) -> bool {
-    armed_by_prompt || registry.get(session_id).is_some_and(|i| i.closing)
+    // A chat that picked "Wait for them" on the close-with-subs card shows
+    // Closing until its last sub ends; a turn it runs meanwhile is not a stalled
+    // /close, and standing the row down would cancel the wait on screen.
+    armed_by_prompt
+        || registry
+            .get(session_id)
+            .is_some_and(|i| i.closing && !crate::daemon::subchats::closing::is_waiting(session_id))
 }
 
 /// Registry `awaiting` value for a `/close` turn that ended without ever
@@ -96,6 +102,13 @@ pub(crate) fn close_stand_down_is_failure_at_eof(close_confirmed_at_eof: bool) -
 /// the MCP tool), which makes this the teardown moment the held-message
 /// sweep below needs: the very last point before the predecessor is gone.
 pub(crate) fn finalize_close(state: &Arc<DaemonState>, session: &Session) {
+    // The `close_session` tool already refused a chat with running subs, so this
+    // is the backstop for one that gained a sub between that call and the turn
+    // end. A `respawn` predecessor is not held: its subs move to the successor.
+    if crate::daemon::subchats::closing::request_close(state, &session.session_id) {
+        log::info!("daemon: session {} close held, it has running subs; Joe was asked", session.session_id);
+        return;
+    }
     let now = chrono::Utc::now().to_rfc3339();
     if state.registry.mark_ended(&session.session_id, crate::types::EndReason::Manual, &now) {
         log::info!(
@@ -106,6 +119,12 @@ pub(crate) fn finalize_close(state: &Arc<DaemonState>, session: &Session) {
     session.expected_exit.store(true, std::sync::atomic::Ordering::SeqCst);
     crate::util::kill::kill_tree(session.pid);
     carry_held_messages_to_successor(state, &session.session_id);
+    // Its finished subs close with it, and a respawn's subs follow the successor.
+    // Detached: this runs inside the pump's result handler.
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let (state, parent) = (state.clone(), session.session_id.clone());
+        handle.spawn(async move { crate::daemon::subchats::closing::settle_family(&state, &parent).await });
+    }
 }
 
 /// Second sweep, beyond `spawn_chat`'s respawn-time

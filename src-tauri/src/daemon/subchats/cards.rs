@@ -219,15 +219,51 @@ pub async fn withdraw_card(state: &Arc<DaemonState>, card_id: &str) -> bool {
 /// answer them to, and an answer would be sent to a chat that is gone. Returns
 /// how many came down.
 pub async fn drop_prompts_of_sub(state: &Arc<DaemonState>, sub_id: &str) -> usize {
+    drop_matching(state, |payload| {
+        payload["session_id"].as_str() == Some(sub_id)
+            || (payload["daemon_card"].as_bool() == Some(true) && payload["sub_id"].as_str() == Some(sub_id))
+    })
+    .await
+}
+
+/// Takes down every daemon card shown in `display`'s window. Used when that
+/// chat is gone: nothing can render them and no one is left to answer.
+pub async fn drop_daemon_cards_shown_in(state: &Arc<DaemonState>, display: &str) -> usize {
+    drop_matching(state, |payload| {
+        payload["daemon_card"].as_bool() == Some(true) && payload["display_session_id"].as_str() == Some(display)
+    })
+    .await
+}
+
+/// Points every open daemon card shown in `old`'s window at `new`'s instead
+/// (`respawn` moved the subs there). The card keeps its id, so the answer task
+/// waiting on it is undisturbed. Returns how many moved.
+pub async fn retarget_daemon_cards(state: &Arc<DaemonState>, old: &str, new: &str) -> usize {
+    let mut moved = 0;
+    for p in state.list_prompts().await {
+        let payload = &p["payload"];
+        if payload["daemon_card"].as_bool() != Some(true) || payload["display_session_id"].as_str() != Some(old) {
+            continue;
+        }
+        let (Some(id), Some(event)) = (p["id"].as_str(), p["event"].as_str()) else { continue };
+        let mut payload = payload.clone();
+        payload["session_id"] = json!(new);
+        payload["display_session_id"] = json!(new);
+        state.add_prompt(id, event, payload, true).await;
+        moved += 1;
+    }
+    if moved > 0 {
+        crate::daemon::machines::publish_instances_changed(state);
+    }
+    moved
+}
+
+async fn drop_matching(state: &Arc<DaemonState>, matches: impl Fn(&Value) -> bool) -> usize {
     let mine: Vec<(String, String)> = state
         .list_prompts()
         .await
         .into_iter()
-        .filter(|p| {
-            let payload = &p["payload"];
-            payload["session_id"].as_str() == Some(sub_id)
-                || (payload["daemon_card"].as_bool() == Some(true) && payload["sub_id"].as_str() == Some(sub_id))
-        })
+        .filter(|p| matches(&p["payload"]))
         .filter_map(|p| Some((p["id"].as_str()?.to_string(), p["payload"]["session_id"].as_str()?.to_string())))
         .collect();
     for (card_id, session_id) in &mine {

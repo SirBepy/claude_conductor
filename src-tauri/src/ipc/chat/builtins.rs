@@ -9,7 +9,7 @@ use crate::state::AppState;
 pub async fn clear_session(
     session_id: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     // Kill the underlying claude so closing a chat actually TERMINATES it, not
     // just hides the row. External sessions (the user's own `claude` terminal)
     // are killed by pid here. Interactive (daemon-hosted) chats run a long-lived
@@ -35,6 +35,7 @@ pub async fn clear_session(
         }
     }
 
+    let mut held = false;
     if let Some(client) = state.client().await {
         if is_interactive {
             // Fire-and-forget the graceful subprocess teardown. Awaiting
@@ -53,7 +54,9 @@ pub async fn clear_session(
                 let _ = client_bg.end_session(&session_id_bg).await;
             });
         }
-        let _ = client.mark_session_ended(&session_id).await;
+        // True when the chat has running subs: the daemon held the close and Joe
+        // is asked on a card, so the caller must not treat the chat as closed.
+        held = client.mark_session_ended(&session_id).await.unwrap_or(false);
         // Re-seed the instance cache directly rather than waiting for the
         // `instances_changed` notification: that broadcast is lossy (can be
         // dropped under pipe backpressure), and if the frame carrying this
@@ -62,5 +65,5 @@ pub async fn clear_session(
         // Same direct-sync pattern register_historical uses for the inverse race.
         crate::daemon_link::fetch_and_reseed_instances(&client, &state).await;
     }
-    Ok(())
+    Ok(held)
 }

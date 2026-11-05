@@ -242,6 +242,11 @@ async fn adopt_spawned(
         // moment it ends, and the successor's transcript chain must still
         // resolve after that.
         crate::sessions::chat_config::set_predecessor(sid, caller_session_id);
+        // The successor stays a main chat and takes the subs, cards, queue and
+        // decisions log. Before the close is armed, so a stop half way leaves the
+        // predecessor open with nothing lost; the close then settles any stragglers.
+        // Before the first send too, which is what tells the successor its mode is on.
+        crate::daemon::subchats::closing::carry_to_successor(state, caller_session_id, sid).await;
         state.registry.set_close_requested(caller_session_id);
     } else {
         crate::sessions::chat_config::set_spawned_by(sid, caller_session_id);

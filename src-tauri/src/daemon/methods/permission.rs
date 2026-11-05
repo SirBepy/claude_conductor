@@ -184,16 +184,35 @@ fn record_skip(state: &Arc<DaemonState>, session_id: &str, question_id: &str) {
 /// `skipped` distinguishes a real Skip from an empty-but-real answer. Nothing
 /// reaches the model, so the live notification below is paired with a durable
 /// `skipped_questions` row for scrollback (todo 661).
+#[cfg(test)]
 pub(crate) async fn respond_question_inner(
     state: &Arc<DaemonState>,
     request_id: &str,
     answers: serde_json::Value,
     skipped: bool,
 ) -> bool {
+    respond_question_as(state, request_id, answers, skipped, false).await
+}
+
+/// The `auto_by` value that marks an answer as when-done's.
+pub(crate) const AUTO_BY_WHEN_DONE: &str = "when_done";
+
+/// [`respond_question_inner`] with who answered. `auto` is when-done picking the
+/// first option while Joe is away: that is not his decision, so the decisions log
+/// does not record it as one, and a sub's question it answered is announced in the
+/// main chat by a card instead (the answer would otherwise leave no trace there).
+pub(crate) async fn respond_question_as(
+    state: &Arc<DaemonState>,
+    request_id: &str,
+    answers: serde_json::Value,
+    skipped: bool,
+    auto: bool,
+) -> bool {
     let session_id = state.prompt_session_id(request_id).await;
     // Before the prompt record is dropped below: it holds the question text, and
     // a Skip is never a decision.
-    if !skipped {
+    let asked = if auto { state.prompt_payload(request_id).await } else { None };
+    if !skipped && !auto {
         crate::daemon::subchats::decisions::record_card_answer(state, request_id, &answers).await;
     }
     // A card the daemon raised for its own code (stuck sub, close approval)
@@ -213,6 +232,9 @@ pub(crate) async fn respond_question_inner(
         None => false,
     };
     settle_prompt(state, request_id, true).await;
+    if let (Some(payload), false) = (asked, skipped) {
+        announce_auto_answer(state, &payload, &answers);
+    }
     // A daemon card that was withdrawn first must not wake the chat it showed in
     // (the answer would have no model to go to), and a Skip leaves no mark or
     // `question_skipped` row in a transcript that never held the card.
@@ -233,6 +255,23 @@ pub(crate) async fn respond_question_inner(
         }
     }
     delivered
+}
+
+/// Draws the main-chat card for a sub's question that when-done answered. Only a
+/// question card asked by a sub: a chat's own question is shown where it is asked,
+/// and a daemon card has no asker. The question text comes from the stored card,
+/// the answer from the map when-done sent back (`{question: first option}`).
+fn announce_auto_answer(state: &Arc<DaemonState>, payload: &serde_json::Value, answers: &serde_json::Value) {
+    let Some(sub_id) = payload["session_id"].as_str() else { return };
+    if payload["daemon_card"].as_bool() == Some(true) || !crate::daemon::subchats::is_sub_session(state, sub_id) {
+        return;
+    }
+    let Some((asked, answer)) = answers.as_object().and_then(|m| m.iter().next()) else { return };
+    let question = payload["questions"][0]["question"].as_str().unwrap_or(asked.as_str());
+    let answer = answer.as_str().unwrap_or_default();
+    if !answer.is_empty() {
+        crate::daemon::subchats::card_log::on_when_done_answer(state, sub_id, question, answer);
+    }
 }
 
 pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
@@ -353,7 +392,7 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
-    router.register("respond_question", move |params, _ctx| {
+    router.register("respond_question", move |params, ctx| {
         let state = state.clone();
         async move {
             #[derive(serde::Deserialize)]
@@ -362,10 +401,16 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
                 answers: serde_json::Value,
                 #[serde(default)]
                 skipped: bool,
+                /// `"when_done"` when the app's when-done engine answered with the
+                /// first option. Honoured only on the desktop pipe: a phone or a
+                /// paired machine must not be able to mark its answer as automatic.
+                #[serde(default)]
+                auto_by: Option<String>,
             }
             let b: Body = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            let delivered = respond_question_inner(&state, &b.request_id, b.answers, b.skipped).await;
+            let auto = b.auto_by.as_deref() == Some(AUTO_BY_WHEN_DONE) && ctx.transport == crate::daemon::rpc::Transport::Local;
+            let delivered = respond_question_as(&state, &b.request_id, b.answers, b.skipped, auto).await;
             Ok(serde_json::json!({"ok": true, "delivered": delivered}))
         }
     });
@@ -398,6 +443,67 @@ mod answer_bridge_tests {
 
         assert!(!respond_question_inner(&state, "q1", json!({}), false).await);
         assert_eq!(state.registry.get("s").unwrap().awaiting.as_deref(), Some("working"));
+    }
+
+    fn sub_question_payload(sub: &str) -> serde_json::Value {
+        json!({
+            "session_id": sub,
+            "display_session_id": "wd-main",
+            "seq": 1,
+            "questions": [{"question": "Which header colour?", "options": [{"label": "Teal"}, {"label": "Navy"}]}],
+        })
+    }
+
+    /// When-done answers a sub's question with its first option while Joe is
+    /// away. The main chat gets one card naming what it answered, and the
+    /// decisions log (Joe's word for word record) does not take it as his.
+    #[tokio::test]
+    async fn when_done_answering_a_subs_question_draws_one_card_naming_the_answer_and_logs_no_decision() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = state_with_idle_session("wd-main");
+        state.registry.upsert_interactive("wd-sub", Path::new("/tmp/x"), "proj", "2026-11-05T00:00:00Z");
+        state.registry.set_name("wd-sub", "header".to_string());
+        state.registry.set_subchat_of("wd-sub", Some("wd-main".into()));
+        state.add_prompt("wd-q", "question-requested", sub_question_payload("wd-sub"), true).await;
+
+        respond_question_as(&state, "wd-q", json!({"Which header colour?": "Teal"}), false, true).await;
+
+        let cards = crate::daemon::subchats::card_log::read("wd-main");
+        assert_eq!(cards.len(), 1, "{cards:?}");
+        let card = &cards[0];
+        assert_eq!(card.kind, crate::daemon::subchats::card_log::KIND_WHEN_DONE);
+        assert_eq!(card.sub_name.as_deref(), Some("header"), "it names the sub");
+        assert!(card.text.contains("Which header colour?") && card.text.contains("Teal"), "it names the answer: {}", card.text);
+        assert!(crate::daemon::subchats::decisions::read_log("wd-main").is_none(), "a machine's pick is not Joe's decision");
+    }
+
+    #[tokio::test]
+    async fn joes_own_answer_to_a_subs_question_draws_no_when_done_card_and_is_logged() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = state_with_idle_session("wd2-main");
+        state.registry.upsert_interactive("wd2-sub", Path::new("/tmp/x"), "proj", "2026-11-05T00:00:00Z");
+        state.registry.set_subchat_of("wd2-sub", Some("wd2-main".into()));
+        state.add_prompt("wd2-q", "question-requested", sub_question_payload("wd2-sub"), true).await;
+
+        respond_question_inner(&state, "wd2-q", json!({"Which header colour?": "Navy"}), false).await;
+
+        assert!(crate::daemon::subchats::card_log::read("wd2-main").is_empty());
+        assert!(crate::daemon::subchats::decisions::read_log("wd2-main").is_some_and(|l| l.contains("Navy")));
+    }
+
+    #[tokio::test]
+    async fn when_done_answering_an_ordinary_chats_question_or_skipping_draws_nothing() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = state_with_idle_session("wd3-plain");
+        state.add_prompt("wd3-q", "question-requested", sub_question_payload("wd3-plain"), true).await;
+        respond_question_as(&state, "wd3-q", json!({"Which header colour?": "Teal"}), false, true).await;
+        assert!(crate::daemon::subchats::card_log::read("wd3-plain").is_empty());
+
+        state.registry.upsert_interactive("wd3-sub", Path::new("/tmp/x"), "proj", "2026-11-05T00:00:00Z");
+        state.registry.set_subchat_of("wd3-sub", Some("wd3-plain".into()));
+        state.add_prompt("wd3-q2", "question-requested", sub_question_payload("wd3-sub"), true).await;
+        respond_question_as(&state, "wd3-q2", json!({}), true, true).await;
+        assert!(crate::daemon::subchats::card_log::read("wd3-plain").is_empty(), "a skip answers nothing");
     }
 
     fn sentinel(id: &str) -> String {

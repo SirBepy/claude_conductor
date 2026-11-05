@@ -77,6 +77,20 @@ impl PersistentClient {
         Ok(result.get("delivered").and_then(|v| v.as_bool()).unwrap_or(false))
     }
 
+    /// [`Self::respond_question`] from the when-done engine: the daemon is told
+    /// the answer is the machine's, not Joe's, so it keeps it out of the decisions
+    /// log and says so in the main chat when a sub asked.
+    pub async fn respond_question_for_when_done(
+        &self,
+        request_id: &str,
+        answers: serde_json::Value,
+    ) -> Result<bool, ClientError> {
+        let mut params = respond_question_params(request_id, answers, false, None);
+        params["auto_by"] = json!("when_done");
+        let result = self.call("respond_question", params).await?;
+        Ok(result.get("delivered").and_then(|v| v.as_bool()).unwrap_or(false))
+    }
+
     /// Tells `on_question_request` a client committed to this question's fate,
     /// so its ack means "reached a client" (todo 735). Fires on a rendered card
     /// AND on a parked one; `respond_question` above resolves only on a real

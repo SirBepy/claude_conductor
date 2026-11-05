@@ -114,11 +114,23 @@ async fn fire_message(
         );
     }
     lifecycle::refuse_if_api_credit_blocked(state, session_id).map_err(|e| e.to_string())?;
-    let session = match state.sessions.get(session_id).map(|s| s.clone()) {
-        Some(s) => s,
-        None => respawn_for_message(state, session_id, cwd).await?,
-    };
-    lifecycle::send_message(&session, &tag_schedule(prompt), true).await.map_err(|e| e.to_string())?;
+    // A sub that ended with its main chat is not respawned for a schedule, and a
+    // finished one is continued through the same door a reply to it uses.
+    let sub_prior = crate::daemon::subchats::before_scheduled_fire(state, session_id)?;
+    let sent = async {
+        let session = match state.sessions.get(session_id).map(|s| s.clone()) {
+            Some(s) => s,
+            None => respawn_for_message(state, session_id, cwd).await?,
+        };
+        lifecycle::send_message(&session, &tag_schedule(prompt), true).await.map_err(|e| e.to_string())
+    }
+    .await;
+    if let Err(e) = sent {
+        if let Some(prior) = sub_prior {
+            crate::daemon::subchats::restore(state, session_id, prior);
+        }
+        return Err(e);
+    }
     state.registry.set_awaiting(session_id, None);
     // todo 873 (2026-10-02 cycle 1): this gen-bump path logged nothing, unlike
     // `send_message`'s own "turn_gen N -> N+1" line - a scheduled retry's
@@ -283,6 +295,76 @@ mod tests {
         let inst = state.registry.get("sess-1").unwrap();
         assert!(inst.frozen, "a manual freeze must survive a fire attempt");
         assert!(!inst.auto_frozen, "auto_frozen must stay false for a manual freeze");
+    }
+
+    // --- a sub as the target ---
+
+    fn sub_pair(state: &Arc<DaemonState>, tag: &str) -> (String, String) {
+        let (main, sub) = (format!("{tag}-main"), format!("{tag}-sub"));
+        for id in [&main, &sub] {
+            state.registry.upsert_interactive(id, std::path::Path::new("."), "proj-1", "2026-11-05T00:00:00Z");
+        }
+        state.registry.set_subchat_of(&sub, Some(main.clone()));
+        (main, sub)
+    }
+
+    /// A sub ended with its parent has no row anyone can see or close. Respawning
+    /// it for a schedule (a `this_chat` item of its own, a rate-limit resume) would
+    /// start a billed child for it.
+    #[tokio::test]
+    async fn a_scheduled_message_does_not_revive_a_sub_that_ended_with_its_parent() {
+        let state = test_state();
+        let (_main, sub) = sub_pair(&state, "sched-ended");
+        state.registry.mark_ended(&sub, crate::types::EndReason::Manual, "2026-11-05T00:00:01Z");
+
+        let err = fire_message(&state, &sub, "Z:\\does\\not\\exist", "hi").await.expect_err("must refuse");
+
+        assert!(err.contains("ended with its main chat"), "refused for the right reason, not by chance: {err}");
+        assert!(state.sessions.is_empty(), "no child was started");
+        assert!(state.registry.get(&sub).unwrap().ended_at.is_some(), "still ended");
+    }
+
+    #[tokio::test]
+    async fn a_scheduled_message_does_not_revive_a_sub_whose_row_left_the_snapshot_either() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        // After a restart only the brief says it was a sub.
+        crate::daemon::subchats::store_sub_brief("sched-gone-sub", "sched-gone-main");
+
+        let err = fire_message(&state, "sched-gone-sub", "Z:\\does\\not\\exist", "hi").await.expect_err("must refuse");
+
+        assert!(err.contains("ended with its main chat"), "{err}");
+    }
+
+    /// A finished sub resumes through the same door a reply uses, so the finished
+    /// flag is cleared for the turn; a failed send puts it back.
+    #[tokio::test]
+    async fn a_scheduled_message_continues_a_finished_sub_and_a_failed_send_leaves_it_finished() {
+        let state = test_state();
+        let (_main, sub) = sub_pair(&state, "sched-finished");
+        state.registry.set_subchat_finished(&sub, true);
+
+        let err = fire_message(&state, &sub, "Z:\\does\\not\\exist", "hi").await.expect_err("the respawn fails in this env");
+
+        assert!(!err.contains("ended with its main chat"), "it was not refused as ended: {err}");
+        let row = state.registry.get(&sub).unwrap();
+        assert!(row.subchat_finished, "a failed continue leaves the sub as it was found");
+        assert!(row.ended_at.is_none());
+    }
+
+    #[test]
+    fn before_scheduled_fire_clears_the_finished_flag_for_a_sub_that_can_continue() {
+        let state = test_state();
+        let (_main, sub) = sub_pair(&state, "sched-prep");
+        state.registry.set_subchat_finished(&sub, true);
+        let prior = crate::daemon::subchats::before_scheduled_fire(&state, &sub).unwrap();
+        assert!(prior.is_some(), "a finished sub is continued");
+        assert!(!state.registry.get(&sub).unwrap().subchat_finished);
+        // A sub still running and an ordinary chat are untouched.
+        let (_m2, running) = sub_pair(&state, "sched-run");
+        assert!(crate::daemon::subchats::before_scheduled_fire(&state, &running).unwrap().is_none());
+        assert!(crate::daemon::subchats::before_scheduled_fire(&state, "sched-run-main").unwrap().is_none());
+        assert!(crate::daemon::subchats::before_scheduled_fire(&state, "nobody").unwrap().is_none());
     }
 
     // --- ScheduledKind::JarvisHygiene fire path ---

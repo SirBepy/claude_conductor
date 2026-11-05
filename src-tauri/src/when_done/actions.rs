@@ -66,7 +66,9 @@ pub(super) async fn auto_resolve_prompts(app: &AppHandle, armed: &HashSet<String
             "question-requested" => {
                 let questions = payload.get("questions");
                 let answers = default_question_answers(questions);
-                if let Err(e) = client.respond_question(&request_id, answers.clone(), false, None).await {
+                // Marked as the machine's answer: a sub's question it answers is
+                // announced in the main chat, and is no decision of Joe's.
+                if let Err(e) = client.respond_question_for_when_done(&request_id, answers.clone()).await {
                     log::warn!("when_done: auto-answer question failed: {e}");
                 } else {
                     log_comment(&format!(

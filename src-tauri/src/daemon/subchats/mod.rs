@@ -21,13 +21,16 @@ use std::sync::Arc;
 pub mod back;
 pub mod card_log;
 pub mod cards;
+pub mod ceiling;
 pub mod checkup;
+pub mod closing;
 pub mod decisions;
 pub mod facts;
 pub mod finish;
 pub(crate) mod git;
 mod reply;
 pub mod joe_message;
+pub mod pause;
 mod resume;
 pub(crate) mod runtime;
 pub mod stall;
@@ -39,6 +42,7 @@ pub mod wake;
 
 pub use reply::{move_to_sidebar, route_send, MoveError};
 pub use resume::{continue_sub, end_sub, nudge, request_nudge, ContinueError, NUDGE_TEXT};
+pub(crate) use resume::{before_scheduled_fire, restore};
 
 /// Env var that marks a sub's MCP child, so `finish_subchat` is listed for it
 /// and for no other chat. Read by `mcp::server`, written by `write_mcp_config`.
@@ -91,6 +95,8 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     // wake for a sub spawned with `report_back`.
     back::on_finished(state, sub_id);
     wake::on_finished(state, sub_id);
+    // A main chat that picked "Wait for them" closes when its last running sub ends.
+    closing::on_sub_settled(state, sub_id);
 }
 
 #[cfg(test)]

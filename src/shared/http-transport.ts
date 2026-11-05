@@ -839,7 +839,11 @@ export class HttpTransport implements Transport {
         } catch {
           /* not daemon-hosted (e.g. External) - fall through to registry cleanup */
         }
-        return this.rpc<T>("mark_session_ended", { session_id: sessionId });
+        // `held` is true when the chat has running subs: the daemon asks Joe on a
+        // card instead of closing, and the caller must not treat the chat as
+        // closed. The desktop's `clear_session` resolves the same boolean.
+        const ended = await this.rpc<{ held?: boolean } | null>("mark_session_ended", { session_id: sessionId });
+        return (ended?.held === true) as T;
       }
       // Project dashboards: reads, a card's refresh (it runs the stored config,
       // it cannot change it) and the dashboard's own todo checkbox (the same

@@ -48,7 +48,13 @@ pub async fn sweep(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> {
     let mut carded = Vec::new();
     for inst in state.registry.list() {
         let id = inst.session_id.clone();
-        if inst.subchat_of.is_none() || inst.ended_at.is_some() || inst.subchat_finished || inst.frozen {
+        // Paused is not stuck: a freeze, a gaming-mode park and a rate limit each
+        // leave a sub silent through no fault of its own.
+        if inst.subchat_of.is_none()
+            || inst.ended_at.is_some()
+            || inst.subchat_finished
+            || super::pause::is_paused(&inst, env.now.timestamp())
+        {
             continue;
         }
         // No live child: either it exited (the EOF handler and `sweep_dead` own
@@ -109,7 +115,7 @@ pub async fn sweep_dead(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> 
     for inst in state.registry.list() {
         let id = inst.session_id.clone();
         let Some(parent) = inst.subchat_of.clone() else { continue };
-        if inst.ended_at.is_some() || inst.subchat_finished || inst.frozen {
+        if inst.ended_at.is_some() || inst.subchat_finished || super::pause::is_paused(&inst, env.now.timestamp()) {
             continue;
         }
         if (env.is_live)(&id) {
@@ -262,6 +268,30 @@ mod tests {
         let (st, sub) = busy_sub("stuck-ex-end");
         st.registry.mark_ended(&sub, crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
         assert!(run(&st, 60).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_gaming_mode_park_and_a_rate_limit_are_not_a_stall() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        // Parked: gaming mode sends a message and freezes nothing.
+        let (st, sub) = busy_sub("stuck-park");
+        crate::daemon::gaming_mode::set_file_for_test(&[&sub]);
+        assert!(!st.registry.get(&sub).unwrap().frozen);
+        assert!(run(&st, 120).await.is_empty(), "a parked sub is silent on purpose");
+        crate::daemon::gaming_mode::set_file_for_test(&[]);
+        assert_eq!(run(&st, 121).await, [sub.clone()], "the same silence is a stall once the park is over");
+
+        // Rate limited: every sub on the account waits, whether or not it was rejected itself.
+        let (st, sub) = busy_sub("stuck-rate");
+        st.registry.set_account(&sub, "acct");
+        st.registry.set_rate_limited_for_account("acct", Utc::now().timestamp() + 4 * 3600, "five_hour");
+        assert!(run(&st, 120).await.is_empty());
+        // The dead-process sweep leaves it alone too.
+        st.registry.set_busy(&sub, false);
+        run_dead(&st, false, 0).await;
+        assert!(run_dead(&st, false, 300).await.is_empty());
+        // Past the reset it is judged like any other sub.
+        assert_eq!(run(&st, 5 * 60).await, [sub], "a window that is over pauses nothing");
     }
 
     #[tokio::test]

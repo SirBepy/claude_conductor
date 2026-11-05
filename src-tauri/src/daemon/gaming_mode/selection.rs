@@ -31,7 +31,11 @@ pub fn target_sessions(instances: &[Instance], projects: &[ProjectConfig]) -> Ve
         // would spend a turn and flip its Done status to In Progress.
         .filter(|i| i.busy)
         .filter(|i| !project_allowlisted(projects, &i.project_id))
-        .map(|i| PausedSession { session_id: i.session_id.clone(), cwd: i.cwd.to_string_lossy().into_owned() })
+        .map(|i| PausedSession {
+            session_id: i.session_id.clone(),
+            cwd: i.cwd.to_string_lossy().into_owned(),
+            sub: i.subchat_of.is_some(),
+        })
         .collect()
 }
 
