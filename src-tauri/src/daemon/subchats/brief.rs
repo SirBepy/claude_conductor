@@ -35,6 +35,10 @@ pub struct SubchatArgs {
     /// A push gate: runs as a sub that needs no brief fields and may push.
     #[serde(default)]
     pub gate: Option<bool>,
+    /// An ordinary visible chat instead of a sub, from a chat with the mode on.
+    /// Every other spawn already makes one, so this changes nothing there.
+    #[serde(default)]
+    pub plain: Option<bool>,
 }
 
 fn default_review() -> bool {

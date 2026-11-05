@@ -8,8 +8,9 @@
 //! model/effort and the character are inherited on the `respawn` path only (a
 //! plain sibling opens on the project's default model/effort). Auto-accept is
 //! inherited per `session_registration::spawned_auto_accept`. A caller with Use
-//! subchats on gets a hidden sub instead, planned by `daemon::subchats::spawn`;
-//! a sub itself may neither spawn nor respawn.
+//! subchats on gets a hidden sub instead, planned by `daemon::subchats::spawn`
+//! (in its own project or any known one; `plain: true` opts out to an ordinary
+//! chat); a sub itself may neither spawn nor respawn.
 //!
 //! Cross-machine spawn forwarding (`resolve_machine`, `spawn_chat_for_peer`,
 //! `spawn_chat_or_forward`) lives in this module's own `forward` submodule
@@ -39,6 +40,19 @@ pub(crate) const FALLBACK_EFFORT: &str = "medium";
 
 /// The name a gate sub gets when the caller names none.
 const GATE_DEFAULT_NAME: &str = "Gate";
+
+/// A gate with no name: plain `Gate` in the caller's own project, `Gate: <folder>`
+/// for another one, so a hub chat running a gate per repo can tell them apart
+/// when it addresses one by name (`subchat send`, `after`).
+fn default_gate_name(caller_cwd: &std::path::Path, target: &std::path::Path) -> String {
+    if project_key(caller_cwd) == project_key(target) {
+        return GATE_DEFAULT_NAME.to_string();
+    }
+    match target.file_name() {
+        Some(folder) => format!("{GATE_DEFAULT_NAME}: {}", folder.to_string_lossy()),
+        None => GATE_DEFAULT_NAME.to_string(),
+    }
+}
 
 /// `caller_session_id` -> the `turn_gen` it last spawned in. A static rather
 /// than a `DaemonState` field: one guard does not earn a field threaded
@@ -145,7 +159,8 @@ pub(crate) async fn spawn_chat(
     let account_id = Some(inherited.account_id.clone()).filter(|a| !a.is_empty());
     // A gate is spawned with a name and a prompt only; a name is what its card,
     // its list row and `after` find it by.
-    let name = name.or_else(|| sub.as_ref().filter(|p| p.brief.gate).map(|_| GATE_DEFAULT_NAME));
+    let gate_name = sub.as_ref().filter(|p| p.brief.gate).map(|_| default_gate_name(&caller.cwd, &target_cwd));
+    let name = name.or(gate_name.as_deref());
 
     // A writing sub that gets its own worktree (`subchats::worktree`) runs there,
     // not in the main chat's folder. The tree is added now, so a failure reaches
