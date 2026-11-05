@@ -486,6 +486,29 @@ fn set_base(sub_id: &str, base: Option<String>) {
     crate::sessions::chat_config::set_subchat(sub_id, Some(brief));
 }
 
+/// Clears tracked files that differ from the index in stat data or line endings
+/// only. Such a file is listed by `git status` and stops `git rebase` with "You
+/// have unstaged changes" although its diff is empty (a tool that rewrote it with
+/// other line endings, e.g. `cargo tauri android init`). `update-index --refresh`
+/// leaves it, because git decides on the file size before it looks at the bytes;
+/// re-hashing the same bytes updates only the entry's stat data. Only paths
+/// `git diff` reports nothing for are touched, so a real edit is never hidden.
+fn settle_index(dir: &Path) {
+    let _ = run(dir, &["update-index", "-q", "--refresh"]);
+    let listed = run(dir, &["-c", "core.quotepath=false", "ls-files", "-m"]).lines();
+    if listed.is_empty() {
+        return;
+    }
+    let differing: std::collections::HashSet<String> =
+        run(dir, &["-c", "core.quotepath=false", "diff", "--name-only"]).lines().into_iter().collect();
+    let same: Vec<&str> = listed.iter().map(String::as_str).filter(|p| !differing.contains(*p)).collect();
+    for chunk in same.chunks(40) {
+        let mut args = vec!["update-index", "-q", "--"];
+        args.extend(chunk);
+        let _ = run(dir, &args);
+    }
+}
+
 /// Rebases the sub's branch on the target inside its worktree. A conflict is
 /// aborted, so the branch and every commit on it stay as they were. Records the
 /// commit the sub's facts count from: the target's tip once the sub has no
@@ -503,6 +526,7 @@ fn update_branch(sub_id: &str, info: &WorktreeInfo) -> Update {
         return Update::Failed(format!("the target branch {} no longer exists", info.target));
     }
     if !is_ancestor(wt, &target, "HEAD") {
+        settle_index(wt);
         let r = run(wt, &["rebase", &target]);
         if !r.ok {
             let files = run(wt, &["diff", "--name-only", "--diff-filter=U"]).lines();
@@ -611,9 +635,23 @@ fn land_with(sub_id: &str, info: &WorktreeInfo, between: &mut dyn FnMut(usize)) 
                 overlap,
             );
         }
-        let merged = run(repo, &["merge", "--ff-only", "-q", &branch_ref(&info.branch)]);
+        // `--no-overwrite-ignore`: the dirty check above cannot see a file git ignores
+        // (a `.env`), and without the flag a sub that committed one with `add -f`
+        // would have it written over the local copy.
+        let merged = run(repo, &["merge", "--ff-only", "--no-overwrite-ignore", "-q", &branch_ref(&info.branch)]);
         if merged.ok {
             return Landing::Merged;
+        }
+        let kept = overwritten_files(&merged.err);
+        if !kept.is_empty() {
+            return blocked(
+                "Not merged",
+                format!(
+                    "The main checkout has files git ignores (a .env file, local settings) where this sub committed files of the same name, so the merge was refused and nothing there was touched. Move or delete those files, then tell the sub to finish again: it merges when it finishes. Its commits are safe on branch {}.",
+                    info.branch
+                ),
+                kept,
+            );
         }
         // The target moved under the rebase: it no longer sits below the branch.
         // One more round re-bases on its new tip.
@@ -627,6 +665,23 @@ fn land_with(sub_id: &str, info: &WorktreeInfo, between: &mut dyn FnMut(usize)) 
         );
     }
     blocked("Not merged", format!("{} kept moving while the merge ran. Tell the sub to finish again.", info.target), Vec::new())
+}
+
+/// The paths git names when a merge would overwrite local files: the tab-indented
+/// lines under "untracked working tree files would be overwritten by merge".
+fn overwritten_files(err: &str) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut listing = false;
+    for line in err.lines() {
+        if line.contains("would be overwritten by merge") {
+            listing = true;
+        } else if listing && line.starts_with(['\t', ' ']) && !line.trim().is_empty() {
+            files.push(line.trim().to_string());
+        } else {
+            listing = false;
+        }
+    }
+    files
 }
 
 pub fn land(sub_id: &str, info: &WorktreeInfo) -> Landing {
@@ -795,6 +850,7 @@ fn is_link(meta: &std::fs::Metadata) -> bool {
 /// Whether `wt` holds uncommitted work. A link into the main checkout (the
 /// `node_modules` junction) is not work, so it is not counted.
 fn uncommitted_in(wt: &Path) -> Vec<String> {
+    settle_index(wt);
     run(wt, &["status", "--porcelain=v1", "--untracked-files=normal"])
         .out
         .lines()
@@ -802,6 +858,43 @@ fn uncommitted_in(wt: &Path) -> Vec<String> {
         .map(|l| l[3..].trim().trim_matches('"').to_string())
         .filter(|p| !std::fs::symlink_metadata(wt.join(p.trim_end_matches('/'))).is_ok_and(|m| is_link(&m)))
         .collect()
+}
+
+/// Why the tree cannot be deleted because of a submodule in it, or `None`. A
+/// worktree's submodules keep their git dirs inside the worktree's own, and
+/// `git worktree remove` refuses any tree with an initialised one, so removal
+/// always ends in `--force`, which deletes them: a commit made only there would be
+/// gone while the superproject points at it. A module is safe to delete only when
+/// it has no uncommitted work and every commit on it is reachable from one of its
+/// remote-tracking refs. A module that cannot be checked counts as at risk.
+fn module_risk(wt: &Path) -> Option<String> {
+    let status = run(wt, &["submodule", "status", "--recursive"]);
+    for line in status.out.lines() {
+        // `<flag><sha> <path> (<describe>)`; the flag `-` is a module never cloned here.
+        let Some(flag) = line.chars().next() else { continue };
+        if flag == '-' {
+            continue;
+        }
+        let rest = line[flag.len_utf8()..].trim_start();
+        let path = rest.split_once(' ').map(|(_, p)| p).unwrap_or("");
+        let path = path.rsplit_once(" (").map_or(path, |(p, _)| p).trim();
+        if path.is_empty() {
+            continue;
+        }
+        let dir = wt.join(path);
+        let unpublished = run(&dir, &["rev-list", "-n", "1", "--branches", "HEAD", "--not", "--remotes"]);
+        if !unpublished.ok {
+            return Some(format!("its submodule {path} could not be checked for commits only this tree has: {}", short(&unpublished.err, 200)));
+        }
+        if !unpublished.out.trim().is_empty() {
+            return Some(format!("its submodule {path} holds commits no remote has, and removing the tree would delete them"));
+        }
+        let dirty = uncommitted_in(&dir);
+        if !dirty.is_empty() {
+            return Some(format!("its submodule {path} has uncommitted work: {}", dirty.iter().take(6).cloned().collect::<Vec<_>>().join(", ")));
+        }
+    }
+    None
 }
 
 /// Removes the sub's worktree and branch when its commits are merged and nothing
@@ -838,6 +931,10 @@ pub fn remove_if_safe(info: &WorktreeInfo) -> Removal {
     if !dirty.is_empty() {
         let shown: Vec<String> = dirty.iter().take(6).cloned().collect();
         return Removal::Kept(format!("it has uncommitted work: {}{}", shown.join(", "), if dirty.len() > shown.len() { " and more" } else { "" }));
+    }
+    // Checked before anything is unlinked or deleted: a kept tree stays whole.
+    if let Some(why) = module_risk(wt) {
+        return Removal::Kept(why);
     }
     if let Err(why) = unlink_reparse_points(wt) {
         return Removal::Kept(format!("{why}, so the folder was not removed"));
@@ -880,6 +977,10 @@ pub(super) fn on_ended(state: &Arc<DaemonState>, sub_id: &str) {
                 points: Vec::new(),
             };
             report(&state, &id, None, &b);
+            // The card goes to the main chat's window, which is often the thing
+            // closing (Close them too, or a closed chat's finished subs): nobody
+            // may be there to read it. The app log is the place that always is.
+            log::warn!("subchats: worktree kept for {id} at {} on branch {}: {why}", info.path, info.branch);
         }
     };
     #[cfg(test)]
@@ -890,6 +991,75 @@ pub(super) fn on_ended(state: &Arc<DaemonState>, sub_id: &str) {
             log::warn!("subchats: could not start the worktree removal thread for {sub_id}: {e}");
         }
     }
+}
+
+// ---- leaving the sub role --------------------------------------------------------------------------
+
+/// Commits on the sub's branch that the target lacks, `None` when it has no tree
+/// or the branch is gone.
+fn unmerged_count(info: &WorktreeInfo) -> Option<u32> {
+    let repo = Path::new(&info.repo);
+    branch_exists(repo, &info.branch).then(|| count(repo, &format!("{}..{}", branch_ref(&info.target), branch_ref(&info.branch))))?
+}
+
+/// The subs of `parent` (running or finished, not ended) whose worktree branch
+/// holds commits the target lacks, with how many. Closing the main chat would end
+/// them and leave those commits on a branch nobody is looking at, so the close
+/// approval names them.
+pub fn unmerged_subs(state: &DaemonState, parent: &str) -> Vec<(String, u32)> {
+    state
+        .registry
+        .list()
+        .into_iter()
+        .filter(|i| i.subchat_of.as_deref() == Some(parent) && i.ended_at.is_none())
+        .filter_map(|i| {
+            let n = unmerged_count(&info_of(&i.session_id)?).filter(|n| *n > 0)?;
+            Some((super::spawn::label(&i), n))
+        })
+        .collect()
+}
+
+/// A worktree sub just left the sub role (Joe's "Move to sidebar", or the main
+/// chat is gone and the sub was promoted): clearing its brief took the tree with
+/// it, so nothing would merge it or remove it any more. This lands its commits at
+/// once, the same merge a finish does, and always says in the main chat's window
+/// where the branch is: the chat keeps the worktree as its folder, so it cannot be
+/// removed under it. A refused merge is a `blocker` card naming the branch and
+/// path. `parent` is the chat the sub had; with no window left to show it, the
+/// app log carries the same words.
+pub async fn on_moved(state: &Arc<DaemonState>, sub_id: &str, info: WorktreeInfo, parent: Option<String>) {
+    let (id, tree) = (sub_id.to_string(), info.clone());
+    let outcome = tokio::task::spawn_blocking(move || {
+        let ahead = unmerged_count(&tree).unwrap_or(0);
+        (ahead, land(&id, &tree))
+    })
+    .await;
+    let Ok((ahead, landing)) = outcome else { return };
+    let where_it_is = format!("It keeps its worktree at {} as its folder, on branch {}.", info.path, info.branch);
+    let blocker = match landing {
+        Landing::Blocked(b) => {
+            log::warn!("subchats: {sub_id} left the sub role with its branch {} not merged: {}", info.branch, b.text);
+            Blocked { text: format!("{} {where_it_is}", b.text), ..b }
+        }
+        Landing::Merged => Blocked {
+            verdict: "Moved with its worktree",
+            text: format!(
+                "It is a normal chat now. {ahead} commit{} merged into {}. {where_it_is}",
+                if ahead == 1 { " was" } else { "s were" },
+                info.target
+            ),
+            points: Vec::new(),
+        },
+        Landing::Nothing => Blocked {
+            verdict: "Moved with its worktree",
+            text: format!("It is a normal chat now. Its branch has nothing {} lacks. {where_it_is}", info.target),
+            points: Vec::new(),
+        },
+    };
+    let tone = if blocker.verdict == "Moved with its worktree" { "neutral" } else { "bad" };
+    let Some(parent) = parent else { return };
+    let card = BlockerCard { text: blocker.text, verdict: blocker.verdict.to_string(), tone: Some(tone.into()), points: blocker.points };
+    card_log::on_blocker_for(state, &parent, sub_id, card);
 }
 
 // ---- facts and restart ---------------------------------------------------------------------------
@@ -1173,6 +1343,33 @@ mod tests {
         let cards = blockers("overlap-main");
         assert_eq!(cards.len(), 1, "{cards:?}");
         assert!(cards[0].points.contains(&"base.txt".to_string()) && cards[0].text.contains("uncommitted"), "{:?}", cards[0]);
+    }
+
+    /// A file git ignores is invisible to the dirty check, so a sub that commits
+    /// one at the same path (`git add -f`) used to have its merge overwrite the
+    /// local copy silently.
+    #[test]
+    fn an_ignored_local_file_the_merge_would_overwrite_is_refused_and_keeps_its_bytes() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        commit_file(&root, ".gitignore", "secret.env\n");
+        std::fs::write(root.join("secret.env"), "API_KEY=mine\n").unwrap();
+        let (id, info) = new_sub(&st, "ignored", &root);
+        let wt = PathBuf::from(&info.path);
+        std::fs::write(wt.join("secret.env"), "API_KEY=the sub's\n").unwrap();
+        g(&wt, &["add", "-f", "secret.env"]);
+        g(&wt, &["commit", "-q", "-m", "add the env file"]);
+        let head_before = git::head(&root).unwrap();
+        let landing = land_and_report(&st, &id, &info);
+        let Landing::Blocked(b) = landing else { panic!("must refuse: {landing:?}") };
+        assert!(b.points.iter().any(|p| p == "secret.env"), "the card names the file: {b:?}");
+        assert_eq!(raw(&root.join("secret.env")), b"API_KEY=mine\n", "not a byte of the ignored file was touched");
+        assert_eq!(git::head(&root).unwrap(), head_before, "the target did not move");
+        assert_eq!(count(&wt, &format!("{}..HEAD", branch_ref(&info.target))), Some(1), "the commit is safe");
+        let cards = blockers("ignored-main");
+        assert_eq!(cards.len(), 1, "{cards:?}");
+        assert!(cards[0].points.contains(&"secret.env".to_string()), "{:?}", cards[0]);
     }
 
     #[test]
@@ -1503,6 +1700,127 @@ mod tests {
         assert_eq!(remove_if_safe(&info), Removal::Removed, "removing twice is harmless");
     }
 
+    /// A scratch repo with an initialised submodule `mod`. The inner repo's temp
+    /// dir is returned so the caller's binding keeps it alive.
+    fn repo_with_module() -> (tempfile::TempDir, PathBuf, tempfile::TempDir, PathBuf) {
+        let (inner_dir, inner) = test_repo::init();
+        let (dir, root) = test_repo::init();
+        // Git takes a plain path as the module's URL, not the `\\?\` form canonicalize gives.
+        let url = inner.to_string_lossy().trim_start_matches(r"\\?\").replace('\\', "/");
+        g(&root, &["-c", "protocol.file.allow=always", "submodule", "add", "-q", &url, "mod"]);
+        g(&root, &["commit", "-q", "-m", "add the module"]);
+        (inner_dir, inner, dir, root)
+    }
+
+    /// Initialises the module inside a sub's tree, the way a bootstrap script does.
+    fn init_module(wt: &Path) -> PathBuf {
+        g(wt, &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q"]);
+        let module = wt.join("mod");
+        g(&module, &["config", "user.email", "t@example.com"]);
+        g(&module, &["config", "user.name", "t"]);
+        g(&module, &["config", "commit.gpgsign", "false"]);
+        module
+    }
+
+    /// `git worktree remove` refuses any tree with an initialised submodule, so the
+    /// removal always fell through to `--force`, which deletes the module's git dir
+    /// with the tree: a commit made only there was lost while main pointed at it.
+    #[test]
+    fn a_submodule_commit_no_remote_has_keeps_the_tree_instead_of_force_removing_it() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (id, info) = new_sub(&st, "module", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        commit_file(&module, "m.txt", "only in this tree\n");
+        let tip = git::head(&module).unwrap();
+        g(&wt, &["add", "mod"]);
+        g(&wt, &["commit", "-q", "-m", "point at the module commit"]);
+        assert_eq!(land(&id, &info), Landing::Merged);
+        assert!(uncommitted_in(&wt).is_empty(), "the superproject sees a clean tree, which is the trap");
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("must keep the tree") };
+        assert!(why.contains("mod"), "it names the module: {why}");
+        assert!(wt.is_dir(), "nothing was deleted");
+        assert_eq!(git::head(&module).as_deref(), Some(tip.as_str()), "the only copy of the commit is still there");
+    }
+
+    #[test]
+    fn a_submodule_at_a_pushed_commit_does_not_stop_the_removal() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (id, info) = new_sub(&st, "module-clean", &root);
+        let wt = PathBuf::from(&info.path);
+        init_module(&wt);
+        assert_eq!(land(&id, &info), Landing::Nothing);
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+        assert!(!wt.exists());
+    }
+
+    #[test]
+    fn a_submodule_with_uncommitted_work_keeps_the_tree() {
+        let _data = TempDataDir::new();
+        let (_i, _inner, _d, root) = repo_with_module();
+        let st = state();
+        let (id, info) = new_sub(&st, "module-dirty", &root);
+        let wt = PathBuf::from(&info.path);
+        let module = init_module(&wt);
+        assert_eq!(land(&id, &info), Landing::Nothing);
+        std::fs::write(module.join("base.txt"), "half done\n").unwrap();
+        let Removal::Kept(_) = remove_if_safe(&info) else { panic!("must keep the tree") };
+        assert_eq!(read(&module.join("base.txt")), "half done\n");
+    }
+
+    /// A difference with an empty diff (a file rewritten with other line endings,
+    /// which is what `cargo tauri android init` does to two tracked files) still
+    /// shows as modified in `git status`, makes `git rebase` refuse with "You have
+    /// unstaged changes", and counted as uncommitted work forever.
+    fn eol_only_dirty_tree() -> (tempfile::TempDir, PathBuf, Arc<DaemonState>, String, WorktreeInfo) {
+        let (d, root) = test_repo::init();
+        g(&root, &["config", "core.autocrlf", "true"]);
+        std::fs::write(root.join("eol.txt"), "one\r\ntwo\r\n").unwrap();
+        g(&root, &["add", "eol.txt"]);
+        g(&root, &["commit", "-q", "-m", "a file with CRLF in the work tree"]);
+        let st = state();
+        let (id, info) = new_sub(&st, "eol", &root);
+        std::fs::write(Path::new(&info.path).join("eol.txt"), "one\ntwo\n").unwrap();
+        (d, root, st, id, info)
+    }
+
+    #[test]
+    fn a_line_ending_only_difference_is_not_uncommitted_work() {
+        let _data = TempDataDir::new();
+        let (_d, _root, _st, _id, info) = eol_only_dirty_tree();
+        let wt = PathBuf::from(&info.path);
+        assert!(!run(&wt, &["status", "--porcelain"]).out.is_empty(), "precondition: git status lists the file");
+        assert!(run(&wt, &["diff", "--name-only"]).out.is_empty(), "precondition: and its diff is empty");
+        assert!(uncommitted_in(&wt).is_empty(), "no real change, so no uncommitted work");
+        assert_eq!(remove_if_safe(&info), Removal::Removed);
+    }
+
+    #[test]
+    fn a_line_ending_only_difference_does_not_block_the_rebase_onto_a_moved_target() {
+        let _data = TempDataDir::new();
+        let (_d, root, _st, id, info) = eol_only_dirty_tree();
+        let wt = PathBuf::from(&info.path);
+        commit_file(&wt, "a.txt", "the sub's work\n");
+        commit_file(&root, "peer.txt", "the target moved\n");
+        assert_eq!(land(&id, &info), Landing::Merged, "the rebase must not stop at 'You have unstaged changes'");
+        assert_eq!(read(&root.join("a.txt")), "the sub's work\n");
+        assert_eq!(read(&root.join("peer.txt")), "the target moved\n");
+    }
+
+    /// Real edits stay real: settling the index must never hide work.
+    #[test]
+    fn a_real_edit_next_to_a_line_ending_only_difference_still_counts() {
+        let _data = TempDataDir::new();
+        let (_d, _root, _st, _id, info) = eol_only_dirty_tree();
+        let wt = PathBuf::from(&info.path);
+        std::fs::write(wt.join("base.txt"), "really changed\n").unwrap();
+        assert_eq!(uncommitted_in(&wt), vec!["base.txt".to_string()]);
+    }
+
     #[test]
     fn it_never_removes_a_folder_it_did_not_make() {
         let (_d, root) = test_repo::init();
@@ -1536,6 +1854,98 @@ mod tests {
         assert_eq!(cards.len(), 1, "the close says so in a card");
         assert_eq!(cards[0].verdict, "Worktree kept");
         assert!(cards[0].text.contains("not merged"), "{}", cards[0].text);
+    }
+
+    // ---- leaving the sub role ----------------------------------------------------------------------
+
+    /// Clearing the brief on "Move to sidebar" used to take the tree with it: nothing
+    /// merged the branch, nothing removed the folder, and no card said so.
+    #[tokio::test]
+    async fn moving_a_worktree_sub_to_the_sidebar_merges_its_commits_and_says_where_its_branch_is() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "mv", &root);
+        commit_file(Path::new(&info.path), "a.txt", "from the sub\n");
+
+        crate::daemon::subchats::move_to_sidebar(&st, &id).await.unwrap();
+
+        assert_eq!(read(&root.join("a.txt")), "from the sub\n", "its commits landed at once");
+        assert!(st.registry.get(&id).unwrap().subchat_of.is_none());
+        assert!(Path::new(&info.path).is_dir(), "the chat keeps its worktree as its folder");
+        let cards = blockers("mv-main");
+        assert_eq!(cards.len(), 1, "{cards:?}");
+        assert_eq!(cards[0].verdict, "Moved with its worktree");
+        assert!(cards[0].text.contains(&info.path) && cards[0].text.contains(&info.branch), "it says where the branch is: {}", cards[0].text);
+        assert!(cards[0].text.contains("1 commit was merged"), "{}", cards[0].text);
+    }
+
+    #[tokio::test]
+    async fn a_conflict_on_move_is_a_blocker_card_naming_the_branch_and_path_and_loses_nothing() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "mvc", &root);
+        commit_file(Path::new(&info.path), "base.txt", "the sub's line\n");
+        commit_file(&root, "base.txt", "the main checkout's line\n");
+
+        crate::daemon::subchats::move_to_sidebar(&st, &id).await.unwrap();
+
+        let cards = blockers("mvc-main");
+        assert_eq!(cards.len(), 1, "{cards:?}");
+        assert_eq!(cards[0].verdict, "Merge conflict");
+        assert!(cards[0].text.contains(&info.path) && cards[0].text.contains(&info.branch), "{}", cards[0].text);
+        assert_eq!(cards[0].points, vec!["base.txt".to_string()]);
+        assert_eq!(count(Path::new(&info.path), &format!("{}..HEAD", branch_ref(&info.target))), Some(1), "the commit is safe");
+        assert_eq!(read(&root.join("base.txt")), "the main checkout's line\n");
+    }
+
+    #[tokio::test]
+    async fn a_sub_without_a_tree_moves_with_no_card() {
+        let _data = TempDataDir::new();
+        let st = state();
+        st.registry.upsert_interactive("plain-main", Path::new("."), "proj", TS);
+        st.registry.upsert_interactive("plain-sub", Path::new("."), "proj", TS);
+        st.registry.set_subchat_of("plain-sub", Some("plain-main".into()));
+        let mut brief = brief_json(false, "");
+        brief.parent = "plain-main".into();
+        chat_config::set_subchat("plain-sub", Some(brief));
+        crate::daemon::subchats::move_to_sidebar(&st, "plain-sub").await.unwrap();
+        assert!(card_log::read("plain-main").is_empty());
+    }
+
+    /// Closing the main chat ends its finished subs, and a tree with unmerged
+    /// commits is kept with a card in a window that is closing.
+    #[tokio::test]
+    async fn closing_a_chat_whose_finished_sub_has_unmerged_commits_asks_and_names_them() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "cu", &root);
+        st.registry.set_subchat_finished(&id, true);
+        assert!(!crate::daemon::subchats::closing::needs_approval(&st, "cu-main"), "nothing unmerged yet");
+        commit_file(Path::new(&info.path), "a.txt", "unmerged\n");
+        assert_eq!(unmerged_subs(&st, "cu-main"), vec![("cu".to_string(), 1)]);
+        assert!(crate::daemon::subchats::closing::needs_approval(&st, "cu-main"));
+
+        assert!(crate::daemon::subchats::closing::request_close(&st, "cu-main"), "the close is held");
+        let mut card = None;
+        for _ in 0..200 {
+            card = st.list_prompts().await.into_iter().find(|p| p["payload"]["card_kind"] == crate::daemon::subchats::closing::KIND);
+            if card.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let card = card.expect("the approval card is raised");
+        let question = card["payload"]["questions"][0]["question"].as_str().unwrap();
+        assert!(question.contains("unmerged commits") && question.contains("**cu** (1)"), "{question}");
+        let labels: Vec<&str> =
+            card["payload"]["questions"][0]["options"].as_array().unwrap().iter().map(|o| o["label"].as_str().unwrap()).collect();
+        assert_eq!(labels, ["Close anyway", "Keep it open"], "nothing is running, so there is nothing to wait for");
+
+        assert_eq!(land(&id, &info), Landing::Merged);
+        assert!(!crate::daemon::subchats::closing::needs_approval(&st, "cu-main"), "merged work holds nothing");
     }
 
     // ---- facts ----------------------------------------------------------------------------------

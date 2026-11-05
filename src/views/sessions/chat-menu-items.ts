@@ -50,6 +50,9 @@ export interface ChatMenuCtx {
   /** Why the mode cannot be turned ON for this chat (an API-credit account).
    *  Set means the item is disabled while off; turning it off always works. */
   subchatsBlockedReason?: string;
+  /** This chat is itself a sub. A sub cannot have subs (depth 1), so "Use subchats"
+   *  is not offered: an item that only ever ends in an error alert is not an item. */
+  isSub?: boolean;
   isHidden: boolean;
   /** Jarvis-flagged sessions always auto-accept (Part A) - the toggle is
    *  disabled for them so flipping it off can't silently stall the fleet. */
@@ -250,7 +253,7 @@ export function buildConfigureItems(ctx: ChatMenuCtx): ItemDesc[] {
         ? "Available once the chat starts"
         : (!sessionId ? "No session" : undefined),
     },
-    {
+    ...(ctx.isSub ? [] : [{
       icon: "tree-structure",
       label: "Use subchats",
       isOn: ctx.subchatsOn,
@@ -271,7 +274,7 @@ export function buildConfigureItems(ctx: ChatMenuCtx): ItemDesc[] {
       disabledReason: isDraft
         ? "Available once the chat starts"
         : (!sessionId ? "No session" : (ctx.subchatsOn ? undefined : ctx.subchatsBlockedReason)),
-    },
+    }]),
     {
       icon: "eye",
       label: "Show raw activity",

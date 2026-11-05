@@ -8,6 +8,7 @@ import "./sub-list.css";
 import { escapeHtml } from "../../shared/escape-html";
 import type { Instance } from "../../types/ipc.generated";
 import { mainChatInfo, type SubStatus } from "./main-chat";
+import { isMirrored } from "./sessions-helpers";
 import { planProgress, ringHtml, type RingSpec } from "./sidebar-ring";
 import { PopoverShell } from "./statusbar-popover-shell";
 
@@ -37,22 +38,25 @@ export function subRingSpec(sub: SubStatus, inst: Instance | undefined): RingSpe
   return plan ? { kind: "plan", done: plan.done, total: plan.total } : { kind: "solid", tone: "working", glow: true };
 }
 
-function rowHtml(sub: SubStatus, inst: Instance | undefined): string {
+/** `canMove` is false for a chat mirrored in from a paired machine: turning a sub
+ *  into a chat is its host's decision and the host refuses it from a peer, so the
+ *  button is not offered. */
+function rowHtml(sub: SubStatus, inst: Instance | undefined, canMove: boolean): string {
   const name = escapeHtml(sub.name);
   return `<div class="sub-row" role="button" tabindex="0" data-sub-id="${escapeHtml(sub.id)}" data-kind="${sub.kind}" title="Read ${name}">
     <span class="sub-dot">${escapeHtml(subInitials(sub.name))}${ringHtml(subRingSpec(sub, inst))}</span>
-    <span class="sub-text"><span class="sub-name">${name}</span><span class="sub-status">${escapeHtml(sub.progress)}</span></span>
-    ${sub.kind === "queued" ? "" : `<button type="button" class="sub-move" data-move title="Move to sidebar" aria-label="Move ${name} to the sidebar"><i class="ph ph-arrow-square-out"></i></button>`}
+    <span class="sub-text"><span class="sub-name">${name}</span><span class="sub-meta"><span class="sub-status">${escapeHtml(sub.progress)}</span>${sub.tier ? `<span class="sub-tier">${escapeHtml(sub.tier)}</span>` : ""}</span></span>
+    ${sub.kind === "queued" || !canMove ? "" : `<button type="button" class="sub-move" data-move title="Move to sidebar" aria-label="Move ${name} to the sidebar"><i class="ph ph-arrow-square-out"></i></button>`}
   </div>`;
 }
 
 /** The popover body. Asking subs sit with the running ones: they are not done. */
-export function subListHtml(subs: readonly SubStatus[], sessions: readonly Instance[]): string {
+export function subListHtml(subs: readonly SubStatus[], sessions: readonly Instance[], canMove = true): string {
   const byId = new Map(sessions.map((s) => [s.session_id, s]));
   const running = subs.filter((s) => s.kind !== "finished");
   const finished = subs.filter((s) => s.kind === "finished");
   const section = (label: string, rows: readonly SubStatus[]): string =>
-    rows.length ? `<h5 class="sub-list-head">${label}</h5>${rows.map((s) => rowHtml(s, byId.get(s.id))).join("")}` : "";
+    rows.length ? `<h5 class="sub-list-head">${label}</h5>${rows.map((s) => rowHtml(s, byId.get(s.id), canMove)).join("")}` : "";
   return section("Running", running) + section("Finished", finished);
 }
 
@@ -133,7 +137,8 @@ export class SubListButton {
 
   private openList(subs: readonly SubStatus[], sessions: readonly Instance[]): void {
     if (!this.btn) return;
-    this.shell.open(this.btn, subListHtml(subs, sessions), {
+    const main = sessions.find((s) => s.session_id === this.mainId);
+    this.shell.open(this.btn, subListHtml(subs, sessions, !isMirrored(main)), {
       className: "sub-list-popover",
       onClose: () => this.btn?.classList.remove("on"),
       wire: (el) => {

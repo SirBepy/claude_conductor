@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: sidebar-ctx-menu.ts passes `isSub` to the chat menu; the close approval card is unchanged and this spec passes.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/close-chat.ts, src/views/sessions/sidebar-ctx-menu.ts, src/views/sessions/permission-modal/index.ts
 import { test, expect, type Page } from "@playwright/test";

@@ -20,6 +20,8 @@ type Tone = "good" | "bad" | "warn" | "neutral";
  *  whose verdict code, not a model, wrote. */
 export interface CardExtras {
   tag?: string;
+  /** A quiet word after the tag (a sub's "Sonnet high"). */
+  tagNote?: string;
   extraHtml?: string;
   tone?: Tone;
 }
@@ -135,8 +137,9 @@ function copyBlockHtml(copy: string): string {
 }
 
 /** The sub's name above its card: a quiet line with the subchat icon. */
-function subTagHtml(tag: string): string {
-  return `<div class="mc-sub"><i class="ph ph-tree-structure" aria-hidden="true"></i><span class="mc-sub-name">${escapeHtml(tag)}</span></div>`;
+function subTagHtml(tag: string, note?: string): string {
+  const quiet = note ? `<span class="mc-sub-tier">${escapeHtml(note)}</span>` : "";
+  return `<div class="mc-sub"><i class="ph ph-tree-structure" aria-hidden="true"></i><span class="mc-sub-name">${escapeHtml(tag)}</span>${quiet}</div>`;
 }
 
 function fullHtml(m: RenderedMessage, card: MessageCard, text: RenderText, extras?: CardExtras): string {
@@ -144,7 +147,7 @@ function fullHtml(m: RenderedMessage, card: MessageCard, text: RenderText, extra
   const head = headlineOf(m.text ?? "");
   const body = bodyOf(m.text ?? "");
   const parts: string[] = [];
-  if (extras?.tag) parts.push(subTagHtml(extras.tag));
+  if (extras?.tag) parts.push(subTagHtml(extras.tag, extras.tagNote));
   if (style) parts.push(`<div class="mc-label"><i class="ph ${style.icon}" aria-hidden="true"></i>${style.label}</div>`);
   if (card.verdict) parts.push(`<p class="mc-verdict">${verdictHtml(card, card.verdict, extras)}</p>`);
   if (head) parts.push(`<div class="mc-head${card.verdict ? "" : " mc-head--main"}">${text(head)}</div>`);

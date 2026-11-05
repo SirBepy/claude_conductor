@@ -210,8 +210,15 @@ fn record_path(root: &Path, sub_id: &str) -> Option<PathBuf> {
 
 /// Reads a sub's finish record from `root` (the data dir, or a tempdir in tests).
 pub fn read_record_in(root: &Path, sub_id: &str) -> Option<FinishRecord> {
-    let raw = std::fs::read_to_string(record_path(root, sub_id)?).ok()?;
-    serde_json::from_str(&raw).ok()
+    let path = record_path(root, sub_id)?;
+    let raw = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str(&raw) {
+        Ok(record) => Some(record),
+        Err(e) => {
+            super::jsonfile::keep_bad_copy(&path, &raw, &e.to_string());
+            None
+        }
+    }
 }
 
 /// A sub's latest finish record from the real data dir.
@@ -853,6 +860,18 @@ mod tests {
         assert!(!commit_finish_at(Some(data.path()), &st, &sub, None, None));
         assert!(!st.registry.get(&sub).unwrap().subchat_finished);
         assert!(read_record_in(data.path(), &sub).is_none());
+    }
+
+    /// A record that will not decode reads as "no record" (unknown never blocks),
+    /// but the bytes stay on disk as `.bad` for whoever has to find out why.
+    #[test]
+    fn a_damaged_finish_record_reads_as_none_and_is_kept_aside() {
+        let data = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(data.path().join("subchats")).unwrap();
+        let path = data.path().join("subchats").join("dmg-sub.finish.json");
+        std::fs::write(&path, r#"{"round": "one"}"#).unwrap();
+        assert!(read_record_in(data.path(), "dmg-sub").is_none());
+        assert_eq!(std::fs::read_to_string(path.with_file_name("dmg-sub.finish.json.bad")).unwrap(), r#"{"round": "one"}"#);
     }
 
     #[test]

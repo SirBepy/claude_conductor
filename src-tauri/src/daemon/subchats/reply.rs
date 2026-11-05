@@ -72,6 +72,8 @@ pub async fn move_to_sidebar(state: &Arc<DaemonState>, sub_id: &str) -> Result<(
         return Err(MoveError::Held(sub_id.to_string()));
     }
     let parent = inst.subchat_of.clone();
+    // Read before the brief goes: the tree is recorded in it.
+    let tree = super::worktree::info_of(sub_id);
     state.registry.set_subchat_of(sub_id, None);
     state.registry.set_subchat_finished(sub_id, false);
     crate::sessions::chat_config::set_subchat(sub_id, None);
@@ -81,6 +83,10 @@ pub async fn move_to_sidebar(state: &Arc<DaemonState>, sub_id: &str) -> Result<(
     withdraw_cards_about(state, sub_id).await;
     crate::sessions::persistence::save_snapshot_default(&state.registry);
     crate::daemon::machines::publish_instances_changed(state);
+    // Without its brief nothing would merge this sub's branch or remove its tree.
+    if let Some(info) = tree {
+        super::worktree::on_moved(state, sub_id, info, parent.clone()).await;
+    }
     // A main chat waiting on "Wait for them" may have just lost its last running sub.
     if let Some(parent) = parent {
         super::closing::after_leaving(state, &parent);

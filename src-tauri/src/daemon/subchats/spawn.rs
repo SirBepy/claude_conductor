@@ -248,7 +248,9 @@ pub fn plan(
         refuse_second_gate(state, caller_id)?;
         brief
     } else {
-        validate(name, args, caller_id)?
+        let brief = validate(name, args, caller_id)?;
+        refuse_duplicate_name(state, caller_id, name)?;
+        brief
     };
     let (model, effort) = resolve_tier(model, effort)?;
     let hold = match args.after.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
@@ -279,6 +281,31 @@ pub fn plan(
 
 /// Said when `gate: true` comes from a chat whose mode is off.
 pub const GATE_MODE_OFF: &str = "gate: true starts a hidden gate sub, which only a chat with Use subchats on can do. Run the push gate in this chat, or spawn the gate chat without gate.";
+
+/// A name is how the main chat addresses a sub (`subchat send`, `after`), so one
+/// parent never has two live subs answering to it. Running, queued and finished
+/// subs all count (a finished one wakes on a follow-up); an ended one is gone. The
+/// match ignores case and surrounding blanks, as the tool's own lookup does.
+fn refuse_duplicate_name(state: &DaemonState, parent: &str, name: Option<&str>) -> Result<(), String> {
+    let wanted = name.map(|n| n.trim().to_lowercase()).filter(|n| !n.is_empty());
+    let Some(wanted) = wanted else { return Ok(()) };
+    let same: Vec<String> = state
+        .registry
+        .list()
+        .into_iter()
+        .filter(|i| i.subchat_of.as_deref() == Some(parent) && i.ended_at.is_none() && i.end_reason.is_none())
+        .filter(|i| label(i).trim().to_lowercase() == wanted)
+        .map(|i| format!("{} ({})", label(&i), if i.subchat_finished { "finished" } else { "running" }))
+        .collect();
+    if same.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "A sub with the name {} already exists in this chat: {}. A name is how you address a sub, so two cannot share one. Pick another name for this job, or hand it to that sub with the subchat tool.",
+        name.unwrap_or_default().trim(),
+        same.join(", ")
+    ))
+}
 
 /// A parent has one gate at a time: two would race on the same push and on the
 /// repo's writer slot. `Err` names the running one.
@@ -467,6 +494,27 @@ mod tests {
         for n in 0..5 {
             assert!(err.contains(&format!("job-{n}")), "job-{n} not named: {err}");
         }
+    }
+
+    /// A name is how the main chat addresses a sub, so a running or a finished one
+    /// blocks reusing it; an ended one is gone.
+    #[test]
+    fn a_name_in_use_by_a_running_or_finished_sub_is_refused_listing_them() {
+        let st = state();
+        row(&st, "dup-main");
+        sub_row(&st, "dup-run", "dup-main", "Header");
+        sub_row(&st, "dup-fin", "dup-main", "footer");
+        st.registry.set_subchat_finished("dup-fin", true);
+        sub_row(&st, "dup-old", "dup-main", "docs");
+        st.registry.mark_ended("dup-old", crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
+        sub_row(&st, "other-sub", "dup-other", "nav");
+
+        let running = plan_as(&st, "dup-main", &on(), Some(" header "), &complete()).err().expect("refused");
+        assert!(running.contains("Header (running)") && running.contains("subchat tool"), "{running}");
+        let finished = plan_as(&st, "dup-main", &on(), Some("FOOTER"), &complete()).err().expect("refused");
+        assert!(finished.contains("footer (finished)"), "{finished}");
+        plan_as(&st, "dup-main", &on(), Some("docs"), &complete()).unwrap().expect("an ended sub's name is free");
+        plan_as(&st, "dup-main", &on(), Some("nav"), &complete()).unwrap().expect("another chat's sub is not this chat's");
     }
 
     #[test]

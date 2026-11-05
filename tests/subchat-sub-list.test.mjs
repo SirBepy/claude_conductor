@@ -46,6 +46,18 @@ describe("sub list rows", () => {
     expect(html).not.toContain("data-move");
   });
 
+  it("names the tier on the row and in the in-place header, and no move button on a mirrored chat", () => {
+    const tiered = sub("a", { busy: false, model: "claude-sonnet-4-5", effort: "medium" });
+    const all = [main, tiered];
+    const subs = mainChatInfo(main, all).subs;
+    expect(subListHtml(subs, all)).toContain('<span class="sub-tier">Sonnet medium</span>');
+    expect(subMetaText(tiered, main)).toBe("Subchat of CV redesign, Sonnet medium");
+    expect(subListHtml(subs, all)).toContain("data-move");
+    // A chat mirrored in from a peer: moving it is the host's call, so no button.
+    expect(subListHtml(subs, all, false)).not.toContain("data-move");
+    expect(subListHtml(subs, all, false)).toContain('data-sub-id="a"');
+  });
+
   it("says in the in-place header that a sub is waiting, and for what", () => {
     const held = sub("a", { busy: false, progress: { plan: null, state_since: null, waiting_for: "waiting for Header" } });
     expect(subMetaText(held, main)).toBe("Subchat of CV redesign, waiting for Header");

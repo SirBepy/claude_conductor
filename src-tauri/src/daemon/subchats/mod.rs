@@ -30,6 +30,7 @@ pub mod finish;
 pub mod followup;
 pub(crate) mod git;
 pub mod held;
+pub(crate) mod jsonfile;
 mod reply;
 pub mod joe_message;
 pub mod pause;

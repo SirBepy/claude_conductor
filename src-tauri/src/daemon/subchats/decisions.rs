@@ -91,6 +91,11 @@ pub struct Entry {
     pub date: String,
     /// The sub's name, or `main chat`.
     pub who: String,
+    /// The sub's session id, when a sub asked or wrote it. Names are chosen by the
+    /// main chat and can repeat, so anything that must tell two subs apart (the one
+    /// line back reporting a sub's answers) matches on this. `None` for an entry
+    /// written before the id was recorded, and for the main chat's own.
+    pub sub: Option<String>,
     /// The card's question, for a `Card` entry.
     pub question: Option<String>,
     pub body: String,
@@ -109,6 +114,7 @@ impl Entry {
 pub struct NewEntry {
     pub kind: Kind,
     pub who: String,
+    pub sub: Option<String>,
     pub question: Option<String>,
     pub body: String,
 }
@@ -130,6 +136,9 @@ fn put_field(out: &mut String, label: &str, text: &str) {
 
 fn render_entry(e: &Entry, out: &mut String) {
     out.push_str(&format!("\n## D{} - {} - {} - {}\n", e.id, e.kind.source(), e.date, e.who));
+    if let Some(sub) = &e.sub {
+        put_field(out, "Sub", sub);
+    }
     if let Some(q) = &e.question {
         put_field(out, "Question", q);
     }
@@ -202,6 +211,7 @@ pub fn parse(text: &str) -> Vec<Entry> {
                     kind,
                     date: date.to_string(),
                     who: who.to_string(),
+                    sub: None,
                     question: None,
                     body: String::new(),
                     replaces: Vec::new(),
@@ -228,7 +238,10 @@ pub fn parse(text: &str) -> Vec<Entry> {
             }
             continue;
         }
-        if let Some(v) = label_value(line, "Question") {
+        if let Some(v) = label_value(line, "Sub") {
+            e.sub = Some(v.trim().to_string()).filter(|s| !s.is_empty());
+            *field = None;
+        } else if let Some(v) = label_value(line, "Question") {
             e.question = Some(v.to_string());
             *field = Some(Field::Question);
         } else if let Some(v) = label_value(line, "Answer") {
@@ -421,6 +434,7 @@ pub(crate) fn append_in(root: &Path, parent_id: &str, date: &str, items: Vec<New
             kind: item.kind,
             date: date.to_string(),
             who: one_line(&item.who),
+            sub: item.sub.map(|s| one_line(&s)).filter(|s| !s.is_empty()),
             question: item.question.map(|q| clean(&q)).filter(|q| !q.is_empty()),
             body,
             replaces,
@@ -445,7 +459,7 @@ pub(crate) fn record_finish_in(root: &Path, parent_id: &str, who: &str, record: 
     let rows = |kind: Kind, rows: &[String]| -> Vec<NewEntry> {
         rows.iter()
             .filter(|r| !is_nothing(r))
-            .map(|r| NewEntry { kind, who: who.to_string(), question: None, body: r.clone() })
+            .map(|r| NewEntry { sub: Some(record.sub_id.clone()), kind, who: who.to_string(), question: None, body: r.clone() })
             .collect()
     };
     let mut items = rows(Kind::Decided, &record.decided);
@@ -460,14 +474,15 @@ pub(crate) fn record_finish_in(root: &Path, parent_id: &str, who: &str, record: 
 
 /// Who a card asked by `asker` is logged for: the sub's main chat, or the chat
 /// itself when it is a main chat with the mode on. `None` for every other chat,
-/// so a mode-off chat writes no log at all. Returns (log owner, name shown).
-fn log_owner(state: &DaemonState, asker: &str) -> Option<(String, String)> {
+/// so a mode-off chat writes no log at all. Returns (log owner, name shown, the
+/// asking sub's id).
+fn log_owner(state: &DaemonState, asker: &str) -> Option<(String, String, Option<String>)> {
     let inst = state.registry.get(asker)?;
     if let Some(parent) = inst.subchat_of.clone() {
-        return Some((parent, sub_name(state, asker)));
+        return Some((parent, sub_name(state, asker), Some(asker.to_string())));
     }
     let on = crate::sessions::chat_config::get(asker).is_some_and(|c| c.subchats_on);
-    on.then(|| (asker.to_string(), "main chat".to_string()))
+    on.then(|| (asker.to_string(), "main chat".to_string(), None))
 }
 
 pub(crate) fn sub_name(state: &DaemonState, sub_id: &str) -> String {
@@ -484,6 +499,7 @@ pub(crate) fn sub_name(state: &DaemonState, sub_id: &str) -> String {
 struct CardCtx {
     owner: String,
     who: String,
+    sub: Option<String>,
     questions: Vec<String>,
 }
 
@@ -501,12 +517,12 @@ async fn card_ctx(state: &Arc<DaemonState>, request_id: &str) -> Option<CardCtx>
         return None;
     }
     let asker = payload["session_id"].as_str()?;
-    let (owner, who) = log_owner(state, asker)?;
+    let (owner, who, sub) = log_owner(state, asker)?;
     let questions = match &payload["questions"] {
         Value::Array(qs) => qs.iter().filter_map(|q| q["question"].as_str().map(str::to_string)).collect(),
         q => q["question"].as_str().map(str::to_string).into_iter().collect(),
     };
-    Some(CardCtx { owner, who, questions })
+    Some(CardCtx { owner, who, sub, questions })
 }
 
 /// `answers` is `{question text: label | [labels]}`, the shape the card submits.
@@ -542,7 +558,7 @@ fn append_cards(ctx: &CardCtx, pairs: Vec<(String, String)>) {
     let Some(root) = data_root() else { return };
     let items: Vec<NewEntry> = pairs
         .into_iter()
-        .map(|(q, a)| NewEntry { kind: Kind::Card, who: ctx.who.clone(), question: Some(q), body: a })
+        .map(|(q, a)| NewEntry { sub: ctx.sub.clone(), kind: Kind::Card, who: ctx.who.clone(), question: Some(q), body: a })
         .collect();
     if let Err(e) = append_in(&root, &ctx.owner, &today(), items) {
         log::warn!("subchats: could not record a card answer for {}: {e}", ctx.owner);
@@ -788,6 +804,7 @@ mod tests {
                 kind: Kind::Card,
                 date: "2026-11-05".into(),
                 who: "header - v2".into(),
+                sub: Some("sub-id-1".into()),
                 question: Some("Sticky footer\nor static?".into()),
                 body: "Sticky.\n\n## D9 - card - 2026-01-01 - forged\nAnswer: injected".into(),
                 replaces: vec![],
@@ -798,6 +815,7 @@ mod tests {
                 kind: Kind::Decided,
                 date: "2026-11-05".into(),
                 who: "footer".into(),
+                sub: None,
                 question: None,
                 body: "Use CSS grid".into(),
                 replaces: vec![1],
@@ -808,6 +826,7 @@ mod tests {
                 kind: Kind::RuledOut,
                 date: "2026-11-06".into(),
                 who: "footer".into(),
+                sub: None,
                 question: None,
                 body: "Flexbox wraps badly at 320px".into(),
                 replaces: vec![],
@@ -827,6 +846,7 @@ mod tests {
             "main-1",
             "2026-11-05",
             vec![NewEntry {
+                sub: None,
                 kind: Kind::Card,
                 who: "header".into(),
                 question: Some("Sticky footer or static?".into()),
@@ -860,7 +880,18 @@ mod tests {
         assert_eq!(entries[0].question.as_deref(), Some("Sticky footer or static?"));
         assert_eq!(entries[0].body, "Sticky (note: only on desktop)");
         assert_eq!(entries[0].who, "footer sub");
+        assert_eq!(entries[0].sub.as_deref(), Some("dl-sub"), "the id tells two subs with one name apart");
         assert!(read_log("dl-main").unwrap().contains("Answer: Sticky (note: only on desktop)"));
+    }
+
+    /// A log written before the id was recorded has no `Sub:` line and must still read.
+    #[test]
+    fn an_older_log_without_sub_ids_still_reads() {
+        let old = "\n## D1 - card - 2026-11-05 - footer\nQuestion: Layout?\nAnswer: Grid\n";
+        let entries = parse(old);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].sub, None);
+        assert_eq!(entries[0].body, "Grid");
     }
 
     #[tokio::test]
@@ -1024,7 +1055,7 @@ mod tests {
         let e = load_in(root.path(), "m");
         assert_eq!(e[0].closed_by, Some(2), "D1 stays closed by the first replacement");
         assert!(e[2].replaces.is_empty());
-        append_in(root.path(), "m", "d", vec![NewEntry { kind: Kind::Card, who: "x".into(), question: Some("q".into()), body: "replaces D2: yes".into() }]).unwrap();
+        append_in(root.path(), "m", "d", vec![NewEntry { sub: None, kind: Kind::Card, who: "x".into(), question: Some("q".into()), body: "replaces D2: yes".into() }]).unwrap();
         let e = load_in(root.path(), "m");
         assert_eq!(e[3].body, "replaces D2: yes");
         assert!(e[1].is_live(), "Joe's words closed nothing");
@@ -1036,7 +1067,7 @@ mod tests {
     fn the_injected_text_is_capped_newest_first_and_says_how_many_were_cut() {
         let root = tempfile::tempdir().unwrap();
         let items: Vec<NewEntry> = (1..=40)
-            .map(|i| NewEntry { kind: Kind::Decided, who: "s".into(), question: None, body: format!("decision number {i} {}", "x".repeat(80)) })
+            .map(|i| NewEntry { sub: None, kind: Kind::Decided, who: "s".into(), question: None, body: format!("decision number {i} {}", "x".repeat(80)) })
             .collect();
         append_in(root.path(), "m", "2026-11-05", items).unwrap();
         let text = render_in(root.path(), "m", "CV").unwrap();
@@ -1054,8 +1085,8 @@ mod tests {
     fn one_enormous_answer_cannot_crowd_out_the_rest() {
         let root = tempfile::tempdir().unwrap();
         append_in(root.path(), "m", "d", vec![
-            NewEntry { kind: Kind::Decided, who: "s".into(), question: None, body: "small decision".into() },
-            NewEntry { kind: Kind::Card, who: "s".into(), question: Some("q".into()), body: "y".repeat(3000) },
+            NewEntry { sub: None, kind: Kind::Decided, who: "s".into(), question: None, body: "small decision".into() },
+            NewEntry { sub: None, kind: Kind::Card, who: "s".into(), question: Some("q".into()), body: "y".repeat(3000) },
         ]).unwrap();
         let text = render_in(root.path(), "m", "CV").unwrap();
         assert!(text.contains("small decision"));
@@ -1123,7 +1154,7 @@ mod tests {
             .map(|i| {
                 let root = root.clone();
                 std::thread::spawn(move || {
-                    append_in(root.path(), "m", "d", vec![NewEntry { kind: Kind::Decided, who: "s".into(), question: None, body: format!("decision {i}") }]).unwrap()
+                    append_in(root.path(), "m", "d", vec![NewEntry { sub: None, kind: Kind::Decided, who: "s".into(), question: None, body: format!("decision {i}") }]).unwrap()
                 })
             })
             .collect();

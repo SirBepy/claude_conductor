@@ -193,13 +193,20 @@ describe("what the chips say", () => {
     expect(words).toContain("Not pushed");
   });
 
+  it("names the tier the sub ran at, quietly, beside its name", async () => {
+    const el = await render(card("c-tier", T0 + MIN, { model: "sonnet", effort: "high" }));
+    expect(el.querySelector(".mc-full .mc-sub .mc-sub-tier").textContent).toBe("Sonnet high");
+    const bare = await render(card("c-notier", T0 + MIN));
+    expect(bare.querySelector(".mc-full .mc-sub .mc-sub-tier")).toBeNull();
+  });
+
   it("shows anything the daemon could not read as unknown, never a number", async () => {
     const el = await render(card("c2", T0 + MIN, { facts: facts({
       commits: null, files_changed: null, uncommitted: null, pushed: null,
       test: { state: "unknown" }, reviewer: { state: "none", note: "no reviewer ran" },
     }) }));
     const chips = [...el.querySelectorAll(".mc-full .mc-facts .mc-chip")].map((c) => c.textContent.trim());
-    expect(chips).toEqual(["?", "?", "?", "unknown", "none"]);
+    expect(chips).toEqual(["?", "?", "?", "unknown", "no reviewer"]);
     const words = el.querySelector(".mc-full .mc-facts-list").textContent;
     expect(words).toContain("Commits: unknown");
     expect(words).toContain("Uncommitted files: unknown");

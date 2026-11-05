@@ -337,6 +337,7 @@ const viewMenu = createMoreMenu<[]>({
           wrapUpOnDoneOn: isWrapUpOnDone(sid),
           subchatsOn: isSubchatsOn(sid),
           subchatsBlockedReason: subchatsBlockedReason(sess?.account_id),
+          isSub: !!sess && isSubchat(sess),
           isHidden: hiddenSet.has(sid),
           isJarvis: sess?.jarvis === true,
           isFrozen: sess?.frozen === true,

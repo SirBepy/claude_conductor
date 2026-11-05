@@ -67,6 +67,9 @@ export interface SubCardEntry {
   sub_id?: string | null;
   sub_name?: string | null;
   round?: number | null;
+  /** What the sub ran at when it wrote this report. */
+  model?: string | null;
+  effort?: string | null;
   verdict: string;
   tone?: string | null;
   text: string;

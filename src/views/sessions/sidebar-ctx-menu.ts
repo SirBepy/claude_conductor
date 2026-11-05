@@ -11,6 +11,7 @@ import {
   saveHiddenCollapsed,
   toggleSegCollapse,
   isMirrored,
+  isSubchat,
 } from "./sessions-helpers";
 import { loadAnimEnabled, markSessionExiting } from "./sidebar-anim";
 import { isAutoAccept, isWrapUpOnDone, isSubchatsOn } from "./permission-modal";
@@ -109,6 +110,7 @@ export function openCtxMenu(
     wrapUpOnDoneOn: isWrapUpOnDone(sessionId),
     subchatsOn: isSubchatsOn(sessionId),
     subchatsBlockedReason: subchatsBlockedReason(sess.account_id),
+    isSub: isSubchat(sess),
     isHidden,
     isJarvis: sess.jarvis === true,
     isFrozen: sess.frozen === true,

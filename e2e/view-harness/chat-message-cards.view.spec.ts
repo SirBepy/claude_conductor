@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: chat-message-card.ts gained an optional quiet `tagNote` after a sub's tag and chat-message-cards.css two rules for it; a card without one draws as before, and this spec passes.
 // Reviewed 2026-11-05: chat-message-cards.css gained the .passed-row rule only; no card rule changed - this spec's contract is unchanged and it passes.
 // asserts: src/shared/chat/chat-message-card.ts, src/shared/chat/chat-message-cards.css, src/shared/chat/chat-card-turns.ts, src/shared/chat/chat-dom-renderer.ts
 import { test, expect, type Page } from "@playwright/test";

@@ -2,6 +2,7 @@
 // Reviewed 2026-11-05: subchat-view.ts exports backToMain for Ctrl+W (no behaviour change to the back arrow); this spec's back-arrow tests pass unchanged.
 // Reviewed 2026-11-05: main-chat.ts's progress text says paused or rate limited for a frozen or rate-limited sub instead of working; this spec's subs are neither, so its contract holds and it passes.
 // Reviewed 2026-11-05: sub-list.ts and main-chat.ts gained a "queued" kind (a sub held for the writer slot); this spec has no queued sub, so its rows are unchanged, and it passed after the change. The queued row is covered in subchat-writer-slot.view.spec.ts.
+// Reviewed 2026-11-05: the in-place header and the list rows name the sub's tier ("Opus high": the harness default) and a mirrored chat has no Move buttons; the header texts below carry the tier, everything else holds and it passes.
 // asserts: src/views/sessions/sub-list.ts, src/views/sessions/subchat-view.ts, src/views/sessions/active-session.ts, src/views/sessions/session-header.ts, src/views/sessions/state.ts, src/views/sessions/sessions-wiring.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/main-chat.ts
 import { test, expect, type Page } from "@playwright/test";
 import {
@@ -94,9 +95,15 @@ async function installBackend(page: Page): Promise<void> {
   }, { main: history("main"), "sub-footer": history("sub-footer"), "sub-header": history("sub-header"), other: history("other") });
 }
 
-async function mount(page: Page, size: { width: number; height: number }, sessions: unknown[], pending: unknown[] = []): Promise<void> {
+async function mount(
+  page: Page,
+  size: { width: number; height: number },
+  sessions: unknown[],
+  pending: unknown[] = [],
+  extra: Record<string, unknown> = {},
+): Promise<void> {
   await page.setViewportSize(size);
-  await mountView(page, { view: "sessions", invoke: invokeFor(sessions, ["main"], pending) });
+  await mountView(page, { view: "sessions", invoke: { ...invokeFor(sessions, ["main"], pending), ...extra } });
   await installBackend(page);
   await page.locator("#sessions-list li").first().waitFor();
   await page.waitForTimeout(250);
@@ -203,7 +210,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       // Reading it in place says it is waiting.
       await listRow(page, "sub-queued").click();
       await expect(backBtn(page)).toBeVisible();
-      await expect(page.locator("#session-pane .session-header .meta-proj")).toHaveText("Subchat of CV redesign, waiting for Header");
+      await expect(page.locator("#session-pane .session-header .meta-proj")).toHaveText("Subchat of CV redesign, Opus high, waiting for Header");
     });
 
     test("a row opens the sub in place with a back arrow, and the sidebar keeps the main chat selected", async ({ page }) => {
@@ -211,7 +218,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await openChat(page, "main");
       await openSubFromList(page, "sub-footer");
       await expect(title(page)).toHaveText("Footer");
-      await expect(page.locator("#session-pane .session-header .meta-proj")).toHaveText("Subchat of CV redesign");
+      await expect(page.locator("#session-pane .session-header .meta-proj")).toHaveText("Subchat of CV redesign, Opus high");
       await expect(moveBtn(page)).toBeVisible();
       // The pane is the sub's own chat view: its transcript, its composer.
       await expect(page.locator("#session-pane .session-messages")).toContainText("sub-footer says hello");
@@ -227,7 +234,52 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await mount(page, size, [MAIN, FOOTER, HEADER]);
       await openChat(page, "main");
       await openSubFromList(page, "sub-header");
-      await expect(page.locator("#session-pane .session-header .meta-proj")).toHaveText("Subchat of CV redesign, finished, can continue");
+      await expect(page.locator("#session-pane .session-header .meta-proj")).toHaveText("Subchat of CV redesign, Opus high, finished, can continue");
+    });
+
+    test("each list row names the sub's tier quietly beside its status", async ({ page }) => {
+      const sonnet = sub("sub-footer", "Footer", 102, { model: "claude-sonnet-4-5", effort: "medium" });
+      await mount(page, size, [MAIN, sonnet, HEADER]);
+      await openChat(page, "main");
+      await openList(page);
+      await expect(listRow(page, "sub-footer").locator(".sub-tier")).toHaveText("Sonnet medium");
+      await expect(listRow(page, "sub-header").locator(".sub-tier")).toHaveText("Opus high");
+      await capture(page, `sub-list-tier-${label}`);
+    });
+
+    test("a sub of a chat mirrored from a paired machine offers no Move to sidebar, in the list or in its header", async ({ page }) => {
+      const peer = { id: "m2", label: "Studio PC", online: true } as never;
+      await mount(page, size, [{ ...MAIN, machine: peer }, { ...FOOTER, machine: peer }]);
+      await openChat(page, "main");
+      await openList(page);
+      await expect(listRow(page, "sub-footer")).toHaveCount(1);
+      await expect(listRow(page, "sub-footer").locator("[data-move]")).toHaveCount(0);
+      await listRow(page, "sub-footer").click();
+      await expect(backBtn(page)).toBeVisible();
+      await expect(moveBtn(page)).toHaveCount(0);
+    });
+
+    test("the model picker on a sub read in place changes that sub, for its next message", async ({ page }) => {
+      const row_ = ["model", "effort", "duration"];
+      await mount(page, size, [MAIN, FOOTER], [], {
+        set_session_model: null,
+        get_settings: { theme: "void", statuslineRows: [row_], statuslineRowsMobile: [row_] },
+      });
+      await openChat(page, "main");
+      await openSubFromList(page, "sub-footer");
+      await page.locator("#session-pane .sb-model-btn").first().click();
+      const pop = page.locator(".sb-popover").first();
+      await pop.waitFor();
+      await expect(pop).toContainText("Applies to your next message");
+      await pop.locator(".sb-model-slider").evaluate((el) => {
+        const slider = el as HTMLInputElement;
+        slider.value = slider.value === "0" ? "1" : "0";
+        slider.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "set_session_model").length).toBe(1);
+      const picks = (await invokeCalls(page)).filter((c) => c.cmd === "set_session_model");
+      expect(picks[0]!.args).toMatchObject({ sessionId: "sub-footer" });
+      expect(picks.some((c) => (c.args as { sessionId?: string }).sessionId === "main")).toBe(false);
     });
 
     test("typing to a running sub sends to that sub, not the main chat", async ({ page }) => {

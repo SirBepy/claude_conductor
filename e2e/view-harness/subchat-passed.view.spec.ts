@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: chat-message-cards.css gained the `.mc-sub-tier` rules only; the passed row is untouched and this spec passes.
 // asserts: src/shared/chat/chat-subchat-passed.ts, src/shared/chat/chat-event-handler-tools.ts, src/shared/chat/chat-event-to-message.ts, src/shared/chat/chat-pagination.ts, src/shared/chat/chat-transforms.ts, src/shared/chat/chat-message-cards.css
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

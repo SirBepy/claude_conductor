@@ -823,7 +823,7 @@ mod tests {
         assert_eq!(v["ok"], json!(true));
         assert!(v["log"].is_null() && v["note"].as_str().unwrap().contains("empty"), "{v}");
         let root = crate::settings::paths::data_dir().unwrap();
-        let card = |q: String, a: String| decisions::NewEntry { kind: decisions::Kind::Card, who: "Footer".into(), question: Some(q), body: a };
+        let card = |q: String, a: String| decisions::NewEntry { sub: None, kind: decisions::Kind::Card, who: "Footer".into(), question: Some(q), body: a };
         decisions::append_in(&root, &main, "2026-11-05", vec![card("Which?".into(), "Two columns".into())]).unwrap();
         let v = call(&st, &main, json!({"action": "log"}), &sent).await;
         assert!(v["log"].as_str().unwrap().contains("Two columns"), "{v}");

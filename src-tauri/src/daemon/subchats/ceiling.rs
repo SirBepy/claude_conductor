@@ -125,9 +125,8 @@ impl Entry {
 }
 
 fn load(sub_id: &str) -> Entry {
-    let saved = super::decisions::data_root()
-        .and_then(|root| std::fs::read_to_string(saved_path(&root, sub_id)).ok())
-        .and_then(|raw| serde_json::from_str::<Saved>(&raw).ok());
+    // A missing file is the defaults; a damaged one is kept aside, not overwritten blind.
+    let saved = super::decisions::data_root().map(|root| super::jsonfile::read_or_keep::<Saved>(&saved_path(&root, sub_id)));
     saved.map_or_else(Entry::default, Entry::from_saved)
 }
 

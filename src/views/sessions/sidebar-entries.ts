@@ -23,7 +23,7 @@ import { renderProjectRail } from "./project-rail";
 import { state, windowIdOf } from "./state";
 import { isRemote } from "../../shared/transport";
 import { pendingPromptSessionIds, isSubchatsOn } from "./permission-modal";
-import { mainChatInfo } from "./main-chat";
+import { mainChatInfo, showsSubs } from "./main-chat";
 import type { MainChatInfo } from "./main-chat";
 import { askingDotsHtml } from "./sidebar-row-visuals";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
@@ -185,17 +185,21 @@ export function buildSidebarEntries(
   // also show the clock badge.
   const scheduledIds = new Set(scheduledCountMap.keys());
 
-  // A chat with Use subchats on carries a summary of its subs (dots, "3x", ring,
-  // hover) and sits in its own group. state.sessions, not listSessions: the list
-  // above has already dropped the subs this reads.
+  // A chat with Use subchats on, or with subs left from before it was turned off,
+  // carries a summary of its subs (dots, "3x", ring, hover). Only the mode puts it
+  // in its own group: a chat turned off mid-run keeps its subs tied to it but sits
+  // where its state says. state.sessions, not listSessions: the list above has
+  // already dropped the subs this reads.
   const mainInfo = new Map<string, MainChatInfo>();
+  const mainIds = new Set<string>();
   for (const s of listSessions) {
-    if (isSubchatsOn(s.session_id)) mainInfo.set(s.session_id, mainChatInfo(s, state.sessions));
+    if (!showsSubs(s.session_id, state.sessions)) continue;
+    mainInfo.set(s.session_id, mainChatInfo(s, state.sessions));
+    if (isSubchatsOn(s.session_id)) mainIds.add(s.session_id);
   }
   const MAIN_SEG = 8;
   const SEGMENT_LABELS = ["Input Needed", "Done", "In Progress", "Closing", "Waiting for Reset", "Waiting", "Scheduled", "Remote", "Main chats"];
   const segmented: Map<number, typeof sorted> = new Map([[0, []], [1, []], [2, []], [3, []], [4, []], [5, []], [6, []], [7, []], [MAIN_SEG, []]]);
-  const mainIds = new Set(mainInfo.keys());
   for (const s of sorted) {
     segmented.get(sessionSegment(s, unread, attention, question, closing, rateLimited, scheduledIds, mainIds))!.push(s);
   }

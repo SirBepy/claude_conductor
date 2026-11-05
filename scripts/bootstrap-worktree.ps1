@@ -151,4 +151,28 @@ if (Test-Path (Join-Path $driversDir "msedgedriver.exe")) {
     Write-Host "[6/6] no msedgedriver.exe in $driversDir and none to copy from the main worktree - wdio specs will fail until it is placed there (see e2e/wdio.conf.js)"
 }
 
+# `cargo tauri android init` (step 4) rewrites two tracked files,
+# android/src-tauri/Cargo.toml and gen/android/buildSrc/.../BuildTask.kt, with the
+# repo's LF endings while the checkout wrote them as CRLF (core.autocrlf=true). The
+# bytes match the index but the size does not, so git decides "modified" on size
+# alone: `git status` lists both files with an empty diff, `git rebase` refuses with
+# "You have unstaged changes", and a sub's worktree then reads as having uncommitted
+# work for good. `git update-index --refresh` leaves them; re-hashing the same bytes
+# clears them. Only paths `git diff` reports nothing for are touched, so a real edit
+# is never hidden. Same rule as `settle_index` in
+# src-tauri/src/daemon/subchats/worktree.rs.
+function Clear-LineEndingOnlyChanges {
+    # Native stderr (git's "LF will be replaced by CRLF" warnings) must not trip
+    # $ErrorActionPreference = "Stop" under Windows PowerShell 5.1.
+    $ErrorActionPreference = "Continue"
+    $listed = @(git -c core.quotepath=false ls-files -m 2>$null)
+    if ($listed.Count -eq 0) { return }
+    $differing = @(git -c core.quotepath=false diff --name-only 2>$null)
+    $same = @($listed | Where-Object { $differing -notcontains $_ } | Sort-Object -Unique)
+    if ($same.Count -eq 0) { return }
+    Write-Host "settling $($same.Count) tracked file(s) that differ from the index only in line endings"
+    git update-index -q -- @same 2>$null
+}
+Clear-LineEndingOnlyChanges
+
 Write-Host "Bootstrap complete."

@@ -6,7 +6,7 @@ import { sessionSegment } from "../src/views/sessions/sessions-helpers.ts";
 import { mainChatRingSpec } from "../src/views/sessions/sidebar-ring.ts";
 import { askingDotsHtml, subCountHtml } from "../src/views/sessions/sidebar-row-visuals.ts";
 import { buildHoverCardHtml } from "../src/views/sessions/sidebar-hover-card-html.ts";
-import { mainChatInfo } from "../src/views/sessions/main-chat.ts";
+import { mainChatInfo, showsSubs } from "../src/views/sessions/main-chat.ts";
 import { storePendingPrompt, clearPendingPrompt, markPendingPromptAnswered } from "../src/views/sessions/permission-modal/gating.ts";
 
 const inst = (over = {}) => ({
@@ -92,6 +92,16 @@ describe("buildHoverCardHtml with subs", () => {
   });
 });
 
+describe("showsSubs", () => {
+  it("is true for a mode-on chat, and for a mode-off chat that still has subs", () => {
+    const main = inst({ session_id: "main" });
+    // The mode flag lives in the gate; a chat with no flag and no subs shows nothing.
+    expect(showsSubs("main", [main])).toBe(false);
+    expect(showsSubs("main", [main, sub("a")])).toBe(true);
+    expect(showsSubs("main", [main, sub("a", { subchat_of: "other" })])).toBe(false);
+  });
+});
+
 describe("mainChatInfo", () => {
   const main = inst({ session_id: "main" });
   beforeEach(() => { clearPendingPrompt("main"); clearPendingPrompt("a"); clearPendingPrompt("b"); });
@@ -168,6 +178,27 @@ describe("mainChatInfo", () => {
     expect(info.askingDots).toBe(0);
     expect(info.allFinished).toBe(false);
     expect(mainChatInfo(main, [main, sub("a", { busy: false, subchat_finished: true })]).allFinished).toBe(true);
+  });
+
+  it("stays off green while a finished sub is still closing, and goes green when it is gone", () => {
+    const closing = sub("a", { busy: false, subchat_finished: true, closing: true });
+    const info = mainChatInfo(main, [main, closing, sub("b", { busy: false, subchat_finished: true })]);
+    expect(info.subs.find((s) => s.name === "a")).toMatchObject({ kind: "finished", closing: true });
+    expect(info.allFinished).toBe(false);
+    expect(mainChatInfo(main, [main, sub("a", { busy: false, subchat_finished: true }), sub("b", { busy: false, subchat_finished: true })]).allFinished).toBe(true);
+  });
+
+  it("names each sub's tier, quietly, from its current model and effort", () => {
+    const info = mainChatInfo(main, [
+      main,
+      sub("a", { model: "claude-sonnet-4-5", effort: "high" }),
+      sub("b", { model: "opus", effort: "high" }),
+      sub("c", { model: "", effort: "" }),
+    ]);
+    expect(Object.fromEntries(info.subs.map((s) => [s.name, s.tier]))).toEqual({ a: "Sonnet high", b: "Opus high", c: "" });
+    const html = buildHoverCardHtml({ title: "CV", project: "cv", st: "st-working", plan: null, question: null, stateSince: null, contextPct: null, now: 0, subs: info.hoverRows });
+    expect(html).toContain('<span class="hc-tier">Sonnet high</span>');
+    expect(html.match(/hc-tier/g)).toHaveLength(2);
   });
 
   it("stops reading as queued once the daemon clears the mark, or when it finishes", () => {

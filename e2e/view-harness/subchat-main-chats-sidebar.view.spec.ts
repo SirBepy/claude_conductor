@@ -1,6 +1,7 @@
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: main-chat.ts's progress text says paused or rate limited for a frozen or rate-limited sub instead of working; this spec's subs are neither, so its contract holds and it passes.
 // Reviewed 2026-11-05: main-chat.ts and the hover card gained a "queued" kind for a sub held for the writer slot; this spec has no queued sub, so asking/working/finished rows are unchanged, and it passed after the change. The queued row is covered in subchat-writer-slot.view.spec.ts.
+// Reviewed 2026-11-05: a chat with subs keeps its sub summary after the mode is turned off (the group still follows the mode), a closing sub no longer reads as finished for the ring, and each hover row names the sub's tier; the existing tests keep their contract and pass.
 // asserts: src/views/sessions/sidebar-entries.ts, src/views/sessions/sidebar-rows.ts, src/views/sessions/sidebar-ring.ts, src/views/sessions/main-chat.ts, src/views/sessions/sidebar-hover-card.ts, src/views/sessions/sidebar-hover-card-html.ts, src/views/sessions/permission-modal/gating.ts
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, mountViewPhone, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
@@ -191,6 +192,38 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(row(page, "empty").locator(".session-sub-count")).toHaveCount(0);
     });
 
+    test("a chat turned off mid-run keeps its dots and 3x in its own group, and the dots still route", async ({ page }) => {
+      // Mode off for every chat, but "main" still has four subs from before.
+      await mount(page, size, ALL, []);
+      const texts = await headerTexts(page);
+      expect(texts).not.toContain("Main chats");
+      await expect(row(page, "main").locator(".session-sub-count")).toHaveText("4x");
+      await expect(row(page, "main").locator(".session-model-battery")).toHaveCount(0);
+      // A chat that never had subs is untouched.
+      await expect(row(page, "plain").locator(".session-model-battery")).toHaveCount(1);
+
+      await fireEvent(page, "question-requested", [subPrompt("sub-footer", 2), subPrompt("sub-contact", 1)]);
+      await expect(dots(row(page, "main"))).toHaveCount(2);
+      await expect(row(page, "main")).toHaveAttribute("data-st", "st-attention");
+      // It sits where its state puts it (Input Needed), not under Main chats.
+      const group = await page.evaluate(() => {
+        let cur = document.querySelector('#sessions-list li[data-session-id="main"]')!.previousElementSibling;
+        while (cur && !cur.classList.contains("session-group-header")) cur = cur.previousElementSibling;
+        return cur?.textContent?.trim();
+      });
+      expect(group).toContain("Input Needed");
+      await capture(page.locator("#sessions-list"), `mode-off-with-subs-${label}`);
+    });
+
+    test("the ring stays off green while a finished sub is still closing", async ({ page }) => {
+      const done = sub("sub-a", "A", 102, { busy: false, awaiting: "done", subchat_finished: true });
+      const closing = sub("sub-b", "B", 103, { busy: false, awaiting: "done", subchat_finished: true, closing: true });
+      await mount(page, size, [MAIN, done, closing]);
+      // An idle, read main chat with one sub closing: no ring at all, not green.
+      // (The sibling test above covers green once every sub has finished.)
+      await expect(row(page, "main").locator(".avatar-ring")).toHaveCount(0);
+    });
+
     test("closing and hiding both take a main chat out of the group", async ({ page }) => {
       await mount(page, size, [chat("main", "CV redesign", 101, { closing: true }), ...SUBS.slice(0, 1)]);
       expect(await headerTexts(page)).not.toContain("Main chats");
@@ -323,6 +356,21 @@ test.describe("view-harness / main chats sidebar (desktop hover)", () => {
     await expect(card).toBeVisible();
     await expect(card.locator(".hc-subrow")).toHaveCount(0);
     await expect(card.locator(".hc-state")).toHaveCount(1);
+  });
+
+  test("the hover card names each sub's tier beside its name, and a mode-off chat with subs still gets the list", async ({ page }) => {
+    const sonnet = sub("sub-footer", "Footer", 102, { model: "claude-sonnet-4-5", effort: "medium" });
+    const opus = sub("sub-header", "Header", 105, { busy: false, awaiting: "done", subchat_finished: true });
+    await mount(page, DESKTOP, [MAIN, sonnet, opus], []);
+    const box = (await row(page, "main").boundingBox())!;
+    await page.mouse.move(box.x + 6, box.y + box.height / 2);
+    const card = page.locator(".cc-row-card");
+    await expect(card).toBeVisible();
+    const rows = card.locator(".hc-subrow");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0).locator(".hc-tier")).toHaveText("Sonnet medium");
+    await expect(rows.nth(1).locator(".hc-tier")).toHaveText("Opus high");
+    await capture(page.locator("body"), "main-chats-hover-card-tier");
   });
 
   test("a mode-off chat's hover card is unchanged", async ({ page }) => {

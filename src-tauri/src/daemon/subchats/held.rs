@@ -51,14 +51,21 @@ pub const TRY_AGAIN: &str = "Try again";
 pub const DROP_IT: &str = "Drop it";
 
 /// Everything needed to start the child later, as `spawn_chat` would have.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+///
+/// Every field has a default, so an entry written by an older build still loads.
+/// Only `Held::sub_id` is required: an entry that names no sub has nobody to start.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct LaunchSpec {
+    #[serde(default)]
     pub cwd: PathBuf,
+    #[serde(default)]
     pub model: String,
+    #[serde(default)]
     pub effort: String,
     /// The account the main chat ran on, resolved when the sub was registered.
     #[serde(default)]
     pub account_id: Option<String>,
+    #[serde(default)]
     pub first_message: String,
 }
 
@@ -67,6 +74,7 @@ pub struct LaunchSpec {
 pub struct Held {
     pub sub_id: String,
     /// The words the sub's row shows ("waiting for header").
+    #[serde(default)]
     pub reason: String,
     /// The sub it waits for. `None` for a hold some other rule owns (the writer
     /// queue): [`release_ready`] leaves those to their owner and
@@ -75,6 +83,7 @@ pub struct Held {
     pub after: Option<String>,
     #[serde(default)]
     pub after_name: String,
+    #[serde(default)]
     pub launch: LaunchSpec,
 }
 
@@ -94,9 +103,31 @@ fn file_path() -> Option<PathBuf> {
     crate::settings::paths::data_dir().ok().map(|d| d.join("subchats").join("held.json"))
 }
 
+/// Entry by entry, so one that will not decode costs only itself. Anything
+/// unreadable is kept aside as `held.json.bad` before the next write replaces the
+/// file (see [`super::jsonfile`]).
 fn read_unlocked() -> Vec<Held> {
     let Some(path) = file_path() else { return Vec::new() };
-    std::fs::read_to_string(path).ok().and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default()
+    let Ok(raw) = std::fs::read_to_string(&path) else { return Vec::new() };
+    let entries: Vec<serde_json::Value> = match serde_json::from_str(raw.trim_start_matches('\u{feff}')) {
+        Ok(v) => v,
+        Err(e) => {
+            super::jsonfile::keep_bad_copy(&path, &raw, &e.to_string());
+            return Vec::new();
+        }
+    };
+    let mut held = Vec::with_capacity(entries.len());
+    let mut unreadable = 0;
+    for entry in entries {
+        match serde_json::from_value::<Held>(entry) {
+            Ok(h) => held.push(h),
+            Err(_) => unreadable += 1,
+        }
+    }
+    if unreadable > 0 {
+        super::jsonfile::keep_bad_copy(&path, &raw, &format!("{unreadable} of its entries did not decode"));
+    }
+    held
 }
 
 fn write_unlocked(all: &[Held]) -> std::io::Result<()> {
@@ -1099,6 +1130,68 @@ mod tests {
         assert!(seen.lock().unwrap().is_empty(), "an ended sub is never launched");
         assert!(!is_held("ex-held"));
         assert!(cards_of_kind(&st).await.is_empty(), "and Joe is not asked about it");
+    }
+
+    // ── a damaged file ──────────────────────────────────────────────────────
+
+    fn held_file() -> PathBuf {
+        file_path().unwrap()
+    }
+
+    fn bad_copies() -> Vec<String> {
+        let dir = held_file().parent().unwrap().to_path_buf();
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("held.json.bad"))
+            .collect()
+    }
+
+    /// One entry that will not decode used to make the whole file read as empty,
+    /// and the next write then dropped every queued sub.
+    #[test]
+    fn one_unreadable_entry_does_not_empty_the_set_and_is_kept_aside() {
+        let _d = TempDataDir::new();
+        let st = state();
+        hold_behind(&st, "bad-main", "bad-one", "footer", "bad-t", "header");
+        let mut entries: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(held_file()).unwrap()).unwrap();
+        entries.push(serde_json::json!({ "reason": "no sub id, so nobody to start" }));
+        std::fs::write(held_file(), serde_json::to_string(&entries).unwrap()).unwrap();
+
+        assert!(is_held("bad-one"), "the readable entry is still held");
+        hold_behind(&st, "bad-main", "bad-two", "docs", "bad-t", "header");
+        assert!(is_held("bad-one") && is_held("bad-two"), "a write does not drop the queue");
+        let copies = bad_copies();
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        let kept = std::fs::read_to_string(held_file().with_file_name(&copies[0])).unwrap();
+        assert!(kept.contains("no sub id"), "the unreadable entry is kept: {kept}");
+    }
+
+    #[test]
+    fn a_file_that_is_not_json_is_kept_aside_before_the_next_write_replaces_it() {
+        let _d = TempDataDir::new();
+        let st = state();
+        std::fs::create_dir_all(held_file().parent().unwrap()).unwrap();
+        std::fs::write(held_file(), "{ half a file").unwrap();
+        assert!(all().is_empty());
+        hold_behind(&st, "junk-main", "junk-one", "footer", "junk-t", "header");
+        let copies = bad_copies();
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        assert_eq!(std::fs::read_to_string(held_file().with_file_name(&copies[0])).unwrap(), "{ half a file");
+        assert!(is_held("junk-one"));
+    }
+
+    /// An entry written by an older build lacks a field a newer one added.
+    #[test]
+    fn an_entry_missing_a_field_still_loads() {
+        let _d = TempDataDir::new();
+        std::fs::create_dir_all(held_file().parent().unwrap()).unwrap();
+        std::fs::write(held_file(), r#"[{"sub_id":"old-one","launch":{"first_message":"do it"}}]"#).unwrap();
+        let held = all();
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].launch.first_message, "do it");
+        assert!(bad_copies().is_empty(), "nothing was unreadable");
     }
 
     #[test]

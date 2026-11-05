@@ -149,13 +149,26 @@ fn cut(text: &str, max: usize) -> String {
     format!("{head}…")
 }
 
-/// `(answers not yet reported, the highest card id seen)` for `who` in the
+/// `(answers not yet reported, the highest card id seen)` for one sub in the
 /// parent's decisions log. Card entries only: they are the one source recorded
 /// from Joe's own submit with no model involved.
-fn answers_since(root: &Path, parent_id: &str, who: &str, after: u32) -> (Vec<Answer>, u32) {
+///
+/// An entry is the sub's by its recorded id. Names are the main chat's to choose
+/// and can repeat, so a second sub given a used name must not report the first's
+/// answers. Only an entry written before the id was recorded has none, and that one
+/// falls back to the name.
+fn answers_since(root: &Path, parent_id: &str, sub_id: &str, who: &str, after: u32) -> (Vec<Answer>, u32) {
     let text = std::fs::read_to_string(decisions::path_in(root, parent_id)).unwrap_or_default();
-    let cards: Vec<decisions::Entry> =
-        decisions::parse(&text).into_iter().filter(|e| e.kind == Kind::Card && e.who == who).collect();
+    let cards: Vec<decisions::Entry> = decisions::parse(&text)
+        .into_iter()
+        .filter(|e| {
+            e.kind == Kind::Card
+                && match e.sub.as_deref() {
+                    Some(id) => id == sub_id,
+                    None => e.who == who,
+                }
+        })
+        .collect();
     let top = cards.iter().map(|e| e.id).max().unwrap_or(after).max(after);
     let fresh: Vec<&decisions::Entry> = cards.iter().filter(|e| e.id > after && e.is_live()).collect();
     let skip = fresh.len().saturating_sub(MAX_ANSWERS);
@@ -187,7 +200,7 @@ pub(crate) fn queue_in(root: &Path, state: &DaemonState, sub_id: &str) -> Option
     if lines.iter().any(|l| matches!(l, Line::Entry(e) if e.sub_id == sub_id && e.round == record.round)) {
         return None;
     }
-    let (answers, top) = answers_since(root, &parent, &who, mark_for(&lines, sub_id));
+    let (answers, top) = answers_since(root, &parent, sub_id, &who, mark_for(&lines, sub_id));
     let entry = BackEntry {
         sub_id: sub_id.to_string(),
         round: record.round,
@@ -397,7 +410,7 @@ mod tests {
     }
 
     fn card(root: &Path, parent: &str, who: &str, q: &str, a: &str) {
-        let items = vec![decisions::NewEntry { kind: Kind::Card, who: who.into(), question: Some(q.into()), body: a.into() }];
+        let items = vec![decisions::NewEntry { sub: None, kind: Kind::Card, who: who.into(), question: Some(q.into()), body: a.into() }];
         decisions::append_in(root, parent, "2026-11-05", items).unwrap();
     }
 
@@ -472,7 +485,7 @@ mod tests {
         card(dir.path(), &main, "Header", "Which colour?", "Teal");
         // A daemon card (stuck, checkup) and a Skip are never recorded in the
         // log, so they cannot reach the line; a Finish entry is not a card.
-        let items = vec![decisions::NewEntry { kind: Kind::Decided, who: "Footer".into(), question: None, body: "Use CSS grid".into() }];
+        let items = vec![decisions::NewEntry { sub: None, kind: Kind::Decided, who: "Footer".into(), question: None, body: "Use CSS grid".into() }];
         decisions::append_in(dir.path(), &main, "2026-11-05", items).unwrap();
         let e = queue_in(dir.path(), &st, &sub).unwrap();
         assert_eq!(e.answers, vec![Answer { question: "Which layout?".into(), answer: "Two columns".into() }]);
@@ -519,6 +532,29 @@ mod tests {
         let entry = text.lines().find(|l| l.starts_with("- Footer")).unwrap();
         // summary pair + one pair for the question + one pair for the answer
         assert_eq!(entry.matches('"').count(), 6, "{entry}");
+    }
+
+    /// A sub's card entry as the daemon writes it now: with the asking sub's id.
+    fn card_of(root: &Path, parent: &str, sub: &str, who: &str, q: &str, a: &str) {
+        let items = vec![decisions::NewEntry { sub: Some(sub.into()), kind: Kind::Card, who: who.into(), question: Some(q.into()), body: a.into() }];
+        decisions::append_in(root, parent, "2026-11-05", items).unwrap();
+    }
+
+    /// Two subs given the same name (the first one's job over, a new job reusing the
+    /// word) used to share their answers, because the log was matched by name.
+    #[test]
+    fn a_second_sub_with_a_reused_name_does_not_report_the_firsts_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = state();
+        let (main, first) = finished(dir.path(), &st, "back-same", "Footer", "Built", "First footer.", 1);
+        let second = "back-same-sub-2".to_string();
+        add_sub(dir.path(), &st, &main, &second, "Footer", "Built", "Second footer.", 1);
+        card_of(dir.path(), &main, &first, "Footer", "Which layout?", "Two columns");
+        card_of(dir.path(), &main, &second, "Footer", "Which colour?", "Teal");
+        let a = queue_in(dir.path(), &st, &first).unwrap();
+        let b = queue_in(dir.path(), &st, &second).unwrap();
+        assert_eq!(a.answers, vec![Answer { question: "Which layout?".into(), answer: "Two columns".into() }]);
+        assert_eq!(b.answers, vec![Answer { question: "Which colour?".into(), answer: "Teal".into() }]);
     }
 
     #[test]

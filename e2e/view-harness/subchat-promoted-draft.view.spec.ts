@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: sub-list.ts and subchat-view.ts: the row names the tier, a mirrored chat has no Move buttons, and the header line carries the tier; a promoted draft's header and count are unchanged and this spec passes.
 // asserts: src/views/sessions/pending-pane.ts, src/views/sessions/subchat-view.ts, src/views/sessions/sub-list.ts, src/views/sessions/sessions-wiring.ts, src/views/sessions/session-statusbar.ts, src/views/sessions/active-session.ts
 import { test, expect, type Page } from "@playwright/test";
 import { fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
