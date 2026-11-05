@@ -1581,7 +1581,9 @@ mod tests {
         commit_file(&root, "peer2.txt", "p\n");
         assert_eq!(land(&id, &info), Landing::Merged);
         let inst = st.registry.get(&id).unwrap();
-        let f = card_log::sub_facts(&inst, crate::types::SubchatCheck::FactsOnly, None, &[], None);
-        assert_eq!(f.commits, Some(1), "only the sub's own commit");
+        // Commits are attributed through the files the sub edited, so it needs a transcript.
+        let transcript = test_repo::transcript(_d.path(), &[("Write", &wt.join("a.txt"))]);
+        let f = card_log::sub_facts(&inst, crate::types::SubchatCheck::FactsOnly, None, &[], Some(&transcript));
+        assert_eq!(f.commits, Some(1), "only the sub's own commit, not the two the peer made");
     }
 }
