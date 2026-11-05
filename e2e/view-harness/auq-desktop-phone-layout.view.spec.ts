@@ -108,6 +108,31 @@ test.describe("view-harness / desktop question card in the phone layout", () => 
     await card.screenshot({ path: `${SHOTS}/question-card-desktop-context.png` });
   });
 
+  for (const [name, body] of [
+    ["inline-code span", "`Setup new claude account / Send dane how to use it and then a good deal more text after that`"],
+    ["fenced code block", "```\nSetup new claude account / Send dane how to use it and then a good deal more text after that\n```"],
+  ] as const) {
+    test(`a long ${name} in the context wraps instead of overflowing the card`, async ({ page }) => {
+      await mountDesktopSession(page);
+      await page.setViewportSize({ width: 390, height: 800 });
+      await openQuestionCard(page, [{
+        question: `Keep note 3 (list, "Todo")\n\n${body}\n\nLeave, archive or delete?`,
+        header: "Note",
+        domain: "data",
+        options: [{ label: "Leave in Keep" }, { label: "Archive" }],
+      }]);
+
+      const overflow = await page.locator(".prompt-card .prompt-zone--ctx").evaluate((zone) => {
+        const text = zone.querySelector(".prompt-ctx__text")!;
+        const zoneRight = zone.getBoundingClientRect().right;
+        const code = text.querySelector("code")!.getBoundingClientRect();
+        return { codeRight: code.right, zoneRight, scroll: text.scrollWidth - text.clientWidth };
+      });
+      expect(overflow.codeRight).toBeLessThanOrEqual(overflow.zoneRight);
+      expect(overflow.scroll).toBeLessThanOrEqual(1);
+    });
+  }
+
   test("review step keeps its Submit button and has no arrow", async ({ page }) => {
     await mountDesktopSession(page);
     await openQuestionCard(page, MULTI);

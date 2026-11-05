@@ -65,6 +65,14 @@
   padding: 1px 5px;
   font-size: 0.85em;
 }
+/* A fenced block in a question keeps pre's no-wrap default, so one long line
+ * pushes the panel (overflow-y:auto, hence scrollable sideways) wider than a
+ * phone screen and the rest sits off-screen. Wrap it instead. */
+.prompt-q__text pre, .prompt-q__context pre, .prompt-q__opts .prompt-opt__desc pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 4px 0 8px;
+}
 
 /* Context/ask split: when splitAsk() finds a clear final question, the
  * reasoning above it is dimmed and the actual ask gets a highlighted,
