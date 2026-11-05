@@ -32,6 +32,9 @@ pub struct SubchatArgs {
     pub after: Option<String>,
     #[serde(default)]
     pub review: Option<bool>,
+    /// A push gate: runs as a sub that needs no brief fields and may push.
+    #[serde(default)]
+    pub gate: Option<bool>,
 }
 
 fn default_review() -> bool {
@@ -77,6 +80,15 @@ pub struct SubchatBrief {
     /// brief that never reached a spawn, and on one stored before this existed.
     #[serde(default)]
     pub git_head_at_spawn: Option<String>,
+    /// A push-gate sub (`spawn_chat` with `gate: true`). The one sub allowed to
+    /// push, and exempt from the named-job rule, the brief fields and the
+    /// reviewer requirement. Read it through `subchats::is_gate`.
+    #[serde(default)]
+    pub gate: bool,
+    /// What the repo's upstream (`@{u}`) pointed at when the gate started, so its
+    /// finish card can say from git whether the upstream moved. Gate subs only.
+    #[serde(default)]
+    pub upstream_at_spawn: Option<String>,
 }
 
 fn text(v: &Option<String>) -> Option<String> {
@@ -119,7 +131,7 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
     }
     if !missing.is_empty() {
         return Err(format!(
-            "Subchats mode: this spawn_chat call is missing {}. Send it again with every one of them filled in; the sub sees nothing but this brief.",
+            "Subchats mode: this spawn_chat call is missing {}. Send it again with every one of them filled in; the sub sees nothing but this brief. If this is a push gate (code-check, e2e, push), pass gate: true with the gate's prompt instead: a gate needs none of these fields.",
             missing.join("; ")
         ));
     }
@@ -136,6 +148,39 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
         after: text(&args.after),
         review: args.review.unwrap_or(true),
         git_head_at_spawn: None,
+        gate: false,
+        upstream_at_spawn: None,
+    })
+}
+
+/// The task a gate sub's card shows, since it is spawned without one.
+pub const GATE_TASK: &str = "Gate and push";
+
+/// The gate sub's brief. A gate is spawned by `/gate-chat` with only a name and
+/// a prompt, so there is nothing to validate: the prompt is its whole task and is
+/// required, because it quotes Joe's push request and the sub sees nothing else.
+/// `writes` is true (a fix the gate makes is a commit, and a push is a write to
+/// the repo) so the writer slot sees it, and `review` is false because the gate's
+/// own `/code-check` already reviewed whatever it changed.
+pub fn gate_brief(prompt: Option<&str>, parent: &str) -> Result<SubchatBrief, String> {
+    if prompt.map(str::trim).filter(|p| !p.is_empty()).is_none() {
+        return Err("gate: true needs a prompt: the gate's first message, quoting Joe's push request word for word and describing the gate to run (a gate sub sees nothing else). It needs no task, goal, done_when or writes.".to_string());
+    }
+    Ok(SubchatBrief {
+        parent: parent.to_string(),
+        task: GATE_TASK.to_string(),
+        goal: "Run the push gate the first message describes, and push if it says Joe asked.".to_string(),
+        done_when: "The gate has passed and the push is done, or it stopped on a red check or a question for Joe.".to_string(),
+        writes: true,
+        files: Vec::new(),
+        decisions: String::new(),
+        report_back: false,
+        worktree: false,
+        after: None,
+        review: false,
+        git_head_at_spawn: None,
+        gate: true,
+        upstream_at_spawn: None,
     })
 }
 
@@ -253,5 +298,25 @@ mod tests {
         let b: SubchatBrief = serde_json::from_str(r#"{"parent":"m","task":"t"}"#).unwrap();
         assert!(b.review, "review defaults on when the key is absent");
         assert!(b.files.is_empty());
+        assert!(!b.gate && b.upstream_at_spawn.is_none(), "an old brief is not a gate");
+    }
+
+    #[test]
+    fn a_gate_brief_needs_only_a_prompt_and_is_a_writing_unreviewed_gate() {
+        let b = gate_brief(Some("Joe said: push it.\n\nRun the gate. /close"), "main-1").unwrap();
+        assert!(b.gate && b.writes && !b.review, "the writer slot sees it, and its own code-check is the review");
+        assert_eq!((b.parent.as_str(), b.task.as_str()), ("main-1", GATE_TASK));
+        assert!(b.files.is_empty() && b.after.is_none());
+        for missing in [None, Some(""), Some("   \n")] {
+            let err = gate_brief(missing, "main-1").unwrap_err();
+            assert!(err.contains("gate: true needs a prompt") && err.contains("push request"), "{err}");
+            assert!(!err.contains("done_when (what"), "a gate is never asked for brief fields: {err}");
+        }
+    }
+
+    #[test]
+    fn the_thin_brief_error_points_a_push_gate_at_gate_true() {
+        let err = validate(Some("Gate: repo push"), &SubchatArgs::default(), "m").unwrap_err();
+        assert!(err.contains("gate: true") && err.contains("push gate"), "{err}");
     }
 }

@@ -275,6 +275,36 @@ test.describe("view-harness / main chats sidebar (desktop hover)", () => {
     await capture(page.locator("body"), "main-chats-hover-card");
   });
 
+  test("a sub held behind another is a yellow row that says what it waits for, and keeps the ring off green", async ({ page }) => {
+    // `after`: the row exists and counts, but nothing has started it.
+    const queued = sub("sub-queued", "Footer links", 106, {
+      busy: false,
+      progress: { plan: null, state_since: null, waiting_for: "waiting for Header" },
+    });
+    const finished = sub("sub-header", "Header", 105, { busy: false, awaiting: "done", subchat_finished: true });
+    await mount(page, DESKTOP, [MAIN, finished, queued]);
+    // Every other sub finished and one is queued: nothing is "all finished" yet.
+    await expect(row(page, "main")).not.toHaveAttribute("data-st", "st-done");
+    const box = (await row(page, "main").boundingBox())!;
+    await page.mouse.move(box.x + 6, box.y + box.height / 2);
+    const card = page.locator(".cc-row-card");
+    await expect(card).toBeVisible();
+    const rows = card.locator(".hc-subrow");
+    await expect(rows).toHaveCount(2);
+    // Queued sits above finished.
+    await expect(rows.nth(0)).toContainText("Footer links");
+    await expect(rows.nth(0)).toContainText("waiting for Header");
+    await expect(rows.nth(0)).toHaveClass(/is-queued/);
+    await expect(rows.nth(1)).toContainText("finished");
+    const colours = await rows.evaluateAll((els) => els.map((el) => getComputedStyle(el.querySelector(".hc-dot")!).backgroundColor));
+    const probe = await page.evaluate(() => {
+      const paint = (v: string) => { const d = document.createElement("i"); d.style.background = `var(${v})`; document.body.appendChild(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c; };
+      return { yellow: paint("--st-working"), green: paint("--st-done") };
+    });
+    expect(colours).toEqual([probe.yellow, probe.green]);
+    await capture(page.locator("body"), "main-chats-hover-card-queued");
+  });
+
   test("the main chat's own question shows as a This chat row, and a chat with no subs keeps the plain card", async ({ page }) => {
     await mount(page, DESKTOP, ALL);
     await fireEvent(page, "question-requested", [ownPrompt("main", 2)]);

@@ -165,6 +165,18 @@ impl Registry {
         }
     }
 
+    /// Marks a sub the daemon holds without a child, with the words its row shows
+    /// ("waiting for header"); `None` clears it. Returns whether anything changed.
+    pub fn set_waiting_for(&self, session_id: &str, waiting_for: Option<String>) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(i) = guard.get_mut(session_id) else { return false };
+        if i.progress.waiting_for == waiting_for {
+            return false;
+        }
+        i.progress.waiting_for = waiting_for;
+        true
+    }
+
     /// Record that this session took over from `predecessor` (the `respawn`
     /// MCP tool). Write-once at spawn time; nothing ever clears it, so the
     /// link survives the predecessor being marked ended a moment later.

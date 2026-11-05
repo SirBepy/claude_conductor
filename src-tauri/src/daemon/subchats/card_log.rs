@@ -166,13 +166,20 @@ pub(super) fn sub_facts(
         (None, Some(spawn)) => (Some(spawn.clone()), facts::SINCE_SPAWN),
         (None, None) => (None, facts::SINCE_SPAWN),
     };
+    // A gate sub's push is measured against the upstream it started from; any
+    // other sub keeps the commit-based reading of "pushed".
+    let gate = brief
+        .as_ref()
+        .filter(|b| b.gate)
+        .map(|b| facts::GateBase { upstream_before: b.upstream_at_spawn.as_deref() });
     facts::compute(&facts::Inputs {
         cwd: &inst.cwd,
         transcript,
         base: base.as_deref(),
         since,
         reviewer_tool_use_id,
-        review_required: brief.map_or(true, |b| b.review),
+        review_required: brief.as_ref().map_or(true, |b| b.review),
+        gate,
     })
 }
 
@@ -549,6 +556,50 @@ mod tests {
         assert_eq!(frame["method"], NOTIFY);
         assert_eq!(frame["params"]["session_id"], main.as_str());
         assert_eq!(frame["params"]["card"]["sub_name"], "header");
+    }
+
+    /// A repo tracking a bare remote, with a gate sub and a plain sub of the same main chat.
+    fn gate_world(tag: &str) -> (tempfile::TempDir, std::path::PathBuf, tempfile::TempDir, Arc<DaemonState>, String, String) {
+        let (dir, repo) = init();
+        let remote = tempfile::tempdir().unwrap();
+        run(remote.path(), &["init", "-q", "--bare"]);
+        run(&repo, &["remote", "add", "origin", &remote.path().to_string_lossy()]);
+        run(&repo, &["push", "-q", "-u", "origin", "HEAD:refs/heads/main"]);
+        std::fs::write(repo.join("w.txt"), "unpushed\n").unwrap();
+        run(&repo, &["add", "w.txt"]);
+        run(&repo, &["commit", "-q", "-m", "w"]);
+        let st = state();
+        let (main, subs) = world(&st, tag, &repo, &["gate", "plain"]);
+        let mut gate = crate::daemon::subchats::brief::gate_brief(Some("push"), &main).unwrap();
+        gate.upstream_at_spawn = crate::daemon::subchats::git::upstream(&repo);
+        gate.git_head_at_spawn = crate::daemon::subchats::git::head(&repo);
+        crate::sessions::chat_config::set_subchat(&subs[0], Some(gate));
+        crate::daemon::subchats::store_sub_brief(&subs[1], &main);
+        let mut plain = crate::sessions::chat_config::get(&subs[1]).unwrap().subchat.unwrap();
+        plain.git_head_at_spawn = crate::daemon::subchats::git::head(&repo);
+        crate::sessions::chat_config::set_subchat(&subs[1], Some(plain));
+        (dir, repo, remote, st, subs[0].clone(), subs[1].clone())
+    }
+
+    fn finish_facts(st: &Arc<DaemonState>, sub: &str) -> Facts {
+        let root = tempfile::tempdir().unwrap();
+        record(root.path(), sub, 1, "Pushed");
+        st.registry.set_subchat_finished(sub, true);
+        let drawn = draw_finish_at(root.path(), st, sub, None);
+        drawn.into_iter().find(|e| e.kind == KIND_FINISH).expect("finish card").facts.expect("facts")
+    }
+
+    #[test]
+    fn a_gate_finish_card_says_pushed_from_git_and_a_plain_sub_beside_it_does_not() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (_dir, repo, _remote, st, gate, plain) = gate_world("gp");
+        // The gate ended without pushing: the upstream is where it started.
+        assert_eq!(finish_facts(&st, &gate).pushed, Some(false));
+        run(&repo, &["push", "-q", "origin", "HEAD:refs/heads/main"]);
+        st.registry.set_subchat_finished(&gate, false);
+        assert_eq!(finish_facts(&st, &gate).pushed, Some(true), "the upstream moved and holds HEAD");
+        // The plain sub made no commit of its own since spawn, so it makes no push claim at all.
+        assert_eq!(finish_facts(&st, &plain).pushed, None);
     }
 
     #[test]

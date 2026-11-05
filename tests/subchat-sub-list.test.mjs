@@ -34,6 +34,23 @@ describe("sub list rows", () => {
     expect(subRingSpec({ id: "x", name: "x", kind: "working", progress: "" }, sub("x"))).toMatchObject({ kind: "solid", tone: "working", glow: true });
   });
 
+  it("draws a queued sub as a plain working-yellow ring with no glow, no arc and no move button", () => {
+    const held = sub("Footer", { busy: false, progress: { plan: null, state_since: null, waiting_for: "waiting for Header" } });
+    const spec = subRingSpec({ id: "Footer", name: "Footer", kind: "queued", progress: "waiting for Header" }, held);
+    expect(spec).toEqual({ kind: "solid", tone: "working" });
+    const all = [main, held];
+    const html = subListHtml(mainChatInfo(main, all).subs, all);
+    expect(html).toContain('data-kind="queued"');
+    expect(html).toContain("waiting for Header");
+    expect(html.indexOf("Running")).toBeGreaterThanOrEqual(0);
+    expect(html).not.toContain("data-move");
+  });
+
+  it("says in the in-place header that a sub is waiting, and for what", () => {
+    const held = sub("a", { busy: false, progress: { plan: null, state_since: null, waiting_for: "waiting for Header" } });
+    expect(subMetaText(held, main)).toBe("Subchat of CV redesign, waiting for Header");
+  });
+
   it("groups running above finished and escapes the name", () => {
     const all = [main, sub("<b>Footer</b>"), sub("Header", { subchat_finished: true, busy: false })];
     const html = subListHtml(mainChatInfo(main, all).subs, all);

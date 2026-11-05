@@ -4,8 +4,10 @@ import { questionProgressFor } from "./question-progress";
 import { sessionSubtitle } from "./sessions-helpers";
 import { planProgress } from "./sidebar-ring";
 
-/** Red asks for Joe, yellow is working, green is finished or closing. */
-export type SubKind = "asking" | "working" | "finished";
+/** Red asks for Joe, yellow is working, green is finished or closing. Queued is
+ *  also yellow, but it has not started: the daemon holds it behind another sub
+ *  (`after`) and says so in `progress.waiting_for`. */
+export type SubKind = "asking" | "working" | "queued" | "finished";
 
 export interface SubStatus {
   id: string;
@@ -29,7 +31,7 @@ export interface MainChatInfo {
   allFinished: boolean;
 }
 
-const KIND_ORDER: Record<SubKind, number> = { asking: 0, working: 1, finished: 2 };
+const KIND_ORDER: Record<SubKind, number> = { asking: 0, working: 1, queued: 2, finished: 3 };
 
 /** Ids with a card waiting in `mainId`'s window: the parked slots (a sub's card
  *  is parked under the sub's own id, shown in its main chat), plus the registry's
@@ -53,6 +55,7 @@ function progressText(s: Instance, kind: SubKind): string {
   }
   if (s.closing) return "closing";
   if (kind === "finished") return "finished";
+  if (kind === "queued") return s.progress?.waiting_for ?? "queued";
   // A paused sub is neither working nor stuck, and "working" would be false.
   if (s.frozen) return "paused";
   if (s.rate_limited_resets_at != null && Number(s.rate_limited_resets_at) * 1000 > Date.now()) return "rate limited";
@@ -67,7 +70,13 @@ export function mainChatInfo(main: Instance, sessions: readonly Instance[]): Mai
   const subInstances = sessions.filter((s) => s.subchat_of === main.session_id);
   const asking = askingIds(main, subInstances);
   const subs: SubStatus[] = subInstances.map((s) => {
-    const kind: SubKind = asking.has(s.session_id) ? "asking" : s.subchat_finished || s.closing ? "finished" : "working";
+    const kind: SubKind = asking.has(s.session_id)
+      ? "asking"
+      : s.subchat_finished || s.closing
+        ? "finished"
+        : s.progress?.waiting_for
+          ? "queued"
+          : "working";
     return { id: s.session_id, name: sessionSubtitle(s), kind, progress: progressText(s, kind) };
   }).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 

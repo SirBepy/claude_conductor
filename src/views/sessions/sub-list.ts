@@ -31,6 +31,8 @@ export function subInitials(name: string): string {
 export function subRingSpec(sub: SubStatus, inst: Instance | undefined): RingSpec {
   if (sub.kind === "asking") return { kind: "solid", tone: "question", pulse: true };
   if (sub.kind === "finished") return { kind: "solid", tone: inst?.closing ? "closing" : "done" };
+  // Queued is yellow like working, but it has not started: no glow, no arc.
+  if (sub.kind === "queued") return { kind: "solid", tone: "working" };
   const plan = planProgress(inst?.progress?.plan);
   return plan ? { kind: "plan", done: plan.done, total: plan.total } : { kind: "solid", tone: "working", glow: true };
 }
@@ -40,7 +42,7 @@ function rowHtml(sub: SubStatus, inst: Instance | undefined): string {
   return `<div class="sub-row" role="button" tabindex="0" data-sub-id="${escapeHtml(sub.id)}" data-kind="${sub.kind}" title="Read ${name}">
     <span class="sub-dot">${escapeHtml(subInitials(sub.name))}${ringHtml(subRingSpec(sub, inst))}</span>
     <span class="sub-text"><span class="sub-name">${name}</span><span class="sub-status">${escapeHtml(sub.progress)}</span></span>
-    <button type="button" class="sub-move" data-move title="Move to sidebar" aria-label="Move ${name} to the sidebar"><i class="ph ph-arrow-square-out"></i></button>
+    ${sub.kind === "queued" ? "" : `<button type="button" class="sub-move" data-move title="Move to sidebar" aria-label="Move ${name} to the sidebar"><i class="ph ph-arrow-square-out"></i></button>`}
   </div>`;
 }
 

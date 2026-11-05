@@ -54,6 +54,9 @@ pub fn status_word(i: &Instance) -> &'static str {
         "ended"
     } else if i.subchat_finished {
         "finished"
+    } else if i.progress.waiting_for.is_some() {
+        // Registered but not started: waiting for another sub (or the writer slot).
+        "queued"
     } else if i.awaiting.as_deref() == Some("question") {
         "asking"
     } else if i.busy {
@@ -164,6 +167,9 @@ pub fn facts_line(f: &Facts) -> String {
 
 /// "step 3 of 6" from the sub's declared plan, else its status word.
 fn progress(i: &Instance) -> String {
+    if let Some(waiting) = i.progress.waiting_for.as_deref().filter(|_| status_word(i) == "queued") {
+        return waiting.to_string();
+    }
     let Some(plan) = i.progress.plan.as_ref().filter(|p| !p.is_empty()) else { return status_word(i).to_string() };
     let done = plan.iter().filter(|s| s.status == "done" || s.status == "skipped").count();
     if done >= plan.len() {
@@ -814,6 +820,30 @@ mod tests {
         assert_eq!(v["ok"], json!(false));
         assert!(v["error"].as_str().unwrap().contains("ended"));
         assert!(sent.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_queued_sub_is_listed_as_queued_with_what_it_waits_for_and_refuses_a_message() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-queued");
+        sub(&st, &main, "tool-queued-t", "Header", "do the header");
+        sub(&st, &main, "tool-queued-a", "Footer", "do the footer");
+        st.registry.set_waiting_for("tool-queued-a", Some("waiting for Header".into()));
+        let v = call(&st, &main, json!({"action": "list"}), &sent).await;
+        let rows = v["subs"].as_array().unwrap();
+        let footer = rows.iter().find(|r| r["name"] == "Footer").unwrap();
+        assert_eq!(footer["status"], "queued");
+        assert_eq!(rows.iter().find(|r| r["name"] == "Header").unwrap()["status"], "idle", "the one it waits for is not queued");
+        let s = call(&st, &main, json!({"action": "status", "sub": "Footer"}), &sent).await;
+        assert_eq!(s["status"], "queued");
+        assert_eq!(s["progress"], "waiting for Header");
+
+        // A message cannot reach a sub that has not started: say so instead of failing oddly.
+        joe_message::note_sent(&main, "hello", false, None);
+        let held = |id: String, _text: String| std::future::ready(Err(ContinueError::Held(id)));
+        let sent_to = run_with(&st, &main, &json!({"action": "send", "sub": "Footer"}), no_facts, held).await;
+        assert_eq!(sent_to["ok"], json!(false), "{sent_to}");
+        assert!(sent_to["error"].as_str().unwrap().contains("has not started yet"), "{sent_to}");
     }
 
     #[tokio::test]

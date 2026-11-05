@@ -32,6 +32,20 @@ pub fn head(cwd: &Path) -> Option<String> {
     (ok && !sha.is_empty()).then_some(sha)
 }
 
+/// The commit the current branch's upstream (`@{u}`, the remote-tracking ref a
+/// push moves) points at. `None` for a branch with no upstream or outside a repo.
+pub fn upstream(cwd: &Path) -> Option<String> {
+    let (ok, out) = run_git(cwd, &["rev-parse", "--verify", "--quiet", "@{u}"])?;
+    let sha = text(&out);
+    (ok && !sha.is_empty()).then_some(sha)
+}
+
+/// Whether `ancestor` is reachable from `descendant` (or equal to it).
+pub fn is_ancestor(cwd: &Path, ancestor: &str, descendant: &str) -> Option<bool> {
+    let (ok, _) = run_git(cwd, &["merge-base", "--is-ancestor", ancestor, descendant])?;
+    Some(ok)
+}
+
 /// Compare-key for a path: forward slashes, no `\\?\` prefix, no trailing
 /// slash, and lowercase on Windows where the filesystem ignores case. Applied
 /// to both sides of the comparison, so only agreement matters, not fidelity.

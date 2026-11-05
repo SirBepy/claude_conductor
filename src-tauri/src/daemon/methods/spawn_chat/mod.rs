@@ -37,6 +37,9 @@ pub use todo::register_todo_chat_rpc;
 pub(crate) const FALLBACK_MODEL: &str = "sonnet";
 pub(crate) const FALLBACK_EFFORT: &str = "medium";
 
+/// The name a gate sub gets when the caller names none.
+const GATE_DEFAULT_NAME: &str = "Gate";
+
 /// `caller_session_id` -> the `turn_gen` it last spawned in. A static rather
 /// than a `DaemonState` field: one guard does not earn a field threaded
 /// through every construction site, and the daemon is a single process.
@@ -140,8 +143,24 @@ pub(crate) async fn spawn_chat(
         None => resolve_model_effort(state, &target_cwd, model, effort, &inherited, respawn),
     };
     let account_id = Some(inherited.account_id.clone()).filter(|a| !a.is_empty());
+    // A gate is spawned with a name and a prompt only; a name is what its card,
+    // its list row and `after` find it by.
+    let name = name.or_else(|| sub.as_ref().filter(|p| p.brief.gate).map(|_| GATE_DEFAULT_NAME));
 
-    let params = StartSessionParams {
+    // A sub that must wait for another (`after`) gets its row and its recipe now
+    // and its child later, from `subchats::held`.
+    if let Some(plan) = sub.as_mut().filter(|p| p.hold.is_some()) {
+        let spec = crate::daemon::subchats::held::LaunchSpec {
+            cwd: target_cwd.clone(),
+            model: model.clone(),
+            effort: effort.clone(),
+            account_id: account_id.clone(),
+            first_message: plan.first_message.clone(),
+        };
+        return crate::daemon::subchats::held::register(state, caller_session_id, name, &inherited, spec, plan).await;
+    }
+
+    let mut params = StartSessionParams {
         cwd: target_cwd.clone(),
         model: model.clone(),
         effort: effort.clone(),
@@ -150,9 +169,25 @@ pub(crate) async fn spawn_chat(
         fork: false,
         new_session_id: None,
     };
-    let session = lifecycle::spawn_session_as(state, params, sub.as_ref().map(|p| p.parent.as_str()))
-        .await
-        .map_err(|e| e.to_string())?;
+    // A gate sub's prompt differs from an ordinary sub's, and the launch reads
+    // the role from the stored brief rather than from this call's arguments. The
+    // brief is therefore stored under an id chosen here, ahead of the spawn.
+    let pre_stored = sub.as_ref().filter(|p| p.brief.gate).map(|plan| {
+        let id = uuid::Uuid::new_v4().to_string();
+        crate::sessions::chat_config::set_subchat(&id, Some(plan.brief.clone()));
+        params.new_session_id = Some(id.clone());
+        id
+    });
+    let spawned = lifecycle::spawn_session_as(state, params, sub.as_ref().map(|p| p.parent.as_str())).await;
+    let session = match spawned {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(id) = &pre_stored {
+                crate::sessions::chat_config::set_subchat(id, None);
+            }
+            return Err(e.to_string());
+        }
+    };
     let sid = session.session_id.clone();
 
     let first_message = sub.as_ref().map(|p| p.first_message.clone()).unwrap_or_else(|| prompt.to_string());

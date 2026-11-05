@@ -165,8 +165,18 @@ pub(crate) async fn spawn_chat_or_forward(
         if plan.is_none() && prompt.trim().is_empty() {
             return json!({"ok": false, "error": PROMPT_REQUIRED});
         }
+        let queued_behind = plan.as_ref().and_then(|p| p.hold.as_ref()).map(|h| h.target_name.clone());
         return match spawn_chat(state, caller_session_id, cwd, prompt, model, effort, name, respawn, plan).await {
-            Ok(sid) => json!({"ok": true, "session_id": sid}),
+            Ok(sid) => match queued_behind {
+                // Said to the main agent so it does not wait on the sub or spawn it twice.
+                Some(target) => json!({
+                    "ok": true,
+                    "session_id": sid,
+                    "queued": true,
+                    "note": format!("Registered, not started: it starts by itself when {target} finishes, without waking you. If {target} ends blocked, Joe gets a card to start it anyway or drop it."),
+                }),
+                None => json!({"ok": true, "session_id": sid}),
+            },
             Err(e) => json!({"ok": false, "error": e}),
         };
     };
@@ -338,6 +348,58 @@ mod tests {
                 "respawn={respawn} machine={machine:?}"
             );
         }
+    }
+
+    fn gate_only() -> SubchatArgs {
+        SubchatArgs { gate: Some(true), ..Default::default() }
+    }
+
+    #[tokio::test]
+    async fn gate_true_is_refused_from_a_sub_and_from_a_chat_with_the_mode_off() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let dir = missing_dir();
+        caller_in(&state, "main", &dir);
+        caller_in(&state, "sub", &dir);
+        state.registry.set_subchat_of("sub", Some("main".into()));
+        crate::sessions::chat_config::set_subchats_on("main", true);
+        let r = spawn_as(&state, "sub", &dir, &gate_only(), false, None, Some("Gate"), "run the gate").await;
+        assert_eq!(r["error"].as_str().unwrap(), crate::daemon::subchats::spawn::DEPTH_REFUSAL, "{r:?}");
+
+        caller_in(&state, "off", &dir);
+        let r = spawn_as(&state, "off", &dir, &gate_only(), false, None, Some("Gate"), "run the gate").await;
+        assert_eq!(r["error"].as_str().unwrap(), crate::daemon::subchats::spawn::GATE_MODE_OFF, "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn a_gate_from_a_mode_on_chat_needs_only_a_prompt_and_leaves_no_brief_behind_when_the_spawn_fails() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let dir = missing_dir();
+        caller_in(&state, "main", &dir);
+        crate::sessions::chat_config::set_subchats_on("main", true);
+        let r = spawn_as(&state, "main", &dir, &gate_only(), false, None, Some("Gate: repo push"), "").await;
+        assert!(r["error"].as_str().unwrap().contains("gate: true needs a prompt"), "{r:?}");
+        let r = spawn_as(&state, "main", &dir, &gate_only(), false, None, Some("Gate: repo push"), "Joe: push it.\n\n/close").await;
+        let err = r["error"].as_str().unwrap();
+        assert!(err.contains("cwd does not exist"), "a prompt alone got it past every guard to the spawn: {err}");
+        assert!(
+            crate::sessions::chat_config::sub_session_ids().is_empty(),
+            "the brief stored ahead of the spawn is removed when the spawn fails"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_mode_on_chat_following_the_old_gate_skill_is_told_to_pass_gate_true() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let dir = missing_dir();
+        caller_in(&state, "main", &dir);
+        crate::sessions::chat_config::set_subchats_on("main", true);
+        // /gate-chat step 2 as it is today: a name and a long prompt, no brief fields.
+        let r = spawn_as(&state, "main", &dir, &SubchatArgs::default(), false, None, Some("Gate: repo push"), "Joe: push it.\n\n/close").await;
+        let err = r["error"].as_str().unwrap();
+        assert!(err.contains("gate: true"), "the error tells the main chat the one thing to change: {err}");
     }
 
     #[tokio::test]
