@@ -102,6 +102,28 @@ pub fn enqueue_notice(state: &Arc<DaemonState>, target_session_id: &str, notice:
     pending.push_back(QueuedLine { author_session_id: String::new(), text: notice, code_built: true });
 }
 
+/// Moves the daemon-built notices queued for `from` (a finished sub's
+/// `report_back` wake) to `to`, for a `respawn`: the predecessor ends at its
+/// turn end and would never drain them. Peer lines stay behind, as they always
+/// have on a respawn. Returns how many moved; the caller starts the drain.
+pub fn move_notices(state: &Arc<DaemonState>, from: &str, to: &str) -> usize {
+    let mut queues = state.repo_channel_wakes.lock().unwrap();
+    let Some(old) = queues.get_mut(from) else { return 0 };
+    let (notices, peers): (VecDeque<QueuedLine>, VecDeque<QueuedLine>) = std::mem::take(old).into_iter().partition(|l| l.code_built);
+    *old = peers;
+    let n = notices.len();
+    if n > 0 {
+        let pending = queues.entry(to.to_string()).or_default();
+        for line in notices {
+            if pending.len() >= MAX_QUEUED_LINES {
+                pending.pop_front();
+            }
+            pending.push_back(line);
+        }
+    }
+    n
+}
+
 /// Wake body written to the target's stdin: a count and the sender's session
 /// id, ZERO bytes of the peer's message text - the `UserPromptSubmit`
 /// injection boundary (todo 743). The recipient calls `read_messages` (a

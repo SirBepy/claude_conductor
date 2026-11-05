@@ -231,8 +231,12 @@ pub(crate) async fn complete(state: &Arc<DaemonState>, parent: &str) {
 /// A sub left its main chat (moved to the sidebar, by Joe or because the chat is
 /// gone). If the chat is waiting on its last running sub, it closes now. Called
 /// from `reply::move_to_sidebar` with the parent the sub had before the move.
-pub async fn after_leaving(state: &Arc<DaemonState>, parent: &str) {
-    complete_if_settled(state, parent).await;
+pub fn after_leaving(state: &Arc<DaemonState>, parent: &str) {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let (state, parent) = (state.clone(), parent.to_string());
+        // Detached: this is reached from `settle_family`, which `complete` awaits.
+        handle.spawn(async move { complete_if_settled(&state, &parent).await });
+    }
 }
 
 /// Settles every sub of `parent`, which is closing or gone. Re-runnable, so the
@@ -291,45 +295,18 @@ pub async fn move_family(state: &Arc<DaemonState>, old: &str, new: &str) {
     }
     super::decisions::move_log(old, new);
     super::card_log::move_log(old, new);
-    if let Ok(root) = crate::settings::paths::data_dir() {
-        move_pending_in(&root, old, new);
+    // The one line back and its per-sub marks, then what else is keyed by the old
+    // chat in memory: a `report_back` wake the predecessor would never drain, and
+    // the message of Joe's it had on hand.
+    super::back::move_queue(old, new);
+    if crate::daemon::repo_channel_wake::move_notices(state, old, new) > 0 {
+        crate::daemon::repo_channel_wake::spawn_drain(state, new);
     }
+    super::joe_message::forget(old);
     cards::retarget_daemon_cards(state, old, new).await;
     if !subs.is_empty() {
         crate::daemon::machines::publish_instances_changed(state);
         crate::sessions::persistence::save_snapshot_default(&state.registry);
-    }
-}
-
-fn pending_path(root: &std::path::Path, parent: &str) -> std::path::PathBuf {
-    root.join("subchats").join(format!("{}.pending.jsonl", super::decisions::file_stem(parent)))
-}
-
-/// Moves the one-line-back queue. The file does not exist until a sub finishes
-/// with Joe away, so a missing one is the common case. Lines are appended to a
-/// queue the destination already has instead of replacing it, and the old file
-/// goes only after that, so a stopped move can be run again.
-pub(crate) fn move_pending_in(root: &std::path::Path, old: &str, new: &str) {
-    if old == new {
-        return;
-    }
-    let (from, to) = (pending_path(root, old), pending_path(root, new));
-    let Ok(lines) = std::fs::read_to_string(&from) else { return };
-    if !lines.trim().is_empty() {
-        use std::io::Write;
-        let appended = std::fs::OpenOptions::new().create(true).append(true).open(&to).and_then(|mut f| {
-            for line in lines.lines().filter(|l| !l.trim().is_empty()) {
-                writeln!(f, "{line}")?;
-            }
-            Ok(())
-        });
-        if let Err(e) = appended {
-            log::warn!("subchats: could not move {old}'s pending line to {new}: {e}");
-            return;
-        }
-    }
-    if let Err(e) = std::fs::remove_file(&from) {
-        log::warn!("subchats: moved {old}'s pending line but could not remove the old file: {e}");
     }
 }
 
@@ -683,7 +660,13 @@ mod tests {
             .unwrap()
         };
         std::fs::write(dir.join(format!("{main}.cards.jsonl")), format!("{}\n{}\n", entry("c1"), entry("c2"))).unwrap();
-        std::fs::write(dir.join(format!("{main}.pending.jsonl")), "{\"line\":\"one\"}\n").unwrap();
+        let entry_line = r#"{"t":"entry","sub_id":"s1","round":1,"name":"header","verdict":"Done","summary":"did it","answers":[]}"#;
+        let mark_line = r#"{"t":"mark","sub_id":"s1","card_id":4}"#;
+        std::fs::write(dir.join(format!("{main}.pending.jsonl")), format!("{entry_line}\n{mark_line}\n")).unwrap();
+        // A `report_back` wake the predecessor never got to drain, a peer's line, and Joe's last message.
+        crate::daemon::repo_channel_wake::enqueue_notice(&st, &main, "Sub header has finished".to_string());
+        crate::daemon::repo_channel_wake::enqueue(&st, &main, "peer-1", "peer line".to_string());
+        crate::daemon::subchats::joe_message::note_sent(&main, "fix the footer", false, None);
         std::fs::write(crate::daemon::subchats::decisions::log_path(&main), "# decisions\n").unwrap();
         successor(&st, &main, "cl-move-next");
 
@@ -699,8 +682,19 @@ mod tests {
         assert_eq!(cards.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["c1", "c2"]);
         assert!(cards.iter().all(|c| c.parent_id == "cl-move-next"), "each entry's parent_id is rewritten");
         assert!(crate::daemon::subchats::card_log::read(&main).is_empty());
-        assert_eq!(std::fs::read_to_string(dir.join("cl-move-next.pending.jsonl")).unwrap(), "{\"line\":\"one\"}\n");
+        let served = crate::daemon::subchats::back::peek_in(&root, "cl-move-next").expect("the waiting line follows the chat");
+        assert!(served.text.contains("header"), "{}", served.text);
+        let moved = std::fs::read_to_string(dir.join("cl-move-next.pending.jsonl")).unwrap();
+        assert!(moved.contains("\"t\":\"mark\"") && moved.contains("\"card_id\":4"), "the per-sub mark moves too: {moved}");
         assert!(!dir.join(format!("{main}.pending.jsonl")).exists());
+        {
+            let queues = st.repo_channel_wakes.lock().unwrap();
+            let next: Vec<&str> =
+                queues.get("cl-move-next").map(|q| q.iter().map(|l| l.text.as_str()).collect()).unwrap_or_default();
+            assert_eq!(next, ["Sub header has finished"], "the report_back notice moves");
+            assert_eq!(queues.get(&main).map(|q| q.len()), Some(1), "the peer's line stays behind, as on any respawn");
+        }
+        assert_eq!(crate::daemon::subchats::joe_message::latest(&main), None, "an old turn's message is not carried");
         assert_eq!(crate::daemon::subchats::decisions::read_log("cl-move-next").as_deref(), Some("# decisions\n"));
         assert!(crate::sessions::chat_config::get("cl-move-next").unwrap().subchats_on, "it stays a main chat");
     }

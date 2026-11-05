@@ -262,6 +262,11 @@ async fn adopt_spawned(
         }
         return Err(e);
     }
+    if respawn {
+        // The handoff text the predecessor wrote is not a message Joe typed, and
+        // the send above recorded it as one for `subchat send` to copy to a sub.
+        crate::daemon::subchats::joe_message::forget(sid);
+    }
     state.registry.set_awaiting(sid, None);
     state.registry.set_busy(sid, true);
     crate::sessions::chat_state::set_busy(sid, true);
