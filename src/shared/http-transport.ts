@@ -197,6 +197,13 @@ export class HttpTransport implements Transport {
       // never sends a path, only a bare name (daemon/methods/create_project.rs).
       case "create_project_folder":
         return this.rpc<T>("create_project_folder", { name: args.name });
+      // "Add a project from GitHub": the daemon runs gh and clones into the
+      // projects root itself, so the phone sends a search string / repo name,
+      // never a path (daemon/methods/github_repos.rs).
+      case "github_search_repos":
+        return this.rpc<T>("github_search_repos", { query: args.query, scope: args.scope });
+      case "github_clone_repo":
+        return this.rpc<T>("github_clone_repo", { full_name: args.fullName, account: args.account ?? "" });
       // Worktree picker (ai_todo 434): mirrors the desktop `ipc::worktrees`
       // Tauri commands so the phone picker isn't silently empty/dead.
       case "list_worktree_details":

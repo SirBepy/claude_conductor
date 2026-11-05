@@ -25,6 +25,7 @@ import {
   joinProjectPath,
   isValidProjectName,
 } from "../projects-root";
+import { type GithubFlow, isSearchableTerm, renderGithubRow, renderGithubPanel } from "./github-add";
 
 export type AddProjectResult = { path: string; name: string; machineId?: string | null } | null;
 
@@ -35,6 +36,8 @@ export type AddProjectResult = { path: string; name: string; machineId?: string 
  *  threading a setter through. */
 export interface AddProjectState {
   projectsRootStored: string | null;
+  /** The "Search GitHub" flow (github-add.ts), shared the same way. */
+  github: GithubFlow;
 }
 
 export interface AddProjectDeps {
@@ -118,13 +121,17 @@ export function renderNoMatches(filter: string, state: AddProjectState, deps: Ad
   if (deps.isMachineActive()) {
     return html`<li class="project-picker-empty">No matches</li>`;
   }
+  // A GitHub search already under way owns the whole list area; the three
+  // actions come back when the dev steps out of it.
+  if (state.github.mode !== "idle") return renderGithubPanel(typed, state, deps);
   const validName = isValidProjectName(typed);
+  const canSearchGithub = isSearchableTerm(typed);
   const noProjects = (deps.getLocalProjects() ?? []).length === 0;
   // The phone has no native folder-picker (pick_folder is Tauri-only), so
   // Browse never renders remotely, and Create needs a server-resolvable
   // root before it can do anything - with neither, an invalid/empty typed
   // term leaves nothing actionable to offer (todo 1058).
-  if (isRemote() && !validName) {
+  if (isRemote() && !validName && !canSearchGithub) {
     return html`<li class="project-picker-empty">${noProjects ? "No projects yet. Type a name to create one." : "No matches"}</li>`;
   }
   const root = projectsRoot(state, deps);
@@ -163,6 +170,7 @@ export function renderNoMatches(filter: string, state: AddProjectState, deps: Ad
           </span>
         </div>
       ` : ""}
+      ${canSearchGithub ? renderGithubRow(typed, state, deps) : ""}
       ${isRemote() ? "" : html`
         <button class="pp-act" @click=${() => void browseForProject(deps)}>
           <i class="ph ph-folder-open pp-lead"></i>

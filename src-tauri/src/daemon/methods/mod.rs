@@ -25,6 +25,8 @@ mod drain;
 // resolution + name validation, since the phone has no native folder-picker
 // dialog to point `create_folder` (files.rs's desktop-only Tauri command) at.
 mod create_project;
+// "Add a project from GitHub" in the new-chat picker: gh search + clone.
+mod github_repos;
 mod files;
 mod gaming_mode;
 /// Shared mechanism (short-id truncation, capped-list overflow line) behind
@@ -89,6 +91,7 @@ pub use drafts::register_drafts;
 pub use drafts_store::register_drafts_store;
 pub use drain::register_drain;
 pub use create_project::register_create_project;
+pub use github_repos::register_github_repos;
 pub use files::register_files;
 pub use gaming_mode::register_gaming_mode;
 pub use hidden_chats::register_hidden_chats;
