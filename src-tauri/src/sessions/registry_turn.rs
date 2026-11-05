@@ -75,6 +75,13 @@ impl Registry {
         self.close_requested.lock().unwrap().insert(session_id.to_string());
     }
 
+    /// Read the close-confirmed flag without consuming it, for the Stop hook's
+    /// early teardown: the pump still needs to see the flag at the result line
+    /// or EOF, or it would read the kill as a close that never confirmed.
+    pub fn peek_close_requested(&self, session_id: &str) -> bool {
+        self.close_requested.lock().unwrap().contains(session_id)
+    }
+
     /// Consume the close-confirmed flag: returns true once, then clears it, so
     /// a stale flag can never re-tear-down a resumed session on a later turn.
     pub fn take_close_requested(&self, session_id: &str) -> bool {

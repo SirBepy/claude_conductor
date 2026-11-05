@@ -197,6 +197,7 @@ pub(super) async fn on_stop(
                 crate::sessions::chat_state::set_busy(&session_id, false);
             }
         }
+        close_now_if_confirmed(&ctx.state, &session_id);
         // Title: durable transcript record, mirrors /close's manual rename.
         // Best-effort - a write failure must never block the turn.
         // Not for a sub: its name was given at spawn and a title it wrote would
@@ -262,6 +263,21 @@ pub(super) async fn on_stop(
     });
 
     (StatusCode::OK, Json(json!({"ok": true})))
+}
+
+/// Tears down a chat whose `close_session` call was confirmed, as soon as its
+/// turn is over. The pump would do it at the `result` line, but the CLI emits
+/// that only after every other Stop hook finishes, which has run 4 minutes
+/// behind this hook (2026-11-05): long enough for Joe to type again, and that
+/// message resumed the chat the daemon was about to kill. `mark_ended` clears
+/// the flag, so the pump's EOF handler tells this close from a failed one by
+/// the row already being ended (`close::ended_already`).
+fn close_now_if_confirmed(state: &Arc<crate::daemon::state::DaemonState>, session_id: &str) {
+    if !state.registry.peek_close_requested(session_id) {
+        return;
+    }
+    let Some(session) = state.sessions.get(session_id).map(|s| s.value().clone()) else { return };
+    crate::daemon::pump::close::finalize_close(state, &session);
 }
 
 /// The per-turn `report_turn_status` + `send_message` duty. A sub is excused:
@@ -482,6 +498,42 @@ mod tests {
         state.add_prompt("q1", "question-requested", json!({"session_id": "s", "seq": 1}), true).await;
         assert!(question_card_is_up(&state, "s", gen).await);
         assert!(!question_card_is_up(&state, "other", gen).await);
+    }
+
+    /// A confirmed close must not wait for the result line (which trailed the
+    /// Stop hook by 4 minutes on 2026-11-05): the Stop hook ends the row and
+    /// kills the child.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_confirmed_close_tears_the_chat_down_at_stop() {
+        use crate::daemon::session_test_support::spawn_fake_session;
+        let (state, _gen) = state_with_busy_turn("s");
+        let mut child = spawn_fake_session(&state.sessions, "s").await;
+        state.registry.set_close_requested("s");
+
+        close_now_if_confirmed(&state, "s");
+
+        let row = state.registry.get("s").unwrap();
+        assert!(row.end_reason.is_some(), "the row must end at Stop, not at the result line");
+        assert!(crate::daemon::pump::close::ended_already(&state.registry, "s"), "the pump tells this close from a failed one by it");
+        tokio::time::timeout(std::time::Duration::from_secs(5), child.wait())
+            .await
+            .expect("the child must be killed")
+            .unwrap();
+    }
+
+    /// No `close_session` call this turn: Stop leaves the chat alone.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_stop_without_a_confirmed_close_leaves_the_chat_running() {
+        use crate::daemon::session_test_support::spawn_fake_session;
+        let (state, _gen) = state_with_busy_turn("s");
+        let mut child = spawn_fake_session(&state.sessions, "s").await;
+
+        close_now_if_confirmed(&state, "s");
+
+        assert!(state.registry.get("s").unwrap().end_reason.is_none());
+        assert!(child.try_wait().unwrap().is_none(), "the child must still be running");
     }
 
     #[tokio::test]

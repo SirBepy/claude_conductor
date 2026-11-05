@@ -38,6 +38,13 @@ pub(crate) fn close_in_flight(
     armed_by_prompt || registry.get(session_id).is_some_and(|i| i.closing)
 }
 
+/// True when the row is already ended, which is how the pump knows the Stop
+/// hook tore a confirmed close down before the result line or EOF arrived:
+/// `mark_ended` clears `close_requested`, so the flag no longer says so.
+pub(crate) fn ended_already(registry: &crate::sessions::registry::Registry, session_id: &str) -> bool {
+    registry.get(session_id).is_some_and(|i| i.end_reason.is_some())
+}
+
 /// Registry `awaiting` value for a `/close` turn that ended without ever
 /// confirming via the `close_session` tool (todo 436): the model deviated
 /// mid-chain rather than the tool call erroring. Reuses `awaiting` (the
