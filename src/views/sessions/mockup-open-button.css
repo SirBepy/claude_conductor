@@ -1,4 +1,4 @@
-/* Same footprint as the sub header's "Move to sidebar" so the two sit as a pair. */
+/* Same height and padding as .sub-count-btn (sub-list.css) so the header's right-hand controls line up. */
 .mockup-open-btn {
   display: inline-flex;
   align-items: center;

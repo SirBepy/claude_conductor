@@ -1,8 +1,9 @@
 //! `POST /hooks/preview-render` + `GET /hooks/preview-render/:id`: serves the
 //! panel's pre-built HTML doc over a real local origin instead of a `data:`
 //! URL, so it gets its own CSP header instead of intersecting with the app
-//! shell's. Held in memory in a byte-budgeted least-recently-served store
-//! (`render_cache.rs`) - not `preview.rs`'s disk-persisted history.
+//! shell's. Served from a byte-budgeted in-memory least-recently-served store
+//! (`render_cache.rs`) first, then from `preview.rs`'s disk-persisted panel
+//! entries by id, which is what `POST /hooks/preview` answers with.
 
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
