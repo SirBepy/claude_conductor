@@ -261,6 +261,10 @@ pub async fn settle_family(state: &Arc<DaemonState>, parent: &str) {
     for sub in subs {
         if sub.subchat_finished {
             super::end_sub(state, &sub.session_id);
+        } else if super::held::is_held(&sub.session_id) {
+            // Queued behind another sub and never run: promoting it would leave an
+            // empty chat that cannot resume, so it is dropped with its parent.
+            super::held::drop_held(state, &sub.session_id);
         } else if let Err(e) = super::move_to_sidebar(state, &sub.session_id).await {
             log::warn!("subchats: could not move {} to the sidebar: {e}", sub.session_id);
         }
@@ -579,6 +583,36 @@ mod tests {
         let listed = crate::daemon::subchats::display_session_id(&st, &subs[0]);
         assert_eq!(listed, subs[0], "its question now shows on itself");
         assert!(heal_orphans(&st).await.is_empty(), "healed once");
+    }
+
+    #[tokio::test]
+    async fn a_crash_drops_a_sub_still_queued_behind_another_instead_of_promoting_a_chat_that_never_ran() {
+        let _data = TempDataDir::new();
+        let st = state();
+        let (main, subs) = family(&st, "cl-held", &[("run", false), ("queued", false)]);
+        crate::daemon::subchats::held::hold(
+            &st,
+            crate::daemon::subchats::held::Held {
+                sub_id: subs[1].clone(),
+                reason: "waiting for run".into(),
+                after: Some(subs[0].clone()),
+                after_name: "run".into(),
+                launch: crate::daemon::subchats::held::LaunchSpec {
+                    cwd: std::path::PathBuf::from("."),
+                    model: "sonnet".into(),
+                    effort: "high".into(),
+                    account_id: None,
+                    first_message: "go".into(),
+                },
+            },
+        )
+        .unwrap();
+        st.registry.mark_ended(&main, crate::types::EndReason::ProcessGone, "2026-11-05T00:00:00Z");
+        heal_orphans(&st).await;
+        let queued = st.registry.get(&subs[1]).unwrap();
+        assert!(queued.ended_at.is_some(), "dropped: it never ran, so there is nothing to keep");
+        assert!(!crate::daemon::subchats::held::is_held(&subs[1]), "and its recipe is gone");
+        assert!(st.registry.get(&subs[0]).unwrap().subchat_of.is_none(), "the running sub is promoted as before");
     }
 
     #[tokio::test]

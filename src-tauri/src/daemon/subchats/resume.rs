@@ -224,6 +224,9 @@ pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
         crate::daemon::machines::publish_instances_changed(state);
         // A main chat waiting for its last running sub may close now.
         super::closing::on_sub_settled(state, sub_id);
+        // Ended while queued (a close that took its subs too, "End it"): it will
+        // never start, so its recipe goes with it.
+        super::held::release(state, sub_id);
         // A sub waiting for this one is now waiting on something that ended blocked.
         super::held::on_target_done(state);
         // Its cards would otherwise keep showing, and answering one would send to
