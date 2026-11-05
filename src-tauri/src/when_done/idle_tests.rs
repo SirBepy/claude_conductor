@@ -253,3 +253,17 @@ fn the_same_status_on_a_sub_that_has_not_finished_still_holds_the_run() {
     running.local_task_running = true;
     assert!(!instance_is_idle(&running));
 }
+
+/// A card the daemon raised in the main chat (ceiling, stuck, close approval) puts
+/// that chat in `awaiting == "question"` and nothing else. Idle ignores that status,
+/// so a card nobody answered cannot hold the sleep forever. Not red before the
+/// change: it pins the property the daemon-card fix relies on.
+#[test]
+fn a_main_chat_waiting_on_a_card_it_did_not_ask_is_idle() {
+    let mut main = instance("main", false, false);
+    main.awaiting = Some("question".into());
+    assert!(instance_is_idle(&main));
+    let mut done = sub("done", false);
+    done.subchat_finished = true;
+    assert!(all_sessions_idle(&[main, done]));
+}

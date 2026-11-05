@@ -522,6 +522,40 @@ mod tests {
         assert!(until(|| subs.iter().all(|s| st.registry.get(s).unwrap().ended_at.is_some())).await);
     }
 
+    /// Joe picked "Wait for them", then the last running sub ends by a path that
+    /// never calls into subchats: the SessionEnd hook, the `end_session` handler
+    /// and the `mark_session_ended` handler all call `mark_ended` directly. The
+    /// parent must still close.
+    #[tokio::test]
+    async fn a_waiting_parent_closes_when_its_last_sub_ends_by_any_path() {
+        let _data = TempDataDir::new();
+        for (i, reason) in [
+            crate::types::EndReason::HookSessionEnd,
+            crate::types::EndReason::Manual,
+            crate::types::EndReason::ProcessGone,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let st = state();
+            let (main, subs) = family(&st, &format!("cl-any-{i}"), &[("a", false), ("b", false)]);
+            assert!(request_close(&st, &main));
+            let id = card_id(&st, KIND).await.unwrap();
+            answer(&st, &id, WAIT_FOR_THEM).await;
+            assert!(until(|| is_waiting(&main)).await);
+
+            st.registry.mark_ended(&subs[0], reason.clone(), "2026-11-05T00:00:00Z");
+            tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+            assert!(st.registry.get(&main).unwrap().ended_at.is_none(), "one sub is still running");
+
+            st.registry.mark_ended(&subs[1], reason, "2026-11-05T00:00:00Z");
+            assert!(
+                until(|| st.registry.get(&main).unwrap().ended_at.is_some()).await,
+                "the parent stayed Closing forever after its last sub ended ({i})"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn a_pending_wait_can_be_asked_again() {
         let st = state();

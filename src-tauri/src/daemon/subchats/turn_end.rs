@@ -12,12 +12,12 @@ use std::sync::Arc;
 
 /// Called once per `result` line for every session; does nothing unless the
 /// session is a sub. `turn_gen` is the gen the pump was handed for this turn.
-pub fn on_turn_end(state: &Arc<DaemonState>, session: &Arc<Session>, turn_gen: u64) {
-    turn_end_for(state, &session.session_id, Some(session), turn_gen);
+pub async fn on_turn_end(state: &Arc<DaemonState>, session: &Arc<Session>, turn_gen: u64) {
+    turn_end_for(state, &session.session_id, Some(session), turn_gen).await;
 }
 
 /// [`on_turn_end`] with the live child optional, so tests can drive it without one.
-pub(crate) fn turn_end_for(state: &Arc<DaemonState>, sub_id: &str, session: Option<&Arc<Session>>, turn_gen: u64) {
+pub(crate) async fn turn_end_for(state: &Arc<DaemonState>, sub_id: &str, session: Option<&Arc<Session>>, turn_gen: u64) {
     if !state.registry.get(sub_id).is_some_and(|i| super::is_sub(&i)) {
         return;
     }
@@ -27,16 +27,33 @@ pub(crate) fn turn_end_for(state: &Arc<DaemonState>, sub_id: &str, session: Opti
     if runtime().finish_pending(sub_id) {
         // Commits, or drops the request if background work started since. A
         // committed finish has stopped the process, so there is nothing to nudge.
-        if finish::commit_finish(state, sub_id, session) {
+        // The commit reads the whole transcript and runs `git status`, so it goes
+        // to the blocking pool: on this thread it would stall every other task the
+        // runtime schedules here. The caller still waits for it, which keeps the
+        // order the pump relies on (the row is finished before its snapshot is saved).
+        let (state, id, session) = (state.clone(), sub_id.to_string(), session.cloned());
+        let committed = tokio::task::spawn_blocking(move || finish::commit_finish(&state, &id, session.as_ref()))
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("subchats: the finish commit panicked: {e}");
+                false
+            });
+        if committed {
             return;
         }
     }
+    spawn_nudge_if_due(state, sub_id);
+}
+
+/// Starts the daemon's one nudge when one is due. A plain `fn`, not part of
+/// [`turn_end_for`]'s future: the nudge can respawn the child, whose future leads
+/// back to the pump that awaits `turn_end_for`, and an `async` body holding that
+/// spawn makes the pump's future self-referential (`jarvis_wake::spawn_drain`
+/// documents the cycle). Detached for the same reason.
+fn spawn_nudge_if_due(state: &Arc<DaemonState>, sub_id: &str) {
     if runtime().take_nudge_due(sub_id) {
         let text = runtime().take_nudge_text(sub_id).unwrap_or(resume::NUDGE_TEXT);
         let (state, sub) = (state.clone(), sub_id.to_string());
-        // Detached, like `repo_channel_wake::spawn_drain`: the nudge can respawn
-        // the child, and awaiting that inside the pump task is the future-size
-        // cycle that function documents.
         tokio::spawn(async move {
             fire_due_nudge(&state, &sub, text).await;
         });
@@ -196,30 +213,44 @@ mod tests {
         (st, sub)
     }
 
-    #[test]
-    fn a_pending_finish_commits_at_turn_end_and_the_row_stays() {
+    #[tokio::test]
+    async fn a_pending_finish_commits_at_turn_end_and_the_row_stays() {
         let (st, sub) = state_with_sub("te-commit");
         runtime().set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
-        turn_end_for(&st, &sub, None, 3);
+        turn_end_for(&st, &sub, None, 3).await;
         let row = st.registry.get(&sub).unwrap();
         assert!(row.subchat_finished && row.ended_at.is_none());
         assert_eq!(runtime().last_ended_gen(&sub), Some(3));
     }
 
-    #[test]
-    fn a_finish_dropped_for_background_work_leaves_the_sub_running() {
+    /// The commit reads the whole transcript and runs `git status`. It runs inside
+    /// the pump's result handler, and on a runtime worker that would stall every
+    /// other task scheduled there, so it belongs on the blocking pool.
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_finish_commit_runs_off_the_pump_thread_and_the_turn_end_still_waits_for_it() {
+        let (st, sub) = state_with_sub("te-offthread");
+        runtime().set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
+        let pump_thread = std::thread::current().id();
+        turn_end_for(&st, &sub, None, 3).await;
+        assert_ne!(finish::commit_seam::thread_of(&sub), Some(pump_thread), "the commit blocked the pump's thread");
+        // Same guarantee as inline: when the turn end returns, the finish is done.
+        assert!(st.registry.get(&sub).unwrap().subchat_finished);
+    }
+
+    #[tokio::test]
+    async fn a_finish_dropped_for_background_work_leaves_the_sub_running() {
         let (st, sub) = state_with_sub("te-bg");
         runtime().set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
         st.registry.set_turn_activity(&sub, TurnActivity::Working);
-        turn_end_for(&st, &sub, None, 1);
+        turn_end_for(&st, &sub, None, 1).await;
         assert!(!st.registry.get(&sub).unwrap().subchat_finished);
     }
 
-    #[test]
-    fn a_normal_chat_turn_end_touches_nothing() {
+    #[tokio::test]
+    async fn a_normal_chat_turn_end_touches_nothing() {
         let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         st.registry.upsert_interactive("plain", std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
-        turn_end_for(&st, "plain", None, 4);
+        turn_end_for(&st, "plain", None, 4).await;
         assert_eq!(runtime().last_ended_gen("plain"), None, "no bookkeeping is created for a chat that is not a sub");
     }
 
@@ -303,7 +334,7 @@ mod tests {
         let (st, sub) = state_with_sub("te-nudge");
         runtime().set_stage(&sub, SubStage::Nudged);
         runtime().set_nudge_due(&sub);
-        turn_end_for(&st, &sub, None, 2);
+        turn_end_for(&st, &sub, None, 2).await;
         assert!(!runtime().take_nudge_due(&sub), "the flag is consumed so the nudge goes out once");
     }
 }

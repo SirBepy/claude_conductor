@@ -128,6 +128,27 @@ for (const vp of [{ name: "desktop", width: 900 }, { name: "phone", width: 390 }
       await capture(chat(page), `subcards-unknown-${vp.name}`);
     });
 
+    test("a figure the daemon could not attribute says why, in words, never a green zero", async ({ page }) => {
+      const commitsNote = "it edited no files with the Edit or Write tools, so another chat's commits in this tree cannot be told apart from its own";
+      const dirtyNote = "this sub only used the shell, so its files can't be tracked";
+      const shellOnly = card("c6", T0 + 50 * MIN, { facts: facts({
+        commits: null, files_changed: null, uncommitted: null, scoped: false, commits_note: commitsNote, uncommitted_note: dirtyNote,
+        test: { state: "unknown", command: "cargo test --lib 2>&1 | tail -5" },
+      }) });
+      await mountChat(page, vp.width, page1, [shellOnly]);
+      const facts_ = chat(page).locator(".mc-root[data-sub-card] .mc-full .mc-facts");
+      // The uncommitted chip is the "?" in the third place, not a green 0.
+      const chips = await facts_.locator(".mc-chip").allTextContents();
+      expect(chips.map((c) => c.trim()).slice(0, 3)).toEqual(["?", "?", "?"]);
+      await facts_.locator("summary").click();
+      const words = facts_.locator(".mc-facts-list");
+      await expect(words).toContainText(`Commits: unknown, ${commitsNote}`);
+      await expect(words).toContainText(`Uncommitted files: unknown, ${dirtyNote}`);
+      await expect(words).toContainText("result unknown, its output showed no pass or fail line");
+      await expectNoOverflow(page);
+      await capture(chat(page), `subcards-unattributed-${vp.name}`);
+    });
+
     test("cards stay in time order with the main chat's messages after a reload", async ({ page }) => {
       const cards = [card("c1", T0 + 20 * MIN, { text: "Between" }), card("c2", T0 + 50 * MIN, { text: "After everything" })];
       await mountChat(page, vp.width, page1, cards);

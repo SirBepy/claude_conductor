@@ -27,6 +27,7 @@ pub mod closing;
 pub mod decisions;
 pub mod facts;
 pub mod finish;
+pub mod followup;
 pub(crate) mod git;
 pub mod held;
 mod reply;
@@ -54,6 +55,15 @@ mod routing;
 pub use routing::{
     display_session_id, is_sub_session, stamp_prompt_routing, sub_task, UNCONFIRMED_NOTE,
 };
+
+/// Whether `session_id` is a sub whose name is fixed. The name the main agent gave
+/// at spawn is how `subchat send` finds the sub and what the decisions log, the one
+/// line back and the cards call it, so no title from the sub's own transcript (a
+/// `/close` rename, its AI title, its first prompt) may replace it. A title the sub
+/// writes also reaches the main chat's wake text through that name.
+pub fn name_is_fixed(registry: &crate::sessions::registry::Registry, session_id: &str) -> bool {
+    registry.get(session_id).is_some_and(|i| is_sub(&i))
+}
 
 /// Whether `inst` is a hidden sub of some main chat.
 pub fn is_sub(inst: &Instance) -> bool {
@@ -84,6 +94,19 @@ pub const PARENT_POST_REFUSAL: &str = "A sub does not message its main chat: the
 pub fn parent_post_refusal(state: &DaemonState, caller: &str, addressed: &[String]) -> Option<&'static str> {
     let parent = state.registry.get(caller)?.subchat_of?;
     addressed.iter().any(|id| id.trim() == parent).then_some(PARENT_POST_REFUSAL)
+}
+
+/// The one reaction to "this chat's registry row just ended", installed as the
+/// registry's ended hook (`DaemonState::new`). Every way a chat ends calls
+/// `Registry::mark_ended` (the menu, SessionEnd, a process exit, `close_session`,
+/// `end_sub`), so what must follow an end hangs here once instead of in each path:
+/// - Joe's last message to that chat is freed.
+/// - A main chat that picked "Wait for them" closes if that was its last running sub.
+/// - Text held for a sub that ended goes to a card instead of being lost.
+pub fn on_chat_ended(state: &Arc<DaemonState>, session_id: &str) {
+    joe_message::forget(session_id);
+    closing::on_sub_settled(state, session_id);
+    followup::on_sub_ended(state, session_id);
 }
 
 /// The one hook point for "a sub just finished". Fired by

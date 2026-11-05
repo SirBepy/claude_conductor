@@ -505,6 +505,8 @@ mod tests {
     async fn only_a_message_joe_typed_becomes_the_one_a_main_chat_passes_on() {
         use crate::daemon::session_test_support::spawn_fake_session;
         use crate::daemon::subchats::joe_message;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        crate::sessions::chat_config::set_subchats_on("joe-msg-s", true);
         let map = new_session_map();
         let mut child = spawn_fake_session(&map, "joe-msg-s").await;
         let session = map.get("joe-msg-s").unwrap().clone();

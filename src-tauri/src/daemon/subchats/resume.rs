@@ -76,6 +76,8 @@ pub fn prepare_continue(state: &Arc<DaemonState>, sub_id: &str) -> Result<Prior,
     }
     if inst.subchat_finished {
         state.registry.set_subchat_finished(sub_id, false);
+        // A continue is a new job: the ceiling counts from here.
+        super::ceiling::on_continued(state, sub_id);
     }
     super::runtime::runtime().reset(sub_id);
     Ok(prior)
@@ -221,10 +223,11 @@ pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
         crate::util::kill::kill_tree(session.pid);
     }
     super::runtime::runtime().reset(sub_id);
+    super::ceiling::forget_stored(sub_id);
     if ended {
         crate::daemon::machines::publish_instances_changed(state);
-        // A main chat waiting for its last running sub may close now.
-        super::closing::on_sub_settled(state, sub_id);
+        // A main chat waiting for its last running sub closes from the registry's
+        // ended hook (`subchats::on_chat_ended`), which `mark_ended` above fired.
         // Ended while queued (a close that took its subs too, "End it"): it will
         // never start, so its recipe goes with it.
         super::held::release(state, sub_id);

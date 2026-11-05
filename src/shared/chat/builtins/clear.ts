@@ -1,12 +1,25 @@
 import { invoke } from "../../ipc";
+import { showToast } from "../../toast";
+import { state } from "../../../views/sessions/state";
 import { launchNewSession } from "../../../views/sessions/pending-flow";
 import { resolveNewChatConfig } from "../../../views/sessions/new-chat-config";
 import type { BuiltinContext, BuiltinHandler } from "./index";
 
 let inflight = false;
 
+/** Said when /clear is typed in a sub's view. */
+export const SUB_CLEAR_REFUSAL =
+  "A subchat is a job defined by its brief, so /clear does not apply to it. Use Move to sidebar to turn it into an ordinary chat.";
+
 export const clearSession: BuiltinHandler = async (_parsed, ctx: BuiltinContext) => {
   if (inflight) return;
+  // A sub's job is its brief: clearing it would end the sub and start an unrelated
+  // chat in its project, with no note to the main chat that handed it the job.
+  const open = ctx.sessionId ? state.sessions.find((s) => s.session_id === ctx.sessionId) : undefined;
+  if (open?.subchat_of != null) {
+    showToast(SUB_CLEAR_REFUSAL);
+    return;
+  }
   if (!ctx.projectDir || !ctx.pane) {
     console.warn("[builtin /clear] missing projectDir or pane; cannot restart");
     return;
@@ -15,7 +28,11 @@ export const clearSession: BuiltinHandler = async (_parsed, ctx: BuiltinContext)
   try {
     if (ctx.sessionId) {
       try {
-        await invoke<void>("clear_session", { sessionId: ctx.sessionId });
+        // True when the daemon held the close: this is a main chat with a sub still
+        // running, and Joe is being asked on a card whether to wait, close them too
+        // or keep it open. The chat is still open, so no new one starts under the card.
+        const held = await invoke<boolean | void>("clear_session", { sessionId: ctx.sessionId });
+        if (held === true) return;
       } catch (e) {
         console.warn("[builtin /clear] clear_session IPC failed, continuing", e);
       }

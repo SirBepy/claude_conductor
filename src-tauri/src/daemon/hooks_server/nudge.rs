@@ -210,6 +210,8 @@ pub(super) async fn on_tool_batch(
         delivered_blocks.extend(blocks);
     }
     crate::daemon::subchats::joe_message::note_delivered(&q.session_id, &typed);
+    // Text held for a busy sub is also on disk until it is delivered; this was.
+    crate::daemon::subchats::followup::settle_many(&q.session_id, &delivered_ids);
     // The common case by volume: nothing queued means EMPTY stdout, never an
     // envelope wrapping an empty string (same rule as `prompt-submit`).
     if messages.is_empty() {
@@ -340,6 +342,8 @@ mod tests {
     /// this hook, and it is then the message `subchat send` copies on to a sub.
     #[tokio::test]
     async fn a_delivered_held_message_becomes_joes_latest_for_subchat_send_without_the_mention_block() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        crate::sessions::chat_config::set_subchats_on("nd-main", true);
         let c = ctx();
         c.state.draft_store.add_held("nd-main", vec![text("do the same for signup\n<file:C:/pics/a.png>")]);
         let out = call(&c, "nd-main", "{}").await;

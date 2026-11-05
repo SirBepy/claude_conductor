@@ -195,7 +195,10 @@ pub(super) async fn on_stop(
         }
         // Title: durable transcript record, mirrors /close's manual rename.
         // Best-effort - a write failure must never block the turn.
-        if let Some(title) = reported.as_ref().filter(|r| r.turn_gen == gen).and_then(|r| r.title.as_deref()) {
+        // Not for a sub: its name was given at spawn and a title it wrote would
+        // rename it on the next restart.
+        let fixed_name = crate::daemon::subchats::name_is_fixed(&ctx.state.registry, &session_id);
+        if let Some(title) = reported.as_ref().filter(|r| r.turn_gen == gen && !fixed_name).and_then(|r| r.title.as_deref()) {
             if !title.trim().is_empty() {
                 if let Err(e) = crate::tokens::append_ai_title_record(std::path::Path::new(&transcript_path), title) {
                     log::warn!("hook /hooks/stop: failed to append ai-title record for {session_id}: {e}");

@@ -340,6 +340,8 @@ pub(crate) fn commit_finish_at(
     session: Option<&Arc<Session>>,
     transcript: Option<PathBuf>,
 ) -> bool {
+    #[cfg(test)]
+    commit_seam::note_thread(sub_id);
     let rt = super::runtime::runtime();
     let Some(mut record) = rt.take_pending_finish(sub_id) else { return false };
     let Some(inst) = state.registry.get(sub_id) else { return false };
@@ -400,6 +402,25 @@ pub(crate) fn commit_finish_at(
     log::info!("subchats: {sub_id} finished (round {}), verdict {:?}", record.round, record.verdict);
     super::on_finished(state, sub_id);
     true
+}
+
+/// Which thread each sub's commit ran on, so a test can tell the pump's thread
+/// from a blocking-pool one.
+#[cfg(test)]
+pub(crate) mod commit_seam {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::thread::ThreadId;
+
+    static THREADS: Mutex<Option<HashMap<String, ThreadId>>> = Mutex::new(None);
+
+    pub(super) fn note_thread(sub_id: &str) {
+        THREADS.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashMap::new).insert(sub_id.to_string(), std::thread::current().id());
+    }
+
+    pub(crate) fn thread_of(sub_id: &str) -> Option<ThreadId> {
+        THREADS.lock().unwrap_or_else(|p| p.into_inner()).as_ref()?.get(sub_id).copied()
+    }
 }
 
 #[cfg(test)]

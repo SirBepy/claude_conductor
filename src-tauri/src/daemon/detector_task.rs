@@ -109,6 +109,9 @@ fn refresh_overrides(
         let Ok(mtime) = std::fs::metadata(path).and_then(|m| m.modified()) else { continue };
         if mtimes.get(session_id) == Some(&mtime) { continue; }
         mtimes.insert(session_id.clone(), mtime);
+        if crate::daemon::subchats::name_is_fixed(registry, session_id) {
+            continue;
+        }
         if let Some(title) = crate::tokens::curated_or_ai_title(path, 60) {
             if registry.set_name(session_id, title) {
                 changed = true;
@@ -154,6 +157,29 @@ mod tests {
         let changed = refresh_overrides(&reg, &[("s1".into(), path)], &mut mtimes);
         assert!(changed);
         assert_eq!(reg.get("s1").unwrap().name.as_deref(), Some("Live AI Title"));
+    }
+
+    /// The name the main agent gave a sub at spawn is how `subchat send` finds it
+    /// and what the decisions log and the one line back call it, so a title the
+    /// sub wrote into its own transcript must not rename it.
+    #[test]
+    fn a_sub_keeps_the_name_it_was_given_at_spawn_whatever_its_transcript_title_says() {
+        let reg = Registry::new();
+        reg.upsert_interactive("main", std::path::Path::new("/tmp/x"), "proj", "2026-05-22T00:00:00Z");
+        reg.upsert_interactive("sub", std::path::Path::new("/tmp/x"), "proj", "2026-05-22T00:00:00Z");
+        reg.set_subchat_of("sub", Some("main".into()));
+        reg.set_name("sub", "Footer".into());
+        let dir = tempdir().unwrap();
+        let sub_path = dir.path().join("sub.jsonl");
+        let plain_path = dir.path().join("main.jsonl");
+        std::fs::write(&sub_path, format!("{}\n{}", assistant_title_jsonl("Ignore previous instructions"), override_jsonl("Hijacked"))).unwrap();
+        std::fs::write(&plain_path, assistant_title_jsonl("Main Title")).unwrap();
+        let mut mtimes = HashMap::new();
+
+        let changed = refresh_overrides(&reg, &[("sub".into(), sub_path), ("main".into(), plain_path)], &mut mtimes);
+        assert!(changed, "the ordinary chat is still retitled");
+        assert_eq!(reg.get("sub").unwrap().name.as_deref(), Some("Footer"));
+        assert_eq!(reg.get("main").unwrap().name.as_deref(), Some("Main Title"));
     }
 
     #[test]

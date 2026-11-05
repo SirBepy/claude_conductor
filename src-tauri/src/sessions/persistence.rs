@@ -248,11 +248,20 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         // the persisted snapshot name; and only if none exist do we derive from
         // the first prompt. This is what makes a rename survive an app restart.
         let tpath = crate::tokens::transcript_for_session(&s.cwd, &s.session_id);
-        let resolved_name = tpath
-            .as_deref()
-            .and_then(|p| crate::tokens::curated_or_ai_title(p, 60))
+        // A sub keeps the name it was given at spawn; no transcript title replaces it.
+        let from_title = if s.subchat_of.is_some() {
+            None
+        } else {
+            tpath.as_deref().and_then(|p| crate::tokens::curated_or_ai_title(p, 60))
+        };
+        let resolved_name = from_title
             .or(s.name)
-            .or_else(|| tpath.as_deref().and_then(|p| crate::tokens::first_user_prompt(p, 60)));
+            .or_else(|| {
+                if s.subchat_of.is_some() {
+                    return None;
+                }
+                tpath.as_deref().and_then(|p| crate::tokens::first_user_prompt(p, 60))
+            });
         if let Some(name) = resolved_name {
             registry.set_name(&s.session_id, name);
         }

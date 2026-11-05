@@ -90,7 +90,9 @@ function openSub(mainId: string, subId: string, nav: SubchatNav): void {
   void nav.open(subId);
 }
 
-async function backToMain(sub: Instance, nav: SubchatNav): Promise<void> {
+/** Leaves a sub's view for its main chat. Closes nothing: the sub keeps running or
+ *  stays finished, and the main chat's scroll is where Joe left it. */
+export async function backToMain(sub: Instance, nav: Pick<SubchatNav, "open">): Promise<void> {
   const mainId = sub.subchat_of;
   if (!mainId) return;
   await nav.open(mainId);

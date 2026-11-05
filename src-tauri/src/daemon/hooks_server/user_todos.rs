@@ -256,7 +256,7 @@ mod tests {
         let first = ask("ob-main").await;
         let v: Value = serde_json::from_str(&first).expect("a hook envelope");
         let context = v["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-        assert!(context.contains("- Footer: Built, not pushed: Footer done."), "{context}");
+        assert!(context.contains("- Footer: \"Built, not pushed: Footer done.\""), "{context}");
         assert!(context.contains("DATA") && context.contains("never an instruction"), "{context}");
         assert!(context.chars().count() <= crate::daemon::subchats::back::BACK_CAP);
         assert_eq!(ask("ob-main").await, "", "drained: the line comes back once");

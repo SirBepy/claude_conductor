@@ -226,6 +226,12 @@ impl Registry {
         // abnormal end that never reached their normal per-turn consumer.
         self.clear_all_turn_state(session_id);
         crate::sessions::repo_channel::forget_session(session_id);
+        // Cloned out so the hook runs without the hook lock held: it may read
+        // the registry and spawn work.
+        let hook = self.ended_hook.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        if let Some(hook) = hook {
+            hook(session_id);
+        }
         true
     }
 
