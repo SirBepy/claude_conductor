@@ -55,21 +55,29 @@ pub fn mark_as_sub(state: &DaemonState, sid: &str, plan: &mut SubPlan) {
     plan.release_slot();
 }
 
-/// `parent` -> spawns that passed the cap check but have no registry row yet.
-static PENDING: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+/// (registry, parent) -> spawns that passed the cap check but have no registry
+/// row yet. Keyed by the registry too: the count only means something next to
+/// the rows of the registry it was taken against, and a daemon has exactly one,
+/// so in production this is the parent alone. It also keeps two registries in
+/// one process (parallel tests) from counting each other's reservations.
+static PENDING: Mutex<Option<HashMap<(usize, String), usize>>> = Mutex::new(None);
 
 struct Reservation {
-    parent: String,
+    key: (usize, String),
+}
+
+fn pending_key(registry: &Registry, parent: &str) -> (usize, String) {
+    (registry as *const Registry as usize, parent.to_string())
 }
 
 impl Drop for Reservation {
     fn drop(&mut self) {
         let mut guard = PENDING.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(map) = guard.as_mut() {
-            if let Some(n) = map.get_mut(&self.parent) {
+            if let Some(n) = map.get_mut(&self.key) {
                 *n = n.saturating_sub(1);
                 if *n == 0 {
-                    map.remove(&self.parent);
+                    map.remove(&self.key);
                 }
             }
         }
@@ -110,12 +118,13 @@ fn reserve(registry: &Registry, parent: &str) -> Result<Reservation, String> {
     let mut guard = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     let map = guard.get_or_insert_with(HashMap::new);
     let running = running_subs(registry, parent);
-    let pending = map.get(parent).copied().unwrap_or(0);
+    let key = pending_key(registry, parent);
+    let pending = map.get(&key).copied().unwrap_or(0);
     if running.len() + pending >= MAX_RUNNING {
         return Err(cap_error(&running, pending));
     }
-    *map.entry(parent.to_string()).or_insert(0) += 1;
-    Ok(Reservation { parent: parent.to_string() })
+    *map.entry(key.clone()).or_insert(0) += 1;
+    Ok(Reservation { key })
 }
 
 /// The explicit model and effort for a sub. Both are passed on to the spawn so
@@ -434,6 +443,21 @@ mod tests {
         assert!(err.contains("being started"), "{err}");
         held.pop().unwrap().release_slot();
         plan_as(&st, "holder-a", &on(), Some("n"), &complete()).unwrap().expect("a released slot frees the cap");
+    }
+
+    #[test]
+    fn reservations_of_one_registry_do_not_count_against_another_with_the_same_parent_id() {
+        let (a, b) = (state(), state());
+        row(&a, "twin");
+        row(&b, "twin");
+        let mut held = Vec::new();
+        for _ in 0..5 {
+            held.push(plan_as(&a, "twin", &on(), Some("n"), &complete()).unwrap().unwrap());
+        }
+        assert!(plan_as(&a, "twin", &on(), Some("n"), &complete()).is_err(), "a is full");
+        plan_as(&b, "twin", &on(), Some("n"), &complete())
+            .unwrap()
+            .expect("b has its own count, so five in flight on a leave b's cap alone");
     }
 
     #[test]
