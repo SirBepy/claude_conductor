@@ -142,7 +142,12 @@ export function decorateSubchatHeader(header: SessionHeader, sess: Instance, nav
       sess.session_id,
       {
         open: (subId) => openSub(sess.session_id, subId, nav),
-        move: (subId) => { void moveSubToSidebar(subId, nav); },
+        popOut: (subId) => {
+          invoke<void>("detach_window", { sessionId: subId }).catch((err) => {
+            console.error("[subchats] detach_window failed", err);
+            showToast(`Could not open it in a new window: ${err}`);
+          });
+        },
       },
       () => state.sessions,
     );

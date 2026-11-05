@@ -21,19 +21,31 @@ pub async fn gc_attachments() {
     );
 }
 
-/// Open the given chat session in a dedicated Tauri webview window. The
-/// window is labeled `session-<session_id>`; if it already exists we just
-/// focus it. Closing the window does NOT kill the session - it stays in
-/// the registry and can be reattached by clicking the row in the main
-/// sidebar.
+/// The first window label for `session_id` that `taken` does not report: the
+/// plain `session-<id>` (the one `reattach_window` closes), then `-2`, `-3`, and so
+/// on. Every call opens a window of its own, so one chat can sit in as many windows
+/// as Joe asks for. The `session-` prefix is what the capability pattern and the
+/// window filters match on; the page reads its chat from the URL, never the label.
+fn free_window_label(session_id: &str, taken: impl Fn(&str) -> bool) -> String {
+    let base = format!("session-{session_id}");
+    if !taken(&base) {
+        return base;
+    }
+    (2u32..)
+        .map(|n| format!("{base}-{n}"))
+        .find(|label| !taken(label))
+        .expect("an unbounded range always yields a free label")
+}
+
+/// Open the given chat session in a new Tauri webview window, every time:
+/// a chat already in a window gets another one. The first is labeled
+/// `session-<session_id>`, later ones `session-<session_id>-<n>`. Closing a
+/// window does NOT kill the session - it stays in the registry and can be
+/// reopened from the sidebar.
 #[tauri::command]
 pub async fn detach_window(session_id: String, app: AppHandle) -> Result<(), String> {
     validate_session_id(&session_id)?;
-    let label = format!("session-{}", session_id);
-    if let Some(existing) = app.get_webview_window(&label) {
-        existing.set_focus().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
+    let label = free_window_label(&session_id, |l| app.get_webview_window(l).is_some());
     let url = format!("index.html#detached?session={}", session_id);
     // Built hidden so it doesn't flash white while WebView2 loads the page.
     // Shown + focused only once the frontend reports it's actually alive
@@ -415,6 +427,21 @@ pub async fn read_attachment(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn each_detach_gets_its_own_window_label_so_a_chat_can_have_many_windows() {
+        let open = std::cell::RefCell::new(Vec::<String>::new());
+        let mut labels = Vec::new();
+        for _ in 0..3 {
+            let label = free_window_label("abc", |l| open.borrow().iter().any(|o| o == l));
+            open.borrow_mut().push(label.clone());
+            labels.push(label);
+        }
+        assert_eq!(labels, ["session-abc", "session-abc-2", "session-abc-3"]);
+        // A closed first window frees its label for the next one.
+        open.borrow_mut().retain(|l| l != "session-abc");
+        assert_eq!(free_window_label("abc", |l| open.borrow().iter().any(|o| o == l)), "session-abc");
+    }
 
     const CWD: &str = "/nonexistent/takeover-proj";
 

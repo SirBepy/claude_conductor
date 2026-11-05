@@ -69,6 +69,7 @@ function invokeFor(sessions: unknown[], on: string[] = ["main"], pending: unknow
     list_slash_commands: [],
     send_message: null,
     move_sub_to_sidebar: null,
+    detach_window: null,
     open_file_window: null,
     list_auto_accept: [],
     confirm_question_rendered: null,
@@ -205,8 +206,8 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       expect(heads, "queued sits with the running ones, not under Finished").toEqual(["Running", "Finished"]);
       await expect(listRow(page, "sub-queued")).toHaveAttribute("data-kind", "queued");
       await expect(listRow(page, "sub-queued").locator(".sub-status")).toHaveText("waiting for Header");
-      await expect(listRow(page, "sub-queued").locator("[data-move]")).toHaveCount(0);
-      await expect(listRow(page, "sub-footer").locator("[data-move]")).toHaveCount(1);
+      await expect(listRow(page, "sub-queued").locator("[data-popout]")).toHaveCount(0);
+      await expect(listRow(page, "sub-footer").locator("[data-popout]")).toHaveCount(1);
       const order = await page.locator(".sub-list-popover .sub-row").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.subId));
       expect(order).toEqual(["sub-footer", "sub-queued", "sub-header"]);
       // The ring is the working yellow, not the glowing or arc one a running sub gets.
@@ -263,7 +264,6 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await openChat(page, "main");
       await openList(page);
       await expect(listRow(page, "sub-footer")).toHaveCount(1);
-      await expect(listRow(page, "sub-footer").locator("[data-move]")).toHaveCount(0);
       await listRow(page, "sub-footer").click();
       await expect(backBtn(page)).toBeVisible();
       await openChatSubmenu(page);
@@ -392,22 +392,27 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(listRow(page, "sub-footer")).toHaveCount(1);
     });
 
-    test("Move to sidebar from a list row moves that sub without leaving the main chat", async ({ page }) => {
+    test("a list row's button opens that sub in a new window and moves nothing", async ({ page }) => {
       await mount(page, size, [MAIN, FOOTER, HEADER]);
       await openChat(page, "main");
       await openList(page);
-      await listRow(page, "sub-footer").locator("[data-move]").click();
-      await expect(row(page, "sub-footer")).toHaveCount(1);
+      await listRow(page, "sub-footer").locator("[data-popout]").click();
+      await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "detach_window").length).toBe(1);
+      expect((await invokeCalls(page)).find((c) => c.cmd === "detach_window")!.args).toMatchObject({ sessionId: "sub-footer" });
+      expect((await invokeCalls(page)).filter((c) => c.cmd === "move_sub_to_sidebar")).toHaveLength(0);
+      await expect(row(page, "sub-footer")).toHaveCount(0);
       await expect(title(page)).toHaveText("CV redesign");
-      await expect(countBtn(page)).toHaveText("1");
+      await expect(countBtn(page)).toHaveText("2");
     });
 
     test("the last sub leaving takes the count icon away", async ({ page }) => {
       await mount(page, size, [MAIN, FOOTER]);
       await openChat(page, "main");
-      await openList(page);
-      await listRow(page, "sub-footer").locator("[data-move]").click();
+      await openSubFromList(page, "sub-footer");
+      await openChatSubmenu(page);
+      await moveItem(page).click();
       await expect(row(page, "sub-footer")).toHaveCount(1);
+      await openChat(page, "main");
       await expect(countBtn(page)).toHaveCount(0);
     });
 
