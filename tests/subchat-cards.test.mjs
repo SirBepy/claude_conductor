@@ -262,6 +262,18 @@ describe("what the chips say", () => {
     expect(el.querySelector(".mc-full .mc-facts-list").textContent).toContain("a.ts, b.ts");
   });
 
+  it("the all-finished card says how many subs were not merged, in a chip and in words, and is drawn as a bad outcome", async () => {
+    const sum = { subs: 3, commits: 1, files_changed: 2, uncommitted: 0, unpushed: 0, tests_passed: 3, tests_failed: 0, tests_unknown: 0, reviewed: 3, unreviewed: 0, unknown_subs: 0, not_merged: 1 };
+    const el = await render({ id: "all-2", ts: T0 + MIN, parent_id: "main", kind: "all_finished", verdict: "All 3 subs finished", text: "1 commit, 2 files changed, 1 not merged", sum, tone: "bad" });
+    expect(el.querySelector(".mc-full .mc-verdict .mc-t-bad")).not.toBeNull();
+    const chips = [...el.querySelectorAll(".mc-full .mc-facts .mc-chip")].map((c) => c.textContent.trim());
+    expect(chips).toContain("1 not merged");
+    expect(el.querySelector(".mc-full .mc-facts-list").textContent).toContain("1 not merged");
+    // A card an older build drew has no such field and shows no such chip.
+    const old = await render({ id: "all-3", ts: T0 + MIN, parent_id: "main", kind: "all_finished", verdict: "All 3 subs finished", text: "x", sum: { ...sum, not_merged: undefined }, tone: null });
+    expect([...old.querySelectorAll(".mc-full .mc-facts .mc-chip")].some((c) => c.textContent.includes("not merged"))).toBe(false);
+  });
+
   it("a when-done card names the sub and what the machine answered, with no fact chips", async () => {
     const text = 'While you were away, when-done answered the question "Which colour?" with its first option: Teal.';
     const el = await render({
