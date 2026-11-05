@@ -110,8 +110,9 @@ const PROMPT_REQUIRED: &str = "prompt is required: it is the new chat's first me
 /// alongside the message.
 ///
 /// A local, non-respawn spawn from a chat with Use subchats on becomes a hidden
-/// sub when `subchats::spawn::plan` says so; `sub_args` are its brief fields,
-/// ignored by every other spawn.
+/// sub when `subchats::spawn::plan` says so; `sub_args` carry the brief fields
+/// plus the `gate` and `plain` switches, all ignored by a chat with the mode off
+/// (except `gate`, which that chat is refused).
 pub(crate) async fn spawn_chat_or_forward(
     state: &Arc<DaemonState>,
     caller_session_id: &str,
@@ -139,8 +140,9 @@ pub(crate) async fn spawn_chat_or_forward(
         },
     };
     let Some(peer) = resolved else {
-        // A subchats-mode caller's plain spawn makes a hidden sub. A `machine`
-        // spawn (below) and a respawn stay what they always were.
+        // A subchats-mode caller's spawn makes a hidden sub unless it passes
+        // `plain: true`. A `machine` spawn (below) and a respawn stay what they
+        // always were.
         let plan = if respawn {
             None
         } else {

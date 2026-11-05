@@ -7,8 +7,9 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The optional `spawn_chat` fields that only a subchats-mode chat acts on.
-/// Every other spawn ignores them, so they are all optional on the wire and
+/// The optional `spawn_chat` fields that only a subchats-mode chat acts on (a
+/// mode-off chat ignores them, `gate` apart, which it is refused), so they are
+/// all optional on the wire and
 /// `validate` is where "required in this mode" is decided.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SubchatArgs {

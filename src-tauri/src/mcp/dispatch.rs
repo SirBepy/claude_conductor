@@ -149,7 +149,8 @@ fn request_secret_result(id: &Value, posted: Result<Value, String>) -> Value {
     }
 }
 
-/// The optional `spawn_chat` fields a chat with Use subchats on briefs a sub with.
+/// The optional `spawn_chat` fields a chat with Use subchats on can pass: the
+/// sub's brief, plus the `gate` and `plain` switches.
 const SUBCHAT_BRIEF_KEYS: [&str; 12] = [
     "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "after", "review", "gate", "plain",
 ];

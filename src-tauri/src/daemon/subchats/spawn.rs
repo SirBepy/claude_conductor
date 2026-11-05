@@ -1,5 +1,5 @@
 //! The rules a mode-on `spawn_chat` obeys before a sub exists: the brief, the
-//! tier, the same-project limit, the cap of five running subs and the depth
+//! tier, the known-project allowlist, the cap of five running subs and the depth
 //! limit. `spawn_chat`'s own module runs the spawn; this is only the decision.
 
 use super::brief::{compose_first_message, gate_brief, validate, SubchatArgs, SubchatBrief};
