@@ -19,6 +19,8 @@ use crate::types::Instance;
 use std::sync::Arc;
 
 pub mod cards;
+pub mod checkup;
+pub mod decisions;
 pub mod finish;
 pub(crate) mod git;
 mod resume;
@@ -65,10 +67,12 @@ pub fn parent_post_refusal(state: &DaemonState, caller: &str, addressed: &[Strin
 /// inline `.await` that can respawn a child makes the pump future
 /// self-referential (`jarvis_wake::spawn_drain` documents it). A step that
 /// needs async work spawns it from here.
-pub fn on_finished(_state: &Arc<DaemonState>, sub_id: &str) {
+pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     log::debug!("subchats: on_finished {sub_id}");
     #[cfg(test)]
     test_support::record_finished(sub_id);
+    // The decisions log and, from it, the checkup counter.
+    decisions::on_finished(state, sub_id);
 }
 
 #[cfg(test)]

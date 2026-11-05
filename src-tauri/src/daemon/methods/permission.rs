@@ -81,6 +81,9 @@ pub(crate) async fn settle_answered_questions(state: &Arc<DaemonState>, session_
         if state.prompt_event(id).await.as_deref() != Some("question-requested") {
             continue;
         }
+        // The answer message outran (or lost) its `respond_question`; this is the
+        // only place the decisions log can still hear the answer.
+        crate::daemon::subchats::decisions::record_card_message(state, id, text).await;
         settle_prompt(state, id, true).await;
     }
 }
@@ -188,6 +191,11 @@ pub(crate) async fn respond_question_inner(
     skipped: bool,
 ) -> bool {
     let session_id = state.prompt_session_id(request_id).await;
+    // Before the prompt record is dropped below: it holds the question text, and
+    // a Skip is never a decision.
+    if !skipped {
+        crate::daemon::subchats::decisions::record_card_answer(state, request_id, &answers).await;
+    }
     let tx = state.pending.lock().await.remove(request_id);
     let delivered = match tx {
         Some(tx) => {

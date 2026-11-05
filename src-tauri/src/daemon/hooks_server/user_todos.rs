@@ -88,6 +88,10 @@ pub(super) async fn on_prompt_submit(
         // Sixth rider: the people of this repo's client, so a name resolves
         // without a lookup. A repo no vault client note lists pays nothing.
         people_methods::render_for_injection(&ctx.state, &q.session_id),
+        // Seventh rider: a sub's decisions log, on its first prompt and the
+        // first after each continue. Hook context rather than message text, so
+        // what other subs wrote never sits in a user or `is_meta` message.
+        crate::daemon::subchats::decisions::render_for_injection(&ctx.state, &q.session_id),
     ]
     .into_iter()
     .flatten()
@@ -173,6 +177,37 @@ mod tests {
         .unwrap();
         assert_eq!(body.id.unwrap_or_default(), "todo-1");
         assert_eq!(body.reason.unwrap_or_default(), "done");
+    }
+
+    #[tokio::test]
+    async fn a_subs_first_prompt_carries_the_live_decisions_as_hook_context_and_a_later_one_does_not() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let c = ctx();
+        for id in ["ps-main", "ps-sub"] {
+            c.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        }
+        c.state.registry.set_subchat_of("ps-sub", Some("ps-main".into()));
+        let root = crate::settings::paths::data_dir().unwrap();
+        let record = crate::daemon::subchats::finish::FinishRecord {
+            sub_id: "other".into(),
+            decided: vec!["Use CSS grid".into()],
+            ruled_out: vec!["nothing".into()],
+            ..Default::default()
+        };
+        crate::daemon::subchats::decisions::record_finish_in(&root, "ps-main", "footer", &record, "2026-11-05");
+
+        let ask = |c: Arc<HookCtx>| async move {
+            let q = PromptSubmitQuery { session_id: "ps-sub".to_string() };
+            body_text(on_prompt_submit(AxState(c), Query(q), String::new()).await.into_response()).await
+        };
+        let first = ask(c.clone()).await;
+        let v: Value = serde_json::from_str(&first).expect("a hook envelope");
+        let context = v["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+        assert!(context.contains("Use CSS grid") && context.contains("DATA"), "{context}");
+        assert_eq!(ask(c.clone()).await, "", "the same stretch is not told twice");
+
+        crate::daemon::subchats::runtime::runtime().reset("ps-sub");
+        assert!(ask(c).await.contains("Use CSS grid"), "a continue starts a new stretch");
     }
 
     #[tokio::test]

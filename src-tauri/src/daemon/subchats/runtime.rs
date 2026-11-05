@@ -38,6 +38,10 @@ struct Entry {
     /// The activity stamp a stuck card was already raised for, so one silent
     /// stretch raises one card even after Joe answers it.
     stuck_carded_for: Option<chrono::DateTime<chrono::Utc>>,
+    /// Whether this stretch of the sub's life has been shown the decisions log
+    /// yet. A new sub starts undelivered, and `reset` (a continue, a finish)
+    /// starts a new stretch.
+    decisions_delivered: bool,
 }
 
 #[derive(Default)]
@@ -97,12 +101,20 @@ impl Runtime {
         self.with(sub_id, |e| e.stuck_carded_for)
     }
 
+    /// True once per stretch: the sub's first prompt, and the first one after a
+    /// continue, are when it is shown the decisions log. Spent even when the
+    /// log was empty, so a later prompt in the same stretch does not repeat it.
+    pub fn take_decisions_due(&self, sub_id: &str) -> bool {
+        self.with(sub_id, |e| !std::mem::replace(&mut e.decisions_delivered, true))
+    }
+
     /// A sub that goes on with its life (continued, finished for good, ended)
-    /// starts its sequence over.
+    /// starts its sequence over, and is shown the decisions log again.
     pub fn reset(&self, sub_id: &str) {
         self.with(sub_id, |e| {
             e.stage = SubStage::Fresh;
             e.nudge_due = false;
+            e.decisions_delivered = false;
         });
     }
 }
