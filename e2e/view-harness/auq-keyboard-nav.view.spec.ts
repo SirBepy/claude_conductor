@@ -223,6 +223,44 @@ test.describe("view-harness / AUQ keyboard navigation", () => {
     await expect(card.locator('[data-act="add-note"]')).toHaveCount(0);
   });
 
+  test("Space on the review step's focused Submit still submits with the composer relay mounted", async ({ page }) => {
+    await mountView(page);
+    await page.evaluate(async () => {
+      const mod = await import("/views/sessions/permission-modal/question-ui.ts");
+      (window as unknown as { __submitted: number }).__submitted = 0;
+      mod.renderQuestionUI({
+        questions: [
+          { question: "Which approach?", header: "Approach", options: [{ label: "A" }, { label: "B" }] },
+          { question: "Which features?", header: "Features", options: [{ label: "X" }, { label: "Y" }] },
+        ],
+        titleIcon: "ph-chat-circle-dots",
+        submitLabel: "Submit",
+        submitIcon: "ph-paper-plane-right",
+        cancelLabel: "Skip",
+        supportsExtras: true,
+        onSubmit: () => { (window as unknown as { __submitted: number }).__submitted++; },
+        onCancel: () => {},
+      });
+      const relay = await import("/shared/chat/composer-stray-input.ts");
+      const box = document.createElement("textarea");
+      box.id = "fake-composer";
+      document.body.appendChild(box);
+      new relay.ComposerStrayInput({ getTextarea: () => box, isDisabled: () => false, handlePaste: () => {} }).mount();
+    });
+    const card = page.locator(".prompt-card");
+    await card.locator(".prompt-card__answer-bar textarea").focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => activeTab(page)).toBe(1);
+    await page.keyboard.press("Enter");
+    await expect.poll(() => activeTab(page)).toBe(2);
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("data-act"))).toBe("primary");
+
+    await page.keyboard.press(" ");
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __submitted: number }).__submitted)).toBe(1);
+    await expect(page.locator("#fake-composer")).toHaveValue("");
+  });
+
   test("typing on an option writes into the answer box", async ({ page }) => {
     await mountView(page);
     await openCard(page);

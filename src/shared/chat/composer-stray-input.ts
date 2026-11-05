@@ -59,6 +59,9 @@ export class ComposerStrayInput {
   private onKeydown = (e: KeyboardEvent): void => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key.length !== 1) return;
+    // Space on a focused card button (Submit, Skip, Add a note) presses it; the
+    // relay would otherwise type the space into the composer and cancel the click.
+    if (e.key === " " && document.activeElement?.closest(`#${QUESTION_CARD_HOST_ID} button`)) return;
     const target = this.target(e.key.trim() !== "");
     if (!target) return;
     target.focus();
