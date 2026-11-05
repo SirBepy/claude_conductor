@@ -49,7 +49,7 @@ pub(super) fn stale_render_reference(html: &str) -> Option<String> {
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect();
-        (!id.is_empty() && !cache.contains(&id)).then_some(id)
+        (!id.is_empty() && !cache.contains(&id) && crate::daemon::preview::get(&id).is_none()).then_some(id)
     })
 }
 
@@ -63,6 +63,11 @@ pub(super) async fn on_preview_render_get(AxPath(id): AxPath<String>) -> Respons
         let cache = cell().lock().unwrap_or_else(|e| e.into_inner());
         cache.get(&id)
     };
+    // `POST /hooks/preview` answers with the panel entry's id, and a gallery's
+    // `render-url` is built from that answer, so it must serve the entry's page.
+    // The entry lives in the disk-persisted history, which also outlasts a daemon
+    // restart that empties the in-memory cache above.
+    let html = html.or_else(|| crate::daemon::preview::get(&id).map(|s| s.html));
     match html {
         Some(html) => (
             StatusCode::OK,
@@ -73,7 +78,7 @@ pub(super) async fn on_preview_render_get(AxPath(id): AxPath<String>) -> Respons
             html,
         )
             .into_response(),
-        // Evicted or unknown id - frontend treats this as "nothing to show".
+        // Evicted from both stores or never staged - frontend treats this as "nothing to show".
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -105,6 +110,33 @@ mod tests {
         assert_eq!(stale_render_reference("<p>hello</p>"), None);
         // The path quoted as prose has no id after it.
         assert_eq!(stale_render_reference("served at /hooks/preview-render/<id>"), None);
+    }
+
+    /// A gallery's `render-url` is built from `/hooks/preview`'s answer, the panel
+    /// entry's id, and the in-memory cache never held that id: every such URL 404ed.
+    #[tokio::test]
+    async fn a_panel_entry_id_serves_its_page_and_is_not_stale() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let id = crate::daemon::preview::push(
+            "Gallery".into(),
+            Some("entry-serves".into()),
+            "<p>entry page</p>".into(),
+            "terminal".into(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(stale_render_reference(&card_html(&id)), None);
+        let resp = on_preview_render_get(AxPath(id)).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&bytes[..], b"<p>entry page</p>");
+    }
+
+    #[tokio::test]
+    async fn an_id_in_neither_store_is_still_a_404() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let resp = on_preview_render_get(AxPath("no-such-id".into())).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]

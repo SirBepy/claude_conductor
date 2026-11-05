@@ -1,0 +1,34 @@
+/* Same footprint as the sub header's "Move to sidebar" so the two sit as a pair. */
+.mockup-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+/* `display` above would otherwise beat the hidden attribute. */
+.mockup-open-btn[hidden] {
+  display: none;
+}
+.mockup-open-btn:hover {
+  background: var(--color-surface-alt);
+}
+
+@media (max-width: 768px) {
+  /* The label would crowd a 44px-button row; the icon and the title say it. */
+  .mockup-open-btn span {
+    display: none;
+  }
+  .mockup-open-btn {
+    width: var(--control-h-sm);
+    justify-content: center;
+    padding: 0;
+  }
+}
