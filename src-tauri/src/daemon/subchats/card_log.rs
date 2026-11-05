@@ -167,18 +167,23 @@ pub(super) fn sub_facts(
         .find(|e| e.kind == KIND_FINISH && e.sub_id.as_deref() == Some(&inst.session_id))
         .and_then(|e| e.facts.as_ref())
         .and_then(|f| f.head.clone());
-    let (base, since) = match (&previous_head, brief.as_ref().and_then(|b| b.git_head_at_spawn.as_ref())) {
+    let (mut base, since) = match (&previous_head, brief.as_ref().and_then(|b| b.git_head_at_spawn.as_ref())) {
         (Some(prev), _) => (Some(prev.clone()), facts::SINCE_LAST_REPORT),
         (None, Some(spawn)) => (Some(spawn.clone()), facts::SINCE_SPAWN),
         (None, None) => (None, facts::SINCE_SPAWN),
     };
+    // A worktree sub's branch is rebased onto its target, which rewrites history
+    // under any earlier head: its own base moves with each update instead.
+    if let Some(tree_base) = brief.as_ref().and_then(|b| b.worktree_at.as_ref()).and_then(|w| w.base.clone()) {
+        base = Some(tree_base);
+    }
     // A gate sub's push is measured against the upstream it started from; any
     // other sub keeps the commit-based reading of "pushed".
     let gate = brief
         .as_ref()
         .filter(|b| b.gate)
         .map(|b| facts::GateBase { upstream_before: b.upstream_at_spawn.as_deref() });
-    facts::compute(&facts::Inputs {
+    let mut computed = facts::compute(&facts::Inputs {
         cwd: &inst.cwd,
         transcript,
         base: base.as_deref(),
@@ -186,7 +191,11 @@ pub(super) fn sub_facts(
         reviewer_tool_use_id,
         review_required: super::project::review_required(check, brief.as_ref()),
         gate,
-    })
+    });
+    if let Some(b) = brief.as_ref() {
+        super::worktree::annotate(&mut computed, b);
+    }
+    computed
 }
 
 /// What a sub's `blocker` message carries into the main chat.

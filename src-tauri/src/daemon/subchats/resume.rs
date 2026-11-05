@@ -107,6 +107,8 @@ pub async fn continue_sub(state: &Arc<DaemonState>, sub_id: &str, text: &str) ->
         .begin_continue(sub_id)
         .ok_or_else(|| ContinueError::Busy(sub_id.to_string()))?;
     let prior = prepare_continue(state, sub_id)?;
+    // A worktree sub's first step: its branch catches up with the target.
+    super::worktree::before_continue(state, sub_id).await;
     // A model or effort picked while the sub sat idle lands on this message.
     lifecycle::refresh_stale_launch(state, sub_id).await;
     // Same order as the desktop `send_message` RPC: busy is set before the
@@ -231,6 +233,9 @@ pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
         // Ended while queued (a close that took its subs too, "End it"): it will
         // never start, so its recipe goes with it.
         super::held::release(state, sub_id);
+        // A worktree goes with the sub when its commits are merged and nothing is
+        // uncommitted; otherwise it stays, with a card.
+        super::worktree::on_ended(state, sub_id);
         // A sub waiting for this one is now waiting on something that ended blocked.
         super::held::on_target_done(state);
         // Its cards would otherwise keep showing, and answering one would send to

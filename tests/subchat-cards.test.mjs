@@ -226,6 +226,23 @@ describe("what the chips say", () => {
     expect(words).not.toContain("0 uncommitted");
   });
 
+  it("a worktree sub's card says whether its commits landed in the branch they merge into", async () => {
+    const merged = await render(card("m1", T0 + MIN, { facts: facts({ merged: true, merged_into: "master" }) }));
+    const chips = [...merged.querySelectorAll(".mc-full .mc-facts .mc-chip")];
+    expect(chips.map((c) => c.textContent.trim())).toEqual(["2", "3", "0", "passed", "ran", "merged", "not pushed"]);
+    expect(chips[5].getAttribute("title")).toBe("Merged into master");
+    expect(merged.querySelector(".mc-full .mc-facts-list").textContent).toContain("Merged into master");
+  });
+
+  it("a refused merge reads as not merged, and a sub with no worktree shows no merge chip at all", async () => {
+    const open = await render(card("m2", T0 + MIN, { facts: facts({ merged: false, merged_into: "master" }) }));
+    const chip = open.querySelector(".mc-full .mc-facts .mc-chip--not .ph-git-merge").parentElement;
+    expect(chip.textContent.trim()).toBe("not merged");
+    expect(open.querySelector(".mc-full .mc-facts-list").textContent).toContain("Not merged into master");
+    const plain = await render(card("m3", T0 + MIN, { facts: facts() }));
+    expect(plain.querySelector(".mc-full .mc-facts .ph-git-merge")).toBeNull();
+  });
+
   it("a card with no stored facts says so instead of drawing none", async () => {
     const el = await render(card("c3", T0 + MIN, { facts: null }));
     expect(el.querySelector(".mc-full .mc-facts-list").textContent).toContain("unknown");

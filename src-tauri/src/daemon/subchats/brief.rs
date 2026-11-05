@@ -89,6 +89,37 @@ pub struct SubchatBrief {
     /// finish card can say from git whether the upstream moved. Gate subs only.
     #[serde(default)]
     pub upstream_at_spawn: Option<String>,
+    /// The sub's own worktree, when it has one (`subchats::worktree`). Kept in
+    /// the brief so a restart, a finish and a continue all find the same tree.
+    #[serde(default)]
+    pub worktree_at: Option<WorktreeInfo>,
+}
+
+/// Where a worktree sub lives and what it merges back into.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorktreeInfo {
+    /// The folder the sub runs in: the worktree root, plus the project's own
+    /// subfolder when the project is not at the repo's top.
+    #[serde(default)]
+    pub cwd: String,
+    /// The worktree's root, the folder `git worktree add` made.
+    #[serde(default)]
+    pub path: String,
+    /// The sub's own branch.
+    #[serde(default)]
+    pub branch: String,
+    /// The branch the main checkout had checked out when the sub was spawned,
+    /// and the branch the sub's commits are merged into.
+    #[serde(default)]
+    pub target: String,
+    /// The main checkout, where the target branch is checked out.
+    #[serde(default)]
+    pub repo: String,
+    /// The commit the sub's facts count from. It moves when the branch is
+    /// brought up to date, so commits other people made meanwhile are not
+    /// counted as this job's.
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 fn text(v: &Option<String>) -> Option<String> {
@@ -150,6 +181,7 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
         git_head_at_spawn: None,
         gate: false,
         upstream_at_spawn: None,
+        worktree_at: None,
     })
 }
 
@@ -181,6 +213,7 @@ pub fn gate_brief(prompt: Option<&str>, parent: &str) -> Result<SubchatBrief, St
         git_head_at_spawn: None,
         gate: true,
         upstream_at_spawn: None,
+        worktree_at: None,
     })
 }
 

@@ -116,6 +116,27 @@ for (const vp of [{ name: "desktop", width: 900 }, { name: "phone", width: 390 }
       await capture(chat(page), `subcards-open-${vp.name}`);
     });
 
+    test("a worktree sub's card says whether its commits landed, and fits the width", async ({ page }) => {
+      const landed = card("c-merged", T0 + 50 * MIN, { facts: facts({ merged: true, merged_into: "master" }) });
+      await mountChat(page, vp.width, page1, [landed]);
+      const summary = chat(page).locator(".mc-root[data-sub-card] .mc-full .mc-facts > summary");
+      expect((await summary.innerText()).replace(/\s+/g, " ").trim()).toBe("2 3 0 passed ran merged not pushed");
+      await summary.click();
+      await expect(chat(page).locator(".mc-root[data-sub-card] .mc-full .mc-facts-list")).toContainText("Merged into master");
+      await expectNoOverflow(page);
+      await capture(chat(page), `subcards-merged-${vp.name}`);
+    });
+
+    test("a merge the daemon refused reads as not merged", async ({ page }) => {
+      const refused = card("c-refused", T0 + 50 * MIN, { facts: facts({ merged: false, merged_into: "master" }) });
+      await mountChat(page, vp.width, page1, [refused]);
+      const open = chat(page).locator(".mc-root[data-sub-card] .mc-full .mc-facts > summary");
+      expect((await open.innerText()).replace(/\s+/g, " ").trim()).toBe("2 3 0 passed ran not merged not pushed");
+      await open.click();
+      await expect(chat(page).locator(".mc-root[data-sub-card] .mc-full .mc-facts-list")).toContainText("Not merged into master");
+      await expectNoOverflow(page);
+    });
+
     test("anything the daemon could not read shows as unknown", async ({ page }) => {
       const unknown = card("c2", T0 + 20 * MIN, { facts: facts({
         commits: null, files_changed: null, uncommitted: null, pushed: null, test: { state: "unknown" }, reviewer: { state: "none", note: "no reviewer ran" },

@@ -9,7 +9,7 @@
 mod brief;
 pub mod spawn;
 
-pub use brief::{SubchatArgs, SubchatBrief};
+pub use brief::{SubchatArgs, SubchatBrief, WorktreeInfo};
 
 use crate::accounts::Account;
 use crate::daemon::claude_config::{append_system_prompt, SUBCHATS_MAIN_PROMPT, SUBCHAT_GATE_PROMPT, SUBCHAT_SUB_PROMPT};
@@ -42,6 +42,7 @@ pub mod stuck;
 pub mod tool;
 pub mod turn_end;
 pub mod wake;
+pub mod worktree;
 pub mod writers;
 
 pub use reply::{move_to_sidebar, route_send, MoveError};
@@ -123,6 +124,16 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     log::debug!("subchats: on_finished {sub_id}");
     #[cfg(test)]
     test_support::record_finished(sub_id);
+    // A sub in its own worktree merges first, so the card and the sub waiting
+    // behind it see what landed; the rest then runs from the merge's thread.
+    if worktree::defer(state, sub_id, finished_rest) {
+        return;
+    }
+    finished_rest(state, sub_id);
+}
+
+/// Everything that follows a sub finishing, once its work has landed.
+fn finished_rest(state: &Arc<DaemonState>, sub_id: &str) {
     // The decisions log and, from it, the checkup counter.
     decisions::on_finished(state, sub_id);
     card_log::on_finished(state, sub_id);
