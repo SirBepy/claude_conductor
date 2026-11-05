@@ -102,13 +102,18 @@ fn read_stored(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: us
 /// The ended chats of every repo as dashboard rows, unsorted across repos:
 /// each repo is read `depth` deep, then the live chats are dropped. Shared by
 /// the snapshot's recent list and the History modal's pages so the two cannot
-/// disagree about what counts as an ended chat.
+/// disagree about what counts as an ended chat. A hidden sub is never one: its
+/// transcript is on disk, but it has no row anywhere to be "recent".
 pub(super) fn ended_rows(
     repos: &[RepoRef],
     projects_dir: &Path,
     live_ids: &HashSet<String>,
     depth: u32,
 ) -> Vec<DashChatRow> {
+    let hidden = crate::daemon::subchats::hidden_from_past_chats(live_ids.iter().cloned());
+    // Hidden subs are read and then dropped, so each repo is read that much deeper.
+    let depth = depth.saturating_add(hidden.len().saturating_sub(live_ids.len()) as u32);
+    let live_ids = &hidden;
     let mut rows = Vec::new();
     for repo in repos {
         let slug = project_dir_slug(projects_dir, &repo.cwd);

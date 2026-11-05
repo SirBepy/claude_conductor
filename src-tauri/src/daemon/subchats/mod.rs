@@ -12,7 +12,7 @@ pub mod spawn;
 pub use brief::{SubchatArgs, SubchatBrief};
 
 use crate::accounts::Account;
-use crate::daemon::claude_config::{append_system_prompt, SUBCHAT_SUB_PROMPT};
+use crate::daemon::claude_config::{append_system_prompt, SUBCHATS_MAIN_PROMPT, SUBCHAT_SUB_PROMPT};
 use crate::daemon::rpc::RpcError;
 use crate::daemon::state::DaemonState;
 use crate::types::Instance;
@@ -94,6 +94,10 @@ pub(crate) mod test_support {
 pub const API_CREDIT_REFUSAL: &str =
     "Subchats are not available on an API-credit account, since every sub would spend its credit. Switch this chat to a subscription account first.";
 
+/// Why a sub cannot become a main chat. Depth is 1, and the main prompt would
+/// stop the sub from closing itself.
+const SUB_CANNOT_BE_MAIN: &str = "A sub cannot use subchats itself: it is a job inside another chat.";
+
 /// Model family and effort a main chat runs on (Joe: it does little work, but
 /// "you REALLY dont want it to be stupid").
 const MAIN_MODEL: &str = "opus";
@@ -147,6 +151,11 @@ pub fn apply_set_on(
     persist: impl FnOnce(&str, bool),
 ) -> Result<Option<(String, String)>, RpcError> {
     if value {
+        // The main prompt tells a chat to stay open until Joe says otherwise,
+        // which would keep a sub from ever finishing.
+        if state.registry.get(session_id).is_some_and(|i| is_sub(&i)) {
+            return Err(RpcError::invalid_params(SUB_CANNOT_BE_MAIN));
+        }
         if let Some(reason) = refusal_for_account(session_account_id(state, session_id).as_deref(), accounts) {
             return Err(RpcError::invalid_params(reason));
         }
@@ -162,6 +171,15 @@ pub fn apply_set_on(
     }
     state.registry.set_model_effort(session_id, &model, &effort);
     Ok(Some((model, effort)))
+}
+
+/// Ids a past-chat list must not show: `live` plus every sub, ended ones
+/// included. A sub's transcript sits on disk like any chat's, so a list built
+/// from transcripts would otherwise show it as a finished chat.
+pub fn hidden_from_past_chats(live: impl IntoIterator<Item = String>) -> std::collections::HashSet<String> {
+    let mut ids: std::collections::HashSet<String> = live.into_iter().collect();
+    ids.extend(crate::sessions::chat_config::sub_session_ids());
+    ids
 }
 
 /// The prompt a sub is spawned with: the shared rules plus which main chat it
@@ -190,6 +208,42 @@ pub fn launch_parent(state: &DaemonState, session_id: &str, explicit: Option<&st
     explicit
         .map(str::to_string)
         .or_else(|| state.registry.get(session_id).and_then(|i| i.subchat_of))
+}
+
+/// What a launch of `session_id` takes from its subchats role: whether it is a
+/// sub (the MCP config then sets `CC_SUBCHAT`) and the system prompts to append,
+/// in order. Built from the registry row and chat-config, never from the
+/// arguments of the first spawn, so a respawned or continued sub keeps both.
+pub struct RoleLaunch {
+    pub sub_parent: Option<String>,
+    main_prompt: bool,
+    parent_label: Option<String>,
+}
+
+impl RoleLaunch {
+    pub fn is_sub(&self) -> bool {
+        self.sub_parent.is_some()
+    }
+
+    /// Adds this role's rules to a spawn's `--append-system-prompt`: the main
+    /// chat's, or the sub's naming its main chat. Nothing for a plain chat.
+    pub fn append_prompts(&self, args: &mut [String]) {
+        if self.main_prompt {
+            append_system_prompt(args, SUBCHATS_MAIN_PROMPT);
+        }
+        if let Some(label) = &self.parent_label {
+            append_sub_prompt(args, label);
+        }
+    }
+}
+
+/// `explicit_parent` is the first spawn's parent, whose row does not exist yet
+/// (see [`launch_parent`]).
+pub fn role_launch(state: &DaemonState, session_id: &str, explicit_parent: Option<&str>) -> RoleLaunch {
+    let sub_parent = launch_parent(state, session_id, explicit_parent);
+    let main_prompt = crate::sessions::chat_config::get(session_id).unwrap_or_default().subchats_on;
+    let parent_label = sub_parent.as_deref().map(|parent| parent_label(state, parent));
+    RoleLaunch { sub_parent, main_prompt, parent_label }
 }
 
 /// How a sub's prompt names its main chat: the chat's title, else its folder
@@ -223,6 +277,15 @@ impl TempDataDir {
         std::env::set_var("CC_DATA_DIR", dir.path());
         Self { _guard: guard, _dir: dir }
     }
+}
+
+/// Marks `session_id` as a stored sub of `parent` in the (temp) chat-config, the
+/// way `spawn::mark_as_sub` does, for tests of the lists that must hide subs.
+#[cfg(test)]
+pub(crate) fn store_sub_brief(session_id: &str, parent: &str) {
+    let brief: SubchatBrief =
+        serde_json::from_str(&format!(r#"{{"parent":"{parent}","task":"t","goal":"g","done_when":"d"}}"#)).unwrap();
+    crate::sessions::chat_config::set_subchat(session_id, Some(brief));
 }
 
 #[cfg(test)]
@@ -282,6 +345,26 @@ mod tests {
         assert!(wrote.borrow().is_empty(), "a refused toggle must not persist");
         let inst = st.registry.get("s1").unwrap();
         assert_eq!((inst.model.as_str(), inst.effort.as_str()), ("sonnet", "low"), "model untouched on refusal");
+    }
+
+    #[test]
+    fn a_sub_cannot_turn_the_mode_on_and_nothing_is_written() {
+        let st = state();
+        chat(&st, "main", None, "opus", "high");
+        chat(&st, "sub", None, "sonnet", "high");
+        st.registry.set_subchat_of("sub", Some("main".into()));
+        let wrote = RefCell::new(Vec::new());
+        let err = apply_set_on(&st, "sub", true, &[], |id, v| wrote.borrow_mut().push((id.to_string(), v)))
+            .expect_err("a sub gets no main prompt");
+        // The main prompt tells a chat to stay open until Joe says otherwise,
+        // which would keep a sub from ever finishing.
+        assert!(err.message.contains("sub"), "{}", err.message);
+        assert!(wrote.borrow().is_empty());
+        let inst = st.registry.get("sub").unwrap();
+        assert_eq!((inst.model.as_str(), inst.effort.as_str()), ("sonnet", "high"), "model untouched on refusal");
+        // Off stays allowed, and the main chat is not affected by its sub's link.
+        apply_set_on(&st, "sub", false, &[], |_, _| {}).unwrap();
+        apply_set_on(&st, "main", true, &[], |_, _| {}).unwrap();
     }
 
     #[test]
@@ -404,5 +487,51 @@ mod tests {
         assert!(args[1].starts_with("base"));
         assert!(args[1].contains("finish_subchat"));
         assert!(args[1].contains("Your main chat is \"CV redesign\"."));
+    }
+
+    #[test]
+    fn a_launch_of_a_sub_gets_the_sub_prompt_naming_its_main_chat_and_the_sub_marking() {
+        let _data = TempDataDir::new();
+        let st = state();
+        chat(&st, "role-main", None, "opus", "high");
+        st.registry.set_name("role-main", "CV redesign".into());
+        chat(&st, "role-sub", None, "sonnet", "high");
+        st.registry.set_subchat_of("role-sub", Some("role-main".into()));
+        // A relaunch passes no explicit parent: the registry row is the source.
+        let role = role_launch(&st, "role-sub", None);
+        assert!(role.is_sub());
+        assert_eq!(role.sub_parent.as_deref(), Some("role-main"));
+        let argv = |r: &RoleLaunch| {
+            let mut args = vec!["--append-system-prompt".to_string(), "base".to_string()];
+            r.append_prompts(&mut args);
+            args[1].clone()
+        };
+        let prompt = argv(&role);
+        assert!(prompt.starts_with("base"));
+        assert!(prompt.contains("finish_subchat"));
+        assert!(prompt.contains("Your main chat is \"CV redesign\"."));
+        assert!(!prompt.contains(SUBCHATS_MAIN_PROMPT), "a sub gets the sub prompt and not the main one");
+        // The first spawn has no row yet and names the parent explicitly.
+        let first = role_launch(&st, "role-fresh", Some("role-main"));
+        assert!(first.is_sub() && argv(&first).contains("finish_subchat"));
+    }
+
+    #[test]
+    fn a_launch_of_a_main_chat_gets_the_main_prompt_and_a_plain_chat_gets_nothing() {
+        let _data = TempDataDir::new();
+        let st = state();
+        chat(&st, "role-main-on", None, "opus", "high");
+        crate::sessions::chat_config::set_subchats_on("role-main-on", true);
+        chat(&st, "role-plain", None, "sonnet", "high");
+        let main = role_launch(&st, "role-main-on", None);
+        assert!(!main.is_sub());
+        let mut args = vec!["--append-system-prompt".to_string(), "base".to_string()];
+        main.append_prompts(&mut args);
+        assert!(args[1].contains(SUBCHATS_MAIN_PROMPT) && !args[1].contains(SUBCHAT_SUB_PROMPT));
+        let plain = role_launch(&st, "role-plain", None);
+        let mut plain_args = vec!["--append-system-prompt".to_string(), "base".to_string()];
+        plain.append_prompts(&mut plain_args);
+        assert!(!plain.is_sub());
+        assert_eq!(plain_args[1], "base", "mode off launches as today");
     }
 }

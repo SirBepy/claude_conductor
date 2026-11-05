@@ -120,16 +120,29 @@ fn reserve(registry: &Registry, parent: &str) -> Result<Reservation, String> {
 
 /// The explicit model and effort for a sub. Both are passed on to the spawn so
 /// `resolve_model_effort` never reaches for the project default; an omitted one
-/// takes the Sonnet-high default. Haiku is refused outright.
+/// takes the Sonnet-high default. Only the three tiers Joe chose pass: Sonnet at
+/// medium, Sonnet at high, Opus at high. A full model id counts as its family, so
+/// `claude-opus-4-8` is Opus. The effort comes back lower-cased because the spawn
+/// compares it exactly.
 pub fn resolve_tier(model: Option<&str>, effort: Option<&str>) -> Result<(String, String), String> {
     let pick = |v: Option<&str>, default: &str| {
         v.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(default).to_string()
     };
     let model = pick(model, DEFAULT_MODEL);
-    if model.to_ascii_lowercase().contains("haiku") {
-        return Err(format!("Subs never run on haiku. Pick one of the three tiers: {TIERS}."));
+    let effort = pick(effort, DEFAULT_EFFORT).to_ascii_lowercase();
+    let family = model.to_ascii_lowercase();
+    let allowed = if family.contains("sonnet") {
+        matches!(effort.as_str(), "medium" | "high")
+    } else if family.contains("opus") {
+        effort == "high"
+    } else {
+        false
+    };
+    if !allowed {
+        let why = if family.contains("haiku") { "Subs never run on haiku. " } else { "" };
+        return Err(format!("{why}{model} at {effort} effort is not a sub tier. Pick one of the three tiers: {TIERS}."));
     }
-    Ok((model, pick(effort, DEFAULT_EFFORT)))
+    Ok((model, effort))
 }
 
 /// A sub stays in its main chat's project. `target` is the already-resolved
@@ -138,10 +151,16 @@ pub fn check_same_project(caller_cwd: &std::path::Path, target: &std::path::Path
     if project_key(caller_cwd) == project_key(target) {
         return Ok(());
     }
-    Err(format!(
-        "A sub works in its main chat's own project ({}). Spawn it there, or start a normal chat for the other project without the subchats fields.",
+    Err(other_project_refusal(caller_cwd))
+}
+
+/// In mode-on every local spawn becomes a sub, so there is no spawn the main
+/// chat can make for another project. The only ways out are Joe's.
+fn other_project_refusal(caller_cwd: &std::path::Path) -> String {
+    format!(
+        "Subs run in this chat's own project ({}) only. To work in another project, ask Joe to start a chat there, or to turn off Use subchats for this chat.",
         caller_cwd.display()
-    ))
+    )
 }
 
 /// `Err` when `caller` is itself a sub: it may neither spawn nor respawn.
@@ -178,14 +197,19 @@ pub fn plan(
     if let Some(reason) = super::refusal_for_account(account, accounts) {
         return Err(reason.to_string());
     }
-    let brief = validate(name, args, caller_id)?;
-    let (model, effort) = resolve_tier(model, effort)?;
+    // Before the brief: a thin brief aimed at another project should hear that
+    // the project is the problem, since filling in the brief would not help.
+    // `resolve_target_cwd` only fails for a directory that is neither this
+    // chat's own nor a known project, which for a sub is the same refusal.
     let target = crate::daemon::methods::spawn_chat::resolve_target_cwd(
         &caller.cwd,
         std::path::Path::new(cwd),
         &state.settings.snapshot().projects,
-    )?;
+    )
+    .map_err(|_| other_project_refusal(&caller.cwd))?;
     check_same_project(&caller.cwd, &target)?;
+    let brief = validate(name, args, caller_id)?;
+    let (model, effort) = resolve_tier(model, effort)?;
     let reservation = reserve(&state.registry, caller_id)?;
     let first_message = compose_first_message(&brief, prompt);
     Ok(Some(SubPlan {
@@ -239,8 +263,15 @@ mod tests {
     }
 
     fn plan_for(st: &DaemonState, cfg: &ChatConfig, name: Option<&str>, args: &SubchatArgs) -> Result<Option<SubPlan>, String> {
+        plan_as(st, "main", cfg, name, args)
+    }
+
+    /// The cap reservations live in a process-wide map keyed by parent id, so a
+    /// test that holds plans open uses its own parent id and cannot make a
+    /// parallel test see a full cap.
+    fn plan_as(st: &DaemonState, parent: &str, cfg: &ChatConfig, name: Option<&str>, args: &SubchatArgs) -> Result<Option<SubPlan>, String> {
         let here = cwd();
-        plan(st, "main", cfg, &here.to_string_lossy(), None, None, None, name, args, &[])
+        plan(st, parent, cfg, &here.to_string_lossy(), None, None, None, name, args, &[])
     }
 
     #[test]
@@ -297,6 +328,49 @@ mod tests {
         assert_eq!(resolve_tier(Some("opus"), Some("high")).unwrap(), ("opus".to_string(), "high".to_string()));
     }
 
+    fn pair(m: &str, e: &str) -> (String, String) {
+        (m.to_string(), e.to_string())
+    }
+
+    #[test]
+    fn each_of_the_three_tiers_is_allowed_and_a_full_model_id_counts_as_its_family() {
+        for (m, e) in [
+            ("sonnet", "medium"),
+            ("sonnet", "high"),
+            ("opus", "high"),
+            ("claude-sonnet-4-5", "high"),
+            ("claude-opus-4-8", "high"),
+            ("claude-sonnet-4-5", "MEDIUM"),
+        ] {
+            // The effort comes back lower-cased: the spawn compares it exactly.
+            assert_eq!(resolve_tier(Some(m), Some(e)).unwrap(), pair(m, &e.to_ascii_lowercase()), "{m} {e}");
+        }
+        // An omitted half takes its default, and the pair is still checked.
+        assert_eq!(resolve_tier(Some("opus"), None).unwrap(), pair("opus", "high"));
+        assert_eq!(resolve_tier(None, Some("medium")).unwrap(), pair("sonnet", "medium"));
+    }
+
+    #[test]
+    fn a_pair_outside_the_three_tiers_is_refused_naming_them() {
+        for (m, e) in [
+            (Some("opus"), Some("medium")),
+            (Some("opus"), Some("low")),
+            (Some("opus"), Some("max")),
+            (Some("sonnet"), Some("low")),
+            (Some("sonnet"), Some("xhigh")),
+            (Some("claude-sonnet-4-5"), Some("max")),
+            (Some("fable"), Some("high")),
+            (Some("some-other-model"), None),
+            (None, Some("max")),
+        ] {
+            let err = resolve_tier(m, e).expect_err(&format!("{m:?} {e:?} must be refused"));
+            assert!(
+                err.contains("sonnet at medium") && err.contains("sonnet at high") && err.contains("opus at high"),
+                "{m:?} {e:?}: {err}"
+            );
+        }
+    }
+
     #[test]
     fn an_omitted_tier_is_sonnet_high_not_the_project_default() {
         assert_eq!(resolve_tier(None, None).unwrap(), ("sonnet".to_string(), "high".to_string()));
@@ -328,13 +402,13 @@ mod tests {
     #[test]
     fn a_finished_or_ended_sub_does_not_count_toward_the_cap() {
         let st = state();
-        row(&st, "main");
+        row(&st, "cap-fin");
         for n in 0..5 {
-            sub_row(&st, &format!("sub{n}"), "main", &format!("job-{n}"));
+            sub_row(&st, &format!("sub{n}"), "cap-fin", &format!("job-{n}"));
         }
         st.registry.set_subchat_finished("sub0", true);
-        assert_eq!(running_subs(&st.registry, "main").len(), 4);
-        plan_for(&st, &on(), Some("sixth"), &complete()).unwrap().expect("one slot free");
+        assert_eq!(running_subs(&st.registry, "cap-fin").len(), 4);
+        plan_as(&st, "cap-fin", &on(), Some("sixth"), &complete()).unwrap().expect("one slot free");
     }
 
     #[test]
@@ -351,37 +425,37 @@ mod tests {
     #[test]
     fn parallel_spawns_reserve_slots_before_any_row_exists() {
         let st = state();
-        row(&st, "main");
+        row(&st, "holder-a");
         let mut held = Vec::new();
         for _ in 0..5 {
-            held.push(plan_for(&st, &on(), Some("n"), &complete()).unwrap().unwrap());
+            held.push(plan_as(&st, "holder-a", &on(), Some("n"), &complete()).unwrap().unwrap());
         }
-        let err = plan_for(&st, &on(), Some("n"), &complete()).err().expect("sixth blocked while five are in flight");
+        let err = plan_as(&st, "holder-a", &on(), Some("n"), &complete()).err().expect("sixth blocked while five are in flight");
         assert!(err.contains("being started"), "{err}");
         held.pop().unwrap().release_slot();
-        plan_for(&st, &on(), Some("n"), &complete()).unwrap().expect("a released slot frees the cap");
+        plan_as(&st, "holder-a", &on(), Some("n"), &complete()).unwrap().expect("a released slot frees the cap");
     }
 
     #[test]
     fn marking_a_spawned_row_sets_the_parent_link_stores_the_brief_and_frees_the_slot() {
         let _data = crate::daemon::subchats::TempDataDir::new();
         let st = state();
-        row(&st, "main");
+        row(&st, "holder-b");
         row(&st, "new-sub");
-        let mut p = plan_for(&st, &on(), Some("header"), &complete()).unwrap().unwrap();
+        let mut p = plan_as(&st, "holder-b", &on(), Some("header"), &complete()).unwrap().unwrap();
         mark_as_sub(&st, "new-sub", &mut p);
         let inst = st.registry.get("new-sub").unwrap();
-        assert_eq!(inst.subchat_of.as_deref(), Some("main"));
+        assert_eq!(inst.subchat_of.as_deref(), Some("holder-b"));
         let stored = crate::sessions::chat_config::get("new-sub").unwrap().subchat.expect("brief stored");
-        assert_eq!((stored.parent.as_str(), stored.task.as_str(), stored.writes), ("main", "t", false));
+        assert_eq!((stored.parent.as_str(), stored.task.as_str(), stored.writes), ("holder-b", "t", false));
         assert!(crate::sessions::chat_config::sub_session_ids().contains("new-sub"));
         // The row counts now and the reservation is gone: 1 running + 4 in flight
         // fills the cap, so a double-counted slot would refuse the fourth plan.
         let mut held = Vec::new();
         for _ in 0..4 {
-            held.push(plan_for(&st, &on(), Some("n"), &complete()).unwrap().unwrap());
+            held.push(plan_as(&st, "holder-b", &on(), Some("n"), &complete()).unwrap().unwrap());
         }
-        assert!(plan_for(&st, &on(), Some("n"), &complete()).is_err());
+        assert!(plan_as(&st, "holder-b", &on(), Some("n"), &complete()).is_err());
     }
 
     #[test]
@@ -390,7 +464,35 @@ mod tests {
         row(&st, "main");
         let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
         let err = plan(&st, "main", &on(), elsewhere, None, None, None, Some("n"), &complete(), &[]).err().expect("refused");
-        assert!(err.contains("working directory") || err.contains("own project"), "{err}");
+        assert!(err.contains("own project"), "{err}");
+    }
+
+    #[test]
+    fn the_project_refusal_points_at_ways_out_that_exist() {
+        let st = state();
+        row(&st, "main");
+        let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
+        for hit in [
+            plan(&st, "main", &on(), elsewhere, None, None, None, Some("n"), &complete(), &[]).err().unwrap(),
+            check_same_project(std::path::Path::new("/a"), std::path::Path::new("/b")).unwrap_err(),
+        ] {
+            // In mode-on every local spawn becomes a sub, so "start a normal
+            // chat without the subchats fields" would send the caller nowhere.
+            assert!(!hit.contains("normal chat"), "{hit}");
+            assert!(hit.contains("Joe") && hit.contains("Use subchats"), "{hit}");
+        }
+    }
+
+    #[test]
+    fn a_thin_brief_aimed_at_another_project_gets_the_project_error_first() {
+        let st = state();
+        row(&st, "main");
+        let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
+        let err = plan(&st, "main", &on(), elsewhere, None, None, None, None, &SubchatArgs::default(), &[])
+            .err()
+            .expect("refused");
+        assert!(err.contains("own project"), "{err}");
+        assert!(!err.contains("done_when"), "the brief error must not win: {err}");
     }
 
     #[test]

@@ -601,6 +601,8 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn end_session_drops_the_closed_chats_ask_threads() {
+        // The ask store lives under the data dir, which other tests repoint.
+        let _data = crate::daemon::subchats::TempDataDir::new();
         let sid = "teardown-test-ask-drop-9f2c";
         let thread = crate::ask::store::AskThread::new("t1".into(), 1);
         crate::ask::store::save(sid, &[thread]).unwrap();

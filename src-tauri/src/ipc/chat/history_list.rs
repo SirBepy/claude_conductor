@@ -103,6 +103,32 @@ fn parse_date_bound(s: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(s).ok().map(|dt| dt.timestamp())
 }
 
+/// `collect_history` minus the chats the History list must not show: live ones
+/// (they are in the sidebar) and every hidden sub, ended ones included (a sub's
+/// transcript sits on disk like any chat's, but a sub is never a chat the user
+/// browses). Shared by the desktop `list_history` command and the daemon's
+/// `list_history` RPC so the two cannot disagree.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn collect_listed_history(
+    projects_dir: &std::path::Path,
+    instances: &[crate::types::Instance],
+    project_id: Option<String>,
+    search: Option<String>,
+    limit: u32,
+    offset: u32,
+    model_filter: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+) -> Vec<crate::types::chat::HistoryEntry> {
+    let hidden = crate::daemon::subchats::hidden_from_past_chats(
+        instances.iter().filter(|i| i.ended_at.is_none()).map(|i| i.session_id.clone()),
+    );
+    let mut entries =
+        collect_history(projects_dir, project_id, search, limit, offset, model_filter, date_from, date_to);
+    entries.retain(|e| !hidden.contains(&e.session_id));
+    entries
+}
+
 /// Core of `list_history`: cheap walk + stat + sort + slice FIRST, then parse
 /// titles for the returned page only. `search` needs every title so it takes
 /// the full-parse path; `model_filter` alone streams the sorted list, parsing
@@ -248,24 +274,11 @@ pub async fn list_history(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<Vec<crate::types::chat::HistoryEntry>, String> {
     let projects_dir = crate::tokens::claude_projects_dir().ok_or("no home dir")?;
-    // Collect live session IDs so we can exclude them from history. Hidden
-    // subs are excluded too, ended ones included: their transcripts sit on disk
-    // like any chat's, but a sub is never a chat the user browses.
-    let mut live_ids: std::collections::HashSet<String> = state
-        .cached_instances
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|i| i.ended_at.is_none())
-        .map(|i| i.session_id.clone())
-        .collect();
-    live_ids.extend(crate::sessions::chat_config::sub_session_ids());
+    let instances = state.cached_instances.lock().unwrap().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut entries = collect_history(
-            &projects_dir, project_id, search, limit, offset, model_filter, date_from, date_to,
-        );
-        entries.retain(|e| !live_ids.contains(&e.session_id));
-        entries
+        collect_listed_history(
+            &projects_dir, &instances, project_id, search, limit, offset, model_filter, date_from, date_to,
+        )
     })
     .await
     .map_err(|e| format!("join: {}", e))
@@ -349,6 +362,30 @@ mod tests {
         let found = ch(root, None, Some("THIRD".into()), 100, 0);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].title, "Third one");
+    }
+
+    #[test]
+    fn the_listed_history_hides_live_chats_and_every_sub_ended_or_not() {
+        use crate::sessions::registry::Registry;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let tmp = tempdir().unwrap();
+        for sid in ["past-chat", "live-chat", "running-sub", "ended-sub"] {
+            write_session(tmp.path(), "proj", sid, sid);
+        }
+        let reg = Registry::new();
+        for sid in ["live-chat", "running-sub", "ended-sub"] {
+            reg.upsert_interactive(sid, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        }
+        reg.mark_ended("ended-sub", crate::types::EndReason::Manual, "2026-11-05T01:00:00Z");
+        crate::daemon::subchats::store_sub_brief("running-sub", "live-chat");
+        crate::daemon::subchats::store_sub_brief("ended-sub", "live-chat");
+
+        let listed: Vec<String> =
+            collect_listed_history(tmp.path(), &reg.list(), None, None, 50, 0, None, None, None)
+                .into_iter()
+                .map(|e| e.session_id)
+                .collect();
+        assert_eq!(listed, ["past-chat"], "a live chat and both subs stay out of the list");
     }
 
     #[test]

@@ -91,6 +91,7 @@ fn add(
         &settings.projects,
         &inherited,
         session_id,
+        crate::daemon::subchats::is_sub(&caller),
         args,
         now,
     )?;
@@ -118,6 +119,7 @@ fn build_item(
     known_projects: &[crate::types::ProjectConfig],
     inherited: &crate::sessions::chat_config::ChatConfig,
     session_id: &str,
+    caller_is_sub: bool,
     args: &ScheduleArgs,
     now: DateTime<Utc>,
 ) -> Result<ScheduledItem, String> {
@@ -151,6 +153,11 @@ fn build_item(
             }
         }
         "new_chat" => {
+            // A fired new chat is an ordinary visible chat (`fire_new_chat` has no
+            // sub check), so a sub that could schedule one would reach past depth 1.
+            if caller_is_sub {
+                return Err(crate::daemon::subchats::spawn::DEPTH_REFUSAL.to_string());
+            }
             let requested = args
                 .cwd
                 .as_deref()
@@ -447,9 +454,33 @@ mod tests {
             &[],
             cfg,
             "sess-1",
+            false,
             a,
             utc("2026-01-05T10:00:00Z"),
         )
+    }
+
+    #[test]
+    fn a_sub_cannot_schedule_a_new_chat_but_can_remind_itself() {
+        let sub = |a: &ScheduleArgs| {
+            build_item(
+                std::path::Path::new("C:/proj"),
+                &[],
+                &cfg("sonnet", "high"),
+                "sub-1",
+                true,
+                a,
+                utc("2026-01-05T10:00:00Z"),
+            )
+        };
+        // The default target is new_chat.
+        let err = sub(&args(|_| {})).expect_err("default target is a new chat");
+        assert_eq!(err, crate::daemon::subchats::spawn::DEPTH_REFUSAL);
+        let err = sub(&args(|a| a.target = Some("new_chat".into()))).expect_err("new_chat refused");
+        assert_eq!(err, crate::daemon::subchats::spawn::DEPTH_REFUSAL);
+        assert!(sub(&args(|a| a.target = Some("this_chat".into()))).is_ok(), "a reminder to itself makes no chat");
+        // A main chat is unaffected.
+        assert!(build(&cfg("opus", "high"), &args(|_| {})).is_ok());
     }
 
     #[test]

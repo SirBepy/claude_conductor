@@ -18,12 +18,14 @@ const PER_REPO: u32 = 20;
 
 /// Scans the newest transcripts of each repo. Blocking: file IO throughout.
 fn scan_repos(repos: &[RepoRef], projects_dir: &Path, live_ids: &HashSet<String>) -> Vec<ScannedChat> {
+    // A hidden sub has no chat row, so what it did is not a chat in the report.
+    let subs = crate::sessions::chat_config::sub_session_ids();
     let mut jobs = Vec::new();
     for repo in repos {
         let slug = project_dir_slug(projects_dir, &repo.cwd);
         let entries =
             crate::ipc::chat::history::collect_history(projects_dir, Some(slug), None, PER_REPO, 0, None, None, None);
-        for e in entries {
+        for e in entries.into_iter().filter(|e| !subs.contains(&e.session_id)) {
             let path = projects_dir.join(&e.project_id).join(format!("{}.jsonl", e.session_id));
             jobs.push((repo.cwd.clone(), e, path));
         }
@@ -104,6 +106,26 @@ mod tests {
     fn par_map_handles_empty_and_single_inputs() {
         assert!(par_map(&Vec::<u32>::new(), |n| *n).is_empty());
         assert_eq!(par_map(&[7u32], |n| *n + 1), vec![8]);
+    }
+
+    #[test]
+    fn the_history_scan_leaves_out_every_hidden_sub() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = "/fixture/repo";
+        let dir = tmp.path().join(crate::tokens::encode_cwd_as_project_dir(Path::new(cwd)));
+        std::fs::create_dir_all(&dir).unwrap();
+        for id in ["chat", "running-sub", "ended-sub"] {
+            let line = serde_json::json!({"type":"user","message":{"role":"user","content":id}}).to_string();
+            std::fs::write(dir.join(format!("{id}.jsonl")), line).unwrap();
+        }
+        crate::daemon::subchats::store_sub_brief("running-sub", "chat");
+        crate::daemon::subchats::store_sub_brief("ended-sub", "chat");
+        let repo = RepoRef { cwd: cwd.into(), name: "r".into(), project_id: None };
+
+        let ids: Vec<String> =
+            scan_repos(&[repo], tmp.path(), &HashSet::new()).into_iter().map(|c| c.session_id).collect();
+        assert_eq!(ids, ["chat"]);
     }
 
     /// Wall-clock measurement against the dev's real transcripts; run by hand
