@@ -304,6 +304,14 @@ pub struct SessionProgress {
     /// (turn timer) or waiting/done. `None` until the first flip this run.
     #[serde(default)]
     pub state_since: Option<String>,
+    /// Set on a sub the daemon holds without a child ("waiting for header"): the
+    /// row exists and counts as running, but nothing has started it yet. Clients
+    /// draw it as queued. Not persisted with the row; `subchats::held` owns the
+    /// durable copy and re-stamps this at boot. Optional on the wire so a client
+    /// that builds a `progress` by literal does not have to name it.
+    #[serde(default)]
+    #[ts(optional)]
+    pub waiting_for: Option<String>,
 }
 
 /// Shape served to the webview. Same as `Instance` for now; kept as a

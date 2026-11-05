@@ -5,6 +5,7 @@ import type { QuestionProgress } from "./question-progress";
 import { truncate } from "./project-dashboard/format";
 import { planProgress } from "./sidebar-ring";
 import type { RingTone } from "./sidebar-ring";
+import type { SubKind } from "./main-chat";
 
 /** What the hover card needs from one row. Plain data so the builder is a
  *  pure string function (tests/sidebar-hover-card.test.mjs). */
@@ -23,7 +24,7 @@ export interface HoverCardInput {
   /** A Use-subchats main chat's subs (main-chat.ts `hoverRows`). A non-empty
    *  list replaces the chat's own state and plan blocks: one chat has no single
    *  state once it has subs asking, working and finished. */
-  subs?: ReadonlyArray<{ name: string; kind: "asking" | "working" | "finished"; progress: string }>;
+  subs?: ReadonlyArray<{ name: string; kind: SubKind; progress: string }>;
 }
 
 interface StateLine { label: string; tone: RingTone | "idle"; timer: "turn" | "waiting" | "ago" | null }
@@ -105,8 +106,8 @@ function questionBlock(q: QuestionProgress): string {
   }).join("");
 }
 
-const SUB_DOT_TONE: Record<"asking" | "working" | "finished", string> = {
-  asking: TONE_VAR.question, working: TONE_VAR.working, finished: TONE_VAR.done,
+const SUB_DOT_TONE: Record<SubKind, string> = {
+  asking: TONE_VAR.question, working: TONE_VAR.working, queued: TONE_VAR.working, finished: TONE_VAR.done,
 };
 
 function subsBlock(subs: NonNullable<HoverCardInput["subs"]>): string {

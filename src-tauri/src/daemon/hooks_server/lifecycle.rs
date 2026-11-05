@@ -292,6 +292,29 @@ mod tests {
         assert!(!ctx.state.registry.get("close-sub").unwrap().closing);
     }
 
+    /// The gate-chat skill ends its prompt in `/close`, so a gate sub reaches this
+    /// call by following its first message to the letter. The refusal has to name
+    /// the way out, and the gate's own prompt says the same, so the two agree.
+    #[tokio::test]
+    async fn the_close_a_gate_prompt_ends_in_is_refused_naming_finish_subchat() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let ctx = close_ctx();
+        for id in ["gclose-main", "gclose-gate"] {
+            ctx.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        }
+        ctx.state.registry.set_subchat_of("gclose-gate", Some("gclose-main".into()));
+        let brief = crate::daemon::subchats::brief_for_test_gate("gclose-main");
+        crate::sessions::chat_config::set_subchat("gclose-gate", Some(brief));
+        assert!(crate::daemon::subchats::is_gate("gclose-gate"));
+        for stage in [None, Some("started")] {
+            let v = close_confirm(&ctx, "gclose-gate", stage).await;
+            assert_eq!(v["ok"], serde_json::json!(false), "{stage:?}");
+            assert!(v["error"].as_str().unwrap().contains("finish_subchat"), "{v}");
+        }
+        assert!(!ctx.state.registry.take_close_requested("gclose-gate"), "no teardown is armed for a gate");
+        assert!(crate::daemon::claude_config::SUBCHAT_GATE_PROMPT.contains("finish_subchat"));
+    }
+
     #[tokio::test]
     async fn close_session_from_an_ordinary_chat_and_from_a_main_chat_still_works() {
         let ctx = close_ctx();

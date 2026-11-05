@@ -41,6 +41,10 @@ pub enum MoveError {
     NotFound(String),
     #[error("{0} is not a sub")]
     NotASub(String),
+    /// A queued sub has no conversation yet; as a sidebar chat it would be an
+    /// empty row that cannot resume.
+    #[error("{0} has not started yet, so it cannot move to the sidebar. Drop it, or wait for it to start.")]
+    Held(String),
 }
 
 /// Turns a sub into an ordinary chat for good, and ends every rule that treated
@@ -63,6 +67,9 @@ pub async fn move_to_sidebar(state: &Arc<DaemonState>, sub_id: &str) -> Result<(
     let inst = state.registry.get(sub_id).ok_or_else(|| MoveError::NotFound(sub_id.to_string()))?;
     if !is_sub(&inst) {
         return Err(MoveError::NotASub(sub_id.to_string()));
+    }
+    if super::held::is_held(sub_id) {
+        return Err(MoveError::Held(sub_id.to_string()));
     }
     let parent = inst.subchat_of.clone();
     state.registry.set_subchat_of(sub_id, None);

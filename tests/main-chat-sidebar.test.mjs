@@ -150,4 +150,36 @@ describe("mainChatInfo", () => {
   it("ignores another chat's subs", () => {
     expect(mainChatInfo(main, [main, sub("x", { subchat_of: "other" })]).subs).toHaveLength(0);
   });
+
+  // A sub the daemon holds behind another (`after`) has a row and no process.
+  const queued = (id, waitingFor = `waiting for header`, over = {}) =>
+    sub(id, { busy: false, progress: { plan: null, state_since: null, waiting_for: waitingFor }, ...over });
+
+  it("shows a held sub as queued with what it waits for, below the working ones and above the finished", () => {
+    const sessions = [main, sub("done", { busy: false, subchat_finished: true }), queued("footer"), sub("header")];
+    const info = mainChatInfo(main, sessions);
+    expect(info.subs.map((s) => [s.name, s.kind])).toEqual([["header", "working"], ["footer", "queued"], ["done", "finished"]]);
+    expect(info.subs.find((s) => s.name === "footer").progress).toBe("waiting for header");
+  });
+
+  it("does not count a queued sub as asking, and it keeps the whole chat from reading as all finished", () => {
+    const sessions = [main, sub("a", { busy: false, subchat_finished: true }), queued("b")];
+    const info = mainChatInfo(main, sessions);
+    expect(info.askingDots).toBe(0);
+    expect(info.allFinished).toBe(false);
+    expect(mainChatInfo(main, [main, sub("a", { busy: false, subchat_finished: true })]).allFinished).toBe(true);
+  });
+
+  it("stops reading as queued once the daemon clears the mark, or when it finishes", () => {
+    expect(mainChatInfo(main, [main, queued("a", undefined, { busy: true, progress: { plan: null, state_since: null } })]).subs[0].kind).toBe("working");
+    expect(mainChatInfo(main, [main, queued("a", "waiting for header", { subchat_finished: true })]).subs[0].kind).toBe("finished");
+  });
+
+  it("puts a queued sub on the hover card in the working yellow with its waiting text", () => {
+    const info = mainChatInfo(main, [main, queued("footer")]);
+    const html = buildHoverCardHtml({ title: "CV", project: "cv", st: "st-working", plan: null, question: null, stateSince: null, contextPct: null, now: 0, subs: info.hoverRows });
+    expect(html).toContain("is-queued");
+    expect(html).toContain("waiting for header");
+    expect(html).toContain("var(--st-working)");
+  });
 });

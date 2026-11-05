@@ -212,6 +212,30 @@ pub struct Inputs<'a> {
     pub reviewer_tool_use_id: Option<&'a str>,
     /// False when the brief opted out of a reviewer (a purely visual job).
     pub review_required: bool,
+    /// Set for a gate sub: `pushed` is then read from whether the upstream moved
+    /// past `upstream_before` and now contains `HEAD`, not from this sub's own
+    /// commits (a gate that only pushes makes none). Every other sub leaves it
+    /// `None` and keeps the commit-based reading.
+    pub gate: Option<GateBase<'a>>,
+}
+
+/// What a gate sub's push is measured against.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GateBase<'a> {
+    /// The upstream's commit when the gate started; `None` when the branch had none.
+    pub upstream_before: Option<&'a str>,
+}
+
+/// Whether a gate pushed: the upstream moved since it started and now holds
+/// `head`. `None` when either end of the comparison is unknown (no upstream
+/// before or after), because "not pushed" would then be a guess.
+fn gate_pushed(cwd: &Path, base: &GateBase, head: &str) -> Option<bool> {
+    let before = base.upstream_before?;
+    let now = git::upstream(cwd)?;
+    if now == before {
+        return Some(false);
+    }
+    git::is_ancestor(cwd, head, &now)
 }
 
 /// Blocking: runs git and reads the transcript. Call from a thread or
@@ -233,6 +257,9 @@ pub fn compute(i: &Inputs) -> Facts {
         if facts.commits.unwrap_or(0) > 0 {
             facts.pushed = gitx::is_pushed(i.cwd, head);
         }
+    }
+    if let (Some(gate), Some(head)) = (&i.gate, head.as_deref()) {
+        facts.pushed = gate_pushed(i.cwd, gate, head);
     }
 
     match (i.transcript, git::dirty_keys(i.cwd)) {
@@ -528,7 +555,7 @@ mod tests {
     }
 
     fn inputs<'a>(root: &'a Path, tp: Option<&'a Path>, base: Option<&'a str>) -> Inputs<'a> {
-        Inputs { cwd: root, transcript: tp, base, since: SINCE_SPAWN, reviewer_tool_use_id: None, review_required: true }
+        Inputs { cwd: root, transcript: tp, base, since: SINCE_SPAWN, reviewer_tool_use_id: None, review_required: true, gate: None }
     }
 
     #[test]
@@ -606,6 +633,71 @@ mod tests {
         assert_eq!(compute(&inputs(&root, Some(&tp), Some(&base))).pushed, Some(false));
         run(&root, &["push", "-q", "origin", "HEAD:refs/heads/main"]);
         assert_eq!(compute(&inputs(&root, Some(&tp), Some(&base))).pushed, Some(true));
+    }
+
+    /// A repo whose branch tracks a bare remote it has pushed once.
+    fn tracked_repo() -> (tempfile::TempDir, PathBuf, tempfile::TempDir) {
+        let (dir, root) = init();
+        let remote = tempfile::tempdir().unwrap();
+        run(remote.path(), &["init", "-q", "--bare"]);
+        run(&root, &["remote", "add", "origin", &remote.path().to_string_lossy()]);
+        run(&root, &["push", "-q", "-u", "origin", "HEAD:refs/heads/main"]);
+        (dir, root, remote)
+    }
+
+    fn gate_inputs<'a>(root: &'a Path, before: Option<&'a str>) -> Inputs<'a> {
+        Inputs { gate: Some(GateBase { upstream_before: before }), ..inputs(root, None, None) }
+    }
+
+    #[test]
+    fn a_gate_that_pushed_says_pushed_even_though_it_made_no_commit_of_its_own() {
+        let (_dir, root, _remote) = tracked_repo();
+        commit_file(&root, "a.txt", "work the main chat left unpushed\n");
+        let before = git::upstream(&root).unwrap();
+        let f = compute(&gate_inputs(&root, Some(&before)));
+        assert_eq!(f.pushed, Some(false), "the upstream has not moved: it did not push");
+        run(&root, &["push", "-q", "origin", "HEAD:refs/heads/main"]);
+        let f = compute(&gate_inputs(&root, Some(&before)));
+        assert_eq!(f.pushed, Some(true), "the upstream moved and holds HEAD");
+        assert_eq!(f.commits, None, "no spawn base was given, and the count is not what makes the chip");
+    }
+
+    #[test]
+    fn a_gate_pushed_chip_is_unknown_when_either_end_of_the_comparison_is_missing() {
+        let (_dir, root, _remote) = tracked_repo();
+        assert_eq!(compute(&gate_inputs(&root, None)).pushed, None, "no upstream recorded at the start");
+        let (_d2, bare_root) = init();
+        let any = git::head(&bare_root).unwrap();
+        assert_eq!(compute(&gate_inputs(&bare_root, Some(&any))).pushed, None, "no upstream now: a guess would mislead");
+    }
+
+    #[test]
+    fn a_gate_that_moved_the_upstream_without_holding_head_did_not_push_this_head() {
+        let (_dir, root, remote) = tracked_repo();
+        let before = git::upstream(&root).unwrap();
+        // Someone else pushed a commit this clone never had, then this clone fetched it
+        // and went on to commit locally on a diverged line.
+        let other = tempfile::tempdir().unwrap();
+        run(other.path(), &["clone", "-q", "-b", "main", &remote.path().to_string_lossy(), "."]);
+        run(other.path(), &["config", "user.email", "t@example.com"]);
+        run(other.path(), &["config", "user.name", "t"]);
+        run(other.path(), &["config", "commit.gpgsign", "false"]);
+        commit_file(other.path(), "theirs.txt", "t\n");
+        run(other.path(), &["push", "-q", "origin", "HEAD:refs/heads/main"]);
+        commit_file(&root, "mine.txt", "m\n");
+        run(&root, &["fetch", "-q"]);
+        assert_eq!(compute(&gate_inputs(&root, Some(&before))).pushed, Some(false));
+    }
+
+    #[test]
+    fn a_plain_sub_keeps_the_commit_based_reading_and_never_gets_the_gate_one() {
+        let (dir, root, _remote) = tracked_repo();
+        let base = git::head(&root).unwrap();
+        // No commits of its own: nothing to say about pushing.
+        assert_eq!(compute(&inputs(&root, None, Some(&base))).pushed, None);
+        commit_file(&root, "a.txt", "a\n");
+        let tp = transcript(dir.path(), &[("Write", &root.join("a.txt"))]);
+        assert_eq!(compute(&inputs(&root, Some(&tp), Some(&base))).pushed, Some(false), "a plain sub that committed says not pushed");
     }
 
     #[test]

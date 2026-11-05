@@ -70,6 +70,7 @@ export function subMetaText(sub: Instance, main: Instance | undefined): string {
   const parts = [`Subchat of ${main ? sessionSubtitle(main) : "its main chat"}`];
   if (sub.closing) parts.push("closing");
   else if (sub.subchat_finished) parts.push("finished, can continue");
+  else if (sub.progress?.waiting_for) parts.push(sub.progress.waiting_for);
   return parts.join(", ");
 }
 

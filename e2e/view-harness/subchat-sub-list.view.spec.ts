@@ -176,6 +176,33 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await capture(page, `sub-list-open-${label}`);
     });
 
+    test("a sub held behind another is listed as waiting, with no way to move it before it has started", async ({ page }) => {
+      const queued = sub("sub-queued", "Footer links", 106, {
+        progress: { plan: null, state_since: null, waiting_for: "waiting for Header" },
+      });
+      await mount(page, size, [MAIN, FOOTER, HEADER, queued]);
+      await openChat(page, "main");
+      await expect(countBtn(page)).toHaveText("3");
+      await openList(page);
+      const heads = await page.locator(".sub-list-popover .sub-list-head").allTextContents();
+      expect(heads, "queued sits with the running ones, not under Finished").toEqual(["Running", "Finished"]);
+      await expect(listRow(page, "sub-queued")).toHaveAttribute("data-kind", "queued");
+      await expect(listRow(page, "sub-queued").locator(".sub-status")).toHaveText("waiting for Header");
+      await expect(listRow(page, "sub-queued").locator("[data-move]")).toHaveCount(0);
+      await expect(listRow(page, "sub-footer").locator("[data-move]")).toHaveCount(1);
+      const order = await page.locator(".sub-list-popover .sub-row").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.subId));
+      expect(order).toEqual(["sub-footer", "sub-queued", "sub-header"]);
+      // The ring is the working yellow, not the glowing or arc one a running sub gets.
+      const dot = listRow(page, "sub-queued").locator(".sub-dot .avatar-ring circle");
+      await expect(dot.first()).toHaveAttribute("data-tone", "working");
+      await expect(dot.first()).not.toHaveClass(/is-glow/);
+      await capture(page, `sub-list-queued-${label}`);
+      // Reading it in place says it is waiting.
+      await listRow(page, "sub-queued").click();
+      await expect(backBtn(page)).toBeVisible();
+      await expect(page.locator("#session-pane .session-header .meta-proj")).toHaveText("Subchat of CV redesign, waiting for Header");
+    });
+
     test("a row opens the sub in place with a back arrow, and the sidebar keeps the main chat selected", async ({ page }) => {
       await mount(page, size, [MAIN, FOOTER, HEADER, PLAIN]);
       await openChat(page, "main");

@@ -12,7 +12,7 @@ pub mod spawn;
 pub use brief::{SubchatArgs, SubchatBrief};
 
 use crate::accounts::Account;
-use crate::daemon::claude_config::{append_system_prompt, SUBCHATS_MAIN_PROMPT, SUBCHAT_SUB_PROMPT};
+use crate::daemon::claude_config::{append_system_prompt, SUBCHATS_MAIN_PROMPT, SUBCHAT_GATE_PROMPT, SUBCHAT_SUB_PROMPT};
 use crate::daemon::rpc::RpcError;
 use crate::daemon::state::DaemonState;
 use crate::types::Instance;
@@ -28,6 +28,7 @@ pub mod decisions;
 pub mod facts;
 pub mod finish;
 pub(crate) mod git;
+pub mod held;
 mod reply;
 pub mod joe_message;
 pub mod pause;
@@ -55,6 +56,15 @@ pub use routing::{
 /// Whether `inst` is a hidden sub of some main chat.
 pub fn is_sub(inst: &Instance) -> bool {
     inst.subchat_of.is_some()
+}
+
+/// Whether `sub_id` is a push-gate sub (`spawn_chat` with `gate: true`), read
+/// from its stored brief. The one sub allowed to push, and exempt from the
+/// reviewer requirement: the check in `finish::request_finish` that demands a
+/// fresh reviewer for a sub that changed files must return early when this is
+/// true, because the gate's own `/code-check` already reviewed what it changed.
+pub fn is_gate(sub_id: &str) -> bool {
+    crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat).is_some_and(|b| b.gate)
 }
 
 /// What a sub is told when its `post_message` names its own main chat.
@@ -97,6 +107,8 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     wake::on_finished(state, sub_id);
     // A main chat that picked "Wait for them" closes when its last running sub ends.
     closing::on_sub_settled(state, sub_id);
+    // A sub registered with `after` this one starts now.
+    held::on_target_done(state);
 }
 
 #[cfg(test)]
@@ -216,6 +228,20 @@ pub fn sub_prompt(parent_label: &str) -> String {
     format!("{SUBCHAT_SUB_PROMPT} Your main chat is \"{parent_label}\".")
 }
 
+/// The prompt a gate sub is spawned with, in place of [`sub_prompt`].
+pub fn gate_prompt(parent_label: &str) -> String {
+    format!("{SUBCHAT_GATE_PROMPT} Your main chat is \"{parent_label}\".")
+}
+
+/// Adds [`gate_prompt`] to a spawn's `--append-system-prompt`; idempotent like
+/// [`append_sub_prompt`], for the same respawn reason.
+pub fn append_gate_prompt(args: &mut [String], parent_label: &str) {
+    if args.iter().any(|a| a.contains(SUBCHAT_GATE_PROMPT)) {
+        return;
+    }
+    append_system_prompt(args, &gate_prompt(parent_label));
+}
+
 /// Adds [`sub_prompt`] to a spawn's `--append-system-prompt`. Idempotent: the
 /// spawn path (`lifecycle::spawn_session`) calls it for every spawn and respawn
 /// of a sub, since a resumed child rebuilds its argv and would otherwise lose
@@ -246,6 +272,7 @@ pub struct RoleLaunch {
     pub sub_parent: Option<String>,
     main_prompt: bool,
     parent_label: Option<String>,
+    gate: bool,
 }
 
 impl RoleLaunch {
@@ -254,13 +281,19 @@ impl RoleLaunch {
     }
 
     /// Adds this role's rules to a spawn's `--append-system-prompt`: the main
-    /// chat's, or the sub's naming its main chat. Nothing for a plain chat.
+    /// chat's, or the sub's naming its main chat (a gate sub gets its own text,
+    /// since the generic sub's ends in rules that do not fit a push).
+    /// Nothing for a plain chat.
     pub fn append_prompts(&self, args: &mut [String]) {
         if self.main_prompt {
             append_system_prompt(args, SUBCHATS_MAIN_PROMPT);
         }
         if let Some(label) = &self.parent_label {
-            append_sub_prompt(args, label);
+            if self.gate {
+                append_gate_prompt(args, label);
+            } else {
+                append_sub_prompt(args, label);
+            }
         }
     }
 }
@@ -269,9 +302,13 @@ impl RoleLaunch {
 /// (see [`launch_parent`]).
 pub fn role_launch(state: &DaemonState, session_id: &str, explicit_parent: Option<&str>) -> RoleLaunch {
     let sub_parent = launch_parent(state, session_id, explicit_parent);
-    let main_prompt = crate::sessions::chat_config::get(session_id).unwrap_or_default().subchats_on;
+    let config = crate::sessions::chat_config::get(session_id).unwrap_or_default();
+    let main_prompt = config.subchats_on;
+    // A gate's brief is stored before its first launch (`spawn_chat` does it),
+    // so the first spawn and every relaunch read the same record.
+    let gate = sub_parent.is_some() && config.subchat.as_ref().is_some_and(|b| b.gate);
     let parent_label = sub_parent.as_deref().map(|parent| parent_label(state, parent));
-    RoleLaunch { sub_parent, main_prompt, parent_label }
+    RoleLaunch { sub_parent, main_prompt, parent_label, gate }
 }
 
 /// How a sub's prompt names its main chat: the chat's title, else its folder
@@ -305,6 +342,12 @@ impl TempDataDir {
         std::env::set_var("CC_DATA_DIR", dir.path());
         Self { _guard: guard, _dir: dir }
     }
+}
+
+/// A gate sub's brief, for tests outside this module that need one stored.
+#[cfg(test)]
+pub(crate) fn brief_for_test_gate(parent: &str) -> SubchatBrief {
+    brief::gate_brief(Some("push it"), parent).unwrap()
 }
 
 /// Marks `session_id` as a stored sub of `parent` in the (temp) chat-config, the
@@ -544,6 +587,43 @@ mod tests {
         // The first spawn has no row yet and names the parent explicitly.
         let first = role_launch(&st, "role-fresh", Some("role-main"));
         assert!(first.is_sub() && argv(&first).contains("finish_subchat"));
+    }
+
+    #[test]
+    fn a_gate_sub_launches_with_the_gate_prompt_in_place_of_the_generic_sub_prompt() {
+        let _data = TempDataDir::new();
+        let st = state();
+        chat(&st, "gate-main", None, "opus", "high");
+        st.registry.set_name("gate-main", "CV redesign".into());
+        chat(&st, "gate-sub", None, "sonnet", "high");
+        st.registry.set_subchat_of("gate-sub", Some("gate-main".into()));
+        chat(&st, "plain-sub", None, "sonnet", "high");
+        st.registry.set_subchat_of("plain-sub", Some("gate-main".into()));
+        store_sub_brief("plain-sub", "gate-main");
+        crate::sessions::chat_config::set_subchat("gate-sub", Some(brief::gate_brief(Some("push it"), "gate-main").unwrap()));
+        assert!(is_gate("gate-sub") && !is_gate("plain-sub") && !is_gate("gate-main") && !is_gate("ghost"));
+
+        let prompt_of = |id: &str, explicit: Option<&str>| {
+            let mut args = vec!["--append-system-prompt".to_string(), "base".to_string()];
+            role_launch(&st, id, explicit).append_prompts(&mut args);
+            args[1].clone()
+        };
+        let gate = prompt_of("gate-sub", None);
+        assert!(gate.contains(SUBCHAT_GATE_PROMPT) && gate.contains("Your main chat is \"CV redesign\"."));
+        assert!(!gate.contains(SUBCHAT_SUB_PROMPT), "one set of rules about pushing, not two");
+        assert!(role_launch(&st, "gate-sub", None).is_sub(), "it still carries CC_SUBCHAT, so finish_subchat is listed");
+        // A relaunch passes the parent explicitly or reads it off the row: same prompt either way.
+        assert_eq!(prompt_of("gate-sub", Some("gate-main")), gate);
+        let plain = prompt_of("plain-sub", None);
+        assert!(plain.contains(SUBCHAT_SUB_PROMPT) && !plain.contains(SUBCHAT_GATE_PROMPT));
+        // The first launch stores the brief under the new id ahead of the spawn.
+        crate::sessions::chat_config::set_subchat("gate-fresh", Some(brief::gate_brief(Some("p"), "gate-main").unwrap()));
+        assert!(prompt_of("gate-fresh", Some("gate-main")).contains(SUBCHAT_GATE_PROMPT));
+        let mut once = vec!["--append-system-prompt".to_string(), "base".to_string()];
+        append_gate_prompt(&mut once, "CV redesign");
+        let first = once[1].clone();
+        append_gate_prompt(&mut once, "CV redesign");
+        assert_eq!(once[1], first, "a respawn must not double the rules");
     }
 
     #[test]

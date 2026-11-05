@@ -118,6 +118,12 @@ pub async fn sweep_dead(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> 
         if inst.ended_at.is_some() || inst.subchat_finished || super::pause::is_paused(&inst, env.now.timestamp()) {
             continue;
         }
+        // A sub the daemon holds without a child (the `after` queue) has not
+        // started, which is not a death; `held` starts it or asks Joe.
+        if super::held::is_held(&id) {
+            rt.clear_childless(&id);
+            continue;
+        }
         if (env.is_live)(&id) {
             rt.clear_childless(&id);
             continue;
@@ -155,6 +161,9 @@ pub async fn sweep_now(state: &Arc<DaemonState>, now: DateTime<Utc>, resumed_at:
     for id in sweep_dead(state, &env).await {
         log::warn!("subchats: sub {id} has no running process and never finished, raised a card");
     }
+    // The tick is also the backstop that starts a held sub whose wait ended
+    // without an event reaching it.
+    super::held::sweep(state).await;
 }
 
 #[cfg(test)]
@@ -406,6 +415,41 @@ mod tests {
             run_dead(&st, false, 0).await;
             assert!(run_dead(&st, false, 300).await.is_empty(), "{tag}");
         }
+    }
+
+    /// A sub the daemon holds behind another has no process because it has not
+    /// started. Without the exemption it would be carded as a death after the grace.
+    #[tokio::test]
+    async fn a_held_sub_is_not_judged_dead_stuck_or_silent_however_long_it_waits() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = idle_sub("dead-held");
+        crate::daemon::subchats::held::hold(
+            &st,
+            crate::daemon::subchats::held::Held {
+                sub_id: sub.clone(),
+                reason: "waiting for header".into(),
+                after: Some("dead-held-target".into()),
+                after_name: "header".into(),
+                launch: crate::daemon::subchats::held::LaunchSpec {
+                    cwd: std::path::PathBuf::from("."),
+                    model: "sonnet".into(),
+                    effort: "high".into(),
+                    account_id: None,
+                    first_message: "go".into(),
+                },
+            },
+        )
+        .unwrap();
+        run_dead(&st, false, 0).await;
+        assert!(run_dead(&st, false, 3600).await.is_empty(), "an hour childless, still not dead");
+        assert!(st.list_prompts().await.is_empty(), "and Joe was not asked about it");
+        // The silence sweep needs a live child, which a held sub never has.
+        let env = Env { now: Utc::now() + chrono::Duration::minutes(600), resumed_at: None, transcript_mtime: &no_mtime, is_live: &|_| false };
+        assert!(sweep(&st, &env).await.is_empty());
+        // Once it is released and still childless, the ordinary rule applies again.
+        crate::daemon::subchats::held::release(&st, &sub);
+        run_dead(&st, false, 3700).await;
+        assert_eq!(run_dead(&st, false, 3800).await, [sub], "it was exempt because it was held, not for good");
     }
 
     #[tokio::test]

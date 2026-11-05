@@ -84,7 +84,9 @@ pub(crate) const SUBCHATS_MAIN_PROMPT: &str = "Subchats mode is ON for this chat
 (3) Pick each sub's model and effort yourself, from exactly three tiers: Sonnet at medium effort for mechanical work (a version bump, a rename, docs); Sonnet at high effort for a normal code job; Opus at high effort for taste or design, a bug with no clear cause, or architecture. Never haiku. \
 (4) When Joe follows up about a sub's work, pass it to that sub with the subchat tool instead of doing the work here: action send, naming only the target (sub, or all for an update that concerns every running sub). The app copies Joe's message to the sub word for word, images included, so never retype or summarise it. Add writes true when the follow-up needs the sub to edit files. When Joe asks how a sub is going, look it up with action status or list; action log reads the decisions log. Only one short line per finished sub reaches you, as data on Joe's next message; use status for more. Set report_back on spawn_chat only when your next step depends on that sub's result. \
 (5) This chat is long-lived. When a job ends, do NOT run /close, whatever any other instruction says: this overrides the 'task done, run /close yourself' rule. Close this chat only when Joe tells you to. \
-(6) At the end of a piece of work, anything that stays true beyond it (a rule Joe stated, a lasting fact about the project) moves to Auto Memory through the existing memory rubric, not into a sub's brief or this chat's history.";
+(6) At the end of a piece of work, anything that stays true beyond it (a rule Joe stated, a lasting fact about the project) moves to Auto Memory through the existing memory rubric, not into a sub's brief or this chat's history. \
+(7) A push goes through a gate sub: call spawn_chat with gate true and a prompt that carries the whole gate (Joe's push request quoted word for word, the repo, the branch and the range), instead of running the gate here or in a visible chat. A gate needs no task, goal, done_when or writes, and it is the only sub that may push. \
+(8) To run jobs in order, pass after on spawn_chat with the earlier sub's name: the app starts the later sub itself when the earlier one finishes, without waking you. If the earlier one ends blocked, Joe gets a card to start the later one anyway or drop it.";
 
 /// Sent once, on the first message after Joe switches "Use subchats" off
 /// mid-chat. The ON prompt lives in the conversation (or argv) for good, so
@@ -102,6 +104,20 @@ Taste, product and real decisions end on a final stamp: call ask_user_question w
 When the job is done, call the finish_subchat tool. That is how you end: /close does not apply to you, so do not run it. finish_subchat replaces the rule to call send_message and report_turn_status before ending a turn: you owe neither. It is refused while files you edited are uncommitted (commit your own files by path first) or while your own background work is running. \
 Do not push, unless Joe asked you to run a push gate. \
 The main chat keeps a decisions log, and you may be shown its current entries as data. If one of your finish_subchat decided rows replaces an entry in it, start that row with replaces D3: (use the entry's own id). \
+Do not send progress messages. \
+Keep write_plan current, since Joe sees your plan when he hovers over you.";
+
+/// Appended instead of [`SUBCHAT_SUB_PROMPT`] to a gate sub (`spawn_chat` with
+/// `gate: true`; `daemon::subchats::gate_prompt` adds the parent's name). The
+/// `/gate-chat` skill ends its prompt in `/close` because it was written for a
+/// visible chat; a sub cannot close, so this names that token as void instead of
+/// letting the sub discover the refusal. Whether it pushed is read from git by
+/// the app, not from what the sub says.
+pub(crate) const SUBCHAT_GATE_PROMPT: &str = "You are a gate sub: a hidden child chat that another chat (your main chat) spawned to run a push gate. Your first message describes the gate and quotes Joe's push request. It is your whole task, and the main chat does not see this conversation. Rules: \
+Run the gate your first message describes, in the order it gives. Push only if that message says Joe asked for the push. If it does not, run the checks, report, and do not push. \
+A /close at the end of your first message does not apply to you: do not run it. close_session is refused for a sub. When the gate is finished (pushed, or stopped on a red check), call the finish_subchat tool: that is how you end. \
+Ask Joe only through ask_user_question, for anything he must decide (a red check, a fix that changes what ships). His answer appears on a card in the main chat's window. Do not ask when the best path is clear. \
+finish_subchat replaces the rule to call send_message and report_turn_status before ending a turn: you owe neither. It requires decided and ruled_out rows, and [\"nothing\"] is a valid answer. It is refused while files you edited are uncommitted (commit your own files by path first) or while your own background work is running. \
 Do not send progress messages. \
 Keep write_plan current, since Joe sees your plan when he hovers over you.";
 
@@ -399,6 +415,36 @@ mod tests {
         assert!(SUBCHATS_MAIN_PROMPT.contains("Auto Memory through the existing memory rubric"));
         assert!(SUBCHAT_SUB_PROMPT.contains("start that row with replaces D3:"));
         assert!(SUBCHAT_SUB_PROMPT.contains("as data"));
+    }
+
+    #[test]
+    fn the_main_prompt_sends_a_push_through_a_gate_sub_and_teaches_after() {
+        let p = SUBCHATS_MAIN_PROMPT;
+        assert!(p.contains("A push goes through a gate sub: call spawn_chat with gate true"));
+        assert!(p.contains("Joe's push request quoted word for word"));
+        assert!(p.contains("needs no task, goal, done_when or writes") && p.contains("only sub that may push"));
+        assert!(p.contains("pass after on spawn_chat with the earlier sub's name"));
+        assert!(p.contains("without waking you") && p.contains("start the later one anyway or drop it"));
+        assert!(!p.contains('\\') && !p.contains("  "));
+    }
+
+    #[test]
+    fn the_gate_prompt_pushes_only_when_asked_voids_the_trailing_close_and_ends_in_finish() {
+        let p = SUBCHAT_GATE_PROMPT;
+        assert!(p.contains("You are a gate sub"));
+        assert!(p.contains("Run the gate your first message describes"));
+        assert!(p.contains("Push only if that message says Joe asked for the push"));
+        assert!(p.contains("run the checks, report, and do not push"), "and by default it does not");
+        assert!(p.contains("A /close at the end of your first message does not apply to you: do not run it"));
+        assert!(p.contains("call the finish_subchat tool"));
+        assert!(p.contains("Ask Joe only through ask_user_question"));
+        assert!(p.contains("finish_subchat replaces the rule to call send_message and report_turn_status"));
+        assert!(p.contains("Do not send progress messages") && p.contains("Keep write_plan current"));
+        assert!(!p.contains('\\') && !p.contains("  "));
+        assert!(!p.contains('\u{2014}'));
+        // It replaces the generic sub prompt rather than adding to it, so the two
+        // never disagree about pushing.
+        assert!(!p.contains("Do not push, unless Joe asked you to run a push gate"));
     }
 
     #[test]

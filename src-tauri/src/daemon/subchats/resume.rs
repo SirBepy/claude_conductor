@@ -27,6 +27,10 @@ pub enum ContinueError {
     /// next step instead (the held-message queue), as the desktop does.
     #[error("{0} is mid-turn")]
     Busy(String),
+    /// Registered but not started: it is waiting for another sub (`after`), so
+    /// there is no conversation to continue. The brief it will start with is fixed.
+    #[error("{0} has not started yet: it is queued behind another sub, and a message cannot reach it until it runs. Try again once it has started.")]
+    Held(String),
     #[error(transparent)]
     Send(#[from] LifecycleError),
 }
@@ -56,6 +60,11 @@ pub fn prepare_continue(state: &Arc<DaemonState>, sub_id: &str) -> Result<Prior,
     }
     if inst.busy && state.sessions.contains_key(sub_id) {
         return Err(ContinueError::Busy(sub_id.to_string()));
+    }
+    // Before anything is cleared: a held sub has no transcript to resume, and a
+    // respawn with `--resume` of an id that never ran would fail.
+    if super::held::is_held(sub_id) {
+        return Err(ContinueError::Held(sub_id.to_string()));
     }
     let prior = Prior { finished: inst.subchat_finished, frozen: inst.frozen, auto_frozen: inst.auto_frozen };
     if inst.frozen {
@@ -215,6 +224,8 @@ pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
         crate::daemon::machines::publish_instances_changed(state);
         // A main chat waiting for its last running sub may close now.
         super::closing::on_sub_settled(state, sub_id);
+        // A sub waiting for this one is now waiting on something that ended blocked.
+        super::held::on_target_done(state);
         // Its cards would otherwise keep showing, and answering one would send to
         // a chat that no longer exists. Detached because dropping them is async
         // and this stays callable from sync code; with no runtime there are no

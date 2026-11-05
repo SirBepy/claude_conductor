@@ -2,7 +2,7 @@
 //! tier, the same-project limit, the cap of five running subs and the depth
 //! limit. `spawn_chat`'s own module runs the spawn; this is only the decision.
 
-use super::brief::{compose_first_message, validate, SubchatArgs, SubchatBrief};
+use super::brief::{compose_first_message, gate_brief, validate, SubchatArgs, SubchatBrief};
 use crate::daemon::state::DaemonState;
 use crate::sessions::chat_config::ChatConfig;
 use crate::sessions::registry::Registry;
@@ -35,7 +35,17 @@ pub struct SubPlan {
     pub first_message: String,
     pub model: String,
     pub effort: String,
+    /// Set when the sub must wait for another sub (`after`): `spawn_chat`
+    /// registers its row and holds it instead of launching a child.
+    pub hold: Option<HoldPlan>,
     reservation: Option<Reservation>,
+}
+
+/// The earlier sub a held sub waits for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HoldPlan {
+    pub target_id: String,
+    pub target_name: String,
 }
 
 impl SubPlan {
@@ -55,6 +65,10 @@ pub fn mark_as_sub(state: &DaemonState, sid: &str, plan: &mut SubPlan) {
     // after this head: the base its facts count from (`facts.rs`).
     if let Some(inst) = state.registry.get(sid) {
         plan.brief.git_head_at_spawn = super::git::head(&inst.cwd);
+        // A gate's push is read as the upstream moving past this.
+        if plan.brief.gate {
+            plan.brief.upstream_at_spawn = super::git::upstream(&inst.cwd);
+        }
     }
     crate::sessions::chat_config::set_subchat(sid, Some(plan.brief.clone()));
     plan.release_slot();
@@ -202,7 +216,14 @@ pub fn plan(
     accounts: &[crate::accounts::Account],
 ) -> Result<Option<SubPlan>, String> {
     let Some(caller) = state.registry.get(caller_id) else { return Ok(None) };
+    let gate = args.gate == Some(true);
     if !inherited.subchats_on {
+        // Every other brief field does nothing here; `gate` is the one that would
+        // otherwise be dropped silently and leave a chat believing a push gate ran
+        // hidden when it started a visible chat.
+        if gate {
+            return Err(GATE_MODE_OFF.to_string());
+        }
         return Ok(None);
     }
     // The mode refuses an API-credit chat when it is turned on, but the account
@@ -222,18 +243,53 @@ pub fn plan(
     )
     .map_err(|_| other_project_refusal(&caller.cwd))?;
     check_same_project(&caller.cwd, &target)?;
-    let brief = validate(name, args, caller_id)?;
+    let mut brief = if gate {
+        let brief = gate_brief(prompt, caller_id)?;
+        refuse_second_gate(state, caller_id)?;
+        brief
+    } else {
+        validate(name, args, caller_id)?
+    };
     let (model, effort) = resolve_tier(model, effort)?;
+    let hold = match args.after.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        Some(query) => {
+            brief.after = Some(query.to_string());
+            super::held::plan_after(state, caller_id, query)?
+        }
+        None => None,
+    };
     let reservation = reserve(&state.registry, caller_id)?;
-    let first_message = compose_first_message(&brief, prompt);
+    // A gate's prompt is its whole first message, kept word for word: it quotes
+    // Joe's push request. Any other sub gets the message written from its brief.
+    let first_message = if gate {
+        prompt.unwrap_or_default().to_string()
+    } else {
+        compose_first_message(&brief, prompt)
+    };
     Ok(Some(SubPlan {
         parent: caller_id.to_string(),
         brief,
         first_message,
         model,
         effort,
+        hold,
         reservation: Some(reservation),
     }))
+}
+
+/// Said when `gate: true` comes from a chat whose mode is off.
+pub const GATE_MODE_OFF: &str = "gate: true starts a hidden gate sub, which only a chat with Use subchats on can do. Run the push gate in this chat, or spawn the gate chat without gate.";
+
+/// A parent has one gate at a time: two would race on the same push and on the
+/// repo's writer slot. `Err` names the running one.
+fn refuse_second_gate(state: &DaemonState, parent: &str) -> Result<(), String> {
+    match running_subs(&state.registry, parent).into_iter().find(|i| super::is_gate(&i.session_id)) {
+        Some(running) => Err(format!(
+            "This chat already has a gate sub running ({}). A push has one gate at a time: wait for it to finish, or hand Joe's request to it with the subchat tool.",
+            label(&running)
+        )),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -569,5 +625,182 @@ mod tests {
             .err()
             .expect("refused");
         assert!(err.contains("API-credit"), "{err}");
+    }
+
+    // ── the gate sub ───────────────────────────────────────────────────────
+
+    const GATE_PROMPT: &str = "Joe asked: \"push it\".\n\nRun /commit's push pipeline from step 2.\n\n/close";
+
+    fn gate_args() -> SubchatArgs {
+        SubchatArgs { gate: Some(true), ..Default::default() }
+    }
+
+    fn plan_gate(st: &DaemonState, parent: &str, cfg: &ChatConfig, prompt: Option<&str>, args: &SubchatArgs) -> Result<Option<SubPlan>, String> {
+        let here = cwd();
+        plan(st, parent, cfg, &here.to_string_lossy(), prompt, None, None, Some("Gate: repo push"), args, &[])
+    }
+
+    /// A running gate sub of `parent`, as `spawn_chat` leaves one.
+    fn running_gate(st: &DaemonState, parent: &str, id: &str) {
+        sub_row(st, id, parent, "Gate: repo push");
+        let brief = gate_brief(Some("go"), parent).unwrap();
+        crate::sessions::chat_config::set_subchat(id, Some(brief));
+    }
+
+    #[test]
+    fn a_gate_skips_the_brief_and_keeps_its_prompt_word_for_word() {
+        let st = state();
+        row(&st, "g-main");
+        // No task, goal, done_when, writes or files: a mode-on spawn without gate would be refused.
+        let p = plan_gate(&st, "g-main", &on(), Some(GATE_PROMPT), &gate_args()).unwrap().expect("a gate sub");
+        assert!(p.brief.gate && p.brief.writes && !p.brief.review);
+        assert_eq!(p.brief.task, "Gate and push", "its card names it");
+        assert_eq!(p.first_message, GATE_PROMPT, "Joe's quoted request is not reworded or wrapped");
+        assert_eq!((p.model.as_str(), p.effort.as_str()), ("sonnet", "high"), "judgement over code-check: Sonnet high");
+        assert!(p.hold.is_none());
+        assert!(plan_gate(&st, "g-main", &on(), Some("x"), &SubchatArgs::default()).is_err(), "without gate the thin brief is still refused");
+    }
+
+    #[test]
+    fn a_gate_needs_a_prompt_and_says_so() {
+        let st = state();
+        row(&st, "g-nop");
+        for missing in [None, Some(""), Some("  ")] {
+            let err = plan_gate(&st, "g-nop", &on(), missing, &gate_args()).err().expect("refused");
+            assert!(err.contains("needs a prompt") && err.contains("push request"), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_gate_can_ask_for_opus_but_never_haiku_and_keeps_the_three_tiers() {
+        let st = state();
+        row(&st, "g-tier");
+        let here = cwd();
+        let ok = plan(&st, "g-tier", &on(), &here.to_string_lossy(), Some("p"), Some("opus"), Some("high"), None, &gate_args(), &[]).unwrap().unwrap();
+        assert_eq!((ok.model.as_str(), ok.effort.as_str()), ("opus", "high"));
+        let err = plan(&st, "g-tier", &on(), &here.to_string_lossy(), Some("p"), Some("haiku"), None, None, &gate_args(), &[]).err().unwrap();
+        assert!(err.contains("never run on haiku"), "{err}");
+    }
+
+    #[test]
+    fn gate_true_is_refused_from_a_chat_with_the_mode_off_and_plain_spawns_are_untouched() {
+        let st = state();
+        row(&st, "g-off");
+        let err = plan_gate(&st, "g-off", &ChatConfig::default(), Some(GATE_PROMPT), &gate_args()).err().expect("refused");
+        assert_eq!(err, GATE_MODE_OFF);
+        assert!(err.contains("Use subchats"), "{err}");
+        // Mode off without gate is exactly what it always was.
+        assert!(plan_gate(&st, "g-off", &ChatConfig::default(), Some("p"), &SubchatArgs::default()).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_second_gate_for_one_parent_is_refused_until_the_first_finishes() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        row(&st, "g-two");
+        running_gate(&st, "g-two", "g-two-first");
+        let err = plan_gate(&st, "g-two", &on(), Some(GATE_PROMPT), &gate_args()).err().expect("refused");
+        assert!(err.contains("already has a gate sub running") && err.contains("Gate: repo push"), "{err}");
+        // Another parent has its own gate, and a plain sub is not a gate.
+        row(&st, "g-three");
+        plan_gate(&st, "g-three", &on(), Some(GATE_PROMPT), &gate_args()).unwrap().expect("a separate parent");
+        st.registry.set_subchat_finished("g-two-first", true);
+        plan_gate(&st, "g-two", &on(), Some(GATE_PROMPT), &gate_args()).unwrap().expect("the first one finished");
+    }
+
+    #[test]
+    fn a_plain_sub_running_does_not_block_a_gate_and_a_gate_still_counts_toward_the_cap() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        row(&st, "g-cap");
+        sub_row(&st, "g-cap-a", "g-cap", "a");
+        plan_gate(&st, "g-cap", &on(), Some(GATE_PROMPT), &gate_args()).unwrap().expect("a plain sub is not a gate");
+        for n in 0..4 {
+            sub_row(&st, &format!("g-cap-{n}"), "g-cap", &format!("job-{n}"));
+        }
+        let err = plan_gate(&st, "g-cap", &on(), Some(GATE_PROMPT), &gate_args()).err().expect("five running");
+        assert!(err.contains("At most 5"), "a gate is a sub, so it is inside the cap: {err}");
+    }
+
+    #[test]
+    fn marking_a_gate_records_the_upstream_it_started_from() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (_dir, root) = super::super::git::test_repo::init();
+        let remote = tempfile::tempdir().unwrap();
+        super::super::git::test_repo::git(remote.path(), &["init", "-q", "--bare"]);
+        super::super::git::test_repo::git(&root, &["remote", "add", "origin", &remote.path().to_string_lossy()]);
+        super::super::git::test_repo::git(&root, &["push", "-q", "-u", "origin", "HEAD:refs/heads/main"]);
+        let st = state();
+        st.registry.upsert_interactive("m-up", &root, "proj", "2026-11-05T00:00:00Z");
+        st.registry.upsert_interactive("g-up", &root, "proj", "2026-11-05T00:00:00Z");
+        let mut p = plan(&st, "m-up", &on(), &root.to_string_lossy(), Some(GATE_PROMPT), None, None, Some("Gate"), &gate_args(), &[])
+            .unwrap()
+            .unwrap();
+        mark_as_sub(&st, "g-up", &mut p);
+        let stored = crate::sessions::chat_config::get("g-up").unwrap().subchat.unwrap();
+        assert!(stored.gate);
+        assert_eq!(stored.upstream_at_spawn, super::super::git::upstream(&root));
+        assert!(stored.upstream_at_spawn.is_some(), "the branch has an upstream");
+        // A plain sub records none: only a gate's push is measured against it.
+        st.registry.upsert_interactive("p-up", &root, "proj", "2026-11-05T00:00:00Z");
+        let mut plain = plan(&st, "m-up", &on(), &root.to_string_lossy(), None, None, None, Some("n"), &complete(), &[]).unwrap().unwrap();
+        mark_as_sub(&st, "p-up", &mut plain);
+        assert!(crate::sessions::chat_config::get("p-up").unwrap().subchat.unwrap().upstream_at_spawn.is_none());
+    }
+
+    #[test]
+    fn a_gate_may_wait_for_a_sub_like_any_other() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        row(&st, "g-after");
+        sub_row(&st, "g-after-fix", "g-after", "fix");
+        let args = SubchatArgs { gate: Some(true), after: Some("fix".into()), ..Default::default() };
+        let p = plan_gate(&st, "g-after", &on(), Some(GATE_PROMPT), &args).unwrap().unwrap();
+        assert_eq!(p.hold.as_ref().map(|h| h.target_name.as_str()), Some("fix"));
+        assert_eq!(p.brief.after.as_deref(), Some("fix"));
+    }
+
+    // ── after ──────────────────────────────────────────────────────────────
+
+    fn after_args(after: &str) -> SubchatArgs {
+        SubchatArgs { after: Some(after.into()), ..complete() }
+    }
+
+    #[test]
+    fn a_pending_target_plans_a_hold_and_a_finished_one_plans_an_immediate_start() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        row(&st, "af-main");
+        sub_row(&st, "af-run", "af-main", "header");
+        sub_row(&st, "af-done", "af-main", "docs");
+        st.registry.set_subchat_finished("af-done", true);
+        let waits = plan_as(&st, "af-main", &on(), Some("footer"), &after_args("header")).unwrap().unwrap();
+        assert_eq!(waits.hold, Some(HoldPlan { target_id: "af-run".into(), target_name: "header".into() }));
+        assert_eq!(waits.brief.after.as_deref(), Some("header"));
+        let now = plan_as(&st, "af-main", &on(), Some("footer"), &after_args("docs")).unwrap().unwrap();
+        assert!(now.hold.is_none(), "the named sub already finished cleanly, so this one starts now");
+        assert_eq!(now.brief.after.as_deref(), Some("docs"), "still recorded");
+    }
+
+    #[test]
+    fn a_name_that_matches_none_or_several_is_refused_with_the_subs_listed() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        row(&st, "af2-main");
+        sub_row(&st, "af2-a", "af2-main", "fix-a");
+        sub_row(&st, "af2-b", "af2-main", "fix-b");
+        let none = plan_as(&st, "af2-main", &on(), Some("x"), &after_args("ghost")).err().expect("refused");
+        assert!(none.contains("No sub named") && none.contains("fix-a") && none.contains("fix-b"), "{none}");
+        let many = plan_as(&st, "af2-main", &on(), Some("x"), &after_args("fix")).err().expect("refused");
+        assert!(many.contains("more than one sub") && many.contains("fix-a") && many.contains("fix-b"), "{many}");
+    }
+
+    #[test]
+    fn a_blank_after_is_no_after_and_mode_off_ignores_after_entirely() {
+        let st = state();
+        row(&st, "af3-main");
+        let p = plan_as(&st, "af3-main", &on(), Some("x"), &after_args("  ")).unwrap().unwrap();
+        assert!(p.hold.is_none() && p.brief.after.is_none());
+        assert!(plan_for(&st, &ChatConfig::default(), Some("x"), &after_args("ghost")).unwrap().is_none());
     }
 }
