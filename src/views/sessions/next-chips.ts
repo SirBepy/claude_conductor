@@ -21,6 +21,10 @@ export interface NextChipsCtx {
   hasHeld: boolean;
   /** Replies Claude attached to its last message this turn (parseNextActions). */
   nextActions?: readonly string[];
+  /** What the open chat is to the subchats mode. A main chat is told never to close
+   *  by itself and a sub's job ends with its finish tool, so the built-in /close
+   *  offer fits neither; an ordinary chat (absent) gets it. */
+  role?: "main" | "sub";
 }
 
 /** A finished turn is `awaiting === "done"` in the registry. It is cleared on
@@ -53,11 +57,16 @@ export function withReply(draft: string, chip: string): string {
 export function nextChips(ctx: NextChipsCtx): string[] {
   if (!ctx.enabled || ctx.hasHeld || !ctx.inst || !turnFinished(ctx.inst)) return [];
   const chips: string[] = [];
-  if (!ctx.wrapUp) chips.push(CLOSE);
+  const isClose = (action: string): boolean => action.split(/\s/, 1)[0]!.toLowerCase() === CLOSE;
+  // A main chat gets /close only when its own latest reply asks for it (its prompt
+  // keeps it open until Joe says so); a sub never does, whatever it wrote.
+  const askedClose = (ctx.nextActions ?? []).some(isClose);
+  const offerClose = ctx.role === "main" ? askedClose : ctx.role !== "sub";
+  if (!ctx.wrapUp && offerClose) chips.push(CLOSE);
   for (const action of ctx.nextActions ?? []) {
     // The strip already offers /close; a model-written one would duplicate it,
     // or offer a close the chat's wrap-up is about to do itself.
-    if (action.split(/\s/, 1)[0]!.toLowerCase() === CLOSE) continue;
+    if (isClose(action)) continue;
     if (!chips.some((c) => c.toLowerCase() === action.toLowerCase())) chips.push(action);
   }
   return chips.slice(0, MAX_NEXT_CHIPS);

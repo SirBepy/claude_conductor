@@ -284,6 +284,9 @@ export async function wireInstancesChangedListener(
         pane.classList.toggle("is-rate-limited", isBlocked(sess));
         state.composer?.refreshBlockedState();
         state.composer?.refreshOfflineState();
+        // The registry moves a chat's model and effort without this bar's help
+        // (turning "Use subchats" on picks Opus high), so the header label follows it.
+        state.statusbar?.syncModelEffort(sess.model, sess.effort);
       }
     }
     // If the previously-selected session vanished (e.g. takeover renamed it,

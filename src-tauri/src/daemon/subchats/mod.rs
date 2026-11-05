@@ -251,6 +251,16 @@ pub fn apply_set_on(
     Ok(Some((model, effort)))
 }
 
+/// Tells every client the set of mode-on chats changed (a flip from any surface,
+/// or a respawn successor taking the mode). Clients hold that set in memory,
+/// seeded once at boot, so without this nudge a flip made on the phone or a second
+/// window, and a successor's inherited mode, only showed after a reload. The
+/// payload is empty on purpose: the client re-reads `list_subchats_on`, which is
+/// the one source and cannot disagree with it.
+pub fn publish_mode_changed(state: &DaemonState) {
+    state.notifier.publish("subchats_on_changed", serde_json::json!({}));
+}
+
 /// Ids a past-chat list must not show: `live` plus every sub, ended ones
 /// included. A sub's transcript sits on disk like any chat's, so a list built
 /// from transcripts would otherwise show it as a finished chat.
@@ -311,6 +321,23 @@ pub struct RoleLaunch {
     main_prompt: bool,
     parent_label: Option<String>,
     gate: bool,
+    /// A sub in its own git worktree: said at every launch, so a sub continued
+    /// after finishing is reminded too, not only the first spawn.
+    worktree_note: Option<String>,
+}
+
+/// What a sub in a worktree is told about where it works. A worktree separates
+/// the files only; the rest of the machine is still shared with the other chats.
+fn worktree_note(info: &WorktreeInfo) -> String {
+    let merged = if info.target.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" Your commits are merged into \"{}\" when you finish.", info.target)
+    };
+    format!(
+        "You are working in a git worktree of this project on branch \"{}\", not in the main checkout.{merged} A worktree separates files only: build folders, dev servers, ports and any local database are still shared with the other chats, so do not stop, restart or overwrite something another chat may be using.",
+        info.branch
+    )
 }
 
 impl RoleLaunch {
@@ -333,6 +360,11 @@ impl RoleLaunch {
                 append_sub_prompt(args, label);
             }
         }
+        if let Some(note) = &self.worktree_note {
+            if !args.iter().any(|a| a.contains(note.as_str())) {
+                append_system_prompt(args, note);
+            }
+        }
     }
 }
 
@@ -346,7 +378,14 @@ pub fn role_launch(state: &DaemonState, session_id: &str, explicit_parent: Optio
     // so the first spawn and every relaunch read the same record.
     let gate = sub_parent.is_some() && config.subchat.as_ref().is_some_and(|b| b.gate);
     let parent_label = sub_parent.as_deref().map(|parent| parent_label(state, parent));
-    RoleLaunch { sub_parent, main_prompt, parent_label, gate }
+    // Set only once the tree exists (`spawn_chat` records it in the brief before the
+    // first launch), so every later launch of the same sub reads it from the store.
+    let worktree_note = sub_parent
+        .as_ref()
+        .and_then(|_| config.subchat.as_ref())
+        .and_then(|b| b.worktree_at.as_ref())
+        .map(worktree_note);
+    RoleLaunch { sub_parent, main_prompt, parent_label, gate, worktree_note }
 }
 
 /// How a sub's prompt names its main chat: the chat's title, else its folder
@@ -662,6 +701,49 @@ mod tests {
         let first = once[1].clone();
         append_gate_prompt(&mut once, "CV redesign");
         assert_eq!(once[1], first, "a respawn must not double the rules");
+    }
+
+    /// A sub continued after finishing is relaunched with a rebuilt argv. Its worktree
+    /// is in the stored brief, so every launch reminds it, not only the first spawn.
+    #[test]
+    fn a_sub_in_a_worktree_is_told_at_every_launch_that_only_files_are_separate() {
+        let _data = TempDataDir::new();
+        let st = state();
+        chat(&st, "wt-main", None, "opus", "high");
+        chat(&st, "wt-sub", None, "sonnet", "high");
+        st.registry.set_subchat_of("wt-sub", Some("wt-main".into()));
+        chat(&st, "plain-sub2", None, "sonnet", "high");
+        st.registry.set_subchat_of("plain-sub2", Some("wt-main".into()));
+        store_sub_brief("plain-sub2", "wt-main");
+        store_sub_brief("wt-sub", "wt-main");
+        let mut brief = crate::sessions::chat_config::get("wt-sub").unwrap().subchat.unwrap();
+        brief.worktree_at = Some(WorktreeInfo {
+            cwd: "C:/repo-wt/sub".into(),
+            path: "C:/repo-wt/sub".into(),
+            branch: "cc-sub-a1b2".into(),
+            target: "master".into(),
+            repo: "C:/repo".into(),
+            base: None,
+        });
+        crate::sessions::chat_config::set_subchat("wt-sub", Some(brief));
+
+        let prompt_of = |id: &str| {
+            let mut args = vec!["--append-system-prompt".to_string(), "base".to_string()];
+            let role = role_launch(&st, id, None);
+            role.append_prompts(&mut args);
+            // A relaunch builds the argv again; the note must not double.
+            role.append_prompts(&mut args);
+            args[1].clone()
+        };
+        let p = prompt_of("wt-sub");
+        assert!(p.contains(SUBCHAT_SUB_PROMPT), "the sub rules are still there");
+        assert!(p.contains("git worktree") && p.contains("\"cc-sub-a1b2\""), "{p}");
+        assert!(p.contains("build folders, dev servers, ports and any local database are still shared"), "{p}");
+        assert!(p.contains("merged into \"master\""), "{p}");
+        assert_eq!(p.matches("You are working in a git worktree").count(), 1, "said once per launch");
+        let plain = prompt_of("plain-sub2");
+        assert!(!plain.contains("git worktree"), "a sub in the shared tree is not told it has a worktree");
+        assert!(!prompt_of("wt-main").contains("git worktree"));
     }
 
     #[test]

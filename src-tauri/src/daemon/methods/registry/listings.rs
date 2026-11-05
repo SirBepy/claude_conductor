@@ -109,6 +109,8 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
                     &crate::accounts::load_registry(),
                     crate::sessions::chat_config::set_subchats_on,
                 )?;
+                // After the write, so a client that re-reads on this nudge sees the new set.
+                crate::daemon::subchats::publish_mode_changed(&state);
                 if let Some((model, effort)) = applied {
                     crate::sessions::chat_config::record(&p.session_id, &model, &effort);
                     crate::daemon::machines::publish_instances_changed(&state);
@@ -315,4 +317,74 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
             .map_err(|e| RpcError::internal(e))
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::rpc::{ConnectionContext, Request};
+    use crate::daemon::session::new_session_map;
+    use crate::daemon::settings_cache::SettingsCache;
+    use crate::types::Settings;
+
+    /// A flip made on one surface must reach the others: every client keeps the set
+    /// of mode-on chats in memory, seeded once at boot, so without this nudge a flip
+    /// from the phone only showed in the desktop sidebar after a reload.
+    #[tokio::test]
+    async fn turning_the_mode_on_tells_every_client_to_re_read_the_set() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("mode-flip", std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        let mut router = Router::new();
+        register_listings(&mut router, state.clone());
+        let mut rx = state.notifier.subscribe();
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let resp = router
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "set_subchats_on".into(),
+                    params: Some(json!({"session_id": "mode-flip", "value": true})),
+                },
+                ConnectionContext::new(tx),
+            )
+            .await;
+        assert!(resp.error.is_none(), "{:?}", resp.error);
+        let mut methods = Vec::new();
+        while let Ok(frame) = rx.try_recv() {
+            methods.push(frame["method"].as_str().unwrap_or("").to_string());
+        }
+        assert!(methods.contains(&"subchats_on_changed".to_string()), "{methods:?}");
+        assert_eq!(crate::sessions::chat_config::list_subchats_on(), ["mode-flip"]);
+    }
+
+    /// A refused flip changed nothing, so nobody is told.
+    #[tokio::test]
+    async fn a_refused_flip_publishes_nothing() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        state.registry.upsert_interactive("sub-main", std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        state.registry.upsert_interactive("sub-flip", std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        state.registry.set_subchat_of("sub-flip", Some("sub-main".into()));
+        let mut router = Router::new();
+        register_listings(&mut router, state.clone());
+        let mut rx = state.notifier.subscribe();
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        let resp = router
+            .dispatch(
+                Request {
+                    jsonrpc: "2.0".into(),
+                    id: json!(1),
+                    method: "set_subchats_on".into(),
+                    params: Some(json!({"session_id": "sub-flip", "value": true})),
+                },
+                ConnectionContext::new(tx),
+            )
+            .await;
+        assert!(resp.error.is_some(), "a sub cannot use subchats itself");
+        while let Ok(frame) = rx.try_recv() {
+            assert_ne!(frame["method"], "subchats_on_changed");
+        }
+    }
 }

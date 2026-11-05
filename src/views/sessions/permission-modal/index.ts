@@ -38,6 +38,7 @@ import {
   onSubchatsChange,
   isAutoAccept,
   isForSelectedSession,
+  isQuietPrompt,
   markLatestQuestion,
   gateDiag,
   storePendingPrompt,
@@ -63,6 +64,7 @@ export {
   getSelectedSessionId,
   clearPendingPrompt,
   pendingPromptSessionIds,
+  parkedDisplayIds,
 } from "./gating";
 export { dismissQuestionCard } from "./question-ui";
 export { autoAcceptParked, replayPendingPrompt, rehydratePendingPrompts, rehydrateAndReplay, reopenPendingPrompt, surfaceNextForDisplay, surfaceParkedPrompt } from "./resurface";
@@ -102,7 +104,24 @@ export function rerenderSidebar(): void {
 // Promotion re-runs the normal arrival gate - the slot is already empty by
 // the time handlePromptResolved promotes, so the sibling parks or shows
 // exactly as a fresh event would.
-const _queuedSiblingQuestions = createPromptQueue<QuestionRequestedPayload>((p) => handleQuestionRequested(p));
+// A quiet card (a decisions checkup) waits behind every other queued card of its
+// chat, whatever arrived first: Joe is only interrupted for something wrong.
+const _queuedSiblingQuestions = createPromptQueue<QuestionRequestedPayload>((p) => handleQuestionRequested(p), {
+  yields: (p) => p.quiet === true,
+});
+
+/** A quiet card owns the slot and a real card just arrived for the same chat: the
+ *  quiet one steps back into the queue (taking its card off screen if it was up),
+ *  so the real one is shown or parked as a fresh arrival. Without this the real
+ *  card sat behind the quiet one until Joe dismissed it. */
+function yieldQuietSlot(sid: string, incoming: QuestionRequestedPayload): void {
+  const existing = peekPendingPrompt(sid);
+  if (!existing || existing.kind !== "question" || existing.answered) return;
+  if (!isQuietPrompt(existing) || incoming.quiet === true || existing.payload.id === incoming.id) return;
+  if (isActiveCardId(existing.payload.id)) dismissQuestionCard(existing.payload.id);
+  clearPendingPromptById(existing.payload.id);
+  _queuedSiblingQuestions.push(sid, existing.payload);
+}
 
 /** What is queued behind `askerId`'s slot, for the asker picker's counts. Read at
  *  call time by askers.ts: that module sits in this file's import cycle, so a
@@ -277,6 +296,7 @@ export function handleQuestionRequested(payload: QuestionRequestedPayload): void
     return;
   }
   if (sid) {
+    yieldQuietSlot(sid, payload);
     const existing = peekPendingPrompt(sid);
     // A different question already owns this session's one slot - queue this
     // one instead of overwriting it (see the sibling-queue block above), UNLESS
@@ -457,6 +477,16 @@ export function installPermissionModalListener(): void {
   // may not have finished evaluating when this module's top level runs.
   onSubchatsChange(rerenderSidebar);
   void hydrateSubchatsOn();
+  // The set is seeded once above, so a flip made on another surface (the phone, a
+  // second window) and a respawn successor that inherits the mode only reach this
+  // window by the daemon's nudge. On both transports, like the seed.
+  void (async () => {
+    try {
+      await getTransport().listen("subchats-on-changed", () => { void hydrateSubchatsOn(); });
+    } catch (e) {
+      console.warn("[subchats-on] listen failed:", e);
+    }
+  })();
 
   // Registered on both transports below - catches a stale card the same way
   // on desktop, phone, and a detached window (own module realm, own listener).

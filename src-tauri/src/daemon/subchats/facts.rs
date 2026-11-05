@@ -383,6 +383,79 @@ struct Scan {
     use_names: std::collections::HashMap<String, String>,
     /// The sub ran at least one shell command.
     shell_used: bool,
+    /// Every `Agent`/`Task` call as (line index, tool_use id), in transcript order.
+    agent_uses: Vec<(usize, String)>,
+    /// Subagent id -> (line index, report): the hand-back a subagent's report
+    /// arrives in when its tool_result is only a launch or delivery stub.
+    handbacks: std::collections::HashMap<String, (usize, String)>,
+}
+
+/// A foreground subagent whose report went to the caller as a message: the
+/// tool_result is this note and the report itself is a later transcript entry.
+const DELIVERED_STUB: &str = "delivered to you as a message from \"";
+/// A subagent run in the background: the tool_result is the launch note and the
+/// report arrives later, if at all.
+const LAUNCHED_STUB: &str = "Async agent launched successfully";
+
+/// The subagent id inside a [`DELIVERED_STUB`] result.
+fn delivered_agent(text: &str) -> Option<String> {
+    let at = text.find(DELIVERED_STUB)? + DELIVERED_STUB.len();
+    let id: String = text[at..].chars().take_while(|c| *c != '"').collect();
+    (!id.is_empty()).then_some(id)
+}
+
+/// The subagent id inside a [`LAUNCHED_STUB`] result.
+fn launched_agent(text: &str) -> Option<String> {
+    if !text.trim_start().starts_with(LAUNCHED_STUB) {
+        return None;
+    }
+    let at = text.find("agentId:")? + "agentId:".len();
+    let id: String = text[at..].trim_start().chars().take_while(|c| !c.is_whitespace()).collect();
+    (!id.is_empty()).then_some(id)
+}
+
+/// Every `<agent-message from="ID">` block in `v`'s strings, as (id, report).
+/// The harness frames a subagent's hand-back this way wherever it lands (a
+/// queue entry, a queued-command attachment, a user line).
+fn handback_reports(v: &Value, out: &mut Vec<(String, String)>, depth: u8) {
+    const OPEN: &str = "<agent-message from=\"";
+    match v {
+        Value::String(s) if s.contains(OPEN) => {
+            let mut rest = s.as_str();
+            while let Some(at) = rest.find(OPEN) {
+                rest = &rest[at + OPEN.len()..];
+                let Some(end) = rest.find('"') else { break };
+                let id = rest[..end].to_string();
+                let body_start = rest.find('>').map_or(0, |g| g + 1);
+                let body = &rest[body_start..rest.find("</agent-message>").unwrap_or(rest.len()).max(body_start)];
+                // The frame's own preamble ends at this line; the report follows it.
+                let report = body.split_once("The report follows:").map_or(body, |(_, r)| r);
+                let report = report
+                    .lines()
+                    .map(|l| l.strip_prefix("  ").unwrap_or(l))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let report = report.trim();
+                if !id.is_empty() && !report.is_empty() {
+                    out.push((id, report.to_string()));
+                }
+            }
+        }
+        Value::Array(items) if depth < 6 => items.iter().for_each(|i| handback_reports(i, out, depth + 1)),
+        Value::Object(map) if depth < 6 => map.values().for_each(|i| handback_reports(i, out, depth + 1)),
+        _ => {}
+    }
+}
+
+/// What became of a reviewer subagent call.
+enum AgentOutcome {
+    /// It returned. `None` text: the result said the report was delivered as a
+    /// message and that message is not in the transcript, so the words are unknown.
+    Returned(Option<String>),
+    /// No result yet, or a background launch whose report never arrived.
+    Pending,
+    /// The call was refused (a dispatch hook) or errored, or returned nothing.
+    Failed,
 }
 
 fn block_text(content: &Value) -> String {
@@ -406,12 +479,36 @@ fn scan_transcript(path: &Path) -> Option<Scan> {
         uses: std::collections::HashMap::new(),
         use_names: std::collections::HashMap::new(),
         shell_used: false,
+        agent_uses: Vec::new(),
+        handbacks: std::collections::HashMap::new(),
     };
+    // (line index, tool_use id) of every edit call. Whether it counts depends on
+    // its result, which comes later, so the last real edit is settled after the pass.
+    let mut edits: Vec<(usize, Option<String>)> = Vec::new();
     for (idx, line) in raw.lines().enumerate() {
-        if !line.contains("tool_use") && !line.contains("tool_result") {
+        let has_handback = line.contains("agent-message from=");
+        if !has_handback && !line.contains("tool_use") && !line.contains("tool_result") {
             continue;
         }
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        // A request log line replays earlier entries with a later position, which
+        // would move an edit or a call past the work that came after it.
+        if matches!(v["type"].as_str(), Some("api-request-blob" | "api-request")) {
+            continue;
+        }
+        if has_handback {
+            let mut found = Vec::new();
+            handback_reports(&v, &mut found, 0);
+            for (agent, report) in found {
+                scan.handbacks.entry(agent).or_insert((idx, report));
+            }
+        }
+        // The same report rides on the tool_result line itself in some builds.
+        if let (Some(agent), Some(report)) = (v["toolUseResult"]["agentId"].as_str(), v["toolUseResult"]["handbackReport"]["text"].as_str()) {
+            if !report.trim().is_empty() {
+                scan.handbacks.entry(agent.to_string()).or_insert((idx, report.trim().to_string()));
+            }
+        }
         let Some(blocks) = v["message"]["content"].as_array() else { continue };
         for b in blocks {
             match b["type"].as_str() {
@@ -420,9 +517,12 @@ fn scan_transcript(path: &Path) -> Option<Scan> {
                     if let Some(id) = b["id"].as_str() {
                         scan.uses.insert(id.to_string(), idx);
                         scan.use_names.insert(id.to_string(), name.to_string());
+                        if SUBAGENT_TOOLS.contains(&name) {
+                            scan.agent_uses.push((idx, id.to_string()));
+                        }
                     }
                     if git::EDIT_TOOLS.contains(&name) {
-                        scan.last_edit = Some(idx);
+                        edits.push((idx, b["id"].as_str().map(str::to_string)));
                     }
                     if matches!(name, "Bash" | "PowerShell") {
                         scan.shell_used = true;
@@ -435,7 +535,8 @@ fn scan_transcript(path: &Path) -> Option<Scan> {
                 }
                 Some("tool_result") => {
                     if let Some(id) = b["tool_use_id"].as_str() {
-                        let is_error = b["is_error"].as_bool().unwrap_or(false);
+                        // A hook refusal counts as an error even when the flag is absent.
+                        let is_error = git::result_failed(b);
                         scan.results.insert(id.to_string(), (idx, is_error, block_text(&b["content"])));
                     }
                 }
@@ -443,6 +544,13 @@ fn scan_transcript(path: &Path) -> Option<Scan> {
             }
         }
     }
+    // A refused or failed edit changed nothing (a read-only sub's guard says no),
+    // so only edits that were not turned down move the "last edit" line.
+    scan.last_edit = edits
+        .iter()
+        .filter(|(_, id)| !id.as_deref().and_then(|id| scan.results.get(id)).is_some_and(|(_, failed, _)| *failed))
+        .map(|(idx, _)| *idx)
+        .max();
     Some(scan)
 }
 
@@ -583,25 +691,86 @@ impl Scan {
         }
     }
 
-    fn reviewer_fact(&self, id: Option<&str>) -> ReviewerFact {
-        let Some(id) = id else { return ReviewerFact::none("no reviewer ran") };
-        let Some(&used_at) = self.uses.get(id) else {
-            return ReviewerFact::none("the named reviewer run is not in the transcript");
+    /// The report a hand-back entry carries for `agent`, when it came after `used_at`.
+    fn handback(&self, agent: &str, used_at: usize) -> Option<String> {
+        self.handbacks.get(agent).filter(|(at, _)| *at > used_at).map(|(_, report)| report.clone())
+    }
+
+    /// What became of the subagent call `id`, which started at line `used_at`.
+    /// The tool_result of a subagent that reported through a message is a stub
+    /// ("This agent's report was delivered to you as a message ..."), never the
+    /// report; the stub is not shown and the real words come from the hand-back.
+    fn agent_outcome(&self, id: &str, used_at: usize) -> AgentOutcome {
+        match self.results.get(id) {
+            None => AgentOutcome::Pending,
+            Some((_, true, _)) => AgentOutcome::Failed,
+            Some((_, false, text)) if text.trim().is_empty() => AgentOutcome::Failed,
+            Some((_, false, text)) => {
+                if let Some(agent) = delivered_agent(text) {
+                    // The stub says the report was delivered, so the subagent did
+                    // return; if the message itself is not in the transcript the
+                    // words are unknown, which is still a run.
+                    return AgentOutcome::Returned(self.handback(&agent, used_at));
+                }
+                if let Some(agent) = launched_agent(text) {
+                    // A background launch has returned nothing until its hand-back
+                    // lands; "ran" with the launch note as its words would be a lie.
+                    return match self.handback(&agent, used_at) {
+                        Some(report) => AgentOutcome::Returned(Some(report)),
+                        None => AgentOutcome::Pending,
+                    };
+                }
+                AgentOutcome::Returned(Some(text.clone()))
+            }
+        }
+    }
+
+    /// The reviewer call to judge when the sub named none: the last subagent call
+    /// after the last edit, preferring one that returned (a later call that a
+    /// dispatch hook refused is not a review and must not hide an earlier good one).
+    fn find_reviewer(&self) -> Result<String, ReviewGap> {
+        let Some(last_edit) = self.last_edit else { return Err(ReviewGap::NotNamed) };
+        let after: Vec<&(usize, String)> = self.agent_uses.iter().filter(|(at, _)| *at > last_edit).collect();
+        let returned = after
+            .iter()
+            .rev()
+            .find(|(at, id)| matches!(self.agent_outcome(id, *at), AgentOutcome::Returned(_)));
+        if let Some((_, id)) = returned.or(after.last()) {
+            return Ok(id.clone());
+        }
+        // Subagents ran, but all before the last edit, so none saw the final code.
+        Err(if self.agent_uses.is_empty() { ReviewGap::NotNamed } else { ReviewGap::BeforeLastEdit })
+    }
+
+    /// The one check for "did a fresh subagent review the code the sub ends
+    /// with": `Ok(report words)` when it did, else why not. `explicit` is a
+    /// reviewer id the sub passed; without one the daemon finds the call itself.
+    fn check_reviewer(&self, explicit: Option<&str>) -> Result<Option<String>, ReviewGap> {
+        let id = match explicit {
+            Some(id) => id.to_string(),
+            None => self.find_reviewer()?,
         };
-        if !SUBAGENT_TOOLS.contains(&self.use_names.get(id).map(String::as_str).unwrap_or("")) {
-            return ReviewerFact::none("the named reviewer run is not a subagent call");
+        let Some(&used_at) = self.uses.get(&id) else { return Err(ReviewGap::NotInTranscript) };
+        let name = self.use_names.get(&id).map(String::as_str).unwrap_or("");
+        if !SUBAGENT_TOOLS.contains(&name) {
+            return Err(ReviewGap::NotASubagent(name.to_string()));
         }
         // A reviewer that read the code before the last edit says nothing about
         // the code that shipped. Level counts as before: an edit and a review
         // started in one assistant message cannot have seen each other.
         if self.last_edit.is_some_and(|e| e >= used_at) {
-            return ReviewerFact::none("the reviewer ran before the last edit");
+            return Err(ReviewGap::BeforeLastEdit);
         }
-        match self.results.get(id) {
-            Some((_, _, text)) if !text.trim().is_empty() => {
-                ReviewerFact { state: "ran".into(), text: Some(one_line(text, MAX_REVIEW_TEXT)), note: None }
-            }
-            _ => ReviewerFact::none("the reviewer has not returned a result"),
+        match self.agent_outcome(&id, used_at) {
+            AgentOutcome::Returned(text) => Ok(text),
+            AgentOutcome::Pending | AgentOutcome::Failed => Err(ReviewGap::NoResult),
+        }
+    }
+
+    fn reviewer_fact(&self, explicit: Option<&str>) -> ReviewerFact {
+        match self.check_reviewer(explicit) {
+            Ok(text) => ReviewerFact { state: "ran".into(), text: text.map(|t| one_line(&t, MAX_REVIEW_TEXT)), note: None },
+            Err(gap) => ReviewerFact::none(gap.chip_note()),
         }
     }
 }
@@ -613,7 +782,7 @@ const SUBAGENT_TOOLS: [&str; 2] = ["Agent", "Task"];
 /// variant maps to a refusal that names its fix (`finish::request_finish`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewGap {
-    /// No `reviewer_tool_use_id` was passed.
+    /// No subagent ran after the last edit (and none was named).
     NotNamed,
     /// The id matches no tool call in the transcript.
     NotInTranscript,
@@ -625,31 +794,36 @@ pub enum ReviewGap {
     NoResult,
 }
 
+impl ReviewGap {
+    /// The reason in words a chip can show.
+    fn chip_note(&self) -> &'static str {
+        match self {
+            ReviewGap::NotNamed => "no reviewer ran",
+            ReviewGap::NotInTranscript => "the named reviewer run is not in the transcript",
+            ReviewGap::NotASubagent(_) => "the named reviewer run is not a subagent call",
+            ReviewGap::BeforeLastEdit => "the reviewer ran before the last edit",
+            ReviewGap::NoResult => "the reviewer has not returned a result",
+        }
+    }
+}
+
 /// Whether the sub, which edited files, has a fresh subagent's result for its
 /// own diff after its last edit. `None` is "nothing owed": the sub made no edit
 /// or the review is in order. An unreadable transcript is also `None`, because a
 /// finish that can never be accepted would trap the sub, and the chip says
 /// "unknown" for it.
 ///
+/// `reviewer_tool_use_id` is optional and normally absent: a model cannot see
+/// its own tool_use ids, so the daemon takes the last `Agent`/`Task` call after
+/// the last edit. An id that is passed is still checked.
+///
 /// What this cannot see: whether the subagent really started with no shared
 /// context (a subagent resumed from an earlier one, or told to approve, reads
 /// the same), and edits made through Bash.
 pub fn review_gap(transcript: &Path, reviewer_tool_use_id: Option<&str>) -> Option<ReviewGap> {
     let scan = scan_transcript(transcript)?;
-    let last_edit = scan.last_edit?;
-    let Some(id) = reviewer_tool_use_id else { return Some(ReviewGap::NotNamed) };
-    let Some(&used_at) = scan.uses.get(id) else { return Some(ReviewGap::NotInTranscript) };
-    let name = scan.use_names.get(id).map(String::as_str).unwrap_or("");
-    if !SUBAGENT_TOOLS.contains(&name) {
-        return Some(ReviewGap::NotASubagent(name.to_string()));
-    }
-    if last_edit >= used_at {
-        return Some(ReviewGap::BeforeLastEdit);
-    }
-    match scan.results.get(id) {
-        Some((_, false, text)) if !text.trim().is_empty() => None,
-        _ => Some(ReviewGap::NoResult),
-    }
+    scan.last_edit?;
+    scan.check_reviewer(reviewer_tool_use_id).err()
 }
 
 /// Facts of several subs added up for the "all finished" card. Each field is the
@@ -719,7 +893,9 @@ pub fn sum(per_sub: &[Option<&Facts>]) -> SumFacts {
 
 #[cfg(test)]
 mod tests {
-    use super::git::test_repo::{git as run, init, transcript};
+    use super::git::test_repo::{
+        fixture_transcript, git as run, init, landed_edit, transcript, BACKGROUND_REVIEWER_FIXTURE, REFUSED_EDIT_FIXTURE,
+    };
     use super::*;
     use serde_json::json;
     use std::path::PathBuf;
@@ -1012,7 +1188,9 @@ mod tests {
         let mut i = inputs(&root, Some(&tp), None);
         i.reviewer_tool_use_id = Some("r");
         assert_eq!(compute(&i).reviewer.state, "ran");
-        assert_eq!(review_gap(&tp, None), Some(ReviewGap::NotNamed));
+        assert_eq!(review_gap(&tp, None), None, "no id passed: the daemon finds the Agent call after the edit itself");
+        let no_agent = edit_then(vec![subagent("r", "Read"), result("r", false, "text")]);
+        assert_eq!(review_gap(&no_agent, None), Some(ReviewGap::NotNamed), "a Read is not a reviewer");
         // No edit at all: nothing is owed, named or not.
         let no_edit = write_transcript(dir.path(), &[shell("b", "ls")]);
         assert_eq!(review_gap(&no_edit, None), None);
@@ -1084,8 +1262,124 @@ mod tests {
         );
         assert_eq!(reviewer_fact_from_transcript(&tp, Some("sh")).state, "none");
         assert_eq!(reviewer_fact_from_transcript(&tp, Some("ag")).state, "ran");
-        assert_eq!(reviewer_fact_from_transcript(&tp, None).state, "none");
+        assert_eq!(reviewer_fact_from_transcript(&tp, None).state, "ran", "the Agent call after the edit is found without an id");
         assert_eq!(reviewer_fact_from_transcript(&dir.path().join("missing.jsonl"), Some("ag")).state, "unknown");
+    }
+
+    /// First real run: a read-only sub's only Edit was refused by the write guard,
+    /// and the finish gate still said "you changed files". A refused edit is not one.
+    #[test]
+    fn a_refused_edit_is_not_the_last_edit_so_no_review_is_owed() {
+        let (dir, root) = init();
+        // The file exists and is untracked, as it would be had the Edit landed.
+        std::fs::write(root.join("index.html"), "x").unwrap();
+        // The fixture's first two lines: the Edit and the guard's refusal.
+        let tp = fixture_transcript(dir.path(), REFUSED_EDIT_FIXTURE, &root.join("index.html"), 2, &[], false);
+        assert_eq!(review_gap(&tp, None), None, "nothing was changed, so nothing is owed");
+        let f = compute(&inputs(&root, Some(&tp), None));
+        assert_eq!(f.uncommitted, Some(0), "the refused file is not the sub's uncommitted work");
+        assert_eq!(f.reviewer.note.as_deref(), Some("no reviewer ran"));
+        // The same Edit with a landed result is an edit, and then a review is owed.
+        let landed = write_transcript(dir.path(), &landed_edit("e1", &root.join("index.html")));
+        assert_eq!(review_gap(&landed, None), Some(ReviewGap::NotNamed));
+    }
+
+    /// An edit that failed for any reason (a stale `old_string`) changed nothing either.
+    #[test]
+    fn an_edit_that_errored_does_not_move_the_last_edit_line() {
+        let (dir, root) = init();
+        let tp = write_transcript(
+            dir.path(),
+            &[
+                assistant(json!([{"type": "tool_use", "id": "rev", "name": "Agent", "input": {}}])),
+                result("rev", false, "No problems."),
+                edit("e1", &root.join("base.txt")),
+                result("e1", true, "String to replace not found in file"),
+            ],
+        );
+        // The review came before the only edit attempt, which did not land.
+        assert_eq!(review_gap(&tp, None), None);
+    }
+
+    /// The model cannot see its own tool_use ids, so the daemon takes the last
+    /// subagent call after the last edit, and a later call a dispatch hook refused
+    /// does not hide an earlier good one.
+    #[test]
+    fn the_reviewer_is_the_last_subagent_call_after_the_last_edit_without_any_id() {
+        let (dir, root) = init();
+        let agent = |id: &str| assistant(json!([{"type": "tool_use", "id": id, "name": "Agent", "input": {}}]));
+        let tp = write_transcript(
+            dir.path(),
+            &[
+                agent("before"),
+                result("before", false, "old review of old code"),
+                edit("e1", &root.join("base.txt")),
+                agent("good"),
+                result("good", false, "Found 1 problem: the loop never exits."),
+                agent("refused"),
+                result("refused", true, "PreToolUse:Agent hook error: dispatch-preamble-guard"),
+            ],
+        );
+        assert_eq!(review_gap(&tp, None), None);
+        let r = reviewer_fact_from_transcript(&tp, None);
+        assert_eq!(r.state, "ran");
+        assert!(r.text.unwrap().starts_with("Found 1 problem"), "the good call after the edit, not the refused one");
+        // An id that is passed is still checked.
+        assert_eq!(review_gap(&tp, Some("ghost")), Some(ReviewGap::NotInTranscript));
+        assert_eq!(review_gap(&tp, Some("before")), Some(ReviewGap::BeforeLastEdit));
+        // Only a refused call after the edit: not a review.
+        let only_refused = write_transcript(
+            dir.path(),
+            &[edit("e1", &root.join("base.txt")), agent("refused"), result("refused", true, "PreToolUse:Agent hook error: x")],
+        );
+        assert_eq!(review_gap(&only_refused, None), Some(ReviewGap::NoResult));
+        // Subagents ran, but all before the last edit.
+        let early = write_transcript(dir.path(), &[agent("a"), result("a", false, "ok"), edit("e1", &root.join("base.txt"))]);
+        assert_eq!(review_gap(&early, None), Some(ReviewGap::BeforeLastEdit));
+    }
+
+    /// First real run: a foreground subagent's tool_result is "This agent's report was
+    /// delivered to you as a message from ...", and the chip showed that as the
+    /// reviewer's words. The words are the hand-back entry; the stub is never shown.
+    #[test]
+    fn a_reviewer_chip_shows_the_handed_back_report_never_the_delivery_stub() {
+        let (dir, root) = init();
+        let file = root.join("index.html");
+        let tp = fixture_transcript(dir.path(), REFUSED_EDIT_FIXTURE, &file, 8, &landed_edit("e0", &file), false);
+        let r = reviewer_fact_from_transcript(&tp, None);
+        assert_eq!(r.state, "ran");
+        let text = r.text.expect("the hand-back words");
+        assert!(text.contains("git status --short") && text.contains("printed nothing"), "{text}");
+        assert!(!text.contains("delivered to you") && !text.contains("Read it there"), "the stub is noise: {text}");
+        // The report entry is missing from the transcript: still a run (the stub says it
+        // was delivered), with no words rather than the stub's.
+        let stub_only = fixture_transcript(dir.path(), REFUSED_EDIT_FIXTURE, &file, 8, &landed_edit("e0", &file), true);
+        let r = reviewer_fact_from_transcript(&stub_only, None);
+        assert_eq!((r.state.as_str(), r.text), ("ran", None));
+        assert_eq!(review_gap(&stub_only, None), None);
+    }
+
+    /// A background reviewer's report arrives after its launch note. Until then it has
+    /// not run: counting it would let a sub finish on a review nobody has read.
+    #[test]
+    fn a_background_reviewer_counts_only_once_its_report_came_back() {
+        let (dir, root) = init();
+        let file = root.join("index.html");
+        let done = fixture_transcript(dir.path(), BACKGROUND_REVIEWER_FIXTURE, &file, 4, &landed_edit("e0", &file), false);
+        let r = reviewer_fact_from_transcript(&done, None);
+        assert_eq!(r.state, "ran");
+        let text = r.text.unwrap();
+        assert!(text.starts_with("None found. Commit 1e739f2"), "{text}");
+        assert!(!text.contains("Async agent launched"), "{text}");
+        assert_eq!(review_gap(&done, None), None);
+        // Only the launch: no hand-back yet.
+        let pending = fixture_transcript(dir.path(), BACKGROUND_REVIEWER_FIXTURE, &file, 2, &landed_edit("e0", &file), false);
+        let r = reviewer_fact_from_transcript(&pending, None);
+        assert_eq!(r.state, "none", "a launch is not a review");
+        assert!(r.text.is_none() && r.note.as_deref().unwrap().contains("has not returned"), "{r:?}");
+        assert_eq!(review_gap(&pending, None), Some(ReviewGap::NoResult));
+        // The same through the explicit id.
+        assert_eq!(review_gap(&pending, Some("toolu_012WiDJwoK5rsMK59Ka8xWLR")), Some(ReviewGap::NoResult));
     }
 
     fn test_state_of(cmd: &str, is_error: bool, output: &str) -> TestFact {

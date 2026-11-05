@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 import { test, expect, type Page } from "@playwright/test";
 // Reviewed 2026-11-05: session-controls.ts's Ctrl+W goes back to the main chat when a sub is open instead of closing it; this spec opens no sub and presses no close key, so its contract is unaffected. Passed after the change.
 // Reviewed 2026-10-28: a dashboard file row and the PLAN.md link now open the app's Files window instead of VS Code, and the file menu adds Open; this spec asserts neither the open command nor that menu, so its contract is unaffected. Passed after the change.

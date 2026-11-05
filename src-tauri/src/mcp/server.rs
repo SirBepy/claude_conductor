@@ -268,9 +268,19 @@ mod tests {
     /// instance's MCP tools silently cross-wired into the production
     /// daemon's port. It must resolve the SAME suffix `daemon_hook_port()`
     /// does, per-instance.
+    /// A test elsewhere that fails while holding the env lock poisons it. That one
+    /// failure used to fail this test too, in a full `--lib` run only, because the
+    /// lock was taken with `.lock().unwrap()`.
+    #[test]
+    fn a_poisoned_env_lock_does_not_fail_the_next_test_that_takes_it() {
+        crate::util::poison_env_lock_for_test();
+        read_port_honours_the_instance_suffix();
+        crate::util::ENV_MUTATION_LOCK.clear_poison();
+    }
+
     #[test]
     fn read_port_honours_the_instance_suffix() {
-        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+        let _guard = crate::util::env_lock();
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("hooks_port-alpha.txt"), "40001").unwrap();
         std::fs::write(dir.path().join("hooks_port-beta.txt"), "40002").unwrap();

@@ -14,6 +14,28 @@ pub mod supervisor_client;
 #[cfg(test)]
 pub(crate) static ENV_MUTATION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Takes [`ENV_MUTATION_LOCK`], ignoring poison. The lock guards no data, only
+/// the order tests touch the environment in, so a panic in the test that held it
+/// (an assertion failing while `CC_DATA_DIR` was set) says nothing about the next
+/// holder. `.lock().unwrap()` turned that one failure into a failure of every later
+/// test that touches the environment, which read as a flake in an unrelated test.
+#[cfg(test)]
+pub(crate) fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    ENV_MUTATION_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Poisons [`ENV_MUTATION_LOCK`] the way a failing holder does: a thread panics
+/// with the guard held. For the test that proves a later holder is unaffected.
+#[cfg(test)]
+pub(crate) fn poison_env_lock_for_test() {
+    let _ = std::thread::spawn(|| {
+        let _held = env_lock();
+        panic!("a test failed while holding the env lock (deliberate)");
+    })
+    .join();
+    assert!(ENV_MUTATION_LOCK.is_poisoned(), "premise: the lock is poisoned now");
+}
+
 /// Tolerates the shapes a path can arrive in (trailing separators,
 /// `.`-segments, Windows case). An uncanonicalizable path falls back to a
 /// literal compare, which can only reject, never wrongly accept - `spawn_chat`

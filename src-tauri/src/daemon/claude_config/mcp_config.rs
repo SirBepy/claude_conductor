@@ -111,7 +111,7 @@ mod tests {
     /// that failure shape.
     #[test]
     fn write_mcp_config_produces_a_parseable_server_entry() {
-        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+        let _guard = crate::util::env_lock();
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
 
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn write_mcp_config_sets_cc_jarvis_for_the_jarvis_session() {
-        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+        let _guard = crate::util::env_lock();
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
 
@@ -147,7 +147,7 @@ mod tests {
     /// A sub's MCP child must carry `CC_SUBCHAT`, and no other session's may.
     #[test]
     fn write_mcp_config_sets_cc_subchat_only_for_a_sub() {
-        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+        let _guard = crate::util::env_lock();
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
 
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn write_mcp_config_sets_cc_browser_when_the_switch_is_on() {
-        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+        let _guard = crate::util::env_lock();
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
 
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn write_mcp_config_sets_cc_browser_script_only_with_the_browser_on() {
-        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+        let _guard = crate::util::env_lock();
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
         let on = write_mcp_config("turn-5", "sess-5", false, true, true, false, Default::default()).unwrap();
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn write_mcp_config_keeps_cc_conductor_beside_connector_entries() {
-        let _guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap();
+        let _guard = crate::util::env_lock();
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("CC_DATA_DIR", dir.path());
 

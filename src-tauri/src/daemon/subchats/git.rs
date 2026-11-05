@@ -11,6 +11,43 @@ use std::path::Path;
 /// guess, and the spec scopes "itself" to these inputs.
 pub(super) const EDIT_TOOLS: [&str; 4] = ["Edit", "Write", "NotebookEdit", "MultiEdit"];
 
+/// Whether a `tool_result` block says its tool call did nothing: the tool's own
+/// error flag, or a hook refusal (`PreToolUse:Edit hook error: ...`) that some
+/// builds deliver without the flag. A refused or failed Edit left the file as it
+/// was, so it is not a change the sub made.
+pub(super) fn result_failed(block: &serde_json::Value) -> bool {
+    if block["is_error"].as_bool().unwrap_or(false) {
+        return true;
+    }
+    let text = match &block["content"] {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(items) => items.iter().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n"),
+        _ => String::new(),
+    };
+    let head = text.trim_start();
+    head.starts_with("PreToolUse:") && head.contains("hook error")
+}
+
+/// The `tool_use` ids whose result says the call failed or was refused.
+fn failed_tool_ids(raw: &str) -> std::collections::HashSet<String> {
+    let mut failed = std::collections::HashSet::new();
+    for line in raw.lines() {
+        if !line.contains("tool_result") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Some(blocks) = v["message"]["content"].as_array() else { continue };
+        for b in blocks {
+            if b["type"] == "tool_result" && result_failed(b) {
+                if let Some(id) = b["tool_use_id"].as_str() {
+                    failed.insert(id.to_string());
+                }
+            }
+        }
+    }
+    failed
+}
+
 /// Blocking git run with the console hidden on Windows. `None` when git could
 /// not be started at all; `(success, raw stdout)` otherwise.
 pub(super) fn run_git(cwd: &Path, args: &[&str]) -> Option<(bool, Vec<u8>)> {
@@ -98,8 +135,12 @@ pub fn dirty_keys(cwd: &Path) -> Option<Vec<String>> {
 
 /// Absolute paths the transcript's Edit, Write, NotebookEdit and MultiEdit
 /// calls named, in first-seen order. A relative path is resolved against `cwd`.
+/// A call whose result says it failed or was refused (a read-only sub's guard,
+/// a stale `old_string`) changed nothing and is not counted; a call with no
+/// result yet is, since it may still land.
 pub fn edited_files(transcript: &Path, cwd: &Path) -> Vec<String> {
     let Ok(raw) = std::fs::read_to_string(transcript) else { return Vec::new() };
+    let failed = failed_tool_ids(&raw);
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for line in raw.lines() {
@@ -111,6 +152,9 @@ pub fn edited_files(transcript: &Path, cwd: &Path) -> Vec<String> {
         let Some(blocks) = v["message"]["content"].as_array() else { continue };
         for b in blocks {
             if b["type"] != "tool_use" || !EDIT_TOOLS.iter().any(|t| b["name"] == *t) {
+                continue;
+            }
+            if b["id"].as_str().is_some_and(|id| failed.contains(id)) {
                 continue;
             }
             let input = &b["input"];
@@ -199,6 +243,96 @@ pub(crate) mod test_repo {
         assert!(ok, "git {args:?} failed");
     }
 
+    /// Real entries from the first end-to-end run (2026-11-05), trimmed to what the
+    /// readers use. A read-only sub's Edit refused by the write guard (`is_error`
+    /// true, `PreToolUse:Edit hook error: ...`), a subagent call a dispatch hook
+    /// refused, then a foreground subagent whose tool_result is only the "report was
+    /// delivered to you as a message" stub, with the report as a later queue entry.
+    pub const REFUSED_EDIT_FIXTURE: &str = include_str!("../../../tests/fixtures/sub_refused_edit_and_delivered_reviewer.jsonl");
+    /// A subagent launched in the background: its tool_result is the "Async agent
+    /// launched successfully" note and the report is a later queue entry.
+    pub const BACKGROUND_REVIEWER_FIXTURE: &str = include_str!("../../../tests/fixtures/sub_background_reviewer.jsonl");
+
+    /// A fixture's first `take` lines after `prefix`, written under `dir`, with each
+    /// edit's `file_path` pointed at `file` (the recorded path is the run machine's).
+    /// `drop_handbacks` removes every entry that carries a subagent's report, which
+    /// leaves only the stub a sub saw.
+    pub fn fixture_transcript(
+        dir: &Path,
+        raw: &str,
+        file: &Path,
+        take: usize,
+        prefix: &[serde_json::Value],
+        drop_handbacks: bool,
+    ) -> PathBuf {
+        let mut lines: Vec<String> = prefix.iter().map(|v| v.to_string()).collect();
+        for line in raw.lines().filter(|l| !l.trim().is_empty()).take(take) {
+            if drop_handbacks && line.contains("agent-message from=") {
+                continue;
+            }
+            let mut v: serde_json::Value = serde_json::from_str(line).unwrap();
+            if drop_handbacks {
+                v.as_object_mut().unwrap().remove("toolUseResult");
+            }
+            if let Some(blocks) = v["message"]["content"].as_array_mut() {
+                for b in blocks {
+                    if b["input"]["file_path"].is_string() {
+                        b["input"]["file_path"] = serde_json::json!(file.to_string_lossy());
+                    }
+                }
+            }
+            lines.push(v.to_string());
+        }
+        let path = dir.join("fixture-transcript.jsonl");
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        path
+    }
+
+    /// A successful Edit of `file` and its result, as two transcript lines.
+    pub fn landed_edit(id: &str, file: &Path) -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": id, "name": "Edit", "input": {"file_path": file.to_string_lossy()}}
+            ]}}),
+            serde_json::json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": id, "content": "The file was updated."}
+            ]}}),
+        ]
+    }
+
+    /// A transcript whose assistant turn called each `(tool, path)` once, with ids
+    /// `toolu_<n>` and a result for each. `refused` are the ids whose result is an
+    /// error, in the shape a read-only sub's `PreToolUse` guard produces in a real
+    /// transcript (`is_error` true, text `PreToolUse:Edit hook error: ...`).
+    pub fn transcript_with_results(dir: &Path, edits: &[(&str, &Path)], refused: &[&str]) -> PathBuf {
+        let path = dir.join("sub-transcript.jsonl");
+        let mut lines: Vec<String> = Vec::new();
+        for (n, (tool, file)) in edits.iter().enumerate() {
+            let key = if *tool == "NotebookEdit" { "notebook_path" } else { "file_path" };
+            let id = format!("toolu_{n}");
+            lines.push(
+                serde_json::json!({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": id, "name": tool, "input": { key: file.to_string_lossy() }}
+                ]}})
+                .to_string(),
+            );
+            let is_error = refused.contains(&id.as_str());
+            let text = if is_error {
+                "PreToolUse:Edit hook error: This sub is read-only (its brief said writes: false), so Edit, Write and NotebookEdit are refused."
+            } else {
+                "The file was updated."
+            };
+            lines.push(
+                serde_json::json!({"type": "user", "message": {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": id, "is_error": is_error, "content": text}
+                ]}})
+                .to_string(),
+            );
+        }
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        path
+    }
+
     /// A transcript whose assistant turn called each `(tool, path)` once.
     pub fn transcript(dir: &Path, edits: &[(&str, &Path)]) -> PathBuf {
         let path = dir.join("sub-transcript.jsonl");
@@ -219,8 +353,35 @@ pub(crate) mod test_repo {
 
 #[cfg(test)]
 mod tests {
-    use super::test_repo::{git, init, transcript};
+    use super::test_repo::{git, init, transcript, transcript_with_results};
     use super::*;
+
+    /// A read-only sub's Edit is refused by `/hooks/sub-write-guard` and changes
+    /// nothing, so it is not an edit the sub made. Counting it asked a sub that
+    /// never touched a file for a reviewer.
+    #[test]
+    fn a_refused_edit_is_not_an_edit() {
+        let (dir, root) = init();
+        let (a, b) = (root.join("a.txt"), root.join("b.txt"));
+        std::fs::write(&a, "x").unwrap();
+        std::fs::write(&b, "y").unwrap();
+        let tp = transcript_with_results(dir.path(), &[("Edit", &a), ("Write", &b)], &["toolu_0"]);
+        let got = edited_files(&tp, &root);
+        assert_eq!(got.len(), 1, "only the Write that landed counts: {got:?}");
+        assert_eq!(path_key(&got[0]), path_key(&b.to_string_lossy()));
+        let dirty = own_uncommitted(&tp, &root);
+        assert_eq!(dirty.len(), 1, "the refused file is not named as the sub's uncommitted work: {dirty:?}");
+    }
+
+    #[test]
+    fn a_hook_refusal_without_the_error_flag_still_counts_as_refused() {
+        let flagless = serde_json::json!({"type": "tool_result", "tool_use_id": "t", "content": "PreToolUse:Edit hook error: nope"});
+        assert!(result_failed(&flagless));
+        let blocks = serde_json::json!({"type": "tool_result", "tool_use_id": "t", "content": [{"type": "text", "text": "PreToolUse:Write hook error: nope"}]});
+        assert!(result_failed(&blocks));
+        let ok = serde_json::json!({"type": "tool_result", "tool_use_id": "t", "content": "The file was updated"});
+        assert!(!result_failed(&ok));
+    }
 
     #[test]
     fn path_key_agrees_across_slash_style_prefix_and_case_on_windows() {

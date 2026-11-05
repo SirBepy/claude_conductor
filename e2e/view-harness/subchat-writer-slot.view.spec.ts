@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/project-dashboard/project-config/project-settings.ts, src/views/sessions/project-dashboard/project-config/rows.ts, src/views/sessions/project-dashboard/project-config/project-settings.css, src/views/sessions/main-chat.ts, src/views/sessions/sub-list.ts, src/views/sessions/sidebar-hover-card-html.ts
 import { test, expect, type Page } from "@playwright/test";
 import {

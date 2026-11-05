@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05 (hidden subs): sidebar.ts now keeps a sub out of the unread marking and the favicon count; this spec's rows carry no subchat_of and it traces a normal chat row's busy flip, so its contract is unaffected. Its @shot tests are skipped by default and were not run.
 // Reviewed 2026-10-23: sidebar.ts's refreshSessions now caches the list and keeps it through a failed fetch on the phone (isRemote) only - this desktop-path spec's contract is unchanged.
 import { expect, test, type Page } from "@playwright/test";

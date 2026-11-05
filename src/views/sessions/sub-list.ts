@@ -70,6 +70,13 @@ export class SubListButton {
     private readonly getSessions: () => readonly Instance[],
   ) {}
 
+  /** Whether this button counts `mainId`'s subs. One module-level button follows the
+   *  chat on screen, so a caller holding a button built for an earlier chat must not
+   *  feed it the current chat's update. */
+  belongsTo(mainId: string): boolean {
+    return this.mainId === mainId;
+  }
+
   /** Re-reads the subs from `sessions`: adds, updates or drops the button, and
    *  repaints the list in place when it is open. */
   update(sessions: readonly Instance[]): void {

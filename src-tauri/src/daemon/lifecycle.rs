@@ -52,8 +52,9 @@ pub fn refuse_if_busy(
 /// Whether a question card for `session_id` is open: its child is parked on the
 /// answer, running nothing.
 pub(crate) async fn has_open_prompt(state: &crate::daemon::state::DaemonState, session_id: &str) -> bool {
+    // A quiet card (a decisions checkup) parks nothing: the child is not waiting on it.
     state.list_prompts().await.iter()
-        .any(|v| v["payload"]["session_id"].as_str() == Some(session_id))
+        .any(|v| v["payload"]["session_id"].as_str() == Some(session_id) && !crate::daemon::state::is_quiet(v))
 }
 
 /// Model and effort are launch-only CLI flags, so a live child keeps the pair it

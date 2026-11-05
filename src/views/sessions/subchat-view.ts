@@ -176,8 +176,10 @@ export function syncSubchatChrome(sess: Instance): "ok" | "rebuild" {
     const main = state.sessions.find((s) => s.session_id === sess.subchat_of);
     const meta = header.querySelector<HTMLElement>(".meta-proj");
     if (meta) meta.textContent = subMetaText(sess, main);
-  } else {
-    list?.update(state.sessions);
+  } else if (list?.belongsTo(sess.session_id)) {
+    // Only the button built for THIS chat: the module keeps one, and a header that was
+    // never dressed (a draft promoted in place) must not be fed another chat's count.
+    list.update(state.sessions);
   }
   return "ok";
 }

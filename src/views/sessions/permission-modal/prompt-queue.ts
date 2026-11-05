@@ -15,7 +15,13 @@ export interface PromptQueue<T extends { id: string }> {
   all(sessionId: string): readonly T[];
 }
 
-export function createPromptQueue<T extends { id: string }>(dispatch: (payload: T) => void): PromptQueue<T> {
+/** `yields` marks payloads that wait behind every other queued payload, whatever
+ *  arrived first (a quiet checkup card): `promote` takes the oldest payload that
+ *  does not yield, and a yielding one only when nothing else is queued. */
+export function createPromptQueue<T extends { id: string }>(
+  dispatch: (payload: T) => void,
+  opts: { yields?: (payload: T) => boolean } = {},
+): PromptQueue<T> {
   const queues = new Map<string, T[]>();
 
   function remove(sessionId: string, index: number): T | null {
@@ -37,7 +43,9 @@ export function createPromptQueue<T extends { id: string }>(dispatch: (payload: 
       return remove(sessionId, queues.get(sessionId)?.findIndex((p) => p.id === id) ?? -1);
     },
     promote(sessionId) {
-      const next = remove(sessionId, 0);
+      const q = queues.get(sessionId) ?? [];
+      const first = opts.yields ? q.findIndex((p) => !opts.yields!(p)) : 0;
+      const next = remove(sessionId, first === -1 ? 0 : first);
       if (next) dispatch(next);
     },
     all(sessionId) {

@@ -36,6 +36,9 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
   // The main chat's window opens a sub, or the decisions log, from a daemon card.
   subchat_open_requested: "subchat-open-requested",
   subchat_log_open_requested: "subchat-log-open-requested",
+  // A "Use subchats" flip from another surface, or a respawn successor taking the
+  // mode: every client re-reads the set of mode-on chats.
+  subchats_on_changed: "subchats-on-changed",
   // Same snake/kebab spelling, so this one is easy to mistake for already
   // wired up. Found by todo 946's own check (`tests/
   // notifier-event-registration-contract.test.mjs`): `preview-panel.ts` already

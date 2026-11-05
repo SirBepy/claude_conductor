@@ -147,6 +147,21 @@ fn question_json(card: &RaisedCard) -> Value {
 /// its answer arrives on. `Err` when that chat is unknown or has ended, since a
 /// card for it would have nowhere to show.
 pub async fn raise_card(state: &Arc<DaemonState>, card: RaisedCard) -> Result<CardHandle, String> {
+    raise(state, card, false).await
+}
+
+/// [`raise_card`] for a card that must not ask for Joe's attention: no red dot, no
+/// "input needed" state, no sound and no push. It is still a card in the chat's
+/// window, shown when he opens the chat and behind every other card there (the
+/// client sorts it last). For a finding that matters only if he looks, such as a
+/// checkup of the decisions log. The prompt carries `quiet: true`, which also keeps
+/// it out of [`DaemonState::session_has_pending_question`], the test the rest of
+/// the daemon uses for "this chat is waiting on Joe".
+pub async fn raise_quiet_card(state: &Arc<DaemonState>, card: RaisedCard) -> Result<CardHandle, String> {
+    raise(state, card, true).await
+}
+
+async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool) -> Result<CardHandle, String> {
     let display = card.display_session_id.clone();
     match state.registry.get(&display) {
         Some(inst) if inst.ended_at.is_none() => {}
@@ -178,16 +193,23 @@ pub async fn raise_card(state: &Arc<DaemonState>, card: RaisedCard) -> Result<Ca
     if state.session_has_pending_question(&display).await {
         payload["has_older_pending"] = json!(true);
     }
+    if quiet {
+        payload["quiet"] = json!(true);
+    }
     // `durable` keeps `expire_prompts_for_session` from sweeping it at the next
     // EOF of the chat; persistence is separately refused for a daemon card.
     state.add_prompt(&card_id, "question-requested", payload.clone(), true).await;
-    state.fire_blocked_prompt(Some(&display), &card_id);
-    state.registry.set_awaiting(&display, Some("question".into()));
-    crate::daemon::machines::publish_instances_changed(state);
+    if !quiet {
+        state.fire_blocked_prompt(Some(&display), &card_id);
+        state.registry.set_awaiting(&display, Some("question".into()));
+        crate::daemon::machines::publish_instances_changed(state);
+    }
     state.notifier.publish("question_request", payload);
-    state
-        .notifier
-        .publish("turn_sound", json!({ "session_id": display, "awaiting": "question" }));
+    if !quiet {
+        state
+            .notifier
+            .publish("turn_sound", json!({ "session_id": display, "awaiting": "question" }));
+    }
     log::info!(
         "subchats: raised {} card {card_id} in {display} for sub {:?}",
         card.kind,
@@ -343,6 +365,43 @@ mod tests {
         assert_eq!(q["question"], "The header sub has gone quiet. What now?");
         assert_eq!(q["options"].as_array().unwrap().len(), 3);
         assert_eq!(st.registry.get("main").unwrap().awaiting.as_deref(), Some("question"), "the ring shows needs input");
+    }
+
+    /// First real run: a checkup raised a red dot and "input needed" on a chat with
+    /// nothing wrong, and sat in front of a real card. A quiet card is listed and
+    /// answerable like any other, but nothing waits on it.
+    #[tokio::test]
+    async fn a_quiet_card_is_listed_and_answerable_but_asks_for_no_attention() {
+        let st = state_with_chat("main");
+        let mut rx = st.notifier.subscribe();
+        let h = raise_quiet_card(&st, card("main", None)).await.unwrap();
+        let listed = st.list_prompts().await;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["payload"]["quiet"], true, "the client keeps it out of every dot");
+        assert_eq!(listed[0]["event"], "question-requested", "it still renders as a card");
+        assert_ne!(st.registry.get("main").unwrap().awaiting.as_deref(), Some("question"), "no input-needed state");
+        assert!(!st.session_has_pending_question("main").await, "nothing in the daemon reads the chat as waiting");
+        assert!(!crate::daemon::lifecycle::has_open_prompt(&st, "main").await, "a turn is not parked on it");
+        let mut frames = Vec::new();
+        while let Ok(f) = rx.try_recv() {
+            frames.push(f["method"].as_str().unwrap_or("").to_string());
+        }
+        assert!(frames.contains(&"question_request".to_string()), "the card reaches the client: {frames:?}");
+        assert!(!frames.contains(&"turn_sound".to_string()), "no sound: {frames:?}");
+
+        // A real card beside it is still a question that waits on Joe, and is not 'older'.
+        let loud = raise_card(&st, card("main", Some("sub-1"))).await.unwrap();
+        assert!(st.session_has_pending_question("main").await);
+        assert_eq!(st.registry.get("main").unwrap().awaiting.as_deref(), Some("question"));
+        let listed = st.list_prompts().await;
+        assert_eq!(listed[1]["payload"].get("has_older_pending"), None);
+        // Answering the real one clears the state although the quiet one is still open.
+        assert!(respond_question_inner(&st, &loud.card_id, json!({}), true).await);
+        assert_ne!(st.registry.get("main").unwrap().awaiting.as_deref(), Some("question"));
+        assert_eq!(st.list_prompts().await.len(), 1);
+
+        assert!(respond_question_inner(&st, &h.card_id, json!({}), true).await);
+        assert_eq!(h.answer().await, CardAnswer::Skipped);
     }
 
     #[tokio::test]

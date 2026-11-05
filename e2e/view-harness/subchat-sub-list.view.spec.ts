@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: subchat-view.ts exports backToMain for Ctrl+W (no behaviour change to the back arrow); this spec's back-arrow tests pass unchanged.
 // Reviewed 2026-11-05: main-chat.ts's progress text says paused or rate limited for a frozen or rate-limited sub instead of working; this spec's subs are neither, so its contract holds and it passes.
 // Reviewed 2026-11-05: sub-list.ts and main-chat.ts gained a "queued" kind (a sub held for the writer slot); this spec has no queued sub, so its rows are unchanged, and it passed after the change. The queued row is covered in subchat-writer-slot.view.spec.ts.
