@@ -52,7 +52,9 @@ pub mod groups_test_helpers {
             .unwrap_or_else(chrono::Utc::now)
             .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         for inst in instances {
-            if inst.end_reason.is_some() { continue }
+            // A hidden sub is no chat the user can open, so it is no live chat
+            // on the card either.
+            if inst.end_reason.is_some() || inst.subchat_of.is_some() { continue }
             let key = project_key(&inst.cwd);
             let entry = by_key
                 .entry(key.clone())
@@ -469,6 +471,18 @@ mod build_groups_tests {
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].live, 1);
         assert!(groups[0].any_automated);
+    }
+
+    #[test]
+    fn a_hidden_sub_adds_nothing_to_a_projects_live_count() {
+        let registry = crate::sessions::registry::Registry::new();
+        let repo = std::path::Path::new("C:\repo");
+        registry.upsert_interactive("main", repo, "x", "2026-11-05T00:00:00Z");
+        registry.upsert_interactive("sub", repo, "x", "2026-11-05T00:00:00Z");
+        registry.set_subchat_of("sub", Some("main".into()));
+        let groups = build_groups(&[], &[], &registry.list(), 1714389600000);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].live, 1, "only the main chat counts");
     }
 
     #[test]

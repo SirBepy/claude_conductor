@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05 (hidden subs): sidebar-entries.ts now drops a row with subchat_of from the list; this spec asserts the empty-state copy of a list with no rows at all, so its contract is unaffected and it passed after the change.
 // Reviewed 2026-11-01: pending-pane-mount.ts now builds the working bar through the shared thinkingBarHtml(); this spec asserts empty-state copy only and passes.
 // Reviewed 2026-10-29: a draft's header now opens on the project name with "New chat" under it, and draft-dashboard.ts places the project's settings rail (desktop only; the phone gets none); this spec asserts empty-state copy only, so its contract is unaffected. Passed after the change.
 // Reviewed 2026-10-25 (in-place statusline editing): pending-pane-mount.ts now passes layoutEditable: true to the statusbar; this spec asserts empty-state copy only, so its contract is unaffected.

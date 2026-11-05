@@ -6,6 +6,11 @@
 //! a Jarvis worker (`worker_of`): that field wakes its parent on every state
 //! change, which is exactly what a sub must never do.
 
+mod brief;
+pub mod spawn;
+
+pub use brief::{SubchatArgs, SubchatBrief};
+
 use crate::accounts::Account;
 use crate::daemon::claude_config::{append_system_prompt, SUBCHAT_SUB_PROMPT};
 use crate::daemon::rpc::RpcError;
@@ -100,10 +105,57 @@ pub fn sub_prompt(parent_label: &str) -> String {
     format!("{SUBCHAT_SUB_PROMPT} Your main chat is \"{parent_label}\".")
 }
 
-/// Adds [`sub_prompt`] to a spawn's `--append-system-prompt`; the sub spawn
-/// path is its intended caller.
+/// Adds [`sub_prompt`] to a spawn's `--append-system-prompt`.
 pub fn append_sub_prompt(args: &mut [String], parent_label: &str) {
     append_system_prompt(args, &sub_prompt(parent_label));
+}
+
+/// The main chat `session_id` is a sub of, for a child about to be launched.
+/// `explicit` is the first spawn, whose registry row does not exist yet; every
+/// later launch of the same sub (a respawn after a model pick, a continue after
+/// finishing) has no such argument and reads the registry row instead, so the
+/// sub keeps `CC_SUBCHAT` and its prompt however it is relaunched.
+pub fn launch_parent(state: &DaemonState, session_id: &str, explicit: Option<&str>) -> Option<String> {
+    explicit
+        .map(str::to_string)
+        .or_else(|| state.registry.get(session_id).and_then(|i| i.subchat_of))
+}
+
+/// How the sub prompt names the main chat: its title, else a plain description.
+pub fn parent_label(state: &DaemonState, parent_id: &str) -> String {
+    state
+        .registry
+        .get(parent_id)
+        .and_then(|i| i.name)
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "the main chat".to_string())
+}
+
+/// Points `CC_DATA_DIR` at a scratch dir for one test, so a test that writes
+/// `chat-config.json` never touches the real app data, and holds the env lock
+/// so two such tests never race on the variable.
+#[cfg(test)]
+pub(crate) struct TempDataDir {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    _dir: tempfile::TempDir,
+}
+
+#[cfg(test)]
+impl TempDataDir {
+    pub(crate) fn new() -> Self {
+        let guard = crate::util::ENV_MUTATION_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", dir.path());
+        Self { _guard: guard, _dir: dir }
+    }
+}
+
+#[cfg(test)]
+impl Drop for TempDataDir {
+    fn drop(&mut self) {
+        std::env::remove_var("CC_DATA_DIR");
+    }
 }
 
 #[cfg(test)]
@@ -217,6 +269,22 @@ mod tests {
         assert!(!is_sub(&st.registry.get("worker").unwrap()), "a Jarvis worker is not a sub");
         assert!(is_sub(&st.registry.get("sub").unwrap()));
         assert!(!is_sub(&st.registry.get("main").unwrap()));
+    }
+
+    #[test]
+    fn a_relaunched_sub_finds_its_parent_in_the_registry_without_the_first_spawns_arguments() {
+        let st = state();
+        chat(&st, "main", None, "opus", "high");
+        st.registry.set_name("main", "CV redesign".into());
+        chat(&st, "sub", None, "sonnet", "high");
+        assert_eq!(launch_parent(&st, "sub", None), None, "a plain chat is not a sub");
+        st.registry.set_subchat_of("sub", Some("main".into()));
+        assert_eq!(launch_parent(&st, "sub", None).as_deref(), Some("main"));
+        assert_eq!(launch_parent(&st, "fresh", Some("main")).as_deref(), Some("main"), "first spawn has no row yet");
+        assert_eq!(parent_label(&st, "main"), "CV redesign");
+        assert_eq!(parent_label(&st, "ghost"), "the main chat");
+        st.registry.set_subchat_of("sub", None);
+        assert_eq!(launch_parent(&st, "sub", None), None, "Move to sidebar drops the sub marking");
     }
 
     #[test]

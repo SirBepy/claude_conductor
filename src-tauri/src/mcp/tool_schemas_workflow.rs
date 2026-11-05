@@ -63,18 +63,28 @@ pub fn workflow_schemas() -> Vec<Value> {
     vec![
         json!({
             "name": TOOL_SPAWN_CHAT,
-            "description": "Start a SEPARATE chat alongside this one and send it `prompt` as its first message; returns {ok, session_id}. Both chats then run independently - this one keeps going. Use it to hand off a self-contained piece of work the user will want to read and steer on its own, rather than burying it in this transcript. The prompt lands as a real, visible user message, so it must carry everything the new chat needs; it cannot see this conversation. Inherits this chat's account and auto-accept; its model and effort default to the target project's default (then Settings' default) unless you pass them, never this chat's own; it gets its own character, since it is a separate chat. `cwd` can be this session's own project or a DIFFERENT project the user already has open/known to the app - never an arbitrary path. Call it as many times as the work needs, one call per chat. To REPLACE this chat instead of running beside it, use `respawn`.",
+            "description": "Start a SEPARATE chat alongside this one and send it `prompt` as its first message; returns {ok, session_id}. Both chats then run independently - this one keeps going. Use it to hand off a self-contained piece of work the user will want to read and steer on its own, rather than burying it in this transcript. The prompt lands as a real, visible user message, so it must carry everything the new chat needs; it cannot see this conversation. Inherits this chat's account and auto-accept; its model and effort default to the target project's default (then Settings' default) unless you pass them, never this chat's own; it gets its own character, since it is a separate chat. `cwd` can be this session's own project or a DIFFERENT project the user already has open/known to the app - never an arbitrary path. Call it as many times as the work needs, one call per chat. To REPLACE this chat instead of running beside it, use `respawn`. In a chat with Use subchats on, a spawn makes a hidden sub instead and the brief fields below are required (name, task, goal, done_when, writes, plus files when writes is true); `prompt` then becomes optional extra context.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "cwd": {"type": "string", "description": "Absolute working directory: this session's own cwd, or another project already known to the app."},
                     "prompt": {"type": "string", "description": "The new chat's first message. Carry the full handoff context here - it is what the user reads."},
-                    "model": {"type": "string", "description": "Optional model id/alias. Omit to use the project's default."},
-                    "effort": {"type": "string", "description": "Optional reasoning effort. Omit to use the project's default."},
+                    "model": {"type": "string", "description": "Optional model id/alias. Omit to use the project's default. A sub: sonnet or opus, never haiku; omitted is sonnet."},
+                    "effort": {"type": "string", "description": "Optional reasoning effort. Omit to use the project's default. A sub: omitted is high."},
                     "name": {"type": "string", "description": "Optional short label for the new chat."},
-                    "machine": {"type": "string", "description": "Label or id (from list_peers) of a paired machine to start this chat on instead of here - use it when the user asks to run something on another one of their machines. If it fails because that machine is offline or unreachable, do not retry blindly or spawn here instead: ask the user to wake that machine and open Conductor on it, then try again. Omit to spawn locally, the default."}
+                    "machine": {"type": "string", "description": "Label or id (from list_peers) of a paired machine to start this chat on instead of here - use it when the user asks to run something on another one of their machines. If it fails because that machine is offline or unreachable, do not retry blindly or spawn here instead: ask the user to wake that machine and open Conductor on it, then try again. Omit to spawn locally, the default."},
+                    "task": {"type": "string", "description": "Use subchats only: the job, one or two sentences."},
+                    "goal": {"type": "string", "description": "Use subchats only: what the job is for."},
+                    "done_when": {"type": "string", "description": "Use subchats only: what makes it finished."},
+                    "writes": {"type": "boolean", "description": "Use subchats only: true if the sub edits files, false if it is read-only."},
+                    "files": {"type": "array", "items": {"type": "string"}, "description": "Use subchats only: the paths it may write. Required when writes is true."},
+                    "decisions": {"type": "string", "description": "Use subchats only: settled decisions the sub must not revisit."},
+                    "report_back": {"type": "boolean", "description": "Use subchats only: wake this chat with a facts-only line when the sub finishes. Only when your next step depends on its result."},
+                    "worktree": {"type": "boolean", "description": "Use subchats only: give a writing sub its own worktree."},
+                    "after": {"type": "string", "description": "Use subchats only: name of a sub that must finish first; this one then starts by itself."},
+                    "review": {"type": "boolean", "description": "Use subchats only: false for a purely visual job a reviewer cannot judge. Default true."}
                 },
-                "required": ["cwd", "prompt"]
+                "required": ["cwd"]
             }
         }),
         json!({

@@ -140,6 +140,11 @@ fn request_secret_result(id: &Value, posted: Result<Value, String>) -> Value {
     }
 }
 
+/// The optional `spawn_chat` fields a chat with Use subchats on briefs a sub with.
+const SUBCHAT_BRIEF_KEYS: [&str; 10] = [
+    "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "after", "review",
+];
+
 /// Session lifecycle: end this one, spawn a sibling chat, or hand off to a
 /// successor and stand down.
 fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
@@ -170,16 +175,26 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             // `machine` only ever comes from `spawn_chat`'s own schema (`respawn`
             // has no such property) - the daemon still rejects it defensively
             // if it somehow arrives on a respawn call.
-            let body = json!({
+            let mut body = json!({
                 "session_id": ctx.session_id,
                 "cwd": ctx.args["cwd"],
-                "prompt": ctx.args["prompt"],
+                "prompt": ctx.args.get("prompt"),
                 "model": ctx.args.get("model"),
                 "effort": ctx.args.get("effort"),
                 "name": ctx.args.get("name"),
                 "respawn": name == TOOL_RESPAWN,
                 "machine": ctx.args.get("machine"),
             });
+            // The subchats brief rides only on `spawn_chat`, and only the keys
+            // the model sent: the receiver's `#[serde(default)]` covers an
+            // absent key, not an explicit null for a bool.
+            if name == TOOL_SPAWN_CHAT {
+                for key in SUBCHAT_BRIEF_KEYS {
+                    if let Some(v) = ctx.args.get(key).filter(|v| !v.is_null()) {
+                        body[key] = v.clone();
+                    }
+                }
+            }
             Some(ctx.relay("/chat/spawn", body, None, None))
         }
         TOOL_SCHEDULE => {

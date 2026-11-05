@@ -28,12 +28,16 @@ impl Registry {
     /// Whether `turn_sound` should fire for a completed live turn, deduping
     /// repeated `question` in a row (todo 564): `done` always fires,
     /// `question` fires only if it differs from the last-notified state,
-    /// anything else resets that state without firing.
+    /// anything else resets that state without firing. A hidden sub never
+    /// plays a `done` voiceline: it finishes through its own card, and one
+    /// sound per sub turn is the noise that over-spawning would multiply. Its
+    /// `question` still fires, since that is how a question reaches Joe when the
+    /// app is not in front of him.
     pub fn should_notify_turn_sound(&self, session_id: &str, awaiting: Option<&str>) -> bool {
         let mut guard = self.inner.lock().unwrap();
         let Some(i) = guard.get_mut(session_id) else { return false };
         let should_fire = match awaiting {
-            Some("done") => true,
+            Some("done") => i.subchat_of.is_none(),
             Some("question") => i.last_notified_awaiting.as_deref() != Some("question"),
             _ => false,
         };
@@ -601,6 +605,16 @@ mod tests {
         registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-08-09T00:00:00Z");
         assert!(registry.should_notify_turn_sound("s", Some("done")));
         assert!(registry.should_notify_turn_sound("s", Some("done")), "done fires every time, no dedup");
+    }
+
+    #[test]
+    fn a_hidden_sub_plays_no_done_sound_but_still_announces_a_question() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-11-05T00:00:00Z");
+        registry.set_subchat_of("s", Some("main".into()));
+        assert!(!registry.should_notify_turn_sound("s", Some("done")));
+        assert!(registry.should_notify_turn_sound("s", Some("question")));
     }
 
     #[test]

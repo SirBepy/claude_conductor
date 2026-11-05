@@ -46,13 +46,15 @@ pub fn register_history(router: &mut Router, state: Arc<DaemonState>) {
                 // No AppState on the daemon (separate process) - use the
                 // daemon's own registry for the live-session exclusion instead
                 // of the desktop command's `state.cached_instances`.
-                let live_ids: std::collections::HashSet<String> = state
+                let mut live_ids: std::collections::HashSet<String> = state
                     .registry
                     .list()
                     .into_iter()
                     .filter(|i| i.ended_at.is_none())
                     .map(|i| i.session_id)
                     .collect();
+                // Hidden subs, ended ones included, are never a past chat to browse.
+                live_ids.extend(crate::sessions::chat_config::sub_session_ids());
                 let entries = tokio::task::spawn_blocking(move || {
                     let mut entries = crate::ipc::chat::history::collect_history(
                         &projects_dir,

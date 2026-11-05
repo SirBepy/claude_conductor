@@ -41,9 +41,9 @@ pub(super) struct Gathered {
 }
 
 /// Jarvis and its workers live outside the Chats list, so they stay out of the
-/// dashboard's counts too.
+/// dashboard's counts too, and so does a hidden sub: it has no row anywhere.
 fn counts_as_live(i: &Instance) -> bool {
-    i.end_reason.is_none() && i.ended_at.is_none() && !i.jarvis && i.worker_of.is_none()
+    i.end_reason.is_none() && i.ended_at.is_none() && !i.jarvis && i.worker_of.is_none() && i.subchat_of.is_none()
 }
 
 pub(super) async fn gather(state: &DaemonState) -> Gathered {
@@ -79,4 +79,22 @@ pub(super) async fn gather(state: &DaemonState) -> Gathered {
         })
         .collect();
     Gathered { groups, projects, live, now_ms: chrono::Utc::now().timestamp_millis() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sessions::registry::Registry;
+
+    #[test]
+    fn a_hidden_sub_is_not_counted_as_a_live_chat() {
+        let registry = Registry::new();
+        let here = std::path::Path::new(".");
+        registry.upsert_interactive("main", here, "proj", "2026-11-05T00:00:00Z");
+        registry.upsert_interactive("sub", here, "proj", "2026-11-05T00:00:00Z");
+        registry.set_subchat_of("sub", Some("main".into()));
+        let live: Vec<String> =
+            registry.list().into_iter().filter(counts_as_live).map(|i| i.session_id).collect();
+        assert_eq!(live, vec!["main".to_string()]);
+    }
 }

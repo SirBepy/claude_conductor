@@ -17,6 +17,7 @@ import { api } from "../api";
 import { showToast } from "../toast";
 import { showView } from "../navigation";
 import type { Instance } from "../../types/ipc.generated";
+import { isSubchat } from "../../views/sessions/sessions-helpers";
 import { setCachedAccounts, listCachedAccounts, getCachedAccount, capitalize } from "../accounts-cache";
 import { formatRelativeMinutes } from "../formatters";
 import { isApiCreditAccount } from "../account-chip";
@@ -144,7 +145,9 @@ export class RateLimitBanner {
   /** Feed the current live instance list and repaint. Safe to call on every
    * `instances-changed` - a no-op render when nothing is blocked. */
   update(instances: Instance[]): void {
-    this.instances = instances;
+    // "N chats affected" counts chats the user can see; hidden subs share their
+    // main chat's account, so they would only inflate it.
+    this.instances = instances.filter((i) => !isSubchat(i));
     this.render();
   }
 

@@ -128,6 +128,18 @@ describe("RateLimitBanner", () => {
     expect(host.querySelector(".rlb-title").textContent).toBe("Fibo hit its weekly limit");
   });
 
+  it("does not count a hidden sub among the chats affected", async () => {
+    const b = new RateLimitBanner();
+    b.mount(host);
+    await flush();
+    const blocked = { rate_limited_resets_at: BigInt(NOW_SEC + 3600) };
+    b.update([
+      instance({ session_id: "main", ...blocked }),
+      instance({ session_id: "sub", subchat_of: "main", ...blocked }),
+    ]);
+    expect(host.querySelector(".rlb-time").textContent).not.toMatch(/chats affected/);
+  });
+
   it("appends '· N chats affected' only when more than one blocked chat shares the account", async () => {
     const b = new RateLimitBanner();
     b.mount(host);

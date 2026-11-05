@@ -134,9 +134,11 @@ fn mirrored_peer_json(i: &crate::types::Instance) -> Value {
 /// listing, same call `remote_handlers::strip_hidden_instances` already makes
 /// for a peer machine's remote listings - a peer machine's mirrored Jarvis rows
 /// would otherwise leak into scope "all"/"machine:*", which no local listing
-/// surface allows either.
+/// surface allows either. A hidden sub is left out for the same reason; the
+/// default same-project listing still shows it, since a sub edits the same tree
+/// its peers do.
 fn visible_for_peers(i: &crate::types::Instance) -> bool {
-    i.ended_at.is_none() && !i.jarvis && i.worker_of.is_none()
+    i.ended_at.is_none() && !i.jarvis && i.worker_of.is_none() && i.subchat_of.is_none()
 }
 
 /// `scope: "all"`: this daemon's own live sessions (minus the caller itself)
@@ -241,6 +243,27 @@ mod tests {
             successor_of: None,
             machine: None,
         }
+    }
+
+    #[test]
+    fn a_hidden_sub_is_left_out_of_cross_machine_listings() {
+        let plain = mirrored_instance("plain");
+        let mut sub = mirrored_instance("sub");
+        sub.subchat_of = Some("main".into());
+        assert!(visible_for_peers(&plain));
+        assert!(!visible_for_peers(&sub));
+    }
+
+    #[test]
+    fn the_default_same_project_listing_still_shows_a_sub() {
+        let state = test_state();
+        state.registry.upsert_interactive("main", std::path::Path::new("."), "proj-1", "2026-11-05T00:00:00Z");
+        state.registry.upsert_interactive("sub", std::path::Path::new("."), "proj-1", "2026-11-05T00:00:00Z");
+        state.registry.set_subchat_of("sub", Some("main".into()));
+        let v = list_peers(&state, "main", None).unwrap();
+        let peers = v["peers"].as_array().unwrap();
+        assert_eq!(peers.len(), 1, "a sub writes the same tree, so its peers must see it");
+        assert_eq!(peers[0]["session_id"], "sub");
     }
 
     #[test]

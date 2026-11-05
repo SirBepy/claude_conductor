@@ -79,6 +79,20 @@ export function isJarvisOrWorker(i: Instance): boolean {
 }
 
 /**
+ * A hidden sub of a main chat (Use subchats): it has no sidebar row, no
+ * Ctrl+N number and no place in any chat count, on any surface. Like
+ * `isJarvisOrWorker` it is applied where a LIST of chats is built, never to
+ * `state.sessions` itself, because the main chat's window opens a sub in place
+ * and every by-id lookup (event store, composer, prompts) must still find it.
+ * Remote lists keep sub rows, so the phone and a paired machine filter with
+ * this same helper instead of the daemon stripping them (a stripped row would
+ * orphan its parked prompt).
+ */
+export function isSubchat(i: Instance): boolean {
+  return i.subchat_of != null;
+}
+
+/**
  * True when the chat is hosted on a paired peer machine (multi-machine
  * federation), the `Instance.machine` tag stamped only by
  * `daemon::machines::all_instances` / `MirrorState::instances`. Accepts a

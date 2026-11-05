@@ -248,8 +248,10 @@ pub async fn list_history(
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<Vec<crate::types::chat::HistoryEntry>, String> {
     let projects_dir = crate::tokens::claude_projects_dir().ok_or("no home dir")?;
-    // Collect live session IDs so we can exclude them from history.
-    let live_ids: std::collections::HashSet<String> = state
+    // Collect live session IDs so we can exclude them from history. Hidden
+    // subs are excluded too, ended ones included: their transcripts sit on disk
+    // like any chat's, but a sub is never a chat the user browses.
+    let mut live_ids: std::collections::HashSet<String> = state
         .cached_instances
         .lock()
         .unwrap()
@@ -257,6 +259,7 @@ pub async fn list_history(
         .filter(|i| i.ended_at.is_none())
         .map(|i| i.session_id.clone())
         .collect();
+    live_ids.extend(crate::sessions::chat_config::sub_session_ids());
     tauri::async_runtime::spawn_blocking(move || {
         let mut entries = collect_history(
             &projects_dir, project_id, search, limit, offset, model_filter, date_from, date_to,

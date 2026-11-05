@@ -7,7 +7,9 @@
 //! to two successors); plain `spawn_chat` siblings are unlimited. It inherits the caller's own account;
 //! model/effort and the character are inherited on the `respawn` path only (a
 //! plain sibling opens on the project's default model/effort). Auto-accept is
-//! inherited per `session_registration::spawned_auto_accept`.
+//! inherited per `session_registration::spawned_auto_accept`. A caller with Use
+//! subchats on gets a hidden sub instead, planned by `daemon::subchats::spawn`;
+//! a sub itself may neither spawn nor respawn.
 //!
 //! Cross-machine spawn forwarding (`resolve_machine`, `spawn_chat_for_peer`,
 //! `spawn_chat_or_forward`) lives in this module's own `forward` submodule
@@ -70,7 +72,7 @@ pub(crate) fn release_turn_slot(caller_session_id: &str) {
 /// else the target project's default, then Settings' default, then the
 /// fallback. A plain sibling is a new job, so it does not inherit the
 /// caller's model/effort, which may have been raised for that caller's task.
-pub(super) fn resolve_model_effort(
+pub(crate) fn resolve_model_effort(
     state: &Arc<DaemonState>,
     project_cwd: &std::path::Path,
     model: Option<&str>,
@@ -102,6 +104,12 @@ pub(super) fn resolve_model_effort(
 /// scratch file. `respawn` makes it a takeover instead: `successor_of =
 /// caller` plus a close flag the caller's pump acts on at turn end, both here
 /// so the old spawn-then-close ordering trap is gone.
+///
+/// `sub` is the daemon's decision for a subchats-mode caller
+/// (`subchats::spawn::plan`): it supplies the first message, the explicit model
+/// and effort (so the project default is never consulted), and marks the new row
+/// as the caller's sub. `None` is every ordinary chat, byte-for-byte what this
+/// function always did.
 pub(crate) async fn spawn_chat(
     state: &Arc<DaemonState>,
     caller_session_id: &str,
@@ -111,7 +119,9 @@ pub(crate) async fn spawn_chat(
     effort: Option<&str>,
     name: Option<&str>,
     respawn: bool,
+    mut sub: Option<crate::daemon::subchats::spawn::SubPlan>,
 ) -> Result<String, String> {
+    crate::daemon::subchats::spawn::refuse_sub_caller(state, caller_session_id)?;
     let caller = state
         .registry
         .get(caller_session_id)
@@ -125,7 +135,10 @@ pub(crate) async fn spawn_chat(
     }
 
     let inherited = crate::sessions::chat_config::get(caller_session_id).unwrap_or_default();
-    let (model, effort) = resolve_model_effort(state, &target_cwd, model, effort, &inherited, respawn);
+    let (model, effort) = match &sub {
+        Some(plan) => resolve_model_effort(state, &target_cwd, Some(&plan.model), Some(&plan.effort), &inherited, respawn),
+        None => resolve_model_effort(state, &target_cwd, model, effort, &inherited, respawn),
+    };
     let account_id = Some(inherited.account_id.clone()).filter(|a| !a.is_empty());
 
     let params = StartSessionParams {
@@ -137,7 +150,9 @@ pub(crate) async fn spawn_chat(
         fork: false,
         new_session_id: None,
     };
-    let session = lifecycle::spawn_session(state, params).await.map_err(|e| e.to_string())?;
+    let session = lifecycle::spawn_session_as(state, params, sub.as_ref().map(|p| p.parent.as_str()))
+        .await
+        .map_err(|e| e.to_string())?;
     let sid = session.session_id.clone();
 
     // Respawn only: character is keyed by session id and never survives a fresh
@@ -187,9 +202,13 @@ pub(crate) async fn spawn_chat(
     } else {
         crate::sessions::chat_config::set_spawned_by(&sid, caller_session_id);
     }
+    if let Some(plan) = sub.as_mut() {
+        crate::daemon::subchats::spawn::mark_as_sub(state, &sid, plan);
+    }
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
-    lifecycle::send_message(&session, prompt, false).await.map_err(|e| e.to_string())?;
+    let first_message = sub.as_ref().map(|p| p.first_message.as_str()).unwrap_or(prompt);
+    lifecycle::send_message(&session, first_message, false).await.map_err(|e| e.to_string())?;
     state.registry.set_awaiting(&sid, None);
     state.registry.set_busy(&sid, true);
     crate::sessions::chat_state::set_busy(&sid, true);
@@ -287,7 +306,7 @@ mod tests {
     #[tokio::test]
     async fn spawn_chat_rejects_an_unknown_caller() {
         let state = test_state();
-        let r = spawn_chat(&state, "ghost", ".", "carry on", None, None, None, false).await;
+        let r = spawn_chat(&state, "ghost", ".", "carry on", None, None, None, false, None).await;
         let err = r.expect_err("unknown caller must be rejected");
         assert!(err.contains("unknown caller session"), "{err}");
     }
@@ -305,7 +324,7 @@ mod tests {
             "2026-08-18T00:00:00Z",
         );
         let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
-        let r = spawn_chat(&state, "sess-1", elsewhere, "carry on", None, None, None, false).await;
+        let r = spawn_chat(&state, "sess-1", elsewhere, "carry on", None, None, None, false, None).await;
         let err = r.expect_err("foreign cwd must be rejected");
         assert!(err.contains("own working directory"), "{err}");
     }

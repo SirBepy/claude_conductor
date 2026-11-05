@@ -15,6 +15,18 @@ pub async fn spawn_session(
     state: &Arc<DaemonState>,
     params: StartSessionParams,
 ) -> Result<Arc<Session>, LifecycleError> {
+    spawn_session_as(state, params, None).await
+}
+
+/// [`spawn_session`] for a hidden sub's first spawn: `sub_parent` names its main
+/// chat, which no registry row records yet. Every later launch of the same sub
+/// goes through plain `spawn_session` and reads the parent off the registry row
+/// (`subchats::launch_parent`), so a respawn keeps `CC_SUBCHAT` and the prompt.
+pub async fn spawn_session_as(
+    state: &Arc<DaemonState>,
+    params: StartSessionParams,
+    sub_parent: Option<&str>,
+) -> Result<Arc<Session>, LifecycleError> {
     let map = &state.sessions;
     if !is_valid_model(&params.model)
         || !VALID_EFFORTS.contains(&params.effort.as_str())
@@ -135,7 +147,16 @@ pub async fn spawn_session(
     );
     let settings = state.settings.snapshot();
     let (browser, browser_script) = (settings.claude_browser_enabled(), settings.claude_browser_script_tool());
-    let mcp_config_path = write_mcp_config(&turn_id, &session_id, is_jarvis, browser, browser_script, connectors);
+    let sub_parent = crate::daemon::subchats::launch_parent(state, &session_id, sub_parent);
+    let mcp_config_path = write_mcp_config(
+        &turn_id,
+        &session_id,
+        is_jarvis,
+        browser,
+        browser_script,
+        sub_parent.is_some(),
+        connectors,
+    );
     let skills = {
         let project = crate::slash::scope::project_id(&settings, Some(&params.cwd));
         crate::slash::scope::chat_settings(&crate::slash::scope::scopes(&settings), project.as_deref())
@@ -173,6 +194,9 @@ pub async fn spawn_session(
     if wrap_up_cfg.subchats_on {
         append_system_prompt(&mut args, SUBCHATS_MAIN_PROMPT);
         crate::sessions::chat_config::set_subchats_told(&session_id, true);
+    }
+    if let Some(parent) = &sub_parent {
+        crate::daemon::subchats::append_sub_prompt(&mut args, &crate::daemon::subchats::parent_label(state, parent));
     }
     // Also true when the toggle is now off but a resumed history still holds
     // the ON note, so the next message retracts it.
