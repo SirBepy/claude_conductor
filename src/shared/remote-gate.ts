@@ -16,6 +16,7 @@
  */
 
 import { REMOTE_TOKEN_KEY, REMOTE_TOKEN_EXPIRED_KEY } from "./http-transport";
+import { captureShellVersion } from "./shell-version";
 
 /** True when the previous token was rejected (401) and cleared by the transport. */
 function consumeExpiredFlag(): boolean {
@@ -98,6 +99,7 @@ async function capturePairingFromUrl(): Promise<boolean> {
 export async function ensureRemoteToken(): Promise<boolean> {
   if (typeof window !== "undefined" && window.__TAURI__) return true;
 
+  captureShellVersion();
   if (await capturePairingFromUrl()) return true;
 
   let token = "";
