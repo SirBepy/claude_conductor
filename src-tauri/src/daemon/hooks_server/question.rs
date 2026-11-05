@@ -213,6 +213,12 @@ pub(super) async fn on_question_request(
         "[perm-relay] published question_request id={} session={:?} -> {} subscriber(s)",
         body.id, body.session_id, subs
     );
+    // A writing sub that waits on Joe with its own work committed lets the writer
+    // slot go. Detached: it reads git and may start the next sub.
+    if let Some(sid) = body.session_id.clone().filter(|s| crate::daemon::subchats::is_sub_session(&ctx.state, s)) {
+        let state = ctx.state.clone();
+        tokio::spawn(async move { crate::daemon::subchats::writers::on_waiting_on_joe(&state, &sid).await });
+    }
     if !await_render_confirmation(&ctx.state, &body.id, confirm_rx, RENDER_CONFIRM_TIMEOUT).await {
         log::warn!(
             "[perm-relay] question {} not confirmed shown/parked within {:?}; acknowledging false",

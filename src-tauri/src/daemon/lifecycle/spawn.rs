@@ -161,7 +161,7 @@ pub async fn spawn_session_as(
         let project = crate::slash::scope::project_id(&settings, Some(&params.cwd));
         crate::slash::scope::chat_settings(&crate::slash::scope::scopes(&settings), project.as_deref())
     };
-    let hook_settings_path = write_hook_settings(&turn_id, &session_id, skills);
+    let hook_settings_path = write_hook_settings(&turn_id, &session_id, skills, role.is_sub());
 
     let claude = crate::util::claude_bin::resolve()
         .map_err(|e| LifecycleError::ClaudeNotFound(e.to_string()))?;

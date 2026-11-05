@@ -76,7 +76,7 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "task": {"type": "string", "description": "Use subchats only: the job, one or two sentences."},
                     "goal": {"type": "string", "description": "Use subchats only: what the job is for."},
                     "done_when": {"type": "string", "description": "Use subchats only: what makes it finished."},
-                    "writes": {"type": "boolean", "description": "Use subchats only: true if the sub edits files, false if it is read-only."},
+                    "writes": {"type": "boolean", "description": "Use subchats only: true if the sub edits files, false if it is read-only (a read-only sub has Edit and Write refused). Only one sub edits files at a time in a project: a second writer is queued and starts when the first finishes, and the result says so."},
                     "files": {"type": "array", "items": {"type": "string"}, "description": "Use subchats only: the paths it may write. Required when writes is true."},
                     "decisions": {"type": "string", "description": "Use subchats only: settled decisions the sub must not revisit."},
                     "report_back": {"type": "boolean", "description": "Use subchats only: wake this chat with a facts-only line when the sub finishes. Only when your next step depends on its result."},

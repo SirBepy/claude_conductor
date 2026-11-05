@@ -150,6 +150,7 @@ fn now_ms() -> i64 {
 /// head when the log has one for this sub, else the head recorded at spawn.
 pub(super) fn sub_facts(
     inst: &Instance,
+    check: crate::types::SubchatCheck,
     reviewer_tool_use_id: Option<&str>,
     log: &[CardEntry],
     transcript: Option<&Path>,
@@ -178,7 +179,7 @@ pub(super) fn sub_facts(
         base: base.as_deref(),
         since,
         reviewer_tool_use_id,
-        review_required: brief.as_ref().map_or(true, |b| b.review),
+        review_required: super::project::review_required(check, brief.as_ref()),
         gate,
     })
 }
@@ -332,7 +333,8 @@ pub(crate) fn draw_finish_at(
     let Some(parent) = inst.subchat_of.clone() else { return drawn };
     let Some(record) = finish::read_record_in(root, sub_id) else { return drawn };
     let log = read_in(root, &parent);
-    let facts = sub_facts(&inst, record.reviewer_tool_use_id.as_deref(), &log, transcript.as_deref());
+    let check = super::project::check_mode(state, &inst.cwd);
+    let facts = sub_facts(&inst, check, record.reviewer_tool_use_id.as_deref(), &log, transcript.as_deref());
     let finish_entry = CardEntry {
         id: format!("finish-{sub_id}-{}", record.round),
         ts: now_ms(),

@@ -215,6 +215,7 @@ async fn defer_nudge_until_turn_ends(
 pub fn end_sub(state: &Arc<DaemonState>, sub_id: &str) -> bool {
     let now = chrono::Utc::now().to_rfc3339();
     let ended = state.registry.mark_ended(sub_id, crate::types::EndReason::Manual, &now);
+    super::writers::release(state, sub_id);
     if let Some(session) = state.sessions.get(sub_id).map(|s| s.clone()) {
         session.expected_exit.store(true, std::sync::atomic::Ordering::SeqCst);
         crate::util::kill::kill_tree(session.pid);

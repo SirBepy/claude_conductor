@@ -76,6 +76,8 @@ pub async fn move_to_sidebar(state: &Arc<DaemonState>, sub_id: &str) -> Result<(
     state.registry.set_subchat_finished(sub_id, false);
     crate::sessions::chat_config::set_subchat(sub_id, None);
     runtime::runtime().reset(sub_id);
+    // A chat Joe took over is his: it no longer holds or waits for a sub's slot.
+    super::writers::release(state, sub_id);
     withdraw_cards_about(state, sub_id).await;
     crate::sessions::persistence::save_snapshot_default(&state.registry);
     crate::daemon::machines::publish_instances_changed(state);

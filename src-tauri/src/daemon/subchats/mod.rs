@@ -32,6 +32,7 @@ pub mod held;
 mod reply;
 pub mod joe_message;
 pub mod pause;
+pub mod project;
 mod resume;
 pub(crate) mod runtime;
 pub mod stall;
@@ -40,6 +41,7 @@ pub mod stuck;
 pub mod tool;
 pub mod turn_end;
 pub mod wake;
+pub mod writers;
 
 pub use reply::{move_to_sidebar, route_send, MoveError};
 pub use resume::{continue_sub, end_sub, nudge, request_nudge, ContinueError, NUDGE_TEXT};
@@ -107,6 +109,8 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     wake::on_finished(state, sub_id);
     // A main chat that picked "Wait for them" closes when its last running sub ends.
     closing::on_sub_settled(state, sub_id);
+    // A finished sub lets go of the writer slot and the next one starts.
+    writers::release(state, sub_id);
     // A sub registered with `after` this one starts now.
     held::on_target_done(state);
 }

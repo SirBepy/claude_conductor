@@ -160,30 +160,53 @@ pub(crate) async fn spawn_chat(
         return crate::daemon::subchats::held::register(state, caller_session_id, name, &inherited, spec, plan).await;
     }
 
-    let mut params = StartSessionParams {
+    // The writer slot (`subchats::writers`): a sub that edits files either takes a
+    // free slot now or is registered here and held, to be started when it is its
+    // turn. Every sub gets its session id up front so a held row and its later
+    // child share one id.
+    let decision = sub
+        .as_ref()
+        .map(|p| crate::daemon::subchats::writers::decide_spawn(state, &p.brief, &target_cwd));
+    if let (Some(plan), Some(held)) = (sub.as_mut(), decision.as_ref().filter(|d| d.queued)) {
+        let spec = crate::daemon::subchats::held::LaunchSpec {
+            cwd: target_cwd.clone(),
+            model: model.clone(),
+            effort: effort.clone(),
+            account_id: account_id.clone(),
+            first_message: plan.first_message.clone(),
+        };
+        return crate::daemon::subchats::writers::register_queued(state, caller_session_id, name, &inherited, spec, plan, &held.sid)
+            .await;
+    }
+    let params = StartSessionParams {
         cwd: target_cwd.clone(),
         model: model.clone(),
         effort: effort.clone(),
         resume_id: None,
         account_id,
         fork: false,
-        new_session_id: None,
+        new_session_id: decision.as_ref().map(|d| d.sid.clone()),
     };
     // A gate sub's prompt differs from an ordinary sub's, and the launch reads
     // the role from the stored brief rather than from this call's arguments. The
-    // brief is therefore stored under an id chosen here, ahead of the spawn.
-    let pre_stored = sub.as_ref().filter(|p| p.brief.gate).map(|plan| {
-        let id = uuid::Uuid::new_v4().to_string();
-        crate::sessions::chat_config::set_subchat(&id, Some(plan.brief.clone()));
-        params.new_session_id = Some(id.clone());
-        id
-    });
+    // brief is therefore stored under the id chosen here, ahead of the spawn.
+    let pre_stored = match (sub.as_ref().filter(|p| p.brief.gate), decision.as_ref()) {
+        (Some(plan), Some(d)) => {
+            crate::sessions::chat_config::set_subchat(&d.sid, Some(plan.brief.clone()));
+            Some(d.sid.clone())
+        }
+        _ => None,
+    };
     let spawned = lifecycle::spawn_session_as(state, params, sub.as_ref().map(|p| p.parent.as_str())).await;
     let session = match spawned {
         Ok(s) => s,
         Err(e) => {
             if let Some(id) = &pre_stored {
                 crate::sessions::chat_config::set_subchat(id, None);
+            }
+            // The slot was taken for a child that never started.
+            if let Some(d) = &decision {
+                crate::daemon::subchats::writers::release(state, &d.sid);
             }
             return Err(e.to_string());
         }
@@ -290,7 +313,6 @@ async fn adopt_spawned(
         crate::daemon::subchats::spawn::mark_as_sub(state, sid, plan);
     }
     crate::sessions::persistence::save_snapshot_default(&state.registry);
-
     if let Err(e) = first_send.await {
         if sub.is_some() {
             end_orphaned_sub(state, sid).await;
@@ -316,6 +338,8 @@ async fn end_orphaned_sub(state: &Arc<DaemonState>, sid: &str) {
     let _ = lifecycle::end_session(&state.sessions, sid).await;
     let now = chrono::Utc::now().to_rfc3339();
     state.registry.mark_ended(sid, crate::types::EndReason::Manual, &now);
+    // A writer that never started must not keep the project's slot.
+    crate::daemon::subchats::writers::release(state, sid);
     crate::daemon::machines::publish_instances_changed(state);
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 }

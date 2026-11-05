@@ -47,6 +47,7 @@ pub(crate) fn write_hook_settings(
     turn_id: &str,
     tracking_id: &str,
     skills: serde_json::Map<String, serde_json::Value>,
+    sub: bool,
 ) -> Option<PathBuf> {
     let dir = crate::settings::paths::mcp_temp_dir().ok()?;
     // Both --max-time AND the hook's `timeout` field MUST out-wait the daemon's
@@ -104,6 +105,13 @@ pub(crate) fn write_hook_settings(
         daemon_hook_port(),
         tracking_id
     );
+    // A sub's file edits go through the daemon first (`hooks_server::subchat_write_guard`):
+    // a read-only sub is refused, and a writer needs the project's writer slot.
+    // Only a sub gets the hook, so every other chat's edits run no extra process.
+    let sub_write_guard_command = format!(
+        "curl -s --connect-timeout 5 --max-time 10 -X POST -H \"Content-Type: application/json\" --data-binary @- http://127.0.0.1:{}/hooks/sub-write-guard",
+        daemon_hook_port()
+    );
     let mut config = serde_json::json!({
         "hooks": {
             "UserPromptSubmit": [
@@ -154,6 +162,14 @@ pub(crate) fn write_hook_settings(
             ]
         }
     });
+    if sub {
+        if let Some(pre) = config["hooks"]["PreToolUse"].as_array_mut() {
+            pre.push(serde_json::json!({
+                "matcher": "Edit|Write|NotebookEdit|MultiEdit",
+                "hooks": [ { "type": "command", "command": sub_write_guard_command, "timeout": 15 } ]
+            }));
+        }
+    }
     if let Some(obj) = config.as_object_mut() {
         obj.extend(skills);
     }
@@ -187,10 +203,25 @@ mod tests {
         let mut skills = serde_json::Map::new();
         skills.insert("skillOverrides".into(), serde_json::json!({ "figma-tiles": "off" }));
         let turn = format!("hook-settings-test-{}", std::process::id());
-        let path = write_hook_settings(&turn, "tracking", skills).expect("settings file written");
+        let path = write_hook_settings(&turn, "tracking", skills, false).expect("settings file written");
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let _ = std::fs::remove_file(&path);
         assert_eq!(v["skillOverrides"]["figma-tiles"], "off");
         assert!(v["hooks"]["UserPromptSubmit"].is_array());
+    }
+
+    fn pre_tool_matchers(sub: bool) -> Vec<String> {
+        let turn = format!("hook-settings-sub-{sub}-{}", std::process::id());
+        let path = write_hook_settings(&turn, "tracking", serde_json::Map::new(), sub).expect("settings file written");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let _ = std::fs::remove_file(&path);
+        v["hooks"]["PreToolUse"].as_array().unwrap().iter().map(|e| e["matcher"].as_str().unwrap_or("").to_string()).collect()
+    }
+
+    // The edit guard is a sub's alone: every other chat's edits stay as they were.
+    #[test]
+    fn only_a_sub_gets_the_edit_guard_hook() {
+        assert!(pre_tool_matchers(true).iter().any(|m| m.contains("Edit") && m.contains("Write") && m.contains("NotebookEdit")));
+        assert!(!pre_tool_matchers(false).iter().any(|m| m.contains("Write")), "mode off adds no hook");
     }
 }

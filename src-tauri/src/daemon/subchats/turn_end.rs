@@ -116,7 +116,7 @@ pub(crate) fn died_note(exit: Option<&ExitInfo>) -> String {
 /// needs a live child and the Stop hook needs a turn end.
 pub fn on_process_died(state: &Arc<DaemonState>, session: &Arc<Session>, was_busy: bool, exit: Option<ExitInfo>) {
     let expected = session.expected_exit.load(std::sync::atomic::Ordering::SeqCst);
-    let Some(note) = died_note_if_unnoticed(state, &session.session_id, expected, was_busy, exit.as_ref()) else {
+    let Some(note) = note_death(state, &session.session_id, expected, was_busy, exit.as_ref()) else {
         return;
     };
     let (state, sub) = (state.clone(), session.session_id.clone());
@@ -125,6 +125,22 @@ pub fn on_process_died(state: &Arc<DaemonState>, session: &Arc<Session>, was_bus
     tokio::spawn(async move {
         super::stall::raise_noted(&state, &sub, super::stall::Stall::Unfinished, Some(&note)).await;
     });
+}
+
+/// [`died_note_if_unnoticed`] plus what a death does to the sub's place in its
+/// project's writer queue: a crashed writer lets the slot go, so the next sub is
+/// not stuck behind a process that no longer exists. The sub takes the slot again
+/// at its next write if Joe revives it.
+pub(crate) fn note_death(
+    state: &Arc<DaemonState>,
+    sub_id: &str,
+    expected_exit: bool,
+    was_busy: bool,
+    exit: Option<&ExitInfo>,
+) -> Option<String> {
+    let note = died_note_if_unnoticed(state, sub_id, expected_exit, was_busy, exit)?;
+    super::writers::release(state, sub_id);
+    Some(note)
 }
 
 /// The decision half of [`on_process_died`]: the card's sentence when this exit

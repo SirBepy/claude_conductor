@@ -26,11 +26,12 @@ pub async fn final_stamp_payload(
         .ok_or_else(|| NOT_A_SUB.to_string())?;
     let parent = inst.subchat_of.clone().unwrap_or_default();
     let reviewer = reviewer_tool_use_id.map(str::to_string);
+    let check = super::project::check_mode(state, &inst.cwd);
     let transcript = crate::context_status::resolve_transcript(&state.registry, session_id);
     // git and a transcript read: off the async worker.
     let facts = tokio::task::spawn_blocking(move || {
         let log = card_log::read(&parent);
-        card_log::sub_facts(&inst, reviewer.as_deref(), &log, transcript.as_deref())
+        card_log::sub_facts(&inst, check, reviewer.as_deref(), &log, transcript.as_deref())
     })
     .await
     .map_err(|e| format!("could not read the facts: {e}"))?;
