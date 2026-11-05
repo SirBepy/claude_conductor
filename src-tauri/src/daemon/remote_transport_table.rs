@@ -123,6 +123,13 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // this is refused from a peer. The client hides "Move to sidebar" on a mirrored
     // chat (`isMirrored`) so the refusal is never what Joe finds out by clicking.
     ("move_sub_to_sidebar", P),
+    // Phone only, for the same reason: the phone's chat menu offers "Move into main
+    // chat" and needs the picker's default. Both are refused from a peer, since
+    // which main chat a chat belongs to is its host's decision, and the daemon
+    // reads only its own registry and card logs. The client hides the item on a
+    // mirrored chat.
+    ("move_chat_into_main", P),
+    ("former_main_chat", P),
     // Read-only transcript paging - the chat pane's own render path, so a
     // peer machine mirroring a session needs it too.
     ("load_history_page", PM),
@@ -915,6 +922,14 @@ mod tests {
         assert!(allowed("move_sub_to_sidebar", &Transport::Phone));
         assert!(!allowed("move_sub_to_sidebar", &Transport::PeerMachine("x".into())));
         assert!(allowed("send_message", &Transport::Phone));
+    }
+
+    #[test]
+    fn moving_a_chat_into_a_main_chat_is_phone_only() {
+        for m in ["move_chat_into_main", "former_main_chat"] {
+            assert!(allowed(m, &Transport::Phone), "{m}");
+            assert!(!allowed(m, &Transport::PeerMachine("x".into())), "{m}");
+        }
     }
 
     /// The Android push handle is enrolled by the phone only.

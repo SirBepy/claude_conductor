@@ -1,4 +1,5 @@
 // asserts: src/views/sessions/sub-list.ts, src/views/sessions/main-chat.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/sidebar-rows.ts, src/views/sessions/sidebar-row-visuals.ts, src/views/sessions/session-header.ts, src/views/sessions/subchat-view.ts
+// Reviewed 2026-11-05: subchat-view.ts lost the header "Move to sidebar" button (it is a chat-menu item now); the header initials and lists this spec asserts are unchanged and it passes.
 import { test, expect, type Page } from "@playwright/test";
 import { assistantMsg, capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 

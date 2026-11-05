@@ -18,6 +18,7 @@ use crate::daemon::state::DaemonState;
 use crate::types::Instance;
 use std::sync::Arc;
 
+pub mod adopt;
 pub mod back;
 pub mod card_log;
 pub mod cards;

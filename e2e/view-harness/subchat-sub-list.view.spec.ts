@@ -114,7 +114,13 @@ const row = (page: Page, id: string) => page.locator(`#sessions-list li[data-ses
 const title = (page: Page) => page.locator("#session-pane .session-header .title");
 const countBtn = (page: Page) => page.locator("#session-pane .session-header .sub-count-btn");
 const backBtn = (page: Page) => page.locator("#session-pane .session-header .sub-back-btn");
-const moveBtn = (page: Page) => page.locator("#session-pane .session-header .sub-move-btn");
+// "Move to sidebar" is a chat-menu item, not a header button (Joe moved a sub by accident).
+const headerMoveBtn = (page: Page) => page.locator("#session-pane .session-header .sub-move-btn");
+const moveItem = (page: Page) => page.locator(".chat-menu-submenu .smore-item", { hasText: "Move to sidebar" });
+async function openChatSubmenu(page: Page): Promise<void> {
+  await page.locator("#viewMoreBtn").click();
+  await page.locator('.smore-item[data-sub-label="Chat"]').click();
+}
 const listRow = (page: Page, id: string) => page.locator(`.sub-list-popover .sub-row[data-sub-id="${id}"]`);
 
 async function openChat(page: Page, id: string): Promise<void> {
@@ -220,7 +226,10 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await openSubFromList(page, "sub-footer");
       await expect(title(page)).toHaveText("Footer");
       await expect(page.locator("#session-pane .session-header .meta-proj")).toHaveText("Subchat of CV redesign, Opus high");
-      await expect(moveBtn(page)).toBeVisible();
+      await expect(headerMoveBtn(page)).toHaveCount(0);
+      await openChatSubmenu(page);
+      await expect(moveItem(page)).toBeVisible();
+      await page.keyboard.press("Escape");
       // The pane is the sub's own chat view: its transcript, its composer.
       await expect(page.locator("#session-pane .session-messages")).toContainText("sub-footer says hello");
       await expect(page.locator(".session-composer .cc-typing-input")).toBeVisible();
@@ -257,7 +266,8 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(listRow(page, "sub-footer").locator("[data-move]")).toHaveCount(0);
       await listRow(page, "sub-footer").click();
       await expect(backBtn(page)).toBeVisible();
-      await expect(moveBtn(page)).toHaveCount(0);
+      await openChatSubmenu(page);
+      await expect(moveItem(page)).toHaveClass(/is-disabled/);
     });
 
     test("the model picker on a sub read in place changes that sub, for its next message", async ({ page }) => {
@@ -364,14 +374,15 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await mount(page, size, [MAIN, FOOTER, HEADER]);
       await openChat(page, "main");
       await openSubFromList(page, "sub-header");
-      await moveBtn(page).click();
+      await openChatSubmenu(page);
+      await moveItem(page).click();
       await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "move_sub_to_sidebar").length).toBe(1);
       expect((await invokeCalls(page)).find((c) => c.cmd === "move_sub_to_sidebar")!.args).toMatchObject({ sessionId: "sub-header" });
       // It is an ordinary chat now: its own row, selected, and no sub chrome.
       await expect(row(page, "sub-header")).toHaveCount(1);
       await expect(row(page, "sub-header")).toHaveClass(/active/);
       await expect(backBtn(page)).toHaveCount(0);
-      await expect(moveBtn(page)).toHaveCount(0);
+      await expect(headerMoveBtn(page)).toHaveCount(0);
       await expect(title(page)).toHaveText("Header");
       // And it left the main chat's list: one sub remains.
       await openChat(page, "main");
@@ -472,7 +483,8 @@ test.describe("view-harness / sub list (phone transport)", () => {
     await expect.poll(() => sent).toEqual(["sub-header"]);
 
     await capture(page, "sub-open-in-place-phone-transport");
-    await moveBtn(page).click();
+    await openChatSubmenu(page);
+    await moveItem(page).click();
     await expect.poll(() => rpcMethods).toContain("move_sub_to_sidebar");
   });
 });

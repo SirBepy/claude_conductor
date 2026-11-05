@@ -351,6 +351,21 @@ pub async fn move_sub_to_sidebar(session_id: String, state: State<'_, AppState>)
     client.move_sub_to_sidebar(&session_id).await.map_err(|e| e.to_string())
 }
 
+/// "Move into main chat": the reverse of the above. The daemon sets the parent link
+/// and the stored brief, and refuses what cannot be a sub.
+#[tauri::command]
+pub async fn move_chat_into_main(session_id: String, main_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.move_chat_into_main(&session_id, &main_id).await.map_err(|e| e.to_string())
+}
+
+/// The main chat this chat was last a sub of, for the picker's default.
+#[tauri::command]
+pub async fn former_main_chat(session_id: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.former_main_chat(&session_id).await.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn cancel_turn(
     session_id: String,
