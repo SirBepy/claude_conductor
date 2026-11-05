@@ -34,7 +34,7 @@ describe("sub list rows", () => {
     expect(subRingSpec({ id: "x", name: "x", kind: "working", progress: "" }, sub("x"))).toMatchObject({ kind: "solid", tone: "working", glow: true });
   });
 
-  it("draws a queued sub as a plain working-yellow ring with no glow, no arc and no move button", () => {
+  it("draws a queued sub as a plain working-yellow ring with no glow, no arc and no window button", () => {
     const held = sub("Footer", { busy: false, progress: { plan: null, state_since: null, waiting_for: "waiting for Header" } });
     const spec = subRingSpec({ id: "Footer", name: "Footer", kind: "queued", progress: "waiting for Header" }, held);
     expect(spec).toEqual({ kind: "solid", tone: "working" });
@@ -43,18 +43,19 @@ describe("sub list rows", () => {
     expect(html).toContain('data-kind="queued"');
     expect(html).toContain("waiting for Header");
     expect(html.indexOf("Running")).toBeGreaterThanOrEqual(0);
-    expect(html).not.toContain("data-move");
+    expect(html).not.toContain("data-popout");
   });
 
-  it("names the tier on the row and in the in-place header, and no move button on a mirrored chat", () => {
+  it("names the tier on the row and in the in-place header, and a window button only where a window can open", () => {
     const tiered = sub("a", { busy: false, model: "claude-sonnet-4-5", effort: "medium" });
     const all = [main, tiered];
     const subs = mainChatInfo(main, all).subs;
     expect(subListHtml(subs, all)).toContain('<span class="sub-tier">Sonnet medium</span>');
     expect(subMetaText(tiered, main)).toBe("Subchat of CV redesign, Sonnet medium");
-    expect(subListHtml(subs, all)).toContain("data-move");
-    // A chat mirrored in from a peer: moving it is the host's call, so no button.
-    expect(subListHtml(subs, all, false)).not.toContain("data-move");
+    expect(subListHtml(subs, all)).toContain('data-popout title="Open in new window"');
+    expect(subListHtml(subs, all)).not.toContain("data-move");
+    // The phone has no second window, so no button.
+    expect(subListHtml(subs, all, false)).not.toContain("data-popout");
     expect(subListHtml(subs, all, false)).toContain('data-sub-id="a"');
   });
 

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: sub-list.ts's row button now opens a new window instead of moving the sub; a promoted draft's header and count are unchanged and this spec passes.
 // Reviewed 2026-11-05: subchat-view.ts lost the header "Move to sidebar" button (it is a chat-menu item now); a promoted draft's header and count are unchanged and this spec passes.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
 // Reviewed 2026-11-05: sub-list.ts and subchat-view.ts: the row names the tier, a mirrored chat has no Move buttons, and the header line carries the tier; a promoted draft's header and count are unchanged and this spec passes.

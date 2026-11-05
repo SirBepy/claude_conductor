@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: subchat-view.ts's sub list button now opens a new window instead of moving the sub; leaving a sub is unchanged and this spec passes.
 // Reviewed 2026-11-05: subchat-view.ts lost the header "Move to sidebar" button (it is a chat-menu item now); leaving a sub is unchanged and this spec passes.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
 // Reviewed 2026-11-05: subchat-view.ts names the tier in a sub's header line and hides Move to sidebar on a mirrored sub; the leave behaviour this spec drives is unchanged and it passes.
