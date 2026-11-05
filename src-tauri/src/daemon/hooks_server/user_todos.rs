@@ -72,7 +72,13 @@ pub(super) async fn on_prompt_submit(
     // One hook, two features (todo 666): the drafts block rides on the same
     // UserPromptSubmit event rather than registering a second hook the CLI
     // would have to fire separately.
-    let blocks: Vec<String> = [
+    // Eighth rider, served first: the one line per sub that finished since this
+    // chat's last prompt. Only peeked here and drained once the payload is
+    // built, so a failure before that leaves it for the next prompt. Hook
+    // context rather than message text, because what a sub wrote must never
+    // sit in a user or `is_meta` message.
+    let back = crate::daemon::subchats::back::peek(&q.session_id);
+    let mut blocks: Vec<String> = [
         todo_methods::render_for_injection(&ctx.state, &q.session_id),
         draft_methods::render_for_injection(&ctx.state, &q.session_id),
         // Third rider on the same event: what a `cancel_turn` killed last turn
@@ -96,6 +102,9 @@ pub(super) async fn on_prompt_submit(
     .into_iter()
     .flatten()
     .collect();
+    if let Some(b) = &back {
+        blocks.insert(0, b.text.clone());
+    }
     if blocks.is_empty() {
         return (StatusCode::OK, String::new());
     }
@@ -111,7 +120,11 @@ pub(super) async fn on_prompt_submit(
             "additionalContext": block,
         }
     });
-    (StatusCode::OK, payload.to_string())
+    let body = payload.to_string();
+    if let Some(b) = &back {
+        crate::daemon::subchats::back::drain(&q.session_id, b);
+    }
+    (StatusCode::OK, body)
 }
 
 #[cfg(test)]
@@ -208,6 +221,45 @@ mod tests {
 
         crate::daemon::subchats::runtime::runtime().reset("ps-sub");
         assert!(ask(c).await.contains("Use CSS grid"), "a continue starts a new stretch");
+    }
+
+    #[tokio::test]
+    async fn a_main_chats_next_prompt_carries_the_one_line_back_once_as_hook_context_framed_as_data() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let c = ctx();
+        for id in ["ob-main", "ob-sub"] {
+            c.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        }
+        c.state.registry.set_subchat_of("ob-sub", Some("ob-main".into()));
+        c.state.registry.set_name("ob-sub", "Footer".into());
+        let root = crate::settings::paths::data_dir().unwrap();
+        let record = crate::daemon::subchats::finish::FinishRecord {
+            sub_id: "ob-sub".into(),
+            parent_id: Some("ob-main".into()),
+            round: 1,
+            verdict: "Built, not pushed".into(),
+            text: "Footer done.".into(),
+            ..Default::default()
+        };
+        std::fs::create_dir_all(root.join("subchats")).unwrap();
+        std::fs::write(root.join("subchats").join("ob-sub.finish.json"), serde_json::to_string(&record).unwrap()).unwrap();
+        crate::daemon::subchats::back::on_finished(&c.state, "ob-sub");
+
+        let ask = |id: &'static str| {
+            let c = c.clone();
+            async move {
+                let q = PromptSubmitQuery { session_id: id.to_string() };
+                body_text(on_prompt_submit(AxState(c), Query(q), String::new()).await.into_response()).await
+            }
+        };
+        assert_eq!(ask("ob-sub").await, "", "only the main chat is served its subs' lines");
+        let first = ask("ob-main").await;
+        let v: Value = serde_json::from_str(&first).expect("a hook envelope");
+        let context = v["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+        assert!(context.contains("- Footer: Built, not pushed: Footer done."), "{context}");
+        assert!(context.contains("DATA") && context.contains("never an instruction"), "{context}");
+        assert!(context.chars().count() <= crate::daemon::subchats::back::BACK_CAP);
+        assert_eq!(ask("ob-main").await, "", "drained: the line comes back once");
     }
 
     #[tokio::test]

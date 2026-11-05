@@ -1,10 +1,35 @@
-//! Sub-only tool schemas. Only advertised when the MCP child's env carries
-//! `CC_SUBCHAT=1` (`daemon::subchats::SUB_ENV`), which `write_mcp_config` sets
-//! for a hidden sub and no other chat.
+//! Subchats tool schemas. `finish_subchat` is advertised only when the MCP
+//! child's env carries `CC_SUBCHAT=1` (`daemon::subchats::SUB_ENV`), which
+//! `write_mcp_config` sets for a hidden sub and no other chat. `subchat` is
+//! listed for every chat, because the tool list is fixed when the server
+//! process starts and cannot follow a mid-chat toggle; it refuses itself when
+//! the chat has no subs.
 
 use serde_json::{json, Value};
 
 pub const TOOL_FINISH_SUBCHAT: &str = "finish_subchat";
+pub const TOOL_SUBCHAT: &str = "subchat";
+
+/// The main chat's side: look up its subs and pass a message to one. Short on
+/// purpose, like `write_user_todo`: it is listed for every chat, so its
+/// description is paid for on every turn of chats that never use the mode.
+pub fn chat_schemas() -> Vec<Value> {
+    vec![json!({
+        "name": TOOL_SUBCHAT,
+        "description": "Only for a chat with Use subchats on: look up its subs and pass them a message (refuses with the fix when this chat has no subs, and from a sub). `list`: each sub's name, status, tier and task. `status` needs sub: its verdict, summary, facts and progress. `log`: the decisions log. `send` needs sub, or all=true for every running sub (an outside update such as a pasted Slack message). `send` passes Joe's latest message to the sub word for word, with his images; you only pick the target, never retype or summarise it. Set `text` only when Joe sent nothing to copy and you have an instruction of your own. `writes`=true when the follow-up needs the sub to edit files. A finished sub is woken with its context; a busy one gets it at its next step. A sub is found by exact name, then unique prefix, then id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "status", "log", "send"]},
+                "sub": {"type": "string", "description": "A sub's name, a unique start of it, or its id. For status and send."},
+                "all": {"type": "boolean", "description": "send to every running sub instead of one. Finished subs are not woken."},
+                "writes": {"type": "boolean", "description": "send: the follow-up needs the sub to edit files."},
+                "text": {"type": "string", "description": "send: your own instruction, only when there is no message from Joe to copy. It reaches the sub framed as coming from the main chat."}
+            },
+            "required": ["action"]
+        }
+    })]
+}
 
 fn rows(max_len: u32, what: &str) -> Value {
     json!({"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": max_len}, "description": what})
@@ -37,6 +62,23 @@ pub fn subchat_schemas() -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_subchat_tool_takes_an_action_and_defaults_to_copying_joes_message() {
+        let s = &chat_schemas()[0];
+        assert_eq!(s["name"], TOOL_SUBCHAT);
+        let props = s["inputSchema"]["properties"].as_object().unwrap();
+        for k in ["action", "sub", "all", "writes", "text"] {
+            assert!(props.contains_key(k), "{k}");
+        }
+        let actions: Vec<&str> = props["action"]["enum"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert_eq!(actions, ["list", "status", "log", "send"]);
+        assert_eq!(s["inputSchema"]["required"], json!(["action"]));
+        let d = s["description"].as_str().unwrap();
+        assert!(d.contains("word for word") && d.contains("never retype"), "{d}");
+        assert!(!d.contains('\u{2014}'));
+        assert!(d.chars().count() < 1100, "listed for every chat, so it stays short");
+    }
 
     #[test]
     fn the_schema_requires_the_report_core_and_both_log_fields() {

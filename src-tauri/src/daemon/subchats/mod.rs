@@ -18,6 +18,7 @@ use crate::daemon::state::DaemonState;
 use crate::types::Instance;
 use std::sync::Arc;
 
+pub mod back;
 pub mod card_log;
 pub mod cards;
 pub mod checkup;
@@ -26,12 +27,15 @@ pub mod facts;
 pub mod finish;
 pub(crate) mod git;
 mod reply;
+pub mod joe_message;
 mod resume;
 pub(crate) mod runtime;
 pub mod stall;
 pub mod stamp;
 pub mod stuck;
+pub mod tool;
 pub mod turn_end;
+pub mod wake;
 
 pub use reply::{move_to_sidebar, route_send, MoveError};
 pub use resume::{continue_sub, end_sub, nudge, request_nudge, ContinueError, NUDGE_TEXT};
@@ -83,6 +87,10 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     // The decisions log and, from it, the checkup counter.
     decisions::on_finished(state, sub_id);
     card_log::on_finished(state, sub_id);
+    // The one line Joe's next message to the main chat carries, and the opt-in
+    // wake for a sub spawned with `report_back`.
+    back::on_finished(state, sub_id);
+    wake::on_finished(state, sub_id);
 }
 
 #[cfg(test)]

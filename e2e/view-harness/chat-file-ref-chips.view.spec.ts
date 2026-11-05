@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: renderMessage gained a "passed" row kind (the quiet "Passed to X" line); every other kind renders as before - this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-28: a chip outside the chat's repo now opens the app's Files window instead of VS Code (covered in code-mode.view.spec.ts and tests/file-refs.test.mjs); this spec asserts the chips' look, which is unchanged. Passed after the change.
 // Reviewed 2026-10-26: a chip click now opens Code mode instead of the editor (covered in code-mode.view.spec.ts); this spec only asserts how chips render, which did not change.
 // asserts: src/shared/chat/file-refs.ts, src/shared/chat/file-ref-match.ts, src/shared/chat/chat-messages-blocks.css

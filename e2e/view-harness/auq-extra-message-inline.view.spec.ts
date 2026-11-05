@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: renderMessage gained a "passed" row kind (the quiet "Passed to X" line); every other kind renders as before - this spec's contract is unchanged and it passes.
 import { test, expect } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 import { AUQ_EXTRA_SENTINEL } from "../../src/shared/chat/chat-transforms";

@@ -43,6 +43,7 @@ mod stop;
 mod stop_verdict;
 mod subagents;
 mod subchat_finish;
+mod subchat_tool;
 mod turn_status;
 mod user_todos;
 mod validated_json;
@@ -217,6 +218,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/hooks/tool-batch", post(nudge::on_tool_batch))
         .route("/hooks/publish-gate", post(publish_gate::on_publish_gate))
         .route("/subchats/finish", post(subchat_finish::on_finish_subchat))
+        .route("/subchats/tool", post(subchat_tool::on_subchat))
         .route("/hooks/subagent-start", post(subagents::on_subagent_start))
         .route("/hooks/subagent-stop", post(subagents::on_subagent_stop))
         .layer(axum::middleware::from_fn(origin_guard::guard))

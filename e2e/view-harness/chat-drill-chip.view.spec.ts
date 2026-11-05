@@ -1,3 +1,4 @@
+// Reviewed 2026-11-05: renderMessage gained a "passed" row kind (the quiet "Passed to X" line); every other kind renders as before - this spec's contract is unchanged and it passes.
 // asserts: src/shared/chat/drill-links.ts, src/shared/chat/chat-messages-blocks.css
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
