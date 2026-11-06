@@ -38,19 +38,19 @@ pub(super) async fn on_preview_render(
     (StatusCode::OK, Json(json!({ "id": id })))
 }
 
-/// First render id in `html` that this server no longer holds, if any. An inline
-/// card embeds the gallery's `render-url` as an iframe, and the card draws from the
-/// pushed html alone, so an expired id would show a blank frame with no signal
-/// back to the session that wrote it.
-pub(super) fn stale_render_reference(html: &str) -> Option<String> {
+/// First render id `html` iframes, if any. A card draws from its pushed html
+/// alone and replays it from the transcript, but a render id lives in daemon
+/// memory (or a panel history that rotates), so any card iframing one goes blank
+/// after a restart with no signal back to the session that wrote it. Held or not,
+/// the card must carry its page inline instead.
+pub(super) fn render_reference(html: &str) -> Option<String> {
     const MARKER: &str = "/hooks/preview-render/";
-    let cache = cell().lock().unwrap_or_else(|e| e.into_inner());
     html.match_indices(MARKER).find_map(|(at, _)| {
         let id: String = html[at + MARKER.len()..]
             .chars()
             .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect();
-        (!id.is_empty() && !cache.contains(&id) && crate::daemon::preview::get(&id).is_none()).then_some(id)
+        (!id.is_empty()).then_some(id)
     })
 }
 
@@ -93,24 +93,22 @@ mod tests {
     }
 
     #[test]
-    fn a_card_iframing_a_held_render_id_is_not_stale() {
+    fn a_card_iframing_a_held_render_id_is_still_a_reference() {
+        // Held now, gone after the next restart: holding it is no reason to allow it.
         cell().lock().unwrap().insert("pr-held-1".into(), "<p>gallery</p>".into());
-        assert_eq!(stale_render_reference(&card_html("pr-held-1")), None);
+        assert_eq!(render_reference(&card_html("pr-held-1")).as_deref(), Some("pr-held-1"));
     }
 
     #[test]
-    fn a_card_iframing_an_unknown_render_id_is_stale() {
-        assert_eq!(
-            stale_render_reference(&card_html("pr-never-staged")).as_deref(),
-            Some("pr-never-staged"),
-        );
+    fn a_card_iframing_an_unknown_render_id_is_a_reference() {
+        assert_eq!(render_reference(&card_html("pr-never-staged")).as_deref(), Some("pr-never-staged"));
     }
 
     #[test]
-    fn html_without_a_render_reference_is_never_stale() {
-        assert_eq!(stale_render_reference("<p>hello</p>"), None);
+    fn html_without_a_render_reference_has_none() {
+        assert_eq!(render_reference("<p>hello</p>"), None);
         // The path quoted as prose has no id after it.
-        assert_eq!(stale_render_reference("served at /hooks/preview-render/<id>"), None);
+        assert_eq!(render_reference("served at /hooks/preview-render/<id>"), None);
     }
 
     /// A gallery's `render-url` is built from `/hooks/preview`'s answer, the panel
@@ -126,7 +124,6 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(stale_render_reference(&card_html(&id)), None);
         let resp = on_preview_render_get(AxPath(id)).await;
         assert_eq!(resp.status(), StatusCode::OK);
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
@@ -140,10 +137,4 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
-    #[test]
-    fn the_second_reference_is_checked_too() {
-        cell().lock().unwrap().insert("pr-held-2".into(), "<p>gallery</p>".into());
-        let html = format!("{}{}", card_html("pr-held-2"), card_html("pr-gone-2"));
-        assert_eq!(stale_render_reference(&html).as_deref(), Some("pr-gone-2"));
-    }
 }
