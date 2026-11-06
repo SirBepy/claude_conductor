@@ -12,6 +12,7 @@ fn start_session_params(
     resume_id: Option<&str>,
     account_id: Option<&str>,
     auto_accept: bool,
+    subchats_on: bool,
     placeholder_id: Option<&str>,
     machine_id: Option<&str>,
 ) -> Value {
@@ -22,6 +23,7 @@ fn start_session_params(
         "resume_id": resume_id,
         "account_id": account_id,
         "auto_accept": auto_accept,
+        "subchats_on": subchats_on,
         "placeholder_id": placeholder_id,
         "machine_id": machine_id,
     })
@@ -66,11 +68,12 @@ impl PersistentClient {
         resume_id: Option<&str>,
         account_id: Option<&str>,
         auto_accept: bool,
+        subchats_on: bool,
         placeholder_id: Option<&str>,
         machine_id: Option<&str>,
     ) -> Result<String, ClientError> {
         let res = self
-            .call("start_session", start_session_params(cwd, model, effort, resume_id, account_id, auto_accept, placeholder_id, machine_id))
+            .call("start_session", start_session_params(cwd, model, effort, resume_id, account_id, auto_accept, subchats_on, placeholder_id, machine_id))
             .await?;
         res.get("session_id")
             .and_then(Value::as_str)
@@ -239,11 +242,6 @@ impl PersistentClient {
         Ok(())
     }
 
-    pub async fn set_wrap_up_on_done(&self, session_id: &str, value: bool) -> Result<(), ClientError> {
-        self.call("set_wrap_up_on_done", json!({"session_id": session_id, "value": value})).await?;
-        Ok(())
-    }
-
     pub async fn set_subchats_on(&self, session_id: &str, value: bool) -> Result<(), ClientError> {
         self.call("set_subchats_on", json!({"session_id": session_id, "value": value})).await?;
         Ok(())
@@ -284,13 +282,23 @@ mod tests {
 
     #[test]
     fn start_session_params_carries_machine_id() {
-        let v = start_session_params("/cwd", "opus", "high", None, None, false, None, Some("mach-b"));
+        let v = start_session_params("/cwd", "opus", "high", None, None, false, false, None, Some("mach-b"));
         assert_eq!(v.get("machine_id").and_then(|x| x.as_str()), Some("mach-b"));
+    }
+
+    /// The daemon reads this key before the first child is spawned; a client
+    /// that dropped it would start every chat with the mode off.
+    #[test]
+    fn start_session_params_carries_subchats_on_under_the_key_the_daemon_reads() {
+        let on = start_session_params("/cwd", "opus", "high", None, None, false, true, None, None);
+        assert_eq!(on.get("subchats_on").and_then(|x| x.as_bool()), Some(true));
+        let off = start_session_params("/cwd", "opus", "high", None, None, true, false, None, None);
+        assert_eq!(off.get("subchats_on").and_then(|x| x.as_bool()), Some(false), "independent of auto_accept");
     }
 
     #[test]
     fn start_session_params_machine_id_absent_serializes_null() {
-        let v = start_session_params("/cwd", "opus", "high", None, None, false, None, None);
+        let v = start_session_params("/cwd", "opus", "high", None, None, false, false, None, None);
         assert!(v.get("machine_id").unwrap().is_null());
     }
 }

@@ -25,11 +25,16 @@ pub async fn start_session(
     placeholder_id: Option<String>,
     account_id: Option<String>,
     auto_accept: Option<bool>,
+    subchats_on: Option<bool>,
     machine_id: Option<String>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    start_session_daemon(cwd, prompt, model, effort, placeholder_id, account_id, auto_accept.unwrap_or(false), machine_id, &state, &app).await
+    start_session_daemon(
+        cwd, prompt, model, effort, placeholder_id, account_id, auto_accept.unwrap_or(false),
+        subchats_on.unwrap_or(false), machine_id, &state, &app,
+    )
+    .await
 }
 
 /// The refusal for a first message aimed at paired machine `target` that
@@ -65,6 +70,7 @@ async fn start_session_daemon(
     placeholder_id: Option<String>,
     account_id: Option<String>,
     auto_accept: bool,
+    subchats_on: bool,
     machine_id: Option<String>,
     state: &State<'_, AppState>,
     app: &AppHandle,
@@ -85,7 +91,7 @@ async fn start_session_daemon(
         };
         let generation = client.generation;
         client
-            .start_session(&cwd, &model, &effort, None, account_id.as_deref(), auto_accept, placeholder_id.as_deref(), machine_id.as_deref())
+            .start_session(&cwd, &model, &effort, None, account_id.as_deref(), auto_accept, subchats_on, placeholder_id.as_deref(), machine_id.as_deref())
             .await
             .map_err(|e| (generation, e))
     };
@@ -242,7 +248,7 @@ async fn send_message_daemon(
                     // leave its already-persisted chat_config flag untouched.
                     // machine_id: None - a resume always respawns locally, the
                     // existing session's owner never changes mid-lifecycle.
-                    .start_session(cwd, model, effort, Some(session_id), account_id, false, None, None)
+                    .start_session(cwd, model, effort, Some(session_id), account_id, false, false, None, None)
                     .await
                     .map_err(|e| e.to_string())?;
             }
@@ -312,20 +318,6 @@ pub async fn set_auto_accept(
 ) -> Result<(), String> {
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.set_auto_accept(&session_id, value).await.map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Persist a chat's "wrap up when done" toggle. Forwarded to the daemon so it
-/// stays the sole writer of chat-config.json (the read side is the local
-/// `list_wrap_up_on_done` command in misc.rs, which reads the same shared file).
-#[tauri::command]
-pub async fn set_wrap_up_on_done(
-    session_id: String,
-    value: bool,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
-    client.set_wrap_up_on_done(&session_id, value).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 

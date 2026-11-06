@@ -126,6 +126,11 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // a network-latency caller's own send_message can otherwise race
                 // ahead of it (same pattern move_session_to_account guards against).
                 let auto_accept = params_value.get("auto_accept").and_then(Value::as_bool).unwrap_or(false);
+                // "Use subchats" from the first spawn: a flip after the spawn
+                // reaches a live child only at its next respawn, too late for
+                // the first turn. Forwarded to a peer untouched (only
+                // `machine_id` is stripped), which then applies it itself.
+                let subchats_on = params_value.get("subchats_on").and_then(Value::as_bool).unwrap_or(false);
                 // Idempotency key: the placeholder id is the one value that
                 // survives the caller's retry (`daemon::start_tokens`). Absent
                 // for schedules and resumes - those spawn as before.
@@ -173,7 +178,37 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                     );
                     return Ok(json!({"session_id": sid}));
                 }
-                let session = lifecycle::spawn_session(&state, p).await.map_err(err_to_rpc)?;
+                // The mode is persisted under the id the child is about to get, so
+                // `lifecycle::spawn` finds it when it builds argv. A plain resume
+                // keeps its own id, and a mode flip on an existing chat is
+                // `set_subchats_on`'s job (it also guards the sub case).
+                let mode_sid = if subchats_on {
+                    if p.resume_id.is_some() && !p.fork {
+                        return Err(RpcError::invalid_params(
+                            "subchats_on only applies to a new chat, not a plain resume".to_string(),
+                        ));
+                    }
+                    let sid = p.new_session_id.get_or_insert_with(|| uuid::Uuid::new_v4().to_string()).clone();
+                    crate::daemon::subchats::prepare_new_main(
+                        &state,
+                        &sid,
+                        p.account_id.as_deref(),
+                        &crate::accounts::load_registry(),
+                        crate::sessions::chat_config::set_subchats_on,
+                    )?;
+                    Some(sid)
+                } else {
+                    None
+                };
+                let spawned = lifecycle::spawn_session(&state, p).await;
+                if spawned.is_err() {
+                    if let Some(sid) = mode_sid.as_deref() {
+                        // Nothing spawned, so no chat should be left holding the mode.
+                        crate::sessions::chat_config::set_subchats_on(sid, false);
+                        crate::daemon::subchats::publish_mode_changed(&state);
+                    }
+                }
+                let session = spawned.map_err(err_to_rpc)?;
                 let sid = session.session_id.clone();
                 if let Some(c) = claim.as_mut() {
                     c.record(&sid);

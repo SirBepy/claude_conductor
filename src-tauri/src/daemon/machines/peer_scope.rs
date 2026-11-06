@@ -20,7 +20,6 @@ const SEE_ONLY: &[&str] = &[
     "list_pending_prompts",
     "get_skipped_question_marks",
     "list_auto_accept",
-    "list_wrap_up_on_done",
     "list_subchats_on",
     "list_subchat_cards",
     "load_history_page",
@@ -244,7 +243,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = state_with_peer(dir.path(), true);
         let mine = MINE;
-        for method in ["send_message", "cancel_turn", "set_auto_accept", "set_wrap_up_on_done", "set_subchats_on", "end_session", "peer_channel_post"] {
+        for method in ["send_message", "cancel_turn", "set_auto_accept", "set_subchats_on", "end_session", "peer_channel_post"] {
             let desktop = json!({"session_id": "desktop-chat", "to_session_id": "desktop-chat"});
             assert!(check(&state, method, &desktop, "mac").await.is_err(), "{method} on a desktop chat");
             let own = json!({"session_id": mine, "to_session_id": mine});
@@ -265,7 +264,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = state_with_peer(dir.path(), true);
         for method in [
-            "list_instances", "load_history_page", "get_git_info", "start_session", "spawn_chat", "list_wrap_up_on_done",
+            "list_instances", "load_history_page", "get_git_info", "start_session", "spawn_chat", "list_subchats_on",
             "new_session_bundle", "get_project_icon", "get_project_tech", "peer_accounts",
         ] {
             assert_eq!(check(&state, method, &json!({"session_id": "desktop-chat"}), "mac").await, Ok(()), "{method}");

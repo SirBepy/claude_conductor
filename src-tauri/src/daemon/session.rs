@@ -123,13 +123,11 @@ pub struct Session {
     /// `TerminateProcess` stamps exit code 1, indistinguishable from a crash, so
     /// without this every intentional teardown reports itself as one.
     pub expected_exit: std::sync::atomic::AtomicBool,
-    /// Whether this live child currently believes "Wrap up when done" is on:
+    /// Whether this live child currently believes "Use subchats" is on:
     /// seeded at spawn from the argv-baked system prompt, then flipped by
     /// `lifecycle::send_message` when it notices the persisted toggle differs.
     /// A running process's argv can't change, so a mid-chat flip reaches the
     /// model only as a note appended to the next message.
-    pub wrap_up_told: std::sync::atomic::AtomicBool,
-    /// Same as `wrap_up_told`, for the "Use subchats" mode and its retraction note.
     pub subchats_told: std::sync::atomic::AtomicBool,
     /// Set when `cancel_turn` wrote an interrupt, consumed by the pump at the
     /// next `result` line. A `--resume` child whose turn is interrupted before
@@ -178,7 +176,6 @@ impl Session {
             stderr_tail: std::sync::Mutex::new(Vec::new()),
             stderr_drain: tokio::sync::Mutex::new(None),
             expected_exit: std::sync::atomic::AtomicBool::new(false),
-            wrap_up_told: std::sync::atomic::AtomicBool::new(false),
             subchats_told: std::sync::atomic::AtomicBool::new(false),
             interrupt_sent: std::sync::atomic::AtomicBool::new(false),
         })

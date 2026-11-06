@@ -23,17 +23,8 @@ pub async fn list_auto_accept() -> Vec<String> {
     crate::sessions::chat_config::list_auto_accept()
 }
 
-/// Session ids with "wrap up when done" enabled. The frontend menu toggle
-/// seeds its in-memory set from this on launch so the toggle survives a
-/// restart. Read-only local file read (writes go through `set_wrap_up_on_done`,
-/// which forwards to the daemon as the sole writer).
-#[tauri::command]
-pub async fn list_wrap_up_on_done() -> Vec<String> {
-    crate::sessions::chat_config::list_wrap_up_on_done()
-}
-
 /// Session ids with "Use subchats" on; seeds the menu toggle on launch like
-/// `list_wrap_up_on_done`. Read-only local file read (writes go through
+/// `list_auto_accept`. Read-only local file read (writes go through
 /// `set_subchats_on`, which forwards to the daemon as the sole writer).
 #[tauri::command]
 pub async fn list_subchats_on() -> Vec<String> {

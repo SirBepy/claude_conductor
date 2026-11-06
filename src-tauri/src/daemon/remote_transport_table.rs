@@ -102,14 +102,9 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("set_session_model", PM),
     ("set_auto_accept", PM),
     ("list_auto_accept", PM),
-    // Same reasoning as set_auto_accept/list_auto_accept just above: this
-    // only steers the model's own system prompt on its NEXT turn, strictly
-    // weaker than start_session.
-    ("set_wrap_up_on_done", PM),
-    ("list_wrap_up_on_done", PM),
-    // Same class again: it steers the chat's own system prompt and, when turned
-    // on, moves the chat's recorded model to Opus (what set_session_model already
-    // lets a peer do). The API-credit refusal is checked daemon-side, so a peer
+    // Same class as set_auto_accept/list_auto_accept just above: it steers the
+    // chat's own system prompt and, when turned on, moves the chat's recorded
+    // model to Opus (what set_session_model already lets a peer do). The API-credit refusal is checked daemon-side, so a peer
     // or phone cannot use it to reach that account kind.
     ("set_subchats_on", PM),
     ("list_subchats_on", PM),
@@ -815,7 +810,7 @@ mod tests {
         for m in [
             "list_pending_prompts", "confirm_question_rendered", "get_skipped_question_marks",
             "set_session_effort", "set_session_model", "set_auto_accept", "list_auto_accept",
-            "set_wrap_up_on_done", "list_wrap_up_on_done", "set_subchats_on", "list_subchats_on", "list_subchat_cards",
+            "set_subchats_on", "list_subchats_on", "list_subchat_cards",
             "freeze_session", "unfreeze_session", "paste_attachment", "read_attachment",
             "transcript_stats", "load_history", "context_status",
             "instance_token_stats", "chat_drain",

@@ -264,6 +264,30 @@ pub fn publish_mode_changed(state: &DaemonState) {
     state.notifier.publish("subchats_on_changed", serde_json::json!({}));
 }
 
+/// The `start_session` half of the mode for a chat that asks for it from its
+/// first spawn. Runs BEFORE the child exists: `lifecycle::spawn` reads
+/// `chat-config.json` when it builds argv, so a flip made after the spawn
+/// would miss the first turn (a live child only learns of it at the next
+/// respawn). Refuses an `ApiCredit` account with the same text as
+/// [`apply_set_on`], writing nothing. Leaves model/effort as the caller sent
+/// them: the new-chat form already picks the main chat's pair, and
+/// [`apply_set_on`]'s move to [`main_launch`] only exists for a chat that
+/// already runs on something else. `persist` is injected like there.
+pub fn prepare_new_main(
+    state: &DaemonState,
+    session_id: &str,
+    account_id: Option<&str>,
+    accounts: &[Account],
+    persist: impl FnOnce(&str, bool),
+) -> Result<(), RpcError> {
+    if let Some(reason) = refusal_for_account(account_id, accounts) {
+        return Err(RpcError::invalid_params(reason));
+    }
+    persist(session_id, true);
+    publish_mode_changed(state);
+    Ok(())
+}
+
 /// Ids a past-chat list must not show: `live` plus every sub, ended ones
 /// included. A sub's transcript sits on disk like any chat's, so a list built
 /// from transcripts would otherwise show it as a finished chat.
@@ -516,6 +540,33 @@ mod tests {
         // Off stays allowed, and the main chat is not affected by its sub's link.
         apply_set_on(&st, "sub", false, &[], |_, _| {}).unwrap();
         apply_set_on(&st, "main", true, &[], |_, _| {}).unwrap();
+    }
+
+    #[test]
+    fn a_new_chat_asking_for_the_mode_persists_it_before_spawn_and_nudges_clients() {
+        let st = state();
+        let mut rx = st.notifier.subscribe();
+        let accounts = [account("sub-1", AccountKind::Subscription)];
+        let wrote = RefCell::new(Vec::new());
+        prepare_new_main(&st, "new-1", Some("sub-1"), &accounts, |id, v| wrote.borrow_mut().push((id.to_string(), v)))
+            .expect("a subscription account may start with the mode on");
+        assert_eq!(*wrote.borrow(), vec![("new-1".to_string(), true)]);
+        assert_eq!(rx.try_recv().expect("clients re-read the set")["method"], "subchats_on_changed");
+        // No registry row exists yet: the write must not depend on one.
+        assert!(st.registry.get("new-1").is_none());
+    }
+
+    #[test]
+    fn a_new_chat_on_an_api_credit_account_is_refused_and_nothing_is_written_or_published() {
+        let st = state();
+        let mut rx = st.notifier.subscribe();
+        let accounts = [account("api-1", AccountKind::ApiCredit)];
+        let wrote = RefCell::new(Vec::new());
+        let err = prepare_new_main(&st, "new-1", Some("api-1"), &accounts, |id, v| wrote.borrow_mut().push((id.to_string(), v)))
+            .expect_err("refused before any spawn");
+        assert_eq!(err.message, API_CREDIT_REFUSAL, "same text as the toggle's refusal");
+        assert!(wrote.borrow().is_empty());
+        assert!(rx.try_recv().is_err(), "a refusal tells no client anything");
     }
 
     #[test]
