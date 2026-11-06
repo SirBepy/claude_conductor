@@ -307,9 +307,9 @@ fn report_status_body(args: &Value, session_id: &str, roots: &[std::path::PathBu
 /// Every `send_message` argument the daemon route validates. `next_actions` is
 /// absent on purpose: the route ignores it and the chat reads it from the
 /// tool_use input in the transcript.
-const SEND_MESSAGE_FORWARDED: [&str; 11] = [
+const SEND_MESSAGE_FORWARDED: [&str; 12] = [
     "details", "kind", "verdict", "tone", "points", "done", "not_done", "waiting_on", "your_move",
-    "was", "copy",
+    "was", "copy", "visuals",
 ];
 
 /// Turn status/title, chat messages, and the Your Todos panel.
@@ -340,8 +340,10 @@ fn user_facing_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "text": ctx.args.get("text"),
                 "retract": ctx.args.get("retract").and_then(|v| v.as_bool()).unwrap_or(false),
             });
-            if let Some(d) = ctx.args.get("details") {
-                body["details"] = d.clone();
+            for key in ["details", "visuals"] {
+                if let Some(v) = ctx.args.get(key) {
+                    body[key] = v.clone();
+                }
             }
             Some(ctx.relay("/messages/update", body, Some("invalid update"), None))
         }
