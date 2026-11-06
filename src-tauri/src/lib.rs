@@ -479,6 +479,7 @@ pub fn run() {
             ipc::add_step_comment,
             when_done::arm_when_done,
             when_done::cancel_when_done,
+            when_done::snooze_when_done,
             when_done::get_when_done_state,
         ])
         .setup(bootstrap::setup_app)

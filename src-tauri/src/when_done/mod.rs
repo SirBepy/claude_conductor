@@ -21,6 +21,7 @@ mod engine;
 mod idle;
 mod nightly;
 mod scope;
+mod snooze;
 
 pub use protocol::{ArmMode, TerminalAction, ProtocolPhase, ProtocolState, WhenDoneInner, OverdueAction};
 pub use nightly::spawn as spawn_nightly_scheduler;
@@ -56,13 +57,8 @@ pub(crate) fn arm(
         if let Some(handle) = inner.task.take() {
             handle.abort();
         }
-        inner.state = ProtocolState {
-            action: Some(action),
-            phase: ProtocolPhase::Watching,
-            countdown_remaining_secs: None,
-            waiting_on: Vec::new(),
-            gave_up_reason: None,
-        };
+        inner.state = ProtocolState::watching(action);
+        inner.snooze_until = None;
         inner.state.clone()
     };
 
@@ -91,8 +87,22 @@ pub async fn cancel_when_done(
             handle.abort();
         }
         inner.state = ProtocolState::disarmed();
+        inner.snooze_until = None;
         inner.state.clone()
     };
+    let _ = app.emit("when-done-state", new_state.clone());
+    Ok(new_state)
+}
+
+/// Postpone the armed run by `minutes`: it stays armed but will not fire, and
+/// an under-way countdown drops back to Watching, until the postpone ends.
+#[tauri::command]
+pub async fn snooze_when_done(
+    minutes: u32,
+    state: tauri::State<'_, AppState>,
+    app: AppHandle,
+) -> Result<ProtocolState, String> {
+    let new_state = snooze::snooze_in_state(&state, minutes);
     let _ = app.emit("when-done-state", new_state.clone());
     Ok(new_state)
 }

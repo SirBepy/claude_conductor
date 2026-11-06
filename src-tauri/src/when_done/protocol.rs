@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use tauri::async_runtime::JoinHandle;
 
 /// The terminal action to perform once every session is idle.
@@ -60,6 +61,11 @@ pub struct ProtocolState {
     /// every other phase.
     #[serde(default)]
     pub gave_up_reason: Option<String>,
+    /// Wall-clock end (unix ms) of a manual postpone, for display only; the
+    /// engine decides on `WhenDoneInner::snooze_until`. `None` when not snoozed.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub snoozed_until_unix_ms: Option<i64>,
 }
 
 impl ProtocolState {
@@ -70,7 +76,13 @@ impl ProtocolState {
             countdown_remaining_secs: None,
             waiting_on: Vec::new(),
             gave_up_reason: None,
+            snoozed_until_unix_ms: None,
         }
+    }
+
+    /// A fresh Watching state for `action`: no countdown, nobody blocking yet.
+    pub fn watching(action: TerminalAction) -> Self {
+        Self { action: Some(action), phase: ProtocolPhase::Watching, ..Self::disarmed() }
     }
 
     /// Aborted without firing: carries the action that was armed (so the UI
@@ -83,6 +95,7 @@ impl ProtocolState {
             countdown_remaining_secs: None,
             waiting_on: blocking,
             gave_up_reason: Some(reason.into()),
+            snoozed_until_unix_ms: None,
         }
     }
 }
@@ -91,6 +104,10 @@ impl ProtocolState {
 pub struct WhenDoneInner {
     pub state: ProtocolState,
     pub task: Option<JoinHandle<()>>,
+    /// Manual postpone: the engine neither fires nor keeps counting down before
+    /// this instant. An `Instant` (not the wall-clock copy in `state`) so a
+    /// clock change or a sleep/wake cannot stretch or cut the postpone.
+    pub snooze_until: Option<Instant>,
 }
 
 impl Default for WhenDoneInner {
@@ -98,6 +115,7 @@ impl Default for WhenDoneInner {
         Self {
             state: ProtocolState::disarmed(),
             task: None,
+            snooze_until: None,
         }
     }
 }

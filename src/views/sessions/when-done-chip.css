@@ -1,0 +1,63 @@
+/* Header chip for an armed sleep/shutdown-when-done run (when-done-chip.ts).
+ * Amber matches the dot on the more-options button and the armed menu rows. */
+.when-done-hchip {
+  --wd-amber: #fbbf24;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-right: 6px;
+  font-size: 0.78rem;
+}
+
+.when-done-hchip[hidden] {
+  display: none;
+}
+
+.when-done-hchip-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--wd-amber) 45%, transparent);
+  background: color-mix(in srgb, var(--wd-amber) 12%, transparent);
+  color: var(--wd-amber);
+  font: inherit;
+  white-space: nowrap;
+}
+
+button.when-done-hchip-main {
+  cursor: pointer;
+}
+
+button.when-done-hchip-main:hover {
+  background: color-mix(in srgb, var(--wd-amber) 20%, transparent);
+}
+
+/* The countdown is the moment to act, so the chip gets heavier then. */
+.when-done-hchip[data-kind="count"] .when-done-hchip-main {
+  background: color-mix(in srgb, var(--wd-amber) 22%, transparent);
+}
+
+/* Snoozed reads quieter: still armed, but nothing is about to happen. */
+.when-done-hchip[data-kind="snoozed"] .when-done-hchip-main {
+  color: var(--color-text-muted);
+  border-color: var(--color-border);
+  background: transparent;
+}
+
+.when-done-hchip-quick {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--wd-amber) 45%, transparent);
+  background: color-mix(in srgb, var(--wd-amber) 22%, transparent);
+  color: var(--wd-amber);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.when-done-hchip-quick:hover {
+  background: color-mix(in srgb, var(--wd-amber) 32%, transparent);
+}

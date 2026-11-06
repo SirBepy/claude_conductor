@@ -19,6 +19,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   armOrToggleWhenDone,
   cancelWhenDone,
+  snoozeWhenDone,
+  whenDoneChipModel,
   whenDoneArmed,
   whenDoneAction,
   whenDoneMenuHtml,
@@ -42,6 +44,7 @@ function ps(overrides = {}) {
     countdown_remaining_secs: null,
     waiting_on: [],
     gave_up_reason: null,
+    snoozed_until_unix_ms: null,
     ...overrides,
   };
 }
@@ -208,6 +211,66 @@ describe("armOrToggleWhenDone - IPC decision", () => {
     expect(invokeCalls).toHaveLength(1);
     expect(invokeCalls[0].cmd).toBe("cancel_when_done");
     expect(state.whenDone.phase).toBe("disarmed");
+  });
+});
+
+describe("snoozeWhenDone - postpone", () => {
+  it("invokes snooze_when_done with the minutes and applies the returned state", async () => {
+    state.whenDone = ps({ action: "shutdown", phase: "watching" });
+    nextReturn = ps({ action: "shutdown", phase: "watching", snoozed_until_unix_ms: 1_800_000_000_000 });
+    await snoozeWhenDone(60);
+    expect(invokeCalls).toEqual([{ cmd: "snooze_when_done", args: { minutes: 60 } }]);
+    expect(state.whenDone.snoozed_until_unix_ms).toBe(1_800_000_000_000);
+  });
+});
+
+describe("whenDoneChipModel - always-visible header chip", () => {
+  it("is null when nothing is armed, and for a gave-up run", () => {
+    expect(whenDoneChipModel(null)).toBe(null);
+    expect(whenDoneChipModel(ps())).toBe(null);
+    expect(whenDoneChipModel(ps({ action: "shutdown", phase: "gaveUp" }))).toBe(null);
+  });
+
+  it("watching: names the action and how many chats still block it", () => {
+    expect(whenDoneChipModel(ps({ action: "shutdown", phase: "watching" }))).toEqual({
+      kind: "watch",
+      text: "Shutdown when idle",
+    });
+    expect(whenDoneChipModel(ps({ action: "sleep", phase: "watching", waiting_on: ["a"] })).text).toBe(
+      "Sleep when idle · 1 chat",
+    );
+    expect(whenDoneChipModel(ps({ action: "sleep", phase: "watching", waiting_on: ["a", "b"] })).text).toBe(
+      "Sleep when idle · 2 chats",
+    );
+  });
+
+  it("countingDown: reads the seconds left", () => {
+    expect(
+      whenDoneChipModel(ps({ action: "shutdown", phase: "countingDown", countdown_remaining_secs: 28 })),
+    ).toEqual({ kind: "count", text: "Shutdown in 28s" });
+  });
+
+  it("a postponed run reads as snoozed with the local end time", () => {
+    const at = new Date(2026, 10, 6, 3, 12).getTime();
+    const m = whenDoneChipModel(ps({ action: "shutdown", phase: "watching", snoozed_until_unix_ms: at }));
+    expect(m.kind).toBe("snoozed");
+    expect(m.text).toMatch(/^Shutdown snoozed until 0?3[:.]12/);
+  });
+
+  it("firing: has its own kind", () => {
+    expect(whenDoneChipModel(ps({ action: "sleep", phase: "firing" }))).toEqual({
+      kind: "firing",
+      text: "Sleep now...",
+    });
+  });
+
+  it("the overflow-menu status line also says when it is snoozed", () => {
+    state.whenDone = ps({
+      action: "shutdown",
+      phase: "watching",
+      snoozed_until_unix_ms: new Date(2026, 10, 6, 3, 12).getTime(),
+    });
+    expect(whenDoneMenuHtml()).toContain("Shutdown snoozed until");
   });
 });
 
