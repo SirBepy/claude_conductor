@@ -54,7 +54,14 @@ const TIMELINE_ANSWER = send("v2", {
   text: "Clockify, Mon and Tue",
   visuals: [{ type: "donut", title: "Chat state", data: [{ label: "Done", value: 18 }, { label: "Blocked", value: 2 }] }, { type: "timeline", title: "Logged time", rows: [{ label: "Mon 3 Nov", blocks: [{ start: "09:00", end: "12:30", label: "Subchats review" }, { start: "13:30", end: "17:00", label: "Tables" }] }, { label: "Tue 4 Nov", blocks: [{ start: "10:00", end: "11:00" }] }] }],
 });
-const FIRST_TURN = [user("ok go with what you think on billers, can it ever be empty though?"), ANSWER, REPORT];
+const RATING = send("g1", {
+  kind: "rating",
+  verdict: "🙂 7/10 Good, two fixes from great",
+  tone: "good",
+  text: "The core is sound and cheap to build, but it has no failure path and no test.\nNext move: **apply all** the suggestions, **apply some** (say which), or **ignore** and carry on?",
+  points: ["→ 8/10: add a retry with a visible error state; costs about half a day", "→ 9/10: add a test that fails without the fix; costs an hour, locks the behavior", "→ 10/10: ship behind a setting for a week first; costs a slower rollout"],
+});
+const FIRST_TURN =[user("ok go with what you think on billers, can it ever be empty though?"), ANSWER, REPORT];
 const SECOND_TURN = [
   user("ok, push it", true),
   send("r2", { kind: "report", verdict: "Pushed, one move is yours", text: "50ef89f is on origin/develop; Claude watches CI, then tests on dev", done: ["Pushed"], your_move: ["Move sc-54311 to Testing when convenient"] }),
@@ -134,6 +141,20 @@ for (const vp of [{ name: "desktop", width: 900 }, { name: "phone", width: 390 }
       const answer = roots.nth(0);
       await expect(answer.locator(".mc-full .mc-label")).toHaveText("Answer to you");
       await expect(answer.locator(".mc-full .mc-points summary")).toHaveText("2 more points");
+    });
+
+    test("a rating shows its ways to raise the score as open rows, score first and cost muted", async ({ page }) => {
+      await mountChat(page, vp.width, [user("rate it"), RATING]);
+      const card = chat(page).locator(".mc-root").first().locator(".mc-full");
+      await expect(card.locator(".mc-lifts-label")).toHaveText("How to raise it");
+      const rows = card.locator(".mc-lift");
+      await expect(rows).toHaveCount(3);
+      await expect(rows.first().locator(".mc-lift-to")).toHaveText("8/10");
+      await expect(rows.first().locator(".mc-lift-cost")).toBeVisible();
+      // The phone pane slides in; measuring mid-slide reads every box as shifted right.
+      await page.waitForFunction(() => Math.round(document.querySelector("#session-pane .session-messages")!.getBoundingClientRect().left) <= (document.querySelector("#session-pane")!.getBoundingClientRect().left) + 1);
+      await expectNoOverflow(page);
+      await capture(chat(page), `cards-rating-${vp.name}`);
     });
 
     test("visuals draw inside the card: a wide table, bars, a line, a donut and a timeline", async ({ page }) => {
