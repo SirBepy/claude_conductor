@@ -313,9 +313,11 @@ export function renderMessage(m: RenderedMessage): string {
     // Explicit send_message call - same bubble shape as "assistant", sourced
     // from m.text instead of m.content (see chat-event-handler.ts tool_use).
     case "message":
-      if (m.failed) {
-        return `<div class="msg system failed-marker"><span class="chat-pill failed-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-wifi-slash"></i>Failed to send</span></div>`;
-      }
+      // A rejected send draws nothing visible: the model resends until one
+      // passes, so a pill per attempt was noise. The daemon logs each rejection
+      // instead (daemon/hooks_server/rejected_sends.rs). The row stays an
+      // element because the paginator and renderer index one element per message.
+      if (m.failed) return `<div class="msg system failed-marker"></div>`;
       if (m.retracted) {
         return `<div class="msg system retracted-marker"><span class="chat-pill chat-pill--retracted retracted-chip" title="${escapeHtml(m.text ?? "")}"><i class="ph ph-prohibit"></i>Retracted</span></div>`;
       }

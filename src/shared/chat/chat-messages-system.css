@@ -114,8 +114,10 @@
 .msg.system.meta-marker {
   display: none;
 }
-.msg.system.retracted-marker,
 .msg.system.failed-marker {
+  display: none;
+}
+.msg.system.retracted-marker {
   font-style: normal;
   padding: 8px 4px;
 }

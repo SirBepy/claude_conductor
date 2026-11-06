@@ -324,8 +324,8 @@ describe("the mini card", () => {
 });
 
 describe("failed and retracted rows", () => {
-  it("still draw their pills ahead of any card", () => {
-    expect(renderMessage(msg(REPORT_INPUT, { failed: true }))).toContain("failed-marker");
+  it("a retracted row draws its pill ahead of any card, a rejected send draws nothing", () => {
+    expect(renderMessage(msg(REPORT_INPUT, { failed: true }))).toBe('<div class="msg system failed-marker"></div>');
     expect(renderMessage(msg(REPORT_INPUT, { retracted: true }))).toContain("retracted-marker");
   });
 });
