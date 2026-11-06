@@ -1,6 +1,18 @@
 import { describe, it, expect } from "vitest";
 
-const { slackPlainText } = await import("../src/shared/message-draft-utils.ts");
+const { slackPlainText, slackHtml } = await import("../src/shared/message-draft-utils.ts");
+
+describe("slackHtml", () => {
+  it("puts an empty paragraph between two paragraphs so Slack shows the gap", () => {
+    expect(slackHtml("<p>a</p><p>b</p>\n<p class=\"x\">c</p>"))
+      .toBe("<p>a</p><p><br></p><p>b</p><p><br></p><p class=\"x\">c</p>");
+  });
+
+  it("leaves a single paragraph, lists and a <pre> alone", () => {
+    const html = "<p>a</p><ul><li>x</li><li>y</li></ul><pre>p</pre>";
+    expect(slackHtml(html)).toBe(html);
+  });
+});
 
 describe("slackPlainText", () => {
   it("turns a markdown link into text plus the bare URL", () => {
