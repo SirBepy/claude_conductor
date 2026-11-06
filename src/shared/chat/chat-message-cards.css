@@ -376,6 +376,61 @@
   overflow-wrap: anywhere;
 }
 
+/* A rating's ways to raise the score: a score column in the success colour, then
+   the change with its cost under it in muted text. Always open, so no caret. */
+.mc-lifts {
+  margin-top: 12px;
+}
+.mc-lifts-label {
+  margin-bottom: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+/* Two classes deep: the chat's own `ol` padding would otherwise indent the rows. */
+.mc-lifts .mc-lifts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mc-lift {
+  display: grid;
+  grid-template-columns: 4.4rem minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+.mc-lift--plain {
+  grid-template-columns: minmax(0, 1fr);
+}
+.mc-lift-to {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-success);
+}
+.mc-lift-to .ph {
+  font-size: 0.8rem;
+}
+.mc-lift-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mc-lift-cost {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
 /* A correction names the claim it replaces, struck through, above its card. */
 .mc-was {
   display: flex;

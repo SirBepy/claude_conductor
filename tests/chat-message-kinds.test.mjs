@@ -331,21 +331,33 @@ describe("failed and retracted rows", () => {
 });
 
 describe("rating points", () => {
-  const draw = (kind) => {
-    const input = { kind, verdict: "Meh", text: "4/10 Meh", points: ["-> 7/10: swap X for Y"] };
+  const draw = (kind, points) => {
+    const input = { kind, verdict: "Meh", text: "4/10 Meh", points };
     const d = document.createElement("div");
     d.innerHTML = renderMessage(msg(input));
-    return d.querySelector(".mc-full .mc-points");
+    return d.querySelector(".mc-full");
   };
 
-  it("a rating shows how to raise it open, without a click", () => {
-    const el = draw("rating");
-    expect(el.hasAttribute("open")).toBe(true);
-    expect(el.querySelector("summary").textContent).toContain("How to raise it");
+  it("a rating lays its points out as open rows with the score, the change and its cost", () => {
+    const el = draw("rating", ["-> 7/10: swap X for Y; costs a day", "→ 9/10: add a test"]);
+    expect(el.querySelector(".mc-points")).toBeNull();
+    expect(el.querySelector(".mc-lifts-label").textContent).toBe("How to raise it");
+    const rows = el.querySelectorAll(".mc-lift");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].querySelector(".mc-lift-to").textContent).toBe("7/10");
+    expect(rows[0].querySelector(".mc-lift-text").textContent).toContain("swap X for Y");
+    expect(rows[0].querySelector(".mc-lift-cost").textContent.trim()).toBe("costs a day");
+    expect(rows[1].querySelector(".mc-lift-cost")).toBeNull();
+  });
+
+  it("a point that is not in the score form still shows, as a plain row", () => {
+    const row = draw("rating", ["just do it"]).querySelector(".mc-lift--plain");
+    expect(row.textContent).toContain("just do it");
+    expect(row.querySelector(".mc-lift-to")).toBeNull();
   });
 
   it("other kinds keep their points folded", () => {
-    const el = draw("answer");
+    const el = draw("answer", ["-> 7/10: swap X for Y"]).querySelector(".mc-points");
     expect(el.hasAttribute("open")).toBe(false);
     expect(el.querySelector("summary").textContent).toContain("1 more point");
   });

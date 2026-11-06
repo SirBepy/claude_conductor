@@ -128,12 +128,25 @@ function chipsHtml(card: MessageCard): string {
   return chip(card.done?.length ?? 0, "done", "ph-check", "done") + chip(notDone, "not", "ph-warning-circle", "not done") + chip(waiting, "wait", "ph-hourglass-medium", "waiting");
 }
 
-/** A rating's points are its ways to raise the score, the part Joe wants without a click; other kinds keep theirs folded. */
+/** "-> 8/10: add a retry; costs half a day": the score it unlocks, the change, and what it costs. */
+const LIFT_RE = /^\s*(?:→|->)\s*(\d+(?:\.\d+)?\s*\/\s*10)\s*:?\s*(.*)$/s;
+const LIFT_COST_RE = /^(.*?)[;,]\s*(costs?\b.*)$/is;
+
+function liftHtml(point: string, text: RenderText): string {
+  const [, score = "", rest = ""] = LIFT_RE.exec(point) ?? [];
+  if (!score) return `<li class="mc-lift mc-lift--plain"><span class="mc-lift-text">${text(point)}</span></li>`;
+  const [, what = rest, costText = ""] = LIFT_COST_RE.exec(rest) ?? [];
+  const cost = costText ? `<span class="mc-lift-cost">${text(costText)}</span>` : "";
+  return `<li class="mc-lift"><span class="mc-lift-to"><i class="ph ph-arrow-right" aria-hidden="true"></i>${escapeHtml(score.replace(/\s+/g, ""))}</span><span class="mc-lift-text">${text(what)}${cost}</span></li>`;
+}
+
+/** A rating's points are its ways to raise the score, laid out as rows Joe sees without a click; other kinds keep theirs folded. */
 function pointsDetailsHtml(points: readonly string[], text: RenderText, kind: string): string {
+  if (kind === "rating") {
+    return `<div class="mc-lifts"><div class="mc-lifts-label">How to raise it</div><ol class="mc-lifts-list">${points.map((p) => liftHtml(p, text)).join("")}</ol></div>`;
+  }
   const n = points.length;
-  const rating = kind === "rating";
-  const label = rating ? "How to raise it" : `${n} more point${n === 1 ? "" : "s"}`;
-  return `<details class="mc-points"${rating ? " open" : ""}><summary class="mc-toggle"><span>${label}</span>${caret}</summary><ul class="mc-points-list">${points.map((p) => `<li>${text(p)}</li>`).join("")}</ul></details>`;
+  return `<details class="mc-points"><summary class="mc-toggle"><span>${n} more point${n === 1 ? "" : "s"}</span>${caret}</summary><ul class="mc-points-list">${points.map((p) => `<li>${text(p)}</li>`).join("")}</ul></details>`;
 }
 
 function copyBlockHtml(copy: string): string {
