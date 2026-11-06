@@ -1,6 +1,6 @@
 use crate::chat::billing::{check_metered_billing, check_metered_billing_api_credit};
 use crate::daemon::claude_config::{
-    append_system_prompt, base_claude_args, write_hook_settings, write_mcp_config, WRAP_UP_ON_DONE_PROMPT,
+    append_system_prompt, base_claude_args, write_hook_settings, write_mcp_config,
 };
 use crate::daemon::pump::run_stdout_pump;
 use crate::daemon::session::Session;
@@ -182,23 +182,17 @@ pub async fn spawn_session_as(
     if let Some(line) = tracker.and_then(|(t, _)| crate::tickets::prompt_line(&t)) {
         append_system_prompt(&mut args, &line);
     }
-    // Baked into argv, so it only describes the toggles at spawn time. A flip
+    // Baked into argv, so it only describes the toggle at spawn time. A flip
     // while this child lives is delivered by `lifecycle::send_message` as a
-    // note on the next message, tracked through `Session::wrap_up_told` and
-    // `Session::subchats_told`.
-    let wrap_up_cfg = crate::sessions::chat_config::get(&session_id).unwrap_or_default();
-    if wrap_up_cfg.wrap_up_on_done {
-        append_system_prompt(&mut args, WRAP_UP_ON_DONE_PROMPT);
-        crate::sessions::chat_config::set_wrap_up_told(&session_id, true);
-    }
-    if wrap_up_cfg.subchats_on {
+    // note on the next message, tracked through `Session::subchats_told`.
+    let chat_cfg = crate::sessions::chat_config::get(&session_id).unwrap_or_default();
+    if chat_cfg.subchats_on {
         crate::sessions::chat_config::set_subchats_told(&session_id, true);
     }
     role.append_prompts(&mut args);
     // Also true when the toggle is now off but a resumed history still holds
-    // the ON note, so the next message retracts it.
-    let wrap_up_at_spawn = wrap_up_cfg.wrap_up_told_at_spawn();
-    let subchats_at_spawn = wrap_up_cfg.subchats_told_at_spawn();
+    // the ON prompt, so the next message retracts it.
+    let subchats_at_spawn = chat_cfg.subchats_told_at_spawn();
     cmd.args(args);
     if let Some(ref mcp_path) = mcp_config_path {
         cmd.arg("--permission-prompt-tool")
@@ -257,7 +251,6 @@ pub async fn spawn_session_as(
         hook_settings_path,
         account.id.clone(),
     );
-    session.wrap_up_told.store(wrap_up_at_spawn, std::sync::atomic::Ordering::SeqCst);
     session.subchats_told.store(subchats_at_spawn, std::sync::atomic::Ordering::SeqCst);
     map.insert(session_id.clone(), Arc::clone(&session));
     let drain = tokio::spawn(drain_stderr(stderr, Arc::clone(&session)));

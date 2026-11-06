@@ -77,16 +77,6 @@ fn told_note_for_message(
     told_note(now, told, on_body, off_body)
 }
 
-/// [`told_note_for_message`] for "Wrap up when done".
-fn wrap_up_note_for_message(
-    text: &str,
-    now: bool,
-    told: &std::sync::atomic::AtomicBool,
-) -> Option<String> {
-    use crate::daemon::claude_config::{WRAP_UP_ON_DONE_OFF_NOTE, WRAP_UP_ON_DONE_PROMPT};
-    told_note_for_message(text, now, told, WRAP_UP_ON_DONE_PROMPT, WRAP_UP_ON_DONE_OFF_NOTE)
-}
-
 /// [`told_note_for_message`] for "Use subchats".
 fn subchats_note_for_message(
     text: &str,
@@ -107,7 +97,7 @@ async fn send_message_inner(
     // producing any output, the scheduled resume replays exactly this text.
     // Deliberately the CLEAN text, not `wire_text` below: a replay re-enters
     // `send_message`, which recomputes the sentinels, mention block and
-    // wrap-up note itself, so storing the decorated text would double them.
+    // subchats note itself, so storing the decorated text would double them.
     if let Ok(mut lp) = session.last_prompt.lock() {
         *lp = text.to_string();
     }
@@ -137,16 +127,11 @@ async fn send_message_inner(
         wire_text.push_str(&crate::slash::mentions::augment(text, Some(&session.cwd)).await);
     }
     let cfg = crate::sessions::chat_config::get(&session.session_id).unwrap_or_default();
-    let wrap_up_now = cfg.wrap_up_on_done;
-    if let Some(note) = wrap_up_note_for_message(text, wrap_up_now, &session.wrap_up_told) {
-        wire_text.push_str(&note);
-        // A respawned child resumes a history that already holds this note, so
-        // what it was last told has to outlive the process.
-        crate::sessions::chat_config::set_wrap_up_told(&session.session_id, wrap_up_now);
-    }
     let subchats_now = cfg.subchats_on;
     if let Some(note) = subchats_note_for_message(text, subchats_now, &session.subchats_told) {
         wire_text.push_str(&note);
+        // A respawned child resumes a history that already holds this note, so
+        // what it was last told has to outlive the process.
         crate::sessions::chat_config::set_subchats_told(&session.session_id, subchats_now);
     }
     let msg = serde_json::json!({
@@ -349,81 +334,18 @@ mod tests {
     use crate::daemon::settings_cache::SettingsCache;
     use crate::types::Settings;
 
-    /// The wrap-up note with no slash-command guard, for the tests that check
-    /// the flip rule on its own.
-    fn wrap_up_note(now: bool, told: &std::sync::atomic::AtomicBool) -> Option<String> {
-        use crate::daemon::claude_config::{WRAP_UP_ON_DONE_OFF_NOTE, WRAP_UP_ON_DONE_PROMPT};
-        told_note(now, told, WRAP_UP_ON_DONE_PROMPT, WRAP_UP_ON_DONE_OFF_NOTE)
-    }
-
-    // A running child's argv is fixed, so a mid-chat flip of "Wrap up when
-    // done" only reaches it through this note.
+    // A running child's argv is fixed, so a mid-chat flip of "Use subchats"
+    // only reaches it through this note.
     #[test]
-    fn wrap_up_note_is_sent_once_per_flip_and_not_when_unchanged() {
+    fn subchats_note_is_sent_once_per_flip_and_not_when_unchanged() {
         use std::sync::atomic::AtomicBool;
         let told = AtomicBool::new(false);
-        assert_eq!(wrap_up_note(false, &told), None, "off and told-off: nothing to say");
-
-        let on = wrap_up_note(true, &told).expect("flip to on is announced");
-        assert!(on.contains(crate::daemon::claude_config::WRAP_UP_ON_DONE_PROMPT));
-        assert!(on.contains(crate::slash::mentions::MENTION_BLOCK_OPEN), "wrapped so transcript stripping hides it");
-        assert_eq!(wrap_up_note(true, &told), None, "already told: not repeated every message");
-
-        let off = wrap_up_note(false, &told).expect("flip to off is retracted");
-        assert!(off.contains(crate::daemon::claude_config::WRAP_UP_ON_DONE_OFF_NOTE));
-        assert_eq!(wrap_up_note(false, &told), None);
-    }
-
-    #[test]
-    fn leading_slash_message_gets_no_wrap_up_note_and_keeps_the_flip_pending() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        let told = AtomicBool::new(false);
-        assert_eq!(wrap_up_note_for_message("/close", true, &told), None);
-        assert_eq!(wrap_up_note_for_message("  /commit v", true, &told), None, "leading whitespace still counts");
-        assert!(!told.load(Ordering::SeqCst), "flip must not be consumed by a slash message");
-        let next = wrap_up_note_for_message("carry on", true, &told).expect("note rides the next plain message");
-        assert!(next.contains(crate::daemon::claude_config::WRAP_UP_ON_DONE_PROMPT));
-        assert!(told.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn mid_sentence_slash_still_gets_the_wrap_up_note() {
-        let told = std::sync::atomic::AtomicBool::new(false);
-        assert!(wrap_up_note_for_message("please run /close after", true, &told).is_some());
-    }
-
-    // The ON note lives in the resumed history; a respawn after the toggle went
-    // OFF must still retract it.
-    #[test]
-    fn respawn_after_on_then_off_still_retracts_exactly_once() {
-        use std::sync::atomic::AtomicBool;
-        let cfg = crate::sessions::chat_config::ChatConfig {
-            wrap_up_on_done: false,
-            wrap_up_told: true,
-            ..Default::default()
-        };
-        let told = AtomicBool::new(cfg.wrap_up_told_at_spawn());
-        let off = wrap_up_note_for_message("next", cfg.wrap_up_on_done, &told).expect("retraction sent");
-        assert!(off.contains(crate::daemon::claude_config::WRAP_UP_ON_DONE_OFF_NOTE));
-        assert_eq!(wrap_up_note_for_message("again", cfg.wrap_up_on_done, &told), None, "only once");
-    }
-
-    // The same flip-once rules as wrap-up, with the subchats text, and the two
-    // modes keep separate told-state so one flip never swallows the other's note.
-    #[test]
-    fn subchats_note_is_sent_once_per_flip_and_independent_of_wrap_up() {
-        use std::sync::atomic::AtomicBool;
-        let told = AtomicBool::new(false);
-        let wrap_up_told = AtomicBool::new(false);
         assert_eq!(subchats_note_for_message("hi", false, &told), None, "off and told-off: nothing to say");
 
         let on = subchats_note_for_message("hi", true, &told).expect("flip to on is announced");
         assert!(on.contains(crate::daemon::claude_config::SUBCHATS_MAIN_PROMPT));
-        assert!(!on.contains(crate::daemon::claude_config::WRAP_UP_ON_DONE_PROMPT));
         assert!(on.contains(crate::slash::mentions::MENTION_BLOCK_OPEN), "wrapped so transcript stripping hides it");
         assert_eq!(subchats_note_for_message("again", true, &told), None, "already told: not repeated");
-
-        assert!(wrap_up_note(true, &wrap_up_told).is_some(), "wrap-up still announces its own flip");
 
         let off = subchats_note_for_message("bye", false, &told).expect("flip to off is retracted");
         assert!(off.contains(crate::daemon::claude_config::SUBCHATS_MAIN_OFF_NOTE));
@@ -463,9 +385,9 @@ mod tests {
     }
 
     #[test]
-    fn wrap_up_note_is_removed_by_the_slash_block_stripper() {
+    fn subchats_note_is_removed_by_the_slash_block_stripper() {
         let told = std::sync::atomic::AtomicBool::new(false);
-        let wire = format!("do the thing{}", wrap_up_note(true, &told).unwrap());
+        let wire = format!("do the thing{}", subchats_note_for_message("hi", true, &told).unwrap());
         assert_eq!(crate::slash::mentions::strip_block(&wire), "do the thing");
     }
 

@@ -27,32 +27,16 @@ pub struct ChatConfig {
     /// `list_auto_accept` on launch). Written only via `set_auto_accept`.
     #[serde(default)]
     pub auto_accept: bool,
-    /// Per-chat "wrap up when done" toggle. While on, every turn's system
-    /// prompt carries a standing instruction to self-verify and `/close` once
-    /// the model believes the task is finished, unless it genuinely needs
-    /// something from Joe first. Persisted so flipping it mid-chat survives
-    /// a daemon restart. Read at spawn (argv system prompt, `lifecycle::spawn`)
-    /// and again on every send (`lifecycle::send_message`), which appends a
-    /// note to the first message after a flip, so a mid-chat toggle reaches
-    /// the already-running child on its next turn. Written only via
-    /// `set_wrap_up_on_done`.
-    #[serde(default)]
-    pub wrap_up_on_done: bool,
-    /// What the chat's model was last told about the toggle (system prompt at
-    /// spawn or a note on a message). Persisted so a child that dies after the
-    /// toggle went OFF still retracts the ON note its resumed history holds;
-    /// an in-memory flag would reset to the config value and skip the retraction.
-    #[serde(default)]
-    pub wrap_up_told: bool,
     /// Per-chat "Use subchats" mode: this chat hands jobs Joe names to hidden
-    /// child chats. Same lifecycle as `wrap_up_on_done` (argv system prompt at
-    /// spawn, a note on the first message after a mid-chat flip). Written only
-    /// via `set_subchats_on`.
+    /// child chats. Read at spawn (argv system prompt, `lifecycle::spawn`) and
+    /// on every send, which appends a note to the first message after a
+    /// mid-chat flip. Written only via `set_subchats_on`.
     #[serde(default)]
     pub subchats_on: bool,
-    /// What the chat's model was last told about `subchats_on`. Persisted for
-    /// the same reason as `wrap_up_told`: a resumed history that holds the ON
-    /// prompt must still receive the retraction after the toggle went OFF.
+    /// What the chat's model was last told about `subchats_on`. Persisted so a
+    /// child that dies after the toggle went OFF still retracts the ON prompt
+    /// its resumed history holds; an in-memory flag would reset to the config
+    /// value and skip the retraction.
     #[serde(default)]
     pub subchats_told: bool,
     /// The registry account this chat was spawned under. Mirrors model/effort:
@@ -134,11 +118,6 @@ pub fn record(session_id: &str, model: &str, effort: &str) {
 impl ChatConfig {
     /// The told-state a freshly spawned child starts from: the toggle's current
     /// value (baked into argv) or an earlier told ON that was never retracted.
-    pub fn wrap_up_told_at_spawn(&self) -> bool {
-        self.wrap_up_on_done || self.wrap_up_told
-    }
-
-    /// Same as [`Self::wrap_up_told_at_spawn`], for the subchats mode.
     pub fn subchats_told_at_spawn(&self) -> bool {
         self.subchats_on || self.subchats_told
     }
@@ -330,59 +309,6 @@ fn list_auto_accept_at(path: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Set (or clear) a chat's wrap-up-on-done flag. Preserves any recorded
-/// model/effort/etc on the same entry. Best-effort, never panics.
-pub fn set_wrap_up_on_done(session_id: &str, value: bool) {
-    let Some(path) = config_path() else { return };
-    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    set_wrap_up_on_done_at(&path, session_id, value);
-}
-
-/// Record what the chat's model was last told about the wrap-up toggle.
-pub fn set_wrap_up_told(session_id: &str, value: bool) {
-    let Some(path) = config_path() else { return };
-    let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    set_wrap_up_told_at(&path, session_id, value);
-}
-
-fn set_wrap_up_told_at(path: &Path, session_id: &str, value: bool) {
-    if session_id.is_empty() {
-        return;
-    }
-    let mut map = load_map(path);
-    let entry = map.entry(session_id.to_string()).or_default();
-    if entry.wrap_up_told == value {
-        return;
-    }
-    entry.wrap_up_told = value;
-    write_atomic(path, &map);
-}
-
-/// Session ids that currently have wrap-up-on-done enabled. The frontend
-/// menu toggle seeds its in-memory set from this on launch, same as
-/// `list_auto_accept`.
-pub fn list_wrap_up_on_done() -> Vec<String> {
-    let Some(path) = config_path() else { return Vec::new() };
-    list_wrap_up_on_done_at(&path)
-}
-
-fn set_wrap_up_on_done_at(path: &Path, session_id: &str, value: bool) {
-    if session_id.is_empty() {
-        return;
-    }
-    let mut map = load_map(path);
-    map.entry(session_id.to_string()).or_default().wrap_up_on_done = value;
-    write_atomic(path, &map);
-}
-
-fn list_wrap_up_on_done_at(path: &Path) -> Vec<String> {
-    load_map(path)
-        .into_iter()
-        .filter(|(_, c)| c.wrap_up_on_done)
-        .map(|(id, _)| id)
-        .collect()
-}
-
 /// Set (or clear) a chat's "Use subchats" flag. Preserves everything else on
 /// the entry. Best-effort, never panics.
 pub fn set_subchats_on(session_id: &str, value: bool) {
@@ -467,32 +393,32 @@ mod tests {
     }
 
     #[test]
-    fn subchats_on_round_trips_lists_and_is_independent_of_wrap_up() {
+    fn subchats_on_round_trips_and_lists() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("chat-config.json");
         record_at(&path, "sess-1", "opus", "high");
-        set_wrap_up_on_done_at(&path, "sess-1", true);
+        set_auto_accept_at(&path, "sess-1", true);
         set_subchats_on_at(&path, "sess-1", true);
         let got = get_at(&path, "sess-1").unwrap();
-        assert!(got.subchats_on && got.wrap_up_on_done);
+        assert!(got.subchats_on && got.auto_accept);
         assert_eq!(got.model, "opus", "model preserved across a subchats write");
         assert_eq!(list_subchats_on_at(&path), vec!["sess-1".to_string()]);
         set_subchats_on_at(&path, "sess-1", false);
         assert!(list_subchats_on_at(&path).is_empty());
-        assert!(get_at(&path, "sess-1").unwrap().wrap_up_on_done, "clearing subchats must not clear wrap-up");
+        assert!(get_at(&path, "sess-1").unwrap().auto_accept, "clearing subchats must not clear auto-accept");
     }
 
     #[test]
     fn subchats_told_persists_and_old_files_default_to_false() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("chat-config.json");
-        std::fs::write(&path, r#"{"sess-1":{"model":"opus","wrap_up_on_done":false}}"#).unwrap();
+        std::fs::write(&path, r#"{"sess-1":{"model":"opus"}}"#).unwrap();
         let old = get_at(&path, "sess-1").unwrap();
         assert!(!old.subchats_on && !old.subchats_told, "missing fields default to false");
         set_subchats_told_at(&path, "sess-1", true);
         let got = get_at(&path, "sess-1").unwrap();
         assert!(got.subchats_told && got.subchats_told_at_spawn());
-        assert!(!got.wrap_up_told, "the two told flags are separate");
+        assert!(!got.subchats_on, "told is separate from the toggle itself");
     }
 
     #[test]
@@ -550,57 +476,21 @@ mod tests {
         assert!(!path.exists(), "no file written for empty session id");
     }
 
+    /// Files written while "Wrap up when done" existed still carry its keys;
+    /// serde must skip them (no `deny_unknown_fields`) or every old chat's
+    /// config, model and subchat brief included, would stop loading.
     #[test]
-    fn wrap_up_on_done_round_trips_and_preserves_model() {
+    fn an_old_file_with_the_removed_wrap_up_keys_still_loads() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("chat-config.json");
-        record_at(&path, "sess-1", "opus", "high");
-        set_wrap_up_on_done_at(&path, "sess-1", true);
-        let got = get_at(&path, "sess-1").unwrap();
-        assert!(got.wrap_up_on_done, "wrap_up_on_done set");
-        assert_eq!(got.model, "opus", "model preserved across wrap-up-on-done write");
-        assert_eq!(list_wrap_up_on_done_at(&path), vec!["sess-1".to_string()]);
-        // Clearing drops it from the list but keeps the entry's model/effort.
-        set_wrap_up_on_done_at(&path, "sess-1", false);
-        assert!(list_wrap_up_on_done_at(&path).is_empty());
-        assert_eq!(get_at(&path, "sess-1").unwrap().model, "opus");
-    }
-
-    #[test]
-    fn wrap_up_told_persists_and_old_files_default_to_false() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("chat-config.json");
-        std::fs::write(&path, r#"{"sess-1":{"model":"opus","wrap_up_on_done":false}}"#).unwrap();
-        assert!(!get_at(&path, "sess-1").unwrap().wrap_up_told, "missing field defaults to false");
-        set_wrap_up_told_at(&path, "sess-1", true);
-        let got = get_at(&path, "sess-1").unwrap();
-        assert!(got.wrap_up_told && got.wrap_up_told_at_spawn());
+        std::fs::write(
+            &path,
+            r#"{"sess-1":{"model":"opus","effort":"high","wrap_up_on_done":true,"wrap_up_told":true,"subchats_on":true}}"#,
+        )
+        .unwrap();
+        let got = get_at(&path, "sess-1").expect("old keys must not fail the load");
         assert_eq!(got.model, "opus");
-    }
-
-    #[test]
-    fn set_wrap_up_on_done_empty_session_id_is_noop() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("chat-config.json");
-        set_wrap_up_on_done_at(&path, "", true);
-        assert!(!path.exists(), "no file written for empty session id");
-    }
-
-    /// `auto_accept` and `wrap_up_on_done` are independent flags on the same
-    /// entry - flipping one must never clobber the other.
-    #[test]
-    fn auto_accept_and_wrap_up_on_done_do_not_clobber_each_other() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("chat-config.json");
-        set_auto_accept_at(&path, "sess-1", true);
-        set_wrap_up_on_done_at(&path, "sess-1", true);
-        let got = get_at(&path, "sess-1").unwrap();
-        assert!(got.auto_accept);
-        assert!(got.wrap_up_on_done);
-        set_auto_accept_at(&path, "sess-1", false);
-        let got = get_at(&path, "sess-1").unwrap();
-        assert!(!got.auto_accept);
-        assert!(got.wrap_up_on_done, "clearing auto_accept must not clear wrap_up_on_done");
+        assert!(got.subchats_on);
     }
 
     #[test]

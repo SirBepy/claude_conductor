@@ -5,7 +5,7 @@
 //!
 //! Every way a chat closes goes through [`request_close`] first: the menu and
 //! the phone (`end_session` and `mark_session_ended`, which `clear_session`
-//! calls), the `close_session` tool that `/close` and a wrap-up end on, and the
+//! calls), the `close_session` tool that `/close` ends on, and the
 //! backstop at [`crate::daemon::pump::close::finalize_close`]. A closing chat
 //! with running subs is held, and Joe is asked on a card. Finished subs never
 //! hold it. A card is never answered by a timeout: only Joe's pick, or a chat

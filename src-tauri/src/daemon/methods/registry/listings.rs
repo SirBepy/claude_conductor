@@ -70,26 +70,8 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
     router.register("list_auto_accept", move |_params, _ctx| {
         async move { Ok(json!(crate::sessions::chat_config::list_auto_accept())) }
     });
-    // Persist a chat's "wrap up when done" toggle. Same sole-writer shape as
-    // set_auto_accept above. A mid-chat flip needs no restart:
-    // `lifecycle::send_message` reads it on every send.
-    router.register("set_wrap_up_on_done", move |params, _ctx| {
-        async move {
-            #[derive(serde::Deserialize)]
-            struct P { session_id: String, value: bool }
-            let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
-                .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-            crate::sessions::chat_config::set_wrap_up_on_done(&p.session_id, p.value);
-            Ok(json!({"ok": true}))
-        }
-    });
-    // Session ids with wrap-up-on-done enabled, so a freshly-launched client
-    // seeds its menu-toggle state. Read-only; mirrors `list_auto_accept`.
-    router.register("list_wrap_up_on_done", move |_params, _ctx| {
-        async move { Ok(json!(crate::sessions::chat_config::list_wrap_up_on_done())) }
-    });
     // Persist a chat's "Use subchats" toggle. Same sole-writer shape as
-    // set_wrap_up_on_done, plus two rules the daemon owns (`subchats::apply_set_on`):
+    // set_auto_accept, plus two rules the daemon owns (`subchats::apply_set_on`):
     // an API-credit chat is refused, and turning it on moves the chat to Opus at
     // high effort through the registry (applied at its next send, never killing a
     // running turn).
@@ -171,7 +153,7 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
         });
     }
     // Session ids with the subchats mode on, so a freshly-launched client seeds
-    // its menu-toggle state. Read-only; mirrors `list_wrap_up_on_done`.
+    // its menu-toggle state. Read-only; mirrors `list_auto_accept`.
     router.register("list_subchats_on", move |_params, _ctx| {
         async move { Ok(json!(crate::sessions::chat_config::list_subchats_on())) }
     });
