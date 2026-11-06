@@ -68,6 +68,34 @@ async fn a_snooze_mid_countdown_returns_to_watching_instead_of_firing() {
     assert_eq!(g.terminal_calls, vec![TerminalAction::Sleep], "fires exactly once, after the snooze");
 }
 
+/// A postpone longer than the 12 h no-progress limit must not trip the guard
+/// while it is in force: the busy signature never changes during a postpone.
+#[tokio::test(start_paused = true)]
+async fn a_postpone_longer_than_the_no_progress_limit_does_not_give_up() {
+    let start = Instant::now();
+    let world = Arc::new(Mutex::new(World {
+        busy_map: vec![("s1".to_string(), true)],
+        clock: start,
+        snooze_until: Some(start + Duration::from_secs(13 * 3600)),
+        ..Default::default()
+    }));
+
+    // One hour per read; the chat finishes at 14 h, after the postpone ended.
+    let tick: Arc<Mutex<dyn FnMut(&mut World) + Send>> = Arc::new(Mutex::new(move |w: &mut World| {
+        w.clock += Duration::from_secs(3600);
+        if w.clock >= start + Duration::from_secs(14 * 3600) {
+            w.busy_map = vec![("s1".to_string(), false)];
+        }
+    }));
+
+    let deps = deps_for(world.clone(), tick);
+    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Manual, None).await;
+
+    let g = world.lock().unwrap();
+    assert!(!g.phases.contains(&ProtocolPhase::GaveUp), "phases: {:?}", g.phases);
+    assert_eq!(g.terminal_calls, vec![TerminalAction::Shutdown]);
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_snooze_pushes_a_nightly_overdue_cutoff_past_its_end() {
     let start = Instant::now();
