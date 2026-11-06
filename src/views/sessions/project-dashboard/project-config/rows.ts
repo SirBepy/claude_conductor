@@ -4,7 +4,7 @@ import { api } from "../../../../shared/api";
 import type { Account } from "../../../../shared/api";
 import { accountIconBadgeHtml, isApiCreditAccount } from "../../../../shared/account-chip";
 import { invoke } from "../../../../shared/ipc";
-import { forgetTicketTracker } from "../../../../shared/chat/ticket-refs";
+import { forgetTicketTracker, normalizeTrelloBoard } from "../../../../shared/chat/ticket-refs";
 import type { SubchatCheck, SubchatWriters, TrackerInfo } from "../../../../types/ipc.generated";
 import type { ProjectCfg } from "./project-cfg";
 import "../../../../shared/account-chip.css";
@@ -253,10 +253,19 @@ export async function renderTrackerRow(cwd: string): Promise<void> {
       input.focus();
       return;
     }
+    // A pasted board URL is reduced to its id, and anything else unusable is
+    // refused here: saved as-is, every tr-N lookup would fail with no visible cause.
+    const board = k === "trello" ? normalizeTrelloBoard(input.value) : null;
+    if (k === "trello" && !board) {
+      showToast("Trello board id: use the id from trello.com/b/<id>.");
+      input.focus();
+      return;
+    }
     select.disabled = true;
     try {
       const id = proj?.id ?? (await api.ensureProject(cwd)).id;
-      const tracker = k ? { kind: k, workspace: k === "off" ? "" : input.value.trim() } : null;
+      const workspace = k === "off" ? "" : (board ?? input.value.trim());
+      const tracker = k ? { kind: k, workspace } : null;
       await api.updateProject(id, { tracker });
       forgetTicketTracker(cwd);
       showToast("Ticket links updated for new messages and turns.");
