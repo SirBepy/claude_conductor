@@ -1,0 +1,3 @@
+# Read by /release step 1d: one command per line, run from the repo root, output shown before the release ships. Advisory, never blocks.
+# Relay calls the daemon rejected (no chat pill shows them): the same shape many times means a tool schema or its error text steers callers wrong.
+powershell -NoProfile -File scripts/rejected-sends-report.ps1 -SinceDays 14
