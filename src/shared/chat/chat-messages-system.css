@@ -108,8 +108,8 @@
   opacity: 0.7;
 }
 
-/* Meta/retraction/failed-send placeholders share the compact-marker geometry.
- * meta-marker itself is bookkeeping only now - its visible render moved
+/* Meta and failed-send placeholders are hidden; only the retraction
+ * placeholder keeps the compact-marker geometry. meta-marker itself is bookkeeping only now - its visible render moved
  * inline into the tool-strip (ensureMetaChip, turn-chips.ts). */
 .msg.system.meta-marker {
   display: none;

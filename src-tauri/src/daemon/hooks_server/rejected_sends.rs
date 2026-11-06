@@ -1,5 +1,8 @@
-//! Append-only record of every MCP relay call the daemon turned down
-//! (`ok:false`), at `<data_dir>/rejected-sends.jsonl`. The chat used to show a
+//! Append-only record of the relay calls the daemon turned down, at
+//! `<data_dir>/rejected-sends.jsonl`: `send_message` / `update_message`
+//! validation failures, plus a request body that failed to decode on any route
+//! using `ValidatedJson`. Other routes' own `ok:false` replies are not
+//! recorded here. The chat used to show a
 //! "Failed to send" pill per rejection; a caller that retries until it passes
 //! stacked six of them, so the chat stays quiet and this file is where a
 //! pattern (the same field wrong again and again) gets read, by
@@ -23,15 +26,28 @@ fn path_in(root: &Path) -> PathBuf {
 /// Records one rejection. Never fails the caller: a log that cannot be written
 /// only costs the record.
 pub(super) fn record(route: &str, session_id: &str, kind: Option<&str>, error: &str) {
-    log::warn!("relay call rejected ({route}, session {session_id}): {error}");
+    // Debug, not warn: the jsonl is the record, and a warn would show up a second
+    // time in the release report's app-log section.
+    log::debug!("relay call rejected ({route}, session {session_id}): {error}");
     // The route tests reject on purpose; they must not write into the real data dir.
     if cfg!(test) {
         return;
     }
     let Ok(root) = crate::settings::paths::data_dir() else { return };
-    if let Err(e) = append_in(&root, route, session_id, kind, error) {
+    if let Err(e) = append_in(&root, route, session_id, kind, &clip(error)) {
         log::warn!("rejected-sends: could not write the record: {e}");
     }
+}
+
+/// A serde decode error embeds the offending value, so a long malformed field
+/// would be copied whole into the log.
+fn clip(error: &str) -> String {
+    const MAX: usize = 500;
+    if error.chars().count() <= MAX {
+        return error.to_string();
+    }
+    let head: String = error.chars().take(MAX).collect();
+    format!("{head}...")
 }
 
 fn append_in(root: &Path, route: &str, session_id: &str, kind: Option<&str>, error: &str) -> std::io::Result<()> {
@@ -69,6 +85,14 @@ mod tests {
         assert_eq!(lines[0]["route"], "/messages/send");
         assert!(lines[0]["error"].as_str().unwrap().contains("over report's 200"));
         assert!(lines[1]["kind"].is_null());
+    }
+
+    #[test]
+    fn a_long_error_is_clipped_and_a_short_one_is_left_alone() {
+        assert_eq!(clip("short"), "short");
+        let clipped = clip(&"x".repeat(2000));
+        assert_eq!(clipped.chars().count(), 503);
+        assert!(clipped.ends_with("..."));
     }
 
     #[test]
