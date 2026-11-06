@@ -30,6 +30,15 @@ export function slackPlainText(markdown: string): string {
     .join("");
 }
 
+/** Slack's composer renders each `<p>` as a bare line and drops the margin
+ *  between them, so a draft written as paragraphs pastes as one tight block
+ *  even though its plain half has the blank lines. An empty paragraph between
+ *  two paragraphs restores the gap; Google Chat and Docs treat it as spacing
+ *  too. Only paragraph-to-paragraph gaps are touched, lists keep their own. */
+export function slackHtml(html: string): string {
+  return html.replace(/<\/p>\s*<p(?=[\s>])/g, "</p><p><br></p><p");
+}
+
 /** Both payloads in one write: Slack and Google Chat read the tags, a plain
  *  field gets the markdown rather than stripped mush. On the phone, and on
  *  the plain-text-only fallback, the plain half is `slackPlainText` instead:
@@ -57,7 +66,7 @@ export function copyDualPayload(html: string, plain: string, btn: HTMLElement, o
   void Promise.resolve()
     .then(() => navigator.clipboard.write([
       new ClipboardItem({
-        "text/html": new Blob([html], { type: "text/html" }),
+        "text/html": new Blob([slackHtml(html)], { type: "text/html" }),
         "text/plain": new Blob([plainHalf], { type: "text/plain" }),
       }),
     ]))
