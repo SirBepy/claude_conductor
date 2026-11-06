@@ -147,6 +147,55 @@ describe("bare Shortcut numbers", () => {
   });
 });
 
+const TR = { kind: "trello", workspace: "AbCd1234", team_keys: [], inferred: false };
+
+describe("Trello card numbers", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    forgetTicketTracker("C:/trello");
+    forgetBareStories();
+  });
+
+  // The board answers tr-N with the card's short URL; `missing` numbers are 404.
+  function trelloBackend(missing = []) {
+    invokeMock.mockImplementation(async (cmd, args) => {
+      if (cmd === "get_ticket_tracker") return TR;
+      const n = args.id.replace(/^tr-/, "");
+      if (missing.includes(n)) throw new Error("Trello returned 404 Not Found");
+      return { id: args.id, title: "t", state: "Doing", owner: null, ticket_type: "card", url: `https://trello.com/c/Card${n.padStart(4, "0")}` };
+    });
+  }
+
+  it("leaves tr-12 as text until the board confirms the card, then links its short URL", async () => {
+    trelloBackend();
+    const root = mount("<p>See tr-12, and <code>TR-7</code>.</p>");
+    expect(applyTicketLinks(root, TR)).toEqual(["tr-12", "TR-7"]);
+    expect(links(root)).toEqual([]);
+    await linkifyTickets(root, "C:/trello");
+    expect(links(root)).toEqual([
+      ["tr-12", "https://trello.com/c/Card0012"],
+      ["tr-7", "https://trello.com/c/Card0007"],
+    ]);
+    expect(invokeMock).toHaveBeenCalledWith("get_ticket_summary", { kind: "trello", workspace: "AbCd1234", id: "tr-12" });
+  });
+
+  it("never links a card number the board does not have, and does not ask twice", async () => {
+    trelloBackend(["99"]);
+    await linkifyTickets(mount("<p>tr-99</p>"), "C:/trello");
+    const root = mount("<p>tr-99 again</p>");
+    await linkifyTickets(root, "C:/trello");
+    expect(links(root)).toEqual([]);
+    expect(summaryCalls()).toHaveLength(1);
+  });
+
+  it("recognizes a card URL by its 8-character short link and nothing longer or elsewhere", () => {
+    expect(parseTicketUrl("https://trello.com/c/Xy12Zq90/12-fix-login")).toEqual({ kind: "trello", workspace: "", id: "Xy12Zq90" });
+    expect(parseTicketUrl("https://trello.com/c/Xy12Zq90")).toEqual({ kind: "trello", workspace: "", id: "Xy12Zq90" });
+    expect(parseTicketUrl("https://trello.com/b/AbCd1234/board")).toBeNull();
+    expect(parseTicketUrl("https://trello.com/c/Xy12Zq90extra")).toBeNull();
+  });
+});
+
 describe("linkifyTickets", () => {
   beforeEach(() => invokeMock.mockReset());
 

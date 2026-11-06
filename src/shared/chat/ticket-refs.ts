@@ -13,9 +13,11 @@ import type { TicketSummary, TrackerInfo, TrackerKind } from "../../types/ipc.ge
 // REGISTRY and the error text tickets.rs::token_for formats when unset
 // ("{key} is not set in ~/.claude/.env"), so a missing-token error can offer
 // the right modal instead of a dead-end message.
-const TOKEN_ENV_FOR_KIND: Record<Exclude<TrackerKind, "off">, string> = {
-  shortcut: "SHORTCUT_API_TOKEN",
-  linear: "LINEAR_API_KEY",
+// Trello needs two secrets, so each kind lists every env name its error can name.
+const TOKEN_ENV_FOR_KIND: Record<Exclude<TrackerKind, "off">, string[]> = {
+  shortcut: ["SHORTCUT_API_TOKEN"],
+  linear: ["LINEAR_API_KEY"],
+  trello: ["TRELLO_API_KEY", "TRELLO_TOKEN"],
 };
 
 // ── tracker per repo ──────────────────────────────────────────────────
@@ -50,13 +52,26 @@ export function forgetTicketTracker(cwd: string): void {
 
 export function ticketUrl(t: Pick<TrackerInfo, "kind" | "workspace">, id: string): string {
   const ws = encodeURIComponent(t.workspace);
+  if (t.kind === "trello") {
+    // A card's own URL needs its short link, which only the lookup knows; until
+    // then (and for a number that never resolves) the board is the honest target.
+    return trelloUrls.get(trelloKey(t, id)) || `https://trello.com/b/${ws}`;
+  }
   return t.kind === "shortcut"
     ? `https://app.shortcut.com/${ws}/story/${id.replace(/^sc-/i, "")}`
     : `https://linear.app/${ws}/issue/${id}`;
 }
 
+// Trello card number -> card URL, or false when the board has no such card. A
+// `tr-12` only links once the tracker confirms it, for the same reason a bare
+// Shortcut number does: it is a plain word until a card answers to it.
+const trelloUrls = new Map<string, string | false>();
+const trelloKey = (t: Pick<TrackerInfo, "workspace">, id: string) => `${t.workspace}/${id.toLowerCase()}`;
+const TRELLO_ID = /(?<![\w/-])tr-\d{1,6}(?![\w-])/gi;
+
 function idPattern(t: TrackerInfo): RegExp | null {
   if (t.kind === "shortcut") return /(?<![\w/-])sc-\d{1,7}(?![\w-])/gi;
+  if (t.kind === "trello") return TRELLO_ID;
   const keys = t.team_keys.filter((k) => /^[A-Z][A-Z0-9]*$/.test(k));
   if (t.kind !== "linear" || keys.length === 0) return null;
   return new RegExp(`(?<![\\w/-])(?:${keys.join("|")})-\\d+(?![\\w-])`, "g");
@@ -95,6 +110,7 @@ const BARE_LOOKUPS_PER_RENDER = 5;
 /** Forgets confirmed/missing bare-number answers (tests, tracker change). */
 export function forgetBareStories(): void {
   bareStory.clear();
+  trelloUrls.clear();
   bareRetryAt.clear();
 }
 
@@ -145,6 +161,11 @@ export function applyTicketLinks(root: HTMLElement, t: TrackerInfo): string[] {
   // .drill-pop: an open detail card sits inside its bubble and is not re-linkified.
   const skip = "a, pre, .ticket-ref, .commit-ref, .drill-pop";
   const pending = new Set<string>();
+  if (t.kind === "trello") {
+    const known = (m: string) => !!trelloUrls.get(trelloKey(t, m));
+    linkMatches(root, re, skip, t, (m) => m.toLowerCase(), known, pending);
+    return [...pending].filter((m) => !trelloUrls.has(trelloKey(t, m)));
+  }
   linkMatches(root, re, skip, t, (m) => (t.kind === "shortcut" ? m.toLowerCase() : m));
   if (t.kind === "shortcut") {
     const confirmed = (n: string) => bareStory.get(bareKey(t, n)) === true;
@@ -161,12 +182,17 @@ export function applyTicketLinks(root: HTMLElement, t: TrackerInfo): string[] {
 }
 
 async function confirmBare(t: TrackerInfo, n: string): Promise<void> {
+  const trello = t.kind === "trello";
+  const key = trello ? trelloKey(t, n) : bareKey(t, n);
   try {
-    await summaryFor(t.kind, t.workspace, `sc-${n}`);
-    bareStory.set(bareKey(t, n), true);
+    const s = await summaryFor(t.kind, t.workspace, trello ? n.toLowerCase() : `sc-${n}`);
+    if (trello) trelloUrls.set(key, s.url || false);
+    else bareStory.set(key, true);
   } catch (err) {
-    if (String(err instanceof Error ? err.message : err).includes("404")) bareStory.set(bareKey(t, n), false);
-    else bareRetryAt.set(bareKey(t, n), Date.now() + BARE_RETRY_MS);
+    const missing = String(err instanceof Error ? err.message : err).includes("404");
+    if (!missing) bareRetryAt.set(key, Date.now() + BARE_RETRY_MS);
+    else if (trello) trelloUrls.set(key, false);
+    else bareStory.set(key, false);
   }
 }
 
@@ -176,7 +202,8 @@ export async function linkifyTickets(root: HTMLElement, cwd: string | undefined)
   const t = known !== undefined ? known : await trackerFor(cwd);
   if (!t || !root.isConnected) return;
   const now = Date.now();
-  const due = applyTicketLinks(root, t).filter((n) => (bareRetryAt.get(bareKey(t, n)) ?? 0) <= now);
+  const retryKey = (n: string) => (t.kind === "trello" ? trelloKey(t, n) : bareKey(t, n));
+  const due = applyTicketLinks(root, t).filter((n) => (bareRetryAt.get(retryKey(n)) ?? 0) <= now);
   if (due.length === 0) return;
   await Promise.all(due.slice(0, BARE_LOOKUPS_PER_RENDER).map((n) => confirmBare(t, n)));
   if (root.isConnected) applyTicketLinks(root, t);
@@ -186,8 +213,12 @@ export async function linkifyTickets(root: HTMLElement, cwd: string | undefined)
 
 const SHORTCUT_URL = /^https:\/\/app\.shortcut\.com\/([^/]+)\/story\/(\d+)/;
 const LINEAR_URL = /^https:\/\/linear\.app\/([^/]+)\/issue\/([A-Z][A-Z0-9]*-\d+)/;
+// A card URL carries only its short link (8 characters), never the board.
+const TRELLO_URL = /^https:\/\/trello\.com\/c\/([A-Za-z0-9]{8})(?=[/?#]|$)/;
 
 export function parseTicketUrl(href: string): { kind: TrackerKind; workspace: string; id: string } | null {
+  const tr = TRELLO_URL.exec(href);
+  if (tr) return { kind: "trello", workspace: "", id: tr[1]! };
   const sc = SHORTCUT_URL.exec(href);
   if (sc) return { kind: "shortcut", workspace: sc[1]!, id: `sc-${sc[2]}` };
   const li = LINEAR_URL.exec(href);
@@ -255,15 +286,15 @@ async function showCard(anchor: HTMLAnchorElement): Promise<void> {
   } catch (err) {
     if (card !== el) return;
     const msg = err instanceof Error ? err.message : String(err);
-    // parseTicketUrl only ever returns "shortcut"/"linear" (the regexes above
-    // match those two URL shapes only) - "off" is a TrackerKind value this
-    // function can't produce, so the lookup below is always defined in
-    // practice; the guard keeps the registry type honest regardless.
-    const envName = ref.kind === "off" ? undefined : TOKEN_ENV_FOR_KIND[ref.kind];
+    // parseTicketUrl never returns "off" (its regexes match tracker URLs only),
+    // so the lookup is always defined in practice; the guard keeps the registry
+    // type honest regardless.
     // Only the backend's own missing-token wording (tickets.rs::token_for)
     // gets the "Add key" action - any other failure (network, bad id, rate
-    // limit) is just an error, nothing a key modal would fix.
-    const missingToken = !isRemote() && !!envName && msg.includes(`${envName} is not set`);
+    // limit) is just an error, nothing a key modal would fix. Trello can miss
+    // either of its two secrets, so the one the message names is the one asked for.
+    const envName = ref.kind === "off" ? undefined : TOKEN_ENV_FOR_KIND[ref.kind].find((n) => msg.includes(`${n} is not set`));
+    const missingToken = !isRemote() && !!envName;
     el.innerHTML = `<div class="ticket-card-id">${escapeHtml(ref.id)}</div><div class="ticket-card-error">${escapeHtml(msg)}</div>${missingToken ? `<button type="button" class="ticket-card-add-key-btn"><i class="ph ph-key"></i> Add key</button>` : ""}`;
     if (missingToken && envName) {
       el.querySelector<HTMLButtonElement>(".ticket-card-add-key-btn")?.addEventListener("click", () => {

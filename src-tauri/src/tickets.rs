@@ -15,12 +15,15 @@ use std::time::{Duration, Instant};
 pub enum TrackerKind {
     Shortcut,
     Linear,
+    Trello,
     /// Explicitly no tracker, overriding whatever the remote would infer.
     Off,
 }
 
 /// Per-project tracker choice. `workspace` is the URL slug: `zirtue` in
 /// `app.shortcut.com/zirtue/story/1`, `revaire` in `linear.app/revaire/issue/X-1`.
+/// For Trello it is the board's short link (`AbCd1234` in `trello.com/b/AbCd1234/name`),
+/// because a card number (`tr-12`) is only unique within one board.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct TicketTracker {
@@ -108,6 +111,11 @@ pub fn prompt_line(t: &TicketTracker) -> Option<String> {
         TrackerKind::Linear => Some(format!(
             "This project's tickets are Linear issues. Whenever you mention one, write it as a markdown link: [ABC-123](https://linear.app/{ws}/issue/ABC-123)."
         )),
+        // A card's URL carries a short link the chat cannot derive from its number,
+        // so the number is the stable form and the client resolves it to the URL.
+        TrackerKind::Trello => Some(format!(
+            "This project's tickets are Trello cards on board {ws}. Refer to a card by its card number as tr-<number> (for example tr-12), and when you know a card's URL write it as a markdown link: [tr-12](https://trello.com/c/<shortLink>)."
+        )),
         TrackerKind::Off => None,
     }
 }
@@ -130,9 +138,39 @@ fn token_for(kind: TrackerKind) -> Result<String, String> {
     let key = match kind {
         TrackerKind::Shortcut => "SHORTCUT_API_TOKEN",
         TrackerKind::Linear => "LINEAR_API_KEY",
+        TrackerKind::Trello => "TRELLO_API_KEY",
         TrackerKind::Off => return Err("no tracker".into()),
     };
     env_token(key).ok_or_else(|| format!("{key} is not set in ~/.claude/.env"))
+}
+
+/// Trello authenticates with an API key AND a user token, so it has a second
+/// secret `token_for` cannot return.
+fn trello_token() -> Result<String, String> {
+    env_token("TRELLO_TOKEN").ok_or_else(|| "TRELLO_TOKEN is not set in ~/.claude/.env".to_string())
+}
+
+/// A board short link, card short link or card number goes straight into a URL
+/// path, so anything beyond these characters is refused rather than escaped.
+fn safe_segment(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// `tr-12` -> the board-relative card path, else a card short link -> the card path.
+fn trello_card_path(workspace: &str, id: &str) -> Result<String, String> {
+    if !safe_segment(id) {
+        return Err(format!("bad card id {id}"));
+    }
+    match id.to_ascii_lowercase().strip_prefix("tr-") {
+        Some(n) if n.chars().all(|c| c.is_ascii_digit()) && !n.is_empty() => {
+            if !safe_segment(workspace) {
+                return Err("set the Trello board id in project settings".into());
+            }
+            Ok(format!("boards/{workspace}/cards/{n}"))
+        }
+        Some(_) => Err(format!("bad card id {id}")),
+        None => Ok(format!("cards/{id}")),
+    }
 }
 
 // ── caches ──────────────────────────────────────────────────────────────
@@ -185,6 +223,43 @@ async fn linear_query(token: &str, query: &str, variables: serde_json::Value) ->
         return Err(err.to_string());
     }
     Ok(body["data"].clone())
+}
+
+// Fields trimmed to what the hover card shows; `list` and `members` expand the
+// two ids a card otherwise carries into names.
+const TRELLO_CARD_QUERY: &str =
+    "fields=name,idShort,shortUrl,labels&list=true&list_fields=name&members=true&member_fields=fullName";
+
+async fn trello_get(path: &str) -> Result<serde_json::Value, String> {
+    let key = token_for(TrackerKind::Trello)?;
+    let token = trello_token()?;
+    // Header auth keeps the token out of the URL, so it cannot land in a log line.
+    let resp = http()
+        .get(format!("https://api.trello.com/1/{path}?{TRELLO_CARD_QUERY}"))
+        .header("Authorization", format!("OAuth oauth_consumer_key=\"{key}\", oauth_token=\"{token}\""))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("Trello returned {}", resp.status()));
+    }
+    resp.json().await.map_err(|e| e.to_string())
+}
+
+fn trello_summary(card: &serde_json::Value) -> Result<TicketSummary, String> {
+    let number = card["idShort"].as_i64().ok_or("card has no number")?;
+    // A label may carry only a colour; fall back to it so a card still shows a type.
+    let label = card["labels"].as_array().and_then(|l| l.first()).and_then(|l| {
+        l["name"].as_str().filter(|n| !n.is_empty()).or_else(|| l["color"].as_str())
+    });
+    Ok(TicketSummary {
+        id: format!("tr-{number}"),
+        title: card["name"].as_str().unwrap_or_default().to_string(),
+        state: card.pointer("/list/name").and_then(|s| s.as_str()).unwrap_or_default().to_string(),
+        owner: card.pointer("/members/0/fullName").and_then(|m| m.as_str()).map(str::to_string),
+        ticket_type: label.unwrap_or("card").to_string(),
+        url: card["shortUrl"].as_str().unwrap_or_default().to_string(),
+    })
 }
 
 async fn linear_team_keys(workspace: &str) -> Vec<String> {
@@ -279,15 +354,17 @@ pub async fn fetch_summary(kind: TrackerKind, workspace: &str, id: &str) -> Resu
             return Ok(s.clone());
         }
     }
-    let token = token_for(kind)?;
     let summary = match kind {
+        TrackerKind::Trello => trello_summary(&trello_get(&trello_card_path(workspace, id)?).await?)?,
         TrackerKind::Shortcut => {
+            let token = token_for(kind)?;
             let n: u64 = id.trim_start_matches("sc-").parse().map_err(|_| format!("bad story id {id}"))?;
             shortcut_names(&token, workspace).await?;
             let story = shortcut_get(&token, &format!("stories/{n}")).await?;
             shortcut_summary(&story, workspace)?
         }
         TrackerKind::Linear => {
+            let token = token_for(kind)?;
             let q = "query($id: String!) { issue(id: $id) { identifier title url state { name } assignee { name } labels(first: 1) { nodes { name } } } }";
             let data = linear_query(&token, q, serde_json::json!({ "id": id })).await?;
             linear_summary(&data["issue"])?
@@ -360,6 +437,40 @@ mod tests {
         assert_eq!(s.state, "In Review");
         assert_eq!(s.owner.as_deref(), Some("Joe"));
         assert_eq!(s.ticket_type, "bug");
+    }
+
+    #[test]
+    fn trello_card_path_uses_the_board_for_a_number_and_the_card_for_a_short_link() {
+        assert_eq!(trello_card_path("AbCd1234", "tr-12").unwrap(), "boards/AbCd1234/cards/12");
+        assert_eq!(trello_card_path("AbCd1234", "TR-7").unwrap(), "boards/AbCd1234/cards/7");
+        assert_eq!(trello_card_path("", "Xy12Zq90").unwrap(), "cards/Xy12Zq90");
+        assert!(trello_card_path("", "tr-12").is_err(), "a number needs a board");
+        assert!(trello_card_path("AbCd1234", "tr-x").is_err());
+        assert!(trello_card_path("AbCd1234", "../members/me").is_err(), "no path traversal");
+        assert!(trello_card_path("a/b", "tr-1").is_err());
+    }
+
+    #[test]
+    fn trello_card_maps_list_member_and_label_and_falls_back_to_a_colour() {
+        let card = serde_json::json!({
+            "name": "Fix login", "idShort": 12, "shortUrl": "https://trello.com/c/Xy12Zq90",
+            "list": { "name": "Doing" }, "members": [{ "fullName": "Joe" }],
+            "labels": [{ "name": "", "color": "red" }]
+        });
+        let s = trello_summary(&card).unwrap();
+        assert_eq!((s.id.as_str(), s.state.as_str(), s.ticket_type.as_str()), ("tr-12", "Doing", "red"));
+        assert_eq!(s.owner.as_deref(), Some("Joe"));
+        assert_eq!(s.url, "https://trello.com/c/Xy12Zq90");
+        let bare = trello_summary(&serde_json::json!({ "name": "x", "idShort": 3, "labels": [], "members": [] })).unwrap();
+        assert_eq!((bare.ticket_type.as_str(), bare.owner), ("card", None));
+        assert!(trello_summary(&serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn trello_prompt_line_names_the_board_and_the_tr_form() {
+        let t = TicketTracker { kind: TrackerKind::Trello, workspace: "AbCd1234".into() };
+        let line = prompt_line(&t).unwrap();
+        assert!(line.contains("board AbCd1234") && line.contains("tr-12"));
     }
 
     #[test]
