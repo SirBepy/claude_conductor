@@ -350,6 +350,14 @@ describe("rating points", () => {
     expect(rows[1].querySelector(".mc-lift-cost")).toBeNull();
   });
 
+  it("the shrunken mini form of a rating draws the same rows, not the raw arrow text", () => {
+    const d = document.createElement("div");
+    d.innerHTML = renderMessage(msg({ kind: "rating", verdict: "Meh", text: "4/10 Meh", points: ["-> 7/10: swap X for Y; costs a day"] }));
+    const mini = d.querySelector(".mc-mini");
+    expect(mini.querySelector(".mc-lift-to").textContent).toBe("7/10");
+    expect(mini.querySelector(".mc-points-list")).toBeNull();
+  });
+
   it("a point that is not in the score form still shows, as a plain row", () => {
     const row = draw("rating", ["just do it"]).querySelector(".mc-lift--plain");
     expect(row.textContent).toContain("just do it");
