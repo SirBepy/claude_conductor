@@ -61,8 +61,8 @@ pub(super) async fn run_engine(
 enum Countdown {
     Finished,
     Cancelled,
-    /// Nightly only: the user came back or a chat went busy mid-countdown, so
-    /// the engine drops back to Watching instead of firing.
+    /// The user postponed mid-countdown, or (nightly only) came back or a chat
+    /// went busy, so the engine drops back to Watching instead of firing.
     Interrupted,
 }
 
@@ -77,10 +77,22 @@ enum WatchOutcome {
     GiveUp,
 }
 
+/// How long after a postpone ends a nightly overdue cutoff may still apply.
+/// Without it a postpone that runs past the cutoff would hit the cutoff the
+/// moment it ends, so a `Cancel` cutoff would give up exactly when the run could
+/// finally fire.
+const SNOOZE_OVERDUE_GRACE: Duration = Duration::from_secs(10 * 60);
+
+/// Whether a manual postpone (`snooze_when_done`) is still in force.
+fn snoozed(deps: &EngineDeps) -> bool {
+    (deps.snooze_until)().is_some_and(|until| (deps.now)() < until)
+}
+
 /// Whether the engine may leave Watching (or keep counting down). A nightly arm
 /// additionally needs the user to have been away for `NIGHTLY_AWAY_SECS`.
 fn ready_to_fire(deps: &EngineDeps, mode: ArmMode) -> bool {
-    (deps.all_idle)()
+    !snoozed(deps)
+        && (deps.all_idle)()
         && (mode == ArmMode::Manual || (deps.user_idle_secs)() >= NIGHTLY_AWAY_SECS)
 }
 
@@ -148,16 +160,24 @@ async fn watch(deps: &EngineDeps, mode: ArmMode, action: TerminalAction, overdue
         let busy_map = (deps.busy_map)();
         let waiting: Vec<String> = waiting_on_ids(&busy_map);
 
+        let postponed = snoozed(deps);
         (deps.mutate_and_emit)(&mut |s| {
             s.phase = ProtocolPhase::Watching;
             s.countdown_remaining_secs = None;
             s.waiting_on = waiting.clone();
+            if !postponed {
+                s.snoozed_until_unix_ms = None;
+            }
         });
 
         // Nightly overdue cutoff: stop waiting once the deadline passes,
-        // regardless of busy/away state.
+        // regardless of busy/away state. A postpone pushes the cutoff past its end.
         if let Some(ov) = overdue {
-            if (deps.now)() >= ov.deadline {
+            let deadline = match (deps.snooze_until)() {
+                Some(until) => ov.deadline.max(until + SNOOZE_OVERDUE_GRACE),
+                None => ov.deadline,
+            };
+            if (deps.now)() >= deadline {
                 match ov.action {
                     OverdueAction::Force => return WatchOutcome::Ready { forced: true },
                     OverdueAction::Cancel => {
@@ -222,7 +242,8 @@ async fn countdown(deps: &EngineDeps, mode: ArmMode, forced: bool) -> Countdown 
         if (deps.is_cancelled)() {
             return Countdown::Cancelled;
         }
-        if mode == ArmMode::Nightly && !forced && !ready_to_fire(deps, mode) {
+        // A postpone interrupts even a forced countdown: the user said not now.
+        if snoozed(deps) || (mode == ArmMode::Nightly && !forced && !ready_to_fire(deps, mode)) {
             return Countdown::Interrupted;
         }
         remaining = next;

@@ -45,6 +45,11 @@ struct World {
     /// deliberately advances it - so tests that ignore it never trip the
     /// no-progress guard, matching the old un-seamed behavior.
     clock: Instant,
+    /// What the `snooze_until` seam reports (a manual postpone's end).
+    snooze_until: Option<Instant>,
+    /// When set, mutate_and_emit postpones by this long (from `clock`) once the
+    /// countdown has ticked, then clears itself. Lets a test snooze mid-countdown.
+    snooze_on_countdown: Option<std::time::Duration>,
 }
 
 impl Default for World {
@@ -60,6 +65,8 @@ impl Default for World {
             resolved: 0,
             user_returns_on_countdown: false,
             clock: Instant::now(),
+            snooze_until: None,
+            snooze_on_countdown: None,
         }
     }
 }
@@ -88,6 +95,7 @@ fn deps_for(
     let w_term = world.clone();
     let w_user = world.clone();
     let w_now = world.clone();
+    let w_snooze = world.clone();
 
     EngineDeps {
         busy_map: Box::new(move || {
@@ -126,6 +134,13 @@ fn deps_for(
                 g.user_idle_secs = 0;
                 g.user_returns_on_countdown = false;
             }
+            if phase == ProtocolPhase::CountingDown
+                && g.state.countdown_remaining_secs.unwrap_or(COUNTDOWN_SECS) < COUNTDOWN_SECS
+            {
+                if let Some(d) = g.snooze_on_countdown.take() {
+                    g.snooze_until = Some(g.clock + d);
+                }
+            }
             g.state.clone()
         }),
         is_cancelled: Box::new(move || w_cancel.lock().unwrap().cancelled),
@@ -135,8 +150,12 @@ fn deps_for(
         }),
         user_idle_secs: Box::new(move || w_user.lock().unwrap().user_idle_secs),
         now: Box::new(move || w_now.lock().unwrap().clock),
+        snooze_until: Box::new(move || w_snooze.lock().unwrap().snooze_until),
     }
 }
+
+#[path = "engine_snooze_tests.rs"]
+mod snooze;
 
 #[tokio::test(start_paused = true)]
 async fn full_run_progresses_through_phases_and_fires_terminal_once() {

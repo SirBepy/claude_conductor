@@ -11,6 +11,7 @@ import { handleTodoRefClick } from "./backlog-panel/todo-ref-click";
 import "../../shared/chat/chat.css";
 import "./sessions.css";
 import "./session-header.css";
+import "./when-done-chip.css";
 import "./sessions-mobile.css";
 import "./project-rail.css";
 import "./session-list.css";

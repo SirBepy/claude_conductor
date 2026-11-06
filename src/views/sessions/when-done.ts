@@ -153,6 +153,47 @@ export async function armOrToggleWhenDone(action: TerminalAction): Promise<void>
   }
 }
 
+/** Postpone the armed run: it stays armed but will not fire (and an under-way
+ *  countdown drops back to watching) for `minutes`. */
+export async function snoozeWhenDone(minutes: number): Promise<void> {
+  try {
+    apply(await invoke<ProtocolState>("snooze_when_done", { minutes }));
+  } catch (err) {
+    console.error("[when-done] snooze failed", err);
+    alert(`Failed to postpone: ${err}`);
+  }
+}
+
+/** Local HH:MM for a unix-ms instant. */
+function clockTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+export interface WhenDoneChipModel {
+  /** Drives the structure and colour; the chip is rebuilt only when it changes. */
+  kind: "watch" | "snoozed" | "count" | "firing";
+  text: string;
+}
+
+/** What the always-visible header chip says for `s`, or null when nothing is
+ *  armed (a gave-up run stays in the overflow menu only). */
+export function whenDoneChipModel(s: ProtocolState | null): WhenDoneChipModel | null {
+  if (!s || !s.action || !isArmed(s)) return null;
+  const label = ACTION_LABEL[s.action];
+  if (s.phase === "countingDown" && s.countdown_remaining_secs != null) {
+    return { kind: "count", text: `${label} in ${s.countdown_remaining_secs}s` };
+  }
+  if (s.phase === "firing") return { kind: "firing", text: `${label} now...` };
+  if (s.snoozed_until_unix_ms != null) {
+    return { kind: "snoozed", text: `${label} snoozed until ${clockTime(s.snoozed_until_unix_ms)}` };
+  }
+  const n = s.waiting_on.length;
+  return {
+    kind: "watch",
+    text: n > 0 ? `${label} when idle · ${n} ${n === 1 ? "chat" : "chats"}` : `${label} when idle`,
+  };
+}
+
 /** Cancel any armed protocol. No-op-safe if already disarmed. */
 export async function cancelWhenDone(): Promise<void> {
   try {
@@ -208,6 +249,8 @@ function whenDoneStatusHtml(s: ProtocolState, action: TerminalAction): string {
     text = `${esc(label)} in ${s.countdown_remaining_secs}s`;
   } else if (s.phase === "firing") {
     text = `${esc(label)} now...`;
+  } else if (s.snoozed_until_unix_ms != null) {
+    text = `${esc(label)} snoozed until ${clockTime(s.snoozed_until_unix_ms)}`;
   } else {
     const n = s.waiting_on.length;
     const sess = n === 1 ? "session" : "sessions";

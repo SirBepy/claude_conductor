@@ -17,6 +17,7 @@ import { updateThinkingBar } from "./session-thinking-bar";
 import { paneEmptyStateHtml } from "./sessions-helpers";
 import { renderSidebar, refreshSessions, openCtxMenu, openDraftCtxMenu } from "./sidebar";
 import { initWhenDone, subscribeWhenDone } from "./when-done";
+import { mountWhenDoneChip } from "./when-done-chip";
 import {
   closeViewMoreMenu,
   refreshViewMoreIndicator,
@@ -106,9 +107,11 @@ export async function wireOverflowMenu(
     rerenderViewMenuProtocol();
   });
   refreshViewMoreIndicator();
+  const disposeChip = mountWhenDoneChip(root);
 
   return () => {
     viewMoreBtn?.removeEventListener("click", onViewMoreClick);
+    disposeChip();
     unsubWhenDone();
     unlistenWhenDone();
   };

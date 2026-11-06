@@ -51,6 +51,9 @@ pub(super) struct EngineDeps {
     /// synthetic clock through this seam instead of waiting out the real
     /// `NO_PROGRESS_LIMIT` wall-clock duration.
     pub(super) now: Box<dyn Fn() -> Instant + Send + Sync>,
+    /// End of a manual postpone, if one was set (`snooze_when_done`). The engine
+    /// holds fire while `now` is before it.
+    pub(super) snooze_until: Box<dyn Fn() -> Option<Instant> + Send + Sync>,
 }
 
 impl EngineDeps {
@@ -63,6 +66,7 @@ impl EngineDeps {
         let app_resolve = app.clone();
         let app_emit = app.clone();
         let app_cancel = app.clone();
+        let app_snooze = app.clone();
         // Built at arm time (production() runs from run_engine), then widened
         // each tick by `admitted_busy_map` as armed chats start children.
         let at_arm = live_busy_map(&app);
@@ -93,6 +97,7 @@ impl EngineDeps {
             }),
             user_idle_secs: Box::new(crate::daemon::idle::idle_secs),
             now: Box::new(Instant::now),
+            snooze_until: Box::new(move || app_snooze.state::<AppState>().when_done.lock().unwrap().snooze_until),
         }
     }
 }
