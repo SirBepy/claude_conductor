@@ -13,7 +13,7 @@ const { stateMock, saveMock } = vi.hoisted(() => ({
 vi.mock("../src/views/sessions/state.ts", () => ({ state: stateMock }));
 vi.mock("../src/views/sessions/pending-draft-storage.ts", () => ({ savePendingSession: saveMock }));
 
-const { mountDraftSubchats, syncDraftSubchats, lockDraftSubchats, unmountDraftSubchats } = await import("../src/views/sessions/draft-subchats.ts");
+const { mountDraftSubchats, mountDraftSubchatsCard, syncDraftSubchats, lockDraftSubchats, unmountDraftSubchats } = await import("../src/views/sessions/draft-subchats.ts");
 const { mainChatLaunch } = await import("../src/views/sessions/subchats-gate.ts");
 const { setCachedAccounts } = await import("../src/shared/accounts-cache.ts");
 
@@ -108,6 +108,31 @@ describe("the draft's Use subchats switch", () => {
     mountDraftSubchats(pane, config);
     expect(input().checked).toBe(true);
     expect(pane.querySelectorAll(".draft-subchats")).toHaveLength(1);
+  });
+
+  it("a rail card replaces the row, and both copies would follow one config", () => {
+    document.body.innerHTML = `<div id="pane"><div class="session-messages"><div class="pd-rail"><div class="view-project-settings"></div></div></div><div class="composer-shell"></div></div>`;
+    pane = document.getElementById("pane");
+    mountDraftSubchats(pane, config);
+    expect(pane.querySelectorAll(".draft-subchats")).toHaveLength(1);
+
+    mountDraftSubchatsCard(pane, pane.querySelector(".pd-rail"), config);
+    expect(pane.querySelector(".draft-subchats")).toBeNull();
+    const card = pane.querySelector(".view-project-settings > .ps-group.draft-subchats-card");
+    expect(card.querySelector(".ps-group-title").textContent).toBe("This chat");
+
+    const cardInput = card.querySelector("input");
+    cardInput.checked = true;
+    cardInput.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(config).toMatchObject({ subchatsOn: true, model: "opus", effort: "high" });
+    expect(card.classList.contains("is-on")).toBe(true);
+
+    config.accountId = "api";
+    syncDraftSubchats(pane, config);
+    expect(cardInput.disabled).toBe(true);
+    expect(config.subchatsOn).toBe(false);
+    unmountDraftSubchats(pane);
+    expect(pane.querySelector(".draft-subchats-card")).toBeNull();
   });
 
   it("is removed once the chat has started", () => {

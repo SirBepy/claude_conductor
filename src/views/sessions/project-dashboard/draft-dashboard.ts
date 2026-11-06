@@ -94,7 +94,12 @@ export function leaveDraftDashboard(pane: HTMLElement): void {
 /** Mounts into a draft pane built by pending-pane-mount.ts. Must run after the
  *  renderer has attached (it clears .session-messages). No-op when a newer
  *  mount has taken the pane by the time the target resolves. */
-export function mountDraftDashboard(pane: HTMLElement, project: { path: string }, myMount: number): void {
+export function mountDraftDashboard(
+  pane: HTMLElement,
+  project: { path: string },
+  myMount: number,
+  railExtra?: (body: HTMLElement) => void,
+): void {
   if (state.mountId !== myMount) return;
   const messagesEl = pane.querySelector<HTMLElement>(".session-messages");
   if (!messagesEl) return;
@@ -111,6 +116,7 @@ export function mountDraftDashboard(pane: HTMLElement, project: { path: string }
       leave: () => { /* a draft is left by the normal chat switch */ },
       back: () => { /* no back from a draft */ },
       deselect: () => unmountDraftDashboard(pane),
+      railExtra,
     });
     current = handle;
     wrap.appendChild(handle.root);

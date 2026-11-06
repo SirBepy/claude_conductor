@@ -9,6 +9,7 @@ import { mainChatLaunch, subchatsBlockedReason } from "./subchats-gate";
 import "./draft-subchats.css";
 
 const HOST_CLASS = "draft-subchats";
+const CARD_CLASS = "draft-subchats-card";
 
 const TIP = "Hand the jobs you name to hidden child chats that report back here. Switching it on moves the chat to Opus at high effort or better.";
 
@@ -21,8 +22,9 @@ interface Applied {
 
 let _applied: Applied | null = null;
 
-function hostOf(pane: ParentNode): HTMLElement | null {
-  return pane.querySelector<HTMLElement>(`.${HOST_CLASS}`);
+/** Every copy of the switch in the pane: the row above the message box, the rail's card, or both. */
+function hostsOf(pane: ParentNode): HTMLElement[] {
+  return [...pane.querySelectorAll<HTMLElement>(`.${HOST_CLASS}, .${CARD_CLASS}`)];
 }
 
 /** Writes `patch` into the draft's config and the persisted copy of it, the way an
@@ -53,26 +55,38 @@ function setOn(config: SessionConfig, on: boolean): void {
   if (restore) state.statusbar?.syncModelEffort(restore.model, restore.effort);
 }
 
-/** Repaints the row from the config: the switch, its tooltip, and whether the
- *  account the draft is on allows the mode at all. */
+/** Repaints every copy of the switch from the config: its state, its tooltip, and
+ *  whether the account the draft is on allows the mode at all. */
 export function syncDraftSubchats(pane: ParentNode, config: SessionConfig): void {
-  const host = hostOf(pane);
-  const input = host?.querySelector<HTMLInputElement>("input");
-  if (!host || !input) return;
+  const hosts = hostsOf(pane);
+  if (hosts.length === 0) return;
   const blocked = subchatsBlockedReason(config.accountId);
   // An account moved to API credit under a draft that had the mode on: the daemon
   // would refuse the spawn, so the switch goes off here instead.
   if (blocked && config.subchatsOn) setOn(config, false);
   const on = config.subchatsOn === true;
-  input.checked = on;
-  input.disabled = !!blocked;
-  host.classList.toggle("is-on", on);
-  host.title = blocked ?? TIP;
+  for (const host of hosts) {
+    const input = host.querySelector<HTMLInputElement>("input")!;
+    input.checked = on;
+    input.disabled = !!blocked;
+    host.classList.toggle("is-on", on);
+    host.title = blocked ?? TIP;
+  }
 }
 
-/** Puts the row just above the draft's message box. Call after the pane's markup
- *  exists; the dashboard's quick-action chips are inserted later and land between
- *  this row and the box. */
+function wire(host: HTMLElement, pane: ParentNode, config: SessionConfig): void {
+  host.querySelector("input")!.addEventListener("change", (e) => {
+    setOn(config, (e.target as HTMLInputElement).checked);
+    syncDraftSubchats(pane, config);
+  });
+  syncDraftSubchats(pane, config);
+}
+
+/** Puts the switch as a row just above the draft's message box. It is the home
+ *  wherever the dashboard has no settings rail (the phone, a group, a rail that
+ *  never loads); once the rail's card mounts it takes over. Call after the pane's
+ *  markup exists; the dashboard's quick-action chips are inserted later and land
+ *  between this row and the box. */
 export function mountDraftSubchats(pane: HTMLElement, config: SessionConfig): void {
   unmountDraftSubchats(pane);
   const shell = pane.querySelector(".composer-shell");
@@ -86,23 +100,39 @@ export function mountDraftSubchats(pane: HTMLElement, config: SessionConfig): vo
     `<label class="switch"><input type="checkbox" aria-label="Use subchats"><span class="slider"></span></label>`,
   ].join("");
   shell.parentElement.insertBefore(host, shell);
-  host.querySelector("input")!.addEventListener("change", (e) => {
-    setOn(config, (e.target as HTMLInputElement).checked);
-    syncDraftSubchats(pane, config);
-  });
-  syncDraftSubchats(pane, config);
+  wire(host, pane, config);
+}
+
+/** Adds a "This chat" group under the dashboard rail's project settings, built from
+ *  the rail's own group and line classes, and retires the row above the message box:
+ *  the card is where per-chat choices live, with room for more. */
+export function mountDraftSubchatsCard(pane: HTMLElement, railBody: HTMLElement, config: SessionConfig): void {
+  const settings = railBody.querySelector(".view-project-settings") ?? railBody;
+  settings.querySelector(`.${CARD_CLASS}`)?.remove();
+  const card = document.createElement("div");
+  card.className = `ps-group ${CARD_CLASS}`;
+  card.innerHTML = [
+    `<div class="ps-group-title">This chat</div>`,
+    `<div class="ps-line">`,
+    `<span class="ps-label">Use subchats</span>`,
+    `<label class="switch"><input type="checkbox" aria-label="Use subchats"><span class="slider"></span></label>`,
+    `</div>`,
+  ].join("");
+  settings.append(card);
+  pane.querySelector(`.${HOST_CLASS}`)?.remove();
+  wire(card, pane, config);
 }
 
 /** Freezes the switch while the first send is in flight, so a flip cannot change
  *  what the spawn already took. Unlocking repaints from the config, which keeps
  *  an account-blocked switch disabled. */
 export function lockDraftSubchats(pane: ParentNode, config: SessionConfig, locked: boolean): void {
-  const input = hostOf(pane)?.querySelector<HTMLInputElement>("input");
-  if (!input) return;
-  if (locked) input.disabled = true;
+  const hosts = hostsOf(pane);
+  if (hosts.length === 0) return;
+  if (locked) for (const host of hosts) host.querySelector<HTMLInputElement>("input")!.disabled = true;
   else syncDraftSubchats(pane, config);
 }
 
 export function unmountDraftSubchats(pane: ParentNode): void {
-  hostOf(pane)?.remove();
+  for (const host of hostsOf(pane)) host.remove();
 }
