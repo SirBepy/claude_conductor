@@ -41,14 +41,14 @@ pub(super) async fn on_preview_push(
     // Only the inline card path: the panel push of a gallery carries no such
     // iframe, and a terminal curl owns its own html.
     if source == crate::daemon::preview::PREVIEW_SOURCE_CHAT_CARD {
-        if let Some(id) = super::preview_render::stale_render_reference(&body.html) {
-            log::warn!("hook /hooks/preview rejected: card iframes expired render id {id}");
+        if let Some(id) = super::preview_render::render_reference(&body.html) {
+            log::warn!("hook /hooks/preview rejected: card iframes render id {id}");
             return (
-                StatusCode::GONE,
+                StatusCode::UNPROCESSABLE_ENTITY,
                 Json(json!({
                     "ok": false,
                     "error": format!(
-                        "the card's iframe points at render id {id}, which the daemon no longer holds, so the card would load blank. Re-run the gallery --post for a fresh render-url, or inline the content as a data: URL."
+                        "the card's iframe points at render id {id}, which lives in daemon memory and goes blank after a restart. Put the page's html directly in the card's `html` instead of iframing a render-url."
                     ),
                 })),
             )
@@ -75,7 +75,7 @@ mod tests {
     use crate::types::Settings;
 
     #[tokio::test]
-    async fn a_card_push_iframing_an_expired_render_id_is_refused_not_acknowledged() {
+    async fn a_card_push_iframing_a_render_id_is_refused_not_acknowledged() {
         let ctx = Arc::new(HookCtx {
             state: DaemonState::new(new_session_map(), SettingsCache::new(Settings::default())),
         });
@@ -87,7 +87,7 @@ mod tests {
             session_id: None,
         };
         let resp = on_preview_push(AxState(ctx), ValidatedJson(body)).await.into_response();
-        assert_eq!(resp.status(), StatusCode::GONE);
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert!(v["error"].as_str().unwrap().contains("expired-id"), "got: {v}");

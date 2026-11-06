@@ -45,11 +45,11 @@ const ERROR_DETAIL_MAX_CHARS: usize = 300;
 
 /// What a non-2xx response body adds to the tool error: the JSON `error` field
 /// when the body parses and has one (the daemon's own refusals, e.g.
-/// `show_preview`'s stale-render 410, name the fix there), else the body's
+/// `show_preview`'s render-url 422, name the fix there), else the body's
 /// first `ERROR_DETAIL_MAX_CHARS` characters, else nothing.
 ///
 /// Safe to surface for every relayed route: the only non-2xx answers the
-/// daemon hooks server produces are `preview` (410/413), the Host/Origin guard
+/// daemon hooks server produces are `preview` (422/413), the Host/Origin guard
 /// and bare 404s, none of which carry secret material. The secret routes
 /// answer 200 with `ok:false` on refusal and never see the secret value (it
 /// travels through `respond_secret`, not this relay). A new route that returns
@@ -183,23 +183,23 @@ mod tests {
         );
     }
 
-    /// The daemon's refusal text (here the stale render id) must reach the
+    /// The daemon's refusal text (here the render-url iframe) must reach the
     /// session, not just the status code, or it cannot tell what to redo.
     #[test]
     fn http_post_carries_the_json_error_field_of_a_non_2xx_body() {
         let mut server = mockito::Server::new();
         let _m = server
             .mock("POST", "/hooks/preview")
-            .with_status(410)
+            .with_status(422)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"ok":false,"error":"the card's iframe points at render id r-abc123, which the daemon no longer holds"}"#)
+            .with_body(r#"{"ok":false,"error":"the card's iframe points at render id r-abc123, so inline its html instead"}"#)
             .create();
         let rt = tokio::runtime::Runtime::new().unwrap();
 
         let err = http_post(&rt, &format!("{}/hooks/preview", server.url()), serde_json::json!({}))
-            .expect_err("a 410 must surface as an error");
+            .expect_err("a 422 must surface as an error");
 
-        assert!(err.contains("410"), "status kept: {err}");
+        assert!(err.contains("422"), "status kept: {err}");
         assert!(err.contains("r-abc123"), "daemon error text must reach the session: {err}");
     }
 
