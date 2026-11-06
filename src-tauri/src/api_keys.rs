@@ -36,6 +36,21 @@ pub const REGISTRY: &[ApiKeyEntry] = &[
         used_by: "Ticket hover cards, /ticket skill (revaire repos)",
         create_url: "https://linear.app/settings/api",
     },
+    // Trello needs both: the key identifies the Power-Up, the token is the user's grant.
+    ApiKeyEntry {
+        env_name: "TRELLO_API_KEY",
+        label: "Trello API key",
+        purpose: "Lets ticket hover cards read Trello cards. Pair it with the Trello token.",
+        used_by: "Ticket hover cards (projects set to Trello)",
+        create_url: "https://trello.com/power-ups/admin",
+    },
+    ApiKeyEntry {
+        env_name: "TRELLO_TOKEN",
+        label: "Trello token",
+        purpose: "Read access to your Trello boards. On the API key page, use the Token link beside the key.",
+        used_by: "Ticket hover cards (projects set to Trello)",
+        create_url: "https://trello.com/power-ups/admin",
+    },
 ];
 
 pub fn entry(name: &str) -> Option<&'static ApiKeyEntry> {

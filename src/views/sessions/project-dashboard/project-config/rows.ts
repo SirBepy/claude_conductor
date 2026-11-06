@@ -211,7 +211,12 @@ export function renderSubchatWritersRow(cwd: string): Promise<void> {
   });
 }
 
-const TRACKER_LABEL: Record<string, string> = { shortcut: "Shortcut", linear: "Linear" };
+const TRACKER_LABEL: Record<string, string> = { shortcut: "Shortcut", linear: "Linear", trello: "Trello" };
+
+// Trello's field is a board (card numbers only mean something per board), the
+// others' is a workspace slug.
+const workspacePlaceholder = (kind: string) => (kind === "trello" ? "board id (trello.com/b/<id>)" : "workspace");
+const needsWorkspace = (kind: string) => kind === "shortcut" || kind === "linear" || kind === "trello";
 
 /** Where this project's tickets live, so chat mentions link to them. Unset
  *  means "infer from the git remote", shown as that inferred answer. */
@@ -232,9 +237,9 @@ export async function renderTrackerRow(cwd: string): Promise<void> {
     <span class="account-icon-badge"><i class="ph ph-ticket"></i></span>
     <span class="tracker-fields">
       <select id="trackerKind" class="inline-select">
-        ${opt("", autoLabel)}${opt("shortcut", "Shortcut")}${opt("linear", "Linear")}${opt("off", "None")}
+        ${opt("", autoLabel)}${opt("shortcut", "Shortcut")}${opt("linear", "Linear")}${opt("trello", "Trello")}${opt("off", "None")}
       </select>
-      <input id="trackerWorkspace" class="inline-input" type="text" placeholder="workspace" value="${escapeHtml(workspace)}"${kind === "shortcut" || kind === "linear" ? "" : " hidden"}>
+      <input id="trackerWorkspace" class="inline-input" type="text" placeholder="${workspacePlaceholder(kind)}" value="${escapeHtml(workspace)}"${needsWorkspace(kind) ? "" : " hidden"}>
     </span>
   `;
   const select = document.getElementById("trackerKind") as HTMLSelectElement | null;
@@ -242,7 +247,8 @@ export async function renderTrackerRow(cwd: string): Promise<void> {
   if (!select || !input) return;
   const save = async () => {
     const k = select.value;
-    if ((k === "shortcut" || k === "linear") && !input.value.trim()) {
+    if (needsWorkspace(k) && !input.value.trim()) {
+      input.placeholder = workspacePlaceholder(k);
       input.hidden = false;
       input.focus();
       return;
@@ -261,6 +267,10 @@ export async function renderTrackerRow(cwd: string): Promise<void> {
       await renderTrackerRow(cwd);
     }
   };
-  select.onchange = () => void save();
+  select.onchange = () => {
+    // A Shortcut/Linear slug is not a Trello board id, so crossing that line drops it.
+    if ((select.value === "trello") !== (kind === "trello")) input.value = "";
+    void save();
+  };
   input.onchange = () => void save();
 }
