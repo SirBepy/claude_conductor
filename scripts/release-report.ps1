@@ -3,8 +3,8 @@ What the app recorded since the last release that a person should look at,
 shown by /release step 1d (`.claude/release-reports.txt`). Two sources:
 
 1. `<data_dir>/rejected-sends.jsonl` (src-tauri/src/daemon/hooks_server/rejected_sends.rs):
-   relay calls the daemon turned down with ok:false. The chat draws nothing
-   for them, so the same shape many times means a tool schema or its error text
+   send_message / update_message validation failures and undecodable request
+   bodies. The chat draws nothing for them, so the same shape many times means a tool schema or its error text
    steers callers wrong.
 2. The app log (`%LOCALAPPDATA%\com.sirbepy.claudeconductor\logs\*.log`, UTC):
    ERROR lines and WARN lines, grouped by target and message shape.
@@ -65,7 +65,7 @@ foreach ($name in 'rejected-sends.jsonl.old', 'rejected-sends.jsonl') {
   if (-not (Test-Path $f)) { continue }
   foreach ($line in @(ReadLinesShared $f)) {
     try { $r = $line | ConvertFrom-Json } catch { continue }
-    if ([datetime]$r.at -ge $cutoff) { $rejected += $r }
+    if (([datetimeoffset]$r.at).UtcDateTime -ge $cutoff) { $rejected += $r }
   }
 }
 Show 'Rejected relay calls' $rejected 'route | kind | error shape' { "$($_.route) | $($_.kind) | $(Shape $_.error)" } 12

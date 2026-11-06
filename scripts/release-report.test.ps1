@@ -17,6 +17,7 @@ try {
   $rejected = @(
     '{"at":"2026-11-06T12:00:00Z","route":"/messages/send","session_id":"a","kind":"report","error":"text is 250 chars, over report''s 200"}',
     '{"at":"2026-11-06T12:01:00Z","route":"/messages/send","session_id":"a","kind":"report","error":"text is 261 chars, over report''s 200"}',
+    '{"at":"2026-10-31T23:30:00+00:00","route":"/messages/send","session_id":"a","kind":"answer","error":"thirty minutes before the cutoff"}',
     '{"at":"2026-10-01T12:00:00Z","route":"/messages/send","session_id":"a","kind":"answer","error":"before the cutoff"}',
     'not json'
   )
@@ -35,7 +36,7 @@ try {
   foreach ($l in $log) { $w.WriteLine($l) }
   $w.Flush()
 
-  $out = & powershell -NoProfile -File $script -Since '2026-11-01' -Data $data -Logs $logs 2>&1 | Out-String
+  $out = & powershell -NoProfile -File $script -Since '2026-11-01T00:00:00Z' -Data $data -Logs $logs 2>&1 | Out-String
   $w.Dispose()
 
   Check ($out -match 'Rejected relay calls \(2\)') 'two rejections inside the window, the older one and the junk line left out'
@@ -44,6 +45,7 @@ try {
   Check ($out -match '2\s+daemon::x \| boom N for <id>') 'numbers and ids fold so the two ERRORs share one shape'
   Check ($out -match 'App log WARN lines \(1\)') 'a WARN is counted and an INFO is not'
   Check ($out -notmatch 'before the cutoff') 'nothing older than the cutoff appears'
+  Check ($out -notmatch 'thirty minutes') 'a row just before the cutoff is out whatever the machine time zone'
 
   $none = & powershell -NoProfile -File $script -Since '2027-01-01' -Data $data -Logs $logs 2>&1 | Out-String
   Check ($none -match 'Rejected relay calls \(0\)' -and $none -match 'none') 'a window with nothing in it says none'
