@@ -7,11 +7,13 @@
 // Parsing is lenient where the daemon is strict: a malformed visual is dropped
 // rather than failing the card, since the rest of the card still reads.
 
+import { asObj } from "../obj-utils";
+
 export interface TableVisual { type: "table"; title?: string; columns: string[]; rows: (string | number | null)[][] }
 export interface BarVisual { type: "bar"; title?: string; unit?: string; data: { label: string; value: number }[] }
 export interface LineVisual { type: "line"; title?: string; labels: string[]; series: { name: string; values: number[] }[] }
 export interface DonutVisual { type: "donut"; title?: string; data: { label: string; value: number }[] }
-export interface TimelineBlock { start: number; end: number; label?: string }
+interface TimelineBlock { start: number; end: number; label?: string }
 export interface TimelineVisual { type: "timeline"; title?: string; rows: { label: string; blocks: TimelineBlock[] }[] }
 export type Visual = TableVisual | BarVisual | LineVisual | DonutVisual | TimelineVisual;
 
@@ -20,7 +22,6 @@ const MAX_VISUALS = 3;
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() !== "" ? v : undefined);
 const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
-const obj = (v: unknown): Record<string, unknown> => (v !== null && typeof v === "object" ? (v as Record<string, unknown>) : {});
 
 /** "HH:MM" to minutes since midnight; `24:00` is allowed as an end. */
 export function parseClock(v: unknown): number | undefined {
@@ -33,7 +34,7 @@ export function parseClock(v: unknown): number | undefined {
 function labelled(raw: unknown, positive: boolean): { label: string; value: number }[] {
   const out: { label: string; value: number }[] = [];
   for (const d of arr(raw)) {
-    const { label, value } = obj(d);
+    const { label, value } = asObj(d);
     const v = num(value);
     if (str(label) !== undefined && v !== undefined && v >= 0 && !(positive && v === 0)) out.push({ label: label as string, value: v });
   }
@@ -41,7 +42,7 @@ function labelled(raw: unknown, positive: boolean): { label: string; value: numb
 }
 
 function parseOne(raw: unknown): Visual | undefined {
-  const o = obj(raw);
+  const o = asObj(raw);
   const title = str(o.title);
   switch (o.type) {
     case "table": {
@@ -66,7 +67,7 @@ function parseOne(raw: unknown): Visual | undefined {
       if (labels.length < 2 || labels.some((l) => l === undefined)) return undefined;
       const series: { name: string; values: number[] }[] = [];
       for (const s of arr(o.series)) {
-        const { name, values } = obj(s);
+        const { name, values } = asObj(s);
         const vs = arr(values).map(num);
         if (str(name) !== undefined && vs.length === labels.length && vs.every((v) => v !== undefined)) series.push({ name: name as string, values: vs as number[] });
       }
@@ -75,10 +76,10 @@ function parseOne(raw: unknown): Visual | undefined {
     case "timeline": {
       const rows: TimelineVisual["rows"] = [];
       for (const r of arr(o.rows)) {
-        const { label, blocks } = obj(r);
+        const { label, blocks } = asObj(r);
         const bs: TimelineBlock[] = [];
         for (const b of arr(blocks)) {
-          const { start, end, label: bl } = obj(b);
+          const { start, end, label: bl } = asObj(b);
           const s = parseClock(start);
           const e = parseClock(end);
           if (s !== undefined && e !== undefined && e > s) bs.push({ start: s, end: e, label: str(bl) });
@@ -95,7 +96,7 @@ function parseOne(raw: unknown): Visual | undefined {
 /** Reads `visuals` off a tool_use input. Absent key is `undefined`; an explicit
  *  list with nothing valid is `[]`, which update_message uses to clear earlier ones. */
 export function parseVisuals(input: unknown): Visual[] | undefined {
-  const raw = obj(input).visuals;
+  const raw = asObj(input).visuals;
   if (!Array.isArray(raw)) return undefined;
   return raw.slice(0, MAX_VISUALS).map(parseOne).filter((v): v is Visual => v !== undefined);
 }

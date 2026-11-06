@@ -132,7 +132,7 @@ function timelineHtml(v: TimelineVisual): string {
   return figure(v.title, "mv-timeline", `<div class="mv-tl"><div class="mv-tl-axis"><span></span><span class="mv-tl-ticks">${ticks.join("")}</span><span></span></div>${rows}</div>`);
 }
 
-export function renderVisual(v: Visual): string {
+function renderVisual(v: Visual): string {
   switch (v.type) {
     case "table": return tableHtml(v);
     case "bar": return barHtml(v);
