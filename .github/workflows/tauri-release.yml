@@ -173,7 +173,7 @@ jobs:
             updater_key: windows-x86_64
             os_label: windows
             arch_label: x64
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             updater_key: darwin-aarch64
             os_label: macos
@@ -286,8 +286,8 @@ jobs:
           # staging steps and broke every 0.2.53 platform. Env outranks config.
           CARGO_TARGET_DIR: target
         working-directory: src-tauri
-        # Invoke cargo-tauri directly, not `cargo tauri`. On macos-14 runners
-        # `/opt/homebrew/bin/cargo` is a rustup-init shim that shadows the real
+        # Invoke cargo-tauri directly, not `cargo tauri`. On macOS runners
+        # (seen on macos-14) `/opt/homebrew/bin/cargo` is a rustup-init shim that shadows the real
         # `~/.cargo/bin/cargo` and breaks subcommand dispatch with
         # "error: unexpected argument 'tauri' found / Usage: rustup-init".
         # Calling cargo-tauri (the actual binary installed by tauri-cli) skips
