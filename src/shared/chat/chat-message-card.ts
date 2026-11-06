@@ -128,9 +128,12 @@ function chipsHtml(card: MessageCard): string {
   return chip(card.done?.length ?? 0, "done", "ph-check", "done") + chip(notDone, "not", "ph-warning-circle", "not done") + chip(waiting, "wait", "ph-hourglass-medium", "waiting");
 }
 
-function pointsDetailsHtml(points: readonly string[], text: RenderText): string {
+/** A rating's points are its ways to raise the score, the part Joe wants without a click; other kinds keep theirs folded. */
+function pointsDetailsHtml(points: readonly string[], text: RenderText, kind: string): string {
   const n = points.length;
-  return `<details class="mc-points"><summary class="mc-toggle"><span>${n} more point${n === 1 ? "" : "s"}</span>${caret}</summary><ul class="mc-points-list">${points.map((p) => `<li>${text(p)}</li>`).join("")}</ul></details>`;
+  const rating = kind === "rating";
+  const label = rating ? "How to raise it" : `${n} more point${n === 1 ? "" : "s"}`;
+  return `<details class="mc-points"${rating ? " open" : ""}><summary class="mc-toggle"><span>${label}</span>${caret}</summary><ul class="mc-points-list">${points.map((p) => `<li>${text(p)}</li>`).join("")}</ul></details>`;
 }
 
 function copyBlockHtml(copy: string): string {
@@ -167,7 +170,7 @@ function fullHtml(m: RenderedMessage, card: MessageCard, text: RenderText, extra
       parts.push(drills);
     }
   }
-  if (card.points?.length) parts.push(pointsDetailsHtml(card.points, text));
+  if (card.points?.length) parts.push(pointsDetailsHtml(card.points, text, card.kind));
   if (extras?.extraHtml) parts.push(extras.extraHtml);
   return parts.join("");
 }
