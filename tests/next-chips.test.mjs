@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 const { nextChips, withReply } = await import("../src/views/sessions/next-chips.ts");
 
 const done = { awaiting: "done", busy: false, closing: false, ended_at: null, frozen: false, kind: "interactive" };
-const ctx = (over = {}, inst = {}) => ({ enabled: true, wrapUp: false, hasHeld: false, inst: { ...done, ...inst }, ...over });
+const ctx = (over = {}, inst = {}) => ({ enabled: true, hasHeld: false, inst: { ...done, ...inst }, ...over });
 
 describe("nextChips", () => {
   it("offers /close once the turn finished", () => {
@@ -34,10 +34,6 @@ describe("nextChips", () => {
     expect(nextChips(ctx({ hasHeld: true }))).toEqual([]);
   });
 
-  it("offers no /close when the chat wraps up on its own", () => {
-    expect(nextChips(ctx({ wrapUp: true }))).toEqual([]);
-  });
-
   it("lists the model's replies after /close", () => {
     expect(nextChips(ctx({ nextActions: ["Yes, implement this", "/commit"] }))).toEqual(["/close", "Yes, implement this", "/commit"]);
   });
@@ -58,10 +54,6 @@ describe("nextChips", () => {
     expect(nextChips(ctx({ nextActions: ["Go", "go"] }))).toEqual(["/close", "Go"]);
   });
 
-  it("keeps the model's replies but not /close while the chat wraps up on its own", () => {
-    expect(nextChips(ctx({ wrapUp: true, nextActions: ["Go"] }))).toEqual(["Go"]);
-  });
-
   it("hides the model's replies on every gate that hides /close", () => {
     expect(nextChips(ctx({ nextActions: ["Go"] }, { awaiting: "question" }))).toEqual([]);
     expect(nextChips(ctx({ nextActions: ["Go"], enabled: false }))).toEqual([]);
@@ -69,7 +61,7 @@ describe("nextChips", () => {
   });
 
   it("offers nothing without a registry row (a draft)", () => {
-    expect(nextChips({ enabled: true, wrapUp: false, hasHeld: false, inst: undefined })).toEqual([]);
+    expect(nextChips({ enabled: true, hasHeld: false, inst: undefined })).toEqual([]);
   });
 
   // First real run: a main chat showed /close although its prompt says never to
@@ -83,10 +75,6 @@ describe("nextChips", () => {
     it("shows /close in a main chat when its own latest reply asks for it", () => {
       expect(nextChips(ctx({ role: "main", nextActions: ["/close", "Go"] }))).toEqual(["/close", "Go"]);
       expect(nextChips(ctx({ role: "main", nextActions: ["Go", "/CLOSE now"] }))).toEqual(["/close", "Go"]);
-    });
-
-    it("still respects wrap-up, even for a main chat that asked", () => {
-      expect(nextChips(ctx({ role: "main", wrapUp: true, nextActions: ["/close"] }))).toEqual([]);
     });
 
     it("never offers /close in a sub's view, whatever it wrote", () => {

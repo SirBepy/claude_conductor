@@ -31,7 +31,6 @@ const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "open-chat-8", defaultKeys: "ctrl+8", label: "Open chat 8", description: "Open the 8th most recent chat", context: "sessions", suppressInInput: false },
   { id: "open-chat-9", defaultKeys: "ctrl+9", label: "Open chat 9", description: "Open the 9th most recent chat", context: "sessions", suppressInInput: false },
   { id: "close-chat",  defaultKeys: "ctrl+w", label: "Close chat",  description: "Close the focused chat (always asks to confirm)", context: "sessions", suppressInInput: false },
-  { id: "toggle-wrap-up-on-done", defaultKeys: "ctrl+shift+w", label: "Toggle wrap up when done", description: "Have Claude self-verify, commit, and close the focused chat on its own once nothing more is needed from you", context: "sessions", suppressInInput: false },
   { id: "project-dashboard", defaultKeys: "ctrl+shift+d", label: "Project dashboard", description: "Show the focused chat's project dashboard", context: "sessions", suppressInInput: false },
   { id: "set-model-1", defaultKeys: "alt+1", label: "Model: Haiku",  description: "Switch the open chat or draft to the 1st model", context: "sessions", suppressInInput: false },
   { id: "set-model-2", defaultKeys: "alt+2", label: "Model: Sonnet", description: "Switch the open chat or draft to the 2nd model", context: "sessions", suppressInInput: false },

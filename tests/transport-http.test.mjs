@@ -614,10 +614,19 @@ describe("HttpTransport.call mapping", () => {
       params: {
         cwd: "/proj", model: "opus", effort: "high", remote: true,
         placeholder_id: "pending-1", account_id: null, machine_id: "peer-1",
-        auto_accept: true,
+        auto_accept: true, subchats_on: false,
       },
     });
     expect(out).toBe("new-1");
+  });
+
+  it("forwards a draft's Use subchats choice in the start_session RPC itself", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ session_id: "new-3" }) });
+    await new HttpTransport().call("start_session", {
+      cwd: "/proj", model: "opus", effort: "high", remote: true,
+      placeholderId: "pending-3", accountId: null, autoAccept: true, subchatsOn: true,
+    });
+    expect(body().params.subchats_on).toBe(true);
   });
 
   it("defaults start_session's machine_id to null when machineId is omitted (local machine)", async () => {

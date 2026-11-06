@@ -17,8 +17,6 @@ vi.mock("../src/views/sessions/permission-modal", () => ({
   isAutoAccept: () => false,
   setAutoAccept: () => {},
   autoAcceptParked: () => {},
-  isWrapUpOnDone: () => false,
-  setWrapUpOnDone: () => {},
 }));
 vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({
   loadHiddenSessions: () => new Set(),
@@ -44,7 +42,7 @@ const { buildConfigureItems } = await import("../src/views/sessions/chat-menu-it
 
 const ctx = (over = {}) => ({
   kind: "live", sessionId: "s1", cwd: "C:/p", pid: 1, readOnly: false, autoAcceptOn: false,
-  wrapUpOnDoneOn: false, isHidden: false, ...over,
+  isHidden: false, ...over,
 });
 const find = (items) => items.find((i) => i.label === "Edit statusline");
 

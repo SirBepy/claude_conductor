@@ -31,7 +31,7 @@ describe("wireKeyboardShortcuts disposer", () => {
     });
 
     const dispose = wireKeyboardShortcuts(document.createElement("ul"));
-    expect(registered).toContain("toggle-wrap-up-on-done");
+    expect(registered).toContain("close-chat");
     dispose();
 
     expect(unregistered.sort()).toEqual([...registered].sort());

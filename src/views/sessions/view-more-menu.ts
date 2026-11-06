@@ -31,7 +31,7 @@ import {
   type ChatMenuCtx,
 } from "./chat-menu";
 import { loadHiddenSessions, loadHiddenProjects, isJarvisOrWorker, isSubchat, loadSort, loadUnreadSet, deriveQuestionSet, isMirrored } from "./sessions-helpers";
-import { isAutoAccept, isWrapUpOnDone, isSubchatsOn, pendingPromptSessionIds } from "./permission-modal";
+import { isAutoAccept, isSubchatsOn, pendingPromptSessionIds } from "./permission-modal";
 import { subchatsBlockedReason } from "./subchats-gate";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { openSchedule } from "../../shared/open-schedule";
@@ -334,7 +334,6 @@ const viewMenu = createMoreMenu<[]>({
           pid: sess?.pid ?? null,
           readOnly: sess?.kind === "external" || sess?.kind === "automated",
           autoAcceptOn: isAutoAccept(sid),
-          wrapUpOnDoneOn: isWrapUpOnDone(sid),
           subchatsOn: isSubchatsOn(sid),
           subchatsBlockedReason: subchatsBlockedReason(sess?.account_id),
           isSub: !!sess && isSubchat(sess),
@@ -358,7 +357,6 @@ const viewMenu = createMoreMenu<[]>({
           pid: null,
           readOnly: false,
           autoAcceptOn: false,
-          wrapUpOnDoneOn: false,
           subchatsOn: false,
           isHidden: false,
           isJarvis: false,

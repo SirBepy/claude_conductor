@@ -27,6 +27,7 @@ import { showToast } from "../../shared/toast";
 import { loadMachineAccounts } from "./machine-accounts";
 import { applyHeaderMerge } from "./mobile-header-merge";
 import { draftSpawnInFlight, moveSpawnedChat } from "./pending-pane-spawn";
+import { syncDraftSubchats } from "./draft-subchats";
 
 export function rebuildSidebar(): void {
   const listEl = document.querySelector<HTMLElement>("#sessions-list");
@@ -245,6 +246,8 @@ export async function changePendingAccount(
     pending.config.accountId = picked;
     savePendingSession(pending);
   }
+  // The new account may be one that cannot run subchats (API credit).
+  syncDraftSubchats(document, config);
 }
 
 /** Attach the ChatRenderer to the pending pane and watch for the placeholder's

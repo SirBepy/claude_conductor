@@ -422,6 +422,8 @@ export class HttpTransport implements Transport {
           // no wait for the "session_started" WS event that would otherwise
           // drive that follow-up call - see pending-pane.ts's autoAccept comment.
           auto_accept: (args.autoAccept ?? args.auto_accept) !== false,
+          // Same reason: the first spawn already has to carry the main-chat prompt.
+          subchats_on: (args.subchatsOn ?? args.subchats_on) === true,
         });
         const sid = spawnResult.session_id;
         const promptText = typeof args.prompt === "string" ? args.prompt.trim() : "";

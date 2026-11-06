@@ -73,19 +73,6 @@ test.describe("quick reply chips", () => {
     });
   }
 
-  test("turning Wrap up when done on hides the chip at once, off brings it back", async ({ page }) => {
-    await mountChat(page, {}, { set_wrap_up_on_done: null, list_wrap_up_on_done: [] });
-    await expect(chip(page)).toHaveText(["/close"]);
-    const flip = (on: boolean) => page.evaluate(async (value) => {
-      const gating = await import("/views/sessions/permission-modal/gating.ts");
-      gating.setWrapUpOnDone("s1", value);
-    }, on);
-    await flip(true);
-    await expect(chip(page)).toHaveCount(0);
-    await flip(false);
-    await expect(chip(page)).toHaveText(["/close"]);
-  });
-
   test("no chip with the setting off", async ({ page }) => {
     await mountChat(page, {}, { get_settings: { nextActionChips: false } });
     await expect(page.locator("#session-pane .next-chip-slot")).toBeHidden();

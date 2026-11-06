@@ -25,7 +25,7 @@ vi.mock("../src/views/sessions/active-session-mount.ts", () => ({ wireRenderer: 
 vi.mock("../src/views/sessions/chat-pane-cache.ts", () => ({ retainChat: vi.fn() }));
 vi.mock("../src/views/sessions/session-header.ts", () => ({ SessionHeader: vi.fn(), projectDashboardOpener: vi.fn() }));
 vi.mock("../src/views/sessions/permission-modal.ts", () => ({
-  isAutoAccept: vi.fn(), isWrapUpOnDone: vi.fn(), setWrapUpOnDone: vi.fn(), rerenderSidebar: vi.fn(),
+  isAutoAccept: vi.fn(),
 }));
 vi.mock("../src/views/sessions/session-characters.ts", () => ({ characterForSession: vi.fn(), characterIconUrl: vi.fn() }));
 vi.mock("../src/shared/projects.ts", () => ({

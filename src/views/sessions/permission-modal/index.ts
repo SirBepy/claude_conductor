@@ -33,7 +33,6 @@ import {
   displayIdOf,
   needsHumanApproval,
   hydrateAutoAccept,
-  hydrateWrapUpOnDone,
   hydrateSubchatsOn,
   onSubchatsChange,
   isAutoAccept,
@@ -56,10 +55,9 @@ export type { ShowQuestionCardOpts } from "./question-submit";
 export {
   isAutoAccept,
   setAutoAccept,
-  isWrapUpOnDone,
-  setWrapUpOnDone,
   isSubchatsOn,
   setSubchatsOn,
+  adoptSubchatsOn,
   setSelectedSessionId,
   getSelectedSessionId,
   clearPendingPrompt,
@@ -470,7 +468,6 @@ export function installPermissionModalListener(): void {
   // restart. Done before the transport split below so the phone (which has no
   // Tauri event bus) still hydrates its gate.
   void hydrateAutoAccept();
-  void hydrateWrapUpOnDone();
   // The Main chats group is built from the mode flags, which change outside any
   // instance refresh (the menu toggle, this hydrate). Registered here rather
   // than at module scope: state.ts and this file import each other, so gating

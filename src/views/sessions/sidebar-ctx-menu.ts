@@ -14,7 +14,7 @@ import {
   isSubchat,
 } from "./sessions-helpers";
 import { loadAnimEnabled, markSessionExiting } from "./sidebar-anim";
-import { isAutoAccept, isWrapUpOnDone, isSubchatsOn } from "./permission-modal";
+import { isAutoAccept, isSubchatsOn } from "./permission-modal";
 import { subchatsBlockedReason } from "./subchats-gate";
 import { closeNeedsApproval, closeNeedsConfirm } from "./close-chat";
 import {
@@ -60,7 +60,6 @@ export function openDraftCtxMenu(
     pid: null,
     readOnly: false,
     autoAcceptOn: false,
-    wrapUpOnDoneOn: false,
     subchatsOn: false,
     isHidden: false,
     isJarvis: false,
@@ -107,7 +106,6 @@ export function openCtxMenu(
     pid: sess.pid ?? null,
     readOnly: sess.kind === "external" || sess.kind === "automated",
     autoAcceptOn: isAutoAccept(sessionId),
-    wrapUpOnDoneOn: isWrapUpOnDone(sessionId),
     subchatsOn: isSubchatsOn(sessionId),
     subchatsBlockedReason: subchatsBlockedReason(sess.account_id),
     isSub: isSubchat(sess),

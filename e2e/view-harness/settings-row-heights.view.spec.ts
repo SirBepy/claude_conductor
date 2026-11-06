@@ -45,7 +45,6 @@ const INVOKE = {
   list_remote_devices: [{ id: "d1", name: "Pixel 8", created_at: 1760000000, last_used: 1760100000, kind: "phone" }],
   list_machines: { self: { machine_id: "m0", label: "Desktop", os: "windows" }, peers: [] },
   list_auto_accept: [],
-  list_wrap_up_on_done: [],
   get_settings_load_notice: null,
 };
 

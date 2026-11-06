@@ -14,9 +14,6 @@ export interface NextChipsCtx {
   enabled: boolean;
   /** The open chat's registry row; undefined for a draft or an unknown id. */
   inst: Pick<Instance, "awaiting" | "busy" | "closing" | "ended_at" | "frozen" | "kind"> | undefined;
-  /** "Wrap up when done" runs /commit and /close by itself, so the chip would
-   *  offer a close the chat is about to do on its own. */
-  wrapUp: boolean;
   /** The "Waiting to send" bar is up: a held message is about to go out. */
   hasHeld: boolean;
   /** Replies Claude attached to its last message this turn (parseNextActions). */
@@ -62,10 +59,9 @@ export function nextChips(ctx: NextChipsCtx): string[] {
   // keeps it open until Joe says so); a sub never does, whatever it wrote.
   const askedClose = (ctx.nextActions ?? []).some(isClose);
   const offerClose = ctx.role === "main" ? askedClose : ctx.role !== "sub";
-  if (!ctx.wrapUp && offerClose) chips.push(CLOSE);
+  if (offerClose) chips.push(CLOSE);
   for (const action of ctx.nextActions ?? []) {
-    // The strip already offers /close; a model-written one would duplicate it,
-    // or offer a close the chat's wrap-up is about to do itself.
+    // The strip already offers /close; a model-written one would duplicate it.
     if (isClose(action)) continue;
     if (!chips.some((c) => c.toLowerCase() === action.toLowerCase())) chips.push(action);
   }

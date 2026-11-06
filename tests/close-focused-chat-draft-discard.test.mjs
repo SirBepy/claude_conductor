@@ -26,11 +26,8 @@ vi.mock("../src/views/sessions/pending-draft-storage.ts", () => ({ saveParkedDra
 vi.mock("../src/views/sessions/session-thinking-bar.ts", () => ({ updateThinkingBar: vi.fn() }));
 vi.mock("../src/shared/navigation.ts", () => ({ showView: vi.fn() }));
 vi.mock("../src/views/sessions/permission-modal.ts", () => ({
-  isWrapUpOnDone: vi.fn(() => false),
-  setWrapUpOnDone: vi.fn(),
   rerenderSidebar: vi.fn(),
 }));
-vi.mock("../src/views/sessions/session-header.ts", () => ({ refreshWrapUpIndicator: vi.fn() }));
 
 const { state } = await import("../src/views/sessions/state.ts");
 const { closeFocusedChat } = await import("../src/views/sessions/session-controls.ts");

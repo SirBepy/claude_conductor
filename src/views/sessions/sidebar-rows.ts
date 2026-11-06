@@ -14,7 +14,6 @@ import {
   scheduledCornerHtml,
   heldCornerHtml,
   modelBatteryHtml,
-  wrapUpChipHtml,
   askingDotsHtml,
   subCountHtml,
   closeWaitChipHtml,
@@ -22,7 +21,6 @@ import {
 import type { LeadingExtras } from "./sidebar-row-visuals";
 import { chainRowKey } from "./successor-follow";
 import { GENERIC_MACHINE_ICON, hasPairedMachines, machineIcon, selfMachineLabel } from "./machine-icons";
-import { isWrapUpOnDone } from "./permission-modal";
 import { ringHtml, ringSpecFor, mainChatRingSpec } from "./sidebar-ring";
 import type { MainChatInfo } from "./main-chat";
 import type { QuestionRingInfo } from "./sidebar-ring";
@@ -143,7 +141,6 @@ function buildRowOptions(args: {
   needsAttention: boolean;
   frozen: boolean;
   autoFrozen: boolean;
-  wrapUpOnDone: boolean;
   scheduledCount: number | undefined;
   heldCount: number | undefined;
   model: string;
@@ -171,7 +168,7 @@ function buildRowOptions(args: {
     statusTitle: args.statusTitle ?? "",
     avatarExtras: {
       badgeClass: "is-centred",
-      extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount) + wrapUpChipHtml(args.wrapUpOnDone, tipAttr),
+      extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount),
       ringHtml: ringHtml(args.mainChat
         ? mainChatRingSpec(args.dotClass, args.question, args.mainChat.allFinished)
         : ringSpecFor(args.dotClass, args.plan, args.question)),
@@ -244,7 +241,6 @@ export function sessionRowOptions(
     needsAttention,
     frozen: !!s.frozen,
     autoFrozen: !!s.auto_frozen,
-    wrapUpOnDone: isWrapUpOnDone(s.session_id),
     scheduledCount: ctx.scheduledCountMap.get(s.session_id),
     heldCount: s.held_count || undefined,
     model: s.model,
@@ -283,7 +279,6 @@ export function draftRowOptions(
     needsAttention: false,
     frozen: false,
     autoFrozen: false,
-    wrapUpOnDone: false,
     scheduledCount: undefined,
     heldCount: undefined,
     model: pending.config.model,
@@ -311,7 +306,6 @@ export function parkedRowOptions(d: ParkedDraft, kbdHint: string = ""): RowOptio
     needsAttention: false,
     frozen: false,
     autoFrozen: false,
-    wrapUpOnDone: false,
     scheduledCount: undefined,
     heldCount: undefined,
     model: d.config.model,

@@ -25,7 +25,6 @@ const INVOKE = {
   remote_access_status: { enabled: false },
   remote_access_qr: { svg: "<svg width='80' height='80'></svg>", url: "http://x/pair", iroh: null },
   list_auto_accept: [],
-  list_wrap_up_on_done: [],
   get_settings_load_notice: null,
   list_installed_skills: [],
   list_projects: [],

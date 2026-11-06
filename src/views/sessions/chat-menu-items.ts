@@ -11,13 +11,10 @@ import {
   isAutoAccept,
   setAutoAccept,
   autoAcceptParked,
-  isWrapUpOnDone,
-  setWrapUpOnDone,
   isSubchatsOn,
   setSubchatsOn,
   rerenderSidebar,
 } from "./permission-modal";
-import { refreshWrapUpIndicator } from "./session-header";
 import {
   loadHiddenSessions,
   saveHiddenSessions,
@@ -36,14 +33,6 @@ export interface ChatMenuCtx {
   pid: number | null;
   readOnly: boolean;
   autoAcceptOn: boolean;
-  /** "Wrap up when done" (per-session): while on, every turn's system prompt
-   *  carries a standing instruction to self-verify and `/close` once the
-   *  model believes the task is finished, unless it still needs something
-   *  from Joe. Also drives the header/row badges and the menu's own
-   *  checkDot (sidebar-rows.ts, session-header.ts) - unlike auto-accept there
-   *  is no draft-time parking equivalent of `autoAcceptParked`, since nothing
-   *  here gates a live permission event. */
-  wrapUpOnDoneOn: boolean;
   /** "Use subchats" (per-session): the chat hands jobs Joe names to hidden
    *  child chats. Menu-only: no header badge or shortcut. */
   subchatsOn: boolean;
@@ -267,23 +256,6 @@ export function buildConfigureItems(ctx: ChatMenuCtx): ItemDesc[] {
         ? "Available once the chat starts"
         : (!sessionId ? "No session" : (ctx.isJarvis ? "Jarvis always auto-accepts" : undefined)),
     },
-    {
-      icon: "flag-checkered",
-      label: "Wrap up when done",
-      isOn: ctx.wrapUpOnDoneOn,
-      checkDot: ctx.wrapUpOnDoneOn,
-      run: isDraft || !sessionId
-        ? undefined
-        : () => {
-            const next = !isWrapUpOnDone(sessionId);
-            setWrapUpOnDone(sessionId, next);
-            refreshWrapUpIndicator(state.selectedId, sessionId, next);
-            rerenderSidebar();
-          },
-      disabledReason: isDraft
-        ? "Available once the chat starts"
-        : (!sessionId ? "No session" : undefined),
-    },
     ...(ctx.isSub ? [] : [{
       icon: "tree-structure",
       label: "Use subchats",
@@ -303,7 +275,7 @@ export function buildConfigureItems(ctx: ChatMenuCtx): ItemDesc[] {
             rerenderSidebar();
           },
       disabledReason: isDraft
-        ? "Available once the chat starts"
+        ? "Set with the switch above the message box"
         : (!sessionId ? "No session" : (ctx.subchatsOn ? undefined : ctx.subchatsBlockedReason)),
     }]),
     {
