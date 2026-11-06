@@ -41,6 +41,9 @@ export interface DashboardDeps {
   back(): void;
   /** The shown target no longer exists (deleted group). */
   deselect(): void;
+  /** Adds a group of its own under the rail's settings once their rows are in (a
+   *  draft's "This chat" choices). Never called when the dashboard has no rail. */
+  railExtra?(body: HTMLElement): void;
 }
 
 export interface DashboardHandle {
@@ -173,7 +176,9 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
       rail.innerHTML = `<div class="pd-rail-title">Project settings</div><div class="pd-rail-body"></div>`;
       // A rail that fails to fill must not take the dashboard's paint down with it.
       const shown = rail;
-      renderProjectSettings(shown.querySelector<HTMLElement>(".pd-rail-body")!, repo.cwd)
+      const railBody = shown.querySelector<HTMLElement>(".pd-rail-body")!;
+      renderProjectSettings(railBody, repo.cwd)
+        .then(() => { if (!destroyed) deps.railExtra?.(railBody); })
         .catch((err) => console.warn("[project-dashboard] project settings rail failed", err))
         .finally(() => {
           if (destroyed) return;
