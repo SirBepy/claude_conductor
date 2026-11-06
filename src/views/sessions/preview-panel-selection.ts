@@ -102,7 +102,7 @@ export class PreviewSelection {
       const all = Array.isArray(list) ? list : [];
       this.snapshots = all.filter((m) => inFamily(m.session_id, this.sessionId));
       this.snapshots.forEach((s) => this.seenIds.add(s.id));
-      // The list now covers only this chat, so only this chat's cached
+      // The list now covers only this chat and its subs, so only their cached
       // snapshots can be judged gone; another chat's stay until it is revisited.
       const listed = new Map(all.map((m) => [m.id, m]));
       for (const [key, cached] of this.snapshotCache) {

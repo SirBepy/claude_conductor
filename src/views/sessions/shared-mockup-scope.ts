@@ -3,6 +3,7 @@
 // every other chat still sees only its own. Reading a sub in place scopes the
 // panel to the sub's family, so it shows the same page with that sub's chip.
 
+import { escapeHtml } from "../../shared/escape-html";
 import type { Instance } from "../../types/ipc.generated";
 import { mainChatInfo } from "./main-chat";
 import { subInitials, subRingSpec } from "./sub-list";
@@ -41,7 +42,7 @@ export function ownerTag(ownerId: string | null | undefined): OwnerTag | null {
   if (!sub) return null;
   return {
     name: sub.name,
-    avatarHtml: `<span class="sub-dot pvs-dot">${subInitials(sub.name)}${ringHtml(subRingSpec(sub, owner))}</span>`,
+    avatarHtml: `<span class="sub-dot pvs-dot">${escapeHtml(subInitials(sub.name))}${ringHtml(subRingSpec(sub, owner))}</span>`,
   };
 }
 
