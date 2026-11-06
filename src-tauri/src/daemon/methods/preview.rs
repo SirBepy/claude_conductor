@@ -128,7 +128,8 @@ fn in_family(state: &DaemonState, owner: &str, scope: &str) -> bool {
 
 /// What a caller may list. A phone token already reads the whole timeline, so
 /// a phone or the desktop pipe gets everything unless it names a session. A
-/// paired peer gets ONLY the previews of one chat this machine hosts: it
+/// paired peer gets ONLY the previews of one chat this machine hosts, and of
+/// that chat's subs (`family`): it
 /// must name that chat, the chat must be hosted here (so a peer cannot pull
 /// previews filed under a third machine's or an unknown id), and previews with
 /// no session at all (terminal pushes) never leave this machine for a peer.
