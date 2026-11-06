@@ -30,6 +30,7 @@
 @import "./chat-messages-user.css";
 @import "./chat-messages-assistant.css";
 @import "./chat-message-cards.css";
+@import "./message-visuals.css";
 @import "./chat-messages-system.css";
 @import "./chat-messages-tool.css";
 @import "./chat-messages-markdown.css";

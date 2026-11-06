@@ -58,6 +58,10 @@ pub(super) struct SendMessageBody {
     was: Option<String>,
     #[serde(default)]
     copy: Option<String>,
+    // Tables and charts. Loose Values so one malformed visual is an `ok:false`
+    // naming the fix, never a body-decode error (see `visuals.rs`).
+    #[serde(default)]
+    visuals: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Deserialize)]
@@ -70,6 +74,8 @@ pub(super) struct UpdateMessageBody {
     retract: bool,
     #[serde(default)]
     details: Option<Vec<Detail>>,
+    #[serde(default)]
+    visuals: Option<Vec<serde_json::Value>>,
 }
 
 /// One click-to-open detail. The daemon does not store it: the frontend reads
@@ -233,6 +239,12 @@ fn validate_send(body: &SendMessageBody) -> Result<(), String> {
             return Err(format!("was is {n} chars, over {MAX_WAS}: quote the earlier claim shorter"));
         }
     }
+    if let Some(visuals) = body.visuals.as_deref() {
+        if kind == "ack" {
+            return Err("ack takes no visuals: it is a bare acknowledgement".to_string());
+        }
+        super::visuals::validate_visuals(visuals)?;
+    }
     if let Some(copy) = body.copy.as_deref() {
         if kind != "do_this" {
             return Err(format!("copy is only for do_this, not {kind}: remove it"));
@@ -344,6 +356,9 @@ pub(super) async fn on_update_message(
         }
     }
     if let Some(Err(e)) = body.details.as_deref().map(validate_details) {
+        return details_rejection(e);
+    }
+    if let Some(Err(e)) = body.visuals.as_deref().map(super::visuals::validate_visuals) {
         return details_rejection(e);
     }
     // A revision counts as this turn having spoken, so a correction-only turn
@@ -657,7 +672,7 @@ mod tests {
     #[tokio::test]
     async fn retract_needs_no_text() {
         let body = UpdateMessageBody {
-            session_id: "s".into(), message: 1, text: None, retract: true, details: None,
+            session_id: "s".into(), message: 1, text: None, retract: true, details: None, visuals: None,
         };
         let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(true));
@@ -666,7 +681,7 @@ mod tests {
     #[tokio::test]
     async fn edit_without_text_is_rejected() {
         let body = UpdateMessageBody {
-            session_id: "s".into(), message: 1, text: None, retract: false, details: None,
+            session_id: "s".into(), message: 1, text: None, retract: false, details: None, visuals: None,
         };
         let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         let v = body_json(resp).await;
@@ -677,7 +692,7 @@ mod tests {
     #[tokio::test]
     async fn zero_ordinal_is_rejected() {
         let body = UpdateMessageBody {
-            session_id: "s".into(), message: 0, text: Some("x".into()), retract: false, details: None,
+            session_id: "s".into(), message: 0, text: Some("x".into()), retract: false, details: None, visuals: None,
         };
         let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(false));
@@ -687,7 +702,7 @@ mod tests {
     async fn update_records_message_sent_so_a_correction_only_turn_counts() {
         let c = ctx();
         let body = UpdateMessageBody {
-            session_id: "s".into(), message: 1, text: Some("fixed".into()), retract: false, details: None,
+            session_id: "s".into(), message: 1, text: Some("fixed".into()), retract: false, details: None, visuals: None,
         };
         on_update_message(AxState(c.clone()), ValidatedJson(body)).await;
         assert_eq!(c.state.registry.peek_message_sent_gen("s"), Some(0));
@@ -722,7 +737,7 @@ mod tests {
     #[tokio::test]
     async fn overlong_update_text_returns_ok_false_with_error() {
         let body = UpdateMessageBody {
-            session_id: "s".into(), message: 1, text: Some("x".repeat(MAX_MESSAGE_LEN + 1)), retract: false, details: None,
+            session_id: "s".into(), message: 1, text: Some("x".repeat(MAX_MESSAGE_LEN + 1)), retract: false, details: None, visuals: None,
         };
         let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -741,7 +756,7 @@ mod tests {
         let long = "x".repeat(MAX_MESSAGE_LEN);
         assert!(long.chars().count() > report_cap);
         let body = UpdateMessageBody {
-            session_id: "s".into(), message: 1, text: Some(long), retract: false, details: None,
+            session_id: "s".into(), message: 1, text: Some(long), retract: false, details: None, visuals: None,
         };
         let resp = on_update_message(AxState(ctx()), ValidatedJson(body)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(true));
@@ -762,5 +777,64 @@ mod tests {
         let list = &block[block.find("= [").unwrap()..block.find("];").unwrap()];
         let schema_kinds: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         assert_eq!(schema_kinds, KINDS);
+    }
+
+    fn visuals_send(kind: &str, visuals: serde_json::Value) -> serde_json::Value {
+        json!({"session_id": "s", "text": "hi", "kind": kind, "verdict": "Yes", "visuals": visuals})
+    }
+
+    #[tokio::test]
+    async fn a_valid_visual_is_accepted_and_does_not_count_against_the_text_cap() {
+        let table = json!({"type": "table", "columns": ["a", "b"], "rows": [["x", 1]]});
+        assert_eq!(send_json(visuals_send("answer", json!([table]))).await["ok"], json!(true));
+        // The text stays within its cap, the figures ride in the visual.
+        let rows: Vec<_> = (0..40).map(|i| json!([format!("row {i}"), i])).collect();
+        let big = json!({"type": "table", "columns": ["a", "b"], "rows": rows});
+        assert_eq!(send_json(visuals_send("answer", json!([big]))).await["ok"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn a_malformed_visual_is_an_ok_false_naming_the_fix_never_a_decode_error() {
+        let bad = json!([{"type": "bar", "data": [{"label": "a", "value": "3"}]}]);
+        let v = send_json(visuals_send("answer", bad)).await;
+        assert_eq!(v["ok"], json!(false));
+        assert!(v["error"].as_str().unwrap().contains("visuals[0].data[0].value"), "{v}");
+        // Not even an object: still a clean refusal, not a 4xx decode failure.
+        let v = send_json(visuals_send("answer", json!(["table"]))).await;
+        assert_eq!(v["ok"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn an_ack_takes_no_visuals() {
+        let bar = json!([{"type": "bar", "data": [{"label": "a", "value": 1}]}]);
+        let v = send_json(json!({"session_id": "s", "text": "ok", "kind": "ack", "visuals": bar})).await;
+        assert!(v["error"].as_str().unwrap().contains("ack takes no visuals"), "{v}");
+    }
+
+    #[tokio::test]
+    async fn update_message_validates_visuals_and_a_bad_one_does_not_record_a_send() {
+        let c = ctx();
+        let bad: UpdateMessageBody = serde_json::from_value(
+            json!({"session_id": "s", "message": 1, "text": "x", "visuals": [{"type": "pie"}]}),
+        )
+        .unwrap();
+        let resp = on_update_message(AxState(c.clone()), ValidatedJson(bad)).await.into_response();
+        assert_eq!(body_json(resp).await["ok"], json!(false));
+        assert!(c.state.registry.peek_message_sent_gen("s").is_none());
+
+        let good: UpdateMessageBody = serde_json::from_value(
+            json!({"session_id": "s", "message": 1, "text": "x", "visuals": [{"type": "donut", "data": [{"label": "a", "value": 1}, {"label": "b", "value": 2}]}]}),
+        )
+        .unwrap();
+        let resp = on_update_message(AxState(c), ValidatedJson(good)).await.into_response();
+        assert_eq!(body_json(resp).await["ok"], json!(true));
+    }
+
+    #[test]
+    fn schema_visual_types_match_the_validator() {
+        const SCHEMA_SRC: &str = include_str!("../../mcp/tool_schemas_coordination.rs");
+        for t in super::super::visuals::TYPE_NAMES {
+            assert!(SCHEMA_SRC.contains(&format!("\"{t}\"")), "schema enum lacks visual type {t}");
+        }
     }
 }

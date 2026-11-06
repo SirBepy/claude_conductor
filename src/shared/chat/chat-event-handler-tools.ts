@@ -6,7 +6,7 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import { parseDetails } from "./chat-details";
 import { parseNextActions } from "./chat-next-actions";
-import { parseMessageCard } from "./chat-message-kinds";
+import { parseMessageCard, reviseCard } from "./chat-message-kinds";
 import { SUBCARD_TOOL, subCardRow } from "./subchat-cards";
 import { applyPassedResult, isSubchatSend, passedRowFromToolUse } from "./chat-subchat-passed";
 import { eventToRenderedMessage } from "./chat-event-to-message";
@@ -119,7 +119,7 @@ export function handleToolUseEvent(
       const prev = r.messages[idx]!;
       r.messages[idx] = input.retract === true
         ? { ...prev, retracted: true, dimmed: false }
-        : { ...prev, text: typeof input.text === "string" ? input.text : prev.text, details: parseDetails(input) ?? prev.details, dimmed: false };
+        : { ...prev, text: typeof input.text === "string" ? input.text : prev.text, details: parseDetails(input) ?? prev.details, card: reviseCard(prev.card, input), dimmed: false };
       r.dirtyIndices.add(idx);
     }
     return { touched: true, coalesce: false };

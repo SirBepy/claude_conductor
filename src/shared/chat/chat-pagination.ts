@@ -1,5 +1,6 @@
 import type { ChatEvent } from "../../types/ipc.generated";
 import { parseDetails } from "./chat-details";
+import { reviseCard } from "./chat-message-kinds";
 import { linkifyDrillRefs } from "./drill-links";
 import { linkifyFilePaths } from "./file-refs";
 import type { RenderedMessage } from "./chat-transforms";
@@ -393,7 +394,7 @@ export class ChatPaginator {
           const prev = newMessages[idx]!;
           const updated = input.retract === true
             ? { ...prev, retracted: true, dimmed: false }
-            : { ...prev, text: typeof input.text === "string" ? input.text : prev.text, details: parseDetails(input) ?? prev.details, dimmed: false };
+            : { ...prev, text: typeof input.text === "string" ? input.text : prev.text, details: parseDetails(input) ?? prev.details, card: reviseCard(prev.card, input), dimmed: false };
           newMessages[idx] = updated;
           const newEl = this.cb.buildMessageEl(updated);
           frag.replaceChild(newEl, newEls[idx]!);

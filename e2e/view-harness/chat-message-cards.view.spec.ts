@@ -1,6 +1,7 @@
 // Reviewed 2026-11-05: chat-message-card.ts gained an optional quiet `tagNote` after a sub's tag and chat-message-cards.css two rules for it; a card without one draws as before, and this spec passes.
 // Reviewed 2026-11-05: chat-message-cards.css gained the .passed-row rule only; no card rule changed - this spec's contract is unchanged and it passes.
-// asserts: src/shared/chat/chat-message-card.ts, src/shared/chat/chat-message-cards.css, src/shared/chat/chat-card-turns.ts, src/shared/chat/chat-dom-renderer.ts
+// Reviewed 2026-11-06: chat-message-card.ts draws a card's optional `visuals` under its body, and chat-pagination.ts / chat-event-handler-tools.ts revise them on update_message; a card without visuals draws as before.
+// asserts: src/shared/chat/message-visuals-render.ts, src/shared/chat/chat-message-card.ts, src/shared/chat/chat-message-cards.css, src/shared/chat/chat-card-turns.ts, src/shared/chat/chat-dom-renderer.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
@@ -36,6 +37,22 @@ const REPORT = send("r1", {
   waiting_on: ["Chat \"Gate: zng-app push\": gate, push, ticket moves"],
   your_move: ["Ask Lenar: QA group with 2+ enabled billers, and is the sc-56598 deploy on QA?"],
   details: [{ id: "calls", label: "3 calls to check", body_md: "- own values merge into `SlugBiller`" }],
+});
+const VISUALS_ANSWER = send("v1", {
+  kind: "answer",
+  verdict: "Opus costs most",
+  text: "Cost per model, last 7 days",
+  visuals: [
+    { type: "table", title: "Cost by model", columns: ["Model", "Chats", "Turns", "Cost", "Cache hit rate", "Median latency"], rows: [["Opus", 4, 212, "$18.40", "91%", "4.2s"], ["Sonnet", 21, 1040, "$9.75", "88%", "2.1s"]] },
+    { type: "bar", title: "Slowest files", unit: "s", data: [{ label: "subchats-spawn", value: 9.2 }, { label: "chat-flow", value: 7.4 }] },
+    { type: "line", title: "Usage by day", labels: ["Mon", "Tue", "Wed"], series: [{ name: "Opus", values: [12, 30, 62] }, { name: "Sonnet", values: [20, 24, 30] }] },
+  ],
+});
+const TIMELINE_ANSWER = send("v2", {
+  kind: "answer",
+  verdict: "Two gaps this week",
+  text: "Clockify, Mon and Tue",
+  visuals: [{ type: "donut", title: "Chat state", data: [{ label: "Done", value: 18 }, { label: "Blocked", value: 2 }] }, { type: "timeline", title: "Logged time", rows: [{ label: "Mon 3 Nov", blocks: [{ start: "09:00", end: "12:30", label: "Subchats review" }, { start: "13:30", end: "17:00", label: "Tables" }] }, { label: "Tue 4 Nov", blocks: [{ start: "10:00", end: "11:00" }] }] }],
 });
 const FIRST_TURN = [user("ok go with what you think on billers, can it ever be empty though?"), ANSWER, REPORT];
 const SECOND_TURN = [
@@ -117,6 +134,42 @@ for (const vp of [{ name: "desktop", width: 900 }, { name: "phone", width: 390 }
       const answer = roots.nth(0);
       await expect(answer.locator(".mc-full .mc-label")).toHaveText("Answer to you");
       await expect(answer.locator(".mc-full .mc-points summary")).toHaveText("2 more points");
+    });
+
+    test("visuals draw inside the card: a wide table, bars, a line, a donut and a timeline", async ({ page }) => {
+      await mountChat(page, vp.width, [user("how much did each model cost?"), VISUALS_ANSWER, TIMELINE_ANSWER]);
+      const roots = chat(page).locator(".mc-root");
+      const cost = roots.nth(0).locator(".mc-full");
+      await expect(cost.locator(".mv-fig")).toHaveCount(3);
+      await expect(cost.locator(".mv-fig figcaption").first()).toHaveText("Cost by model");
+      await expect(cost.locator(".mv-table th")).toHaveCount(6);
+      await expect(cost.locator(".mv-bar-row")).toHaveCount(2);
+      await expect(cost.locator(".mv-line polyline")).toHaveCount(2);
+      const second = roots.nth(1).locator(".mc-full");
+      await expect(second.locator(".mv-donut circle")).toHaveCount(2);
+      const tl = second.locator(".mv-timeline");
+      await expect(tl.locator(".mv-block")).toHaveCount(3);
+      await expect(tl.locator(".mv-tl-row b").first()).toHaveText("7h");
+      // A wide table scrolls inside its own wrapper instead of pushing the card past the screen, so
+      // expectNoOverflow (which reads every descendant's rect, clipped or not) does not fit it: measure
+      // the card, the wrapper and the host instead.
+      const fit = await page.evaluate(() => {
+        const vw = document.documentElement.clientWidth;
+        const host = document.querySelector<HTMLElement>("#session-pane .session-messages")!;
+        const wrap = host.querySelector<HTMLElement>(".mv-table .table-wrap")!;
+        const card = host.querySelector<HTMLElement>(".mc-root")!;
+        return { hostFits: host.scrollWidth <= host.clientWidth + 1, cardRight: card.getBoundingClientRect().right, wrapRight: wrap.getBoundingClientRect().right, wrapScrolls: wrap.scrollWidth > wrap.clientWidth, vw };
+      });
+      expect(fit.hostFits).toBe(true);
+      expect(fit.cardRight).toBeLessThanOrEqual(fit.vw + 1);
+      expect(fit.wrapRight).toBeLessThanOrEqual(fit.vw + 1);
+      // Six columns do not fit a phone card, so there the wrapper must be the thing that scrolls.
+      if (vp.width < 500) expect(fit.wrapScrolls).toBe(true);
+      // The SVG charts keep their ratio and fill the figure.
+      const box = await cost.locator(".mv-line svg").boundingBox();
+      expect(box!.width).toBeGreaterThan(150);
+      expect(box!.height).toBeGreaterThan(50);
+      await capture(chat(page), `cards-visuals-${vp.name}`);
     });
 
     test("a later turn shrinks the earlier cards to mini cards, and a click reopens one in place", async ({ page }) => {

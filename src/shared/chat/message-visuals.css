@@ -1,0 +1,224 @@
+/* Tables and charts a message card draws under its body (message-visuals-render.ts).
+ * Colours come from the theme's custom properties, so every theme gets them. A table
+ * reuses the markdown table styles in chat-messages-markdown.css; only the chart
+ * pieces and the figure frame live here. */
+
+.mv-visuals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  /* A card is a size container (see chat-message-cards.css); charts shrink with it. */
+  min-width: 0;
+}
+
+.mv-fig {
+  margin: 0;
+  padding: 10px 12px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-alt);
+  min-width: 0;
+}
+
+.mv-fig figcaption {
+  margin-bottom: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.mv-fig .table-wrap {
+  margin: 0;
+}
+
+.mv-fig table {
+  width: 100%;
+}
+
+.mv-num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bar */
+.mv-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mv-bar-row {
+  display: grid;
+  grid-template-columns: minmax(64px, 96px) 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+
+.mv-bar-l {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.mv-bar-track {
+  height: 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-border) 55%, transparent);
+  overflow: hidden;
+}
+
+.mv-bar-track i {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+}
+
+/* Line and donut */
+.mv-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.mv-svg-sm {
+  flex: none;
+  width: 112px;
+  height: 112px;
+}
+
+.mv-grid {
+  stroke: var(--color-border);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.mv-axis {
+  fill: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.mv-donut-n {
+  fill: var(--color-text);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.mv-donut-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.mv-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+.mv-legend--col {
+  flex-direction: column;
+  margin: 0;
+}
+
+.mv-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mv-key i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+
+.mv-key b {
+  margin-left: 6px;
+  color: var(--color-text);
+}
+
+/* Timeline: one lane per row, blocks placed by percent of the shown hours. The
+ * label and total columns match the bar chart so the two read as one family. */
+.mv-tl {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.8rem;
+}
+
+.mv-tl-axis,
+.mv-tl-row {
+  display: grid;
+  grid-template-columns: minmax(48px, 72px) 1fr 52px;
+  align-items: center;
+  gap: 8px;
+}
+
+.mv-tl-ticks {
+  position: relative;
+  height: 12px;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+}
+
+.mv-tick {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+/* The end ticks sit inside the track: centred on the edge they would run into the label and total columns. */
+.mv-tick:first-child {
+  transform: none;
+}
+
+.mv-tick:last-child {
+  transform: translateX(-100%);
+}
+
+.mv-tl-l {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.mv-tl-track {
+  position: relative;
+  height: 20px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-border) 45%, transparent);
+  overflow: hidden;
+}
+
+.mv-block {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+  padding: 0 5px;
+  border-radius: 4px;
+  overflow: hidden;
+  /* The accent is mixed into the surface and the label keeps the theme's text colour: a flat
+   * accent fill needs dark text on some themes and light on others. */
+  background: color-mix(in srgb, var(--c) 45%, var(--color-surface));
+  border-left: 3px solid var(--c);
+  color: var(--color-text);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mv-block span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
