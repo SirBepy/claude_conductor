@@ -329,3 +329,24 @@ describe("failed and retracted rows", () => {
     expect(renderMessage(msg(REPORT_INPUT, { retracted: true }))).toContain("retracted-marker");
   });
 });
+
+describe("rating points", () => {
+  const draw = (kind) => {
+    const input = { kind, verdict: "Meh", text: "4/10 Meh", points: ["-> 7/10: swap X for Y"] };
+    const d = document.createElement("div");
+    d.innerHTML = renderMessage(msg(input));
+    return d.querySelector(".mc-full .mc-points");
+  };
+
+  it("a rating shows how to raise it open, without a click", () => {
+    const el = draw("rating");
+    expect(el.hasAttribute("open")).toBe(true);
+    expect(el.querySelector("summary").textContent).toContain("How to raise it");
+  });
+
+  it("other kinds keep their points folded", () => {
+    const el = draw("answer");
+    expect(el.hasAttribute("open")).toBe(false);
+    expect(el.querySelector("summary").textContent).toContain("1 more point");
+  });
+});
