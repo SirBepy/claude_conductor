@@ -28,7 +28,7 @@ const INVOKE = {
   get_default_whitelist: [], list_characters: [], remote_access_status: { enabled: true },
   remote_access_qr: { svg: "<svg width='80' height='80'></svg>", url: "http://x/pair", iroh: null },
   list_remote_devices: [], list_machines: { self: { machine_id: "m0", label: "Desktop", os: "windows" }, peers: [] },
-  list_auto_accept: [], list_wrap_up_on_done: [], get_settings_load_notice: null,
+  list_auto_accept: [], get_settings_load_notice: null,
 };
 
 const VIEWS = [

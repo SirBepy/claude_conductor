@@ -3,13 +3,14 @@ import { sessionSubtitle, projectName } from "./sessions-helpers";
 import { characterForSession, characterIconUrl } from "./session-characters";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import type { SessionConfig } from "../../shared/effort-presets";
-import { isAutoAccept, isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
+import { isAutoAccept } from "./permission-modal";
 import { SessionHeader, projectDashboardOpener } from "./session-header";
 import { wireRenderer } from "./active-session-mount";
 import { retainChat } from "./chat-pane-cache";
 import { mountPendingChrome, mountPendingStatusbar, attachPendingRenderer, changePendingAccount } from "./pending-pane-mount";
 import { mountDraftDashboard, unmountDraftDashboard } from "./project-dashboard/draft-dashboard";
 import { wirePendingComposer } from "./pending-pane-composer";
+import { mountDraftSubchats, unmountDraftSubchats } from "./draft-subchats";
 import { decorateSubchatHeader } from "./subchat-view";
 import { mountMockupButton } from "./mockup-open-button";
 
@@ -43,6 +44,7 @@ export async function renderPendingPane(
   // Must come after attachPendingRenderer: ChatRenderer.attach() clears
   // .session-messages, which would wipe a dashboard mounted any earlier.
   mountDraftDashboard(pane, project, myMount);
+  mountDraftSubchats(pane, config);
   wirePendingComposer(pane, placeholderId, project, config, myMount, {
     rebindPaneHeader,
     pickAccount: () => { void changePendingAccount(config, placeholderId, project.path); },
@@ -70,6 +72,7 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
     state.statusbar.setAccountId(sess?.account_id ?? null);
   }
   unmountDraftDashboard(pane);
+  unmountDraftSubchats(pane);
 
   const h = _pendingHeader;
   if (!h) return;
@@ -85,12 +88,6 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
   // we actually have an id, so a not-yet-loaded char map can't clobber the
   // portrait already shown for a user-picked character.
   const realCharId = sess ? characterForSession(sess) : null;
-  h.onWrapUpToggleClick = () => {
-    const next = !isWrapUpOnDone(sessionId);
-    setWrapUpOnDone(sessionId, next);
-    h.setWrapUpOnDone(next);
-    rerenderSidebar();
-  };
   h.bindSession({
     sessionId,
     readOnly: false,
@@ -101,7 +98,6 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
         }
       : {}),
     autoAcceptOn: isAutoAccept(sessionId),
-    wrapUpOnDoneOn: isWrapUpOnDone(sessionId),
   });
   if (realCharId) void hydrateCharacterAvatars(pane);
   void hydrateProjectTechIcons(pane);

@@ -9,6 +9,10 @@ export interface SessionConfig {
   // Spawn `claude --remote-control` for this session. Defaults on for new chats
   // (the modal checkbox); undefined on legacy drafts is treated as on.
   remote?: boolean;
+  /** "Use subchats" picked on the draft: the first spawn already runs as a main
+   *  chat (the daemon persists the flag before it launches the child). Absent
+   *  or false = an ordinary chat. */
+  subchatsOn?: boolean;
   /** Character chosen in the new-session pane; applied to the real session once it starts. */
   characterId?: string | null;
   /** When set, the pending pane auto-sends this text as the first message on mount. */

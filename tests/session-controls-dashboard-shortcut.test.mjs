@@ -18,16 +18,13 @@ vi.mock("../src/views/sessions/pending-flow.ts", () => ({
 vi.mock("../src/views/sessions/session-thinking-bar.ts", () => ({ updateThinkingBar: vi.fn() }));
 vi.mock("../src/shared/navigation.ts", () => ({ showView: vi.fn(), getActiveView: vi.fn(() => "sessions") }));
 vi.mock("../src/views/sessions/session-header.ts", () => ({
-  refreshWrapUpIndicator: vi.fn(),
   projectDashboardOpener: (s) => {
     const cwd = s.cwd ? String(s.cwd) : "";
     if (!cwd || s.machine) return null;
     return () => { void openDashboardPage(cwd, s.project_id || null); };
   },
 }));
-vi.mock("../src/views/sessions/permission-modal/index.ts", () => ({
-  isWrapUpOnDone: vi.fn(() => false), setWrapUpOnDone: vi.fn(), rerenderSidebar: vi.fn(),
-}));
+vi.mock("../src/views/sessions/permission-modal/index.ts", () => ({}));
 
 const { state } = await import("../src/views/sessions/state.ts");
 const { openFocusedChatDashboard, setPaneRef } = await import("../src/views/sessions/session-controls.ts");

@@ -40,7 +40,7 @@ describe("mainChatCandidates", () => {
 
 describe("the chat menu item", () => {
   const ctx = (over = {}) => ({
-    kind: "live", sessionId: "c", cwd: "/p", pid: 1, readOnly: false, autoAcceptOn: false, wrapUpOnDoneOn: false,
+    kind: "live", sessionId: "c", cwd: "/p", pid: 1, readOnly: false, autoAcceptOn: false,
     subchatsOn: false, isHidden: false, ...over,
   });
   const item = (label, over) => buildChatItems(ctx(over)).find((i) => i.label === label);

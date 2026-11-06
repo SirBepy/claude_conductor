@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// "Use subchats" in the chat's ... menu: sits next to "Wrap up when done", toggles
+// "Use subchats" in the chat's ... menu: sits next to "Auto-accept", toggles
 // the per-chat mode, and is unavailable (with the reason) on an API-credit chat.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -18,8 +18,6 @@ vi.mock("../src/views/sessions/permission-modal", () => ({
   isAutoAccept: () => false,
   setAutoAccept: () => {},
   autoAcceptParked: () => {},
-  isWrapUpOnDone: () => false,
-  setWrapUpOnDone: () => {},
   isSubchatsOn: isSubchatsOnMock,
   setSubchatsOn: setSubchatsOnMock,
   rerenderSidebar: rerenderMock,
@@ -52,7 +50,7 @@ const { setCachedAccounts } = await import("../src/shared/accounts-cache.ts");
 
 const ctx = (over = {}) => ({
   kind: "live", sessionId: "s1", cwd: "C:/p", pid: 1, readOnly: false, autoAcceptOn: false,
-  wrapUpOnDoneOn: false, subchatsOn: false, isHidden: false, ...over,
+  subchatsOn: false, isHidden: false, ...over,
 });
 const find = (items) => items.find((i) => i.label === "Use subchats");
 
@@ -65,16 +63,16 @@ beforeEach(() => {
 });
 
 describe("Use subchats menu item", () => {
-  it("is listed right after Wrap up when done", () => {
+  it("is listed right after Auto-accept", () => {
     const labels = buildConfigureItems(ctx()).map((i) => i.label);
-    expect(labels.indexOf("Use subchats")).toBe(labels.indexOf("Wrap up when done") + 1);
+    expect(labels.indexOf("Use subchats")).toBe(labels.indexOf("Auto-accept") + 1);
   });
 
   it("is not offered to a sub, which cannot have subs of its own", () => {
     expect(find(buildConfigureItems(ctx({ isSub: true })))).toBeUndefined();
     expect(find(buildConfigureItems(ctx({ isSub: false })))).toBeDefined();
     const labels = buildConfigureItems(ctx({ isSub: true })).map((i) => i.label);
-    expect(labels).toContain("Wrap up when done");
+    expect(labels).toContain("Auto-accept");
   });
 
   it("shows its on state as the check dot", () => {
@@ -108,7 +106,7 @@ describe("Use subchats menu item", () => {
 
   it("is unavailable for a draft", () => {
     const item = find(buildConfigureItems(ctx({ kind: "draft", sessionId: null })));
-    expect(item.disabledReason).toBe("Available once the chat starts");
+    expect(item.disabledReason).toBe("Set with the switch above the message box");
     expect(item.run).toBeUndefined();
   });
 

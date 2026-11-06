@@ -2,7 +2,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { typeSwap } from "../../shared/title-typewriter";
 import { modelLabel as shortModelName } from "../../shared/model-name";
 import { modelRankIcon } from "./sidebar-row-visuals";
-import { projBadgeHtml, wrapUpTooltip } from "./sidebar-row-visuals";
+import { projBadgeHtml } from "./sidebar-row-visuals";
 
 // Phone effort label: 3-4 letters because the header row has no room for the word.
 const EFFORT_SHORT: Record<string, string> = { low: "low", medium: "mid", high: "high", xhigh: "xhi", max: "max" };
@@ -18,27 +18,6 @@ export interface SessionHeaderBindOpts {
    *  machine federation); undefined/null for every locally-hosted session. */
   machineId?: string | null;
   autoAcceptOn?: boolean;
-  wrapUpOnDoneOn?: boolean;
-}
-
-/** Live-updates the mounted header's "Wrap up when done" button for
- *  `sessionId`, if `selectedId` (the caller's own `state.selectedId`) says
- *  that session's pane is the one currently on screen - no-op otherwise
- *  (toggled from the menu/shortcut on a backgrounded chat). Takes
- *  `selectedId` as a plain argument rather than reading `state` itself, so
- *  this file - otherwise a dependency-free presentational module - doesn't
- *  pull every caller into importing the much heavier `active-session.ts`
- *  just to reach one DOM update. The header button's OWN click handler
- *  updates itself directly via `setWrapUpOnDone` instead of going through
- *  this; this is for the other two trigger paths (chat-menu-items.ts's menu
- *  item, session-controls.ts's keyboard shortcut), neither of which holds a
- *  `SessionHeader` instance. */
-export function refreshWrapUpIndicator(selectedId: string | null, sessionId: string, on: boolean): void {
-  if (selectedId !== sessionId) return;
-  const btn = document.querySelector<HTMLButtonElement>(".session-pane .wrap-up-btn");
-  if (!btn) return;
-  btn.classList.toggle("is-on", on);
-  btn.title = wrapUpTooltip(on);
 }
 
 /**
@@ -72,10 +51,7 @@ export class SessionHeader {
   private readonly _cfgEffortFullEl: HTMLElement;
   private readonly _cfgEffortShortEl: HTMLElement;
   private readonly _cfgEffortEl: HTMLElement;
-  private readonly _wrapUpBtn: HTMLButtonElement;
 
-  /** The flag button: toggle "Wrap up when done" for this chat. */
-  onWrapUpToggleClick: (() => void) | null = null;
   onCharClick: (() => void) | null = null;
   private _onProjectClick: (() => void) | null = null;
   /** Opens the statusbar's model / effort slider popover on the header's own
@@ -105,9 +81,6 @@ export class SessionHeader {
       `    </span>`,
       `  </span>`,
       `</div>`,
-      `<button class="wrap-up-btn" title="${escapeHtml(wrapUpTooltip(false))}" aria-label="Wrap up when done">`,
-      `  <i class="ph-bold ph-flag-checkered"></i>`,
-      `</button>`,
       `<span class="session-header-trail"></span>`,
     ].join("");
 
@@ -122,19 +95,6 @@ export class SessionHeader {
     this._cfgEffortFullEl = el.querySelector(".meta-cfg-effort-full")!;
     this._cfgEffortShortEl = el.querySelector(".meta-cfg-effort-short")!;
     this._cfgEffortEl = el.querySelector(".meta-cfg-effort")!;
-    this._wrapUpBtn = el.querySelector(".wrap-up-btn")!;
-    // Corner badge on the avatar, not a separate icon in the button row
-    // (Joe, 2026-10-20: disliked the flag sitting in the icon row). Moved
-    // into `_wrap` here and re-moved after every `setAvatar` call below,
-    // since `setAvatar` replaces `_wrap.innerHTML` wholesale - appendChild
-    // RELOCATES the existing node (same element, same listener), it never
-    // clones, so this survives repeated avatar swaps without re-binding.
-    this._wrap.appendChild(this._wrapUpBtn);
-
-    this._wrapUpBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.onWrapUpToggleClick?.();
-    });
 
     // Char-click delegate on the header element so it survives avatar swaps.
     el.addEventListener("click", (e) => {
@@ -271,10 +231,6 @@ export class SessionHeader {
         badge,
       ].join("");
     }
-    // innerHTML above wiped the wrap-up corner badge along with everything
-    // else - relocate the same node (not a clone) back in, so its listener
-    // and current on/off state survive an avatar swap.
-    this._wrap.appendChild(this._wrapUpBtn);
   }
 
   /**
@@ -286,19 +242,6 @@ export class SessionHeader {
       this.setAvatar(opts.charId ?? null, opts.charUrl ?? null, opts.charStatus, opts.cwd, opts.machineId);
     }
 
-    // Read-only (external/automated) sessions aren't driven by this app's own
-    // turns, so the toggle has nothing to act on - same gate as auto-accept.
-    this._wrapUpBtn.hidden = opts.readOnly;
-    this.setWrapUpOnDone(!!opts.wrapUpOnDoneOn);
-  }
-
-  /** Reflects the current toggle state on the header's flag badge - its own
-   *  click handler calls this directly; the menu item and the keyboard
-   *  shortcut go through `active-session.ts`'s `refreshWrapUpIndicator`
-   *  instead, since they don't hold a `SessionHeader` reference. */
-  setWrapUpOnDone(on: boolean): void {
-    this._wrapUpBtn.classList.toggle("is-on", on);
-    this._wrapUpBtn.title = wrapUpTooltip(on);
   }
 
   /**

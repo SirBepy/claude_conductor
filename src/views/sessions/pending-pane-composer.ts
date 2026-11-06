@@ -11,7 +11,7 @@ import { isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar"
 import type { SessionConfig } from "../../shared/effort-presets";
 import { accountPickNeeded, noAccountsRegistered, persistNewChatChoice } from "./new-chat-config";
 import { showView } from "../../shared/navigation";
-import { setAutoAccept } from "./permission-modal";
+import { setAutoAccept, adoptSubchatsOn } from "./permission-modal";
 import { savePendingSession, clearPendingSession } from "./pending-draft-storage";
 import { showToast } from "../../shared/toast";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
@@ -22,6 +22,7 @@ import { refreshSessions } from "./sidebar";
 import { rebuildSidebar } from "./pending-pane-mount";
 import { beginDraftSpawn, endDraftSpawn, moveSpawnedChat } from "./pending-pane-spawn";
 import { leaveDraftDashboard } from "./project-dashboard/draft-dashboard";
+import { lockDraftSubchats } from "./draft-subchats";
 
 /** With no account registered there is nothing to pick, so the picker would
  *  open empty; point at Settings instead. The toast itself is the link. */
@@ -203,6 +204,7 @@ export function wirePendingComposer(
           savePendingSession(state.pendingNewSession);
         }
         leaveDraftDashboard(pane);
+        lockDraftSubchats(pane, config, true);
         rebuildSidebar();
         beginDraftSpawn(placeholderId, config.accountId ?? null);
         try {
@@ -221,6 +223,10 @@ export function wirePendingComposer(
             // follow-up below), so a remote/phone caller's first-turn tool
             // call can't race ahead of it under real network latency.
             autoAccept: config.autoAccept !== false,
+            // Same reason: the daemon persists it before the first child launches, so
+            // that child already carries the main-chat prompt (a flip after the spawn
+            // would only reach the next respawn).
+            subchatsOn: config.subchatsOn === true,
           });
           const heldPick = endDraftSpawn(placeholderId);
           if (state.mountId !== myMount) {
@@ -230,6 +236,7 @@ export function wirePendingComposer(
           }
           if (sessionId) {
             if (config.autoAccept !== false) setAutoAccept(sessionId, true);
+            if (config.subchatsOn === true) adoptSubchatsOn(sessionId);
             const isStillActive = state.selectedId === placeholderId || state.selectedId === sessionId;
             if (isStillActive && state.renderer && state.renderer.currentSessionId() !== sessionId) {
               await state.renderer.swapSubscription(sessionId);
@@ -269,6 +276,7 @@ export function wirePendingComposer(
           // keeps the account the retry will use.
           endDraftSpawn(placeholderId);
           started = false;
+          lockDraftSubchats(pane, config, false);
           // Roll the pending row back to a draft so it doesn't hang on
           // "starting…" forever; the user can retry from the same composer
           // or discard it. (Native alert() routes through the dialog plugin,

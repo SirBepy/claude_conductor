@@ -13,8 +13,7 @@ import { showView } from "../../shared/navigation";
 import { closeChatWithConfirm } from "./close-chat";
 import { askConfirm } from "../../shared/confirm";
 import type { SessionConfig } from "../../shared/effort-presets";
-import { isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar } from "./permission-modal";
-import { refreshWrapUpIndicator, projectDashboardOpener } from "./session-header";
+import { projectDashboardOpener } from "./session-header";
 import { openDashboardPage } from "./project-dashboard/dashboard-page";
 import { backToMain } from "./subchat-view";
 import { isSubchat } from "./sessions-helpers";
@@ -214,16 +213,4 @@ export function closeFocusedChat(): void {
     return;
   }
   void closeChatWithConfirm(id);
-}
-
-/** Ctrl+Shift+W: flips "Wrap up when done" for the focused chat. A no-op on
- *  a not-yet-sent draft (no `session_id` to persist against yet) - same gate
- *  as the chat menu's own item. */
-export function toggleWrapUpOnDoneForFocusedChat(): void {
-  const id = state.selectedId;
-  if (!id || state.pendingNewSession?.placeholderId === id) return;
-  const next = !isWrapUpOnDone(id);
-  setWrapUpOnDone(id, next);
-  refreshWrapUpIndicator(state.selectedId, id, next);
-  rerenderSidebar();
 }

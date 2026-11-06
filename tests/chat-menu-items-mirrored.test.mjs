@@ -18,8 +18,6 @@ vi.mock("../src/views/sessions/permission-modal", () => ({
   isAutoAccept: () => false,
   setAutoAccept: () => {},
   autoAcceptParked: () => {},
-  isWrapUpOnDone: () => false,
-  setWrapUpOnDone: () => {},
 }));
 vi.mock("../src/views/sessions/sessions-helpers.ts", () => ({
   loadHiddenSessions: () => new Set(),

@@ -19,7 +19,7 @@ import { characterForSession, characterIconUrl } from "./session-characters";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { api } from "../../shared/api";
 import { changeCharacterForSession, changeAccountForSession } from "./active-session-account";
-import { isAutoAccept, isWrapUpOnDone, setWrapUpOnDone, rerenderSidebar, replayPendingPrompt, rehydrateAndReplay, pendingPromptSessionIds, dismissQuestionCard } from "./permission-modal";
+import { isAutoAccept, replayPendingPrompt, rehydrateAndReplay, pendingPromptSessionIds, dismissQuestionCard } from "./permission-modal";
 import { snapshotActiveCardDraftIn } from "./permission-modal/question-state";
 import { savePendingPromptDraft } from "./permission-modal/gating";
 import { expandActiveCard, hasActiveCardForSession } from "./permission-modal/question-state";
@@ -246,12 +246,6 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   const header = new SessionHeader({ title: sessionSubtitle(sess), meta: projectName(sess) });
   header.onCharClick = () => { void changeCharacterForSession(sess.session_id, headerStatusClass); };
   header.onProjectClick = projectDashboardOpener(sess);
-  header.onWrapUpToggleClick = () => {
-    const next = !isWrapUpOnDone(sess.session_id);
-    setWrapUpOnDone(sess.session_id, next);
-    header.setWrapUpOnDone(next);
-    rerenderSidebar();
-  };
   header.bindSession({
     sessionId: sess.session_id,
     readOnly,
@@ -261,7 +255,6 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     cwd: sess.cwd ? String(sess.cwd) : null,
     machineId: sess.machine?.id ?? null,
     autoAcceptOn: !readOnly && isAutoAccept(sess.session_id),
-    wrapUpOnDoneOn: !readOnly && isWrapUpOnDone(sess.session_id),
   });
   // Jarvis has no in-app view (it only lives at #detached?session=<id>), so
   // its window's pane header is the only place a menu can go. Gated on both

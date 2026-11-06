@@ -115,27 +115,6 @@ export function frozenChipHtml(frozen: boolean, autoFrozen: boolean, tipAttr: "t
   return `<span class="frozen-chip${autoFrozen ? " frozen-chip--auto" : ""}" ${tipAttr}="${title}"><i class="ph-bold ph-snowflake"></i></span>`;
 }
 
-/** Shared by this chip, the header's corner badge (session-header.ts), and the
- *  chat menu item, so the same toggle reads the same explanation everywhere
- *  it surfaces. Lives here rather than in session-header.ts because that file
- *  already imports `projBadgeHtml` from this one - the reverse import would
- *  be a cycle. */
-export function wrapUpTooltip(on: boolean): string {
-  const base = on
-    ? "Wrap up when done: ON (Ctrl+Shift+W)"
-    : "Wrap up when done (Ctrl+Shift+W)";
-  const body = on
-    ? "Claude verifies, commits, and closes this chat when you're done"
-    : "turn on to have Claude verify, commit, and close this chat when you're done";
-  return `${base} - ${body}`;
-}
-
-/** "Wrap up when done" marker - same slot/sizing as the frozen chip above. */
-export function wrapUpChipHtml(on: boolean, tipAttr: "title" | "data-tip"): string {
-  if (!on) return "";
-  return `<span class="wrap-up-chip" ${tipAttr}="${wrapUpTooltip(true)}"><i class="ph-bold ph-flag-checkered"></i></span>`;
-}
-
 /** Row-level tint class for a frozen chat - `""` when not frozen. Auto-frozen
  *  reuses the "waiting" hue (same bind as `frozen-chip--auto` above) since a
  *  rate-limit auto-freeze IS a waiting state. */

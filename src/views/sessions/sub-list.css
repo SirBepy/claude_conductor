@@ -154,11 +154,6 @@
 .sub-back-btn {
   flex-shrink: 0;
 }
-/* "Finish replaces the wrap-up flag": a sub ends through its own finish tool. */
-.session-header.is-sub-view .wrap-up-btn {
-  display: none;
-}
-
 @media (max-width: 768px) {
   /* The phone's list-back stays in the DOM (the header merge relocates it) but a
      sub has its own back arrow, so two arrows never sit side by side. */

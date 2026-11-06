@@ -176,27 +176,6 @@
 .frozen-chip--auto { color: var(--chat-state-waiting); }
 .sessions-list li.active .frozen-chip { color: var(--color-background); opacity: 0.85; }
 
-/* "Wrap up when done" marker: a corner badge on the avatar instead of a chip
-   in the text line (Joe, 2026-10-20 - disliked the chips-row flag). Top left
-   is where .session-sched-corner also sits, so a chat that is both scheduled
-   and wrapping up stacks the two on the same spot. */
-.wrap-up-chip {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  z-index: 11;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: rgba(13, 15, 21, 0.85);
-  color: var(--color-accent, #7c6af7);
-}
-.wrap-up-chip i { font-size: 0.6rem; }
-.sessions-list li.active .wrap-up-chip { color: var(--color-background); background: rgba(255, 255, 255, 0.2); }
-
 /* Portrait row: the devicon moves from the bottom corner to the middle of the
    portrait's right border, so it lines up with the project name. It straddles
    the strip edge; the row's 15px flex gap is what keeps it from touching the

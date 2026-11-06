@@ -1,0 +1,17 @@
+/* The "Use subchats" row above a draft's message box. Lines up with the box's left
+   edge the way the dashboard's quick-action chips do (pd-dashboard.css), and keeps
+   the same room on the right for the FAB, which floats over this strip. */
+.draft-subchats {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px max(12px, calc((100% - 900px) / 2)) 0;
+  padding-right: max(0px, calc(58px - max(12px, (100% - 900px) / 2)));
+  color: var(--sb-muted, var(--color-text-muted));
+  font: 12.5px/18px var(--font-mono, monospace);
+}
+.draft-subchats i { font-size: 14px; }
+.draft-subchats.is-on { color: var(--color-text); }
+.draft-subchats .switch { margin-left: 2px; }
+.draft-subchats .switch input:disabled + .slider { cursor: not-allowed; opacity: 0.5; }
