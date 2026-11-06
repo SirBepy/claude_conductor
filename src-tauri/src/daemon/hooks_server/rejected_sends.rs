@@ -3,7 +3,7 @@
 //! "Failed to send" pill per rejection; a caller that retries until it passes
 //! stacked six of them, so the chat stays quiet and this file is where a
 //! pattern (the same field wrong again and again) gets read, by
-//! `scripts/rejected-sends-report.ps1` at release time.
+//! `scripts/release-report.ps1` at release time.
 
 use serde_json::json;
 use std::path::{Path, PathBuf};
