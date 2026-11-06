@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-// Regression for todo 597: the older-page (scrollback) path used to fully
-// drop a rejected send_message instead of showing the live path's "Failed
-// to send" ghost (chat-transforms.ts's `m.failed` branch).
+// A rejected send_message draws nothing on the older-page (scrollback) path
+// either, same as the live path (chat-transforms.ts's `m.failed` branch): the
+// daemon's rejected-sends log is where it is recorded.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
@@ -51,7 +51,7 @@ async function makeRenderer() {
 }
 
 describe("older-page failed send_message rendering", () => {
-  it("shows a 'Failed to send' ghost for a rejected send_message instead of dropping it", async () => {
+  it("draws neither a bubble nor a pill for a rejected send_message", async () => {
     invokeRouter.queueOnce("load_history_page", {
       events: [userEvent("later question", 2_000_000), assistantEvent("later answer", 2_001_000)],
       oldest_seq: 10,
@@ -72,9 +72,9 @@ describe("older-page failed send_message rendering", () => {
     const { renderer, container } = await makeRenderer();
     await renderer.fetchOlder();
 
-    const ghost = container.querySelector(".failed-chip");
-    expect(ghost).not.toBeNull();
-    expect(ghost.getAttribute("title")).toBe("too long, rejected");
-    expect(container.textContent).toContain("Failed to send");
+    expect(container.querySelector(".failed-chip")).toBeNull();
+    expect(container.textContent).not.toContain("Failed to send");
+    expect(container.textContent).not.toContain("too long, rejected");
+    expect(container.textContent).toContain("old question");
   });
 });

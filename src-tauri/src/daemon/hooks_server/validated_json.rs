@@ -22,9 +22,14 @@ where
     type Rejection = (StatusCode, Json<Value>);
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let route = req.uri().path().to_string();
         match Json::<T>::from_request(req, state).await {
             Ok(Json(value)) => Ok(ValidatedJson(value)),
-            Err(rejection) => Err(json_error(rejection)),
+            Err(rejection) => {
+                // No body to read a session id from: the decode is what failed.
+                super::rejected_sends::record(&route, "", None, &rejection.body_text());
+                Err(json_error(rejection))
+            }
         }
     }
 }

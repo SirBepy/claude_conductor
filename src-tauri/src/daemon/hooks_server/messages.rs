@@ -288,7 +288,10 @@ pub(super) fn validate_report(f: ReportFields) -> Result<(), String> {
 }
 
 /// An `ok:false` reply carrying the fix; shared by every validation failure.
-fn details_rejection(err: String) -> (StatusCode, Json<serde_json::Value>) {
+/// Also writes the rejection to the rejected-sends log, since the chat no
+/// longer draws a pill for it.
+fn rejection(route: &str, session_id: &str, kind: Option<&str>, err: String) -> (StatusCode, Json<serde_json::Value>) {
+    super::rejected_sends::record(route, session_id, kind, &err);
     (StatusCode::OK, Json(json!({"ok": false, "error": err})))
 }
 
@@ -318,11 +321,12 @@ pub(super) async fn on_send_message(
     // todo 824 remaining 1: reachable only via the MCP `send_message` tool -
     // mark even a validation-rejected call, since arrival alone is the proof.
     super::mark_mcp_tool_used(&ctx, &body.session_id);
+    let kind = body.kind.as_deref();
     if let Err(e) = validate_send(&body) {
-        return details_rejection(e);
+        return rejection("/messages/send", &body.session_id, kind, e);
     }
     if let Some(Err(e)) = body.details.as_deref().map(validate_details) {
-        return details_rejection(e);
+        return rejection("/messages/send", &body.session_id, kind, e);
     }
     let gen = ctx.state.registry.current_turn_gen(&body.session_id);
     ctx.state.registry.mark_message_sent(&body.session_id, gen);
@@ -338,28 +342,22 @@ pub(super) async fn on_update_message(
     // todo 824 remaining 1: reachable only via the MCP `update_message` tool.
     super::mark_mcp_tool_used(&ctx, &body.session_id);
     if body.message < 1 || body.message > MAX_ORDINAL {
-        return (StatusCode::OK, Json(json!({"ok": false, "error": "message must be 1 or greater"})));
+        return rejection("/messages/update", &body.session_id, None, "message must be 1 or greater".into());
     }
     if !body.retract {
         let trimmed = body.text.as_deref().unwrap_or("").trim().to_string();
         if trimmed.is_empty() {
-            return (
-                StatusCode::OK,
-                Json(json!({"ok": false, "error": "text is required unless retract is true"})),
-            );
+            return rejection("/messages/update", &body.session_id, None, "text is required unless retract is true".into());
         }
         if trimmed.chars().count() > MAX_MESSAGE_LEN {
-            return (
-                StatusCode::OK,
-                Json(json!({"ok": false, "error": format!("text exceeds {MAX_MESSAGE_LEN} chars")})),
-            );
+            return rejection("/messages/update", &body.session_id, None, format!("text exceeds {MAX_MESSAGE_LEN} chars"));
         }
     }
     if let Some(Err(e)) = body.details.as_deref().map(validate_details) {
-        return details_rejection(e);
+        return rejection("/messages/update", &body.session_id, None, e);
     }
     if let Some(Err(e)) = body.visuals.as_deref().map(super::visuals::validate_visuals) {
-        return details_rejection(e);
+        return rejection("/messages/update", &body.session_id, None, e);
     }
     // A revision counts as this turn having spoken, so a correction-only turn
     // doesn't trip the Stop-hook's "said nothing" enforcement.
