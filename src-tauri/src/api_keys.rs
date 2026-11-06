@@ -19,7 +19,8 @@ pub struct ApiKeyEntry {
 }
 
 // Names confirmed against the actual readers: `tickets.rs::token_for`
-// (SHORTCUT_API_TOKEN / LINEAR_API_KEY) and `~/.claude/skills/ticket/shortcut.md`'s
+// (SHORTCUT_API_TOKEN / LINEAR_API_KEY / TRELLO_API_KEY), `tickets.rs::trello_token`
+// (TRELLO_TOKEN) and `~/.claude/skills/ticket/shortcut.md`'s
 // `grep -a SHORTCUT_API_TOKEN ~/.claude/.env`.
 pub const REGISTRY: &[ApiKeyEntry] = &[
     ApiKeyEntry {

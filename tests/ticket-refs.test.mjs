@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
-const { applyTicketLinks, linkifyTickets, parseTicketUrl, ticketCardHtml, forgetTicketTracker, forgetBareStories } = await import(
+const { applyTicketLinks, linkifyTickets, parseTicketUrl, ticketCardHtml, forgetTicketTracker, forgetBareStories, normalizeTrelloBoard } = await import(
   "../src/shared/chat/ticket-refs.ts"
 );
 
@@ -186,6 +186,16 @@ describe("Trello card numbers", () => {
     await linkifyTickets(root, "C:/trello");
     expect(links(root)).toEqual([]);
     expect(summaryCalls()).toHaveLength(1);
+  });
+
+  it("reads a board id from a bare id or a pasted board URL and refuses anything else", () => {
+    expect(normalizeTrelloBoard("AbCd1234")).toBe("AbCd1234");
+    expect(normalizeTrelloBoard(" https://trello.com/b/AbCd1234/my-board ")).toBe("AbCd1234");
+    expect(normalizeTrelloBoard("trello.com/b/AbCd1234")).toBe("AbCd1234");
+    expect(normalizeTrelloBoard("https://trello.com/c/Xy12Zq90/card")).toBeNull();
+    expect(normalizeTrelloBoard("my board")).toBeNull();
+    expect(normalizeTrelloBoard("a/b")).toBeNull();
+    expect(normalizeTrelloBoard("")).toBeNull();
   });
 
   it("recognizes a card URL by its 8-character short link and nothing longer or elsewhere", () => {

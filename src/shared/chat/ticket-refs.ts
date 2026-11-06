@@ -10,10 +10,11 @@ import { isRemote } from "../transport";
 import type { TicketSummary, TrackerInfo, TrackerKind } from "../../types/ipc.generated";
 
 // Registry env name per tracker kind - mirrors src-tauri/src/api_keys.rs's
-// REGISTRY and the error text tickets.rs::token_for formats when unset
-// ("{key} is not set in ~/.claude/.env"), so a missing-token error can offer
-// the right modal instead of a dead-end message.
-// Trello needs two secrets, so each kind lists every env name its error can name.
+// REGISTRY and the error text tickets.rs::token_for (and, for Trello's second
+// secret, trello_token) formats when unset ("{key} is not set in
+// ~/.claude/.env"), so a missing-token error can offer the right modal instead
+// of a dead-end message. Trello needs two secrets, so each kind lists every env
+// name its error can name.
 const TOKEN_ENV_FOR_KIND: Record<Exclude<TrackerKind, "off">, string[]> = {
   shortcut: ["SHORTCUT_API_TOKEN"],
   linear: ["LINEAR_API_KEY"],
@@ -53,8 +54,9 @@ export function forgetTicketTracker(cwd: string): void {
 export function ticketUrl(t: Pick<TrackerInfo, "kind" | "workspace">, id: string): string {
   const ws = encodeURIComponent(t.workspace);
   if (t.kind === "trello") {
-    // A card's own URL needs its short link, which only the lookup knows; until
-    // then (and for a number that never resolves) the board is the honest target.
+    // A card's own URL needs its short link, which only the lookup knows, and a
+    // `tr-N` is only anchored once that lookup stored it, so the board fallback
+    // is a guard for a caller outside that path, never the normal result.
     return trelloUrls.get(trelloKey(t, id)) || `https://trello.com/b/${ws}`;
   }
   return t.kind === "shortcut"
@@ -68,6 +70,16 @@ export function ticketUrl(t: Pick<TrackerInfo, "kind" | "workspace">, id: string
 const trelloUrls = new Map<string, string | false>();
 const trelloKey = (t: Pick<TrackerInfo, "workspace">, id: string) => `${t.workspace}/${id.toLowerCase()}`;
 const TRELLO_ID = /(?<![\w/-])tr-\d{1,6}(?![\w-])/gi;
+
+/** The board id from what Joe typed into the settings row: a bare id or a
+ *  pasted `trello.com/b/<id>/name` URL. null when it is neither, because an
+ *  unusable id makes every `tr-N` lookup fail with no visible cause. */
+export function normalizeTrelloBoard(input: string): string | null {
+  const text = input.trim();
+  const fromUrl = /^(?:https?:\/\/)?(?:www\.)?trello\.com\/b\/([A-Za-z0-9_-]{1,64})(?=[/?#]|$)/.exec(text);
+  const id = fromUrl ? fromUrl[1]! : text;
+  return /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : null;
+}
 
 function idPattern(t: TrackerInfo): RegExp | null {
   if (t.kind === "shortcut") return /(?<![\w/-])sc-\d{1,7}(?![\w-])/gi;
