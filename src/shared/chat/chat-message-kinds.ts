@@ -5,6 +5,8 @@
 // of renderer imports so the event mappers can use it without a cycle through
 // chat-transforms.
 
+import { parseVisuals, type Visual } from "./message-visuals";
+
 export const MESSAGE_KINDS = [
   "answer", "report", "blocker", "do_this", "plan", "rating",
   "correction", "call", "handoff", "artifact", "discovery", "ack",
@@ -33,6 +35,8 @@ export interface MessageCard {
   was?: string;
   /** do_this only: a paste-ready payload. */
   copy?: string;
+  /** Tables and charts drawn under the body (message-visuals.ts). */
+  visuals?: Visual[];
 }
 
 function str(v: unknown): string | undefined {
@@ -62,6 +66,8 @@ export function parseMessageCard(input: unknown): MessageCard | undefined {
   if ((MESSAGE_TONES as readonly unknown[]).includes(raw.tone)) card.tone = raw.tone as MessageTone;
   if (kind === "ack") return card;
   card.points = strList(raw.points);
+  const visuals = parseVisuals(raw);
+  if (visuals?.length) card.visuals = visuals;
   if (kind === "report") {
     card.done = strList(raw.done);
     card.notDone = strList(raw.not_done);
@@ -72,6 +78,15 @@ export function parseMessageCard(input: unknown): MessageCard | undefined {
   // The payload is pasted as written: trimming would eat a command's trailing newline.
   if (kind === "do_this" && typeof raw.copy === "string" && raw.copy.trim() !== "") card.copy = raw.copy;
   return card;
+}
+
+/** What an update_message call does to a card's visuals: `visuals` given replaces
+ *  them (an empty list clears), absent keeps them, the same rule `details` follows. */
+export function reviseCard(card: MessageCard | undefined, input: unknown): MessageCard | undefined {
+  const visuals = parseVisuals(input);
+  if (!card || visuals === undefined) return card;
+  const { visuals: _old, ...rest } = card;
+  return visuals.length > 0 ? { ...rest, visuals } : rest;
 }
 
 /** First line of a message's text: the one line a card prints large. */

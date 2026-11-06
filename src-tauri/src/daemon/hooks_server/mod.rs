@@ -42,6 +42,7 @@ mod shared_mockup;
 mod spawn_chat;
 mod stop;
 mod stop_verdict;
+mod visuals;
 mod subagents;
 mod subchat_finish;
 mod subchat_tool;

@@ -53,6 +53,50 @@ fn next_actions_schema() -> Value {
     })
 }
 
+/// Shared by send_message and update_message. The limits mirror
+/// `hooks_server/visuals.rs`, which enforces them; the chat draws them from the
+/// tool_use input (`src/shared/chat/message-visuals.ts`).
+fn visuals_schema() -> Value {
+    let labelled = |max: usize| json!({
+        "type": "array",
+        "maxItems": max,
+        "items": {
+            "type": "object",
+            "properties": {"label": {"type": "string", "maxLength": 40}, "value": {"type": "number"}},
+            "required": ["label", "value"]
+        }
+    });
+    json!({
+        "type": "array",
+        "maxItems": 3,
+        "description": "Optional tables and charts drawn inside the card, under the text. Use one whenever the answer is numbers or a comparison: a table beats a paragraph of figures, and a chart beats a table when the shape is the point. At most 3 per message, drawn in order. Each item has a `type` and an optional `title` (80 chars):
+- table: `columns` (1-8 headers) and `rows` (1-40 rows, one cell per column; a cell is text or a number, numbers right-align).
+- bar: `data` [{label, value}] (1-12, ranking; value 0 or more) and optional `unit` (\"s\", \"%\", \"$\").
+- line: `labels` (2-24 x-axis labels) and `series` [{name, values}] (1-3 lines, one number per label).
+- donut: `data` [{label, value}] (2-6 parts of a whole, each above 0).
+- timeline: `rows` [{label, blocks: [{start, end, label}]}] (1-10 rows such as days, 1-12 blocks each, times 24-hour \"HH:MM\"). Use it for time-tracking, schedules, anything with a start and an end.
+Example: {\"type\": \"table\", \"title\": \"Cost by model\", \"columns\": [\"Model\", \"Cost\"], \"rows\": [[\"Opus\", \"$18.40\"], [\"Sonnet\", \"$9.75\"]]}. Keep `text` as the one-line conclusion; the visual carries the figures. A malformed visual is rejected with the fix, so read the error and resend.",
+        "items": {
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "enum": ["table", "bar", "line", "donut", "timeline"]},
+                "title": {"type": "string", "maxLength": 80},
+                "columns": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 40}},
+                "rows": {"type": "array", "maxItems": 40, "items": {}},
+                "unit": {"type": "string", "maxLength": 8},
+                "data": labelled(12),
+                "labels": {"type": "array", "maxItems": 24, "items": {"type": "string", "maxLength": 40}},
+                "series": {"type": "array", "maxItems": 3, "items": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string", "maxLength": 40}, "values": {"type": "array", "items": {"type": "number"}}},
+                    "required": ["name", "values"]
+                }}
+            },
+            "required": ["type"]
+        }
+    })
+}
+
 /// Mirrors `hooks_server/messages.rs::KINDS`, which enforces it. Neither module
 /// can see the other's constant, so a test in messages.rs reads this declaration
 /// and fails when the two lists differ.
@@ -71,6 +115,7 @@ fn send_message_description() -> String {
         "NEVER narrate progress. Steps go in `write_plan`: it renders a live checklist in the turn footer and the thinking bar already shows the active step, and a step's `detail` answers \"why is this slow\". Do not send a message that only says work is still running, and do not send one that only points at a question card: the card is the message.",
         "DO NOT SEND for: peer-session coordination. A clean `list_peers`/`post_message` exchange is invisible plumbing - Joe does not want to hear that another session acked or that there was no overlap. Message him about peers ONLY when it changes what you do (you are holding off a commit, another session owns files you need).",
         "A turn may end with NO message at all when there is genuinely nothing worth saying - but the turn that finishes the work must always report.",
+        "VISUALS: when the answer is figures, a comparison, a ranking, a trend or a schedule, pass `visuals` (table, bar, line, donut or timeline) instead of typing a markdown table or a paragraph of numbers. They draw inside the card and do not count against the `text` cap, so `text` stays the one-line conclusion and the visual carries the data.",
         "NEXT ACTIONS: the last send_message of a turn that proposes or finishes work MUST carry `next_actions`, 1 to 3 replies Joe would click next (for example \"/commit\" after a code change, \"Yes, implement this\" after a plan). The app shows them as chips above his input, and a turn without them leaves him typing the obvious. Leave it out only when the message asks Joe a question, reports a blocker, or is not the last one before report_turn_status(done).",
         "Format: short. The first line of `text` is the headline and later lines render as muted body. Caps on `text`: ack 80 chars, report 200, answer 400, every other kind 300; a longer explanation belongs in `details`, and a message over its cap is rejected. Bullets are encouraged over long sentences; break things up with blank lines rather than writing a dense paragraph. If it is long, Joe will not read it. Put supporting detail (lists, ids, reasons) in `details` instead of the text. Each detail has an id, a label and a markdown body. Link to it in the text as [label](#d:id). Joe clicks the link to see the body. To point at a detail from an earlier message, use the same #d:id link and do not repeat the body.",
         "Returns the message's ordinal (always 1 - it is now your newest), which update_message uses to revise or retract it later.",
@@ -144,6 +189,7 @@ pub fn coordination_schemas() -> Vec<Value> {
                     "was": {"type": "string", "maxLength": 100, "description": "correction only: the earlier claim being corrected, at most 100 chars."},
                     "copy": {"type": "string", "maxLength": 4000, "description": "do_this only: a paste-ready payload (a command, a message), at most 4000 chars."},
                     "details": details_schema(),
+                    "visuals": visuals_schema(),
                     "next_actions": next_actions_schema()
                 },
                 "required": ["kind", "text"]
@@ -151,14 +197,15 @@ pub fn coordination_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_UPDATE_MESSAGE,
-            "description": "Revise or retract a message you already sent Joe, instead of sending a second near-identical one. If you catch yourself about to re-send the same point reworded, call this instead.\n\nAddressing: `message` counts BACKWARDS through your own send_message bubbles - 1 is your newest, 2 the one before it. Sending a new message shifts every ordinal up by one.\n\nWindow: you can only reach messages sent since Joe's second-most-recent message. Anything older is out of reach and the call is ignored.\n\nA revision is not held to the per-kind `text` caps send_message enforces, because the daemon does not store a message's kind (it accepts up to 8000 chars). Keep a revised card as short as the one it replaces; long prose belongs in `details`.\n\n`details` replaces the message's details when given.\n\nEdit (pass `text`) swaps the bubble silently in place, no trace. Retract (pass `retract: true`) replaces it with a thin struck 'Retracted' line.\n\nAfter Joe interrupts you, every bubble from the cancelled turn is dimmed automatically. Retract the ones that are now false, and re-state the ones that are still true via `text` - either clears the dim.",
+            "description": "Revise or retract a message you already sent Joe, instead of sending a second near-identical one. If you catch yourself about to re-send the same point reworded, call this instead.\n\nAddressing: `message` counts BACKWARDS through your own send_message bubbles - 1 is your newest, 2 the one before it. Sending a new message shifts every ordinal up by one.\n\nWindow: you can only reach messages sent since Joe's second-most-recent message. Anything older is out of reach and the call is ignored.\n\nA revision is not held to the per-kind `text` caps send_message enforces, because the daemon does not store a message's kind (it accepts up to 8000 chars). Keep a revised card as short as the one it replaces; long prose belongs in `details`.\n\n`details` replaces the message's details when given, and so does `visuals`.\n\nEdit (pass `text`) swaps the bubble silently in place, no trace. Retract (pass `retract: true`) replaces it with a thin struck 'Retracted' line.\n\nAfter Joe interrupts you, every bubble from the cancelled turn is dimmed automatically. Retract the ones that are now false, and re-state the ones that are still true via `text` - either clears the dim.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "message": {"type": "integer", "description": "Which message, counting back from your newest (1 = newest)."},
                     "text": {"type": "string", "description": "Replacement text. Required unless retract is true."},
                     "retract": {"type": "boolean", "description": "Strike the message out instead of replacing its text."},
-                    "details": details_schema()
+                    "details": details_schema(),
+                    "visuals": visuals_schema()
                 },
                 "required": ["message"]
             }

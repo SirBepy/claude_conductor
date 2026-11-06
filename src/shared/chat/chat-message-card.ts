@@ -10,6 +10,7 @@
 import { escapeHtml } from "../escape-html";
 import { bodyOf, headlineOf, openCounts, type MessageCard, type MessageKind } from "./chat-message-kinds";
 import type { RenderedMessage } from "./chat-classifiers";
+import { renderVisuals } from "./message-visuals-render";
 
 export type RenderText = (markdown: string) => string;
 
@@ -152,6 +153,8 @@ function fullHtml(m: RenderedMessage, card: MessageCard, text: RenderText, extra
   if (card.verdict) parts.push(`<p class="mc-verdict">${verdictHtml(card, card.verdict, extras)}</p>`);
   if (head) parts.push(`<div class="mc-head${card.verdict ? "" : " mc-head--main"}">${text(head)}</div>`);
   if (body) parts.push(`<div class="mc-body">${text(body)}</div>`);
+  // Figures live in the full card only: the one-line mini form stays one line.
+  if (card.visuals?.length) parts.push(renderVisuals(card.visuals));
   if (card.copy) parts.push(copyBlockHtml(card.copy));
   if (card.kind === "report") {
     const yours = sectionHtml("Your move", "yours", "ph-hand-pointing", card.yourMove, text);
