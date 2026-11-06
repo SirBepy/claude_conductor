@@ -24,7 +24,7 @@ export interface MessageCard {
   kind: MessageKind;
   verdict?: string;
   tone?: MessageTone;
-  /** Extra points behind a click. */
+  /** Extra points behind a click; on a rating, the ways to raise the score, drawn open as rows. */
   points?: string[];
   /** Report rows. */
   done?: string[];

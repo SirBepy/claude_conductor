@@ -134,17 +134,21 @@ const LIFT_COST_RE = /^(.*?)[;,]\s*(costs?\b.*)$/is;
 
 function liftHtml(point: string, text: RenderText): string {
   const [, score = "", rest = ""] = LIFT_RE.exec(point) ?? [];
-  if (!score) return `<li class="mc-lift mc-lift--plain"><span class="mc-lift-text">${text(point)}</span></li>`;
+  // Divs, not spans: `text()` returns block markup (a div holding a paragraph).
+  if (!score) return `<li class="mc-lift mc-lift--plain"><div class="mc-lift-text">${text(point)}</div></li>`;
   const [, what = rest, costText = ""] = LIFT_COST_RE.exec(rest) ?? [];
-  const cost = costText ? `<span class="mc-lift-cost">${text(costText)}</span>` : "";
-  return `<li class="mc-lift"><span class="mc-lift-to"><i class="ph ph-arrow-right" aria-hidden="true"></i>${escapeHtml(score.replace(/\s+/g, ""))}</span><span class="mc-lift-text">${text(what)}${cost}</span></li>`;
+  const cost = costText ? `<div class="mc-lift-cost">${text(costText)}</div>` : "";
+  return `<li class="mc-lift"><span class="mc-lift-to"><i class="ph ph-arrow-right" aria-hidden="true"></i>${escapeHtml(score.replace(/\s+/g, ""))}</span><div class="mc-lift-text">${text(what)}${cost}</div></li>`;
+}
+
+/** The rows of a rating's ways to raise the score; the full card and its shrunken mini form both draw them. */
+function liftsHtml(points: readonly string[], text: RenderText): string {
+  return `<div class="mc-lifts"><div class="mc-lifts-label">How to raise it</div><ol class="mc-lifts-list">${points.map((p) => liftHtml(p, text)).join("")}</ol></div>`;
 }
 
 /** A rating's points are its ways to raise the score, laid out as rows Joe sees without a click; other kinds keep theirs folded. */
 function pointsDetailsHtml(points: readonly string[], text: RenderText, kind: string): string {
-  if (kind === "rating") {
-    return `<div class="mc-lifts"><div class="mc-lifts-label">How to raise it</div><ol class="mc-lifts-list">${points.map((p) => liftHtml(p, text)).join("")}</ol></div>`;
-  }
+  if (kind === "rating") return liftsHtml(points, text);
   const n = points.length;
   return `<details class="mc-points"><summary class="mc-toggle"><span>${n} more point${n === 1 ? "" : "s"}</span>${caret}</summary><ul class="mc-points-list">${points.map((p) => `<li>${text(p)}</li>`).join("")}</ul></details>`;
 }
@@ -206,7 +210,9 @@ function miniHtml(m: RenderedMessage, card: MessageCard, text: RenderText, extra
   const inner: string[] = [];
   if (body) inner.push(`<div class="mc-body">${text(body)}</div>`);
   if (card.copy) inner.push(copyBlockHtml(card.copy));
-  if (card.points?.length) inner.push(`<ul class="mc-points-list">${card.points.map((p) => `<li>${text(p)}</li>`).join("")}</ul>`);
+  if (card.points?.length) {
+    inner.push(card.kind === "rating" ? liftsHtml(card.points, text) : `<ul class="mc-points-list">${card.points.map((p) => `<li>${text(p)}</li>`).join("")}</ul>`);
+  }
   if (card.kind === "report") inner.push(`<div class="mc-secs">${reportSections(card, text, true)}</div>`, drillRowHtml(m));
   if (extras?.extraHtml) inner.push(extras.extraHtml);
   // Always a <details>, even with nothing behind the row: opening it un-truncates the headline.
