@@ -74,6 +74,14 @@ describe("when-done header chip", () => {
     expect(host().innerHTML).toBe("");
   });
 
+  it("switching the armed action while armed swaps the icon along with the text", () => {
+    push(ps({ action: "sleep", phase: "watching" }));
+    expect(host().querySelector("i").className).toContain("ph-moon-stars");
+    push(ps({ action: "shutdown", phase: "watching" }));
+    expect(host().querySelector("i").className).toContain("ph-power");
+    expect(host().textContent).toContain("Shutdown when idle");
+  });
+
   it("the countdown chip has a one-click Postpone that snoozes 30 minutes", () => {
     push(ps({ action: "shutdown", phase: "countingDown", countdown_remaining_secs: 28 }));
     expect(host().textContent).toContain("Shutdown in 28s");

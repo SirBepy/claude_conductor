@@ -98,9 +98,10 @@ fn ready_to_fire(deps: &EngineDeps, mode: ArmMode) -> bool {
 
 /// The phase machine: Watching -> CountingDown -> Firing. Drives only through
 /// `deps`, so it is identical for production and tests. Runs until the action
-/// fires, the protocol is cancelled, or the runaway guard trips. A nightly run
-/// drops back to Watching if interrupted. Chats are never closed: every one is
-/// still there after boot.
+/// fires, the protocol is cancelled, or the runaway guard trips. A run drops
+/// back to Watching if interrupted: by a postpone in any mode, or on a nightly
+/// run by the user returning or a chat going busy. Chats are never closed:
+/// every one is still there after boot.
 async fn run_engine_with_deps(
     deps: EngineDeps,
     action: TerminalAction,
@@ -196,6 +197,11 @@ async fn watch(deps: &EngineDeps, mode: ArmMode, action: TerminalAction, overdue
         // Runaway guard: if the busy signature is unchanged for too long, bail.
         // Not on a nightly arm: nobody is there to re-arm it, and staying armed
         // only keeps the PC on, which is what would happen without it anyway.
+        // A postponed run is waiting on purpose, not stuck, so the limit counts
+        // from the postpone's end (a postpone may be longer than the limit).
+        if postponed {
+            no_progress_since = (deps.now)();
+        }
         let sig = Some(busy_map.clone());
         if sig != last_idle_signature {
             last_idle_signature = sig;

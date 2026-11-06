@@ -70,19 +70,22 @@ function chipHtml(m: WhenDoneChipModel): string {
 }
 
 /** Keep `host` showing the chip for the current state. The DOM is rebuilt only
- *  when the chip's kind changes, so the popover's anchor survives the 1s
- *  countdown ticks. */
+ *  when the chip's kind or action changes (the icon is baked into the markup),
+ *  so the popover's anchor survives the 1s countdown ticks. */
 function render(host: HTMLElement): void {
   const m = whenDoneChipModel(state.whenDone);
   if (!m) {
     host.hidden = true;
     host.innerHTML = "";
     delete host.dataset.kind;
+    delete host.dataset.key;
     popover.close();
     return;
   }
-  if (host.dataset.kind !== m.kind) {
+  const key = `${m.kind}:${state.whenDone?.action}`;
+  if (host.dataset.key !== key) {
     host.innerHTML = chipHtml(m);
+    host.dataset.key = key;
     host.dataset.kind = m.kind;
   }
   host.hidden = false;
