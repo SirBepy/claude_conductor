@@ -275,8 +275,8 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     `  <div class="session-composer"></div>`,
     `</div>`,
   ].join("");
-  // A sub read in place gets its back arrow and "Move to sidebar"; a chat with
-  // subs gets their count. Before the header is in the pane, so the phone's
+  // A sub read in place gets its back arrow ("Move to sidebar" is in the chat menu,
+  // chat-menu-items.ts); a chat with subs gets their count. Before the header is in the pane, so the phone's
   // header merge below sees the finished slots.
   decorateSubchatHeader(header, sess, subchatNavFor(pane));
   mountMockupButton(header, sess.session_id);

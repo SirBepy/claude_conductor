@@ -2,8 +2,8 @@
 //
 // A sub opened in place is the ordinary chat view of a row the sidebar hides: the
 // same pane, renderer, composer and statusbar, selected by its own session id.
-// Only the header differs (a back arrow, a "Move to sidebar" button, a line saying
-// whose sub it is), and everything that asks "which chat's window is this" goes
+// Only the header differs (a back arrow and a line saying whose sub it is; "Move to
+// sidebar" is a chat-menu item, chat-menu-items.ts), and everything that asks "which chat's window is this" goes
 // through `windowIdOf`, so the sidebar marks the main chat and the prompt gate
 // shows the main chat's cards. Whether a pane is a sub's is read from the
 // instance's `subchat_of` each time, never kept as view state, so a reload, the
