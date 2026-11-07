@@ -57,13 +57,37 @@ pub(crate) async fn has_open_prompt(state: &crate::daemon::state::DaemonState, s
         .any(|v| v["payload"]["session_id"].as_str() == Some(session_id) && !crate::daemon::state::is_quiet(v))
 }
 
+/// The model and effort a chat is spawned with when its registry row never
+/// recorded either. One definition for every respawn path (`respawn_interactive`,
+/// a scheduled message's respawn, the desktop's cold-cache send) AND for
+/// [`launch_differs`]: if they disagreed, an unrecorded row would read as stale
+/// on every send and respawn each time.
+pub(crate) const SPAWN_DEFAULT_MODEL: &str = "opus";
+pub(crate) const SPAWN_DEFAULT_EFFORT: &str = "high";
+
 /// Model and effort are launch-only CLI flags, so a live child keeps the pair it
-/// was spawned with. Empty means the same default `respawn_interactive` spawns
-/// with, so a registry row that never recorded either does not read as a change.
+/// was spawned with. Empty means the spawn default ([`SPAWN_DEFAULT_MODEL`] /
+/// [`SPAWN_DEFAULT_EFFORT`]), so a registry row that never recorded either does
+/// not read as a change.
 fn launch_differs(live_model: &str, live_effort: &str, want_model: &str, want_effort: &str) -> bool {
-    let model = |m: &str| if m.is_empty() { "opus".to_string() } else { m.to_string() };
-    let effort = |e: &str| if e.is_empty() { "high".to_string() } else { e.to_string() };
+    let model = |m: &str| if m.is_empty() { SPAWN_DEFAULT_MODEL.to_string() } else { m.to_string() };
+    let effort = |e: &str| if e.is_empty() { SPAWN_DEFAULT_EFFORT.to_string() } else { e.to_string() };
     model(live_model) != model(want_model) || effort(live_effort) != effort(want_effort)
+}
+
+/// Would a respawn kill a turn that is running right now: the chat is mid-turn
+/// and no question card is open. A card parks the child, which runs nothing, so
+/// it is safe to respawn. The one rule behind both halves of the deferred
+/// model/effort pick: `apply_launch_change` respawns exactly this chat at once
+/// (and nudges it with "continue"), and [`refresh_stale_launch`] refuses to.
+pub(crate) fn respawn_would_kill_a_turn(busy: bool, has_prompt: bool) -> bool {
+    busy && !has_prompt
+}
+
+/// [`refresh_stale_launch`]'s decision: respawn only a chat whose child runs a
+/// stale pair and is not in the middle of a turn.
+fn stale_respawn_due(busy: bool, has_prompt: bool, stale: bool) -> bool {
+    stale && !respawn_would_kill_a_turn(busy, has_prompt)
 }
 
 /// Does `session_id`'s live child run a different model/effort than the
@@ -83,16 +107,24 @@ pub(crate) fn launch_is_stale(state: &crate::daemon::state::DaemonState, session
 /// Returns whether it respawned, which also means the child has a new broadcast
 /// channel the caller's subscribers must re-attach to. A failed respawn is
 /// logged and reported as `false`: the send then falls to its NotFound respawn.
+///
+/// The send right behind a respawn is not refused as busy: `restart_session`
+/// returns after the old child leaves `state.sessions`, and the pump clears
+/// `busy` in the same await-free stretch of `pump/exit.rs`, before the new
+/// spawn's own awaits finish. A `busy` that outlives it is a gen mismatch the
+/// registry logs (`set_busy_false_if_gen`), not something this respawn causes.
 pub(crate) async fn refresh_stale_launch(
     state: &std::sync::Arc<crate::daemon::state::DaemonState>,
     session_id: &str,
 ) -> bool {
-    if !launch_is_stale(state, session_id) {
-        return false;
-    }
+    // Each read is skipped once the answer no longer depends on it: this runs on
+    // every user send, and most chats are not stale.
+    let stale = launch_is_stale(state, session_id);
+    let busy = stale && is_busy(state, session_id);
+    let has_prompt = busy && has_open_prompt(state, session_id).await;
     // A turn running with no card open would be killed by this, and the send
     // behind it is about to be refused as busy anyway.
-    if is_busy(state, session_id) && !has_open_prompt(state, session_id).await {
+    if !stale_respawn_due(busy, has_prompt, stale) {
         return false;
     }
     log::info!("daemon: {session_id} runs a stale model/effort, respawning before the next send");
@@ -230,6 +262,48 @@ pub enum LifecycleError {
     ApiCreditBlocked(String),
 }
 
+/// A live `Session` for tests that need `state.sessions` to hold a child: a
+/// `Session` owns a real `ChildStdin`, so this spawns a throwaway process.
+/// Windows-only, like the other tests that spawn a probe child.
+#[cfg(all(test, windows))]
+pub(crate) mod probe {
+    use crate::daemon::session::Session;
+    use crate::daemon::state::DaemonState;
+    use std::sync::Arc;
+
+    /// Registers `session_id` as an Interactive row in `cwd` (a folder that does
+    /// not exist, so a respawn fails at the cwd check instead of starting
+    /// `claude`) with the registry's pick set to `registry_pair`, and inserts a
+    /// live session launched with `live_pair`. Keep the returned child alive for
+    /// the test; it is killed on drop. A respawn attempt shows as
+    /// `expected_exit`, which `kill_and_wait_for_teardown` sets before it kills.
+    pub(crate) fn live_session(
+        state: &DaemonState,
+        session_id: &str,
+        live_pair: (&str, &str),
+        registry_pair: (&str, &str),
+    ) -> (tokio::process::Child, Arc<Session>) {
+        let cwd = std::path::Path::new("Z:\\does\\not\\exist");
+        state.registry.upsert_interactive(session_id, cwd, "proj", "2026-11-07T00:00:00Z");
+        state.registry.set_model_effort(session_id, registry_pair.0, registry_pair.1);
+        let mut child = tokio::process::Command::new("cmd")
+            .args(["/C", "ping", "-n", "60", "127.0.0.1"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn probe child");
+        let stdin = child.stdin.take().expect("piped stdin");
+        let pid = child.id().expect("pid");
+        let session = Session::new(
+            session_id.to_string(), cwd.to_path_buf(), live_pair.0.into(), live_pair.1.into(),
+            pid, stdin, None, None, "acct".into(),
+        );
+        state.sessions.insert(session_id.to_string(), session.clone());
+        (child, session)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +367,66 @@ mod tests {
         assert!(launch_differs("opus", "high", "sonnet", "high"), "a model pick is a change");
         assert!(launch_differs("opus", "high", "opus", "max"), "an effort pick is a change");
         assert!(!launch_differs("sonnet", "low", "sonnet", "low"), "picking the original back cancels it");
+    }
+
+    #[test]
+    fn the_spawn_default_pair_is_never_a_launch_change() {
+        assert!(!launch_differs(SPAWN_DEFAULT_MODEL, SPAWN_DEFAULT_EFFORT, "", ""));
+        assert!(!launch_differs("", "", SPAWN_DEFAULT_MODEL, SPAWN_DEFAULT_EFFORT));
+    }
+
+    #[test]
+    fn only_a_chat_mid_turn_with_no_card_open_would_lose_its_turn_to_a_respawn() {
+        assert!(respawn_would_kill_a_turn(true, false), "a running turn dies with the child");
+        assert!(!respawn_would_kill_a_turn(false, false), "idle: nothing runs");
+        assert!(!respawn_would_kill_a_turn(true, true), "a question card parks the child, nothing runs");
+        assert!(!respawn_would_kill_a_turn(false, true));
+    }
+
+    #[test]
+    fn a_stale_pick_is_applied_on_the_next_send_unless_a_turn_is_running() {
+        // (busy, has_prompt, stale)
+        assert!(stale_respawn_due(false, false, true), "idle chat: the send applies the pick");
+        assert!(stale_respawn_due(true, true, true), "open question card: the send applies the pick");
+        assert!(!stale_respawn_due(true, false, true), "mid-turn: refused as busy, the child is left alone");
+        assert!(!stale_respawn_due(false, false, false), "nothing pending");
+        assert!(!stale_respawn_due(true, true, false));
+        assert!(!stale_respawn_due(true, false, false));
+    }
+
+    /// The live-child cases below read `expected_exit` as "a respawn was
+    /// attempted": the respawn itself cannot complete here (it would start
+    /// `claude`), so it fails at the cwd check after the kill.
+    #[cfg(windows)]
+    async fn refresh_with(busy: bool, card: bool, stale: bool) -> (bool, bool) {
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let registry_pair = if stale { ("sonnet", "low") } else { ("opus", "high") };
+        let (_child, session) = probe::live_session(&state, "s", ("opus", "high"), registry_pair);
+        state.registry.set_busy("s", busy);
+        if card {
+            state.add_prompt("p1", "question-requested", serde_json::json!({"session_id": "s", "seq": 1}), false).await;
+        }
+        let returned = refresh_stale_launch(&state, "s").await;
+        (returned, session.expected_exit.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn refresh_stale_launch_respawns_an_idle_chat_and_one_parked_on_a_card() {
+        assert!(refresh_with(false, false, true).await.1, "idle and stale: the send applies the pick");
+        assert!(refresh_with(true, true, true).await.1, "a question card open: nothing runs, the send applies the pick");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn refresh_stale_launch_refuses_a_chat_mid_turn_without_a_card() {
+        assert_eq!(refresh_with(true, false, true).await, (false, false), "the running turn must not be killed");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn refresh_stale_launch_leaves_a_chat_running_its_pick_alone() {
+        assert_eq!(refresh_with(false, false, false).await, (false, false));
     }
 
     #[test]

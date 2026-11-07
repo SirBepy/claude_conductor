@@ -47,9 +47,10 @@ pub(crate) async fn restart_live_session(state: &Arc<DaemonState>, caller: &str,
 /// when Joe next sends, so no unwanted "continue" turn is spent on it.
 /// Returns whether it respawned.
 async fn apply_launch_change(state: &Arc<DaemonState>, caller: &str, session_id: &str) -> bool {
-    let working = crate::daemon::lifecycle::is_busy(state, session_id)
-        && !crate::daemon::lifecycle::has_open_prompt(state, session_id).await;
-    working && restart_live_session(state, caller, session_id).await
+    let busy = crate::daemon::lifecycle::is_busy(state, session_id);
+    let has_prompt = busy && crate::daemon::lifecycle::has_open_prompt(state, session_id).await;
+    crate::daemon::lifecycle::respawn_would_kill_a_turn(busy, has_prompt)
+        && restart_live_session(state, caller, session_id).await
 }
 
 pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
@@ -256,6 +257,42 @@ mod tests {
 
     fn dummy_state() -> Arc<DaemonState> {
         DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()))
+    }
+
+    /// Runs `apply_launch_change` on a live chat whose registry pick differs from
+    /// the pair its child launched with, and returns whether it tried to respawn:
+    /// `expected_exit` is set before the kill. The respawn itself cannot finish
+    /// here (it would start `claude`), so the return value is `false` either way.
+    #[cfg(windows)]
+    async fn picks_a_model_on(busy: bool, card: bool) -> bool {
+        let state = dummy_state();
+        let (_child, session) =
+            crate::daemon::lifecycle::probe::live_session(&state, "s", ("opus", "high"), ("sonnet", "low"));
+        state.registry.set_busy("s", busy);
+        if card {
+            state.add_prompt("p1", "question-requested", json!({"session_id": "s", "seq": 1}), false).await;
+        }
+        apply_launch_change(&state, "test", "s").await;
+        session.expected_exit.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_model_pick_on_an_idle_chat_keeps_its_child_for_the_next_send() {
+        assert!(!picks_a_model_on(false, false).await);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_model_pick_on_a_chat_parked_on_a_question_card_keeps_its_child() {
+        assert!(!picks_a_model_on(true, true).await, "the card's answer must not be lost to a respawn");
+        assert!(!picks_a_model_on(false, true).await);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_model_pick_mid_turn_respawns_the_chat_at_once() {
+        assert!(picks_a_model_on(true, false).await, "the running turn is dead either way, so apply it now");
     }
 
     #[tokio::test]

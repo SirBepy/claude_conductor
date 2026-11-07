@@ -118,6 +118,11 @@ async fn fire_message(
     // finished one is continued through the same door a reply to it uses.
     let sub_prior = crate::daemon::subchats::before_scheduled_fire(state, session_id)?;
     let sent = async {
+        // A model/effort pick made on the idle chat waits for the next send
+        // (`apply_launch_change`); a fire is that send when Joe did not type
+        // one first, and the picker already shows the new pair. Its respawn
+        // swaps the channel, which the app re-attaches to on `channel_epoch`.
+        lifecycle::refresh_stale_launch(state, session_id).await;
         let session = match state.sessions.get(session_id).map(|s| s.clone()) {
             Some(s) => s,
             None => respawn_for_message(state, session_id, cwd).await?,
@@ -159,11 +164,11 @@ async fn respawn_for_message(
         .registry
         .get(session_id)
         .map(|inst| {
-            let model = if inst.model.is_empty() { "opus".to_string() } else { inst.model };
-            let effort = if inst.effort.is_empty() { "high".to_string() } else { inst.effort };
+            let model = if inst.model.is_empty() { lifecycle::SPAWN_DEFAULT_MODEL.to_string() } else { inst.model };
+            let effort = if inst.effort.is_empty() { lifecycle::SPAWN_DEFAULT_EFFORT.to_string() } else { inst.effort };
             (model, effort, inst.account_id)
         })
-        .unwrap_or_else(|| ("opus".to_string(), "high".to_string(), None));
+        .unwrap_or_else(|| (lifecycle::SPAWN_DEFAULT_MODEL.to_string(), lifecycle::SPAWN_DEFAULT_EFFORT.to_string(), None));
     let params = StartSessionParams {
         cwd: PathBuf::from(cwd),
         model,
@@ -279,6 +284,35 @@ mod tests {
         let inst = state.registry.get("sess-1").unwrap();
         assert!(!inst.frozen, "auto-freeze must be cleared once the resume is ready to fire");
         assert!(!inst.auto_frozen);
+    }
+
+    /// `expected_exit` marks a respawn attempt (set before the kill). The
+    /// respawn cannot finish here, since it would start `claude`.
+    #[cfg(windows)]
+    /// Returns whether a respawn was attempted, with what `fire_message` answered
+    /// (for the failure message). The id is per test: the send path writes
+    /// process-wide chat state keyed by it.
+    #[cfg(windows)]
+    async fn fire_into_live_chat(sid: &str, registry_pair: (&str, &str)) -> (bool, Result<(), String>) {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        let (_child, session) = lifecycle::probe::live_session(&state, sid, ("opus", "high"), registry_pair);
+        let fired = fire_message(&state, sid, "Z:\\does\\not\\exist", "hi").await;
+        (session.expected_exit.load(std::sync::atomic::Ordering::SeqCst), fired)
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn fire_message_applies_a_pending_model_pick_by_respawning_the_idle_chat() {
+        let (attempted, fired) = fire_into_live_chat("sched-pick-stale", ("sonnet", "low")).await;
+        assert!(attempted, "the picker shows sonnet, so the fired turn must run on it: {fired:?}");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn fire_message_leaves_a_chat_already_on_its_pick_alone() {
+        let (attempted, fired) = fire_into_live_chat("sched-pick-current", ("opus", "high")).await;
+        assert!(!attempted, "{fired:?}");
     }
 
     #[tokio::test]
