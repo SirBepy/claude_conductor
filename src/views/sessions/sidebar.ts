@@ -1,4 +1,7 @@
 import { invoke } from "../../shared/ipc";
+import { api } from "../../shared/api";
+import { getSettings } from "../../shared/state";
+import { chatsWithoutFiveHour } from "./sidebar-rows";
 import { updateFaviconBadge } from "../../shared/favicon-badge";
 import type { Instance, DrainBoard, ScheduledItem } from "../../types/ipc.generated";
 import {
@@ -70,6 +73,9 @@ function createDebouncedRefresher(
 // block on (or unconditionally fire) the chat_drains IPC — it reads whatever
 // drainMap already has and triggers an async, debounced background refresh.
 const drainMap = new Map<string, number>();
+// Accounts whose latest usage record says the plan has no 5h window. Read with
+// the drain figures so the chip stays off for them; empty until the first read.
+let noFiveHourAccounts: ReadonlySet<string> = new Set();
 const DRAIN_REFRESH_DEBOUNCE_MS = 3000;
 let pendingDrainSessionIds: string[] = [];
 
@@ -78,7 +84,13 @@ const runDrainRefresh = createDebouncedRefresher("chat_drains", async () => {
   // in flight overwrites pendingDrainSessionIds, and the apply loop must walk
   // the ids this fetch actually queried, not the newer set.
   const sessionIds = pendingDrainSessionIds;
-  const board = await invoke<DrainBoard>("chat_drains", { sessionIds });
+  const [board, usage] = await Promise.all([
+    invoke<DrainBoard>("chat_drains", { sessionIds }),
+    api.getUsageMap(),
+  ]);
+  noFiveHourAccounts = new Set(
+    Object.entries(usage).filter(([, rec]) => rec.session_limited === false).map(([id]) => id),
+  );
   for (const id of sessionIds) {
     const chat = board.chats[id];
     // null share = no usage snapshot yet; leave it out so the row keeps the
@@ -275,6 +287,7 @@ export function renderSidebar(listEl: HTMLElement): void {
     listEl,
     () => renderSidebar(listEl),
     drainMap,
+    chatsWithoutFiveHour(state.sessions, noFiveHourAccounts, (getSettings().default_account_id as string | null | undefined) ?? null),
     scheduledCountMap,
     scheduledPendingPlaceholders,
     refreshDrainMap,
