@@ -88,6 +88,14 @@ fn snoozed(deps: &EngineDeps) -> bool {
     (deps.snooze_until)().is_some_and(|until| (deps.now)() < until)
 }
 
+/// Wall-clock now, the clock `snoozed_until_unix_ms` (the display copy of a
+/// postpone's end) is written in.
+fn unix_ms_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
+}
+
 /// Whether the engine may leave Watching (or keep counting down). A nightly arm
 /// additionally needs the user to have been away for `NIGHTLY_AWAY_SECS`.
 fn ready_to_fire(deps: &EngineDeps, mode: ArmMode) -> bool {
@@ -166,7 +174,10 @@ async fn watch(deps: &EngineDeps, mode: ArmMode, action: TerminalAction, overdue
             s.phase = ProtocolPhase::Watching;
             s.countdown_remaining_secs = None;
             s.waiting_on = waiting.clone();
-            if !postponed {
+            // Decided here, against the display copy itself, not from `postponed`
+            // read under an earlier lock: a snooze landing between that read and
+            // this closure wrote the copy, and a stale `false` would wipe it.
+            if s.snoozed_until_unix_ms.is_some_and(|until| until <= unix_ms_now()) {
                 s.snoozed_until_unix_ms = None;
             }
         });
