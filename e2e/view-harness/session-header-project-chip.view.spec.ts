@@ -1,4 +1,3 @@
-// Reviewed 2026-11-02: the avatar's wrap-up badge is now --control-h-sm (24px) instead of 16px; this spec asserts the project chip and passes.
 // Reviewed 2026-10-29: session-header.css gained the .is-swapping title crossfade; this spec asserts the project chip only, so its contract is unaffected. Passed after the change.
 // asserts: src/views/sessions/session-header.css
 import { test, expect } from "@playwright/test";
