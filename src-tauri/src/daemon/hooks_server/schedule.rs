@@ -5,6 +5,7 @@
 //! same shape every other MCP route in this module uses, so a rejected write
 //! reaches the model as a readable reason rather than a transport error.
 
+use super::rejected_sends;
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::schedule_mcp::{self, ScheduleArgs};
@@ -62,11 +63,11 @@ pub(super) async fn on_write_schedule(
         after_meeting: body.after_meeting,
     };
     if let Err(e) = approve_new_chat(&ctx, &body.session_id, &args).await {
-        return (StatusCode::OK, Json(json!({"ok": false, "error": e})));
+        return rejected_sends::reply("/schedule/write", &body.session_id, e);
     }
     match schedule_mcp::write_schedule(&ctx.state, &body.session_id, &args) {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/schedule/write", &body.session_id, e),
     }
 }
 

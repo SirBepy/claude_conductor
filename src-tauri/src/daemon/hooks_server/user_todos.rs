@@ -3,6 +3,7 @@
 //! envelope was verified against CLI 2.1.231 in the daemon's own stream-json
 //! spawn shape before this was built; nothing else here registers it.
 
+use super::rejected_sends;
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::drafts_store as draft_methods;
@@ -48,7 +49,7 @@ pub(super) async fn on_write_user_todo(
         &body.reason.unwrap_or_default(),
     ) {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/todos/write", &body.session_id, e),
     }
 }
 

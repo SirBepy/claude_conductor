@@ -18,6 +18,7 @@
 //! et al.), so the HTTP status carries no meaning to it beyond "the request
 //! reached the daemon".
 
+use super::rejected_sends;
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::jarvis as jarvis_methods;
@@ -60,7 +61,7 @@ pub(super) async fn on_spawn_worker(
     .await;
     match result {
         Ok(session_id) => (StatusCode::OK, Json(json!({"ok": true, "session_id": session_id}))),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/jarvis/spawn-worker", &body.jarvis_session_id, e),
     }
 }
 
@@ -86,7 +87,7 @@ pub(super) async fn on_send_to_session(
     .await;
     match result {
         Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/jarvis/send-to-session", &body.jarvis_session_id, e),
     }
 }
 
@@ -104,7 +105,7 @@ pub(super) async fn on_fleet_status(
     let result = jarvis_methods::fleet_status(&ctx.state, &body.jarvis_session_id).await;
     match result {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/jarvis/fleet-status", &body.jarvis_session_id, e),
     }
 }
 
@@ -136,7 +137,7 @@ pub(super) async fn on_respond_worker_prompt(
     .await;
     match result {
         Ok(delivered) => (StatusCode::OK, Json(json!({"ok": true, "delivered": delivered}))),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/jarvis/respond-worker-prompt", &body.jarvis_session_id, e),
     }
 }
 

@@ -3,10 +3,11 @@
 //! an `ok:false` naming the fix, because the model reads it as the tool result
 //! and retries, and a malformed body must never reach it as a decode error.
 
+use super::rejected_sends;
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 
 pub(super) async fn on_subchat(
@@ -14,7 +15,7 @@ pub(super) async fn on_subchat(
     ValidatedJson(body): ValidatedJson<Value>,
 ) -> impl IntoResponse {
     let Some(session_id) = body["session_id"].as_str().map(str::to_string) else {
-        return (StatusCode::OK, Json(json!({"ok": false, "error": "session_id is missing"})));
+        return rejected_sends::reply("/subchats/tool", "", "session_id is missing");
     };
     // The call arriving at all proves the MCP transport is up this turn.
     super::mark_mcp_tool_used(&ctx, &session_id);
@@ -25,6 +26,7 @@ pub(super) async fn on_subchat(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::daemon::state::DaemonState;

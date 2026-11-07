@@ -3,10 +3,11 @@
 //! `session_id` rides the tool call's own `CC_SESSION_ID` env, no separate
 //! auth.
 
+use super::rejected_sends;
 use super::HookCtx;
 use crate::daemon::methods::turn_status;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 
 /// Extracts as `Json<Value>` rather than a typed struct with a required
@@ -33,12 +34,10 @@ pub(super) async fn on_report_status(
     let status = match body["status"].as_str() {
         Some(s) => s,
         None => {
-            return (
-                StatusCode::OK,
-                Json(json!({
-                    "ok": false,
-                    "error": "missing 'status': must be one of done|question|waiting|working"
-                })),
+            return rejected_sends::reply(
+                "/turn/report-status",
+                session_id,
+                "missing 'status': must be one of done|question|waiting|working",
             );
         }
     };
@@ -53,13 +52,14 @@ pub(super) async fn on_report_status(
     );
     match turn_status::report_status(&ctx.state, session_id, status, title, waiting_on) {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/turn/report-status", session_id, e),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::daemon::state::DaemonState;
@@ -136,5 +136,32 @@ mod tests {
         let v = body_json(resp).await;
         assert_eq!(v["ok"], json!(false));
         assert!(v["error"].as_str().unwrap().contains("missing 'status'"));
+    }
+
+    /// A rejected status call reaches the rejected-sends log with its route and
+    /// session; an accepted one writes nothing.
+    #[tokio::test]
+    async fn a_rejected_status_call_is_recorded_and_an_accepted_one_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let _capture = rejected_sends::capture_in(dir.path());
+        let ok = on_report_status(AxState(ctx()), Json(json!({"session_id": "rec-ok", "status": "done"}))).await.into_response();
+        assert_eq!(body_json(ok).await, json!({"ok": true}));
+        assert!(rejected_sends::read_records(dir.path()).is_empty());
+
+        let missing = on_report_status(AxState(ctx()), Json(json!({"session_id": "rec-s"}))).await.into_response();
+        assert_eq!(
+            body_json(missing).await,
+            json!({"ok": false, "error": "missing 'status': must be one of done|question|waiting|working"})
+        );
+        let bogus = on_report_status(AxState(ctx()), Json(json!({"session_id": "rec-b", "status": "bogus"}))).await.into_response();
+        assert_eq!(body_json(bogus).await["ok"], json!(false));
+
+        let rows = rejected_sends::read_records(dir.path());
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_eq!(rows[0]["route"], "/turn/report-status");
+        assert_eq!(rows[0]["session_id"], "rec-s");
+        assert!(rows[0]["error"].as_str().unwrap().contains("missing 'status'"));
+        assert_eq!(rows[1]["session_id"], "rec-b");
+        assert!(rows[1]["error"].as_str().unwrap().contains("bogus"));
     }
 }

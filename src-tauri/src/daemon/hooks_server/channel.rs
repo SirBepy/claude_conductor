@@ -11,12 +11,12 @@
 //! just has to resolve to a live registry entry, the same trust level as any
 //! other MCP tool call riding that session's own `CC_SESSION_ID` env.
 
+use super::rejected_sends;
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::channel as channel_methods;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
-use serde_json::json;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
@@ -37,7 +37,7 @@ pub(super) async fn on_list_peers(
     super::mark_mcp_tool_used(&ctx, &body.session_id);
     match channel_methods::list_peers(&ctx.state, &body.session_id, body.scope.as_deref()) {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/channel/list-peers", &body.session_id, e),
     }
 }
 
@@ -49,7 +49,7 @@ pub(super) async fn on_read_messages(
     super::mark_mcp_tool_used(&ctx, &body.session_id);
     match channel_methods::read_messages(&ctx.state, &body.session_id) {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/channel/read-messages", &body.session_id, e),
     }
 }
 
