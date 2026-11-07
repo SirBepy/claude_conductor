@@ -8,7 +8,8 @@ import { eventToRenderedMessage, originSessionIdOf, isBoundaryMessage, cleanUser
 import type { SkipMark } from "./skip-marks";
 import { sessionEvents } from "./event-store";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
-import { isAskQuestionTool, isWriteDraftTool } from "./tool-meta";
+import { isAskQuestionTool, isShowPreviewTool, isWriteDraftTool } from "./tool-meta";
+import { previewCardIndex, previewRefusalReason, refusePreview, supersedePreview } from "./chat-preview-card";
 import { isQuestionResolutionText } from "./tool-views";
 import { draftResultFieldsOf } from "./chat-draft-card";
 import { applyPassedResult, isSubchatSend } from "./chat-subchat-passed";
@@ -237,6 +238,18 @@ export class ChatPaginator {
       const fields = draftResultFieldsOf(ev.output);
       draftResultById.set(ev.tool_use_id, ev.is_error || !fields ? { draftFailed: true } : fields);
     }
+    // A refused show_preview never gets its own card: the live path takes the
+    // painted card back on the error result (handleToolResultEvent), so here a
+    // refused push is told apart up front and its result absorbed. An accepted
+    // push's result is left alone, as live.
+    const previewRefusalById = new Map<string, string>();
+    for (const ev of events) {
+      if (ev.type !== "tool_result" || !ev.is_error) continue;
+      const src = events.find((e) => e.type === "tool_use" && e.id === ev.tool_use_id);
+      if (src?.type === "tool_use" && isShowPreviewTool(src.tool_name) && !src.parent_tool_use_id) {
+        previewRefusalById.set(src.id, previewRefusalReason(ev.output));
+      }
+    }
     // A `subchat send` tool_result never renders its own row either: it names the
     // sub that got the message and is folded into the "Passed to X" row, the way
     // the live path's handleToolResultEvent does.
@@ -351,7 +364,7 @@ export class ChatPaginator {
     // Answered-later-in-this-page cards render at the answer, not the ask site.
     const deferredQuestions = new Map<string, RenderedMessage>();
     const filtered = events.filter((ev) =>
-      !(ev.type === "tool_result" && (rejectedSendIds.has(ev.tool_use_id) || updateMsgIds.has(ev.tool_use_id) || questionToolIds.has(ev.tool_use_id) || draftToolIds.has(ev.tool_use_id) || passedResultById.has(ev.tool_use_id))));
+      !(ev.type === "tool_result" && (rejectedSendIds.has(ev.tool_use_id) || updateMsgIds.has(ev.tool_use_id) || questionToolIds.has(ev.tool_use_id) || draftToolIds.has(ev.tool_use_id) || previewRefusalById.has(ev.tool_use_id) || passedResultById.has(ev.tool_use_id))));
 
     const messages = this.cb.getMessages();
     const messageEls = this.cb.getMessageEls();
@@ -441,6 +454,26 @@ export class ChatPaginator {
       if (ev.type === "tool_use" && msg.kind === "passed") {
         const result = passedResultById.get(ev.id);
         if (result) Object.assign(msg, applyPassedResult(msg, result.output, result.is_error));
+      }
+      if (ev.type === "tool_use" && msg.kind === "preview") {
+        // Same rule as the live path, applied to the rows this page is building:
+        // a re-push replaces its slug's card in place, and a refused push
+        // either leaves the earlier card as it was or, with none, is a stub.
+        const refusal = previewRefusalById.get(ev.id);
+        const idx = previewCardIndex(newMessages, msg.previewSlug);
+        if (idx >= 0) {
+          if (refusal !== undefined) continue;
+          newMessages[idx] = supersedePreview(newMessages[idx]!, msg);
+          const newEl = this.cb.buildMessageEl(newMessages[idx]!);
+          frag.replaceChild(newEl, newEls[idx]!);
+          newEls[idx] = newEl;
+          continue;
+        }
+        // This page is older than every row on screen: a newer accepted card
+        // for the slug already stands for this one.
+        const newerIdx = previewCardIndex(messages, msg.previewSlug);
+        if (newerIdx >= 0 && messages[newerIdx]!.previewFailed === undefined) continue;
+        if (refusal !== undefined) Object.assign(msg, refusePreview(msg, ev.id, refusal));
       }
       if (ev.type === "tool_use" && msg.kind === "draft") {
         // Result second, but never letting an empty recipient blank the input's

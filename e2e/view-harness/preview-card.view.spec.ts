@@ -126,3 +126,58 @@ test("clicking the header folds the card, and the pop button does not", async ({
   await card.locator(".pc-pop").click();
   await expect(card).toHaveClass(/\bopen\b/);
 });
+
+// Two pushes of one slug, then a second slug refused: through the real browser
+// the chat must show the second push's card alone, plus a reason stub (and no
+// white frame) for the refused one, as it does after a reload from scrollback.
+test("a re-pushed slug leaves one card and a refused push leaves a reason, not a blank frame", async ({ page }) => {
+  const use = (id: string, slug: string, title: string, html: string) => ({
+    type: "tool_use",
+    tool_name: "mcp__cc_conductor__show_preview",
+    input: { slug, title, html },
+    id,
+    timestamp: 0,
+    parent_tool_use_id: null,
+  });
+  const result = (id: string, isError: boolean, text: string) => ({
+    type: "tool_result", tool_use_id: id, output: { type: "text", text }, is_error: isError, timestamp: 0,
+  });
+  await mountView(page, {
+    view: "sessions",
+    invoke: {
+      ...SESSIONS_BASE_INVOKE,
+      list_instances: [sessionInstance()],
+      get_active_sessions: [sessionInstance()],
+      load_history_page: {
+        events: [
+          { type: "user_message", content: [{ type: "text", text: "show me" }], timestamp: 0, remote_echo: false, is_meta: false },
+          use("tu-a1", "week", "Week v1", "<p id=\"v1\">one</p>"),
+          result("tu-a1", false, "preview shown in chat"),
+          use("tu-a2", "week", "Week v2", "<p id=\"v2\">two</p>"),
+          result("tu-a2", false, "preview shown in chat"),
+          use("tu-b", "month", "Month", "<p>month</p>"),
+          result("tu-b", true, "relay error: HTTP 410 the card's iframe points at a render id the daemon no longer holds"),
+        ],
+        oldest_seq: 0,
+        newest_seq: 0,
+        has_more: false,
+      },
+      render_preview_doc: PREVIEW_URL,
+      list_previews: [],
+    },
+  });
+  await page.locator("#sessions-list li[data-session-id]").first().click();
+  await page.locator("#session-pane .msg.preview-card").first().waitFor();
+
+  const cards = page.locator("#session-pane .msg.preview-card");
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0).locator(".pc-label")).toHaveText("Week v2");
+  await expect(cards.nth(1).locator(".pc-label")).toHaveText("Month");
+  await expect(cards.nth(1).locator(".pc-frame")).toHaveCount(0);
+  await expect(cards.nth(1).locator(".pc-failed")).toContainText("Preview was not accepted");
+  const staged = (await invokeCalls(page))
+    .filter((c) => c.cmd === "render_preview_doc")
+    .map((c) => (c.args as { html?: string } | undefined)?.html ?? "");
+  expect(staged.some((h) => h.includes("id=\"v2\""))).toBe(true);
+  await cards.nth(1).screenshot({ path: ".for_bepy/screenshots/_specs/preview-card-refused.png" });
+});

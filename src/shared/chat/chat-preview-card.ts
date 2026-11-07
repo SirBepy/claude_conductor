@@ -3,6 +3,7 @@
 // The rail still owns the big canvas, device widths and history; ⤢ goes there.
 
 import { invoke } from "../ipc";
+import type { ContentBlock } from "../../types/ipc.generated";
 import type { RenderedMessage } from "./chat-classifiers";
 import { escapeHtml } from "../escape-html";
 import { asObj, strField } from "../obj-utils";
@@ -31,11 +32,76 @@ export function previewFieldsOf(input: unknown): Pick<RenderedMessage, "text" | 
   };
 }
 
+/** Index of the card a push for `slug` replaces in this chat's rows, or -1.
+ *  Rows are per chat, so another chat's card is never touched. A slugless push
+ *  has no identity to match on and always gets its own card. */
+export function previewCardIndex(messages: readonly RenderedMessage[], slug: string | undefined): number {
+  if (!slug) return -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.kind === "preview" && m.previewSlug === slug) return i;
+  }
+  return -1;
+}
+
+/** The row `next` becomes when it replaces `prev`: `next`'s content in `prev`'s
+ *  place in the transcript (the tool promises an in-place replace), with
+ *  `prev`'s own timestamp so the row stays ordered among its neighbours. The
+ *  replaced version is kept, because the push is painted from its input before
+ *  the daemon answers and a refusal must not cost the user the last good card. */
+export function supersedePreview(prev: RenderedMessage, next: RenderedMessage): RenderedMessage {
+  // A refused card has nothing worth falling back to.
+  const kept = prev.previewFailed !== undefined
+    ? []
+    : [...(prev.previewPrev ?? []), { id: prev.id ?? "", text: prev.text ?? "", html: prev.previewHtml ?? "" }];
+  return { ...next, ts: prev.ts, previewPrev: kept.length > 0 ? kept : undefined };
+}
+
+/** Index of the card a show_preview `toolUseId` is the current or a replaced
+ *  version of, or -1. */
+export function previewRowOfToolUse(messages: readonly RenderedMessage[], toolUseId: string): number {
+  return messages.findIndex((m) => m.kind === "preview" && (m.id === toolUseId || m.previewPrev?.some((v) => v.id === toolUseId)));
+}
+
+/** The error text of a refused show_preview, short enough for a card body. */
+export function previewRefusalReason(output: ContentBlock | undefined): string {
+  const text = output && output.type === "text" ? output.text.trim().replace(/\s+/g, " ") : "";
+  return text.length > 200 ? `${text.slice(0, 200)}...` : text;
+}
+
+/** `row` after the daemon refused the show_preview `toolUseId`. The card is
+ *  built from the tool input before the answer, so without this a refused push
+ *  stays on screen as an iframe at a render id the daemon does not hold: a
+ *  blank white box. A refusal of a re-push falls back to the last accepted
+ *  version instead, so a bad retry never costs the card that was working. */
+export function refusePreview(row: RenderedMessage, toolUseId: string, reason: string): RenderedMessage {
+  const prev = row.previewPrev ?? [];
+  if (row.id !== toolUseId) {
+    // A replaced version's push was refused: just forget it.
+    return { ...row, previewPrev: prev.filter((v) => v.id !== toolUseId) };
+  }
+  const last = prev[prev.length - 1];
+  if (last) {
+    return { ...row, id: last.id, text: last.text, previewHtml: last.html, previewPrev: prev.length > 1 ? prev.slice(0, -1) : undefined };
+  }
+  return { ...row, previewHtml: "", previewPrev: undefined, previewFailed: reason || "the daemon refused it" };
+}
+
 /** Card markup. The frame starts empty - `mountPreviewFrame` fills its src
  *  once the daemon has staged the document (async, so it cannot happen here). */
 export function renderPreviewCardHtml(m: RenderedMessage): string {
   const title = escapeHtml(m.text ?? "Preview");
   const slug = escapeHtml(m.previewSlug ?? "");
+  // No frame and no panel button: nothing was staged, so there is nothing to
+  // show or to open, and the reason is the only thing worth reading.
+  if (m.previewFailed !== undefined) {
+    return `<div class="pc-summary" data-preview-toggle>`
+      + `<i class="ph ph-monitor-play"></i>`
+      + `<span class="pc-label">${title}</span>`
+      + `<i class="ph ph-caret-down pc-chevron"></i>`
+      + `</div>`
+      + `<div class="pc-body"><div class="pc-failed"><i class="ph ph-warning-circle"></i><span>Preview was not accepted: ${escapeHtml(m.previewFailed)}</span></div></div>`;
+  }
   return `<div class="pc-summary" data-preview-toggle>`
     + `<i class="ph ph-monitor-play"></i>`
     + `<span class="pc-label">${title}</span>`

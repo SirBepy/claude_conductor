@@ -227,6 +227,12 @@ export interface RenderedMessage {
    *  reached the store. */
   previewHtml?: string;
   previewSlug?: string;
+  /** The versions this card replaced (oldest first), kept so a re-push the
+   *  daemon refuses can fall back to the last accepted one. */
+  previewPrev?: { id: string; text: string; html: string }[];
+  /** Why the daemon refused the push; set means the card is a stub with no
+   *  frame. Never set while `previewPrev` is non-empty (a refusal restores). */
+  previewFailed?: string;
   /** `kind:"draft"` only - see chat-draft-card.ts. `draftAction` and the three
    *  body fields come off the write_draft tool_use input, so the card paints
    *  before the daemon answers; `draftId` arrives with the tool_result and is
