@@ -109,6 +109,7 @@ function queueStoreOp<T>(op: () => Promise<T>): Promise<T> {
  *  `loadUsageHistory({ fromMs })`. */
 export function enableUsageHistoryPersistence(store: UsageHistoryStore): void {
   persistence = store;
+  addFlushListeners();
   resetMemory();
 }
 
@@ -179,11 +180,48 @@ function hydrate(): Promise<void> {
   return hydration;
 }
 
+/** Minimum gap between saves driven by new poll rows. The saved blob is about
+ *  whole 15-day window, and handing it to IndexedDB is a structured clone on
+ *  the main thread (about 15ms per 2MB on a desktop V8), so a save per poll is
+ *  jank for a few hundred bytes of change. A save skipped here loses nothing: the saved copy
+ *  is always a consistent floor/cursor/rows snapshot, so the next launch just
+ *  re-reads the newer rows from the PC. */
+const SAVE_INTERVAL_MS = 60_000;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let lastSaveAt = 0;
+let flushListenersAdded = false;
+
 function persist(): void {
+  if (saveTimer !== null) { clearTimeout(saveTimer); saveTimer = null; }
   const store = persistence;
   if (!store || floor === null || cursor === null) return;
+  lastSaveAt = Date.now();
   const snapshot: StoredUsageHistory = { rows: rows.slice(), floor, cursor };
   void queueStoreOp(() => store.save(snapshot)).catch(() => {});
+}
+
+/** Save for rows a poll appended: at once if the last save is over a minute
+ *  old, otherwise one trailing save at the minute mark (later rows join it). */
+function persistSoon(): void {
+  if (!persistence || saveTimer !== null) return;
+  const wait = lastSaveAt + SAVE_INTERVAL_MS - Date.now();
+  if (wait <= 0) persist();
+  else saveTimer = setTimeout(persist, wait);
+}
+
+/** Settles a held save when the page is hidden or going away, the last moment
+ *  the phone is sure to run any script. */
+function flushHeldSave(): void {
+  if (saveTimer !== null) persist();
+}
+
+function addFlushListeners(): void {
+  if (flushListenersAdded || typeof document === "undefined" || typeof window === "undefined") return;
+  flushListenersAdded = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushHeldSave();
+  });
+  window.addEventListener("pagehide", flushHeldSave);
 }
 
 async function fetchDelta(): Promise<void> {
@@ -215,7 +253,7 @@ async function fetchDelta(): Promise<void> {
   }
   if (grew) {
     derived = new Map();
-    persist();
+    persistSoon();
   }
 }
 
@@ -284,6 +322,8 @@ export async function loadUsageHistory(
 }
 
 function resetMemory(): void {
+  if (saveTimer !== null) { clearTimeout(saveTimer); saveTimer = null; }
+  lastSaveAt = 0;
   generation++;
   rows = [];
   floor = null;
