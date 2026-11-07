@@ -42,6 +42,41 @@ describe("mockup button", () => {
     expect(newestPreviewOf(undefined, "sub")).toBeUndefined();
   });
 
+  it("scopes by family as the panel does: a main chat sees its subs' previews, a sub sees its family's", async () => {
+    state.sessions = [
+      { session_id: "main", name: "main" },
+      { session_id: "sub", name: "sub", subchat_of: "main" },
+      { session_id: "sub2", name: "sub2", subchat_of: "main" },
+      { session_id: "other", name: "other" },
+    ];
+    try {
+      const list = [meta("elsewhere", "other"), meta("from-sub", "sub2"), meta("shared", "main")];
+      // The main chat's panel lists its sub's page, so its button must exist.
+      expect(newestPreviewOf([meta("from-sub", "sub2")], "main")?.id).toBe("from-sub");
+      // A sub read in place covers the whole family, newest first.
+      expect(newestPreviewOf(list, "sub")?.id).toBe("from-sub");
+      expect(newestPreviewOf([meta("elsewhere", "other")], "main")).toBeUndefined();
+    } finally {
+      state.sessions = [];
+    }
+  });
+
+  it("a main chat's button appears on a live push from one of its subs", async () => {
+    state.sessions = [{ session_id: "main", name: "main" }, { session_id: "sub", name: "sub", subchat_of: "main" }];
+    try {
+      const header = makeHeader();
+      mountMockupButton(header, "main");
+      const btn = header.trailSlot.querySelector(".mockup-open-btn");
+      await vi.waitFor(() => expect(pushListener).toBeTypeOf("function"));
+      pushListener({ snapshot: meta("x", "elsewhere") });
+      expect(btn.hidden).toBe(true);
+      pushListener({ snapshot: meta("x", "sub") });
+      expect(btn.hidden).toBe(false);
+    } finally {
+      state.sessions = [];
+    }
+  });
+
   it("stays hidden for a chat with no preview and appears on its first live push", async () => {
     const header = makeHeader();
     mountMockupButton(header, "sub");

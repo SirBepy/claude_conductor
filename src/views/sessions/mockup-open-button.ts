@@ -1,13 +1,15 @@
 // "Mockup" in a chat's header: opens the newest preview that chat pushed in the
 // preview panel, so Joe never hunts for the card or the panel's history picker.
-// Hidden until the chat has pushed one. A sub read in place has its own
-// session_id on its previews, which is why this is keyed to the chat on screen
-// and not to its main chat.
+// Hidden until the chat's panel has one to show. It follows the panel's scope
+// (a main chat plus its subs, a sub in place covers its family), so the button
+// is shown exactly when opening the panel would land on a page.
 
 import { invoke } from "../../shared/ipc";
 import { getTransport } from "../../shared/transport";
 import type { PreviewMeta } from "../../types/ipc.generated";
 import type { SessionHeader } from "./session-header";
+import { previewsOfSession } from "./preview-panel-history";
+import { inFamily } from "./shared-mockup-scope";
 import { state } from "./state";
 import "./mockup-open-button.css";
 
@@ -15,11 +17,12 @@ import "./mockup-open-button.css";
  *  chat switch and the module keeps one button, like subchat-view's sub list. */
 let dispose: (() => void) | null = null;
 
-/** The newest preview `sessionId` pushed. `list_previews` is newest-first; the
- *  session filter is still applied here because the daemon lists the whole store
- *  when it cannot route the read to the chat's host. */
+/** The newest preview the panel for `sessionId` would list (`list_previews` is
+ *  newest-first). Scoped as the panel is, by family: a main chat whose subs hold
+ *  the mockup would otherwise show no button while its own panel is full, and a
+ *  sub's button would hide while the family page it opens is right there. */
 export function newestPreviewOf(list: unknown, sessionId: string): PreviewMeta | undefined {
-  return (Array.isArray(list) ? (list as PreviewMeta[]) : []).find((m) => m.session_id === sessionId);
+  return previewsOfSession(list, sessionId)[0];
 }
 
 export function mountMockupButton(header: SessionHeader, sessionId: string): void {
@@ -64,7 +67,7 @@ export function mountMockupButton(header: SessionHeader, sessionId: string): voi
     }
     try {
       const off = await getTransport().listen<{ snapshot?: PreviewMeta }>("preview", (p) => {
-        if (p?.snapshot?.session_id === sessionId) btn.hidden = false;
+        if (inFamily(p?.snapshot?.session_id, sessionId)) btn.hidden = false;
       });
       if (live) unlisten = off;
       else off();

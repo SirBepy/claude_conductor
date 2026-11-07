@@ -10,7 +10,7 @@
 import { invoke } from "../../shared/ipc";
 import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
 import { PREVIEW_SOURCE_CHAT_CARD } from "../../shared/chat/chat-preview-card";
-import { versionsOf } from "./preview-panel-history";
+import { previewsOfSession, versionsOf } from "./preview-panel-history";
 import { inFamily, scopeRoot } from "./shared-mockup-scope";
 import type { RailTabDeps } from "./rail-panel";
 
@@ -79,7 +79,7 @@ export class PreviewSelection {
       console.error("[preview-panel] checkForUnseen failed", err);
       return;
     }
-    const scoped = (Array.isArray(all) ? all : []).filter((m) => inFamily(m.session_id, this.sessionId));
+    const scoped = previewsOfSession(all, this.sessionId);
     const unseen = scoped.filter((m) => !this.seenIds.has(m.id));
     scoped.forEach((m) => this.seenIds.add(m.id));
     // Same carve-out as onLivePush: a show_preview push is already on screen
@@ -100,7 +100,7 @@ export class PreviewSelection {
       const list = await invoke<PreviewMeta[]>("list_previews", { sessionId: scopeRoot(scope) });
       if (this.sessionId !== scope) return;
       const all = Array.isArray(list) ? list : [];
-      this.snapshots = all.filter((m) => inFamily(m.session_id, this.sessionId));
+      this.snapshots = previewsOfSession(all, this.sessionId);
       this.snapshots.forEach((s) => this.seenIds.add(s.id));
       // The list now covers only this chat and its subs, so only their cached
       // snapshots can be judged gone; another chat's stay until it is revisited.

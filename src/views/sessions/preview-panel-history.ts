@@ -7,7 +7,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { formatRelativeMinutes } from "../../shared/formatters";
 import { PopoverShell } from "./statusbar-popover-shell";
 import type { PreviewMeta } from "../../types/ipc.generated";
-import { ownerTag } from "./shared-mockup-scope";
+import { inFamily, ownerTag } from "./shared-mockup-scope";
 
 export interface PvPickerDeps {
   /** This chat's previews, newest first. */
@@ -36,6 +36,15 @@ function sourceDotClass(source: string): string {
  *  field means none are kept. */
 export function versionsOf(meta: PreviewMeta): PreviewMeta["versions"] {
   return meta.versions ?? [];
+}
+
+/** The entries of a `list_previews` result that belong in the panel of the chat
+ *  `sessionId`, in the list's order (newest first). The filter is needed even
+ *  though the call names a chat: the daemon lists the whole store when it
+ *  cannot route the read to the chat's host. Family-aware like the panel, so a
+ *  main chat includes its subs' previews and a sub in view covers its family. */
+export function previewsOfSession(list: unknown, sessionId: string | null): PreviewMeta[] {
+  return (Array.isArray(list) ? (list as PreviewMeta[]) : []).filter((m) => inFamily(m.session_id, sessionId));
 }
 
 type PickerKind = "previews" | "versions";
