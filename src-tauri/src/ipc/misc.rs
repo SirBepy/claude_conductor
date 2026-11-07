@@ -111,12 +111,7 @@ fn clip_log_line(line: &str) -> &str {
 
 #[tauri::command]
 pub async fn get_app_version(app: AppHandle) -> String {
-    if option_env!("CI").is_none() {
-        return "local-build".to_string();
-    }
-    let cfg = app.config().version.clone();
-    cfg.filter(|v| !v.is_empty())
-        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+    crate::daemon::health::build_release_version(app.config().version.as_deref())
 }
 
 #[derive(Serialize)]
