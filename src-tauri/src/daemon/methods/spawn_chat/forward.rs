@@ -55,7 +55,9 @@ pub(crate) fn resolve_machine(
 /// inherit from. `model`/`effort` arrive already resolved by the RPC handler
 /// (`peer_model_effort`): the caller's explicit values, else THIS machine's
 /// project default. `cwd` existing on THIS machine is `spawn_session`'s own
-/// `LifecycleError::CwdMissing` check - no separate validation needed here.
+/// `LifecycleError::CwdMissing` check. That `cwd` is a registered project is the
+/// RPC handler's job (`register_spawn_chat_rpc`), not this function's: the local
+/// todo-chat path shares it and has its own caller.
 pub(crate) async fn spawn_chat_for_peer(
     state: &Arc<DaemonState>,
     cwd: &str,
