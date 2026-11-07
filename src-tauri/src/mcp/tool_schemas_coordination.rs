@@ -70,9 +70,9 @@ fn visuals_schema() -> Value {
         "type": "array",
         "maxItems": 3,
         "description": "Optional tables and charts drawn inside the card, under the text. Use one whenever the answer is numbers or a comparison: a table beats a paragraph of figures, and a chart beats a table when the shape is the point. At most 3 per message, drawn in order. Each item has a `type` and an optional `title` (80 chars):
-- table: `columns` (1-8 headers) and `rows` (1-40 rows, one cell per column; a cell is text or a number, numbers right-align).
+- table: `columns` (1-8 headers) and `rows` (1-40 rows, one cell per column; a cell is text up to 80 chars or a number, numbers right-align).
 - bar: `data` [{label, value}] (1-12, ranking; value 0 or more) and optional `unit` (\"s\", \"%\", \"$\").
-- line: `labels` (2-24 x-axis labels) and `series` [{name, values}] (1-3 lines, one number per label).
+- line: `labels` (2-24 x-axis labels) and `series` [{name, values}] (1-3 lines, one number per label, each 0 or more: a line cannot draw below zero, so put negative figures in a table).
 - donut: `data` [{label, value}] (2-6 parts of a whole, each above 0).
 - timeline: `rows` [{label, blocks: [{start, end, label}]}] (1-10 rows such as days, 1-12 blocks each, times 24-hour \"HH:MM\"). Use it for time-tracking, schedules, anything with a start and an end.
 Example: {\"type\": \"table\", \"title\": \"Cost by model\", \"columns\": [\"Model\", \"Cost\"], \"rows\": [[\"Opus\", \"$18.40\"], [\"Sonnet\", \"$9.75\"]]}. Keep `text` as the one-line conclusion; the visual carries the figures. A malformed visual is rejected with the fix, so read the error and resend.",
@@ -216,6 +216,58 @@ pub fn coordination_schemas() -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The value of `const <name>: usize = N;` in a Rust or `const <name> = N;` in a TS source.
+    fn cap(src: &str, name: &str) -> usize {
+        let at = src.find(&format!("const {name}")).unwrap_or_else(|| panic!("no const {name}"));
+        let rest = &src[at..];
+        let eq = rest.find('=').unwrap() + 1;
+        rest[eq..rest.find(';').unwrap()].trim().parse().unwrap_or_else(|_| panic!("const {name} is not a plain number"))
+    }
+
+    // The validator's caps (hooks_server/visuals.rs), the schema's numbers and
+    // prose, and the chat's own MAX_VISUALS are four copies of the same limits.
+    #[test]
+    fn visuals_schema_caps_match_the_validator_and_the_chat() {
+        const VALIDATOR: &str = include_str!("../daemon/hooks_server/visuals.rs");
+        const CHAT: &str = include_str!("../../../src/shared/chat/message-visuals.ts");
+        let c = |name: &str| cap(VALIDATOR, name);
+        let schema = visuals_schema();
+        let props = &schema["items"]["properties"];
+        let max_items = |v: &Value| v["maxItems"].as_u64().unwrap() as usize;
+        let max_len = |v: &Value| v["maxLength"].as_u64().unwrap() as usize;
+
+        assert_eq!(max_items(&schema), c("MAX_VISUALS"));
+        assert_eq!(cap(CHAT, "MAX_VISUALS"), c("MAX_VISUALS"), "message-visuals.ts keeps its own copy");
+        assert_eq!(max_len(&props["title"]), c("MAX_TITLE"));
+        assert_eq!(max_items(&props["columns"]), c("MAX_COLUMNS"));
+        assert_eq!(max_items(&props["rows"]), c("MAX_TABLE_ROWS"));
+        assert_eq!(max_items(&props["labels"]), c("MAX_LINE_LABELS"));
+        assert_eq!(max_items(&props["series"]), c("MAX_SERIES"));
+        // `data` serves bar (MAX_BARS) and donut (MAX_SLICES, lower), so the schema carries the larger.
+        assert_eq!(max_items(&props["data"]), c("MAX_BARS"));
+        assert!(c("MAX_SLICES") <= c("MAX_BARS"));
+        for label in [&props["columns"]["items"], &props["labels"]["items"], &props["data"]["items"]["properties"]["label"], &props["series"]["items"]["properties"]["name"]] {
+            assert_eq!(max_len(label), c("MAX_LABEL"));
+        }
+
+        let d = schema["description"].as_str().unwrap();
+        for want in [
+            format!("At most {} per message", c("MAX_VISUALS")),
+            format!("({} chars)", c("MAX_TITLE")),
+            format!("(1-{} headers)", c("MAX_COLUMNS")),
+            format!("(1-{} rows,", c("MAX_TABLE_ROWS")),
+            format!("text up to {} chars", c("MAX_CELL")),
+            format!("(1-{},", c("MAX_BARS")),
+            format!("(2-{} x-axis labels)", c("MAX_LINE_LABELS")),
+            format!("(1-{} lines,", c("MAX_SERIES")),
+            format!("(2-{} parts", c("MAX_SLICES")),
+            format!("(1-{} rows such as", c("MAX_TIMELINE_ROWS")),
+            format!("1-{} blocks each", c("MAX_TIMELINE_BLOCKS")),
+        ] {
+            assert!(d.contains(&want), "visuals description lost or changed {want:?}");
+        }
+    }
 
     // The daemon stores no kind, so update_message cannot enforce send_message's
     // card caps; the description is the only place the model learns that.
