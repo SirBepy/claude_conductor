@@ -56,6 +56,19 @@ pub(crate) fn handle_rate_limit_rejection(
         log::warn!("daemon: rate_limit body has no resetsAt: {body}");
         return;
     };
+    // A rejection whose window has already reset cannot be live: a `--resume`
+    // child replays its transcript's old `rate_limit_event` lines, and the
+    // live-vs-replay signal (`TurnBoundary`) cannot tell those apart from a real
+    // rejection that lands before the turn's first `stream_event`. Re-running the
+    // effects below for one would block the account, freeze the chat and queue a
+    // resume for a quota that has already refilled, and clear the new turn's busy.
+    if resets_at <= chrono::Utc::now().timestamp() {
+        log::info!(
+            "daemon: session {} ignoring rate_limit rejection whose window reset at {resets_at} (replayed history)",
+            session.session_id
+        );
+        return;
+    }
     let window = info.get("rateLimitType").and_then(|v| v.as_str()).unwrap_or("five_hour");
     let blocked = state
         .registry
@@ -146,12 +159,55 @@ mod tests {
         use std::sync::Mutex;
 
         fn rejection_body() -> String {
+            rejection_body_resetting_at(chrono::Utc::now().timestamp() + 120)
+        }
+
+        fn rejection_body_resetting_at(resets_at: i64) -> String {
             serde_json::json!({
                 "status": "rejected",
                 "rateLimitType": "five_hour",
-                "resetsAt": chrono::Utc::now().timestamp() + 120,
+                "resetsAt": resets_at,
             })
             .to_string()
+        }
+
+        /// A rejection whose window already reset is a replayed history line:
+        /// none of its effects (busy clear, freeze, queued resume, block) may run.
+        #[tokio::test]
+        async fn replayed_rejection_with_a_past_reset_has_no_side_effects() {
+            let _guard = crate::util::env_lock();
+            let dir = tempfile::tempdir().unwrap();
+            std::env::set_var("CC_DATA_DIR", dir.path());
+
+            let map = new_session_map();
+            let state = DaemonState::new(map.clone(), SettingsCache::new(Settings::default()));
+            let sid = format!("rl-test-{}", uuid::Uuid::new_v4());
+            let settings = Mutex::new(Settings::default());
+            state.registry.record_interactive_session(
+                &sid,
+                std::path::Path::new("/tmp/x"),
+                &settings,
+                "2026-01-01T00:00:00Z",
+            );
+            state.registry.set_busy(&sid, true);
+            let gen = state.registry.current_turn_gen(&sid);
+
+            let mut child = spawn_fake_session(&map, &sid).await;
+            let session = map.get(&sid).unwrap().clone();
+
+            let past = chrono::Utc::now().timestamp() - 3600;
+            handle_rate_limit_rejection(&state, &session, &rejection_body_resetting_at(past), false, gen);
+
+            let row = state.registry.get(&sid).unwrap();
+            assert!(row.busy, "a replayed rejection must not clear the live turn's busy");
+            assert!(!row.frozen && !row.auto_frozen, "a replayed rejection must not freeze the chat");
+            assert!(
+                crate::sessions::scheduled_items::find_pending_message_for_session(&sid).is_none(),
+                "a replayed rejection must not queue a resume"
+            );
+
+            let _ = child.kill().await;
+            std::env::remove_var("CC_DATA_DIR");
         }
 
         /// todo 873, 2026-10-02 cycle 1: a rate-limit rejection never produces
