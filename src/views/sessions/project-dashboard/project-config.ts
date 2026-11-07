@@ -46,7 +46,13 @@ export function openProjectSettingsModal(cwd: string): void {
 }
 
 /** What a folder-mapping change needs from the dashboard it was opened on. */
-export type FolderMappingHost = { ctx(): { mode: DashMode }, pane(): HTMLElement, deselect(): void };
+export type FolderMappingHost = {
+  ctx(): { mode: DashMode },
+  pane(): HTMLElement,
+  deselect(): void,
+  /** The draft's rail extra (its "This chat" card), which the rebuilt draft dashboard must get again. */
+  railExtra?(body: HTMLElement): void,
+};
 
 /** The shown dashboard's target no longer matches the folder: a repoint follows
  *  the project to its new folder, a hide leaves the dashboard. */
@@ -56,7 +62,7 @@ export function followFolderChange(host: FolderMappingHost, change: { repointedT
   if (host.ctx().mode === "page") { void openDashboardPage(change.repointedTo); return; }
   const pane = host.pane();
   unmountDraftDashboard(pane);
-  mountDraftDashboard(pane, { path: change.repointedTo }, state.mountId);
+  mountDraftDashboard(pane, { path: change.repointedTo }, state.mountId, host.railExtra);
 }
 
 export function openFolderMappingModal(cwd: string, host: FolderMappingHost): void {

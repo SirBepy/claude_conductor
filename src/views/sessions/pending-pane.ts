@@ -49,7 +49,7 @@ export async function renderPendingPane(
   mountDraftSubchats(pane, config);
   wirePendingComposer(pane, placeholderId, project, config, myMount, {
     rebindPaneHeader,
-    pickAccount: () => { void changePendingAccount(config, placeholderId, project.path); },
+    pickAccount: () => { void changePendingAccount(config, placeholderId, project.path, pane); },
   });
 
   const ta = pane.querySelector<HTMLTextAreaElement>(".composer-textarea");

@@ -38,6 +38,8 @@ export interface ActionHost {
   loadUsage(range: UsageRange): void;
   /** Start lazy gallery loading, one image at a time. */
   loadGallery(): void;
+  /** A draft's extra group under the rail's settings; a folder repoint hands it to the rebuilt draft dashboard. */
+  railExtra?(body: HTMLElement): void;
 }
 
 // One repo menu at a time; the pending promise settles on pick or dismiss.

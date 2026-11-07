@@ -46,6 +46,22 @@ describe("followFolderChange", () => {
     expect(listCalls()).toBe(2);
   });
 
+  it("draft mode: a repoint rebuilds the draft dashboard with the rail extra the draft passed", async () => {
+    const { mountDashboard } = await import("../src/views/sessions/project-dashboard/dashboard.ts");
+    const { state } = await import("../src/views/sessions/state.ts");
+    mountDashboard.mockReset();
+    mountDashboard.mockReturnValue({ root: document.createElement("div"), rail: null, chips: document.createElement("div"), destroy: vi.fn() });
+    const pane = document.createElement("div");
+    pane.innerHTML = `<div class="session-messages"></div><div class="composer-shell"></div>`;
+    document.body.append(pane);
+    const railExtra = vi.fn();
+    const host = { ctx: () => ({ mode: "draft" }), pane: () => pane, deselect: vi.fn(), railExtra };
+    followFolderChange(host, { repointedTo: "C:/b" });
+    await vi.waitFor(() => expect(mountDashboard).toHaveBeenCalled());
+    expect(mountDashboard.mock.calls[0][1].railExtra).toBe(railExtra);
+    expect(state.mountId).toBeDefined();
+  });
+
   it("a hide leaves the dashboard", () => {
     const host = { ctx: () => ({ mode: "page" }), pane: () => document.createElement("div"), deselect: vi.fn() };
     followFolderChange(host, { hidden: true });

@@ -37,8 +37,10 @@ const { renderPendingPane } = await import("../src/views/sessions/pending-pane.t
 describe("renderPendingPane account picker hook", () => {
   it("passes the project path to changePendingAccount", async () => {
     const config = { model: "", effort: "high", accountId: null, machineId: "m1" };
-    await renderPendingPane(document.createElement("div"), "ph-1", { path: "C:/p", name: "p" }, config);
+    const pane = document.createElement("div");
+    await renderPendingPane(pane, "ph-1", { path: "C:/p", name: "p" }, config);
     composerDeps.current.pickAccount();
-    expect(changePendingAccount).toHaveBeenCalledWith(config, "ph-1", "C:/p");
+    // The pane rides along so the Use subchats sync repaints this draft's switch, not another pane's.
+    expect(changePendingAccount).toHaveBeenCalledWith(config, "ph-1", "C:/p", pane);
   });
 });

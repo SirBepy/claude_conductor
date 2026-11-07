@@ -22,9 +22,11 @@ interface Applied {
 
 let _applied: Applied | null = null;
 
-/** Every copy of the switch in the pane: the row above the message box, the rail's card, or both. */
+/** Every live copy of the switch in the pane: the row above the message box, the rail's
+ *  card, or both. A card inside the dashboard's fading ghost (draft-dashboard.ts) is
+ *  not one: it is a dead clone, and removing it would cut the fade short. */
 function hostsOf(pane: ParentNode): HTMLElement[] {
-  return [...pane.querySelectorAll<HTMLElement>(`.${HOST_CLASS}, .${CARD_CLASS}`)];
+  return [...pane.querySelectorAll<HTMLElement>(`.${HOST_CLASS}, .${CARD_CLASS}`)].filter((el) => !el.closest(".pd-ghost"));
 }
 
 /** Writes `patch` into the draft's config and the persisted copy of it, the way an
@@ -89,9 +91,13 @@ function wire(host: HTMLElement, pane: ParentNode, config: SessionConfig): void 
  *  between this row and the box. */
 export function mountDraftSubchats(pane: HTMLElement, config: SessionConfig): void {
   unmountDraftSubchats(pane);
+  _applied = null;
+  insertRow(pane, config);
+}
+
+function insertRow(pane: ParentNode, config: SessionConfig): void {
   const shell = pane.querySelector(".composer-shell");
   if (!shell?.parentElement) return;
-  _applied = null;
   const host = document.createElement("div");
   host.className = HOST_CLASS;
   host.innerHTML = [
@@ -128,7 +134,13 @@ export function mountDraftSubchatsCard(pane: HTMLElement, railBody: HTMLElement,
  *  an account-blocked switch disabled. */
 export function lockDraftSubchats(pane: ParentNode, config: SessionConfig, locked: boolean): void {
   const hosts = hostsOf(pane);
-  if (hosts.length === 0) return;
+  // The send took the dashboard and its rail card down before the spawn answered, and
+  // nothing brings them back: a failed spawn gets the row, so the draft keeps a switch
+  // for the choice its config still carries. `_applied` stays, so switching off restores.
+  if (hosts.length === 0) {
+    if (!locked) insertRow(pane, config);
+    return;
+  }
   if (locked) for (const host of hosts) host.querySelector<HTMLInputElement>("input")!.disabled = true;
   else syncDraftSubchats(pane, config);
 }

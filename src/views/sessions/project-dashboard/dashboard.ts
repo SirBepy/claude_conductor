@@ -295,6 +295,7 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     deselect: deps.deselect,
     loadGallery: () => { void loadGallery(); },
     loadUsage,
+    railExtra: deps.railExtra,
   };
 
   async function loadSnapshot(): Promise<void> {
