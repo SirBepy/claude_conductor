@@ -134,17 +134,63 @@ pub struct Session {
     /// its first `stream_event` answers with an eventless `result`, which the
     /// pump's replay window cannot tell from a replayed history line; this is
     /// the one fact that does.
-    interrupt_sent: std::sync::atomic::AtomicBool,
+    interrupt_sent: InterruptFlag,
+}
+
+/// The interrupts `cancel_turn` has flagged and the pump has not consumed yet,
+/// one token per call. A call whose write fails withdraws only its own token, so
+/// it cannot clear the flag of an overlapping call whose interrupt did reach the
+/// child.
+#[derive(Default)]
+struct InterruptFlag {
+    state: std::sync::Mutex<InterruptTokens>,
+}
+
+#[derive(Default)]
+struct InterruptTokens {
+    next: u64,
+    live: Vec<u64>,
+}
+
+impl InterruptFlag {
+    fn note(&self) -> u64 {
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        st.next += 1;
+        let token = st.next;
+        st.live.push(token);
+        token
+    }
+
+    fn withdraw(&self, token: u64) {
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        st.live.retain(|t| *t != token);
+    }
+
+    /// Consumes every outstanding token: one `result` line answers them all.
+    fn take(&self) -> bool {
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let any = !st.live.is_empty();
+        st.live.clear();
+        any
+    }
 }
 
 impl Session {
-    pub fn note_interrupt_sent(&self) {
-        self.interrupt_sent.store(true, std::sync::atomic::Ordering::SeqCst);
+    /// Flags one interrupt about to be written. The returned token goes to
+    /// `withdraw_interrupt_sent` if that write fails.
+    pub fn note_interrupt_sent(&self) -> u64 {
+        self.interrupt_sent.note()
+    }
+
+    /// Takes back one `note_interrupt_sent` call whose interrupt never reached the
+    /// child, leaving any other call's flag in place.
+    pub fn withdraw_interrupt_sent(&self, token: u64) {
+        self.interrupt_sent.withdraw(token);
     }
 
     /// True once per interrupt: the pump asks at every `result` line.
     pub fn take_interrupt_sent(&self) -> bool {
-        self.interrupt_sent.swap(false, std::sync::atomic::Ordering::SeqCst)
+        self.interrupt_sent.take()
     }
 
     pub fn new(
@@ -177,7 +223,7 @@ impl Session {
             stderr_drain: tokio::sync::Mutex::new(None),
             expected_exit: std::sync::atomic::AtomicBool::new(false),
             subchats_told: std::sync::atomic::AtomicBool::new(false),
-            interrupt_sent: std::sync::atomic::AtomicBool::new(false),
+            interrupt_sent: InterruptFlag::default(),
         })
     }
 }
@@ -196,6 +242,30 @@ mod tests {
     fn new_session_map_is_empty() {
         let m = new_session_map();
         assert_eq!(m.len(), 0);
+    }
+
+    #[test]
+    fn a_failed_interrupt_write_keeps_the_flag_an_overlapping_call_still_needs() {
+        let flag = InterruptFlag::default();
+        flag.note();
+        let second = flag.note();
+        flag.withdraw(second);
+        assert!(flag.take(), "the first call's interrupt reached the child, so its result must be flagged");
+        assert!(!flag.take(), "consumed by the first read");
+
+        let only = flag.note();
+        flag.withdraw(only);
+        assert!(!flag.take(), "a lone failed write leaves nothing behind");
+    }
+
+    #[test]
+    fn a_withdrawal_after_the_result_does_not_clear_the_next_interrupts_flag() {
+        let flag = InterruptFlag::default();
+        let stale = flag.note();
+        assert!(flag.take());
+        flag.note();
+        flag.withdraw(stale);
+        assert!(flag.take(), "the older call's late failure must not eat the newer flag");
     }
 
     #[test]

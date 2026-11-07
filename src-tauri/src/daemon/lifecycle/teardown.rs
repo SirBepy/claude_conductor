@@ -274,16 +274,17 @@ pub async fn cancel_turn(map: &SessionMap, session_id: &str) -> Result<(), Lifec
     line.push(b'\n');
     // Flagged before the stdin lock and the write: the pump reads `result` lines
     // concurrently, and one already in the pipe would otherwise be judged without
-    // the interrupt it answers. A write that fails takes the flag back, since no
-    // interrupt reached the child and the next real result is not its answer.
-    session.note_interrupt_sent();
+    // the interrupt it answers. A write that fails withdraws its own flag, since no
+    // interrupt reached the child and the next real result is not its answer; an
+    // overlapping call's flag stays.
+    let interrupt = session.note_interrupt_sent();
     let mut stdin = session.stdin.lock().await;
     let written = match stdin.write_all(&line).await {
         Ok(()) => stdin.flush().await,
         Err(e) => Err(e),
     };
     if let Err(e) = written {
-        session.take_interrupt_sent();
+        session.withdraw_interrupt_sent(interrupt);
         return Err(e.into());
     }
     // The held-answer rescue (todo 926) reaches the daemon only through here, so
