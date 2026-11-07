@@ -64,12 +64,25 @@ pub fn get_snapshots_since(
     since: i64,
     account_id: Option<&str>,
 ) -> Result<Vec<UsageSnapshot>> {
+    get_snapshots_range(conn, since, i64::MAX, account_id)
+}
+
+/// Snapshots with `since <= timestamp < until`, same order and account filter
+/// as `get_snapshots_since`. `until` is exclusive so a phone paging backwards
+/// can ask for "everything older than what I hold" without re-reading its
+/// oldest second.
+pub fn get_snapshots_range(
+    conn: &Connection,
+    since: i64,
+    until: i64,
+    account_id: Option<&str>,
+) -> Result<Vec<UsageSnapshot>> {
     let mut stmt = conn.prepare(
         "SELECT data FROM usage_snapshots \
-         WHERE timestamp >= ?1 AND (?2 IS NULL OR account_id = ?2) \
+         WHERE timestamp >= ?1 AND timestamp < ?3 AND (?2 IS NULL OR account_id = ?2) \
          ORDER BY timestamp ASC, id ASC",
     )?;
-    let rows = stmt.query_map(rusqlite::params![since, account_id], |row| {
+    let rows = stmt.query_map(rusqlite::params![since, account_id, until], |row| {
         let data: String = row.get(0)?;
         Ok(data)
     })?;
@@ -78,6 +91,17 @@ pub fn get_snapshots_since(
         out.push(serde_json::from_str::<UsageSnapshot>(&data?)?);
     }
     Ok(out)
+}
+
+/// How many rows (every account) fall in `since <= timestamp <= until`. A
+/// phone that cached that range compares this with the rows it holds there:
+/// a difference means retention or a clear removed rows it still shows.
+pub fn count_snapshots_between(conn: &Connection, since: i64, until: i64) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usage_snapshots WHERE timestamp >= ?1 AND timestamp <= ?2",
+        rusqlite::params![since, until],
+        |r| r.get(0),
+    )?)
 }
 
 /// Returns every snapshot in ascending timestamp order, tagged with `account_id`.
@@ -171,5 +195,23 @@ mod tests {
         let tail_a = get_snapshots_since(&conn, cursor, Some("a")).unwrap();
         assert_eq!(tail_a.len(), 1);
         assert_eq!(tail_a[0].captured_at, "2026-07-01T00:02:00Z");
+    }
+
+    #[test]
+    fn range_is_exclusive_at_until_and_count_is_inclusive_at_both_ends() {
+        let conn = test_conn();
+        insert_snapshot(&conn, &snap("2026-07-01T00:00:00Z", Some("a"))).unwrap();
+        insert_snapshot(&conn, &snap("2026-07-01T00:01:00Z", Some("b"))).unwrap();
+        insert_snapshot(&conn, &snap("2026-07-01T00:02:00Z", Some("a"))).unwrap();
+        let first = rfc3339_to_unix("2026-07-01T00:00:00Z").unwrap();
+        let mid = rfc3339_to_unix("2026-07-01T00:01:00Z").unwrap();
+
+        let older = get_snapshots_range(&conn, first, mid, None).unwrap();
+        let stamps: Vec<_> = older.iter().map(|s| s.captured_at.as_str()).collect();
+        assert_eq!(stamps, ["2026-07-01T00:00:00Z"], "the row at `until` is not older than itself");
+
+        assert_eq!(count_snapshots_between(&conn, first, mid).unwrap(), 2);
+        assert_eq!(count_snapshots_between(&conn, mid, mid).unwrap(), 1);
+        assert_eq!(count_snapshots_between(&conn, mid + 1, i64::MAX).unwrap(), 1);
     }
 }

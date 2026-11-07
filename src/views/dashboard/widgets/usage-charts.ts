@@ -48,13 +48,21 @@ export function stepPageOffset(metric: "session" | "weekly", dir: "prev" | "next
 
 // ── Per-account history fetch ───────────────────────────────────────────────
 
-export async function fetchHistory(accountId: string | null): Promise<UsageRecord[]> {
+export async function fetchHistory(accountId: string | null, fromMs?: number): Promise<UsageRecord[]> {
   try {
-    return await api.getHistory({ accountId });
+    return await api.getHistory({ accountId, fromMs });
   } catch (err) {
     console.error("[dashboard] getHistory failed", err);
     return [];
   }
+}
+
+/** History for the chart's current page. The phone holds only the recent days,
+ *  so a chart paged back asks for the window it shows plus the one before it
+ *  (which decides the "previous" arrow); inside the held days that is a no-op. */
+export function fetchHistoryForPage(metric: "session" | "weekly", accountId: string | null): Promise<UsageRecord[]> {
+  const windowMs = metric === "session" ? 5 * 3_600_000 : 7 * 24 * 3_600_000;
+  return fetchHistory(accountId, Date.now() - (getPageOffset(metric) + 2) * windowMs);
 }
 
 // ── Per-metric window helpers ─────────────────────────────────────────────
@@ -148,7 +156,7 @@ function mountUsageWidget(
   let disposed = false;
 
   const draw = async () => {
-    const history = await fetchHistory(ctx.accountId);
+    const history = await fetchHistoryForPage(metric, ctx.accountId);
     if (disposed) return;
     if (!history.length) {
       root.innerHTML = `<div class="v-empty">

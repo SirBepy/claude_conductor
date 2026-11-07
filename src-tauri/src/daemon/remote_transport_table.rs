@@ -262,6 +262,9 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("get_project_icon", PM),
     // Read-only usage/token history for the remote homescreen + statistics.
     ("get_history", P),
+    // Row count of a usage-history range, so the phone can tell its cached
+    // copy still matches the PC's table. Read-only, returns one integer.
+    ("get_history_meta", P),
     ("get_token_history", P),
     ("get_active_sessions", P),
     // Read-only current-usage-percentage + per-account login-state maps for the
@@ -657,7 +660,7 @@ mod tests {
             "character_asset_url", "resolve_voiceline", "resolve_whitelist_characters", "list_projects",
             "project_last_activity_at", "get_project_tech", "get_project_icon",
             "count_ai_todos", "list_ai_todos", "list_ai_backlog", "read_ai_todo",
-            "get_history", "get_token_history", "get_active_sessions",
+            "get_history", "get_history_meta", "get_token_history", "get_active_sessions",
             "get_usage_map", "get_auth_state_map", "context_status",
             "get_api_credit_status", "refresh_api_credit_status",
             "list_accounts", "list_slash_commands", "ensure_session_character",

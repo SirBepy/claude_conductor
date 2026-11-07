@@ -747,7 +747,15 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("get_history", {
           limit: args.limit ?? null,
           since: args.since ?? null,
+          until: args.until ?? null,
           account_id: args.accountId ?? null,
+        });
+      // Row count of a history range: the phone's saved copy of the recent
+      // history is kept only while this matches the rows it holds there.
+      case "get_history_meta":
+        return this.rpc<T>("get_history_meta", {
+          since: args.since ?? null,
+          until: args.until ?? null,
         });
       case "get_token_history":
         // `since` (unix seconds) bounds the window. Unbounded here used to be

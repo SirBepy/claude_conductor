@@ -18,12 +18,12 @@ import { activeLoad, aggregateSnapshot } from "./load-progress";
 import { isRemote } from "./transport";
 
 /** The RPC methods `initBoot`'s gate actually waits on over the remote
- *  transport. `fetchTokens` is excluded deliberately: it short-circuits to `[]`
- *  on remote (see boot.ts's fetchTokenHistoryWithLive), so a leg for it would
- *  complete instantly and only add noise. */
+ *  transport. `fetchTokens` and `fetchUsage` are excluded deliberately: the
+ *  first short-circuits to `[]` on remote (see boot.ts's
+ *  fetchTokenHistoryWithLive) and the second resolves at once and loads in the
+ *  background (publishUsageAfterBoot), so a leg for either would only add noise. */
 const BOOT_METHODS = [
   { method: "get_settings", label: "Settings" },
-  { method: "get_history", label: "Usage" },
 ] as const;
 
 /** Grace period before the overlay appears. A warm boot settles well inside
