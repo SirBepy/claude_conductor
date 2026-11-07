@@ -437,9 +437,8 @@ pub(crate) fn resolve_target_cwd(
     // comparison here would silently miss a worktree, undercutting this
     // guard's own stated purpose of letting a chat hand off to a project the
     // user already has registered.
-    let requested_key = project_key(requested);
-    if let Some(p) = known_projects.iter().find(|p| project_key(&p.path) == requested_key) {
-        return Ok(p.path.clone());
+    if let Some(root) = known_project_root(requested, known_projects) {
+        return Ok(root);
     }
     Err(format!(
         "spawn_chat only spawns into the calling session's own working directory ({}) or a \
@@ -447,6 +446,18 @@ pub(crate) fn resolve_target_cwd(
         caller_cwd.display(),
         requested.display()
     ))
+}
+
+/// The registered project `requested` belongs to (itself, a worktree of it, or a
+/// folder inside it), as the registry's own path. The one lookup behind both
+/// `resolve_target_cwd` and the peer-facing `spawn_chat` guard, so the two cannot
+/// disagree on what counts as a known project.
+fn known_project_root(
+    requested: &std::path::Path,
+    known_projects: &[crate::types::ProjectConfig],
+) -> Option<std::path::PathBuf> {
+    let requested_key = project_key(requested);
+    known_projects.iter().find(|p| project_key(&p.path) == requested_key).map(|p| p.path.clone())
 }
 
 /// Model and effort for a spawn forwarded from a paired machine. The caller
@@ -477,6 +488,14 @@ pub fn register_spawn_chat_rpc(router: &mut Router, state: Arc<DaemonState>) {
             let p = params.unwrap_or(Value::Null);
             let cwd = p.get("cwd").and_then(Value::as_str).unwrap_or_default();
             let prompt = p.get("prompt").and_then(Value::as_str).unwrap_or_default();
+            // A paired machine may start a chat only in a project registered HERE,
+            // like the local tool's own cwd guard: `claude` runs with this cwd, so
+            // an unchecked one would let a compromised peer pick any readable folder.
+            if known_project_root(std::path::Path::new(cwd), &state.settings.snapshot().projects).is_none() {
+                return Err(RpcError::invalid_params(format!(
+                    "{cwd} is not a registered project on this machine; add it as a project here before starting a chat in it from another machine"
+                )));
+            }
             let (model, effort) = peer_model_effort(&state, cwd, &p);
             let name = p.get("name").and_then(Value::as_str);
             match forward::spawn_chat_for_peer(&state, cwd, prompt, &model, &effort, name, None).await {
@@ -856,5 +875,56 @@ mod tests {
         let mut trailing = here.clone().into_os_string();
         trailing.push(std::path::MAIN_SEPARATOR.to_string());
         assert!(crate::util::same_dir(&here, std::path::Path::new(&trailing)));
+    }
+
+    fn peer_spawn_request(cwd: &str) -> crate::daemon::rpc::Request {
+        crate::daemon::rpc::Request {
+            jsonrpc: "2.0".into(),
+            id: json!(1),
+            method: "spawn_chat".into(),
+            params: Some(json!({"cwd": cwd, "prompt": "hello"})),
+        }
+    }
+
+    fn peer_ctx() -> crate::daemon::rpc::ConnectionContext {
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        crate::daemon::rpc::ConnectionContext::new(tx)
+    }
+
+    /// A forwarded spawn into a folder that is not a registered project is
+    /// refused before any session is started.
+    #[tokio::test]
+    async fn peer_spawn_into_an_unregistered_cwd_is_refused() {
+        let dir = crate::settings::identity::test_support::non_ephemeral_tempdir();
+        let unregistered = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&unregistered).unwrap();
+        let state = test_state();
+        let mut router = Router::new();
+        register_spawn_chat_rpc(&mut router, state.clone());
+
+        let resp = router.dispatch(peer_spawn_request(&unregistered.to_string_lossy()), peer_ctx()).await;
+
+        let err = resp.error.expect("an unregistered cwd must be refused");
+        assert!(err.message.contains("not a registered project"), "{}", err.message);
+        assert!(state.registry.list().is_empty(), "nothing may be registered for a refused spawn");
+    }
+
+    /// A registered project passes the guard: the call then fails later, on the
+    /// folder not existing (so no `claude` child is spawned by this test), which
+    /// is a different error from the refusal.
+    #[tokio::test]
+    async fn peer_spawn_into_a_registered_project_passes_the_guard() {
+        let dir = crate::settings::identity::test_support::non_ephemeral_tempdir();
+        let missing = dir.path().join("registered-but-gone");
+        let mut settings = Settings::default();
+        settings.projects.push(project(missing.to_str().unwrap()));
+        let state = DaemonState::new(crate::daemon::session::new_session_map(), SettingsCache::new(settings));
+        let mut router = Router::new();
+        register_spawn_chat_rpc(&mut router, state);
+
+        let resp = router.dispatch(peer_spawn_request(&missing.to_string_lossy()), peer_ctx()).await;
+
+        let err = resp.error.expect("the missing folder still fails the spawn");
+        assert!(!err.message.contains("not a registered project"), "{}", err.message);
     }
 }
