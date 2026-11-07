@@ -294,8 +294,17 @@ impl Drop for CloneClaim {
     }
 }
 
-/// Runs `clone` into `dest`, a folder the caller has just checked does not
-/// exist. If it fails or times out, whatever it left at `dest` is removed so
+/// An empty folder is fine: `git clone` accepts one, and anything in it after a
+/// failed clone is that clone's own partial output.
+fn is_absent_or_empty(dest: &Path) -> bool {
+    match std::fs::read_dir(dest) {
+        Ok(mut entries) => entries.next().is_none(),
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
+/// Runs `clone` into `dest`, a folder the caller has checked does not
+/// exist (re-checked here once the claim is held). If it fails or times out, whatever it left at `dest` is removed so
 /// an immediate retry is not blocked by an "already exists" on a half-cloned
 /// folder; when the removal itself fails (an open handle on Windows), the
 /// error names the leftover path instead.
@@ -307,6 +316,13 @@ where
         return Err(RpcError::invalid_params(format!("{} is already being cloned", dest.display())));
     }
     let _claim = CloneClaim(dest.to_path_buf());
+    // The caller's exists check ran before awaits (account lookup, token) that
+    // let another clone create and finish this folder. Failing the clone below
+    // would then remove that finished checkout, so a folder with content here
+    // is refused untouched: the cleanup only ever removes what this call wrote.
+    if !is_absent_or_empty(dest) {
+        return Err(RpcError::invalid_params(format!("{} already exists", dest.display())));
+    }
     let msg = match clone.await {
         Ok(_) => return Ok(()),
         Err(GhError::Missing) => return Err(RpcError::invalid_params("gh is not installed".to_string())),
@@ -684,6 +700,26 @@ mod tests {
         .await;
         assert!(first.is_ok());
         assert!(dest.exists(), "the refused second clone must not remove the folder");
+    }
+
+    #[tokio::test]
+    async fn a_clone_into_a_folder_that_appeared_before_its_claim_leaves_it_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("repo");
+        std::fs::create_dir_all(dest.join(".git")).unwrap();
+        std::fs::write(dest.join("README.md"), "first clone's file").unwrap();
+        let ran = std::sync::atomic::AtomicBool::new(false);
+        let err = clone_cleaning_up(&dest, async {
+            ran.store(true, std::sync::atomic::Ordering::SeqCst);
+            Err(GhError::Failed("fatal: destination path already exists and is not an empty directory".into()))
+        })
+        .await
+        .expect_err("a non-empty destination must be refused");
+        assert!(err.message.contains("already exists"), "got {}", err.message);
+        assert!(!err.message.contains("clone failed"), "got {}", err.message);
+        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst), "the clone must not even start");
+        assert!(dest.join("README.md").exists(), "the finished checkout must survive");
+        assert!(dest.join(".git").exists());
     }
 
     #[tokio::test]
