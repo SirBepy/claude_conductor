@@ -155,6 +155,40 @@ test.describe("view-harness / add a project inline", () => {
       await expect(page.locator(".pp-act", { hasText: 'Search GitHub for "hubb"' })).toHaveCount(1);
     });
 
+    // The daemon finishes a clone it started and the RPC cannot be cancelled,
+    // so typing or Escape must not hide the one sign that it is running.
+    test("typing or Escape while a clone runs keeps the cloning panel up", async ({ page }) => {
+      await mountView(page, {
+        invoke: baseInvoke({
+          github_search_repos: MINE,
+          github_clone_repo: { path: "C:\\Users\\tecno\\Desktop\\Projects\\hubbub", name: "hubbub" },
+        }),
+      });
+      await delayInvokes(page, ["github_clone_repo"], 2500);
+      await page.waitForFunction(() => typeof (window as unknown as { __startNewSession?: unknown }).__startNewSession === "function");
+      await page.evaluate(() => localStorage.removeItem("claude_companion_project_favorites"));
+      await page.evaluate(() => {
+        void (window as unknown as { __startNewSession: () => Promise<void> }).__startNewSession();
+      });
+      await page.waitForSelector(".project-picker-row");
+      const search = page.locator("#project-picker-search");
+      await search.fill("hub");
+      await search.press("Enter");
+      await page.waitForSelector("[data-gh-row]");
+      await search.press("Enter");
+      await expect(page.locator(".pp-gh-state")).toContainText("Cloning");
+
+      await search.pressSequentially("x");
+      await expect(page.locator(".pp-gh-state")).toContainText("Cloning");
+      await expect(search).toHaveValue("hub");
+      await search.press("Escape");
+      await expect(page.locator(".pp-gh-state")).toContainText("Cloning");
+      await expect(page.locator(".project-picker-modal")).toHaveCount(1);
+
+      // The reply still resolves the picker once the clone answers.
+      await expect(page.locator(".project-picker-modal")).toHaveCount(0, { timeout: 6000 });
+    });
+
     test("gh not signed in explains how to fix it", async ({ page }) => {
       await openPicker(page, { github_search_repos: { status: "not_signed_in", items: [], failed_accounts: 0 } });
       await page.locator("#project-picker-search").fill("hub");
