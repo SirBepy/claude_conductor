@@ -69,14 +69,30 @@ pub async fn detach_window(session_id: String, app: AppHandle) -> Result<(), Str
     Ok(())
 }
 
-/// Close the detached window for `session_id`, if any. Does not kill the
-/// session itself.
+/// Whether `label` is one of `session_id`'s detached windows: the plain
+/// `session-<id>` or a `session-<id>-<n>` that `free_window_label` hands out for
+/// a second, third, ... window. Only digits may follow the dash, so a label of a
+/// different chat that merely starts with this id is left alone.
+fn is_window_of_session(label: &str, session_id: &str) -> bool {
+    let base = format!("session-{session_id}");
+    match label.strip_prefix(&base) {
+        Some("") => true,
+        Some(rest) => rest
+            .strip_prefix('-')
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())),
+        None => false,
+    }
+}
+
+/// Close every detached window of `session_id` (each Detach opens its own), if
+/// any. Does not kill the session itself.
 #[tauri::command]
 pub async fn reattach_window(session_id: String, app: AppHandle) -> Result<(), String> {
     validate_session_id(&session_id)?;
-    let label = format!("session-{}", session_id);
-    if let Some(win) = app.get_webview_window(&label) {
-        win.close().map_err(|e| e.to_string())?;
+    for (label, win) in app.webview_windows() {
+        if is_window_of_session(&label, &session_id) {
+            win.close().map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
@@ -441,6 +457,18 @@ mod tests {
         // A closed first window frees its label for the next one.
         open.borrow_mut().retain(|l| l != "session-abc");
         assert_eq!(free_window_label("abc", |l| open.borrow().iter().any(|o| o == l)), "session-abc");
+    }
+
+    #[test]
+    fn reattach_matches_every_window_of_the_chat_and_no_other() {
+        assert!(is_window_of_session("session-abc", "abc"));
+        assert!(is_window_of_session("session-abc-2", "abc"));
+        assert!(is_window_of_session("session-abc-13", "abc"));
+        assert!(!is_window_of_session("session-abcd", "abc"), "another chat whose id starts the same");
+        assert!(!is_window_of_session("session-abc-x", "abc"));
+        assert!(!is_window_of_session("session-abc-", "abc"));
+        assert!(!is_window_of_session("main", "abc"));
+        assert!(!is_window_of_session("session-xyz-2", "abc"));
     }
 
     const CWD: &str = "/nonexistent/takeover-proj";
