@@ -53,10 +53,11 @@ describe("buildHoverCardHtml", () => {
       answers: ["A".repeat(40), "Yes"], total: 2, answered: 2,
     };
     const html = buildHoverCardHtml({ ...base, st: "st-question", question });
-    expect(html).toContain(`${"H".repeat(34)}…`);
-    expect(html).not.toContain("H".repeat(35));
-    expect(html).toContain(`${"A".repeat(22)}…`);
-    expect(html).not.toContain("A".repeat(23));
+    // The ellipsis counts toward the cap: a cut label renders 34 characters, a cut answer 22.
+    expect(html).toContain(`>${"H".repeat(33)}…<`);
+    expect(html).not.toContain("H".repeat(34));
+    expect(html).toContain(`>${"A".repeat(21)}…<`);
+    expect(html).not.toContain("A".repeat(22));
     expect(html).toContain(">Short<");
     expect(html).toContain(">Yes<");
   });

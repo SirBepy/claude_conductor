@@ -44,17 +44,16 @@ let state: HistoryState = {
   statusbar: null,
 };
 let nextMountId = 1;
-let _pendingSelect: { sessionId: string; projectId: string | null } | null = null;
+let _pendingSelect: { sessionId: string } | null = null;
 
 /**
  * Open a specific past session read-only on the next History-view mount. Used
  * by the chats-window cross-window open request and the project dashboard's
- * closed-chat rows. `projectId` is the Claude project-dir slug
- * (`HistoryEntry.project_id`); neither caller has it, so the mount learns it
- * from the opened entry when omitted.
+ * closed-chat rows. Neither has the project-dir slug (`HistoryEntry.project_id`),
+ * so the mount learns it from the opened entry.
  */
-export function queueHistorySelect(sessionId: string, projectId: string | null = null): void {
-  _pendingSelect = { sessionId, projectId };
+export function queueHistorySelect(sessionId: string): void {
+  _pendingSelect = { sessionId };
 }
 
 async function listHistory(projectId: string | null): Promise<HistoryEntry[] | null> {
@@ -80,11 +79,10 @@ async function listHistory(projectId: string | null): Promise<HistoryEntry[] | n
  * the entry, then one scoped read; if the entry is not among the newest 200 the
  * unscoped list stays rather than showing nothing.
  */
-async function fetchEntries(pending: { sessionId: string; projectId: string | null } | null): Promise<void> {
-  const scopeId = pending?.projectId ?? null;
-  const first = await listHistory(scopeId);
+async function fetchEntries(pending: { sessionId: string } | null): Promise<void> {
+  const first = await listHistory(null);
   state.entries = first ?? [];
-  if (!pending || scopeId || !first) return;
+  if (!pending || !first) return;
   const projectId = first.find((e) => e.session_id === pending.sessionId)?.project_id;
   if (!projectId || first.every((e) => e.project_id === projectId)) return;
   const scoped = await listHistory(projectId);

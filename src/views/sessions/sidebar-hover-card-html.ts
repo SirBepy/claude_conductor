@@ -99,9 +99,10 @@ function planBlock(plan: readonly PlanStepSnapshot[]): string {
 function questionBlock(q: QuestionProgress): string {
   const firstOpen = q.answers.findIndex((a) => a === null);
   return q.questions.map((qu, i) => {
-    const label = truncate(qu.header || qu.question, 34);
+    // truncate() keeps n characters plus the ellipsis, so 33 and 21 cap the card at 34 and 22 rendered.
+    const label = truncate(qu.header || qu.question, 33);
     const a = q.answers[i];
-    if (a !== null && a !== undefined) return row("done", "ph-check", label, truncate(a, 22));
+    if (a !== null && a !== undefined) return row("done", "ph-check", label, truncate(a, 21));
     return i === firstOpen ? row("now", "ph-caret-right", label) : row("todo", "ph-circle", label);
   }).join("");
 }
