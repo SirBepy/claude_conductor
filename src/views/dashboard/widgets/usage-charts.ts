@@ -57,11 +57,16 @@ export async function fetchHistory(accountId: string | null, fromMs?: number): P
   }
 }
 
+/** The 5h session and 7d weekly window lengths. The page windows and the history
+ *  prefetch share them so the prefetch always spans what the chart shows. */
+const SESSION_MS = 5 * 3_600_000;
+const WEEK_MS = 7 * 24 * 3_600_000;
+
 /** History for the chart's current page. The phone holds only the recent days,
  *  so a chart paged back asks for the window it shows plus the one before it
  *  (which decides the "previous" arrow); inside the held days that is a no-op. */
 export function fetchHistoryForPage(metric: "session" | "weekly", accountId: string | null): Promise<UsageRecord[]> {
-  const windowMs = metric === "session" ? 5 * 3_600_000 : 7 * 24 * 3_600_000;
+  const windowMs = metric === "session" ? SESSION_MS : WEEK_MS;
   return fetchHistory(accountId, Date.now() - (getPageOffset(metric) + 2) * windowMs);
 }
 
@@ -87,7 +92,6 @@ function legendItem(elId: string, color: string, isDashed: boolean, label: strin
 }
 
 export function sessionWindow(history: UsageRecord[]): WindowState {
-  const SESSION_MS = 5 * 3_600_000;
   const latest = history[history.length - 1]!;
   const sessionEndMs = latest.session_resets_at
     ? new Date(latest.session_resets_at).getTime()
@@ -109,7 +113,6 @@ export function sessionWindow(history: UsageRecord[]): WindowState {
 }
 
 export function weeklyWindow(history: UsageRecord[]): WindowState {
-  const WEEK_MS = 7 * 24 * 3_600_000;
   const latest = history[history.length - 1]!;
   const weeklyEndMs = latest.weekly_resets_at
     ? new Date(latest.weekly_resets_at).getTime()
