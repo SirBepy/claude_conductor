@@ -49,10 +49,10 @@ async fn latest_captured_at(
 }
 
 pub fn register_usage(router: &mut Router, state: Arc<DaemonState>) {
-    // Mirrors `get_history` (params: { limit, since, account_id }) ->
+    // Mirrors `get_history` (params: { limit, since, until, account_id }) ->
     // Vec<UsageSnapshot>. Snapshots come back ascending by timestamp; `limit`
     // keeps the newest N (trim front), `since` is an inclusive unix-seconds
-    // floor.
+    // floor and `until` an exclusive ceiling.
     {
         let state = state.clone();
         router.register("get_history", move |params, _ctx| {
