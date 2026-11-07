@@ -491,6 +491,12 @@ pub fn register_spawn_chat_rpc(router: &mut Router, state: Arc<DaemonState>) {
             // A paired machine may start a chat only in a project registered HERE,
             // like the local tool's own cwd guard: `claude` runs with this cwd, so
             // an unchecked one would let a compromised peer pick any readable folder.
+            // Deliberately narrower than `start_session`'s `is_known_cwd` (core.rs):
+            // that one also accepts the cwd of any session already in the registry,
+            // which can be a folder that was never a project. This guard answers only
+            // "is it a registered project", so a subfolder of a registered non-git
+            // project (its `project_root` is the folder itself) is refused and the
+            // error tells the caller to register it here.
             if known_project_root(std::path::Path::new(cwd), &state.settings.snapshot().projects).is_none() {
                 return Err(RpcError::invalid_params(format!(
                     "{cwd} is not a registered project on this machine; add it as a project here before starting a chat in it from another machine"
