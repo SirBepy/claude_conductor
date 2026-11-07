@@ -6,8 +6,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const previews = [];
 let pushListener = null;
+const listArgs = [];
 vi.mock("../src/shared/ipc", () => ({
-  invoke: (cmd) => (cmd === "list_previews" ? Promise.resolve(previews) : Promise.resolve(undefined)),
+  invoke: (cmd, args) => {
+    if (cmd !== "list_previews") return Promise.resolve(undefined);
+    listArgs.push(args);
+    return Promise.resolve(previews);
+  },
 }));
 vi.mock("../src/shared/transport", () => ({
   getTransport: () => ({
@@ -31,6 +36,7 @@ const makeHeader = () => {
 describe("mockup button", () => {
   beforeEach(() => {
     previews.length = 0;
+    listArgs.length = 0;
     document.body.innerHTML = "";
     state.previewController = null;
   });
@@ -99,6 +105,26 @@ describe("mockup button", () => {
     await vi.waitFor(() => expect(btn.hidden).toBe(false));
     btn.click();
     await vi.waitFor(() => expect(open).toHaveBeenCalledWith("new"));
+  });
+
+  it("a sub in view asks list_previews with its main chat's id, as the panel does, so a family page shows the button", async () => {
+    state.sessions = [{ session_id: "main", name: "main" }, { session_id: "sub", name: "sub", subchat_of: "main" }];
+    try {
+      // The daemon matches owner == scope or a sub of scope: only the main id reaches the shared page.
+      previews.push(meta("shared", "main"));
+      const open = vi.fn();
+      state.previewController = { open };
+      const header = makeHeader();
+      mountMockupButton(header, "sub");
+      const btn = header.trailSlot.querySelector(".mockup-open-btn");
+      await vi.waitFor(() => expect(btn.hidden).toBe(false));
+      expect(listArgs[0]).toEqual({ sessionId: "main" });
+      btn.click();
+      await vi.waitFor(() => expect(open).toHaveBeenCalledWith("shared"));
+      expect(listArgs.at(-1)).toEqual({ sessionId: "main" });
+    } finally {
+      state.sessions = [];
+    }
   });
 
   it("mounting for another chat removes the previous chat's button and listener", async () => {
