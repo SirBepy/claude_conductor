@@ -1,5 +1,6 @@
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
+// Reviewed 2026-11-07: the Skills row left the settings index (a skill is opened by clicking it), so the Skills back-arrow test reaches the page through showView instead of a row.
 // asserts: src/shared/settings-popup.ts, src/shared/app-rail.ts, src/shared/navigation.ts, src/router.ts, src/views/settings/settings.ts, src/views/settings/ui.ts
 import { expect, test, type Page } from "@playwright/test";
 import { fireEvent, mountView } from "./harness";
@@ -113,7 +114,8 @@ test("a settings row opens its subpage inside the popup, and that page's back bu
 test("Skills, whose header has a burger, gets a back arrow in the popup that returns to Settings", async ({ page }) => {
   await mountChats(page);
   await openFromRail(page);
-  await popup(page).locator(".kit-nav-row", { hasText: "Skills" }).click();
+  // No Settings row leads to Skills any more: a skill chip opens a skill, and its Back arrow lands here.
+  await page.evaluate(async () => (await import("/shared/navigation.ts")).showView("skills"));
   await expect(popup(page).locator(".view-skills")).toHaveCount(1);
   await expect(popup(page).locator(".view-header .burger")).toBeHidden();
 

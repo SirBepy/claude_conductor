@@ -139,8 +139,21 @@ export class CaretSuggestPopup {
       const row = active.renderRow(it, i === this.selectedIdx);
       row.addEventListener("mousedown", (e) => {
         e.preventDefault();
+        // A control inside the row (a skill's info icon) is its own gesture:
+        // pressing it must not insert the row. preventDefault above still
+        // keeps the textarea focused.
+        if ((e.target as Element | null)?.closest?.("[data-no-pick]")) return;
         this.pick(it);
       });
+      // Capture, because the control stops its click from bubbling; the
+      // menu has nothing left to offer once the control navigated away.
+      row.addEventListener(
+        "click",
+        (e) => {
+          if ((e.target as Element | null)?.closest?.("[data-no-pick]")) this.close();
+        },
+        true,
+      );
       return row;
     });
     this.el.replaceChildren(...rows);

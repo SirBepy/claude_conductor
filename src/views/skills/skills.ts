@@ -2,7 +2,7 @@ import { html, render, type TemplateResult } from "lit-html";
 import { api } from "../../shared/api";
 import type { InstalledSkill } from "../../types/ipc.generated";
 import { readScopes, scopeSummary, type ScopeMap, type ScopeProject } from "../skill-detail/scope-editor";
-import { showView } from "../../shared/navigation";
+import { openSkillDetail } from "../../shared/open-skill-detail";
 import { openSidemenu } from "../../shared/sidemenu";
 import "./skills.css";
 
@@ -46,15 +46,10 @@ function scopeLine(s: InstalledSkill): TemplateResult {
   return html`<span class="skill-where" title="Available in"><i class="ph ph-folder-simple"></i>${text}</span>`;
 }
 
-function openSkill(skill: string) {
-  (window as unknown as { skillDetailTarget?: string }).skillDetailTarget = skill;
-  showView("skill-detail");
-}
-
 function onRowKeydown(e: KeyboardEvent, skill: string) {
   if (e.key === "Enter" || e.key === " ") {
     e.preventDefault();
-    openSkill(skill);
+    openSkillDetail(skill);
   }
 }
 
@@ -113,7 +108,7 @@ function content(): TemplateResult {
             role="button"
             tabindex="0"
             title=${s.skill}
-            @click=${() => openSkill(s.skill)}
+            @click=${() => openSkillDetail(s.skill)}
             @keydown=${(e: KeyboardEvent) => onRowKeydown(e, s.skill)}
           >
             <div class="skill-row-main">

@@ -27,8 +27,8 @@ describe("sidemenu markup", () => {
     for (const view of ["dashboard", "schedule", "settings"]) {
       expect(html).toMatch(new RegExp(`data-view="${view}"`));
     }
-    // News is retired; Characters lives in Settings and Skills is reached from
-    // Settings or by clicking a skill, so none of them has a nav entry.
+    // News is retired; Characters lives in Settings and Skills is reached by clicking
+    // a skill (a mention, a slash-menu row, a Home widget), so none of them has a nav entry.
     for (const view of ["news", "characters", "skills"]) {
       expect(html).not.toMatch(new RegExp(`data-view="${view}"`));
     }
