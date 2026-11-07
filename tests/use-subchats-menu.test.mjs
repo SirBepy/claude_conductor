@@ -106,7 +106,7 @@ describe("Use subchats menu item", () => {
 
   it("is unavailable for a draft", () => {
     const item = find(buildConfigureItems(ctx({ kind: "draft", sessionId: null })));
-    expect(item.disabledReason).toBe("Set with the switch above the message box");
+    expect(item.disabledReason).toBe("Set on the new-chat screen before the first message");
     expect(item.run).toBeUndefined();
   });
 

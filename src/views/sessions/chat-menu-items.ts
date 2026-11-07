@@ -275,7 +275,7 @@ export function buildConfigureItems(ctx: ChatMenuCtx): ItemDesc[] {
             rerenderSidebar();
           },
       disabledReason: isDraft
-        ? "Set with the switch above the message box"
+        ? "Set on the new-chat screen before the first message"
         : (!sessionId ? "No session" : (ctx.subchatsOn ? undefined : ctx.subchatsBlockedReason)),
     }]),
     {
