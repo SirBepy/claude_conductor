@@ -2,8 +2,10 @@
  * Incremental cache over `get_history`. The store keeps one row per poll per
  * account (48k rows, ~17MB of JSON on this dev's machine), and every
  * `usage-updated` used to re-download all of it once per listener plus once
- * per dashboard chart widget. Now the first read fetches everything, later
- * reads fetch only rows at or after the newest one already held.
+ * per dashboard chart widget. Desktop's first read fetches everything and later
+ * reads fetch only rows at or after the newest one already held. The phone
+ * (after `enableUsageHistoryPersistence`) holds only the last WINDOW_DAYS days,
+ * saved between launches, and `loadUsageHistory({ fromMs })` extends it back.
  */
 
 import { invoke } from "./ipc";
