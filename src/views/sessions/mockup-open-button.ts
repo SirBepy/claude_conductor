@@ -2,14 +2,16 @@
 // preview panel, so Joe never hunts for the card or the panel's history picker.
 // Hidden until the chat's panel has one to show. It follows the panel's scope
 // (a main chat plus its subs, a sub in place covers its family), so the button
-// is shown exactly when opening the panel would land on a page.
+// is shown exactly when opening the panel would land on a page. `list_previews`
+// is asked with `scopeRoot(sessionId)` like the panel: the daemon matches only
+// the named chat and its subs, so a sub's own id would miss the family's pages.
 
 import { invoke } from "../../shared/ipc";
 import { getTransport } from "../../shared/transport";
 import type { PreviewMeta } from "../../types/ipc.generated";
 import type { SessionHeader } from "./session-header";
 import { previewsOfSession } from "./preview-panel-history";
-import { inFamily } from "./shared-mockup-scope";
+import { inFamily, scopeRoot } from "./shared-mockup-scope";
 import { state } from "./state";
 import "./mockup-open-button.css";
 
@@ -45,7 +47,7 @@ export function mountMockupButton(header: SessionHeader, sessionId: string): voi
     void (async () => {
       let id: string | undefined;
       try {
-        id = newestPreviewOf(await invoke<PreviewMeta[]>("list_previews", { sessionId }), sessionId)?.id;
+        id = newestPreviewOf(await invoke<PreviewMeta[]>("list_previews", { sessionId: scopeRoot(sessionId) }), sessionId)?.id;
       } catch (err) {
         console.error("[mockup-button] list_previews failed", err);
       }
@@ -60,7 +62,7 @@ export function mountMockupButton(header: SessionHeader, sessionId: string): voi
 
   void (async () => {
     try {
-      const list = await invoke<PreviewMeta[]>("list_previews", { sessionId });
+      const list = await invoke<PreviewMeta[]>("list_previews", { sessionId: scopeRoot(sessionId) });
       if (live && newestPreviewOf(list, sessionId)) btn.hidden = false;
     } catch (err) {
       console.error("[mockup-button] list_previews failed", err);

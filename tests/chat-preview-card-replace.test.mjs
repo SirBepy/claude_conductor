@@ -218,4 +218,25 @@ describe("a page fetched by scrolling up", () => {
     await renderer.fetchOlder();
     expect(labels(container)).toEqual(["Older", "Refused"]);
   });
+
+  it("pairs a refusal that sits on the newer, already-rendered page with its push on this one", async () => {
+    const newest = {
+      events: [refused("tu-1", 2_000_150), userEvent("later", 2_000_200)],
+      oldest_seq: 10,
+      newest_seq: 12,
+      has_more: true,
+    };
+    const older = {
+      events: [userEvent("first", 1_000_000), push("tu-1", "week", "Doomed", "one", 1_000_100)],
+      oldest_seq: 1,
+      newest_seq: 9,
+      has_more: false,
+    };
+    const { renderer, container } = await makeRenderer({ newest, older });
+    await renderer.fetchOlder();
+    const cards = cardsOf(container);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].querySelector(".pc-frame")).toBeNull();
+    expect(cards[0].querySelector(".pc-failed").textContent).toContain("HTTP 410");
+  });
 });
