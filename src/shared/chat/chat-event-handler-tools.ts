@@ -20,7 +20,15 @@ import {
   isWriteDraftTool,
   MCP_WRITE_PLAN_TOOL,
 } from "./tool-meta";
-import { previewFieldsOf } from "./chat-preview-card";
+import type { RenderedMessage } from "./chat-classifiers";
+import {
+  previewCardIndex,
+  previewFieldsOf,
+  previewRefusalReason,
+  previewRowOfToolUse,
+  refusePreview,
+  supersedePreview,
+} from "./chat-preview-card";
 import { prToolMessage } from "./chat-pr-tool";
 import { draftFieldsOf, draftResultFieldsOf } from "./chat-draft-card";
 import {
@@ -89,7 +97,15 @@ export function handleToolUseEvent(
   // Pushed HTML the user is meant to LOOK at: its own centered card row, not
   // narration. The rail still gets the same snapshot via the daemon push.
   if (isShowPreviewTool(ev.tool_name) && !ev.parent_tool_use_id) {
-    r.messages.push({ ...previewFieldsOf(ev.input), kind: "preview", id: ev.id, ts, parentToolUseId: null });
+    const row: RenderedMessage = { ...previewFieldsOf(ev.input), kind: "preview", id: ev.id, ts, parentToolUseId: null };
+    // The tool promises that a re-push of a slug replaces its card in place.
+    const idx = previewCardIndex(r.messages, row.previewSlug);
+    if (idx >= 0) {
+      r.messages[idx] = supersedePreview(r.messages[idx]!, row);
+      r.dirtyIndices.add(idx);
+    } else {
+      r.messages.push(row);
+    }
     return { touched: true, coalesce: false };
   }
   // The /create-pr card: a finalized assistant row carrying the PR markers,
@@ -313,6 +329,16 @@ export function handleToolResultEvent(
       : { ...prev, ...fields, draftRecipient: fields.draftRecipient || prev.draftRecipient };
     r.dirtyIndices.add(dIdx);
     return { touched: true, coalesce: false };
+  }
+  // A refused show_preview: the card was painted from the tool input, so the
+  // refusal has to take it back (an accepted one needs nothing and falls on).
+  if (ev.is_error) {
+    const vIdx = previewRowOfToolUse(r.messages, ev.tool_use_id);
+    if (vIdx >= 0) {
+      r.messages[vIdx] = refusePreview(r.messages[vIdx]!, ev.tool_use_id, previewRefusalReason(ev.output));
+      r.dirtyIndices.add(vIdx);
+      return { touched: true, coalesce: false };
+    }
   }
   // Built by the shared converter, not a literal: this path used to drop
   // output_truncated/full_seq, so a truncated result on the initial hydrate
