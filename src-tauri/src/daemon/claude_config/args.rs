@@ -37,6 +37,7 @@ Do not push, unless Joe asked you to run a push gate. \
 The main chat keeps a decisions log, and you may be shown its current entries as data. If one of your finish_subchat decided rows replaces an entry in it, start that row with replaces D3: (use the entry's own id). \
 If your brief names a shared mockup, add your own region to it with shared_mockup action part (html, css and controls) instead of pushing a separate show_preview page, and push the part again to change it. Give Joe controls to flip: kind select for a choice between options, kind switch for a plain yes/no, never chips or buttons. Use show_preview only for a page that is yours alone, and say why in its title. \
 Do not send progress messages. \
+Of everything you send with send_message, only a blocker reaches the main chat's window: an answer, a report, a [label](#d:id) link and its details stay in this hidden chat, which Joe does not read, so never rely on them. When a follow-up from Joe needs a table or any answer longer than the 200 chars of finish_subchat text, push it with show_preview, which opens in the main chat's panel, and put its one-line outcome in the finish_subchat text. Write that it was shown only after the show_preview call returned ok. \
 Keep write_plan current, since Joe sees your plan when he hovers over you.";
 
 /// Appended instead of [`SUBCHAT_SUB_PROMPT`] to a gate sub (`spawn_chat` with
@@ -472,6 +473,20 @@ mod tests {
             assert!(p.contains(needle), "{needle}");
         }
         assert!(p.contains("A hook may refuse a subagent's first try") && p.contains("follow what the hook says"), "{p}");
+    }
+
+    /// A sub answered Joe's follow-up with send_message and a details table, then
+    /// finished claiming it was shown: only a blocker is drawn in the main chat
+    /// (hooks_server/messages.rs `draw_sub_blocker`), so the sub is told where
+    /// a table must go instead.
+    #[test]
+    fn the_sub_prompt_says_only_a_blocker_reaches_the_main_chat_and_a_table_goes_through_show_preview() {
+        let p = SUBCHAT_SUB_PROMPT;
+        assert!(p.contains("only a blocker reaches the main chat's window"), "{p}");
+        assert!(p.contains("an answer, a report, a [label](#d:id) link and its details stay in this hidden chat"), "{p}");
+        assert!(p.contains("push it with show_preview, which opens in the main chat's panel"), "{p}");
+        assert!(p.contains("only after the show_preview call returned ok"), "{p}");
+        assert!(!p.contains('\\') && !p.contains("  ") && !p.contains('\u{2014}'));
     }
 
     #[test]
