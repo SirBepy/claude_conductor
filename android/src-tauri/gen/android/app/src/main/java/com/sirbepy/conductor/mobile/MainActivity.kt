@@ -54,6 +54,11 @@ class MainActivity : TauriActivity() {
   private val notificationPermission =
     registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+  // Declining Play's update dialog needs no handling: the next start asks again.
+  private val updateFlow =
+    registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
+  private val inAppUpdate by lazy { InAppUpdate(this, updateFlow) { locked } }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // App always renders dark (frontend forces color-scheme: dark via CSS); lock
     // night-mode so native chrome (status/nav bar via enableEdgeToEdge's auto style)
@@ -153,6 +158,7 @@ class MainActivity : TauriActivity() {
         if (locked) lockScreen.post { promptUnlock() } else showApp()
       }
     }
+    inAppUpdate.onStart()
   }
 
   // Shown over the lock screen before the unlock prompt, on the first launch
@@ -182,6 +188,7 @@ class MainActivity : TauriActivity() {
 
   override fun onStop() {
     super.onStop()
+    inAppUpdate.onStop()
     OnScreen.appVisible = false
     if (!locked) backgroundedAt = SystemClock.elapsedRealtime()
   }
@@ -212,6 +219,7 @@ class MainActivity : TauriActivity() {
     showApp()
     askNotificationPermissionOnce()
     deliverPendingChat()
+    inAppUpdate.offerRestartIfReady()
   }
 
   // After unlock, so the dialog never covers the app-lock prompt.
