@@ -25,18 +25,35 @@ fn allowed(list: &[&str]) -> String {
 /// runaway paste before it rides every pending-prompt snapshot.
 const MAX_PREVIEW_BYTES: usize = 64 * 1024;
 
+/// What a missing or blank `preview` means for the caller: `None` accepts it,
+/// `Some(message)` is the problem to report. A question's preview and an
+/// option's differ only here (and in the label), so one check serves both.
+struct PreviewRule<'a> {
+    missing: Option<&'a str>,
+    empty: Option<&'a str>,
+}
+
+/// The one definition of "this `preview` value counts": a string of HTML that is
+/// under the byte cap, and not blank where the rule rejects blanks. `label`
+/// prefixes the problem (`question 2`, `question 2 option 1`).
+fn check_preview(value: Option<&Value>, label: &str, rule: &PreviewRule) -> Option<String> {
+    let problem = match value.filter(|p| !p.is_null()) {
+        None => rule.missing?.to_string(),
+        Some(Value::String(s)) if s.trim().is_empty() => rule.empty?.to_string(),
+        Some(Value::String(s)) if s.len() > MAX_PREVIEW_BYTES => {
+            format!("preview is {} bytes, over the {MAX_PREVIEW_BYTES}-byte cap", s.len())
+        }
+        Some(Value::String(_)) => return None,
+        Some(_) => "preview must be a string of HTML".to_string(),
+    };
+    Some(format!("{label}: {problem}"))
+}
+
 /// The question's own `preview`: optional, never required, but when present it
 /// must be a non-empty string under the same cap as an option's.
 fn question_preview_problems(q: &Value, n: usize) -> Vec<String> {
-    match q.get("preview").filter(|p| !p.is_null()) {
-        None => Vec::new(),
-        Some(Value::String(s)) if s.trim().is_empty() => vec![format!("question {n}: preview is empty, leave it out instead")],
-        Some(Value::String(s)) if s.len() > MAX_PREVIEW_BYTES => {
-            vec![format!("question {n}: preview is {} bytes, over the {MAX_PREVIEW_BYTES}-byte cap", s.len())]
-        }
-        Some(Value::String(_)) => Vec::new(),
-        Some(_) => vec![format!("question {n}: preview must be a string of HTML")],
-    }
+    let rule = PreviewRule { missing: None, empty: Some("preview is empty, leave it out instead") };
+    check_preview(q.get("preview"), &format!("question {n}"), &rule).into_iter().collect()
 }
 
 /// Option-level `preview` problems. A `ux` question exists to compare looks,
@@ -47,24 +64,16 @@ fn preview_problems(q: &Value, n: usize) -> Vec<String> {
     let Some(options) = q.get("options").and_then(Value::as_array) else {
         return Vec::new();
     };
-    let mut out = Vec::new();
-    for (oi, opt) in options.iter().enumerate() {
-        let o = oi + 1;
-        match opt.get("preview").filter(|p| !p.is_null()) {
-            None if is_ux => out.push(format!("question {n} option {o}: a ux question needs a preview on every option")),
-            None => {}
-            Some(Value::String(s)) if s.trim().is_empty() && is_ux => {
-                out.push(format!("question {n} option {o}: preview is empty"));
-            }
-            Some(Value::String(s)) if s.len() > MAX_PREVIEW_BYTES => out.push(format!(
-                "question {n} option {o}: preview is {} bytes, over the {MAX_PREVIEW_BYTES}-byte cap",
-                s.len()
-            )),
-            Some(Value::String(_)) => {}
-            Some(_) => out.push(format!("question {n} option {o}: preview must be a string of HTML")),
-        }
-    }
-    out
+    // Off a ux question an option's preview may be absent or blank.
+    let rule = PreviewRule {
+        missing: is_ux.then_some("a ux question needs a preview on every option"),
+        empty: is_ux.then_some("preview is empty"),
+    };
+    options
+        .iter()
+        .enumerate()
+        .filter_map(|(oi, opt)| check_preview(opt.get("preview"), &format!("question {n} option {}", oi + 1), &rule))
+        .collect()
 }
 
 /// Normalize `domain` and option `badges` in place and check option
@@ -285,6 +294,30 @@ mod tests {
             assert!(!err.contains("ux question compares"), "{err}");
             assert!(!err.contains("fixed enum tokens"), "{err}");
         }
+    }
+
+    /// The question-level and option-level checks share one helper; the wording
+    /// the model reads back differs only in the label and in whether an empty
+    /// string is a problem, so every message is pinned whole.
+    #[test]
+    fn question_and_option_preview_errors_keep_their_exact_wording() {
+        let over = MAX_PREVIEW_BYTES + 1;
+        let cap = format!("preview is {over} bytes, over the {MAX_PREVIEW_BYTES}-byte cap");
+        let err_of = |q: serde_json::Value| normalize(&json!([q])).unwrap_err();
+
+        let q = |preview: serde_json::Value| json!({"question": "Q", "preview": preview, "options": [{"label": "A"}]});
+        assert!(err_of(q(json!(3))).starts_with("question 1: preview must be a string of HTML. "));
+        assert!(err_of(q(json!("  "))).starts_with("question 1: preview is empty, leave it out instead. "));
+        assert!(err_of(q(json!("x".repeat(over)))).starts_with(&format!("question 1: {cap}. ")));
+
+        let o = |domain: &str, preview: serde_json::Value| {
+            json!({"question": "Q", "domain": domain, "options": [{"label": "A", "preview": preview}]})
+        };
+        assert!(err_of(o("arch", json!(3))).starts_with("question 1 option 1: preview must be a string of HTML. "));
+        assert!(err_of(o("arch", json!("x".repeat(over)))).starts_with(&format!("question 1 option 1: {cap}. ")));
+        assert!(err_of(o("ux", json!("  "))).starts_with("question 1 option 1: preview is empty. "));
+        assert!(err_of(o("ux", json!(null))).starts_with("question 1 option 1: a ux question needs a preview on every option. "));
+        assert!(normalize(&json!([o("arch", json!("  "))])).is_ok(), "an empty option preview is only a problem on a ux question");
     }
 
     #[test]
