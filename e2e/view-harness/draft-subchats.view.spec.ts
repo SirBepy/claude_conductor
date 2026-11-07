@@ -1,4 +1,4 @@
-// asserts: src/views/sessions/draft-subchats.ts, src/views/sessions/pending-pane.ts, src/views/sessions/pending-pane-composer.ts, src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/draft-dashboard.ts
+// asserts: src/views/sessions/draft-subchats.ts, src/views/sessions/pending-pane.ts, src/views/sessions/pending-pane-composer.ts, src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/project-config.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountSessionsList, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 import { CONDUCTOR_CWD, LIST_ROWS, conductorHistory, conductorSnapshot, fakeShot } from "./project-dashboard-fixtures";
@@ -62,61 +62,121 @@ const row = (page: Page) => page.locator("#session-pane .draft-subchats");
 const sw = (page: Page) => row(page).locator(".slider");
 const modelText = (page: Page) => page.locator("#session-pane .session-header .meta-cfg-model-text");
 
+// The path a repoint test moves the project to; its dashboard snapshot is keyed by the
+// path itself because no project or group row in the list names it.
+const MOVED_CWD = "C:/Projects/claude_usage_in_taskbar_moved";
+const railCard = (page: Page) => page.locator(".pd-rail .view-project-settings .draft-subchats-card");
+
+type Core = { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> };
+
 // A project's draft on a wide window has the dashboard's settings rail, and the
 // switch is a "This chat" card under the settings there instead of a row.
+async function openRailDraft(page: Page): Promise<void> {
+  await page.setViewportSize({ width: 1700, height: 1000 });
+  type Backend = { list: unknown; snapshots: Record<string, unknown>; histories: Record<string, unknown>; shots: string[] };
+  await page.addInitScript((b: Backend) => {
+    let tauri: { core: Core } | undefined;
+    Object.defineProperty(window, "__TAURI__", {
+      configurable: true,
+      get: () => tauri,
+      set: (v) => {
+        const real = v.core.invoke;
+        v.core.invoke = (cmd: string, args?: Record<string, unknown>) => {
+          const key = args && typeof args.target === "object" ? (args.target as { id: string }).id : "";
+          switch (cmd) {
+            case "dashboard_list_targets": return Promise.resolve(b.list);
+            case "dashboard_snapshot": return Promise.resolve(b.snapshots[key]);
+            case "dashboard_history": return Promise.resolve(b.histories[key]);
+            case "dashboard_gallery_image": return Promise.resolve(b.shots[0]);
+            default: return real(cmd, args);
+          }
+        };
+        tauri = v;
+      },
+    });
+  }, {
+    list: LIST_ROWS,
+    snapshots: { "p-conductor": conductorSnapshot(), [MOVED_CWD]: conductorSnapshot() },
+    histories: { "p-conductor": conductorHistory(), [MOVED_CWD]: conductorHistory() },
+    shots: [0, 1].map(fakeShot),
+  });
+  await mountSessionsList(page, [sessionInstance({ session_id: "s-w", pid: 201, name: "Loop todos: cycle 3", cwd: CONDUCTOR_CWD, busy: true, awaiting: "working" })], {
+    load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
+    list_projects: [{ id: "p-conductor", path: CONDUCTOR_CWD, name: "claude_usage_in_taskbar", default_model: "haiku", default_effort: null }],
+    list_accounts: [],
+    get_settings: { theme: "void", defaultModel: "sonnet", defaultEffort: "high" },
+    update_project: null,
+    start_session: REAL,
+    set_auto_accept: null,
+    list_subchats_on: [],
+    check_paths_exist: { [MOVED_CWD]: true },
+  });
+  await page.evaluate(() => {
+    (window as unknown as { __ccInvokeCalls: Array<{ cmd: string; args?: unknown }> }).__ccInvokeCalls ??= [];
+  });
+  await page.waitForFunction(() => typeof (window as unknown as { __launchDraftForTest?: unknown }).__launchDraftForTest === "function");
+  await page.evaluate((p) => (window as unknown as { __launchDraftForTest: (p: unknown, c: unknown) => void })
+    .__launchDraftForTest({ path: p, name: "claude_usage_in_taskbar" }, { model: "sonnet", effort: "low", accountId: "acc1" }), CONDUCTOR_CWD);
+  await expect(railCard(page)).toBeVisible();
+  // The rail fades in after the dashboard's own entrance; a click mid-fade never settles.
+  await expect(page.locator(".pd-rail")).toHaveCSS("opacity", "1", { timeout: 15_000 });
+}
+
 test.describe("view-harness / Use subchats on a new-chat draft with a settings rail", () => {
   test("the switch is a This chat card in the rail, and the row above the message box is gone", async ({ page }) => {
-    await page.setViewportSize({ width: 1700, height: 1000 });
-    type Backend = { list: unknown; snapshots: Record<string, unknown>; histories: Record<string, unknown>; shots: string[] };
-    await page.addInitScript((b: Backend) => {
-      let tauri: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } | undefined;
-      Object.defineProperty(window, "__TAURI__", {
-        configurable: true,
-        get: () => tauri,
-        set: (v) => {
-          const real = v.core.invoke;
-          v.core.invoke = (cmd: string, args?: Record<string, unknown>) => {
-            const key = args && typeof args.target === "object" ? (args.target as { id: string }).id : "";
-            switch (cmd) {
-              case "dashboard_list_targets": return Promise.resolve(b.list);
-              case "dashboard_snapshot": return Promise.resolve(b.snapshots[key]);
-              case "dashboard_history": return Promise.resolve(b.histories[key]);
-              case "dashboard_gallery_image": return Promise.resolve(b.shots[0]);
-              default: return real(cmd, args);
-            }
-          };
-          tauri = v;
-        },
-      });
-    }, { list: LIST_ROWS, snapshots: { "p-conductor": conductorSnapshot() }, histories: { "p-conductor": conductorHistory() }, shots: [0, 1].map(fakeShot) });
-    await mountSessionsList(page, [sessionInstance({ session_id: "s-w", pid: 201, name: "Loop todos: cycle 3", cwd: CONDUCTOR_CWD, busy: true, awaiting: "working" })], {
-      load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
-      list_projects: [{ id: "p-conductor", path: CONDUCTOR_CWD, name: "claude_usage_in_taskbar", default_model: "haiku", default_effort: null }],
-      list_accounts: [],
-      get_settings: { theme: "void", defaultModel: "sonnet", defaultEffort: "high" },
-      update_project: null,
-      start_session: REAL,
-      set_auto_accept: null,
-      list_subchats_on: [],
-    });
-    await page.evaluate(() => {
-      (window as unknown as { __ccInvokeCalls: Array<{ cmd: string; args?: unknown }> }).__ccInvokeCalls ??= [];
-    });
-    await page.waitForFunction(() => typeof (window as unknown as { __launchDraftForTest?: unknown }).__launchDraftForTest === "function");
-    await page.evaluate((p) => (window as unknown as { __launchDraftForTest: (p: unknown, c: unknown) => void })
-      .__launchDraftForTest({ path: p, name: "claude_usage_in_taskbar" }, { model: "sonnet", effort: "low", accountId: "acc1" }), CONDUCTOR_CWD);
-
-    const card = page.locator(".pd-rail .view-project-settings .draft-subchats-card");
-    await expect(card).toBeVisible();
+    await openRailDraft(page);
+    const card = railCard(page);
     await expect(card.locator(".ps-group-title")).toHaveText(/This chat/i);
     await expect(page.locator("#session-pane .draft-subchats")).toHaveCount(0);
 
-    // The rail fades in after the dashboard's own entrance; a click mid-fade never settles.
-    await expect(page.locator(".pd-rail")).toHaveCSS("opacity", "1", { timeout: 15_000 });
     await card.locator(".slider").click();
     await expect(card.locator("input")).toBeChecked();
-    await expect(page.locator("#session-pane .session-header .meta-cfg-model-text")).toHaveText(/Opus/);
+    await expect(modelText(page)).toHaveText(/Opus/);
     await capture(page.locator(".pd-rail"), "draft-subchats-rail-card");
+  });
+
+  test("a failed first send leaves a working switch with the flag intact", async ({ page }) => {
+    await openRailDraft(page);
+    await railCard(page).locator(".slider").click();
+    await expect(modelText(page)).toHaveText(/Opus/);
+    // The send takes the dashboard (and its card) down before the spawn answers, so a
+    // rejected spawn must hand the draft a switch again.
+    await page.evaluate(() => {
+      const core = (window as unknown as { __TAURI__: { core: Core } }).__TAURI__.core;
+      const orig = core.invoke;
+      core.invoke = (cmd, args) => (cmd === "start_session" ? Promise.reject(new Error("spawn refused")) : orig(cmd, args));
+    });
+    await page.locator("#session-pane .session-composer .composer-textarea").fill("build the site");
+    await page.locator("#session-pane .session-composer .composer-send").click();
+    await expect(page.locator(".toast").filter({ hasText: /Failed to start session/ }).first()).toBeVisible();
+
+    await expect(row(page)).toBeVisible();
+    await expect(row(page).locator("input")).toBeChecked();
+    await expect(row(page).locator("input")).toBeEnabled();
+    await expect(modelText(page)).toHaveText(/Opus/);
+    // It still flips, and flipping off puts back the model it replaced.
+    await sw(page).click();
+    await expect(row(page).locator("input")).not.toBeChecked();
+    await expect(modelText(page)).toHaveText(/Sonnet/);
+  });
+
+  test("a folder repoint rebuilds the card with the choice kept", async ({ page }) => {
+    await openRailDraft(page);
+    await railCard(page).locator(".slider").click();
+    await expect(railCard(page).locator("input")).toBeChecked();
+
+    // A draft's dashboard has no header kebab; its project menu is the right-click one.
+    await page.locator(".pd-draft .pd-row").first().click({ button: "right" });
+    await page.locator(".session-more-menu .smore-item", { hasText: "Folder mapping..." }).click();
+    await page.locator("#projectDetailPath").click();
+    await page.locator("#projectDetailPathInput").fill(MOVED_CWD);
+    await page.locator("#projectDetailPathInput").press("Enter");
+
+    // The rebuilt rail has its settings in, so a missing card is the card's doing.
+    await expect(page.locator(".pd-rail .view-project-settings")).toBeVisible();
+    await expect(railCard(page)).toHaveCount(1);
+    await expect(railCard(page).locator("input")).toBeChecked();
+    await expect(page.locator("#session-pane .draft-subchats")).toHaveCount(0);
   });
 });
 

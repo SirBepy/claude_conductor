@@ -135,6 +135,39 @@ describe("the draft's Use subchats switch", () => {
     expect(pane.querySelector(".draft-subchats-card")).toBeNull();
   });
 
+  it("leaves the dashboard's fading ghost copy alone, and a failed send gives the pane a row again", () => {
+    document.body.innerHTML = `<div id="pane"><div class="session-messages"><div class="pd-rail"><div class="view-project-settings"></div></div></div><div class="composer-shell"></div></div>`;
+    pane = document.getElementById("pane");
+    mountDraftSubchats(pane, config);
+    const liveRail = pane.querySelector(".pd-rail");
+    mountDraftSubchatsCard(pane, liveRail, config);
+    const cardInput = liveRail.querySelector(".draft-subchats-card input");
+    cardInput.checked = true;
+    cardInput.dispatchEvent(new Event("change", { bubbles: true }));
+    // The send: the live dashboard comes down, a clone of it fades in its place.
+    const ghost = document.createElement("div");
+    ghost.className = "pd-draft pd-ghost";
+    ghost.append(liveRail.cloneNode(true));
+    pane.querySelector(".session-messages").append(ghost);
+    liveRail.remove();
+
+    lockDraftSubchats(pane, config, true);
+    expect(ghost.querySelector(".draft-subchats-card input").disabled).toBe(false);
+    unmountDraftSubchats(pane);
+    expect(ghost.querySelector(".draft-subchats-card")).not.toBeNull();
+
+    lockDraftSubchats(pane, config, false);
+    const rows = pane.querySelectorAll(".draft-subchats");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].classList.contains("is-on")).toBe(true);
+    expect(rows[0].querySelector("input").checked).toBe(true);
+    expect(config.subchatsOn).toBe(true);
+    // Switching off still puts back the model the switch replaced.
+    rows[0].querySelector("input").checked = false;
+    rows[0].querySelector("input").dispatchEvent(new Event("change", { bubbles: true }));
+    expect(config).toMatchObject({ subchatsOn: false, model: "sonnet", effort: "low" });
+  });
+
   it("is removed once the chat has started", () => {
     unmountDraftSubchats(pane);
     expect(pane.querySelector(".draft-subchats")).toBeNull();

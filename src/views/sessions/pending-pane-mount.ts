@@ -161,7 +161,7 @@ export async function mountPendingStatusbar(
     onEffortChange: (e) => { config.effort = e; },
     onModelChange: (m) => { config.model = m; },
     onConfig: (model, effort, effortEditable) => header?.setConfig(model, effort, effortEditable),
-    onAccountClick: () => { void changePendingAccount(config, placeholderId, project.path); },
+    onAccountClick: () => { void changePendingAccount(config, placeholderId, project.path, pane); },
     layoutEditable: true,
   });
   state.statusbar = sb;
@@ -190,6 +190,7 @@ export async function changePendingAccount(
   config: SessionConfig,
   placeholderId: string,
   projectPath?: string,
+  pane?: ParentNode,
 ): Promise<void> {
   const sb = state.statusbar;
   const liveId = state.renderer?.currentSessionId();
@@ -247,7 +248,7 @@ export async function changePendingAccount(
     savePendingSession(pending);
   }
   // The new account may be one that cannot run subchats (API credit).
-  syncDraftSubchats(document, config);
+  if (pane) syncDraftSubchats(pane, config);
 }
 
 /** Attach the ChatRenderer to the pending pane and watch for the placeholder's
