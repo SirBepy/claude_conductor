@@ -107,10 +107,18 @@ pub(super) fn sweep_archive(path: &Path, list: &[PreviewSnapshot]) {
 
 /// Drops archived versions, oldest first across every preview, until the html the
 /// store holds fits [`MAX_STORE_HTML_BYTES`]. Current pages are never dropped
-/// here; the 30-preview cap and the 2MB push cap already bound those.
+/// here; the 30-preview cap and the page cap (`MAX_HTML_BYTES`, which shared
+/// mockups are held to as well) already bound those. A shared mockup stores its
+/// shell and parts in addition to the composed `html`, so that copy counts too.
 pub(super) fn trim_to_budget(list: &mut [PreviewSnapshot]) {
     let held = |l: &[PreviewSnapshot]| -> usize {
-        l.iter().map(|s| s.html.len() + s.previous.iter().map(PreviousVersion::size).sum::<usize>()).sum()
+        l.iter()
+            .map(|s| {
+                s.html.len()
+                    + s.shared.as_ref().map_or(0, super::shared::SharedMockup::stored_bytes)
+                    + s.previous.iter().map(PreviousVersion::size).sum::<usize>()
+            })
+            .sum()
     };
     while held(list) > MAX_STORE_HTML_BYTES {
         let oldest = list
@@ -239,6 +247,23 @@ mod tests {
         // Three third-budget pages plus the current ones overflow; only the single oldest one is dropped.
         assert_eq!(list[1].previous.len(), 0);
         assert_eq!(list[0].previous.len(), 2);
+    }
+
+    #[test]
+    fn the_html_budget_counts_a_shared_mockups_shell_and_parts() {
+        use super::super::shared::{Part, SharedMockup};
+        let archived = PreviousVersion {
+            version: 1, title: "old".into(), html: "x".repeat(MAX_STORE_HTML_BYTES / 2), created_at: "2026-01-01T00:00:00.000Z".into(), session_id: None, html_bytes: 0,
+        };
+        // The composed html is tiny, so only the stored shell and part copy can push it past the budget.
+        let part = Part { id: "a".into(), owner_session_id: "s".into(), owner_name: "n".into(), html: "y".repeat(MAX_STORE_HTML_BYTES / 2 + 1), css: String::new(), controls: vec![] };
+        let mut list = vec![PreviewSnapshot {
+            id: "m".into(), slug: "m".into(), title: "m".into(), html: "<p></p>".into(), source: "chat".into(),
+            session_id: None, version: 2, created_at: "2026-02-01T00:00:00.000Z".into(), published: None, previous: vec![archived],
+            shared: Some(SharedMockup { owner_session_id: "s".into(), shell: String::new(), parts: vec![part] }),
+        }];
+        trim_to_budget(&mut list);
+        assert!(list[0].previous.is_empty(), "the shared copy counts toward the budget, so the archived version goes");
     }
 
     #[test]
