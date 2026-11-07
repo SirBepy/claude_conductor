@@ -22,24 +22,27 @@ pub async fn gc_attachments() {
 }
 
 /// The first window label for `session_id` that `taken` does not report: the
-/// plain `session-<id>` (the one `reattach_window` closes), then `-2`, `-3`, and so
+/// plain `session-<id>` (the one `reattach_window` closes), then `:2`, `:3`, and so
 /// on. Every call opens a window of its own, so one chat can sit in as many windows
 /// as Joe asks for. The `session-` prefix is what the capability pattern and the
 /// window filters match on; the page reads its chat from the URL, never the label.
+/// The counter is joined with `:` (a legal label character that `validate_session_id`
+/// refuses in an id) because a session id may itself end in `-<digits>`: with a dash,
+/// `session-abc-2` would be both chat `abc`'s second window and chat `abc-2`'s only one.
 fn free_window_label(session_id: &str, taken: impl Fn(&str) -> bool) -> String {
     let base = format!("session-{session_id}");
     if !taken(&base) {
         return base;
     }
     (2u32..)
-        .map(|n| format!("{base}-{n}"))
+        .map(|n| format!("{base}:{n}"))
         .find(|label| !taken(label))
         .expect("an unbounded range always yields a free label")
 }
 
 /// Open the given chat session in a new Tauri webview window, every time:
 /// a chat already in a window gets another one. The first is labeled
-/// `session-<session_id>`, later ones `session-<session_id>-<n>`. Closing a
+/// `session-<session_id>`, later ones `session-<session_id>:<n>`. Closing a
 /// window does NOT kill the session - it stays in the registry and can be
 /// reopened from the sidebar.
 #[tauri::command]
@@ -70,15 +73,15 @@ pub async fn detach_window(session_id: String, app: AppHandle) -> Result<(), Str
 }
 
 /// Whether `label` is one of `session_id`'s detached windows: the plain
-/// `session-<id>` or a `session-<id>-<n>` that `free_window_label` hands out for
-/// a second, third, ... window. Only digits may follow the dash, so a label of a
-/// different chat that merely starts with this id is left alone.
+/// `session-<id>` or a `session-<id>:<n>` that `free_window_label` hands out for
+/// a second, third, ... window. Only digits may follow the colon, so a label of a
+/// different chat that merely starts with this id (`abc-2` vs `abc`) is left alone.
 fn is_window_of_session(label: &str, session_id: &str) -> bool {
     let base = format!("session-{session_id}");
     match label.strip_prefix(&base) {
         Some("") => true,
         Some(rest) => rest
-            .strip_prefix('-')
+            .strip_prefix(':')
             .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())),
         None => false,
     }
@@ -89,12 +92,26 @@ fn is_window_of_session(label: &str, session_id: &str) -> bool {
 #[tauri::command]
 pub async fn reattach_window(session_id: String, app: AppHandle) -> Result<(), String> {
     validate_session_id(&session_id)?;
-    for (label, win) in app.webview_windows() {
-        if is_window_of_session(&label, &session_id) {
-            win.close().map_err(|e| e.to_string())?;
+    let windows = app
+        .webview_windows()
+        .into_iter()
+        .filter(|(label, _)| is_window_of_session(label, &session_id))
+        .map(|(_, win)| win);
+    close_all(windows, |win| win.close().map_err(|e| e.to_string()))
+}
+
+/// Runs `close` on every window, then returns the first error. A failure on one
+/// window must not leave the chat's remaining windows open.
+fn close_all<W>(windows: impl IntoIterator<Item = W>, close: impl Fn(&W) -> Result<(), String>) -> Result<(), String> {
+    let mut first_err = Ok(());
+    for w in windows {
+        if let Err(e) = close(&w) {
+            if first_err.is_ok() {
+                first_err = Err(e);
+            }
         }
     }
-    Ok(())
+    first_err
 }
 
 /// Promote a Manual (External) session to Interactive. Kills the external
@@ -453,7 +470,7 @@ mod tests {
             open.borrow_mut().push(label.clone());
             labels.push(label);
         }
-        assert_eq!(labels, ["session-abc", "session-abc-2", "session-abc-3"]);
+        assert_eq!(labels, ["session-abc", "session-abc:2", "session-abc:3"]);
         // A closed first window frees its label for the next one.
         open.borrow_mut().retain(|l| l != "session-abc");
         assert_eq!(free_window_label("abc", |l| open.borrow().iter().any(|o| o == l)), "session-abc");
@@ -462,13 +479,64 @@ mod tests {
     #[test]
     fn reattach_matches_every_window_of_the_chat_and_no_other() {
         assert!(is_window_of_session("session-abc", "abc"));
-        assert!(is_window_of_session("session-abc-2", "abc"));
-        assert!(is_window_of_session("session-abc-13", "abc"));
+        assert!(is_window_of_session("session-abc:2", "abc"));
+        assert!(is_window_of_session("session-abc:13", "abc"));
         assert!(!is_window_of_session("session-abcd", "abc"), "another chat whose id starts the same");
-        assert!(!is_window_of_session("session-abc-x", "abc"));
-        assert!(!is_window_of_session("session-abc-", "abc"));
+        assert!(!is_window_of_session("session-abc:x", "abc"));
+        assert!(!is_window_of_session("session-abc:", "abc"));
         assert!(!is_window_of_session("main", "abc"));
-        assert!(!is_window_of_session("session-xyz-2", "abc"));
+        assert!(!is_window_of_session("session-xyz:2", "abc"));
+    }
+
+    /// A custom id may itself end in `-<digits>`, so chat `abc-2`'s only window
+    /// (`session-abc-2`) must never read as a second window of chat `abc`.
+    #[test]
+    fn reattach_does_not_close_the_window_of_a_chat_whose_id_is_another_id_plus_a_number() {
+        assert!(!is_window_of_session("session-abc-2", "abc"), "abc-2's own window is not abc's");
+        assert!(is_window_of_session("session-abc-2", "abc-2"));
+        assert!(!is_window_of_session("session-abc-2:2", "abc"), "abc-2's second window is not abc's");
+        assert!(is_window_of_session("session-abc-2:2", "abc-2"));
+        assert!(!is_window_of_session("session-abc:2", "abc-2"));
+    }
+
+    /// The labels `free_window_label` hands out for one chat are all matched by
+    /// that chat and by no other chat in a set of look-alike ids.
+    #[test]
+    fn every_generated_window_label_belongs_to_exactly_its_own_chat() {
+        let ids = ["abc", "abc-2", "abc-2-3", "abc_2", "ab"];
+        for owner in ids {
+            let open = std::cell::RefCell::new(Vec::<String>::new());
+            for _ in 0..4 {
+                let label = free_window_label(owner, |l| open.borrow().iter().any(|o| o == l));
+                open.borrow_mut().push(label);
+            }
+            for label in open.borrow().iter() {
+                for other in ids {
+                    assert_eq!(
+                        is_window_of_session(label, other),
+                        other == owner,
+                        "label {label} vs chat {other} (opened for {owner})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn closing_visits_every_window_and_reports_the_first_error() {
+        let seen = std::cell::RefCell::new(Vec::<&str>::new());
+        let result = close_all(["a", "b", "c", "d"], |w| {
+            seen.borrow_mut().push(*w);
+            match *w {
+                "b" => Err("b failed".to_string()),
+                "c" => Err("c failed".to_string()),
+                _ => Ok(()),
+            }
+        });
+        assert_eq!(result, Err("b failed".to_string()));
+        assert_eq!(*seen.borrow(), ["a", "b", "c", "d"], "an error on one window must not skip the rest");
+        assert_eq!(close_all(["a"], |_| Ok(())), Ok(()));
+        assert_eq!(close_all(Vec::<&str>::new(), |_| Ok(())), Ok(()));
     }
 
     const CWD: &str = "/nonexistent/takeover-proj";

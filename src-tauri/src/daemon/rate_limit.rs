@@ -62,6 +62,12 @@ pub(crate) fn handle_rate_limit_rejection(
     // rejection that lands before the turn's first `stream_event`. Re-running the
     // effects below for one would block the account, freeze the chat and queue a
     // resume for a quota that has already refilled, and clear the new turn's busy.
+    // The gen-guarded busy clear below stays out of this branch on purpose: a
+    // replayed line is stamped with the CURRENT turn's gen, so the gen match
+    // cannot tell it from a live one, and clearing would drop a running turn's
+    // busy. The price: a genuine live rejection whose `resetsAt` is already at or
+    // before local now (clock skew; real rejections carry a future reset) leaves
+    // busy set until the stuck-busy watchdog clears it.
     if resets_at <= chrono::Utc::now().timestamp() {
         log::info!(
             "daemon: session {} ignoring rate_limit rejection whose window reset at {resets_at} (replayed history)",
