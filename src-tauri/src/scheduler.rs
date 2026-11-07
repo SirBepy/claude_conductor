@@ -37,10 +37,7 @@ pub fn spawn(app: AppHandle) {
                         snap.five_hour.utilization,
                         snap.seven_day.utilization,
                     );
-                    let reset_detected = prev_util
-                        .map(|prev| prev >= 15.0 && snap.five_hour.utilization < prev - 30.0)
-                        .unwrap_or(false);
-                    if reset_detected {
+                    if five_hour_reset_detected(prev_util, &snap) {
                         let jitter = reset_jitter_secs();
                         log::info!("usage reset detected - waiting {}s before next poll", jitter);
                         tokio::time::sleep(Duration::from_secs(jitter)).await;
@@ -85,6 +82,15 @@ pub fn spawn(app: AppHandle) {
             }
         }
     });
+}
+
+/// True when the 5h window just reset: the previous utilization was real and the
+/// new one fell well below it. A plan with no 5h limit has no window to reset,
+/// and its absent window reads as 0%, so a switch from a limited plan would
+/// otherwise look like a reset.
+fn five_hour_reset_detected(prev_util: Option<f64>, snap: &UsageSnapshot) -> bool {
+    snap.five_hour_limited
+        && prev_util.is_some_and(|prev| prev >= 15.0 && snap.five_hour.utilization < prev - 30.0)
 }
 
 /// Random delay after a usage reset: 60-300 seconds (1-5 min).
@@ -394,7 +400,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{is_auth_failure, next_target_ts, poll_accounts_isolated};
+    use super::{five_hour_reset_detected, is_auth_failure, next_target_ts, poll_accounts_isolated};
     use crate::accounts::Account;
     use crate::scraping::ScrapeError;
     use crate::types::{UsageSnapshot, WindowUsage};
@@ -484,6 +490,28 @@ mod tests {
         })
         .await;
         assert!(outcomes.is_empty());
+    }
+
+    fn snap_with_five_hour(utilization: f64, limited: bool) -> UsageSnapshot {
+        UsageSnapshot {
+            five_hour: WindowUsage { utilization, resets_at: "x".into() },
+            five_hour_limited: limited,
+            ..snap_for("a")
+        }
+    }
+
+    #[test]
+    fn a_big_drop_in_five_hour_utilization_is_a_reset() {
+        assert!(five_hour_reset_detected(Some(60.0), &snap_with_five_hour(2.0, true)));
+        assert!(!five_hour_reset_detected(Some(60.0), &snap_with_five_hour(45.0, true)), "a small dip is not a reset");
+        assert!(!five_hour_reset_detected(Some(10.0), &snap_with_five_hour(0.0, true)), "a low starting point is not a reset");
+        assert!(!five_hour_reset_detected(None, &snap_with_five_hour(0.0, true)), "no previous reading, nothing to compare");
+    }
+
+    #[test]
+    fn a_plan_with_no_five_hour_window_never_reports_a_reset() {
+        // Switching from a limited plan reads the absent window as 0%.
+        assert!(!five_hour_reset_detected(Some(60.0), &snap_with_five_hour(0.0, false)));
     }
 
     #[test]

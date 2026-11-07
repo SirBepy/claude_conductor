@@ -107,13 +107,19 @@ pub(crate) struct WindowCtx {
 /// pair when there is none. Pure (no `AppState`) so both the desktop
 /// `windows_from_state` below and the daemon RPC (which reads the DB-backed
 /// snapshot instead of `AppState.current_usage`) share the exact same
-/// resets_at -> window-start math.
+/// resets_at -> window-start math. A plan with no 5h limit reports its absent
+/// window as 0% with no reset time, so its 5h context stays "unknown" and
+/// capacity calibration never treats that 0% as a reading.
 pub(crate) fn windows_from_snapshot(snap: Option<&crate::types::UsageSnapshot>) -> (WindowCtx, WindowCtx) {
     match snap {
         Some(s) => (
-            WindowCtx {
-                util: Some(s.five_hour.utilization),
-                start: drain_engine::rfc3339_to_system_time(&s.five_hour.resets_at).and_then(|r| r.checked_sub(FIVE_HOURS)),
+            if s.five_hour_limited {
+                WindowCtx {
+                    util: Some(s.five_hour.utilization),
+                    start: drain_engine::rfc3339_to_system_time(&s.five_hour.resets_at).and_then(|r| r.checked_sub(FIVE_HOURS)),
+                }
+            } else {
+                WindowCtx { util: None, start: None }
             },
             WindowCtx {
                 util: Some(s.seven_day.utilization),
@@ -310,6 +316,43 @@ mod mirrored_branch_tests {
 
         assert!(chat_drain_forwarded("local-1", &cache, Some(fake.clone())).await.is_none());
         assert!(fake.calls().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod window_ctx_tests {
+    use super::*;
+    use crate::types::{UsageSnapshot, WindowUsage};
+
+    fn snap(five_hour_limited: bool) -> UsageSnapshot {
+        UsageSnapshot {
+            captured_at: "2026-11-07T10:00:00Z".into(),
+            five_hour: WindowUsage { utilization: 50.0, resets_at: "2026-11-07T12:00:00Z".into() },
+            five_hour_limited,
+            seven_day: WindowUsage { utilization: 20.0, resets_at: "2026-11-10T12:00:00Z".into() },
+            extra_usage: None,
+            account_id: None,
+        }
+    }
+
+    #[test]
+    fn a_limited_plan_reads_both_windows() {
+        let (five, weekly) = windows_from_snapshot(Some(&snap(true)));
+        assert_eq!(five.util, Some(50.0));
+        assert!(five.start.is_some());
+        assert_eq!(weekly.util, Some(20.0));
+        assert!(weekly.start.is_some());
+    }
+
+    /// An unknown 5h context is what keeps `compute_capacities` from folding the
+    /// absent window's 0% into the persisted 5h capacity.
+    #[test]
+    fn a_plan_with_no_five_hour_window_leaves_that_context_unknown_but_keeps_weekly() {
+        let (five, weekly) = windows_from_snapshot(Some(&snap(false)));
+        assert_eq!(five.util, None);
+        assert_eq!(five.start, None);
+        assert_eq!(weekly.util, Some(20.0));
+        assert!(weekly.start.is_some());
     }
 }
 
