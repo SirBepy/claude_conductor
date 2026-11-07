@@ -15,6 +15,7 @@ import { escapeHtml } from "../../../shared/escape-html";
 import { isMobileViewport } from "../../../shared/mobile-viewport";
 import { previewDocument } from "./option-preview-doc";
 import { inlineLocalImages, prefetchLocalImages } from "./option-preview-images";
+import { isPreviewHtml } from "./question-state";
 import { attachSwipe } from "./swipe-detector";
 import type { Question, QuestionOption, Selection } from "./types";
 
@@ -23,7 +24,7 @@ export const TILE_MAX = 3;
 export type PreviewLayout = "tiles" | "stage";
 
 export function previewedOptions(q: Question): QuestionOption[] {
-  return (q.options ?? []).filter((o) => typeof o.preview === "string" && o.preview.trim() !== "");
+  return (q.options ?? []).filter((o) => isPreviewHtml(o.preview));
 }
 
 export function previewLayout(q: Question): PreviewLayout | null {
@@ -54,7 +55,7 @@ export function tilePictureHtml(opt: QuestionOption, sessionId?: string): string
 }
 
 export function hasQuestionPreview(q: Question | undefined): boolean {
-  return typeof q?.preview === "string" && q.preview.trim() !== "";
+  return isPreviewHtml(q?.preview);
 }
 
 /** The question's own picture, at the top of its panel. Unlike a tile it picks

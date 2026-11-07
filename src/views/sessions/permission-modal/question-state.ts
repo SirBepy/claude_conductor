@@ -23,6 +23,12 @@ export function isQuestionAnswered(q: Question | undefined, freeText: string, se
   return typeof selection === "string";
 }
 
+/** True for a preview value worth drawing: a non-blank string. The one test the
+ *  payload normaliser, a question's picture and an option's picture all share. */
+export function isPreviewHtml(v: unknown): v is string {
+  return typeof v === "string" && v.trim() !== "";
+}
+
 /** Wire text for a question left unanswered at submit time - keeps the
  *  question visible to Claude (formatAnswersAsMessage/Answers payload)
  *  instead of the key silently vanishing. */
@@ -132,7 +138,7 @@ export function extractQuestions(input: unknown): Question[] | null {
       header: typeof q.header === "string" ? q.header : undefined,
       domain: DOMAINS.has(q.domain as string) ? (q.domain as QuestionDomain) : undefined,
       multiSelect: q.multiSelect === true,
-      preview: typeof q.preview === "string" && q.preview.trim() ? q.preview : undefined,
+      preview: isPreviewHtml(q.preview) ? q.preview : undefined,
       options: Array.isArray(q.options)
         ? (q.options as unknown[]).flatMap((o) => {
             if (!o || typeof o !== "object") return [];
@@ -144,7 +150,7 @@ export function extractQuestions(input: unknown): Question[] | null {
               badges: Array.isArray(oo.badges)
                 ? (oo.badges as unknown[]).filter((b): b is OptionBadge => BADGES.has(b as string))
                 : undefined,
-              preview: typeof oo.preview === "string" && oo.preview.trim() ? oo.preview : undefined,
+              preview: isPreviewHtml(oo.preview) ? oo.preview : undefined,
             }];
           })
         : undefined,
