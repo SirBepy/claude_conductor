@@ -2,12 +2,13 @@
 //! custom dashboard card for its own project (or a group containing it). The
 //! scope rule lives in `methods::project_dashboard::cards`.
 
+use super::rejected_sends;
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::project_dashboard::cards;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
@@ -36,7 +37,7 @@ pub(super) async fn on_dashboard_card(
     match cards::dashboard_card_tool(&ctx.state, &body.session_id, &body.action, body.card, body.id, body.actions, body.scope)
         .await {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/dashboard/card", &body.session_id, e),
     }
 }
 

@@ -2,12 +2,13 @@
 //! for drafts is served by `user_todos::on_prompt_submit`, which owns the one
 //! `UserPromptSubmit` hook both features share.
 
+use super::rejected_sends;
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::drafts_store as draft_methods;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 
 /// Everything past `session_id`/`action` is forwarded as a raw object rather
@@ -29,13 +30,14 @@ pub(super) async fn on_write_draft(
     super::mark_mcp_tool_used(&ctx, &body.session_id);
     match draft_methods::write_draft(&ctx.state, &body.session_id, &body.action, &body.rest) {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/drafts/write", &body.session_id, e),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::daemon::state::DaemonState;

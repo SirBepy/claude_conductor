@@ -1,14 +1,19 @@
 //! Append-only record of the relay calls the daemon turned down, at
 //! `<data_dir>/rejected-sends.jsonl`: `send_message` / `update_message`
-//! validation failures, plus a request body that failed to decode on any route
-//! using `ValidatedJson`. Other routes' own `ok:false` replies are not
-//! recorded here. The chat used to show a
+//! validation failures, a request body that failed to decode on any route
+//! using `ValidatedJson`, and the `ok:false` reply of every other relay route
+//! that goes through `reply` (a handler error: bad arguments, an unknown
+//! session). Refusals that are expected control flow (a disabled browser, a
+//! sub's close refusal, a secret prompt that timed out) answer `ok:false`
+//! directly and are not recorded. The chat used to show a
 //! "Failed to send" pill per rejection; a caller that retries until it passes
 //! stacked six of them, so the chat stays quiet and this file is where a
 //! pattern (the same field wrong again and again) gets read, by
 //! `scripts/release-report.ps1` at release time.
 
-use serde_json::json;
+use axum::http::StatusCode;
+use axum::Json;
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -29,14 +34,60 @@ pub(super) fn record(route: &str, session_id: &str, kind: Option<&str>, error: &
     // Debug, not warn: the jsonl is the record, and a warn would show up a second
     // time in the release report's app-log section.
     log::debug!("relay call rejected ({route}, session {session_id}): {error}");
-    // The route tests reject on purpose; they must not write into the real data dir.
-    if cfg!(test) {
-        return;
-    }
-    let Ok(root) = crate::settings::paths::data_dir() else { return };
+    let Some(root) = log_root() else { return };
     if let Err(e) = append_in(&root, route, session_id, kind, &clip(error)) {
         log::warn!("rejected-sends: could not write the record: {e}");
     }
+}
+
+/// Records one handler error and returns the `{"ok": false, "error": ...}` reply
+/// the route sent before it was recorded, byte for byte.
+pub(super) fn reply(route: &str, session_id: &str, error: impl Into<String>) -> (StatusCode, Json<Value>) {
+    let error = error.into();
+    record(route, session_id, None, &error);
+    (StatusCode::OK, Json(json!({"ok": false, "error": error})))
+}
+
+#[cfg(not(test))]
+fn log_root() -> Option<PathBuf> {
+    crate::settings::paths::data_dir().ok()
+}
+
+// The route tests reject on purpose; they must not write into the real data
+// dir, so a test writes only after `capture_in` named a temp dir for its thread
+// (a current-thread tokio test runs its handler on that same thread).
+#[cfg(test)]
+thread_local! {
+    static TEST_ROOT: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn log_root() -> Option<PathBuf> {
+    TEST_ROOT.with(|r| r.borrow().clone())
+}
+
+/// Test-only: sends this thread's records to `root` until the guard drops.
+#[cfg(test)]
+pub(super) struct Capture;
+
+#[cfg(test)]
+pub(super) fn capture_in(root: &Path) -> Capture {
+    TEST_ROOT.with(|r| *r.borrow_mut() = Some(root.to_path_buf()));
+    Capture
+}
+
+#[cfg(test)]
+impl Drop for Capture {
+    fn drop(&mut self) {
+        TEST_ROOT.with(|r| *r.borrow_mut() = None);
+    }
+}
+
+/// Test-only: the records written under `root`, oldest first.
+#[cfg(test)]
+pub(super) fn read_records(root: &Path) -> Vec<Value> {
+    let raw = std::fs::read_to_string(path_in(root)).unwrap_or_default();
+    raw.lines().map(|l| serde_json::from_str(l).unwrap()).collect()
 }
 
 /// A serde decode error embeds the offending value, so a long malformed field

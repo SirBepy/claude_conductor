@@ -2,12 +2,13 @@
 //! per-turn people block rides `user_todos::on_prompt_submit`, which owns the
 //! one `UserPromptSubmit` hook every rider shares.
 
+use super::rejected_sends;
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use crate::daemon::methods::people as people_methods;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
@@ -24,7 +25,7 @@ pub(super) async fn on_find_person(
     super::mark_mcp_tool_used(&ctx, &body.session_id);
     match people_methods::find_person(&ctx.state, &body.session_id, &body.text) {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/people/find", &body.session_id, e),
     }
 }
 
@@ -44,13 +45,14 @@ pub(super) async fn on_remember_person(
     super::mark_mcp_tool_used(&ctx, &body.session_id);
     match people_methods::remember_person(&ctx.state, &body.session_id, &body.rest) {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/people/remember", &body.session_id, e),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::daemon::state::DaemonState;

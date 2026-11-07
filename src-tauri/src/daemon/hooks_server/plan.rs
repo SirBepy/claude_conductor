@@ -7,6 +7,7 @@
 //! response the moment that step is reported `active`, which is the whole
 //! reason this route holds anything at all.
 
+use super::rejected_sends;
 use super::validated_json::ValidatedJson;
 use crate::types::PlanStepSnapshot;
 use super::HookCtx;
@@ -70,7 +71,7 @@ pub(super) async fn on_write_plan(
     }
 
     match validate_steps(&body.steps) {
-        Err(e) => (StatusCode::OK, Json(json!({"ok": false, "error": e}))),
+        Err(e) => rejected_sends::reply("/plan/write", &body.session_id, e),
         Ok(active) => {
             // The sidebar ring and hover card read the plan off the Instance,
             // so keep the latest one and tell every surface when it changed.
@@ -312,5 +313,20 @@ mod tests {
         assert_eq!(resp["ok"], serde_json::json!(false));
         let plan = c.state.registry.get("s1").unwrap().progress.plan.unwrap();
         assert_eq!(plan[0].text, "a");
+    }
+
+    /// A rejected plan reaches the rejected-sends log with its route and session,
+    /// and the reply body is the same `ok:false` it always was.
+    #[tokio::test]
+    async fn a_rejected_plan_is_recorded_in_the_rejected_sends_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let _capture = rejected_sends::capture_in(dir.path());
+        let resp = write_plan_json(ctx(), body("rec-plan", vec![])).await;
+        assert_eq!(resp, serde_json::json!({"ok": false, "error": "steps must not be empty"}));
+        let rows = rejected_sends::read_records(dir.path());
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["route"], "/plan/write");
+        assert_eq!(rows[0]["session_id"], "rec-plan");
+        assert_eq!(rows[0]["error"], "steps must not be empty");
     }
 }

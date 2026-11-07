@@ -3,9 +3,11 @@ What the app recorded since the last release that a person should look at,
 shown by /release step 1d (`.claude/release-reports.txt`). Two sources:
 
 1. `<data_dir>/rejected-sends.jsonl` (src-tauri/src/daemon/hooks_server/rejected_sends.rs):
-   send_message / update_message validation failures and undecodable request
-   bodies. The chat draws nothing for them, so the same shape many times means a tool schema or its error text
-   steers callers wrong.
+   send_message / update_message validation failures, undecodable request
+   bodies, and the ok:false reply of the other relay routes (turn status,
+   plan, schedule, drafts, people, jarvis, channel, todos, dashboard card,
+   subchat tool, shared mockup). The chat draws nothing for them, so the same
+   shape many times means a tool schema or its error text steers callers wrong.
 2. The app log (`%LOCALAPPDATA%\com.sirbepy.claudeconductor\logs\*.log`, UTC):
    ERROR lines and WARN lines, grouped by target and message shape.
 
