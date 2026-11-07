@@ -39,10 +39,12 @@ struct PreviewRule<'a> {
 fn check_preview(value: Option<&Value>, label: &str, rule: &PreviewRule) -> Option<String> {
     let problem = match value.filter(|p| !p.is_null()) {
         None => rule.missing?.to_string(),
-        Some(Value::String(s)) if s.trim().is_empty() => rule.empty?.to_string(),
+        // The cap is checked before blankness: a rule that tolerates a blank
+        // preview must still refuse a whitespace paste over the cap.
         Some(Value::String(s)) if s.len() > MAX_PREVIEW_BYTES => {
             format!("preview is {} bytes, over the {MAX_PREVIEW_BYTES}-byte cap", s.len())
         }
+        Some(Value::String(s)) if s.trim().is_empty() => rule.empty?.to_string(),
         Some(Value::String(_)) => return None,
         Some(_) => "preview must be a string of HTML".to_string(),
     };
@@ -318,6 +320,10 @@ mod tests {
         assert!(err_of(o("ux", json!("  "))).starts_with("question 1 option 1: preview is empty. "));
         assert!(err_of(o("ux", json!(null))).starts_with("question 1 option 1: a ux question needs a preview on every option. "));
         assert!(normalize(&json!([o("arch", json!("  "))])).is_ok(), "an empty option preview is only a problem on a ux question");
+        assert!(
+            err_of(o("arch", json!(" ".repeat(over)))).starts_with(&format!("question 1 option 1: {cap}. ")),
+            "a whitespace paste over the cap is refused even where a blank preview is tolerated"
+        );
     }
 
     #[test]
