@@ -244,7 +244,7 @@ export const api = {
   getUsageHistory: (): Promise<UsageRecord[]> => loadUsageHistory(),
   /** `accountId: null` (or omitted) is every account's rows, used before any
    * account is registered (multi-account milestone 05). */
-  getHistory: (opts: { limit?: number; accountId?: string | null } = {}): Promise<UsageRecord[]> =>
+  getHistory: (opts: { limit?: number; accountId?: string | null; fromMs?: number } = {}): Promise<UsageRecord[]> =>
     loadUsageHistory(opts),
   pollNow: (): Promise<unknown> => invoke("poll_now"),
 

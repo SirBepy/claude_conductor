@@ -8,7 +8,7 @@ import { wireProjectListClicks } from "./project-list";
 import type { UsageRecord } from "../../../shared/api";
 import { buildChart, buildWindowProjectsHTML, setupChartHover } from "./usage-chart-view";
 import { buildProjectBarsView, wireBarsMore } from "./usage-bars-view";
-import { fetchHistory, sessionWindow, weeklyWindow, stepPageOffset } from "./usage-charts";
+import { fetchHistoryForPage, sessionWindow, weeklyWindow, stepPageOffset } from "./usage-charts";
 
 export interface GraphCardOpts {
   metric: "session" | "weekly";
@@ -94,7 +94,7 @@ function wireDetailNav(container: HTMLElement, metric: "session" | "weekly", kin
 }
 
 async function renderGraphDetailFromCurrent(metric: "session" | "weekly", kind: "chart" | "bars", accountId: string | null): Promise<void> {
-  const lastHistory = await fetchHistory(accountId);
+  const lastHistory = await fetchHistoryForPage(metric, accountId);
   if (!lastHistory.length) return;
 
   let config: GraphCardOpts;

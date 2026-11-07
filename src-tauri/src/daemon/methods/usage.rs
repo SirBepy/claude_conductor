@@ -62,15 +62,19 @@ pub fn register_usage(router: &mut Router, state: Arc<DaemonState>) {
                 struct P {
                     limit: Option<u32>,
                     since: Option<i64>,
+                    /// Exclusive unix-seconds ceiling; a phone paging back asks
+                    /// for the slice older than what it already holds.
+                    until: Option<i64>,
                     account_id: Option<String>,
                 }
                 let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null)).unwrap_or_default();
                 let Some(db) = state.db.clone() else { return Ok(json!([])) };
                 let snaps = tokio::task::spawn_blocking(move || {
                     let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
-                    let mut all = crate::storage::usage_store::get_snapshots_since(
+                    let mut all = crate::storage::usage_store::get_snapshots_range(
                         mgr.conn(),
                         p.since.unwrap_or(0),
+                        p.until.unwrap_or(i64::MAX),
                         p.account_id.as_deref(),
                     )
                     .unwrap_or_default();
@@ -83,6 +87,38 @@ pub fn register_usage(router: &mut Router, state: Arc<DaemonState>) {
                 .await
                 .map_err(|e| RpcError::internal(format!("join: {e}")))?;
                 Ok(json!(snaps))
+            }
+        });
+    }
+    // `get_history_meta` (params: { since, until }) -> { count }: how many rows
+    // (every account) sit in that inclusive range. The phone keeps a copy of
+    // the recent history across launches and compares this with the rows it
+    // holds in the range, so rows retention or a clear removed since do not
+    // linger on its charts.
+    {
+        let state = state.clone();
+        router.register("get_history_meta", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize, Default)]
+                struct P {
+                    since: Option<i64>,
+                    until: Option<i64>,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null)).unwrap_or_default();
+                let Some(db) = state.db.clone() else { return Ok(json!({ "count": 0 })) };
+                let count = tokio::task::spawn_blocking(move || {
+                    let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
+                    crate::storage::usage_store::count_snapshots_between(
+                        mgr.conn(),
+                        p.since.unwrap_or(0),
+                        p.until.unwrap_or(i64::MAX),
+                    )
+                    .unwrap_or(0)
+                })
+                .await
+                .map_err(|e| RpcError::internal(format!("join: {e}")))?;
+                Ok(json!({ "count": count }))
             }
         });
     }

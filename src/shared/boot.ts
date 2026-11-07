@@ -41,6 +41,8 @@ import { mountReconnectStrip } from "./reconnect-strip";
 import { applyAppearance, followAppearanceChanges } from "./theme-sync";
 import { warmNewSessionCache } from "../views/sessions/new-session-cache";
 import { loadTokenHistory, mergeLiveSessions } from "./token-history";
+import { enableUsageHistoryPersistence } from "./usage-history";
+import { indexedDbUsageHistoryStore } from "./usage-history-store";
 
 // ── Live token history merge ───────────────────────────────────────────────
 /** Only the Dashboard reads this, and the phone lands on Chats, so it is not
@@ -247,6 +249,19 @@ export function applySettingsToDocument(s: SettingsShape): SettingsShape {
   return coerced;
 }
 
+/** Starts the usage-history load without holding the boot gate on it. Resolves
+ *  null so the gate settles at once; a failed load is retried by the dashboard,
+ *  which fetches whenever it finds no history in state. */
+function publishUsageAfterBoot(): Promise<null> {
+  void api.getUsageHistory()
+    .then((h) => {
+      setUsageHistory(h);
+      refreshDashboardView();
+    })
+    .catch(() => {});
+  return Promise.resolve(null);
+}
+
 // ── Public entrypoint ──────────────────────────────────────────────────────
 export function initBoot(): void {
   // Phone-only cold-boot overlay. Torn down from onReady, which the gate fires
@@ -258,8 +273,13 @@ export function initBoot(): void {
 
   // Initial data fetches: render once all three settle (success OR failure, so
   // a failed fetch can't wedge the gate - see wireInitialFetches).
+  // Phone: the usage history is not what the first screen is waiting for, so
+  // the gate takes a null at once and the real rows publish when they land.
+  // It keeps the last two weeks on the device and downloads only what is newer.
+  const remote = isRemote();
+  if (remote) enableUsageHistoryPersistence(indexedDbUsageHistoryStore());
   wireInitialFetches({
-    fetchUsage: () => api.getUsageHistory(),
+    fetchUsage: () => (remote ? publishUsageAfterBoot() : api.getUsageHistory()),
     fetchTokens: () => fetchTokenHistoryWithLive(),
     fetchSettings: () => api.getSettings(),
     onUsage: (h) => setUsageHistory(h),

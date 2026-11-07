@@ -321,8 +321,19 @@ describe("HttpTransport.call mapping", () => {
     expect(url()).toBe("/api/rpc");
     expect(body()).toEqual({
       method: "get_history",
-      params: { limit: null, since: null, account_id: null },
+      params: { limit: null, since: null, until: null, account_id: null },
     });
+  });
+
+  it("forwards the get_history since/until slice and the get_history_meta range", async () => {
+    await new HttpTransport().call("get_history", { since: 100, until: 200 });
+    expect(body()).toEqual({
+      method: "get_history",
+      params: { limit: null, since: 100, until: 200, account_id: null },
+    });
+    await new HttpTransport().call("get_history_meta", { since: 100, until: 200 });
+    expect(url()).toBe("/api/rpc");
+    expect(body(1)).toEqual({ method: "get_history_meta", params: { since: 100, until: 200 } });
   });
 
   it("forwards get_token_history to the rpc, defaulting since to all history", async () => {
