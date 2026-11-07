@@ -4,10 +4,17 @@
 //! ticket for the hover card. Tokens come from `~/.claude/.env`, the one place
 //! every tool already reads them from; they never leave this process.
 
+mod linear;
+mod shortcut;
+mod trello;
+
+use linear::{linear_query, linear_summary, linear_team_keys};
 use serde::{Deserialize, Serialize};
+use shortcut::{shortcut_get, shortcut_names, shortcut_summary};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use trello::{trello_card_path, trello_get, trello_summary};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
@@ -144,35 +151,6 @@ fn token_for(kind: TrackerKind) -> Result<String, String> {
     env_token(key).ok_or_else(|| format!("{key} is not set in ~/.claude/.env"))
 }
 
-/// Trello authenticates with an API key AND a user token, so it has a second
-/// secret `token_for` cannot return.
-fn trello_token() -> Result<String, String> {
-    env_token("TRELLO_TOKEN").ok_or_else(|| "TRELLO_TOKEN is not set in ~/.claude/.env".to_string())
-}
-
-/// A board short link, card short link or card number goes straight into a URL
-/// path, so anything beyond these characters is refused rather than escaped.
-fn safe_segment(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
-
-/// `tr-12` -> the board-relative card path, else a card short link -> the card path.
-fn trello_card_path(workspace: &str, id: &str) -> Result<String, String> {
-    if !safe_segment(id) {
-        return Err(format!("bad card id {id}"));
-    }
-    match id.to_ascii_lowercase().strip_prefix("tr-") {
-        Some(n) if n.chars().all(|c| c.is_ascii_digit()) && !n.is_empty() => {
-            if !safe_segment(workspace) {
-                return Err("set the Trello board id in project settings".into());
-            }
-            Ok(format!("boards/{workspace}/cards/{n}"))
-        }
-        Some(_) => Err(format!("bad card id {id}")),
-        None => Ok(format!("cards/{id}")),
-    }
-}
-
 // ── caches ──────────────────────────────────────────────────────────────
 
 // A ticket's state/owner changes on a human timescale; five minutes keeps a
@@ -192,159 +170,6 @@ static CACHES: std::sync::LazyLock<Mutex<Caches>> = std::sync::LazyLock::new(Def
 
 fn http() -> reqwest::Client {
     reqwest::Client::builder().timeout(Duration::from_secs(10)).build().unwrap_or_default()
-}
-
-async fn shortcut_get(token: &str, path: &str) -> Result<serde_json::Value, String> {
-    let resp = http()
-        .get(format!("https://api.app.shortcut.com/api/v3/{path}"))
-        .header("Shortcut-Token", token)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("Shortcut returned {}", resp.status()));
-    }
-    resp.json().await.map_err(|e| e.to_string())
-}
-
-async fn linear_query(token: &str, query: &str, variables: serde_json::Value) -> Result<serde_json::Value, String> {
-    let resp = http()
-        .post("https://api.linear.app/graphql")
-        .header("Authorization", token)
-        .json(&serde_json::json!({ "query": query, "variables": variables }))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("Linear returned {}", resp.status()));
-    }
-    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    if let Some(err) = body.pointer("/errors/0/message").and_then(|m| m.as_str()) {
-        return Err(err.to_string());
-    }
-    Ok(body["data"].clone())
-}
-
-// Fields trimmed to what the hover card shows; `list` and `members` expand the
-// two ids a card otherwise carries into names.
-const TRELLO_CARD_QUERY: &str =
-    "fields=name,idShort,shortUrl,labels&list=true&list_fields=name&members=true&member_fields=fullName";
-
-async fn trello_get(path: &str) -> Result<serde_json::Value, String> {
-    let key = token_for(TrackerKind::Trello)?;
-    let token = trello_token()?;
-    // Header auth keeps the token out of the URL, so it cannot land in a log line.
-    let resp = http()
-        .get(format!("https://api.trello.com/1/{path}?{TRELLO_CARD_QUERY}"))
-        .header("Authorization", format!("OAuth oauth_consumer_key=\"{key}\", oauth_token=\"{token}\""))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("Trello returned {}", resp.status()));
-    }
-    resp.json().await.map_err(|e| e.to_string())
-}
-
-fn trello_summary(card: &serde_json::Value) -> Result<TicketSummary, String> {
-    let number = card["idShort"].as_i64().ok_or("card has no number")?;
-    // A label may carry only a colour; fall back to it so a card still shows a type.
-    let label = card["labels"].as_array().and_then(|l| l.first()).and_then(|l| {
-        l["name"].as_str().filter(|n| !n.is_empty()).or_else(|| l["color"].as_str())
-    });
-    Ok(TicketSummary {
-        id: format!("tr-{number}"),
-        title: card["name"].as_str().unwrap_or_default().to_string(),
-        state: card.pointer("/list/name").and_then(|s| s.as_str()).unwrap_or_default().to_string(),
-        owner: card.pointer("/members/0/fullName").and_then(|m| m.as_str()).map(str::to_string),
-        ticket_type: label.unwrap_or("card").to_string(),
-        url: card["shortUrl"].as_str().unwrap_or_default().to_string(),
-    })
-}
-
-async fn linear_team_keys(workspace: &str) -> Vec<String> {
-    if let Some(keys) = CACHES.lock().unwrap().linear_keys.get(workspace) {
-        return keys.clone();
-    }
-    let Ok(token) = token_for(TrackerKind::Linear) else { return vec![] };
-    let Ok(data) = linear_query(&token, "{ teams { nodes { key } } }", serde_json::json!({})).await else {
-        return vec![];
-    };
-    let keys: Vec<String> = data
-        .pointer("/teams/nodes")
-        .and_then(|n| n.as_array())
-        .map(|a| a.iter().filter_map(|t| t["key"].as_str().map(str::to_string)).collect())
-        .unwrap_or_default();
-    CACHES.lock().unwrap().linear_keys.insert(workspace.to_string(), keys.clone());
-    keys
-}
-
-async fn shortcut_names(token: &str, workspace: &str) -> Result<(), String> {
-    let have = {
-        let c = CACHES.lock().unwrap();
-        c.sc_states.contains_key(workspace) && c.sc_members.contains_key(workspace)
-    };
-    if have {
-        return Ok(());
-    }
-    let workflows = shortcut_get(token, "workflows").await?;
-    let members = shortcut_get(token, "members").await?;
-    let states: HashMap<i64, String> = workflows
-        .as_array()
-        .into_iter()
-        .flatten()
-        .flat_map(|w| w["states"].as_array().cloned().unwrap_or_default())
-        .filter_map(|s| Some((s["id"].as_i64()?, s["name"].as_str()?.to_string())))
-        .collect();
-    let people: HashMap<String, String> = members
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|m| Some((m["id"].as_str()?.to_string(), m.pointer("/profile/name")?.as_str()?.to_string())))
-        .collect();
-    let mut c = CACHES.lock().unwrap();
-    c.sc_states.insert(workspace.to_string(), states);
-    c.sc_members.insert(workspace.to_string(), people);
-    Ok(())
-}
-
-fn shortcut_summary(story: &serde_json::Value, workspace: &str) -> Result<TicketSummary, String> {
-    let id = story["id"].as_i64().ok_or("story has no id")?;
-    let c = CACHES.lock().unwrap();
-    let state = story["workflow_state_id"]
-        .as_i64()
-        .and_then(|s| c.sc_states.get(workspace)?.get(&s).cloned())
-        .unwrap_or_default();
-    let owner = story["owner_ids"]
-        .as_array()
-        .and_then(|o| o.first()?.as_str())
-        .and_then(|o| c.sc_members.get(workspace)?.get(o).cloned());
-    Ok(TicketSummary {
-        id: format!("sc-{id}"),
-        title: story["name"].as_str().unwrap_or_default().to_string(),
-        state,
-        owner,
-        ticket_type: story["story_type"].as_str().unwrap_or("story").to_string(),
-        url: story["app_url"]
-            .as_str()
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("https://app.shortcut.com/{workspace}/story/{id}")),
-    })
-}
-
-fn linear_summary(issue: &serde_json::Value) -> Result<TicketSummary, String> {
-    if issue.is_null() {
-        return Err("no such issue".into());
-    }
-    let label = issue.pointer("/labels/nodes/0/name").and_then(|l| l.as_str());
-    Ok(TicketSummary {
-        id: issue["identifier"].as_str().unwrap_or_default().to_string(),
-        title: issue["title"].as_str().unwrap_or_default().to_string(),
-        state: issue.pointer("/state/name").and_then(|s| s.as_str()).unwrap_or_default().to_string(),
-        owner: issue.pointer("/assignee/name").and_then(|a| a.as_str()).map(str::to_string),
-        ticket_type: label.unwrap_or("issue").to_string(),
-        url: issue["url"].as_str().unwrap_or_default().to_string(),
-    })
 }
 
 pub async fn fetch_summary(kind: TrackerKind, workspace: &str, id: &str) -> Result<TicketSummary, String> {
@@ -419,69 +244,5 @@ mod tests {
         assert!(prompt_line(&t).unwrap().contains("https://app.shortcut.com/zirtue/story/12345"));
         let off = TicketTracker { kind: TrackerKind::Off, workspace: String::new() };
         assert!(prompt_line(&off).is_none());
-    }
-
-    #[test]
-    fn shortcut_story_maps_state_and_owner_names_from_the_caches() {
-        {
-            let mut c = CACHES.lock().unwrap();
-            c.sc_states.insert("ws-test".into(), HashMap::from([(7, "In Review".to_string())]));
-            c.sc_members.insert("ws-test".into(), HashMap::from([("u1".to_string(), "Joe".to_string())]));
-        }
-        let story = serde_json::json!({
-            "id": 55411, "name": "Fix DOB", "story_type": "bug", "workflow_state_id": 7,
-            "owner_ids": ["u1"], "app_url": "https://app.shortcut.com/ws-test/story/55411"
-        });
-        let s = shortcut_summary(&story, "ws-test").unwrap();
-        assert_eq!(s.id, "sc-55411");
-        assert_eq!(s.state, "In Review");
-        assert_eq!(s.owner.as_deref(), Some("Joe"));
-        assert_eq!(s.ticket_type, "bug");
-    }
-
-    #[test]
-    fn trello_card_path_uses_the_board_for_a_number_and_the_card_for_a_short_link() {
-        assert_eq!(trello_card_path("AbCd1234", "tr-12").unwrap(), "boards/AbCd1234/cards/12");
-        assert_eq!(trello_card_path("AbCd1234", "TR-7").unwrap(), "boards/AbCd1234/cards/7");
-        assert_eq!(trello_card_path("", "Xy12Zq90").unwrap(), "cards/Xy12Zq90");
-        assert!(trello_card_path("", "tr-12").is_err(), "a number needs a board");
-        assert!(trello_card_path("AbCd1234", "tr-x").is_err());
-        assert!(trello_card_path("AbCd1234", "../members/me").is_err(), "no path traversal");
-        assert!(trello_card_path("a/b", "tr-1").is_err());
-    }
-
-    #[test]
-    fn trello_card_maps_list_member_and_label_and_falls_back_to_a_colour() {
-        let card = serde_json::json!({
-            "name": "Fix login", "idShort": 12, "shortUrl": "https://trello.com/c/Xy12Zq90",
-            "list": { "name": "Doing" }, "members": [{ "fullName": "Joe" }],
-            "labels": [{ "name": "", "color": "red" }]
-        });
-        let s = trello_summary(&card).unwrap();
-        assert_eq!((s.id.as_str(), s.state.as_str(), s.ticket_type.as_str()), ("tr-12", "Doing", "red"));
-        assert_eq!(s.owner.as_deref(), Some("Joe"));
-        assert_eq!(s.url, "https://trello.com/c/Xy12Zq90");
-        let bare = trello_summary(&serde_json::json!({ "name": "x", "idShort": 3, "labels": [], "members": [] })).unwrap();
-        assert_eq!((bare.ticket_type.as_str(), bare.owner), ("card", None));
-        assert!(trello_summary(&serde_json::json!({})).is_err());
-    }
-
-    #[test]
-    fn trello_prompt_line_names_the_board_and_the_tr_form() {
-        let t = TicketTracker { kind: TrackerKind::Trello, workspace: "AbCd1234".into() };
-        let line = prompt_line(&t).unwrap();
-        assert!(line.contains("board AbCd1234") && line.contains("tr-12"));
-    }
-
-    #[test]
-    fn linear_issue_maps_and_a_missing_issue_errors() {
-        let issue = serde_json::json!({
-            "identifier": "MOB-12", "title": "Crash", "url": "https://linear.app/revaire/issue/MOB-12",
-            "state": { "name": "Todo" }, "assignee": null, "labels": { "nodes": [{ "name": "Bug" }] }
-        });
-        let s = linear_summary(&issue).unwrap();
-        assert_eq!((s.id.as_str(), s.state.as_str(), s.ticket_type.as_str()), ("MOB-12", "Todo", "Bug"));
-        assert_eq!(s.owner, None);
-        assert!(linear_summary(&serde_json::Value::Null).is_err());
     }
 }
