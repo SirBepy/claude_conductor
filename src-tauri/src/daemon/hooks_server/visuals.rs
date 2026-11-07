@@ -8,7 +8,10 @@
 //! field existed must learn the shape from a clean `ok:false` that names the fix.
 //!
 //! The caps are the ones in `mcp/tool_schemas_coordination.rs::visuals_schema`;
-//! the model may not honour a schema, so the route enforces them too.
+//! the model may not honour a schema, so the route enforces them too. A test in
+//! that file reads the consts below (and `MAX_VISUALS` in
+//! `src/shared/chat/message-visuals.ts`) and fails when one disagrees with the
+//! schema, so change a cap in all of them together.
 
 use serde_json::{Map, Value};
 
@@ -27,7 +30,11 @@ const MAX_TIMELINE_BLOCKS: usize = 12;
 
 /// The schema's `type` enum must list exactly these (a messages.rs test pins it).
 pub(super) const TYPE_NAMES: [&str; 5] = ["table", "bar", "line", "donut", "timeline"];
-const TYPES: &str = "table, bar, line, donut, timeline";
+
+/// The type names as error text, built from [`TYPE_NAMES`] so the two cannot drift.
+fn types() -> String {
+    TYPE_NAMES.join(", ")
+}
 
 pub(super) fn validate_visuals(visuals: &[Value]) -> Result<(), String> {
     if visuals.len() > MAX_VISUALS {
@@ -38,7 +45,7 @@ pub(super) fn validate_visuals(visuals: &[Value]) -> Result<(), String> {
     }
     for (i, v) in visuals.iter().enumerate() {
         let at = format!("visuals[{i}]");
-        let obj = v.as_object().ok_or_else(|| format!("{at} must be an object with a type: {TYPES}"))?;
+        let obj = v.as_object().ok_or_else(|| format!("{at} must be an object with a type: {}", types()))?;
         optional_text(obj, "title", MAX_TITLE, &at)?;
         match obj.get("type").and_then(Value::as_str) {
             Some("table") => table(obj, &at)?,
@@ -46,8 +53,8 @@ pub(super) fn validate_visuals(visuals: &[Value]) -> Result<(), String> {
             Some("line") => line(obj, &at)?,
             Some("donut") => donut(obj, &at)?,
             Some("timeline") => timeline(obj, &at)?,
-            Some(other) => return Err(format!("{at} type \"{other}\" is not a visual type: use one of {TYPES}")),
-            None => return Err(format!("{at} needs a type: one of {TYPES}")),
+            Some(other) => return Err(format!("{at} type \"{other}\" is not a visual type: use one of {}", types())),
+            None => return Err(format!("{at} needs a type: one of {}", types())),
         }
     }
     Ok(())
@@ -164,7 +171,11 @@ fn line(obj: &Map<String, Value>, at: &str) -> Result<(), String> {
             ));
         }
         for v in values {
-            number(v, &format!("a {at}.series[{i}] value"))?;
+            let what = format!("a {at}.series[{i}] value");
+            // The renderer fixes the y axis at 0, so a negative point would draw outside the plot.
+            if number(v, &what)? < 0.0 {
+                return Err(format!("{what} must be 0 or more: a line chart cannot draw below zero, so use a table for negative figures"));
+            }
         }
     }
     Ok(())
@@ -232,7 +243,8 @@ mod tests {
     #[test]
     fn a_missing_or_unknown_type_names_the_valid_types() {
         assert!(err(json!({"columns": []})).contains("needs a type"));
-        assert!(err(json!({"type": "pie"})).contains("table, bar, line, donut, timeline"));
+        assert!(err(json!({"type": "pie"})).contains(&TYPE_NAMES.join(", ")));
+        assert!(err(json!({"columns": []})).contains(&TYPE_NAMES.join(", ")));
         assert!(validate_visuals(&[json!("table")]).unwrap_err().contains("must be an object"));
     }
 
@@ -266,6 +278,13 @@ mod tests {
         let e = err(json!({"type": "line", "labels": ["a", "b", "c"], "series": [{"name": "n", "values": [1, 2]}]}));
         assert!(e.contains("one value per label"), "{e}");
         assert!(err(json!({"type": "line", "labels": ["a"], "series": []})).contains("2 to 24"));
+    }
+
+    #[test]
+    fn a_line_refuses_a_negative_value_because_the_chart_cannot_draw_below_zero() {
+        let e = err(json!({"type": "line", "labels": ["a", "b"], "series": [{"name": "n", "values": [-50, 10]}]}));
+        assert!(e.contains("0 or more") && e.contains("series[0]") && e.contains("table"), "{e}");
+        ok(json!({"type": "line", "labels": ["a", "b"], "series": [{"name": "n", "values": [0, 10.5]}]}));
     }
 
     #[test]
