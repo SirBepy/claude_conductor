@@ -23,7 +23,7 @@ pub const TOOL_SEND_MESSAGE: &str = "send_message";
 pub const TOOL_UPDATE_MESSAGE: &str = "update_message";
 
 /// Shared by send_message and update_message. The limits mirror
-/// `hooks_server/messages.rs::validate_details`, which enforces them.
+/// `hooks_server/messages/validate.rs::validate_details`, which enforces them.
 fn details_schema() -> Value {
     json!({
         "type": "array",
@@ -97,8 +97,8 @@ Example: {\"type\": \"table\", \"title\": \"Cost by model\", \"columns\": [\"Mod
     })
 }
 
-/// Mirrors `hooks_server/messages.rs::KINDS`, which enforces it. Neither module
-/// can see the other's constant, so a test in messages.rs reads this declaration
+/// Mirrors `hooks_server/messages/validate.rs::KINDS`, which enforces it. Neither module
+/// can see the other's constant, so a test in messages/mod.rs reads this declaration
 /// and fails when the two lists differ.
 const SEND_MESSAGE_KINDS: [&str; 12] = [
     "answer", "report", "blocker", "do_this", "plan", "rating", "correction", "call", "handoff",

@@ -1,5 +1,5 @@
 // Ticket mentions in chat: ids in a message become links to the ticket (for a
-// chat whose project has a tracker, see src-tauri/src/tickets.rs), and hovering
+// chat whose project has a tracker, see src-tauri/src/tickets/mod.rs), and hovering
 // any ticket link - ours or one Claude wrote as markdown - shows a small card
 // with its title, state, owner and type. Tokens stay in the backend; this only
 // ever sees the summary.
@@ -10,8 +10,8 @@ import { isRemote } from "../transport";
 import type { TicketSummary, TrackerInfo, TrackerKind } from "../../types/ipc.generated";
 
 // Registry env name per tracker kind - mirrors src-tauri/src/api_keys.rs's
-// REGISTRY and the error text tickets.rs::token_for (and, for Trello's second
-// secret, trello_token) formats when unset ("{key} is not set in
+// REGISTRY and the error text tickets/mod.rs::token_for (and, for Trello's second
+// secret, tickets/trello.rs::trello_token) formats when unset ("{key} is not set in
 // ~/.claude/.env"), so a missing-token error can offer the right modal instead
 // of a dead-end message. Trello needs two secrets, so each kind lists every env
 // name its error can name.
@@ -301,7 +301,7 @@ async function showCard(anchor: HTMLAnchorElement): Promise<void> {
     // parseTicketUrl never returns "off" (its regexes match tracker URLs only),
     // so the lookup is always defined in practice; the guard keeps the registry
     // type honest regardless.
-    // Only the backend's own missing-token wording (tickets.rs::token_for)
+    // Only the backend's own missing-token wording (tickets/mod.rs::token_for)
     // gets the "Add key" action - any other failure (network, bad id, rate
     // limit) is just an error, nothing a key modal would fix. Trello can miss
     // either of its two secrets, so the one the message names is the one asked for.

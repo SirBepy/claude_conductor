@@ -5,11 +5,10 @@
 //! that goes through `reply` (a handler error: bad arguments, an unknown
 //! session). Refusals that are expected control flow (a disabled browser, a
 //! sub's close refusal, a secret prompt that timed out) answer `ok:false`
-//! directly and are not recorded. The chat used to show a
-//! "Failed to send" pill per rejection; a caller that retries until it passes
-//! stacked six of them, so the chat stays quiet and this file is where a
-//! pattern (the same field wrong again and again) gets read, by
-//! `scripts/release-report.ps1` at release time.
+//! directly and are not recorded. The chat draws nothing for a rejection (a
+//! caller that retries until it passes would stack one pill per attempt), so
+//! this file is where a pattern (the same field wrong again and again) gets
+//! read, by `scripts/release-report.ps1` at release time.
 
 use axum::http::StatusCode;
 use axum::Json;

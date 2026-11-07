@@ -189,8 +189,9 @@ export interface RenderedMessage {
   subCard?: SubCardEntry;
   /** Retracted via `update_message`; `text` keeps the original for the tooltip. */
   retracted?: boolean;
-  /** Set when a failed send_message's tool_result was is_error:true - stays
-   *  visible as a "failed to send" ghost instead of being deleted. */
+  /** Set when a send_message's tool_result was is_error:true. The row stays so
+   *  message indexing lines up and draws nothing; the daemon logs the rejection
+   *  (hooks_server/rejected_sends.rs). */
   failed?: boolean;
   /** From a turn the user interrupted. Cleared by revising or retracting. */
   dimmed?: boolean;

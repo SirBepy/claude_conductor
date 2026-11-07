@@ -1,6 +1,6 @@
 //! Registry of API keys the app can read, plus a line-preserving `.env`
 //! rewriter. Keys live in `~/.claude/.env`, the one place every tool already
-//! reads them from. The line READ itself is shared with `tickets.rs`'s
+//! reads them from. The line READ itself is shared with `tickets/mod.rs`'s
 //! tracker token lookup via `crate::env_file` (todo 1049); this module still
 //! owns key storage (the registry + the writer), not tracker lookups.
 //!
@@ -18,8 +18,8 @@ pub struct ApiKeyEntry {
     pub create_url: &'static str,
 }
 
-// Names confirmed against the actual readers: `tickets.rs::token_for`
-// (SHORTCUT_API_TOKEN / LINEAR_API_KEY / TRELLO_API_KEY), `tickets.rs::trello_token`
+// Names confirmed against the actual readers: `tickets/mod.rs::token_for`
+// (SHORTCUT_API_TOKEN / LINEAR_API_KEY / TRELLO_API_KEY), `tickets/trello.rs::trello_token`
 // (TRELLO_TOKEN) and `~/.claude/skills/ticket/shortcut.md`'s
 // `grep -a SHORTCUT_API_TOKEN ~/.claude/.env`.
 pub const REGISTRY: &[ApiKeyEntry] = &[
@@ -65,7 +65,7 @@ pub fn env_path() -> Option<PathBuf> {
 
 /// Whether `name` has a non-empty value in `text`. The line parse itself
 /// (BOM, surrounding quotes, first match wins) is shared with
-/// `tickets.rs::parse_env_value` via `crate::env_file::read_value` (todo
+/// `tickets/mod.rs::parse_env_value` via `crate::env_file::read_value` (todo
 /// 1049) - this module still owns key storage, `env_file` just owns the read.
 pub fn is_key_set(text: &str, name: &str) -> bool {
     crate::env_file::read_value(text, name).is_some()

@@ -490,7 +490,7 @@ mod tests {
 
     /// A sub answered Joe's follow-up with send_message and a details table, then
     /// finished claiming it was shown: only a blocker is drawn in the main chat
-    /// (hooks_server/messages.rs `draw_sub_blocker`), so the sub is told where
+    /// (hooks_server/messages/mod.rs `draw_sub_blocker`), so the sub is told where
     /// a table must go instead.
     #[test]
     fn the_sub_prompt_says_only_a_blocker_reaches_the_main_chat_and_a_table_goes_through_show_preview() {

@@ -28,7 +28,7 @@ const MAX_SLICES: usize = 6;
 const MAX_TIMELINE_ROWS: usize = 10;
 const MAX_TIMELINE_BLOCKS: usize = 12;
 
-/// The schema's `type` enum must list exactly these (a messages.rs test pins it).
+/// The schema's `type` enum must list exactly these (a messages/mod.rs test pins it).
 pub(super) const TYPE_NAMES: [&str; 5] = ["table", "bar", "line", "donut", "timeline"];
 
 /// The type names as error text, built from [`TYPE_NAMES`] so the two cannot drift.

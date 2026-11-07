@@ -180,11 +180,11 @@ function hydrate(): Promise<void> {
   return hydration;
 }
 
-/** Minimum gap between saves driven by new poll rows. The saved blob is about
+/** Minimum gap between saves driven by new poll rows. The saved blob is the
  *  whole 15-day window, and handing it to IndexedDB is a structured clone on
  *  the main thread (about 15ms per 2MB on a desktop V8), so a save per poll is
- *  jank for a few hundred bytes of change. A save skipped here loses nothing: the saved copy
- *  is always a consistent floor/cursor/rows snapshot, so the next launch just
+ *  jank for a few hundred bytes of change. A save skipped here loses nothing:
+ *  the saved copy is always a consistent floor/cursor/rows snapshot, so the next launch just
  *  re-reads the newer rows from the PC. */
 const SAVE_INTERVAL_MS = 60_000;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
