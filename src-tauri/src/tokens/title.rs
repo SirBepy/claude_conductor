@@ -244,6 +244,36 @@ pub(crate) fn is_titleable_user_turn(v: &serde_json::Value) -> bool {
     !t.starts_with("[Request interrupted by user]") && !is_auq_answer_text(&t)
 }
 
+/// True for a daemon-injected user turn (a schedule fire, a repo-channel wake):
+/// its text leads with `DAEMON_META_SENTINEL`, which `is_real_user_turn`
+/// refuses, so such a turn is never titleable on its own.
+fn is_daemon_meta_user_turn(v: &serde_json::Value) -> bool {
+    if v.get("type").and_then(|t| t.as_str()) != Some("user") { return false; }
+    let Some(msg) = v.get("message") else { return false; };
+    if msg.get("role").and_then(|r| r.as_str()) != Some("user") { return false; }
+    let sentinel = crate::types::chat::DAEMON_META_SENTINEL;
+    match msg.get("content") {
+        Some(serde_json::Value::String(s)) => s.starts_with(sentinel),
+        Some(serde_json::Value::Array(items)) => items.iter().any(|it| {
+            it.get("type").and_then(|t| t.as_str()) == Some("text")
+                && it.get("text").and_then(|t| t.as_str()).is_some_and(|s| s.starts_with(sentinel))
+        }),
+        _ => false,
+    }
+}
+
+/// Whether `v` opens a turn for the AI title freeze, given how many turns were
+/// opened before it. A real prompt always does. A daemon-meta turn does only as
+/// the chat's first turn: a schedule-started chat reports its title via
+/// `report_turn_status` inside that turn, before any real prompt exists, so
+/// leaving it uncounted dropped the `ai-title` as belonging to no turn. A meta
+/// turn later in the chat is injected mid-conversation and must not freeze
+/// the current turn's title early. Shared by `ai_milestone_title` and
+/// `scan_transcript` so the two passes cannot drift.
+pub(crate) fn opens_title_turn(v: &serde_json::Value, turns_so_far: usize) -> bool {
+    is_titleable_user_turn(v) || (turns_so_far == 0 && is_daemon_meta_user_turn(v))
+}
+
 /// Concatenated text of an `assistant` message's text blocks, or None if the
 /// line isn't an assistant message with text (e.g. a pure tool_use turn).
 pub(crate) fn assistant_text(v: &serde_json::Value) -> Option<String> {
@@ -290,7 +320,7 @@ pub fn ai_milestone_title(path: &Path, max_chars: usize) -> Option<String> {
     for line in reader.lines().map_while(|r| r.ok()) {
         if line.trim().is_empty() { continue; }
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-        if is_titleable_user_turn(&v) {
+        if opens_title_turn(&v, turn) {
             // The turn that just ended is complete; its title, if any, is final.
             if latest.is_some() { break; }
             turn += 1;
@@ -979,6 +1009,61 @@ mod tests {
             normalise_and_truncate("aaaaaaaaaa bbbbbbbbb ccc", 20).as_deref(),
             Some("aaaaaaaaaa bbbbbbbbb…"),
         );
+    }
+
+    fn meta_fire_line() -> String {
+        user_line(&format!("{}[schedule] fire", crate::types::chat::DAEMON_META_SENTINEL))
+    }
+
+    /// A schedule-started chat reports its title inside the meta-only first turn.
+    #[test]
+    fn leading_meta_turn_ai_title_is_kept() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let body = [
+            meta_fire_line(),
+            assistant_line("running the job"),
+            ai_title_line("Nightly Report"),
+            user_line("how did it go"),
+            ai_title_line("Later Rename"),
+        ].join("
+");
+        std::fs::write(&path, body).unwrap();
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Nightly Report"));
+    }
+
+    /// A meta first turn with no title must not freeze anything: the first real
+    /// prompt's turn still gets to title the chat.
+    #[test]
+    fn leading_meta_turn_without_a_title_waits_for_the_real_prompt() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let body = [
+            meta_fire_line(),
+            assistant_line("running the job"),
+            user_line("how did it go"),
+            ai_title_line("Job Review"),
+        ].join("
+");
+        std::fs::write(&path, body).unwrap();
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Job Review"));
+    }
+
+    /// A meta turn injected mid-conversation is not a turn boundary.
+    #[test]
+    fn mid_chat_meta_turn_does_not_freeze_the_title_early() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let body = [
+            user_line("help me with auth"),
+            ai_title_line("Early Guess"),
+            meta_fire_line(),
+            ai_title_line("Final Topic"),
+            user_line("thanks"),
+        ].join("
+");
+        std::fs::write(&path, body).unwrap();
+        assert_eq!(ai_milestone_title(&path, 60).as_deref(), Some("Final Topic"));
     }
 
     #[test]

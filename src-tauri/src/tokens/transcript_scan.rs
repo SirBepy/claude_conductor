@@ -2,7 +2,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use super::title::{
-    ai_title_record, assistant_text, extract_cc_title, is_real_user_turn, is_titleable_user_turn,
+    ai_title_record, assistant_text, extract_cc_title, is_real_user_turn, is_titleable_user_turn, opens_title_turn,
     normalise_and_truncate, user_prompt_label,
 };
 
@@ -31,6 +31,9 @@ pub fn scan_transcript(path: &Path, max_chars: usize) -> TranscriptScan {
     let reader = BufReader::new(file);
 
     let mut turn = 0usize;
+    // Stays false through a leading daemon-meta turn, which counts in `turn` for
+    // the title freeze but is not the prompt the fallback label comes from.
+    let mut real_turn_seen = false;
     let mut latest_marker: Option<String> = None;
     // ai_milestone_title's freeze: set once, at the end of the first turn that
     // carried a marker, and never replaced by a later turn's marker.
@@ -64,13 +67,14 @@ pub fn scan_transcript(path: &Path, max_chars: usize) -> TranscriptScan {
             _ => {}
         }
 
-        if turn == 0 && first_prompt.is_none() && is_real_user_turn(&v) {
+        if !real_turn_seen && first_prompt.is_none() && is_real_user_turn(&v) {
             if let Some(msg) = v.get("message") {
                 first_prompt = user_prompt_label(msg, max_chars);
             }
         }
 
-        if is_titleable_user_turn(&v) {
+        if opens_title_turn(&v, turn) {
+            real_turn_seen |= is_titleable_user_turn(&v);
             if frozen_title.is_none() { frozen_title = latest_marker.clone(); }
             turn += 1;
             continue;
@@ -135,6 +139,32 @@ mod tests {
     #[test]
     fn no_ai_title_falls_back_to_first_prompt() {
         let r = scan(&[USER1]);
+        assert_eq!(r.title.as_deref(), Some("first prompt"));
+    }
+
+    fn meta_line() -> String {
+        serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": format!("{}[schedule] fire", crate::types::chat::DAEMON_META_SENTINEL)}
+        }).to_string()
+    }
+
+    #[test]
+    fn leading_meta_turn_ai_title_wins_over_the_first_prompt_fallback() {
+        let meta = meta_line();
+        let r = scan(&[
+            &meta,
+            r#"{"type":"ai-title","aiTitle":"Nightly Report"}"#,
+            USER1,
+            r#"{"type":"ai-title","aiTitle":"Later Rename"}"#,
+        ]);
+        assert_eq!(r.title.as_deref(), Some("Nightly Report"));
+    }
+
+    #[test]
+    fn leading_meta_turn_without_a_title_still_falls_back_to_the_real_prompt() {
+        let meta = meta_line();
+        let r = scan(&[&meta, USER1]);
         assert_eq!(r.title.as_deref(), Some("first prompt"));
     }
 }
