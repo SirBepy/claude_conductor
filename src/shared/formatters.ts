@@ -5,6 +5,11 @@
  * migrated off them.
  */
 
+/** Local HH:MM in the reader's own locale (24h or am/pm as their system has it). */
+export function localTime(d: Date): string {
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
 /** `clockify-week` / `cc_conductor` -> "Clockify Week" / "Cc Conductor". Mirrors
  *  the Rust `preview_title_from_slug`, so both sides label a slug the same. */
 export function titleCaseWords(s: string): string {

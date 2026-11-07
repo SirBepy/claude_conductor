@@ -2,8 +2,14 @@
 // Rewired from the deleted src/modules/formatters.js — vitest imports TS directly.
 
 import { describe, it, expect } from "vitest";
-import { pctColor, getPaceColor, fmtPct, valueColor } from "../src/shared/formatters.ts";
+import { pctColor, getPaceColor, fmtPct, valueColor, localTime } from "../src/shared/formatters.ts";
 import { hourToMs, formatElapsed } from "../src/shared/time.ts";
+
+describe("localTime", () => {
+  it("prints the local hour and minute, zero-padded, with no seconds or date", () => {
+    expect(localTime(new Date(2026, 10, 6, 3, 12, 59))).toMatch(/^0?3[:.]12(\s?[AP]M)?$/i);
+  });
+});
 
 describe("formatElapsed", () => {
   it("prints zero and clamps a negative span to 0:00", () => {
