@@ -62,6 +62,14 @@ pub struct SharedMockup {
     pub parts: Vec<Part>,
 }
 
+impl SharedMockup {
+    /// Bytes this copy holds on top of the snapshot's composed `html`, for the
+    /// store budget: the shell plus each part's own html and css.
+    pub(super) fn stored_bytes(&self) -> usize {
+        self.shell.len() + self.parts.iter().map(|p| p.html.len() + p.css.len()).sum::<usize>()
+    }
+}
+
 // ── Document ────────────────────────────────────────────────────────────────
 
 /// One empty element carrying `data-part="<id>"` in the shell.
@@ -239,6 +247,18 @@ fn refuse(msg: impl Into<String>) -> Value {
     json!({ "ok": false, "error": msg.into() })
 }
 
+/// Refusal for a composed page past the cap an ordinary push is held to
+/// (`push_at`); the route body limit alone would let a shell plus 12 parts
+/// reach about 12 times that.
+fn over_page_cap(composed: &str) -> Option<Value> {
+    (composed.len() > MAX_HTML_BYTES).then(|| {
+        refuse(format!(
+            "the composed page is {} bytes, over the {MAX_HTML_BYTES}-byte cap every preview page has: shorten the shell or the parts' html and css",
+            composed.len()
+        ))
+    })
+}
+
 fn display_name(state: &DaemonState, session_id: &str) -> String {
     let Some(inst) = state.registry.get(session_id) else { return session_id.chars().take(8).collect() };
     if let Some(n) = inst.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
@@ -295,14 +315,26 @@ fn create_at(path: &Path, state: &DaemonState, caller: &str, body: &Value) -> Va
         let Some(shared) = existing.shared.as_mut().filter(|s| s.owner_session_id == caller) else {
             return refuse(format!("slug \"{slug}\" already belongs to another preview: pick a different slug"));
         };
+        // A part whose region the new shell dropped never renders, but would
+        // still show a chip in the row and count toward MAX_PARTS.
+        let kept: Vec<Part> = shared.parts.iter().filter(|p| found.contains(&p.id)).cloned().collect();
+        let html = compose(&shell, &kept);
+        if let Some(refused) = over_page_cap(&html) {
+            return refused;
+        }
         shared.shell = shell;
+        shared.parts = kept;
         existing.title = title;
-        existing.html = compose(&shared.shell, &shared.parts);
+        existing.html = html;
         existing.version += 1;
         existing.created_at = now_rfc3339();
         let id = existing.id.clone();
         save(path, &mut list);
         return json!({ "ok": true, "id": id, "regions": found });
+    }
+    let html = compose(&shell, &[]);
+    if let Some(refused) = over_page_cap(&html) {
+        return refused;
     }
     let id = uuid::Uuid::new_v4().to_string();
     evict_if_at_cap(&mut list);
@@ -310,7 +342,7 @@ fn create_at(path: &Path, state: &DaemonState, caller: &str, body: &Value) -> Va
         id: id.clone(),
         slug,
         title,
-        html: compose(&shell, &[]),
+        html,
         source: SHARED_SOURCE.into(),
         session_id: Some(caller.to_string()),
         version: 1,
@@ -386,7 +418,11 @@ fn part_at(path: &Path, state: &DaemonState, caller: &str, body: &Value) -> Valu
         Some(i) => shared.parts[i] = part,
         None => shared.parts.push(part),
     }
-    snap.html = compose(&shared.shell, &shared.parts);
+    let composed = compose(&shared.shell, &shared.parts);
+    if let Some(refused) = over_page_cap(&composed) {
+        return refused;
+    }
+    snap.html = composed;
     snap.version += 1;
     snap.created_at = now_rfc3339();
     let id = snap.id.clone();
@@ -582,6 +618,52 @@ mod tests {
         assert_eq!(load_list(&path)[0].shared.as_ref().unwrap().parts[0].controls.len(), 1);
         run_at(&path, &st, "sub-a", &json!({"action": "part", "part": "header", "html": "A3", "controls": []}));
         assert!(load_list(&path)[0].shared.as_ref().unwrap().parts[0].controls.is_empty());
+    }
+
+    #[test]
+    fn a_part_that_pushes_the_composed_page_past_the_cap_is_refused_naming_the_fix() {
+        let (_t, path) = store();
+        let st = state();
+        create(&path, &st, "main");
+        // Each part is under the per-part cap; together they are not.
+        let big = "x".repeat(MAX_HTML_BYTES / 2 + 1);
+        let a = run_at(&path, &st, "sub-a", &json!({"action": "part", "part": "header", "html": big}));
+        assert_eq!(a["ok"], json!(true), "{}", a["error"]);
+        let b = run_at(&path, &st, "sub-b", &json!({"action": "part", "part": "footer", "html": big}));
+        assert_eq!(b["ok"], json!(false));
+        assert!(b["error"].as_str().unwrap().contains("composed page") && b["error"].as_str().unwrap().contains("shorten"), "{b}");
+        let stored = &load_list(&path)[0];
+        assert_eq!(stored.shared.as_ref().unwrap().parts.len(), 1, "the refused part is not stored");
+        assert!(stored.html.len() <= MAX_HTML_BYTES);
+    }
+
+    #[test]
+    fn a_shell_over_the_page_cap_is_refused_on_create_and_on_re_create() {
+        let (_t, path) = store();
+        let st = state();
+        let huge = format!("{SHELL}<!--{}-->", "x".repeat(MAX_HTML_BYTES));
+        let v = run_at(&path, &st, "main", &json!({"action": "create", "slug": "page", "shell": huge}));
+        assert_eq!(v["ok"], json!(false));
+        assert!(load_list(&path).is_empty());
+        create(&path, &st, "main");
+        let again = run_at(&path, &st, "main", &json!({"action": "create", "slug": "page", "shell": huge}));
+        assert_eq!(again["ok"], json!(false));
+        assert_eq!(load_list(&path)[0].shared.as_ref().unwrap().shell, SHELL, "the old shell stays");
+    }
+
+    #[test]
+    fn re_creating_with_a_shell_that_drops_a_region_drops_its_part_and_frees_the_slot() {
+        let (_t, path) = store();
+        let st = state();
+        create(&path, &st, "main");
+        run_at(&path, &st, "sub-a", &json!({"action": "part", "part": "header", "html": "A"}));
+        run_at(&path, &st, "sub-b", &json!({"action": "part", "part": "footer", "html": "B"}));
+        let again = run_at(&path, &st, "main", &json!({"action": "create", "slug": "page", "shell": "<main><div data-part=\"top\"></div><section data-part=\"footer\"></section></main>"}));
+        assert_eq!(again["ok"], json!(true), "{again}");
+        let snap = &load_list(&path)[0];
+        let ids: Vec<&str> = snap.shared.as_ref().unwrap().parts.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["footer"], "the header part had no region left");
+        assert!(snap.html.contains('B') && !snap.html.contains(">A<") && !snap.html.contains("data-part=\"header\""), "{}", snap.html);
     }
 
     #[test]
