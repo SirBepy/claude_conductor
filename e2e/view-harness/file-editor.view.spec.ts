@@ -233,6 +233,53 @@ test.describe("view-harness / file editor", () => {
     await expect(frame).toHaveCount(0);
   });
 
+  // Rendered-vs-Source is remembered per file kind, and html opens rendered
+  // (scripts and all, inside the preview sandbox) by default.
+  test("choosing Source on a markdown file leaves the next html page opening rendered", async ({ page }) => {
+    const md = "C:/Projects/alpha/.claude/todos/12-thing.md";
+    const html = "C:/Projects/alpha/deck.html";
+    await mountFiles(page, {
+      [FILE]: { content: "x\n", mtime: 1, writable: true },
+      [md]: { content: "# Make the thing\n", mtime: 1, writable: true },
+      [html]: { content: "<h1>Status deck</h1>\n", mtime: 1, writable: true },
+    }, FILE);
+    const open = (p: string) => page.evaluate((p) => {
+      const w = window as unknown as { __ccListeners: Map<string, Set<(e: { payload: unknown }) => void>> };
+      w.__ccListeners.get("file-window-open")?.forEach((cb) => cb({ payload: { path: p, line: null } }));
+    }, p);
+    await open(md);
+    await expect(page.locator("#fw-test .fs-md h1")).toHaveText("Make the thing");
+    await page.locator("#fw-test .fs-md-btn").click();
+    await expect(page.locator("#fw-test .cm-content")).toContainText("# Make the thing");
+
+    await open(html);
+
+    await expect(page.locator("#fw-test .fs-html-frame")).toBeVisible();
+  });
+
+  test("Ctrl+F does nothing on a rendered html page, whose iframe search cannot reach, and works again on its Source", async ({ page }) => {
+    const html = "C:/Projects/alpha/deck.html";
+    await mountFiles(page, {
+      [FILE]: { content: "x\n", mtime: 1, writable: true },
+      [html]: { content: "<h1>Status deck</h1>\n", mtime: 1, writable: true },
+    }, FILE);
+    await page.evaluate((p) => {
+      const w = window as unknown as { __ccListeners: Map<string, Set<(e: { payload: unknown }) => void>> };
+      w.__ccListeners.get("file-window-open")?.forEach((cb) => cb({ payload: { path: p, line: null } }));
+    }, html);
+    await expect(page.locator("#fw-test .fs-html-frame")).toBeVisible();
+
+    await page.keyboard.press("Control+f");
+    await expect(page.locator("#fw-test .fs-search")).toHaveClass(/fs-hidden/);
+    await page.locator("#fw-test .fs-menu-btn").click();
+    await expect(page.locator("#fw-test .fs-mi[data-act=search]")).toHaveClass(/fs-disabled/);
+
+    await page.locator("#fw-test .fs-md-btn").click();
+    await expect(page.locator("#fw-test .cm-content")).toContainText("Status deck");
+    await page.keyboard.press("Control+f");
+    await expect(page.locator("#fw-test .fs-search")).not.toHaveClass(/fs-hidden/);
+  });
+
   test("a page still staging when the reader toggles to Source does not replace the editor with its failure card", async ({ page }) => {
     const html = "C:/Projects/alpha/deck.html";
     await mountFiles(page, {
