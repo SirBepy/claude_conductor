@@ -139,6 +139,42 @@ describe("ensureRemoteToken - browser with NO token", () => {
   });
 });
 
+describe("ensureRemoteToken - pairing params leave the address bar", () => {
+  function stubAddress(href) {
+    const replaceState = vi.fn();
+    globalThis.location = { href, origin: new URL(href).origin };
+    globalThis.history = { replaceState };
+    return replaceState;
+  }
+
+  it("stores a legacy ?token= and strips it, keeping other params and the hash", async () => {
+    globalThis.window = {};
+    const storage = makeLocalStorage();
+    globalThis.localStorage = storage;
+    globalThis.document = makeDocument();
+    const replaceState = stubAddress("http://phone.test/app/?token=tok123&x=1#top");
+
+    const { ensureRemoteToken } = await import("../src/shared/remote-gate.ts");
+    expect(await ensureRemoteToken()).toBe(true);
+    expect(storage.getItem(REMOTE_TOKEN_KEY)).toBe("tok123");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/app/?x=1#top");
+  });
+
+  it("strips ?pair= before exchanging the code, even when the exchange fails", async () => {
+    globalThis.window = {};
+    globalThis.localStorage = makeLocalStorage();
+    globalThis.document = makeDocument();
+    globalThis.setTimeout = (fn, _ms) => { try { fn(); } catch {} return 0; };
+    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 401, text: async () => "bad code" }));
+    const replaceState = stubAddress("http://phone.test/?pair=code1");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { ensureRemoteToken } = await import("../src/shared/remote-gate.ts");
+    expect(await ensureRemoteToken()).toBe(false);
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/");
+  });
+});
+
 // get_settings is no longer a safe-default stub: like get_history/get_token_history
 // it now forwards to the daemon's rpc (settings served from the shared store, so
 // the phone populates). That forwarding is covered in tests/transport-http.test.mjs
