@@ -145,7 +145,17 @@ const TOOLS_HTML =
 // diff editor; nothing earns persisting them across restarts yet.
 let preferredDiffMode: "inline" | "split" = "inline";
 let preferredFull = false;
-let preferredRendered = true;
+// Rendered-vs-Source is remembered per file kind: choosing Source on a markdown
+// note must not make the next html page open as Source too.
+//
+// Both kinds open rendered. An .html on disk therefore runs its own scripts the
+// moment it opens, and that is deliberate (Joe asked for html to be shown, not
+// listed): the frame is the Preview panel's sandbox (opaque origin, so no
+// parent DOM, no IPC, and the daemon's origin guard rejects it), which leaves
+// network beacons as the only thing a hostile page can do. Opening an
+// untrusted page as Source by default would trade that away for a click on
+// every page Joe opens on purpose.
+const preferredRendered: Record<"markdown" | "html", boolean> = { markdown: true, html: true };
 
 function isMarkdown(path: string): boolean {
   const lang = langFromPath(path);
@@ -159,6 +169,10 @@ function isHtml(path: string): boolean {
 /** Files that open as a rendered page, with a Source toggle back to the editor. */
 function hasRenderedView(path: string): boolean {
   return isMarkdown(path) || isHtml(path);
+}
+
+function renderKind(path: string): "markdown" | "html" | null {
+  return isHtml(path) ? "html" : isMarkdown(path) ? "markdown" : null;
 }
 
 let editorModule: Promise<typeof import("./file-editor")> | null = null;
@@ -206,7 +220,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     view: "file" as "diff" | "file",
     diffMode: preferredDiffMode,
     full: preferredFull,
-    rendered: preferredRendered,
+    rendered: true,
     editor: null as FileEditor | null,
     /** View chosen from the menu for the open path; null until one is. */
     pickedView: null as "diff" | "file" | null,
@@ -257,6 +271,12 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     el.searchInput.value = "";
     updateSearchCount();
     el.search.classList.add("fs-hidden");
+  }
+
+  /** A rendered html page lives in a sandboxed iframe that runSearch cannot
+   *  enter, so search there would only ever report no matches. */
+  function canSearch(): boolean {
+    return !(state.file && state.view === "file" && isHtml(state.file.path) && state.rendered);
   }
 
   function openSearch(): void {
@@ -444,7 +464,9 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     void renderBody();
   });
   el.mdBtn.addEventListener("click", () => {
-    state.rendered = preferredRendered = !state.rendered;
+    state.rendered = !state.rendered;
+    const kind = state.file && renderKind(state.file.path);
+    if (kind) preferredRendered[kind] = state.rendered;
     closeSearch();
     updateBar();
     void renderBody();
@@ -471,6 +493,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     if (isDiff && (file.removed ?? 0) > 0) parts.push(`<span class="diff-del">-${file.removed}</span>`);
     el.counts.innerHTML = parts.join("");
 
+    setMenuItem("search", false, !canSearch());
     setMenuItem("view-diff", isDiff, !hasDiffSource(file));
     setMenuItem("view-file", !isDiff, false);
     el.diffTools.classList.toggle("fs-hidden", !isDiff);
@@ -730,6 +753,7 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
   function handleKey(e: KeyboardEvent): boolean {
     if (!state.file) return false;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+      if (!canSearch()) return false;
       e.preventDefault();
       openSearch();
       return true;
@@ -754,6 +778,8 @@ export function createFileSurface(host: HTMLElement, opts: FileSurfaceOptions): 
     // view the reader picked from the menu instead of snapping back to diff.
     if (state.file?.path !== file.path) state.pickedView = null;
     state.file = file;
+    const kind = renderKind(file.path);
+    if (kind) state.rendered = preferredRendered[kind];
     state.view = resolveView(file, view ?? state.pickedView ?? undefined);
     // A chat editing files reloads Code mode's scope, which re-shows the open
     // tab with a fresh SurfaceFile. Remounting the editor then would steal
