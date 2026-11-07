@@ -435,6 +435,12 @@ export function openProjectPickerModal(
               placeholder="Search projects..."
               .value=${filter}
               @input=${(e: Event) => {
+                // A running clone owns the list area and cannot be cancelled
+                // (see handleGithubKey), so the term is locked until it answers.
+                if (addProjectState.github.mode === "cloning") {
+                  (e.target as HTMLInputElement).value = filter;
+                  return;
+                }
                 filter = (e.target as HTMLInputElement).value;
                 resetGithub(addProjectState.github);
                 selectedIdx = 0;

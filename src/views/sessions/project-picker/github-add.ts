@@ -163,6 +163,9 @@ export function handleGithubKey(
   if (e.key === "Escape") {
     e.preventDefault();
     e.stopPropagation();
+    // The daemon finishes a clone it started and the RPC has no cancel, so
+    // stepping back would only hide a clone that is still running.
+    if (flow.mode === "cloning") return true;
     resetGithub(flow);
     deps.renderModal();
     return true;
