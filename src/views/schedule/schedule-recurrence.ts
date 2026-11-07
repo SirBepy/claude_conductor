@@ -33,9 +33,9 @@ export function dayKeyOf(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-export function localTime(d: Date): string {
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-}
+// The formatter lives in shared/ so the sessions view's when-done wording uses
+// the same one; schedule code keeps importing it from here.
+export { localTime } from "../../shared/formatters";
 
 /** `schedule_list_external`'s `humanTime` is a local "yyyy-MM-dd HH:mm:ss"
  * string (not RFC3339) - reparse as a local wall-clock Date. */

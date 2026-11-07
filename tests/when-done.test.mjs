@@ -272,6 +272,19 @@ describe("whenDoneChipModel - always-visible header chip", () => {
     });
     expect(whenDoneMenuHtml()).toContain("Shutdown snoozed until");
   });
+
+  it("the chip and the menu line word the counting, firing and snoozed phases identically", () => {
+    const at = new Date(2026, 10, 6, 3, 12).getTime();
+    const cases = [
+      ps({ action: "shutdown", phase: "countingDown", countdown_remaining_secs: 28 }),
+      ps({ action: "sleep", phase: "firing" }),
+      ps({ action: "shutdown", phase: "watching", snoozed_until_unix_ms: at }),
+    ];
+    for (const s of cases) {
+      state.whenDone = s;
+      expect(whenDoneMenuHtml()).toContain(`<span class="when-done-chip-text">${whenDoneChipModel(s).text}</span>`);
+    }
+  });
 });
 
 describe("when-done-state event reconciliation", () => {

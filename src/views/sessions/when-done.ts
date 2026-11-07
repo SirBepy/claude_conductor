@@ -17,6 +17,7 @@ import { invoke } from "../../shared/ipc";
 import type { ProtocolState, TerminalAction } from "../../types/ipc.generated";
 import { state } from "./state";
 import { visibleInterval } from "../../shared/visible-interval";
+import { localTime } from "../../shared/formatters";
 
 type Listener = (s: ProtocolState | null) => void;
 
@@ -164,9 +165,19 @@ export async function snoozeWhenDone(minutes: number): Promise<void> {
   }
 }
 
-/** Local HH:MM for a unix-ms instant. */
-function clockTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+/** The wording for the phases that read the same on every surface (counting
+ *  down, firing, snoozed), or null while merely watching: the chip and the
+ *  overflow menu word the watching line differently on purpose (the chip is
+ *  compact, the menu spells out what is being waited on). */
+function phaseLine(s: ProtocolState, label: string): { kind: "count" | "firing" | "snoozed"; text: string } | null {
+  if (s.phase === "countingDown" && s.countdown_remaining_secs != null) {
+    return { kind: "count", text: `${label} in ${s.countdown_remaining_secs}s` };
+  }
+  if (s.phase === "firing") return { kind: "firing", text: `${label} now...` };
+  if (s.snoozed_until_unix_ms != null) {
+    return { kind: "snoozed", text: `${label} snoozed until ${localTime(new Date(s.snoozed_until_unix_ms))}` };
+  }
+  return null;
 }
 
 export interface WhenDoneChipModel {
@@ -180,13 +191,8 @@ export interface WhenDoneChipModel {
 export function whenDoneChipModel(s: ProtocolState | null): WhenDoneChipModel | null {
   if (!s || !s.action || !isArmed(s)) return null;
   const label = ACTION_LABEL[s.action];
-  if (s.phase === "countingDown" && s.countdown_remaining_secs != null) {
-    return { kind: "count", text: `${label} in ${s.countdown_remaining_secs}s` };
-  }
-  if (s.phase === "firing") return { kind: "firing", text: `${label} now...` };
-  if (s.snoozed_until_unix_ms != null) {
-    return { kind: "snoozed", text: `${label} snoozed until ${clockTime(s.snoozed_until_unix_ms)}` };
-  }
+  const phase = phaseLine(s, label);
+  if (phase) return phase;
   const n = s.waiting_on.length;
   return {
     kind: "watch",
@@ -244,20 +250,11 @@ export function whenDoneMenuHtml(): string {
 
 function whenDoneStatusHtml(s: ProtocolState, action: TerminalAction): string {
   const label = ACTION_LABEL[action];
-  let text: string;
-  if (s.phase === "countingDown" && s.countdown_remaining_secs != null) {
-    text = `${esc(label)} in ${s.countdown_remaining_secs}s`;
-  } else if (s.phase === "firing") {
-    text = `${esc(label)} now...`;
-  } else if (s.snoozed_until_unix_ms != null) {
-    text = `${esc(label)} snoozed until ${clockTime(s.snoozed_until_unix_ms)}`;
-  } else {
-    const n = s.waiting_on.length;
-    const sess = n === 1 ? "session" : "sessions";
-    text = n > 0
-      ? `${esc(label)} when done: armed (waiting on ${n} ${sess})`
-      : `${esc(label)} when done: armed`;
-  }
+  const n = s.waiting_on.length;
+  const sess = n === 1 ? "session" : "sessions";
+  const text = phaseLine(s, esc(label))?.text ?? (n > 0
+    ? `${esc(label)} when done: armed (waiting on ${n} ${sess})`
+    : `${esc(label)} when done: armed`);
   return (
     `<div class="when-done-chip">` +
     `<span class="when-done-chip-text">${text}</span>` +
