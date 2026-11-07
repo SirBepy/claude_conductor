@@ -34,20 +34,29 @@ pub(crate) fn is_jarvis_caller(state: &Arc<DaemonState>, jarvis_session_id: &str
 /// of `companion.db`'s `usage_snapshots` table: latest snapshot per account
 /// (via the shared `usage::reduce_to_latest_per_account`, todo 330), mapped to
 /// its `five_hour.utilization`. An account absent from the returned map has
-/// never been polled yet; `pick_worker_account` below treats that as full
-/// headroom (utilization 0.0), not as "unranked" or "excluded".
+/// never been polled yet, or is on a plan with no 5h window (its absent window
+/// reads as 0%, which is not a measurement); `pick_worker_account` below
+/// treats both as full headroom (utilization 0.0), not as "unranked" or
+/// "excluded".
 async fn five_hour_utilization_by_account(state: &Arc<DaemonState>) -> HashMap<String, f64> {
     let Some(db) = state.db.clone() else { return HashMap::new(); };
     tokio::task::spawn_blocking(move || {
         let mgr = db.lock().unwrap_or_else(|e| e.into_inner());
         let all = crate::storage::usage_store::get_all_snapshots(mgr.conn()).unwrap_or_default();
-        super::usage::reduce_to_latest_per_account(all)
-            .into_iter()
-            .map(|(id, snap)| (id, snap.five_hour.utilization))
-            .collect()
+        five_hour_utilization_of(all)
     })
     .await
     .unwrap_or_default()
+}
+
+/// The latest snapshot per account, mapped to its 5h utilization, skipping an
+/// account whose latest snapshot says its plan has no 5h window.
+fn five_hour_utilization_of(snapshots: Vec<crate::types::UsageSnapshot>) -> HashMap<String, f64> {
+    super::usage::reduce_to_latest_per_account(snapshots)
+        .into_iter()
+        .filter(|(_, snap)| snap.five_hour_limited)
+        .map(|(id, snap)| (id, snap.five_hour.utilization))
+        .collect()
 }
 
 /// Allocator for `spawn_worker` when Jarvis omits an explicit `account` arg
@@ -268,6 +277,37 @@ mod tests {
 
     fn test_state() -> Arc<DaemonState> {
         DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
+    }
+
+    fn usage_snap(account: &str, captured_at: &str, utilization: f64, five_hour_limited: bool) -> crate::types::UsageSnapshot {
+        use crate::types::{UsageSnapshot, WindowUsage};
+        UsageSnapshot {
+            captured_at: captured_at.into(),
+            five_hour: WindowUsage { utilization, resets_at: "x".into() },
+            five_hour_limited,
+            seven_day: WindowUsage { utilization: 0.0, resets_at: "y".into() },
+            extra_usage: None,
+            account_id: Some(account.to_string()),
+        }
+    }
+
+    #[test]
+    fn five_hour_utilization_uses_each_accounts_latest_snapshot() {
+        let map = five_hour_utilization_of(vec![
+            usage_snap("a", "2026-11-07T09:00:00Z", 80.0, true),
+            usage_snap("a", "2026-11-07T10:00:00Z", 30.0, true),
+        ]);
+        assert_eq!(map.get("a"), Some(&30.0));
+    }
+
+    #[test]
+    fn an_account_on_a_plan_with_no_five_hour_window_is_left_out_of_the_ranking_input() {
+        let map = five_hour_utilization_of(vec![
+            usage_snap("unlimited", "2026-11-07T10:00:00Z", 55.0, false),
+            usage_snap("limited", "2026-11-07T10:00:00Z", 30.0, true),
+        ]);
+        assert_eq!(map.get("unlimited"), None, "no window means no reading, so it ranks as full headroom");
+        assert_eq!(map.get("limited"), Some(&30.0));
     }
 
     // ── fleet account allocation (todo 272) ─────────────────────────────────
