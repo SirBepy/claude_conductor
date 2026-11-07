@@ -54,6 +54,39 @@ fn default_gate_name(caller_cwd: &std::path::Path, target: &std::path::Path) -> 
     }
 }
 
+/// `default_gate_name`, made unique among the names the caller's subs already
+/// answer to (`taken`, trimmed and lower-cased). Gates skip the duplicate-name
+/// refusal, so two repos whose folders share a basename would otherwise both be
+/// `Gate: <folder>` and `subchat send` or `after` by that name would be
+/// ambiguous. A taken name tries the parent folder first (`Gate: <parent>/<folder>`),
+/// then a counter on the last name tried (`... 2`, `... 3`).
+fn unique_gate_name(caller_cwd: &std::path::Path, target: &std::path::Path, taken: &[String]) -> String {
+    let is_taken = |name: &str| taken.iter().any(|t| *t == name.trim().to_lowercase());
+    let base = default_gate_name(caller_cwd, target);
+    if !is_taken(&base) {
+        return base;
+    }
+    let with_parent = match (target.parent().and_then(|p| p.file_name()), target.file_name()) {
+        (Some(parent), Some(folder)) if base != GATE_DEFAULT_NAME => {
+            Some(format!("{GATE_DEFAULT_NAME}: {}/{}", parent.to_string_lossy(), folder.to_string_lossy()))
+        }
+        _ => None,
+    };
+    let stem = match with_parent {
+        Some(name) if !is_taken(&name) => return name,
+        Some(name) => name,
+        None => base,
+    };
+    let mut n = 2;
+    loop {
+        let name = format!("{stem} {n}");
+        if !is_taken(&name) {
+            return name;
+        }
+        n += 1;
+    }
+}
+
 /// `caller_session_id` -> the `turn_gen` it last spawned in. A static rather
 /// than a `DaemonState` field: one guard does not earn a field threaded
 /// through every construction site, and the daemon is a single process.
@@ -159,7 +192,10 @@ pub(crate) async fn spawn_chat(
     let account_id = Some(inherited.account_id.clone()).filter(|a| !a.is_empty());
     // A gate is spawned with a name and a prompt only; a name is what its card,
     // its list row and `after` find it by.
-    let gate_name = sub.as_ref().filter(|p| p.brief.gate).map(|_| default_gate_name(&caller.cwd, &target_cwd));
+    let gate_name = sub.as_ref().filter(|p| p.brief.gate).map(|_| {
+        let taken = crate::daemon::subchats::spawn::live_sub_names(state, caller_session_id);
+        unique_gate_name(&caller.cwd, &target_cwd, &taken)
+    });
     let name = name.or(gate_name.as_deref());
 
     // A writing sub that gets its own worktree (`subchats::worktree`) runs there,
@@ -757,6 +793,43 @@ mod tests {
         let state = state_with_defaults(Some("haiku"), None);
         let (m, e) = peer_model_effort(&state, "C:\\proj-a", &json!({"model": "opus", "effort": "high"}));
         assert_eq!((m.as_str(), e.as_str()), ("opus", "high"));
+    }
+
+    fn names(taken: &[&str]) -> Vec<String> {
+        taken.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[test]
+    fn a_gate_name_nobody_holds_is_the_default() {
+        let (hub, admin) = (std::path::Path::new("/work/hub"), std::path::Path::new("/work/zng-admin"));
+        assert_eq!(unique_gate_name(hub, hub, &[]), "Gate");
+        assert_eq!(unique_gate_name(hub, admin, &names(&["gate: other-repo", "header"])), "Gate: zng-admin");
+    }
+
+    #[test]
+    fn two_gates_in_repos_sharing_a_folder_name_are_told_apart_by_the_parent_folder() {
+        let hub = std::path::Path::new("/work/hub");
+        let (a, b) = (std::path::Path::new("/clients/a/admin"), std::path::Path::new("/clients/b/admin"));
+        let first = unique_gate_name(hub, a, &[]);
+        assert_eq!(first, "Gate: admin");
+        let second = unique_gate_name(hub, b, &names(&[&first.to_lowercase()]));
+        assert_eq!(second, "Gate: b/admin");
+    }
+
+    #[test]
+    fn a_gate_name_still_taken_after_the_parent_folder_gets_a_counter() {
+        let hub = std::path::Path::new("/work/hub");
+        let b = std::path::Path::new("/clients/b/admin");
+        assert_eq!(unique_gate_name(hub, b, &names(&["gate: admin", "gate: b/admin"])), "Gate: b/admin 2");
+        assert_eq!(unique_gate_name(hub, b, &names(&["gate: admin", "gate: b/admin", "gate: b/admin 2"])), "Gate: b/admin 3");
+    }
+
+    /// A finished gate still answers to its name, so the next gate in the same
+    /// project cannot reuse plain `Gate` either.
+    #[test]
+    fn a_taken_plain_gate_name_in_the_callers_own_project_gets_a_counter() {
+        let hub = std::path::Path::new("/work/hub");
+        assert_eq!(unique_gate_name(hub, hub, &names(&["gate"])), "Gate 2");
     }
 
     fn project(path: &str) -> crate::types::ProjectConfig {

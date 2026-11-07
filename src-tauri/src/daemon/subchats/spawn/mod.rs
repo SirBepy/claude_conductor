@@ -60,9 +60,8 @@ pub fn resolve_tier(model: Option<&str>, effort: Option<&str>) -> Result<(String
     Ok((model, effort))
 }
 
-/// "Move into main chat" only adopts a chat from the main chat's own project.
-/// `target` is the chat's directory, `caller_cwd` the main chat's own. A fresh
-/// sub is not held to this: `plan` lets it run in any project the app knows.
+/// `Ok` when `target` (a chat's directory) is in the main chat's own project.
+/// `caller_cwd` is the main chat's own directory.
 pub fn check_same_project(caller_cwd: &std::path::Path, target: &std::path::Path) -> Result<(), String> {
     if project_key(caller_cwd) == project_key(target) {
         return Ok(());
@@ -70,10 +69,23 @@ pub fn check_same_project(caller_cwd: &std::path::Path, target: &std::path::Path
     Err(other_project_refusal(caller_cwd))
 }
 
-/// Adopting a chat from another project is Joe's call to make from that chat.
+/// "Move into main chat" adopts a chat from the main chat's own project or from
+/// any project the app already knows, the same reach a fresh sub has in `plan`
+/// (both go through `resolve_target_cwd`).
+pub fn check_adoptable_project(state: &DaemonState, caller_cwd: &std::path::Path, target: &std::path::Path) -> Result<(), String> {
+    check_same_project(caller_cwd, target).or_else(|refusal| {
+        crate::daemon::methods::spawn_chat::resolve_target_cwd(caller_cwd, target, &state.settings.snapshot().projects)
+            .map(|_| ())
+            .map_err(|_| refusal)
+    })
+}
+
+/// Said when a chat's folder is neither the main chat's project nor a known one.
+/// Joe is the one moving the chat in, so it says which projects work and how to
+/// make a project known, not whom to ask.
 fn other_project_refusal(caller_cwd: &std::path::Path) -> String {
     format!(
-        "Subs run in this chat's own project ({}) only. To work in another project, ask Joe to start a chat there, or to turn off Use subchats for this chat.",
+        "A chat can join as a sub from this chat's own project ({}) or a project Conductor already knows, and this one is neither. Open its project in Conductor first, or leave the chat in the sidebar.",
         caller_cwd.display()
     )
 }
@@ -190,18 +202,31 @@ pub fn plan(
 /// Said when `gate: true` comes from a chat whose mode is off.
 pub const GATE_MODE_OFF: &str = "gate: true starts a hidden gate sub, which only a chat with Use subchats on can do. Run the push gate in this chat, or spawn the gate chat without gate.";
 
-/// A name is how the main chat addresses a sub (`subchat send`, `after`), so one
-/// parent never has two live subs answering to it. Running, queued and finished
-/// subs all count (a finished one wakes on a follow-up); an ended one is gone. The
-/// match ignores case and surrounding blanks, as the tool's own lookup does.
-fn refuse_duplicate_name(state: &DaemonState, parent: &str, name: Option<&str>) -> Result<(), String> {
-    let wanted = name.map(|n| n.trim().to_lowercase()).filter(|n| !n.is_empty());
-    let Some(wanted) = wanted else { return Ok(()) };
-    let same: Vec<String> = state
+/// The subs a parent can still address by name: running, queued and finished
+/// ones (a finished one wakes on a follow-up); an ended one is gone.
+fn live_subs(state: &DaemonState, parent: &str) -> Vec<Instance> {
+    state
         .registry
         .list()
         .into_iter()
         .filter(|i| i.subchat_of.as_deref() == Some(parent) && i.ended_at.is_none() && i.end_reason.is_none())
+        .collect()
+}
+
+/// The names `live_subs` answer to, trimmed and lower-cased the way the name
+/// match below compares them, for a caller picking a name that is still free.
+pub fn live_sub_names(state: &DaemonState, parent: &str) -> Vec<String> {
+    live_subs(state, parent).iter().map(|i| label(i).trim().to_lowercase()).collect()
+}
+
+/// A name is how the main chat addresses a sub (`subchat send`, `after`), so one
+/// parent never has two live subs answering to it. The match ignores case and
+/// surrounding blanks, as the tool's own lookup does.
+fn refuse_duplicate_name(state: &DaemonState, parent: &str, name: Option<&str>) -> Result<(), String> {
+    let wanted = name.map(|n| n.trim().to_lowercase()).filter(|n| !n.is_empty());
+    let Some(wanted) = wanted else { return Ok(()) };
+    let same: Vec<String> = live_subs(state, parent)
+        .into_iter()
         .filter(|i| label(i).trim().to_lowercase() == wanted)
         .map(|i| format!("{} ({})", label(&i), if i.subchat_finished { "finished" } else { "running" }))
         .collect();
@@ -533,9 +558,33 @@ mod tests {
         row(&st, "main");
         let hit = plan(&st, "main", &on(), elsewhere(), None, None, None, Some("n"), &complete(), &[]).err().unwrap();
         assert!(hit.contains("Joe") && hit.contains("plain=true"), "{hit}");
-        // Adoption keeps its own-project rule, with the Joe-only way out.
+        // Joe is the one moving a chat in, so the adoption refusal never tells the
+        // caller to ask him; it says which projects do work.
         let adopt = check_same_project(std::path::Path::new("/a"), std::path::Path::new("/b")).unwrap_err();
-        assert!(adopt.contains("Joe") && adopt.contains("Use subchats"), "{adopt}");
+        assert!(adopt.contains("already knows") && adopt.contains("/a"), "{adopt}");
+        assert!(!adopt.contains("ask Joe") && !adopt.contains("Use subchats"), "{adopt}");
+    }
+
+    #[test]
+    fn adoption_accepts_a_chat_from_a_known_project_and_refuses_an_unknown_one() {
+        let other = tempfile::tempdir().unwrap();
+        let st = state_knowing(other.path());
+        let caller = cwd();
+        assert!(check_adoptable_project(&st, &caller, other.path()).is_ok(), "a known project, like a fresh sub");
+        assert!(check_adoptable_project(&st, &caller, &caller).is_ok(), "the main chat's own project");
+        let err = check_adoptable_project(&st, &caller, std::path::Path::new(elsewhere())).unwrap_err();
+        assert!(err.contains("already knows"), "{err}");
+    }
+
+    #[test]
+    fn live_sub_names_lists_the_names_a_parent_can_still_address() {
+        let st = state();
+        row(&st, "ln-main");
+        sub_row(&st, "ln-a", "ln-main", "  Header ");
+        sub_row(&st, "ln-gone", "ln-main", "gone");
+        st.registry.mark_ended("ln-gone", crate::types::EndReason::Manual, "2026-11-05T00:00:01Z");
+        sub_row(&st, "ln-other", "someone-else", "elsewhere");
+        assert_eq!(live_sub_names(&st, "ln-main"), vec!["header".to_string()]);
     }
 
     #[test]

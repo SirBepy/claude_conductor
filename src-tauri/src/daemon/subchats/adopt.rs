@@ -102,7 +102,7 @@ pub async fn move_into_main(state: &Arc<DaemonState>, chat_id: &str, main_id: &s
     if !crate::sessions::chat_config::get(main_id).is_some_and(|c| c.subchats_on) {
         return Err(AdoptError::TargetNotMain(main_id.to_string()));
     }
-    spawn::check_same_project(&main.cwd, &inst.cwd).map_err(AdoptError::OtherProject)?;
+    spawn::check_adoptable_project(state, &main.cwd, &inst.cwd).map_err(AdoptError::OtherProject)?;
     let running = spawn::running_subs(&state.registry, main_id).len();
     if running >= spawn::MAX_RUNNING {
         return Err(AdoptError::Full(main_id.to_string(), running));
@@ -249,6 +249,28 @@ mod tests {
 
         assert!(st.registry.get("ref-plain").unwrap().subchat_of.is_none());
         assert!(!crate::sessions::chat_config::sub_session_ids().contains("ref-plain"));
+    }
+
+    /// A fresh sub may run in any project the app knows, so a chat from one joins
+    /// the same way; a folder the app does not know still does not.
+    #[tokio::test]
+    async fn a_chat_from_another_known_project_can_be_moved_in() {
+        let _data = TempDataDir::new();
+        let known = tempfile::tempdir().unwrap();
+        let raw = serde_json::json!({ "id": "other", "path": known.path(), "name": "other", "created_at": "2026-11-05T00:00:00Z" });
+        let mut settings = Settings::default();
+        settings.projects.push(serde_json::from_value::<crate::types::ProjectConfig>(raw).unwrap());
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(settings));
+        main_chat(&st, "kp-main");
+        chat(&st, "kp-known", &known.path().to_string_lossy());
+        chat(&st, "kp-unknown", "some-other-project-folder");
+
+        move_into_main(&st, "kp-known", "kp-main").await.unwrap();
+        assert_eq!(st.registry.get("kp-known").unwrap().subchat_of.as_deref(), Some("kp-main"));
+
+        let e = move_into_main(&st, "kp-unknown", "kp-main").await.unwrap_err();
+        assert!(matches!(e, AdoptError::OtherProject(_)), "{e:?}");
+        assert!(st.registry.get("kp-unknown").unwrap().subchat_of.is_none());
     }
 
     #[test]
