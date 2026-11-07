@@ -6,6 +6,8 @@
  * version on the URL it opens as `?shellv=`; this module keeps it.
  */
 
+import { stripUrlParam } from "./url-params";
+
 export const SHELL_VERSION_KEY = "conductor_shell_version";
 
 /** Reads `?shellv=` off the current URL, stores it, and removes it from the
@@ -20,9 +22,7 @@ export function captureShellVersion(): void {
     const raw = url.searchParams.get("shellv")?.trim();
     if (raw === undefined) return;
     if (raw) localStorage.setItem(SHELL_VERSION_KEY, raw);
-    url.searchParams.delete("shellv");
-    const query = url.searchParams.toString();
-    history.replaceState(null, "", url.pathname + (query ? `?${query}` : "") + url.hash);
+    stripUrlParam("shellv");
   } catch { /* storage or history unavailable: the version just stays unknown */ }
 }
 

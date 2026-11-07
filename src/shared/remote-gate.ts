@@ -17,6 +17,7 @@
 
 import { REMOTE_TOKEN_KEY, REMOTE_TOKEN_EXPIRED_KEY } from "./http-transport";
 import { captureShellVersion } from "./shell-version";
+import { stripUrlParam } from "./url-params";
 
 /** True when the previous token was rejected (401) and cleared by the transport. */
 function consumeExpiredFlag(): boolean {
@@ -27,16 +28,6 @@ function consumeExpiredFlag(): boolean {
   } catch {
     return false;
   }
-}
-
-function stripUrlParam(param: string): void {
-  try {
-    const url = new URL(location.href);
-    if (!url.searchParams.has(param)) return;
-    url.searchParams.delete(param);
-    const clean = url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : "") + url.hash;
-    history.replaceState(null, "", clean);
-  } catch { /* ignore */ }
 }
 
 function daemonOrigin(): string {
