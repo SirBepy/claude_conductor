@@ -106,6 +106,16 @@ pub(crate) fn resolve_projects_root(stored: Option<&str>, project_paths: &[Strin
     infer_projects_root(project_paths)
 }
 
+/// The projects root for this daemon: the stored setting, else the inference
+/// over the known projects. The one place both `create_project_folder` and the
+/// GitHub clone RPC read "where do new projects go".
+pub(crate) fn projects_root(state: &DaemonState) -> Option<String> {
+    let settings = state.settings.snapshot();
+    let stored = settings.extra.get(PROJECTS_ROOT_SETTINGS_KEY).and_then(|v| v.as_str());
+    let paths: Vec<String> = settings.projects.iter().map(|p| p.path.to_string_lossy().into_owned()).collect();
+    resolve_projects_root(stored, &paths)
+}
+
 /// Joins `root` and `name` with the separator `root` itself uses (ported
 /// from `projects-root.ts::joinProjectPath`), so a Windows root never
 /// produces a mixed `C:\a\b/c`.
@@ -130,17 +140,7 @@ pub fn register_create_project(router: &mut Router, state: Arc<DaemonState>) {
                 return Err(RpcError::invalid_params("invalid project name".to_string()));
             }
 
-            let settings = state.settings.snapshot();
-            let stored = settings
-                .extra
-                .get(PROJECTS_ROOT_SETTINGS_KEY)
-                .and_then(|v| v.as_str());
-            let paths: Vec<String> = settings
-                .projects
-                .iter()
-                .map(|proj| proj.path.to_string_lossy().into_owned())
-                .collect();
-            let root = resolve_projects_root(stored, &paths).ok_or_else(|| {
+            let root = projects_root(&state).ok_or_else(|| {
                 RpcError::invalid_params(
                     "no projects root configured - set one on the desktop first".to_string(),
                 )

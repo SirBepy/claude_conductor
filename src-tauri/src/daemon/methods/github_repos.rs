@@ -12,7 +12,7 @@
 //! `full_name` and never a path: the destination is `<projects root>/<repo>`,
 //! resolved server-side the same way `create_project_folder` does it.
 
-use crate::daemon::methods::create_project::{is_valid_project_name, resolve_projects_root};
+use crate::daemon::methods::create_project::{is_valid_project_name, projects_root as shared_projects_root};
 use crate::daemon::rpc::{Router, RpcError};
 use crate::daemon::state::DaemonState;
 use serde::{Deserialize, Serialize};
@@ -22,9 +22,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-/// Same key `create_project.rs` and `projects-root.ts` use, so a root set on
-/// the desktop is the root a clone lands in.
-const PROJECTS_ROOT_SETTINGS_KEY: &str = "newProjectLastParent";
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(40);
 const CLONE_TIMEOUT: Duration = Duration::from_secs(600);
 /// A typed-ahead search re-runs on every Enter; the per-account repo listing is
@@ -83,11 +80,17 @@ pub(crate) fn matches_query(full_name: &str, query: &str) -> bool {
     query.split_whitespace().all(|w| hay.contains(&w.to_lowercase()))
 }
 
-/// 0 exact repo name, 1 repo name starts with, 2 repo name contains, 3 owner
-/// part only. Stable within a rank, so the API's recently-updated order holds.
+/// 0 exact name, 1 name starts with, 2 name contains, 3 owner part only. The
+/// "name" is the repo half, or the whole `owner/repo` when the query itself
+/// has a `/` (a repo-half comparison could never match such a query). Stable
+/// within a rank, so the API's recently-updated order holds.
 fn rank(full_name: &str, query: &str) -> u8 {
     let q = query.trim().to_lowercase();
-    let repo = full_name.rsplit('/').next().unwrap_or(full_name).to_lowercase();
+    let repo = if q.contains('/') {
+        full_name.to_lowercase()
+    } else {
+        full_name.rsplit('/').next().unwrap_or(full_name).to_lowercase()
+    };
     if repo == q {
         0
     } else if repo.starts_with(&q) {
@@ -261,10 +264,7 @@ async fn list_account_repos(login: &str) -> Result<Vec<RepoHit>, GhError> {
 }
 
 fn projects_root(state: &DaemonState) -> Option<PathBuf> {
-    let settings = state.settings.snapshot();
-    let stored = settings.extra.get(PROJECTS_ROOT_SETTINGS_KEY).and_then(|v| v.as_str());
-    let paths: Vec<String> = settings.projects.iter().map(|p| p.path.to_string_lossy().into_owned()).collect();
-    resolve_projects_root(stored, &paths).map(PathBuf::from)
+    shared_projects_root(state).map(PathBuf::from)
 }
 
 fn project_paths(state: &DaemonState) -> Vec<PathBuf> {
@@ -277,6 +277,50 @@ fn mark_on_disk(hits: &mut [RepoHit], state: &DaemonState) {
     for h in hits {
         h.on_disk = find_on_disk(root.as_deref(), &known, &h.full_name);
     }
+}
+
+/// Destinations a clone is writing into right now. A failed clone removes its
+/// folder, so a second request for the same destination must not get that far:
+/// its failure would delete the first one's in-progress checkout.
+fn cloning_now() -> &'static Mutex<std::collections::HashSet<PathBuf>> {
+    static C: OnceLock<Mutex<std::collections::HashSet<PathBuf>>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
+
+struct CloneClaim(PathBuf);
+impl Drop for CloneClaim {
+    fn drop(&mut self) {
+        cloning_now().lock().unwrap().remove(&self.0);
+    }
+}
+
+/// Runs `clone` into `dest`, a folder the caller has just checked does not
+/// exist. If it fails or times out, whatever it left at `dest` is removed so
+/// an immediate retry is not blocked by an "already exists" on a half-cloned
+/// folder; when the removal itself fails (an open handle on Windows), the
+/// error names the leftover path instead.
+async fn clone_cleaning_up<F>(dest: &Path, clone: F) -> Result<(), RpcError>
+where
+    F: std::future::Future<Output = Result<String, GhError>>,
+{
+    if !cloning_now().lock().unwrap().insert(dest.to_path_buf()) {
+        return Err(RpcError::invalid_params(format!("{} is already being cloned", dest.display())));
+    }
+    let _claim = CloneClaim(dest.to_path_buf());
+    let msg = match clone.await {
+        Ok(_) => return Ok(()),
+        Err(GhError::Missing) => return Err(RpcError::invalid_params("gh is not installed".to_string())),
+        Err(GhError::Failed(m)) => m,
+    };
+    if dest.exists() {
+        if let Err(e) = std::fs::remove_dir_all(dest) {
+            return Err(RpcError::internal(format!(
+                "clone failed: {msg} (could not remove the partial folder {}: {e})",
+                dest.display()
+            )));
+        }
+    }
+    Err(RpcError::internal(format!("clone failed: {msg}")))
 }
 
 fn status_reply(status: &str, items: Vec<RepoHit>, failed: usize) -> Value {
@@ -425,12 +469,11 @@ pub fn register_github_repos(router: &mut Router, state: Arc<DaemonState>) {
                 };
 
                 let dest_str = dest.to_string_lossy().into_owned();
-                run_gh(&["repo", "clone", &p.full_name, &dest_str], token.as_deref(), CLONE_TIMEOUT)
-                    .await
-                    .map_err(|e| match e {
-                        GhError::Missing => RpcError::invalid_params("gh is not installed".to_string()),
-                        GhError::Failed(m) => RpcError::internal(format!("clone failed: {m}")),
-                    })?;
+                clone_cleaning_up(
+                    &dest,
+                    run_gh(&["repo", "clone", &p.full_name, &dest_str], token.as_deref(), CLONE_TIMEOUT),
+                )
+                .await?;
 
                 let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
                 crate::daemon::session_registration::register_project(&state, &dest, &now);
@@ -485,6 +528,17 @@ mod tests {
         assert!(rank("o/hub", "hub") < rank("o/hubbub", "hub"));
         assert!(rank("o/hubbub", "hub") < rank("o/my-hub", "hub"));
         assert!(rank("o/my-hub", "hub") < rank("hub/other", "hub"));
+    }
+
+    #[test]
+    fn rank_of_an_owner_slash_repo_query_compares_the_full_name() {
+        assert_eq!(rank("acme/hubbub", "acme/hubbub"), 0);
+        assert_eq!(rank("Acme/Hubbub", " acme/hubbub "), 0, "case and padding are ignored");
+        assert!(rank("acme/hubbub", "acme/hubbub") < rank("acme/hubbub-api", "acme/hubbub"));
+        assert!(rank("acme/hubbub-api", "acme/hubbub") < rank("acme/my-hubbub", "acme/hub"));
+        let mut names = ["acme/hubbub-api", "acme/hubbub"];
+        names.sort_by_key(|n| rank(n, "acme/hubbub"));
+        assert_eq!(names[0], "acme/hubbub");
     }
 
     #[test]
@@ -596,6 +650,40 @@ mod tests {
         let v = r.result.unwrap();
         assert_eq!(v["existing"], true);
         assert_eq!(Path::new(v["path"].as_str().unwrap()), dir.path().join("repo"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_clone_removes_its_partial_folder_so_the_retry_is_not_blocked() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("repo");
+        let partial = dest.clone();
+        let err = clone_cleaning_up(&dest, async move {
+            std::fs::create_dir_all(partial.join(".git")).unwrap();
+            std::fs::write(partial.join(".git").join("config"), "[remote \"origin\"]").unwrap();
+            Err(GhError::Failed("GitHub did not answer in time".into()))
+        })
+        .await
+        .expect_err("a failed clone must error");
+        assert!(err.message.contains("clone failed: GitHub did not answer in time"), "got {}", err.message);
+        assert!(!dest.exists(), "the half-cloned folder must be gone");
+        // The retry goes through: the destination is neither claimed nor present.
+        clone_cleaning_up(&dest, async { Ok(String::new()) }).await.expect("retry must run");
+    }
+
+    #[tokio::test]
+    async fn a_second_clone_of_the_same_destination_cannot_delete_the_first_ones_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("repo");
+        std::fs::create_dir_all(&dest).unwrap();
+        let inner_dest = dest.clone();
+        let first = clone_cleaning_up(&dest, async {
+            let second = clone_cleaning_up(&inner_dest, async { Err(GhError::Failed("boom".into())) }).await;
+            assert!(second.expect_err("claimed").message.contains("already being cloned"));
+            Ok(String::new())
+        })
+        .await;
+        assert!(first.is_ok());
+        assert!(dest.exists(), "the refused second clone must not remove the folder");
     }
 
     #[tokio::test]
