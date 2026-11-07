@@ -10,6 +10,7 @@
 //! convention, the IPC layer fires it after the registry call).
 
 use super::start_retry::start_session_with_retry;
+use crate::daemon::lifecycle::{SPAWN_DEFAULT_EFFORT, SPAWN_DEFAULT_MODEL};
 use crate::daemon_client::ClientError;
 use crate::state::AppState;
 use crate::types::chat::{ChatEvent, ContentBlock};
@@ -164,14 +165,14 @@ pub async fn send_message(
                 let (model, effort) = if !i.model.is_empty() && !i.effort.is_empty() {
                     (i.model.clone(), i.effort.clone())
                 } else {
-                    ("opus".to_string(), "high".to_string())
+                    (SPAWN_DEFAULT_MODEL.to_string(), SPAWN_DEFAULT_EFFORT.to_string())
                 };
                 // A finished or frozen sub has no child: the daemon wakes it with a new
                 // one, whose broadcast channel this window is not attached to yet.
                 let wakes_sub = i.subchat_of.is_some() && (i.subchat_finished || i.frozen);
                 (model, effort, i.account_id.clone(), i.machine.is_some(), wakes_sub)
             }
-            None => ("opus".to_string(), "high".to_string(), None, false, false),
+            None => (SPAWN_DEFAULT_MODEL.to_string(), SPAWN_DEFAULT_EFFORT.to_string(), None, false, false),
         }
     };
 
@@ -214,8 +215,10 @@ async fn send_message_daemon(
     super::daemon_bridge::ensure_attached(app, session_id).await.ok();
 
     // A model/effort pick made while the chat was idle is applied here, on the
-    // message that follows it. Its own try: a mirrored chat is refreshed by its
-    // host's send, and a failure must not cost the send itself.
+    // message that follows it. A question-card answer is such a message: a
+    // question never parks a oneshot in `DaemonState::pending`, so its answer
+    // always travels as this send, never in-band. Its own try: a mirrored chat
+    // is refreshed by its host's send, and a failure must not cost the send itself.
     if !mirrored {
         let refreshed = match state.client().await {
             Some(client) => client.refresh_stale_launch(session_id).await.unwrap_or(false),
