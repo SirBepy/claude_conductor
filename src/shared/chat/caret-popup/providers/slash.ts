@@ -1,7 +1,7 @@
 import type { SlashEntry, SlashSource } from "../../../../types/ipc.generated";
 import { invoke } from "../../../ipc";
 import { getTransport } from "../../../transport";
-import { setSlashEntries, slashEntryQualifiedName } from "../../slash-registry";
+import { setSlashEntries, skillDetailTarget, slashEntryQualifiedName } from "../../slash-registry";
 import { insertAtCaret } from "../insert-at-caret";
 import { match } from "../match";
 import type { SuggestProvider } from "../types";
@@ -81,6 +81,13 @@ export class SlashProvider implements SuggestProvider<SlashEntry> {
 
     row.appendChild(head);
     row.appendChild(meta);
+    // A row click means "pick", so the way into a skill's detail is its own
+    // control. Commands and builtins have no detail page and get none.
+    const target = skillDetailTarget(e.name, e.source);
+    if (target) {
+      row.classList.add("has-info");
+      row.appendChild(infoButton(target));
+    }
     return row;
   }
 
@@ -108,6 +115,25 @@ export class SlashProvider implements SuggestProvider<SlashEntry> {
     this.cache = entries;
     setSlashEntries(this.cache);
   }
+}
+
+function infoButton(skill: string): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "skill-info";
+  btn.dataset.noPick = "";
+  btn.title = "Open skill details";
+  btn.setAttribute("aria-label", `Open details for ${skill}`);
+  btn.innerHTML = `<i class="ph ph-info"></i>`;
+  // Not a click on the row: the popup picks on mousedown, and the click that
+  // follows a touch tap must not reach anything else either.
+  btn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    // Lazy: navigation.ts touches `window` at import, and this provider is
+    // also loaded by code that runs without a DOM.
+    void import("../../../open-skill-detail").then((m) => m.openSkillDetail(skill));
+  });
+  return btn;
 }
 
 function sourceLabel(s: SlashSource): string {

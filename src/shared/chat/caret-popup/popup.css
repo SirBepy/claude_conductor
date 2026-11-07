@@ -13,6 +13,7 @@
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
 }
 .caret-popup .row {
+  position: relative;
   padding: 6px 10px;
   cursor: pointer;
   line-height: 1.3;
@@ -75,3 +76,46 @@
 /* Only project-local kinds render a badge (see SlashProvider.renderRow). */
 .caret-popup .badge.project-skill,
 .caret-popup .badge.project-command { background: #7cb6ff; }
+
+/* A skill row's info icon opens its detail (SlashProvider.renderRow). It sits at
+   the row's right edge, vertically centred, and the row reserves its width so
+   the one-line description never runs under it. --control-h-sm on desktop; the
+   44px phone floor is --control-h, which tokens.css raises at the same breakpoint. */
+.caret-popup .row.has-info {
+  padding-right: calc(var(--control-h-sm) + 14px);
+}
+.caret-popup .skill-info {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  box-sizing: border-box;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.caret-popup .skill-info:hover {
+  color: var(--color-primary);
+  background: var(--color-surface-alt);
+}
+@media (max-width: 768px) {
+  .caret-popup .row.has-info {
+    min-height: var(--control-h);
+    box-sizing: border-box;
+    padding-right: calc(var(--control-h) + 10px);
+  }
+  .caret-popup .skill-info {
+    width: var(--control-h);
+    height: var(--control-h);
+    font-size: 18px;
+  }
+}
