@@ -275,7 +275,7 @@ export function initBoot(): void {
   // a failed fetch can't wedge the gate - see wireInitialFetches).
   // Phone: the usage history is not what the first screen is waiting for, so
   // the gate takes a null at once and the real rows publish when they land.
-  // It keeps the last two weeks on the device and downloads only what is newer.
+  // It keeps the last 15 days on the device and downloads only what is newer.
   const remote = isRemote();
   if (remote) enableUsageHistoryPersistence(indexedDbUsageHistoryStore());
   wireInitialFetches({
