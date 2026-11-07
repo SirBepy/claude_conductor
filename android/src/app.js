@@ -40,8 +40,8 @@
   // acted, so silently retrying for 30s instead of showing the error would
   // be worse UX, not better.
   let retryToken = null; // { cancelled } for the in-flight auto-retry loop
-  let navigating = false; // set the instant window.location.href is assigned;
-  // every loop checks it before proceeding, so nothing fires after nav starts
+  let navigating = false; // set when handoff() starts leaving for the SPA, before the
+  // href is assigned; every loop checks it before proceeding, so nothing fires after nav starts
   let activeAbortController = null; // lets Cancel abort a health check in flight
   let countdownTimerId = null;
   let countdownResolve = null; // lets Cancel resolve the backoff wait instantly
