@@ -186,6 +186,22 @@ function buildRowOptions(args: {
   };
 }
 
+/** Ids of the chats whose account has a plan with no 5h window. A chat with no
+ *  account of its own is measured against the default account, because that is
+ *  the usage snapshot the daemon's drain percentages are computed from. */
+export function chatsWithoutFiveHour(
+  sessions: readonly Pick<Instance, "session_id" | "account_id">[],
+  noWindowAccounts: ReadonlySet<string>,
+  defaultAccountId: string | null,
+): Set<string> {
+  const out = new Set<string>();
+  for (const s of sessions) {
+    const account = s.account_id ?? defaultAccountId;
+    if (account && noWindowAccounts.has(account)) out.add(s.session_id);
+  }
+  return out;
+}
+
 /** Maps a live `Instance` + render context to `RowOptions`. */
 export function sessionRowOptions(
   s: Instance,
@@ -202,11 +218,16 @@ export function sessionRowOptions(
     kbdHint: string;
     /** This chat's subs summary when it has Use subchats on, else absent. */
     mainChat?: MainChatInfo | null;
+    /** Chats whose account has a plan with no 5h window: their drain chip
+     *  would quote a share of a window that does not exist. Absent = none. */
+    noFiveHour?: ReadonlySet<string>;
   },
 ): RowOptions {
   const needsAttention = ctx.attention.has(s.session_id);
   const isClosing = ctx.closing.has(s.session_id);
-  const drainChip = ctx.sort === "drain" ? drainChipHtml(ctx.drainMap.get(s.session_id)) : "";
+  const drainChip = ctx.sort === "drain" && !ctx.noFiveHour?.has(s.session_id)
+    ? drainChipHtml(ctx.drainMap.get(s.session_id))
+    : "";
   const statusClass = statusDotClass(s, ctx.unread, ctx.attention, ctx.question, ctx.rateLimited);
   // Only close_failed gets a hover title today - the tooltip cascade
   // (stateTooltip) exists for every state, but wiring the rest into the DOM

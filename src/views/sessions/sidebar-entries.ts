@@ -38,6 +38,7 @@ export function buildSidebarEntries(
   listEl: HTMLElement,
   rerender: () => void,
   drainMap: Map<string, number>,
+  noFiveHour: ReadonlySet<string>,
   scheduledCountMap: Map<string, number>,
   scheduledPendingPlaceholders: Set<string>,
   refreshDrainMap: (sessionIds: string[]) => void,
@@ -236,7 +237,7 @@ export function buildSidebarEntries(
         entries.push({
           key: chainRowKey(s.session_id),
           html: renderSidebarRow(sessionRowOptions(s, {
-            isActive, unread, attention, question, rateLimited, closing, sort, drainMap, scheduledCountMap, kbdHint,
+            isActive, unread, attention, question, rateLimited, closing, sort, drainMap, noFiveHour, scheduledCountMap, kbdHint,
             mainChat: mainInfo.get(s.session_id),
           })),
         });
@@ -288,7 +289,7 @@ export function buildSidebarEntries(
         entries.push({
           key: chainRowKey(s.session_id),
           html: renderSidebarRow(sessionRowOptions(s, {
-            isActive, unread, attention, question, rateLimited, closing, sort, drainMap, scheduledCountMap, kbdHint: "",
+            isActive, unread, attention, question, rateLimited, closing, sort, drainMap, noFiveHour, scheduledCountMap, kbdHint: "",
             mainChat: mainInfo.get(s.session_id),
           })),
         });
