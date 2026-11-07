@@ -786,6 +786,10 @@ export class HttpTransport implements Transport {
         });
       case "get_settings":
         return this.rpc<T>("get_settings", null);
+      // The PC app's release version for Settings > About on the phone
+      // (daemon/health.rs); the page degrades to "unknown" without this case.
+      case "get_version_info":
+        return this.rpc<T>("get_version_info", null);
       case "list_slash_commands":
         // Read-only filesystem scan for the `/` autocomplete popup; the daemon
         // runs on the same PC and can read the same disk as desktop.
