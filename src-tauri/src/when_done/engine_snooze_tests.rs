@@ -125,3 +125,44 @@ async fn a_snooze_pushes_a_nightly_overdue_cutoff_past_its_end() {
     assert_eq!(g.state.phase, ProtocolPhase::GaveUp);
     assert!(g.terminal_calls.is_empty());
 }
+
+/// A snooze that lands between the Watching tick's `snoozed()` read and its
+/// state write leaves `snooze_until` unseen by that tick (it reads `None`) but
+/// the display copy already set. The tick must not wipe a copy that is still in
+/// the future.
+#[tokio::test(start_paused = true)]
+async fn a_display_copy_written_after_the_snoozed_read_survives_the_tick() {
+    let future_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+        + 60 * 60_000;
+    let world = Arc::new(Mutex::new(World {
+        busy_map: vec![("s1".to_string(), true)],
+        snooze_until: None,
+        state: ProtocolState { snoozed_until_unix_ms: Some(future_ms), ..ProtocolState::watching(TerminalAction::Shutdown) },
+        ..Default::default()
+    }));
+    // The second busy read happens after the first tick's state write.
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let seen_in_tick = seen.clone();
+    let reads = Arc::new(Mutex::new(0u32));
+    let reads_in_tick = reads.clone();
+    let tick: Arc<Mutex<dyn FnMut(&mut World) + Send>> = Arc::new(Mutex::new(move |w: &mut World| {
+        let mut n = reads_in_tick.lock().unwrap();
+        *n += 1;
+        if *n == 2 {
+            seen_in_tick.lock().unwrap().push(w.state.snoozed_until_unix_ms);
+            w.busy_map = vec![("s1".to_string(), false)];
+        }
+    }));
+
+    let deps = deps_for(world.clone(), tick);
+    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Manual, None).await;
+
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![Some(future_ms)],
+        "the tick cleared a display copy whose end is still in the future"
+    );
+}
