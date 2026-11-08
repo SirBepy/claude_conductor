@@ -11,7 +11,10 @@ import "./draft-subchats.css";
 const HOST_CLASS = "draft-subchats";
 const CARD_CLASS = "draft-subchats-card";
 
-const TIP = "Hand the jobs you name to hidden child chats that report back here. Switching it on moves the chat to Opus at high effort or better.";
+/** Longest the row waits for the rail card before showing itself anyway. */
+const RAIL_WAIT_MS = 4000;
+
+const TIP ="Hand the jobs you name to hidden child chats that report back here. Switching it on moves the chat to Opus at high effort or better.";
 
 /** What the chat was on before the switch moved it to the main-chat model, so
  *  switching back puts it right unless the user picked something else meanwhile. */
@@ -92,14 +95,25 @@ function wire(host: HTMLElement, pane: ParentNode, config: SessionConfig): void 
 export function mountDraftSubchats(pane: HTMLElement, config: SessionConfig): void {
   unmountDraftSubchats(pane);
   _applied = null;
-  insertRow(pane, config);
+  insertRow(pane, config, true);
+  // The dashboard's rail loads after its snapshot, so the row stays unseen until we know
+  // the rail is not coming; this covers a rail that fails to fill or never mounts.
+  setTimeout(() => revealDraftSubchats(pane), RAIL_WAIT_MS);
 }
 
-function insertRow(pane: ParentNode, config: SessionConfig): void {
+/** Shows the row once the dashboard has no rail card to replace it. A no-op when the
+ *  card already took over (the row is gone) or the row is already visible. */
+export function revealDraftSubchats(pane: ParentNode): void {
+  pane.querySelector(`.${HOST_CLASS}.is-pending`)?.classList.remove("is-pending");
+}
+
+function insertRow(pane: ParentNode, config: SessionConfig, pending = false): void {
   const shell = pane.querySelector(".composer-shell");
   if (!shell?.parentElement) return;
   const host = document.createElement("div");
-  host.className = HOST_CLASS;
+  // Pending keeps the row out of the layout, so a rail card that retires it moments later
+  // never flashes it above the message box.
+  host.className = pending ? `${HOST_CLASS} is-pending` : HOST_CLASS;
   host.innerHTML = [
     `<i class="ph ph-tree-structure" aria-hidden="true"></i>`,
     `<span class="draft-subchats-label">Use subchats</span>`,
