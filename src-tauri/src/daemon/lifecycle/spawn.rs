@@ -318,8 +318,7 @@ pub(super) async fn respawn_interactive(
         .filter(|i| !i.frozen)
         .ok_or_else(|| LifecycleError::NotFound(session_id.to_string()))?;
 
-    let model = if inst.model.is_empty() { super::SPAWN_DEFAULT_MODEL.to_string() } else { inst.model };
-    let effort = if inst.effort.is_empty() { super::SPAWN_DEFAULT_EFFORT.to_string() } else { inst.effort };
+    let (model, effort) = super::model_effort_or_default(&inst);
     spawn_session(
         state,
         StartSessionParams {
