@@ -1,3 +1,4 @@
+// Reviewed 2026-11-08: shortcuts.ts gained the command-palette def (Ctrl+Shift+P) and hasHandler/fire; the Ctrl+Shift hold hint this spec drives is unchanged and it passed.
 // Reviewed 2026-10-27 (shortcuts.ts sets an Alt-held model hint on keydown): this spec drives the Ctrl/Ctrl+Shift hints only and passed after the change, so its contract is unaffected.
 // Reviewed 2026-10-25 (desktop split): sessions-dom-wiring.ts only had wirePreviewPanel's doc comment reworded for the desktop split; nothing this spec drives changed.
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.

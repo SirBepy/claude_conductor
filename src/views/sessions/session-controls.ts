@@ -6,7 +6,10 @@
 
 import { state } from "./state";
 import { selectSession } from "./active-session";
-import { startNewSession, startNewSessionWithFavorite, resumeDraft, resumeParkedDraft } from "./pending-flow";
+import { startNewSession, startNewSessionWithFavorite, startNewSessionInProject, resumeDraft, resumeParkedDraft } from "./pending-flow";
+import { resolveRememberedLocation } from "./location-picker";
+import { resolveNewChatConfig } from "./new-chat-config";
+import type { ProjectGroup } from "../../types/ipc.generated";
 import { saveParkedDrafts } from "./pending-draft-storage";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { showView } from "../../shared/navigation";
@@ -127,6 +130,19 @@ export function triggerNewSessionGlobal(): void {
     _pendingOpenPicker = true;
     showView("sessions");
   }
+}
+
+/** Command palette's "New chat in <project>": same pane-not-mounted fallback as
+ *  the favourite slots, except the config is resolved here because the queued
+ *  launch (queueNewChat) carries one rather than a slot. */
+export async function startNewChatInProject(group: ProjectGroup): Promise<void> {
+  if (_pane) {
+    await startNewSessionInProject(_pane, group);
+    return;
+  }
+  const project = resolveRememberedLocation(group);
+  queueNewChat(project, await resolveNewChatConfig(project.path, null));
+  showView("sessions");
 }
 
 /** Ctrl+Shift+1..9 global shortcut: same pane-not-mounted fallback as

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-08: session-controls.ts gained startNewChatInProject (the palette's New chat in <project>); leaving a sub is unchanged and this spec passed.
 // Reviewed 2026-11-05: subchat-view.ts's sub list button now opens a new window instead of moving the sub; leaving a sub is unchanged and this spec passes.
 // Reviewed 2026-11-05: subchat-view.ts lost the header "Move to sidebar" button (it is a chat-menu item now); leaving a sub is unchanged and this spec passes.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.

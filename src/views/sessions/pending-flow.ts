@@ -21,7 +21,7 @@ import { loadDraft } from "../../shared/chat/composer-persistence";
 import { renderPendingPane } from "./pending-pane";
 import { paneEmptyStateHtml, ownedScheduledNewChatIds } from "./sessions-helpers";
 import { PENDING_SESSION_ID_PREFIX } from "../../shared/chat/pending-session-id";
-import type { ScheduledItem } from "../../types/ipc.generated";
+import type { ProjectGroup, ScheduledItem } from "../../types/ipc.generated";
 
 /**
  * Generate a placeholder session id used to subscribe `chat:<id>` BEFORE
@@ -221,6 +221,20 @@ export async function startNewSessionWithFavorite(pane: HTMLElement, slot: numbe
     const p = groups.find((g) => g.path.toLowerCase() === path.toLowerCase());
     if (!p || p.path_exists === false) return;
     await resolveConfigAndLaunch(pane, { ...resolveRememberedLocation(p), machineId: null });
+  } finally {
+    inFlight = false;
+    unlockBackgroundInputIfClosed();
+  }
+}
+
+/** Command palette's "New chat in <project>": the project is already chosen, so
+ *  there is no picker, same as a favourite slot. */
+export async function startNewSessionInProject(pane: HTMLElement, group: ProjectGroup): Promise<void> {
+  if (inFlight || group.path_exists === false) return;
+  inFlight = true;
+  lockBackgroundInput();
+  try {
+    await resolveConfigAndLaunch(pane, { ...resolveRememberedLocation(group), machineId: null });
   } finally {
     inFlight = false;
     unlockBackgroundInputIfClosed();

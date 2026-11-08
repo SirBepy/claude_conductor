@@ -1,3 +1,4 @@
+// Reviewed 2026-11-08: boot.ts registers the command-palette shortcut; theme following is unchanged and this spec passed.
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 import { expect, test } from "@playwright/test";
 import { capture, fireEvent, mountView } from "./harness";

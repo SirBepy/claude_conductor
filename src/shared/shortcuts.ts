@@ -19,6 +19,7 @@ const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "new-chat",   defaultKeys: "ctrl+n",       label: "New chat",       description: "Open project picker to start a chat",   context: "sessions", suppressInInput: false },
   { id: "go-home",    defaultKeys: "ctrl+shift+h",  label: "Go to Home",     description: "Navigate to the Home view",              suppressInInput: true },
   { id: "go-chats",   defaultKeys: "ctrl+shift+c",  label: "Go to Chats",    description: "Navigate to the Chats view",             suppressInInput: true },
+  { id: "command-palette", defaultKeys: "ctrl+shift+p", label: "Command palette", description: "Search every action, chat, project and setting", suppressInInput: false },
 
   // Chats view
   { id: "open-chat-1", defaultKeys: "ctrl+1", label: "Open chat 1", description: "Open the most recent chat",    context: "sessions", suppressInInput: false },
@@ -150,6 +151,17 @@ export function register(id: string, handler: () => void | Promise<void>): void 
 
 export function unregister(id: string): void {
   handlers.delete(id);
+}
+
+/** True while a handler is registered: view-scoped shortcuts unregister when
+ *  their view unmounts, so this is what tells the palette a command can run. */
+export function hasHandler(id: string): boolean {
+  return handlers.has(id);
+}
+
+/** Runs a shortcut's handler without its key combo, for the palette. */
+export function fire(id: string): void | Promise<void> {
+  return handlers.get(id)?.();
 }
 
 /** Fires when the held modifiers change what should be revealed: Ctrl alone
