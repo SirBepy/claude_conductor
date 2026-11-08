@@ -122,9 +122,13 @@ test.describe("view-harness / chat row style", () => {
     expect(stripes.beforeDisplay).toBe("none");
   });
 
-  test("right-click opens the chat menu", async ({ page }) => {
+  test("right-click opens the command palette narrowed to that chat", async ({ page }) => {
     await mountSessions(page);
     await page.locator("#sessions-list li[data-session-id]").first().click({ button: "right" });
-    await expect(page.locator(".session-ctx-menu")).toBeVisible();
+    await expect(page.locator(".cp-overlay")).toBeVisible();
+    await expect(page.locator(".cp-input")).toHaveAttribute("placeholder", /^Actions for "/);
+    await expect(page.locator(".cp-row .cp-title", { hasText: "Freeze chat" })).toBeVisible();
+    // Narrowed: none of the global rows (shortcuts, other chats, Settings).
+    await expect(page.locator(".cp-row .cp-group", { hasText: /^(Shortcut|Settings|Chat)$/ })).toHaveCount(0);
   });
 });

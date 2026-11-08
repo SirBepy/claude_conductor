@@ -14,6 +14,7 @@ import { openChatById, startNewChatInProject } from "../sessions/session-control
 import { projectGroupsData, resolveCached } from "../sessions/new-session-cache";
 import { liveChatMenuCtx } from "../sessions/chat-menu-ctx";
 import { closeChat } from "../sessions/close-chat";
+import { rerenderSidebar } from "../sessions/permission-modal";
 import { armOrToggleWhenDone, cancelWhenDone, whenDoneAction, whenDoneArmed } from "../sessions/when-done";
 import { PENDING_SESSION_ID_PREFIX } from "../../shared/chat/pending-session-id";
 import {
@@ -196,11 +197,13 @@ function fromItems(items: ItemDesc[], titleOf: (label: string) => string): Palet
 
 const OPEN_IN = (label: string) => `Open project in ${label}`;
 
-export function thisChatCommands(): PaletteCommand[] {
-  const id = state.selectedId;
+/** The actions for one live chat: the open one by default, or the row Joe
+ *  right-clicked in the sidebar. */
+export function thisChatCommands(id: string | null = state.selectedId): PaletteCommand[] {
   if (!id || id.startsWith(PENDING_SESSION_ID_PREFIX)) return [];
   if (!state.sessions.some((s) => s.session_id === id)) return [];
-  const ctx = liveChatMenuCtx(id);
+  // The sidebar's hide/freeze marks live in localStorage, so it repaints only when told to.
+  const ctx = liveChatMenuCtx(id, () => rerenderSidebar());
   // A Dashboard row would duplicate the "Project dashboard" shortcut row.
   const open = buildOpenProjectItems(ctx).filter((i) => i.label !== "Dashboard");
   return [
@@ -212,6 +215,18 @@ export function thisChatCommands(): PaletteCommand[] {
     // The header menu's red item. Ctrl+W (the "Close chat" shortcut row) always asks first;
     // this one asks only when a turn is running, as the menu did.
     { id: "this-chat:Close session", title: "Close session", group: "This chat", icon: "x-circle", run: () => closeChat(id) },
+  ];
+}
+
+/** A right-clicked draft row: the one action that applies to it, plus the project openers. */
+export function draftRowCommands(cwd: string | null, onDiscard: () => void): PaletteCommand[] {
+  const open = buildOpenProjectItems({
+    kind: "draft", sessionId: null, cwd, pid: null, readOnly: false, autoAcceptOn: false,
+    subchatsOn: false, isHidden: false, isJarvis: false, isFrozen: false,
+  }).filter((i) => i.label !== "Dashboard");
+  return [
+    { id: "this-chat:Delete draft", title: "Delete draft", group: "This chat", icon: "x-circle", run: onDiscard },
+    ...fromItems(open, OPEN_IN),
   ];
 }
 

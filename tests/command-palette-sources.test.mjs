@@ -11,7 +11,7 @@ Element.prototype.scrollIntoView ??= () => {};
 
 const shortcuts = await import("../src/shared/shortcuts.ts");
 const { state } = await import("../src/views/sessions/state.ts");
-const { shortcutCommands, settingsCommands, chatCommands, thisChatCommands, whenDoneCommands, draftCommands } =
+const { shortcutCommands, settingsCommands, chatCommands, thisChatCommands, whenDoneCommands, draftCommands, draftRowCommands } =
   await import("../src/views/command-palette/sources.ts");
 
 const live = (id, name, extra = {}) => ({
@@ -158,5 +158,40 @@ describe("draft rows", () => {
     document.addEventListener("discard-pending-draft", seen);
     draftCommands()[0].run();
     expect(seen).toHaveBeenCalledOnce();
+  });
+});
+
+describe("a right-clicked row (not the open chat)", () => {
+  it("lists the clicked chat's actions while another chat is open", () => {
+    state.sessions = [live("a", "Alpha"), live("b", "Beta", { frozen: true })];
+    state.selectedId = "a";
+    const titles = thisChatCommands("b").map((r) => r.title);
+    expect(titles).toContain("Unfreeze chat");
+    expect(thisChatCommands().map((r) => r.title)).toContain("Freeze chat");
+  });
+
+  it("has no View changes for a chat that is not on screen", () => {
+    state.sessions = [live("a", "Alpha"), live("b", "Beta")];
+    state.selectedId = "a";
+    state.activeChatActions = { viewChanges: () => {} };
+    const row = (id) => thisChatCommands(id).find((r) => r.title === "View changes");
+    expect(row("a").run).toBeTypeOf("function");
+    expect(row("b").run).toBeUndefined();
+    expect(row("b").disabledReason).toBe("Open the chat to view changes");
+    state.activeChatActions = null;
+  });
+
+  it("is empty for an unknown or draft id", () => {
+    state.sessions = [live("a", "Alpha")];
+    expect(thisChatCommands("nope")).toEqual([]);
+    expect(thisChatCommands("pending-xyz")).toEqual([]);
+  });
+
+  it("gives a draft row Delete draft, which runs the row's own discard", () => {
+    const onDiscard = vi.fn();
+    const rows = draftRowCommands("C:\Projects\demo", onDiscard);
+    expect(rows.map((r) => r.title)).toEqual(["Delete draft", "Open project in VS Code", "Open project in Terminal", "Open project in File Explorer"]);
+    rows[0].run();
+    expect(onDiscard).toHaveBeenCalledOnce();
   });
 });
