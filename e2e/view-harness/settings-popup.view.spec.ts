@@ -1,3 +1,4 @@
+// Reviewed 2026-11-08: shortcuts.ts gained the command-palette def and hasHandler/fire (Ctrl+Shift+P); this spec drives Settings only and passed after the change.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
 // Reviewed 2026-11-07: the Skills row left the settings index (a skill is opened by clicking it), so the Skills back-arrow test reaches the page through showView instead of a row.

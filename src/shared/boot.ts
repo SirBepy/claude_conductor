@@ -30,6 +30,7 @@ import { curateLatestPerFamily, setApiModels } from "./effort-presets";
 import { refreshDashboardView } from "../views/dashboard/dashboard";
 import * as shortcuts from "./shortcuts";
 import { triggerNewSessionGlobal, triggerNewSessionFavoriteGlobal } from "../views/sessions/sessions";
+import { toggleCommandPalette } from "../views/command-palette";
 import { showFavoritesStrip, hideFavoritesStrip } from "../views/sessions/favorites-strip";
 import { showView } from "./navigation";
 import { isRemote } from "./transport";
@@ -348,4 +349,5 @@ export function initBoot(): void {
   });
   shortcuts.register("go-home", () => showView("dashboard"));
   shortcuts.register("go-chats", () => showView("sessions"));
+  shortcuts.register("command-palette", toggleCommandPalette);
 }

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-08: session-controls.ts gained startNewChatInProject (the palette's New chat in <project>); the dashboard opener this spec drives is unchanged and it passed.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 import { test, expect, type Page } from "@playwright/test";

@@ -30,9 +30,9 @@ import {
   closeActiveChatSubmenu,
   type ChatMenuCtx,
 } from "./chat-menu";
-import { loadHiddenSessions, loadHiddenProjects, isJarvisOrWorker, isSubchat, loadSort, loadUnreadSet, deriveQuestionSet, isMirrored } from "./sessions-helpers";
-import { isAutoAccept, isSubchatsOn, pendingPromptSessionIds } from "./permission-modal";
-import { subchatsBlockedReason } from "./subchats-gate";
+import { loadHiddenSessions, loadHiddenProjects, isJarvisOrWorker, isSubchat, loadSort, loadUnreadSet, deriveQuestionSet } from "./sessions-helpers";
+import { pendingPromptSessionIds } from "./permission-modal";
+import { liveChatMenuCtx } from "./chat-menu-ctx";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { openSchedule } from "../../shared/open-schedule";
 import { isRemote } from "../../shared/transport";
@@ -323,29 +323,7 @@ const viewMenu = createMoreMenu<[]>({
 
       let ctx: ChatMenuCtx;
       if (hasLive && state.selectedId) {
-        const sid = state.selectedId;
-        const sess = state.sessions.find(s => s.session_id === sid);
-        const hiddenSet = loadHiddenSessions();
-        const cwd = sess?.cwd ? String(sess.cwd) : null;
-        ctx = {
-          kind: "live",
-          sessionId: sid,
-          cwd,
-          pid: sess?.pid ?? null,
-          readOnly: sess?.kind === "external" || sess?.kind === "automated",
-          autoAcceptOn: isAutoAccept(sid),
-          subchatsOn: isSubchatsOn(sid),
-          subchatsBlockedReason: subchatsBlockedReason(sess?.account_id),
-          isSub: !!sess && isSubchat(sess),
-          isHidden: hiddenSet.has(sid),
-          isJarvis: sess?.jarvis === true,
-          isFrozen: sess?.frozen === true,
-          hasDeployWorkflow: cachedHasDeployWorkflow(cwd),
-          mirrored: isMirrored(sess),
-          viewChanges: state.activeChatActions?.viewChanges,
-          onAfterAction: () => close(),
-        };
-        if (!isRemote()) void refreshDeployWorkflowCache(cwd);
+        ctx = liveChatMenuCtx(state.selectedId, () => close());
       } else {
         // draft
         const pending = state.pendingNewSession!;
