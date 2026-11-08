@@ -12,6 +12,7 @@ mod debug;
 mod notifier;
 mod settings;
 mod shutdown;
+mod start_session;
 
 use crate::daemon::lifecycle::LifecycleError;
 use crate::daemon::rpc::{Router, RpcError};
