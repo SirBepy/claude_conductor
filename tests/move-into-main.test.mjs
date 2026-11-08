@@ -2,6 +2,8 @@
 // "Move into main chat": which chats the picker offers, the menu item's gating, and
 // the phone transport case.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mainChatCandidates } from "../src/views/sessions/move-into-main.ts";
 import { buildChatItems } from "../src/views/sessions/chat-menu-items.ts";
@@ -35,6 +37,16 @@ describe("mainChatCandidates", () => {
 
   it("ignores a previous main chat that no longer qualifies", () => {
     expect(mainChatCandidates(rows, "self", (id) => on.has(id), "off").map((s) => s.session_id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("the picker card", () => {
+  // #modal-host-card-slot is display:contents and a bare .modal-card has no position, so
+  // without a positioned card class the picker lands in flow below the app, behind the
+  // z-index 2500 backdrop: dimmed and unclickable (seen 2026-11-08).
+  it("carries the fixed-centre card class every other host-card picker uses", () => {
+    const src = readFileSync(join(process.cwd(), "src/views/sessions/move-into-main.ts"), "utf8");
+    expect(src).toMatch(/class="modal-card wt-picker-modal"[^>]*data-move-into-main/);
   });
 });
 
