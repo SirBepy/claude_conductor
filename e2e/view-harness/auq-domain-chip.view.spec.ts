@@ -1,3 +1,4 @@
+// Reviewed 2026-11-08: the chip no longer falls into the ask band when there is no context; a chip-only strip above the band keeps it at the context row's chip position (asserted below).
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-31: the chip is back on the context row's right (the edge-to-edge zones are asserted in auq-desktop-phone-layout.view.spec.ts).
 // Reviewed 2026-10-29: question cards now re-expand from their collapsed bar on re-open/re-announce, a parked question is shown only while the daemon still lists it, and an already-answered one is dropped (answered-gate.ts) - this spec's contract is unchanged and it passes.
@@ -10,9 +11,8 @@ import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 import type { Question } from "../../src/views/sessions/permission-modal/types";
 
-// Todo 565: the domain chip used to live only inside the Context row splitAsk()
-// produces, so a terse one-sentence question rendered no chip at all. It now
-// falls back into the ask band. Badges ride the option rows either way.
+// The domain chip sits at the same spot whether or not the question has a
+// Context row: top right of the first row. Badges ride the option rows either way.
 
 const TERSE = {
   question: "Which approach?",
@@ -46,29 +46,29 @@ async function mount(page: Page, question: typeof TERSE) {
   return page.locator(".prompt-card");
 }
 
-test("a terse question shows the domain chip in the ask band", async ({ page }) => {
+// Chip offset from the card's own top-left, so two cards mounted in turn compare.
+async function chipOffset(card: ReturnType<Page["locator"]>) {
+  const chip = (await card.locator(".prompt-zone--ctx .prompt-domain").boundingBox())!;
+  const frame = (await card.boundingBox())!;
+  return { fromRight: frame.x + frame.width - (chip.x + chip.width), fromTop: chip.y - frame.y };
+}
+
+test("a terse question shows the domain chip on a chip-only strip above the ask band", async ({ page }) => {
   const card = await mount(page, TERSE);
 
-  await expect(card.locator(".prompt-zone--ctx")).toHaveCount(0);
-  const chip = card.locator(".prompt-zone--ask .prompt-domain");
+  await expect(card.locator(".prompt-ctx__label")).toHaveCount(0);
+  const chip = card.locator(".prompt-zone--ctx .prompt-domain");
   await expect(chip).toHaveCount(1);
   await expect(chip).toHaveText(/arch/i);
+  await expect(card.locator(".prompt-zone--ask .prompt-domain")).toHaveCount(0);
 
-  // Visible, not merely in the DOM: real size, and inside the ask band's bounds.
-  const chipBox = await chip.boundingBox();
-  const askBox = await card.locator(".prompt-zone--ask").boundingBox();
-  expect(chipBox!.width).toBeGreaterThan(30);
-  expect(chipBox!.height).toBeGreaterThan(12);
-  expect(chipBox!.x).toBeGreaterThan(askBox!.x);
-  expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(askBox!.x + askBox!.width + 1);
-
-  // Chip (and Ask) sit in a row ABOVE the question text, not in columns beside
-  // it, so the text keeps the band's full width.
-  const textBox = (await card.locator(".prompt-zone--ask .prompt-ask__text").boundingBox())!;
-  expect(chipBox!.y + chipBox!.height).toBeLessThanOrEqual(textBox.y + 1);
-  expect(textBox.width).toBeGreaterThan(askBox!.width - 60);
-  // ...and right-aligned, like the chip on a context row.
-  expect(chipBox!.x).toBeGreaterThan(askBox!.x + askBox!.width / 2);
+  const box = (await chip.boundingBox())!;
+  const strip = (await card.locator(".prompt-zone--ctx").boundingBox())!;
+  const askBox = (await card.locator(".prompt-zone--ask").boundingBox())!;
+  expect(box.width).toBeGreaterThan(30);
+  expect(box.height).toBeGreaterThan(12);
+  expect(box.x).toBeGreaterThan(strip.x + strip.width / 2);
+  expect(box.y + box.height).toBeLessThanOrEqual(askBox.y + 1);
 
   await card.screenshot({
     path: ".for_bepy/screenshots/_specs/auq-domain-chip-terse.png",
@@ -89,7 +89,6 @@ test("a question WITH context keeps the chip on the context row, right-aligned",
 
   await expect(card.locator(".prompt-ctx__head .prompt-domain")).toHaveCount(1);
   await expect(card.locator(".prompt-zone--ask .prompt-domain")).toHaveCount(0);
-  await expect(card.locator(".prompt-zone--ask .prompt-ask__icon")).toHaveCount(0);
 
   const head = (await card.locator(".prompt-ctx__head").boundingBox())!;
   const chip = (await card.locator(".prompt-ctx__head .prompt-domain").boundingBox())!;
@@ -98,4 +97,13 @@ test("a question WITH context keeps the chip on the context row, right-aligned",
   await card.screenshot({
     path: ".for_bepy/screenshots/_specs/auq-domain-chip-context.png",
   });
+});
+
+test("the chip lands on the same spot with and without a context row", async ({ page }) => {
+  const terse = await chipOffset(await mount(page, TERSE));
+  await page.reload();
+  const withCtx = await chipOffset(await mount(page, WITH_CONTEXT));
+
+  expect(Math.abs(terse.fromRight - withCtx.fromRight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(terse.fromTop - withCtx.fromTop)).toBeLessThanOrEqual(1);
 });

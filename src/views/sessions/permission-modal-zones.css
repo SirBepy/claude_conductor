@@ -54,8 +54,13 @@
   color: var(--color-text-muted);
 }
 
-/* Ask band always takes the domain colour. One row: question text, then the
- * domain chip (only when there is no context row to carry it) and Ask. */
+/* No context: the strip carries only the chip, same padding and head height as
+ * a context row so the chip lands on the same spot. */
+.prompt-zone--chip-only .prompt-ctx__head {
+  margin-bottom: 0;
+}
+
+/* Ask band always takes the domain colour. One row: question text, then Ask. */
 .prompt-zone--ask {
   display: flex;
   align-items: flex-start;
@@ -76,18 +81,4 @@
   font-weight: 700;
   line-height: 1.35;
   color: var(--color-text);
-}
-/* No context row: the band stacks, with a head row (chip then Ask, pinned to
- * the right like the chip on a context row) above the question text. */
-.prompt-zone--ask-solo {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-}
-.prompt-ask__head {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  min-height: 24px;
 }
