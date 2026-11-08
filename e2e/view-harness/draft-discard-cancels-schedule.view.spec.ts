@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mountView, invokeCalls, SESSIONS_BASE_INVOKE } from "./harness";
+import { mountView, invokeCalls, runPaletteCommand, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Drives the real "Delete draft" menu item on a draft made through
 // __launchDraftForTest, since the full pickProject + model-modal chain is not
@@ -56,8 +56,7 @@ async function createDraft(page: Page): Promise<string> {
  *  keeps going through the harness's real mock (so __ccInvokeCalls still
  *  records schedule_delete calls). */
 async function deleteDraftViaMenu(page: Page): Promise<void> {
-  await page.locator("#viewMoreBtn").click();
-  await page.locator(".smore-item.smore-danger", { hasText: "Delete draft" }).click();
+  await runPaletteCommand(page, "Delete draft");
 }
 
 async function seedScheduleList(page: Page, items: unknown[]): Promise<void> {

@@ -4,10 +4,11 @@
 // Reviewed 2026-11-05: main-chat.ts's progress text says paused or rate limited for a frozen or rate-limited sub instead of working; this spec's subs are neither, so its contract holds and it passes.
 // Reviewed 2026-11-05: sub-list.ts and main-chat.ts gained a "queued" kind (a sub held for the writer slot); this spec has no queued sub, so its rows are unchanged, and it passed after the change. The queued row is covered in subchat-writer-slot.view.spec.ts.
 // Reviewed 2026-11-05: the in-place header and the list rows name the sub's tier ("Opus high": the harness default) and a mirrored chat has no Move buttons; the header texts below carry the tier, everything else holds and it passes.
+// Reviewed 2026-11-08: the header three-dots button opens the command palette on desktop, so the Move to sidebar checks read the palette row instead of the Chat submenu; the actions they drive are the same.
 // asserts: src/views/sessions/sub-list.ts, src/views/sessions/subchat-view.ts, src/views/sessions/active-session.ts, src/views/sessions/session-header.ts, src/views/sessions/state.ts, src/views/sessions/sessions-wiring.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/main-chat.ts
 import { test, expect, type Page } from "@playwright/test";
 import {
-  assistantMsg, capture, fireEvent, invokeCalls, mountView, mountViewPhone, SESSIONS_BASE_INVOKE, sessionInstance, userMsg,
+  assistantMsg, capture, fireEvent, invokeCalls, mountView, mountViewPhone, openPaletteFor, paletteRow, SESSIONS_BASE_INVOKE, sessionInstance, userMsg,
 } from "./harness";
 
 // Subchats step 7: a main chat's header counts its subs and lists them; a row
@@ -117,10 +118,9 @@ const countBtn = (page: Page) => page.locator("#session-pane .session-header .su
 const backBtn = (page: Page) => page.locator("#session-pane .session-header .sub-back-btn");
 // "Move to sidebar" is a chat-menu item, not a header button (Joe moved a sub by accident).
 const headerMoveBtn = (page: Page) => page.locator("#session-pane .session-header .sub-move-btn");
-const moveItem = (page: Page) => page.locator(".chat-menu-submenu .smore-item", { hasText: "Move to sidebar" });
+const moveItem = (page: Page) => paletteRow(page, "Move to sidebar");
 async function openChatSubmenu(page: Page): Promise<void> {
-  await page.locator("#viewMoreBtn").click();
-  await page.locator('.smore-item[data-sub-label="Chat"]').click();
+  await openPaletteFor(page, "Move to sidebar");
 }
 const listRow = (page: Page, id: string) => page.locator(`.sub-list-popover .sub-row[data-sub-id="${id}"]`);
 
@@ -267,7 +267,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await listRow(page, "sub-footer").click();
       await expect(backBtn(page)).toBeVisible();
       await openChatSubmenu(page);
-      await expect(moveItem(page)).toHaveClass(/is-disabled/);
+      await expect(moveItem(page)).toHaveClass(/disabled/);
     });
 
     test("the model picker on a sub read in place changes that sub, for its next message", async ({ page }) => {
@@ -488,8 +488,10 @@ test.describe("view-harness / sub list (phone transport)", () => {
     await expect.poll(() => sent).toEqual(["sub-header"]);
 
     await capture(page, "sub-open-in-place-phone-transport");
-    await openChatSubmenu(page);
-    await moveItem(page).click();
+    // The phone keeps the three-dots dropdown (no keyboard for the palette).
+    await page.locator("#viewMoreBtn").click();
+    await page.locator('.smore-item[data-sub-label="Chat"]').click();
+    await page.locator(".chat-menu-submenu .smore-item", { hasText: "Move to sidebar" }).click();
     await expect.poll(() => rpcMethods).toContain("move_sub_to_sidebar");
   });
 });

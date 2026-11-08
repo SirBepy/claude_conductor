@@ -13,6 +13,8 @@ import { isSubchat, loadHiddenSessions, projectName, sessionSubtitle } from "../
 import { openChatById, startNewChatInProject } from "../sessions/session-controls";
 import { projectGroupsData, resolveCached } from "../sessions/new-session-cache";
 import { liveChatMenuCtx } from "../sessions/chat-menu-ctx";
+import { closeChat } from "../sessions/close-chat";
+import { armOrToggleWhenDone, cancelWhenDone, whenDoneAction, whenDoneArmed } from "../sessions/when-done";
 import { PENDING_SESSION_ID_PREFIX } from "../../shared/chat/pending-session-id";
 import {
   buildAgentItems,
@@ -29,7 +31,8 @@ import type { PaletteCommand } from "./types";
 // ── Shortcuts ───────────────────────────────────────────────────────────────
 
 // Not worth a row: the palette itself, Escape-in-composer, and the numbered
-// families, which "Switch chat" and "New chat in" cover by name instead.
+// families, which chatCommands (by chat name) and projectCommands ("New chat in
+// <project>") cover by name instead.
 const SKIPPED_SHORTCUTS = new Set(["command-palette", "blur-composer"]);
 
 export function shortcutCommands(): PaletteCommand[] {
@@ -125,7 +128,51 @@ export async function projectCommands(): Promise<PaletteCommand[]> {
     }));
 }
 
+// ── Sleep / shutdown when done ──────────────────────────────────────────────
+
+// The daemon owns the protocol and has no RPC on the phone, so the rows are
+// desktop-only, same gate as the header menu they replaced.
+export function whenDoneCommands(): PaletteCommand[] {
+  if (isRemote()) return [];
+  const armed = whenDoneArmed();
+  const current = whenDoneAction();
+  const row = (action: "sleep" | "shutdown", title: string, icon: string): PaletteCommand => ({
+    id: `when-done:${action}`,
+    title,
+    group: "When done",
+    icon,
+    detail: armed && current === action ? "armed, run again to cancel" : undefined,
+    keywords: ["power", "idle", "finish"],
+    run: () => armOrToggleWhenDone(action),
+  });
+  const rows = [row("sleep", "Sleep when done", "moon-stars"), row("shutdown", "Shutdown when done", "power")];
+  if (armed) {
+    rows.push({
+      id: "when-done:cancel",
+      title: "Cancel sleep/shutdown when done",
+      group: "When done",
+      icon: "prohibit",
+      run: () => cancelWhenDone(),
+    });
+  }
+  return rows;
+}
+
 // ── This chat ───────────────────────────────────────────────────────────────
+
+/** The header menu's "Delete draft": a draft has no session to list, so it
+ *  gets the one action that applies to it. Signals sessions.ts the way the menu does. */
+export function draftCommands(): PaletteCommand[] {
+  const pending = state.pendingNewSession;
+  if (!pending || state.selectedId !== pending.placeholderId) return [];
+  return [{
+    id: "this-chat:Delete draft",
+    title: "Delete draft",
+    group: "This chat",
+    icon: "x-circle",
+    run: () => { document.dispatchEvent(new CustomEvent("discard-pending-draft")); },
+  }];
+}
 
 // The menu relabels a toggle by state ("Hide chat" / "Unhide chat"); the id must
 // not flip with it or the recents entry would stop matching.
@@ -162,6 +209,9 @@ export function thisChatCommands(): PaletteCommand[] {
     ...fromItems(buildAgentItems(ctx), (l) => l),
     ...fromItems(open, OPEN_IN),
     branchCommand(ctx.cwd, id, ctx.mirrored === true),
+    // The header menu's red item. Ctrl+W (the "Close chat" shortcut row) always asks first;
+    // this one asks only when a turn is running, as the menu did.
+    { id: "this-chat:Close session", title: "Close session", group: "This chat", icon: "x-circle", run: () => closeChat(id) },
   ];
 }
 

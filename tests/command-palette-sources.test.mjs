@@ -5,11 +5,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // single settings, the live chats in sidebar order, and the open chat's actions.
 const invokeMock = vi.fn();
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: (...a) => invokeMock(...a) }));
+let remote = false;
+vi.mock("../src/shared/transport.ts", async (orig) => ({ ...(await orig()), isRemote: () => remote }));
 Element.prototype.scrollIntoView ??= () => {};
 
 const shortcuts = await import("../src/shared/shortcuts.ts");
 const { state } = await import("../src/views/sessions/state.ts");
-const { shortcutCommands, settingsCommands, chatCommands, thisChatCommands } =
+const { shortcutCommands, settingsCommands, chatCommands, thisChatCommands, whenDoneCommands, draftCommands } =
   await import("../src/views/command-palette/sources.ts");
 
 const live = (id, name, extra = {}) => ({
@@ -18,6 +20,9 @@ const live = (id, name, extra = {}) => ({
 });
 
 beforeEach(() => {
+  remote = false;
+  state.whenDone = null;
+  state.pendingNewSession = null;
   invokeMock.mockReset();
   state.sessions = [];
   state.selectedId = null;
@@ -80,7 +85,7 @@ describe("this chat rows", () => {
     state.sessions = [live("a", "Alpha")];
     state.selectedId = "a";
     const titles = thisChatCommands().map((r) => r.title);
-    for (const t of ["Change account", "Change character", "Freeze chat", "Auto-accept", "Switch branch", "Open project in VS Code"]) {
+    for (const t of ["Change account", "Change character", "Freeze chat", "Auto-accept", "Switch branch", "Open project in VS Code", "Close session"]) {
       expect(titles, t).toContain(t);
     }
     expect(titles).not.toContain("Open project in Dashboard");
@@ -116,5 +121,42 @@ describe("this chat rows", () => {
     state.selectedId = "a";
     const branch = thisChatCommands().find((r) => r.title === "Switch branch");
     expect(branch.disabledReason).toBe("Chat is on another machine");
+  });
+});
+
+describe("when-done rows (moved in from the header menu)", () => {
+  it("offers Sleep and Shutdown, and arms the chosen one", async () => {
+    invokeMock.mockResolvedValue({ phase: "watching", action: "sleep", waiting_on: [] });
+    const rows = whenDoneCommands();
+    expect(rows.map((r) => r.title)).toEqual(["Sleep when done", "Shutdown when done"]);
+    await rows[0].run();
+    expect(invokeMock).toHaveBeenCalledWith("arm_when_done", { action: "sleep" });
+  });
+
+  it("adds a Cancel row and marks the armed one while a run is armed", () => {
+    state.whenDone = { phase: "watching", action: "shutdown", waiting_on: [], countdown_remaining_secs: null, snoozed_until_unix_ms: null };
+    const rows = whenDoneCommands();
+    expect(rows.map((r) => r.title)).toContain("Cancel sleep/shutdown when done");
+    expect(rows.find((r) => r.title === "Shutdown when done").detail).toContain("armed");
+    expect(rows.find((r) => r.title === "Sleep when done").detail).toBeUndefined();
+  });
+
+  it("is absent on the phone, where the daemon has no when-done RPC", () => {
+    remote = true;
+    expect(whenDoneCommands()).toEqual([]);
+  });
+});
+
+describe("draft rows", () => {
+  it("offers Delete draft only while the open chat is the draft, and signals sessions.ts like the menu did", () => {
+    expect(draftCommands()).toEqual([]);
+    state.pendingNewSession = { placeholderId: "draft-1" };
+    state.selectedId = "other";
+    expect(draftCommands()).toEqual([]);
+    state.selectedId = "draft-1";
+    const seen = vi.fn();
+    document.addEventListener("discard-pending-draft", seen);
+    draftCommands()[0].run();
+    expect(seen).toHaveBeenCalledOnce();
   });
 });
