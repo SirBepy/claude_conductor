@@ -63,7 +63,9 @@ pub(super) async fn on_write_schedule(
         after_meeting: body.after_meeting,
     };
     if let Err(e) = approve_new_chat(&ctx, &body.session_id, &args).await {
-        return rejected_sends::reply("/schedule/write", &body.session_id, e);
+        // Joe's own decline is expected control flow, so it answers directly and
+        // stays out of rejected-sends.jsonl (see that module's header).
+        return (StatusCode::OK, Json(json!({"ok": false, "error": e})));
     }
     match schedule_mcp::write_schedule(&ctx.state, &body.session_id, &args) {
         Ok(v) => (StatusCode::OK, Json(v)),
@@ -288,6 +290,32 @@ mod tests {
         let v: Value = serde_json::from_str(&body_text(handle.await.unwrap()).await).unwrap();
         assert_eq!(v["ok"], false);
         assert!(v["error"].as_str().unwrap_or_default().starts_with("not scheduled"), "got {v}");
+    }
+
+    /// Joe saying no is not a malformed call, so it must not inflate the release
+    /// report's rejected-shape counts; a real handler error still does.
+    #[tokio::test]
+    async fn a_declined_card_is_not_recorded_but_a_bad_call_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let _capture = rejected_sends::capture_in(dir.path());
+        let ctx = ctx();
+        let sid = registered(&ctx);
+        let task_ctx = ctx.clone();
+        let body = add_body(&sid);
+        let handle = tokio::spawn(async move {
+            on_write_schedule(AxState(task_ctx), ValidatedJson(body)).await.into_response()
+        });
+        let id = first_pending_id(&ctx).await;
+        let tx = ctx.state.pending.lock().await.remove(&id).unwrap();
+        tx.send(json!({"behavior": "deny", "message": "no"})).unwrap();
+        let v: Value = serde_json::from_str(&body_text(handle.await.unwrap()).await).unwrap();
+        assert_eq!(v["ok"], false);
+        assert!(rejected_sends::read_records(dir.path()).is_empty(), "a decline is not a rejected send");
+
+        let resp = on_write_schedule(AxState(ctx), ValidatedJson(add_body("ghost"))).await.into_response();
+        let v: Value = serde_json::from_str(&body_text(resp).await).unwrap();
+        assert_eq!(v["ok"], false);
+        assert_eq!(rejected_sends::read_records(dir.path()).len(), 1, "an unknown caller is still recorded");
     }
 
     #[tokio::test]
