@@ -252,16 +252,21 @@ export class ChatPaginator {
     }
     // A refusal that landed on an adjacent, already-rendered page never appears
     // in `events`; it stands there as a plain tool_result row, so pair across by
-    // tool_use_id. That row stays where it is; only this page's card is refused.
+    // tool_use_id. This page's card is refused and that row's element is taken
+    // off screen, as the live path absorbs the result into the card. The message
+    // entry stays so every index the renderer holds into `messages` still lines up.
     const previewPushIds = new Set<string>();
     for (const ev of events) {
       if (ev.type === "tool_use" && isShowPreviewTool(ev.tool_name) && !ev.parent_tool_use_id) previewPushIds.add(ev.id);
     }
     if (previewPushIds.size > 0) {
-      for (const m of this.cb.getMessages()) {
-        if (m.kind !== "tool_result" || !m.is_error || !m.tool_use_id || !previewPushIds.has(m.tool_use_id)) continue;
+      const renderedMessages = this.cb.getMessages();
+      const renderedEls = this.cb.getMessageEls();
+      renderedMessages.forEach((m, i) => {
+        if (m.kind !== "tool_result" || !m.is_error || !m.tool_use_id || !previewPushIds.has(m.tool_use_id)) return;
         if (!previewRefusalById.has(m.tool_use_id)) previewRefusalById.set(m.tool_use_id, previewRefusalReason(m.output));
-      }
+        renderedEls[i]?.remove();
+      });
     }
     // A `subchat send` tool_result never renders its own row either: it names the
     // sub that got the message and is folded into the "Passed to X" row, the way
