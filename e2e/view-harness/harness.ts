@@ -423,6 +423,23 @@ export function assistantMsg(text: string): unknown {
   return { type: "assistant_message", content: [{ type: "text", text }], streaming: false, timestamp: 0 };
 }
 
+/** Opens the command palette from the header's three-dots button (the desktop
+ *  path that replaced the old dropdown) with `label` typed into its search box. */
+export async function openPaletteFor(page: Page, label: string): Promise<void> {
+  await page.locator("#viewMoreBtn").click();
+  await page.locator(".cp-overlay .cp-input").fill(label);
+}
+
+/** The palette row titled exactly `label`, runnable or not. */
+export const paletteRow = (page: Page, label: string): Locator =>
+  page.locator(".cp-overlay .cp-row").filter({ has: page.locator(".cp-title", { hasText: new RegExp(`^${label}$`) }) });
+
+/** Runs the palette command titled `label` from the header button, as a click. */
+export async function runPaletteCommand(page: Page, label: string): Promise<void> {
+  await openPaletteFor(page, label);
+  await paletteRow(page, label).click();
+}
+
 /** Invokes every callback registered via mocked `event.listen(name, cb)` for
  *  `name` (e.g. `chat:${sessionId}`), once per payload, in order. */
 export async function fireEvent(page: Page, name: string, payloads: unknown[]): Promise<void> {

@@ -94,3 +94,47 @@ test("a single setting opens its page and flashes the row", async ({ page }) => 
   // view here rather than the popup; the row jump is the same either way.
   await expect(page.locator(".kit-row.palette-flash .kit-row-label")).toContainText("Gaming mode");
 });
+
+test("the header's three-dots button opens the palette, which carries the old menu's rows", async ({ page }) => {
+  await page.setViewportSize({ width: 1359, height: 900 });
+  await mountChat(page);
+  const more = page.locator("#viewMoreBtn");
+  await expect(more).toHaveAttribute("title", /Command palette/);
+  await more.click();
+  await expect(page.locator(OVERLAY)).toBeVisible();
+  await expect(page.locator(".session-more-menu")).toHaveCount(0);
+  const all = await titles(page);
+  for (const t of ["Sleep when done", "Shutdown when done", "Hide chat", "Freeze chat", "Copy PID", "Open project in VS Code", "Change account"]) {
+    expect(all, t).toContain(t);
+  }
+  await capture(page, "command-palette-from-kebab");
+});
+
+test("dragging the grip moves the palette, and it reopens where it was left", async ({ page }) => {
+  await page.setViewportSize({ width: 1359, height: 900 });
+  await mountChat(page);
+  await page.keyboard.press("Control+Shift+P");
+  const panel = page.locator(`${OVERLAY} .cp`);
+  const grip = page.locator(`${OVERLAY} .cp-grip`);
+  await expect(panel).toBeVisible();
+  const home = (await panel.boundingBox())!;
+  const g = (await grip.boundingBox())!;
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g.x + g.width / 2 - 380, g.y + g.height / 2 + 300, { steps: 8 });
+  await page.mouse.up();
+  const moved = (await panel.boundingBox())!;
+  expect(Math.round(moved.x - home.x)).toBe(-380);
+  expect(Math.round(moved.y - home.y)).toBe(300);
+  await capture(page, "command-palette-dragged");
+
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+Shift+P");
+  const again = (await panel.boundingBox())!;
+  expect(Math.round(again.x)).toBe(Math.round(moved.x));
+  expect(Math.round(again.y)).toBe(Math.round(moved.y));
+
+  await grip.dblclick();
+  const reset = (await panel.boundingBox())!;
+  expect(Math.round(reset.x)).toBe(Math.round(home.x));
+});

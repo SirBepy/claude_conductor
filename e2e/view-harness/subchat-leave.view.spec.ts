@@ -6,7 +6,7 @@
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/session-controls.ts, src/views/sessions/subchat-view.ts, src/shared/chat/builtins/clear.ts, src/views/sessions/close-chat.ts, src/views/sessions/chat-menu.ts
 import { test, expect, type Page } from "@playwright/test";
-import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg, assistantMsg } from "./harness";
+import { capture, invokeCalls, mountView, runPaletteCommand, SESSIONS_BASE_INVOKE, sessionInstance, userMsg, assistantMsg } from "./harness";
 
 // Leaving a sub's view must not end the sub. Ctrl+W goes back to the main chat and
 // closes nothing, `/clear` is refused with a toast naming why (a sub's job is its
@@ -135,8 +135,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await mount(page, size, [MAIN, FOOTER], false);
       await openFooter(page);
       // The open chat's own menu: the explicit way to close it.
-      await page.locator("#viewMoreBtn").click();
-      await page.locator(".view-more-menu .smore-item.smore-danger", { hasText: "Close session" }).click();
+      await runPaletteCommand(page, "Close session");
       await expect.poll(async () => (await calls(page, "clear_session")).length).toBe(1);
       expect((await calls(page, "clear_session"))[0]!.args).toMatchObject({ sessionId: "sub-footer" });
     });

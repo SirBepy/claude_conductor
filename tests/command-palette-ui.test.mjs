@@ -30,6 +30,7 @@ beforeEach(() => {
   globalThis.localStorage = {
     getItem: (k) => (store.has(k) ? store.get(k) : null),
     setItem: (k, v) => void store.set(k, String(v)),
+    removeItem: (k) => void store.delete(k),
   };
   document.body.innerHTML = "";
   toast.mockReset();
@@ -129,6 +130,42 @@ describe("palette overlay", () => {
     key("Enter");
     await flush();
     expect(toast).toHaveBeenCalledWith("Alpha failed: boom");
+  });
+});
+
+describe("dragging", () => {
+  const ptr = (el, type, x, y) =>
+    el.dispatchEvent(Object.assign(new Event(type, { bubbles: true, cancelable: true }), { clientX: x, clientY: y, pointerId: 1 }));
+
+  it("moves the panel with the grip, remembers the spot, and reopens there", () => {
+    openPalette({ sync: () => [cmd("a", "Alpha")], later: [] });
+    const grip = document.querySelector(".cp-grip");
+    ptr(grip, "pointerdown", 100, 100);
+    ptr(grip, "pointermove", 330, 160);
+    ptr(grip, "pointerup", 330, 160);
+    const panel = document.querySelector(".cp");
+    expect(panel.classList.contains("placed")).toBe(true);
+    expect(panel.style.left).toBe("230px");
+    expect(panel.style.top).toBe("60px");
+    expect(JSON.parse(store.get("cc_palette_position"))).toEqual({ left: 230, top: 60 });
+
+    closePalette();
+    openPalette({ sync: () => [cmd("a", "Alpha")], later: [] });
+    expect(document.querySelector(".cp").style.left).toBe("230px");
+  });
+
+  it("recentres and forgets the spot on a double-click of the grip", () => {
+    store.set("cc_palette_position", JSON.stringify({ left: 50, top: 50 }));
+    openPalette({ sync: () => [cmd("a", "Alpha")], later: [] });
+    expect(document.querySelector(".cp").classList.contains("placed")).toBe(true);
+    document.querySelector(".cp-grip").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    expect(document.querySelector(".cp").classList.contains("placed")).toBe(false);
+    expect(store.has("cc_palette_position")).toBe(false);
+  });
+
+  it("a plain click on the grip does not count as moving it", () => {
+    openPalette({ sync: () => [cmd("a", "Alpha")], later: [] });
+    expect(document.querySelector(".cp").classList.contains("placed")).toBe(false);
   });
 });
 

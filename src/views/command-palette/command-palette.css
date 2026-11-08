@@ -23,6 +23,31 @@
   overflow: hidden;
 }
 
+/* Once dragged, the panel leaves the overlay's flex flow and sits at the saved
+   spot; left/top come from palette-ui.ts. */
+.cp.placed {
+  position: fixed;
+}
+
+.cp-grip {
+  display: flex;
+  justify-content: center;
+  height: 14px;
+  align-items: center;
+  cursor: grab;
+  color: var(--color-text-muted);
+  touch-action: none;
+  user-select: none;
+}
+
+.cp-grip:active {
+  cursor: grabbing;
+}
+
+.cp-grip .ph {
+  font-size: 0.9rem;
+}
+
 .cp-field {
   display: flex;
   align-items: center;
@@ -49,7 +74,7 @@
 }
 
 .cp-list {
-  max-height: 50vh;
+  max-height: min(50vh, var(--cp-room, 50vh));
   overflow-y: auto;
   padding: 4px 0;
 }

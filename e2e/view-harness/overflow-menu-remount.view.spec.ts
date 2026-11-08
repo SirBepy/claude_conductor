@@ -30,11 +30,7 @@ test.describe("view-harness / overflow menu remount", () => {
 
     await page.locator("#viewMoreBtn").click();
 
-    await expect(page.locator(".view-more-menu")).toBeVisible();
-    const box = await page.locator("#newSessionBtn").boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThan(0);
-    expect(box!.height).toBeGreaterThan(0);
+    await expect(page.locator(".cp-overlay")).toBeVisible();
   });
 
   // Leaving Chats and coming back rebuilds .view-header from scratch, while
@@ -50,6 +46,6 @@ test.describe("view-harness / overflow menu remount", () => {
 
     await expect(page.locator("#viewMoreBtn")).toBeVisible();
     await page.locator("#viewMoreBtn").click();
-    await expect(page.locator(".view-more-menu")).toBeVisible();
+    await expect(page.locator(".cp-overlay")).toBeVisible();
   });
 });

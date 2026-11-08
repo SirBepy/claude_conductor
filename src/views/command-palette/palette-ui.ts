@@ -6,6 +6,7 @@ import { lockInputToHost } from "../../shared/modal-input-lock";
 import { showToast } from "../../shared/toast";
 import { escapeHtml } from "../../shared/escape-html";
 import { rankCommands } from "./rank";
+import { clampPosition, clearPosition, loadPosition, savePosition, type PalettePosition } from "./position";
 import { loadRecents, pushRecent } from "./recents";
 import { isRunnable, type PaletteCommand, type PaletteStage } from "./types";
 
@@ -52,6 +53,7 @@ export function openPalette(sources: PaletteSources): void {
   const overlay = document.createElement("div");
   overlay.className = "cp-overlay";
   overlay.innerHTML = `<div class="cp" role="dialog" aria-label="Command palette">`
+    + `<div class="cp-grip" title="Drag to move, double-click to recentre"><i class="ph ph-dots-six"></i></div>`
     + `<div class="cp-field"><i class="ph ph-magnifying-glass cp-lead"></i>`
     + `<input class="cp-input" placeholder="Search commands, chats, projects and settings" aria-label="Search commands" spellcheck="false" autocomplete="off" /></div>`
     + `<div class="cp-list" role="listbox"></div>`
@@ -195,6 +197,7 @@ export function openPalette(sources: PaletteSources): void {
     if (current !== handle) return;
     current = null;
     window.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("resize", onResize);
     unlock();
     overlay.remove();
   }
@@ -219,7 +222,59 @@ export function openPalette(sources: PaletteSources): void {
   });
   window.addEventListener("keydown", onKey, true);
 
+  const panel = overlay.querySelector<HTMLElement>(".cp")!;
+  const grip = overlay.querySelector<HTMLElement>(".cp-grip")!;
+
+  // The clamped spot the panel is at now, so a drag saves what is shown, not a re-measure.
+  let placed: PalettePosition | null = null;
+  function place(pos: PalettePosition | null): void {
+    if (!pos) {
+      placed = null;
+      panel.classList.remove("placed");
+      panel.style.left = panel.style.top = "";
+      panel.style.removeProperty("--cp-room");
+      return;
+    }
+    const box = panel.getBoundingClientRect();
+    const at = clampPosition(pos, { width: box.width, height: box.height }, { width: window.innerWidth, height: window.innerHeight });
+    panel.classList.add("placed");
+    panel.style.left = `${at.left}px`;
+    panel.style.top = `${at.top}px`;
+    // The list shrinks to the room left below the panel, so a panel parked low stays readable.
+    panel.style.setProperty("--cp-room", `${Math.max(window.innerHeight - at.top - 90, 120)}px`);
+    placed = at;
+  }
+
+  let dragFrom: { x: number; y: number; left: number; top: number } | null = null;
+  grip.addEventListener("pointerdown", (e) => {
+    const box = panel.getBoundingClientRect();
+    dragFrom = { x: e.clientX, y: e.clientY, left: box.left, top: box.top };
+    // Capture keeps the drag alive when the pointer outruns the panel.
+    grip.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  });
+  grip.addEventListener("pointermove", (e) => {
+    if (!dragFrom) return;
+    place({ left: dragFrom.left + e.clientX - dragFrom.x, top: dragFrom.top + e.clientY - dragFrom.y });
+  });
+  const endDrag = () => {
+    if (!dragFrom) return;
+    dragFrom = null;
+    if (placed) savePosition(placed);
+    input.focus();
+  };
+  grip.addEventListener("pointerup", endDrag);
+  grip.addEventListener("pointercancel", endDrag);
+  grip.addEventListener("dblclick", () => {
+    clearPosition();
+    place(null);
+  });
+  // A smaller window than the one the spot was saved in must not strand the panel off screen.
+  const onResize = () => { const p = loadPosition(); if (p) place(p); };
+  window.addEventListener("resize", onResize);
+
   document.body.appendChild(overlay);
+  place(loadPosition());
   input.focus();
   refilter(true);
 
