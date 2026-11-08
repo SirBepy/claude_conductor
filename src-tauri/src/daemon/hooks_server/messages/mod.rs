@@ -135,6 +135,14 @@ pub(super) async fn on_send_message(
         return rejection("/messages/send", &body.session_id, kind, e);
     }
     let gen = ctx.state.registry.current_turn_gen(&body.session_id);
+    if kind.map(str::trim) == Some("answer") && !ctx.state.registry.try_claim_answer(&body.session_id, gen) {
+        return rejection(
+            "/messages/send",
+            &body.session_id,
+            kind,
+            "this turn already sent an answer, and a turn replies to one message from Joe. If this is progress, put it in write_plan (the checklist) and send nothing. If it is finished work, send kind report. Otherwise fold it into one answer with update_message.".into(),
+        );
+    }
     ctx.state.registry.mark_message_sent(&body.session_id, gen);
     draw_sub_blocker(&ctx, &body);
     log::debug!("session {} sent a message", body.session_id);
@@ -277,6 +285,27 @@ mod tests {
         assert_eq!(ok["ok"], json!(true));
         assert_eq!(crate::daemon::subchats::card_log::read("blk-main").len(), 1);
         assert!(crate::daemon::subchats::card_log::read("blk-sub").is_empty());
+    }
+
+    /// A turn replies to one message from Joe: a second `answer` is progress
+    /// narration under the wrong label, so it is refused with the fix named. Other
+    /// kinds are unaffected, and the turn's end frees the slot for the next one.
+    #[tokio::test]
+    async fn a_second_answer_in_one_turn_is_refused_but_other_kinds_and_the_next_turn_pass() {
+        let c = ctx();
+        c.state.registry.upsert_interactive("ans", std::path::Path::new("."), "proj", "2026-11-08T00:00:00Z");
+        let send = |kind: &str| {
+            let c = c.clone();
+            let v = json!({"session_id": "ans", "kind": kind, "verdict": "Yes", "text": "now testing"});
+            async move { body_json(on_send_message(AxState(c), ValidatedJson(body_of(v))).await.into_response()).await }
+        };
+        assert_eq!(send("answer").await["ok"], json!(true));
+        let e = error_of(&send("answer").await);
+        assert!(e.contains("write_plan") && e.contains("report"), "{e}");
+        assert_eq!(send("report").await["ok"], json!(true), "another kind still passes");
+        let gen = c.state.registry.current_turn_gen("ans");
+        c.state.registry.take_reported_status_if_gen("ans", gen);
+        assert_eq!(send("answer").await["ok"], json!(true), "the next turn gets its own answer");
     }
 
     #[tokio::test]

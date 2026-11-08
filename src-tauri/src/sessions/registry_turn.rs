@@ -116,6 +116,7 @@ impl Registry {
         // Runs after the Stop hook has read them, so this is also where the
         // per-turn side maps self-clean instead of growing per session forever.
         self.message_sent_gen.lock().unwrap().remove(session_id);
+        self.answer_sent_gen.lock().unwrap().remove(session_id);
         self.question_posted.lock().unwrap().remove(session_id);
         let entry = self.reported_status.lock().unwrap().remove(session_id)?;
         if entry.turn_gen == gen {
@@ -139,6 +140,17 @@ impl Registry {
 
     pub fn peek_message_sent_gen(&self, session_id: &str) -> Option<u64> {
         self.message_sent_gen.lock().unwrap().get(session_id).copied()
+    }
+
+    /// Claim this turn's one `answer`. False when `turn_gen` already used it.
+    /// One lock for check and set, so two concurrent sends cannot both win.
+    pub fn try_claim_answer(&self, session_id: &str, turn_gen: u64) -> bool {
+        let mut map = self.answer_sent_gen.lock().unwrap();
+        if map.get(session_id) == Some(&turn_gen) {
+            return false;
+        }
+        map.insert(session_id.to_string(), turn_gen);
+        true
     }
 
     /// Record that a `cc_conductor` MCP tool call landed at the daemon during
@@ -263,6 +275,7 @@ impl Registry {
         self.close_requested.lock().unwrap().remove(session_id);
         self.reported_status.lock().unwrap().remove(session_id);
         self.message_sent_gen.lock().unwrap().remove(session_id);
+        self.answer_sent_gen.lock().unwrap().remove(session_id);
         self.question_posted.lock().unwrap().remove(session_id);
         self.turn_opened_by_wake.lock().unwrap().remove(session_id);
         self.builtin_ask_attempts.lock().unwrap().remove(session_id);
