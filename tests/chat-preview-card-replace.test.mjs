@@ -239,4 +239,24 @@ describe("a page fetched by scrolling up", () => {
     expect(cards[0].querySelector(".pc-frame")).toBeNull();
     expect(cards[0].querySelector(".pc-failed").textContent).toContain("HTTP 410");
   });
+
+  it("takes the stray error row off the newer page once the push it belongs to is paged in", async () => {
+    const newest = {
+      events: [refused("tu-1", 2_000_150), userEvent("later", 2_000_200)],
+      oldest_seq: 10,
+      newest_seq: 12,
+      has_more: true,
+    };
+    const older = {
+      events: [userEvent("first", 1_000_000), push("tu-1", "week", "Doomed", "one", 1_000_100)],
+      oldest_seq: 1,
+      newest_seq: 9,
+      has_more: false,
+    };
+    const { renderer, container } = await makeRenderer({ newest, older });
+    expect(container.querySelectorAll(".msg.tool-result").length).toBe(1);
+    await renderer.fetchOlder();
+    expect(cardsOf(container)[0].querySelector(".pc-failed").textContent).toContain("HTTP 410");
+    expect(container.querySelectorAll(".msg.tool-result").length).toBe(0);
+  });
 });
