@@ -135,6 +135,23 @@ test.describe("view-harness / Use subchats on a new-chat draft with a settings r
     await capture(page.locator(".pd-rail"), "draft-subchats-rail-card");
   });
 
+  test("the row above the message box is never painted while the rail is still loading", async ({ page }) => {
+    // Sampled every frame from before the draft opens: the row is mounted ahead of the
+    // rail card that retires it, and one painted frame in between reads as a flash.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __rowPainted: boolean };
+      w.__rowPainted = false;
+      const tick = (): void => {
+        const el = document.querySelector<HTMLElement>("#session-pane .draft-subchats");
+        if (el && getComputedStyle(el).display !== "none") w.__rowPainted = true;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await openRailDraft(page);
+    expect(await page.evaluate(() => (window as unknown as { __rowPainted: boolean }).__rowPainted)).toBe(false);
+  });
+
   test("a failed first send leaves a working switch with the flag intact", async ({ page }) => {
     await openRailDraft(page);
     await railCard(page).locator(".slider").click();

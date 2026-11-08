@@ -10,7 +10,7 @@ import { retainChat } from "./chat-pane-cache";
 import { mountPendingChrome, mountPendingStatusbar, attachPendingRenderer, changePendingAccount } from "./pending-pane-mount";
 import { mountDraftDashboard, unmountDraftDashboard } from "./project-dashboard/draft-dashboard";
 import { wirePendingComposer } from "./pending-pane-composer";
-import { mountDraftSubchats, mountDraftSubchatsCard, unmountDraftSubchats } from "./draft-subchats";
+import { mountDraftSubchats, mountDraftSubchatsCard, revealDraftSubchats, unmountDraftSubchats } from "./draft-subchats";
 import { decorateSubchatHeader } from "./subchat-view";
 import { mountMockupButton } from "./mockup-open-button";
 
@@ -45,7 +45,7 @@ export async function renderPendingPane(
   // .session-messages, which would wipe a dashboard mounted any earlier.
   // The switch is a card in the dashboard's settings rail when the draft has one
   // (desktop, a single project); everywhere else it is a row above the message box.
-  mountDraftDashboard(pane, project, myMount, (railBody) => mountDraftSubchatsCard(pane, railBody, config));
+  mountDraftDashboard(pane, project, myMount, (railBody) => mountDraftSubchatsCard(pane, railBody, config), () => revealDraftSubchats(pane));
   mountDraftSubchats(pane, config);
   wirePendingComposer(pane, placeholderId, project, config, myMount, {
     rebindPaneHeader,

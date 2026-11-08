@@ -11,6 +11,7 @@
   color: var(--sb-muted, var(--color-text-muted));
   font: 12.5px/18px var(--font-mono, monospace);
 }
+.draft-subchats.is-pending { display: none; }
 .draft-subchats i { font-size: 14px; }
 .draft-subchats.is-on { color: var(--color-text); }
 .draft-subchats .switch { margin-left: 2px; }

@@ -99,6 +99,7 @@ export function mountDraftDashboard(
   project: { path: string },
   myMount: number,
   railExtra?: (body: HTMLElement) => void,
+  onNoRail?: () => void,
 ): void {
   if (state.mountId !== myMount) return;
   const messagesEl = pane.querySelector<HTMLElement>(".session-messages");
@@ -124,6 +125,8 @@ export function mountDraftDashboard(
       // Widens the draft's column past the chat's 900px to make room for the rail (sessions.css).
       wrap.classList.add("has-rail");
       wrap.appendChild(handle.rail);
+    } else {
+      onNoRail?.();
     }
     // Outside .composer-shell, whose border wraps only the thinking bar and the input.
     const shell = pane.querySelector(".composer-shell");
