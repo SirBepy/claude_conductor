@@ -5,6 +5,10 @@
  * migrated off them.
  */
 
+/** Length of the 5h session and the 7d weekly usage windows. */
+export const SESSION_WINDOW_MS = 5 * 3_600_000;
+export const WEEKLY_WINDOW_MS = 7 * 24 * 3_600_000;
+
 /** Local HH:MM in the reader's own locale (24h or am/pm as their system has it). */
 export function localTime(d: Date): string {
   return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });

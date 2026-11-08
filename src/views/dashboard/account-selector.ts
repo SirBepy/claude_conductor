@@ -7,14 +7,11 @@
 
 import { escapeHtml } from "../../shared/escape-html";
 import { accountIconBadgeHtml } from "../../shared/account-chip";
-import { fmtResetDisplay, valueColor, computeSafePacePct, formatRelativeMinutes, windowPctOrNull } from "../../shared/formatters";
+import { fmtResetDisplay, valueColor, computeSafePacePct, formatRelativeMinutes, windowPctOrNull, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
 import type { ValueColorSettings } from "../../shared/formatters";
 import type { Account, AuthState, UsageRecord } from "../../shared/api";
 import { navigateTo } from "../../router";
 import { formatElapsed } from "../../shared/time";
-
-const SESSION_WINDOW_MS = 5 * 3_600_000;
-const WEEKLY_WINDOW_MS = 7 * 24 * 3_600_000;
 
 // Near/hot countdown thresholds - shared by the initial render (ringHtml) and
 // the live per-second tick (tickAccountCardCountdowns) so both agree on when
