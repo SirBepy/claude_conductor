@@ -56,6 +56,9 @@ export function badgesHtml(badges?: OptionBadge[]): string {
 // copy of the header one (permission-modal-shell.css shows one or the other).
 export function questionZonesHtml(q: Question): string {
   const { context, ask } = splitAsk(q.question);
+  // The chip always sits at the same spot: the right of the first row's head.
+  // Without context that row is a chip-only strip with the same padding and
+  // head height as the context row's, so the chip does not move between the two.
   const ctxZone = context
     ? `<div class="prompt-zone prompt-zone--ctx">
         <span class="prompt-ctx__rail"><i class="ph ph-info"></i></span>
@@ -66,19 +69,14 @@ export function questionZonesHtml(q: Question): string {
           <div class="prompt-ctx__text prompt-q__context">${renderMarkdown(context)}</div>
         </span>
       </div>`
-    : "";
+    : q.domain
+      ? `<div class="prompt-zone prompt-zone--ctx prompt-zone--chip-only">
+        <span class="prompt-ctx__body">
+          <span class="prompt-ctx__head">${domainChipHtml(q.domain)}</span>
+        </span>
+      </div>`
+      : "";
   const askBtn = `<button type="button" class="icon-btn-sq prompt-icon-btn prompt-ask__btn" data-act="ask-inline" title="Ask about this question"><i class="ph ph-chat-teardrop-dots"></i></button>`;
-  // No context row to carry the chip: chip and Ask get their own row above the
-  // text, so a long question keeps the full band width instead of being squeezed
-  // into a narrow column between them (phone).
-  if (!context) {
-    return `
-    <div class="prompt-zone prompt-zone--ask prompt-zone--ask-solo">
-      <div class="prompt-ask__head">${domainChipHtml(q.domain)}${askBtn}</div>
-      <div class="prompt-ask__text prompt-q__text">${renderMarkdown(ask)}</div>
-    </div>
-  `;
-  }
   return `
     ${ctxZone}
     <div class="prompt-zone prompt-zone--ask">
