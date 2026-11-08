@@ -550,6 +550,9 @@ mod tests {
         let state = test_state();
         live(&state, "s1", "proj-1");
         let _child = crate::daemon::session_test_support::spawn_fake_session(&state.sessions, "s1").await;
+        // The send doors respawn a child whose launch pair differs from the
+        // registry's pick; give the row the fake's pair so this wake is not stale.
+        state.registry.set_model_effort("s1", "m", "high");
         let mut rx = state.sessions.get("s1").unwrap().events.subscribe();
         let notice = crate::daemon::subchats::wake::notice("Fix login", "abcdef0123456789", 1);
         enqueue_notice(&state, "s1", notice.clone());

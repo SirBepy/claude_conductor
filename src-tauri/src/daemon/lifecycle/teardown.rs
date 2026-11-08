@@ -186,6 +186,10 @@ async fn send_message_inner(
 /// session's cwd/model/effort/account from the Registry (the daemon's own
 /// canonical record) instead of trusting the caller.
 ///
+/// A pending model/effort pick is applied first ([`super::refresh_stale_launch`]),
+/// so a daemon-originated send (Jarvis, a wake, an account move) runs on the pick
+/// the picker shows, exactly like a typed send.
+///
 /// Only respawns sessions the Registry still considers a live Interactive
 /// chat (not `ended_at`-marked, not External/Automated) - anything else is a
 /// genuine NotFound, same as before this existed.
@@ -200,6 +204,7 @@ pub async fn send_message_with_respawn(
     is_meta: bool,
 ) -> Result<(), LifecycleError> {
     super::refuse_if_api_credit_blocked(state, session_id)?;
+    super::refresh_stale_launch(state, session_id).await;
     if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
         return send_message(&session, text, is_meta).await;
     }
@@ -217,6 +222,7 @@ pub async fn send_message_with_respawn_and_author(
     author_session_id: &str,
 ) -> Result<(), LifecycleError> {
     super::refuse_if_api_credit_blocked(state, session_id)?;
+    super::refresh_stale_launch(state, session_id).await;
     if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
         return send_message_with_author(&session, text, author_session_id).await;
     }
@@ -234,6 +240,7 @@ pub async fn send_message_with_respawn_meta_and_author(
     author_session_id: &str,
 ) -> Result<(), LifecycleError> {
     super::refuse_if_api_credit_blocked(state, session_id)?;
+    super::refresh_stale_launch(state, session_id).await;
     if let Some(session) = state.sessions.get(session_id).map(|s| s.clone()) {
         return send_message_meta_with_author(&session, text, author_session_id).await;
     }

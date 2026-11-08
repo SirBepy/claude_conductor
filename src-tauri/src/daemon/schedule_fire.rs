@@ -164,8 +164,7 @@ async fn respawn_for_message(
         .registry
         .get(session_id)
         .map(|inst| {
-            let model = if inst.model.is_empty() { lifecycle::SPAWN_DEFAULT_MODEL.to_string() } else { inst.model };
-            let effort = if inst.effort.is_empty() { lifecycle::SPAWN_DEFAULT_EFFORT.to_string() } else { inst.effort };
+            let (model, effort) = lifecycle::model_effort_or_default(&inst);
             (model, effort, inst.account_id)
         })
         .unwrap_or_else(|| (lifecycle::SPAWN_DEFAULT_MODEL.to_string(), lifecycle::SPAWN_DEFAULT_EFFORT.to_string(), None));
