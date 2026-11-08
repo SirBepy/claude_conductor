@@ -55,9 +55,9 @@ export async function openMoveIntoMain(chatId: string): Promise<void> {
 
   const draw = (): void => {
     render(html`
-      <div class="modal-card" role="dialog" aria-modal="true" aria-label="Move into main chat" data-move-into-main>
+      <div class="modal-card wt-picker-modal" role="dialog" aria-modal="true" aria-label="Move into main chat" data-move-into-main>
         <header class="modal-header"><h3>Move into main chat</h3></header>
-        <div class="modal-body">
+        <div class="modal-body wt-picker-body">
           ${rows.length
             ? html`<ul class="wt-picker-list">${rows.map((m) => html`
                 <li class="wt-picker-row">
