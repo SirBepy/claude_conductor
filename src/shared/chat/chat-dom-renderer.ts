@@ -14,6 +14,7 @@ import { linkifyFilePaths } from "./file-refs";
 import { linkifyDrillRefs } from "./drill-links";
 import { toolSummary } from "./tool-meta";
 import { asObj, strField } from "../obj-utils";
+import { localTime } from "../formatters";
 import { groupToolRange } from "./tool-strip";
 import { clampUserMessages } from "./turn-collapse";
 import { groupAttachmentTray, refoldAttachmentTray } from "./message-attachment-tray";
@@ -210,7 +211,7 @@ export function buildMessageEl(m: RenderedMessage, sessionId: string | null = nu
   // we deliberately don't write back to m.ts, which stays 0 for live so the
   // turn-span/duration logic keeps using duration_ms instead of a wall span.
   const ms = m.ts ? (m.ts < 1e10 ? m.ts * 1000 : m.ts) : Date.now();
-  el.dataset.ts = new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  el.dataset.ts = localTime(new Date(ms));
   if (el.querySelector(".attachment-chip[data-attachment-path]")) {
     if (m.kind === "user") groupAttachmentTray(el);
     void hydrateAttachments(el, sessionId, () => refoldAttachmentTray(el));

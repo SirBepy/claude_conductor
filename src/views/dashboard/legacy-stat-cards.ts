@@ -3,7 +3,7 @@
 // replace this once at least one account is registered.
 
 import "./stat-cards.css";
-import { fmtPct, fmtResetDisplay, valueColor } from "../../shared/formatters";
+import { fmtPct, fmtResetDisplay, valueColor, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
 import type { ResetDisplay } from "../../shared/formatters";
 import { getSettings } from "../../shared/state";
 import type { UsageRecord } from "../../shared/api";
@@ -20,8 +20,6 @@ export function legacyStatCardsHtml(history: UsageRecord[]): string {
   const settings = getSettings();
   const sessionReset = fmtResetDisplay(latest.session_resets_at);
   const weeklyReset = fmtResetDisplay(latest.weekly_resets_at);
-  const SESSION_WINDOW_MS = 5 * 3_600_000;
-  const WEEKLY_WINDOW_MS = 7 * 24 * 3_600_000;
   const renderReset = (r: ResetDisplay | null, windowMs: number): string => {
     if (!r) return "";
     if (r.diffMs <= 0) return `<div class="reset-info"><div class="reset-relative">now</div></div>`;
@@ -48,8 +46,8 @@ export function legacyStatCardsHtml(history: UsageRecord[]): string {
           Math.min(
             100,
             Math.round(
-              ((5 * 3_600_000 - (sessionResetMs - Date.now())) /
-                (5 * 3_600_000)) *
+              ((SESSION_WINDOW_MS - (sessionResetMs - Date.now())) /
+                SESSION_WINDOW_MS) *
                 100,
             ),
           ),
@@ -60,8 +58,8 @@ export function legacyStatCardsHtml(history: UsageRecord[]): string {
     Math.min(
       100,
       Math.round(
-        ((7 * 24 * 3_600_000 - (weeklyEndMs - Date.now())) /
-          (7 * 24 * 3_600_000)) *
+        ((WEEKLY_WINDOW_MS - (weeklyEndMs - Date.now())) /
+          WEEKLY_WINDOW_MS) *
           100,
       ),
     ),
