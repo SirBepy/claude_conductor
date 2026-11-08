@@ -225,3 +225,25 @@ describe("second-step picks", () => {
     expect(document.querySelector(".cp-empty").textContent).toContain("no repo");
   });
 });
+
+describe("a palette scoped to one chat", () => {
+  it("shows the caller's hint, and keeps it after backing out of a second step", async () => {
+    const stage = { placeholder: "Pick a branch", load: async () => [cmd("b", "main")] };
+    openPalette({
+      sync: () => [cmd("sw", "Switch branch", { run: undefined, stage })],
+      later: [],
+      placeholder: 'Actions for "Alpha"',
+    });
+    expect(input().placeholder).toBe('Actions for "Alpha"');
+    key("Enter");
+    await flush();
+    expect(input().placeholder).toBe("Pick a branch");
+    key("Backspace");
+    expect(input().placeholder).toBe('Actions for "Alpha"');
+  });
+
+  it("falls back to the general hint when the caller gives none", () => {
+    openPalette({ sync: () => [cmd("a", "Alpha")], later: [] });
+    expect(input().placeholder).toMatch(/^Search commands/);
+  });
+});

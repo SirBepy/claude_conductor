@@ -28,7 +28,9 @@ export function liveChatMenuCtx(sessionId: string, onAfterAction?: () => void): 
     isFrozen: sess?.frozen === true,
     hasDeployWorkflow: cachedHasDeployWorkflow(cwd),
     mirrored: isMirrored(sess),
-    viewChanges: state.activeChatActions?.viewChanges,
+    // Code mode's provider belongs to the chat on screen; another chat's row
+    // (sidebar right-click) has none, and the item then reads "Open the chat to view changes".
+    viewChanges: state.selectedId === sessionId ? state.activeChatActions?.viewChanges : undefined,
     onAfterAction,
   };
   if (!isRemote()) void refreshDeployWorkflowCache(cwd);

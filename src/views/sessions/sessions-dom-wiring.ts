@@ -16,7 +16,7 @@ import { selectSession } from "./active-session";
 import { state, setActiveSession, clearLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { paneEmptyStateHtml } from "./sessions-helpers";
-import { renderSidebar, refreshSessions, openCtxMenu, openDraftCtxMenu } from "./sidebar";
+import { renderSidebar, refreshSessions } from "./sidebar";
 import { initWhenDone, subscribeWhenDone } from "./when-done";
 import { mountWhenDoneChip } from "./when-done-chip";
 import {
@@ -209,38 +209,47 @@ export function wireStaticListeners(
   // Sort select moved to Settings. No binding needed here; sessions.ts reads
   // the persisted localStorage value on each renderSidebar call via loadSort().
 
-  // Opens the right context menu for whichever row kind `li` is - right-click
-  // only, there is no 3-dot button.
-  const openMenuForRow = (li: HTMLElement, anchor: HTMLElement): void => {
+  // Opens the command palette narrowed to whichever row kind `li` is - right-click
+  // only, there is no 3-dot button. Loaded on demand: the palette pulls in most of
+  // the app, and a right-click is rare.
+  const openActionsForRow = (li: HTMLElement): void => {
     const sid = li.dataset.sessionId;
     if (sid) {
-      openCtxMenu(sid, anchor);
+      void import("../command-palette").then((m) => m.openRowActionsPalette({ kind: "chat", sessionId: sid }));
       return;
     }
     const pid = li.dataset.placeholderId;
     if (!pid) return;
     if (li.classList.contains("parked-draft")) {
       const parked = state.parkedDrafts.find(d => d.placeholderId === pid);
-      openDraftCtxMenu(anchor, () => {
-        state.parkedDrafts = state.parkedDrafts.filter(d => d.placeholderId !== pid);
-        saveParkedDrafts(state.parkedDrafts);
-        discardComposerDraft(pid);
-        renderSidebar(listEl);
-      }, parked?.projectPath ?? null);
+      void import("../command-palette").then((m) => m.openRowActionsPalette({
+        kind: "draft",
+        cwd: parked?.projectPath ?? null,
+        onDiscard: () => {
+          state.parkedDrafts = state.parkedDrafts.filter(d => d.placeholderId !== pid);
+          saveParkedDrafts(state.parkedDrafts);
+          discardComposerDraft(pid);
+          renderSidebar(listEl);
+        },
+      }));
     } else {
-      openDraftCtxMenu(anchor, () => {
-        if (state.pendingNewSession?.firstMessageSent) discardStuckPending(pane);
-        else { discardDraft(pane); updateThinkingBar(); }
-      });
+      void import("../command-palette").then((m) => m.openRowActionsPalette({
+        kind: "draft",
+        cwd: state.pendingNewSession?.projectPath ?? null,
+        onDiscard: () => {
+          if (state.pendingNewSession?.firstMessageSent) discardStuckPending(pane);
+          else { discardDraft(pane); updateThinkingBar(); }
+        },
+      }));
     }
   };
 
-  // Right-click anywhere on a session row opens the row's context menu.
+  // Right-click anywhere on a session row opens that row's actions.
   listEl.addEventListener("contextmenu", (e) => {
     const li = (e.target as HTMLElement).closest<HTMLLIElement>("li[data-session-id], li[data-placeholder-id]");
     if (!li) return;
     e.preventDefault();
-    openMenuForRow(li, li);
+    openActionsForRow(li);
   });
 
   listEl.addEventListener("click", (e) => {

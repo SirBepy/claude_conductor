@@ -1,3 +1,4 @@
+// Reviewed 2026-11-08: sessions-dom-wiring.ts's sidebar right-click now opens the command palette instead of the dropdown; this spec drives the Ctrl badge numbers only and passed.
 // Reviewed 2026-11-08: sessions-dom-wiring.ts routes the desktop three-dots button to the command palette; the Ctrl chat-number hint this spec drives is unchanged and it passed.
 // Reviewed 2026-11-02: the working line is now --control-h-sm tall (--control-h on a phone); nothing this spec drives changed and it passes.
 // Reviewed 2026-11-01: sessions.css's working strip lost its card and became a bare line (earlier the same day it gained a --control-h min-height); nothing this spec drives changed and it passes.
