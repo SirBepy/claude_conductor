@@ -5,11 +5,8 @@
 // (percentages, safe-pace, reset), account-selector.ts/overlay.ts handle the
 // HTML for their own (differently-shaped) markup.
 
-import { computeSafePacePct, windowPctOrNull } from "../../shared/formatters";
+import { computeSafePacePct, windowPctOrNull, SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../shared/formatters";
 import { isApiCreditAccount, type AccountLite } from "../../shared/account-chip";
-
-const SESSION_WINDOW_MS = 5 * 3_600_000;
-const WEEKLY_WINDOW_MS = 7 * 24 * 3_600_000;
 
 export type OverlayAccountLite = AccountLite;
 

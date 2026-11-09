@@ -110,7 +110,8 @@ pub(crate) fn launch_is_stale(state: &crate::daemon::state::DaemonState, session
 }
 
 /// Respawn `session_id` with the registry's model/effort if its live child is
-/// stale (see [`launch_is_stale`]). Called by a user send BEFORE the write, so
+/// stale (see [`launch_is_stale`]). Called BEFORE the write by a user send and by every daemon-originated
+/// respawning send (`teardown.rs` `send_message_with_respawn*`), so
 /// the picked model takes effect on that message without a "continue" turn.
 /// Returns whether it respawned, which also means the child has a new broadcast
 /// channel the caller's subscribers must re-attach to. A failed respawn is
