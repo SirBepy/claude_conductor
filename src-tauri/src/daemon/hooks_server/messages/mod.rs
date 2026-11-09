@@ -406,23 +406,31 @@ mod tests {
         assert_eq!(c.state.registry.peek_mcp_tool_used_gen("s"), Some(0), "arrival alone is the MCP proof");
     }
 
-    /// The three status lines Joe saw drawn as answer cards on 2026-11-09, plus
-    /// the plain-text shape, against results that only look similar.
+    /// Status lines against results that only look similar. A `call` is a decision
+    /// whose verdict is naturally a gerund ("Adding a column, not a table"), so it
+    /// is never checked.
     #[test]
     fn a_status_line_is_refused_as_a_result_kind_but_a_result_and_a_plan_pass() {
-        for kind in ["answer", "report", "call", "discovery"] {
-            for verdict in ["Committing the removal", "Button removed, committing next", "Building now"] {
+        for kind in ["answer", "report", "discovery"] {
+            for verdict in ["Committing the removal", "Button removed, committing next", "Now committing", "Next: pushing"] {
                 let e = validate_send(&kinded(kind, Some(verdict), "Done with the first part.")).unwrap_err();
                 assert!(e.contains("progress update") && e.contains("write_plan"), "{kind} {verdict}: {e}");
             }
-            for text in ["Claude is now running /commit.", "Claude is committing and pushing those two files."] {
+            for text in ["Claude is now fixing the test.", "Claude Is committing and pushing those two files.", "Claude is now pushing it."] {
                 let e = validate_send(&kinded(kind, Some("Yes"), text)).unwrap_err();
                 assert!(e.contains("progress update"), "{kind} {text}: {e}");
             }
-            for verdict in ["Removed and committed", "Nothing to commit", "Missing field", "Committed, not pushed", "Stuck on auth"] {
+            for verdict in [
+                "Removed and committed", "Nothing to commit", "Missing field", "Committed, not pushed", "Stuck on auth",
+                "Working tree clean", "Building on Windows fails", "Testing gap found", "Reading the log shows X",
+            ] {
                 assert!(validate_send(&kinded(kind, Some(verdict), "It is done.")).is_ok(), "{kind} {verdict}");
             }
             assert!(validate_send(&kinded(kind, Some("Yes"), "Claude is waiting on your answer.")).is_ok(), "{kind}");
+            assert!(validate_send(&kinded(kind, Some("Yes"), "Claude is running the tests, 3 of 5 done.")).is_ok(), "{kind}: running is not on the list");
+        }
+        for verdict in ["Adding a column, not a table", "Committing the removal", "Fixing it in the daemon"] {
+            assert!(validate_send(&kinded("call", Some(verdict), "It is a decision.")).is_ok(), "call {verdict}");
         }
         assert!(validate_send(&kinded("plan", None, "Claude is now refreshing the status.")).is_ok(), "a plan may say what is next");
     }
