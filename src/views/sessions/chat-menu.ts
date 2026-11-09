@@ -1,8 +1,8 @@
-// Shared "This chat" action block used by:
-//   - view-more-menu.ts  (top-right viewMore dropdown, "THIS CHAT" section)
-//   - sidebar-ctx-menu.ts (per-row 3-dot context menu)
-//
-// Returns a built DOM fragment; caller appends it into the parent container.
+// "This chat" action blocks, each a DOM fragment the caller appends:
+//   - buildChatMenuBlock: view-more-menu.ts (the phone header's viewMore
+//     dropdown, "THIS CHAT" section), with submenus
+//   - buildRowMenuBlock: sidebar-ctx-menu.ts (the sidebar row's right-click
+//     menu), four flat items
 
 import { closeChat } from "./close-chat";
 import { positionSubmenu } from "./position-dropdown";

@@ -1,6 +1,6 @@
 // Right-click on a sidebar row opens a flat four-item menu (Joe, 2026-11-09):
 // Copy PID, Freeze, Hide, Close. A draft row has no process, so it gets only
-// Delete draft. No submenus: the full "This chat" menu stays in the header.
+// Delete draft. No submenus: the full menu is the phone header's dropdown and, on desktop, the command palette.
 
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from "vitest";
