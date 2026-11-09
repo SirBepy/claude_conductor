@@ -86,42 +86,50 @@ fn check_rows(name: &str, rows: &Option<Vec<String>>, max_items: usize, max_len:
     Ok(())
 }
 
-/// Verbs a status line opens with ("Committing the removal"). A finished
-/// conclusion never starts with one, so a verdict that does is a progress
-/// update filed as a message. A word list rather than "ends in -ing": that
-/// would refuse "Nothing to commit" and "Missing field".
-const PROGRESS_VERBS: [&str; 24] = [
-    "committing", "building", "running", "checking", "writing", "editing", "fixing", "starting",
-    "adding", "removing", "pushing", "reading", "searching", "looking", "researching", "updating",
-    "installing", "testing", "working", "applying", "creating", "deleting", "fetching", "implementing",
+/// Verbs a status line opens with ("Committing the removal"). A word list rather
+/// than "ends in -ing", which would refuse "Nothing to commit" and "Missing
+/// field". Verbs that also start a noun phrase in a finished result (running,
+/// building, checking, reading, testing, working, looking, updating: "Working
+/// tree clean", "Building on Windows fails") are left out, so a real result is
+/// never refused for its first word.
+const PROGRESS_VERBS: &[&str] = &[
+    "committing", "writing", "editing", "fixing", "starting", "adding", "removing", "pushing",
+    "searching", "researching", "installing", "applying", "creating", "deleting", "fetching",
+    "implementing", "pulling", "merging", "rebasing", "refactoring", "verifying", "investigating",
+    "rebuilding", "compiling", "restarting", "deploying", "wiring", "renaming",
 ];
 
+fn bare(word: &str) -> String {
+    word.trim_matches(|c: char| !c.is_alphabetic()).to_lowercase()
+}
+
 fn is_progress_verb(word: &str) -> bool {
-    let w = word.trim_matches(|c: char| !c.is_alphabetic()).to_lowercase();
-    PROGRESS_VERBS.contains(&w.as_str())
+    PROGRESS_VERBS.contains(&bare(word).as_str())
 }
 
 /// Whether `verdict` or the opening of `text` reads as "what Claude is doing
-/// right now", not a result. Three shapes seen in real chats: a verdict that
-/// opens with a progress verb ("Committing the removal"), a verdict that ends
-/// "..., committing next", and a text that opens "Claude is (now) <verb>ing".
+/// right now", not a result. Shapes seen in real chats: a verdict that opens
+/// with a progress verb, optionally after "Now" or "Next:" ("Committing the
+/// removal"), a verdict that ends "<verb> next" or "<verb> now" ("Button
+/// removed, committing next"), and a text that opens "Claude is (now) <verb>".
 fn reads_as_progress(verdict: Option<&str>, text: &str) -> bool {
     if let Some(v) = verdict {
         let words: Vec<&str> = v.split_whitespace().collect();
-        if words.first().is_some_and(|w| is_progress_verb(w)) {
+        let lead = words.iter().position(|w| !matches!(bare(w).as_str(), "now" | "next")).unwrap_or(words.len());
+        if words.get(lead).is_some_and(|w| is_progress_verb(w)) {
             return true;
         }
         if words.len() >= 2
-            && matches!(words[words.len() - 1].trim_matches(|c: char| !c.is_alphabetic()).to_lowercase().as_str(), "next" | "now")
+            && matches!(bare(words[words.len() - 1]).as_str(), "next" | "now")
             && is_progress_verb(words[words.len() - 2])
         {
             return true;
         }
     }
     let mut words = text.split_whitespace();
-    if words.next().is_some_and(|w| w.eq_ignore_ascii_case("claude")) && words.next() == Some("is") {
+    if words.next().is_some_and(|w| bare(w) == "claude") && words.next().is_some_and(|w| bare(w) == "is") {
         let after = match words.next() {
-            Some(w) if w.eq_ignore_ascii_case("now") => words.next(),
+            Some(w) if bare(w) == "now" => words.next(),
             other => other,
         };
         return after.is_some_and(is_progress_verb);
@@ -165,9 +173,9 @@ pub(super) fn validate_send(body: &SendMessageBody) -> Result<(), String> {
         _ => {}
     }
 
-    if matches!(kind, "answer" | "report" | "call" | "discovery") && reads_as_progress(verdict, text) {
+    if matches!(kind, "answer" | "report" | "discovery") && reads_as_progress(verdict, text) {
         return Err(format!(
-            "this {kind} reads as a progress update (it says what Claude is doing, not what came out). Progress goes in write_plan, which draws a live checklist; send no message for it. Send a message only for a result: resend when the work is done, with a verdict that states the outcome (\"Removed and committed\", not \"Committing the removal\")."
+            "this {kind} reads as a progress update (it says what Claude is doing, not what came out). Progress goes in write_plan, which draws a live checklist; send no message for it. Send a message only for a result: resend when the work is done, with a verdict that states the outcome (\"Removed and committed\", not \"Committing the removal\"). If Joe asked what you are doing, answer with the state reached (\"Two of three steps done\")."
         ));
     }
 
