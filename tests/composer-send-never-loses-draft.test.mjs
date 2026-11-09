@@ -96,6 +96,10 @@ describe("sent-outbox recovery", () => {
     typeInto(textarea, "first one");
     pressKey(textarea, "Enter");
     await vi.waitFor(() => expect(textarea.value).toBe(""));
+    // The box clears before the send settles, and a second Enter inside that
+    // gap is the composer's re-entry guard; let the first send finish.
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 0));
 
     typeInto(textarea, "second one");
     pressKey(textarea, "Enter");

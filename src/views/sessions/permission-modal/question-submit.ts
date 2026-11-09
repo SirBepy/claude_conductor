@@ -26,10 +26,11 @@ import {
   gateDiag,
 } from "./gating";
 import { askerChips } from "./askers";
-import type { Question, QuestionDraft, QuestionRequestedPayload } from "./types";
+import type { Answers, Question, QuestionDraft, QuestionRequestedPayload, QuestionUIOpts } from "./types";
 import { rerenderSidebar, surfaceNextForDisplay, surfaceParkedPrompt } from "./index";
 import { dropIfAlreadyAnswered } from "./answered-gate";
 import { setLiveQuestionProgress } from "../question-progress";
+import { startGrace, graceLabel, floatingGraceMount } from "../../../shared/chat/send-grace";
 
 /** Mirror per-question answered/unanswered progress into the chat transcript's
  *  question card while the floating card is still being answered. No-op for a
@@ -42,6 +43,17 @@ function syncQuestionProgress(sessionId: string | undefined, promptId: string, q
     isQuestionAnswered(q, draft.freeText.get(i) ?? "", draft.selections.get(i))
   );
   state.renderer?.updateQuestionProgress(promptId, liveAnswered);
+}
+
+/** Prompt ids whose answer or skip is waiting out its grace window. */
+const heldForGrace = new Set<string>();
+
+/** One line of what was picked or typed, for the Undo bar. */
+function answerSummary(answers: Answers): string {
+  return Object.values(answers)
+    .map((a) => (Array.isArray(a) ? a.join(", ") : a))
+    .filter(Boolean)
+    .join(" / ");
 }
 
 /** `reopened`: clicked in the transcript, so it is deliberately answered out
@@ -117,6 +129,7 @@ export async function showQuestionCard(
 ): Promise<void> {
   // Every show path funnels through here, so this is the last line of defence
   // against re-presenting a question that was already answered.
+  if (heldForGrace.has(payload.id)) return;
   if (dropIfAlreadyAnswered(payload.session_id, payload.id)) return;
   // Park the prompt while it's on screen so switching chats and back re-surfaces
   // it (a card torn down by navigation is otherwise lost while the daemon turn
@@ -158,6 +171,152 @@ export async function showQuestionCard(
   const shownOn = displayIdOf(payload);
   const fromSub = isSubPrompt(payload);
   const daemonCard = payload.daemon_card === true;
+  // The answer's real delivery. Runs after the grace window, so everything that
+  // marks the prompt answered waits with it and an Undo leaves the card as it was.
+  const deliverAnswer: QuestionUIOpts["onSubmit"] = async (answers, extras) => {
+    // Mark the slot answered NOW, synchronously, before any
+    // await below - the daemon's `prompt-resolved` poll that would
+    // otherwise clear this slot can lag a full round trip behind a
+    // same-turn sibling's arrival, and handleQuestionRequested's sibling
+    // gate needs this flag to tell "answered, poll hasn't caught up" apart
+    // from "still genuinely open" by more than id-inequality alone.
+    if (payload.session_id) markPendingPromptAnswered(payload.session_id, payload.id);
+    // Several chats can have a card in this window (a sub per card): the next
+    // one comes up now, not after the daemon's resolve poll.
+    if (shownOn) surfaceNextForDisplay(shownOn);
+    // NOT cleared here (ai_todo 820): the card tears down before this runs,
+    // so localStorage is the only surviving draft. Cleared per-branch below.
+    void clearAuqPush(payload.session_id, payload.id);
+    const sid = payload.session_id;
+    // A daemon card answers daemon code and nothing else. Its `session_id` is
+    // the main chat it shows in, so every branch below (the answer message, the
+    // extras, the chat's composer draft and held queue) would reach that chat's
+    // model. It settles the card and stops, whether or not the oneshot was still
+    // there: a card withdrawn before the click has no model to tell.
+    if (daemonCard) {
+      try {
+        await invoke("respond_question", { id: payload.id, sessionId: payload.session_id, answers, skipped: false });
+      } catch (e) {
+        console.warn("respond_question (daemon card) failed:", e);
+        clearPendingPromptById(payload.id);
+        rerenderSidebar();
+      }
+      clearQuestionDraft(payload.id);
+      return;
+    }
+    // Settle the daemon card + learn whether a live oneshot was resolved:
+    // delivered=true means the answer already reached the model in-band.
+    // `=== true`, never truthiness: the daemon's raw envelope would
+    // otherwise read as delivered and drop the answer block.
+    let delivered = false;
+    try {
+      delivered = (await invoke<boolean>("respond_question", { id: payload.id, sessionId: payload.session_id, answers, skipped: false })) === true;
+    } catch (e) {
+      // respond_question_inner has no error path of its own - this only
+      // fires on a transport failure, so falling through to attempt
+      // delivery below is intentional, not a missed `return`.
+      console.warn("respond_question (settle) failed:", e);
+      clearPendingPromptById(payload.id);
+      rerenderSidebar();
+    }
+    if (!sid) { clearQuestionDraft(payload.id); return; }
+    if (!opts.reopened && !isLatestQuestion(sid, payload.id)) {
+      // This id was ITSELF superseded (a ghost swap) - not merely
+      // that a sibling card exists (an earlier bug dropped it for that).
+      console.warn("[perm-relay] dropping stale question answer", payload.id, "for", sid);
+      clearQuestionDraft(payload.id);
+      return;
+    }
+    // bundleHeld/extractAuqAnswerText key off the AUQ_ANSWER_SENTINEL block
+    // staying standalone (cca356d8), included only when NOT delivered
+    // in-band. Names the card so the fold lands on THIS one, not the newest.
+    const answerBlocks: ContentBlock[] = delivered
+      ? []
+      : [{ type: "text", text: `${auqAnswerSentinel(payload.id)}${formatAnswersAsMessage(questions, answers)}` }];
+    // Tagged AUQ_EXTRA_SENTINEL so this folds into the SAME card (see
+    // chat-question-card.ts's resolvePendingQuestionExtra), not a detached bubble.
+    const cardExtraBlocks: ContentBlock[] = [];
+    if (extras.additionalMessage) cardExtraBlocks.push({ type: "text", text: `${AUQ_EXTRA_SENTINEL}${extras.additionalMessage}` });
+    for (const a of extras.attachments) {
+      if (a.path) cardExtraBlocks.push({ type: "text", text: `<file:${a.path}::${a.filename}>` });
+    }
+    if (state.selectedId === sid && state.heldMessages) {
+      // Unrelated to the card - staged as its own item so it joins any
+      // already-queued prose, never merged with the card's own extras.
+      const attach = state.heldMessages.getAttached();
+      if (attach && !attach.isDraftEmpty()) {
+        state.heldMessages.stage(attach.getDraftBlocks());
+        attach.clearComposer();
+      }
+      // Its own held item so bundleHeld's sentinel-group check (held-messages.ts)
+      // keeps the note+attachments intact, not merged into the queued prose.
+      if (cardExtraBlocks.length) state.heldMessages.stage(cardExtraBlocks);
+      try {
+        await state.heldMessages.flushHeldWithDraft(answerBlocks);
+        clearQuestionDraft(payload.id);
+      } catch (e) {
+        console.warn("[perm-relay] flushHeldWithDraft (answer delivery) failed:", e);
+        showToast(`Answer delivery failed: ${e}`);
+      }
+    } else if (answerBlocks.length || cardExtraBlocks.length) {
+      const cwd = resolveCwdForSession(sid) ?? ".";
+      try {
+        await invoke("send_message", { sessionId: sid, cwd, blocks: [...answerBlocks, ...cardExtraBlocks] });
+        clearQuestionDraft(payload.id);
+      } catch (e) {
+        // A backgrounded session still mid-turn refuses the write.
+        // The answer belongs on its held queue, not in a failure toast: the
+        // idle sweep in sidebar.ts sends it the moment that turn ends.
+        if (isSessionBusyError(e) && (await holdWhileBusy(sid, [...answerBlocks, ...cardExtraBlocks]))) {
+          clearQuestionDraft(payload.id);
+          return;
+        }
+        console.warn("[perm-relay] send_message (answer delivery) failed:", e);
+        showToast(`Answer delivery failed: ${e}`);
+      }
+    } else {
+      // Nothing left to deliver (in-band via the oneshot, no extras): the
+      // draft is safe to drop now.
+      clearQuestionDraft(payload.id);
+    }
+  };
+
+  const deliverSkip = async (): Promise<void> => {
+    // Fire-and-forget skip: the asking turn already ended, so just settle
+    // the card (drop the durable prompt + clear "Input Needed"). No message
+    // is sent - with no blocking waiter the model never sees a skip signal.
+    // Marked answered too - a skip settles the slot exactly like
+    // a submit does, same stale-vs-open ambiguity while the resolve poll
+    // hasn't caught up yet.
+    if (payload.session_id) markPendingPromptAnswered(payload.session_id, payload.id);
+    if (shownOn) surfaceNextForDisplay(shownOn);
+    clearQuestionDraft(payload.id);
+    void clearAuqPush(payload.session_id, payload.id);
+    try {
+      await invoke("respond_question", { id: payload.id, sessionId: payload.session_id, answers: {}, skipped: true });
+    } catch (e) {
+      console.warn("respond_question (skip settle) failed:", e);
+      clearPendingPromptById(payload.id);
+      rerenderSidebar();
+    }
+    // Only a sub's Skip says anything: every other chat's stays silent.
+    if (fromSub && payload.session_id) await tellSubSkipped(payload.session_id);
+  };
+
+  // Several chats can have a card at once; each holds its own answer.
+  const graceKey = shownOn ?? payload.session_id ?? payload.id;
+  const withGrace = (label: string, fire: () => Promise<void> | void): Promise<void> => {
+    // Parked replays (a chat switch back) must not re-show a card whose answer is on hold.
+    heldForGrace.add(payload.id);
+    return startGrace({
+      key: graceKey,
+      label,
+      mount: floatingGraceMount(),
+      fire: () => { heldForGrace.delete(payload.id); return fire(); },
+      onUndo: () => { heldForGrace.delete(payload.id); void showQuestionCard(payload, undefined, opts); },
+    });
+  };
+
   renderQuestionUI({
     id: payload.id,
     sessionId: payload.session_id,
@@ -189,133 +348,7 @@ export async function showQuestionCard(
       scheduleAuqPush(payload.session_id, payload.id, draft);
       syncQuestionProgress(payload.session_id, payload.id, questions, draft);
     },
-    onSubmit: async (answers, extras) => {
-      // Mark the slot answered NOW (todo 971), synchronously, before any
-      // await below - the daemon's `prompt-resolved` poll that would
-      // otherwise clear this slot can lag a full round trip behind a
-      // same-turn sibling's arrival, and handleQuestionRequested's sibling
-      // gate needs this flag to tell "answered, poll hasn't caught up" apart
-      // from "still genuinely open" by more than id-inequality alone.
-      if (payload.session_id) markPendingPromptAnswered(payload.session_id, payload.id);
-      // Several chats can have a card in this window (a sub per card): the next
-      // one comes up now, not after the daemon's resolve poll.
-      if (shownOn) surfaceNextForDisplay(shownOn);
-      // NOT cleared here (ai_todo 820): the card tears down before this runs,
-      // so localStorage is the only surviving draft. Cleared per-branch below.
-      void clearAuqPush(payload.session_id, payload.id);
-      const sid = payload.session_id;
-      // A daemon card answers daemon code and nothing else. Its `session_id` is
-      // the main chat it shows in, so every branch below (the answer message, the
-      // extras, the chat's composer draft and held queue) would reach that chat's
-      // model. It settles the card and stops, whether or not the oneshot was still
-      // there: a card withdrawn before the click has no model to tell.
-      if (daemonCard) {
-        try {
-          await invoke("respond_question", { id: payload.id, sessionId: payload.session_id, answers, skipped: false });
-        } catch (e) {
-          console.warn("respond_question (daemon card) failed:", e);
-          clearPendingPromptById(payload.id);
-          rerenderSidebar();
-        }
-        clearQuestionDraft(payload.id);
-        return;
-      }
-      // Settle the daemon card + learn whether a live oneshot was resolved:
-      // delivered=true means the answer already reached the model in-band.
-      // `=== true`, never truthiness: the daemon's raw envelope would
-      // otherwise read as delivered and drop the answer block (todo 773).
-      let delivered = false;
-      try {
-        delivered = (await invoke<boolean>("respond_question", { id: payload.id, sessionId: payload.session_id, answers, skipped: false })) === true;
-      } catch (e) {
-        // respond_question_inner has no error path of its own - this only
-        // fires on a transport failure, so falling through to attempt
-        // delivery below is intentional, not a missed `return`.
-        console.warn("respond_question (settle) failed:", e);
-        clearPendingPromptById(payload.id);
-        rerenderSidebar();
-      }
-      if (!sid) { clearQuestionDraft(payload.id); return; }
-      if (!opts.reopened && !isLatestQuestion(sid, payload.id)) {
-        // This id was ITSELF superseded (a ghost swap, todo 833) - not merely
-        // that a sibling card exists (todo 860 fixed that false drop).
-        console.warn("[perm-relay] dropping stale question answer", payload.id, "for", sid);
-        clearQuestionDraft(payload.id);
-        return;
-      }
-      // bundleHeld/extractAuqAnswerText key off the AUQ_ANSWER_SENTINEL block
-      // staying standalone (cca356d8), included only when NOT delivered
-      // in-band. Names the card so the fold lands on THIS one, not the newest.
-      const answerBlocks: ContentBlock[] = delivered
-        ? []
-        : [{ type: "text", text: `${auqAnswerSentinel(payload.id)}${formatAnswersAsMessage(questions, answers)}` }];
-      // Tagged AUQ_EXTRA_SENTINEL so this folds into the SAME card (see
-      // chat-question-card.ts's resolvePendingQuestionExtra), not a detached bubble.
-      const cardExtraBlocks: ContentBlock[] = [];
-      if (extras.additionalMessage) cardExtraBlocks.push({ type: "text", text: `${AUQ_EXTRA_SENTINEL}${extras.additionalMessage}` });
-      for (const a of extras.attachments) {
-        if (a.path) cardExtraBlocks.push({ type: "text", text: `<file:${a.path}::${a.filename}>` });
-      }
-      if (state.selectedId === sid && state.heldMessages) {
-        // Unrelated to the card - staged as its own item so it joins any
-        // already-queued prose, never merged with the card's own extras.
-        const attach = state.heldMessages.getAttached();
-        if (attach && !attach.isDraftEmpty()) {
-          state.heldMessages.stage(attach.getDraftBlocks());
-          attach.clearComposer();
-        }
-        // Its own held item so bundleHeld's sentinel-group check (held-messages.ts)
-        // keeps the note+attachments intact, not merged into the queued prose.
-        if (cardExtraBlocks.length) state.heldMessages.stage(cardExtraBlocks);
-        try {
-          await state.heldMessages.flushHeldWithDraft(answerBlocks);
-          clearQuestionDraft(payload.id);
-        } catch (e) {
-          console.warn("[perm-relay] flushHeldWithDraft (answer delivery) failed:", e);
-          showToast(`Answer delivery failed: ${e}`);
-        }
-      } else if (answerBlocks.length || cardExtraBlocks.length) {
-        const cwd = resolveCwdForSession(sid) ?? ".";
-        try {
-          await invoke("send_message", { sessionId: sid, cwd, blocks: [...answerBlocks, ...cardExtraBlocks] });
-          clearQuestionDraft(payload.id);
-        } catch (e) {
-          // A backgrounded session still mid-turn refuses the write (todo 873).
-          // The answer belongs on its held queue, not in a failure toast: the
-          // idle sweep in sidebar.ts sends it the moment that turn ends.
-          if (isSessionBusyError(e) && (await holdWhileBusy(sid, [...answerBlocks, ...cardExtraBlocks]))) {
-            clearQuestionDraft(payload.id);
-            return;
-          }
-          console.warn("[perm-relay] send_message (answer delivery) failed:", e);
-          showToast(`Answer delivery failed: ${e}`);
-        }
-      } else {
-        // Nothing left to deliver (in-band via the oneshot, no extras): the
-        // draft is safe to drop now.
-        clearQuestionDraft(payload.id);
-      }
-    },
-    onCancel: async () => {
-      // Fire-and-forget skip: the asking turn already ended, so just settle
-      // the card (drop the durable prompt + clear "Input Needed"). No message
-      // is sent - with no blocking waiter the model never sees a skip signal.
-      // Marked answered too (todo 971) - a skip settles the slot exactly like
-      // a submit does, same stale-vs-open ambiguity while the resolve poll
-      // hasn't caught up yet.
-      if (payload.session_id) markPendingPromptAnswered(payload.session_id, payload.id);
-      if (shownOn) surfaceNextForDisplay(shownOn);
-      clearQuestionDraft(payload.id);
-      void clearAuqPush(payload.session_id, payload.id);
-      try {
-        await invoke("respond_question", { id: payload.id, sessionId: payload.session_id, answers: {}, skipped: true });
-      } catch (e) {
-        console.warn("respond_question (skip settle) failed:", e);
-        clearPendingPromptById(payload.id);
-        rerenderSidebar();
-      }
-      // Only a sub's Skip says anything: every other chat's stays silent.
-      if (fromSub && payload.session_id) await tellSubSkipped(payload.session_id);
-    },
+    onSubmit: (answers, extras) => withGrace(graceLabel("Answer", answerSummary(answers)), () => deliverAnswer(answers, extras)),
+    onCancel: () => withGrace("Skipping this question", deliverSkip),
   });
 }

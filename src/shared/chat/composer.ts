@@ -22,7 +22,8 @@ import "./builtins/register";
 import "./caret-popup/popup.css";
 import { ComposerAttachments, type Attachment, type PastedBlock } from "./composer-attachments";
 import { loadDraft, saveDraft, clearDraft } from "./composer-persistence";
-import { recordSent, moveSentOutbox } from "./sent-outbox";
+import { recordSent, moveSentOutbox, popLastSent } from "./sent-outbox";
+import { startGrace, undoGrace, graceLabel, remountGraceBar, detachGraceBar } from "./send-grace";
 import { ComposerDraftSync } from "./composer-draft-sync";
 import { openFrozenChoice } from "./composer-frozen-choice";
 import { ComposerUndo } from "./composer-undo";
@@ -164,6 +165,7 @@ export class Composer {
       hasHeld: opts.hasHeld,
       popLastHeld: opts.popLastHeld,
       sendQueuedNow: opts.sendQueuedNow,
+      undoPendingSend: () => undoGrace(this.graceKey()),
     });
     this.cv = new ComposerVoice({
       onAfterEdit: () => { this.autoResize(); this.updateHighlight(); this.updateSendState(); this.persistDraft(); this.opts.onDraftActivity?.(); },
@@ -277,6 +279,9 @@ export class Composer {
       this.att.migrateSession(prevId!, id);
       moveSentOutbox(prevId!, id);
     }
+    // Leaving a chat must not leave its Undo bar over the next one. The held
+    // send still fires on its own timer.
+    if (prevId !== id) detachGraceBar(this.graceKey());
     this.sessionId = id;
     this.baseReadOnly = !!opts.readOnly;
     this.disabled = this.baseReadOnly || !!this.opts.isOffline?.();
@@ -387,6 +392,7 @@ export class Composer {
     const dis = this.disabled ? "disabled" : "";
     const sendTitle = this.opts.onSchedule ? "Send (Enter). Right-click or hold to schedule." : "Send";
     this.root.innerHTML = `
+      <div class="composer-grace-slot"></div>
       <div class="composer-attachments"></div>
       <div class="composer-scope-warning" hidden></div>
       <div class="composer-row">
@@ -420,6 +426,9 @@ export class Composer {
     this.highlightEl = this.root.querySelector<HTMLElement>(".composer-highlight");
     this.noticeEl = this.root.querySelector<HTMLElement>(".composer-notice");
     this.scopeWarn.bind(this.root.querySelector<HTMLElement>(".composer-scope-warning"));
+    // The rebuilt DOM dropped a still-pending send's Undo bar; put it back.
+    const graceSlot = this.root.querySelector<HTMLElement>(".composer-grace-slot");
+    if (graceSlot) remountGraceBar(this.graceKey(), graceSlot);
     this.sendBtn = this.root.querySelector<HTMLButtonElement>(".composer-send");
     this.micBtn = this.root.querySelector<HTMLButtonElement>(".composer-mic");
     this.att.bind(this.root);
@@ -808,14 +817,41 @@ export class Composer {
     const savedAttachments = this.att.attachments;
     const savedPastedBlocks = this.att.pastedBlocks;
     this.clearComposer();
+    const slot = this.root.querySelector<HTMLElement>(".composer-grace-slot");
+    const fire = async (): Promise<void> => {
+      try {
+        await this.opts.onSend(blocks);
+      } catch (err) {
+        console.error("[Composer] onSend failed", err);
+        this.restoreDraft(text, savedAttachments, savedPastedBlocks);
+      }
+    };
     try {
-      await this.opts.onSend(blocks);
-    } catch (err) {
-      console.error("[Composer] onSend failed", err);
-      this.restoreDraft(text, savedAttachments, savedPastedBlocks);
+      // Held for the grace window so an accidental Enter can be taken back
+      // before claude has seen it; without a slot to show the bar it sends now.
+      if (!slot) await fire();
+      else {
+        await startGrace({
+          key: this.graceKey(),
+          label: graceLabel("Sending", text),
+          mount: slot,
+          fire,
+          onUndo: () => {
+            // The text goes back in front of whatever has been typed since,
+            // and out of the Ctrl+Z outbox, which would offer it a second time.
+            if (this.sessionId) popLastSent(this.sessionId);
+            this.restoreDraft(text, savedAttachments, savedPastedBlocks);
+          },
+        });
+      }
     } finally {
       this.sending = false;
     }
+  }
+
+  /** Chat id the grace window is keyed on; the pending-draft composer has none yet. */
+  private graceKey(): string {
+    return this.sessionId ?? "composer";
   }
 
   /** Focus the textarea. Public so the held-messages controller can return
@@ -845,11 +881,16 @@ export class Composer {
   /** Undo a `clearComposer()` after a failed send: puts the text, attachments
    * and pasted blocks back so the user doesn't lose what they typed. */
   private restoreDraft(text: string, attachments: Attachment[], pastedBlocks: PastedBlock[]): void {
+    // In front of anything typed since the clear (the grace window leaves the
+    // box live), so Undo never overwrites what the user carried on writing.
+    const typed = this.textarea?.value ?? "";
     if (this.textarea) {
-      this.textarea.value = text;
+      this.textarea.value = typed.trim() ? `${text}
+
+${typed}` : text;
       this.textarea.focus();
     }
-    this.att.restoreDraft(attachments, pastedBlocks);
+    this.att.restoreDraft([...attachments, ...this.att.attachments], [...pastedBlocks, ...this.att.pastedBlocks]);
     this.autoResize();
     this.updateHighlight();
     this.updateSendState();
