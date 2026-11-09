@@ -1,3 +1,4 @@
+// Reviewed 2026-11-09: the desktop header no longer renders the three-dots (#viewMoreBtn, phone only now); this spec waits on the header and opens things with the keyboard instead.
 // asserts: src/views/sessions/project-picker.ts, src/views/sessions/location-picker.ts, src/shared/modal.ts
 // Reviewed 2026-10-20 (Mac-mirrored project icon fix): project-picker.ts's row render now passes a machineId to renderAvatar - this spec never selects a peer machine, so it stays null and the markup is unchanged.
 // Reviewed 2026-10-23 (peer project stats): project-picker.ts now reads row stats through statFor() and hides the worktree badge on peer rows - this spec only drives the local list, where both are unchanged.
@@ -55,7 +56,7 @@ async function raceEscapePastTheLocationStep(page: Page): Promise<void> {
   // Widens loadScopes()'s own gap well past the 150ms morph, so the race
   // below isn't pinned to a single-digit-ms CSS-animation window.
   await delayInvokes(page, ["list_claude_md_scopes"], DELAY_MS);
-  await page.locator("#viewMoreBtn").waitFor();
+  await page.locator(".view-sessions .view-header").waitFor();
   await page.keyboard.press("Control+n");
   await page.locator(".project-picker-row").click();
   // Lands while list_claude_md_scopes is still in flight - the project

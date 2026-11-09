@@ -1,3 +1,4 @@
+// Reviewed 2026-11-09: the desktop header no longer renders the three-dots (#viewMoreBtn, phone only now); this spec waits on the header and opens things with the keyboard instead.
 // asserts: src/views/sessions/new-chat-config.ts, src/views/sessions/pending-pane-composer.ts, src/views/sessions/account-picker-logic.ts
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, invokeCalls, SESSIONS_BASE_INVOKE } from "./harness";
@@ -32,7 +33,7 @@ async function openDraft(page: Page, extra: Record<string, unknown>): Promise<vo
       ...extra,
     },
   });
-  await page.locator("#viewMoreBtn").waitFor();
+  await page.locator(".view-sessions .view-header").waitFor();
   await page.keyboard.press("Control+n");
   await page.locator(".project-picker-row").click();
   await page.locator("#session-pane .session-composer .composer-textarea").waitFor();

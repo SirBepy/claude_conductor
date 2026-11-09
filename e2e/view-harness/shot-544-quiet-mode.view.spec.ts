@@ -1,5 +1,6 @@
+// Reviewed 2026-11-09: the desktop header no longer renders the three-dots (#viewMoreBtn, phone only now); this spec waits on the header and opens things with the keyboard instead.
 import { expect, test } from "@playwright/test";
-import { capture, mountView, sessionInstance, SESSIONS_BASE_INVOKE } from "./harness";
+import { capture, mountView, openPaletteFor, sessionInstance, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Todo 544: visual confirmation of quiet-mode chat (commit 9f4500b8).
 // Narration rows must be present-but-hidden by default; the chat menu's
@@ -55,12 +56,9 @@ test.describe("@shot", () => {
     await expect(messages).not.toHaveClass(/show-raw-chat/);
     await capture(messages, "quiet-mode-default");
 
-    // Real toggle path: viewMore kebab -> THIS CHAT -> Chat -> Show raw activity.
-    await page.locator("#viewMoreBtn").click();
-    await page.locator('.smore-item[data-sub-label="Chat"]').click();
-    const item = page.locator(".chat-menu-submenu .smore-item", { hasText: "Show raw activity" }).first();
-    await expect(item).toBeVisible();
-    await item.click();
+    // Real toggle path: Ctrl+Shift+P -> "Show raw activity".
+    await openPaletteFor(page, "Show raw activity");
+    await page.keyboard.press("Enter");
 
     await expect(messages).toHaveClass(/show-raw-chat/);
     await expect(narration.first()).toBeVisible();

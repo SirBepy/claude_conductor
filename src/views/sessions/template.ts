@@ -1,6 +1,7 @@
 import { html } from "lit-html";
 import { openSidemenu } from "../../shared/sidemenu";
 import { showView } from "../../shared/navigation";
+import { isRemote } from "../../shared/transport";
 
 export function template() {
   return html`
@@ -24,13 +25,13 @@ export function template() {
         <h2>Chats</h2>
         <span class="when-done-hchip" id="when-done-chip-host" hidden></span>
         <span class="usage-dial-row" id="usage-dial-host" hidden></span>
-        <button
+        ${isRemote() ? html`<button
           class="icon-btn more-btn"
           id="viewMoreBtn"
           title="More options"
         >
           <i class="ph ph-dots-three-vertical"></i>
-        </button>
+        </button>` : ""}
       </div>
       <!--
         Host for the controls that now live inside the "more options" overflow
