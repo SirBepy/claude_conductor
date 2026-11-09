@@ -8,6 +8,7 @@ pub mod browser;
 pub mod busy_watchdog;
 pub mod external_adopt;
 pub mod claude_ai_connectors;
+pub mod project_mcp;
 pub mod claude_config;
 pub mod detector_task;
 pub mod device_registry;

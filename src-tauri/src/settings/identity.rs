@@ -142,6 +142,16 @@ pub fn resolve_claude_ai_connectors(
     resolve_project_setting(projects, path, |p| p.claude_ai_connectors.then_some(())).is_some()
 }
 
+/// The project's own MCP servers for chats under `path`, with the same
+/// own-project-then-parent-repo fallback. An empty list reads as unset.
+pub fn resolve_project_mcp_servers(
+    projects: &[crate::types::ProjectConfig],
+    path: &std::path::Path,
+) -> Vec<crate::types::project::ProjectMcpServer> {
+    resolve_project_setting(projects, path, |p| (!p.mcp_servers.is_empty()).then(|| p.mcp_servers.clone()))
+        .unwrap_or_default()
+}
+
 /// The model and effort a new chat in the project owning `path` opens on (own
 /// project first, then the parent repo of an unbound worktree). Blank values
 /// count as unset, so each half falls back on its own.
@@ -338,6 +348,7 @@ mod tests {
             last_worktree_path: None,
             last_start_folder_rel: None,
             claude_ai_connectors: false,
+            mcp_servers: Vec::new(),
             tracker: None,
             keep_running_in_gaming_mode: false,
             default_model: None,
