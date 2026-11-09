@@ -15,11 +15,7 @@ export interface PaletteSources {
   sync: () => PaletteCommand[];
   /** Slower reads (the project list). Rows are added as each one lands; a read that throws adds nothing. */
   later: Array<() => Promise<PaletteCommand[]>>;
-  /** The search box's hint; a palette scoped to one chat names it here. */
-  placeholder?: string;
 }
-
-const DEFAULT_PLACEHOLDER = "Search commands, chats, projects and settings";
 
 let current: { close(): void } | null = null;
 
@@ -59,7 +55,7 @@ export function openPalette(sources: PaletteSources): void {
   overlay.innerHTML = `<div class="cp" role="dialog" aria-label="Command palette">`
     + `<div class="cp-grip" title="Drag to move, double-click to recentre"><i class="ph ph-dots-six"></i></div>`
     + `<div class="cp-field"><i class="ph ph-magnifying-glass cp-lead"></i>`
-    + `<input class="cp-input" aria-label="Search commands" spellcheck="false" autocomplete="off" /></div>`
+    + `<input class="cp-input" placeholder="Search commands, chats, projects and settings" aria-label="Search commands" spellcheck="false" autocomplete="off" /></div>`
     + `<div class="cp-list" role="listbox"></div>`
     + `<div class="cp-error" hidden></div>`
     + `</div>`;
@@ -67,8 +63,6 @@ export function openPalette(sources: PaletteSources): void {
   const list = overlay.querySelector<HTMLElement>(".cp-list")!;
   const lead = overlay.querySelector<HTMLElement>(".cp-lead")!;
   const errorBox = overlay.querySelector<HTMLElement>(".cp-error")!;
-  const rootPlaceholder = sources.placeholder ?? DEFAULT_PLACEHOLDER;
-  input.placeholder = rootPlaceholder;
 
   const recents = loadRecents();
   let root: PaletteCommand[] = sources.sync();
@@ -145,7 +139,7 @@ export function openPalette(sources: PaletteSources): void {
   function leaveStage(): void {
     stage = null;
     input.value = "";
-    input.placeholder = rootPlaceholder;
+    input.placeholder = "Search commands, chats, projects and settings";
     lead.className = "ph ph-magnifying-glass cp-lead";
     setError(null);
     refilter(true);
