@@ -13,7 +13,7 @@ import { previewCardIndex, previewRefusalReason, refusePreview, supersedePreview
 import { isQuestionResolutionText } from "./tool-views";
 import { draftResultFieldsOf } from "./chat-draft-card";
 import { applyPassedResult, isSubchatSend } from "./chat-subchat-passed";
-import { findNearestOpenQuestionId, findLastQuestionId, findStrandedSentinelAnswer, findStrandedSentinelExtra, matchSkipMarks } from "./chat-question-card";
+import { isHookRefusedAsk, refusedQuestionCard, findNearestOpenQuestionId, findLastQuestionId, findStrandedSentinelAnswer, findStrandedSentinelExtra, matchSkipMarks } from "./chat-question-card";
 import type { TurnUsageTotals } from "./turn-chips";
 
 // Re-exported: tests/chat-mcp-ask-question.test.mjs imports matchSkipMarks
@@ -284,12 +284,18 @@ export class ChatPaginator {
     const questionAnswerById = new Map<string, string>();
     const questionToolIds = new Set<string>();
     const questionCards: { id: string; ts: number }[] = [];
+    // MCP asks a hook blocked before the daemon took them (see isHookRefusedAsk): no card is drawn, and
+    // none may soak up an answer, a skip mark or a note meant for the real one.
+    const refusedQuestionIds = new Set<string>();
     for (const ev of events) {
       if (ev.type === "tool_use" && isAskQuestionTool(ev.tool_name) && !ev.parent_tool_use_id) {
         questionToolIds.add(ev.id);
         questionCards.push({ id: ev.id, ts: Number(ev.timestamp) });
+        const result = events.find((e) => e.type === "tool_result" && e.tool_use_id === ev.id);
+        if (result?.type === "tool_result" && isHookRefusedAsk({ tool: ev.tool_name }, result)) refusedQuestionIds.add(ev.id);
       }
     }
+    const liveQuestionCards = (upTo: number) => questionCards.slice(0, upTo).filter((c) => !refusedQuestionIds.has(c.id));
     for (const ev of events) {
       if (ev.type !== "tool_result" || !questionToolIds.has(ev.tool_use_id)) continue;
       const text = !ev.is_error && ev.output?.type === "text" ? ev.output.text : "";
@@ -323,7 +329,7 @@ export class ChatPaginator {
         const namedId = extractAuqAnswerCardId(cleanedContent);
         const qid = namedId && questionToolIds.has(namedId)
           ? namedId
-          : findNearestOpenQuestionId(questionCards.slice(0, opened), resolvedSoFar);
+          : findNearestOpenQuestionId(liveQuestionCards(opened), resolvedSoFar);
         if (qid === null) continue;
         sentinelAnswerById.set(qid, answer);
         foldedUserMsgs.set(ev, qid);
@@ -331,7 +337,7 @@ export class ChatPaginator {
       }
       // An answer that landed on an adjacent, already-rendered page never
       // appears in `events` - reach across via cb.getMessages() (replay-only).
-      const strandedQid = findNearestOpenQuestionId(questionCards, resolvedSoFar);
+      const strandedQid = findNearestOpenQuestionId(liveQuestionCards(questionCards.length), resolvedSoFar);
       if (strandedQid !== null) {
         const stranded = findStrandedSentinelAnswer(this.cb.getMessages());
         if (stranded !== null) {
@@ -358,7 +364,7 @@ export class ChatPaginator {
         if (ev.type !== "user_message") continue;
         const extra = extractAuqExtraText(cleanUserBlocks(ev.content));
         if (extra === null) continue;
-        const qid = findLastQuestionId(questionCards.slice(0, opened));
+        const qid = findLastQuestionId(liveQuestionCards(opened));
         if (qid === null) continue;
         sentinelExtraById.set(qid, extra);
         foldedExtraMsgs.set(ev, qid);
@@ -367,7 +373,7 @@ export class ChatPaginator {
       // appears in `events` - reach across via cb.getMessages() (replay-only).
       // No "still open" gating (see findLastQuestionId), so guard against
       // clobbering a note this batch already folded onto the same card.
-      const strandedExtraQid = findLastQuestionId(questionCards);
+      const strandedExtraQid = findLastQuestionId(liveQuestionCards(questionCards.length));
       if (strandedExtraQid !== null && !sentinelExtraById.has(strandedExtraQid)) {
         const strandedExtra = findStrandedSentinelExtra(this.cb.getMessages());
         if (strandedExtra !== null) strandedExtraById.set(strandedExtraQid, strandedExtra);
@@ -375,7 +381,7 @@ export class ChatPaginator {
     }
     // Folded in client-side; never spliced into the page's cursor math.
     const skippedQuestionIds = matchSkipMarks(
-      questionCards,
+      liveQuestionCards(questionCards.length),
       this.skipMarks,
       new Set([...questionAnswerById.keys(), ...sentinelAnswerById.keys(), ...strandedAnswerById.keys()]),
     );
@@ -466,6 +472,9 @@ export class ChatPaginator {
       const msg = eventToRenderedMessage(ev);
       if (!msg) continue;
       msg.originSessionId = originSessionIdOf(ev);
+      if (ev.type === "tool_use" && msg.kind === "question" && refusedQuestionIds.has(ev.id)) {
+        Object.assign(msg, refusedQuestionCard(msg));
+      }
       if (ev.type === "tool_use" && msg.kind === "message" && rejectedSendIds.has(ev.id)) {
         msg.failed = true;
       }

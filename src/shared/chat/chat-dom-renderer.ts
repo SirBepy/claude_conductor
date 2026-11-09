@@ -165,6 +165,11 @@ export function finalizeStreamingBubble(r: ChatRenderer): void {
 export function buildMessageEl(m: RenderedMessage, sessionId: string | null = null): HTMLElement {
   if (m.kind === "question") {
     const el = document.createElement("div");
+    // A refused ask draws nothing, like a rejected send_message (see renderMessage).
+    if (m.failed) {
+      el.className = "msg system failed-marker";
+      return el;
+    }
     el.className = "msg question-card";
     // Click-to-reopen needs to name the card it came from - two open cards
     // are indistinguishable otherwise (see sessions.ts's reopen handler).
