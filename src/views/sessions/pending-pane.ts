@@ -12,7 +12,6 @@ import { mountDraftDashboard, unmountDraftDashboard } from "./project-dashboard/
 import { wirePendingComposer } from "./pending-pane-composer";
 import { mountDraftSubchats, mountDraftSubchatsCard, revealDraftSubchats, unmountDraftSubchats } from "./draft-subchats";
 import { decorateSubchatHeader } from "./subchat-view";
-import { mountMockupButton } from "./mockup-open-button";
 
 let _pendingHeader: SessionHeader | null = null;
 
@@ -111,7 +110,6 @@ function rebindPaneHeader(pane: HTMLElement, sessionId: string): void {
     if (_pendingHeader !== h || state.selectedId !== sessionId) return;
     const live = state.sessions.find((s) => s.session_id === sessionId);
     if (live) decorateSubchatHeader(h, live, subchatNavFor(pane));
-    mountMockupButton(h, sessionId);
   });
 
   const messagesEl = pane.querySelector<HTMLElement>(".session-messages");

@@ -25,7 +25,6 @@ import { savePendingPromptDraft } from "./permission-modal/gating";
 import { expandActiveCard, hasActiveCardForSession } from "./permission-modal/question-state";
 import { SessionHeader, projectDashboardOpener } from "./session-header";
 import { decorateSubchatHeader, type SubchatNav } from "./subchat-view";
-import { mountMockupButton } from "./mockup-open-button";
 import { closeCodeMode } from "./code-mode/code-mode";
 import { setCodeModeChatProvider } from "./code-mode/entry";
 import { applyHeaderMerge } from "./mobile-header-merge";
@@ -279,7 +278,6 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   // chat-menu-items.ts); a chat with subs gets their count. Before the header is in the pane, so the phone's
   // header merge below sees the finished slots.
   decorateSubchatHeader(header, sess, subchatNavFor(pane));
-  mountMockupButton(header, sess.session_id);
   pane.insertBefore(header.el, pane.firstChild);
   // This header is rebuilt per session, so the phone's relocated back / ⋮ have
   // to be re-homed into the fresh one (todo 702).
