@@ -26,7 +26,11 @@
 .table-wrap {
   position: relative;
   overflow-x: auto;
-  margin: 8px 0;
+  /* A table's height is fractional (rem font, collapsed borders); the scroller rounds its
+     scrollHeight up past its clientHeight, so a table that fits drew a vertical scrollbar.
+     The 1px of padding absorbs that rounding; the matching negative margin keeps the layout. */
+  padding-bottom: 1px;
+  margin: 8px 0 7px;
 }
 
 .table-wrap:hover .table-fs-btn {

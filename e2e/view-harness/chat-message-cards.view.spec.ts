@@ -193,6 +193,40 @@ for (const vp of [{ name: "desktop", width: 900 }, { name: "phone", width: 390 }
       await capture(chat(page), `cards-visuals-${vp.name}`);
     });
 
+    test("a short visuals table shows no vertical scrollbar", async ({ page }) => {
+      const SHORT = send("t1", {
+        kind: "answer", verdict: "Trackers", tone: "neutral",
+        text: "Three trackers",
+        visuals: [{ type: "table", title: "Trackers", columns: ["Tracker", "Status"], rows: [["Sentry", "on"], ["Datadog", "off"], ["Plausible", "on"]] }],
+      });
+      await mountChat(page, vp.width, [user("which trackers?"), SHORT]);
+      await expect(chat(page).locator(".table-wrap")).toHaveCount(1);
+      const gutters = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>("#session-pane .table-wrap")].map((w) => ({
+        // A vertical scrollbar takes width from the scroller (the wrapper has no border) and
+        // shows as content taller than the box; a horizontal one is allowed on a narrow screen.
+        gutter: w.offsetWidth - w.clientWidth,
+        over: w.scrollHeight - w.clientHeight,
+      })));
+      expect(gutters).toHaveLength(1);
+      for (const g of gutters) {
+        expect(g.over).toBeLessThanOrEqual(0);
+        expect(g.gutter).toBe(0);
+      }
+    });
+
+    test("a table taller than its max height still scrolls inside its wrapper", async ({ page }) => {
+      const rows = Array.from({ length: 60 }, (_, i) => [`Row ${i}`, i]);
+      const TALL = send("t2", { kind: "answer", verdict: "Long", tone: "neutral", text: "Sixty rows", visuals: [{ type: "table", title: "Rows", columns: ["Name", "N"], rows }] });
+      await mountChat(page, vp.width, [user("list rows"), TALL]);
+      const m = await page.evaluate(() => {
+        const w = document.querySelector<HTMLElement>("#session-pane .table-wrap")!;
+        return { scrolls: w.scrollHeight > w.clientHeight + 1, y: getComputedStyle(w).overflowY, h: w.clientHeight };
+      });
+      expect(m.scrolls).toBe(true);
+      expect(m.y).toBe("auto");
+      expect(m.h).toBeLessThan(900);
+    });
+
     test("a later turn shrinks the earlier cards to mini cards, and a click reopens one in place", async ({ page }) => {
       await mountChat(page, vp.width, FIRST_TURN);
       const roots = chat(page).locator(".mc-root");
