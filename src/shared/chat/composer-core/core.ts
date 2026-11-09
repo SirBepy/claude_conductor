@@ -175,6 +175,15 @@ export class ComposerCore {
     const { highlightEl, textarea } = this.opts;
     if (!highlightEl) return;
     highlightEl.innerHTML = html;
+    // Every repaint builds fresh spans, so a `.rainbow-keyword` animation would
+    // restart at phase 0 on each keystroke. Pinning every animation to the
+    // document timeline's origin makes the phase a function of the clock alone,
+    // so the new span continues where the old one was.
+    if (html.includes("rainbow-keyword")) {
+      for (const el of highlightEl.querySelectorAll<HTMLElement>(".rainbow-keyword")) {
+        for (const anim of el.getAnimations?.() ?? []) anim.startTime = 0;
+      }
+    }
     // Emptying the backdrop leaves its glyphs on screen in WKWebView (macOS)
     // until something else dirties the layer - a send clears the box but the
     // old text stays painted under the placeholder until the next keystroke.
