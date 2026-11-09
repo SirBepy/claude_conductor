@@ -130,6 +130,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_claude_ai_publish(&mut router, state.clone());
     methods::register_voice(&mut router, state.clone());
     methods::register_machines(&mut router, state.clone());
+    methods::register_mcp_servers(&mut router);
     methods::register_api_credit(&mut router, state.clone());
     // Peer-facing halves of `spawn_chat`'s `machine` and `post_message`'s
     // `to` (multi-machine chat parity): reached only via a paired peer's

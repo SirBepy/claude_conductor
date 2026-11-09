@@ -420,6 +420,8 @@ pub fn run() {
             ipc::github_search_repos,
             ipc::github_clone_repo,
             ipc::list_machines,
+            ipc::mcp_sign_in,
+            ipc::mcp_signed_in,
             ipc::list_machine_projects,
             ipc::list_machine_accounts,
             ipc::set_machine_project_account,

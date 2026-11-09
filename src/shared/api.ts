@@ -521,6 +521,10 @@ export const api = {
   renameRemoteDevice: (id: string, name: string): Promise<boolean> =>
     invoke("rename_remote_device", { id, name }),
 
+  // --- Project MCP servers (project settings): desktop pipe only ---
+  mcpSignIn: (url: string): Promise<{ auth_url: string }> => invoke("mcp_sign_in", { url }),
+  mcpSignedIn: (urls: string[]): Promise<Record<string, boolean>> => invoke("mcp_signed_in", { urls }),
+
   // --- Machines (multi-machine federation, Settings > Remote access) ---
   // The mutators are desktop-pipe only; HttpTransport (phone) rejects them
   // with RemoteUnavailableError. listMachines/listMachineProjects reach the

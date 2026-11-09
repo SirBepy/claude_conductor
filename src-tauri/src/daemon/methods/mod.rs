@@ -45,6 +45,7 @@ mod hidden_chats;
 mod history;
 mod lifecycle;
 mod machines;
+mod mcp_servers;
 /// `find_person`/`remember_person` and the per-turn people block; the vault
 /// reader itself is `crate::people`.
 pub(crate) mod people;
@@ -99,6 +100,7 @@ pub use history::register_history;
 pub use jarvis::register_jarvis;
 pub use lifecycle::{register, register_notifier, register_settings};
 pub use machines::register_machines;
+pub use mcp_servers::register_mcp_servers;
 pub use api_credit::register_api_credit;
 pub use ask::register_ask;
 pub use permission::register_responders;
