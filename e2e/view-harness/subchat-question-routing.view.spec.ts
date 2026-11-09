@@ -1,3 +1,4 @@
+// Reviewed 2026-11-09: question-submit.ts holds an answer or skip behind a 3s Undo bar; the harness sets the window to 0 (harness.ts), so this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/permission-modal/index.ts, src/views/sessions/permission-modal/question-submit.ts, src/views/sessions/permission-modal/gating.ts, src/views/sessions/permission-modal/askers.ts
 import { test, expect, type Page } from "@playwright/test";

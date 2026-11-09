@@ -1,3 +1,4 @@
+// Reviewed 2026-11-09: question-submit.ts holds an answer or skip behind a 3s Undo bar; the harness sets the window to 0 (harness.ts), so this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those. Its phone-width tier test ("names the tier it ran at") overflows the 390px viewport by 26px with master's chat-subchat-card.ts too, so it is not from this change.
 // Reviewed 2026-11-05: subchat-cards.ts accepts a fifth card kind, when_done (the machine answered a sub's question); finish, blocker and all-finished cards draw as before and this spec passes.
 // Reviewed 2026-11-05: chat-message-cards.css gained the .passed-row rule only; no card rule changed - this spec's contract is unchanged and it passes.

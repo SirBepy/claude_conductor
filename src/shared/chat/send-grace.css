@@ -1,0 +1,80 @@
+/* Undo bar for a held send or card answer (send-grace.ts). The fuse line along
+   the bottom edge shrinks over the grace window, so the time left reads
+   without a ticking number. */
+.send-grace-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.send-grace-icon {
+  flex: none;
+}
+
+.send-grace-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.send-grace-undo {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: none;
+  border: 1px solid var(--color-primary);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.send-grace-fuse {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: var(--color-primary);
+  transform-origin: left center;
+  animation: send-grace-fuse var(--send-grace-ms, 3000ms) linear forwards;
+}
+
+@keyframes send-grace-fuse {
+  to { transform: scaleX(0); }
+}
+
+/* A card answer has no composer to sit in: the card is already gone. */
+.send-grace-floating {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 3100;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, calc(100vw - 24px));
+  transform: translateX(-50%);
+}
+
+.send-grace-floating .send-grace-bar {
+  margin-bottom: 0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.send-grace-floating .send-grace-bar + .send-grace-bar {
+  margin-top: 6px;
+}

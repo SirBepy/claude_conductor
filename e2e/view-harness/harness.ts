@@ -78,6 +78,9 @@ function installMockTauri(seed: { invokeMap: InvokeMap }): void {
   const w = window as unknown as Record<string, unknown>;
   w.__ccInvokeCalls = [];
   w.__ccListeners = listeners;
+  // A send or card answer reaches the mock at once; the grace-window spec sets
+  // a real window itself (send-grace.ts's graceMs).
+  w.__ccSendGraceMs = 0;
 
   (window as { __TAURI__?: unknown }).__TAURI__ = {
     core: {
@@ -175,6 +178,7 @@ export async function mountViewPhone(page: Page, opts: MountOptions = {}): Promi
   // installMockTauri's belt-and-suspenders rc_token write.
   await page.addInitScript(() => {
     try { localStorage.setItem("rc_token", "view-harness-phone-token"); } catch { /* ignore */ }
+    (window as unknown as Record<string, unknown>).__ccSendGraceMs = 0;
   });
 
   const hash = opts.view ? `#${opts.view}` : "";
