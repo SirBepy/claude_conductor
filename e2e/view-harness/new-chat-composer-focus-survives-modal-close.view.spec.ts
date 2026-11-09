@@ -1,3 +1,4 @@
+// Reviewed 2026-11-09: the desktop header no longer renders the three-dots (#viewMoreBtn, phone only now); this spec waits on the header and opens things with the keyboard instead.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
 
@@ -91,10 +92,8 @@ async function assertComposerHoldsFocus(page: Page): Promise<void> {
 test.describe("view-harness / new-chat composer focus after the picker closes", () => {
   test("desktop: composer holds focus once the picker resolves", async ({ page }) => {
     await mountSessionsEntry(page);
-    await page.locator("#viewMoreBtn").waitFor();
-    await page.locator("#viewMoreBtn").click();
-    await page.locator("#newSessionBtn").waitFor({ state: "visible" });
-    await page.locator("#newSessionBtn").click();
+    await page.locator(".view-sessions .view-header").waitFor();
+    await page.keyboard.press("Control+n");
     await pickProjectIntoDraft(page);
     await assertComposerHoldsFocus(page);
   });

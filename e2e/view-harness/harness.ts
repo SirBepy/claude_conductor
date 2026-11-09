@@ -423,10 +423,10 @@ export function assistantMsg(text: string): unknown {
   return { type: "assistant_message", content: [{ type: "text", text }], streaming: false, timestamp: 0 };
 }
 
-/** Opens the command palette from the header's three-dots button (the desktop
- *  path that replaced the old dropdown) with `label` typed into its search box. */
+/** Opens the command palette with Ctrl+Shift+P (the desktop has no three-dots
+ *  button) and types `label` into its search box. */
 export async function openPaletteFor(page: Page, label: string): Promise<void> {
-  await page.locator("#viewMoreBtn").click();
+  await page.keyboard.press("Control+Shift+P");
   await page.locator(".cp-overlay .cp-input").fill(label);
 }
 

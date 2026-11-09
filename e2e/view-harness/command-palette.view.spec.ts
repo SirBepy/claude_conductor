@@ -95,19 +95,18 @@ test("a single setting opens its page and flashes the row", async ({ page }) => 
   await expect(page.locator(".kit-row.palette-flash .kit-row-label")).toContainText("Gaming mode");
 });
 
-test("the header's three-dots button opens the palette, which carries the old menu's rows", async ({ page }) => {
+test("the desktop header has no three-dots button, and the palette carries the old menu's rows", async ({ page }) => {
   await page.setViewportSize({ width: 1359, height: 900 });
   await mountChat(page);
-  const more = page.locator("#viewMoreBtn");
-  await expect(more).toHaveAttribute("title", /Command palette/);
-  await more.click();
+  await expect(page.locator("#viewMoreBtn")).toHaveCount(0);
+  await page.keyboard.press("Control+Shift+P");
   await expect(page.locator(OVERLAY)).toBeVisible();
   await expect(page.locator(".session-more-menu")).toHaveCount(0);
   const all = await titles(page);
   for (const t of ["Sleep when done", "Shutdown when done", "Hide chat", "Freeze chat", "Copy PID", "Open project in VS Code", "Change account"]) {
     expect(all, t).toContain(t);
   }
-  await capture(page, "command-palette-from-kebab");
+  await capture(page, "command-palette-old-menu-rows");
 });
 
 test("dragging the grip moves the palette, and it reopens where it was left", async ({ page }) => {

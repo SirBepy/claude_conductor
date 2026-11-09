@@ -1,10 +1,13 @@
+// Reviewed 2026-11-09: #viewMoreBtn renders on the phone only, so this spec mounts the phone transport and asserts the dropdown again.
 import { test, expect } from "@playwright/test";
-import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
+import { mountViewPhone, SESSIONS_BASE_INVOKE } from "./harness";
 
 // Regression for todo 687: wireOverflowMenu's #viewMoreBtn click listener was
 // never removed in its own teardown, so a same-view remount (lit-html reuses
 // the button node) stacked a second listener - one click then fired both,
-// opening then immediately re-closing the menu.
+// opening then immediately re-closing the menu. The button is phone-only now
+// (the desktop opens the command palette with Ctrl+Shift+P), so this mounts the
+// phone transport.
 
 const BASE_INVOKE = {
   ...SESSIONS_BASE_INVOKE,
@@ -14,7 +17,7 @@ const BASE_INVOKE = {
 };
 
 async function mountSessions(page: import("@playwright/test").Page): Promise<void> {
-  await mountView(page, { view: "sessions", invoke: BASE_INVOKE });
+  await mountViewPhone(page, { view: "sessions", invoke: BASE_INVOKE });
   await page.locator("#viewMoreBtn").waitFor();
 }
 
@@ -30,7 +33,7 @@ test.describe("view-harness / overflow menu remount", () => {
 
     await page.locator("#viewMoreBtn").click();
 
-    await expect(page.locator(".cp-overlay")).toBeVisible();
+    await expect(page.locator(".session-more-menu")).toBeVisible();
   });
 
   // Leaving Chats and coming back rebuilds .view-header from scratch, while
@@ -46,6 +49,6 @@ test.describe("view-harness / overflow menu remount", () => {
 
     await expect(page.locator("#viewMoreBtn")).toBeVisible();
     await page.locator("#viewMoreBtn").click();
-    await expect(page.locator(".cp-overlay")).toBeVisible();
+    await expect(page.locator(".session-more-menu")).toBeVisible();
   });
 });

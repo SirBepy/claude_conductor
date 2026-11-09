@@ -3,7 +3,6 @@
 // wiring (daemon/instances listeners) stays in sessions-wiring.ts.
 
 import { invoke } from "../../shared/ipc";
-import { isRemote } from "../../shared/transport";
 import * as shortcuts from "../../shared/shortcuts";
 import { mountPreviewTab, type PreviewController } from "./preview-panel";
 import { mountFabDial } from "./fab-dial";
@@ -82,19 +81,15 @@ export async function wireOverflowMenu(
   previewController: PreviewController | null,
 ): Promise<() => void> {
   const viewMoreBtn = root.querySelector<HTMLButtonElement>("#viewMoreBtn");
-  // Desktop: the button opens the command palette, which now carries every row the
-  // dropdown had (New chat, When done, This chat actions). The phone keeps the
-  // dropdown: it has no keyboard, and History / Preview / Scheduled / Filter / Hidden
-  // have no palette row.
+  // The button only exists on the phone (template.ts): the desktop opens the
+  // command palette with Ctrl+Shift+P instead, which carries every row the
+  // dropdown had. The phone has no keyboard, and History / Preview / Scheduled /
+  // Filter / Hidden have no palette row, so it keeps the dropdown.
   const onViewMoreClick = (e: MouseEvent) => {
     e.stopPropagation();
-    if (isRemote()) toggleViewMoreMenu(viewMoreBtn!);
-    else void import("../command-palette").then((m) => m.toggleCommandPalette());
+    if (viewMoreBtn) toggleViewMoreMenu(viewMoreBtn);
   };
-  if (viewMoreBtn) {
-    if (!isRemote()) viewMoreBtn.title = "Command palette (Ctrl+Shift+P)";
-    viewMoreBtn.addEventListener("click", onViewMoreClick);
-  }
+  viewMoreBtn?.addEventListener("click", onViewMoreClick);
 
   const previewToggleBtn = root.querySelector<HTMLButtonElement>("#previewToggleBtn");
   if (previewToggleBtn) {

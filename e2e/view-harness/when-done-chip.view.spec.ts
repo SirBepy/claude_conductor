@@ -1,3 +1,4 @@
+// Reviewed 2026-11-09: the desktop header no longer renders the three-dots (#viewMoreBtn, phone only now); this spec waits on the header and opens things with the keyboard instead.
 // asserts: src/views/sessions/when-done-chip.ts, src/views/sessions/when-done-chip.css
 import { test, expect } from "@playwright/test";
 import { mountView, capture, SESSIONS_BASE_INVOKE } from "./harness";
@@ -52,7 +53,7 @@ test.describe("view-harness / when-done header chip", () => {
 
   test("nothing armed shows no chip", async ({ page }) => {
     await mountView(page, { view: "sessions", invoke: { ...BASE_INVOKE, get_when_done_state: { ...ARMED, action: null, phase: "disarmed" } } });
-    await page.locator("#viewMoreBtn").waitFor();
+    await page.locator(".view-sessions .view-header").waitFor();
     await expect(page.locator("#when-done-chip-host")).toBeHidden();
   });
 });
