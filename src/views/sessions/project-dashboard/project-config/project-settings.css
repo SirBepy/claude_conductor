@@ -41,6 +41,20 @@
 .tracker-fields .inline-select, .tracker-fields .inline-input { flex: none; }
 .acc-row-empty-hint { color: var(--sb-muted); font-size: var(--fs-body); }
 
+/* MCP servers: one row per listed server, then the add form. */
+.mcp-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mcp-row-main { flex: 1; min-width: 0; }
+.mcp-row-name { font-size: var(--fs-body); color: var(--color-text); }
+.mcp-row-url { font-size: var(--fs-micro); color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-row-state { font-size: var(--fs-micro); color: var(--color-success, var(--color-text-muted)); white-space: nowrap; }
+.mcp-row-remove { opacity: 1; pointer-events: auto; transform: none; }
+.mcp-add { display: flex; flex-direction: column; gap: 6px; }
+.ps-btn {
+  height: var(--control-h-sm); padding: 0 10px; border-radius: 6px; font-size: var(--fs-body); cursor: pointer;
+  background: var(--color-surface-alt); color: var(--color-text); border: 1px solid var(--color-border); white-space: nowrap;
+}
+.ps-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+
 /* Model / effort: stops sit in equal columns, so the track is inset by half a
    column and every thumb position lands on its label's centre. */
 .vs { --vs-inset: calc(100% / var(--n) / 2); }

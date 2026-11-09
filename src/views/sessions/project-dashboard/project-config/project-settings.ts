@@ -3,6 +3,7 @@ import { renderChatDefaultsRow } from "./chat-defaults-row";
 import {
   renderAccountRow, renderConnectorsRow, renderGamingModeRow, renderSubchatCheckRow, renderSubchatWritersRow, renderTrackerRow,
 } from "./rows";
+import { renderMcpServersRow } from "./mcp-servers-row";
 import "./project-settings.css";
 
 /** Fills a popup body with the project's settings (model and effort, account,
@@ -14,6 +15,7 @@ export async function renderProjectSettings(root: HTMLElement, cwd: string): Pro
   await renderConnectorsRow(cwd);
   await renderGamingModeRow(cwd);
   await renderTrackerRow(cwd);
+  await renderMcpServersRow(cwd);
   await renderSubchatCheckRow(cwd);
   await renderSubchatWritersRow(cwd);
 }
@@ -57,6 +59,10 @@ function template() {
           <span class="ps-label" title="Chats and dev servers here are not parked while gaming mode is on">Run in gaming mode</span>
           ${toggle("gamingModeKeepRunning")}
         </div>
+      </div>
+      <div class="ps-group">
+        <div class="ps-group-title" title="This project's own MCP servers (a local app's /mcp). Each is checked before a turn starts and left out if it does not answer.">MCP servers</div>
+        <div class="ps-field" id="mcpServersControl"></div>
       </div>
       <div class="ps-group">
         <div class="ps-group-title">Subchats</div>

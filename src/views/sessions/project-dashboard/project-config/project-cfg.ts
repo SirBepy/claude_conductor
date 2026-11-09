@@ -1,4 +1,4 @@
-import type { SubchatCheck, SubchatWriters, TicketTracker } from "../../../../types/ipc.generated";
+import type { ProjectMcpServer, SubchatCheck, SubchatWriters, TicketTracker } from "../../../../types/ipc.generated";
 
 /** The slice of a `list_projects` row the settings rows read. */
 export interface ProjectCfg {
@@ -6,6 +6,7 @@ export interface ProjectCfg {
   path: string;
   preferred_account_id?: string | null;
   claude_ai_connectors?: boolean;
+  mcp_servers?: ProjectMcpServer[];
   tracker?: TicketTracker | null;
   keep_running_in_gaming_mode?: boolean;
   default_model?: string | null;
