@@ -1,7 +1,7 @@
 // Per-row 3-dot context menu, split out of sidebar.ts.
 // Uses a rerender callback (injected by sidebar.ts) to avoid a circular import.
 //
-// Now delegates to chat-menu.ts for the shared "This chat" action block.
+// Four flat items (Copy PID, Freeze, Hide, Close), built by chat-menu.ts.
 
 import { positionDropdown } from "./position-dropdown";
 import { state } from "./state";
@@ -18,7 +18,7 @@ import { isAutoAccept, isSubchatsOn } from "./permission-modal";
 import { subchatsBlockedReason } from "./subchats-gate";
 import { closeNeedsApproval, closeNeedsConfirm } from "./close-chat";
 import {
-  buildChatMenuBlock,
+  buildRowMenuBlock,
   closeActiveChatSubmenu,
   type ChatMenuCtx,
 } from "./chat-menu";
@@ -70,7 +70,7 @@ export function openDraftCtxMenu(
   };
   if (!isRemote()) void refreshDeployWorkflowCache(cwd);
 
-  const block = buildChatMenuBlock(ctx, closeCtxMenu);
+  const block = buildRowMenuBlock(ctx, closeCtxMenu);
   menu.appendChild(block);
 
   positionDropdown(menu, anchor);
@@ -123,7 +123,7 @@ export function openCtxMenu(
   };
   if (!isRemote()) void refreshDeployWorkflowCache(cwd);
 
-  const block = buildChatMenuBlock(ctx, closeCtxMenu);
+  const block = buildRowMenuBlock(ctx, closeCtxMenu);
 
   // Wire exit animation for Close (capture so it runs before chat-menu's close).
   // A busy chat asks "discard the turn?" first, and a sticky exit can't be

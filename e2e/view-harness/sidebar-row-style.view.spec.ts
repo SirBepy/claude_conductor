@@ -1,3 +1,4 @@
+// Reviewed 2026-11-09: the sidebar right-click menu is a flat Copy PID / Freeze / Hide / Close list (chat-menu.ts buildRowMenuBlock); the right-click test asserts it.
 import { test, expect } from "@playwright/test";
 import { SESSIONS_BASE_INVOKE, sessionInstance, mountView } from "./harness";
 
@@ -122,9 +123,10 @@ test.describe("view-harness / chat row style", () => {
     expect(stripes.beforeDisplay).toBe("none");
   });
 
-  test("right-click opens the chat menu", async ({ page }) => {
+  test("right-click opens the flat four-item row menu", async ({ page }) => {
     await mountSessions(page);
     await page.locator("#sessions-list li[data-session-id]").first().click({ button: "right" });
     await expect(page.locator(".session-ctx-menu")).toBeVisible();
+    await expect(page.locator(".session-ctx-menu .smore-item")).toHaveText(["Copy PID", "Freeze chat", "Hide chat", "Close session"]);
   });
 });

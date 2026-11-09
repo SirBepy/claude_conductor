@@ -76,9 +76,6 @@ export function buildChatMenuBlock(
   const frag = document.createElement("div");
   frag.className = "chat-menu-block";
 
-  const isDraft = ctx.kind === "draft";
-  const sessionId = ctx.sessionId;
-
   // Each submenu's items are assembled in chat-menu-items.ts (todo 972 split);
   // this file only wires the resulting ItemDesc[] into DOM + click handling.
   const openProjectItems = buildOpenProjectItems(ctx);
@@ -125,22 +122,61 @@ export function buildChatMenuBlock(
   appendSubMenu(makeSubParent("chat-dots", "Chat", allChatItems), allChatItems);
   appendSubMenu(makeSubParent("robot", "Agent", agentItems), agentItems);
 
-  // ── Close / Delete draft ────────────────────────────────────────────────────
-  const closeLabel = isDraft ? "Delete draft" : "Close session";
+  frag.appendChild(makeCloseItem(ctx, closeMenu));
+
+  return frag;
+}
+
+// ── Close / Delete draft ──────────────────────────────────────────────────────
+
+function makeCloseItem(ctx: ChatMenuCtx, closeMenu: () => void): HTMLButtonElement {
   const closeBtn = document.createElement("button");
   closeBtn.className = "smore-item smore-danger";
-  closeBtn.innerHTML = `<i class="ph ph-x-circle"></i>${closeLabel}`;
+  closeBtn.innerHTML = `<i class="ph ph-x-circle"></i>${ctx.kind === "draft" ? "Delete draft" : "Close session"}`;
   closeBtn.addEventListener("click", () => {
     closeSub();
     closeMenu();
-    if (isDraft) {
+    if (ctx.kind === "draft") {
       ctx.onDiscard?.();
-    } else if (sessionId) {
-      void closeChat(sessionId);
+    } else if (ctx.sessionId) {
+      void closeChat(ctx.sessionId);
     }
   });
-  frag.appendChild(closeBtn);
+  return closeBtn;
+}
 
+/**
+ * The sidebar row's right-click menu: four flat items, no submenus (Joe,
+ * 2026-11-09): Copy PID, Freeze, Hide, Close. A draft row has no process to
+ * freeze or hide, so it gets only Delete draft. Items come from the same
+ * builders as the full menu, so their labels, disabled reasons and actions
+ * cannot drift from it.
+ */
+export function buildRowMenuBlock(ctx: ChatMenuCtx, closeMenu: () => void): HTMLElement {
+  const frag = document.createElement("div");
+  frag.className = "chat-menu-block";
+
+  if (ctx.kind === "live") {
+    const chatItems = buildChatItems(ctx);
+    const picks = [
+      buildAgentItems(ctx).find((i) => i.label === "Copy PID"),
+      chatItems.find((i) => /freeze chat$/i.test(i.label)),
+      chatItems.find((i) => /hide chat$/i.test(i.label)),
+    ];
+    for (const item of picks) {
+      if (!item) continue;
+      const btn = makeItem(item);
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (btn.classList.contains("is-disabled")) return;
+        closeMenu();
+        void item.run?.();
+      });
+      frag.appendChild(btn);
+    }
+  }
+
+  frag.appendChild(makeCloseItem(ctx, closeMenu));
   return frag;
 }
 
