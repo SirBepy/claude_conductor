@@ -1,4 +1,3 @@
-// Reviewed 2026-11-08: a sidebar right-click now opens the command palette narrowed to that chat, so the spec closes through its "Close session" row; the close approval card is unchanged and this spec passes.
 // Reviewed 2026-11-05: sidebar-ctx-menu.ts passes `isSub` to the chat menu; the close approval card is unchanged and this spec passes.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/close-chat.ts, src/views/sessions/sidebar-ctx-menu.ts, src/views/sessions/permission-modal/index.ts
@@ -68,8 +67,7 @@ async function mount(page: Page, size: { width: number; height: number }, sessio
 
 async function clickCloseInMenu(page: Page): Promise<void> {
   await page.locator('#sessions-list li[data-session-id="main"]').click({ button: "right" });
-  await page.locator(".cp-input").fill("close session");
-  await page.keyboard.press("Enter");
+  await page.locator(".session-ctx-menu .smore-item.smore-danger").click();
 }
 
 const closedEvents = (page: Page) => page.evaluate(() => (window as unknown as { __closed: string[] }).__closed);
