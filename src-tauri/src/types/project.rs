@@ -29,6 +29,15 @@ impl Default for Avatar {
     fn default() -> Self { Avatar::None }
 }
 
+/// One project-listed HTTP MCP server: the name becomes the `mcp__<name>__`
+/// tool prefix.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct ProjectMcpServer {
+    pub name: String,
+    pub url: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct ProjectConfig {
@@ -65,6 +74,11 @@ pub struct ProjectConfig {
     /// user-scope servers whose failed auth broke MCP init (todo 867).
     #[serde(default)]
     pub claude_ai_connectors: bool,
+    /// The project's own HTTP MCP servers (e.g. a local app's `/mcp`), merged
+    /// into each turn's generated config after a reachability probe. Never
+    /// read from a repo file: only what Joe entered here runs.
+    #[serde(default)]
+    pub mcp_servers: Vec<ProjectMcpServer>,
     /// Where this project's tickets live, so chat mentions link to them.
     /// `None` infers from the git remote (`tickets::infer_from_remote`).
     #[serde(default)]
@@ -381,6 +395,7 @@ mod tests {
             last_worktree_path: None,
             last_start_folder_rel: None,
             claude_ai_connectors: false,
+            mcp_servers: Vec::new(),
             tracker: None,
             keep_running_in_gaming_mode: false,
             default_model: Some("sonnet".into()),

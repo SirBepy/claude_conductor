@@ -131,6 +131,7 @@ mod tests {
             last_worktree_path: None,
             last_start_folder_rel: None,
             claude_ai_connectors: false,
+            mcp_servers: Vec::new(),
             tracker: None,
             keep_running_in_gaming_mode: keep_running,
             default_model: None,

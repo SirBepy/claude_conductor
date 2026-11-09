@@ -133,11 +133,26 @@ pub async fn spawn_session_as(
         &state.settings.snapshot().projects,
         &params.cwd,
     );
-    let connectors = if connectors_on {
+    let mut connectors = if connectors_on {
         crate::daemon::claude_ai_connectors::servers_for(&account.config_dir).await
     } else {
         Default::default()
     };
+    // The project's own listed servers, probed so a dead or silent one is
+    // left out instead of stalling MCP init, as an unauthenticated connector once did.
+    let listed = crate::settings::identity::resolve_project_mcp_servers(
+        &state.settings.snapshot().projects,
+        &params.cwd,
+    );
+    if !listed.is_empty() {
+        let own = crate::daemon::project_mcp::servers_for(&listed).await;
+        log::info!(
+            "daemon: turn {turn_id} project mcp servers: {} written, skipped {:?}",
+            own.servers.len(),
+            own.skipped
+        );
+        connectors.extend(own.servers);
+    }
     // Names the side that came up empty when a chat lacks its connectors.
     log::info!(
         "daemon: turn {turn_id} claude.ai connectors: project flag {}, {} server(s)",
