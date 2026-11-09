@@ -86,6 +86,49 @@ fn check_rows(name: &str, rows: &Option<Vec<String>>, max_items: usize, max_len:
     Ok(())
 }
 
+/// Verbs a status line opens with ("Committing the removal"). A finished
+/// conclusion never starts with one, so a verdict that does is a progress
+/// update filed as a message. A word list rather than "ends in -ing": that
+/// would refuse "Nothing to commit" and "Missing field".
+const PROGRESS_VERBS: [&str; 24] = [
+    "committing", "building", "running", "checking", "writing", "editing", "fixing", "starting",
+    "adding", "removing", "pushing", "reading", "searching", "looking", "researching", "updating",
+    "installing", "testing", "working", "applying", "creating", "deleting", "fetching", "implementing",
+];
+
+fn is_progress_verb(word: &str) -> bool {
+    let w = word.trim_matches(|c: char| !c.is_alphabetic()).to_lowercase();
+    PROGRESS_VERBS.contains(&w.as_str())
+}
+
+/// Whether `verdict` or the opening of `text` reads as "what Claude is doing
+/// right now", not a result. Three shapes seen in real chats: a verdict that
+/// opens with a progress verb ("Committing the removal"), a verdict that ends
+/// "..., committing next", and a text that opens "Claude is (now) <verb>ing".
+fn reads_as_progress(verdict: Option<&str>, text: &str) -> bool {
+    if let Some(v) = verdict {
+        let words: Vec<&str> = v.split_whitespace().collect();
+        if words.first().is_some_and(|w| is_progress_verb(w)) {
+            return true;
+        }
+        if words.len() >= 2
+            && matches!(words[words.len() - 1].trim_matches(|c: char| !c.is_alphabetic()).to_lowercase().as_str(), "next" | "now")
+            && is_progress_verb(words[words.len() - 2])
+        {
+            return true;
+        }
+    }
+    let mut words = text.split_whitespace();
+    if words.next().is_some_and(|w| w.eq_ignore_ascii_case("claude")) && words.next() == Some("is") {
+        let after = match words.next() {
+            Some(w) if w.eq_ignore_ascii_case("now") => words.next(),
+            other => other,
+        };
+        return after.is_some_and(is_progress_verb);
+    }
+    false
+}
+
 /// Mirrors the limits in the `send_message` tool schema; the model may not honour
 /// a schema, so the route enforces them too. Every error names the fix, because
 /// the model reads it as the tool result and retries.
@@ -120,6 +163,12 @@ pub(super) fn validate_send(body: &SendMessageBody) -> Result<(), String> {
             ))
         }
         _ => {}
+    }
+
+    if matches!(kind, "answer" | "report" | "call" | "discovery") && reads_as_progress(verdict, text) {
+        return Err(format!(
+            "this {kind} reads as a progress update (it says what Claude is doing, not what came out). Progress goes in write_plan, which draws a live checklist; send no message for it. Send a message only for a result: resend when the work is done, with a verdict that states the outcome (\"Removed and committed\", not \"Committing the removal\")."
+        ));
     }
 
     if let Some(t) = body.tone.as_deref() {
