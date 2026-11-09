@@ -51,6 +51,13 @@ export function createQuestionCardLayout(
     // would stop measuring anything once minimized.
     const card = host.querySelector<HTMLElement>(".prompt-card, .prompt-collapsed");
     if (!card) return;
+    const cardRect = card.getBoundingClientRect();
+    // A card whose pane is display:none (a chat switch parks it, a ResizeObserver
+    // still fires) reports an all-zero rect. Read as "top = 0" that covers the
+    // whole transcript, so the padding jumped to ~1300px, the composer scrolled
+    // off the bottom and the pane's ancestor scrolled; it stuck until a reload.
+    // An unmeasurable card leaves the last good padding alone.
+    if (cardRect.width === 0 && cardRect.height === 0) return;
     // Only re-pin to bottom if the user was already there - otherwise typing
     // in the free-text box (which grows the card via ResizeObserver) yanks
     // someone who scrolled up to reread earlier messages back down every
@@ -63,7 +70,7 @@ export function createQuestionCardLayout(
     // instead of leaving an empty band. Peeking is the permission card's, and
     // a question card's on the --viewport fallback host; the phone's
     // fullscreen question page has no handle.
-    const covered = Math.max(0, messagesEl.getBoundingClientRect().bottom - card.getBoundingClientRect().top);
+    const covered = Math.max(0, messagesEl.getBoundingClientRect().bottom - cardRect.top);
     messagesEl.style.paddingBottom = `${covered + 12}px`;
     if (wasNearBottom) messagesEl.scrollTop = messagesEl.scrollHeight - messagesEl.clientHeight;
   };
