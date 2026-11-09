@@ -191,7 +191,8 @@ export interface RenderedMessage {
   retracted?: boolean;
   /** Set when a send_message's tool_result was is_error:true. The row stays so
    *  message indexing lines up and draws nothing; the daemon logs the rejection
-   *  (hooks_server/rejected_sends.rs). */
+   *  (hooks_server/rejected_sends.rs). A `kind:"question"` row carries it too
+   *  when its ask_user_question was refused before the daemon took it. */
   failed?: boolean;
   /** From a turn the user interrupted. Cleared by revising or retracting. */
   dimmed?: boolean;

@@ -7,7 +7,7 @@ import type { ChatEvent } from "../../types/ipc.generated";
 import { blocksToText } from "./content-blocks";
 import { AUQ_SKIPPED_TEXT, RenderedMessage, extractAuqAnswerText, extractAuqExtraText } from "./chat-transforms";
 import type { SkipMark } from "./skip-marks";
-import { isAskQuestionTool } from "./tool-meta";
+import { isAskQuestionTool, MCP_ASK_QUESTION_TOOL } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
 import { enqueueTurnClose } from "./chat-turn-fold";
 import type { ChatRenderer } from "./chat-renderer";
@@ -160,6 +160,20 @@ export function tryHandleQuestionToolUse(
   return true;
 }
 
+export function isHookRefusedAsk(
+  ask: { tool?: string },
+  result: Extract<ChatEvent, { type: "tool_result" }>,
+): boolean {
+  if (ask.tool !== MCP_ASK_QUESTION_TOOL || !result.is_error) return false;
+  return result.output?.type === "text" && /hook error/i.test(result.output.text);
+}
+
+/** Resolved (`text` set, so no open-card lookup picks it) and `failed`, which
+ *  `buildMessageEl` draws as nothing. The row stays so indexing lines up. */
+export function refusedQuestionCard(m: RenderedMessage): RenderedMessage {
+  return { ...m, text: "", failed: true };
+}
+
 /** tool_result pre-pass: true once the result was absorbed by a question card. */
 export function tryHandleQuestionResult(
   r: ChatRenderer,
@@ -172,6 +186,17 @@ export function tryHandleQuestionResult(
     (m) => m.kind === "question" && m.id === ev.tool_use_id,
   );
   if (qIdx < 0) return false;
+  // A PreToolUse hook that blocks the MCP ask answers with an error before the
+  // daemon takes the call, so no card was ever shown and none can be answered.
+  // Only that shape counts: the builtin's deny handshake and an MCP receipt are
+  // also is_error yet did surface a card.
+  if (isHookRefusedAsk(r.messages[qIdx]!, ev)) {
+    r.messages[qIdx] = refusedQuestionCard(r.messages[qIdx]!);
+    r.dirtyIndices.add(qIdx);
+    r.auqPendingResult = false;
+    if (!r.hydrating) r.onToolTally?.(r.tallyState.build());
+    return true;
+  }
   const ansText = !ev.is_error && ev.output?.type === "text" ? ev.output.text : "";
   if (isQuestionResolutionText(ansText)) {
     r.messages[qIdx] = { ...r.messages[qIdx]!, text: ansText };
