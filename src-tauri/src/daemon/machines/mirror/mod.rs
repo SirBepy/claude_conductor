@@ -169,7 +169,7 @@ impl MirrorState {
     }
 
     /// Records `session_id` as owned by `machine_id` the instant a forwarded
-    /// `start_session` returns it (`lifecycle/core.rs::forward_start_session`),
+    /// `start_session` returns it (`lifecycle/start_session.rs::forward_start_session`),
     /// before the peer's own next `instances_changed` frame can report it.
     pub fn record_pending(&self, session_id: &str, machine_id: &str) {
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
