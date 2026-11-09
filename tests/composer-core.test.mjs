@@ -49,6 +49,32 @@ describe("ComposerCore highlight", () => {
     expect(highlightEl.innerHTML).toBe('<span class="custom">x</span>');
   });
 
+  it("pins a repainted rainbow keyword's animation to the timeline origin so typing does not restart it", () => {
+    const { core, ta, highlightEl } = mount();
+    const pinned = [];
+    // jsdom has no Web Animations; stub it so the spans report one animation each.
+    const proto = HTMLElement.prototype;
+    const original = proto.getAnimations;
+    proto.getAnimations = function () {
+      const anim = { startTime: null };
+      pinned.push(anim);
+      return [anim];
+    };
+    try {
+      ta.value = "ultrathin";
+      core.updateHighlight();
+      expect(pinned).toHaveLength(0);
+      ta.value = "ultrathink";
+      core.updateHighlight();
+      ta.value = "ultrathink ";
+      core.updateHighlight();
+      expect(pinned).toHaveLength(2);
+      expect(pinned.every((a) => a.startTime === 0)).toBe(true);
+    } finally {
+      proto.getAnimations = original;
+    }
+  });
+
   it("drops the emptied backdrop out of the render tree", () => {
     const { core, ta, highlightEl } = mount();
     ta.value = "hello";
