@@ -31,7 +31,10 @@
 }
 
 .mv-fig .table-wrap {
-  margin: 0;
+  /* -1px cancels the wrapper's 1px scroll-rounding padding (chat-messages-markdown.css). */
+  margin: 0 0 -1px;
+  /* A long table scrolls inside its card instead of stretching it; a short one shows no scrollbar. */
+  max-height: 24rem;
 }
 
 .mv-fig table {
