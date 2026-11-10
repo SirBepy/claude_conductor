@@ -23,13 +23,16 @@ Started 2026-11-06 in chat "Dashboard instead of chat" (session 763c45be).
 ## Layout
 
 - **Left = what Joe must look at:** Answers, then Waiting on you, blockers and warnings.
-  **Right = what stays put:** Plan (Result takes its spot when the job ends). Reason: Joe wants the
+  **Right = what stays put:** Plan (the Result joins it when the job ends). Reason: Joe wants the
   important things on one side and the rest on the other (2026-11-09).
 - **Answers and Plan always sit on top;** cards that come and go sit below them. Reason: those two
   are always visible, the rest appear and disappear (2026-11-10).
 - **Longer-lived cards sit higher**, so less moves around when something new appears (2026-11-09).
-- **Empty zones do not draw.** A quick one-question chat collapses to one answer card plus Joe's
-  message.
+- **Empty zones do not draw, except Answers and Plan, which always do.** Reason: "considering
+  that questions and plan is something that will always be active, i think we always show both,
+  even when empty" (2026-11-10). Before the first answer the Answers card says "No answers yet"
+  with New question; before the first plan the Plan card says "Nothing planned yet." This replaced
+  "a quick one-question chat collapses to one answer card".
 - **Joe's own messages** sit in a strip under the chat title: the latest as a clamped reminder
   (click to expand), "N earlier" beside it to open the rest. Reason: "we know what we wrote, we
   mostly need a reminder" (2026-11-07).
@@ -169,11 +172,12 @@ Board: preview slug `ask-ux-options` (real app shots of the three options).
   the plan" (2026-11-09); as progress, Status only repeated Plan's active step.
 - **Result appears only when the job ends:** verdict, your move, figures (tables/charts). Reason: it
   is the one card Joe does read (2026-11-09).
-- **Result takes the Plan card's spot;** the finished plan steps back behind a "Plan 6/6" button.
-  Reason: nothing on the left moves, and it was fully in view at every chat height measured; at the
-  bottom of the left column 187px of 300 was cut off in a 640px chat with a waiting question, and
-  above Answers pushed Answers ~310px down. Cost: Result sits in the narrower right column (Joe's
-  pick, 2026-11-10, sub "result-placement").
+- **Result sits in the Plan card's spot, under the finished plan's steps,** which stay open with no
+  way to fold them (2026-11-10, sub "plan-card-lifecycle"; see the section below). This replaced
+  the "Plan 6/6" flip button, which hid the plan. Why the right column: nothing on the left moves,
+  and it was fully in view at every chat height measured; at the bottom of the left column 187px of
+  300 was cut off in a 640px chat with a waiting question, and above Answers pushed Answers ~310px
+  down (Joe's pick, 2026-11-10, sub "result-placement").
 - **Subchecks of a batch job** (release gates, todo progress) live inside Plan, not in their own
   card. Reason: "surely we should just show that in the plan section" (2026-11-10). Open: a second
   Plan column for subchecks vs a view that hides the rest of the plan.
@@ -183,6 +187,50 @@ Board: preview slug `ask-ux-options` (real app shots of the three options).
   app's "Plan for you" label in the same amber as "Your turn" reads like a to-do for Joe
   (`src/shared/chat/chat-message-card.ts`, `chat-message-cards.css`); Joe's call (2026-11-09): "do
   we even need this? we have the plan on the right".
+
+## Plan card across a chat's life (2026-11-10, sub "plan-card-lifecycle", 5 board rounds)
+
+Board: the `plan` region of shared mockup `dashboard-rework-nov10`. Joe "hates that the plan card
+disappears when the plan is done": it dropped the moment he wrote after a finished job. Built in
+`src/views/sessions/chat-dashboard/plan-card.ts` (rendering) and `dashboard-model.ts` `derivePlan` /
+`recordPlan` (the jobs).
+
+- **The card never vanishes. "Last job stays":** the card always shows the latest job. A brand-new
+  chat says "Nothing planned yet." (with a running turn, "No plan yet."). A running plan shows its
+  steps; once the job ends its Result joins it. When Joe writes again and no new plan comes (a quick
+  follow-up), the job stays, dimmed, under "Last job" and the time, until a new plan replaces it.
+  Picked over a "Plan timeline" that kept every earlier job listed in the card, which grows with each
+  job. Joe watched both play in a simulated chat of 4 jobs before picking.
+- **A plan is a job.** Every write_plan call of one job updates one entry. A call starts a new plan
+  when a report came since the last one began or no step label carries over (`recordPlan`).
+- **Earlier plans: a pager in the header with three fixed slots:** older, the middle, newer. On the
+  current plan the middle is a history icon with how many earlier plans there are (no "N / N": "i
+  can see theres 3 elements"); on an earlier one it is "2 / 3". The newer arrow keeps its space
+  while hidden, so nothing in the header moves. The middle button swaps the card's body for the list
+  of earlier plans; clicking it again (or Esc) goes back to whatever was open. The body slides like
+  an Answers thread.
+- **The list:** newest first, one compact row each (title, start time; hover shows the verdict), day
+  headings once plans span days, a search box from 7 plans. No scrollbar: it scrolls with the wheel
+  and a fade shows more rows below. No gaps between rows ("x min between" was cut), and no way-back
+  bar in the list.
+- **The way back to the current plan is the status line itself:** on an earlier plan the card's foot
+  (the live status, same look, not blue) is a button with a quiet arrow. No "Current" button: one
+  that appeared beside the pager moved the header around.
+- **Step times show only when a step is clicked open:** "14:43 to 14:45" on its own line under the
+  step (room for more details later), the length ("2 min", "running") on the step's own row. Times
+  come from when write_plan first marked a step active and done.
+- **The status line says what Claude is doing,** not which step it is on (the plan already shows
+  that): the tool's icon, "Editing todo-chip.ts", the turn's time and Stop. It must look right with
+  no plan at all. Clicking it opens the turn's calls counted by kind ("6 read · 2 edits · 1 command")
+  and the few calls before the current one. Only in the dashboard; Messages view keeps the step on
+  its line. Idle, the foot says "Idle since 14:47", or "Waiting on your answer · asked 14:44" while a
+  question card is open.
+- Ruled out: the card vanishing after a finished job (today's behaviour), the Plan timeline, the
+  earlier plans as a popover list, the two newest as rows under the card ("the loudest and
+  ugliest"), a time strip (coolest, but did not look right, worse with 20 plans), a pager with no
+  list, a blue Current strip, hover times on steps, times on the step's row only, a step count in
+  the header, a folded "Plan 5/5" line above the Result, the status line naming the plan step, a
+  recent-calls trail or counters always showing under it.
 
 ## Waiting on you and Decided
 
@@ -301,9 +349,8 @@ vitest files keep driving the transcript on purpose; the dashboard has its own s
 `e2e/specs/chat-dashboard.e2e.js` (the fake claude answers a message containing `DASH_ANSWER` with an
 `answer` card: strip, Answers card, Got it, History). Left open, each needs a call from Joe:
 
-- **+ question in a chat with no answer yet.** The Answers zone is not drawn when empty, so + is
-  unreachable until the first answer lands. Option: a header-only Answers card (title, History, +)
-  once Joe has written anything.
+- **+ question in a chat with no answer yet.** Settled 2026-11-10: the Answers card now always
+  draws, so + is there from the start (see Layout).
 - **Zones read only the loaded history page.** An old plan or blocker past the first page is missing
   from the dashboard, because the hidden transcript only loads older pages on scroll. Option: have
   the dashboard ask the paginator for older pages until it finds a plan, or keep a daemon-side
