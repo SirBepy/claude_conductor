@@ -1,5 +1,5 @@
 //! The `subchat` MCP tool: how a main chat looks up and talks to its subs
-//! (spec section 5). One tool with four actions, listed for every chat because
+//! (spec section 5). One tool with five actions, listed for every chat because
 //! the MCP tool list is fixed when the server process starts and cannot follow
 //! a mid-chat toggle. A chat with no subs, and a sub itself, get a refusal
 //! naming the fix.
