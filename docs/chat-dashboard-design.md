@@ -216,9 +216,18 @@ Lanes, run in this order, each a sub of the "Chat as dashboard" main chat:
 4. `dash-extras`: Links and files with the three quick-view buttons, and the Preview window card.
 5. `dash-behaviour`: the main chat rewrites Joe's questions and hands them to a sub, and the
    question-card icon.
+5b. `main-retro`: todo pc-1677. A main chat writes a retro file when it closes, stamped by the
+   daemon with the version, so a later Conductor session can review how main chats felt. Joe asked
+   for it 2026-11-10 and wants it in before the release.
 6. `dash-tests`: audits view, vitest and wdio specs that the dashboard makes stale, rewrites or adds
    them, and runs the whole floor.
 7. A gate sub runs code-check, the wdio sweep and /release.
+
+The app runs at most 5 subs at once, and a queued sub counts. So lanes 5b, 6 and 7 are spawned by
+the main chat as slots free up, each `after` the one before it. Once the release is out, the main
+chat writes its own retro by hand in pc-1677's format to
+`%APPDATA%\claude-conductor\main-chat-retros\`, then closes (Joe: "I'd like you to even close when
+you're done").
 
 ## Gone
 
