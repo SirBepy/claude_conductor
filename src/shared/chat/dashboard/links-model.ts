@@ -133,13 +133,19 @@ function editedPath(m: RenderedMessage): string | null {
   return p || null;
 }
 
+/** One key per file however the chat spelled it: case and slash direction do not
+ *  matter on Windows, and `extractFiles` and `changedFiles` must agree. */
+export function pathKey(path: string): string {
+  return path.toLowerCase().replace(/\\/g, "/");
+}
+
 /** Files the chat touched or named, newest first, each path once. A path the
  *  chat edited counts as touched even if it was only named earlier. */
 export function extractFiles(msgs: readonly RenderedMessage[]): FileItem[] {
   const byPath = new Map<string, FileItem>();
   const order: string[] = [];
   const add = (path: string, touched: boolean): void => {
-    const key = path.toLowerCase().replace(/\\/g, "/");
+    const key = pathKey(path);
     const had = byPath.get(key);
     if (had) {
       if (touched) had.touched = true;
@@ -168,7 +174,7 @@ export function changedFiles(msgs: readonly RenderedMessage[], from: number): Ch
   for (let i = Math.max(0, from); i < msgs.length; i++) {
     const p = editedPath(msgs[i]!);
     if (!p) continue;
-    const key = p.toLowerCase().replace(/\\/g, "/");
+    const key = pathKey(p);
     const hit = counts.get(key);
     if (hit) hit.edits += 1;
     else counts.set(key, { path: p, edits: 1 });
