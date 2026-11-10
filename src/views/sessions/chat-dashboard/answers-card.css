@@ -58,6 +58,8 @@
 .ax-icon-acts .ax-btn-t { display: none; }
 .ax-icon-acts .ax-actions .ax-btn { width: 30px; padding: 0; justify-content: center; font-size: 15px; }
 .ax-icon-acts .ax-actions .ax-thbtn { width: auto; padding: 0 8px; gap: 4px; }
+/* A read answer with others unread: the check's place holds the way to the next one, with its count */
+.ax-icon-acts .ax-actions .ax-next { width: auto; padding: 0 8px; gap: 4px; }
 /* All caught up: the answer card's border plus Plan's background, bigger words */
 .ax-host .ax-caughtmode .mc-card { background: transparent; box-shadow: none; }
 .ax-host .ax-frame-border .mc-card { border-color: var(--color-border); }

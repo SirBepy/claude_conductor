@@ -49,6 +49,8 @@ export interface AnswerItem {
   replies: number;
   /** Came from a + question, not from the chat. */
   asked: boolean;
+  /** When the chat judged from Joe's next message that he read it (ms), 0 = never. */
+  seenAt: number;
 }
 
 const PASTED_LOG_RE = /<pasted-log(?: id="[^"]*")? name="([^"]*)">[\s\S]*?<\/pasted-log(?::[^>]*)?>/g;
@@ -119,17 +121,44 @@ function threadById(side: AnswerSide | undefined, id: string | undefined): AskTh
 
 const userCount = (t: AskThread | null): number => t?.messages.filter((m) => m.role === "user").length ?? 0;
 
+const normVerdict = (v: string): string => v.trim().replace(/\s+/g, " ").toLowerCase();
+
+/** A message's `read_answers` (the chat's judgement of Joe's latest message)
+ *  marks the newest earlier answer with each verdict, among those he could have
+ *  read: answers that landed before his latest message. */
+function applyReadJudgement(m: RenderedMessage, chat: readonly { item: AnswerItem; joeBefore: number }[], joeCount: number): void {
+  const read = m.card?.readAnswers;
+  if (!read?.length || m.failed || m.retracted || m.subCard || joeCount === 0) return;
+  // A row with no time still counts as read; 0 would mean "never judged".
+  const at = toMs(m.ts) || 1;
+  for (const v of read) {
+    const want = normVerdict(v);
+    for (let i = chat.length - 1; i >= 0; i--) {
+      const c = chat[i]!;
+      if (c.joeBefore >= joeCount || normVerdict(c.item.verdict) !== want) continue;
+      c.item.seenAt = Math.max(c.item.seenAt, at);
+      break;
+    }
+  }
+}
+
 /** Every answer, oldest first. */
 export function buildAnswerItems(messages: readonly RenderedMessage[], side?: AnswerSide): AnswerItem[] {
   const items: AnswerItem[] = [];
+  const chat: { item: AnswerItem; joeBefore: number }[] = [];
   let joe: RenderedMessage | null = null;
+  let joeCount = 0;
   for (const m of messages) {
-    if (isJoeRow(m)) joe = m;
+    if (isJoeRow(m)) {
+      joe = m;
+      joeCount++;
+    }
+    if (m.kind === "message") applyReadJudgement(m, chat, joeCount);
     if (!isAnswerRow(m) || !m.id) continue;
     const typed = joe ? plainUserText(joe) : "";
     const rewrite = m.card?.question ?? null;
     const thread = threadById(side, side?.store.threads[m.id]);
-    items.push({
+    const item: AnswerItem = {
       key: m.id,
       message: m,
       question: rewrite ?? typed,
@@ -140,7 +169,10 @@ export function buildAnswerItems(messages: readonly RenderedMessage[], side?: An
       thread,
       replies: userCount(thread),
       asked: false,
-    });
+      seenAt: 0,
+    };
+    items.push(item);
+    chat.push({ item, joeBefore: joeCount });
   }
   for (const q of side?.store.questions ?? []) {
     const thread = threadById(side, q.thread_id);
@@ -168,6 +200,7 @@ export function buildAnswerItems(messages: readonly RenderedMessage[], side?: An
       thread,
       replies: Math.max(0, userCount(thread) - 1),
       asked: true,
+      seenAt: 0,
     });
   }
   return items.sort((a, b) => a.at - b.at);
@@ -180,10 +213,11 @@ export function threadFollowUps(item: AnswerItem): AskThread["messages"] {
   return item.asked ? msgs.slice(2) : msgs;
 }
 
-/** Unread until Got it, and unread again when its thread got a reply after that. */
+/** Unread until Got it or until the chat judged Joe's next message shows he read
+ *  it, and unread again when its thread got a reply after that. */
 export function isUnread(item: AnswerItem, store: AnswerStore): boolean {
-  const readAt = store.read[item.key];
-  if (readAt === undefined) return true;
+  const readAt = Math.max(store.read[item.key] ?? 0, item.seenAt);
+  if (readAt <= 0) return true;
   const replies = threadFollowUps(item).filter((m) => m.role === "assistant");
   return replies.some((m) => askMs(m.ts) > readAt);
 }

@@ -37,6 +37,9 @@ export interface MessageCard {
   copy?: string;
   /** answer only: Claude's clear rewrite of what Joe asked (the dashboard's Answers card). */
   question?: string;
+  /** Any kind: verdicts of earlier answers Joe's latest message shows he read, as
+   *  the chat judged it. The Answers card marks them read (answers-model.ts). */
+  readAnswers?: string[];
   /** Tables and charts drawn under the body (message-visuals.ts). */
   visuals?: Visual[];
 }
@@ -66,6 +69,9 @@ export function parseMessageCard(input: unknown): MessageCard | undefined {
   const card: MessageCard = { kind };
   if (!NO_VERDICT.has(kind)) card.verdict = str(raw.verdict);
   if ((MESSAGE_TONES as readonly unknown[]).includes(raw.tone)) card.tone = raw.tone as MessageTone;
+  // Read before the ack return: the first message after Joe's is often a bare ack.
+  const readAnswers = strList(raw.read_answers);
+  if (readAnswers) card.readAnswers = readAnswers;
   if (kind === "ack") return card;
   card.points = strList(raw.points);
   const visuals = parseVisuals(raw);

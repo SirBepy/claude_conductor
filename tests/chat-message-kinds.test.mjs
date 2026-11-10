@@ -80,6 +80,13 @@ describe("parseMessageCard", () => {
     expect(card({ kind: "ack", verdict: "Ready", points: ["a"] })).toEqual({ kind: "ack", tone: undefined });
   });
 
+  it("reads read_answers on every kind, the bare ack included, and drops blank items", () => {
+    expect(card({ kind: "ack", read_answers: [" Yes ", "", 3] }).readAnswers).toEqual(["Yes"]);
+    expect(card({ kind: "report", verdict: "Built", read_answers: ["No"] }).readAnswers).toEqual(["No"]);
+    expect(card({ kind: "answer", read_answers: [] }).readAnswers).toBeUndefined();
+    expect(card({ kind: "answer", read_answers: "Yes" }).readAnswers).toBeUndefined();
+  });
+
   it("takes `was` only on a correction and `copy` only on do_this, copy untrimmed", () => {
     expect(card({ kind: "correction", was: " old claim " }).was).toBe("old claim");
     expect(card({ kind: "answer", was: "x" }).was).toBeUndefined();

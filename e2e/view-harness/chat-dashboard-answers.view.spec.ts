@@ -2,13 +2,14 @@
 // Reviewed 2026-11-10 (dash-extras): the dashboard gained the Links and files, Preview window and Changes zones and reads list_previews/chat_quick_view (both caught when unmocked); the Answers card is untouched, and this spec passes.
 // asserts: src/views/sessions/chat-dashboard/answers-card.ts, src/views/sessions/chat-dashboard/answers-card.css, src/views/sessions/chat-dashboard/answers-api.ts, src/shared/chat/dashboard/answers-model.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts
 import { test, expect, type Page } from "@playwright/test";
-import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
 // The dashboard's Answers card in the real app shell (docs/chat-dashboard-design.md,
 // "Answers card"): it rests at 210px with its buttons on the bottom edge, Got it
 // walks back through the unread answers with only the text moving, and the last
 // one fades to All caught up. A chat whose answers the daemon already has marked
-// read opens straight on All caught up.
+// read opens straight on All caught up. The newest answer always takes the card,
+// and the chat's judgement of Joe's next message (`read_answers`) marks answers read.
 
 const SESSION = sessionInstance();
 const CHANNEL = `chat:${SESSION.session_id}`;
@@ -107,6 +108,40 @@ test.describe("Answers card", () => {
     await expect(c.locator(".ax-cc [data-ax='new-q']")).toBeVisible();
     await page.waitForTimeout(400);
     await capture(pane(page), "answers-caught-up");
+  });
+
+  test("a newer answer takes the card over an older unread one, and a judged read turns the check into Next", async ({ page }) => {
+    await openChat(page, EMPTY_STORE);
+    const c = card(page);
+    const pick = async (title: string) => {
+      await c.locator("[data-ax='history']").click();
+      await page.locator(".cp-row", { hasText: title }).click();
+    };
+    // Joe goes back to the oldest answer, still unread.
+    await pick("Does Trello reuse the Shortcut tracker, or start from scratch?");
+    await expect(c.locator(".ax-face .mc-verdict")).toHaveText("It copies Shortcut's shape");
+    await expect(c.locator("[data-ax='gotit']")).toBeVisible();
+
+    // His next message reacts to it; the chat says so on its first message, then answers.
+    await fireEvent(page, CHANNEL, [
+      user("ok so it copies shortcut, and the board id?"),
+      ...tool(SEND, { kind: "ack", text: "Checking the board id", read_answers: ["It copies Shortcut's shape"] }, "j1", AT + 2000),
+      ...tool(SEND, { kind: "answer", verdict: "One board per project", question: "How many Trello boards can a project use?", text: "The board id is one field per project." }, "a4", AT + 2100),
+    ]);
+    // The new answer takes the card although Joe was on an unread one.
+    await expect(c.locator(".ax-face .mc-verdict")).toHaveText("One board per project");
+    // Judged read: only a2 and a3 are the other unread ones now.
+    await expect(c.locator("[data-ax='history'] b")).toHaveText("2");
+
+    // The judged answer shows as read; with others unread its check is the way to the next one.
+    await pick("Does Trello reuse the Shortcut tracker, or start from scratch?");
+    await expect(c.locator("[data-ax='gotit']")).toHaveCount(0);
+    const next = c.locator(".ax-next[data-ax='close']");
+    await expect(next).toContainText("3 more");
+    await page.waitForTimeout(400);
+    await capture(pane(page), "answers-judged-read-next");
+    await next.click();
+    await expect(c.locator(".ax-face .mc-verdict")).toHaveText("One board per project");
   });
 
   test("a chat whose answers are already read opens on All caught up, with History grouped", async ({ page }) => {

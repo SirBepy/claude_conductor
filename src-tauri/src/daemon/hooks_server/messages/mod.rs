@@ -66,6 +66,11 @@ pub(super) struct SendMessageBody {
     // dashboard's Answers card shows it in place of Joe's own wording.
     #[serde(default)]
     question: Option<String>,
+    // Any kind: the verdicts of earlier answers that Joe's latest message shows
+    // he read, as the chat judged it. The Answers card marks those read, since
+    // only the chat reading his reply can tell (docs/chat-dashboard-design.md).
+    #[serde(default)]
+    read_answers: Option<Vec<String>>,
     // Tables and charts. Loose Values so one malformed visual is an `ok:false`
     // naming the fix, never a body-decode error (see `visuals.rs`).
     #[serde(default)]
@@ -539,6 +544,31 @@ mod tests {
         // Optional: an answer without one still passes, and the dashboard falls back to Joe's message.
         let bare = json!({"session_id": "s", "kind": "answer", "verdict": "Yes", "text": "t"});
         assert_eq!(send_json(bare).await["ok"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn read_answers_takes_any_kind_up_to_eight_verdict_sized_items() {
+        let with = |kind: &str, read: serde_json::Value| {
+            let mut b = json!({"session_id": "s", "kind": kind, "text": "t", "read_answers": read});
+            if kind != "ack" {
+                b["verdict"] = json!("Yes");
+            }
+            b
+        };
+        // Any kind: the first message after Joe's carries it, whatever it is.
+        for kind in ["ack", "report", "answer", "plan"] {
+            let mut b = with(kind, json!(["Read-only is enough"]));
+            if kind == "plan" {
+                b.as_object_mut().unwrap().remove("verdict");
+            }
+            assert_eq!(send_json(b).await["ok"], json!(true), "{kind}");
+        }
+        assert_eq!(send_json(with("ack", json!(["x".repeat(40)]))).await["ok"], json!(true));
+        let long = error_of(&send_json(with("ack", json!(["x".repeat(41)]))).await);
+        assert!(long.contains("read_answers item is 41 chars, over 40"), "{long}");
+        assert!(error_of(&send_json(with("ack", json!(["  "]))).await).contains("read_answers has an empty item"));
+        let nine: Vec<String> = (0..9).map(|i| format!("v{i}")).collect();
+        assert!(error_of(&send_json(with("ack", json!(nine))).await).contains("read_answers has 9 items, over 8"));
     }
 
     #[tokio::test]

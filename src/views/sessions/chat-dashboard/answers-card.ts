@@ -275,12 +275,20 @@ export class AnswersCard {
     if (this.thread && !isNew(this.thread) && !this.item(this.thread)) this.thread = null;
     const landed = fresh.filter((i) => this.unread(i)).at(-1);
     if (landed && this.thread !== null) this.landedInThread = landed.key;
-    const curItem = this.item(this.cur);
-    // The newest answer always shows, unless Joe is still on an unread one or in a thread.
-    if (landed && this.thread === null && (!curItem || !this.unread(curItem))) {
+    // The newest answer always takes the card, even over an older unread one,
+    // which waits behind History's badge and the Next button. Only a thread holds
+    // it back. An older answer surfacing late (an earlier history page) never
+    // displaces the one on the card, and while Got it's text leaves, its own timer
+    // picks the newest unread, which is this one.
+    if (landed && this.thread === null && this.isNewerThanCur(landed) && !this.gotBusy) {
       this.cur = landed.key;
       this.anim = "ax-fade";
     }
+  }
+
+  private isNewerThanCur(item: AnswerItem): boolean {
+    const cur = this.item(this.cur);
+    return !cur || item.at >= cur.at;
   }
 
   // ---- Rendering -----------------------------------------------------------------------
@@ -301,8 +309,12 @@ export class AnswersCard {
   }
 
   private checkBtn(item: AnswerItem): string {
-    return this.unread(item)
-      ? btn("gotit", "ph-check", "Got it", "Got it: mark read and show the next unread", "ax-gotit")
+    if (this.unread(item)) return btn("gotit", "ph-check", "Got it", "Got it: mark read and show the next unread", "ax-gotit");
+    // Read (by Got it, or judged from Joe's reply): with others unread the
+    // check becomes the way to the next one, so the card never moves by itself.
+    const more = this.otherUnread();
+    return more
+      ? btn("close", "ph-arrow-down", "Next", `Read. Show the next unread (${more} more)`, "ax-next", `<b class="ax-btn-n">${more} more</b>`)
       : btn("close", "ph-check", "Read", "Read. Put it away", "ax-gotit ax-checked");
   }
 
@@ -566,12 +578,12 @@ export class AnswersCard {
     }
     this.thread = null;
     this.anim = "ax-t-slide-close";
-    // Back returns to the answer Joe was on. An answer that landed while he was
-    // in the thread shows instead, unless he is on an unread one.
+    // Back returns to the answer Joe was on, unless a newer one landed while he
+    // was in the thread: the newest always takes the card.
     const curItem = this.item(this.cur);
     const landed = this.item(this.landedInThread);
     this.landedInThread = null;
-    if (landed && this.unread(landed) && (!curItem || !this.unread(curItem))) this.cur = landed.key;
+    if (landed && this.unread(landed) && this.isNewerThanCur(landed)) this.cur = landed.key;
     else if (!curItem) this.cur = nextUnread(this.items, this.store())?.key ?? null;
     this.lastHtml = "";
     this.render();
@@ -619,14 +631,12 @@ export class AnswersCard {
         } else if (this.thread === key && wasRead) {
           // Read while Joe watched it arrive: it stays read.
           this.markRead([key]);
-        } else if (this.thread === null) {
-          // A reply after leaving the thread makes the answer unread again.
-          const curItem = this.item(this.cur);
-          if (!curItem || !this.unread(curItem)) {
-            this.cur = key;
-            this.anim = "ax-fade";
-            this.lastHtml = "";
-          }
+        } else if (this.thread === null && !this.gotBusy) {
+          // A reply after leaving the thread makes the answer unread again, and
+          // like any newer answer it takes the card.
+          this.cur = key;
+          this.anim = "ax-fade";
+          this.lastHtml = "";
         }
         this.deps.onSideChange();
       })

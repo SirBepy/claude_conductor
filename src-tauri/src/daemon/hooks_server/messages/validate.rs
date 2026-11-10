@@ -239,6 +239,20 @@ pub(super) fn validate_send(body: &SendMessageBody) -> Result<(), String> {
             return Err(format!("question is {n} chars, over {MAX_QUESTION}: ask it shorter"));
         }
     }
+    if let Some(read) = body.read_answers.as_deref() {
+        if read.len() > MAX_ROWS {
+            return Err(format!("read_answers has {} items, over {MAX_ROWS}: list only the answers his message shows he read", read.len()));
+        }
+        for v in read {
+            let n = v.trim().chars().count();
+            if n == 0 {
+                return Err("read_answers has an empty item: copy each answer's verdict, or leave the field out".to_string());
+            }
+            if n > MAX_VERDICT {
+                return Err(format!("read_answers item is {n} chars, over {MAX_VERDICT}: copy the answer's verdict exactly, not its text"));
+            }
+        }
+    }
     Ok(())
 }
 

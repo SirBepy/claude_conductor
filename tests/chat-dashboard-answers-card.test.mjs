@@ -117,6 +117,40 @@ describe("Answers card", () => {
     expect(db.marks).toEqual([["a3"], ["a2"], ["a1"]]);
   });
 
+  it("lets a newer answer take the card over an older unread one, and turns a judged read into Next", async () => {
+    const { pane, r } = mountPane("chat-newest");
+    new ChatDashboard(pane, r);
+    feed(r, [
+      userEvent("does it read the shortcut tracker?"),
+      ...send({ kind: "answer", verdict: "It copies Shortcut's shape", text: "Same interface." }, "n1"),
+      userEvent("tr- links?"),
+      ...send({ kind: "answer", verdict: "Yes, once the board confirms", text: "Only after Trello confirms." }, "n2"),
+    ]);
+    await wait(30);
+    click(pane, "gotit");
+    await wait(260);
+    // Joe sits on the older answer, still unread.
+    expect(verdict(pane)).toBe("It copies Shortcut's shape");
+    feed(r, [userEvent("write access?"), ...send({ kind: "answer", verdict: "No, read-only is enough", text: "It only reads." }, "n3")]);
+    await wait(30);
+    expect(verdict(pane)).toBe("No, read-only is enough");
+    expect(card(pane).querySelector("[data-ax='gotit']")).not.toBeNull();
+
+    // His next message reacts to it: the chat's judgement marks it read, the card stays put,
+    // and with the older one still unread the check becomes Next.
+    feed(r, [userEvent("ok read-only it is"), ...send({ kind: "ack", text: "On it", read_answers: ["No, read-only is enough"] }, "n4")]);
+    await wait(30);
+    expect(verdict(pane)).toBe("No, read-only is enough");
+    expect(card(pane).querySelector("[data-ax='gotit']")).toBeNull();
+    const next = card(pane).querySelector(".ax-next[data-ax='close']");
+    expect(next.textContent).toContain("1 more");
+    next.click();
+    await wait(30);
+    expect(verdict(pane)).toBe("It copies Shortcut's shape");
+    // Only Got it was stored: the judged read lives in the transcript.
+    expect(db.marks).toEqual([["n2"]]);
+  });
+
   it("keeps a Got it across a reload: a fresh dashboard reads the daemon's marks", async () => {
     db.store.read.a3 = Date.now();
     db.store.read.a2 = Date.now();

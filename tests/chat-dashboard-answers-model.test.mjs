@@ -32,7 +32,7 @@ function chat() {
   const api = {
     r,
     joe(text) { r.handleEvent(userEvent(text)); return api; },
-    send(input, id = `m${++seq}`) { r.handleEvent(toolUseEvent(SEND, input, id)); r.handleEvent(ok(id)); return api; },
+    send(input, id = `m${++seq}`, ts = 0) { r.handleEvent(toolUseEvent(SEND, input, id, ts)); r.handleEvent(ok(id)); return api; },
     items(side) { return buildAnswerItems(r.messages, side); },
   };
   return api;
@@ -133,6 +133,55 @@ describe("answers model", () => {
     expect(nextUnread(items, store).key).toBe("u1");
     store.read.u1 = 1;
     expect(nextUnread(items, store)).toBeNull();
+  });
+
+  it("is read when the chat judges Joe's next message shows he read it, by verdict", () => {
+    const items = chat()
+      .joe("token needs write?")
+      .send({ kind: "answer", verdict: "No, read-only is enough", text: "t" }, "r1", 100)
+      .joe("ask about the board id")
+      .send({ kind: "answer", verdict: "One board per project", text: "t" }, "r2", 200)
+      .joe("ok, and  NO, READ-ONLY IS ENOUGH  then? also the board one makes sense")
+      // An ack is often the first message of a turn: it carries the judgement too.
+      .send({ kind: "ack", text: "On it", read_answers: ["no, read-only is enough", "One board per project", "Never sent"] }, "j1", 300)
+      .items();
+    const store = emptyStore();
+    expect(items.map((i) => [i.key, i.seenAt])).toEqual([["r1", 300_000], ["r2", 300_000]]);
+    expect(items.every((i) => !isUnread(i, store))).toBe(true);
+  });
+
+  it("never marks an answer Joe could not have read: one sent after his latest message", () => {
+    const items = chat()
+      .joe("q1")
+      .send({ kind: "answer", verdict: "Same", text: "old" }, "o1", 100)
+      .joe("q2")
+      // Same turn: the new answer lands, then a later message judges "Same". Only the
+      // one from before Joe's message counts, even though the newer shares its verdict.
+      .send({ kind: "answer", verdict: "Same", text: "new" }, "o2", 200)
+      .send({ kind: "report", verdict: "Done", text: "d", read_answers: ["Same"] }, "o3", 210)
+      .items();
+    const store = emptyStore();
+    expect(isUnread(items[0], store)).toBe(false);
+    expect(isUnread(items[1], store)).toBe(true);
+  });
+
+  it("leaves answers unread when the judgement names none, and a later thread reply unreads a judged one", () => {
+    const quiet = chat().joe("q").send({ kind: "answer", verdict: "V", text: "t" }, "q1", 100).joe("new topic").send({ kind: "ack", text: "ok" }, "q2", 200).items();
+    expect(isUnread(quiet[0], emptyStore())).toBe(true);
+
+    // A retracted message's judgement no longer counts.
+    const c = chat().joe("q").send({ kind: "answer", verdict: "V", text: "t" }, "x1", 100).joe("ok").send({ kind: "ack", text: "ok", read_answers: ["V"] }, "x2", 200);
+    expect(c.items()[0].seenAt).toBe(200_000);
+    const ack = c.r.messages.find((m) => m.id === "x2");
+    ack.retracted = true;
+    expect(c.items()[0].seenAt).toBe(0);
+
+    const store = emptyStore();
+    store.threads.t1 = "th";
+    const side = { store, threads: [thread("th", [["user", "and?", 400_000], ["assistant", "More.", 500_000]])] };
+    const [it] = chat().joe("q").send({ kind: "answer", verdict: "V", text: "t" }, "t1", 100).joe("thanks").send({ kind: "ack", text: "ok", read_answers: ["V"] }, "t2", 300).items(side);
+    expect(it.seenAt).toBe(300_000);
+    expect(isUnread(it, store)).toBe(true);
   });
 
   it("groups History as Unread, Read with a thread, then Read, newest first, with headings only for two groups", () => {
