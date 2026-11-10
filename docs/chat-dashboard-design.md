@@ -41,9 +41,10 @@ Started 2026-11-06 in chat "Dashboard instead of chat" (session 763c45be).
   Plan and the Result carry it. Reason: "Answer to you should only answer to answers" (2026-11-09).
 - **One spot, latest first.** The newest answer always shows. Reason: "i always wanna see the last
   answer" (2026-11-09).
-- **Read only by an explicit check-off ("Got it").** Reason: Claude cannot know he read it
-  (2026-11-08). This is a read mark, not a dismissal: read answers stay reachable. (On 2026-11-04 he
-  rejected dismissing answers; the check-off replaced automatic shrinking only for the read state.)
+- **Read by Got it, or by the chat judging his next message** (replaces "read only by an explicit
+  check-off", 2026-11-10, see "Read state" below). This is a read mark, not a dismissal: read answers
+  stay reachable. (On 2026-11-04 he rejected dismissing answers; the check-off replaced automatic
+  shrinking only for the read state.)
 - **Got it walks back:** it shows the next newest unread answer, then the next, until none are
   unread (2026-11-09).
 - **All read:** once nothing is unread, show that, keep the latest answer visible, and let him pick
@@ -100,6 +101,31 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
   chat bubble moves to Answers (2026-11-10). Built in lane 5: `shared/question-icon.ts` draws it for
   the live card, the read-only card and the transcript card's summary; the Answers header already
   used the dotted bubble.
+- **Read state (rethought 2026-11-10, sub "answers-read", board region `answers` of shared
+  mockup `dashboard-rework-nov10`).** Problem: Joe read answers but did not click Got it, so they
+  stayed unread and he reread them later; and a newer answer did not take the card while he sat on an
+  older unread one ("i got a newer answer, but i was still stuck on seeing the old answer").
+  - **The newest answer always takes the card**, even over an older unread one, which waits behind
+    History's badge. Only an open thread holds it back (Back then shows it). A thread reply that
+    lands after he left the thread takes the card the same way.
+  - **The chat judges from his next message.** `send_message` takes `read_answers` on any kind: on
+    its first message after Joe's, the chat lists the verdicts of earlier `answer`/`rating` messages
+    his message reacts to (replies to, acts on, builds on), copied exactly; an answer his message
+    ignores stays unread. His idea ("detect if a message has been read based on my message"). It
+    rides the turn the chat runs anyway: a few output tokens, no extra model call. Rule text: the
+    READ ANSWERS paragraph of `send_message_description` (`mcp/tool_schemas_coordination.rs`);
+    validated in `hooks_server/messages/validate.rs` (8 items of 40 chars at most); read by
+    `answers-model.ts` (`AnswerItem.seenAt`), which only matches answers sent before his latest
+    message (newest first per verdict, case and spacing ignored). Derived from the transcript, so
+    nothing new is stored: `isUnread` takes the later of Got it and the judgement, and a thread reply
+    after either makes the answer unread again.
+  - **The card never moves under him.** A judged-read answer on the card stays; with other answers
+    unread its check becomes **Next** (arrow plus "N more"), which shows the newest unread; with
+    none unread it is the grey check. Got it stays as the manual shortcut, Mark all read in History.
+  - **Card stays full size** when read (fold to the verdict line was shown and turned down).
+  - Ruled out: read after a few seconds on screen (dwell) and read on open: "just cuz its been
+    opened doesnt mean i read it"; any message he sends marks everything read (skipped answers would
+    go read too); no read state at all.
 - Ruled out: an earlier-questions list inside the card, a deck of unread, threads under the answer
   or in a drawer, thread summaries, the question shown at rest or in a tooltip, a More button, fixed
   heights of 240/280/320 or growing with content, the slide/crossfade/blur/scale Got it presets.
