@@ -46,15 +46,12 @@ function discardStuckPending(pane: HTMLElement): void {
   })();
 }
 
-/** The chat pane's panels: Ask / Todos / Drafts / Preview, in a split beside
+/** The chat pane's panels: Todos / Drafts / Backlog / Preview, in a split beside
  * the chat on desktop and a full-screen cover on the phone (fab-dial.ts).
  * Preview's controller is what the rest of the view drives Preview through. Owns its own host element
  * because active-session.ts rewrites the pane's innerHTML on every switch. */
 export function wirePreviewPanel(root: HTMLElement, pane: HTMLElement): PreviewController | null {
   state.fabDial = mountFabDial(pane, {
-    onDraft: (text) => {
-      state.composer?.setDraftText(text, false);
-    },
     mountPreview: mountPreviewTab,
     onCode: () => void enterCodeMode(),
   });

@@ -22,6 +22,8 @@ import { highlightCodeBlocks, highlightInlineCode } from "../../../shared/chat/c
 import { scrollToBottom } from "../../../shared/chat/chat-dom-renderer";
 import { initialUi, renderStrip, renderZone, QUICK_VIEWS, type DashUi, type QuickViewId } from "./dashboard-zones";
 import { AnswersCard } from "./answers-card";
+import { QUESTION_ASK_EVENT, type QuestionAsk } from "../question-ask";
+import { HOST_ID } from "../permission-modal/host";
 import { SubsCard } from "./subs-card";
 import { collectSubItems } from "./subs-source";
 import { fetchSubCards } from "../../../shared/chat/subchat-cards";
@@ -35,7 +37,7 @@ import { PREVIEW_OPEN_EVENT } from "../../../shared/chat/chat-preview-card";
 import { buildPreviewDocumentHtml } from "../preview-panel-document";
 import { scopeRoot } from "../shared-mockup-scope";
 import type { PreviewMeta, PreviewSnapshot } from "../../../types/ipc.generated";
-import { ACTIVE_QUESTION_EVENT, activeCardFor } from "../permission-modal/question-state";
+import { ACTIVE_QUESTION_EVENT, activeCardFor, expandActiveCard } from "../permission-modal/question-state";
 import "./chat-dashboard.css";
 import "./dashboard-extras.css";
 
@@ -90,6 +92,15 @@ export class ChatDashboard {
     this.ui.earlierOpen = false;
     this.render();
   };
+  /** A question card's Ask (question-ask.ts). The card sits in this pane's
+   *  composer, so the dashboard of the pane holding it takes the ask. */
+  private readonly onQuestionAsk = (e: Event): void => {
+    const card = document.getElementById(HOST_ID);
+    if (this.disposed || e.defaultPrevented || !this.el.isConnected || !card || !this.pane.contains(card)) return;
+    e.preventDefault();
+    this.answers.askAbout((e as CustomEvent<QuestionAsk>).detail);
+    this.schedule();
+  };
   private readonly onKey = (e: KeyboardEvent): void => {
     if (e.key === "Escape" && this.ui.earlierOpen) {
       this.ui.earlierOpen = false;
@@ -113,6 +124,10 @@ export class ChatDashboard {
       cwd: () => renderer.paginator.cwdHint ?? null,
       onSideChange: () => this.schedule(),
       decorate: (root) => this.decorate(root),
+      expandQuestion: () => {
+        const sid = renderer.sessionId;
+        if (sid) expandActiveCard({ sessionId: sid });
+      },
     });
     this.subs = new SubsCard({
       mainId: () => renderer.sessionId ?? "",
@@ -154,6 +169,7 @@ export class ChatDashboard {
     document.addEventListener("click", this.onDocClick, true);
     document.addEventListener("keydown", this.onKey);
     window.addEventListener(ACTIVE_QUESTION_EVENT, this.onFlushed);
+    window.addEventListener(QUESTION_ASK_EVENT, this.onQuestionAsk);
 
     const msgs = pane.querySelector<HTMLElement>(".session-messages");
     if (msgs) msgs.before(this.el);
@@ -213,6 +229,7 @@ export class ChatDashboard {
       plan: this.renderer.dashPlan,
       busy,
       answers: this.answers.sideData(),
+      answersThreadOpen: this.answers.threadOpen(),
       subs: subItems,
       now,
       previews: this.previews,
@@ -541,6 +558,7 @@ export class ChatDashboard {
     document.removeEventListener("click", this.onDocClick, true);
     document.removeEventListener("keydown", this.onKey);
     window.removeEventListener(ACTIVE_QUESTION_EVENT, this.onFlushed);
+    window.removeEventListener(QUESTION_ASK_EVENT, this.onQuestionAsk);
     if (this.renderer.onFlushed === this.onFlushed) this.renderer.onFlushed = null;
     this.el.remove();
     if (this.pane.getAttribute(DASH_ATTR) === "dashboard" && !this.pane.querySelector(".cdash")) this.pane.removeAttribute(DASH_ATTR);

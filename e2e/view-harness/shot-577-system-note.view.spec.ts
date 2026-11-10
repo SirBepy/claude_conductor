@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (question-card-ask): the Ask panel and its strip/dial entries are gone, a question card's Ask (shown only in Dashboard view) minimizes the card and opens a thread in the Answers card, and the thread classes moved from ask-* to ax-*; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-05: renderMessage gained a "passed" row kind (the quiet "Passed to X" line); every other kind renders as before - this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.
 import { test, expect, type Page } from "@playwright/test";

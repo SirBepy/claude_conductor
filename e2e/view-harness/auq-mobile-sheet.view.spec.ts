@@ -15,10 +15,11 @@ const PHONE = { width: 393, height: 852 };
 
 const SESSION = sessionInstance();
 
-async function mountPhoneSession(page: Page, events: unknown[] = []): Promise<void> {
+async function mountPhoneSession(page: Page, events: unknown[] = [], chatView: "messages" | "dashboard" = "messages"): Promise<void> {
   await page.setViewportSize(PHONE);
   await mountView(page, {
     view: "sessions",
+    chatView,
     invoke: {
       ...SESSIONS_BASE_INVOKE,
       list_instances: [SESSION],
@@ -266,9 +267,10 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     await expect(page.locator(".prompt-panel.is-active")).toHaveAttribute("data-panel", "1");
   });
 
-  // Joe, 2026-10-25: no "Question" word in the header, and Ask sits on the
-  // question band instead of the header.
-  test("phone page: header has no title, Ask sits on the active question's band and opens Ask", async ({ page }) => {
+  // Joe, 2026-10-25: no "Question" word in the header. Joe, 2026-11-10: Ask
+  // opens a thread in the dashboard's Answers card, which the phone does not
+  // draw (it always shows Messages view), so the phone card has no Ask.
+  test("phone page: header has no title and the card has no Ask", async ({ page }) => {
     await mountPhoneSession(page);
     await openQuestionCard(page, [
       { question: "First?", options: [{ label: "A" }, { label: "B" }] },
@@ -276,12 +278,17 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     ]);
     await expect(page.locator(".prompt-card__header")).not.toContainText("Question");
     await expect(page.locator('.prompt-card__header [data-act="ask"]')).toBeHidden();
+    await expect(page.locator('.prompt-panel.is-active .prompt-zone--ask [data-act="ask-inline"]')).toBeHidden();
+  });
 
-    await page.evaluate(() => {
-      window.addEventListener("cc-ask-open", (e) => {
-        (window as unknown as { __askText?: string }).__askText = (e as CustomEvent<{ text: string }>).detail.text;
-      });
-    });
+  // In a wide-enough window the same page layout runs with the dashboard
+  // behind it, and there Ask sits on the active question's band.
+  test("phone page with the dashboard behind it: Ask sits on the active question's band", async ({ page }) => {
+    await mountPhoneSession(page, [], "dashboard");
+    await openQuestionCard(page, [
+      { question: "First?", options: [{ label: "A" }, { label: "B" }] },
+      { question: "Second?", options: [{ label: "C" }, { label: "D" }] },
+    ]);
     const inline = page.locator('.prompt-panel.is-active .prompt-zone--ask [data-act="ask-inline"]');
     await expect(inline).toBeVisible();
     const band = (await page.locator(".prompt-panel.is-active .prompt-zone--ask").boundingBox())!;
@@ -291,9 +298,6 @@ test.describe("view-harness / mobile bottom-sheet card", () => {
     expect(band.x + band.width - (btn.x + btn.width)).toBeLessThan(30);
     expect(btn.y).toBeGreaterThanOrEqual(band.y);
     expect(btn.y + btn.height).toBeLessThanOrEqual(band.y + band.height);
-
-    await inline.click();
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __askText?: string }).__askText ?? "")).toContain("First?");
   });
 
   test("phone page: no full-height line at the left edge on a later question", async ({ page }) => {

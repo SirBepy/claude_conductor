@@ -510,10 +510,6 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     ("mark_todos_seen", P),
     ("set_todo_columns", P),
     ("clear_archived_todos", P),
-    // Ask panel: same fab-dial reachability as Todos above (todo 1007).
-    ("ask_list_threads", P),
-    ("ask_send", P),
-    ("ask_delete_thread", P),
     // Dictation cleanup pass (todo: voice dictation cleanup, 2026-10-18): the
     // phone composer dictates too, so its "clean on finalize" hook needs the
     // same stateless `claude -p` round trip as desktop.
@@ -697,7 +693,6 @@ mod tests {
             "tail_waiting_log",
             "list_user_todos", "set_user_todo_state", "mark_todos_seen",
             "set_todo_columns", "clear_archived_todos",
-            "ask_list_threads", "ask_send", "ask_delete_thread",
             "voice_clean_transcript",
             "list_message_drafts", "set_draft_body", "set_draft_version",
             "set_draft_state",

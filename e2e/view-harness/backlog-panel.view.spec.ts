@@ -74,7 +74,7 @@ async function mountPane(page: Page, width: number, fraction: number): Promise<v
       document.body.appendChild(pane);
       const pv = await import("/views/sessions/preview-panel.ts");
       const mod = await import("/views/sessions/fab-dial.ts");
-      const fab = mod.mountFabDial(pane, { onDraft: () => {}, onCode: () => {}, mountPreview: pv.mountPreviewTab });
+      const fab = mod.mountFabDial(pane, { onCode: () => {}, mountPreview: pv.mountPreviewTab });
       fab.setSessionScope(viewer, "C:\\proj");
     },
     { backlog: BACKLOG, docs: Object.fromEntries(TODOS.map((t) => [t.id, DOC(t.id)])), viewer: VIEWER, fraction },

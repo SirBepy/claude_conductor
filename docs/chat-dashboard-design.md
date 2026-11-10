@@ -51,14 +51,16 @@ Started 2026-11-06 in chat "Dashboard instead of chat" (session 763c45be).
   any earlier question from a list (2026-11-09).
 - **"N earlier, K unread"** says how many other answers exist, louder while any are unread
   ("especially other answers that havent been read yet", 2026-11-09).
-- **Threads on demand:** the thread button on an answer turns it into a mini chat like the Ask
-  panel. A settled thread updates that answer and any decision lands in Decided. Reason: gives
+- **Threads on demand:** the thread button on an answer turns it into a mini chat. A settled thread updates that answer and any decision lands in Decided. Reason: gives
   follow-ups a home without a transcript; the flow-back stops a thread's decision being invisible to
   the main chat (rated 8/10 lifts, 2026-11-08).
 - **New question:** Joe can start a brand-new question thread at any time; its answer lands in
   Answers (2026-11-09).
-- **Quick side questions** can also go to the existing Ask panel (the /btw alternative); that
-  rework is for later (2026-11-06).
+- **No separate Ask panel** (replaces "quick side questions can also go to the existing Ask
+  panel", 2026-11-06). Joe, 2026-11-10: "we dont need the 'Ask' section anymore if we have this".
+  Side questions are a + question or a thread; the Ask panel, its strip and dial entries, its
+  `ask_send`/`ask_delete_thread` calls and the sidecar's "hand off to the chat" line are gone. The
+  read-only Ask sidecar stays as the engine behind every thread.
 
 ### Answers card (approved 2026-11-10, sub "answers-design", 17 board rounds)
 
@@ -129,6 +131,29 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
 - Ruled out: an earlier-questions list inside the card, a deck of unread, threads under the answer
   or in a drawer, thread summaries, the question shown at rest or in a tooltip, a More button, fixed
   heights of 240/280/320 or growing with content, the slide/crossfade/blur/scale Got it presets.
+
+### Asking about a question card (approved 2026-11-10, sub "question-card-ask")
+
+Board: preview slug `ask-ux-options` (real app shots of the three options).
+
+- **Ask on a question card minimizes the card and opens a thread in Answers.** Joe's idea, option A
+  of three. The thread is titled with the question's final ask line, labelled "About a question",
+  and opens on the question and its options as the first bubble; the box is focused. Joe's first
+  message is his question; the sidecar is told which card it is about (`card_question_context` in
+  `daemon/methods/answers.rs`), and the reply lands in Answers like a + question, rewritten question
+  and verdict included. The zone draws for the thread even in a chat with no answers yet.
+- **Back reopens the card** with any half-typed answer intact; Back from any other thread does not.
+  Asking about the same card again returns to its thread. The card's bar stays at the bottom the
+  whole time, so it can be answered without leaving the thread.
+- **No Ask where there is no Answers card.** Messages view and the phone (which always draws
+  Messages) show no Ask button on the card. Joe: "dont worry about phone so much rn, for now just
+  fully remove it... later the phone will have the dashboard too".
+- Code: `src/views/sessions/question-ask.ts` (the cancelable `cc-question-ask` event; the card
+  minimizes only when a dashboard took it), `ChatDashboard.onQuestionAsk` (the dashboard whose pane
+  holds the card takes it), `AnswersCard.askAbout`.
+- Ruled out: the card staying open beside the thread (two tall cards fight for height and overlap
+  on a laptop screen); a small thread inside the question card itself (a second kind of thread that
+  Answers and History never see).
 
 ## Status, Plan, Result
 
@@ -307,5 +332,5 @@ you're done").
   board: `dashboard-extra-content`. Full card-by-card record of every pick: the main chat's
   subchats decisions log (D48-D110).
 - Mockups use the app's real components (renderMessage cards, renderQuestionUI, composerFieldHtml,
-  Ask panel classes) bundled with the /mockup skill's `bundle-board.mjs` and checked with
+  the Answers card's thread classes) bundled with the /mockup skill's `bundle-board.mjs` and checked with
   `verify-board.cjs` on the panel route.

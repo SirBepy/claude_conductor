@@ -97,7 +97,8 @@ export function parseQuestionReply(reply: string): { question: string | null; ve
 
 const capitalise = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** Ask's optional trailing `SUGGESTED:` line is the Ask panel's hand-off; the card has none. */
+/** Threads written before 2026-11-10 may end in a `SUGGESTED:` line, the hand-off
+ *  the removed Ask panel turned into a draft; the card has no use for it. */
 export function withoutSuggestion(text: string): string {
   return text.replace(/\n\s*[>\-*\s]*SUGGESTED:[^\n]*\s*$/, "").trimEnd();
 }

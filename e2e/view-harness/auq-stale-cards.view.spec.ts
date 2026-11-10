@@ -1,3 +1,4 @@
+// Reviewed 2026-11-11 (question-card-ask): the dashboard gained the question card's Ask thread (answersThreadOpen draws the Answers zone for it) and listens for cc-question-ask; nothing this spec asserts changed, and it passes.
 // asserts: src/shared/chat/dashboard/dashboard-model.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/permission-modal/question-state.ts, src/views/sessions/permission-modal/question-submit.ts, src/views/sessions/permission-modal/resurface.ts, src/views/sessions/permission-modal/dismiss-open-questions.ts, src/views/sessions/chat-menu-items.ts, src/shared/chat/chat-question-card.ts, src/shared/chat/question-texts.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, runPaletteCommand, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

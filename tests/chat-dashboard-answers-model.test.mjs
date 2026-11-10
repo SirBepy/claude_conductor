@@ -39,7 +39,7 @@ function chat() {
 }
 
 const thread = (id, msgs) => ({
-  id, title: "", created_at: 0, updated_at: 0, sidecar_session_id: null,
+  id, created_at: 0, updated_at: 0, sidecar_session_id: null,
   messages: msgs.map(([role, text, ts]) => ({ role, text, ts })),
 });
 

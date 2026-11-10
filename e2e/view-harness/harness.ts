@@ -337,7 +337,6 @@ export async function mountSessionsLayout(page: Page, opts: SessionsLayoutOption
     document.body.appendChild(view);
 
     const fab = mountFabDial(view.querySelector<HTMLElement>("#session-pane")!, {
-      onDraft: () => {},
       onCode: () => {},
       mountPreview: pv.mountPreviewTab,
     });

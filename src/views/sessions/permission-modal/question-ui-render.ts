@@ -21,7 +21,7 @@ import { createPreviewFullscreen } from "./preview-fullscreen";
 import { createCollapseController } from "./question-ui-collapse";
 import type { AuqAttachmentsController } from "./attachments";
 import type { AuqSlashPopupController } from "./slash-popup";
-import { ASK_OPEN_EVENT, askContextText } from "../ask-open-event";
+import { askAboutQuestion } from "../question-ask";
 import type { OptionNotes, Question, QuestionUIOpts, Selection } from "./types";
 
 export type { QuestionRenderState };
@@ -334,12 +334,14 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         ?.addEventListener("click", () => goToTab(state.activeTab - 1));
       host.querySelector<HTMLButtonElement>('.prompt-pager [data-nav="1"]')
         ?.addEventListener("click", advance);
-      // Only announces; the card is left exactly as it is, so a half-typed
-      // answer and the pending prompt survive the detour.
+      // The dashboard's Answers card opens a thread about the question and the
+      // card drops to its bar; minimizing keeps a half-typed answer and the
+      // pending prompt, and the thread's Back opens the card again.
       host.querySelectorAll<HTMLButtonElement>('[data-act="ask"], [data-act="ask-inline"]').forEach((btn) => {
         btn.addEventListener("click", () => {
-          const q = questions[Math.min(state.activeTab, questions.length - 1)];
-          if (q) window.dispatchEvent(new CustomEvent(ASK_OPEN_EVENT, { detail: { text: askContextText(q) } }));
+          const index = Math.min(state.activeTab, questions.length - 1);
+          const q = questions[index];
+          if (q && askAboutQuestion(q, opts.id, index)) minimize();
         });
       });
       host.querySelector<HTMLButtonElement>('[data-act="minimize"]')

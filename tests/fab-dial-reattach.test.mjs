@@ -2,7 +2,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 vi.mock("../src/views/sessions/fab-dial.css", () => ({}));
-vi.mock("../src/views/sessions/ask-panel", () => ({ mountAskPanel: () => ({ setCwd() {}, setSessionScope() {}, destroy() {} }) }));
 vi.mock("../src/views/sessions/todos-panel", () => ({ mountTodosPanel: () => ({ setSessionScope() {}, destroy() {} }) }));
 vi.mock("../src/views/sessions/drafts-panel", () => ({ mountDraftsPanel: () => ({ setSessionScope() {}, destroy() {} }) }));
 const backlogRoots = vi.hoisted(() => []);
@@ -35,7 +34,7 @@ describe("fab dial survives a pane rebuild", () => {
   });
 
   it("mounts a host once a session is scoped", () => {
-    const fab = mountFabDial(pane, { onDraft() {}, onCode() {}, mountPreview: stubPreview });
+    const fab = mountFabDial(pane, { onCode() {}, mountPreview: stubPreview });
     fab.setSessionScope("sess-A", "C:/repo");
     expect(pane.querySelector(".fab-dial-host")).not.toBeNull();
     expect(pane.querySelector("[data-fab-toggle]")).not.toBeNull();
@@ -45,7 +44,7 @@ describe("fab dial survives a pane rebuild", () => {
   // setSessionScope has run, which orphans the host - the reason the dial was
   // invisible in the shipped app despite being mounted.
   it("reattaches after pane.innerHTML wipes it", () => {
-    const fab = mountFabDial(pane, { onDraft() {}, onCode() {}, mountPreview: stubPreview });
+    const fab = mountFabDial(pane, { onCode() {}, mountPreview: stubPreview });
     fab.setSessionScope("sess-A", "C:/repo");
 
     pane.innerHTML = `<div class="session-messages"></div>`;
@@ -53,11 +52,12 @@ describe("fab dial survives a pane rebuild", () => {
 
     fab.reattach();
     expect(pane.querySelector(".fab-dial-host")).not.toBeNull();
-    expect(pane.querySelectorAll("[data-dial]").length).toBe(6);
+    // Todos, Drafts, Backlog, Code, Preview.
+    expect(pane.querySelectorAll("[data-dial]").length).toBe(5);
   });
 
   it("stays gone when no session is scoped", () => {
-    const fab = mountFabDial(pane, { onDraft() {}, onCode() {}, mountPreview: stubPreview });
+    const fab = mountFabDial(pane, { onCode() {}, mountPreview: stubPreview });
     fab.setSessionScope(null, null);
     fab.reattach();
     expect(pane.querySelector(".fab-dial-host")).toBeNull();
@@ -65,7 +65,7 @@ describe("fab dial survives a pane rebuild", () => {
 
   it("draws no FAB on desktop, where the split's strip already lists the panels", () => {
     setNarrow(false);
-    const fab = mountFabDial(pane, { onDraft() {}, onCode() {}, mountPreview: stubPreview });
+    const fab = mountFabDial(pane, { onCode() {}, mountPreview: stubPreview });
     fab.setSessionScope("sess-A", "C:/repo");
     expect(pane.querySelector("[data-fab-toggle]")).toBeNull();
     expect(pane.querySelector("[data-dial]")).toBeNull();
@@ -74,7 +74,7 @@ describe("fab dial survives a pane rebuild", () => {
   it("puts Code at the top of the desktop strip and fires onCode", () => {
     setNarrow(false);
     const onCode = vi.fn();
-    const fab = mountFabDial(pane, { onDraft() {}, onCode, mountPreview: stubPreview });
+    const fab = mountFabDial(pane, { onCode, mountPreview: stubPreview });
     fab.setSessionScope("sess-A", "C:/repo");
     const tabs = pane.querySelectorAll(".sp-strip .sp-tab");
     expect(tabs[0].hasAttribute("data-sp-code")).toBe(true);
@@ -85,7 +85,7 @@ describe("fab dial survives a pane rebuild", () => {
   // The phone's todos chip dispatches cc-backlog-open, which sessions.ts routes
   // to openPanel("backlog"); without it the chip would do nothing.
   it("openPanel('backlog') brings the Backlog panel's window up", () => {
-    const fab = mountFabDial(pane, { onDraft() {}, onCode() {}, mountPreview: stubPreview });
+    const fab = mountFabDial(pane, { onCode() {}, mountPreview: stubPreview });
     fab.setSessionScope("sess-A", "C:/repo");
     const shown = () => [...pane.querySelectorAll(".pw-window")].filter((w) => !w.hidden);
     expect(shown()).toHaveLength(0);

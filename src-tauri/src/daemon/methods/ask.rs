@@ -1,6 +1,7 @@
-//! Daemon-side Ask RPC. The daemon owns the store and the sidecar spawn, and
-//! `ipc/ask.rs` is a thin desktop proxy - same split as `user_todos`, so the
-//! phone and the desktop share one implementation instead of two.
+//! Daemon-side Ask threads: the read-only sidecar runs behind the chat
+//! dashboard's Answers card. The daemon owns the store and the sidecar spawn;
+//! `methods/answers.rs` sends through `ask_send_with`, and `ask_list_threads` is
+//! how the card reads the threads back (`ipc/ask.rs` is its desktop proxy).
 
 use super::super::rpc::{Router, RpcError};
 use super::super::state::DaemonState;
@@ -20,20 +21,10 @@ static SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Runs one question and persists both sides. `thread_id` `None` starts a new
 /// thread; an existing `sidecar_session_id` is what makes a follow-up a resume.
-pub(crate) async fn ask_send(
-    session_id: &str,
-    thread_id: Option<&str>,
-    question: &str,
-    cwd: Option<&str>,
-) -> Result<Value, String> {
-    let thread = ask_send_with(session_id, thread_id, question, cwd, None).await?;
-    serde_json::to_value(thread).map_err(|e| e.to_string())
-}
-
-/// `ask_send` plus `context`: words put ahead of the question in the prompt of
-/// a thread's FIRST question only (a follow-up resumes a session that already
-/// holds them) and never stored, so the thread shows what Joe typed. The chat
-/// dashboard's Answers card uses it to say which answer a thread follows up on.
+/// `context` is put ahead of the question in the prompt of a thread's FIRST
+/// question only (a follow-up resumes a session that already holds it) and is
+/// never stored, so the thread shows what Joe typed. The Answers card uses it to
+/// say which answer or question card a thread is about.
 pub(crate) async fn ask_send_with(
     session_id: &str,
     thread_id: Option<&str>,
@@ -84,9 +75,6 @@ pub(crate) async fn ask_send_with(
         }
     };
     let t = &mut threads[idx];
-    if t.title.is_empty() {
-        t.title = store::title_from(question);
-    }
     t.sidecar_session_id = Some(answer.sidecar_session_id);
     t.updated_at = now_ms();
     t.messages.push(store::AskMessage {
@@ -115,36 +103,6 @@ pub fn register_ask(router: &mut Router, _state: Arc<DaemonState>) {
             .map_err(|e| RpcError::invalid_params(e.to_string()))?;
         serde_json::to_value(store::load(&p.session_id)).map_err(|e| RpcError::internal(e.to_string()))
     });
-
-    router.register("ask_send", move |params, _ctx| async move {
-        #[derive(serde::Deserialize)]
-        struct P {
-            session_id: String,
-            #[serde(default)]
-            thread_id: Option<String>,
-            question: String,
-            #[serde(default)]
-            cwd: Option<String>,
-        }
-        let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
-            .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-        ask_send(&p.session_id, p.thread_id.as_deref(), &p.question, p.cwd.as_deref())
-            .await
-            .map_err(RpcError::internal)
-    });
-
-    router.register("ask_delete_thread", move |params, _ctx| async move {
-        #[derive(serde::Deserialize)]
-        struct P {
-            session_id: String,
-            thread_id: String,
-        }
-        let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
-            .map_err(|e| RpcError::invalid_params(e.to_string()))?;
-        let left = store::delete_thread(&p.session_id, &p.thread_id)
-            .map_err(|e| RpcError::internal(format!("{e:#}")))?;
-        serde_json::to_value(left).map_err(|e| RpcError::internal(e.to_string()))
-    });
 }
 
 #[cfg(test)]
@@ -153,13 +111,13 @@ mod tests {
 
     #[tokio::test]
     async fn ask_send_rejects_empty_question() {
-        let err = ask_send("sid", None, "   ", None).await.unwrap_err();
+        let err = ask_send_with("sid", None, "   ", None, None).await.unwrap_err();
         assert!(err.contains("empty"), "{err}");
     }
 
     #[tokio::test]
     async fn ask_send_rejects_unknown_thread_before_spawning() {
-        let err = ask_send("sid", Some("no-such-thread"), "hi", None).await.unwrap_err();
+        let err = ask_send_with("sid", Some("no-such-thread"), "hi", None, None).await.unwrap_err();
         assert!(err.contains("no Ask thread"), "{err}");
     }
 }

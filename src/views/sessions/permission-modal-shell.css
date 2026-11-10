@@ -364,6 +364,13 @@
 .prompt-ask__btn {
   display: none;
 }
+/* Ask opens a thread in the chat dashboard's Answers card (question-ask.ts), so
+ * a card with no dashboard behind it (Messages view, the phone) has no Ask. The
+ * !important beats the per-layout display rules below, which would otherwise
+ * show the button again by specificity alone. */
+#prompt-card-host:not(.session-pane[data-chat-view="dashboard"] *) :is([data-act="ask"], [data-act="ask-inline"]) {
+  display: none !important;
+}
 #prompt-card-host:not(.prompt-card-host--viewport) .prompt-card__header:has(.prompt-pager) [data-act="ask"] {
   display: none;
 }

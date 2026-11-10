@@ -2,7 +2,7 @@
 // a time fills a split beside the chat, behind a draggable divider, and a
 // narrow icon strip on the far right swaps which one. This replaced the
 // floating / snapped / docked pane windows as the desktop home of Preview,
-// Drafts, Todos and Ask; the phone keeps those as full-screen covers
+// Drafts, Todos and Backlog; the phone keeps those as full-screen covers
 // (pane-windows/manager.ts), picked once in fab-dial.ts.
 //
 // Everything here lives in the FAB host, which is absolutely positioned over
@@ -29,7 +29,7 @@ import { onSettingsPopupChange } from "../../../shared/settings-popup";
 import "./split.css";
 
 /** Top to bottom, as Joe picked it in the split mockup. */
-const STRIP_ORDER: readonly PanelKey[] = ["preview", "drafts", "todos", "backlog", "ask"];
+const STRIP_ORDER: readonly PanelKey[] = ["preview", "drafts", "todos", "backlog"];
 const STRIP_W = 44;
 const DIVIDER_W = 6;
 /** Below these the split cannot keep both sides usable, so the panel covers
@@ -171,12 +171,6 @@ export class SplitPanels implements PanelHost {
     this.show(panel);
   }
 
-  /** Brings Ask up with its input prefilled. */
-  askAbout(text: string): void {
-    this.show("ask");
-    this.handles.get("ask")?.seed?.(text);
-  }
-
   openDraft(id: string): void {
     this.show("drafts");
     this.mounted.drafts?.openDraft(id);
@@ -273,7 +267,6 @@ export class SplitPanels implements PanelHost {
     this.body.appendChild(root);
     this.roots.set(panel, root);
     const deps: PanelDeps = {
-      onDraft: this.deps.onDraft,
       mountPreview: this.deps.mountPreview,
       previewDeps: this.previewDeps(),
       onDraftsCount: (n) => {

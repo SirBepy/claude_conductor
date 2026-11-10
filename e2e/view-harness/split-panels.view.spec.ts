@@ -9,7 +9,7 @@ const SCREENSHOT_DIR = shotDir();
 
 // The chat pane's panels on desktop (Joe, 2026-10-25): a split
 // beside the chat with a draggable divider, and a narrow icon strip on the far
-// right (Preview / Drafts / Todos / Ask) swapping which one fills it. Real
+// right (Preview / Drafts / Todos / Backlog) swapping which one fills it. Real
 // pointer input on the real strip and FAB, not internal state.
 
 const VIEWER = "sess-A";
@@ -72,7 +72,7 @@ async function mountPane(
       document.body.appendChild(pane);
       const pv = await import("/views/sessions/preview-panel.ts");
       const mod = await import("/views/sessions/fab-dial.ts");
-      const fab = mod.mountFabDial(pane, { onDraft: () => {}, onCode: () => {}, mountPreview: pv.mountPreviewTab });
+      const fab = mod.mountFabDial(pane, { onCode: () => {}, mountPreview: pv.mountPreviewTab });
       fab.setSessionScope(viewer, "/proj");
       (window as any).__fab = fab;
     },
@@ -84,11 +84,11 @@ const panel = (page: Page) => page.locator(".sp-panel");
 const tab = (page: Page, k: string) => page.locator(`.sp-tab[data-sp-k="${k}"]`);
 const chatWidth = (page: Page) => page.locator("#chat-col").evaluate((el) => el.getBoundingClientRect().width);
 
-test("at rest only the strip shows, Code then Preview / Drafts / Todos / Backlog / Ask top to bottom, and the chat keeps the rest", async ({ page }) => {
+test("at rest only the strip shows, Code then Preview / Drafts / Todos / Backlog top to bottom, and the chat keeps the rest", async ({ page }) => {
   await mountPane(page);
   await expect(panel(page)).toBeHidden();
   const keys = await page.locator(".sp-tab").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.spK ?? "code"));
-  expect(keys).toEqual(["code", "preview", "drafts", "todos", "backlog", "ask"]);
+  expect(keys).toEqual(["code", "preview", "drafts", "todos", "backlog"]);
   expect(Math.round(await chatWidth(page))).toBe(1280 - STRIP_W);
 });
 

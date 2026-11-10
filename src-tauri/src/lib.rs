@@ -438,8 +438,6 @@ pub fn run() {
             ipc::window::file::file_window_ready,
             ipc::window::code::focus_app_window,
             ipc::ask_list_threads,
-            ipc::ask_send,
-            ipc::ask_delete_thread,
             ipc::answers_state,
             ipc::answers_mark,
             ipc::answers_thread_send,

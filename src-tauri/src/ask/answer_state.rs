@@ -13,11 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The key of the answer a + question's thread produced.
-pub fn question_key(thread_id: &str) -> String {
-    format!("ask:{thread_id}")
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct NewQuestion {
     pub thread_id: String,
@@ -61,20 +56,9 @@ impl AnswerState {
         self.questions.push(NewQuestion { thread_id: thread_id.to_string(), asked_at: now });
     }
 
-    /// Forgets everything that points at a deleted Ask thread: the + question it
-    /// answered, that answer's read mark, and any answer's link to it (a follow-up
-    /// to such an answer then starts a fresh thread instead of failing on a
-    /// thread that is gone). Returns whether anything changed.
-    pub fn forget_thread(&mut self, thread_id: &str) -> bool {
-        let before = (self.questions.len(), self.threads.len(), self.read.len());
-        self.questions.retain(|q| q.thread_id != thread_id);
-        self.threads.retain(|_, t| t != thread_id);
-        self.read.remove(&question_key(thread_id));
-        before != (self.questions.len(), self.threads.len(), self.read.len())
-    }
-
     /// The thread an answer's follow-ups go to: a + question is its own thread,
-    /// unless that thread was deleted and a fresh one linked in its place.
+    /// unless that thread went missing from the store and a fresh one was linked
+    /// in its place.
     pub fn thread_of(&self, key: &str) -> Option<String> {
         if let Some(linked) = self.threads.get(key) {
             return Some(linked.clone());
@@ -132,21 +116,6 @@ pub fn update(chat_session_id: &str, f: impl FnOnce(&mut AnswerState)) -> Result
     Ok(state)
 }
 
-/// Drops the references to a deleted Ask thread. Writes only when there was
-/// something to drop, so deleting a plain Ask thread never creates the file.
-pub fn forget_thread(chat_session_id: &str, thread_id: &str) -> Result<()> {
-    let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let path = file_for(chat_session_id)?;
-    if !path.exists() {
-        return Ok(());
-    }
-    let mut state = load_from(&path);
-    if state.forget_thread(thread_id) {
-        save_to(&path, &state)?;
-    }
-    Ok(())
-}
-
 pub fn drop_for_chat(chat_session_id: &str) {
     if let Ok(path) = file_for(chat_session_id) {
         let _ = std::fs::remove_file(path);
@@ -171,7 +140,7 @@ mod tests {
         assert_eq!(back, s);
         assert_eq!(back.read.get("toolu_1"), Some(&100));
         assert_eq!(back.thread_of("toolu_2").as_deref(), Some("th-a"));
-        assert_eq!(back.thread_of(&question_key("th-b")).as_deref(), Some("th-b"));
+        assert_eq!(back.thread_of("ask:th-b").as_deref(), Some("th-b"));
         assert_eq!(back.thread_of("toolu_1"), None);
     }
 
@@ -190,22 +159,6 @@ mod tests {
         assert_eq!(s.read.len(), 1);
         s.mark(&["a".into()], false, 6);
         assert!(s.read.is_empty());
-    }
-
-    #[test]
-    fn deleting_a_thread_forgets_its_question_read_mark_and_links() {
-        let mut s = AnswerState::default();
-        s.add_question("gone", 1);
-        s.add_question("kept", 2);
-        s.mark(&[question_key("gone"), question_key("kept"), "toolu_1".into()], true, 9);
-        s.link_thread("toolu_1", "gone");
-        s.link_thread("toolu_2", "kept");
-        assert!(s.forget_thread("gone"));
-        assert_eq!(s.questions, vec![NewQuestion { thread_id: "kept".into(), asked_at: 2 }]);
-        assert!(!s.read.contains_key("ask:gone") && s.read.contains_key("ask:kept") && s.read.contains_key("toolu_1"));
-        assert_eq!(s.threads.get("toolu_1"), None);
-        assert_eq!(s.threads.get("toolu_2").map(String::as_str), Some("kept"));
-        assert!(!s.forget_thread("gone"), "nothing left to forget");
     }
 
     #[test]
