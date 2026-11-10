@@ -406,11 +406,28 @@ pub fn register_responders(router: &mut Router, state: Arc<DaemonState>) {
                 /// paired machine must not be able to mark its answer as automatic.
                 #[serde(default)]
                 auto_by: Option<String>,
+                /// The chat the card shows in, as the client knows it.
+                #[serde(default)]
+                session_id: Option<String>,
             }
             let b: Body = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
                 .map_err(|e| RpcError::invalid_params(e.to_string()))?;
             let auto = b.auto_by.as_deref() == Some(AUTO_BY_WHEN_DONE) && ctx.transport == crate::daemon::rpc::Transport::Local;
+            let held = state.prompt_session_id(&b.request_id).await.is_some();
             let delivered = respond_question_as(&state, &b.request_id, b.answers, b.skipped, auto).await;
+            // A card the daemon no longer holds (lost to a restart before cards
+            // were saved, or its chat ended) is drawn from the transcript alone.
+            // Its Skip still needs the durable mark, or the card reads as open
+            // again on the next reload. Only for a card's own tool_use id: a
+            // random daemon id names no card, and is also what a withdrawn daemon
+            // card sends, which is not a Skip. A settle of an already answered
+            // card (answered-gate.ts) also lands here; its mark changes nothing,
+            // since an answered card never takes a Skip mark (matchSkipMarks).
+            if b.skipped && !held && uuid::Uuid::parse_str(&b.request_id).is_err() {
+                if let Some(sid) = b.session_id.as_deref().filter(|s| !s.is_empty()) {
+                    record_skip(&state, sid, &b.request_id);
+                }
+            }
             Ok(serde_json::json!({"ok": true, "delivered": delivered}))
         }
     });
@@ -489,6 +506,38 @@ mod answer_bridge_tests {
 
         assert!(crate::daemon::subchats::card_log::read("wd2-main").is_empty());
         assert!(crate::daemon::subchats::decisions::read_log("wd2-main").is_some_and(|l| l.contains("Navy")));
+    }
+
+    /// A card drawn from the transcript after the daemon lost its prompt (a
+    /// restart before cards were saved, an ended chat) must still keep its Skip
+    /// across a reload; a held card's Skip is marked once, not twice, and a
+    /// random daemon id the daemon no longer holds leaves no mark.
+    #[tokio::test]
+    async fn skipping_a_card_the_daemon_no_longer_holds_still_leaves_a_durable_mark() {
+        use crate::daemon::rpc::{ConnectionContext, Request, Router};
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::storage::StorageManager::open(&dir.path().join("companion.db")).unwrap();
+        let state = DaemonState::with_db(new_session_map(), SettingsCache::new(Settings::default()), Some(Arc::new(Mutex::new(db))));
+        let mut router = Router::new();
+        register_responders(&mut router, state.clone());
+        state.add_prompt("toolu_held", "question-requested", json!({"session_id": "lost-s"}), true).await;
+        let lost_daemon_id = "799df8a4-9d30-4294-bbb1-36b05a4b6949";
+        for id in ["toolu_lost", "toolu_held", lost_daemon_id] {
+            let (tx, _rx) = tokio::sync::mpsc::channel(16);
+            let req = Request {
+                jsonrpc: "2.0".into(),
+                id: json!(1),
+                method: "respond_question".into(),
+                params: Some(json!({"request_id": id, "session_id": "lost-s", "answers": {}, "skipped": true})),
+            };
+            assert!(router.dispatch(req, ConnectionContext::new(tx)).await.error.is_none());
+        }
+        let marks = {
+            let mgr = state.db.as_ref().unwrap().lock().unwrap();
+            crate::storage::skipped_question_store::get_skips(mgr.conn(), "lost-s").unwrap()
+        };
+        let ids: Vec<_> = marks.iter().map(|m| m.question_id.clone().unwrap_or_default()).collect();
+        assert_eq!(ids, vec!["toolu_lost".to_string(), "toolu_held".to_string()], "a random daemon id no longer held names no card: no mark");
     }
 
     /// `auto_by: "when_done"` makes an answer count as the machine's: no decision is

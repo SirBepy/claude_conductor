@@ -45,6 +45,8 @@ export interface QuestionRenderDeps {
   submit: () => void;
   cancel: () => void;
   notifyDraftChange: () => void;
+  /** The card collapsed to its bar or opened again. */
+  onMinimizedChange?: () => void;
 }
 
 export interface QuestionCardRenderer {
@@ -60,6 +62,8 @@ export interface QuestionCardRenderer {
   minimize: () => boolean;
   /** Re-opens a collapsed card. Returns false when it was already open. */
   expand: () => boolean;
+  /** True while the card is collapsed to its bar. */
+  isMinimized: () => boolean;
   /** Repaints the asker picker (and the header's sub chip that yields to it) in
    *  place, for when another chat's question arrived or was settled. */
   refreshAskers: () => void;
@@ -454,7 +458,11 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
   };
 
   const { minimize, expand } = createCollapseController({
-    host, fullscreen, isMinimized: () => minimized, setMinimized: (v) => { minimized = v; },
+    host, fullscreen, isMinimized: () => minimized, setMinimized: (v) => {
+      const changed = minimized !== v;
+      minimized = v;
+      if (changed) deps.onMinimizedChange?.();
+    },
     setExpanding: (v) => { expanding = v; }, render: () => render(),
   });
 
@@ -477,5 +485,5 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     field.setSelectionRange(caret[0], caret[1]);
   };
 
-  return { render, goToTab, togglePick, refreshAttachments, refreshAskers, minimize, expand, onViewportCrossing, dispose: () => { fullscreen.close(); disposeLayout(); } };
+  return { render, goToTab, togglePick, refreshAttachments, refreshAskers, minimize, expand, isMinimized: () => minimized, onViewportCrossing, dispose: () => { fullscreen.close(); disposeLayout(); } };
 }

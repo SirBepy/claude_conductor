@@ -31,6 +31,8 @@ import { rerenderSidebar, surfaceNextForDisplay, surfaceParkedPrompt } from "./i
 import { dropIfAlreadyAnswered } from "./answered-gate";
 import { setLiveQuestionProgress } from "../question-progress";
 import { startGrace, graceLabel, floatingGraceMount } from "../../../shared/chat/send-grace";
+import { needsCardSkipMark, skipQuestionCard } from "../../../shared/chat/chat-question-card";
+import { flushRenderNow } from "../../../shared/chat/flush-scheduler";
 
 /** Mirror per-question answered/unanswered progress into the chat transcript's
  *  question card while the floating card is still being answered. No-op for a
@@ -298,6 +300,18 @@ export async function showQuestionCard(
       console.warn("respond_question (skip settle) failed:", e);
       clearPendingPromptById(payload.id);
       rerenderSidebar();
+    }
+    // Settled in the transcript here and now, not only by the daemon's
+    // `question_skipped` notice: a card the daemon no longer holds gets no
+    // notice, and an older prompt's notice names an id no card carries.
+    const r = state.renderer;
+    if (r && payload.session_id && r.sessionId === payload.session_id) {
+      const cardId = skipQuestionCard(r, payload.id, questions.map((q) => q.question));
+      if (cardId !== null) flushRenderNow(r);
+      if (needsCardSkipMark(payload.id, cardId)) {
+        await invoke("respond_question", { id: cardId, sessionId: payload.session_id, answers: {}, skipped: true })
+          .catch((e) => console.warn("respond_question (card skip mark) failed:", e));
+      }
     }
     // Only a sub's Skip says anything: every other chat's stays silent.
     if (fromSub && payload.session_id) await tellSubSkipped(payload.session_id);

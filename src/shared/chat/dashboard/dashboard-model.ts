@@ -19,6 +19,7 @@ import type { Visual } from "../message-visuals";
 import { buildAnswerItems, type AnswerItem, type AnswerSide } from "./answers-model";
 import { buildSubsState, type SubCardItem, type SubsState } from "./subs-model";
 import { changedFiles, extractFiles, extractLinks, type ChangedFile, type FileItem, type LinkItem } from "./links-model";
+import { cardQuestionTexts, findOpenCardForPrompt } from "../question-texts";
 
 export const TURN_STATUS_TOOL = "mcp__cc_conductor__report_turn_status";
 
@@ -56,6 +57,15 @@ export interface DashboardInput {
   previews?: readonly PreviewMeta[];
   /** Joe's per-section overrides (Settings > Chat defaults), by zone id. */
   sections?: Readonly<Record<string, boolean>>;
+  /** The question card open by the message box for this chat, if any: Waiting
+   *  on you leaves its copy out, so a question shows only where it is answered. */
+  openCard?: OpenCardRef | null;
+}
+
+/** The prompt id and question strings of the answer card on screen. */
+export interface OpenCardRef {
+  id: string;
+  questions: readonly string[];
 }
 
 /** Zones Joe can switch off or on in Settings. The value is the default when he
@@ -149,12 +159,6 @@ export interface WaitingState {
   blocked: boolean;
 }
 
-function questionTexts(m: RenderedMessage): string[] {
-  const raw = (m.input as { questions?: unknown } | null)?.questions;
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((q) => (q && typeof q === "object" && typeof (q as { question?: unknown }).question === "string"
-    ? [(q as { question: string }).question] : []));
-}
 
 /** The tables and charts of the send_message that came with a question card:
  *  the nearest own message before it in the same stretch (Joe has not written
@@ -172,12 +176,16 @@ function figuresBefore(msgs: readonly RenderedMessage[], at: number): Visual[] {
 /** Blockers first (tinted red), then what only Joe can do, then open questions.
  *  A blocker or do_this counts only until Joe writes again, since his next
  *  message is how he answers it. A sub's blocker counts until that sub sends a
- *  later card. Open question cards count until they are answered. */
+ *  later card. Open question cards count until they are answered, except the
+ *  one open in the answer card by the message box (Joe reads it there). */
 export function deriveWaiting({ input, lastJoe }: DeriveCtx): WaitingState | null {
   const msgs = input.messages;
   const blockers: WaitingItem[] = [];
   const doThis: WaitingItem[] = [];
   const questions: WaitingItem[] = [];
+  // The one transcript card the answer popover stands for: by id, else (a
+  // prompt from before the ids matched) the newest open card asking the same.
+  const onScreen = input.openCard ? findOpenCardForPrompt(msgs, input.openCard.id, input.openCard.questions) : -1;
   msgs.forEach((m, i) => {
     if (isOwnMessage(m) && i > lastJoe) {
       const k = messageKindOf(m);
@@ -187,8 +195,8 @@ export function deriveWaiting({ input, lastJoe }: DeriveCtx): WaitingState | nul
       const sub = m.subCard.sub_id;
       const later = !!sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub);
       if (!later) blockers.push({ type: "blocker", message: m });
-    } else if (isOpenQuestion(m)) {
-      questions.push({ type: "question", message: m, questions: questionTexts(m), figures: figuresBefore(msgs, i) });
+    } else if (isOpenQuestion(m) && i !== onScreen) {
+      questions.push({ type: "question", message: m, questions: cardQuestionTexts(m), figures: figuresBefore(msgs, i) });
     }
   });
   const items = [...blockers, ...doThis, ...questions];

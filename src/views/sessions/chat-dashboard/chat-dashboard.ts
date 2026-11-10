@@ -35,6 +35,7 @@ import { PREVIEW_OPEN_EVENT } from "../../../shared/chat/chat-preview-card";
 import { buildPreviewDocumentHtml } from "../preview-panel-document";
 import { scopeRoot } from "../shared-mockup-scope";
 import type { PreviewMeta, PreviewSnapshot } from "../../../types/ipc.generated";
+import { ACTIVE_QUESTION_EVENT, activeCardFor } from "../permission-modal/question-state";
 import "./chat-dashboard.css";
 import "./dashboard-extras.css";
 
@@ -152,6 +153,7 @@ export class ChatDashboard {
     });
     document.addEventListener("click", this.onDocClick, true);
     document.addEventListener("keydown", this.onKey);
+    window.addEventListener(ACTIVE_QUESTION_EVENT, this.onFlushed);
 
     const msgs = pane.querySelector<HTMLElement>(".session-messages");
     if (msgs) msgs.before(this.el);
@@ -215,6 +217,7 @@ export class ChatDashboard {
       now,
       previews: this.previews,
       sections: readSections(getSettings()),
+      openCard: this.renderer.sessionId ? activeCardFor(this.renderer.sessionId) : null,
     });
     this.applyUiRules(derived);
     this.renderStripPart(derived);
@@ -537,6 +540,7 @@ export class ChatDashboard {
     this.sendBarHome();
     document.removeEventListener("click", this.onDocClick, true);
     document.removeEventListener("keydown", this.onKey);
+    window.removeEventListener(ACTIVE_QUESTION_EVENT, this.onFlushed);
     if (this.renderer.onFlushed === this.onFlushed) this.renderer.onFlushed = null;
     this.el.remove();
     if (this.pane.getAttribute(DASH_ATTR) === "dashboard" && !this.pane.querySelector(".cdash")) this.pane.removeAttribute(DASH_ATTR);
