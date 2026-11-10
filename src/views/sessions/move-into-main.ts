@@ -1,5 +1,5 @@
 // "Move into main chat": turns an ordinary chat into a sub of a main chat Joe picks.
-// The reverse of "Move to sidebar" (subchat-view.ts). Lives in the chat menu, not on
+// The reverse of the daemon's move_sub_to_sidebar (a sub becoming a chat). Lives in the chat menu, not on
 // a button: it is a rare, deliberate move. The daemon owns every rule (and refuses
 // what cannot be a sub); this file only offers the candidates and shows its refusal.
 

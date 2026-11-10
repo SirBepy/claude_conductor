@@ -1,9 +1,9 @@
 //! What the chat dashboard's Subchats card asks the daemon about one sub
 //! (docs/chat-dashboard-design.md, "Subchats card"): every image in its
-//! transcript, and the Pin to sidemenu flag.
+//! transcript, the job it was briefed with, and the Pin to sidemenu flag.
 //!
-//! Both are phone-reachable (`P` in `remote_transport_table::TRANSPORT_TABLE`)
-//! because the chat menu they hang off is shared with the phone, and neither
+//! All three are phone-reachable (`P` in `remote_transport_table::TRANSPORT_TABLE`)
+//! because the chat menu they hang off is shared with the phone, and none
 //! exposes anything the phone's transcript and sidebar do not already show.
 
 use super::super::rpc::{Router, RpcError};

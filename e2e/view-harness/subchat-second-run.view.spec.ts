@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (dash lane 3, code-check fixes): comment rewording, a transport case split and a deleted unused getter; nothing this spec asserts changed.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // asserts: src/views/sessions/sub-list.ts, src/views/sessions/main-chat.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/sidebar-rows.ts, src/views/sessions/sidebar-row-visuals.ts, src/views/sessions/session-header.ts, src/views/sessions/subchat-view.ts
 // Reviewed 2026-11-05: sub-list.ts's row button now opens a new window instead of moving the sub; the lists and initials this spec asserts are unchanged and it passes.

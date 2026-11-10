@@ -481,8 +481,8 @@ export class HttpTransport implements Transport {
         });
       case "list_subchats_on":
         return this.rpc<T>("list_subchats_on", null);
-      // "Move to sidebar" on a sub read in place: phone-only row in
-      // remote_transport_table.rs; unmapped, the phone's chat-menu item would throw.
+      // The daemon's turn-a-sub-into-a-chat RPC: a phone-only row in
+      // remote_transport_table.rs, kept although no menu item calls it now.
       case "move_sub_to_sidebar":
         return this.rpc<T>("move_sub_to_sidebar", {
           session_id: args.session_id ?? args.sessionId,
@@ -496,7 +496,7 @@ export class HttpTransport implements Transport {
         });
       case "get_sub_brief":
       case "list_session_images":
-        return this.rpc<T>("list_session_images", {
+        return this.rpc<T>(command, {
           session_id: args.session_id ?? args.sessionId,
         });
       // "Move into main chat" and its picker default: phone rows in

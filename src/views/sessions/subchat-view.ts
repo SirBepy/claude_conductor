@@ -120,8 +120,8 @@ export async function setSubPinned(subId: string, pinned: boolean): Promise<void
   list?.update(state.sessions);
 }
 
-/** Dresses the header being built for `sess`: a sub gets its back arrow, "Move to
- *  sidebar" and whose-sub line; any other chat gets the sub count, which stays
+/** Dresses the header being built for `sess`: a sub gets its back arrow and
+ *  whose-sub line; any other chat gets the sub count, which stays
  *  hidden until the chat has a sub. Called once per `selectSession`. */
 export function decorateSubchatHeader(header: SessionHeader, sess: Instance, nav: SubchatNav): void {
   list?.destroy();
