@@ -34,7 +34,11 @@ impl Default for Avatar {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct ProjectMcpServer {
+    // Defaulted so a trimmed entry in settings.json cannot fail the whole file's
+    // deserialization; `project_mcp::check` rejects an empty name or url.
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub url: String,
 }
 
@@ -385,6 +389,13 @@ pub struct WorktreeSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_project_mcp_entry_missing_a_key_still_deserializes() {
+        let s: ProjectMcpServer = serde_json::from_str(r#"{"name":"rodge"}"#).unwrap();
+        assert_eq!(s.name, "rodge");
+        assert_eq!(s.url, "");
+    }
 
     #[test]
     fn project_config_roundtrips_json() {
