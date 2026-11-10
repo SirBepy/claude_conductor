@@ -6,7 +6,7 @@
 // right, the chat's status line moved into the Plan card while it runs, and
 // nothing at all added to the pane in Messages view.
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
@@ -169,6 +169,26 @@ describe("chat dashboard layout", () => {
     expect(msg().textContent).toContain("first message");
     pane.querySelector("[data-act='strip-latest']").click();
     expect(msg().textContent).toContain("second message");
+  });
+
+  it("opens the chat-wide gallery, not the bare lightbox, for an image inside a dashboard card", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    const DATA = "iVBORw0KGgo=";
+    feed(r, [{ type: "user_message", content: [{ type: "text", text: "look" }, { type: "image", mime: "image/png", data: DATA }], timestamp: 0 }]);
+    await tick();
+    // The card's own copy of the image: a different element from the transcript's,
+    // so element identity cannot find its gallery slot.
+    const img = document.createElement("img");
+    img.className = "block image";
+    img.src = `data:image/png;base64,${DATA}`;
+    pane.querySelector(".cdash-body").appendChild(img);
+    const errors = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...a) => errors.push(a));
+    img.click();
+    spy.mockRestore();
+    expect(document.querySelector(".chat-image-gallery-overlay")).not.toBeNull();
+    expect(errors).toEqual([]);
   });
 
   it("puts the Result in the Plan card's spot with a Plan N/N flip back", async () => {

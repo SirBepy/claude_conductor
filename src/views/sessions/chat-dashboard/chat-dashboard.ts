@@ -9,6 +9,7 @@
 import type { ChatRenderer } from "../../../shared/chat/chat-renderer";
 import { deriveDashboard, type DashboardState, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
 import { handleAttachmentClick, handleCopyClick, handlePastedLogClick, handleSlashClick, handleTableFullscreen } from "../../../shared/chat/chat-click-handlers";
+import { createHandleBlockImageClick } from "../../../shared/chat/chat-renderer-click-handlers";
 import { handleCommitRefClick, handleCommitRefKeydown, resolveCommitRefs } from "../../../shared/chat/commit-refs";
 import { linkifyTickets } from "../../../shared/chat/ticket-refs";
 import { hydrateAttachments } from "../../../shared/chat/attachment-hydrator";
@@ -140,6 +141,8 @@ export class ChatDashboard {
     this.el.addEventListener("contextmenu", handleFileRefContextMenu);
     this.el.addEventListener("keydown", handleFileRefKeydown);
     this.el.addEventListener("click", handleTableFullscreen);
+    // An image in a card opens the chat-wide gallery, like one in the transcript.
+    this.el.addEventListener("click", createHandleBlockImageClick(renderer));
     this.el.addEventListener("click", (e) => this.onClick(e));
     this.el.addEventListener("keydown", (e) => {
       const t = e.target as HTMLElement;
