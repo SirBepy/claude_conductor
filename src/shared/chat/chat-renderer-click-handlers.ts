@@ -34,6 +34,14 @@ export function createHandleBlockImageClick(renderer: ChatRenderer): (e: MouseEv
     const mime = match?.[1];
     const base64 = match?.[2];
     if (!mime || !base64) return;
+    // The chat dashboard draws its cards from renderMessage's HTML, so its images
+    // are not the transcript elements `byElement` knows: the same bytes still
+    // find their gallery slot.
+    const byBytes = collection.images.findIndex((ci) => ci.kind === "inline" && ci.data === base64 && ci.mime === mime);
+    if (byBytes >= 0 && img.closest(".cdash")) {
+      openChatImageGallery(collection, byBytes);
+      return;
+    }
     // Loud on purpose (todo 740): the silent lightbox fallback is what let a
     // broken gallery look correct for a whole release.
     console.error("[chat-renderer] inline image is not in the gallery collection, falling back to the lightbox", img);
