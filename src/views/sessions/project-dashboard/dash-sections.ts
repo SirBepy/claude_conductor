@@ -7,6 +7,8 @@ import {
   card, dot, hidden, icon, isGroup, kv, quiet, repoTag, row, type DashCtx,
 } from "./dash-parts";
 import type { CommitRow, RepoShip } from "./types";
+import { dayLabel, doAllIds, doAllMessage, dueTotal, dueVisible, MISSED_SELECTION } from "./due-model";
+import { dueSelection } from "../backlog-panel/due-highlight";
 
 export function yourTodos(c: DashCtx): TemplateResult | typeof nothing {
   if (hidden(c, "your_todos")) return nothing;
@@ -21,6 +23,29 @@ export function yourTodos(c: DashCtx): TemplateResult | typeof nothing {
     </label>`;
   });
   return card("Your todos", rows, { id: "your_todos", trailing: pager });
+}
+
+/** Todos with a due date: five day counts, a pill for the missed, and one button for everything owed now.
+ *  Absent unless something is due soon or missed, so a quiet project shows no empty card. */
+export function dueCard(c: DashCtx): TemplateResult | typeof nothing {
+  if (hidden(c, "due")) return nothing;
+  const due = c.snap.due;
+  if (!due || !dueVisible(due)) return nothing;
+  const picked = dueSelection();
+  const owed = doAllIds(due).length;
+  const missed = due.missed_ids.length;
+  const cells = due.days.map((d, i) => html`<button type="button" class="pd-due-day ${i === 0 ? "is-today" : ""} ${picked === d.date ? "on" : ""} ${d.count === 0 ? "is-zero" : ""}"
+    data-pd-due-day=${d.date} @click=${() => c.act.toggleDue(d.date)}>
+    <span class="pd-due-n">${d.count}</span><span class="pd-due-l">${dayLabel(d.date, i)}</span></button>`);
+  const doAll = owed > 0
+    ? html`<button type="button" class="pd-chip" data-pd-due-all
+        @click=${(e: Event) => c.act.runCardAction(e.currentTarget as HTMLElement, doAllMessage(due)!)}>Do all due (${owed})</button>`
+    : nothing;
+  const pill = missed > 0
+    ? html`<button type="button" class="pd-due-missed ${picked === MISSED_SELECTION ? "on" : ""}" data-pd-due-missed
+        @click=${() => c.act.toggleDue(MISSED_SELECTION)}>${missed} missed</button>`
+    : nothing;
+  return card("Due", html`<div class="pd-due-days">${cells}</div>${pill}`, { id: "due", trailing: doAll, count: dueTotal(due) });
 }
 
 // The plan is long and mostly prose, so the card shows only what is next: a few

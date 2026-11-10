@@ -4,6 +4,7 @@
 // the chat pipeline's dependencies.
 
 import { escapeHtml as esc } from "../../../shared/escape-html";
+import { isDueHit } from "./due-highlight";
 import type { AiTodoDoc, AiTodoEntry } from "../../../types/ipc.generated";
 import {
   UNPLANNED_LABEL, metaLine, readerSections, readerWhy, worthDots, type ListGroup,
@@ -15,6 +16,8 @@ export interface ListCtx {
   selectedId: string | null;
   /** Rows and plan headings show a drag grip and can be picked up. */
   draggable: boolean;
+  /** The project folder the list shows, which the Due card's highlight is keyed by. */
+  cwd: string | null;
 }
 
 export function listHtml(groups: ListGroup[], ctx: ListCtx): string {
@@ -36,13 +39,14 @@ function groupHtml(g: ListGroup, ctx: ListCtx): string {
 
 function rowHtml(t: AiTodoEntry, ctx: ListCtx): string {
   const on = t.id === ctx.selectedId;
+  const hit = ctx.cwd !== null && isDueHit(t.id, ctx.cwd);
   // A claimed row swaps the origin dot for the live pulse: both are one glyph slot.
   const mark = t.claimed
     ? `<span class="bl-pulse" title="A chat is on it"></span>`
     : `<span class="bl-dot ${t.origin === "dev" ? "dev" : "ai"}" title="${t.origin === "dev" ? "Joe's" : "AI-written"}"></span>`;
   const grip = ctx.draggable ? `<i class="ph ph-dots-six-vertical bl-grip" aria-hidden="true"></i>` : "";
   return (
-    `<button type="button" class="bl-row${on ? " is-on" : ""}" data-bl-id="${esc(t.id)}" aria-pressed="${on}">` +
+    `<button type="button" class="bl-row${on ? " is-on" : ""}${hit ? " is-hit" : ""}" data-bl-id="${esc(t.id)}" aria-pressed="${on}">` +
     `${grip}<span class="bl-row-m"><span class="bl-title">${esc(t.title)}</span>` +
     `<span class="bl-meta">${mark}<span>${esc(metaLine(t))}</span></span></span></button>`
   );

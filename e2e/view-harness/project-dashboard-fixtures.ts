@@ -56,6 +56,23 @@ function todoStats(): TodoStats {
 
 const EMPTY_TODO_STATS: TodoStats = { days: [], open_now: 0, claimed_now: 0 };
 
+const EMPTY_DUE: DashSnapshot["due"] = { days: [], missed_ids: [] };
+
+/** Five days from today with todos due on today, +1 and +3, and two missed. Ids are device-prefixed, as the daemon sends them. */
+export function dueSummary(cwd: string = CONDUCTOR_CWD): DashSnapshot["due"] {
+  const iso = (offset: number): string => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const ids = (...n: number[]) => n.map((i) => ({ id: `pc-${i}`, repo_cwd: cwd }));
+  const day = (offset: number, list: ReturnType<typeof ids>) => ({ date: iso(offset), count: list.length, ids: list });
+  return {
+    days: [day(0, ids(1674, 1675)), day(1, ids(1680)), day(2, []), day(3, ids(1690, 1691, 1692)), day(4, [])],
+    missed_ids: ids(1601, 1602),
+  };
+}
+
 const ship = (cwd: string, name: string, branch: string, ahead: number, dirty: number, commits: RepoShip["recent_commits"] = []): RepoShip => ({
   cwd, name, branch, ahead, behind: 0, has_upstream: true, dirty_count: dirty, recent_commits: commits,
 });
@@ -90,6 +107,7 @@ export function conductorSnapshot(): DashSnapshot {
       { id: "506", text: "Android push via FCM", section: "Blocked", priority: false, repo_cwd: CONDUCTOR_CWD },
     ],
     todo_stats: todoStats(),
+    due: EMPTY_DUE,
     scheduled: [
       { id: "sc1", label: "/loop-todos cycle", fire_at_ms: Date.now() + 5 * 3_600_000, repo_cwd: CONDUCTOR_CWD },
       { id: "sc2", label: "Check release CI", fire_at_ms: Date.now() + 26 * 3_600_000, repo_cwd: CONDUCTOR_CWD },
@@ -139,6 +157,7 @@ export function zirtueSnapshot(): DashSnapshot {
       { id: "87", text: "[P] - SC-54866 header biller logo (needs stevan's self-scoped token)", section: "Phase 2 - blocked on others", priority: false, repo_cwd: biller },
     ],
     todo_stats: EMPTY_TODO_STATS,
+    due: EMPTY_DUE,
     scheduled: [],
     ship: [
       ship(app, "zng-app", "release/2.14", 3, 0),

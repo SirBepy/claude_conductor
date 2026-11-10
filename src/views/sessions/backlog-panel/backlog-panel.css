@@ -113,6 +113,9 @@
 .bl-row .bl-grip { margin-top: 2px; }
 .bl-row:hover { background: color-mix(in srgb, var(--color-text) 5%, transparent); }
 
+/* The todos the project dashboard's Due card is pointing at. */
+.bl-row.is-hit { background: color-mix(in srgb, var(--color-primary) 16%, transparent); }
+
 .bl-row.is-on {
   background: rgba(var(--color-primary-rgb), 0.12);
   border-right-color: var(--color-primary);

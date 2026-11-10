@@ -22,7 +22,7 @@ import { usage, type UsageRange } from "./dash-usage";
 import { todoChart } from "./dash-todo-chart";
 import { openContextMenu } from "./dash-menu";
 import { chats } from "./dash-chats";
-import { nextUp, running, shipState, yourTodos } from "./dash-sections";
+import { dueCard, nextUp, running, shipState, yourTodos } from "./dash-sections";
 import { assignColumns, naturalHeight } from "../../../shared/balance";
 import { playEntrance, playRailEntrance, type Entrance } from "./dash-motion";
 import { cardRefreshSecs, staleCardIds } from "./format";
@@ -76,6 +76,7 @@ interface Section { id: string, body: TemplateResult | typeof nothing }
 /** The half-width sections, in reading order; hidden ones drop out. */
 function halfSections(c: DashCtx): Section[] {
   const all: Section[] = [
+    { id: "due", body: dueCard(c) },
     { id: "next_up", body: nextUp(c) },
     { id: "ship", body: shipState(c) },
     { id: "usage", body: usage(c, (getSettings()?.projectAliases ?? {}) as AliasMap) },
