@@ -283,4 +283,31 @@ describe("Answers card", () => {
     click(pane, "new-q");
     expect(card(pane).querySelector(".ax-thead-v").textContent).toContain("Ask anything");
   });
+
+  it("marks the thread button when a follow-up fails after Joe left the thread, and clears the mark once he has seen the error", async () => {
+    const { pane, r } = mountPane("chat-late-fail");
+    new ChatDashboard(pane, r);
+    threeAnswers(r);
+    await wait(30);
+    let fail = null;
+    const gate = new Promise((res) => { fail = res; });
+    db.api.send = async () => { await gate; throw new Error("sidecar went away"); };
+    click(pane, "reply");
+    const ta = card(pane).querySelector(".ax-t-input");
+    ta.value = "and the rest?";
+    ta.dispatchEvent(new Event("input"));
+    card(pane).querySelector(".ax-t-send").click();
+    click(pane, "close-thread");
+    expect(card(pane).querySelector("[data-ax='reply']").classList.contains("ax-failed")).toBe(false);
+    fail();
+    await wait(30);
+    const thbtn = () => card(pane).querySelector("[data-ax='reply']");
+    expect(thbtn().classList.contains("ax-failed"), "the failure shows without reopening the thread").toBe(true);
+    expect(thbtn().title).toContain("failed");
+    click(pane, "reply");
+    expect(card(pane).querySelector(".ask-error").textContent).toContain("sidecar went away");
+    click(pane, "close-thread");
+    await wait();
+    expect(thbtn().classList.contains("ax-failed")).toBe(false);
+  });
 });

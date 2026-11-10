@@ -309,9 +309,12 @@ export class AnswersCard {
   private replyBtn(item: AnswerItem): string {
     const n = item.replies;
     const busy = this.pending.has(item.key);
-    if (!n && !busy) return btn("reply", "ph-chats-circle", "Reply", "Reply: ask a follow-up in a thread");
-    const tip = `Open the thread: ${plural(n, "back-and-forth")}${busy ? ", Claude is replying" : ""}`;
-    return btn("reply", "ph-chats-circle", "Open thread", tip, `ax-thbtn${busy ? " ax-busy" : ""}`, n ? `<b class="ax-btn-n">${n}</b>` : "");
+    // A follow-up that failed after Joe left the thread: the error is in the thread,
+    // so the button says so instead of looking like nothing happened.
+    const failed = !busy && this.errors.has(item.key);
+    if (!n && !busy && !failed) return btn("reply", "ph-chats-circle", "Reply", "Reply: ask a follow-up in a thread");
+    const tip = failed ? "Your follow-up failed. Open the thread to see why" : `Open the thread: ${plural(n, "back-and-forth")}${busy ? ", Claude is replying" : ""}`;
+    return btn("reply", "ph-chats-circle", "Open thread", tip, `ax-thbtn${busy ? " ax-busy" : ""}${failed ? " ax-failed" : ""}`, n ? `<b class="ax-btn-n">${n}</b>` : "");
   }
 
   private readMoreLabel(): string {
@@ -555,8 +558,9 @@ export class AnswersCard {
   }
 
   private closeThread(): void {
-    // A failed + question has now been seen with its error: the next + starts fresh.
-    if (this.thread && this.failedAsk.has(this.thread)) {
+    // An error has now been seen: a failed + question lets the next + start fresh,
+    // and a failed follow-up stops marking its thread button.
+    if (this.thread) {
       this.failedAsk.delete(this.thread);
       this.errors.delete(this.thread);
     }
