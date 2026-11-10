@@ -14,6 +14,8 @@ export interface QuestionCardLayout {
   paintAttachmentStrips: () => void;
   syncMessagesPadding: () => void;
   positionTrack: (instant: boolean, slideFrom?: number) => void;
+  /** Card teardown: drops the document listener that follows the chat view setting. */
+  dispose: () => void;
 }
 
 /** The scroller the card pads so nothing hides under it: the card's own pane
@@ -97,7 +99,6 @@ export function createQuestionCardLayout(
   // Switching view in Settings changes which scroller shows; the card's own resize
   // observer fires on neither, so re-pad on the switch (after the pane's attribute flips).
   const onViewChanged = (): void => {
-    if (!host.isConnected) return document.removeEventListener(CHAT_VIEW_CHANGED, onViewChanged);
     queueMicrotask(syncMessagesPadding);
   };
   document.addEventListener(CHAT_VIEW_CHANGED, onViewChanged);
@@ -144,5 +145,7 @@ export function createQuestionCardLayout(
     }
   }
 
-  return { showPasteHint, paintAttachmentStrips, syncMessagesPadding, positionTrack };
+  const dispose = (): void => document.removeEventListener(CHAT_VIEW_CHANGED, onViewChanged);
+
+  return { showPasteHint, paintAttachmentStrips, syncMessagesPadding, positionTrack, dispose };
 }
