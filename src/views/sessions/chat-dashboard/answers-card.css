@@ -106,6 +106,8 @@
 /* The thread button carries its count, plus a blinking dot while Claude replies */
 .ax-btn-n { font-size: 11px; font-weight: 600; margin-left: 2px; }
 .ax-busy { position: relative; }
+.ax-failed { position: relative; }
+.ax-failed::after { content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-danger); }
 .ax-busy::after { content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-primary); animation: axblink 1.2s ease-in-out infinite; }
 @keyframes axblink { 50% { opacity: 0.25; } }
 .ax-row { display: flex; align-items: flex-start; gap: 10px; }
