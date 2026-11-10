@@ -106,7 +106,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     expandQuestion: (qi) => fullscreen.openQuestion(qi),
     sessionId: opts.sessionId,
   });
-  const { showPasteHint, paintAttachmentStrips, syncMessagesPadding, positionTrack } =
+  const { showPasteHint, paintAttachmentStrips, syncMessagesPadding, positionTrack, dispose: disposeLayout } =
     createQuestionCardLayout(host, state, messagesEl, auqAttachments);
 
   // Single source for the footer's primary button: Next on any question
@@ -477,5 +477,5 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
     field.setSelectionRange(caret[0], caret[1]);
   };
 
-  return { render, goToTab, togglePick, refreshAttachments, refreshAskers, minimize, expand, onViewportCrossing, dispose: fullscreen.close };
+  return { render, goToTab, togglePick, refreshAttachments, refreshAskers, minimize, expand, onViewportCrossing, dispose: () => { fullscreen.close(); disposeLayout(); } };
 }

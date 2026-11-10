@@ -83,5 +83,12 @@ describe("switching Dashboard / Messages while a question card is open", () => {
     await Promise.resolve();
     expect(msgs.style.paddingBottom).toBe("334px");
     expect(dash.style.paddingBottom, "the hidden scroller keeps no band").toBe("");
+
+    // A torn-down card no longer follows the setting.
+    layout.dispose();
+    pane.setAttribute("data-chat-view", "dashboard");
+    document.dispatchEvent(new CustomEvent("cc-chat-view-changed"));
+    await Promise.resolve();
+    expect(dash.style.paddingBottom).toBe("");
   });
 });
