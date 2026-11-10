@@ -32,12 +32,23 @@ impl ArmScope {
     /// Classifies every late chat in `live` not yet armed. Repeats until
     /// nothing changes, so a grandchild that shows up in the same tick as its
     /// parent is still admitted.
-    pub(super) fn admit(&mut self, live: &[String], parent_of: impl Fn(&str) -> Option<String>) {
+    ///
+    /// A hidden sub also joins when its main chat merely existed at arm time,
+    /// even if that chat was idle then: a main chat waiting on its subs is idle
+    /// until one finishes and wakes it, and the next sub it starts is the same
+    /// work the dev chose to let finish. Any other child of an idle chat stays
+    /// ignored.
+    pub(super) fn admit(
+        &mut self,
+        live: &[String],
+        parent_of: impl Fn(&str) -> Option<String>,
+        is_sub: impl Fn(&str) -> bool,
+    ) {
         let mut pending: Vec<&String> = live.iter().filter(|id| !self.seen.contains(*id)).collect();
         loop {
             let before = pending.len();
             pending.retain(|id| match parent_of(id) {
-                Some(p) if self.armed.contains(&p) => {
+                Some(p) if self.armed.contains(&p) || (self.seen.contains(&p) && is_sub(id)) => {
                     self.armed.insert((*id).clone());
                     self.ignored.remove(*id);
                     self.seen.insert((*id).clone());

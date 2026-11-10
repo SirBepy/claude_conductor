@@ -105,17 +105,20 @@ impl EngineDeps {
 /// The live busy map minus every chat the arm scope ignores, after admitting
 /// any chat an armed chat started since the last tick.
 pub(super) fn admitted_busy_map(scope: &Mutex<ArmScope>, live: Vec<(String, bool)>) -> Vec<(String, bool)> {
-    admitted_with(scope, live, crate::sessions::chat_config::parent_of)
+    admitted_with(scope, live, crate::sessions::chat_config::parent_of, |id| {
+        crate::sessions::chat_config::get(id).is_some_and(|c| c.subchat.is_some())
+    })
 }
 
 pub(super) fn admitted_with(
     scope: &Mutex<ArmScope>,
     live: Vec<(String, bool)>,
     parent_of: impl Fn(&str) -> Option<String>,
+    is_sub: impl Fn(&str) -> bool,
 ) -> Vec<(String, bool)> {
     let mut scope = scope.lock().unwrap_or_else(|e| e.into_inner());
     let ids: Vec<String> = live.iter().map(|(id, _)| id.clone()).collect();
-    scope.admit(&ids, parent_of);
+    scope.admit(&ids, parent_of, is_sub);
     live.into_iter().filter(|(id, _)| !scope.is_ignored(id)).collect()
 }
 

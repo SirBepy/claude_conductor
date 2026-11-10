@@ -62,7 +62,14 @@ pub(super) fn instance_is_idle(i: &crate::types::Instance) -> bool {
     // status its last turn left on the row is not work in flight, so it never
     // holds the sleep back. A sub still running is judged like any chat: it is
     // busy while it works, which is what holds the run.
-    i.subchat_finished || (!i.busy && i.awaiting.as_deref() != Some("working") && !i.local_task_running)
+    if i.subchat_finished {
+        return true;
+    }
+    // A sub the daemon holds without a child (queued behind the writer slot, or
+    // waiting on an `after` sub) is not busy because it has not started, but
+    // its job is still ahead: shutting down now would drop it unrun.
+    let queued_sub = i.subchat_of.is_some() && i.progress.waiting_for.is_some();
+    !queued_sub && !i.busy && i.awaiting.as_deref() != Some("working") && !i.local_task_running
 }
 
 /// True when every live (not-ended) session is idle. An empty list (after

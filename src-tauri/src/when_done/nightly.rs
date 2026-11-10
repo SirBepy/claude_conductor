@@ -4,18 +4,27 @@
 //! Settings > System view; read fresh every tick so a save applies at once.
 
 use super::engine::Overdue;
+use super::snooze::snooze_in_state;
 use super::{arm, ArmMode, OverdueAction, ProtocolPhase, TerminalAction};
 use crate::state::AppState;
 use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::Deserialize;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 const TICK: Duration = Duration::from_secs(30);
 /// How late past the set time an arm still happens, for a PC that was asleep or
 /// an app that was closed at that exact minute. Past this it waits for the next
 /// night, so booting the PC in the morning never arms a shutdown.
 const GRACE_MINS: i64 = 60;
+/// An app started this recently when the arm falls due means the PC was just
+/// switched on, so someone is about to use it: the run is postponed instead of
+/// shutting it down right after boot. Keyed on the app's own uptime, not the
+/// system's: Windows Fast Startup keeps the system uptime counting across a
+/// shutdown, so it cannot tell a cold start from an always-on PC.
+const RECENT_START: Duration = Duration::from_secs(30 * 60);
+/// How long a fresh start postpones the nightly run.
+const START_POSTPONE_MINS: u32 = 30;
 
 #[derive(Deserialize, Debug, PartialEq)]
 #[serde(default)]
@@ -69,6 +78,13 @@ fn due_night(now: NaiveDateTime, at: NaiveTime, last_armed: Option<NaiveDate>) -
     })
 }
 
+/// How long to postpone a nightly run that falls due `app_uptime` after the app
+/// started, or `None` when the app has been up long enough that the PC was not
+/// just switched on.
+fn start_postpone_mins(app_uptime: Duration) -> Option<u32> {
+    (app_uptime < RECENT_START).then_some(START_POSTPONE_MINS)
+}
+
 /// Start the nightly scheduler loop. Runs for the app's lifetime. Windows only:
 /// the away gate reads `daemon::idle::idle_secs`, which is 0 elsewhere, so a
 /// nightly arm there could never fire and would block every later night.
@@ -76,6 +92,7 @@ pub fn spawn(app: AppHandle) {
     if !cfg!(windows) {
         return;
     }
+    let started = Instant::now();
     tauri::async_runtime::spawn(async move {
         // In-memory on purpose: once a night is consumed (armed, or skipped
         // because something was already armed), cancelling it keeps it off
@@ -97,6 +114,11 @@ pub fn spawn(app: AppHandle) {
             log::info!("when_done: nightly arm ({action:?}, overdue {overdue_action:?} after {overdue_after:?})");
             let overdue = Overdue { deadline: Instant::now() + overdue_after, action: overdue_action };
             arm(&app, action, ArmMode::Nightly, Some(overdue));
+            if let Some(mins) = start_postpone_mins(started.elapsed()) {
+                log::info!("when_done: app started {:?} ago, PC just switched on, postponing the nightly run {mins} min", started.elapsed());
+                let new_state = snooze_in_state(&state, mins);
+                let _ = app.emit("when-done-state", new_state);
+            }
         }
     });
 }
@@ -138,6 +160,14 @@ mod tests {
     fn a_late_evening_time_catches_up_past_midnight() {
         let at = NaiveTime::from_hms_opt(23, 30, 0).unwrap();
         assert_eq!(due_night(dt("2026-10-01 00:10"), at, None), Some(dt("2026-09-30 00:00").date()));
+    }
+
+    #[test]
+    fn a_freshly_started_app_postpones_the_run_and_a_long_running_one_does_not() {
+        assert_eq!(start_postpone_mins(Duration::from_secs(0)), Some(30));
+        assert_eq!(start_postpone_mins(Duration::from_secs(29 * 60)), Some(30));
+        assert_eq!(start_postpone_mins(Duration::from_secs(30 * 60)), None);
+        assert_eq!(start_postpone_mins(Duration::from_secs(8 * 3600)), None);
     }
 
     #[test]

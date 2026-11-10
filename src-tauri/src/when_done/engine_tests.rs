@@ -50,6 +50,9 @@ struct World {
     /// When set, mutate_and_emit postpones by this long (from `clock`) once the
     /// countdown has ticked, then clears itself. Lets a test snooze mid-countdown.
     snooze_on_countdown: Option<std::time::Duration>,
+    /// When true, mutate_and_emit marks the one live chat busy once the
+    /// countdown has ticked, then clears itself. Lets a test wake a chat mid-countdown.
+    chat_wakes_on_countdown: bool,
 }
 
 impl Default for World {
@@ -67,6 +70,7 @@ impl Default for World {
             clock: Instant::now(),
             snooze_until: None,
             snooze_on_countdown: None,
+            chat_wakes_on_countdown: false,
         }
     }
 }
@@ -133,6 +137,13 @@ fn deps_for(
             {
                 g.user_idle_secs = 0;
                 g.user_returns_on_countdown = false;
+            }
+            if g.chat_wakes_on_countdown
+                && phase == ProtocolPhase::CountingDown
+                && g.state.countdown_remaining_secs.unwrap_or(COUNTDOWN_SECS) < COUNTDOWN_SECS
+            {
+                g.busy_map = vec![("main".to_string(), true)];
+                g.chat_wakes_on_countdown = false;
             }
             if phase == ProtocolPhase::CountingDown
                 && g.state.countdown_remaining_secs.unwrap_or(COUNTDOWN_SECS) < COUNTDOWN_SECS
@@ -312,6 +323,39 @@ async fn nightly_countdown_returns_to_watching_when_the_user_comes_back() {
         "interrupted countdown restarts from Watching"
     );
     assert_eq!(g.terminal_calls, vec![TerminalAction::Sleep], "fires exactly once");
+}
+
+/// A main chat woken by a finished sub goes busy a moment after the Watching
+/// tick saw everything idle. A manual run must drop back to Watching then, not
+/// shut the PC down under the working chat.
+#[tokio::test(start_paused = true)]
+async fn manual_countdown_returns_to_watching_when_a_chat_goes_busy() {
+    let world = Arc::new(Mutex::new(World {
+        busy_map: vec![("main".to_string(), false)],
+        chat_wakes_on_countdown: true,
+        ..Default::default()
+    }));
+
+    // The chat finishes its work again before the next Watching read.
+    let tick: Arc<Mutex<dyn FnMut(&mut World) + Send>> =
+        Arc::new(Mutex::new(|w: &mut World| w.busy_map = vec![("main".to_string(), false)]));
+
+    let deps = deps_for(world.clone(), tick);
+    run_engine_with_deps(deps, TerminalAction::Shutdown, ArmMode::Manual, None).await;
+
+    let g = world.lock().unwrap();
+    assert_eq!(
+        g.phases,
+        vec![
+            ProtocolPhase::Watching,
+            ProtocolPhase::CountingDown,
+            ProtocolPhase::Watching,
+            ProtocolPhase::CountingDown,
+            ProtocolPhase::Firing,
+        ],
+        "a chat going busy mid-countdown restarts from Watching"
+    );
+    assert_eq!(g.terminal_calls, vec![TerminalAction::Shutdown], "fires exactly once");
 }
 
 /// todo 894: when the Watching loop's no-progress runaway guard trips (the

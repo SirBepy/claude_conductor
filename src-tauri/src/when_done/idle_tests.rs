@@ -84,6 +84,38 @@ fn a_done_session_with_a_live_task_is_still_not_idle() {
     assert!(!instance_is_idle(&instance_with_local_task("a", Some("done"))));
 }
 
+// --- queued subs ---------------------------------------------------------
+
+fn queued_sub(session_id: &str) -> Instance {
+    let mut i = instance(session_id, false, false);
+    i.subchat_of = Some("main".into());
+    i.progress.waiting_for = Some("waiting for header".into());
+    i
+}
+
+/// A held sub has no child yet, so it is not busy, but its job is still ahead:
+/// shutting down would drop it unrun.
+#[test]
+fn a_sub_the_daemon_holds_without_a_child_is_not_idle() {
+    assert!(!instance_is_idle(&queued_sub("sub")));
+}
+
+#[test]
+fn a_finished_sub_is_idle_even_with_a_stale_waiting_mark() {
+    let mut i = queued_sub("sub");
+    i.subchat_finished = true;
+    assert!(instance_is_idle(&i));
+}
+
+/// The waiting mark only means "queued, unstarted" on a sub; elsewhere it is
+/// not a reason to hold the machine awake.
+#[test]
+fn a_waiting_mark_on_a_non_sub_does_not_hold_the_run() {
+    let mut i = queued_sub("chat");
+    i.subchat_of = None;
+    assert!(instance_is_idle(&i));
+}
+
 // --- all_sessions_idle --------------------------------------------------
 
 #[test]
