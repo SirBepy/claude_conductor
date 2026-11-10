@@ -45,6 +45,7 @@ import {
 import { applySkipMarks, findQuestionIndexById } from "./chat-question-card";
 import { fetchSubCards, mergeSubCards, normalizeCards, subCardEvent, type SubCardEntry } from "./subchat-cards";
 import { getTransport } from "../transport";
+import type { DashboardPlan } from "./dashboard/dashboard-model";
 
 export interface SessionMeta {
   model: string | null;
@@ -160,6 +161,9 @@ export class ChatRenderer {
   // Running tracker of the full todos array as of the last TodoWrite call.
   // NEVER reset at turn boundaries - only ever overwritten.
   lastTodosSnapshot: { content: string; status: string }[] | null = null;
+  // The latest write_plan call, kept for the chat dashboard (dashboard-model.ts).
+  // write_plan draws no transcript row, so this is the only record of it.
+  dashPlan: DashboardPlan | null = null;
   // In-flight TodoWrite tool_use ids, so the paired tool_result can be
   // silently absorbed instead of rendered as a raw tool_result row.
   _todoWriteToolUseIds = new Set<string>();
@@ -245,6 +249,9 @@ export class ChatRenderer {
   // on screen. The thinking bar uses it to tell a working session apart from a
   // dead one; nothing else should depend on its rate.
   public onLiveEvent: (() => void) | null = null;
+  /** Fires at the end of every flushRender, even one that drew nothing (a
+   *  write_plan call changes no row). The chat dashboard re-derives from it. */
+  public onFlushed: (() => void) | null = null;
   /** Set by chat-event-handler when a Skill tool_use for "next-ai-prompt" is seen in a live turn. */
   _nextAiPromptPending = false;
   turnStatus: "done" | "question" | "waiting" | "working" | null = null;
@@ -328,6 +335,9 @@ export class ChatRenderer {
     this.activeTurnStart = mapOrNull(this.activeTurnStart);
     this.activeTurnFoldStart = mapOrNull(this.activeTurnFoldStart);
     this.silentStreakBoundaryIndex = mapOrNull(this.silentStreakBoundaryIndex);
+    // `at` is a row count, not a row: a spliced row before it moves it back, one
+    // at or after it (written later) leaves it where it is.
+    if (this.dashPlan) this.dashPlan = { ...this.dashPlan, at: fn(this.dashPlan.at) };
     if (this.dirtyIndices.size > 0) {
       const remapped = new Set<number>();
       for (const idx of this.dirtyIndices) {
@@ -412,6 +422,7 @@ export class ChatRenderer {
     this.channelMessages = undefined;
     this.subCardPool = [];
     this.subCardsPlaced.clear();
+    this.dashPlan = null;
     this.fileEdits = [];
     this.lastActivity = null;
     this.lastActivityDetail = null;

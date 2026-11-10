@@ -1,0 +1,309 @@
+// @vitest-environment jsdom
+// asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/chat-view-pref.ts
+
+// The dashboard is drawn beside the transcript from the renderer's own rows:
+// Joe's strip on top, Answers and Waiting on the left, Plan (or Result) on the
+// right, the chat's status line moved into the Plan card while it runs, and
+// nothing at all added to the pane in Messages view.
+
+import { describe, it, expect, beforeEach } from "vitest";
+import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
+
+const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
+const { resetTransportForTests } = await import("../src/shared/transport.ts");
+const { setSettings } = await import("../src/shared/state.ts");
+const { ChatDashboard, attachChatDashboard, applyChatViewSetting } = await import("../src/views/sessions/chat-dashboard/chat-dashboard.ts");
+const { dashboardEnabled, readChatView } = await import("../src/views/sessions/chat-dashboard/chat-view-pref.ts");
+const { thinkingBarHtml } = await import("../src/views/sessions/session-thinking-bar.ts");
+const { sessionEvents } = await import("../src/shared/chat/event-store.ts");
+const { state } = await import("../src/views/sessions/state.ts");
+
+const SEND = "mcp__cc_conductor__send_message";
+const PLAN = "mcp__cc_conductor__write_plan";
+const STATUS = "mcp__cc_conductor__report_turn_status";
+let seq = 0;
+const ok = (id) => ({ type: "tool_result", tool_use_id: id, output: { type: "text", text: "{}" }, is_error: false, timestamp: 0 });
+
+beforeEach(() => {
+  document.body.innerHTML = "";
+  globalThis.window.__TAURI__ = undefined;
+  resetTransportForTests();
+  setSettings({});
+});
+
+function mountPane() {
+  const pane = document.createElement("div");
+  pane.className = "session-pane";
+  pane.innerHTML = `<div class="session-messages"></div><div class="composer-shell">${thinkingBarHtml()}<div class="session-composer"></div></div>`;
+  document.body.appendChild(pane);
+  const r = new ChatRenderer(pane.querySelector(".session-messages"));
+  return { pane, r };
+}
+
+function feed(r, events) {
+  for (const ev of events) r.handleEvent(ev);
+}
+const send = (input) => { const id = `m${++seq}`; return [toolUseEvent(SEND, input, id), ok(id)]; };
+const plan = (steps) => { const id = `p${++seq}`; return [toolUseEvent(PLAN, { steps }, id), ok(id)]; };
+const status = (s) => { const id = `s${++seq}`; return [toolUseEvent(STATUS, { status: s }, id), ok(id)]; };
+
+/** Lets the dashboard's coalesced derive run. */
+const tick = () => new Promise((res) => setTimeout(res, 5));
+
+describe("chat view setting", () => {
+  it("defaults to the dashboard and keeps Messages on the phone", () => {
+    expect(readChatView({})).toBe("dashboard");
+    expect(readChatView({ chatView: "bogus" })).toBe("dashboard");
+    expect(readChatView({ chatView: "messages" })).toBe("messages");
+    expect(dashboardEnabled(false, {})).toBe(true);
+    expect(dashboardEnabled(true, {})).toBe(false);
+    expect(dashboardEnabled(false, { chatView: "messages" })).toBe(false);
+  });
+
+  it("adds nothing to the pane in Messages view", () => {
+    globalThis.window.__TAURI__ = {};
+    setSettings({ chatView: "messages" });
+    const { pane, r } = mountPane();
+    feed(r, [userEvent("hi"), ...send({ kind: "answer", verdict: "Yes", text: "ok" })]);
+    const before = pane.innerHTML;
+    expect(attachChatDashboard(pane, r)).toBeNull();
+    expect(pane.innerHTML).toBe(before);
+    expect(pane.hasAttribute("data-chat-view")).toBe(false);
+  });
+
+  it("switches an open chat between the views in place", async () => {
+    globalThis.window.__TAURI__ = {};
+    const { pane, r } = mountPane();
+    attachChatDashboard(pane, r);
+    expect(pane.querySelector(".cdash")).not.toBeNull();
+    expect(pane.getAttribute("data-chat-view")).toBe("dashboard");
+    setSettings({ chatView: "messages" });
+    applyChatViewSetting();
+    expect(pane.querySelector(".cdash")).toBeNull();
+    expect(pane.hasAttribute("data-chat-view")).toBe(false);
+    setSettings({ chatView: "dashboard" });
+    applyChatViewSetting();
+    expect(pane.querySelector(".cdash")).not.toBeNull();
+  });
+});
+
+describe("chat dashboard layout", () => {
+  it("draws the strip, Answers on the left and the Plan on the right from the chat's events", async () => {
+    const { pane, r } = mountPane();
+    const dash = new ChatDashboard(pane, r);
+    feed(r, [
+      userEvent("we should support trello"),
+      userEvent("does it link tr- numbers?"),
+      ...send({ kind: "answer", verdict: "Yes", text: "Once the board confirms." }),
+      ...plan([{ text: "Read the tracker", status: "done", detail: "How Shortcut reads ids" }, { text: "Add Trello", status: "active" }]),
+    ]);
+    await tick();
+    // The dashboard sits before the transcript, which keeps rendering underneath.
+    expect(pane.firstElementChild).toBe(dash.el);
+    expect(pane.querySelector(".session-messages .mc-root")).not.toBeNull();
+
+    const strip = pane.querySelector(".cdash-strip");
+    expect(strip.hidden).toBe(false);
+    expect(strip.querySelector(".cdash-strip-msg").textContent).toContain("does it link tr- numbers?");
+    expect(strip.querySelector("[data-act='strip-earlier']").textContent).toContain("1 earlier");
+
+    const left = pane.querySelector(".cdash-left");
+    const right = pane.querySelector(".cdash-right");
+    expect([...left.querySelectorAll(".cdash-slot")].map((e) => e.dataset.zone)).toEqual(["answers"]);
+    expect(left.querySelector(".mc-root .mc-verdict").textContent).toBe("Yes");
+    expect([...right.querySelectorAll(".cdash-slot")].map((e) => e.dataset.zone)).toEqual(["plan"]);
+    expect(right.querySelector(".cdash-count").textContent).toBe("1/2");
+    expect(pane.querySelector(".cdash-grid").classList.contains("is-single")).toBe(false);
+  });
+
+  it("opens a step's detail line on click", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent("go"), ...plan([{ text: "Read", status: "active", detail: "Reads the tracker code" }, { text: "Ship", status: "pending" }])]);
+    await tick();
+    expect(pane.querySelector(".cdash-step-d")).toBeNull();
+    // A step with no detail line is not a button.
+    expect(pane.querySelectorAll("button.cdash-step")).toHaveLength(1);
+    pane.querySelector("button.cdash-step").click();
+    expect(pane.querySelector(".cdash-step-d").textContent).toBe("Reads the tracker code");
+    pane.querySelector("button.cdash-step").click();
+    expect(pane.querySelector(".cdash-step-d")).toBeNull();
+  });
+
+  it("expands Joe's latest message on click and shows an earlier one picked from the list", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent("first message"), userEvent("second message")]);
+    await tick();
+    const msg = () => pane.querySelector(".cdash-strip-msg");
+    msg().click();
+    expect(msg().classList.contains("open")).toBe(true);
+    pane.querySelector("[data-act='strip-earlier']").click();
+    const rows = [...pane.querySelectorAll(".cdash-pop-row")];
+    expect(rows.map((b) => b.textContent)).toEqual(["second message", "first message"]);
+    rows[1].click();
+    expect(pane.querySelector(".cdash-pop")).toBeNull();
+    expect(msg().textContent).toContain("first message");
+    pane.querySelector("[data-act='strip-latest']").click();
+    expect(msg().textContent).toContain("second message");
+  });
+
+  it("puts the Result in the Plan card's spot with a Plan N/N flip back", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [
+      userEvent("go"), ...status("done"), userEvent("build it"),
+      ...plan([{ text: "Build", status: "done" }, { text: "Test", status: "done" }]),
+      ...send({ kind: "report", verdict: "Built, not pushed", text: "Two commits", your_move: ["Push it"], visuals: [{ type: "table", columns: ["A"], rows: [["1"]] }] }),
+      ...status("done"),
+    ]);
+    await tick();
+    const right = pane.querySelector(".cdash-right");
+    expect(right.querySelector(".cdash-result .mc-verdict").textContent).toBe("Built, not pushed");
+    expect(right.querySelector(".cdash-result .mc-sec--yours").textContent).toContain("Push it");
+    expect(right.querySelector(".cdash-result table")).not.toBeNull();
+    expect(right.querySelector("[data-act='show-plan']").textContent).toBe("Plan 2/2");
+    right.querySelector("[data-act='show-plan']").click();
+    expect(right.querySelector(".cdash-plan")).not.toBeNull();
+    expect(right.querySelectorAll(".cdash-step")).toHaveLength(2);
+    right.querySelector("[data-act='show-result']").click();
+    expect(right.querySelector(".cdash-result")).not.toBeNull();
+    // The report is the Result, never an answer. The right column keeps its place.
+    expect(pane.querySelector(".cdash-left .cdash-slot")).toBeNull();
+    expect(pane.querySelector(".cdash-left").hidden).toBe(true);
+    expect(pane.querySelector(".cdash-grid").classList.contains("is-single")).toBe(false);
+  });
+
+  it("lists a blocker, tinted red, and the open question card in Waiting on you", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [
+      userEvent("go"),
+      toolUseEvent("mcp__cc_conductor__ask_user_question", { questions: [{ question: "Tabs or spaces?", options: [{ label: "Tabs" }] }] }, "q1"),
+      ok("q1"),
+      ...send({ kind: "blocker", verdict: "Stuck on auth", text: "No token" }),
+    ]);
+    await tick();
+    const w = pane.querySelector(".cdash-waiting");
+    expect(w.classList.contains("is-blocked")).toBe(true);
+    const stack = [...w.querySelector(".cdash-stack").children];
+    expect(stack[0].querySelector(".mc-verdict").textContent).toBe("Stuck on auth");
+    const q = w.querySelector(".msg.question-card");
+    expect(q.dataset.questionId).toBe("q1");
+    expect(q.textContent).toContain("Tabs or spaces?");
+  });
+
+  it("moves the chat's status line into the Plan card while it runs, and back when the card goes", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    const bar = pane.querySelector(".session-thinking");
+    const home = bar.parentElement;
+    await tick();
+    expect(bar.parentElement).toBe(home);
+    // A turn starts: the bar shows itself, and the Plan card draws to host it.
+    bar.removeAttribute("hidden");
+    await tick();
+    const slot = pane.querySelector(".cdash-plan [data-slot='status']");
+    expect(slot).not.toBeNull();
+    expect(bar.parentElement).toBe(slot);
+    // New plan steps redraw the card; the bar survives the redraw.
+    feed(r, [userEvent("go"), ...plan([{ text: "One", status: "active" }])]);
+    await tick();
+    expect(pane.querySelector(".cdash-plan [data-slot='status'] .session-thinking")).toBe(bar);
+    bar.setAttribute("hidden", "");
+    await tick();
+    expect(pane.querySelector(".cdash-pstatus").textContent).toBe("Idle");
+    // Hidden, it goes home, so session-thinking-bar.ts shows it above the message box for held messages.
+    expect(bar.parentElement).toBe(home);
+  });
+
+  it("puts the status line back above the message box when disposed", async () => {
+    const { pane, r } = mountPane();
+    const dash = new ChatDashboard(pane, r);
+    const bar = pane.querySelector(".session-thinking");
+    bar.removeAttribute("hidden");
+    await tick();
+    expect(bar.closest(".cdash")).not.toBeNull();
+    dash.dispose();
+    expect(bar.parentElement.classList.contains("composer-shell")).toBe(true);
+    expect(bar.nextElementSibling.classList.contains("session-composer")).toBe(true);
+    expect(pane.querySelector(".cdash")).toBeNull();
+    expect(r.onFlushed).toBeNull();
+  });
+
+  it("collapses a quick one-question chat to its answer card", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent("is it empty?"), ...send({ kind: "answer", verdict: "No", text: "It has two rows." })]);
+    await tick();
+    expect(pane.querySelector(".cdash-grid").classList.contains("is-single")).toBe(true);
+    expect(pane.querySelector(".cdash-right").hidden).toBe(true);
+    expect(pane.querySelectorAll(".cdash-slot")).toHaveLength(1);
+  });
+
+  it("shows a quiet hint for an empty chat, but not while its history is still loading", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    await tick();
+    expect(pane.querySelector(".cdash-empty").hidden).toBe(true);
+    const realIsLoaded = sessionEvents.isLoaded;
+    sessionEvents.isLoaded = () => true;
+    try {
+      r.sessionId = "s1";
+      feed(r, [toolUseEvent("Read", { file_path: "a.ts" }, "x1")]);
+      await tick();
+      expect(pane.querySelector(".cdash-empty").hidden).toBe(false);
+      expect(pane.querySelector(".cdash-strip").hidden).toBe(true);
+    } finally {
+      sessionEvents.isLoaded = realIsLoaded;
+    }
+  });
+
+  it("draws nothing while a history replay is half built", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    r.hydrating = true;
+    feed(r, [userEvent("go"), ...send({ kind: "blocker", verdict: "Stuck", text: "x" })]);
+    await tick();
+    expect(pane.querySelector(".cdash-waiting")).toBeNull();
+    r.hydrating = false;
+    r.onFlushed();
+    await tick();
+    expect(pane.querySelector(".cdash-waiting")).not.toBeNull();
+  });
+
+  it("keeps the status line above the message box while messages are held", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    const bar = pane.querySelector(".session-thinking");
+    const prevHeld = state.heldMessages;
+    state.heldMessages = { hasItemsForActive: () => true };
+    try {
+      bar.removeAttribute("hidden");
+      await tick();
+      expect(bar.parentElement.classList.contains("composer-shell")).toBe(true);
+      state.heldMessages = { hasItemsForActive: () => false };
+      bar.classList.add("busy");
+      await tick();
+      expect(bar.parentElement.dataset.slot).toBe("status");
+    } finally {
+      state.heldMessages = prevHeld;
+    }
+  });
+
+  it("measures long user messages again once a hidden transcript is shown", async () => {
+    globalThis.window.__TAURI__ = {};
+    const { pane, r } = mountPane();
+    attachChatDashboard(pane, r);
+    feed(r, [userEvent("a very long message")]);
+    const row = pane.querySelector(".session-messages .msg.user");
+    // Built hidden: measured 0, so it was checked and left unclamped.
+    expect(row.dataset.clampChecked).toBe("1");
+    expect(row.classList.contains("has-clamp")).toBe(false);
+    Object.defineProperty(row, "scrollHeight", { configurable: true, get: () => 900 });
+    setSettings({ chatView: "messages" });
+    applyChatViewSetting();
+    expect(row.classList.contains("has-clamp")).toBe(true);
+    expect(row.querySelector(".msg-clamp-toggle").textContent).toBe("Show more");
+  });
+});

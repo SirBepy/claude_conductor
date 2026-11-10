@@ -51,7 +51,10 @@ export class HeldMessagesRender {
     // rebuilds on every setSessionId (a placeholder swapping to its real id), so
     // the element captured at attach() can be a detached node by now.
     if (!a.chipSlot.isConnected) {
-      const live = a.anchor?.parentElement?.querySelector<HTMLElement>(".composer-send-wrap .held-chip-slot");
+      // From the pane, not the anchor's parent: the chat dashboard moves the
+      // anchor (the status line) into its Plan card while a turn runs.
+      const scope = a.anchor?.closest<HTMLElement>(".session-pane") ?? a.anchor?.parentElement;
+      const live = scope?.querySelector<HTMLElement>(".composer-send-wrap .held-chip-slot");
       if (live) a.chipSlot = live;
     }
     const items = this.host.itemsForActive();

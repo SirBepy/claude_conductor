@@ -132,6 +132,7 @@ export function flushRender(r: ChatRenderer): void {
   // that a later turn has now overtaken shrinks. Not animated while a history
   // replay is building the chat: those cards were never seen at full size.
   if (touchedEls.length > 0) sweepOldCards(r.messages, r.messageEls, !r.hydrating);
+  r.onFlushed?.();
   // Nothing rendered this flush (a redundant trailing-throttle tick, or a
   // turn_usage settle with no pending dirty/appended state): the passes
   // below only ever act on new/changed elements, so there is nothing for
