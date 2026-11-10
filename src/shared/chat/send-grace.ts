@@ -100,19 +100,15 @@ export function undoGrace(key: string): boolean {
   return true;
 }
 
-export function hasGrace(key: string): boolean {
-  return pending.has(key);
-}
-
-/** Move a still-pending bar into a freshly rendered mount (the composer
- *  rebuilds its DOM on a session switch and would otherwise drop the bar). */
+/** Move a still-pending Undo button into a freshly rendered mount (the composer
+ *  rebuilds its DOM on a session switch and would otherwise drop the button). */
 export function remountGraceBar(key: string, mount: HTMLElement): void {
   const p = pending.get(key);
   if (p) mount.appendChild(p.bar);
 }
 
-/** Detach a bar from its mount without touching the pending action, so
- *  leaving a chat never leaves its undo bar floating over another. */
+/** Detach a button from its mount without touching the pending action, so
+ *  leaving a chat never leaves its Undo button floating over another. */
 export function detachGraceBar(key: string): void {
   pending.get(key)?.bar.remove();
 }

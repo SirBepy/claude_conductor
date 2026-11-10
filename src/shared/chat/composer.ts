@@ -877,8 +877,8 @@ export class Composer {
     }
   }
 
-  /** Undo a `clearComposer()` after a failed send: puts the text, attachments
-   * and pasted blocks back so the user doesn't lose what they typed. */
+  /** Undo a `clearComposer()` after a failed send or an Undo press: puts the
+   * text, attachments and pasted blocks back, in front of anything typed since. */
   private restoreDraft(text: string, attachments: Attachment[], pastedBlocks: PastedBlock[]): void {
     // In front of anything typed since the clear (the grace window leaves the
     // box live), so Undo never overwrites what the user carried on writing.

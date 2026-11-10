@@ -48,7 +48,7 @@ function syncQuestionProgress(sessionId: string | undefined, promptId: string, q
 /** Prompt ids whose answer or skip is waiting out its grace window. */
 const heldForGrace = new Set<string>();
 
-/** One line of what was picked or typed, for the Undo bar. */
+/** One line of what was picked or typed, for the Undo button's tooltip. */
 function answerSummary(answers: Answers): string {
   return Object.values(answers)
     .map((a) => (Array.isArray(a) ? a.join(", ") : a))
