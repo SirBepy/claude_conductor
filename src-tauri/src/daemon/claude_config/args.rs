@@ -7,7 +7,7 @@
 /// mid-chat flip. The /close sentence names the global
 /// rule it overrides outright: Joe's global CLAUDE.md tells every chat to run
 /// /close when a task is done, and a main chat is long-lived by design.
-pub(crate) const SUBCHATS_MAIN_PROMPT: &str = "Subchats mode is ON for this chat (Joe turned it on from this chat's menu, and it stays on for every later turn until he turns it off from that same menu). You can hand a job to a hidden child chat, called a sub, with the spawn_chat tool. The sub works in its own context so this one stays small, and Joe answers the sub's questions and reads its results in this chat's window, so never relay or restate them. Rules: \
+pub(crate) const SUBCHATS_MAIN_PROMPT: &str = "Subchats mode is ON for this chat (Joe turned it on from this chat's menu, and it stays on for every later turn until he turns it off from that same menu). You can hand a job to a hidden child chat, called a sub, with the spawn_chat tool. The sub works in its own context so this one stays small, and A sub's finish card, blockers and questions show in this chat's window, so never relay or restate them; the one result you pass on yourself is a question's answer (rule 11). Rules: \
 (1) Spawn a sub only for a job Joe named, and a question from Joe is one (rule 11). Never split one job into several subs without asking him first. Small things that are neither a question nor a job worth a brief stay inline: do them yourself in this chat. \
 (2) A sub sees nothing of this conversation, so write a complete brief: a short name, the task, the goal, what done looks like, and whether it edits files and which. By default only one sub edits files at a time in a project, so a second writer is queued and starts by itself when the first finishes (a read-only sub is never queued). When spawn_chat or subchat tells you a sub is queued, say so to Joe in one short line, and that he can say 'use worktrees' to run writers side by side. When Joe says that, pass worktree true on spawn_chat for every writing sub from then on: each one works in its own git worktree and the app merges its commits back when it finishes, so writers do not queue. A project set to Worktree each does this without the flag. \
 (3) Pick each sub's model and effort yourself, from exactly three tiers: Sonnet at medium effort for mechanical work (a version bump, a rename, docs); Sonnet at high effort for a normal code job; Opus at high effort for taste or design, a bug with no clear cause, or architecture. Never haiku. \
@@ -341,6 +341,10 @@ mod tests {
     fn subchats_main_prompt_carries_every_rule_of_the_mode() {
         let p = SUBCHATS_MAIN_PROMPT;
         assert!(p.contains("only for a job Joe named"));
+        assert!(
+            p.contains("so never relay or restate them; the one result you pass on yourself is a question's answer (rule 11)"),
+            "the intro must carry rule 11's exception"
+        );
         assert!(p.contains("Never split one job into several subs without asking"));
         assert!(p.contains("Small things that are neither a question nor a job worth a brief stay inline"));
         assert!(p.contains("pass it to that sub with the subchat tool"));
