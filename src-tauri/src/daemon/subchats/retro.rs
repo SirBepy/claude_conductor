@@ -13,9 +13,10 @@
 //! `<YYYY-MM-DD>-<session id first 8>.md`. A second call from the same chat on
 //! the same day rewrites its file, so a fuller retro replaces a thin one.
 //!
-//! Frontmatter is flat `key: value` lines (no nesting) so `Grep` and
-//! [`parse_frontmatter`] read it without a YAML parser. A retro written by hand
-//! in this shape reads the same as a tool-written one.
+//! Frontmatter is flat `key: value` lines (no nesting) so `Grep` reads it
+//! without a YAML parser. A retro written by hand in this shape reads the same
+//! as a tool-written one (the tests pin that with `parse_frontmatter`, which has
+//! no production reader).
 
 use super::{card_log, decisions, tool};
 use crate::daemon::state::DaemonState;
@@ -87,11 +88,6 @@ pub struct Stamp {
     pub decisions: usize,
 }
 
-/// One line, no newlines: a frontmatter value must not break the flat format.
-fn one_line(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 /// The chat's `Instance` when it is a main chat that may write a retro. A sub
 /// and a chat with the mode off each get a refusal naming why.
 fn check_role(state: &DaemonState, session_id: &str) -> Result<crate::types::Instance, String> {
@@ -130,11 +126,11 @@ fn stamp_for(state: &DaemonState, inst: &crate::types::Instance, now: &chrono::D
     Stamp {
         version: crate::daemon::health::DAEMON_VERSION.to_string(),
         session_id: id.to_string(),
-        chat_title: one_line(&tool::label(inst)),
-        project: one_line(&inst.cwd.to_string_lossy()),
-        model: one_line(&inst.model),
-        effort: one_line(&inst.effort),
-        started: one_line(&inst.started_at),
+        chat_title: decisions::one_line(&tool::label(inst)),
+        project: decisions::one_line(&inst.cwd.to_string_lossy()),
+        model: decisions::one_line(&inst.model),
+        effort: decisions::one_line(&inst.effort),
+        started: decisions::one_line(&inst.started_at),
         closed: now.to_rfc3339(),
         subs: subs.len(),
         subs_finished: subs.iter().filter(|s| s.subchat_finished).count(),
@@ -172,8 +168,9 @@ pub fn render(stamp: &Stamp, sections: &[String]) -> String {
 }
 
 /// The frontmatter's `key: value` lines, or `None` when the text does not open
-/// with a `---` block. A reader (and the test of a hand-written retro) uses this
-/// instead of a YAML parser because the format is flat on purpose.
+/// with a `---` block. Test-only: nothing in the app reads a retro back (a later
+/// session uses `Read`/`Grep`), so this pins the format a reader would rely on.
+#[cfg(test)]
 pub fn parse_frontmatter(text: &str) -> Option<BTreeMap<String, String>> {
     let mut lines = text.replace("\r\n", "\n");
     lines.insert(0, '\n');
@@ -428,7 +425,8 @@ mod tests {
 
     #[test]
     fn frontmatter_values_never_carry_a_newline() {
-        assert_eq!(one_line("a\nb\r\n c"), "a b c");
+        assert_eq!(decisions::one_line("a\nb\r\n c"), "a b c");
+        assert_eq!(decisions::one_line("a\u{7}b\tc"), "a b c", "a control character flattens too");
         assert!(parse_frontmatter("no frontmatter").is_none());
         let m = parse_frontmatter("---\r\nk: v\r\n---\r\nbody").unwrap();
         assert_eq!(m["k"], "v");

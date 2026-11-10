@@ -362,7 +362,7 @@ fn clean(text: &str) -> String {
     format!("{cut} [cut: longer than {STORED_CAP} characters]")
 }
 
-fn one_line(text: &str) -> String {
+pub(crate) fn one_line(text: &str) -> String {
     let flat: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     flat.split_whitespace().collect::<Vec<_>>().join(" ")
 }
