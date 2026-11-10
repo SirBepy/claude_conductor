@@ -197,7 +197,7 @@
   top: 0;
 }
 
-/* ---- Zone frames: small uppercase label, the real cards inside ---- */
+/* ---- Zone frames: every zone is one .cdash-card with its small uppercase title inside it ---- */
 .cdash-h {
   display: flex;
   align-items: center;
@@ -255,7 +255,8 @@
   color: var(--color-text-muted);
 }
 
-/* Plan and Result: the right column's card. */
+/* The frame every zone's title sits in. Zones holding the transcript's own
+   message cards (Result, Waiting on you, Notes) draw those cards inside it. */
 .cdash-card {
   padding: 10px 12px;
   border: 1px solid var(--color-border);

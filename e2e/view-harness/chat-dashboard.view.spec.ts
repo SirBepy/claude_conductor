@@ -141,6 +141,41 @@ test.describe("chat dashboard", () => {
     await capture(pane(page), "chat-dashboard-running");
   });
 
+  // Every card's title sits inside its own framed card, never as a label above
+  // the cards it holds (Result, Waiting on you and Notes drew theirs outside).
+  const WITH_NOTE = [
+    ...MID_JOB,
+    ...tool(SEND, { kind: "call", verdict: "Kept the board id in project settings", text: "It sits next to the Shortcut one." }),
+  ];
+  for (const [name, history, zones] of [
+    ["mid-job", WITH_NOTE, ["answers", "waiting", "plan", "notes", "links"]],
+    ["finished", FINISHED, ["answers", "plan", "links"]],
+  ] as const) {
+    test(`every card's title is inside its card (${name})`, async ({ page }) => {
+      await openChat(page, history as unknown[], "dashboard");
+      for (const z of zones) await expect(dash(page).locator(`.cdash-slot[data-zone='${z}'] .cdash-zone`)).toBeVisible();
+      const problems = await dash(page).evaluate((root) => {
+        const out: string[] = [];
+        for (const zone of root.querySelectorAll<HTMLElement>(".cdash-zone")) {
+          const id = zone.closest<HTMLElement>(".cdash-slot")?.dataset.zone ?? zone.className;
+          // The Answers card draws its own frame (.mc-card) and title (.ax-kind) inside its host.
+          const frame = id === "answers" ? zone.querySelector<HTMLElement>(".ax-shell .mc-card") : zone;
+          const title = zone.querySelector<HTMLElement>(id === "answers" ? ".ax-head .ax-kind" : ".cdash-h .cdash-h-t");
+          if (!frame || !title) { out.push(`${id}: no frame or title`); continue; }
+          // A zone without the .cdash-card frame has no border, so its title floats above the cards it holds.
+          const cs = getComputedStyle(frame);
+          if (parseFloat(cs.borderTopWidth) < 1 || cs.borderTopColor === "rgba(0, 0, 0, 0)") out.push(`${id}: frame has no visible border`);
+          const f = frame.getBoundingClientRect();
+          const t = title.getBoundingClientRect();
+          if (t.top < f.top || t.left < f.left || t.bottom > f.bottom || t.right > f.right) out.push(`${id}: title outside its frame`);
+        }
+        return out;
+      });
+      expect(problems).toEqual([]);
+      await capture(pane(page), `chat-dashboard-titles-inside-${name}`);
+    });
+  }
+
   test("Messages view is the plain transcript with no dashboard", async ({ page }) => {
     await openChat(page, MID_JOB, "messages");
     await expect(page.locator("#session-pane .session-messages .mc-root").first()).toBeVisible();
