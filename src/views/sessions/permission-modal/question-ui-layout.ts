@@ -145,7 +145,12 @@ export function createQuestionCardLayout(
     }
   }
 
-  const dispose = (): void => document.removeEventListener(CHAT_VIEW_CHANGED, onViewChanged);
+  // The scroller padded last may not be the one the card opened over (a view
+  // switch moved the padding), and teardown only restores the opening one.
+  const dispose = (): void => {
+    document.removeEventListener(CHAT_VIEW_CHANGED, onViewChanged);
+    if (padded) padded.style.paddingBottom = "";
+  };
 
   return { showPasteHint, paintAttachmentStrips, syncMessagesPadding, positionTrack, dispose };
 }
