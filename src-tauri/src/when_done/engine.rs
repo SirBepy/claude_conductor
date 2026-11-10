@@ -61,8 +61,8 @@ pub(super) async fn run_engine(
 enum Countdown {
     Finished,
     Cancelled,
-    /// The user postponed mid-countdown, or (nightly only) came back or a chat
-    /// went busy, so the engine drops back to Watching instead of firing.
+    /// The user postponed mid-countdown, a chat went busy, or (nightly only) the
+    /// user came back, so the engine drops back to Watching instead of firing.
     Interrupted,
 }
 
@@ -107,8 +107,8 @@ fn ready_to_fire(deps: &EngineDeps, mode: ArmMode) -> bool {
 /// The phase machine: Watching -> CountingDown -> Firing. Drives only through
 /// `deps`, so it is identical for production and tests. Runs until the action
 /// fires, the protocol is cancelled, or the runaway guard trips. A run drops
-/// back to Watching if interrupted: by a postpone in any mode, or on a nightly
-/// run by the user returning or a chat going busy. Chats are never closed:
+/// back to Watching if interrupted: by a postpone or a chat going busy in any
+/// mode, or on a nightly run by the user returning. Chats are never closed:
 /// every one is still there after boot.
 async fn run_engine_with_deps(
     deps: EngineDeps,
@@ -260,7 +260,11 @@ async fn countdown(deps: &EngineDeps, mode: ArmMode, forced: bool) -> Countdown 
             return Countdown::Cancelled;
         }
         // A postpone interrupts even a forced countdown: the user said not now.
-        if snoozed(deps) || (mode == ArmMode::Nightly && !forced && !ready_to_fire(deps, mode)) {
+        // Any other change (a chat going busy, a nightly user returning) is
+        // re-checked in every mode: a finished sub wakes its main chat a moment
+        // after the sub goes idle, so the Watching tick can see "all idle" in
+        // that gap, and only this check stops the action firing on live work.
+        if snoozed(deps) || (!forced && !ready_to_fire(deps, mode)) {
             return Countdown::Interrupted;
         }
         remaining = next;
