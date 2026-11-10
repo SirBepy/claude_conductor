@@ -10,7 +10,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("../src/shared/chat/chat-dom-renderer.ts", () => ({ isElNearBottom: () => false }));
 vi.mock("../src/views/sessions/permission-modal/drag-handle.ts", () => ({ PEEK_SETTLED_EVENT: "peek-settled" }));
 
-const { createQuestionCardLayout } = await import("../src/views/sessions/permission-modal/question-ui-layout.ts");
+const { createQuestionCardLayout, cardPaddedScroller } = await import("../src/views/sessions/permission-modal/question-ui-layout.ts");
 
 function rect(top, bottom, width = 600) {
   return () => ({ top, bottom, height: bottom - top, width, left: 0, right: width, x: 0, y: top, toJSON() {} });
@@ -48,5 +48,17 @@ describe("syncMessagesPadding", () => {
     card.getBoundingClientRect = rect(0, 0, 0);
     layout.syncMessagesPadding();
     expect(messagesEl.style.paddingBottom).toBe("");
+  });
+});
+
+describe("cardPaddedScroller", () => {
+  it("pads the card's own pane's transcript, or the chat dashboard's body while it shows", () => {
+    document.body.innerHTML = `<div class="session-messages" id="other"></div>
+      <div class="session-pane"><div class="cdash"><div class="cdash-body"></div></div><div class="session-messages" id="mine"></div><div id="host"></div></div>`;
+    const host = document.getElementById("host");
+    const pane = document.querySelector(".session-pane");
+    expect(cardPaddedScroller(host).id).toBe("mine");
+    pane.setAttribute("data-chat-view", "dashboard");
+    expect(cardPaddedScroller(host).className).toBe("cdash-body");
   });
 });

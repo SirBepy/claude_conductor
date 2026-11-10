@@ -12,7 +12,7 @@ import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 const { resetTransportForTests } = await import("../src/shared/transport.ts");
 const { setSettings } = await import("../src/shared/state.ts");
-const { ChatDashboard, attachChatDashboard, applyChatViewSetting } = await import("../src/views/sessions/chat-dashboard/chat-dashboard.ts");
+const { ChatDashboard, attachChatDashboard, applyChatViewSetting, detachChatDashboard } = await import("../src/views/sessions/chat-dashboard/chat-dashboard.ts");
 const { dashboardEnabled, readChatView } = await import("../src/views/sessions/chat-dashboard/chat-view-pref.ts");
 const { thinkingBarHtml } = await import("../src/views/sessions/session-thinking-bar.ts");
 const { sessionEvents } = await import("../src/shared/chat/event-store.ts");
@@ -69,6 +69,28 @@ describe("chat view setting", () => {
     expect(attachChatDashboard(pane, r)).toBeNull();
     expect(pane.innerHTML).toBe(before);
     expect(pane.hasAttribute("data-chat-view")).toBe(false);
+  });
+
+  it("keeps Messages for a read-only external or automated session, which has no cards to show", () => {
+    globalThis.window.__TAURI__ = {};
+    const { pane, r } = mountPane();
+    expect(attachChatDashboard(pane, r, { transcriptOnly: true })).toBeNull();
+    expect(pane.querySelector(".cdash")).toBeNull();
+    applyChatViewSetting();
+    expect(pane.querySelector(".cdash")).toBeNull();
+  });
+
+  it("goes away with the pane when no chat is open", () => {
+    globalThis.window.__TAURI__ = {};
+    const { pane, r } = mountPane();
+    const bar = pane.querySelector(".session-thinking");
+    attachChatDashboard(pane, r);
+    detachChatDashboard();
+    expect(pane.querySelector(".cdash")).toBeNull();
+    expect(r.onFlushed).toBeNull();
+    expect(bar.parentElement.classList.contains("composer-shell")).toBe(true);
+    applyChatViewSetting();
+    expect(pane.querySelector(".cdash")).toBeNull();
   });
 
   it("switches an open chat between the views in place", async () => {

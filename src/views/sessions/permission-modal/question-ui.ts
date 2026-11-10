@@ -5,6 +5,7 @@ import { createAuqAttachments, draftUploads } from "./attachments";
 import { createAuqSlashPopup } from "./slash-popup";
 import { LIGHTBOX_OVERLAY_CLASS } from "../../../shared/chat/lightbox";
 import { createQuestionCardRenderer } from "./question-ui-render";
+import { cardPaddedScroller } from "./question-ui-layout";
 import type { QuestionRenderState } from "./question-ui-render";
 import { handleQuestionCardKey } from "./question-keyboard";
 import type { Answers, OptionNotes, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
@@ -149,10 +150,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // the composer uses (ai_todo 439), not a reimplementation.
   const slashPopup = createAuqSlashPopup(opts.cwd);
 
-  // The card's own pane first: the document's first .session-messages can belong
-  // to another view (history), and the padding would land on the wrong transcript.
-  const messagesEl = host.closest(".session-pane")?.querySelector<HTMLElement>(".session-messages")
-    ?? document.querySelector<HTMLElement>(".session-messages");
+  const messagesEl = cardPaddedScroller(host);
   const savedScrollTop = messagesEl?.scrollTop ?? 0;
   const savedPaddingBottom = messagesEl?.style.paddingBottom ?? "";
 

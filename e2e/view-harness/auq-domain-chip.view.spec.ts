@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10: the question card pads the scroller cardPaddedScroller picks (this pane's transcript as before, or the chat dashboard's body while it shows), active-session.ts detaches the chat dashboard on dismount, and a read-only session keeps Messages; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-08: the chip no longer falls into the ask band when there is no context; a chip-only strip above the band keeps it at the context row's chip position (asserted below).
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-31: the chip is back on the context row's right (the edge-to-edge zones are asserted in auq-desktop-phone-layout.view.spec.ts).
