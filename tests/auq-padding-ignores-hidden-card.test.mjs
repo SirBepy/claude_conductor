@@ -62,3 +62,26 @@ describe("cardPaddedScroller", () => {
     expect(cardPaddedScroller(host).className).toBe("cdash-body");
   });
 });
+
+describe("switching Dashboard / Messages while a question card is open", () => {
+  it("moves the padding to the scroller that shows now and clears the old one", async () => {
+    document.body.innerHTML = `<div class="session-pane" data-chat-view="dashboard"><div class="cdash-body" id="dash"></div><div class="session-messages" id="msgs"></div><div id="host"><div class="prompt-card"></div></div></div>`;
+    const pane = document.querySelector(".session-pane");
+    const dash = document.getElementById("dash");
+    const msgs = document.getElementById("msgs");
+    const host = document.getElementById("host");
+    dash.getBoundingClientRect = rect(0, 1322);
+    msgs.getBoundingClientRect = rect(0, 1322);
+    host.querySelector(".prompt-card").getBoundingClientRect = rect(1000, 1300);
+    const layout = createQuestionCardLayout(host, { activeTab: 0 }, msgs, {});
+    layout.syncMessagesPadding();
+    expect(dash.style.paddingBottom).toBe("334px");
+    expect(msgs.style.paddingBottom).toBe("");
+
+    pane.setAttribute("data-chat-view", "messages");
+    document.dispatchEvent(new CustomEvent("cc-chat-view-changed"));
+    await Promise.resolve();
+    expect(msgs.style.paddingBottom).toBe("334px");
+    expect(dash.style.paddingBottom, "the hidden scroller keeps no band").toBe("");
+  });
+});
