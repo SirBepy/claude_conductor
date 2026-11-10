@@ -121,7 +121,7 @@ function waitingItemHtml(item: WaitingItem): string {
 }
 
 function renderWaiting(s: ZoneState<"waiting">): string {
-  return `<section class="cdash-zone cdash-waiting${s.blocked ? " is-blocked" : ""}">${head("ph-bell-ringing", "Waiting on you")}`
+  return `<section class="cdash-zone cdash-card cdash-waiting${s.blocked ? " is-blocked" : ""}">${head("ph-bell-ringing", "Waiting on you")}`
     + `<div class="cdash-stack">${s.items.map(waitingItemHtml).join("")}</div></section>`;
 }
 
@@ -155,7 +155,7 @@ function renderPlan(s: ZoneState<"plan">, ctx: ZoneCtx): string {
   if (s.result && !ctx.ui.showPlan) {
     const flip = total > 0
       ? `<button type="button" class="cdash-flip" data-act="show-plan" title="Show the finished plan"><i class="ph ph-list-checks"></i>Plan ${count}</button>` : "";
-    return `<section class="cdash-zone cdash-result">${head("ph-flag-checkered", "Result", flip)}${cardHtml(s.result)}${statusSlot(ctx.busy)}</section>`;
+    return `<section class="cdash-zone cdash-card cdash-result">${head("ph-flag-checkered", "Result", flip)}${cardHtml(s.result)}${statusSlot(ctx.busy)}</section>`;
   }
   const flip = s.result
     ? `<button type="button" class="cdash-flip" data-act="show-result" title="Back to the result"><i class="ph ph-flag-checkered"></i>Result</button>` : "";
@@ -218,7 +218,7 @@ function renderChanges(s: ZoneState<"changes">): string {
 }
 
 const listZone = (cls: string, icon: string, title: string) => (s: { cards: RenderedMessage[] }): string =>
-  `<section class="cdash-zone cdash-list ${cls}">${head(icon, title)}<div class="cdash-stack">${s.cards.map(cardHtml).join("")}</div></section>`;
+  `<section class="cdash-zone cdash-card cdash-list ${cls}">${head(icon, title)}<div class="cdash-stack">${s.cards.map(cardHtml).join("")}</div></section>`;
 
 /** A fixed host like Answers': the Subchats card (subs-card.ts) draws inside it,
  *  so a re-derive never replaces the avatars under Joe's pointer or wipes the
