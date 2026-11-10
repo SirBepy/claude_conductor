@@ -68,7 +68,7 @@ pub(super) fn instance_is_idle(i: &crate::types::Instance) -> bool {
     // A sub the daemon holds without a child (queued behind the writer slot, or
     // waiting on an `after` sub) is not busy because it has not started, but
     // its job is still ahead: shutting down now would drop it unrun.
-    let queued_sub = i.subchat_of.is_some() && i.progress.waiting_for.is_some();
+    let queued_sub = crate::daemon::subchats::is_sub(i) && i.progress.waiting_for.is_some();
     !queued_sub && !i.busy && i.awaiting.as_deref() != Some("working") && !i.local_task_running
 }
 

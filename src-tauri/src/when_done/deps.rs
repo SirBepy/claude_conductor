@@ -68,7 +68,8 @@ impl EngineDeps {
         let app_cancel = app.clone();
         let app_snooze = app.clone();
         // Built at arm time (production() runs from run_engine), then widened
-        // each tick by `admitted_busy_map` as armed chats start children.
+        // each tick by `admitted_busy_map` as armed chats start children, and as
+        // chats alive at arm time start subs.
         let at_arm = live_busy_map(&app);
         let live: Vec<String> = at_arm.iter().map(|(id, _)| id.clone()).collect();
         let scope = Arc::new(Mutex::new(ArmScope::new(&live, &waiting_on_ids(&at_arm))));
@@ -103,7 +104,8 @@ impl EngineDeps {
 }
 
 /// The live busy map minus every chat the arm scope ignores, after admitting
-/// any chat an armed chat started since the last tick.
+/// any chat an armed chat started, or any sub of a chat alive at arm time,
+/// since the last tick.
 pub(super) fn admitted_busy_map(scope: &Mutex<ArmScope>, live: Vec<(String, bool)>) -> Vec<(String, bool)> {
     admitted_with(scope, live, crate::sessions::chat_config::parent_of, |id| {
         crate::sessions::chat_config::get(id).is_some_and(|c| c.subchat.is_some())
