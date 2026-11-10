@@ -223,6 +223,13 @@ Lanes, run in this order, each a sub of the "Chat as dashboard" main chat:
    them, and runs the whole floor.
 7. A gate sub runs code-check, the wdio sweep and /release.
 
+**2026-11-10 change:** lane 2 finished at 06:38 and lane 3 never started. The cause (chat
+"Queued subs never start", 3c72edf2, read from the daemon logs): a lane's `cargo test` boots a test
+daemon on the shared data dir, and its startup sweep deleted the held queue (`held.json`). The 5
+queued rows left behind are dead and still fill the sub cap. Joe's call: lanes 3 to 6 run now, one at
+a time, as plain visible chats named "dash lane N: ...", each started by the main chat when the
+previous one posts its result to it. /release waits until the fix chat posts "fix committed".
+
 The app runs at most 5 subs at once, and a queued sub counts. So lanes 5b, 6 and 7 are spawned by
 the main chat as slots free up, each `after` the one before it. Once the release is out, the main
 chat writes its own retro by hand in pc-1677's format to
