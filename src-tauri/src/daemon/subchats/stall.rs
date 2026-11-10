@@ -74,6 +74,16 @@ pub async fn raise(state: &Arc<DaemonState>, sub_id: &str, stall: Stall) -> Opti
 /// [`raise`] with a sentence of what is known, for a stall whose cause the
 /// daemon saw itself (a process that died, with its last error).
 pub async fn raise_noted(state: &Arc<DaemonState>, sub_id: &str, stall: Stall, note: Option<&str>) -> Option<String> {
+    raise_with(state, sub_id, stall, note, false).await
+}
+
+/// [`raise_noted`] as a quiet card (see `cards::raise_quiet_card`): for a stall
+/// Joe was already told about, asked again only because a restart lost the card.
+pub async fn raise_noted_quietly(state: &Arc<DaemonState>, sub_id: &str, stall: Stall, note: Option<&str>) -> Option<String> {
+    raise_with(state, sub_id, stall, note, true).await
+}
+
+async fn raise_with(state: &Arc<DaemonState>, sub_id: &str, stall: Stall, note: Option<&str>, quiet: bool) -> Option<String> {
     let parent = state.registry.get(sub_id)?.subchat_of?;
     if cards::open_card_for(state, stall.card_kind(), sub_id).await.is_some() {
         return None;
@@ -91,7 +101,8 @@ pub async fn raise_noted(state: &Arc<DaemonState>, sub_id: &str, stall: Stall, n
         ],
         domain: None,
     };
-    let handle = match cards::raise_card(state, card).await {
+    let raised = if quiet { cards::raise_quiet_card(state, card).await } else { cards::raise_card(state, card).await };
+    let handle = match raised {
         Ok(h) => h,
         Err(e) => {
             log::warn!("subchats: could not raise the {stall:?} card for {sub_id}: {e}");

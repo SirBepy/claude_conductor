@@ -200,15 +200,19 @@ async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool) -> Resul
     // EOF of the chat; persistence is separately refused for a daemon card.
     state.add_prompt(&card_id, "question-requested", payload.clone(), true).await;
     if !quiet {
-        state.fire_blocked_prompt(Some(&display), &card_id);
+        crate::daemon::notify_gate::push_blocked(state, Some(&display), &card_id);
         state.registry.set_awaiting(&display, Some("question".into()));
         crate::daemon::machines::publish_instances_changed(state);
     }
     state.notifier.publish("question_request", payload);
     if !quiet {
-        state
-            .notifier
-            .publish("turn_sound", json!({ "session_id": display, "awaiting": "question" }));
+        crate::daemon::notify_gate::sound(
+            state,
+            &display,
+            "question",
+            crate::daemon::notify_gate::turn_of(state, &display),
+            json!({ "session_id": display, "awaiting": "question" }),
+        );
     }
     log::info!(
         "subchats: raised {} card {card_id} in {display} for sub {:?}",

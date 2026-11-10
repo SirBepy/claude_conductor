@@ -184,6 +184,9 @@ pub(crate) async fn run_stdout_pump(
                         {
                             let mut dirty = state_for_pump.registry.mark_turn_live(&pump_session.session_id);
                             crate::sessions::chat_state::set_busy(&pump_session.session_id, true);
+                            // The chat is working again, whoever started the turn (a
+                            // send or a wake), so what it next waits on is news.
+                            state_for_pump.notify_gate.turn_started(&pump_session.session_id);
                             // Mark the row "Closing" now (daemon-authoritative, no text marker)
                             // so every window's sidebar shows it; close_requested drives teardown.
                             if turn_is_close(&pump_session) {
@@ -334,18 +337,26 @@ pub(crate) async fn run_stdout_pump(
                                 // Guard on live_turn so replayed history result lines
                                 // (emitted by claude on --resume before the live turn starts)
                                 // don't each trigger their own sound. should_notify_turn_sound
-                                // (todo 564) also dedupes repeated `question` in a row.
+                                // also dedupes repeated `question` in a row, and
+                                // the notify gate drops a `question` already rung for this
+                                // turn's question card.
+                                if live_turn {
+                                    state_for_pump.notify_gate.turn_ending(&pump_session.session_id);
+                                }
                                 if live_turn && state_for_pump.registry.should_notify_turn_sound(
                                     &pump_session.session_id,
                                     awaiting.as_deref(),
                                 ) {
-                                    state_for_pump.notifier.publish(
-                                        "turn_sound",
+                                    let kind = if awaiting.as_deref() == Some("done") { "done" } else { "question" };
+                                    crate::daemon::notify_gate::sound(
+                                        &state_for_pump,
+                                        &pump_session.session_id,
+                                        kind,
+                                        crate::daemon::notify_gate::turn_of(&state_for_pump, &pump_session.session_id),
                                         serde_json::json!({
                                             "session_id": pump_session.session_id,
                                             "cwd": pump_session.cwd.to_string_lossy(),
                                             "awaiting": awaiting.as_deref(),
-                                            "fired_at_ms": chrono::Utc::now().timestamp_millis(),
                                         }),
                                     );
                                 }
