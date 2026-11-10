@@ -11,7 +11,8 @@
   margin: 4px max(12px, calc((100% - 900px) / 2)) 0;
 }
 
-.next-chip-slot:empty {
+.next-chip-slot:empty,
+.next-chip-slot[data-typing] {
   display: none;
 }
 
