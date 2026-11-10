@@ -848,7 +848,7 @@ export class Composer {
       const draftBlocks = empty ? [] : this.undo.buildBlocks(text);
       const savedHeldAttachments = this.att.attachments;
       const savedHeldPastedBlocks = this.att.pastedBlocks;
-      this.clearComposer();
+      this.clearComposer(false);
       void Promise.resolve(this.opts.flushHeldWithDraft?.(draftBlocks)).then((ok) => {
         if (ok !== false) return;
         this.restoreDraft(text, savedHeldAttachments, savedHeldPastedBlocks);
@@ -867,7 +867,7 @@ export class Composer {
     const blocks = this.undo.buildBlocks(text);
     const savedAttachments = this.att.attachments;
     const savedPastedBlocks = this.att.pastedBlocks;
-    this.clearComposer();
+    this.clearComposer(false);
     const slot = this.root.querySelector<HTMLElement>(".composer-send-wrap");
     const fire = async (): Promise<void> => {
       try {
@@ -938,19 +938,22 @@ export class Composer {
   }
 
   /** Reset the input, attachments, pasted blocks and persisted draft. Public so
-   * the held-messages controller can clear after bundling the draft. */
-  clearComposer(): void {
+   * the held-messages controller can clear after bundling the draft.
+   * `refreshStrip` false is for the two real-send paths only: they clear at send
+   * time, while the chat still reads as finished until the daemon answers, so a
+   * refresh would bring the quick-reply strip back under the "Sending... Undo"
+   * bar. Every other clear (schedule, discard, slash command) must refresh, or
+   * the strip stays hidden over an empty box. */
+  clearComposer(refreshStrip = true): void {
     if (this.textarea) this.textarea.value = "";
     this.autoResize();
     this.updateHighlight();
     // Reset voice state; stop an in-flight recording so a send mid-dictation
     // doesn't leave the controller running against stale anchor positions.
     this.cv.reset();
-    // Silent: clearComposer runs at send time, while the chat still reads as
-    // finished until the daemon answers, so refreshing the quick-reply strip
-    // here would bring it back under the "Sending... Undo" bar. A text-only
-    // clear never refreshed it either.
-    this.attChangeQuiet = true;
+    this.attChangeQuiet = !refreshStrip;
+    // The textarea is already empty, so this clear's own change event is what
+    // lets the strip show again.
     try { this.att.clear(); } finally { this.attChangeQuiet = false; }
     this.updateSendState();
     // Explicit clear: send/discard only, never blur or navigate-away.
