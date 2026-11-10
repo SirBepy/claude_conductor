@@ -1,4 +1,4 @@
-//! The cap of running subs and the slot a planned spawn holds until its registry
+//! The cap of started subs and the slot a planned spawn holds until its registry
 //! row exists. `spawn/mod.rs` decides whether a spawn may happen; this is the
 //! count it is held to.
 
@@ -93,7 +93,8 @@ impl Drop for Reservation {
     }
 }
 
-/// Subs of `parent` that count against the cap: not ended and not finished.
+/// Unfinished subs of `parent`, queued and never-started rows included. The cap
+/// counts [`started_subs`], not this.
 pub fn running_subs(registry: &Registry, parent: &str) -> Vec<Instance> {
     registry
         .list()
