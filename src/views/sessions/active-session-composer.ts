@@ -12,6 +12,7 @@ import { blocksToText } from "../../shared/chat/content-blocks";
 import { showToast } from "../../shared/toast";
 import type { ChatEvent, ContentBlock, Instance, ScheduledItem, ScheduledKind } from "../../types/ipc.generated";
 import { state } from "./state";
+import { saveScheduledEdit } from "./scheduled-edit-save";
 import { api } from "../../shared/api";
 import { isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar";
 import { isBlocked, formatClockLabel, capitalize, getCachedAccount } from "../../shared/chat/rate-limit-banner";
@@ -146,23 +147,7 @@ export function mountComposer(
           composer.beginScheduledEdit(item.prompt, {
             label: `${formatFireAt(item.fire_at)}${item.recurrence ? `, ${formatRecurrenceBadge(item.recurrence)}` : ""}`,
             onSave: async (blocks) => {
-              const prompt = blocksToText(blocks);
-              // Re-read the item: it may have fired or been deleted since the
-              // edit began, and an update would resurrect it.
-              const all = await invoke<ScheduledItem[]>("schedule_list");
-              const current = all.find((i) => i.id === item.id);
-              if (!current || current.status.type !== "pending") {
-                showToast("That message was already sent or removed. Your text is still here.");
-                throw new Error("scheduled item no longer pending");
-              }
-              try {
-                await invoke<void>("schedule_update", { item: { ...current, prompt } });
-              } catch (err) {
-                console.error("[sessions] schedule_update failed", err);
-                showToast(`Failed to save: ${err}`);
-                throw err;
-              }
-              showToast(`Still scheduled for ${formatFireAt(current.fire_at)}`);
+              await saveScheduledEdit(item, blocks);
               void state.scheduledChip?.refresh();
             },
           }),
