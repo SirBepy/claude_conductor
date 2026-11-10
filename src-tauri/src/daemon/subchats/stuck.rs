@@ -115,7 +115,11 @@ pub async fn sweep_dead(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> 
     for inst in state.registry.list() {
         let id = inst.session_id.clone();
         let Some(parent) = inst.subchat_of.clone() else { continue };
-        if inst.ended_at.is_some() || inst.subchat_finished || super::pause::is_paused(&inst, env.now.timestamp()) {
+        if inst.ended_at.is_some() || inst.subchat_finished {
+            super::announced::forget(&id);
+            continue;
+        }
+        if super::pause::is_paused(&inst, env.now.timestamp()) {
             continue;
         }
         // A sub the daemon holds without a child (the `after` queue) has not
@@ -141,7 +145,14 @@ pub async fn sweep_dead(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> 
         if env.now.signed_duration_since(since) < DEAD_GRACE {
             continue;
         }
-        if stall::raise_noted(state, &id, Stall::Unfinished, Some(NO_PROCESS_NOTE)).await.is_some() {
+        // A death announced before a restart is asked again quietly: the restart
+        // lost its card, not Joe's knowledge of it.
+        let raised = if super::announced::was_announced(&id) {
+            stall::raise_noted_quietly(state, &id, Stall::Unfinished, Some(NO_PROCESS_NOTE)).await
+        } else {
+            stall::raise_noted(state, &id, Stall::Unfinished, Some(NO_PROCESS_NOTE)).await
+        };
+        if raised.is_some() {
             rt.mark_death_carded(&id);
             carded.push(id);
         }
@@ -375,6 +386,34 @@ mod tests {
         assert!(run_dead(&st, true, 130).await.is_empty());
         run_dead(&st, false, 140).await;
         assert_eq!(run_dead(&st, false, 200).await, [sub]);
+    }
+
+    /// Every daemon start re-announced the same dead subs, eight at once on
+    /// 2026-11-10 18:27:52. The card is still asked again (a restart lost it),
+    /// but quietly: no sound, no push, no "input needed".
+    #[tokio::test(start_paused = true)]
+    async fn a_death_announced_before_a_restart_is_asked_again_quietly() {
+        let (st, sub) = idle_sub("dead-restart");
+        // The earlier daemon run announced it; this run's in-memory record is new.
+        crate::daemon::subchats::announced::mark(&sub);
+        let mut rx = st.notifier.subscribe();
+        run_dead(&st, false, 0).await;
+        assert_eq!(run_dead(&st, false, 60).await, [sub.clone()], "the card is asked again");
+        let cards = st.list_prompts().await;
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0]["payload"]["quiet"], true, "and does not ring or push");
+        assert_ne!(
+            st.registry.get("dead-restart-main").and_then(|i| i.awaiting).as_deref(),
+            Some("question"),
+            "the main chat is not flagged as waiting on Joe"
+        );
+        tokio::time::sleep(crate::daemon::notify_gate::SETTLE + std::time::Duration::from_millis(200)).await;
+        while let Ok(frame) = rx.try_recv() {
+            assert_ne!(frame["method"], "turn_sound", "no sound: {frame}");
+        }
+        // A new death after the sub came back is news again.
+        assert!(run_dead(&st, true, 70).await.is_empty());
+        assert!(!crate::daemon::subchats::announced::was_announced(&sub));
     }
 
     #[tokio::test]

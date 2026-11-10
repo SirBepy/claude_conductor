@@ -3,6 +3,7 @@
 //! daemon now performs on its own.
 
 use super::HookCtx;
+use crate::daemon::state::DaemonState;
 use crate::storage::token_store;
 use crate::tokens as token_stats;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
@@ -39,9 +40,9 @@ pub(super) async fn on_refresh(
         payload.transcript_path.as_deref().unwrap_or("-"),
     );
 
-    // Tell the app to kick a poll + play a sound. App handles audio + scraper.
-    // Skip for daemon-managed sessions: lifecycle.rs already fires `turn_sound`
-    // when the `result` line is detected, so publishing here would double the sound.
+    // Tell the app to kick a poll, and ring the turn's "done" through the notify
+    // gate. Skip for daemon-managed sessions: the pump already rings when the
+    // `result` line is detected, so doing it here would double the sound.
     let is_daemon_session = payload.session_id
         .as_deref()
         .map(|id| ctx.state.sessions.contains_key(id))
@@ -51,6 +52,7 @@ pub(super) async fn on_refresh(
             "refresh_requested",
             json!({"cwd": payload.cwd, "session_id": payload.session_id}),
         );
+        hook_sound(&ctx.state, &payload, "done");
     }
 
     // Token-record persist in background. The daemon now writes to the shared
@@ -148,10 +150,36 @@ pub(super) async fn on_notify(
     Json(payload): Json<RefreshPayload>,
 ) -> impl IntoResponse {
     log::info!("hook /notify: cwd={}", payload.cwd.as_deref().unwrap_or("-"));
-    ctx.state
-        .notifier
-        .publish("notify_requested", json!({"cwd": payload.cwd, "session_id": payload.session_id}));
+    hook_sound(&ctx.state, &payload, "question");
     StatusCode::OK
+}
+
+/// A Claude Code hook's sound. A session the daemon runs is keyed by its turn
+/// like every other chat sound, and its kind is what the chat already reports:
+/// the idle "waiting for input" Notification after a turn that ended `done` is
+/// that same `done`, and one after a question already rung is that question, so
+/// neither rings twice. One it does not run (an outside terminal) has no turn,
+/// so the gate keys it by session (or by folder when the hook sent no session)
+/// and applies only the settle and the floor.
+fn hook_sound(state: &Arc<DaemonState>, payload: &RefreshPayload, kind: &'static str) {
+    let daemon_run = payload.session_id.as_deref().filter(|id| state.sessions.contains_key(*id));
+    let gen = daemon_run.and_then(|id| crate::daemon::notify_gate::turn_of(state, id));
+    let reported_done = daemon_run
+        .and_then(|id| state.registry.get(id))
+        .is_some_and(|i| i.awaiting.as_deref() == Some("done"));
+    let kind = if reported_done { "done" } else { kind };
+    let key = payload
+        .session_id
+        .clone()
+        .or_else(|| payload.cwd.as_ref().map(|c| format!("cwd:{c}")))
+        .unwrap_or_else(|| "outside-session".to_string());
+    crate::daemon::notify_gate::sound(
+        state,
+        &key,
+        kind,
+        gen,
+        json!({ "session_id": payload.session_id, "cwd": payload.cwd, "awaiting": kind }),
+    );
 }
 
 pub(super) async fn on_quit(AxState(ctx): AxState<Arc<HookCtx>>) -> impl IntoResponse {

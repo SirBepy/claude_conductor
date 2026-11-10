@@ -131,7 +131,7 @@ async fn post_fire_and_forget_question(
         }
     }
     ctx.state.add_prompt(id, "question-requested", payload.clone(), true).await;
-    ctx.state.fire_blocked_prompt(session_id, id);
+    crate::daemon::notify_gate::push_blocked(&ctx.state, session_id, id);
     crate::daemon::jarvis_wake::wake_on_worker_blocked(&ctx.state, session_id, id, Some(wake_label)).await;
     let surfaced = set_question_awaiting(&ctx.state, session_id, true).await;
     if let Some(sid) = session_id {
@@ -139,8 +139,14 @@ async fn post_fire_and_forget_question(
         ctx.state.registry.mark_question_posted(sid, gen, surfaced);
     }
     let subs = ctx.state.notifier.publish("question_request", payload);
-    ctx.state.notifier.publish(
-        "turn_sound",
+    // A question with no session has no chat to dedupe on; it is its own key.
+    let key = session_id.map_or_else(|| format!("prompt:{id}"), str::to_string);
+    let gen = session_id.and_then(|sid| crate::daemon::notify_gate::turn_of(&ctx.state, sid));
+    crate::daemon::notify_gate::sound(
+        &ctx.state,
+        &key,
+        "question",
+        gen,
         json!({ "session_id": session_id, "awaiting": "question" }),
     );
     subs

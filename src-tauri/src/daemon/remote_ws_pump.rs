@@ -45,7 +45,7 @@ fn instances_changed_frame(state: &DaemonState, keep_jarvis: bool) -> String {
 /// because every notifier event (`instances_changed`,
 /// `project_created`, `scheduled_items_changed`, `scheduled_item_fired`,
 /// `permission_request`, `question_request`, `question_expired`,
-/// `turn_sound`, `refresh_requested`, `usage_poll_requested`, `notify_requested`, `quit_requested`,
+/// `turn_sound`, `refresh_requested`, `usage_poll_requested`, `quit_requested`,
 /// `skill_usage_changed`, `api_credit_status_changed`, `session_character_assigned`,
 /// `token_history_updated` - see the `notifier.publish` call sites across
 /// `daemon/`) mirrors data already exposed by an allowlisted `/api/rpc`

@@ -154,7 +154,7 @@ pub(super) async fn ask_human(
     state.pending.lock().await.insert(id.to_string(), tx);
     state.add_prompt(id, "permission-requested", payload.clone(), false).await;
     // Push the phone if Joe is away (ai_todo 119): Claude is now blocked on him.
-    state.fire_blocked_prompt(session_id, id);
+    crate::daemon::notify_gate::push_blocked(state, session_id, id);
     // Wake Jarvis (todo 272 chunk 3) if this prompt belongs to one of its
     // workers - no-op for every other session.
     crate::daemon::jarvis_wake::wake_on_worker_blocked(state, session_id, id, Some(tool_name)).await;

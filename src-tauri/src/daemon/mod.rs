@@ -30,6 +30,7 @@ pub mod machines;
 pub mod meeting_monitor;
 pub mod methods;
 pub mod notifier;
+pub mod notify_gate;
 pub mod preview;
 pub mod pump;
 pub mod push;

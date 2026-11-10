@@ -7,6 +7,8 @@
 //!
 //! Nothing here is persisted on purpose: a restart ends every turn, so a
 //! pending finish or a half-run nudge sequence has nothing left to apply to.
+//! The one exception, that a death card was already announced, lives in
+//! [`super::announced`].
 
 use super::finish::FinishRecord;
 use std::collections::HashMap;
@@ -151,14 +153,18 @@ impl Runtime {
             e.childless_since = None;
             e.death_carded = false;
         });
+        super::announced::forget(sub_id);
     }
 
     pub fn death_carded(&self, sub_id: &str) -> bool {
         self.with(sub_id, |e| e.death_carded)
     }
 
+    /// Also recorded in [`super::announced`], the one part of a death that
+    /// outlives the daemon, so a restart asks again without ringing again.
     pub fn mark_death_carded(&self, sub_id: &str) {
         self.with(sub_id, |e| e.death_carded = true);
+        super::announced::mark(sub_id);
     }
 
     /// Claims the sub for one `continue_sub`. `None` while another holds it. The
@@ -179,6 +185,7 @@ impl Runtime {
             e.childless_since = None;
             e.death_carded = false;
         });
+        super::announced::forget(sub_id);
     }
 }
 

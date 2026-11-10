@@ -154,7 +154,7 @@ pub fn worker_terminal_wake(
 }
 
 /// Shared by every hook-server prompt endpoint that already calls
-/// `DaemonState::fire_blocked_prompt`: if the prompt's owning session is one
+/// `notify_gate::push_blocked`: if the prompt's owning session is one
 /// of a Jarvis's workers, wake that Jarvis too. `kind` is an optional,
 /// purely cosmetic label folded into the wake line when the caller has one
 /// handy - always a fixed literal from the call site (a tool name off the

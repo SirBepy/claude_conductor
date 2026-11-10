@@ -79,7 +79,7 @@ pub(super) async fn on_secret_request(
     ctx.state.pending.lock().await.insert(body.id.clone(), tx);
     ctx.state.add_prompt(&body.id, "secret-requested", payload.clone(), false).await;
     // Push the phone if Joe is away, same as a blocking permission prompt.
-    ctx.state.fire_blocked_prompt(body.session_id.as_deref(), &body.id);
+    crate::daemon::notify_gate::push_blocked(&ctx.state, body.session_id.as_deref(), &body.id);
     crate::daemon::jarvis_wake::wake_on_worker_blocked(
         &ctx.state,
         body.session_id.as_deref(),

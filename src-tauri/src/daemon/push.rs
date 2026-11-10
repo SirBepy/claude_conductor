@@ -300,22 +300,23 @@ impl PushManager {
         session_name: String,
         prompt_id: String,
         show_chat_name: bool,
-    ) {
+    ) -> bool {
         if self.outbound_off.load(Ordering::Relaxed) {
-            return;
+            return false;
         }
         if crate::daemon::idle::idle_secs() < IDLE_THRESHOLD_SECS {
-            return; // Joe is at the desk - the in-app card already surfaces it.
+            return false; // Joe is at the desk - the in-app card already surfaces it.
         }
         if let Some(sid) = &session_id {
             let mut lf = self.last_fired.lock().unwrap();
             if lf.get(sid).map(|p| p == &prompt_id).unwrap_or(false) {
-                return; // already buzzed for this prompt
+                return false; // already buzzed for this prompt
             }
             lf.insert(sid.clone(), prompt_id.clone());
         }
 
         self.notify_all(session_id.as_deref(), &session_name, show_chat_name).await;
+        true
     }
 
     /// Nothing in `session_id` waits on Joe any more (answered on any screen,

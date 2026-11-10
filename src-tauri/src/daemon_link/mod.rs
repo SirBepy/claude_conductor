@@ -362,8 +362,10 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "subchat_card" => {
             let _ = app.emit("subchat-card", params);
         }
-        // Character turn sound: the daemon fires this when an in-app chat finishes
-        // a turn (done / plain-text question) or surfaces an AskUserQuestion. We
+        // Character turn sound: the daemon fires this, always through its notify
+        // gate (`daemon::notify_gate`), when a chat finishes a turn (done /
+        // plain-text question), surfaces a question card, or a Claude Code hook
+        // from an outside session reports one. We
         // map it to the existing notification path so it resolves the session
         // character + slot and respects mute/meeting/per-slot gating.
         "turn_sound" => {
@@ -405,46 +407,16 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         }
         "refresh_requested" => {
             let app2 = app.clone();
-            let cwd = params.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let session_id = params.get("session_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+            // The hook's sound arrives separately as `turn_sound`, through the
+            // daemon's notify gate (`daemon::notify_gate`).
             tokio::spawn(async move {
                 let _ = crate::scheduler::poll_once(&app2, crate::scheduler::PollTrigger::Hook).await;
-                let name = cwd.as_deref().and_then(crate::notifications::project_name_from_cwd);
-                crate::notifications::fire(
-                    &app2,
-                    crate::notifications::NotifKind::WorkFinished,
-                    crate::notifications::NotifContext { name, percent: None, ..Default::default() },
-                    session_id.as_deref(),
-                    cwd.as_deref(),
-                );
             });
         }
-        "notify_requested" => {
-            let cwd = params.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let session_id = params.get("session_id").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let name = cwd.as_deref().and_then(crate::notifications::project_name_from_cwd);
-            crate::notifications::fire(
-                app,
-                crate::notifications::NotifKind::QuestionAsked,
-                crate::notifications::NotifContext { name, percent: None, ..Default::default() },
-                session_id.as_deref(),
-                cwd.as_deref(),
-            );
-        }
-        // A question's prompt timed out with no answer. The card is removed via
-        // the reliable `prompt-resolved` poll path; here we just notify the user
-        // they missed it (best-effort - a dropped broadcast frame only costs the
-        // notification, not the cleanup).
-        "question_expired" => {
-            let session_id = params.get("session_id").and_then(|v| v.as_str()).map(|s| s.to_string());
-            crate::notifications::fire(
-                app,
-                crate::notifications::NotifKind::QuestionAsked,
-                crate::notifications::NotifContext { name: None, percent: None, ..Default::default() },
-                session_id.as_deref(),
-                None,
-            );
-        }
+        // Plays nothing: the question already rang when it was asked, and a
+        // withdrawn or dropped card is not news. The card itself is removed
+        // through the reliable `prompt-resolved` poll path.
+        "question_expired" => {}
         "quit_requested" => {
             app.exit(0);
         }

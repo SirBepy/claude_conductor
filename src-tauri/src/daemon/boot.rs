@@ -89,6 +89,10 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // subscriptions persisted under app_data.
     state.init_push(app_data.clone());
 
+    // Before anything can revive or card a sub, so the record of deaths already
+    // announced is read before it is first used (`subchats::announced`).
+    crate::daemon::subchats::announced::init();
+
     // Durable question cards come back before the hooks server or any RPC
     // serves, so the first `list_pending_prompts` poll already sees them. The
     // registry is not restored yet; `reconcile_pending_questions` (run once

@@ -157,6 +157,8 @@ pub struct DaemonState {
     /// `after_meeting` gate. Idle (no thread, no OS calls) until one of them
     /// asks - see `daemon::meeting_monitor`.
     pub meeting: Arc<crate::daemon::meeting_monitor::MeetingMonitor>,
+    /// Every chat sound and phone push goes through it - see `daemon::notify_gate`.
+    pub notify_gate: crate::daemon::notify_gate::NotifyGate,
 }
 
 impl DaemonState {
@@ -205,6 +207,7 @@ impl DaemonState {
             step_comments: Arc::new(Mutex::new(HashMap::new())),
             api_credit: crate::daemon::api_credit::ApiCreditHub::new(),
             meeting: Arc::new(crate::daemon::meeting_monitor::MeetingMonitor::new()),
+            notify_gate: crate::daemon::notify_gate::NotifyGate::new(),
         });
         // Weak, because the registry lives inside the state it would point back at.
         let weak = Arc::downgrade(&state);
@@ -289,34 +292,11 @@ impl DaemonState {
         let _ = self.push.set(pm);
     }
 
-    /// Fire a "Claude is blocked on you" push for a freshly-registered prompt.
-    /// No-op if push isn't initialised. Resolves a human session name from the
-    /// registry and spawns the (best-effort, idle-gated) send so the prompt
-    /// relay path is never delayed by a network call.
-    pub fn fire_blocked_prompt(&self, session_id: Option<&str>, prompt_id: &str) {
-        let Some(pm) = self.push.get().cloned() else { return };
-        let name = session_id
-            .and_then(|sid| self.registry.get(sid))
-            .map(|inst| {
-                inst.name.clone().unwrap_or_else(|| {
-                    inst.cwd
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "a chat".into())
-                })
-            })
-            .unwrap_or_else(|| "a chat".into());
-        let sid = session_id.map(|s| s.to_string());
-        let pid = prompt_id.to_string();
-        let show_name = self.settings.snapshot().push_show_chat_name();
-        tokio::spawn(async move {
-            pm.maybe_notify_blocked(sid, name, pid, show_name).await;
-        });
-    }
-
     /// `session_id` has no open prompt left: clear the phone's banner for it.
-    /// Spawned for the same reason as `fire_blocked_prompt`.
+    /// The chat no longer waits on Joe, so the notify gate counts its next
+    /// request as a change. The clear is spawned so no prompt path waits on the relay.
     pub fn fire_prompts_resolved(&self, session_id: &str) {
+        self.notify_gate.reset(session_id);
         let Some(pm) = self.push.get().cloned() else { return };
         let sid = session_id.to_string();
         tokio::spawn(async move {
