@@ -197,7 +197,9 @@ export class Composer {
     this.att = new ComposerAttachments({
       getSessionId: () => this.sessionId,
       getMachineId: () => this.opts.getMachineId?.() ?? null,
-      onChange: () => this.updateSendState(),
+      // An attached or pasted image changes whether the draft is empty without
+      // any keystroke, and the quick-reply strip above the box hides on that.
+      onChange: () => { this.updateSendState(); this.opts.onDraftActivity?.(); },
     });
     this.strayInput = new ComposerStrayInput({
       getTextarea: () => this.textarea,
