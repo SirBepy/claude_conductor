@@ -17,6 +17,7 @@ import { isCurrentSessionBusy, updateThinkingBar } from "./session-thinking-bar"
 import { isBlocked, formatClockLabel, capitalize, getCachedAccount } from "../../shared/chat/rate-limit-banner";
 import { loadHiddenSessions, saveHiddenSessions } from "./sessions-helpers";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
+import { refreshNextChips } from "./next-chip-strip";
 
 /** Attach the composer + held-messages controller, including the `sendBundle`
  * closure both use to actually send to the daemon. */
@@ -100,7 +101,10 @@ export function mountComposer(
     popLastHeld: () => state.heldMessages?.popLastForActive() ?? null,
     flushHeldWithDraft: (draftBlocks) => state.heldMessages?.flushHeldWithDraft(draftBlocks) ?? false,
     sendQueuedNow: () => { void state.heldMessages?.sendNow(); },
-    onDraftActivity: () => state.heldMessages?.notifyDraftActivity(),
+    onDraftActivity: () => {
+      state.heldMessages?.notifyDraftActivity();
+      refreshNextChips(pane);
+    },
     getNextTokenReset: async () => {
       if (!sess.account_id) return null;
       const map = await api.getUsageMap();

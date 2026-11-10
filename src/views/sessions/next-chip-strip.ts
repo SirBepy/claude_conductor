@@ -40,6 +40,11 @@ export function refreshNextChips(pane: HTMLElement): void {
   _lastPane = pane;
   const slot = pane.querySelector<HTMLElement>(".next-chip-slot");
   if (!slot) return;
+  // Hidden (not emptied) while a draft exists: the chips are suggestions for an
+  // empty box, and keeping the key below untouched means the same buttons come
+  // straight back once the box is cleared.
+  const typing = !!state.composer && !state.composer.isDraftEmpty();
+  slot.toggleAttribute("data-typing", typing);
   const id = state.selectedId;
   // The renderer can still be the previous chat's for a beat after a switch.
   const renderer = id && state.renderer?.sessionId === id ? state.renderer : null;

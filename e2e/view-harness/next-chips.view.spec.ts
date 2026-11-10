@@ -1,6 +1,6 @@
 // Reviewed 2026-11-10: the question card pads the scroller cardPaddedScroller picks (this pane's transcript as before, or the chat dashboard's body while it shows), active-session.ts detaches the chat dashboard on dismount, and a read-only session keeps Messages; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
-// asserts: src/views/sessions/next-chips.ts, src/views/sessions/next-chip-strip.ts, src/views/sessions/session-thinking-bar.ts, src/views/sessions/active-session.ts
+// asserts: src/views/sessions/next-chips.ts, src/views/sessions/next-chip-strip.ts, src/views/sessions/session-thinking-bar.ts, src/views/sessions/active-session.ts, src/views/sessions/active-session-composer.ts
 // Reviewed 2026-11-03: selectSession now returns when the chat was switched away during the statusbar settings read; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-01: the working bar lost its card and gained an opened block (session-thinking-bar.ts); this spec drives only the chip strip above it and passes.
 import { expect, test, type Page } from "@playwright/test";
@@ -42,11 +42,10 @@ test.describe("quick reply chips", () => {
     expect(chipBox.y + chipBox.height).toBeLessThanOrEqual(composerBox.y);
   });
 
-  test("a click fills the box with the command first and keeps what was typed", async ({ page }) => {
+  test("a click fills the empty box with the command and does not send it", async ({ page }) => {
     await mountChat(page);
-    await box(page).fill("it worked");
     await chip(page).click();
-    await expect(box(page)).toHaveValue("/close it worked");
+    await expect(box(page)).toHaveValue("/close ");
     expect((await invokeCalls(page)).some((c) => JSON.stringify(c.args ?? "").includes("/close"))).toBe(false);
   });
 
@@ -56,12 +55,20 @@ test.describe("quick reply chips", () => {
     await expect.poll(async () => (await invokeCalls(page)).some((c) => JSON.stringify(c.args ?? "").includes("/close"))).toBe(true);
   });
 
-  test("Shift+click with text typed fills instead of sending", async ({ page }) => {
+  test("the chips hide while a message is being typed and return when the box is emptied", async ({ page }) => {
     await mountChat(page);
-    await box(page).fill("it worked");
-    await chip(page).click({ modifiers: ["Shift"] });
-    await expect(box(page)).toHaveValue("/close it worked");
-    expect((await invokeCalls(page)).some((c) => JSON.stringify(c.args ?? "").includes("/close"))).toBe(false);
+    await expect(chip(page)).toHaveText(["/close"]);
+    await box(page).pressSequentially("it");
+    await expect(page.locator("#session-pane .next-chip-slot")).toBeHidden();
+    await box(page).fill("");
+    await expect(chip(page)).toHaveText(["/close"]);
+    await expect(chip(page)).toBeVisible();
+  });
+
+  test("a chip filling the box hides the strip like typing does", async ({ page }) => {
+    await mountChat(page);
+    await chip(page).click();
+    await expect(page.locator("#session-pane .next-chip-slot")).toBeHidden();
   });
 
   for (const [label, over] of [
@@ -108,21 +115,10 @@ test.describe("quick reply chips written by the model", () => {
     await expect.poll(async () => (await invokeCalls(page)).some((c) => JSON.stringify(c.args ?? "").includes("Yes, implement this"))).toBe(true);
   });
 
-  test("a reply goes above what was typed, and a second click does not stack it", async ({ page }) => {
+  test("every chip is hidden once the draft has text, so a reply cannot land on typed words", async ({ page }) => {
     await mountChat(page, {}, { load_history_page: proposal });
     await box(page).fill("but keep the old name");
-    const reply = chip(page).filter({ hasText: "Yes, implement this" });
-    await reply.click();
-    await expect(box(page)).toHaveValue("Yes, implement this\nbut keep the old name");
-    await reply.click();
-    await expect(box(page)).toHaveValue("Yes, implement this\nbut keep the old name");
-  });
-
-  test("a slash reply puts its command first like /close does", async ({ page }) => {
-    await mountChat(page, {}, { load_history_page: proposal });
-    await box(page).fill("everything");
-    await chip(page).filter({ hasText: "/commit" }).click();
-    await expect(box(page)).toHaveValue("/commit everything");
+    await expect(page.locator("#session-pane .next-chip-slot")).toBeHidden();
   });
 
   test("the replies are gone once Joe has written after them", async ({ page }) => {
