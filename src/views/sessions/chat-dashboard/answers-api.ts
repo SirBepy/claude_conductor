@@ -12,6 +12,8 @@ export interface ThreadSend {
   key: string | null;
   question: string;
   cwd: string | null;
+  /** The answer's question on a follow-up; on a new thread, the question card
+   *  it was asked from (question-ask.ts), else absent. */
   aboutQuestion?: string;
   aboutAnswer?: string;
 }

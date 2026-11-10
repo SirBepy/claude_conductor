@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (question-card-ask): the Ask panel and its strip/dial entries are gone, a question card's Ask (shown only in Dashboard view) minimizes the card and opens a thread in the Answers card, and the thread classes moved from ask-* to ax-*; nothing this spec asserts changed, and it passes.
 // asserts: src/router.ts, src/views/sessions/sessions.ts, src/views/sessions/sessions-teardown.ts, src/views/sessions/split-panels/split.ts, src/views/dashboard/dashboard.ts
 import { test, expect, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

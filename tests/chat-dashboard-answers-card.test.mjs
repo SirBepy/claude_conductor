@@ -42,7 +42,7 @@ function fakeDaemon() {
       if (db.gate) await db.gate;
       const id = db.store.threads[req.key] ?? `th${db.threads.length + 1}`;
       let t = db.threads.find((x) => x.id === id);
-      if (!t) { t = { id, title: "", created_at: 0, updated_at: 0, sidecar_session_id: null, messages: [] }; db.threads.push(t); }
+      if (!t) { t = { id, created_at: 0, updated_at: 0, sidecar_session_id: null, messages: [] }; db.threads.push(t); }
       t.messages.push({ role: "user", text: req.question, ts: Date.now() });
       t.messages.push({ role: "assistant", text: "Then it stays plain text.", ts: Date.now() + 1 });
       if (req.key) db.store.threads[req.key] = id;
@@ -217,7 +217,7 @@ describe("Answers card", () => {
     card(pane).querySelector(".ax-t-send").click();
     await wait();
     expect(db.sends[0]).toMatchObject({ key: "a2", question: "what if the board id is wrong?", aboutQuestion: "tr- links?" });
-    expect(card(pane).querySelector(".ax-tbody .ask-thinking")).not.toBeNull();
+    expect(card(pane).querySelector(".ax-tbody .ax-thinking")).not.toBeNull();
     // Back before the reply lands: the thread button blinks while Claude replies.
     click(pane, "close-thread");
     expect(card(pane).querySelector("[data-ax='reply']").classList.contains("ax-busy")).toBe(true);
@@ -280,7 +280,7 @@ describe("Answers card", () => {
     click(pane, "new-q");
     // A fresh thread: no earlier question, no "reading...", and sendable.
     expect(card(pane).querySelector(".ax-thead-v").textContent).toContain("Ask anything");
-    expect(card(pane).querySelector(".ax-tbody .ask-thinking")).toBeNull();
+    expect(card(pane).querySelector(".ax-tbody .ax-thinking")).toBeNull();
     open();
     await wait(30);
   });
@@ -312,7 +312,7 @@ describe("Answers card", () => {
     await wait(30);
     click(pane, "new-q");
     expect(card(pane).querySelector(".ax-thead-v").textContent).toBe("will this fail?");
-    expect(card(pane).querySelector(".ask-error").textContent).toContain("sidecar failed");
+    expect(card(pane).querySelector(".ax-error").textContent).toContain("sidecar failed");
     click(pane, "close-thread");
     click(pane, "new-q");
     expect(card(pane).querySelector(".ax-thead-v").textContent).toContain("Ask anything");
@@ -339,7 +339,7 @@ describe("Answers card", () => {
     expect(thbtn().classList.contains("ax-failed"), "the failure shows without reopening the thread").toBe(true);
     expect(thbtn().title).toContain("failed");
     click(pane, "reply");
-    expect(card(pane).querySelector(".ask-error").textContent).toContain("sidecar went away");
+    expect(card(pane).querySelector(".ax-error").textContent).toContain("sidecar went away");
     click(pane, "close-thread");
     await wait();
     expect(thbtn().classList.contains("ax-failed")).toBe(false);

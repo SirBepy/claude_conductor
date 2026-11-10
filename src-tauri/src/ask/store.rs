@@ -19,8 +19,6 @@ pub struct AskMessage {
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct AskThread {
     pub id: String,
-    /// Auto-titled from the first question; the index shows this.
-    pub title: String,
     pub created_at: i64,
     pub updated_at: i64,
     /// The sidecar's own `claude` session id, so a follow-up can `--resume` it.
@@ -33,7 +31,6 @@ impl AskThread {
     pub fn new(id: String, now: i64) -> Self {
         Self {
             id,
-            title: String::new(),
             created_at: now,
             updated_at: now,
             sidecar_session_id: None,
@@ -79,42 +76,9 @@ pub fn drop_for_chat(chat_session_id: &str) {
     super::answer_state::drop_for_chat(chat_session_id);
 }
 
-pub fn delete_thread(chat_session_id: &str, thread_id: &str) -> Result<Vec<AskThread>> {
-    let mut threads = load(chat_session_id);
-    threads.retain(|t| t.id != thread_id);
-    save(chat_session_id, &threads)?;
-    // The Answers card points at threads by id; a deleted one must not linger there.
-    super::answer_state::forget_thread(chat_session_id, thread_id)?;
-    Ok(threads)
-}
-
-/// First line of the first question, clipped. Used as the index label.
-pub fn title_from(question: &str) -> String {
-    let line = question.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
-    let mut out: String = line.chars().take(60).collect();
-    if line.chars().count() > 60 {
-        out.push_str("...");
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn title_from_clips_and_skips_blank_lines() {
-        assert_eq!(title_from("\n\nwhat was i meant to do here\nmore"), "what was i meant to do here");
-        let long = "x".repeat(80);
-        let t = title_from(&long);
-        assert_eq!(t.chars().count(), 63);
-        assert!(t.ends_with("..."));
-    }
-
-    #[test]
-    fn title_from_empty_is_empty() {
-        assert_eq!(title_from("   \n  "), "");
-    }
 
     #[test]
     fn file_for_rejects_path_traversal() {

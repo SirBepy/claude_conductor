@@ -48,6 +48,9 @@ export interface DashboardInput {
   busy?: boolean;
   /** What the daemon remembers for the Answers card, once loaded. */
   answers?: AnswerSide;
+  /** The Answers card holds an open thread (a question card's Ask opened one in
+   *  a chat with no answers yet): the zone draws to host it. */
+  answersThreadOpen?: boolean;
   /** This chat's subs, read from the instance list (subs-source.ts). */
   subs?: SubCardItem[];
   /** Clock for the Subchats card's one-hour fold; tests pass their own. */
@@ -145,7 +148,7 @@ export interface AnswersState {
  *  (chat-dashboard/answers-card.ts) decides which one shows. */
 export function deriveAnswers({ input }: DeriveCtx): AnswersState | null {
   const items = buildAnswerItems(input.messages, input.answers);
-  return items.length > 0 ? { items } : null;
+  return items.length > 0 || input.answersThreadOpen ? { items } : null;
 }
 
 export type WaitingItem =

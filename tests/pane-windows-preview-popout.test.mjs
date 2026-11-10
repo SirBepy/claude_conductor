@@ -23,7 +23,6 @@ vi.mock("../src/shared/events", () => ({
 }));
 
 const stubPanel = () => ({ setSessionScope() {}, setCwd() {}, refresh() {}, destroy() {}, openDraft() {} });
-vi.mock("../src/views/sessions/ask-panel", () => ({ mountAskPanel: stubPanel }));
 vi.mock("../src/views/sessions/todos-panel", () => ({ mountTodosPanel: stubPanel }));
 vi.mock("../src/views/sessions/drafts-panel", () => ({ mountDraftsPanel: stubPanel }));
 
@@ -37,7 +36,7 @@ function mountPane() {
   const layer = document.createElement("div");
   pane.appendChild(layer);
   document.body.appendChild(pane);
-  const windows = new PaneWindows(pane, layer, { onDraft() {}, mountPreview: stubTab, onChange() {} });
+  const windows = new PaneWindows(pane, layer, { mountPreview: stubTab, onChange() {} });
   windows.setSessionScope("sess-A", "/repo");
   return { layer, windows, preview: windows.previewController() };
 }
@@ -45,7 +44,7 @@ function mountPane() {
 const previewWindow = (layer) => layer.querySelector('.pw-window[data-active="preview"]');
 
 /** Drafts and Preview start in separate windows by default (Joe, 2026-10-19:
- *  Ask/Drafts snap bottom-right, Todos/Preview dock right, each solo). The
+ *  Drafts snaps bottom-right, Todos/Preview dock right, each solo). The
  *  "busy elsewhere" dot only has a tab strip to render on once a window
  *  holds more than one tab, so these tests seed a layout as if the user had
  *  already dragged Drafts and Preview into one shared window - the exact
@@ -54,7 +53,6 @@ function seedMergedDraftsPreview(sessionId) {
   const layout = {
     windows: [
       { id: "w-shared", tabs: ["drafts", "preview"], active: "drafts", placement: { kind: "float", rect: null }, open: false },
-      { id: "w-ask", tabs: ["ask"], active: "ask", placement: { kind: "snap", corner: "se" }, open: false },
       { id: "w-todos", tabs: ["todos"], active: "todos", placement: { kind: "dock", side: "right" }, open: false },
     ],
     dockShare: { left: null, right: null },

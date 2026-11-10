@@ -6,9 +6,10 @@
 // Got it walking back through the unread ones to All caught up, Read more
 // opening the rewritten question and the full text, History as the command
 // palette, and threads opening in place. A thread is an Ask thread: follow-ups
-// run the Ask panel's read-only sidecar (daemon/methods/answers.rs), so there is
-// no second spawn path. Read marks live in the daemon, so a Got it survives a
-// reload, a restart and the other device.
+// run the read-only Ask sidecar (daemon/methods/answers.rs), so there is no
+// second spawn path. A question card's Ask opens a thread here too (askAbout).
+// Read marks live in the daemon, so a Got it survives a reload, a restart and
+// the other device.
 //
 // The card owns its DOM inside the zone's fixed host (dashboard-zones.ts): a
 // re-derive hands it new answers instead of replacing it, so an animation, an
@@ -26,9 +27,9 @@ import {
   type AnswerItem, type AnswerSide, type AnswerStore,
 } from "../../../shared/chat/dashboard/answers-model";
 import type { ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
+import type { QuestionAsk } from "../question-ask";
 import { answersApi, cachedSide, emptySide, rememberSide } from "./answers-api";
 import { cardHtml } from "./dashboard-zones";
-import "../ask-panel.css";
 import "./answers-card.css";
 
 /** Thread keys of + questions that have no answer yet: `new:<n>`, one per
@@ -56,6 +57,8 @@ export interface AnswersCardDeps {
   onSideChange(): void;
   /** The transcript's passes for freshly drawn markup (code, file refs, commit refs). */
   decorate(root: HTMLElement): void;
+  /** Opens the question card a thread was asked from, minimized while Joe asked. */
+  expandQuestion(): void;
 }
 
 const esc = escapeHtml;
@@ -106,6 +109,16 @@ export class AnswersCard {
   private readonly failedAsk = new Map<string, string>();
   /** An unread answer that landed while Joe was in a thread: Back shows it. */
   private landedInThread: string | null = null;
+  /** Threads asked from a question card, by thread key: the card's question,
+   *  drawn at the top of the thread. A + key's entry moves to its answer's key
+   *  once the reply lands. In memory: the rewritten question carries it after. */
+  private readonly about = new Map<string, QuestionAsk>();
+  /** The open thread came from a question card's Ask, so Back reopens that card. */
+  private fromCard = false;
+  /** Focus the thread's box once the zone draws it (the zone may not exist yet). */
+  private focusOnDraw = false;
+  /** Unsent text of a thread a question card's Ask switched away from, by key. */
+  private readonly drafts = new Map<string, string>();
   private readonly seen = new Set<string>();
   /** Joe has used the card since it loaded: a late load must not move it under him. */
   private touched = false;
@@ -147,6 +160,41 @@ export class AnswersCard {
     if (!this.ready()) return;
     this.reconcile();
     this.render();
+    if (this.focusOnDraw && this.wire) {
+      this.focusOnDraw = false;
+      this.focusInput();
+    }
+  }
+
+  /** A thread is open: the dashboard draws the zone for it even with no answers. */
+  threadOpen(): boolean {
+    return this.thread !== null;
+  }
+
+  /** A question card's Ask: a thread about that question, Joe's first message the
+   *  question. Asking about the same card again goes back to its thread. */
+  askAbout(ask: QuestionAsk): void {
+    if (this.disposed) return;
+    this.touched = true;
+    let key = [...this.about.entries()].find(([k, a]) => a.card === ask.card && (isNew(k) || this.item(k)))?.[0];
+    if (!key) {
+      key = `${NEW_PREFIX}${++this.newSeq}`;
+      this.about.set(key, ask);
+    }
+    // Another thread's half-typed message waits for that thread to open again.
+    const typed = this.wire?.textarea.value ?? "";
+    if (this.wiredFor && this.wiredFor !== key && typed.trim()) this.drafts.set(this.wiredFor, typed);
+    this.thread = key;
+    this.fromCard = true;
+    this.anim = "ax-t-slide-open";
+    this.lastHtml = "";
+    this.focusOnDraw = true;
+    this.render();
+    if (this.wire) {
+      this.focusOnDraw = false;
+      this.focusInput();
+    }
+    this.deps.onSideChange();
   }
 
   /** The zone stopped drawing (no answers): forget the DOM, keep the state. */
@@ -184,6 +232,9 @@ export class AnswersCard {
       this.side = emptySide();
       this.thread = null;
       this.landedInThread = null;
+      this.about.clear();
+      this.drafts.clear();
+      this.fromCard = false;
       this.pending.clear();
       this.errors.clear();
       this.failedAsk.clear();
@@ -363,38 +414,47 @@ export class AnswersCard {
   private threadFace(): string {
     const fresh = isNew(this.thread);
     const item = fresh ? null : this.item(this.thread);
-    const title = fresh ? (this.pending.get(this.thread!) ?? this.failedAsk.get(this.thread!) ?? "Ask anything; your first message is the question") : item?.question || item?.verdict || "";
+    const card = fresh ? this.about.get(this.thread!) : undefined;
+    const title = card
+      ? card.title
+      : fresh ? (this.pending.get(this.thread!) ?? this.failedAsk.get(this.thread!) ?? "Ask anything; your first message is the question") : item?.question || item?.verdict || "";
     const sub = item?.verdict ? `<span class="ax-thead-s">${esc(item.verdict)}</span>` : "";
-    return `<div class="ax-thread ask-panel"><div class="ax-thead"><button type="button" class="ax-back" data-ax="close-thread" title="Back to the answer"><i class="ph ph-arrow-left"></i></button>`
-      + `<div class="ax-thead-t"><span class="ax-thead-k">${fresh ? "New question" : "Thread"}</span><span class="ax-thead-v" title="${esc(title)}">${esc(title)}</span>${sub}</div>`
+    const kind = card ? "About a question" : fresh ? "New question" : "Thread";
+    const back = this.fromCard ? "Back to the question" : "Back to the answer";
+    const placeholder = card ? "Ask about this question..." : fresh ? "Ask Claude a question..." : "Follow up on this answer...";
+    return `<div class="ax-thread"><div class="ax-thead"><button type="button" class="ax-back" data-ax="close-thread" title="${back}"><i class="ph ph-arrow-left"></i></button>`
+      + `<div class="ax-thead-t"><span class="ax-thead-k">${kind}</span><span class="ax-thead-v" title="${esc(title)}">${esc(title)}</span>${sub}</div>`
       + `<button type="button" class="ax-back ax-grow" data-ax="grow-thread" title="Taller thread (fills the window)"><i class="ph ph-arrows-out-simple"></i><i class="ph ph-arrows-in-simple"></i></button></div>`
-      + `<div class="ask-body ax-tbody"></div>`
-      + `<div class="ax-tcomp">${composerFieldHtml({ placeholder: fresh ? "Ask Claude a question..." : "Follow up on this answer...", inputClass: "ax-t-input", sendClass: "ax-t-send" })}</div></div>`;
+      + `<div class="ax-tbody"></div>`
+      + `<div class="ax-tcomp">${composerFieldHtml({ placeholder, inputClass: "ax-t-input", sendClass: "ax-t-send" })}</div></div>`;
   }
 
   private threadBodyHtml(): string {
     const key = this.thread!;
     const item = isNew(key) ? null : this.item(key);
     const parts: string[] = [];
+    // A thread asked from a question card opens on that question and its options.
+    const card = this.about.get(key);
+    if (card) parts.push(`<div class="msg assistant ax-t-bub ax-about">${renderMarkdown(card.about, false)}</div>`);
     if (item) {
       // Every thread opens on the question and the answer it got; they are not a back-and-forth.
       const raw = item.raw ? `<span class="ax-q0-raw">You wrote: ${esc(item.raw)}</span>` : "";
-      if (item.question) parts.push(`<div class="msg user ask-q ax-q0">${renderMarkdown(item.question, true)}${raw}</div>`);
+      if (item.question) parts.push(`<div class="msg user ax-q ax-q0">${renderMarkdown(item.question, true)}${raw}</div>`);
       parts.push(bubble(item.verdict, item.text));
       for (const m of threadFollowUps(item)) {
         parts.push(m.role === "user"
-          ? `<div class="msg user ask-q">${renderMarkdown(m.text, true)}</div>`
+          ? `<div class="msg user ax-q">${renderMarkdown(m.text, true)}</div>`
           : bubble("", withoutSuggestion(m.text)));
       }
     }
     const failedQ = this.failedAsk.get(key);
-    if (failedQ) parts.push(`<div class="msg user ask-q">${renderMarkdown(failedQ, true)}</div>`);
+    if (failedQ) parts.push(`<div class="msg user ax-q">${renderMarkdown(failedQ, true)}</div>`);
     const asking = this.pending.get(key);
-    if (asking) parts.push(`<div class="msg user ask-q">${renderMarkdown(asking, true)}</div>`, `<div class="ask-thinking"><span class="ask-spin"></span>reading...</div>`);
+    if (asking) parts.push(`<div class="msg user ax-q">${renderMarkdown(asking, true)}</div>`, `<div class="ax-thinking"><span class="ax-spin"></span>reading...</div>`);
     const err = this.errors.get(key);
-    if (err) parts.push(`<div class="ask-error">${esc(err)}</div>`);
+    if (err) parts.push(`<div class="ax-error">${esc(err)}</div>`);
     if (!parts.length) {
-      return `<div class="ask-empty"><i class="ph ph-chat-teardrop-dots"></i><span>Ask anything. Your first message is the question; Claude's reply lands in Answers.</span></div>`;
+      return `<div class="ax-empty"><i class="ph ph-chat-teardrop-dots"></i><span>Ask anything. Your first message is the question; Claude's reply lands in Answers.</span></div>`;
     }
     return parts.join("");
   }
@@ -435,7 +495,9 @@ export class AnswersCard {
     const key = this.thread!;
     const frame = shell(`<div class="ax-in">${this.threadFace()}</div>`, "ax-threadmode");
     if (frame !== this.lastHtml || this.wiredFor !== key) {
-      const draft = this.wiredFor === key ? this.wire?.textarea.value ?? "" : "";
+      const kept = this.drafts.get(key) ?? "";
+      this.drafts.delete(key);
+      const draft = this.wiredFor === key ? this.wire?.textarea.value ?? "" : kept;
       const hadFocus = !!this.wire && document.activeElement === this.wire.textarea;
       this.destroyWire();
       this.lastHtml = frame;
@@ -567,6 +629,7 @@ export class AnswersCard {
     const item = this.item(this.cur);
     if (!item || this.thread !== null) return;
     this.touched = true;
+    this.fromCard = false;
     this.thread = item.key;
     this.anim = "ax-t-slide-open";
     this.render();
@@ -576,9 +639,11 @@ export class AnswersCard {
   private newQuestion(): void {
     if (this.thread !== null) return;
     this.touched = true;
+    this.fromCard = false;
     // A + question whose send failed after Joe left it reopens, with its error,
-    // so it never vanishes silently; otherwise + starts a fresh one.
-    const failed = [...this.failedAsk.keys()].at(-1);
+    // so it never vanishes silently; otherwise + starts a fresh one. A question
+    // card's failed ask stays with that card's Ask.
+    const failed = [...this.failedAsk.keys()].filter((k) => !this.about.has(k)).at(-1);
     this.thread = failed ?? `${NEW_PREFIX}${++this.newSeq}`;
     this.anim = "ax-t-slide-open";
     this.render();
@@ -623,6 +688,8 @@ export class AnswersCard {
       this.failedAsk.delete(this.thread);
       this.errors.delete(this.thread);
     }
+    const reopenCard = this.fromCard;
+    this.fromCard = false;
     this.thread = null;
     this.anim = "ax-t-slide-close";
     // Back returns to the answer Joe was on, unless a newer one landed while he
@@ -634,6 +701,10 @@ export class AnswersCard {
     else if (!curItem) this.cur = nextUnread(this.items, this.store())?.key ?? null;
     this.lastHtml = "";
     this.render();
+    // The card was minimized for the thread; leaving it brings the card back.
+    if (reopenCard) this.deps.expandQuestion();
+    // A thread that was the zone's only reason to draw is gone.
+    if (this.items.length === 0) this.deps.onSideChange();
   }
 
   private focusInput(): void {
@@ -651,13 +722,15 @@ export class AnswersCard {
     this.pending.set(key, q);
     const item = isNew(key) ? null : this.item(key);
     const wasRead = item ? !this.unread(item) : false;
+    const card = isNew(key) ? this.about.get(key) : undefined;
     this.render();
     void answersApi().send({
       sessionId: sid,
       key: isNew(key) ? null : key,
       question: q,
       cwd: this.deps.cwd(),
-      aboutQuestion: item?.question,
+      // On a new thread this is the question card it was asked from.
+      aboutQuestion: card?.about ?? item?.question,
       aboutAnswer: item ? [item.verdict, item.text].filter(Boolean).join("\n") : undefined,
     })
       .then(({ thread, state }) => {
@@ -668,6 +741,16 @@ export class AnswersCard {
           const answerKey = `ask:${thread.id}`;
           // Still in the thread: it becomes this answer's thread, and the answer
           // waits unread for Back. Left already: it lands like any new answer.
+          if (card) {
+            this.about.delete(key);
+            this.about.set(answerKey, card);
+          }
+          // A follow-up typed while it was pending, kept when Ask switched away, follows the thread.
+          const kept = this.drafts.get(key);
+          if (kept !== undefined) {
+            this.drafts.delete(key);
+            this.drafts.set(answerKey, kept);
+          }
           if (this.thread === key) {
             // The thread keeps its message box (and any follow-up being typed) across the key change.
             if (this.wiredFor === key) this.wiredFor = answerKey;
@@ -755,8 +838,8 @@ export class AnswersCard {
 }
 
 /** How long a thread the daemon's list lacks is kept: long enough for a load
- *  that started before its reply was saved, short enough that a thread deleted
- *  in the Ask panel leaves the card. */
+ *  that started before its reply was saved, short enough that a thread gone
+ *  from the daemon's store leaves the card. */
 const LOCAL_THREAD_GRACE_MS = 60_000;
 
 /** The newer copy of each thread wins (a reply only ever adds messages). */

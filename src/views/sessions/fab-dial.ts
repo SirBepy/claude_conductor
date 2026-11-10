@@ -1,4 +1,4 @@
-// The chat pane's FAB: tap to fan out Ask / Todos / Drafts / Backlog / Code / Preview.
+// The chat pane's FAB: tap to fan out Todos / Drafts / Backlog / Code / Preview.
 // What a pick opens depends on the screen: on desktop a split beside the chat
 // with an icon strip on the far right (split-panels/), on the
 // phone a full-screen cover (pane-windows/).
@@ -15,8 +15,6 @@ import "../../../vendor/tauri_kit/frontend/pane-windows/pane-windows.css";
 import "./pane-windows/pane-windows.css";
 
 export interface FabDialDeps {
-  /** Ask's hand-off target: fills the real composer, unsent. */
-  onDraft(text: string): void;
   /** Mounts the Preview tab; null where this pane has no preview. */
   mountPreview: PanelDeps["mountPreview"];
   /** Enters Code mode for this chat. */
@@ -31,15 +29,13 @@ export interface FabDialHandle {
   openDraft(id: string): void;
   /** Bring one panel up, e.g. Backlog from the phone's todos chip. */
   openPanel(panel: PanelKey): void;
-  /** Open Ask with its input prefilled, e.g. from a question card. */
-  askAbout(text: string): void;
   /** What the rest of the view drives Preview through. */
   previewController(): PreviewController;
   close(): void;
   destroy(): void;
 }
 
-const DIAL: PanelKey[] = ["ask", "todos", "drafts", "backlog"];
+const DIAL: PanelKey[] = ["todos", "drafts", "backlog"];
 
 class FabDial implements FabDialHandle {
   private pane: HTMLElement;
@@ -69,7 +65,6 @@ class FabDial implements FabDialHandle {
     this.chrome.addEventListener("click", this.onClick);
     document.addEventListener("keydown", this.onKeydown);
     const hostDeps = {
-      onDraft: deps.onDraft,
       mountPreview: deps.mountPreview,
       onChange: () => {
         this.syncHost();
@@ -179,10 +174,6 @@ class FabDial implements FabDialHandle {
     this.renderChrome();
   }
 
-  askAbout(text: string): void {
-    this.windows.askAbout(text);
-  }
-
   previewController(): PreviewController {
     return this.windows.previewController();
   }
@@ -252,8 +243,8 @@ class FabDial implements FabDialHandle {
       : "";
     this.chrome.innerHTML =
       `<div class="fab-dial">${items}${code}${preview}</div>` +
-      `<button type="button" class="fab-dial-fab" data-fab-toggle title="Ask, Todos, Drafts, Backlog, Code, Preview" ` +
-        `aria-label="Ask, Todos, Drafts, Backlog, Code, Preview"><i class="ph ph-list"></i></button>`;
+      `<button type="button" class="fab-dial-fab" data-fab-toggle title="Todos, Drafts, Backlog, Code, Preview" ` +
+        `aria-label="Todos, Drafts, Backlog, Code, Preview"><i class="ph ph-list"></i></button>`;
     this.syncLift();
   }
 

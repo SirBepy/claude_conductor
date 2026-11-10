@@ -25,7 +25,7 @@ pub async fn answers_mark(
         .map_err(|e| e.to_string())
 }
 
-/// Blocks for the Ask sidecar's whole run, like `ask_send`.
+/// Blocks for the Ask sidecar's whole run (seconds, not milliseconds).
 #[tauri::command]
 pub async fn answers_thread_send(
     session_id: String,

@@ -1,7 +1,7 @@
 //! The chat dashboard's Answers card (docs/chat-dashboard-design.md, "Answers
 //! card"): which answers Joe has read, and the threads behind them. A thread is
-//! an Ask thread (`methods/ask.rs`), so a follow-up runs the same read-only
-//! sidecar the Ask panel does and needs no spawn path of its own.
+//! an Ask thread (`methods/ask.rs`), so a follow-up runs the read-only Ask
+//! sidecar and needs no spawn path of its own.
 //!
 //! Desktop-pipe only: absent from `remote_transport_table::TRANSPORT_TABLE`,
 //! since the phone always draws the Messages view and never shows the card.
@@ -28,6 +28,18 @@ pub(crate) const NEW_QUESTION_CONTEXT: &str = "Joe asks this from the chat dashb
 Begin your reply with exactly two lines, then a blank line, then the answer:\n\
 QUESTION: <his question rewritten as one clear question>\n\
 VERDICT: <the answer in at most 40 characters, as a person would say it out loud>";
+
+/// The first prompt of a thread Joe opened with a question card's Ask: the card
+/// (its question and options, as the webview's `question-ask.ts` writes them) is
+/// what he asks about, and the reply still opens with the two lines the card
+/// parses, since it lands in Answers like a + question.
+pub(crate) fn card_question_context(card: &str) -> String {
+    format!(
+        "Joe has a question card from his chat waiting for his answer, and asks about it before \
+answering. The card:\n{}\n\n{NEW_QUESTION_CONTEXT}",
+        card.trim()
+    )
+}
 
 /// The first prompt of a follow-up thread on an answer the chat gave.
 pub(crate) fn follow_up_context(question: &str, answer: &str) -> String {
@@ -77,9 +89,10 @@ pub fn register_answers(router: &mut Router, _state: Arc<DaemonState>) {
         state_json(&s)
     });
 
-    // Blocks for the sidecar's run like `ask_send`. `key` names the answer the
-    // thread follows up on; no `key` starts a + question, whose thread then
-    // stands for its own answer.
+    // Blocks for the sidecar's whole run. `key` names the answer the thread
+    // follows up on; no `key` starts a + question, whose thread then stands for
+    // its own answer, and `about_question` on such a question is the question
+    // card it was asked from.
     router.register("answers_thread_send", move |params, _ctx| async move {
         #[derive(Deserialize)]
         struct P {
@@ -96,13 +109,15 @@ pub fn register_answers(router: &mut Router, _state: Arc<DaemonState>) {
         }
         let p: P = parse(params)?;
         let key = p.key.as_deref().map(str::trim).filter(|k| !k.is_empty());
-        // A link to a thread Joe deleted in the Ask panel starts a fresh thread
-        // instead of failing every later follow-up with "no Ask thread".
+        // A link to a thread missing from the store (its file lost or unreadable)
+        // starts a fresh thread instead of failing every later follow-up with
+        // "no Ask thread".
         let existing = key
             .and_then(|k| answer_state::load(&p.session_id).thread_of(k))
             .filter(|id| crate::ask::store::load(&p.session_id).iter().any(|t| &t.id == id));
         let context = match key {
             Some(_) => follow_up_context(&p.about_question, &p.about_answer),
+            None if !p.about_question.trim().is_empty() => card_question_context(&p.about_question),
             None => NEW_QUESTION_CONTEXT.to_string(),
         };
         let thread = super::ask::ask_send_with(
@@ -134,6 +149,13 @@ mod tests {
         assert!(c.contains("The answer was:\nNo, read-only is enough"));
         assert!(c.ends_with("His follow-up:"));
         assert!(!follow_up_context("", "").contains("question was"));
+    }
+
+    #[test]
+    fn card_question_context_carries_the_card_and_the_two_lines() {
+        let c = card_question_context("  Where should the key live?\n\n- **Key modal**: in .env  ");
+        assert!(c.contains("The card:\nWhere should the key live?\n\n- **Key modal**: in .env\n"));
+        assert!(c.contains("\nQUESTION: ") && c.contains("\nVERDICT: "));
     }
 
     #[test]

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (question-card-ask): the Ask panel and its strip/dial entries are gone, a question card's Ask (shown only in Dashboard view) minimizes the card and opens a thread in the Answers card, and the thread classes moved from ask-* to ax-*; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-09: sessions-dom-wiring.ts only wires the three-dots button when it exists (phone only now); this spec drives the Ctrl-held hints and passed.
 // Reviewed 2026-11-08: sessions-dom-wiring.ts routes the desktop three-dots button to the command palette; the Ctrl chat-number hint this spec drives is unchanged and it passed.
 // Reviewed 2026-11-02: the working line is now --control-h-sm tall (--control-h on a phone); nothing this spec drives changed and it passes.

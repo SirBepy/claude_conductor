@@ -40,7 +40,6 @@ const HISTORY = [
 
 const THREAD = {
   id: "th1",
-  title: "can u send me the command again?",
   created_at: 1,
   updated_at: 2,
   sidecar_session_id: "side-1",

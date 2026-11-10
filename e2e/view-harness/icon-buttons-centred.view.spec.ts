@@ -29,6 +29,8 @@ const QUESTION = [{
 async function openChatWithCard(page: Page): Promise<void> {
   await mountView(page, {
     view: "sessions",
+    // Dashboard view, where the card's Ask button shows (Messages view has none).
+    chatView: "dashboard",
     invoke: {
       ...SESSIONS_BASE_INVOKE,
       list_instances: [SESSION],

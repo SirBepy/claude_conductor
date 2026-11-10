@@ -55,7 +55,7 @@ async function mountChat(page: Page): Promise<void> {
       pane.querySelector("#chat-col")!.appendChild(msg);
       const pv = await import("/views/sessions/preview-panel.ts");
       const mod = await import("/views/sessions/fab-dial.ts");
-      const fab = mod.mountFabDial(pane, { onDraft: () => {}, onCode: () => {}, mountPreview: pv.mountPreviewTab });
+      const fab = mod.mountFabDial(pane, { onCode: () => {}, mountPreview: pv.mountPreviewTab });
       fab.setSessionScope("sess-A", "C:\\proj");
       const ev = await import("/views/sessions/backlog-panel/backlog-open-event.ts");
       const click = await import("/views/sessions/backlog-panel/todo-ref-click.ts");

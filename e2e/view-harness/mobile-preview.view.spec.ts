@@ -138,9 +138,9 @@ test("a non-preview panel also opens as a full cover with its bar at the bottom"
   await page.setViewportSize(PHONE);
   await mountPhone(page, { fab: true });
   await page.locator(".fab-dial-fab").click();
-  await page.locator('[data-dial="ask"]').click();
+  await page.locator('[data-dial="todos"]').click();
 
-  const win = page.locator('.pw-window[data-active="ask"]');
+  const win = page.locator('.pw-window[data-active="todos"]');
   await expect(win).toBeVisible();
   const box = (await win.boundingBox())!;
   const pane = (await page.locator(".session-pane").boundingBox())!;

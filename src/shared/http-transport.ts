@@ -348,22 +348,7 @@ export class HttpTransport implements Transport {
       // The phone's one settings write (it is refused save_settings).
       case "set_push_show_chat_name":
         return this.rpc<T>("set_push_show_chat_name", { value: args.value });
-      // Ask panel (todo 1007): same fab-dial reachability as Todos above.
-      case "ask_list_threads":
-        return this.rpc<T>("ask_list_threads", { session_id: args.sessionId ?? args.session_id });
-      case "ask_send":
-        return this.rpc<T>("ask_send", {
-          session_id: args.sessionId ?? args.session_id,
-          thread_id: args.threadId ?? args.thread_id ?? null,
-          question: args.question,
-          cwd: args.cwd ?? null,
-        });
-      case "ask_delete_thread":
-        return this.rpc<T>("ask_delete_thread", {
-          session_id: args.sessionId ?? args.session_id,
-          thread_id: args.threadId ?? args.thread_id,
-        });
-      // Dictation cleanup pass: stateless, same reachability as Ask above.
+      // Dictation cleanup pass: stateless.
       case "voice_clean_transcript":
         return this.rpc<T>("voice_clean_transcript", { text: args.text });
       // Drafts panel (todo 1007): same fab-dial reachability as Todos above.

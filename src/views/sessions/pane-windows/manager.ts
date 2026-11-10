@@ -111,12 +111,6 @@ export class PaneWindows implements PanelHost {
     this.mgr.openPanel(panel);
   }
 
-  /** Brings Ask up with its input prefilled. */
-  askAbout(text: string): void {
-    this.openPanel("ask");
-    this.handles.get("ask")?.seed?.(text);
-  }
-
   togglePanel(panel: PanelKey): void {
     this.mgr.togglePanel(panel);
   }
@@ -173,7 +167,6 @@ export class PaneWindows implements PanelHost {
 
   private mountOne(panel: PanelKey, root: HTMLElement): { destroy(): void } {
     const deps: PanelDeps = {
-      onDraft: this.deps.onDraft,
       mountPreview: this.deps.mountPreview,
       previewDeps: this.previewDeps(),
     };

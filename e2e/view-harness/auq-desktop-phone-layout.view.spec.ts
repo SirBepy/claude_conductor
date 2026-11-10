@@ -47,6 +47,8 @@ async function mountDesktopSession(page: Page): Promise<void> {
   await page.setViewportSize(DESKTOP);
   await mountView(page, {
     view: "sessions",
+    // Dashboard view, where the card's Ask button shows (Messages view has none).
+    chatView: "dashboard",
     invoke: {
       ...SESSIONS_BASE_INVOKE,
       list_instances: [SESSION],

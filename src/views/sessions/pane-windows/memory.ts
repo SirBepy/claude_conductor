@@ -11,14 +11,13 @@ import type { PanelKey } from "./panels";
 
 /** Where a panel starts before it has ever been moved in this chat (Joe,
  *  2026-10-19): Preview and Todos default to a full-height dock on the
- *  right, Ask and Drafts default to the bottom-right corner - nothing
+ *  right, Drafts defaults to the bottom-right corner - nothing
  *  auto-opens, this only decides where a panel lands once the user opens it
  *  themselves. Each panel gets its own window rather than sharing the old
  *  single "main" tab strip, so these placements don't collide. Once a panel
  *  is dragged anywhere (including back to centre), the stored layout below
  *  wins and this never runs again for that chat. */
 const FRESH_PLACEMENT: Record<PanelKey, Placement> = {
-  ask: { kind: "snap", corner: "se" },
   drafts: { kind: "snap", corner: "se" },
   backlog: { kind: "dock", side: "right" },
   todos: { kind: "dock", side: "right" },
@@ -48,7 +47,7 @@ function legacyCard(sessionId: string): { panel: PanelKey; open: boolean } | nul
   try {
     const all = JSON.parse(localStorage.getItem(LEGACY_CARD_KEY) ?? "{}");
     const hit = all?.[sessionId];
-    if (hit && ["ask", "todos", "drafts"].includes(hit.panel)) return { panel: hit.panel, open: true };
+    if (hit && ["todos", "drafts"].includes(hit.panel)) return { panel: hit.panel, open: true };
   } catch {
     /* ignore */
   }
