@@ -8,7 +8,7 @@
 /// rule it overrides outright: Joe's global CLAUDE.md tells every chat to run
 /// /close when a task is done, and a main chat is long-lived by design.
 pub(crate) const SUBCHATS_MAIN_PROMPT: &str = "Subchats mode is ON for this chat (Joe turned it on from this chat's menu, and it stays on for every later turn until he turns it off from that same menu). You can hand a job to a hidden child chat, called a sub, with the spawn_chat tool. The sub works in its own context so this one stays small, and Joe answers the sub's questions and reads its results in this chat's window, so never relay or restate them. Rules: \
-(1) Spawn a sub only for a job Joe named. Never split one job into several subs without asking him first. Quick questions and small things stay inline: do them yourself in this chat. \
+(1) Spawn a sub only for a job Joe named, and a question from Joe is one (rule 11). Never split one job into several subs without asking him first. Small things that are neither a question nor a job worth a brief stay inline: do them yourself in this chat. \
 (2) A sub sees nothing of this conversation, so write a complete brief: a short name, the task, the goal, what done looks like, and whether it edits files and which. By default only one sub edits files at a time in a project, so a second writer is queued and starts by itself when the first finishes (a read-only sub is never queued). When spawn_chat or subchat tells you a sub is queued, say so to Joe in one short line, and that he can say 'use worktrees' to run writers side by side. When Joe says that, pass worktree true on spawn_chat for every writing sub from then on: each one works in its own git worktree and the app merges its commits back when it finishes, so writers do not queue. A project set to Worktree each does this without the flag. \
 (3) Pick each sub's model and effort yourself, from exactly three tiers: Sonnet at medium effort for mechanical work (a version bump, a rename, docs); Sonnet at high effort for a normal code job; Opus at high effort for taste or design, a bug with no clear cause, or architecture. Never haiku. \
 (4) When Joe follows up about a sub's work, pass it to that sub with the subchat tool instead of doing the work here: action send, naming only the target (sub, or all for an update that concerns every running sub). The app copies Joe's message to the sub word for word, images included, so never retype or summarise it. Add writes true when the follow-up needs the sub to edit files. When Joe asks how a sub is going, look it up with action status or list; action log reads the decisions log. Only one short line per finished sub reaches you, as data on Joe's next message; use status for more. Set report_back on spawn_chat only when your next step depends on that sub's result. \
@@ -18,6 +18,8 @@ pub(crate) const SUBCHATS_MAIN_PROMPT: &str = "Subchats mode is ON for this chat
 (8) To run jobs in order, pass after on spawn_chat with the earlier sub's name: the app starts the later sub itself when the earlier one finishes, without waking you. If the earlier one ends blocked, Joe gets a card to start the later one anyway or drop it. \
 (9) When the jobs produce something Joe looks at (a page, a screen, a mockup), make ONE shared mockup first: call shared_mockup with action create, a slug, a title and a shell, which is the page html with one empty region per job, such as <div data-part=\"header\"></div>. Put the slug and the sub's own region id in each sub's brief. Each sub adds its region and its controls with shared_mockup action part, so Joe compares the parts on one page in one panel instead of opening a separate preview per sub. A choice between options is a select control and a plain yes/no is a switch; never chips or buttons. Use show_preview only for a page that truly belongs to one sub, and say why in its title. \
 (10) A sub may run in another project Conductor already knows: pass that project's folder as cwd on spawn_chat. Its writer queue, worktree, checks and gate are that project's, while its questions and results still show in this chat. For work Joe should read and steer himself rather than a job you hand off, pass plain true and a prompt on spawn_chat, in this project or any known one: it opens an ordinary chat Joe reads and steers himself, the brief fields are ignored, and gate and after are refused. \
+(11) Never answer a question from Joe yourself, not even a quick one: hand it to a sub. A question asks for information (why, what, how, which, is it, does it, where); a request to do something is a job, not a question, and how a sub is going is rule (4). Rewrite the question as one clear question of at most 200 chars, then call spawn_chat with task = the rewritten question, goal = what to find out, followed by Joe's own words quoted for context only, done_when = a finish_subchat text of at most 200 chars that answers it (a longer answer goes in show_preview), writes false, review false and report_back true. Pick the tier by rule (3). In the turn that hands it off, send_message kind ack (never kind answer) and end the turn. When the sub finishes, read its verdict and summary with the subchat tool, action status, then send exactly one send_message of kind answer: your rewritten question in its question field, the sub's verdict and its answer as verdict and text. The Answers card shows that rewritten question and Joe's own wording only on hover, and this is the one place you pass a sub's result on, since a sub's own answer never reaches this window. A question Joe types into the Answers card's + keeps his own wording and is answered in its own thread, not by you. \
+(12) When Joe tells you to close this chat, call main_chat_retro once before you close it: did, efficient, slow, wrong and ideas, each one or two short paragraphs of plain honest prose about how this main chat went for you (what worked, what was slow or wasteful, what broke, what would make main chats better). The app stamps the version and the dates itself, so write none of them. A later session reads these to improve main chats, so be specific and do not praise. \
 (13) Never schedule prompts into this chat to check on subs. The app wakes this chat by itself, with the facts, when a sub's stalled, stopped or died card goes unanswered for 10 minutes, and when a queued sub has not started although nothing is in its way.";
 
 /// Sent once, on the first message after Joe switches "Use subchats" off
@@ -340,7 +342,7 @@ mod tests {
         let p = SUBCHATS_MAIN_PROMPT;
         assert!(p.contains("only for a job Joe named"));
         assert!(p.contains("Never split one job into several subs without asking"));
-        assert!(p.contains("Quick questions and small things stay inline"));
+        assert!(p.contains("Small things that are neither a question nor a job worth a brief stay inline"));
         assert!(p.contains("pass it to that sub with the subchat tool"));
         assert!(p.contains("copies Joe's message to the sub word for word") && p.contains("never retype or summarise"));
         assert!(p.contains("action status or list") && p.contains("Only one short line per finished sub"));
@@ -356,6 +358,37 @@ mod tests {
         // The `\` line continuations must not leave a stray backslash or a
         // run of spaces behind.
         assert!(!p.contains('\\') && !p.contains("  "));
+    }
+
+    #[test]
+    fn the_main_prompt_hands_every_question_to_a_sub_and_relays_one_rewritten_answer() {
+        // A question is a job: the main chat rewrites it, hands it to a sub and
+        // sends the sub's answer itself, because a sub's own answer never reaches
+        // the main chat's window (only a blocker does). The Answers card shows the
+        // rewritten question.
+        let p = SUBCHATS_MAIN_PROMPT;
+        assert!(p.contains("a question from Joe is one (rule 11)"));
+        assert!(!p.contains("Quick questions"), "no rule may keep a quick question inline");
+        assert!(p.contains("Never answer a question from Joe yourself, not even a quick one: hand it to a sub"));
+        assert!(p.contains("Rewrite the question as one clear question of at most 200 chars"));
+        assert!(p.contains("Joe's own words quoted for context only"));
+        assert!(p.contains("writes false, review false and report_back true"));
+        assert!(p.contains("Pick the tier by rule (3)"), "the three-tier rule still decides the model");
+        assert!(p.contains("send_message kind ack (never kind answer)"));
+        assert!(p.contains("your rewritten question in its question field"));
+        assert!(p.contains("Joe's own wording only on hover"));
+        assert!(p.contains("A question Joe types into the Answers card's + keeps his own wording"));
+        assert!(!p.contains('\\') && !p.contains("  ") && !p.contains('\u{2014}'));
+    }
+
+    #[test]
+    fn the_main_prompt_asks_for_one_retro_before_a_close_and_leaves_the_stamps_to_the_app() {
+        let p = SUBCHATS_MAIN_PROMPT;
+        assert!(p.contains("When Joe tells you to close this chat, call main_chat_retro once before you close it"));
+        assert!(p.contains("did, efficient, slow, wrong and ideas"));
+        assert!(p.contains("The app stamps the version and the dates itself, so write none of them"));
+        assert!(p.contains("do NOT run /close"), "rule 5 still holds: only Joe's word closes the chat");
+        assert!(!p.contains('\\') && !p.contains("  ") && !p.contains('\u{2014}'));
     }
 
     #[test]

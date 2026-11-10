@@ -90,9 +90,16 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
   over the question inside the thread. A + question keeps a thread first, and its reply lands as an
   unread answer. A reply after leaving a thread makes the answer unread again.
 - **The main chat never answers a question itself:** it rewrites it and hands it to a sub, keeping
-  the original (2026-11-10, its own main-chat job, not built).
+  the original (2026-11-10). Built in lane 5 as rules (1) and (11) of `SUBCHATS_MAIN_PROMPT`
+  (`daemon/claude_config/args.rs`). A sub's own `send_message` answer never reaches the main chat's
+  window (only a blocker does, `hooks_server/messages/mod.rs`), and the Answers card reads only the
+  main chat's own `answer` rows, so the main chat sends the one `answer` itself after the sub
+  finishes (its rewritten question in `question`, the sub's verdict and text), and sends an `ack`
+  (not shown) in the hand-off turn.
 - **Question card icon:** `ph-chat-circle` with `ph-question-mark` stacked inside it; the dotted
-  chat bubble moves to Answers (2026-11-10, its own job, not built).
+  chat bubble moves to Answers (2026-11-10). Built in lane 5: `shared/question-icon.ts` draws it for
+  the live card, the read-only card and the transcript card's summary; the Answers header already
+  used the dotted bubble.
 - Ruled out: an earlier-questions list inside the card, a deck of unread, threads under the answer
   or in a drawer, thread summaries, the question shown at rest or in a tooltip, a More button, fixed
   heights of 240/280/320 or growing with content, the slide/crossfade/blur/scale Got it presets.
