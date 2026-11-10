@@ -158,6 +158,8 @@ struct Meta {
     authorization_endpoint: String,
     token_endpoint: String,
     registration_endpoint: String,
+    /// The resource's `scopes_supported`, space-joined; rodge's tools need them asked for.
+    scope: Option<String>,
 }
 
 async fn get_json(c: &reqwest::Client, url: &str) -> Option<Value> {
@@ -178,6 +180,11 @@ async fn discover(c: &reqwest::Client, mcp_url: &str) -> Result<Meta, String> {
         Some(v) => Some(v),
         None => get_json(c, &format!("{origin}/.well-known/oauth-protected-resource")).await,
     };
+    let scope = prm
+        .as_ref()
+        .and_then(|v| v.get("scopes_supported")?.as_array().cloned())
+        .map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
+        .filter(|s| !s.is_empty());
     let as_base = prm
         .as_ref()
         .and_then(|v| v.get("authorization_servers")?.get(0)?.as_str().map(|s| s.trim_end_matches('/').to_string()))
@@ -190,6 +197,7 @@ async fn discover(c: &reqwest::Client, mcp_url: &str) -> Result<Meta, String> {
         authorization_endpoint: field("authorization_endpoint")?,
         token_endpoint: field("token_endpoint")?,
         registration_endpoint: field("registration_endpoint")?,
+        scope,
     })
 }
 
@@ -229,6 +237,9 @@ pub(crate) async fn begin_sign_in(path: PathBuf, mcp_url: String) -> Result<Stri
         .append_pair("code_challenge_method", "S256")
         .append_pair("state", &state)
         .append_pair("resource", &mcp_url);
+    if let Some(scope) = &meta.scope {
+        auth.query_pairs_mut().append_pair("scope", scope);
+    }
     tokio::spawn(async move {
         match tokio::time::timeout(CALLBACK_WAIT, finish(listener, &c, &meta, &client_id, &redirect, &verifier, &state, &mcp_url)).await {
             Ok(Ok(entry)) => {
@@ -419,6 +430,31 @@ mod tests {
         assert!(!signed_in(&path, "u"));
     }
 
+    /// Against a real rodge dev server (`MCP_LIVE_URL`, e.g. http://localhost:5173/mcp):
+    /// discovery, registration and an authorize request that rodge accepts. The
+    /// consent click is a person's, so this stops at the authorize response.
+    /// Run: cargo test --lib -- --ignored live_rodge_accepts
+    #[tokio::test]
+    #[ignore]
+    async fn live_rodge_accepts_discovery_registration_and_the_authorize_request() {
+        let url = std::env::var("MCP_LIVE_URL").unwrap_or_else(|_| "http://localhost:5173/mcp".into());
+        let (_d, path) = tmp();
+        let auth = begin_sign_in(path, url).await.expect("discovery and registration");
+        let res = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap()
+            .get(&auth)
+            .send()
+            .await
+            .unwrap();
+        let status = res.status().as_u16();
+        let location = res.headers().get("location").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+        println!("authorize -> {status} {location}");
+        assert!(status < 400, "rodge refused the authorize request: {status} {location}");
+        assert!(!location.contains("error="), "rodge redirected with an error: {location}");
+    }
+
     #[tokio::test]
     async fn sign_in_discovers_registers_and_stores_the_token_from_the_callback() {
         let hits = Arc::new(AtomicUsize::new(0));
@@ -428,7 +464,10 @@ mod tests {
         let base = fake_server(hits, move |path, body| {
             let base = cell.get().cloned().unwrap_or_default();
             match path {
-                p if p.starts_with("/.well-known/oauth-protected-resource") => (404, "{}".into()),
+                p if p.starts_with("/.well-known/oauth-protected-resource") => (
+                    200,
+                    format!(r#"{{"resource":"{base}/mcp","authorization_servers":["{base}"],"scopes_supported":["mail.read","drafts.write"]}}"#),
+                ),
                 "/.well-known/oauth-authorization-server" => (
                     200,
                     format!(r#"{{"authorization_endpoint":"{base}/oauth/authorize","token_endpoint":"{base}/oauth/token","registration_endpoint":"{base}/oauth/register"}}"#),
@@ -453,6 +492,7 @@ mod tests {
         let q: HashMap<_, _> = auth.query_pairs().into_owned().collect();
         assert_eq!(q["code_challenge_method"], "S256");
         assert_eq!(q["resource"], mcp);
+        assert_eq!(q["scope"], "mail.read drafts.write");
         // The browser's redirect back to the loopback listener.
         reqwest::get(format!("{}?code=the-code&state={}", q["redirect_uri"], q["state"])).await.unwrap();
         for _ in 0..50 {

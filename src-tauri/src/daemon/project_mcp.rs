@@ -109,8 +109,10 @@ fn check(s: &ProjectMcpServer) -> Result<(), &'static str> {
     }
 }
 
-/// The HTTP status of an unauthenticated GET, `None` for a refused, timed-out
-/// or silent connection. Any answer proves the server responds.
+/// The HTTP status of an unauthenticated POST, `None` for a refused, timed-out
+/// or silent connection. Any answer proves the server responds. POST because
+/// an MCP endpoint may take only POST (rodge's `/mcp` answers a GET 405 and
+/// only a POST reaches its 401), and the body is never a call the server could act on.
 async fn probe(url: &str) -> Option<u16> {
     if let Some((at, status)) = CACHE.lock().unwrap().as_ref().and_then(|c| c.get(url)) {
         if at.elapsed() < CACHE_TTL {
@@ -118,7 +120,15 @@ async fn probe(url: &str) -> Option<u16> {
         }
     }
     let status = match reqwest::Client::builder().timeout(PROBE_TIMEOUT).build() {
-        Ok(c) => c.get(url).send().await.ok().map(|r| r.status().as_u16()),
+        Ok(c) => c
+            .post(url)
+            .header("content-type", "application/json")
+            .header("accept", "application/json, text/event-stream")
+            .body(r#"{"jsonrpc":"2.0","id":0,"method":"ping"}"#)
+            .send()
+            .await
+            .ok()
+            .map(|r| r.status().as_u16()),
         Err(_) => None,
     };
     CACHE.lock().unwrap().get_or_insert_with(HashMap::new).insert(url.to_string(), (Instant::now(), status));
