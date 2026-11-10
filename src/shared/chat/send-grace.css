@@ -1,80 +1,72 @@
-/* Undo bar for a held send or card answer (send-grace.ts). The fuse line along
-   the bottom edge shrinks over the grace window, so the time left reads
-   without a ticking number. */
-.send-grace-bar {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  margin-bottom: 6px;
-  overflow: hidden;
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-}
-
-.send-grace-icon {
-  flex: none;
-}
-
-.send-grace-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Undo button for a held send or card answer (send-grace.ts). It covers Send in
+   the composer for the grace window, so it adds nothing to the layout; a ring
+   around it drains over the window. Muted on purpose: it is there when wanted
+   and otherwise reads as a quiet Send. */
+@property --send-grace {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
 }
 
 .send-grace-undo {
-  flex: none;
-  display: inline-flex;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  font: inherit;
-  font-weight: 600;
-  color: var(--color-primary);
-  background: none;
-  border: 1px solid var(--color-primary);
-  border-radius: 4px;
+  justify-content: center;
+  padding: 0;
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  border: 0;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--color-border);
   cursor: pointer;
 }
 
-.send-grace-fuse {
+.send-grace-undo:hover {
+  color: var(--color-text);
+}
+
+/* Border-only sweep, same recipe as .composer-send-ring (composer.css). */
+.send-grace-ring {
   position: absolute;
-  left: 0;
-  bottom: 0;
-  height: 2px;
-  width: 100%;
-  background: var(--color-primary);
-  transform-origin: left center;
-  animation: send-grace-fuse var(--send-grace-ms, 3000ms) linear forwards;
+  inset: -3px;
+  padding: 2px;
+  border-radius: 9px;
+  pointer-events: none;
+  background: conic-gradient(var(--color-primary) calc(var(--send-grace) * 1turn), transparent 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: send-grace-drain var(--send-grace-ms, 3000ms) linear forwards;
 }
 
-@keyframes send-grace-fuse {
-  to { transform: scaleX(0); }
+@keyframes send-grace-drain {
+  from { --send-grace: 1; }
+  to { --send-grace: 0; }
 }
 
-/* A card answer has no composer to sit in: the card is already gone. */
+@media (prefers-reduced-motion: reduce) {
+  .send-grace-ring {
+    animation: none;
+  }
+}
+
+/* A card answer has no Send to cover: the card is already gone. */
 .send-grace-floating {
   position: fixed;
   left: 50%;
   bottom: 24px;
   z-index: 3100;
   display: flex;
-  flex-direction: column;
-  width: min(420px, calc(100vw - 24px));
+  gap: 10px;
   transform: translateX(-50%);
 }
 
-.send-grace-floating .send-grace-bar {
-  margin-bottom: 0;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-}
-
-.send-grace-floating .send-grace-bar + .send-grace-bar {
-  margin-top: 6px;
+.send-grace-floating .send-grace-undo {
+  position: relative;
+  inset: auto;
+  width: var(--control-h);
+  height: var(--control-h);
 }

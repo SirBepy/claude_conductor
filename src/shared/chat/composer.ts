@@ -279,7 +279,7 @@ export class Composer {
       this.att.migrateSession(prevId!, id);
       moveSentOutbox(prevId!, id);
     }
-    // Leaving a chat must not leave its Undo bar over the next one. The held
+    // Leaving a chat must not leave its Undo button over the next one. The held
     // send still fires on its own timer.
     if (prevId !== id) detachGraceBar(this.graceKey());
     this.sessionId = id;
@@ -392,7 +392,6 @@ export class Composer {
     const dis = this.disabled ? "disabled" : "";
     const sendTitle = this.opts.onSchedule ? "Send (Enter). Right-click or hold to schedule." : "Send";
     this.root.innerHTML = `
-      <div class="composer-grace-slot"></div>
       <div class="composer-attachments"></div>
       <div class="composer-scope-warning" hidden></div>
       <div class="composer-row">
@@ -426,8 +425,8 @@ export class Composer {
     this.highlightEl = this.root.querySelector<HTMLElement>(".composer-highlight");
     this.noticeEl = this.root.querySelector<HTMLElement>(".composer-notice");
     this.scopeWarn.bind(this.root.querySelector<HTMLElement>(".composer-scope-warning"));
-    // The rebuilt DOM dropped a still-pending send's Undo bar; put it back.
-    const graceSlot = this.root.querySelector<HTMLElement>(".composer-grace-slot");
+    // The rebuilt DOM dropped a still-pending send's Undo button; put it back.
+    const graceSlot = this.root.querySelector<HTMLElement>(".composer-send-wrap");
     if (graceSlot) remountGraceBar(this.graceKey(), graceSlot);
     this.sendBtn = this.root.querySelector<HTMLButtonElement>(".composer-send");
     this.micBtn = this.root.querySelector<HTMLButtonElement>(".composer-mic");
@@ -817,7 +816,7 @@ export class Composer {
     const savedAttachments = this.att.attachments;
     const savedPastedBlocks = this.att.pastedBlocks;
     this.clearComposer();
-    const slot = this.root.querySelector<HTMLElement>(".composer-grace-slot");
+    const slot = this.root.querySelector<HTMLElement>(".composer-send-wrap");
     const fire = async (): Promise<void> => {
       try {
         await this.opts.onSend(blocks);
@@ -828,7 +827,7 @@ export class Composer {
     };
     try {
       // Held for the grace window so an accidental Enter can be taken back
-      // before claude has seen it; without a slot to show the bar it sends now.
+      // before claude has seen it; without a Send button to cover it sends now.
       if (!slot) await fire();
       else {
         await startGrace({

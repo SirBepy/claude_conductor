@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 // An accidental Enter can be taken back: a send waits out a grace window behind
-// an Undo bar, so claude never receives an undone message (it starts answering
+// a small Undo button over Send, so claude never receives an undone message (it starts answering
 // the instant it does). Undo puts the text back in FRONT of whatever was typed
 // meanwhile, a second send fires the first, and a zero window sends at once.
 
@@ -46,7 +46,7 @@ function pressKey(textarea, key, init = {}) {
 const undoBtn = (root) => root.querySelector(".send-grace-undo");
 
 describe("send grace window", () => {
-  it("holds the send behind an Undo bar until the window lapses", async () => {
+  it("holds the send behind an Undo button until the window lapses", async () => {
     const onSend = vi.fn(async () => {});
     const { textarea, root } = await mountWithGrace({ onSend });
     typeInto(textarea, "oops, not finished");
@@ -56,7 +56,9 @@ describe("send grace window", () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(textarea.value).toBe("");
     expect(undoBtn(root)).not.toBeNull();
-    expect(root.querySelector(".send-grace-label").textContent).toContain("oops, not finished");
+    expect(undoBtn(root).title).toContain("oops, not finished");
+    // It covers Send itself, so the composer layout does not move.
+    expect(undoBtn(root).parentElement.classList.contains("composer-send-wrap")).toBe(true);
 
     vi.advanceTimersByTime(2999);
     expect(onSend).not.toHaveBeenCalled();
