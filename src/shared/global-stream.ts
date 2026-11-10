@@ -64,8 +64,14 @@ export const GLOBAL_STALE_MS = 10_000;
  *  heartbeat period (`GLOBAL_HEARTBEAT_INTERVAL`, 15s, in
  *  src-tauri/src/daemon/remote_ws_pump.rs) plus slack, or a healthy quiet
  *  socket whose age peaks just under 15s gets closed and redialed every
- *  cycle. A contract test pins the relation. */
-export const GLOBAL_WATCHDOG_STALE_MS = 20_000;
+ *  cycle. It also has to outlast one missed heartbeat: the phone's tunnel
+ *  rides a public relay that stalls for 7s+ (measured 2026-11-10), and a limit
+ *  5s over the heartbeat closed a healthy socket on each stall and flashed
+ *  "Reconnecting". Two heartbeats plus slack means two in a row must go
+ *  missing. A true zombie while the page stays visible is noticed within
+ *  limit + one watchdog tick; a thaw is caught by `GLOBAL_STALE_MS` instead.
+ *  A contract test pins the relation. */
+export const GLOBAL_WATCHDOG_STALE_MS = 35_000;
 const GLOBAL_WATCHDOG_INTERVAL_MS = 5_000;
 /** Degrade-path poll cadence, matching the interval the old per-listener poll
  *  used before this singleton existed. */

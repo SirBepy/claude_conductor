@@ -758,11 +758,11 @@ describe("HttpTransport.listen — instances-changed poll", () => {
     const afterImmediate = received.length;
     expect(afterImmediate).toBe(1);
 
-    // 19s sits just under GLOBAL_WATCHDOG_STALE_MS (20s): the watchdog ticks at
-    // 5, 10 and 15s all read an age under the limit, so the degrade poll never
-    // starts. Under the old 10s limit the 15s tick trips it and its first 3.5s
-    // poll tick fires at 18.5s, so this advance is what pins the 20s limit.
-    await vi.advanceTimersByTimeAsync(19000);
+    // 34s sits just under GLOBAL_WATCHDOG_STALE_MS (35s): every watchdog tick up
+    // to 30s reads an age under the limit, so the degrade poll never starts.
+    // Under the old 20s limit the 25s tick trips it and its first 3.5s poll
+    // tick fires at 28.5s, so this advance is what pins the 35s limit.
+    await vi.advanceTimersByTimeAsync(34000);
 
     expect(received.length).toBe(afterImmediate);
 
@@ -803,9 +803,9 @@ describe("HttpTransport.listen — instances-changed poll", () => {
     expect(afterImmediate).toBe(1);
 
     // The mock WS never opens/frames, so the watchdog (ticking every 5s) trips
-    // at the 25s tick (age 20s is not yet over GLOBAL_WATCHDOG_STALE_MS),
-    // starts the degrade poll, and that poll's first 3.5s tick fires at 28.5s.
-    await vi.advanceTimersByTimeAsync(30000);
+    // at the 40s tick (age 35s is not yet over GLOBAL_WATCHDOG_STALE_MS),
+    // starts the degrade poll, and that poll's first 3.5s tick fires at 43.5s.
+    await vi.advanceTimersByTimeAsync(45000);
 
     expect(received.length).toBeGreaterThan(afterImmediate);
 

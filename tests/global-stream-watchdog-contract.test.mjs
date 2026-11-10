@@ -26,6 +26,14 @@ describe("global stream watchdog vs daemon heartbeat", () => {
     expect(GLOBAL_WATCHDOG_STALE_MS).toBeGreaterThanOrEqual(heartbeatMs() + 3000);
   });
 
+  // The phone rides a public relay whose stalls run 7s+ (daemon log 2026-11-10,
+  // 12:14:31Z). A limit only 5s over one heartbeat closed a healthy socket on any
+  // such stall and showed "Reconnecting". Two heartbeats plus slack means a link
+  // has to miss two in a row before it counts as dead.
+  it("the steady-state watchdog limit survives one missed heartbeat", () => {
+    expect(GLOBAL_WATCHDOG_STALE_MS).toBeGreaterThanOrEqual(heartbeatMs() * 2 + 5000);
+  });
+
   it("the resume-path limit stays at or under the heartbeat so a thaw reconnects at once", () => {
     expect(GLOBAL_STALE_MS).toBeLessThanOrEqual(heartbeatMs());
   });
