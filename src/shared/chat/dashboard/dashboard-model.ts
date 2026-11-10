@@ -46,6 +46,9 @@ export interface DashboardPlan {
   lastAt: number;
   /** When its first write_plan call came (ms). */
   startedAt: number;
+  /** The tool_use id of its first write_plan call: a job key that stays put
+   *  when rows are prepended and stays unique when calls share a timestamp. */
+  id: string;
 }
 
 /** One tool call of the turn in flight, as ChatRenderer.turnActions keeps it. */
@@ -321,11 +324,13 @@ function jobTitle(lead: RenderedMessage | null, joe: RenderedMessage | null, ste
   return t.length > TITLE_MAX ? `${t.slice(0, TITLE_MAX - 1)}…` : t;
 }
 
-/** The job a plan stands for: its rows run from the plan's first call up to the
- *  Joe message that started the next plan (the next job's own plan message and
- *  report come after it), or to the end. Its lead is a plan message after the
- *  Joe message that started it (later Joe messages answered its questions). */
-function jobFor(msgs: readonly RenderedMessage[], plan: DashboardPlan, next: DashboardPlan | undefined): PlanJob {
+/** The job a plan stands for, and the row its rows stop at. They run from the
+ *  plan's first call up to the Joe message that started the next plan (the next
+ *  job's own plan message comes after it), and never past the first Joe message
+ *  after the job's own report: a later report answers a follow-up, not this job.
+ *  Its lead is a plan message after the Joe message that started it (later Joe
+ *  messages answered its questions). */
+function jobFor(msgs: readonly RenderedMessage[], plan: DashboardPlan, next: DashboardPlan | undefined): { job: PlanJob; end: number } {
   const at = Math.min(plan.at, msgs.length);
   let stop = msgs.length;
   if (next) {
@@ -333,27 +338,33 @@ function jobFor(msgs: readonly RenderedMessage[], plan: DashboardPlan, next: Das
     const nextAsk = lastIndexWhere(msgs, isJoeMessage, stop - 1);
     if (nextAsk >= at) stop = nextAsk;
   }
+  const first = msgs.findIndex((m, i) => i >= at && i < stop && isReport(m) && reportClosed(msgs, i));
+  if (first >= 0) {
+    const after = msgs.findIndex((m, i) => i > first && i < stop && isJoeMessage(m));
+    if (after >= 0) stop = after;
+  }
   const joeAt = lastIndexWhere(msgs, isJoeMessage, at - 1);
   const leadAt = lastIndexWhere(msgs, (m, i) => i > joeAt && isOwnMessage(m) && messageKindOf(m) === "plan", stop - 1);
   const r = lastIndexWhere(msgs, (m, i) => i >= at && isReport(m), stop - 1);
   const lead = leadAt >= 0 ? msgs[leadAt]! : null;
-  return {
-    key: `p${plan.startedAt}`,
+  return { end: stop, job: {
+    key: `p${plan.id}`,
     plan,
     steps: plan.steps,
     lead,
     result: r >= 0 && reportClosed(msgs, r) ? msgs[r]! : null,
     title: jobTitle(lead, joeAt >= 0 ? msgs[joeAt]! : null, plan.steps),
     startedAt: plan.startedAt,
-  };
+  } };
 }
 
-/** A chat with no plan yet can still have a job: a report, or a plan message
- *  that came with no write_plan. */
-function planlessJob(msgs: readonly RenderedMessage[], lastJoe: number): PlanJob | null {
-  const r = lastIndexWhere(msgs, isReport);
+/** A job with no write_plan, among the rows from `from` on: a report, or a
+ *  plan message that came with no write_plan. A chat with no plan yet, or a
+ *  follow-up after the last plan's job ended, is one. */
+function planlessJob(msgs: readonly RenderedMessage[], lastJoe: number, from = 0): PlanJob | null {
+  const r = lastIndexWhere(msgs, (m, i) => i >= from && isReport(m));
   const result = r >= 0 && reportClosed(msgs, r) ? msgs[r]! : null;
-  const leadAt = lastIndexWhere(msgs, (m, i) => i > lastJoe && isOwnMessage(m) && messageKindOf(m) === "plan");
+  const leadAt = lastIndexWhere(msgs, (m, i) => i >= from && i > lastJoe && isOwnMessage(m) && messageKindOf(m) === "plan");
   const lead = leadAt >= 0 ? msgs[leadAt]! : null;
   if (!result && !lead) return null;
   const anchor = result ?? lead!;
@@ -383,9 +394,14 @@ const finished = (s: PlanStep): boolean => s.status === "done" || s.status === "
 export function derivePlan({ input, lastJoe }: DeriveCtx): PlanState {
   const msgs = input.messages;
   const plans = input.plans;
-  const jobs = plans.map((p, i) => jobFor(msgs, p, plans[i + 1]));
-  const job = jobs.at(-1) ?? planlessJob(msgs, lastJoe);
-  const earlier = jobs.length > 0 ? jobs.slice(0, -1) : [];
+  const built = plans.map((p, i) => jobFor(msgs, p, plans[i + 1]));
+  const jobs = built.map((b) => b.job);
+  // The last plan's job stops where a follow-up began; a report or plan message
+  // after that is a planless job of its own, and the plan steps one back.
+  const tailFrom = built.at(-1)?.end ?? 0;
+  const tail = tailFrom < msgs.length ? planlessJob(msgs, lastJoe, tailFrom) : null;
+  const job = tail ?? jobs.at(-1) ?? null;
+  const earlier = tail ? jobs : jobs.slice(0, -1);
   let mode: PlanState["mode"] = "empty";
   if (job) {
     const resultAt = job.result ? msgs.indexOf(job.result) : -1;
@@ -418,6 +434,7 @@ export function recordPlan(
   msgs: readonly RenderedMessage[],
   steps: readonly PlanStep[],
   now: number,
+  id: string,
 ): DashboardPlan[] {
   const prev = plans.at(-1);
   const at = msgs.length;
@@ -439,7 +456,7 @@ export function recordPlan(
     if (ended !== undefined) out.doneAt = ended;
     return out;
   });
-  const entry: DashboardPlan = { steps: timed, at: base?.at ?? at, lastAt: at, startedAt };
+  const entry: DashboardPlan = { steps: timed, at: base?.at ?? at, lastAt: at, startedAt, id: base?.id ?? id };
   return base ? [...plans.slice(0, -1), entry] : [...plans, entry];
 }
 
