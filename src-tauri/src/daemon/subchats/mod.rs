@@ -40,6 +40,7 @@ pub mod pause;
 pub mod project;
 pub(crate) mod queue_watch;
 mod resume;
+pub mod retro;
 pub(crate) mod runtime;
 pub mod stall;
 pub mod stamp;

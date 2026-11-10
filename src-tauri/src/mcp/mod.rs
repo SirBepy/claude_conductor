@@ -8,5 +8,6 @@ mod tool_schemas;
 mod tool_schemas_core;
 mod tool_schemas_coordination;
 mod tool_schemas_jarvis;
+mod tool_schemas_retro;
 mod tool_schemas_subchat;
 pub(crate) mod tool_schemas_workflow;
