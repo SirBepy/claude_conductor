@@ -35,6 +35,8 @@ export interface MessageCard {
   was?: string;
   /** do_this only: a paste-ready payload. */
   copy?: string;
+  /** answer only: Claude's clear rewrite of what Joe asked (the dashboard's Answers card). */
+  question?: string;
   /** Tables and charts drawn under the body (message-visuals.ts). */
   visuals?: Visual[];
 }
@@ -75,6 +77,10 @@ export function parseMessageCard(input: unknown): MessageCard | undefined {
     card.yourMove = strList(raw.your_move);
   }
   if (kind === "correction") card.was = str(raw.was);
+  if (kind === "answer") {
+    const q = str(raw.question);
+    if (q !== undefined) card.question = q;
+  }
   // The payload is pasted as written: trimming would eat a command's trailing newline.
   if (kind === "do_this" && typeof raw.copy === "string" && raw.copy.trim() !== "") card.copy = raw.copy;
   return card;

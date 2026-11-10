@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (dash-answers): the Answers zone is now the Answers card (answers-card.ts) drawing its verdict in .ax-face, so `.cdash-answers .mc-verdict` still holds; a kindless message moved to Notes. Passes.
 // Reviewed 2026-11-10: the question card pads the scroller cardPaddedScroller picks (this pane's transcript as before, or the chat dashboard's body while it shows), active-session.ts detaches the chat dashboard on dismount, and a read-only session keeps Messages; nothing this spec asserts changed, and it passes.
 // asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/chat-dashboard/chat-view-pref.ts, src/shared/chat/dashboard/dashboard-model.ts, src/views/sessions/active-session-mount.ts
 import { test, expect, type Page } from "@playwright/test";

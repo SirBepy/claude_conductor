@@ -62,6 +62,10 @@ pub(super) struct SendMessageBody {
     was: Option<String>,
     #[serde(default)]
     copy: Option<String>,
+    // answer only: Claude's clear rewrite of what Joe asked. The chat
+    // dashboard's Answers card shows it in place of Joe's own wording.
+    #[serde(default)]
+    question: Option<String>,
     // Tables and charts. Loose Values so one malformed visual is an `ok:false`
     // naming the fix, never a body-decode error (see `visuals.rs`).
     #[serde(default)]
@@ -520,6 +524,21 @@ mod tests {
         assert_eq!(send_json(do_this("x".repeat(4000))).await["ok"], json!(true));
         assert!(error_of(&send_json(do_this("x".repeat(4001))).await).contains("copy is 4001 chars, over 4000"));
         assert!(error_of(&send_json(report(json!({"copy": "cmd"}))).await).contains("copy is only for do_this, not report"));
+    }
+
+    #[tokio::test]
+    async fn question_is_answer_only_non_empty_and_capped_at_200() {
+        let answer = |q: serde_json::Value| json!({
+            "session_id": "s", "kind": "answer", "verdict": "Yes", "text": "t", "question": q
+        });
+        assert_eq!(send_json(answer(json!("Does the token need write access?"))).await["ok"], json!(true));
+        assert_eq!(send_json(answer(json!("x".repeat(200)))).await["ok"], json!(true));
+        assert!(error_of(&send_json(answer(json!("x".repeat(201)))).await).contains("question is 201 chars, over 200"));
+        assert!(error_of(&send_json(answer(json!("   "))).await).contains("question is empty"));
+        assert!(error_of(&send_json(report(json!({"question": "q?"}))).await).contains("question is only for answer, not report"));
+        // Optional: an answer without one still passes, and the dashboard falls back to Joe's message.
+        let bare = json!({"session_id": "s", "kind": "answer", "verdict": "Yes", "text": "t"});
+        assert_eq!(send_json(bare).await["ok"], json!(true));
     }
 
     #[tokio::test]

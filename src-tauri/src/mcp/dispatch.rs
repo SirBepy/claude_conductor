@@ -307,9 +307,9 @@ fn report_status_body(args: &Value, session_id: &str, roots: &[std::path::PathBu
 /// Every `send_message` argument the daemon route validates. `next_actions` is
 /// absent on purpose: the route ignores it and the chat reads it from the
 /// tool_use input in the transcript.
-const SEND_MESSAGE_FORWARDED: [&str; 12] = [
+const SEND_MESSAGE_FORWARDED: [&str; 13] = [
     "details", "kind", "verdict", "tone", "points", "done", "not_done", "waiting_on", "your_move",
-    "was", "copy", "visuals",
+    "was", "copy", "visuals", "question",
 ];
 
 /// Turn status/title, chat messages, and the Your Todos panel.

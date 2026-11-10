@@ -1,0 +1,757 @@
+// The chat dashboard's Answers card (docs/chat-dashboard-design.md, "Answers
+// card (approved 2026-11-10)"), ported from the approved board
+// (.for_bepy/mockups/mockup-answers.ts, round 17) with its measured numbers.
+//
+// One card holds everything: the newest unread answer at a fixed 210px rest,
+// Got it walking back through the unread ones to All caught up, Read more
+// opening the rewritten question and the full text, History as the command
+// palette, and threads opening in place. A thread is an Ask thread: follow-ups
+// run the Ask panel's read-only sidecar (daemon/methods/answers.rs), so there is
+// no second spawn path. Read marks live in the daemon, so a Got it survives a
+// reload, a restart and the other device.
+//
+// The card owns its DOM inside the zone's fixed host (dashboard-zones.ts): a
+// re-derive hands it new answers instead of replacing it, so an animation, an
+// open Read more or a thread's message box is never wiped by a flush.
+
+import { escapeHtml } from "../../../shared/escape-html";
+import { localTime } from "../../../shared/formatters";
+import { renderMarkdown } from "../../../shared/chat/chat-transforms";
+import { composerFieldHtml, wireComposerField, type ComposerFieldWiring } from "../../../shared/chat/composer-field";
+import { openPalette, closePalette } from "../../command-palette/palette-ui";
+import type { PaletteCommand } from "../../command-palette/types";
+import type { AskThread } from "../../../types/ipc.generated";
+import {
+  historyGroups, isUnread, nextUnread, ownText, threadFollowUps, threadText, withoutSuggestion,
+  type AnswerItem, type AnswerSide, type AnswerStore,
+} from "../../../shared/chat/dashboard/answers-model";
+import type { ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
+import { answersApi, cachedSide, emptySide, rememberSide } from "./answers-api";
+import { cardHtml } from "./dashboard-zones";
+import "../ask-panel.css";
+import "./answers-card.css";
+
+/** Thread keys of + questions that have no answer yet: `new:<n>`, one per
+ *  question, so leaving one in flight and pressing + again starts a fresh one. */
+const NEW_PREFIX = "new:";
+const isNew = (key: string | null): boolean => !!key && key.startsWith(NEW_PREFIX);
+
+/** How long the card waits for the daemon's read marks before drawing anyway,
+ *  so a slow daemon never leaves the zone blank. */
+const LOAD_GRACE_MS = 400;
+/** Rise: the text leaves in 200ms, then the next one rises in (board GOT_OUT_MS). */
+const GOT_OUT_MS = 200;
+
+export interface AnswersCardDeps {
+  sessionId(): string | null;
+  cwd(): string | null;
+  /** The card's daemon data changed: the dashboard re-derives (a + answer may appear). */
+  onSideChange(): void;
+  /** The transcript's passes for freshly drawn markup (code, file refs, commit refs). */
+  decorate(root: HTMLElement): void;
+}
+
+const esc = escapeHtml;
+const timeOf = (ms: number): string => (ms > 0 ? localTime(new Date(ms)) : "");
+const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+// The card's inner form of the real answer card: label, verdict, head, body,
+// visuals. Cached per row object, which is replaced (never mutated) on change.
+const innerCache = new WeakMap<object, string>();
+function cardInner(item: AnswerItem): string {
+  let html = innerCache.get(item.message);
+  if (html === undefined) {
+    const box = document.createElement("div");
+    box.innerHTML = cardHtml(item.message);
+    html = box.querySelector(".mc-full .mc-pad")?.innerHTML ?? "";
+    innerCache.set(item.message, html);
+  }
+  return html;
+}
+
+// The shell renderMessageCard draws, so the tint, border and padding are the real ones.
+const shell = (inner: string, cls = ""): string =>
+  `<div class="msg assistant mc-root ax-shell ${cls}" data-card-kind="answer"><div class="mc-card mc-k-answer"><div class="mc-fold mc-full"><div class="mc-clip"><div class="mc-pad">${inner}</div></div></div></div></div>`;
+
+const btn = (act: string, icon: string, label: string, tip: string, cls = "", extra = ""): string =>
+  `<button type="button" class="ax-btn ${cls}" data-ax="${act}" title="${esc(tip)}"><i class="ph ${icon}"></i>${extra}<span class="ax-btn-t">${label}</span></button>`;
+
+/** Ask replies carry no verdict; a reply that leads with one shows it bold. */
+const bubble = (verdict: string, text: string): string =>
+  `<div class="msg assistant ax-t-bub">${renderMarkdown(verdict ? `**${verdict}**\n\n${text}` : text, false)}</div>`;
+
+export class AnswersCard {
+  private host: HTMLElement | null = null;
+  private items: AnswerItem[] = [];
+  private side: AnswerSide = emptySide();
+  private loadedFor: string | null = null;
+  private loadingFor: string | null = null;
+  /** The answer on the card; null = All caught up; undefined = not picked yet. */
+  private cur: string | null | undefined = undefined;
+  private open = false;
+  /** The answer whose thread fills the card, or a `new:<n>` key for a + question with no answer yet. */
+  private thread: string | null = null;
+  private newSeq = 0;
+  /** Question in flight per thread key. */
+  private readonly pending = new Map<string, string>();
+  private readonly errors = new Map<string, string>();
+  /** A + question whose send failed, kept so the thread can still show what was asked. */
+  private readonly failedAsk = new Map<string, string>();
+  /** An unread answer that landed while Joe was in a thread: Back shows it. */
+  private landedInThread: string | null = null;
+  private readonly seen = new Set<string>();
+  /** Joe has used the card since it loaded: a late load must not move it under him. */
+  private touched = false;
+  private anim = "";
+  private gotBusy = false;
+  private lastHtml = "";
+  private wire: ComposerFieldWiring | null = null;
+  private wiredFor: string | null = null;
+  private graceTimer: ReturnType<typeof setTimeout> | null = null;
+  private disposed = false;
+  private readonly onClick = (e: MouseEvent): void => this.click(e);
+  private readonly onFocus = (): void => this.refresh();
+
+  constructor(private readonly deps: AnswersCardDeps) {
+    if (typeof window !== "undefined") window.addEventListener("focus", this.onFocus);
+  }
+
+  /** What the dashboard's derive reads for the zone. */
+  sideData(): AnswerSide {
+    return this.side;
+  }
+
+  /** Called after every derive that draws the zone, with the zone's fixed host. */
+  update(host: HTMLElement, state: ZoneState<"answers">): void {
+    if (this.disposed) return;
+    if (host !== this.host) {
+      this.host?.removeEventListener("click", this.onClick);
+      this.destroyWire();
+      this.host = host;
+      host.classList.add("ax-quiet-got", "ax-icon-acts");
+      host.addEventListener("click", this.onClick);
+      this.lastHtml = "";
+    }
+    this.items = state.items;
+    this.ensureLoaded();
+    if (!this.ready()) return;
+    this.reconcile();
+    this.render();
+  }
+
+  /** The zone stopped drawing (no answers): forget the DOM, keep the state. */
+  detach(): void {
+    this.host?.removeEventListener("click", this.onClick);
+    this.destroyWire();
+    this.host = null;
+    this.lastHtml = "";
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.detach();
+    if (this.graceTimer !== null) clearTimeout(this.graceTimer);
+    if (typeof window !== "undefined") window.removeEventListener("focus", this.onFocus);
+  }
+
+  // ---- Data ------------------------------------------------------------------------
+
+  private ready(): boolean {
+    const sid = this.deps.sessionId();
+    return !sid || this.loadedFor === sid;
+  }
+
+  private ensureLoaded(): void {
+    const sid = this.deps.sessionId();
+    if (!sid || this.loadedFor === sid || this.loadingFor === sid) return;
+    if (this.loadedFor !== null) {
+      // The window moved to another chat's id: nothing of the old chat carries over.
+      this.cur = undefined;
+      this.seen.clear();
+      this.touched = false;
+      this.side = emptySide();
+      this.thread = null;
+      this.landedInThread = null;
+      this.pending.clear();
+      this.errors.clear();
+      this.failedAsk.clear();
+    }
+    const cached = cachedSide(sid);
+    if (cached) {
+      this.side = cached;
+      this.loadedFor = sid;
+    }
+    this.loadingFor = sid;
+    if (!cached) {
+      this.graceTimer = setTimeout(() => {
+        this.graceTimer = null;
+        if (this.loadingFor !== sid || this.disposed) return;
+        this.loadedFor = sid;
+        this.deps.onSideChange();
+      }, LOAD_GRACE_MS);
+    }
+    answersApi().load(sid)
+      .then((side) => {
+        if (this.disposed || this.deps.sessionId() !== sid) return;
+        // Merged, not replaced: a Got it or a thread reply may have landed while it loaded.
+        this.side = { store: mergeStore(side.store, this.side.store), threads: mergeThreads(side.threads, this.side.threads) };
+        rememberSide(sid, this.side);
+        // A draw before the load used no read marks: pick again unless Joe acted.
+        if (!this.touched) {
+          this.cur = undefined;
+          this.seen.clear();
+        }
+      })
+      .catch((err) => console.warn("[answers-card] load failed; read marks stay in memory", err))
+      .finally(() => {
+        if (this.loadingFor !== sid || this.disposed) return;
+        this.loadingFor = null;
+        this.loadedFor = sid;
+        if (this.graceTimer !== null) clearTimeout(this.graceTimer);
+        this.graceTimer = null;
+        this.deps.onSideChange();
+      });
+  }
+
+  /** Another window (the pop-out, the other machine) may have read or replied. */
+  private refresh(): void {
+    const sid = this.deps.sessionId();
+    if (!sid || this.loadedFor !== sid || this.loadingFor) return;
+    answersApi().load(sid)
+      .then((side) => {
+        if (this.disposed || this.deps.sessionId() !== sid) return;
+        this.side = { store: mergeStore(side.store, this.side.store), threads: mergeThreads(side.threads, this.side.threads) };
+        rememberSide(sid, this.side);
+        this.deps.onSideChange();
+      })
+      .catch(() => { /* the card keeps what it has */ });
+  }
+
+  private store(): AnswerStore {
+    return this.side.store;
+  }
+
+  private item(key: string | null | undefined): AnswerItem | null {
+    if (!key) return null;
+    return this.items.find((i) => i.key === key) ?? null;
+  }
+
+  private unread(item: AnswerItem): boolean {
+    return isUnread(item, this.store());
+  }
+
+  private markRead(keys: string[]): void {
+    if (keys.length === 0) return;
+    const now = Date.now();
+    for (const k of keys) this.side.store.read[k] = now;
+    const sid = this.deps.sessionId();
+    if (sid) {
+      rememberSide(sid, this.side);
+      answersApi().mark(sid, keys, true).catch((err) => console.warn("[answers-card] marking read failed", err));
+    }
+  }
+
+  private upsertThread(thread: AskThread, store: AnswerStore): void {
+    const threads = [...this.side.threads];
+    const i = threads.findIndex((t) => t.id === thread.id);
+    if (i >= 0) threads[i] = thread;
+    else threads.unshift(thread);
+    this.side = { store: mergeStore(store, this.side.store), threads };
+    const sid = this.deps.sessionId();
+    if (sid) rememberSide(sid, this.side);
+  }
+
+  /** Picks the answer to show, and brings a newly landed unread one in. */
+  private reconcile(): void {
+    if (this.cur === undefined) {
+      this.cur = nextUnread(this.items, this.store())?.key ?? null;
+      for (const i of this.items) this.seen.add(i.key);
+      return;
+    }
+    const fresh = this.items.filter((i) => !this.seen.has(i.key));
+    for (const i of fresh) this.seen.add(i.key);
+    const shown = this.item(this.cur);
+    if (this.cur !== null && !shown) this.cur = nextUnread(this.items, this.store())?.key ?? null;
+    if (this.thread && !isNew(this.thread) && !this.item(this.thread)) this.thread = null;
+    const landed = fresh.filter((i) => this.unread(i)).at(-1);
+    if (landed && this.thread !== null) this.landedInThread = landed.key;
+    const curItem = this.item(this.cur);
+    // The newest answer always shows, unless Joe is still on an unread one or in a thread.
+    if (landed && this.thread === null && (!curItem || !this.unread(curItem))) {
+      this.cur = landed.key;
+      this.anim = "ax-fade";
+    }
+  }
+
+  // ---- Rendering -----------------------------------------------------------------------
+
+  private otherUnread(): number {
+    return this.items.filter((i) => i.key !== this.cur && this.unread(i)).length;
+  }
+
+  private historyBtn(): string {
+    const u = this.otherUnread();
+    const n = this.items.length;
+    return `<button type="button" class="ax-icon${u ? " ax-ubadge" : ""}" data-ax="history" title="All ${plural(n, "answer")}${u ? `, ${u} more unread` : ""}: search them"><i class="ph ph-clock-counter-clockwise"></i>${u ? `<b>${u}</b>` : ""}</button>`;
+  }
+
+  private headerRow(): string {
+    return `<div class="ax-head"><span class="mc-label ax-kind"><i class="ph ph-chat-circle-dots"></i>Answers</span><span class="ax-hq-gap"></span>`
+      + `<span class="ax-icons">${this.historyBtn()}<button type="button" class="ax-icon" data-ax="new-q" title="New question"><i class="ph ph-plus"></i></button></span></div>`;
+  }
+
+  private checkBtn(item: AnswerItem): string {
+    return this.unread(item)
+      ? btn("gotit", "ph-check", "Got it", "Got it: mark read and show the next unread", "ax-gotit")
+      : btn("close", "ph-check", "Read", "Read. Put it away", "ax-gotit ax-checked");
+  }
+
+  private replyBtn(item: AnswerItem): string {
+    const n = item.replies;
+    const busy = this.pending.has(item.key);
+    if (!n && !busy) return btn("reply", "ph-chats-circle", "Reply", "Reply: ask a follow-up in a thread");
+    const tip = `Open the thread: ${plural(n, "back-and-forth")}${busy ? ", Claude is replying" : ""}`;
+    return btn("reply", "ph-chats-circle", "Open thread", tip, `ax-thbtn${busy ? " ax-busy" : ""}`, n ? `<b class="ax-btn-n">${n}</b>` : "");
+  }
+
+  private readMoreLabel(): string {
+    return this.open ? `Show less<i class="ph ph-caret-up"></i>` : `Read more<i class="ph ph-caret-down"></i>`;
+  }
+
+  private answerFace(item: AnswerItem): string {
+    const raw = item.raw ? ` title="You wrote: ${esc(item.raw)}"` : "";
+    const q = item.question ? `<div class="ax-qline"${raw}><time>${esc(timeOf(item.at))}</time><span>${esc(item.question)}</span></div>` : "";
+    const rm = `<span class="ax-readmore ax-rm-bottom-right" data-ax="toggle">${this.readMoreLabel()}</span>`;
+    return `<div class="ax-face ax-pos-bottom-left ax-align-center has-more${this.open ? " open" : ""}" data-ans="${esc(item.key)}">`
+      + `<div class="ax-mid"><div class="ax-tb"><div class="ax-row"><div class="ax-text" data-ax="toggle">${q}${cardInner(item)}</div></div></div></div>`
+      + `<div class="ax-actions ax-actions--bottom-left">${this.checkBtn(item)}${this.replyBtn(item)}${rm}</div></div>`;
+  }
+
+  private caughtFace(): string {
+    return `<div class="ax-cc"><span class="ax-cc-t"><i class="ph ph-checks"></i>All caught up</span>`
+      + `<span class="ax-cc-b"><button type="button" class="ax-tbtn" data-ax="history"><i class="ph ph-clock-counter-clockwise"></i>History</button>`
+      + `<button type="button" class="ax-tbtn" data-ax="new-q"><i class="ph ph-plus"></i>New question</button></span></div>`;
+  }
+
+  private threadFace(): string {
+    const fresh = isNew(this.thread);
+    const item = fresh ? null : this.item(this.thread);
+    const title = fresh ? (this.pending.get(this.thread!) ?? this.failedAsk.get(this.thread!) ?? "Ask anything; your first message is the question") : item?.question || item?.verdict || "";
+    const sub = item?.verdict ? `<span class="ax-thead-s">${esc(item.verdict)}</span>` : "";
+    return `<div class="ax-thread ask-panel"><div class="ax-thead"><button type="button" class="ax-back" data-ax="close-thread" title="Back to the answer"><i class="ph ph-arrow-left"></i></button>`
+      + `<div class="ax-thead-t"><span class="ax-thead-k">${fresh ? "New question" : "Thread"}</span><span class="ax-thead-v">${esc(title)}</span>${sub}</div></div>`
+      + `<div class="ask-body ax-tbody"></div>`
+      + `<div class="ax-tcomp">${composerFieldHtml({ placeholder: fresh ? "Ask Claude a question..." : "Follow up on this answer...", inputClass: "ax-t-input", sendClass: "ax-t-send" })}</div></div>`;
+  }
+
+  private threadBodyHtml(): string {
+    const key = this.thread!;
+    const item = isNew(key) ? null : this.item(key);
+    const parts: string[] = [];
+    if (item) {
+      // Every thread opens on the question and the answer it got; they are not a back-and-forth.
+      const raw = item.raw ? `<span class="ax-q0-raw">You wrote: ${esc(item.raw)}</span>` : "";
+      if (item.question) parts.push(`<div class="msg user ask-q ax-q0">${renderMarkdown(item.question, true)}${raw}</div>`);
+      parts.push(bubble(item.verdict, item.text));
+      for (const m of threadFollowUps(item)) {
+        parts.push(m.role === "user"
+          ? `<div class="msg user ask-q">${renderMarkdown(m.text, true)}</div>`
+          : bubble("", withoutSuggestion(m.text)));
+      }
+    }
+    const failedQ = this.failedAsk.get(key);
+    if (failedQ) parts.push(`<div class="msg user ask-q">${renderMarkdown(failedQ, true)}</div>`);
+    const asking = this.pending.get(key);
+    if (asking) parts.push(`<div class="msg user ask-q">${renderMarkdown(asking, true)}</div>`, `<div class="ask-thinking"><span class="ask-spin"></span>reading...</div>`);
+    const err = this.errors.get(key);
+    if (err) parts.push(`<div class="ask-error">${esc(err)}</div>`);
+    if (!parts.length) {
+      return `<div class="ask-empty"><i class="ph ph-chat-teardrop-dots"></i><span>Ask anything. Your first message is the question; Claude's reply lands in Answers.</span></div>`;
+    }
+    return parts.join("");
+  }
+
+  private destroyWire(): void {
+    this.wire?.destroy();
+    this.wire = null;
+    this.wiredFor = null;
+  }
+
+  private render(): void {
+    const host = this.host;
+    // While Got it's text leaves, a flush must not redraw it back; the timer draws next.
+    if (!host || !this.ready() || this.gotBusy) return;
+    const anim = this.anim;
+    this.anim = "";
+    if (this.thread !== null) {
+      this.renderThread(host, anim);
+      return;
+    }
+    this.destroyWire();
+    const item = this.item(this.cur);
+    const html = item
+      ? shell(`${this.headerRow()}<div class="ax-in">${this.answerFace(item)}</div>`)
+      : shell(`<div class="ax-in">${this.caughtFace()}</div>`, "ax-caughtmode ax-frame-border ax-cu-both");
+    // The HTML is compared without its animation class, so a flush that lands
+    // mid-animation finds nothing changed and lets the motion finish.
+    if (html === this.lastHtml && !anim) return;
+    this.lastHtml = html;
+    host.innerHTML = html;
+    this.applyAnim(host, anim);
+    this.deps.decorate(host);
+  }
+
+  private renderThread(host: HTMLElement, anim: string): void {
+    const key = this.thread!;
+    const frame = shell(`<div class="ax-in">${this.threadFace()}</div>`, "ax-threadmode");
+    if (frame !== this.lastHtml || this.wiredFor !== key) {
+      const draft = this.wiredFor === key ? this.wire?.textarea.value ?? "" : "";
+      const hadFocus = !!this.wire && document.activeElement === this.wire.textarea;
+      this.destroyWire();
+      this.lastHtml = frame;
+      host.innerHTML = frame;
+      const row = host.querySelector<HTMLElement>(".ax-tcomp .composer-field");
+      if (row) {
+        this.wire = wireComposerField(row, {
+          onSend: (text) => this.sendInThread(text),
+          canSend: () => !this.pending.has(this.thread ?? ""),
+        });
+        this.wiredFor = key;
+        if (draft && this.wire) {
+          this.wire.textarea.value = draft;
+          this.wire.core.handleInput();
+        }
+        if (hadFocus) this.wire?.textarea.focus({ preventScroll: true });
+      }
+      this.applyAnim(host, anim);
+    }
+    const body = host.querySelector<HTMLElement>(".ax-tbody");
+    if (body) {
+      const html = this.threadBodyHtml();
+      // Only new content scrolls to the bottom, so a flush never yanks Joe back while he reads up.
+      if (body.dataset.html !== html) {
+        body.dataset.html = html;
+        body.innerHTML = html;
+        this.deps.decorate(body);
+        body.scrollTop = body.scrollHeight;
+      }
+    }
+    this.wire?.sync();
+  }
+
+  /** "mid:" animates only the answer's text block, so the header and the buttons stay still. */
+  private applyAnim(host: HTMLElement, anim: string): void {
+    if (!anim) return;
+    const mid = anim.startsWith("mid:");
+    const target = host.querySelector(mid ? ".ax-mid" : ".ax-in");
+    target?.classList.add(mid ? anim.slice(4) : anim);
+    // While anything moves the card clips instead of scrolling, so no scrollbar flashes on its edge.
+    const sh = host.querySelector<HTMLElement>(".ax-shell");
+    sh?.classList.add("ax-animating");
+    setTimeout(() => sh?.classList.remove("ax-animating"), 700);
+  }
+
+  // ---- Actions -------------------------------------------------------------------------
+
+  private click(e: MouseEvent): void {
+    const t = e.target as HTMLElement;
+    const act = t.closest<HTMLElement>("[data-ax]")?.dataset.ax;
+    const selecting = !!window.getSelection?.()?.toString();
+    switch (act) {
+      case "gotit": return this.gotIt();
+      case "close": return this.putAway();
+      case "reply": return this.openThread();
+      case "new-q": return this.newQuestion();
+      case "close-thread": return this.closeThread();
+      case "history": return this.history();
+      case "toggle":
+        if (t.closest("a, button, .attachment-chip, [data-file-ref]") && !t.closest(".ax-readmore")) return;
+        if (!selecting) this.toggleOpen();
+        return;
+    }
+    // Anywhere on the answer that is not a control opens or folds it, the header included.
+    if (this.thread === null && this.host?.querySelector(".ax-face") && t.closest(".ax-shell")
+      && !t.closest("a, button, input, textarea, .attachment-chip, [role='button']") && !selecting) {
+      this.toggleOpen();
+    }
+  }
+
+  /** Opens and folds in place: each part grows its own height and fades in through
+   *  CSS, so no re-render and nothing flickers. An open card stays open across Got it. */
+  private toggleOpen(): void {
+    const host = this.host;
+    const face = host?.querySelector<HTMLElement>(".ax-face");
+    if (!host || !face) return;
+    this.touched = true;
+    this.open = !this.open;
+    face.classList.toggle("open", this.open);
+    const rm = face.querySelector(".ax-readmore");
+    if (rm) rm.innerHTML = this.readMoreLabel();
+    const item = this.item(this.cur);
+    if (item) this.lastHtml = shell(`${this.headerRow()}<div class="ax-in">${this.answerFace(item)}</div>`);
+    const sh = host.querySelector<HTMLElement>(".ax-shell");
+    sh?.classList.add("ax-animating");
+    setTimeout(() => sh?.classList.remove("ax-animating"), 450);
+  }
+
+  private gotIt(): void {
+    const item = this.item(this.cur);
+    if (!item || !this.unread(item) || this.gotBusy) return;
+    this.touched = true;
+    this.markRead([item.key]);
+    this.gotBusy = true;
+    // Only the answer's text leaves and arrives; the header and the buttons stay put.
+    this.host?.querySelector(".ax-mid")?.classList.add("ax-g-rise-out");
+    setTimeout(() => {
+      this.gotBusy = false;
+      if (this.disposed) return;
+      // Walk back: the next newest unread comes in; with none left, All caught up fades in.
+      const next = nextUnread(this.items, this.store());
+      this.cur = next?.key ?? null;
+      this.anim = next ? "mid:ax-g-rise-in" : "ax-c-fade";
+      this.lastHtml = "";
+      this.render();
+    }, GOT_OUT_MS);
+  }
+
+  /** The grey check on a read answer puts it away: the next unread, or All caught up. */
+  private putAway(): void {
+    this.touched = true;
+    this.cur = nextUnread(this.items, this.store())?.key ?? null;
+    this.anim = "ax-fade";
+    this.render();
+  }
+
+  private show(key: string): void {
+    closePalette();
+    this.touched = true;
+    this.thread = null;
+    this.cur = key;
+    this.anim = "mid:ax-g-rise-in";
+    this.lastHtml = "";
+    this.render();
+  }
+
+  private openThread(): void {
+    const item = this.item(this.cur);
+    if (!item || this.thread !== null) return;
+    this.touched = true;
+    this.thread = item.key;
+    this.anim = "ax-t-slide-open";
+    this.render();
+    this.focusInput();
+  }
+
+  private newQuestion(): void {
+    if (this.thread !== null) return;
+    this.touched = true;
+    // A + question whose send failed after Joe left it reopens, with its error,
+    // so it never vanishes silently; otherwise + starts a fresh one.
+    const failed = [...this.failedAsk.keys()].at(-1);
+    this.thread = failed ?? `${NEW_PREFIX}${++this.newSeq}`;
+    this.anim = "ax-t-slide-open";
+    this.render();
+    this.focusInput();
+  }
+
+  private closeThread(): void {
+    // A failed + question has now been seen with its error: the next + starts fresh.
+    if (this.thread && this.failedAsk.has(this.thread)) {
+      this.failedAsk.delete(this.thread);
+      this.errors.delete(this.thread);
+    }
+    this.thread = null;
+    this.anim = "ax-t-slide-close";
+    // Back returns to the answer Joe was on. An answer that landed while he was
+    // in the thread shows instead, unless he is on an unread one.
+    const curItem = this.item(this.cur);
+    const landed = this.item(this.landedInThread);
+    this.landedInThread = null;
+    if (landed && this.unread(landed) && (!curItem || !this.unread(curItem))) this.cur = landed.key;
+    else if (!curItem) this.cur = nextUnread(this.items, this.store())?.key ?? null;
+    this.lastHtml = "";
+    this.render();
+  }
+
+  private focusInput(): void {
+    this.wire?.textarea.focus({ preventScroll: true });
+  }
+
+  private sendInThread(text: string): void {
+    const key = this.thread;
+    const sid = this.deps.sessionId();
+    const q = text.trim();
+    if (!key || !sid || !q || this.pending.has(key)) return;
+    this.wire?.clear();
+    this.errors.delete(key);
+    this.failedAsk.delete(key);
+    this.pending.set(key, q);
+    const item = isNew(key) ? null : this.item(key);
+    const wasRead = item ? !this.unread(item) : false;
+    this.render();
+    void answersApi().send({
+      sessionId: sid,
+      key: isNew(key) ? null : key,
+      question: q,
+      cwd: this.deps.cwd(),
+      aboutQuestion: item?.question,
+      aboutAnswer: item ? [item.verdict, item.text].filter(Boolean).join("\n") : undefined,
+    })
+      .then(({ thread, state }) => {
+        if (this.disposed || this.deps.sessionId() !== sid) return;
+        this.pending.delete(key);
+        this.upsertThread(thread, state);
+        if (isNew(key)) {
+          const answerKey = `ask:${thread.id}`;
+          // Still in the thread: it becomes this answer's thread, and the answer
+          // waits unread for Back. Left already: it lands like any new answer.
+          if (this.thread === key) {
+            // The thread keeps its message box (and any follow-up being typed) across the key change.
+            if (this.wiredFor === key) this.wiredFor = answerKey;
+            this.thread = answerKey;
+            this.cur = answerKey;
+            this.seen.add(answerKey);
+          }
+        } else if (this.thread === key && wasRead) {
+          // Read while Joe watched it arrive: it stays read.
+          this.markRead([key]);
+        } else if (this.thread === null) {
+          // A reply after leaving the thread makes the answer unread again.
+          const curItem = this.item(this.cur);
+          if (!curItem || !this.unread(curItem)) {
+            this.cur = key;
+            this.anim = "ax-fade";
+            this.lastHtml = "";
+          }
+        }
+        this.deps.onSideChange();
+      })
+      .catch((err) => {
+        if (this.disposed) return;
+        this.pending.delete(key);
+        this.errors.set(key, String((err as { message?: string })?.message ?? err));
+        if (isNew(key)) this.failedAsk.set(key, q);
+        this.render();
+      });
+  }
+
+  // ---- History -------------------------------------------------------------------------
+
+  private markAllRead(): void {
+    const keys = this.items.filter((i) => this.unread(i)).map((i) => i.key);
+    this.touched = true;
+    this.markRead(keys);
+    this.cur = null;
+    this.thread = null;
+    this.anim = "ax-c-fade";
+    this.lastHtml = "";
+    this.render();
+  }
+
+  /** One command-palette list: Mark all N as read, then Unread / Read with a
+   *  thread / Read, newest first. Rows show the question; search covers threads. */
+  private history(): void {
+    const store = this.store();
+    const { groups, headings } = historyGroups(this.items, store);
+    const byId = new Map<string, AnswerItem>();
+    const groupOf = new Map<string, string>();
+    const rows: PaletteCommand[] = [];
+    const unread = this.items.filter((i) => isUnread(i, store)).length;
+    if (unread) rows.push({ id: "answers-mark-all", title: `Mark all ${unread} as read`, icon: "checks", group: "", run: () => this.markAllRead() });
+    for (const g of groups) {
+      for (const it of g.items) {
+        const id = `answer:${it.key}`;
+        byId.set(id, it);
+        groupOf.set(id, g.label);
+        rows.push({
+          id,
+          title: it.question || it.verdict,
+          icon: g.id === "unread" ? "circle-wavy" : "check",
+          group: timeOf(it.at),
+          // Thread text rides keywords, which the ranker scores below a hit in the
+          // title, so a hit in the question always outranks one found only in a thread.
+          keywords: [it.verdict, it.raw ?? "", it.text, threadText(it)],
+          run: () => this.show(it.key),
+        });
+      }
+    }
+    openPalette({
+      sync: () => rows,
+      later: [],
+      remember: false,
+      placeholder: `Search ${plural(this.items.length, "answer")} and their threads`,
+      // The ranker's fuzzy tier matches scattered letters ("toast" in "tracker or
+      // start"), which is noise when looking for one answer: only literal hits stay.
+      match: (c, query) => {
+        const it = byId.get(c.id);
+        if (!it) return true;
+        const q = query.toLowerCase();
+        return ownText(it).toLowerCase().includes(q) || threadText(it).toLowerCase().includes(q);
+      },
+      decorate: (list, shown, query) => decorateHistory(list, shown, query, byId, groupOf, headings),
+    });
+  }
+}
+
+/** How long a thread the daemon's list lacks is kept: long enough for a load
+ *  that started before its reply was saved, short enough that a thread deleted
+ *  in the Ask panel leaves the card. */
+const LOCAL_THREAD_GRACE_MS = 60_000;
+
+/** The newer copy of each thread wins (a reply only ever adds messages). */
+function mergeThreads(server: readonly AskThread[], local: readonly AskThread[]): AskThread[] {
+  const out = [...server];
+  const now = Date.now();
+  for (const t of local) {
+    const i = out.findIndex((x) => x.id === t.id);
+    if (i < 0) {
+      if (now - Number(t.updated_at) < LOCAL_THREAD_GRACE_MS) out.push(t);
+    } else if (t.messages.length > out[i]!.messages.length) out[i] = t;
+  }
+  return out;
+}
+
+/** Read marks only ever move forward, so a reply's state never undoes a Got it still in flight. */
+function mergeStore(server: AnswerStore, local: AnswerStore): AnswerStore {
+  const read = { ...server.read };
+  for (const [k, v] of Object.entries(local.read)) if ((read[k] ?? -1) < v) read[k] = v;
+  return { read, threads: { ...local.threads, ...server.threads }, questions: server.questions.length >= local.questions.length ? server.questions : local.questions };
+}
+
+function decorateHistory(
+  list: HTMLElement,
+  shown: readonly PaletteCommand[],
+  query: string,
+  byId: ReadonlyMap<string, AnswerItem>,
+  groupOf: ReadonlyMap<string, string>,
+  headings: boolean,
+): void {
+  const q = query.trim().toLowerCase();
+  let prev = "";
+  list.querySelectorAll<HTMLElement>(".cp-row").forEach((row) => {
+    const c = shown[Number(row.dataset.index)];
+    const it = c ? byId.get(c.id) : undefined;
+    if (!c || !it) return;
+    // A row whose answer has a thread says so: a small chat icon and its count.
+    if (it.replies > 0) {
+      row.querySelector(".cp-spacer")?.insertAdjacentHTML("beforebegin",
+        `<span class="ax-cp-th" title="Has a thread: ${plural(it.replies, "back-and-forth")}"><i class="ph ph-chats-circle"></i>${it.replies}</span>`);
+    }
+    // A row found only through its thread says so, with the words that matched.
+    if (q && !ownText(it).toLowerCase().includes(q)) {
+      const hit = threadFollowUps(it).map((m) => m.text).find((t) => t.toLowerCase().includes(q));
+      if (hit) {
+        const at = hit.toLowerCase().indexOf(q);
+        const from = Math.max(0, at - 24);
+        const end = at + q.length + 30;
+        const snip = (from ? "..." : "") + hit.slice(from, end).replace(/\n/g, " ") + (end < hit.length ? "..." : "");
+        row.querySelector(".cp-title")?.insertAdjacentHTML("afterend",
+          `<span class="cp-detail"><span class="ax-cp-tag"><i class="ph ph-chats-circle"></i>in thread</span><span class="ax-cp-snip">${esc(snip)}</span></span>`);
+      }
+    }
+    // A heading opens each group, only while the list is in its own order and holds two groups or more.
+    const g = groupOf.get(c.id) ?? "";
+    if (headings && !q && g !== prev) row.insertAdjacentHTML("beforebegin", `<div class="cp-section ax-sec">${esc(g)}</div>`);
+    prev = g;
+  });
+}

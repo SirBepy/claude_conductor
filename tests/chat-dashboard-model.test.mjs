@@ -65,7 +65,7 @@ describe("chat dashboard model", () => {
     expect(ZONES.answers.order).toBeLessThan(ZONES.waiting.order);
   });
 
-  it("shows the newest answer, counts the rest, and never treats a plan or report as an answer", () => {
+  it("lists only answers to Joe's questions, never a plan, a report or a kindless message", () => {
     const c = chat()
       .joe("can it be empty?")
       .send({ kind: "answer", verdict: "Yes", text: "It can." })
@@ -74,8 +74,9 @@ describe("chat dashboard model", () => {
       .send({ text: "an old message with no kind" })
       .send({ kind: "report", verdict: "Built", text: "done" });
     const a = zone(c.dash(), "answers");
-    expect(a.total).toBe(2);
-    expect(a.latest.text).toBe("an old message with no kind");
+    expect(a.items.map((i) => i.text)).toEqual(["It can."]);
+    // A kindless message could be anything, so it is a note of the current job.
+    expect(zone(c.dash(), "notes").cards.map((m) => m.text)).toEqual(["an old message with no kind"]);
   });
 
   it("keeps a refused or retracted message out of every zone", () => {

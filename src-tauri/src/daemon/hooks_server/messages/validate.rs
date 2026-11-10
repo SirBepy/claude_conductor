@@ -44,6 +44,7 @@ const MAX_ROWS: usize = 8;
 const MAX_ROW: usize = 120;
 const MAX_WAS: usize = 100;
 const MAX_COPY: usize = 4000;
+const MAX_QUESTION: usize = 200;
 
 /// How long a kind's `text` may be. Past the cap the prose belongs in `details`,
 /// which sits behind a click; the card shows `text` at full size.
@@ -224,6 +225,18 @@ pub(super) fn validate_send(body: &SendMessageBody) -> Result<(), String> {
         let n = copy.chars().count();
         if n > MAX_COPY {
             return Err(format!("copy is {n} chars, over {MAX_COPY}: trim the paste-ready payload"));
+        }
+    }
+    if let Some(q) = body.question.as_deref() {
+        if kind != "answer" {
+            return Err(format!("question is only for answer, not {kind}: remove it"));
+        }
+        let n = q.trim().chars().count();
+        if n == 0 {
+            return Err("question is empty: write Joe's question as one clear question, or leave it out".to_string());
+        }
+        if n > MAX_QUESTION {
+            return Err(format!("question is {n} chars, over {MAX_QUESTION}: ask it shorter"));
         }
     }
     Ok(())

@@ -20,6 +20,7 @@ import { handleFileRefClick, handleFileRefContextMenu, handleFileRefKeydown, lin
 import { highlightCodeBlocks, highlightInlineCode } from "../../../shared/chat/code-highlighter";
 import { scrollToBottom } from "../../../shared/chat/chat-dom-renderer";
 import { initialUi, renderStrip, renderZone, type DashUi } from "./dashboard-zones";
+import { AnswersCard } from "./answers-card";
 import { CHAT_VIEW_CHANGED, dashboardEnabled } from "./chat-view-pref";
 import "./chat-dashboard.css";
 
@@ -44,6 +45,8 @@ export class ChatDashboard {
   private readonly bar: HTMLElement | null;
   private readonly barHome: HTMLElement | null;
   private disposed = false;
+  /** The Answers card keeps its own DOM inside the zone's host (answers-card.ts). */
+  private readonly answers: AnswersCard;
   private readonly onFlushed = (): void => this.schedule();
   private readonly onDocClick = (e: MouseEvent): void => {
     if (!this.ui.earlierOpen || this.stripEl.contains(e.target as Node)) return;
@@ -68,6 +71,12 @@ export class ChatDashboard {
     this.rightEl = this.el.querySelector(".cdash-right")!;
     this.emptyEl = this.el.querySelector(".cdash-empty")!;
     this.bar = pane.querySelector<HTMLElement>(".session-thinking");
+    this.answers = new AnswersCard({
+      sessionId: () => renderer.sessionId,
+      cwd: () => renderer.paginator.cwdHint ?? null,
+      onSideChange: () => this.schedule(),
+      decorate: (root) => this.decorate(root),
+    });
     this.barHome = this.bar?.parentElement ?? null;
 
     // The cards are the transcript's own, so they get the transcript's own
@@ -145,10 +154,11 @@ export class ChatDashboard {
     // `hydrating` clears, so nothing is missed.
     if (this.renderer.hydrating) return;
     const busy = this.barMayMove();
-    const derived = deriveDashboard({ messages: this.renderer.messages, plan: this.renderer.dashPlan, busy });
+    const derived = deriveDashboard({ messages: this.renderer.messages, plan: this.renderer.dashPlan, busy, answers: this.answers.sideData() });
     this.applyUiRules(derived);
     this.renderStripPart(derived);
     this.renderZones(derived, busy);
+    this.renderAnswers(derived);
     this.placeBar(busy);
   }
 
@@ -218,6 +228,13 @@ export class ChatDashboard {
     this.emptyEl.hidden = !loaded || leftN + rightN > 0 || state.strip !== null;
   }
 
+  private renderAnswers(state: DashboardState): void {
+    const zone = state.left.find((z) => z.id === "answers");
+    const host = this.zoneEls.get("answers")?.el.querySelector<HTMLElement>(".ax-host") ?? null;
+    if (zone && zone.id === "answers" && host) this.answers.update(host, zone.state);
+    else this.answers.detach();
+  }
+
   /** The status line sits at the foot of the Plan card while that card is
    *  drawn, and back above the message box otherwise. Moving the node keeps its
    *  own listeners (Stop, the detail block) and session-thinking-bar.ts finds it
@@ -283,6 +300,7 @@ export class ChatDashboard {
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
     this.barObserver?.disconnect();
+    this.answers.dispose();
     this.sendBarHome();
     document.removeEventListener("click", this.onDocClick, true);
     document.removeEventListener("keydown", this.onKey);

@@ -15,6 +15,9 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Serializes the read-modify-write of a chat's thread list after a sidecar run.
+static SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Runs one question and persists both sides. `thread_id` `None` starts a new
 /// thread; an existing `sidecar_session_id` is what makes a follow-up a resume.
 pub(crate) async fn ask_send(
@@ -23,30 +26,43 @@ pub(crate) async fn ask_send(
     question: &str,
     cwd: Option<&str>,
 ) -> Result<Value, String> {
+    let thread = ask_send_with(session_id, thread_id, question, cwd, None).await?;
+    serde_json::to_value(thread).map_err(|e| e.to_string())
+}
+
+/// `ask_send` plus `context`: words put ahead of the question in the prompt of
+/// a thread's FIRST question only (a follow-up resumes a session that already
+/// holds them) and never stored, so the thread shows what Joe typed. The chat
+/// dashboard's Answers card uses it to say which answer a thread follows up on.
+pub(crate) async fn ask_send_with(
+    session_id: &str,
+    thread_id: Option<&str>,
+    question: &str,
+    cwd: Option<&str>,
+    context: Option<&str>,
+) -> Result<store::AskThread, String> {
     let question = question.trim();
     if question.is_empty() {
         return Err("question is empty".to_string());
     }
 
-    let mut threads = store::load(session_id);
-    let idx = match thread_id {
-        Some(id) => threads
-            .iter()
-            .position(|t| t.id == id)
-            .ok_or_else(|| format!("no Ask thread {id}"))?,
-        None => {
-            let t = store::AskThread::new(uuid::Uuid::new_v4().to_string(), now_ms());
-            threads.insert(0, t);
-            0
+    let threads = store::load(session_id);
+    let (thread_id, resume) = match thread_id {
+        Some(id) => {
+            let t = threads.iter().find(|t| t.id == id).ok_or_else(|| format!("no Ask thread {id}"))?;
+            (t.id.clone(), t.sidecar_session_id.clone())
         }
+        None => (uuid::Uuid::new_v4().to_string(), None),
     };
-
-    let resume = threads[idx].sidecar_session_id.clone();
     let transcript = crate::chat::history::locate_transcript(session_id, cwd).ok();
     let fresh_id = uuid::Uuid::new_v4().to_string();
 
+    let prompted = match context.map(str::trim).filter(|c| !c.is_empty()) {
+        Some(c) if resume.is_none() => format!("{c}\n\n{question}"),
+        _ => question.to_string(),
+    };
     let answer = sidecar::ask(
-        question,
+        &prompted,
         transcript.as_deref(),
         cwd,
         resume.as_deref(),
@@ -55,6 +71,18 @@ pub(crate) async fn ask_send(
     .await
     .map_err(|e| format!("{e:#}"))?;
 
+    // Read again after the sidecar's run, under a lock: another thread of this
+    // chat (the Answers card runs several at once) may have been saved
+    // meanwhile, and saving the list read before the run would drop it.
+    let _guard = SAVE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut threads = store::load(session_id);
+    let idx = match threads.iter().position(|t| t.id == thread_id) {
+        Some(i) => i,
+        None => {
+            threads.insert(0, store::AskThread::new(thread_id.clone(), now_ms()));
+            0
+        }
+    };
     let t = &mut threads[idx];
     if t.title.is_empty() {
         t.title = store::title_from(question);
@@ -73,7 +101,7 @@ pub(crate) async fn ask_send(
     });
     let out = t.clone();
     store::save(session_id, &threads).map_err(|e| format!("{e:#}"))?;
-    serde_json::to_value(out).map_err(|e| e.to_string())
+    Ok(out)
 }
 
 pub fn register_ask(router: &mut Router, _state: Arc<DaemonState>) {

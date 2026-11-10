@@ -14,6 +14,7 @@
 import type { RenderedMessage } from "../chat-classifiers";
 import type { MessageKind } from "../chat-message-kinds";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../chat-event-to-message";
+import { buildAnswerItems, type AnswerItem, type AnswerSide } from "./answers-model";
 
 export const TURN_STATUS_TOOL = "mcp__cc_conductor__report_turn_status";
 
@@ -40,6 +41,8 @@ export interface DashboardInput {
   /** A turn is running (or messages are held): the Plan card then draws even
    *  with no steps, because it hosts the chat's status line. */
   busy?: boolean;
+  /** What the daemon remembers for the Answers card, once loaded. */
+  answers?: AnswerSide;
 }
 
 /** Context every derive gets, computed once per derive pass. */
@@ -100,20 +103,17 @@ export function deriveStrip(input: DashboardInput): StripState | null {
 
 // ---- Zones -----------------------------------------------------------------------
 
-/** Kinds that answer something Joe asked. A legacy message (no kind) is treated
- *  as an answer, so an old chat still shows its last reply. */
-const ANSWER_KINDS: ReadonlySet<MessageKind | "legacy"> = new Set(["answer", "rating", "correction", "legacy"]);
-
 export interface AnswersState {
-  /** The newest answer. Lane `dash-answers` replaces this placeholder zone. */
-  latest: RenderedMessage;
-  total: number;
+  /** Every answer to one of Joe's questions, oldest first (answers-model.ts). */
+  items: AnswerItem[];
 }
 
+/** Only replies to Joe's questions count (answers-model.ts isAnswerRow): a
+ *  request's plan or report never lands here. The card itself
+ *  (chat-dashboard/answers-card.ts) decides which one shows. */
 export function deriveAnswers({ input }: DeriveCtx): AnswersState | null {
-  const answers = input.messages.filter((m) => isOwnMessage(m) && ANSWER_KINDS.has(messageKindOf(m)));
-  const latest = answers.at(-1);
-  return latest ? { latest, total: answers.length } : null;
+  const items = buildAnswerItems(input.messages, input.answers);
+  return items.length > 0 ? { items } : null;
 }
 
 export type WaitingItem =
@@ -236,10 +236,12 @@ export function deriveSubchats({ input }: DeriveCtx): CardListState | null {
   return cards.length > 0 ? { cards } : null;
 }
 
-const NOTE_KINDS: ReadonlySet<MessageKind | "legacy"> = new Set(["call", "discovery", "handoff"]);
+const NOTE_KINDS: ReadonlySet<MessageKind | "legacy"> = new Set(["call", "discovery", "handoff", "correction", "legacy"]);
 
-/** Calls, discoveries and handoffs of the current job: none of them answers a
- *  question or ends the job, and Joe may still want to overrule a call. */
+/** Calls, discoveries, handoffs and corrections of the current job: none of
+ *  them answers a question or ends the job, and Joe may still want to overrule
+ *  a call. A legacy message (sent before kinds existed) could be anything, so
+ *  it is a note rather than an answer. */
 export function deriveNotes({ input, lastJoe }: DeriveCtx): CardListState | null {
   const cards = input.messages.filter((m, i) => i > lastJoe && isOwnMessage(m) && NOTE_KINDS.has(messageKindOf(m))).reverse();
   return cards.length > 0 ? { cards } : null;
