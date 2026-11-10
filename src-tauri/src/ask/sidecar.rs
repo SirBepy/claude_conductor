@@ -13,12 +13,28 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 /// nobody asked for.
 pub const ASK_MODEL: &str = "sonnet";
 /// "What was i meant to do" means reading a transcript and inferring intent,
-/// which low effort visibly degrades.
+/// which low effort visibly degrades. Low was also no faster (2026-11-10, same
+/// question needing the transcript: 27.4s at low, 24.2s and 32.6s at medium):
+/// the wait is the transcript searches, not the thinking. Sonnet is already
+/// the lightest tier Joe allows.
 pub const ASK_EFFORT: &str = "medium";
 
 /// `--allowedTools` only PRE-APPROVES: it is not an exhaustive allowlist, so
 /// absence from here does not stop a tool running.
 const ALLOWED_TOOLS: &str = "Read Grep Glob";
+
+/// `--tools`: the only built-in tools the run has at all, the same three.
+/// Without it the run listed 44 tools, and past Ask runs called PowerShell,
+/// which `DENIED_TOOLS` never named and Joe's own permission allowlist approved.
+const TOOL_SET: &str = "Read,Grep,Glob";
+
+/// Run as a brand-new, bare chat: `--safe-mode` drops Joe's CLAUDE.md, skills,
+/// plugins, hooks and MCP servers (auth and permissions still load), and
+/// `--strict-mcp-config` with no `--mcp-config` keeps every MCP server out.
+/// Measured 2026-11-10 on a follow-up answerable from the answer itself: 15.0s
+/// to the result with all of that loaded (init alone 4.3s: 12 MCP servers, the
+/// session hooks, 21k tokens of fresh cache) against 5.2s without it.
+const BARE_RUN: [&str; 2] = ["--safe-mode", "--strict-mcp-config"];
 
 /// The actual read-only guarantee. `Task` too: a subagent would not inherit
 /// it. `WebSearch`/`WebFetch` are denied, not merely left un-pre-approved:
@@ -32,7 +48,7 @@ const ALLOWED_TOOLS: &str = "Read Grep Glob";
 /// injected by an earlier WebFetch in the main chat, and a WebFetch here
 /// would be a silent exfiltration path for it.
 const DENIED_TOOLS: &str =
-    "Edit Write NotebookEdit Bash BashOutput KillShell Task WebSearch WebFetch";
+    "Edit Write NotebookEdit Bash BashOutput KillShell PowerShell Task WebSearch WebFetch";
 
 /// What came back from one sidecar run.
 pub struct AskAnswer {
@@ -67,6 +83,8 @@ pub fn parse_ask_result_line(line: &str) -> Option<SidecarResult> {
     })
 }
 
+/// The em dash line stands in for Joe's global CLAUDE.md rule, which the bare
+/// run (`BARE_RUN`) no longer loads.
 pub fn build_prompt(question: &str, transcript: Option<&Path>, cwd: Option<&str>) -> String {
     let mut ctx = String::new();
     if let Some(t) = transcript {
@@ -83,8 +101,8 @@ question is about what was said, decided, or left unfinished.",
         "You are answering a quick side question for the developer, ABOUT a Claude Code chat he \
 has open. You are not in that chat and cannot act on it.\n\n\
 Answer directly and briefly - a few sentences, or short bullets. No preamble, no restating the \
-question, no offer to help further. Markdown is fine. If you genuinely cannot tell, say so \
-instead of guessing.\n\n\
+question, no offer to help further. Markdown is fine. Never use the em dash character. If you \
+genuinely cannot tell, say so instead of guessing.\n\n\
 You can read, and only read. Never propose that you will change something yourself.\n\n\
 If, and only if, the answer implies work the developer would want his chat to do, end your whole \
 reply with one final line of the exact form:\n\
@@ -113,6 +131,8 @@ fn cli_args(prompt: &str, resume: Option<&str>, new_session_id: &str, persist: b
         ASK_MODEL.to_string(),
         "--effort".to_string(),
         ASK_EFFORT.to_string(),
+        "--tools".to_string(),
+        TOOL_SET.to_string(),
         "--allowedTools".to_string(),
         ALLOWED_TOOLS.to_string(),
         "--disallowedTools".to_string(),
@@ -121,6 +141,7 @@ fn cli_args(prompt: &str, resume: Option<&str>, new_session_id: &str, persist: b
         "stream-json".to_string(),
         "--verbose".to_string(),
     ];
+    args.extend(BARE_RUN.iter().map(|a| a.to_string()));
     match resume {
         Some(id) => {
             args.push("--resume".to_string());
@@ -313,11 +334,31 @@ mod tests {
         }
     }
 
+    /// A run that loads Joe's MCP servers, hooks and plugins took three times as
+    /// long to answer, and one with the default tool set ran PowerShell.
+    #[test]
+    fn built_args_run_bare_with_only_the_read_tools() {
+        let args = cli_args("q", None, "sid", true);
+        let tools_idx = args.iter().position(|a| a == "--tools").expect("--tools");
+        let mut set: Vec<&str> = args[tools_idx + 1].split(',').collect();
+        let mut allowed: Vec<&str> = ALLOWED_TOOLS.split(' ').collect();
+        set.sort_unstable();
+        allowed.sort_unstable();
+        assert_eq!(set, allowed);
+        for flag in ["--safe-mode", "--strict-mcp-config"] {
+            assert!(args.iter().any(|a| a == flag), "{flag} missing: {args:?}");
+        }
+        // strict with no config means no MCP server at all.
+        assert!(!args.iter().any(|a| a == "--mcp-config"));
+        let resumed = cli_args("q", Some("old"), "sid", true);
+        assert!(resumed.iter().any(|a| a == "--safe-mode"));
+    }
+
     #[test]
     fn every_mutating_tool_is_explicitly_denied() {
         // Absence from ALLOWED_TOOLS is not enough: that flag only pre-approves,
         // so a mutating tool has to be named in the deny list to be refused.
-        for t in ["Edit", "Write", "NotebookEdit", "Bash", "Task"] {
+        for t in ["Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "Task"] {
             assert!(DENIED_TOOLS.split(' ').any(|d| d == t), "{t} is not denied");
         }
     }
