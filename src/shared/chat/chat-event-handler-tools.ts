@@ -173,7 +173,7 @@ export function handleToolUseEvent(
       r.turnFooters.updateTodoSteps(r.activeTurnChipKey, steps);
     }
     // Live events carry no timestamp of their own; history's carry the real one.
-    r.dashPlans = recordPlan(r.dashPlans, r.messages, steps, ts > 0 ? ts : Date.now());
+    r.dashPlans = recordPlan(r.dashPlans, r.messages, steps, ts > 0 ? ts : Date.now(), ev.id);
     r.lastTodoActivity = steps.find((s) => s.status === "active")?.label ?? null;
     if (!r.hydrating) r.onTodoActivityUpdate?.(r.lastTodoActivity);
     return { touched: true, coalesce: false };

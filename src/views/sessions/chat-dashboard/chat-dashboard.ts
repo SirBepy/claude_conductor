@@ -109,9 +109,10 @@ export class ChatDashboard {
     if (e.key === "Escape" && this.ui.earlierOpen) {
       this.ui.earlierOpen = false;
       this.render();
-    } else if (e.key === "Escape" && this.ui.planList && !e.defaultPrevented && this.ownsFocus()) {
-      // Only Esc meant for the dashboard: not one pressed in the composer, a
-      // modal, or while this chat's pane is hidden.
+    } else if (e.key === "Escape" && this.ui.planList && this.ownsFocus()) {
+      // Only Esc meant for the dashboard: not one pressed in the composer or a
+      // modal. A window holds one dashboard (attachChatDashboard disposes the
+      // last), so no hidden chat's list closes with it.
       this.act("plan-list", this.el);
     }
   };

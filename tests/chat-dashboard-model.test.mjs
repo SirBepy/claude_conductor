@@ -232,6 +232,25 @@ describe("chat dashboard model", () => {
     expect(p.result.card.verdict).toBe("Done");
   });
 
+  it("gives a follow-up's report with no plan its own job, with the plan a step back", () => {
+    const c = chat().joe("job one").plan([{ text: "Read", status: "done" }]).send({ kind: "report", verdict: "One done", text: "ok" }).status("done")
+      .joe("also bump the version").send({ kind: "report", verdict: "Bumped", text: "ok" }).status("done");
+    const p = zone(c.dash(), "plan");
+    expect(p.mode).toBe("current");
+    expect(p.job.plan).toBeNull();
+    expect(p.result.card.verdict).toBe("Bumped");
+    expect(p.earlier.map((j) => j.result.card.verdict)).toEqual(["One done"]);
+  });
+
+  it("keys each plan by its first call, even when two calls share a timestamp", () => {
+    const c = chat().joe("a");
+    c.r.handleEvent(toolUseEvent(PLAN, { steps: [{ text: "A", status: "done" }] }, "pa", 5000));
+    c.r.handleEvent(toolUseEvent(PLAN, { steps: [{ text: "B", status: "active" }] }, "pb", 5000));
+    const p = zone(c.dash(), "plan");
+    expect(p.earlier).toHaveLength(1);
+    expect(p.earlier[0].key).not.toBe(p.job.key);
+  });
+
   it("says the chat waits on Joe while a question card is open", () => {
     const c = chat().joe("go").ask("Tabs or spaces?");
     expect(zone(c.dash(), "plan").status.kind).toBe("wait");
@@ -270,35 +289,35 @@ describe("recordPlan", () => {
   const step = (label, status) => ({ label, status });
 
   it("updates one entry for every call of the same job, stamping when each step ran", () => {
-    let plans = recordPlan([], [], [step("Read", "active"), step("Ship", "pending")], 1000);
-    plans = recordPlan(plans, [], [step("Read", "done"), step("Ship", "active")], 61_000);
-    plans = recordPlan(plans, [], [step("Read", "done"), step("Ship", "done")], 181_000);
+    let plans = recordPlan([], [], [step("Read", "active"), step("Ship", "pending")], 1000, "id1000");
+    plans = recordPlan(plans, [], [step("Read", "done"), step("Ship", "active")], 61_000, "id61_000");
+    plans = recordPlan(plans, [], [step("Read", "done"), step("Ship", "done")], 181_000, "id181_000");
     expect(plans).toHaveLength(1);
     expect(plans[0].startedAt).toBe(1000);
     expect(plans[0].steps.map((s) => [s.startedAt, s.doneAt])).toEqual([[1000, 61_000], [61_000, 181_000]]);
   });
 
   it("starts a step that went straight to done when the step before it finished", () => {
-    let plans = recordPlan([], [], [step("A", "active"), step("B", "pending")], 1000);
-    plans = recordPlan(plans, [], [step("A", "done"), step("B", "done")], 5000);
+    let plans = recordPlan([], [], [step("A", "active"), step("B", "pending")], 1000, "id1000");
+    plans = recordPlan(plans, [], [step("A", "done"), step("B", "done")], 5000, "id5000");
     expect(plans[0].steps[1].startedAt).toBe(5000);
-    plans = recordPlan([], [], [step("A", "done"), step("B", "done")], 9000);
+    plans = recordPlan([], [], [step("A", "done"), step("B", "done")], 9000, "id9000");
     expect(plans[0].steps.map((s) => s.startedAt)).toEqual([9000, 9000]);
   });
 
   it("clears a finish time when a step is reopened", () => {
-    let plans = recordPlan([], [], [step("A", "done")], 1000);
-    plans = recordPlan(plans, [], [step("A", "active")], 2000);
+    let plans = recordPlan([], [], [step("A", "done")], 1000, "id1000");
+    plans = recordPlan(plans, [], [step("A", "active")], 2000, "id2000");
     expect(plans[0].steps[0].doneAt).toBeUndefined();
     expect(plans[0].steps[0].startedAt).toBe(1000);
   });
 
   it("starts a new plan when no step label carries over, or a report came since", () => {
-    let plans = recordPlan([], [], [step("A", "active")], 1000);
-    plans = recordPlan(plans, [], [step("B", "active")], 2000);
+    let plans = recordPlan([], [], [step("A", "active")], 1000, "id1000");
+    plans = recordPlan(plans, [], [step("B", "active")], 2000, "id2000");
     expect(plans).toHaveLength(2);
     const report = { kind: "message", text: "t", card: { kind: "report", verdict: "v" }, ts: 0 };
-    plans = recordPlan(plans, [report], [step("B", "active")], 3000);
+    plans = recordPlan(plans, [report], [step("B", "active")], 3000, "id3000");
     expect(plans).toHaveLength(3);
     expect(plans[2].at).toBe(1);
   });
