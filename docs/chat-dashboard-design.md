@@ -237,6 +237,23 @@ queued rows left behind are dead and still fill the sub cap. Joe's call: lanes 3
 a time, as plain visible chats named "dash lane N: ...", each started by the main chat when the
 previous one posts its result to it. /release waits until the fix chat posts "fix committed".
 
+**Lane 6 (tests), 2026-11-10.** The view harness pins Messages, so the existing view specs and the
+vitest files keep driving the transcript on purpose; the dashboard has its own specs
+(`chat-dashboard*.view.spec.ts`, `tests/chat-dashboard-*.test.mjs`) and one free wdio flow,
+`e2e/specs/chat-dashboard.e2e.js` (the fake claude answers a message containing `DASH_ANSWER` with an
+`answer` card: strip, Answers card, Got it, History). Left open, each needs a call from Joe:
+
+- **+ question in a chat with no answer yet.** The Answers zone is not drawn when empty, so + is
+  unreachable until the first answer lands. Option: a header-only Answers card (title, History, +)
+  once Joe has written anything.
+- **Zones read only the loaded history page.** An old plan or blocker past the first page is missing
+  from the dashboard, because the hidden transcript only loads older pages on scroll. Option: have
+  the dashboard ask the paginator for older pages until it finds a plan, or keep a daemon-side
+  snapshot.
+- **A sub whose hold is gone.** The sub list now has a Queued group, but a never-started sub that
+  lost its hold after a restart reads as "working" (the `waiting_for` mark is in memory only,
+  `held.rs`). Showing it as lost needs a daemon field on `Instance`.
+
 When this was written the app ran at most 5 subs at once and a queued sub counted (since 2026-11-10 the cap is 10 started subs and a queued or never-started sub holds no slot). So lanes 5b, 6 and 7 are spawned by
 the main chat as slots free up, each `after` the one before it. Once the release is out, the main
 chat writes its own retro by hand in pc-1677's format to

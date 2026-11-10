@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Runs the whole wdio release-gate sweep in one call: the 8 free specs (daemon-lifecycle last),
+  Runs the whole wdio release-gate sweep in one call: the 9 free specs (daemon-lifecycle last),
   then chat-flow and reload-dup, with every spec's full output kept on disk and a one-line verdict
   printed per spec. See .claude/todos/1121-wdio-sweep-script.md.
 
@@ -122,6 +122,7 @@ $freeSpecs = @(
     'multi-account',
     'question-card',
     'question-card-reload',
+    'chat-dashboard',
     'schedule-view',
     'preview-popout',
     'daemon-lifecycle'
@@ -129,7 +130,7 @@ $freeSpecs = @(
 $chatSpecs = @('chat-flow', 'reload-dup')
 # Free specs that host a chat on the fake claude. Always the fake, even under -RealClaude: they
 # raise their own questions and have no use for a model, so a real one would only bill for nothing.
-$fakeClaudeFreeSpecs = @('question-card-reload')
+$fakeClaudeFreeSpecs = @('question-card-reload', 'chat-dashboard')
 $billedOnlySpec = 'question-card-live'
 
 # First entry of `git worktree list` is always the main checkout. Specs that name the project

@@ -3,6 +3,8 @@
 // never gets a result, so the session stays busy; one containing FAKE_SLOW_ON gets its result
 // after 90s; anything else gets one text reply and a result. Each turn is also appended to the
 // transcript JSONL the real CLI would write, since chat history is read from there.
+// A user message containing DASH_ANSWER also gets a send_message answer card ahead of the reply,
+// the row the chat dashboard's Answers card reads (e2e/specs/chat-dashboard.e2e.js).
 // FAKE_CLAUDE_LOG=<path> appends one line per spawn, for checking what the daemon passed.
 const fs = require("fs");
 const path = require("path");
@@ -31,9 +33,9 @@ let parent = null;
 // FAKE_TOOL_ROW=1: a quiet-mode turn's shape, a send_message tool_use and its
 // tool_result ahead of the text reply, so the transcript holds rows the live
 // stream painted differently (what the chat-resync rebuild reacts to).
-function emitSendMessageRow(text) {
+function emitSendMessageRow(text, input = { text }) {
   const toolId = "toolu_" + crypto.randomUUID().replace(/-/g, "").slice(0, 24);
-  const tmsg = { id: "msg_" + crypto.randomUUID().replace(/-/g, ""), type: "message", role: "assistant", model: "claude-haiku-4-5-20251001", content: [{ type: "tool_use", id: toolId, name: "mcp__cc_conductor__send_message", input: { text } }], stop_reason: "tool_use", usage: { input_tokens: 1, output_tokens: 1 } };
+  const tmsg = { id: "msg_" + crypto.randomUUID().replace(/-/g, ""), type: "message", role: "assistant", model: "claude-haiku-4-5-20251001", content: [{ type: "tool_use", id: toolId, name: "mcp__cc_conductor__send_message", input }], stop_reason: "tool_use", usage: { input_tokens: 1, output_tokens: 1 } };
   const tu = crypto.randomUUID();
   out({ type: "assistant", message: tmsg, session_id: sid, uuid: tu, parent_tool_use_id: null });
   tx({ type: "assistant", message: tmsg, uuid: tu, parentUuid: parent, sessionId: sid, cwd, timestamp: new Date().toISOString() });
@@ -69,6 +71,7 @@ process.stdin.on("data", (d) => {
     const au = crypto.randomUUID();
     setTimeout(() => {
       if (process.env.FAKE_TOOL_ROW) emitSendMessageRow(reply);
+      if (text.includes("DASH_ANSWER")) emitSendMessageRow(reply, { kind: "answer", verdict: "Dashboard answer verdict", text: "Dashboard answer body.", question: "Does the dashboard show this answer?" });
       out({ type: "assistant", message: amsg, session_id: sid, uuid: au, parent_tool_use_id: null });
       tx({ type: "assistant", message: amsg, uuid: au, parentUuid: parent, sessionId: sid, cwd, timestamp: new Date().toISOString() });
       parent = au;
