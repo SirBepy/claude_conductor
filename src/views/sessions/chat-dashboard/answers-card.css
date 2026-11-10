@@ -10,7 +10,8 @@
   /* Read more animates height:auto, which needs keyword interpolation. */
   interpolate-size: allow-keywords;
 }
-.ax-host .msg { max-width: none; margin: 0; }
+/* 100%, never none: see .cdash-zone .msg in chat-dashboard.css. */
+.ax-host .msg { max-width: 100%; margin: 0; }
 .ax-host .msg-copy-btn { display: none; }
 .ax-host .mc-pad { position: relative; }
 /* Only the card's own box takes the resting height, never a card drawn inside it */
@@ -35,7 +36,6 @@
 .ax-cc-t i { color: var(--color-success); font-size: 25px; }
 .ax-cc-b { display: inline-flex; gap: 8px; }
 /* Thread replies, compact */
-.ax-t-bub { max-width: none; }
 .ax-t-bub p { margin: 0 0 4px; }
 .ax-head { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
 .ax-kind { cursor: default; }
