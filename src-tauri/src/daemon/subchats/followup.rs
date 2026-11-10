@@ -276,6 +276,20 @@ pub async fn restore(state: &Arc<DaemonState>) {
     .await;
 }
 
+/// A test, dev or wdio daemon on the live app's data folder (an instance suffix,
+/// no `CC_DATA_DIR` of its own) has a registry of its own, so a sub it does not
+/// know is the live app's, and taking its file would lose the live app's message.
+/// Only a daemon with its own data folder reads an unknown row as one that ended
+/// while it was down (an ended row is not in the snapshot).
+fn on_shared_data() -> bool {
+    let over = crate::daemon::data_dir_override();
+    crate::daemon::push::is_isolated_on_shared_data(&crate::daemon::instance::instance_suffix(), over.as_deref())
+}
+
+fn owns_unknown_rows(row_known: bool, shared: bool) -> bool {
+    row_known || !shared
+}
+
 pub(crate) async fn restore_with<F, Fut>(state: &Arc<DaemonState>, resume: F)
 where
     F: Fn(String, String) -> Fut + Clone + Send + Sync + 'static,
@@ -284,6 +298,9 @@ where
     let Some(root) = data_root() else { return };
     for sub_id in sub_ids_in(&root) {
         let row = state.registry.get(&sub_id);
+        if !owns_unknown_rows(row.is_some(), on_shared_data()) {
+            continue;
+        }
         let live = row.as_ref().is_some_and(|i| i.ended_at.is_none() && i.end_reason.is_none());
         if live && row.as_ref().is_some_and(super::is_sub) {
             for h in list_in(&root, &sub_id) {
@@ -340,6 +357,13 @@ mod tests {
         add_in(dir.path(), "../escape", "x").unwrap();
         assert!(path_in(dir.path(), "../escape").starts_with(dir.path().join("subchats")));
         assert!(!dir.path().join("escape.held.jsonl").exists());
+    }
+
+    #[test]
+    fn a_daemon_on_the_live_data_folder_leaves_the_messages_of_subs_it_does_not_know() {
+        assert!(!owns_unknown_rows(false, true), "a test daemon on the shared folder must not take the live app's file");
+        assert!(owns_unknown_rows(false, false), "with its own folder, an unknown row ended while it was down");
+        assert!(owns_unknown_rows(true, true));
     }
 
     #[test]

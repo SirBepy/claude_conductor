@@ -122,6 +122,11 @@ pub(crate) async fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, parent:
             );
         }
         NUDGE_AGAIN => {
+            // A sub that never started has no conversation to resume; it is
+            // started from its brief instead.
+            if super::held::start_never_started(state, sub_id).await {
+                return;
+            }
             if let Err(e) = resume::request_nudge(state, sub_id).await {
                 log::warn!("subchats: nudge for {sub_id} failed: {e}");
             }

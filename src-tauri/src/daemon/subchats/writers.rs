@@ -486,6 +486,19 @@ pub fn queue_of(cwd: &Path) -> Vec<String> {
     table().get(&project_key(cwd)).map(|s| s.queue.iter().map(|e| e.sub_id.clone()).collect()).unwrap_or_default()
 }
 
+/// Whether an unstarted sub held for the slot has nothing left in its way: no
+/// queue entry names it (it can never be reached), or its slot has no live holder
+/// and it is first in line. A sub behind a live holder or another waiter is
+/// waiting as it should.
+pub fn nothing_in_the_way(state: &DaemonState, sub_id: &str) -> bool {
+    let table = table();
+    let Some(slot) = table.values().find(|s| s.queue.iter().any(|e| e.sub_id == sub_id)) else { return true };
+    // A holder with no row yet is a spawn still registering it: in the way.
+    let holder_live = slot.holder.as_deref().is_some_and(|h| alive(state, h) || state.registry.get(h).is_none());
+    let merge_wait = slot.queue.first().is_some_and(|e| e.after_merges) && super::worktree::merging(&slot.repo);
+    !holder_live && !merge_wait && queue_position(slot, sub_id) == Some(1)
+}
+
 /// True while `sub_id` is an unstarted Launch entry.
 pub fn is_unstarted(sub_id: &str) -> bool {
     table().values().any(|s| s.queue.iter().any(|e| e.sub_id == sub_id && e.kind == Kind::Launch))
@@ -636,6 +649,14 @@ pub fn restore(state: &Arc<DaemonState>) {
     super::worktree::restore(state);
 }
 
+/// Puts a held writer that no queue entry names back in line, as at boot, and
+/// starts the head if the slot is free. For a hold [`held::recover_lost`] rebuilt
+/// while the daemon runs; an entry already queued or holding is left as it is.
+pub(crate) fn requeue_held(state: &Arc<DaemonState>) {
+    let starts = restore_inner(state);
+    finish_release(state, starts);
+}
+
 pub(crate) fn restore_inner(state: &Arc<DaemonState>) -> Vec<Start> {
     let mut starts = Vec::new();
     let mut table = table();
@@ -750,6 +771,28 @@ mod tests {
             .unwrap();
         }
         (id, d.queued)
+    }
+
+    /// The slot reads the row, not the process: a finished holder whose `claude`
+    /// is still running (dash-answers on 2026-11-10 kept pid 27316 after its
+    /// finish) is not alive to the slot, so it never holds it for good.
+    #[test]
+    fn a_finished_holder_lets_the_next_writer_in_whatever_its_process_does() {
+        let _data = TempDataDir::new();
+        let (_d, root) = project();
+        let st = state();
+        let (first, _) = spawn_writer(&st, "linger-a", &root, "A");
+        let (next, queued) = spawn_writer(&st, "linger-b", &root, "B");
+        assert!(queued);
+        assert!(!nothing_in_the_way(&st, &next), "a live holder is in the way");
+        st.registry.set_subchat_finished(&first, true);
+        assert!(nothing_in_the_way(&st, &next), "a finished holder is not");
+        let starts = {
+            let mut t = table();
+            advance_locked(&st, t.get_mut(&project_key(&root)).unwrap())
+        };
+        assert_eq!(starts, vec![Start::Launch { sub_id: next.clone() }]);
+        assert!(nothing_in_the_way(&st, "linger-nobody"), "a sub no queue names can never be reached");
     }
 
     #[test]

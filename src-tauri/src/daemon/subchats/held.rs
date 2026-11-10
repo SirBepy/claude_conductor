@@ -99,8 +99,14 @@ static PARKED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 /// Subs a launch is in flight for, so a finish event and the tick cannot both start one.
 static LAUNCHING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+/// One file per daemon instance. A test, dev or wdio daemon runs on the same data
+/// folder as the live app with a registry of its own, and its boot pass reads a
+/// held sub its registry does not know as one that vanished and forgets it: a
+/// shared file let every `cargo test` wipe the live app's queue (2026-11-10, the
+/// `test-pclient` lib test). The default instance keeps the plain `held.json`.
 fn file_path() -> Option<PathBuf> {
-    crate::settings::paths::data_dir().ok().map(|d| d.join("subchats").join("held.json"))
+    let suffix = crate::daemon::instance::instance_suffix();
+    crate::settings::paths::data_dir().ok().map(|d| d.join("subchats").join(format!("held{suffix}.json")))
 }
 
 /// Entry by entry, so one that will not decode costs only itself. Anything
@@ -579,8 +585,185 @@ where
     }
 }
 
-/// The production pass: starts real children.
+/// Subs whose lost hold was rebuilt this run. Once each: a sub that loses its hold
+/// a second time is left to [`super::queue_watch`], which tells the main chat,
+/// instead of being rebuilt and started every minute.
+static RECOVERED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+fn launching(sub_id: &str) -> bool {
+    LAUNCHING.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id))
+}
+
+/// A sub that was registered and never started, with no hold left to start it:
+/// a live sub row with no child, no transcript and no held entry. Its hold was
+/// lost (another daemon instance on the same data folder forgot it before
+/// `held.json` was per instance), and without this nothing would ever start it:
+/// it reads as queued for good, and `--resume` on it fails because it never had a
+/// conversation.
+pub(crate) fn is_lost_hold(state: &DaemonState, inst: &Instance, held: &[Held], has_transcript: &(dyn Fn(&str) -> bool + Sync)) -> bool {
+    let id = inst.session_id.as_str();
+    inst.subchat_of.is_some()
+        && inst.ended_at.is_none()
+        && inst.end_reason.is_none()
+        && !inst.subchat_finished
+        && !inst.busy
+        && !state.sessions.contains_key(id)
+        && !launching(id)
+        && !held.iter().any(|h| h.sub_id == id)
+        && !has_transcript(id)
+}
+
+/// How old a lost hold may be and still be rebuilt by the tick on its own. An
+/// older one was most likely worked around by then (2026-11-10: the main chat
+/// re-ran four lost lanes as plain chats), and starting it blind would run the job
+/// twice. It is left to [`super::queue_watch`], which tells the main chat, and the
+/// main chat drops it (`subchat drop`) or Joe nudges it from its card.
+pub const RECOVER_WITHIN: chrono::Duration = chrono::Duration::hours(2);
+
+/// Whether `inst` was registered recently enough for the tick to rebuild its lost
+/// hold. An unreadable start time is not.
+pub(crate) fn recent_enough(inst: &Instance, now: chrono::DateTime<chrono::Utc>) -> bool {
+    chrono::DateTime::parse_from_rfc3339(&inst.started_at)
+        .is_ok_and(|t| now.signed_duration_since(t.with_timezone(&chrono::Utc)) <= RECOVER_WITHIN)
+}
+
+/// Whether `inst` is a sub that never started: held, or a lost hold.
+pub(crate) fn never_started(state: &DaemonState, inst: &Instance, has_transcript: &(dyn Fn(&str) -> bool + Sync)) -> bool {
+    let held = all();
+    held.iter().any(|h| h.sub_id == inst.session_id) || is_lost_hold(state, inst, &held, has_transcript)
+}
+
+/// Rebuilds the hold of every lost one ([`is_lost_hold`]) that `admit` lets in from what survives: its
+/// brief (stored in chat-config, which also holds `after` by name) and its row
+/// (folder, model, effort, account). The first message is composed from the brief
+/// again; an extra `prompt` the main chat passed at spawn is not kept anywhere and
+/// is not in it. A worktree sub is left out: its tree has its own start path.
+/// Returns the subs rebuilt and whether any of them waits for the writer slot
+/// rather than for a named sub.
+pub(crate) fn recover_lost_with(
+    state: &DaemonState,
+    has_transcript: &(dyn Fn(&str) -> bool + Sync),
+    admit: &(dyn Fn(&Instance) -> bool + Sync),
+) -> (Vec<String>, bool) {
+    let held = all();
+    let mut rebuilt = Vec::new();
+    let mut for_slot = false;
+    for inst in state.registry.list() {
+        if !is_lost_hold(state, &inst, &held, has_transcript) || !admit(&inst) || orphaned(state, &inst.session_id) {
+            continue;
+        }
+        let id = inst.session_id.clone();
+        let Some(brief) = crate::sessions::chat_config::get(&id).and_then(|c| c.subchat) else { continue };
+        if brief.worktree_at.is_some() {
+            continue;
+        }
+        if RECOVERED.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|s| s.contains(&id)) {
+            continue;
+        }
+        let Some(parent) = inst.subchat_of.as_deref() else { continue };
+        let (after, after_name) = match brief.after.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+            Some(query) => {
+                let subs: Vec<Instance> = subs_of(state, parent).into_iter().filter(|s| s.session_id != id).collect();
+                match super::tool::resolve(&subs, query) {
+                    Ok(target) => (Some(target.session_id.clone()), super::tool::label(target)),
+                    // The sub it waited for cannot be named again: the watchdog
+                    // tells the main chat rather than starting it out of order.
+                    Err(e) => {
+                        log::warn!("subchats: lost hold of {id} not rebuilt, its after {query:?} does not resolve: {e}");
+                        continue;
+                    }
+                }
+            }
+            None => (None, String::new()),
+        };
+        let reason = if after.is_some() { format!("waiting for {after_name}") } else { super::writers::QUEUED_TEXT.to_string() };
+        for_slot |= after.is_none();
+        let entry = Held {
+            sub_id: id.clone(),
+            reason,
+            after,
+            after_name,
+            launch: LaunchSpec {
+                cwd: inst.cwd.clone(),
+                model: inst.model.clone(),
+                effort: inst.effort.clone(),
+                account_id: inst.account_id.clone(),
+                first_message: super::brief::compose_first_message(&brief, None),
+            },
+        };
+        if let Err(e) = hold(state, entry) {
+            log::warn!("subchats: could not rebuild the lost hold of {id}: {e}");
+            continue;
+        }
+        RECOVERED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashSet::new).insert(id.clone());
+        log::warn!("subchats: rebuilt the lost hold of sub {id} from its brief");
+        rebuilt.push(id);
+    }
+    (rebuilt, for_slot)
+}
+
+/// [`recover_lost_with`] against the real transcripts, then the writer queue picks
+/// up any rebuilt sub that waits for the slot.
+pub(crate) fn recover_lost(state: &Arc<DaemonState>) -> Vec<String> {
+    let now = chrono::Utc::now();
+    let (rebuilt, for_slot) = recover_lost_with(
+        state,
+        &|id| crate::context_status::resolve_transcript(&state.registry, id).is_some(),
+        &|inst| recent_enough(inst, now),
+    );
+    if !rebuilt.is_empty() {
+        crate::daemon::machines::publish_instances_changed(state);
+    }
+    if for_slot {
+        super::writers::requeue_held(state);
+    }
+    rebuilt
+}
+
+/// Joe's "nudge" on a sub that never started. It has no conversation, so
+/// `--resume` would fail with "No conversation found" and raise the same card
+/// again. Instead its hold is rebuilt (even if it was rebuilt once already: Joe
+/// asked) and the held pass starts it if what it waits for is done. Returns false
+/// for a sub that did start, which a real nudge is for.
+pub(crate) async fn start_never_started_with<F, Fut>(
+    state: &Arc<DaemonState>,
+    sub_id: &str,
+    has_transcript: &(dyn Fn(&str) -> bool + Sync),
+    launch: F,
+) -> bool
+where
+    F: Fn(Arc<DaemonState>, String) -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
+    let Some(inst) = state.registry.get(sub_id) else { return false };
+    let held_now = all();
+    let was_held = held_now.iter().any(|h| h.sub_id == sub_id);
+    if !was_held && !is_lost_hold(state, &inst, &held_now, has_transcript) {
+        return false;
+    }
+    if !was_held {
+        if let Some(set) = RECOVERED.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            set.remove(sub_id);
+        }
+        let (_, for_slot) = recover_lost_with(state, has_transcript, &|inst| inst.session_id == sub_id);
+        if for_slot {
+            super::writers::requeue_held(state);
+        }
+    }
+    set_parked(sub_id, false);
+    release_ready(state, launch).await;
+    true
+}
+
+/// [`start_never_started_with`] against the real transcripts and launcher.
+pub async fn start_never_started(state: &Arc<DaemonState>, sub_id: &str) -> bool {
+    let has = |id: &str| crate::context_status::resolve_transcript(&state.registry, id).is_some();
+    start_never_started_with(state, sub_id, &has, production_launch).await
+}
+
+/// The production pass: rebuilds lost holds, then starts real children.
 pub async fn sweep(state: &Arc<DaemonState>) {
+    recover_lost(state);
     release_ready(state, production_launch).await;
 }
 
@@ -1146,7 +1329,7 @@ mod tests {
             .unwrap()
             .flatten()
             .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| n.starts_with("held.json.bad"))
+            .filter(|n| n.starts_with(&format!("{}.bad", held_file().file_name().unwrap().to_string_lossy())))
             .collect()
     }
 
@@ -1204,5 +1387,108 @@ mod tests {
         hold_behind(&st, "dp-b", "dp-b-held", "y", "dp-b-t", "t");
         assert_eq!(drop_held_of_parent(&st, "dp-a"), ["dp-a-held"]);
         assert!(!is_held("dp-a-held") && is_held("dp-b-held"));
+    }
+
+    // ── a second daemon on the same data folder ───────────────────────────
+
+    /// 2026-11-10: the `test-pclient` lib test booted a daemon on the live data
+    /// folder, its boot pass found no row for the live app's held subs, and it
+    /// forgot all of them, so four queued lanes never started.
+    #[tokio::test]
+    async fn a_second_daemon_instance_on_the_same_data_dir_leaves_the_live_held_set_alone() {
+        let _d = TempDataDir::new();
+        let st = state();
+        hold_behind(&st, "si-main", "si-sub", "footer", "si-target", "header");
+        std::env::set_var("CC_DAEMON_INSTANCE", "test-other");
+        let other = state();
+        let c = calls();
+        release_ready(&other, launcher(&c)).await;
+        std::env::remove_var("CC_DAEMON_INSTANCE");
+        assert!(is_held("si-sub"), "a daemon whose registry does not know the sub must not forget it");
+        assert!(c.lock().unwrap().is_empty());
+    }
+
+    // ── a hold that was lost ───────────────────────────────────────────────
+
+    /// A sub of `parent` whose brief says it waits for `after` by name.
+    fn lost_sub(st: &DaemonState, parent: &str, id: &str, name: &str, after: Option<&str>) {
+        sub_of(st, parent, id, name);
+        let mut brief: super::super::SubchatBrief = serde_json::from_str(&format!(
+            r#"{{"parent":"{parent}","task":"Build the footer","goal":"g","done_when":"d","writes":true,"files":["src/"]}}"#
+        ))
+        .unwrap();
+        brief.after = after.map(str::to_string);
+        crate::sessions::chat_config::set_subchat(id, Some(brief));
+    }
+
+    fn no_transcript(_: &str) -> bool {
+        false
+    }
+
+    #[tokio::test]
+    async fn a_never_started_sub_whose_hold_was_lost_is_rebuilt_from_its_brief_and_starts_when_its_target_is_done() {
+        let _d = TempDataDir::new();
+        let st = state();
+        sub_of(&st, "lh-main", "lh-target", "header");
+        st.registry.set_subchat_finished("lh-target", true);
+        lost_sub(&st, "lh-main", "lh-lost", "footer", Some("header"));
+        lost_sub(&st, "lh-main", "lh-later", "sidebar", Some("footer"));
+
+        let (mut rebuilt, for_slot) = recover_lost_with(&st, &no_transcript, &|_| true);
+        rebuilt.sort();
+        assert_eq!(rebuilt, ["lh-later", "lh-lost"]);
+        assert!(!for_slot, "both wait for a named sub");
+        let entry = all().into_iter().find(|h| h.sub_id == "lh-lost").expect("held again");
+        assert_eq!((entry.after.as_deref(), entry.after_name.as_str()), (Some("lh-target"), "header"));
+        assert!(entry.launch.first_message.starts_with("Job: Build the footer"), "{}", entry.launch.first_message);
+        assert_eq!(st.registry.get("lh-lost").unwrap().progress.waiting_for.as_deref(), Some("waiting for header"));
+
+        let c = calls();
+        release_ready(&st, launcher(&c)).await;
+        assert_eq!(*c.lock().unwrap(), ["lh-lost"], "the one whose target finished starts; the next keeps waiting");
+        assert!(is_held("lh-later"));
+    }
+
+    #[test]
+    fn a_lost_hold_is_rebuilt_once_and_a_sub_that_ran_is_never_rebuilt() {
+        let _d = TempDataDir::new();
+        let st = state();
+        lost_sub(&st, "lo-main", "lo-lost", "footer", None);
+        lost_sub(&st, "lo-main", "lo-ran", "header", None);
+        let has = |id: &str| id == "lo-ran";
+        let (rebuilt, for_slot) = recover_lost_with(&st, &has, &|_| true);
+        assert_eq!(rebuilt, ["lo-lost"]);
+        assert!(for_slot, "no after: it waits for the writer slot");
+        release(&st, "lo-lost");
+        assert!(recover_lost_with(&st, &has, &|_| true).0.is_empty(), "rebuilt once per run; a second loss goes to the watchdog");
+    }
+
+    #[test]
+    fn only_a_recent_lost_hold_is_rebuilt_on_its_own() {
+        let _d = TempDataDir::new();
+        let st = state();
+        lost_sub(&st, "ag-main", "ag-old", "footer", None);
+        let inst = st.registry.get("ag-old").unwrap();
+        let registered = chrono::DateTime::parse_from_rfc3339(&inst.started_at).unwrap().with_timezone(&chrono::Utc);
+        assert!(recent_enough(&inst, registered + RECOVER_WITHIN));
+        assert!(!recent_enough(&inst, registered + RECOVER_WITHIN + chrono::Duration::minutes(1)));
+        let now = registered + chrono::Duration::hours(8);
+        assert!(recover_lost_with(&st, &no_transcript, &|i| recent_enough(i, now)).0.is_empty(), "an hours-old job is the main chat's call");
+        assert!(never_started(&st, &inst, &no_transcript));
+    }
+
+    #[tokio::test]
+    async fn joes_nudge_on_a_sub_that_never_started_starts_it_and_a_sub_that_ran_is_left_to_the_real_nudge() {
+        let _d = TempDataDir::new();
+        let st = state();
+        sub_of(&st, "ns-main", "ns-target", "header");
+        st.registry.set_subchat_finished("ns-target", true);
+        lost_sub(&st, "ns-main", "ns-lost", "footer", Some("header"));
+        lost_sub(&st, "ns-main", "ns-ran", "sidebar", None);
+        let has = |id: &str| id == "ns-ran";
+        let c = calls();
+        assert!(start_never_started_with(&st, "ns-lost", &has, launcher(&c)).await);
+        assert_eq!(*c.lock().unwrap(), ["ns-lost"]);
+        assert!(!start_never_started_with(&st, "ns-ran", &has, launcher(&c)).await, "it has a conversation to resume");
     }
 }
