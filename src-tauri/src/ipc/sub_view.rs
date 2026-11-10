@@ -1,4 +1,4 @@
-//! Desktop IPC mirror for the Subchats card's two daemon RPCs
+//! Desktop IPC mirror for the Subchats card's three daemon RPCs
 //! (`daemon/methods/sub_view.rs`), same thin-wrapper pattern as `ipc/answers.rs`.
 
 use crate::state::AppState;

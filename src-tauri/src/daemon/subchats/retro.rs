@@ -92,8 +92,8 @@ fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// `Ok(())` for a main chat that may write a retro. A sub and a chat with the
-/// mode off each get a refusal naming why.
+/// The chat's `Instance` when it is a main chat that may write a retro. A sub
+/// and a chat with the mode off each get a refusal naming why.
 fn check_role(state: &DaemonState, session_id: &str) -> Result<crate::types::Instance, String> {
     let Some(inst) = state.registry.get(session_id) else {
         return Err("this chat is not known to the app, so no retro was written".to_string());
