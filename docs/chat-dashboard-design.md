@@ -181,6 +181,45 @@ Board: preview slug `subs-card`; rules sheet: `subs-card-rules`.
   Copy brief in the menu, Move to sidebar turning a sub into an ordinary chat, model/effort words and
   message/turn counts in the details.
 
+## Build (started 2026-11-10, overnight, unattended)
+
+Joe's calls on 2026-11-10, before he went to sleep:
+
+- **Ship behind a Settings switch: chat view Dashboard / Messages.** "it could be handy if we could
+  toggle it on/off in settings, but if thats too difficult, i am fine with us replacing transcript
+  everywhere". Default is Dashboard, so it's what he sees when he wakes up. Once it's approved and
+  stable, the old flow is removed, or kept in a form that doesn't weigh the app down, as a view the
+  user can swap to.
+- **Scope: everything in this file,** including the question rewrite rule and the new question-card
+  icon. "All of it".
+- **One writer at a time, no worktrees.** "I'm fine with us going slower and, that way, maybe using
+  fewer tokens or whatever, and maybe even being more careful." It needs to be usable by 13:00 on
+  2026-11-11.
+- **Deferred to Joe (2026-11-11), not in this build:** a Questions section (he leans toward no;
+  maybe an answered-questions count per sub in the Subchats card) and how Plan shows a batch job's
+  subchecks. Until then, Waiting on you stays as designed, and subchecks are ordinary Plan steps.
+- **No question cards overnight.** Every build sub decides for itself and writes each judgement call
+  in its final result, so Joe can fix it in the morning. "dont bother asking me anything else, just
+  keep doing it all to the best of your ability and then tmorrow ill fix anything thats not good".
+- **Release when every check is green,** with no stop to show him first: unit tests, typecheck, the
+  view harness, code-check, the full wdio sweep, then /release.
+
+Lanes, run in this order, each a sub of the "Chat as dashboard" main chat:
+
+1. `dash-shell`: the Settings switch, the dashboard container and two-column layout, Joe's message
+   strip, Plan (with Result taking its spot and the Plan N/N flip-back), Waiting on you, empty zones
+   not drawn, and the data model the cards read from the chat's events.
+2. `dash-answers`: the Answers card in full (History, threads, + question, Got it, animations), with
+   read state stored per the persistence rule.
+3. `dash-subchats`: the Subchats card, the daemon sub-image scan, Pin to sidemenu, and effort
+   battery colours app-wide.
+4. `dash-extras`: Links and files with the three quick-view buttons, and the Preview window card.
+5. `dash-behaviour`: the main chat rewrites Joe's questions and hands them to a sub, and the
+   question-card icon.
+6. `dash-tests`: audits view, vitest and wdio specs that the dashboard makes stale, rewrites or adds
+   them, and runs the whole floor.
+7. A gate sub runs code-check, the wdio sweep and /release.
+
 ## Gone
 
 - **Tool-count chips** (Read x4, Grep x8): unnecessary; the bottom activity bar is enough for now
