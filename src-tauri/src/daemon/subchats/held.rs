@@ -5,7 +5,9 @@
 //! A held sub is a real registry row, so it shows in the list, counts toward the
 //! cap of five and survives a restart with the rest of the snapshot. What the
 //! snapshot cannot carry is the launch recipe (the first message, the tier, the
-//! account) and the thing it waits for, so those live in `<data_dir>/subchats/held.json`.
+//! account) and the thing it waits for, so those live in
+//! `<data_dir>/subchats/held.json` (`held-<instance>.json` for a test or dev
+//! daemon, see [`file_path`]).
 //!
 //! **Ends blocked**, the rule that decides between starting a waiting sub and
 //! asking Joe, is defined once in [`after_state`]:
@@ -110,7 +112,7 @@ fn file_path() -> Option<PathBuf> {
 }
 
 /// Entry by entry, so one that will not decode costs only itself. Anything
-/// unreadable is kept aside as `held.json.bad` before the next write replaces the
+/// unreadable is kept aside as `<held file>.bad` before the next write replaces the
 /// file (see [`super::jsonfile`]).
 fn read_unlocked() -> Vec<Held> {
     let Some(path) = file_path() else { return Vec::new() };

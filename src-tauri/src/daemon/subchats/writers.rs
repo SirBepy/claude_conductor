@@ -33,7 +33,7 @@
 //! attempt, queued as a Wake, and woken when the slot is free. Holding its
 //! answer instead would mean holding a card answer already delivered.
 //!
-//! Only the Launch entries outlive a restart (through `held.json`), because a
+//! Only the Launch entries outlive a restart (through the held file), because a
 //! restart ends every turn: the holder's process is gone, and a Wake entry has no
 //! intent left to carry out (the sub takes the slot again at its next write). At
 //! boot the Launch queue is rebuilt from the held set and its head starts if the
@@ -1161,7 +1161,7 @@ mod tests {
         let (b, _) = spawn_writer(&st, "boot-b", &root, "message for B");
         let (c, _) = spawn_writer(&st, "boot-c", &root, "message for C");
         // The daemon restarts: the in-memory table is gone, the rows were restored
-        // from the snapshot, and held.json still has the recipes.
+        // from the snapshot, and the held file still has the recipes.
         forget_project_for_test(&root);
         let starts = restore_inner(&st);
         assert_eq!(starts, vec![Start::Launch { sub_id: b.clone() }], "nothing holds the slot after a restart, so the head starts");
