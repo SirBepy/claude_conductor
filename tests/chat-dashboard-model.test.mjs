@@ -189,12 +189,12 @@ describe("chat dashboard model", () => {
     expect(p.result).toBeNull();
   });
 
-  it("collects calls and discoveries of the current job as notes, and artifacts as links", () => {
-    const c = chat().joe("a").send({ kind: "call", verdict: "Went with B", text: "B" }).send({ kind: "artifact", text: "Open the board" })
+  it("collects calls and discoveries of the current job as notes, and the links an artifact names as links", () => {
+    const c = chat().joe("a").send({ kind: "call", verdict: "Went with B", text: "B" }).send({ kind: "artifact", text: "Open https://example.com/board" })
       .joe("b").send({ kind: "discovery", verdict: "Found it", text: "c" });
     const d = c.dash();
     expect(zone(d, "notes").cards.map((m) => m.card.kind)).toEqual(["discovery"]);
-    expect(zone(d, "links").cards).toHaveLength(1);
+    expect(zone(d, "links").links.map((l) => l.url)).toEqual(["https://example.com/board"]);
     expect(ids(d.right)).toEqual(["notes", "links"]);
   });
 

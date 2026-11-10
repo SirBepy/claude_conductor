@@ -21,3 +21,14 @@ export function readChatView(settings: Record<string, unknown>): ChatView {
 export function dashboardEnabled(remote: boolean = isRemote(), settings: Record<string, unknown> = getSettings()): boolean {
   return !remote && readChatView(settings) === "dashboard";
 }
+
+/** Joe's per-section choices (Settings > Chat defaults), zone id -> shown. Only
+ *  what he changed is stored; a section he has not touched follows
+ *  SECTION_DEFAULTS in dashboard-model.ts. Lives in settings.json's extra map. */
+export const SECTIONS_KEY = "dashboardSections";
+
+export function readSections(settings: Record<string, unknown>): Record<string, boolean> {
+  const raw = settings[SECTIONS_KEY];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).filter(([, v]) => typeof v === "boolean")) as Record<string, boolean>;
+}
