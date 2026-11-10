@@ -207,7 +207,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(countBtn(page)).toHaveText("3");
       await openList(page);
       const heads = await page.locator(".sub-list-popover .sub-list-head").allTextContents();
-      expect(heads, "queued sits with the running ones, not under Finished").toEqual(["Running", "Finished"]);
+      expect(heads, "queued has its own group between Running and Finished").toEqual(["Running", "Queued", "Finished"]);
       await expect(listRow(page, "sub-queued")).toHaveAttribute("data-kind", "queued");
       await expect(listRow(page, "sub-queued").locator(".sub-status")).toHaveText("waiting for Header");
       await expect(listRow(page, "sub-queued").locator("[data-popout]")).toHaveCount(0);

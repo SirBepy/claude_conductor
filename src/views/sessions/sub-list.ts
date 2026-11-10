@@ -72,7 +72,9 @@ export function newestFinishedFirst(
     .map((e) => e.row);
 }
 
-/** The popover body. Asking subs sit with the running ones: they are not done. */
+/** The popover body. Asking subs sit with the running ones: they are not done. A
+ *  queued sub has no claude process yet, so it gets its own group: filing it under
+ *  Running said "working" about a sub that is only waiting for a slot or another sub. */
 export function subListHtml(
   subs: readonly SubStatus[],
   sessions: readonly Instance[],
@@ -81,12 +83,13 @@ export function subListHtml(
   closesWhenSubsFinish = false,
 ): string {
   const byId = new Map(sessions.map((s) => [s.session_id, s]));
-  const running = subs.filter((s) => s.kind !== "finished");
+  const running = subs.filter((s) => s.kind !== "finished" && s.kind !== "queued");
+  const queued = subs.filter((s) => s.kind === "queued");
   const finished = newestFinishedFirst(subs.filter((s) => s.kind === "finished"), byId, finishedAt);
   const section = (label: string, rows: readonly SubStatus[]): string =>
     rows.length ? `<h5 class="sub-list-head">${label}</h5>${rows.map((s) => rowHtml(s, byId.get(s.id), canPopOut)).join("")}` : "";
   const note = closesWhenSubsFinish ? `<p class="sub-list-note">${escapeHtml(CLOSES_WHEN_SUBS_FINISH)}</p>` : "";
-  return note + section("Running", running) + section("Finished", finished);
+  return note + section("Running", running) + section("Queued", queued) + section("Finished", finished);
 }
 
 /** The count icon in a main chat's header and the list behind it. Owns its button:

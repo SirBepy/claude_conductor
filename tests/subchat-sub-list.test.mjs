@@ -42,7 +42,9 @@ describe("sub list rows", () => {
     const html = subListHtml(mainChatInfo(main, all).subs, all);
     expect(html).toContain('data-kind="queued"');
     expect(html).toContain("waiting for Header");
-    expect(html.indexOf("Running")).toBeGreaterThanOrEqual(0);
+    // A queued sub has no claude process: it sits under Queued, never under Running.
+    expect(html).toContain('<h5 class="sub-list-head">Queued</h5>');
+    expect(html).not.toContain('<h5 class="sub-list-head">Running</h5>');
     expect(html).not.toContain("data-popout");
   });
 
