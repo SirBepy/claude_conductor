@@ -1,6 +1,9 @@
 /* Chat dashboard (chat-dashboard.ts). The transcript stays in the pane, built
-   as usual, and is only hidden while the dashboard shows. */
-.session-pane[data-chat-view="dashboard"] > .session-messages {
+   as usual, and is only hidden while the dashboard shows. Keyed on the .cdash
+   node itself, not the pane's mark alone: the mark outlives a pane rebuild (a
+   chat switch, a new-chat draft), and hiding the fresh transcript area with no
+   dashboard beside it leaves the message box up under the header. */
+.session-pane[data-chat-view="dashboard"] > .cdash ~ .session-messages {
   display: none;
 }
 

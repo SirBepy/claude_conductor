@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (pane rebuild): the transcript-hiding rule now also needs the .cdash node before .session-messages, which every dashboard this spec opens has; nothing asserted changed, and it passes.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats zone is now the Subchats card fed by the instance list instead of the transcript's sub cards; no spec here has a sub, so nothing asserted changed and it passes.
 // Reviewed 2026-11-10 (dash-extras): the Links and files, Preview window and Changes zones join ZONES, a Links card draws once a chat has a plan, and a question carries its message figures; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (dash-answers): the Answers zone is now the Answers card (answers-card.ts) drawing its verdict in .ax-face, so `.cdash-answers .mc-verdict` still holds; a kindless message moved to Notes. Passes.
