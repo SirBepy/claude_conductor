@@ -279,8 +279,9 @@ async fn finish(
     let code = loop {
         let (mut sock, _) = listener.accept().await.map_err(|e| e.to_string())?;
         let mut buf = vec![0u8; 4096];
-        let Ok(read) = tokio::time::timeout(CALLBACK_READ_WAIT, sock.read(&mut buf)).await else { continue };
-        let n = read.map_err(|e| e.to_string())?;
+        // A stray connection that stalls or resets (Windows reports a dropped
+        // speculative connection as ECONNRESET) is skipped, never a failed sign-in.
+        let Ok(Ok(n)) = tokio::time::timeout(CALLBACK_READ_WAIT, sock.read(&mut buf)).await else { continue };
         let got = parse_callback(&String::from_utf8_lossy(&buf[..n]), state);
         let page = if got.is_some() { "Signed in. You can close this tab and return to Conductor." } else { "Not the sign-in callback." };
         let _ = sock
