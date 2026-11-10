@@ -1,0 +1,278 @@
+/* The dashboard's extra-content cards (docs/chat-dashboard-design.md, "Extra
+   content and quick views"): Links and files with its quick-view buttons, the
+   Preview window tile, Changes, the figures on a question, and the quick-view
+   read view. */
+
+/* ---- Links and files ---- */
+.cdash-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 7px;
+}
+.cdash-link,
+.cdash-zone .file-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.cdash-zone .file-ref {
+  font-family: var(--font-mono, monospace);
+}
+.cdash-link span,
+.cdash-zone .file-ref-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cdash-link:hover,
+.cdash-zone .file-ref:hover {
+  color: var(--color-text);
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+.cdash-link:focus-visible,
+.cdash-zone .file-ref:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.cdash-link.is-draft {
+  cursor: default;
+}
+.cdash-link.is-draft:hover {
+  color: var(--color-text-muted);
+  border-color: var(--color-border);
+  background: transparent;
+}
+.cdash-touched {
+  margin-left: 2px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* The three quick views: quiet text buttons, never loud pills. */
+.cdash-qv {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+  padding-top: 7px;
+  border-top: 1px solid var(--color-border);
+}
+.cdash-chips + .cdash-qv,
+.cdash-links > .cdash-h + .cdash-qv {
+  margin-top: 0;
+}
+.cdash-qv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.cdash-qv-btn:hover {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+.cdash-qv-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+/* A view with nothing behind it stays clickable (it says why) but reads as empty. */
+.cdash-qv-btn.is-none {
+  opacity: 0.5;
+}
+
+/* ---- Preview window ---- */
+.cdash-pv-tile {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-alt);
+  cursor: pointer;
+}
+.cdash-pv-tile:hover {
+  border-color: var(--color-primary);
+}
+.cdash-pv-tile:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+/* The page is laid out at a desktop width and scaled to the tile (the scale is
+   set from the tile's measured width), and the frame ignores the pointer so a
+   click anywhere on the tile opens the panel. */
+.cdash-pv-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--pv-w, 1280px);
+  height: calc(var(--pv-w, 1280px) * 0.625);
+  border: 0;
+  background: #fff;
+  transform: scale(var(--pv-scale, 0.25));
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.cdash-pv-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.cdash-pv-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+.cdash-pv-more {
+  margin-left: auto;
+  flex: none;
+}
+
+/* ---- Changes ---- */
+.cdash-change {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.cdash-change em {
+  margin-left: auto;
+  flex: none;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* ---- Figures on a question ---- */
+.cdash-figs {
+  min-width: 0;
+}
+
+/* ---- Quick-view read view ---- */
+.cdash-qvm {
+  position: fixed;
+  inset: 0;
+  z-index: 2600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cdash-qvm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+.cdash-qvm-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(900px, calc(100vw - 48px));
+  height: min(640px, calc(100vh - 64px));
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.cdash-qvm-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+.cdash-qvm-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.cdash-qvm-x {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.cdash-qvm-x:hover {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+.cdash-qvm-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.cdash-qvm-list {
+  flex: none;
+  width: 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+}
+.cdash-qvm-file {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cdash-qvm-file:hover,
+.cdash-qvm-file.on {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+.cdash-qvm-body {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 18px;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.cdash-qvm-none {
+  margin: 0;
+  color: var(--color-text-muted);
+}

@@ -9,7 +9,8 @@ import {
 } from "../../../../shared/effort-presets";
 import { settingsData } from "../../../sessions/new-session-cache";
 import { settingsHeader, toggleRow } from "../../ui";
-import { CHAT_VIEW_CHANGED, CHAT_VIEW_KEY, readChatView, type ChatView } from "../../../sessions/chat-dashboard/chat-view-pref";
+import { CHAT_VIEW_CHANGED, CHAT_VIEW_KEY, SECTIONS_KEY, readChatView, readSections, type ChatView } from "../../../sessions/chat-dashboard/chat-view-pref";
+import { SECTION_DEFAULTS, sectionOn } from "../../../../shared/chat/dashboard/dashboard-model";
 import "./chat-defaults.css";
 
 /** Parse a comma-separated models string into a trimmed, deduped, non-empty list. */
@@ -22,7 +23,14 @@ function parseModels(raw: string): string[] {
   return out;
 }
 
-function template(models: string[], sort: SessionSort, def: { model: string; effort: string }, chips: boolean, view: ChatView) {
+/** Dashboard cards Joe can switch off or on. The rest (Answers, Plan, Waiting on you) always draw. */
+const DASHBOARD_SECTIONS: ReadonlyArray<{ id: string; label: string; tooltip: string }> = [
+  { id: "links", label: "Links and files", tooltip: "Links the chat produced and the files it touched, with the Bigger plan, Decided and Project memory buttons." },
+  { id: "preview", label: "Preview window", tooltip: "A small live tile of the chat's newest preview that opens the preview panel." },
+  { id: "changes", label: "Changes", tooltip: "The files the chat edited since your last message. Off unless you turn it on." },
+];
+
+function template(models: string[], sort: SessionSort, def: { model: string; effort: string }, chips: boolean, view: ChatView, sections: Record<string, boolean>) {
   return html`
     <div class="view view-settings-chat-defaults">
       ${settingsHeader("Chat defaults")}
@@ -67,7 +75,13 @@ function template(models: string[], sort: SessionSort, def: { model: string; eff
                   <option value="messages" ?selected=${view === "messages"}>Messages</option>
                 </select>
               </div>
-              <p class="cd-hint">Dashboard shows a chat's answers, plan and what waits on you as cards. Messages shows the full transcript.</p>`}
+              <p class="cd-hint">Dashboard shows a chat's answers, plan and what waits on you as cards. Messages shows the full transcript.</p>
+              ${DASHBOARD_SECTIONS.map((sec) => toggleRow({
+                label: `Dashboard: ${sec.label}`,
+                inputId: `chatDefaultsSection-${sec.id}`,
+                checked: sectionOn(sections, sec.id),
+                tooltip: sec.tooltip,
+              }))}`}
           ${toggleRow({
             label: "Quick reply chips",
             inputId: "chatDefaultsNextChips",
@@ -103,7 +117,16 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
   if (!models.includes(def.model)) models = [...models, def.model];
 
   // Default on: an absent key resolves to true.
-  render(template(models, sort, def, getSettings().nextActionChips !== false, readChatView(getSettings())), root);
+  render(template(models, sort, def, getSettings().nextActionChips !== false, readChatView(getSettings()), readSections(getSettings())), root);
+
+  for (const id of Object.keys(SECTION_DEFAULTS)) {
+    root.querySelector<HTMLInputElement>(`#chatDefaultsSection-${id}`)?.addEventListener("change", (e) => {
+      const checked = (e.currentTarget as HTMLInputElement).checked;
+      void updateSettings((fresh) => ({ ...fresh, [SECTIONS_KEY]: { ...readSections(fresh as Record<string, unknown>), [id]: checked } }))
+        .then(() => document.dispatchEvent(new CustomEvent(CHAT_VIEW_CHANGED)))
+        .catch((err) => console.error("[chat-defaults] saving a dashboard section failed", err));
+    });
+  }
 
   root.querySelector<HTMLSelectElement>("#chatDefaultsChatView")?.addEventListener("change", (e) => {
     const value: ChatView = (e.currentTarget as HTMLSelectElement).value === "messages" ? "messages" : "dashboard";

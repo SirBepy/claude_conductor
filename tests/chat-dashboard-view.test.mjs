@@ -133,7 +133,8 @@ describe("chat dashboard layout", () => {
     const right = pane.querySelector(".cdash-right");
     expect([...left.querySelectorAll(".cdash-slot")].map((e) => e.dataset.zone)).toEqual(["answers"]);
     expect(left.querySelector(".mc-root .mc-verdict").textContent).toBe("Yes");
-    expect([...right.querySelectorAll(".cdash-slot")].map((e) => e.dataset.zone)).toEqual(["plan"]);
+    // A chat with a plan is a job, so it also gets Links and files for its quick-view buttons.
+    expect([...right.querySelectorAll(".cdash-slot")].map((e) => e.dataset.zone)).toEqual(["plan", "links"]);
     expect(right.querySelector(".cdash-count").textContent).toBe("1/2");
     expect(pane.querySelector(".cdash-grid").classList.contains("is-single")).toBe(false);
   });

@@ -14,8 +14,11 @@
 import type { RenderedMessage } from "../chat-classifiers";
 import type { MessageKind } from "../chat-message-kinds";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../chat-event-to-message";
+import type { PreviewMeta } from "../../../types/ipc.generated";
+import type { Visual } from "../message-visuals";
 import { buildAnswerItems, type AnswerItem, type AnswerSide } from "./answers-model";
 import { buildSubsState, type SubCardItem, type SubsState } from "./subs-model";
+import { changedFiles, extractFiles, extractLinks, type ChangedFile, type FileItem, type LinkItem } from "./links-model";
 
 export const TURN_STATUS_TOOL = "mcp__cc_conductor__report_turn_status";
 
@@ -48,6 +51,20 @@ export interface DashboardInput {
   subs?: SubCardItem[];
   /** Clock for the Subchats card's one-hour fold; tests pass their own. */
   now?: number;
+  /** This chat's previews and its subs' (list_previews scoped to the chat's
+   *  family), newest first, once loaded. */
+  previews?: readonly PreviewMeta[];
+  /** Joe's per-section overrides (Settings > Chat defaults), by zone id. */
+  sections?: Readonly<Record<string, boolean>>;
+}
+
+/** Zones Joe can switch off or on in Settings. The value is the default when he
+ *  has not chosen: Changes is off for him ("i know i wont be caring about
+ *  them", 2026-11-10), the others are on. Any other zone always draws. */
+export const SECTION_DEFAULTS: Readonly<Record<string, boolean>> = { links: true, preview: true, changes: false };
+
+export function sectionOn(sections: Readonly<Record<string, boolean>> | undefined, id: string): boolean {
+  return sections?.[id] ?? SECTION_DEFAULTS[id] ?? true;
 }
 
 /** Context every derive gets, computed once per derive pass. */
@@ -124,7 +141,7 @@ export function deriveAnswers({ input }: DeriveCtx): AnswersState | null {
 export type WaitingItem =
   | { type: "blocker"; message: RenderedMessage }
   | { type: "do_this"; message: RenderedMessage }
-  | { type: "question"; message: RenderedMessage; questions: string[] };
+  | { type: "question"; message: RenderedMessage; questions: string[]; figures: Visual[] };
 
 export interface WaitingState {
   items: WaitingItem[];
@@ -137,6 +154,19 @@ function questionTexts(m: RenderedMessage): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((q) => (q && typeof q === "object" && typeof (q as { question?: unknown }).question === "string"
     ? [(q as { question: string }).question] : []));
+}
+
+/** The tables and charts of the send_message that came with a question card:
+ *  the nearest own message before it in the same stretch (Joe has not written
+ *  in between and no other question sits between), so an approval question
+ *  shows the figures it asks about. */
+function figuresBefore(msgs: readonly RenderedMessage[], at: number): Visual[] {
+  for (let i = at - 1; i >= 0; i--) {
+    const m = msgs[i]!;
+    if (isJoeMessage(m) || m.kind === "question") return [];
+    if (isOwnMessage(m) && m.card?.visuals?.length) return m.card.visuals;
+  }
+  return [];
 }
 
 /** Blockers first (tinted red), then what only Joe can do, then open questions.
@@ -158,7 +188,7 @@ export function deriveWaiting({ input, lastJoe }: DeriveCtx): WaitingState | nul
       const later = !!sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub);
       if (!later) blockers.push({ type: "blocker", message: m });
     } else if (isOpenQuestion(m)) {
-      questions.push({ type: "question", message: m, questions: questionTexts(m) });
+      questions.push({ type: "question", message: m, questions: questionTexts(m), figures: figuresBefore(msgs, i) });
     }
   });
   const items = [...blockers, ...doThis, ...questions];
@@ -240,13 +270,51 @@ export function deriveNotes({ input, lastJoe }: DeriveCtx): CardListState | null
   return cards.length > 0 ? { cards } : null;
 }
 
-const LINKS_SHOWN = 5;
+export interface LinksState {
+  links: LinkItem[];
+  files: FileItem[];
+}
 
-/** Placeholder for lane `dash-extras`: the newest artifact messages (a file,
- *  preview or link to open), newest first. */
-export function deriveLinks({ input }: DeriveCtx): CardListState | null {
-  const cards = input.messages.filter((m) => isOwnMessage(m) && messageKindOf(m) === "artifact").slice(-LINKS_SHOWN).reverse();
-  return cards.length > 0 ? { cards } : null;
+/** Links and files: what the chat produced (a ticket, a PR, a CI run, sources)
+ *  and the files it touched or showed, derived from its own rows
+ *  (links-model.ts). It also hosts the three quick-view buttons, so it draws
+ *  when it has links or files, and also once the chat has a plan, which is a
+ *  job rather than a one-question chat: those buttons are then worth having
+ *  even before the first link. A quick one-question chat still collapses. */
+export function deriveLinks({ input }: DeriveCtx): LinksState | null {
+  if (!sectionOn(input.sections, "links")) return null;
+  const links = extractLinks(input.messages);
+  const files = extractFiles(input.messages);
+  if (links.length === 0 && files.length === 0 && !input.plan) return null;
+  return { links, files };
+}
+
+export interface PreviewWindowState {
+  /** The chat's (or its subs') newest preview. */
+  newest: PreviewMeta;
+  /** How many others the panel holds. */
+  others: number;
+}
+
+/** The Preview window card: the newest preview as a small live tile that opens
+ *  the preview panel. A comparison table is a preview like any other, so it
+ *  lands here too instead of in a card of its own. */
+export function derivePreviewWindow({ input }: DeriveCtx): PreviewWindowState | null {
+  if (!sectionOn(input.sections, "preview")) return null;
+  const list = input.previews ?? [];
+  const newest = list[0];
+  return newest ? { newest, others: list.length - 1 } : null;
+}
+
+export interface ChangesState {
+  files: ChangedFile[];
+}
+
+/** Changes: files the chat edited since Joe last wrote. Off unless Joe turns it on. */
+export function deriveChanges({ input, lastJoe }: DeriveCtx): ChangesState | null {
+  if (!sectionOn(input.sections, "changes")) return null;
+  const files = changedFiles(input.messages, lastJoe + 1);
+  return files.length > 0 ? { files } : null;
 }
 
 export type Column = "left" | "right";
@@ -270,7 +338,9 @@ export const ZONES = {
   plan: zone({ column: "right", order: 10, derive: derivePlan }),
   subchats: zone({ column: "right", order: 20, derive: deriveSubchats }),
   notes: zone({ column: "right", order: 30, derive: deriveNotes }),
+  preview: zone({ column: "right", order: 35, derive: derivePreviewWindow }),
   links: zone({ column: "right", order: 40, derive: deriveLinks }),
+  changes: zone({ column: "right", order: 50, derive: deriveChanges }),
 };
 
 export type ZoneId = keyof typeof ZONES;
