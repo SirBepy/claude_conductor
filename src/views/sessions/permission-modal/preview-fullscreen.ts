@@ -47,6 +47,26 @@ function writeTextPref(on: boolean): void {
   try { localStorage.setItem(TEXT_PREF_KEY, on ? "on" : "off"); } catch { /* private mode: in-memory only */ }
 }
 
+/** A page taller than the view would be cut off at the bottom: the frame's
+ *  document clips its own overflow and nothing scrolls it. So the frame is laid
+ *  out at the page's full height (same width as the view, so the layout stays
+ *  the screen-width one) and shrunk to fit the view's height; zoom then reads
+ *  the detail. A page that already fits is left at the view's size. */
+function fitFrameToView(frame: HTMLIFrameElement, view: HTMLElement): void {
+  const doc = frame.contentDocument?.documentElement;
+  const viewH = view.clientHeight;
+  if (!doc || viewH <= 0) return;
+  // Back to the view's own height first: the page's min-height is 100vh, so a
+  // frame already stretched to a past height would report that height again.
+  frame.style.height = "";
+  frame.style.transform = "";
+  const pageH = doc.scrollHeight;
+  if (pageH <= viewH + 1) return;
+  frame.style.height = `${pageH}px`;
+  frame.style.transformOrigin = "top center";
+  frame.style.transform = `scale(${viewH / pageH})`;
+}
+
 export interface PreviewFullscreenDeps {
   questions: Question[];
   selections: Map<number, Selection>;
@@ -179,11 +199,23 @@ export function createPreviewFullscreen(deps: PreviewFullscreenDeps): PreviewFul
     view.querySelector(".auq-fs__canvas")?.remove();
     const canvas = document.createElement("div");
     canvas.className = "auq-fs__canvas";
-    canvas.innerHTML = `<iframe class="auq-fs__frame" sandbox="" tabindex="-1" aria-hidden="true"></iframe>`;
-    canvas.querySelector<HTMLIFrameElement>(".auq-fs__frame")!.srcdoc = previewDocument(inlineLocalImages(html, sessionId));
+    // allow-same-origin and no allow-scripts: the fragment still cannot run
+    // anything, but the parent can read its height to fit a tall page.
+    canvas.innerHTML = `<iframe class="auq-fs__frame" sandbox="allow-same-origin" tabindex="-1" aria-hidden="true"></iframe>`;
+    const frame = canvas.querySelector<HTMLIFrameElement>(".auq-fs__frame")!;
+    const fit = () => fitFrameToView(frame, view);
+    frame.addEventListener("load", () => {
+      fit();
+      // An image landing after load can grow the page.
+      frame.contentDocument?.addEventListener("load", fit, true);
+    });
+    frame.srcdoc = previewDocument(inlineLocalImages(html, sessionId));
     view.prepend(canvas);
+    const resizeWatch = new ResizeObserver(fit);
+    resizeWatch.observe(view);
     scale = 1;
-    disposeZoom = setupImageZoomPan(canvas, view, (s) => { scale = s; });
+    const disposePan = setupImageZoomPan(canvas, view, (s) => { scale = s; });
+    disposeZoom = () => { disposePan(); resizeWatch.disconnect(); };
   }
 
   // Built once per question; sync() only moves the highlight and the checks.
