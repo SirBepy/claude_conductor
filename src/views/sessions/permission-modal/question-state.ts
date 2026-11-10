@@ -167,6 +167,9 @@ export function extractQuestions(input: unknown): Question[] | null {
 // touching module state directly.
 export interface ActiveQuestionCard {
   id: string;
+  /** The question strings it asks, to find its transcript card by what it asks
+   *  when the ids differ (a prompt from before they matched). */
+  questions?: readonly string[];
   /** The asker, which is also where the answer goes. */
   sessionId?: string;
   /** The chat whose window shows the card: a sub's main chat, else the asker. */
@@ -175,6 +178,8 @@ export interface ActiveQuestionCard {
   getDraft: () => QuestionDraft;
   /** Re-opens the card if it is collapsed to its bar; false when already open. */
   expand: () => boolean;
+  /** True while the card is collapsed to its bar. */
+  isMinimized?: () => boolean;
   /** Repaints the asker picker in place after another chat's question arrived
    *  or was settled, without rebuilding the card under a typing cursor. */
   refreshAskers?: () => void;
@@ -187,13 +192,34 @@ let activeCard: ActiveQuestionCard | null = null;
  * closures exist. */
 export function setActiveCard(card: ActiveQuestionCard | null): void {
   activeCard = card;
+  announceActiveCard();
+}
+
+/** Fired on `window` whenever the answer card on screen changes, collapses to
+ *  its bar, opens again or goes away, so the chat dashboard can leave the
+ *  question it shows out of Waiting on you. */
+export const ACTIVE_QUESTION_EVENT = "cc-active-question-changed";
+
+export function announceActiveCard(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(ACTIVE_QUESTION_EVENT));
+}
+
+/** The answer card open on screen when it was asked by `sessionId`: its prompt
+ *  id and question strings. Null when no card is up, it belongs to another
+ *  chat, or it is collapsed to its bar (which does not show the question). */
+export function activeCardFor(sessionId: string): { id: string; questions: readonly string[] } | null {
+  if (!activeCard || activeCard.sessionId !== sessionId || activeCard.isMinimized?.()) return null;
+  return { id: activeCard.id, questions: activeCard.questions ?? [] };
 }
 
 /** Clear the registry only if it's still pointing at `teardown` - guards
  * against a stale card's own teardown() (e.g. fired after a newer card
  * already replaced it) wiping out that newer card. */
 export function clearActiveCardIfCurrent(teardown: () => void): void {
-  if (activeCard?.teardown === teardown) activeCard = null;
+  if (activeCard?.teardown === teardown) {
+    activeCard = null;
+    announceActiveCard();
+  }
 }
 
 /**

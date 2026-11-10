@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (stale question cards): the answer card announces itself so the dashboard leaves the question open by the message box out of Waiting on you, Skip settles its transcript card in place, a reopen swaps to the daemon prompt only when it asks the same, and Skip marks naming an old daemon id fall back to time matching; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-05: prependEvents folds a subchat send result into its passed row and absorbs that result; every other event is handled as before - this spec's contract is unchanged and it passes.
 // asserts: src/shared/chat/chat-pagination.ts
 import { test, expect, type Page } from "@playwright/test";

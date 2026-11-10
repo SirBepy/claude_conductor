@@ -15,6 +15,7 @@ import {
   isDraftForPrompt,
   setActiveCard,
   clearActiveCardIfCurrent,
+  announceActiveCard,
   NO_ANSWER_TEXT,
 } from "./question-state";
 import { flushAuqPush, cancelAuqPush, pollRemoteAuqChange } from "./auq-draft-sync";
@@ -311,11 +312,13 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   if (opts.id) {
     setActiveCard({
       id: opts.id,
+      questions: questions.map((q) => q.question),
       sessionId: opts.sessionId,
       displayId: opts.displayId ?? opts.sessionId,
       teardown,
       getDraft: currentDraft,
       expand: () => renderer.expand(),
+      isMinimized: () => renderer.isMinimized(),
       refreshAskers: () => renderer.refreshAskers(),
     });
   }
@@ -417,6 +420,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     submit,
     cancel,
     notifyDraftChange: () => opts.onDraftChange?.(currentDraft()),
+    onMinimizedChange: announceActiveCard,
   });
 
   // Ctrl/Cmd+Enter never skips review: it submits only from the review panel,

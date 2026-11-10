@@ -167,11 +167,12 @@ pub fn run_stdio() {
             "tools/call" => {
                 let name = req["params"]["name"].as_str().unwrap_or("");
                 let arguments = req["params"]["arguments"].clone();
+                let tool_use_id = req["params"]["_meta"]["claudecode/toolUseId"].as_str();
 
                 if port == 0 {
                     tool_error_result(&id, "hooks server port unavailable")
                 } else {
-                    dispatch_tool(&rt, &id, name, &arguments, &session_id, port)
+                    dispatch_tool(&rt, &id, name, &arguments, tool_use_id, &session_id, port)
                 }
             }
             _ => {
@@ -552,6 +553,24 @@ mod tests {
         assert_eq!(body["reviewer_tool_use_id"], json!("toolu_1"));
         assert_eq!(body["decided"], json!(["nothing"]));
         assert_eq!(body["session_id"], json!("sub-1"));
+    }
+
+    /// The transcript keys a question card by its `tool_use` id, so the prompt
+    /// must carry the same id or no answer marker or Skip mark can name the card.
+    #[test]
+    fn a_question_prompt_takes_the_calls_tool_use_id_and_falls_back_to_a_fresh_id() {
+        use super::super::dispatch::dispatch_tool_meta;
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let args = json!({"questions": [{"question": "q?"}]});
+        POSTED_BODIES.with(|b| b.borrow_mut().clear());
+        dispatch_tool_meta(&rt, &json!(1), TOOL_QUESTION, &args, Some("toolu_01abc"), "s1", 1234, fake_http_post);
+        dispatch_tool_meta(&rt, &json!(2), TOOL_QUESTION, &args, None, "s1", 1234, fake_http_post);
+        dispatch_tool_meta(&rt, &json!(3), TOOL_APPROVAL, &json!({"tool_name": "x", "input": {}}), Some("toolu_02def"), "s1", 1234, fake_http_post);
+        let bodies = POSTED_BODIES.with(|b| b.borrow().clone());
+        assert_eq!(bodies[0]["id"], json!("toolu_01abc"));
+        let fresh = bodies[1]["id"].as_str().unwrap();
+        assert!(!fresh.is_empty() && !fresh.starts_with("toolu_"), "no tool_use id: a fresh one, got {fresh}");
+        assert_ne!(bodies[2]["id"], json!("toolu_02def"), "only the question prompt is keyed by the tool_use id");
     }
 
     #[test]

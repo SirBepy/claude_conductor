@@ -33,6 +33,7 @@ import type { Question, QuestionRequestedPayload } from "./types";
 import { showPermissionCard, showQuestionReplay } from "./permission-card";
 import { showSecretCard } from "./secret-card";
 import { findQuestionIndexById } from "../../../shared/chat/chat-question-card";
+import { cardQuestionTexts, isDaemonPromptId, questionTextsOf, sameQuestions } from "../../../shared/chat/question-texts";
 import { rerenderSidebar, dismissQuestionCard, queueSiblingQuestion, takeQueuedSiblingQuestionById } from "./index";
 import { showQuestionCard } from "./question-submit";
 
@@ -271,6 +272,21 @@ export async function rehydrateAndReplay(displayId: string): Promise<void> {
   if (await rehydratePendingPrompts(displayId) && stillSelected()) replayPendingPrompt(displayId);
 }
 
+/** The clicked transcript card is loaded and the daemon's prompt is not this
+ *  card under another id (its own tool_use id names another card, or an older
+ *  prompt's random id asks other questions): showing it would let a Skip or an
+ *  answer settle a question Joe never clicked, and leave the clicked one open.
+ *  False when the card is not loaded (nothing to compare) or the ids match. */
+function asksSomethingElse(cardId: string | undefined, prompt: QuestionRequestedPayload): boolean {
+  if (!cardId || cardId === prompt.id) return false;
+  const messages = state.renderer?.messages ?? [];
+  const card = messages[findQuestionIndexById(messages, cardId, true)];
+  if (!card) return false;
+  if (!isDaemonPromptId(prompt.id)) return true;
+  const asked = cardQuestionTexts(card);
+  return asked.length > 0 && !sameQuestions(asked, questionTextsOf(prompt.questions));
+}
+
 /** Rebuild an answerable payload from the transcript alone. The daemon's prompt
  *  store is memory-only, but the tool_use `input` is in history and a
  *  fire-and-forget answer travels as an ordinary message, not the dead oneshot.
@@ -347,7 +363,7 @@ export async function reopenPendingPrompt(sessionId: string, cardId?: string): P
   // Newest open question wins instead - resolvePendingQuestionCard's own rule.
   if (!pending) {
     const newest = recs ? pickNewestOpenQuestion(recs, sessionId) : await newestOpenQuestion(sessionId);
-    if (newest) {
+    if (newest && !asksSomethingElse(cardId, newest)) {
       markLatestQuestion(sessionId, newest.id, newest.seq);
       // `cardId` was requested but isn't the daemon's real current prompt -
       // an explicit ghost, not merely "a newer one exists" (todo 860).

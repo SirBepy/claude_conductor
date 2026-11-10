@@ -11,6 +11,7 @@ import { isAskQuestionTool, MCP_ASK_QUESTION_TOOL } from "./tool-meta";
 import { isQuestionResolutionText } from "./tool-views";
 import { enqueueTurnClose } from "./chat-turn-fold";
 import type { ChatRenderer } from "./chat-renderer";
+import { findOpenCardForPrompt } from "./question-texts";
 
 /** Index of the question card with this id, or -1. `openOnly` also requires
  *  `text === undefined` (the fold/progress-mirror callers' shared filter). */
@@ -215,11 +216,15 @@ export function tryHandleQuestionSkipped(
   if (ev.kind !== "question_skipped") return false;
   // The body names the skipped prompt, which is the card's tool_use id. A
   // named card that is already answered is a reload settling a stale prompt
-  // (answered-gate.ts), so a newer open card must stay open. An unnamed or
-  // unknown card falls back to the newest open one, as a real answer does.
-  const named = ev.body ? findQuestionIndexById(r.messages, ev.body) : -1;
-  if (named >= 0) {
-    if (r.messages[named]!.text === undefined) resolvePendingQuestionCard(r, AUQ_SKIPPED_TEXT, ev.body);
+  // (answered-gate.ts), so a newer open card must stay open. A name no card
+  // carries (a prompt from before its id was the tool_use id) settles nothing
+  // here: the window that pressed Skip already settled its card by what it
+  // asks (skipQuestionCard), and the newest open card is often another
+  // question. Only an unnamed notice falls back to the newest open card, as an
+  // unnamed answer does.
+  if (ev.body) {
+    const named = findQuestionIndexById(r.messages, ev.body);
+    if (named >= 0 && r.messages[named]!.text === undefined) resolvePendingQuestionCard(r, AUQ_SKIPPED_TEXT, ev.body);
     return true;
   }
   resolvePendingQuestionCard(r, AUQ_SKIPPED_TEXT);
@@ -251,6 +256,29 @@ export function matchSkipMarks(
     }
   }
   return skipped;
+}
+
+/** Settle the transcript card a skipped prompt stands for, in place: the card
+ *  with its id, else (a prompt from before the ids matched) the newest open card
+ *  asking the same questions. Never any other card, unlike a skip notice with no
+ *  name. Returns the settled card's own id ("" for a card with none), or null
+ *  when no such card is open. */
+export function skipQuestionCard(r: ChatRenderer, id: string, questions: readonly string[]): string | null {
+  const i = findOpenCardForPrompt(r.messages, id, questions);
+  if (i < 0) return null;
+  const cardId = r.messages[i]!.id ?? "";
+  r.messages[i] = { ...r.messages[i]!, text: AUQ_SKIPPED_TEXT };
+  r.dirtyIndices.add(i);
+  moveMessageToEnd(r, i);
+  return cardId;
+}
+
+/** A prompt from before its id was the card's tool_use id leaves its Skip mark
+ *  under the daemon's id, which no card carries, so the card would read as open
+ *  again after a reload. A second Skip under the card's own id (a prompt the
+ *  daemon does not hold, so only the mark is written) keeps it settled. */
+export function needsCardSkipMark(promptId: string, cardId: string | null): cardId is string {
+  return !!cardId && cardId !== promptId;
 }
 
 /** Bulk-load fold (todo 661): after full history replay, resolve any question

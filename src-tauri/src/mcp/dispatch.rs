@@ -22,16 +22,18 @@ use super::tool_schemas::{
     TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
 };
 
-/// Route one `tools/call` to its hooks-server endpoint.
+/// Route one `tools/call` to its hooks-server endpoint. `tool_use_id` is the
+/// call's `_meta["claudecode/toolUseId"]`, when Claude Code sent one.
 pub(super) fn dispatch_tool(
     rt: &tokio::runtime::Runtime,
     id: &Value,
     name: &str,
     arguments: &Value,
+    tool_use_id: Option<&str>,
     session_id: &str,
     port: u16,
 ) -> Value {
-    dispatch_tool_with(rt, id, name, arguments, session_id, port, http_post)
+    dispatch_tool_meta(rt, id, name, arguments, tool_use_id, session_id, port, http_post)
 }
 
 /// Same routing as `dispatch_tool`, with the HTTP transport swapped for
@@ -45,6 +47,21 @@ pub(super) fn dispatch_tool_with(
     port: u16,
     post: HttpPost,
 ) -> Value {
+    dispatch_tool_meta(rt, id, name, arguments, None, session_id, port, post)
+}
+
+/// [`dispatch_tool_with`] plus the call's `tool_use` id.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn dispatch_tool_meta(
+    rt: &tokio::runtime::Runtime,
+    id: &Value,
+    name: &str,
+    arguments: &Value,
+    tool_use_id: Option<&str>,
+    session_id: &str,
+    port: u16,
+    post: HttpPost,
+) -> Value {
     let ctx = Ctx {
         rt,
         id,
@@ -52,6 +69,7 @@ pub(super) fn dispatch_tool_with(
         session_id,
         port,
         post,
+        tool_use_id: tool_use_id.filter(|t| !t.is_empty()),
     };
     prompt_tools(&ctx, name)
         .or_else(|| session_tools(&ctx, name))
@@ -82,6 +100,12 @@ fn prompt_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             Some(ctx.relay("/permissions/request", body, None, None))
         }
         TOOL_QUESTION => {
+            // The card's prompt id is the transcript's own `tool_use` id when
+            // Claude Code sent it: the answer marker, the Skip mark and the
+            // `question_skipped` notice all name the prompt id, and a random one
+            // matched no card in the transcript, so a reload forgot every Skip
+            // and paired answers with cards by position.
+            let request_id = ctx.tool_use_id.map(str::to_string).unwrap_or(request_id);
             // todo 818: reject out-of-enum domain/badges HERE - downstream is
             // permissive (untyped relay, card strips unknowns), so a bad chip
             // used to vanish behind a normal `{"acknowledged": true}`.

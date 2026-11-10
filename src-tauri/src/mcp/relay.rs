@@ -122,6 +122,9 @@ pub(super) struct Ctx<'a> {
     pub(super) session_id: &'a str,
     pub(super) port: u16,
     pub(super) post: HttpPost,
+    /// Claude Code's own id for this call (`params._meta["claudecode/toolUseId"]`),
+    /// when the client sent one. It is the `tool_use` id the transcript holds.
+    pub(super) tool_use_id: Option<&'a str>,
 }
 
 impl Ctx<'_> {

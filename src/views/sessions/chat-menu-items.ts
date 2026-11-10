@@ -24,6 +24,7 @@ import { state } from "./state";
 import { changeCharacterForSession, changeAccountForSession } from "./active-session-account";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 import { sessionEvents } from "../../shared/chat/event-store";
+import { openQuestionCards } from "./permission-modal/dismiss-open-questions";
 import type { ChatEvent, ContentBlock } from "../../types/ipc.generated";
 
 export interface ChatMenuCtx {
@@ -219,6 +220,24 @@ export function buildChatItems(ctx: ChatMenuCtx): ItemDesc[] {
               : (ctx.mirrored ? NOT_ON_THIS_MACHINE
                 : (ctx.subchatsOn ? "A main chat cannot be a sub. Turn Use subchats off first." : undefined))),
         },
+    // Rare, so here and not on the card: a question card left waiting with
+    // nothing that could answer it is cleared all at once, each one settled as
+    // its own Skip would be.
+    (() => {
+      const open = sessionId && !isDraft ? openQuestionCards(sessionId).length : 0;
+      return {
+        icon: "broom",
+        label: open > 1 ? `Dismiss ${open} open questions` : "Dismiss open question",
+        run: open > 0 && sessionId
+          ? async () => {
+              const { dismissOpenQuestions } = await import("./permission-modal/dismiss-open-questions");
+              await dismissOpenQuestions(sessionId);
+              ctx.onAfterAction?.();
+            }
+          : undefined,
+        disabledReason: open > 0 ? undefined : (isDraft ? "Not available until the chat starts" : "No question is waiting in this chat"),
+      };
+    })(),
     {
       icon: "git-diff",
       label: "View changes",
