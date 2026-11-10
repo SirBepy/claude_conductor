@@ -83,6 +83,8 @@ pub fn delete_thread(chat_session_id: &str, thread_id: &str) -> Result<Vec<AskTh
     let mut threads = load(chat_session_id);
     threads.retain(|t| t.id != thread_id);
     save(chat_session_id, &threads)?;
+    // The Answers card points at threads by id; a deleted one must not linger there.
+    super::answer_state::forget_thread(chat_session_id, thread_id)?;
     Ok(threads)
 }
 
