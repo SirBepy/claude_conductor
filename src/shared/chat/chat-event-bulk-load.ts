@@ -121,6 +121,10 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   // leaves lastActivity null -> the bar clears; a still-busy turn shows its
   // last activity, and buffered live events below take over from there.
   r.hydrating = false;
+  // The last flushRender above ran while `hydrating` was still true, so a
+  // listener that skips hydrating flushes (the chat dashboard) has drawn
+  // nothing of the finished replay yet.
+  r.onFlushed?.();
   r.onFileEditsChanged?.(r.getFileEdits());
   r.onActivityUpdate?.(r.lastActivity, r.activityIdle);
   r.onToolTally?.(r.tallyState.build());
