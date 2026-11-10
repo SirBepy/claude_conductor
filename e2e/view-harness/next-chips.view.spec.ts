@@ -102,6 +102,8 @@ test.describe("quick reply chips", () => {
       const { state } = await import("/views/sessions/state.ts");
       state.composer!.clearComposer();
     });
+    // A clear that is not a send (schedule, discard, slash command) must bring the strip back over the empty box.
+    await expect(chip(page)).toBeVisible();
     expect(await page.evaluate(() => (window as unknown as { __draftActivity: number }).__draftActivity)).toBe(0);
   });
 
