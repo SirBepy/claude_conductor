@@ -1,0 +1,27 @@
+/* The question card's icon: a chat bubble with a question mark inside it.
+   The two glyphs are stacked, so the wrapper owns the size (font-size set by
+   the host rule) and both glyphs inherit it. The dotted bubble
+   (ph-chat-circle-dots) belongs to the Answers card instead. */
+.q-icon {
+  position: relative;
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.q-icon > .ph {
+  font-size: inherit;
+  line-height: 1;
+}
+.q-icon > .q-icon__mark {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.52em;
+}
+
+.prompt-card__title > .q-icon { font-size: 1.05rem; color: var(--color-primary); }
+.question-card-summary > .q-icon { font-size: 0.95rem; color: var(--color-primary); }

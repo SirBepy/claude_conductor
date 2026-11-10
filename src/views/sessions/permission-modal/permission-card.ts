@@ -3,6 +3,7 @@ import { updateSettings } from "../../../shared/settings-update";
 import { isRemote } from "../../../shared/transport";
 import { isSettingsPopupOpen } from "../../../shared/settings-popup";
 import { escapeHtml } from "../../../shared/escape-html";
+import { questionIconHtml } from "../../../shared/question-icon";
 import { buildRule, describeRule, isDestructive, withAddedRule } from "../permission-rules";
 import { clearHost, ensureHost, renderCardShell } from "./host";
 import { extractQuestions, formatAnswersAsMessage, renderQuestionUI } from "./question-ui";
@@ -45,7 +46,6 @@ export function showPermissionCard(payload: PermissionRequestedPayload, restored
       questions,
       initialDraft: restoredDraft,
       cwd: resolveCwdForSession(payload.session_id),
-      titleIcon: "ph-chat-circle-dots",
       // Fallback-path tell for every OTHER tool; hidden for our own.
       rightChipHtml: isAskQuestionTool(payload.tool_name)
         ? undefined
@@ -187,7 +187,7 @@ export function showQuestionReplay(m: RenderedMessage): void {
 
   const title = `
     <span class="prompt-card__title">
-      <i class="ph ph-chat-circle-dots"></i>
+      ${questionIconHtml()}
       Question
     </span>
   `;

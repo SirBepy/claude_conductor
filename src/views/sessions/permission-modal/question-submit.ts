@@ -330,7 +330,6 @@ export async function showQuestionCard(
     onPickAsker: askerId ? (to) => pickAsker(askerId, to) : undefined,
     initialDraft,
     cwd: resolveCwdForSession(payload.session_id),
-    titleIcon: "ph-chat-circle-dots",
     submitLabel: "Submit",
     submitIcon: "ph-paper-plane-right",
     cancelLabel: "Skip",
