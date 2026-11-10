@@ -7,7 +7,7 @@ import { sessionEvents } from "../../shared/chat/event-store";
 import { Composer } from "../../shared/chat/composer";
 import { HeldMessages } from "../../shared/chat/held-messages";
 import { ScheduledChip } from "../../shared/chat/scheduled-chip";
-import { formatFireAt } from "../../shared/chat/schedule-picker";
+import { formatFireAt, formatRecurrenceBadge } from "../../shared/chat/schedule-picker";
 import { blocksToText } from "../../shared/chat/content-blocks";
 import { showToast } from "../../shared/toast";
 import type { ChatEvent, ContentBlock, Instance, ScheduledItem, ScheduledKind } from "../../types/ipc.generated";
@@ -138,9 +138,33 @@ export function mountComposer(
     ? new ScheduledChip({
         root: scheduledChipSlot,
         sessionId,
-        // Pencil-edit: bring the scheduled prompt back into this pane's
-        // composer as a fresh draft; the chip cancels the item itself.
-        onEdit: (item) => composer.setDraftText(item.prompt),
+        // Pencil-edit: the prompt goes into the composer in edit mode; the item
+        // stays scheduled until Send re-saves it (same time and repeat) or the
+        // edit is cancelled.
+        onEdit: (item) =>
+          composer.beginScheduledEdit(item.prompt, {
+            label: `${formatFireAt(item.fire_at)}${item.recurrence ? `, ${formatRecurrenceBadge(item.recurrence)}` : ""}`,
+            onSave: async (blocks) => {
+              const prompt = blocksToText(blocks);
+              // Re-read the item: it may have fired or been deleted since the
+              // edit began, and an update would resurrect it.
+              const all = await invoke<ScheduledItem[]>("schedule_list");
+              const current = all.find((i) => i.id === item.id);
+              if (!current || current.status.type !== "pending") {
+                showToast("That message was already sent or removed. Your text is still here.");
+                throw new Error("scheduled item no longer pending");
+              }
+              try {
+                await invoke<void>("schedule_update", { item: { ...current, prompt } });
+              } catch (err) {
+                console.error("[sessions] schedule_update failed", err);
+                showToast(`Failed to save: ${err}`);
+                throw err;
+              }
+              showToast(`Still scheduled for ${formatFireAt(current.fire_at)}`);
+              void state.scheduledChip?.refresh();
+            },
+          }),
       })
     : null;
   // Held-messages controller is a singleton (its per-session set survives

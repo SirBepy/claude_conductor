@@ -91,6 +91,13 @@ export interface ComposerOptions {
 
 let _composerInstanceCount = 0;
 
+export interface ScheduledEdit {
+  /** When/how often it fires, shown in the edit bar. */
+  label: string;
+  /** Saves the edited text onto the existing schedule; reject to keep editing. */
+  onSave: (blocks: ContentBlock[]) => Promise<void>;
+}
+
 export class Composer {
   private root: HTMLElement;
   private opts: ComposerOptions;
@@ -109,6 +116,7 @@ export class Composer {
   private file: FileProvider | null = null;
   private core: ComposerCore | null = null;
   private sending = false;
+  private scheduledEdit: ScheduledEdit | null = null;
   // Guards syncTall's own re-measure against recursing through onResize.
   private syncingTall = false;
   // Wall-clock of the last keystroke; feeds isComposing() so an auto-flush
@@ -250,6 +258,12 @@ export class Composer {
     window.removeEventListener("focus", this._windowFocusHandler);
     shortcuts.unregister("blur-composer");
     this.draftSync.flush(); // not cancel - a teardown mid-debounce must not lose the last edit
+    // An edit left open dies with this composer while the original stays
+    // scheduled; a surviving draft would later send as a duplicate.
+    if (this.scheduledEdit && this.sessionId) {
+      clearDraft(this.sessionId);
+      void this.draftSync.clear(this.sessionId);
+    }
     this.ptt.destroy();
     if (this.noticeTimer) {
       clearTimeout(this.noticeTimer);
@@ -394,6 +408,11 @@ export class Composer {
     this.root.innerHTML = `
       <div class="composer-attachments"></div>
       <div class="composer-scope-warning" hidden></div>
+      <div class="composer-edit-bar" hidden>
+        <i class="ph ph-clock-countdown"></i>
+        <span class="composer-edit-label"></span>
+        <button type="button" class="composer-scope-link composer-edit-cancel">Cancel edit</button>
+      </div>
       <div class="composer-row">
         <div class="composer-input-wrap cc-typing-wrap">
           <div class="composer-highlight cc-typing-highlight" aria-hidden="true"></div>
@@ -425,6 +444,8 @@ export class Composer {
     this.highlightEl = this.root.querySelector<HTMLElement>(".composer-highlight");
     this.noticeEl = this.root.querySelector<HTMLElement>(".composer-notice");
     this.scopeWarn.bind(this.root.querySelector<HTMLElement>(".composer-scope-warning"));
+    this.root.querySelector(".composer-edit-cancel")?.addEventListener("click", () => this.cancelScheduledEdit());
+    this.renderEditBar();
     // The rebuilt DOM dropped a still-pending send's Undo button; put it back.
     const graceSlot = this.root.querySelector<HTMLElement>(".composer-send-wrap");
     if (graceSlot) remountGraceBar(this.graceKey(), graceSlot);
@@ -684,6 +705,30 @@ export class Composer {
     const text = (this.textarea?.value ?? "").trim();
     const empty = !text && this.att.isEmpty();
 
+    // Editing a still-scheduled message: Send saves the new text back onto the
+    // same schedule instead of sending it now. A refused save puts the draft
+    // back and keeps the edit open, so nothing is lost.
+    const edit = this.scheduledEdit;
+    if (edit) {
+      if (empty) return;
+      this.sending = true;
+      const blocks = this.undo.buildBlocks(text);
+      const savedAttachments = this.att.attachments;
+      const savedPastedBlocks = this.att.pastedBlocks;
+      this.clearComposer();
+      try {
+        await edit.onSave(blocks);
+        this.scheduledEdit = null;
+        this.renderEditBar();
+      } catch (err) {
+        console.error("[Composer] scheduled edit save failed", err);
+        this.restoreDraft(text, savedAttachments, savedPastedBlocks);
+      } finally {
+        this.sending = false;
+      }
+      return;
+    }
+
     const builtin = text ? parseBuiltin(text) : null;
     if (builtin) {
       this.sending = true;
@@ -846,6 +891,32 @@ export class Composer {
     } finally {
       this.sending = false;
     }
+  }
+
+  /** Start editing a scheduled message: its text becomes the draft, and Send
+   *  saves back onto the schedule (`onSave`) until Cancel edit or a successful
+   *  save ends it. The scheduled item itself is never touched here. */
+  beginScheduledEdit(text: string, edit: ScheduledEdit): void {
+    this.scheduledEdit = edit;
+    this.renderEditBar();
+    this.setDraftText(text);
+  }
+
+  /** Abandon the edit: the draft goes away and the original stays scheduled. */
+  private cancelScheduledEdit(): void {
+    if (!this.scheduledEdit) return;
+    this.scheduledEdit = null;
+    this.clearComposer();
+    this.renderEditBar();
+  }
+
+  private renderEditBar(): void {
+    const bar = this.root.querySelector<HTMLElement>(".composer-edit-bar");
+    if (!bar) return;
+    const edit = this.scheduledEdit;
+    bar.hidden = !edit;
+    const label = bar.querySelector<HTMLElement>(".composer-edit-label");
+    if (label) label.textContent = edit ? `Editing scheduled message (${edit.label}). Send keeps the schedule.` : "";
   }
 
   /** Chat id the grace window is keyed on; the pending-draft composer has none yet. */

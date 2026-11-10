@@ -1,8 +1,7 @@
 // Per-chat scheduled-message chip: clock icon + count of Pending
 // ScheduledKind::Message items for the active session, with a dropdown of
-// Send now / Edit / Delete rows. Edit loads the item's prompt back into the
-// composer (via onEdit) and cancels the pending item, leaving the user to
-// re-send or re-schedule through the normal composer flow. Mechanically
+// Send now / Edit / Delete rows. Edit hands the item to the composer (via
+// onEdit), which edits it in place and keeps it scheduled. Mechanically
 // mirrors held-messages.ts (chip + floating dropdown, outside-click close) but
 // renders in its own slot next to `.session-thinking` rather than reusing its
 // chipSlot/anchor, so the two controllers never fight over the same DOM.
@@ -23,11 +22,8 @@ export interface ScheduledChipOptions {
   /** `.scheduled-chip-slot` host — cleared/repopulated on every render. */
   root: HTMLElement;
   sessionId: string;
-  /** Called when the user clicks a pending item's Edit (pencil) action: load
-   * the item's prompt back into the composer as a fresh draft. The chip
-   * itself then cancels (schedule_delete) the item right after, so the
-   * caller only has to repopulate - the two never race since this call is
-   * synchronous. */
+  /** Called when the user clicks a pending item's Edit (pencil) action: put
+   * the item into the composer's edit mode. The item is NOT deleted. */
   onEdit: (item: ScheduledItem) => void;
 }
 
@@ -205,24 +201,12 @@ export class ScheduledChip {
     await this.refresh();
   }
 
-  /** Load the item's prompt back into the composer, then cancel the pending
-   * item so it doesn't also fire while the user is re-editing - the user is
-   * left in the normal compose state (send now or re-schedule via the usual
-   * picker applies again). */
+  /** Hand the item to the composer in edit mode. The item stays scheduled the
+   * whole time: cancelling the edit loses nothing, and saving re-uses its time
+   * and repeat. */
   private editItem(item: ScheduledItem): void {
     this.opts.onEdit(item);
     this.isOpen = false;
     this.closeDropdown();
-    void this.cancelForEdit(item.id);
-  }
-
-  private async cancelForEdit(id: string): Promise<void> {
-    try {
-      await invoke<void>("schedule_delete", { id });
-    } catch (err) {
-      console.error("[scheduled-chip] schedule_delete (edit) failed", err);
-      showToast(`Failed to cancel scheduled item: ${err}`);
-    }
-    await this.refresh();
   }
 }
