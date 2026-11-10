@@ -13,8 +13,8 @@
 //!   held at spawn: its row and brief exist and no child has started. Its recipe
 //!   (the first message, the tier, the account) lives in [`super::held`], the
 //!   one place a registered sub with no child is kept, so it shows in the list,
-//!   counts toward the cap, is exempt from the dead and ceiling sweeps and
-//!   survives a restart there. A [`Kind::Wake`] is a sub that is already running
+//!   holds no cap slot (it has no process), is exempt from the dead and ceiling
+//!   sweeps and survives a restart there. A [`Kind::Wake`] is a sub that is already running
 //!   (a follow-up with `writes: true`, a continued writer, or one that lost the
 //!   slot while it waited on Joe): it carries on read-only and is woken when the
 //!   slot reaches it.

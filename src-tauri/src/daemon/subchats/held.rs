@@ -2,8 +2,9 @@
 //! here until the sub it named finishes, then the daemon starts it without waking
 //! the main agent (spec section 2).
 //!
-//! A held sub is a real registry row, so it shows in the list, counts toward the
-//! cap of five and survives a restart with the rest of the snapshot. What the
+//! A held sub is a real registry row, so it shows in the list and survives a
+//! restart with the rest of the snapshot, but it holds no cap slot: it has no
+//! process (`spawn::started_subs`). What the
 //! snapshot cannot carry is the launch recipe (the first message, the tier, the
 //! account) and the thing it waits for, so those live in
 //! `<data_dir>/subchats/held.json` (`held-<instance>.json` for a test or dev
