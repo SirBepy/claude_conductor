@@ -226,8 +226,12 @@
 .cdash-count + .cdash-flip {
   margin-left: 8px;
 }
+/* 100%, never none: a bubble is fit-content (chat-messages-assistant.css), so
+   with no cap a one-line code block widens it to the code's full length and the
+   zone (or an Answers thread) scrolls sideways; capped, the block scrolls inside
+   its own box. */
 .cdash-zone .msg {
-  max-width: none;
+  max-width: 100%;
   margin: 0;
 }
 .cdash-stack {
