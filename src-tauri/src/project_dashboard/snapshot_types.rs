@@ -150,6 +150,35 @@ pub struct TodoStats {
     pub claimed_now: u32,
 }
 
+/// A backlog todo named by id and the repo it lives in: an id like `pc-0007`
+/// can repeat across a group's repos.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct DueId {
+    pub id: String,
+    pub repo_cwd: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct DueDay {
+    /// Local `YYYY-MM-DD`.
+    pub date: String,
+    pub count: u32,
+    pub ids: Vec<DueId>,
+}
+
+/// The Due card's data (see `todo_due.rs`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct DueSummary {
+    /// Exactly five entries: local today and the next four days. Today's ids
+    /// are `days[0].ids`.
+    pub days: Vec<DueDay>,
+    /// Open todos due before local today.
+    pub missed_ids: Vec<DueId>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct DashboardSnapshot {
@@ -167,6 +196,10 @@ pub struct DashboardSnapshot {
     /// Quick-action chips the dev (or a chat) pinned for this target, in order.
     /// Empty means "show the most-used commands instead".
     pub pinned_actions: Vec<String>,
+    /// Todos due in the next five days or already missed. `#[serde(default)]`
+    /// so a paired machine on an older build, which omits it, still decodes.
+    #[serde(default)]
+    pub due: DueSummary,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]

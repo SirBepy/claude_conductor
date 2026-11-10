@@ -25,6 +25,17 @@ pub struct Head {
     pub todo_type: Option<String>,
     pub worth: Option<u8>,
     pub complexity: Option<String>,
+    /// A valid `YYYY-MM-DD` from the `**Due:**` line; anything else is `None`.
+    pub due: Option<String>,
+}
+
+/// `YYYY-MM-DD` only when it is exactly that shape and a real calendar date.
+/// chrono alone would also accept `2026-1-5`, which the card's date math must
+/// not see.
+pub fn valid_due(raw: &str) -> Option<String> {
+    let v = raw.trim();
+    let shaped = v.len() == 10 && v.bytes().enumerate().all(|(i, b)| if i == 4 || i == 7 { b == b'-' } else { b.is_ascii_digit() });
+    (shaped && chrono::NaiveDate::parse_from_str(v, "%Y-%m-%d").is_ok()).then(|| v.to_string())
 }
 
 /// `android-loopback-tunnel` -> `Android loopback tunnel`.
@@ -102,6 +113,8 @@ pub fn parse_head(text: &str, fallback_title: &str) -> Head {
                     .next()
                     .map(|w| w.trim_matches(|c: char| !c.is_ascii_alphabetic()).to_lowercase())
                     .filter(|w| w == "dev" || w == "ai");
+            } else if let Some(v) = line.strip_prefix("**Due:**") {
+                head.due = valid_due(v);
             } else if let Some(v) = line.strip_prefix("**Summary:**") {
                 head.summary = Some(v.trim().to_string()).filter(|v| !v.is_empty());
             }
@@ -249,6 +262,7 @@ fn entry_for(path: &Path, head: Head, key: Option<&TodoKey>, placement: Option<&
         todo_type: head.todo_type,
         worth: head.worth,
         complexity: head.complexity,
+        due: head.due,
         claimed: key.is_some_and(|k| live.contains(k)),
         group: placement.map(|p| p.group.clone()),
         plan_index: placement.map(|p| p.plan_index),
@@ -389,6 +403,26 @@ Some context.\n\
     fn an_origin_with_a_trailing_note_still_reads() {
         assert_eq!(parse_head("# T\n**Origin:** dev (Joe said so)\n", "f").origin.as_deref(), Some("dev"));
         assert_eq!(parse_head("# T\n**Origin:** somebody\n", "f").origin, None);
+    }
+
+    #[test]
+    fn a_valid_due_line_is_read() {
+        let h = parse_head("# T\n**Type:** task\n**Due:** 2026-11-12\n**Summary:** S.\n", "f");
+        assert_eq!(h.due.as_deref(), Some("2026-11-12"));
+    }
+
+    #[test]
+    fn an_invalid_or_absent_due_is_none_never_an_error() {
+        for bad in ["2026-13-40", "soon", "2026-1-5", "2026-02-30", ""] {
+            assert_eq!(parse_head(&format!("# T\n**Due:** {bad}\n"), "f").due, None, "{bad:?}");
+        }
+        assert_eq!(parse_head("# T\n**Summary:** S.\n", "f").due, None);
+    }
+
+    #[test]
+    fn a_due_line_inside_a_code_fence_or_after_the_head_is_ignored() {
+        assert_eq!(parse_head("# T\n```\n**Due:** 2026-11-12\n```\n", "f").due, None);
+        assert_eq!(parse_head("# T\n## Context\n**Due:** 2026-11-12\n", "f").due, None);
     }
 
     #[test]
