@@ -315,6 +315,15 @@ describe("chat dashboard layout", () => {
     expect(pane.querySelector(".cdash-waiting")).not.toBeNull();
   });
 
+  it("draws a finished history replay once it has loaded, with no later event to trigger it", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    await r.loadHistory([userEvent("go"), ...send({ kind: "blocker", verdict: "Stuck", text: "x" })]);
+    await tick();
+    expect(r.hydrating).toBe(false);
+    expect(pane.querySelector(".cdash-waiting")).not.toBeNull();
+  });
+
   it("keeps the status line above the message box while messages are held", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
