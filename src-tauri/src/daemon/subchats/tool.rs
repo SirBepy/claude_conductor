@@ -245,7 +245,13 @@ fn status(state: &Arc<DaemonState>, subs: &[Instance], query: &str, facts: Facts
         out["writes"] = json!(b.writes);
     }
     if sub.progress.waiting_for.is_some() {
-        out["waiting"] = json!("waiting for the writer slot: only one sub changes files at a time in this project");
+        // Two different waits: telling a main chat it waits for the slot when it
+        // waits for a named sub sent it looking at the wrong thing (2026-11-10).
+        let after = super::held::all().into_iter().find(|h| h.sub_id == sub.session_id).and_then(|h| h.after.map(|_| h.after_name));
+        out["waiting"] = json!(match after {
+            Some(name) => format!("waiting for {name} to finish: it starts by itself then"),
+            None => "waiting for the writer slot: only one sub changes files at a time in this project".to_string(),
+        });
     }
     if let Some(r) = finish::read_record(&sub.session_id) {
         out["round"] = json!(r.round);
@@ -450,6 +456,8 @@ fn sub_is_gone(state: &DaemonState, sub_id: &str) -> bool {
 enum Delivery {
     Passed,
     Held,
+    /// The sub has not started: the text waits for its first turn.
+    NotStarted,
 }
 
 async fn deliver<F, Fut>(state: &Arc<DaemonState>, sub: &Instance, text: &str, resume: &F) -> Result<Delivery, String>
@@ -458,6 +466,14 @@ where
     Fut: Future<Output = Result<(), ContinueError>> + Send + 'static,
 {
     let id = sub.session_id.clone();
+    // A sub the daemon still holds has no conversation, so `--resume` would fail
+    // ("No conversation found") and lose the text. It waits on disk and in the
+    // held queue, which reaches the sub at the first step of its first turn.
+    if super::held::is_held(&id) {
+        let entry = followup::add(&id, text);
+        hold_linked(state, &id, text, &entry);
+        return Ok(Delivery::NotStarted);
+    }
     match resume(id.clone(), text.to_string()).await {
         Ok(()) => Ok(Delivery::Passed),
         Err(ContinueError::Busy(_)) => {
@@ -499,6 +515,7 @@ where
     }
     let writes = args["writes"].as_bool() == Some(true);
     let (mut passed, mut held, mut failed) = (Vec::new(), Vec::new(), Vec::new());
+    let mut not_started: Vec<String> = Vec::new();
     let mut waiting_for_writer: Vec<(String, String)> = Vec::new();
     for sub in &targets {
         let name = label(sub);
@@ -535,12 +552,13 @@ where
                 match d {
                     Delivery::Passed => passed.push(name),
                     Delivery::Held => held.push(name),
+                    Delivery::NotStarted => not_started.push(name),
                 }
             }
             Err(e) => failed.push(json!({"sub": name, "error": e})),
         }
     }
-    if passed.is_empty() && held.is_empty() {
+    if passed.is_empty() && held.is_empty() && not_started.is_empty() {
         return refusal(failed.iter().filter_map(|f| f["error"].as_str().map(|e| format!("{}: {e}", f["sub"].as_str().unwrap_or("sub")))).collect::<Vec<_>>().join("; "));
     }
     let message = match (joe.is_some(), explicit.is_some()) {
@@ -552,6 +570,10 @@ where
     if !held.is_empty() {
         out["held_for"] = json!(held);
         out["held_note"] = json!("these subs were mid-turn: the message reaches them at their next step");
+    }
+    if !not_started.is_empty() {
+        out["not_started"] = json!(not_started);
+        out["not_started_note"] = json!("these subs are queued and have not started: the message waits and reaches them at their first step, and they start by themselves when what they wait for is done");
     }
     if !failed.is_empty() {
         out["failed"] = json!(failed);
@@ -578,6 +600,29 @@ pub async fn run(state: &Arc<DaemonState>, caller: &str, args: &Value) -> Value 
     .await
 }
 
+/// `drop`: ends a sub that never started (it is queued, or its hold was lost), for
+/// a job the main chat no longer wants. It never ran, so nothing is lost, and its
+/// row stops counting toward the cap. A sub that ran is Joe's to end, from its
+/// card or the chat menu, so it is refused here.
+fn drop_action(state: &Arc<DaemonState>, subs: &[Instance], query: &str) -> Value {
+    let sub = match resolve(subs, query) {
+        Ok(s) => s,
+        Err(e) => return refusal(e),
+    };
+    let name = label(sub);
+    if status_word(sub) == "ended" {
+        return refusal(format!("{name} has already ended."));
+    }
+    let has = |id: &str| crate::context_status::resolve_transcript(&state.registry, id).is_some();
+    if !super::held::never_started(state, sub, &has) {
+        return refusal(format!(
+            "{name} has started, so drop does not apply: only a sub that never ran is dropped. Ask Joe to end it from its card or the chat menu."
+        ));
+    }
+    super::held::drop_held(state, &sub.session_id);
+    json!({"ok": true, "dropped": name, "note": "ended without ever running; it no longer counts toward the cap, and a sub waiting for it asks Joe on a card"})
+}
+
 /// [`run`] with the facts reader and the "wake this sub with this text" step
 /// injected, so a test starts no `claude` and runs no git.
 pub async fn run_with<F, Fut>(state: &Arc<DaemonState>, caller: &str, args: &Value, facts: FactsFn, resume: F) -> Value
@@ -601,7 +646,8 @@ where
         "status" => status(state, &subs, sub, facts),
         "log" => log_action(caller),
         "send" => send(state, caller, &subs, args, resume).await,
-        other => refusal(format!("action must be list, status, log or send, not \"{other}\".")),
+        "drop" => drop_action(state, &subs, sub),
+        other => refusal(format!("action must be list, status, log, send or drop, not \"{other}\".")),
     }
 }
 
@@ -1076,12 +1122,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unknown_action_names_the_four() {
+    async fn an_unknown_action_names_the_five() {
         let _d = super::super::TempDataDir::new();
         let (st, main, sent) = setup("tool-action");
         sub(&st, &main, "tool-action-a", "Footer", "t");
         let v = call(&st, &main, json!({"action": "nuke"}), &sent).await;
-        assert!(v["error"].as_str().unwrap().contains("list, status, log or send"));
+        assert!(v["error"].as_str().unwrap().contains("list, status, log, send or drop"));
     }
 
     async fn until(mut done: impl FnMut() -> bool) -> bool {
@@ -1231,5 +1277,61 @@ mod tests {
         st.draft_store.remove_held("tool-settle-a", item);
         followup::settle_many("tool-settle-a", &[item]);
         assert!(followup::list_in(&data_root(), "tool-settle-a").is_empty());
+    }
+
+    #[tokio::test]
+    async fn drop_ends_a_sub_that_never_started_and_refuses_one_that_ran() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-drop");
+        sub(&st, &main, "tool-drop-q", "Queued", "t");
+        super::super::held::hold(
+            &st,
+            super::super::held::Held {
+                sub_id: "tool-drop-q".into(),
+                reason: "waiting for Running".into(),
+                after: Some("tool-drop-r".into()),
+                after_name: "Running".into(),
+                launch: super::super::held::LaunchSpec::default(),
+            },
+        )
+        .unwrap();
+        sub(&st, &main, "tool-drop-r", "Running", "t");
+        st.registry.set_busy("tool-drop-r", true);
+
+        let status = call(&st, &main, json!({"action": "status", "sub": "Queued"}), &sent).await;
+        assert_eq!(status["waiting"], json!("waiting for Running to finish: it starts by itself then"), "{status}");
+
+        let out = call(&st, &main, json!({"action": "drop", "sub": "Queued"}), &sent).await;
+        assert_eq!(out["ok"], json!(true), "{out}");
+        assert!(st.registry.get("tool-drop-q").unwrap().ended_at.is_some());
+        assert!(!super::super::held::is_held("tool-drop-q"));
+
+        let ran = call(&st, &main, json!({"action": "drop", "sub": "Running"}), &sent).await;
+        assert_eq!(ran["ok"], json!(false));
+        assert!(ran["error"].as_str().unwrap().contains("has started"), "{ran}");
+        assert!(st.registry.get("tool-drop-r").unwrap().ended_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_message_to_a_sub_that_has_not_started_waits_for_it_instead_of_resuming_nothing() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-nostart");
+        sub(&st, &main, "tool-nostart-q", "Queued", "t");
+        super::super::held::hold(
+            &st,
+            super::super::held::Held {
+                sub_id: "tool-nostart-q".into(),
+                reason: "waiting for the writer before it".into(),
+                after: None,
+                after_name: String::new(),
+                launch: super::super::held::LaunchSpec::default(),
+            },
+        )
+        .unwrap();
+        let out = call(&st, &main, json!({"action": "send", "sub": "Queued", "text": "also do the footer"}), &sent).await;
+        assert_eq!(out["ok"], json!(true), "{out}");
+        assert_eq!(out["not_started"], json!(["Queued"]));
+        assert!(sent.lock().unwrap().is_empty(), "a --resume of a chat that never ran fails, so none is tried");
+        assert_eq!(followup::list_in(&data_root(), "tool-nostart-q").len(), 1, "the text waits on disk for its first turn");
     }
 }

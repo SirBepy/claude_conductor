@@ -37,6 +37,7 @@ pub mod joe_message;
 pub mod merge_followup;
 pub mod pause;
 pub mod project;
+pub(crate) mod queue_watch;
 mod resume;
 pub(crate) mod runtime;
 pub mod stall;

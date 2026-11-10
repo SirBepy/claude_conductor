@@ -17,12 +17,12 @@ pub const TOOL_SHARED_MOCKUP: &str = "shared_mockup";
 pub fn chat_schemas() -> Vec<Value> {
     vec![shared_mockup_schema(), json!({
         "name": TOOL_SUBCHAT,
-        "description": "Only for a chat with Use subchats on: look up its subs and pass them a message (refuses with the fix when this chat has no subs, and from a sub). `list`: each sub's name, status, tier and task. `status` needs sub: its verdict, summary, facts and progress. `log`: the decisions log. `send` needs sub, or all=true for every running sub (an outside update such as a pasted Slack message). `send` passes Joe's latest message to the sub word for word, with his images; you only pick the target, never retype or summarise it. Set `text` only when Joe sent nothing to copy and you have an instruction of your own. `writes`=true when the follow-up needs the sub to edit files. A finished sub is woken with its context; a busy one gets it at its next step. A sub is found by exact name, then unique prefix, then id.",
+        "description": "Only for a chat with Use subchats on: look up its subs and pass them a message (refuses with the fix when this chat has no subs, and from a sub). `list`: each sub's name, status, tier and task. `status` needs sub: its verdict, summary, facts and progress. `log`: the decisions log. `send` needs sub, or all=true for every running sub (an outside update such as a pasted Slack message). `send` passes Joe's latest message to the sub word for word, with his images; you only pick the target, never retype or summarise it. Set `text` only when Joe sent nothing to copy and you have an instruction of your own. `writes`=true when the follow-up needs the sub to edit files. A finished sub is woken with its context; a busy one gets it at its next step. `drop` needs sub: ends a sub that never started (queued), for a job no longer wanted. A sub is found by exact name, then unique prefix, then id.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["list", "status", "log", "send"]},
-                "sub": {"type": "string", "description": "A sub's name, a unique start of it, or its id. For status and send."},
+                "action": {"type": "string", "enum": ["list", "status", "log", "send", "drop"]},
+                "sub": {"type": "string", "description": "A sub's name, a unique start of it, or its id. For status, send and drop."},
                 "all": {"type": "boolean", "description": "send to every running sub instead of one. Finished subs are not woken."},
                 "writes": {"type": "boolean", "description": "send: the follow-up needs the sub to edit files. Only one sub edits files at a time in a project: if another holds the writer slot this sub is queued for it, and the result says so."},
                 "text": {"type": "string", "description": "send: your own instruction, only when there is no message from Joe to copy. It reaches the sub framed as coming from the main chat."}
@@ -114,7 +114,7 @@ mod tests {
             assert!(props.contains_key(k), "{k}");
         }
         let actions: Vec<&str> = props["action"]["enum"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
-        assert_eq!(actions, ["list", "status", "log", "send"]);
+        assert_eq!(actions, ["list", "status", "log", "send", "drop"]);
         assert_eq!(s["inputSchema"]["required"], json!(["action"]));
         let d = s["description"].as_str().unwrap();
         assert!(d.contains("word for word") && d.contains("never retype"), "{d}");

@@ -154,6 +154,9 @@ pub async fn sweep_now(state: &Arc<DaemonState>, now: DateTime<Utc>, resumed_at:
     let mtime = |i: &Instance| file_mtime(state, i);
     let live = |id: &str| state.sessions.contains_key(id);
     let env = Env { now, resumed_at, transcript_mtime: &mtime, is_live: &live };
+    // First, so a sub that never started and lost its hold is held again before
+    // the dead sweep below would card it as a process that died.
+    super::held::recover_lost(state);
     let carded = sweep(state, &env).await;
     for id in carded {
         log::warn!("subchats: sub {id} has been silent for over {}m, raised a card", STUCK_AFTER.num_minutes());
@@ -167,6 +170,9 @@ pub async fn sweep_now(state: &Arc<DaemonState>, now: DateTime<Utc>, resumed_at:
     // The writer slot's safety net: a holder or waiter ended by a path that did
     // not release it stops blocking the next sub.
     super::writers::sweep(state);
+    // Last, after every pass that could have started it: a sub still waiting
+    // with nothing in its way is told to its main chat.
+    super::queue_watch::tick(state, now);
 }
 
 #[cfg(test)]
