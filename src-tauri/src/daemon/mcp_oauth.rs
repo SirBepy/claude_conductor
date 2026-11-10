@@ -23,6 +23,9 @@ use std::time::Duration;
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 const CALLBACK_WAIT: Duration = Duration::from_secs(300);
+// A browser may open the callback port speculatively and send nothing; the
+// real callback queues behind it, so one connection gets this long to speak.
+const CALLBACK_READ_WAIT: Duration = Duration::from_secs(2);
 // Refresh a little early so a token never expires between the check and the
 // child's first request.
 const EXPIRY_SLACK_SECS: i64 = 60;
@@ -243,6 +246,9 @@ pub(crate) async fn begin_sign_in(path: PathBuf, mcp_url: String) -> Result<Stri
     tokio::spawn(async move {
         match tokio::time::timeout(CALLBACK_WAIT, finish(listener, &c, &meta, &client_id, &redirect, &verifier, &state, &mcp_url)).await {
             Ok(Ok(entry)) => {
+                // Same lock as `access_token`'s refresh: load-insert-save must not
+                // overwrite another server's rotated token written meanwhile.
+                let _one_at_a_time = REFRESH_LOCK.lock().await;
                 let mut store = load(&path);
                 store.insert(mcp_url.clone(), entry);
                 if let Err(e) = save(&path, &store) {
@@ -273,7 +279,8 @@ async fn finish(
     let code = loop {
         let (mut sock, _) = listener.accept().await.map_err(|e| e.to_string())?;
         let mut buf = vec![0u8; 4096];
-        let n = sock.read(&mut buf).await.map_err(|e| e.to_string())?;
+        let Ok(read) = tokio::time::timeout(CALLBACK_READ_WAIT, sock.read(&mut buf)).await else { continue };
+        let n = read.map_err(|e| e.to_string())?;
         let got = parse_callback(&String::from_utf8_lossy(&buf[..n]), state);
         let page = if got.is_some() { "Signed in. You can close this tab and return to Conductor." } else { "Not the sign-in callback." };
         let _ = sock
@@ -394,6 +401,33 @@ mod tests {
         assert_eq!(parse_callback(&req("code=abc&state=other"), "s1"), None);
         assert_eq!(parse_callback(&req("error=access_denied&state=s1"), "s1"), None);
         assert_eq!(parse_callback("GET /favicon.ico HTTP/1.1\r\n\r\n", "s1"), None);
+    }
+
+    #[tokio::test]
+    async fn an_idle_connection_on_the_callback_port_does_not_block_the_real_callback() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let base = fake_server(Arc::new(AtomicUsize::new(0)), |_, _| (200, r#"{"access_token":"tok","expires_in":3600}"#.into())).await;
+        let meta = Meta {
+            authorization_endpoint: format!("{base}/authorize"),
+            token_endpoint: format!("{base}/oauth/token"),
+            registration_endpoint: format!("{base}/register"),
+            scope: None,
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let c = client().unwrap();
+        let done = tokio::spawn(async move {
+            finish(listener, &c, &meta, "cid", "http://127.0.0.1/callback", "v", "st", "https://m.example/mcp").await
+        });
+        // Connects first and says nothing, like a browser's speculative connection.
+        let _idle = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut real = tokio::net::TcpStream::connect(addr).await.unwrap();
+        real.write_all(b"GET /callback?code=abc&state=st HTTP/1.1\r\nhost: x\r\n\r\n").await.unwrap();
+        let entry = tokio::time::timeout(Duration::from_secs(10), done).await.expect("blocked behind the idle connection").unwrap().unwrap();
+        assert_eq!(entry.access_token, "tok");
+        let mut page = String::new();
+        let _ = real.read_to_string(&mut page).await;
+        assert!(page.contains("Signed in"), "got {page:?}");
     }
 
     #[tokio::test]
