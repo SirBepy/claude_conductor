@@ -35,6 +35,7 @@
 
 import path from "node:path";
 import { selectProjectRow } from "../helpers/select-project.js";
+import { openNewChatPicker } from "../helpers/new-chat.js";
 
 const PROJECT_NAME = path.basename(process.cwd());
 
@@ -87,15 +88,7 @@ describe("New-chat account resolution (multi-account milestone 04)", () => {
 
   it("opens the draft straight after the project pick; the account chip shows only with 2+ accounts", async () => {
     await browser.execute(() => window.showView("sessions"));
-    // New chat is only interactable once the view-more menu relocates it out
-    // of the hidden `#view-more-host` (view-more-menu.ts:112-118).
-    const moreBtn = await $("#viewMoreBtn");
-    await moreBtn.waitForClickable({ timeout: 15000 });
-    await moreBtn.click();
-
-    const newSessionBtn = await $("#newSessionBtn");
-    await newSessionBtn.waitForClickable({ timeout: 15000 });
-    await newSessionBtn.click();
+    await openNewChatPicker();
 
     // Filter-then-click by name (todo 865); the old first-row selector had no
     // assertion on which project it hit.

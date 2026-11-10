@@ -26,6 +26,7 @@ import os from "node:os";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { selectProjectRow } from "../helpers/select-project.js";
+import { turnSubchatsOff } from "../helpers/new-chat.js";
 
 const PROJECT_NAME = path.basename(process.cwd());
 const DATA_DIR = path.join(os.homedir(), "AppData", "Roaming", "claude-conductor");
@@ -106,6 +107,7 @@ async function startNewChat() {
   await browser.execute(() => document.getElementById("newSessionBtn").click());
   await selectProjectRow(PROJECT_NAME);
   await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 20000 });
+  await turnSubchatsOff();
 }
 
 /** The sidebar re-renders on every daemon tick, so re-query on each attempt. */
