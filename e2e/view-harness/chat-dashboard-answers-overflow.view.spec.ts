@@ -31,7 +31,7 @@ const HISTORY = [
   ...tool(SEND, {
     kind: "answer",
     verdict: "Run only the second one",
-    question: "Am I meant to run both commands, or only the second one?",
+    question: "Am I meant to run both of the uninstall commands on the two cards, or only the second one, and does the order matter?",
     text: "Only the second one:\n\n" + CODE,
   }, "a1", AT),
   ...tool(SEND, { kind: "call", verdict: "Kept the MSI stub", text: "The stub stays until the uninstall ends:\n\n" + CODE }, "n1", AT + 5),
@@ -130,4 +130,39 @@ test("a long code block and a file chip stay inside every dashboard bubble", asy
   expect(covered).toEqual([]);
 
   await capture(c, "answers-thread-overflow");
+});
+
+// Joe, 2026-11-10: at 310px a thread showed about six lines of a reply and its
+// question was cut to one line. It opens at 460px, the question wraps to two
+// lines with the whole of it on hover, and Grow fills the window without
+// losing what he typed.
+test("a thread opens tall, wraps its question, and grows to the window", async ({ page }) => {
+  const c = await openChat(page);
+  await c.locator("[data-ax='reply']").click();
+  const thread = c.locator(".ax-thread");
+  await expect(thread).toBeVisible();
+  await page.waitForTimeout(400);
+  expect(Math.round((await thread.boundingBox())!.height)).toBe(460);
+
+  const q = c.locator(".ax-thead-v");
+  await expect(q).toHaveAttribute("title", /does the order matter\?$/);
+  const lineH = await q.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight) || 16);
+  expect((await q.boundingBox())!.height).toBeGreaterThan(lineH * 1.5);
+
+  await capture(page.locator("#session-pane"), "answers-thread-default");
+  await c.locator(".ax-t-input").fill("half a follow-up");
+  await c.locator("[data-ax='grow-thread']").click();
+  await page.waitForTimeout(400);
+  // Tall is the dashboard's visible height, so the message box stays on screen.
+  const room = await page.locator("#session-pane .cdash-body").evaluate((el) => el.clientHeight);
+  expect(Math.round((await thread.boundingBox())!.height)).toBe(Math.max(460, room - 24));
+  const comp = (await c.locator(".ax-tcomp").boundingBox())!;
+  const view = (await page.locator("#session-pane .cdash-body").boundingBox())!;
+  expect(comp.y + comp.height).toBeLessThanOrEqual(view.y + view.height + 1);
+  await expect(c.locator(".ax-t-input")).toHaveValue("half a follow-up");
+  await capture(page.locator("#session-pane"), "answers-thread-tall");
+
+  await c.locator("[data-ax='grow-thread']").click();
+  await page.waitForTimeout(400);
+  expect(Math.round((await thread.boundingBox())!.height)).toBe(460);
 });

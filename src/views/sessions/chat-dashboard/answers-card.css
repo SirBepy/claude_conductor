@@ -1,12 +1,14 @@
 /* The chat dashboard's Answers card, ported from the approved board
    (.for_bepy/mockups/mockup-answers.ts round 17, docs/chat-dashboard-design.md
    "Answers card"). Numbers are the board's measured ones: a 210px rest, up to
-   370px with Read more open (rest + 160), and a thread at 310px (rest + 100). */
+   370px with Read more open (rest + 160). A thread is taller than the board's
+   310px, see --ax-th. */
 
 .ax-host {
   --ax-min: 210px;
   --ax-max: 370px;
-  --ax-th: 310px;
+  /* 460, not the board's 310: at 310 a reply showed about six lines (Joe, 2026-11-10). */
+  --ax-th: 460px;
   /* Read more animates height:auto, which needs keyword interpolation. */
   interpolate-size: allow-keywords;
 }
@@ -119,13 +121,22 @@
 .ax-gotit { border-color: color-mix(in srgb, var(--color-success) 55%, transparent); background: color-mix(in srgb, var(--color-success) 16%, transparent); }
 /* Thread inside the card */
 .ax-host .ax-threadmode .mc-pad { padding: 0; }
-.ax-thread { height: var(--ax-th, 380px); background: transparent; }
+/* The thread sets its own height, so the card's resting cap does not clip it. */
+.ax-host > .ax-shell.ax-threadmode > .mc-card > .mc-full > .mc-clip { max-height: none; }
+.ax-thread { height: var(--ax-th, 380px); background: transparent; transition: height 0.25s cubic-bezier(0.2, 0.7, 0.2, 1); }
+/* Grow: answers-card.ts fitTall sets --ax-th to the dashboard's visible height;
+   this is the fallback when no dashboard body is around the card. */
+.ax-host.ax-th-tall { --ax-th: max(460px, calc(100vh - 170px)); }
+.ax-grow { margin-left: auto; }
+.ax-grow .ph-arrows-in-simple, .ax-th-tall .ax-grow .ph-arrows-out-simple { display: none; }
+.ax-th-tall .ax-grow .ph-arrows-in-simple { display: inline; }
 .ax-thead { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent); }
 .ax-back { width: 26px; height: 26px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--color-text) 16%, transparent); border-radius: 6px; background: none; color: var(--color-text); cursor: pointer; }
 .ax-back:hover { background: color-mix(in srgb, var(--color-text) 9%, transparent); }
-.ax-thead-t { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.ax-thead-t { flex: 1; display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
 .ax-thead-k { font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
-.ax-thead-v { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Two lines before it clips, and the hover title carries the whole question. */
+.ax-thead-v { font-size: 13px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .ax-thead-s { font-size: 11.5px; color: var(--color-success); }
 .ax-tbody { background: transparent; }
 .ax-tcomp { padding: 8px 10px 10px; border-top: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent); }
