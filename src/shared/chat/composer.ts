@@ -79,6 +79,10 @@ export interface ComposerOptions {
   sendQueuedNow?: () => Promise<void> | void;
   /** Fired on draft input/blur so a deferred auto-flush can retry. */
   onDraftActivity?: () => void;
+  /** Fired whenever an attachment or pasted block is added, removed or cleared.
+   * Separate from onDraftActivity: that one drives the held-message auto-flush,
+   * which must not run when clearComposer() empties the set mid-send. */
+  onAttachmentsChange?: () => void;
   /** Schedule the current draft to fire later instead of sending it now. When
    * omitted, Send's right-click / long-press menu has no Schedule row. The
    * composer builds the blocks from the draft and clears itself before calling. */
@@ -199,7 +203,7 @@ export class Composer {
       getMachineId: () => this.opts.getMachineId?.() ?? null,
       // An attached or pasted image changes whether the draft is empty without
       // any keystroke, and the quick-reply strip above the box hides on that.
-      onChange: () => { this.updateSendState(); this.opts.onDraftActivity?.(); },
+      onChange: () => { this.updateSendState(); this.opts.onAttachmentsChange?.(); },
     });
     this.strayInput = new ComposerStrayInput({
       getTextarea: () => this.textarea,
