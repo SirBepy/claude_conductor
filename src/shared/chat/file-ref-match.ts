@@ -35,6 +35,31 @@ function refFrom(raw: string, index: number): FileRef | null {
   return { path, line: suffix[2] ? Number(suffix[2]) : null, col: suffix[3] ? Number(suffix[3]) : null, text: raw, index };
 }
 
+// Prose cannot say where a path with a space ends, so the plain matcher stops at
+// the first space: `C:\x\Josip Muzic - CV.pdf` chips as `Josip`. This picks the
+// rest back up only when it is unambiguous enough: the cut-off name has no
+// extension of its own, and up to 5 more space-separated tokens lead to a
+// filename ending in a 2-5 character extension with a letter in it. Tokens may
+// carry `\` or `/` so a folder with a space (`C:\Users\Josip Muzic\CV.pdf`) joins
+// too. A joining word (`and`, `the`) means prose, not a name, so it stops this.
+const CONTINUATION_RE = /((?: [^\s"'<>|&^%!*?:`()[\]{},;]+){1,5}?\.(?=[A-Za-z0-9]{0,4}[A-Za-z])[A-Za-z0-9]{2,5})(?![\w\\/-])/y;
+const PROSE_WORDS = new Set(["a", "an", "and", "or", "the", "to", "in", "on", "at", "as", "is", "of", "for", "with", "then", "but", "into", "from", "by", "if", "so", "also"]);
+
+function spaceContinuation(text: string, end: number, raw: string): string {
+  const last = raw.slice(Math.max(raw.lastIndexOf("/"), raw.lastIndexOf("\\")) + 1);
+  // Nothing to join: the name already has an extension, ends in a separator, or
+  // is empty.
+  if (!last || last.includes(".")) return "";
+  CONTINUATION_RE.lastIndex = end;
+  const m = CONTINUATION_RE.exec(text);
+  if (!m) return "";
+  const tokens = m[1]!.trim().split(" ");
+  // A token opening with a separator is a second path, one opening with `-` a
+  // flag (a lone `-` is a name's dash): both mean a command, not one name.
+  if (tokens.some((t) => PROSE_WORDS.has(t.toLowerCase()) || /^[\\/]|^-./.test(t))) return "";
+  return m[1]!;
+}
+
 /** Finds paths in plain text; trailing sentence punctuation is not part of one. */
 export function findFileRefs(text: string): FileRef[] {
   const out: FileRef[] = [];
@@ -51,6 +76,15 @@ export function findFileRefs(text: string): FileRef[] {
     if (closing) {
       const opening = /^_*/.exec(raw.slice(Math.max(raw.lastIndexOf("/"), raw.lastIndexOf("\\")) + 1))![0].length;
       if (opening < closing) raw = raw.replace(/[.\-+~@_]+$/, "");
+    }
+    // Only a path the matcher took whole (no trimmed tail, no `:line` suffix) can
+    // continue past a space.
+    if (raw === m[0] && !/:\d+$/.test(raw)) {
+      const more = spaceContinuation(text, m.index + raw.length, raw);
+      if (more) {
+        raw += more;
+        PATH_RE.lastIndex = m.index + raw.length;
+      }
     }
     const ref = refFrom(raw, m.index);
     if (ref) out.push(ref);

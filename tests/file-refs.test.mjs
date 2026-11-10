@@ -226,10 +226,24 @@ describe("a path with a space in an inline code span", () => {
     }
   });
 
-  it("still cuts prose at the space", () => {
-    const root = mount(String.raw`<p>see C:\Users\x\a.txt and more words, and C:\Program Files\x.txt</p>`);
+  it("still cuts prose at the space when nothing says the name goes on", () => {
+    const root = mount(String.raw`<p>see C:\Users\x\a.txt and more words, and C:\repo\src and README.md</p>`);
     linkifyFilePaths(root);
-    expect(chips(root).map((c) => c[0])).toEqual([String.raw`C:\Users\x\a.txt`, String.raw`C:\Program`]);
+    expect(chips(root).map((c) => c[0])).toEqual([String.raw`C:\Users\x\a.txt`, String.raw`C:\repo\src`]);
+  });
+
+  it("joins a spaced name in prose when the words lead to an extension", () => {
+    const names = (s) => findFileRefs(s).map((r) => r.path);
+    expect(names(String.raw`exported: C:\out\Josip Muzic - CV.pdf (2 pages, 757 KB)`)).toEqual([String.raw`C:\out\Josip Muzic - CV.pdf`]);
+    expect(names(String.raw`read C:\out\Josip Muzic - CV.pdf.`)).toEqual([String.raw`C:\out\Josip Muzic - CV.pdf`]);
+    expect(names(String.raw`open C:\Users\Josip Muzic\CV.pdf now`)).toEqual([String.raw`C:\Users\Josip Muzic\CV.pdf`]);
+    expect(names("saved /home/joe/My Docs/cv.pdf ok")).toEqual(["/home/joe/My Docs/cv.pdf"]);
+    // A joining word, a flag or a second path means prose or a command.
+    expect(names(String.raw`C:\repo\src and README.md`)).toEqual([String.raw`C:\repo\src`]);
+    expect(names("/usr/bin/env python /home/joe/p/a.py")).toEqual(["/usr/bin/env", "/home/joe/p/a.py"]);
+    expect(names(String.raw`C:\x\run --verbose a.txt`)).toEqual([String.raw`C:\x\run`]);
+    // A name that already has an extension does not take more words.
+    expect(names(String.raw`C:\x\a.txt and b.pdf`)).toEqual([String.raw`C:\x\a.txt`]);
   });
 
   it("leaves a span with markup inside it to the prose matcher", () => {
