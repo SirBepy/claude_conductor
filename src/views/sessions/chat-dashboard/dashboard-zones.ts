@@ -9,12 +9,12 @@ import { localTime } from "../../../shared/formatters";
 import { renderBlocks, renderMarkdown, renderMessage } from "../../../shared/chat/chat-transforms";
 import { headlineOf } from "../../../shared/chat/chat-message-kinds";
 import { renderQuestionCardHtml } from "../../../shared/chat/tool-views";
-import { blocksToText } from "../../../shared/chat/content-blocks";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../../../shared/chat/chat-event-to-message";
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
 import type {
   PlanStep, StripState, WaitingItem, ZoneId, ZoneState,
 } from "../../../shared/chat/dashboard/dashboard-model";
+import { plainUserText } from "../../../shared/chat/dashboard/answers-model";
 
 /** What the dashboard remembers between derives. In memory only: none of it
  *  needs to survive a reload (each is one click to redo). */
@@ -63,21 +63,7 @@ function stampOf(m: RenderedMessage): string {
 
 // ---- Joe's message strip -----------------------------------------------------------
 
-const PASTED_LOG_RE = /<pasted-log(?: id="[^"]*")? name="([^"]*)">[\s\S]*?<\/pasted-log(?::[^>]*)?>/g;
-const FILE_TOKEN_RE = /<file:(.+?)(?:::(.+?))?>/g;
-
-/** One plain line of a message for the "N earlier" list: chips become their names. */
-export function plainUserText(m: RenderedMessage): string {
-  const blocks = stripAuqExtraBlock(stripAuqAnswerBlock(m.content ?? []));
-  const text = blocksToText(blocks)
-    .replace(PASTED_LOG_RE, (_all, name: string) => `[${name || "pasted log"}]`)
-    .replace(FILE_TOKEN_RE, (_all, path: string, name?: string) => name ?? path.split(/[\\/]/).pop() ?? path)
-    .replace(/<voice-input\s*\/>/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (text) return text;
-  return blocks.some((b) => b.type === "image") ? "(image)" : "";
-}
+export { plainUserText };
 
 export function renderStrip(strip: StripState | null, ui: DashUi): string {
   if (!strip) return "";
@@ -101,10 +87,11 @@ export function renderStrip(strip: StripState | null, ui: DashUi): string {
 
 // ---- Zones -------------------------------------------------------------------------
 
-function renderAnswers(s: ZoneState<"answers">): string {
-  const earlier = s.total - 1;
-  const count = earlier > 0 ? `<span class="cdash-count">${earlier} earlier</span>` : "";
-  return `<section class="cdash-zone cdash-answers">${head("ph-chat-circle-dots", "Answers", count)}${cardHtml(s.latest)}</section>`;
+/** A fixed host: the Answers card (answers-card.ts) draws and animates inside
+ *  it, so a re-derive never replaces the card under Joe's pointer or wipes a
+ *  thread's message box. */
+function renderAnswers(): string {
+  return `<section class="cdash-zone cdash-answers ax-host"></section>`;
 }
 
 /** A question is the transcript's own question card, so the pane's existing

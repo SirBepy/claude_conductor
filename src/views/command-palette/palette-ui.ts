@@ -15,6 +15,15 @@ export interface PaletteSources {
   sync: () => PaletteCommand[];
   /** Slower reads (the project list). Rows are added as each one lands; a read that throws adds nothing. */
   later: Array<() => Promise<PaletteCommand[]>>;
+  /** The search box's placeholder, for a palette over something other than commands. */
+  placeholder?: string;
+  /** false: picks are not remembered and recents neither reorder nor section
+   *  the list, for a list whose own order means something (the Answers card's History). */
+  remember?: boolean;
+  /** Drops ranked rows the caller does not count as a hit for this query. */
+  match?: (c: PaletteCommand, query: string) => boolean;
+  /** Runs after every redraw of the list, with the rows drawn in order. */
+  decorate?: (list: HTMLElement, shown: readonly PaletteCommand[], query: string) => void;
 }
 
 let current: { close(): void } | null = null;
@@ -64,7 +73,10 @@ export function openPalette(sources: PaletteSources): void {
   const lead = overlay.querySelector<HTMLElement>(".cp-lead")!;
   const errorBox = overlay.querySelector<HTMLElement>(".cp-error")!;
 
-  const recents = loadRecents();
+  const remember = sources.remember !== false;
+  const recents = remember ? loadRecents() : [];
+  const basePlaceholder = sources.placeholder ?? "Search commands, chats, projects and settings";
+  if (sources.placeholder) input.placeholder = sources.placeholder;
   let root: PaletteCommand[] = sources.sync();
   let stage: { def: PaletteStage; items: PaletteCommand[] | null; failed: string | null } | null = null;
   let shown: PaletteCommand[] = [];
@@ -106,12 +118,15 @@ export function openPalette(sources: PaletteSources): void {
       html += rowHtml(c, i, i === sel);
     });
     list.innerHTML = html;
+    sources.decorate?.(list, shown, input.value);
     list.querySelector(".cp-row.selected")?.scrollIntoView({ block: "nearest" });
   }
 
   function refilter(resetSel: boolean): void {
     const all = commands();
     shown = all ? rankCommands(all, input.value, stage ? [] : recents) : [];
+    const q = input.value.trim();
+    if (q && sources.match && !stage) shown = shown.filter((c) => sources.match!(c, q));
     sel = resetSel ? 0 : Math.min(sel, Math.max(shown.length - 1, 0));
     render();
   }
@@ -139,7 +154,7 @@ export function openPalette(sources: PaletteSources): void {
   function leaveStage(): void {
     stage = null;
     input.value = "";
-    input.placeholder = "Search commands, chats, projects and settings";
+    input.placeholder = basePlaceholder;
     lead.className = "ph ph-magnifying-glass cp-lead";
     setError(null);
     refilter(true);
@@ -149,7 +164,7 @@ export function openPalette(sources: PaletteSources): void {
     const c = shown[i];
     if (!c || busy || !isRunnable(c)) return;
     // Only root rows are remembered: a branch name is not a command to come back to.
-    if (!stage) pushRecent(c.id);
+    if (!stage && remember) pushRecent(c.id);
     if (c.stage) {
       enterStage(c.stage);
       return;

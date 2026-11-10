@@ -1,0 +1,150 @@
+/* The chat dashboard's Answers card, ported from the approved board
+   (.for_bepy/mockups/mockup-answers.ts round 17, docs/chat-dashboard-design.md
+   "Answers card"). Numbers are the board's measured ones: a 210px rest, up to
+   370px with Read more open (rest + 160), and a thread at 310px (rest + 100). */
+
+.ax-host {
+  --ax-min: 210px;
+  --ax-max: 370px;
+  --ax-th: 310px;
+  /* Read more animates height:auto, which needs keyword interpolation. */
+  interpolate-size: allow-keywords;
+}
+.ax-host .msg { max-width: none; margin: 0; }
+.ax-host .msg-copy-btn { display: none; }
+.ax-host .mc-pad { position: relative; }
+/* Only the card's own box takes the resting height, never a card drawn inside it */
+.ax-host > .ax-shell > .mc-card > .mc-full > .mc-clip > .mc-pad { min-height: var(--ax-min, 0); box-sizing: border-box; display: flex; flex-direction: column; }
+.ax-host .ax-in { flex: 1; display: flex; flex-direction: column; }
+.ax-host .ax-in > * { flex: 0 0 auto; }
+.ax-host > .ax-shell > .mc-card > .mc-full > .mc-clip { max-height: var(--ax-max, none); overflow-y: auto; }
+/* All caught up, centred: the quiet face fills the resting height */
+.ax-cc { flex: 1 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 8px 0; }
+.ax-host .ax-in > .ax-cc { flex: 1 0 auto; }
+/* With a resting height the actions stay on the card's bottom edge, not floating mid-card */
+.ax-host .ax-in > .ax-face { flex: 1 0 auto; display: flex; flex-direction: column; }
+.ax-host .ax-face > .ax-actions { margin-top: auto; padding-top: 10px; }
+/* Whatever is shorter than the resting height sits in its middle */
+.ax-host .ax-mid { flex: 1 0 auto; display: flex; flex-direction: column; justify-content: center; }
+.ax-align-center .ax-text { text-align: center; }
+.ax-align-center .ax-row { justify-content: center; }
+/* History carries the other unread answers as a badge on its top-right corner */
+.ax-ubadge { position: relative; }
+.ax-ubadge b { position: absolute; top: -3px; right: -5px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--color-primary); color: var(--color-background); font-size: 10px; font-weight: 600; line-height: 15px; text-align: center; }
+.ax-cc-t { display: inline-flex; align-items: center; gap: 10px; font-size: 21px; font-weight: 500; }
+.ax-cc-t i { color: var(--color-success); font-size: 25px; }
+.ax-cc-b { display: inline-flex; gap: 8px; }
+/* Thread replies, compact */
+.ax-t-bub { max-width: none; }
+.ax-t-bub p { margin: 0 0 4px; }
+.ax-head { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+.ax-kind { cursor: default; }
+.ax-host .ax-face .mc-label { display: none; }
+.ax-host .ax-head .mc-label { display: inline-flex; margin: 0; }
+/* The question this answers, shown once Read more is open; time first */
+.ax-qline { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font-size: 12.5px; color: var(--color-text-muted); }
+.ax-qline time { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-size: 11.5px; opacity: 0.8; }
+.ax-qline span { font-style: italic; color: var(--color-text); padding-right: 0.25em; }
+.ax-align-center .ax-qline { justify-content: center; }
+.ax-face { cursor: pointer; }
+.ax-face button { cursor: pointer; }
+.ax-text { position: relative; cursor: pointer; }
+.ax-hq-gap { flex: 1; }
+/* Got it, quiet: a plain button whose check alone carries the colour */
+.ax-quiet-got .ax-gotit { border-color: color-mix(in srgb, var(--color-text) 16%, transparent); background: color-mix(in srgb, var(--color-background) 35%, transparent); }
+.ax-quiet-got .ax-gotit i { color: var(--color-success); }
+.ax-quiet-got .ax-gotit.ax-checked i { color: var(--color-text-muted); }
+/* Icon-only actions: the words live in each button's hover title */
+.ax-icon-acts .ax-btn-t { display: none; }
+.ax-icon-acts .ax-actions .ax-btn { width: 30px; padding: 0; justify-content: center; font-size: 15px; }
+.ax-icon-acts .ax-actions .ax-thbtn { width: auto; padding: 0 8px; gap: 4px; }
+/* All caught up: the answer card's border plus Plan's background, bigger words */
+.ax-host .ax-caughtmode .mc-card { background: transparent; box-shadow: none; }
+.ax-host .ax-frame-border .mc-card { border-color: var(--color-border); }
+.ax-host .ax-cu-both > .mc-card { border-color: color-mix(in srgb, var(--color-primary) 32%, var(--color-border)); background: var(--color-surface); }
+.ax-tbtn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid var(--color-border); border-radius: 7px; background: none; color: var(--color-text); font: inherit; font-size: 13px; cursor: pointer; }
+.ax-tbtn:hover { background: var(--color-surface-alt); }
+.ax-tbtn i { color: var(--color-text-muted); font-size: 15px; }
+.ax-icons { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; }
+.ax-icon { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: none; color: var(--color-text-muted); font-size: 15px; cursor: pointer; }
+.ax-icon:hover:not(:disabled) { background: color-mix(in srgb, var(--color-text) 9%, transparent); color: var(--color-text); }
+.ax-icon:disabled { opacity: 0.4; cursor: default; }
+/* Read more: the question above and the body, figures and points below each grow
+   from zero height and fade in, so the centred block opens evenly instead of jumping */
+.ax-face .ax-qline,
+.ax-face .ax-text .mc-body,
+.ax-face .ax-text .mv-fig,
+.ax-face .ax-text .mc-points { overflow: hidden; transition: height 0.32s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.32s ease, margin 0.32s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.ax-face:not(.open) .ax-qline,
+.ax-face:not(.open) .ax-text .mc-body,
+.ax-face:not(.open) .ax-text .mv-fig,
+.ax-face:not(.open) .ax-text .mc-points { height: 0; opacity: 0; margin-top: 0; margin-bottom: 0; }
+.ax-face.open .ax-qline,
+.ax-face.open .ax-text .mc-body,
+.ax-face.open .ax-text .mv-fig,
+.ax-face.open .ax-text .mc-points { height: auto; opacity: 1; }
+.ax-face:not(.open) .ax-text .mc-head { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+/* At rest the verdict holds two lines at most; the card opens to show the rest */
+.ax-face:not(.open) .ax-text .mc-verdict { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* Read more is always there; it glows a little while the card is hovered */
+.ax-readmore { display: none; align-items: center; gap: 4px; font-size: 12px; color: var(--color-text-muted); cursor: pointer; white-space: nowrap; transition: color 0.25s, text-shadow 0.25s; }
+.ax-readmore i { font-size: 11px; }
+.ax-face.has-more .ax-readmore { display: inline-flex; }
+.ax-readmore:hover { color: var(--color-text); }
+.ax-shell:hover .ax-readmore { color: var(--color-primary); text-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 55%, transparent); }
+/* What Joe typed opens under the rewritten question: height and opacity ease in after a
+   short pause, so a pointer passing over the bubble does not flicker it */
+.ax-q0-raw { display: block; height: 0; margin-top: 0; opacity: 0; overflow: hidden; font-size: 11.5px; font-style: italic; padding-right: 0.25em; transition: height 0.26s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.26s ease, margin 0.26s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.ax-q0:hover .ax-q0-raw { height: auto; margin-top: 4px; opacity: 0.75; transition-delay: 0.15s; }
+.ax-actions { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.ax-actions--bottom-left { justify-content: flex-start; }
+.ax-rm-bottom-right { margin-left: auto; }
+.ax-tb { position: relative; }
+/* Room for descenders: the clamped verdict and head get a line-height that holds g, y and p */
+.ax-face .ax-text .mc-verdict { line-height: 1.3; }
+.ax-face .ax-text .mc-head { line-height: 1.5; }
+/* The thread button carries its count, plus a blinking dot while Claude replies */
+.ax-btn-n { font-size: 11px; font-weight: 600; margin-left: 2px; }
+.ax-busy { position: relative; }
+.ax-busy::after { content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-primary); animation: axblink 1.2s ease-in-out infinite; }
+@keyframes axblink { 50% { opacity: 0.25; } }
+.ax-row { display: flex; align-items: flex-start; gap: 10px; }
+.ax-row .ax-text { flex: 1; min-width: 0; }
+.ax-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 1px solid color-mix(in srgb, var(--color-text) 16%, transparent); border-radius: 6px; background: color-mix(in srgb, var(--color-background) 35%, transparent); color: var(--color-text); font: inherit; font-size: 12.5px; cursor: pointer; }
+.ax-btn:hover { background: color-mix(in srgb, var(--color-text) 9%, transparent); }
+.ax-gotit { border-color: color-mix(in srgb, var(--color-success) 55%, transparent); background: color-mix(in srgb, var(--color-success) 16%, transparent); }
+/* Thread inside the card */
+.ax-host .ax-threadmode .mc-pad { padding: 0; }
+.ax-thread { height: var(--ax-th, 380px); background: transparent; }
+.ax-thead { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent); }
+.ax-back { width: 26px; height: 26px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--color-text) 16%, transparent); border-radius: 6px; background: none; color: var(--color-text); cursor: pointer; }
+.ax-back:hover { background: color-mix(in srgb, var(--color-text) 9%, transparent); }
+.ax-thead-t { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.ax-thead-k { font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
+.ax-thead-v { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax-thead-s { font-size: 11.5px; color: var(--color-success); }
+.ax-tbody { background: transparent; }
+.ax-tcomp { padding: 8px 10px 10px; border-top: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent); }
+/* History rows (the palette overlay lives outside the card) */
+.ax-cp-tag { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; padding: 0 6px; border-radius: 4px; background: color-mix(in srgb, var(--color-primary) 16%, transparent); color: var(--color-text); font-size: 11px; }
+.ax-cp-snip { font-style: italic; }
+.ax-cp-th { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; font-size: 11.5px; color: var(--color-text-muted); }
+.ax-cp-th i { font-size: 13px; }
+/* Motion */
+.ax-fade { animation: axpop 0.3s ease-out; }
+/* While something moves the card clips instead of scrolling: no scrollbar flashing on its right edge */
+.ax-host .ax-animating > .mc-card > .mc-full > .mc-clip { overflow: hidden; }
+/* Got it, "Rise": only the text block (.ax-mid) leaves and arrives */
+.ax-g-rise-out { animation: axg-rise-out 0.2s ease-in forwards; }
+.ax-g-rise-in { animation: axg-rise-in 0.3s cubic-bezier(0.2, 0.7, 0.2, 1); }
+@keyframes axg-fade-in { from { opacity: 0; } }
+@keyframes axg-rise-out { to { opacity: 0; transform: translateY(-8px); } }
+@keyframes axg-rise-in { from { opacity: 0; transform: translateY(8px); } }
+/* The last Got it fades to All caught up */
+.ax-c-fade { animation: axg-fade-in 0.3s ease-out; }
+/* A thread slides in from the right, and back from the left */
+.ax-t-slide-open { animation: axt-from-right 0.3s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.ax-t-slide-close { animation: axt-from-left 0.3s cubic-bezier(0.2, 0.7, 0.2, 1); }
+@keyframes axt-from-right { from { opacity: 0; transform: translateX(24px); } }
+@keyframes axt-from-left { from { opacity: 0; transform: translateX(-24px); } }
+@keyframes axpop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }

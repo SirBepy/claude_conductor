@@ -425,7 +425,7 @@ mod tests {
         let required = schema["required"].as_array().unwrap();
         assert!(required.iter().any(|r| r == "kind") && required.iter().any(|r| r == "text"));
         assert_eq!(schema["properties"]["kind"]["enum"].as_array().unwrap().len(), 12);
-        for field in ["verdict", "tone", "points", "done", "not_done", "waiting_on", "your_move", "was", "copy"] {
+        for field in ["verdict", "tone", "points", "done", "not_done", "waiting_on", "your_move", "was", "copy", "question"] {
             assert!(schema["properties"].get(field).is_some(), "{field} missing from the schema");
             assert!(!required.iter().any(|r| r == field), "{field} is optional at the schema level");
         }

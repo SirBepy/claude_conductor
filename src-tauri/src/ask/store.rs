@@ -76,6 +76,7 @@ pub fn drop_for_chat(chat_session_id: &str) {
     if let Ok(path) = file_for(chat_session_id) {
         let _ = std::fs::remove_file(path);
     }
+    super::answer_state::drop_for_chat(chat_session_id);
 }
 
 pub fn delete_thread(chat_session_id: &str, thread_id: &str) -> Result<Vec<AskThread>> {
