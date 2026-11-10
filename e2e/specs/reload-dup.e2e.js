@@ -7,6 +7,7 @@
 
 import path from "node:path";
 import { selectProjectRow } from "../helpers/select-project.js";
+import { openNewChatPicker, turnSubchatsOff } from "../helpers/new-chat.js";
 
 const PROJECT_NAME = path.basename(process.cwd());
 
@@ -29,13 +30,7 @@ async function pickAccountIfAsked() {
 }
 
 async function startNewChatPickingFirstProject() {
-  // New chat now lives in the view-header "more options" overflow menu.
-  const moreBtn = await $("#viewMoreBtn");
-  await moreBtn.waitForClickable({ timeout: 15000 });
-  await moreBtn.click();
-  const newBtn = await $("#newSessionBtn");
-  await newBtn.waitForClickable({ timeout: 15000 });
-  await newBtn.click();
+  await openNewChatPicker();
   // 1. Project picker -> pick this repo by name (todo 865).
   await selectProjectRow(PROJECT_NAME);
 
@@ -44,6 +39,7 @@ async function startNewChatPickingFirstProject() {
   //    instead (see sendFirstMessage below).
   // 3. Pending pane mounts the composer.
   await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 20000 });
+  await turnSubchatsOff();
 }
 
 describe("Chat reload de-duplication (ai_todo 65)", () => {

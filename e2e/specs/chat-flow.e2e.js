@@ -13,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { selectProjectRow } from "../helpers/select-project.js";
+import { openNewChatPicker, turnSubchatsOff } from "../helpers/new-chat.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FINDINGS = path.resolve(__dirname, "chat-flow-findings.json");
@@ -100,13 +101,7 @@ async function activeSessionId() {
 
 // Start a new chat picking the first project, forcing model=haiku effort=normal.
 async function startHaikuChat() {
-  // New chat now lives in the view-header "more options" overflow menu.
-  const moreBtn = await $("#viewMoreBtn");
-  await moreBtn.waitForClickable({ timeout: 15000 });
-  await moreBtn.click();
-  const newBtn = await $("#newSessionBtn");
-  await newBtn.waitForClickable({ timeout: 15000 });
-  await newBtn.click();
+  await openNewChatPicker();
 
   await selectProjectRow(PROJECT_NAME);
 
@@ -116,6 +111,7 @@ async function startHaikuChat() {
   // start value is the project's last choice), then one Alt+Up gives medium.
   const composer = await $(".session-composer .composer-textarea");
   await composer.waitForExist({ timeout: 20000 });
+  await turnSubchatsOff();
   await composer.click();
   await browser.keys(["Alt", "1"]);
   for (let i = 0; i < 4; i++) await browser.keys(["Alt", "ArrowDown"]);

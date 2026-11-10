@@ -12,6 +12,7 @@
 import assert from "node:assert";
 import path from "node:path";
 import { selectProjectRow } from "../helpers/select-project.js";
+import { openNewChatPicker } from "../helpers/new-chat.js";
 
 const PROJECT_NAME = path.basename(process.cwd());
 
@@ -29,13 +30,7 @@ async function drainLogs() {
   return browser.execute(() => { const o = window.__qLogs || []; window.__qLogs = []; return o; });
 }
 async function startHaikuChat() {
-  // New chat now lives in the view-header "more options" overflow menu.
-  const moreBtn = await $("#viewMoreBtn");
-  await moreBtn.waitForClickable({ timeout: 15000 });
-  await moreBtn.click();
-  const newBtn = await $("#newSessionBtn");
-  await newBtn.waitForClickable({ timeout: 15000 });
-  await newBtn.click();
+  await openNewChatPicker();
   await selectProjectRow(PROJECT_NAME);
   // No dialog after the project pick: the draft pane is already up on the
   // project's last model/effort (Opus/high first time). Set Haiku with
