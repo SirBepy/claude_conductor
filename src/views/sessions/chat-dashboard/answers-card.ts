@@ -47,6 +47,8 @@ const isNew = (key: string | null): boolean => !!key && key.startsWith(NEW_PREFI
 /** How long the card waits for the daemon's read marks before drawing anyway,
  *  so a slow daemon never leaves the zone blank. */
 const LOAD_GRACE_MS = 400;
+/** Only this many of the newest answers are given a model-written question; older rows keep their preview. */
+const REWRITE_WINDOW = 5;
 /** Rise: the text leaves in 200ms, then the next one rises in (board GOT_OUT_MS). */
 const GOT_OUT_MS = 200;
 
@@ -120,6 +122,9 @@ export class AnswersCard {
   /** Unsent text of a thread a question card's Ask switched away from, by key. */
   private readonly drafts = new Map<string, string>();
   private readonly seen = new Set<string>();
+  /** Answers whose short question was asked for in this window, win or lose: a failed call is not retried until a reload. */
+  private readonly rewriteTried = new Set<string>();
+  private rewriteBusy = false;
   /** Joe has used the card since it loaded: a late load must not move it under him. */
   private touched = false;
   private anim = "";
@@ -164,6 +169,7 @@ export class AnswersCard {
       this.focusOnDraw = false;
       this.focusInput();
     }
+    this.pumpRewrites();
   }
 
   /** A thread is open: the dashboard draws the zone for it even with no answers. */
@@ -195,6 +201,31 @@ export class AnswersCard {
       this.focusInput();
     }
     this.deps.onSideChange();
+  }
+
+  /** Has the daemon write the short question for the newest answers still showing a
+   *  clipped preview, one call at a time (each is a model call on Joe's subscription).
+   *  Only the newest few: older rows keep their preview rather than costing a call each. */
+  private pumpRewrites(): void {
+    const sid = this.deps.sessionId();
+    if (!sid || this.rewriteBusy || this.disposed) return;
+    const next = this.items.slice(-REWRITE_WINDOW).reverse().find((i) => i.provisional && !this.rewriteTried.has(i.key));
+    if (!next) return;
+    this.rewriteTried.add(next.key);
+    this.rewriteBusy = true;
+    const answer = [next.verdict, next.text].filter(Boolean).join("\n");
+    answersApi().rewrite(sid, next.key, next.typed, answer)
+      .then((store) => {
+        if (this.disposed || this.deps.sessionId() !== sid) return;
+        this.side = { store: mergeStore(store, this.side.store), threads: this.side.threads };
+        rememberSide(sid, this.side);
+        this.deps.onSideChange();
+      })
+      .catch((err) => console.warn("[answers-card] writing the short question failed; the preview stays", err))
+      .finally(() => {
+        this.rewriteBusy = false;
+        this.pumpRewrites();
+      });
   }
 
   /** The zone stopped drawing (no answers): forget the DOM, keep the state. */
@@ -238,6 +269,8 @@ export class AnswersCard {
       this.pending.clear();
       this.errors.clear();
       this.failedAsk.clear();
+      this.rewriteTried.clear();
+      this.rewriteBusy = false;
     }
     const cached = cachedSide(sid);
     if (cached) {
@@ -729,8 +762,9 @@ export class AnswersCard {
       key: isNew(key) ? null : key,
       question: q,
       cwd: this.deps.cwd(),
-      // On a new thread this is the question card it was asked from.
-      aboutQuestion: card?.about ?? item?.question,
+      // On a new thread this is the question card it was asked from; a clipped preview
+      // would tell the Ask sidecar a truncated question.
+      aboutQuestion: card?.about ?? (item?.provisional ? item.typed : item?.question),
       aboutAnswer: item ? [item.verdict, item.text].filter(Boolean).join("\n") : undefined,
     })
       .then(({ thread, state }) => {
@@ -859,7 +893,12 @@ function mergeThreads(server: readonly AskThread[], local: readonly AskThread[])
 function mergeStore(server: AnswerStore, local: AnswerStore): AnswerStore {
   const read = { ...server.read };
   for (const [k, v] of Object.entries(local.read)) if ((read[k] ?? -1) < v) read[k] = v;
-  return { read, threads: { ...local.threads, ...server.threads }, questions: server.questions.length >= local.questions.length ? server.questions : local.questions };
+  return {
+    read,
+    threads: { ...local.threads, ...server.threads },
+    questions: server.questions.length >= local.questions.length ? server.questions : local.questions,
+    rewrites: { ...local.rewrites, ...server.rewrites },
+  };
 }
 
 function decorateHistory(

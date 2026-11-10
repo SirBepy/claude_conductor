@@ -21,6 +21,8 @@ export interface ThreadSend {
 export interface AnswersApi {
   load(sessionId: string): Promise<AnswerSide>;
   mark(sessionId: string, keys: string[], read: boolean): Promise<AnswerStore>;
+  /** Has the daemon write the short question for an answer that carries none; stored once per answer. */
+  rewrite(sessionId: string, key: string, joe: string, answer: string): Promise<AnswerStore>;
   send(req: ThreadSend): Promise<{ thread: AskThread; state: AnswerStore }>;
 }
 
@@ -31,6 +33,7 @@ export function normaliseStore(raw: unknown): AnswerStore {
     read: s.read && typeof s.read === "object" ? { ...s.read } : {},
     threads: s.threads && typeof s.threads === "object" ? { ...s.threads } : {},
     questions: Array.isArray(s.questions) ? s.questions.filter((q) => q && typeof q.thread_id === "string") : [],
+    rewrites: s.rewrites && typeof s.rewrites === "object" ? { ...s.rewrites } : {},
   };
 }
 
@@ -44,6 +47,9 @@ const daemonApi: AnswersApi = {
   },
   async mark(sessionId, keys, read) {
     return normaliseStore(await invoke<unknown>("answers_mark", { sessionId, keys, read }));
+  },
+  async rewrite(sessionId, key, joe, answer) {
+    return normaliseStore(await invoke<unknown>("answers_rewrite_question", { sessionId, key, joe, answer }));
   },
   async send(req) {
     const out = await invoke<{ thread: AskThread; state: unknown }>("answers_thread_send", {

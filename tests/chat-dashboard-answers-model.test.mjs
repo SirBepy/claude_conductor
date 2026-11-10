@@ -11,7 +11,7 @@ import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 const { resetTransportForTests } = await import("../src/shared/transport.ts");
 const {
-  buildAnswerItems, isUnread, nextUnread, historyGroups, parseQuestionReply, emptyStore, threadText, withoutSuggestion,
+  buildAnswerItems, clipPreview, PREVIEW_MAX, isUnread, nextUnread, historyGroups, parseQuestionReply, emptyStore, threadText, withoutSuggestion,
 } = await import("../src/shared/chat/dashboard/answers-model.ts");
 const { normaliseStore } = await import("../src/views/sessions/chat-dashboard/answers-api.ts");
 
@@ -57,6 +57,40 @@ describe("answers model", () => {
     expect(items[1].question).toBe("token needs write?");
     expect(items[1].raw).toBeNull();
     expect(items[1].verdict).toBe("No");
+  });
+
+  it("never shows Joe's whole message as the question: a clipped preview until a short one exists", () => {
+    const wall = "first fix the build and bump the version, then tidy the sidebar label, and also does the token need write access to the board? after that rename the old branch and update the readme";
+    const c = chat().joe(wall).send({ kind: "answer", verdict: "No", text: "Read is enough." }, "a1");
+    const [bare] = c.items();
+    expect(bare.provisional).toBe(true);
+    expect(bare.question.length).toBeLessThanOrEqual(PREVIEW_MAX + 1);
+    expect(bare.question.endsWith("\u2026")).toBe(true);
+    expect(wall.startsWith(bare.question.slice(0, -1))).toBe(true);
+    expect(bare.raw).toBe(wall);
+    expect(bare.typed).toBe(wall);
+
+    const made = emptyStore();
+    made.rewrites.a1 = "Does the token need write access?";
+    const [done] = c.items({ store: made, threads: [] });
+    expect(done.provisional).toBe(false);
+    expect(done.question).toBe("Does the token need write access?");
+    expect(done.raw).toBe(wall);
+
+    // The send_message's own question still wins over a stored one.
+    const [own] = chat().joe(wall).send({ kind: "answer", verdict: "No", text: "t", question: "Their own?" }, "a1").items({ store: made, threads: [] });
+    expect(own.question).toBe("Their own?");
+    expect(own.provisional).toBe(false);
+  });
+
+  it("clips at a word and leaves a short message alone", () => {
+    expect(clipPreview("write access?")).toBe("write access?");
+    const [short] = chat().joe("write access?").send({ kind: "answer", verdict: "No", text: "t" }, "s1").items();
+    expect(short.question).toBe("write access?");
+    expect(short.provisional).toBe(false);
+    const out = clipPreview(("word ".repeat(40)).trim());
+    expect(out.length).toBeLessThanOrEqual(PREVIEW_MAX + 1);
+    expect(out.endsWith("word\u2026")).toBe(true);
   });
 
   it("counts a rating as an answer but never a plan, report, request or kindless message", () => {
@@ -208,6 +242,6 @@ describe("answers model", () => {
   it("reads the daemon's state defensively", () => {
     expect(normaliseStore(null)).toEqual(emptyStore());
     expect(normaliseStore({ read: { a: 1 }, questions: [{ thread_id: "t", asked_at: 2 }, { bogus: 1 }] }))
-      .toEqual({ read: { a: 1 }, threads: {}, questions: [{ thread_id: "t", asked_at: 2 }] });
+      .toEqual({ read: { a: 1 }, threads: {}, questions: [{ thread_id: "t", asked_at: 2 }], rewrites: {} });
   });
 });

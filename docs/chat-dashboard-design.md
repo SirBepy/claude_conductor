@@ -90,7 +90,14 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
   then compact bubbles. No thread summary: the thread button carries the count, plus a blinking dot
   while Claude replies. Hovering the thread header never hides the answer.
 - **Questions always show rewritten** as clear questions; Joe's original wording shows only on hover
-  over the question inside the thread. A + question keeps a thread first, and its reply lands as an
+  over the question inside the thread. An answer whose `send_message` had no `question`
+  and whose message is longer than a one-line preview (90 chars) shows a clipped preview first, never
+  the whole message; the card then asks the daemon (`answers_rewrite_question`) for one short question
+  from a one-shot sonnet call (`ask::sidecar::run_readonly`, subscription only, no Haiku: see the
+  quick-reply-chips decision) given his message and the answer. The result is stored once per answer
+  in `AnswerState.rewrites` (2026-11-10), only the newest 5 answers are asked for, one at a time, and a
+  failed call keeps the preview until a reload. No earlier decision for an AI call existed; this one
+  follows from "questions always show rewritten". A + question keeps a thread first, and its reply lands as an
   unread answer. A reply after leaving a thread makes the answer unread again.
 - **The main chat never answers a question itself:** it rewrites it and hands it to a sub, keeping
   the original (2026-11-10). Built in lane 5 as rules (1) and (11) of `SUBCHATS_MAIN_PROMPT`
