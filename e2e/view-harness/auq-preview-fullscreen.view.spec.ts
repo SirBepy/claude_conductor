@@ -58,6 +58,28 @@ const pickedAt = (page: Page, qi: number) =>
   page.evaluate((qi) => Array.from(document.querySelectorAll<HTMLInputElement>(`.prompt-panel[data-panel="${qi}"] .prompt-opt > input:checked`)).map((i) => i.dataset.label), qi);
 
 test.describe("view-harness / AUQ fullscreen preview", () => {
+  test("a page taller than the screen is shrunk to fit, so its bottom is not cut off", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    const tall = (label: string) =>
+      `<div style="height:2400px;display:flex;flex-direction:column;justify-content:space-between;background:var(--color-surface);color:var(--color-text)"><span>${label}</span><span class="bottom-mark">bottom of ${label}</span></div>`;
+    const q: Question = {
+      question: "Tall?", header: "Tall", domain: "ux",
+      options: ["A", "B"].map((label) => ({ label, description: `${label} desc`, preview: tall(label) })),
+    };
+    await openCard(page, [q]);
+    await page.locator(".prompt-panel.is-active .prompt-opt__expand").first().click();
+    await expect(page.locator(fs)).toBeVisible();
+    const mark = page.frameLocator(`${fs} .auq-fs__frame`).locator(".bottom-mark");
+    await expect(mark).toBeVisible();
+    // The marker sits at the bottom of a 2400px page: it is only on screen if
+    // the page was scaled down to the view's height.
+    await expect.poll(async () => {
+      const view = await page.locator(`${fs} .auq-fs__view`).boundingBox();
+      const box = await mark.boundingBox();
+      return Boolean(view && box && box.y >= view.y - 1 && box.y + box.height <= view.y + view.height + 1);
+    }).toBe(true);
+  });
+
   test("desktop: a tile opens fullscreen at the full view size, arrows page, Select advances", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [visual("First", ["A", "B", "C"]), visual("Second", ["D", "E"]), plain]);
