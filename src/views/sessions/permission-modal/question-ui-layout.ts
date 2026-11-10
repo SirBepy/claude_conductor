@@ -5,6 +5,7 @@
 
 import { isElNearBottom } from "../../../shared/chat/chat-dom-renderer";
 import type { AuqAttachmentsController } from "./attachments";
+import { CHAT_VIEW_CHANGED } from "../chat-dashboard/chat-view-pref";
 import { PEEK_SETTLED_EVENT } from "./drag-handle";
 import type { QuestionRenderState } from "./question-ui-templates";
 
@@ -28,7 +29,7 @@ export function cardPaddedScroller(host: HTMLElement): HTMLElement | null {
 export function createQuestionCardLayout(
   host: HTMLElement,
   state: QuestionRenderState,
-  messagesEl: HTMLElement | null,
+  fallbackScroller: HTMLElement | null,
   auqAttachments: AuqAttachmentsController,
 ): QuestionCardLayout {
   let hintTimer: number | undefined;
@@ -54,8 +55,15 @@ export function createQuestionCardLayout(
     });
   }
 
+  // The scroller this card last padded. The Dashboard / Messages switch swaps which
+  // scroller shows while the card stays open, so the padding follows the live one
+  // and the old one is cleared (else it keeps a band of empty space nobody sees).
+  let padded: HTMLElement | null = null;
   const syncMessagesPadding = (): void => {
-    if (!messagesEl) return;
+    const target = cardPaddedScroller(host) ?? fallbackScroller;
+    if (!target) return;
+    if (padded && padded !== target) padded.style.paddingBottom = "";
+    padded = target;
     // Broadened to the minimized bar too - it replaces .prompt-card wholesale
     // rather than living inside it, so the old ".prompt-card"-only selector
     // would stop measuring anything once minimized.
@@ -72,7 +80,7 @@ export function createQuestionCardLayout(
     // in the free-text box (which grows the card via ResizeObserver) yanks
     // someone who scrolled up to reread earlier messages back down every
     // keystroke.
-    const wasNearBottom = isElNearBottom(messagesEl);
+    const wasNearBottom = isElNearBottom(target);
     // Measured as the card's overlap with the transcript, not its height: an
     // open question card sits over the composer too, so only the part above the
     // composer hides messages. A peek moves the card by transform, which the
@@ -80,12 +88,19 @@ export function createQuestionCardLayout(
     // instead of leaving an empty band. Peeking is the permission card's, and
     // a question card's on the --viewport fallback host; the phone's
     // fullscreen question page has no handle.
-    const covered = Math.max(0, messagesEl.getBoundingClientRect().bottom - cardRect.top);
-    messagesEl.style.paddingBottom = `${covered + 12}px`;
-    if (wasNearBottom) messagesEl.scrollTop = messagesEl.scrollHeight - messagesEl.clientHeight;
+    const covered = Math.max(0, target.getBoundingClientRect().bottom - cardRect.top);
+    target.style.paddingBottom = `${covered + 12}px`;
+    if (wasNearBottom) target.scrollTop = target.scrollHeight - target.clientHeight;
   };
   // A peek moves the card by transform, which no ResizeObserver sees.
   host.addEventListener(PEEK_SETTLED_EVENT, syncMessagesPadding);
+  // Switching view in Settings changes which scroller shows; the card's own resize
+  // observer fires on neither, so re-pad on the switch (after the pane's attribute flips).
+  const onViewChanged = (): void => {
+    if (!host.isConnected) return document.removeEventListener(CHAT_VIEW_CHANGED, onViewChanged);
+    queueMicrotask(syncMessagesPadding);
+  };
+  document.addEventListener(CHAT_VIEW_CHANGED, onViewChanged);
 
   // Moves the persistent track to the current activeTab. `instant` skips the
   // transition (full rebuild - a fresh node has no prior position to slide
