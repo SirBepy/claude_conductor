@@ -153,13 +153,16 @@ pub(super) async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonS
     }
 }
 
-/// Whether a paired machine may receive this global frame. Only `preview`
-/// frames are filtered: one for a chat hosted here passes (the peer mirrors
-/// that chat and can already read its previews), a session-less one or one
-/// for any other chat never does. Every other method passes.
+/// Whether a paired machine may receive this global frame. `preview` frames
+/// are filtered: one for a chat hosted here passes (the peer mirrors that chat
+/// and can already read its previews), a session-less one or one for any other
+/// chat never does. `preview_state` never passes: it names no chat, and a peer
+/// does not follow or write another machine's view state. Every other method passes.
 fn peer_may_see_preview(frame: &serde_json::Value, is_local: impl Fn(&str) -> bool) -> bool {
-    if frame.get("method").and_then(serde_json::Value::as_str) != Some("preview") {
-        return true;
+    match frame.get("method").and_then(serde_json::Value::as_str) {
+        Some("preview_state") => return false,
+        Some("preview") => {}
+        _ => return true,
     }
     frame.pointer("/params/snapshot/session_id").and_then(serde_json::Value::as_str).is_some_and(is_local)
 }
@@ -398,6 +401,8 @@ mod tests {
         assert!(!peer_may_see_preview(&frame(serde_json::json!("elsewhere")), is_local));
         let other = serde_json::json!({"jsonrpc": "2.0", "method": "instances_changed", "params": {}});
         assert!(peer_may_see_preview(&other, is_local), "other methods pass");
+        let state = serde_json::json!({"jsonrpc": "2.0", "method": "preview_state", "params": {"id": "p", "key": "page", "value": 5}});
+        assert!(!peer_may_see_preview(&state, is_local), "view state is not a peer's to follow");
     }
 
     #[test]

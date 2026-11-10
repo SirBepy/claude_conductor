@@ -317,6 +317,12 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "preview" => {
             let _ = app.emit("preview", params);
         }
+        // A saved control value or page state of a preview (`set_preview_state`),
+        // so the pop-out window and the docked panel follow each other. Payload
+        // is { id, key, value }.
+        "preview_state" => {
+            let _ = app.emit("preview-state", params);
+        }
         // A stalled-sub or stopped-sub card's "Open it" (`subchats::stall`), and the
         // checkup card's "Open the log" (`subchats::checkup`). Pure forwards: the
         // main chat's window opens the sub in place / the file viewer, and only the
