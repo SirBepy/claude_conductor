@@ -34,6 +34,13 @@ import "./answers-card.css";
 /** Thread keys of + questions that have no answer yet: `new:<n>`, one per
  *  question, so leaving one in flight and pressing + again starts a fresh one. */
 const NEW_PREFIX = "new:";
+
+/** The thread's tall size, shared by every chat's card and kept in memory only:
+ *  Joe who grew one thread wants the next one tall too, and a reload resets it. */
+let threadTall = false;
+/** A tall thread is never shorter than the default one, and leaves the dashboard's padding. */
+const TALL_MIN = 460;
+const TALL_AIR = 24;
 const isNew = (key: string | null): boolean => !!key && key.startsWith(NEW_PREFIX);
 
 /** How long the card waits for the daemon's read marks before drawing anyway,
@@ -109,6 +116,8 @@ export class AnswersCard {
   private wiredFor: string | null = null;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  /** Refits a tall thread when the dashboard's height changes. */
+  private roomWatch: ResizeObserver | null = null;
   private readonly onClick = (e: MouseEvent): void => this.click(e);
   private readonly onFocus = (): void => this.refresh();
 
@@ -131,6 +140,7 @@ export class AnswersCard {
       host.classList.add("ax-quiet-got", "ax-icon-acts");
       host.addEventListener("click", this.onClick);
       this.lastHtml = "";
+      this.watchRoom(host);
     }
     this.items = state.items;
     this.ensureLoaded();
@@ -142,6 +152,8 @@ export class AnswersCard {
   /** The zone stopped drawing (no answers): forget the DOM, keep the state. */
   detach(): void {
     this.host?.removeEventListener("click", this.onClick);
+    this.roomWatch?.disconnect();
+    this.roomWatch = null;
     this.destroyWire();
     this.host = null;
     this.lastHtml = "";
@@ -354,7 +366,8 @@ export class AnswersCard {
     const title = fresh ? (this.pending.get(this.thread!) ?? this.failedAsk.get(this.thread!) ?? "Ask anything; your first message is the question") : item?.question || item?.verdict || "";
     const sub = item?.verdict ? `<span class="ax-thead-s">${esc(item.verdict)}</span>` : "";
     return `<div class="ax-thread ask-panel"><div class="ax-thead"><button type="button" class="ax-back" data-ax="close-thread" title="Back to the answer"><i class="ph ph-arrow-left"></i></button>`
-      + `<div class="ax-thead-t"><span class="ax-thead-k">${fresh ? "New question" : "Thread"}</span><span class="ax-thead-v">${esc(title)}</span>${sub}</div></div>`
+      + `<div class="ax-thead-t"><span class="ax-thead-k">${fresh ? "New question" : "Thread"}</span><span class="ax-thead-v" title="${esc(title)}">${esc(title)}</span>${sub}</div>`
+      + `<button type="button" class="ax-back ax-grow" data-ax="grow-thread" title="Taller thread (fills the window)"><i class="ph ph-arrows-out-simple"></i><i class="ph ph-arrows-in-simple"></i></button></div>`
       + `<div class="ask-body ax-tbody"></div>`
       + `<div class="ax-tcomp">${composerFieldHtml({ placeholder: fresh ? "Ask Claude a question..." : "Follow up on this answer...", inputClass: "ax-t-input", sendClass: "ax-t-send" })}</div></div>`;
   }
@@ -478,6 +491,7 @@ export class AnswersCard {
       case "reply": return this.openThread();
       case "new-q": return this.newQuestion();
       case "close-thread": return this.closeThread();
+      case "grow-thread": return this.growThread();
       case "history": return this.history();
       case "toggle":
         if (t.closest("a, button, .attachment-chip, [data-file-ref]") && !t.closest(".ax-readmore")) return;
@@ -567,6 +581,36 @@ export class AnswersCard {
     this.anim = "ax-t-slide-open";
     this.render();
     this.focusInput();
+  }
+
+  /** Set on the zone's own host, so the thread grows without a re-render and its
+   *  message box (and anything typed in it) stays put. */
+  private growThread(): void {
+    threadTall = !threadTall;
+    this.fitTall();
+    if (threadTall) this.host?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+
+  /** Tall = the dashboard's visible height, so the message box stays on screen;
+   *  the window's height would push it under the chat's own composer. */
+  private fitTall(): void {
+    const host = this.host;
+    if (!host) return;
+    host.classList.toggle("ax-th-tall", threadTall);
+    const room = host.closest<HTMLElement>(".cdash-body")?.clientHeight ?? 0;
+    if (threadTall && room) host.style.setProperty("--ax-th", `${Math.max(TALL_MIN, room - TALL_AIR)}px`);
+    else host.style.removeProperty("--ax-th");
+  }
+
+  private watchRoom(host: HTMLElement): void {
+    this.roomWatch?.disconnect();
+    this.roomWatch = null;
+    const body = host.closest<HTMLElement>(".cdash-body");
+    if (body && typeof ResizeObserver !== "undefined") {
+      this.roomWatch = new ResizeObserver(() => this.fitTall());
+      this.roomWatch.observe(body);
+    }
+    this.fitTall();
   }
 
   private closeThread(): void {
