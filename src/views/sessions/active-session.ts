@@ -33,6 +33,7 @@ import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { resolveNewChatConfig } from "./new-chat-config";
 import { registerCta } from "../../shared/chat/cta-registry";
 import { mountStatusbar, mountRenderer } from "./active-session-mount";
+import { detachChatDashboard } from "./chat-dashboard/chat-dashboard";
 import { mountComposer } from "./active-session-composer";
 import { handleTakeoverClick } from "./active-session-takeover";
 import { isRemote } from "../../shared/transport";
@@ -125,6 +126,7 @@ export function dismountActivePane(opts?: { rerenderSidebar?: boolean }): void {
   closeCodeMode();
   setCodeModeChatProvider(null);
   setThinkingActivity(null);
+  detachChatDashboard();
   setActiveSession(null);
   const pane = document.querySelector<HTMLElement>(".session-pane #session-pane")
     ?? document.querySelector<HTMLElement>("#session-pane");

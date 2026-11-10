@@ -299,18 +299,26 @@ export class ChatDashboard {
 }
 
 /** The chat window the dashboard currently belongs to (one per app window). */
-let current: { pane: HTMLElement; renderer: ChatRenderer; dash: ChatDashboard | null } | null = null;
+let current: { pane: HTMLElement; renderer: ChatRenderer; dash: ChatDashboard | null; transcriptOnly: boolean } | null = null;
+
+/** The chat pane was emptied (no chat open): the dashboard goes with it. */
+export function detachChatDashboard(): void {
+  current?.dash?.dispose();
+  current = null;
+}
 
 /** Called whenever a renderer is pointed at a pane (active-session-mount.ts's
  *  wireRenderer): draws the dashboard there when the setting says so, and only
  *  then. In Messages view, and on the phone, nothing is added to the pane. */
-export function attachChatDashboard(pane: HTMLElement, renderer: ChatRenderer): ChatDashboard | null {
+export function attachChatDashboard(pane: HTMLElement, renderer: ChatRenderer, opts: { transcriptOnly?: boolean } = {}): ChatDashboard | null {
   current?.dash?.dispose();
   // The previous chat's renderer may be retained off-screen; it must not keep
   // driving a dashboard that is no longer on screen.
   if (current && current.renderer !== renderer && current.renderer.onFlushed) current.renderer.onFlushed = null;
-  current = { pane, renderer, dash: null };
-  if (!dashboardEnabled()) {
+  // A read-only external or automated session talks in plain transcript text,
+  // with no send_message cards for the zones to read, so it keeps Messages.
+  current = { pane, renderer, dash: null, transcriptOnly: !!opts.transcriptOnly };
+  if (!dashboardEnabled() || opts.transcriptOnly) {
     showTranscript(renderer);
     return null;
   }
@@ -328,7 +336,7 @@ export function applyChatViewSetting(): void {
   // The pane outlives its chat (a dismount leaves the empty state in it), so
   // the transcript being on screen is what says the chat is still open.
   if (!current || !current.renderer.container.isConnected) return;
-  const want = dashboardEnabled();
+  const want = dashboardEnabled() && !current.transcriptOnly;
   if (want && !current.dash) current.dash = new ChatDashboard(current.pane, current.renderer);
   else if (!want && current.dash) {
     current.dash.dispose();

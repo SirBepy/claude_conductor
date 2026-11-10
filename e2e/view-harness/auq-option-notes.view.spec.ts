@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10: the question card pads the scroller cardPaddedScroller picks (this pane's transcript as before, or the chat dashboard's body while it shows), active-session.ts detaches the chat dashboard on dismount, and a read-only session keeps Messages; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-02: the question card's header ask button now takes --control-h and its nav arrows --control-h-sm; this spec asserts option notes and passes.
 // Reviewed 2026-10-31: the question card's context box and ask band now run edge to edge on desktop too and the domain chip is back on the context row - this spec's contract is unchanged and it passes.
 // Reviewed 2026-10-30: the question card's ask band is now two rows (domain chip + Ask button on top, question text under them) and the ? icon is gone - this spec's contract is unchanged and it passes.

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10: the question card pads the scroller cardPaddedScroller picks (this pane's transcript as before, or the chat dashboard's body while it shows), active-session.ts detaches the chat dashboard on dismount, and a read-only session keeps Messages; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-05: http-transport.ts gained move_chat_into_main and former_main_chat cases - additive, and this is the mocked-invoke harness, so it never executes here.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: http-transport.ts's clear_session now returns whether the daemon held the close (a boolean) instead of the raw RPC result; nothing this spec asserts reads it, and it passes.

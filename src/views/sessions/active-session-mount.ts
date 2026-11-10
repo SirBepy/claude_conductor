@@ -176,7 +176,7 @@ export function wireRenderer(
   syncThinkingBar(renderer);
   // Dashboard view (Settings > Chat defaults): drawn beside the transcript,
   // which keeps rendering underneath. A no-op in Messages view and on the phone.
-  attachChatDashboard(pane, renderer);
+  attachChatDashboard(pane, renderer, { transcriptOnly: sess.kind === "external" || sess.kind === "automated" });
 }
 
 /** Re-show a cached chat: swap the pane's empty `.session-messages` for the

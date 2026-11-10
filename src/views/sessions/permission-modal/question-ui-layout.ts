@@ -15,6 +15,16 @@ export interface QuestionCardLayout {
   positionTrack: (instant: boolean, slideFrom?: number) => void;
 }
 
+/** The scroller the card pads so nothing hides under it: the card's own pane
+ *  first (the document's first .session-messages can belong to another view),
+ *  and in that pane the chat dashboard's body while it shows, since the
+ *  transcript is display:none then and measures nothing. */
+export function cardPaddedScroller(host: HTMLElement): HTMLElement | null {
+  const pane = host.closest<HTMLElement>(".session-pane");
+  const dash = pane?.getAttribute("data-chat-view") === "dashboard" ? pane.querySelector<HTMLElement>(".cdash-body") : null;
+  return dash ?? pane?.querySelector<HTMLElement>(".session-messages") ?? document.querySelector<HTMLElement>(".session-messages");
+}
+
 export function createQuestionCardLayout(
   host: HTMLElement,
   state: QuestionRenderState,
