@@ -105,6 +105,7 @@ export function mountComposer(
       state.heldMessages?.notifyDraftActivity();
       refreshNextChips(pane);
     },
+    onAttachmentsChange: () => refreshNextChips(pane),
     getNextTokenReset: async () => {
       if (!sess.account_id) return null;
       const map = await api.getUsageMap();

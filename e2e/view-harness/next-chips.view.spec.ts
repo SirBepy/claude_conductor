@@ -82,6 +82,30 @@ test.describe("quick reply chips", () => {
     await expect(chip(page)).toBeVisible();
   });
 
+  // onDraftActivity is the held-message auto-flush hook: firing it from clearComposer() (inside send()) would flush
+  // held messages on their own before the draft is bundled with them, splitting one message into two.
+  test("attaching and clearing an image never fires the held-flush draft-activity hook", async ({ page }) => {
+    await mountChat(page, {}, { paste_attachment: "C:/tmp/pasted.png" });
+    await expect(chip(page)).toBeVisible();
+    await page.evaluate(async () => {
+      const { state } = await import("/views/sessions/state.ts");
+      const opts = (state.composer as unknown as { opts: { onDraftActivity: () => void } }).opts;
+      const w = window as unknown as { __draftActivity: number };
+      w.__draftActivity = 0;
+      const orig = opts.onDraftActivity;
+      opts.onDraftActivity = () => { w.__draftActivity++; orig(); };
+    });
+    await attach(page);
+    await page.locator("#session-pane .composer-attachments .attachment").first().waitFor();
+    await expect(page.locator("#session-pane .next-chip-slot")).toBeHidden();
+    await page.evaluate(async () => {
+      const { state } = await import("/views/sessions/state.ts");
+      state.composer!.clearComposer();
+    });
+    await expect(chip(page)).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { __draftActivity: number }).__draftActivity)).toBe(0);
+  });
+
   test("the message box stays where it was when the chips hide", async ({ page }) => {
     await mountChat(page, {}, { paste_attachment: "C:/tmp/pasted.png" });
     await expect(chip(page)).toBeVisible();
