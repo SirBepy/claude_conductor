@@ -1,6 +1,6 @@
 # Chat as a dashboard: design rules
 
-Design in progress, not built. A Conductor chat stops being a scrolling transcript and becomes a
+Built and released in v0.2.148 (2026-11-10); later changes refine it. A Conductor chat stops being a scrolling transcript and becomes a
 dashboard Claude keeps current. This file is the source of truth for every rule Joe has settled,
 each with the reason he gave or the evidence behind it. Sub briefs point here instead of carrying
 the rules themselves, because a sub sees nothing but its brief (`src-tauri/src/daemon/subchats/brief.rs`).
