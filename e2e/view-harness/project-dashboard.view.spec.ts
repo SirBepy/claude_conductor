@@ -435,7 +435,7 @@ test.describe("view-harness / project dashboard", () => {
     await expect(modal).toBeVisible();
     await expect(modal.locator(".pd-msec")).toHaveText(["Quick actions", "Sections", "Custom cards"]);
     await expect(modal.locator("[data-pd-pin]")).toHaveCount(9);
-    await expect(modal.locator(".pd-mrow")).toHaveCount(9 + 1 + 9 + 2);
+    await expect(modal.locator(".pd-mrow")).toHaveCount(9 + 1 + 10 + 2); // 10 sections since the Due card
     await expect(modal).toContainText("Ask Claude in a chat here to add a card");
     await expect(modal).not.toHaveClass(/modal-card-morph-hidden/);
     await page.waitForTimeout(350); // open morph
