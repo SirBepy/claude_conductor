@@ -91,4 +91,24 @@ describe("switching Dashboard / Messages while a question card is open", () => {
     await Promise.resolve();
     expect(dash.style.paddingBottom).toBe("");
   });
+
+  it("leaves no padding on the scroller it last padded when the card goes away", async () => {
+    document.body.innerHTML = `<div class="session-pane" data-chat-view="dashboard"><div class="cdash-body" id="dash"></div><div class="session-messages" id="msgs"></div><div id="host"><div class="prompt-card"></div></div></div>`;
+    const pane = document.querySelector(".session-pane");
+    const msgs = document.getElementById("msgs");
+    const host = document.getElementById("host");
+    document.getElementById("dash").getBoundingClientRect = rect(0, 1322);
+    msgs.getBoundingClientRect = rect(0, 1322);
+    host.querySelector(".prompt-card").getBoundingClientRect = rect(1000, 1300);
+    // The card opened over the dashboard; the switch to Messages moves the band to msgs.
+    const layout = createQuestionCardLayout(host, { activeTab: 0 }, document.getElementById("dash"), {});
+    layout.syncMessagesPadding();
+    pane.setAttribute("data-chat-view", "messages");
+    document.dispatchEvent(new CustomEvent("cc-chat-view-changed"));
+    await Promise.resolve();
+    expect(msgs.style.paddingBottom).toBe("334px");
+
+    layout.dispose();
+    expect(msgs.style.paddingBottom, "answering the card must not strand its band").toBe("");
+  });
 });
