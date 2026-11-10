@@ -1048,17 +1048,20 @@ mod tests {
         let entry = all().into_iter().find(|h| h.sub_id == sid).unwrap();
         assert_eq!(entry.after.as_deref(), Some("rg-header"));
         assert!(entry.launch.first_message.contains("Footer"), "{}", entry.launch.first_message);
-        // The row counts as running (header + footer), so the held sub is in the cap.
+        // The row is an unfinished sub (header + footer) but holds no cap slot: it has no process yet.
         assert_eq!(super::super::spawn::running_subs(&st.registry, "rg-main").len(), 2);
+        assert!(!super::super::spawn::started_subs(&st, "rg-main").iter().any(|i| i.session_id == sid));
         assert_eq!(super::super::tool::status_word(&inst), "queued");
     }
 
     #[test]
-    fn a_held_sub_counts_toward_the_cap_of_five() {
+    fn a_held_sub_does_not_count_toward_the_cap_of_started_subs() {
         let _d = TempDataDir::new();
         let st = state();
-        for n in 0..4 {
+        let cap = super::super::spawn::MAX_RUNNING;
+        for n in 0..cap - 1 {
             sub_of(&st, "cp-main", &format!("cp-run{n}"), &format!("job-{n}"));
+            st.registry.set_busy(&format!("cp-run{n}"), true);
         }
         hold_behind(&st, "cp-main", "cp-held", "queued-job", "cp-run0", "job-0");
         let cfg = crate::sessions::chat_config::ChatConfig { subchats_on: true, ..Default::default() };
@@ -1069,10 +1072,16 @@ mod tests {
             writes: Some(false),
             ..Default::default()
         };
-        let err = super::super::spawn::plan(&st, "cp-main", &cfg, &here().to_string_lossy(), None, None, None, Some("sixth"), &args, &[])
+        // One slot is left: the held sub has no process, so it does not use it.
+        let mut last = super::super::spawn::plan(&st, "cp-main", &cfg, &here().to_string_lossy(), None, None, None, Some("last"), &args, &[])
+            .unwrap()
+            .expect("the held sub holds no slot");
+        // That plan now holds the last slot until its row exists.
+        let err = super::super::spawn::plan(&st, "cp-main", &cfg, &here().to_string_lossy(), None, None, None, Some("over"), &args, &[])
             .err()
-            .expect("four running plus one held is five");
-        assert!(err.contains("queued-job"), "the held sub is named among the running: {err}");
+            .expect("the cap is reached by started subs plus the plan in flight");
+        assert!(err.contains("job-0") && !err.contains("queued-job"), "only started subs are named: {err}");
+        last.release_slot();
     }
 
     #[test]

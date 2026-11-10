@@ -871,7 +871,8 @@ mod tests {
         let inst = st.registry.get(&sid).unwrap();
         assert_eq!(inst.progress.waiting_for.as_deref(), Some(QUEUED_TEXT));
         assert_eq!(super::super::tool::status_word(&inst), "queued");
-        assert!(super::super::spawn::running_subs(&st.registry, "reg-main").iter().any(|i| i.session_id == sid), "it counts toward the cap");
+        assert!(super::super::spawn::running_subs(&st.registry, "reg-main").iter().any(|i| i.session_id == sid), "it is an unfinished sub (closing waits on it) but holds no cap slot");
+        assert!(!super::super::spawn::started_subs(&st, "reg-main").iter().any(|i| i.session_id == sid));
         let entry = held::all().into_iter().find(|h| h.sub_id == sid).expect("held keeps the recipe");
         assert_eq!(entry.after, None, "release_ready must leave a writer-queue hold alone");
         assert!(entry.launch.first_message.contains("Footer"));
@@ -906,7 +907,7 @@ mod tests {
     }
 
     #[test]
-    fn a_queued_sub_counts_toward_the_cap_and_shows_as_queued() {
+    fn a_queued_sub_holds_no_cap_slot_and_shows_as_queued() {
         let _data = TempDataDir::new();
         let (_d, root) = project();
         let st = state();
@@ -915,8 +916,8 @@ mod tests {
         let row = st.registry.get(&second).unwrap();
         assert_eq!(row.progress.waiting_for.as_deref(), Some(QUEUED_TEXT));
         assert!(
-            super::super::spawn::running_subs(&st.registry, "cap1b-main").iter().any(|i| i.session_id == second),
-            "an unstarted sub holds one of the parent's five slots"
+            !super::super::spawn::started_subs(&st, "cap1b-main").iter().any(|i| i.session_id == second),
+            "an unstarted sub has no process, so it holds no cap slot"
         );
         assert_eq!(tool::status_word(&row), "queued");
     }

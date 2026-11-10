@@ -103,7 +103,7 @@ pub async fn move_into_main(state: &Arc<DaemonState>, chat_id: &str, main_id: &s
         return Err(AdoptError::TargetNotMain(main_id.to_string()));
     }
     spawn::check_adoptable_project(state, &main.cwd, &inst.cwd).map_err(AdoptError::OtherProject)?;
-    let running = spawn::running_subs(&state.registry, main_id).len();
+    let running = spawn::started_subs(state, main_id).len();
     if running >= spawn::MAX_RUNNING {
         return Err(AdoptError::Full(main_id.to_string(), running));
     }

@@ -348,7 +348,7 @@ struct Spawned<'a> {
 /// the failed-send cleanup can be tested without a real `claude` child.
 ///
 /// A hidden sub whose first send fails is ended: its row is hidden everywhere
-/// and counts as running, so left alone it would hold one of the parent's five
+/// and counts as running, so left alone it would hold one of the parent's cap
 /// slots forever while the parent gets an error and retries. An ordinary chat
 /// stays as it was, since Joe can see and close it.
 async fn adopt_spawned(
@@ -710,7 +710,7 @@ mod tests {
         assert!(inst.end_reason.is_some() && inst.ended_at.is_some(), "the orphan is ended");
         assert!(
             crate::daemon::subchats::spawn::running_subs(&state.registry, "main-bad").is_empty(),
-            "an ended sub no longer counts toward the parent's five"
+            "an ended sub no longer counts toward the parent's cap"
         );
     }
 

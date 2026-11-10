@@ -1,5 +1,5 @@
 //! The rules a mode-on `spawn_chat` obeys before a sub exists: the brief, the
-//! tier, the known-project allowlist, the cap of five running subs and the depth
+//! tier, the known-project allowlist, the cap of ten started subs and the depth
 //! limit. `spawn_chat`'s own module runs the spawn; this is only the decision.
 
 mod cap;
@@ -10,7 +10,7 @@ use crate::sessions::chat_config::ChatConfig;
 use crate::settings::identity::project_key;
 use crate::types::Instance;
 use cap::reserve;
-pub use cap::{mark_as_sub, running_subs, HoldPlan, SubPlan, MAX_RUNNING};
+pub use cap::{mark_as_sub, running_subs, started_subs, HoldPlan, SubPlan, MAX_RUNNING};
 
 /// A sub with no model named opens here. Joe: "normal code jobs" are Sonnet high.
 const DEFAULT_MODEL: &str = "sonnet";
@@ -180,7 +180,7 @@ pub fn plan(
         }
         None => None,
     };
-    let reservation = reserve(&state.registry, caller_id)?;
+    let reservation = reserve(state, caller_id)?;
     // A gate's prompt is its whole first message, kept word for word: it quotes
     // Joe's push request. Any other sub gets the message written from its brief.
     let first_message = if gate {
@@ -275,7 +275,16 @@ mod tests {
         st.registry.upsert_interactive(id, &cwd(), "proj", "2026-11-05T00:00:00Z");
     }
 
+    /// A started sub: busy, so the cap reads it as having a process.
     fn sub_row(st: &DaemonState, id: &str, parent: &str, name: &str) {
+        row(st, id);
+        st.registry.set_subchat_of(id, Some(parent.into()));
+        st.registry.set_name(id, name.into());
+        st.registry.set_busy(id, true);
+    }
+
+    /// A sub row that never started: no child, no transcript, busy never set.
+    fn ghost_row(st: &DaemonState, id: &str, parent: &str, name: &str) {
         row(st, id);
         st.registry.set_subchat_of(id, Some(parent.into()));
         st.registry.set_name(id, name.into());
@@ -420,16 +429,53 @@ mod tests {
     }
 
     #[test]
-    fn a_sixth_running_sub_is_refused_naming_the_five() {
+    fn a_spawn_past_the_cap_is_refused_naming_the_running_subs() {
         let st = state();
         row(&st, "main");
-        for n in 0..5 {
+        for n in 0..MAX_RUNNING {
             sub_row(&st, &format!("sub{n}"), "main", &format!("job-{n}"));
         }
-        let err = plan_for(&st, &on(), Some("sixth"), &complete()).err().expect("capped");
-        for n in 0..5 {
+        let err = plan_for(&st, &on(), Some("over"), &complete()).err().expect("capped");
+        for n in 0..MAX_RUNNING {
             assert!(err.contains(&format!("job-{n}")), "job-{n} not named: {err}");
         }
+    }
+
+    /// 2026-11-10: five never-started rows (their hold was wiped) refused every
+    /// spawn of a main chat for hours, because the cap counted rows, not processes.
+    #[test]
+    fn ghost_subs_do_not_count_toward_the_cap() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        row(&st, "ghost-main");
+        for n in 0..MAX_RUNNING {
+            ghost_row(&st, &format!("ghost{n}"), "ghost-main", &format!("lost-{n}"));
+        }
+        assert_eq!(running_subs(&st.registry, "ghost-main").len(), MAX_RUNNING, "they are still unfinished rows");
+        assert!(started_subs(&st, "ghost-main").is_empty());
+        plan_as(&st, "ghost-main", &on(), Some("fresh"), &complete()).unwrap().expect("ghosts hold no slot");
+    }
+
+    #[test]
+    fn a_queued_sub_with_a_hold_does_not_count_toward_the_cap_but_a_started_one_does() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        row(&st, "q-main");
+        sub_row(&st, "q-run", "q-main", "run");
+        ghost_row(&st, "q-wait", "q-main", "wait");
+        crate::daemon::subchats::held::hold(
+            &st,
+            crate::daemon::subchats::held::Held {
+                sub_id: "q-wait".into(),
+                reason: "waiting for run".into(),
+                after: Some("q-run".into()),
+                after_name: "run".into(),
+                launch: Default::default(),
+            },
+        )
+        .unwrap();
+        let started: Vec<String> = started_subs(&st, "q-main").into_iter().map(|i| i.session_id).collect();
+        assert_eq!(started, vec!["q-run".to_string()]);
     }
 
     /// A name is how the main chat addresses a sub, so a running or a finished one
@@ -457,12 +503,12 @@ mod tests {
     fn a_finished_or_ended_sub_does_not_count_toward_the_cap() {
         let st = state();
         row(&st, "cap-fin");
-        for n in 0..5 {
+        for n in 0..MAX_RUNNING {
             sub_row(&st, &format!("sub{n}"), "cap-fin", &format!("job-{n}"));
         }
         st.registry.set_subchat_finished("sub0", true);
-        assert_eq!(running_subs(&st.registry, "cap-fin").len(), 4);
-        plan_as(&st, "cap-fin", &on(), Some("sixth"), &complete()).unwrap().expect("one slot free");
+        assert_eq!(running_subs(&st.registry, "cap-fin").len(), MAX_RUNNING - 1);
+        plan_as(&st, "cap-fin", &on(), Some("over"), &complete()).unwrap().expect("one slot free");
     }
 
     #[test]
@@ -470,7 +516,7 @@ mod tests {
         let st = state();
         row(&st, "main");
         row(&st, "other");
-        for n in 0..5 {
+        for n in 0..MAX_RUNNING {
             sub_row(&st, &format!("sub{n}"), "other", &format!("job-{n}"));
         }
         plan_for(&st, &on(), Some("mine"), &complete()).unwrap().expect("a separate main has its own cap");
@@ -481,10 +527,10 @@ mod tests {
         let st = state();
         row(&st, "holder-a");
         let mut held = Vec::new();
-        for _ in 0..5 {
+        for _ in 0..MAX_RUNNING {
             held.push(plan_as(&st, "holder-a", &on(), Some("n"), &complete()).unwrap().unwrap());
         }
-        let err = plan_as(&st, "holder-a", &on(), Some("n"), &complete()).err().expect("sixth blocked while five are in flight");
+        let err = plan_as(&st, "holder-a", &on(), Some("n"), &complete()).err().expect("blocked while the cap is in flight");
         assert!(err.contains("being started"), "{err}");
         held.pop().unwrap().release_slot();
         plan_as(&st, "holder-a", &on(), Some("n"), &complete()).unwrap().expect("a released slot frees the cap");
@@ -496,7 +542,7 @@ mod tests {
         row(&a, "twin");
         row(&b, "twin");
         let mut held = Vec::new();
-        for _ in 0..5 {
+        for _ in 0..MAX_RUNNING {
             held.push(plan_as(&a, "twin", &on(), Some("n"), &complete()).unwrap().unwrap());
         }
         assert!(plan_as(&a, "twin", &on(), Some("n"), &complete()).is_err(), "a is full");
@@ -511,6 +557,7 @@ mod tests {
         let st = state();
         row(&st, "holder-b");
         row(&st, "new-sub");
+        st.registry.set_busy("new-sub", true);
         let mut p = plan_as(&st, "holder-b", &on(), Some("header"), &complete()).unwrap().unwrap();
         mark_as_sub(&st, "new-sub", &mut p);
         let inst = st.registry.get("new-sub").unwrap();
@@ -519,10 +566,11 @@ mod tests {
         assert_eq!((stored.parent.as_str(), stored.task.as_str(), stored.writes), ("holder-b", "t", false));
         assert_eq!(stored.git_head_at_spawn, super::super::git::head(&inst.cwd), "the base the facts count from is stored");
         assert!(crate::sessions::chat_config::sub_session_ids().contains("new-sub"));
-        // The row counts now and the reservation is gone: 1 running + 4 in flight
-        // fills the cap, so a double-counted slot would refuse the fourth plan.
+        // The row counts now (its child is running in production, `busy` here) and
+        // the reservation is gone: 1 running + the rest in flight fills the cap, so
+        // a double-counted slot would refuse the last plan.
         let mut held = Vec::new();
-        for _ in 0..4 {
+        for _ in 0..MAX_RUNNING - 1 {
             held.push(plan_as(&st, "holder-b", &on(), Some("n"), &complete()).unwrap().unwrap());
         }
         assert!(plan_as(&st, "holder-b", &on(), Some("n"), &complete()).is_err());
@@ -809,11 +857,11 @@ mod tests {
         row(&st, "g-cap");
         sub_row(&st, "g-cap-a", "g-cap", "a");
         plan_gate(&st, "g-cap", &on(), Some(GATE_PROMPT), &gate_args()).unwrap().expect("a plain sub is not a gate");
-        for n in 0..4 {
+        for n in 0..MAX_RUNNING - 1 {
             sub_row(&st, &format!("g-cap-{n}"), "g-cap", &format!("job-{n}"));
         }
-        let err = plan_gate(&st, "g-cap", &on(), Some(GATE_PROMPT), &gate_args()).err().expect("five running");
-        assert!(err.contains("At most 5"), "a gate is a sub, so it is inside the cap: {err}");
+        let err = plan_gate(&st, "g-cap", &on(), Some(GATE_PROMPT), &gate_args()).err().expect("cap running");
+        assert!(err.contains(&format!("At most {MAX_RUNNING}")), "a gate is a sub, so it is inside the cap: {err}");
     }
 
     #[test]

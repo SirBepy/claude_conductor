@@ -10,8 +10,11 @@ use crate::types::Instance;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// Running subs one main chat may have at once (spec section 2).
-pub const MAX_RUNNING: usize = 5;
+/// Started subs one main chat may have at once. The cap bounds concurrent
+/// `claude` processes (each ~280 MB; 2026-11-10 measure: 13 running used 3.6 GB
+/// of 31.7 GB), so the real limits are subscription rate limits and how many subs
+/// Joe can follow in one window; Joe set 10 on 2026-11-10.
+pub const MAX_RUNNING: usize = 10;
 
 /// Everything the spawn needs once the rules have passed. Holding it keeps the
 /// parent's cap slot reserved, so parallel `spawn_chat` calls in one turn
@@ -100,6 +103,24 @@ pub fn running_subs(registry: &Registry, parent: &str) -> Vec<Instance> {
         .collect()
 }
 
+/// Subs of `parent` that hold a cap slot: unfinished and actually started. A
+/// queued sub (held behind another sub or the writer slot) and a ghost (a live row
+/// with no child, no transcript and no hold, e.g. its hold was wiped) have no
+/// process, so they do not count; otherwise five dead rows refuse every new spawn
+/// forever (2026-11-10).
+pub fn started_subs(state: &DaemonState, parent: &str) -> Vec<Instance> {
+    let has = |id: &str| crate::context_status::resolve_transcript(&state.registry, id).is_some();
+    started_subs_with(state, parent, &has)
+}
+
+pub(crate) fn started_subs_with(state: &DaemonState, parent: &str, has_transcript: &(dyn Fn(&str) -> bool + Sync)) -> Vec<Instance> {
+    let held = super::super::held::all();
+    running_subs(&state.registry, parent)
+        .into_iter()
+        .filter(|i| !held.iter().any(|h| h.sub_id == i.session_id) && !super::super::held::is_lost_hold(state, i, &held, has_transcript))
+        .collect()
+}
+
 fn cap_error(running: &[Instance], pending: usize) -> String {
     let mut names: Vec<String> = running.iter().map(label).collect();
     if pending > 0 {
@@ -111,10 +132,11 @@ fn cap_error(running: &[Instance], pending: usize) -> String {
     )
 }
 
-pub(super) fn reserve(registry: &Registry, parent: &str) -> Result<Reservation, String> {
+pub(super) fn reserve(state: &DaemonState, parent: &str) -> Result<Reservation, String> {
+    let registry = &state.registry;
     let mut guard = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     let map = guard.get_or_insert_with(HashMap::new);
-    let running = running_subs(registry, parent);
+    let running = started_subs(state, parent);
     let key = pending_key(registry, parent);
     let pending = map.get(&key).copied().unwrap_or(0);
     if running.len() + pending >= MAX_RUNNING {

@@ -230,7 +230,7 @@ queued rows left behind are dead and still fill the sub cap. Joe's call: lanes 3
 a time, as plain visible chats named "dash lane N: ...", each started by the main chat when the
 previous one posts its result to it. /release waits until the fix chat posts "fix committed".
 
-The app runs at most 5 subs at once, and a queued sub counts. So lanes 5b, 6 and 7 are spawned by
+When this was written the app ran at most 5 subs at once and a queued sub counted (since 2026-11-10 the cap is 10 started subs and a queued or never-started sub holds no slot). So lanes 5b, 6 and 7 are spawned by
 the main chat as slots free up, each `after` the one before it. Once the release is out, the main
 chat writes its own retro by hand in pc-1677's format to
 `%APPDATA%\claude-conductor\main-chat-retros\`, then closes (Joe: "I'd like you to even close when
