@@ -78,7 +78,8 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(files).toHaveValue("one_at_a_time");
       await expect(check.locator("option")).toHaveText(["Facts and a reviewer", "Facts only"]);
       await expect(files.locator("option")).toHaveText(["One at a time", "Worktree each"]);
-      await expect(page.locator(".ps-group-title")).toHaveText("Subchats");
+      // The rail also carries the MCP servers group, so name the one asserted.
+      await expect(page.locator(".ps-group-title", { hasText: "Subchats" })).toHaveText("Subchats");
       // Nothing spills out of the 270px rail.
       const host = (await page.locator("#project-config-host").boundingBox())!;
       for (const sel of [check, files]) {
@@ -147,7 +148,7 @@ function invokeFor(sessions: unknown[]) {
 
 for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
   test.describe(`view-harness / queued sub (${label})`, () => {
-    test("the sub list shows a sub held for the writer as waiting, in yellow, among the running ones", async ({ page }) => {
+    test("the sub list shows a sub held for the writer as waiting, in yellow, in its own Queued group", async ({ page }) => {
       await page.setViewportSize(size);
       await mountView(page, { view: "sessions", invoke: invokeFor([MAIN, HEADER, FOOTER]) });
       await page.locator("#sessions-list li").first().waitFor();
@@ -159,7 +160,8 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(queued).toBeVisible();
       await expect(queued).toHaveAttribute("data-kind", "queued");
       await expect(queued.locator(".sub-status")).toHaveText("waiting for the writer before it");
-      // Running group: the working sub, then the queued one.
+      // The working sub sits under Running and the queued one under Queued.
+      await expect(page.locator(".sub-list-popover .sub-list-head")).toHaveText(["Running", "Queued"]);
       const names = await page.locator(".sub-list-popover .sub-row .sub-name").allTextContents();
       expect(names).toEqual(["Header", "Footer"]);
       await capture(page.locator(".sub-list-popover"), `queued-sub-list-${label}`);
