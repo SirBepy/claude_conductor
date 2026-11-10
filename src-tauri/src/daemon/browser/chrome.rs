@@ -29,6 +29,9 @@ pub struct Chrome {
     profile: PathBuf,
     running: Mutex<Option<Running>>,
     last_active: std::sync::Mutex<Instant>,
+    /// A field so a test sets a zero timeout instead of backdating `last_active`:
+    /// `Instant::now() - IDLE_TIMEOUT` overflows on a PC booted less than that ago.
+    idle_timeout: Duration,
 }
 
 struct Running {
@@ -43,6 +46,7 @@ impl Chrome {
             profile,
             running: Mutex::new(None),
             last_active: std::sync::Mutex::new(Instant::now()),
+            idle_timeout: IDLE_TIMEOUT,
         }
     }
 
@@ -116,7 +120,7 @@ impl Chrome {
     }
 
     pub async fn maybe_idle_shutdown(&self) {
-        if self.last_active.lock().unwrap().elapsed() < IDLE_TIMEOUT {
+        if self.last_active.lock().unwrap().elapsed() < self.idle_timeout {
             return;
         }
         let Some(port) = self.port_if_running().await else { return };
@@ -131,7 +135,7 @@ impl Chrome {
             Ok(_) => {}
             Err(e) => log::warn!("claude-browser: could not read the window state before the idle close: {e}"),
         }
-        log::info!("claude-browser: idle for {}m, closing", IDLE_TIMEOUT.as_secs() / 60);
+        log::info!("claude-browser: idle for {}m, closing", self.idle_timeout.as_secs() / 60);
         self.shutdown().await;
     }
 
@@ -294,8 +298,8 @@ mod tests {
 
     #[tokio::test]
     async fn idle_shutdown_is_a_noop_with_nothing_running() {
-        let c = Chrome::new(tempfile::tempdir().unwrap().path().to_path_buf());
-        *c.last_active.lock().unwrap() = Instant::now() - IDLE_TIMEOUT - Duration::from_secs(1);
+        let mut c = Chrome::new(tempfile::tempdir().unwrap().path().to_path_buf());
+        c.idle_timeout = Duration::ZERO;
         c.maybe_idle_shutdown().await;
         assert!(c.port_if_running().await.is_none());
     }
@@ -363,9 +367,9 @@ mod tests {
         /// A `Chrome` that already holds this fake as its running browser and
         /// has sat idle past the timeout.
         async fn idle_chrome(&self) -> Chrome {
-            let c = Chrome::new(tempfile::tempdir().unwrap().path().to_path_buf());
+            let mut c = Chrome::new(tempfile::tempdir().unwrap().path().to_path_buf());
             *c.running.lock().await = Some(Running { child: None, port: self.port });
-            *c.last_active.lock().unwrap() = Instant::now() - IDLE_TIMEOUT - Duration::from_secs(1);
+            c.idle_timeout = Duration::ZERO;
             c
         }
     }
@@ -376,12 +380,14 @@ mod tests {
     async fn idle_shutdown_leaves_a_window_the_user_is_using_open() {
         let fake = FakeChrome::start("normal", 100, 100).await;
         let c = fake.idle_chrome().await;
+        let before = *c.last_active.lock().unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
 
         c.maybe_idle_shutdown().await;
 
         assert_eq!(c.port_if_running().await, Some(fake.port), "still running");
         assert!(!fake.methods().contains(&"Browser.close".to_string()), "got {:?}", fake.methods());
-        assert!(c.last_active.lock().unwrap().elapsed() < IDLE_TIMEOUT, "the idle clock restarts");
+        assert!(*c.last_active.lock().unwrap() > before, "the idle clock restarts");
     }
 
     #[tokio::test]
@@ -398,7 +404,8 @@ mod tests {
     #[tokio::test]
     async fn idle_shutdown_leaves_a_recently_used_browser_alone() {
         let fake = FakeChrome::start("minimized", -32000, -32000).await;
-        let c = fake.idle_chrome().await;
+        let mut c = fake.idle_chrome().await;
+        c.idle_timeout = IDLE_TIMEOUT;
         c.touch();
 
         c.maybe_idle_shutdown().await;
