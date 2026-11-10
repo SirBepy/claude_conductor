@@ -146,13 +146,40 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
   wont be caring about them").
 - **Live test progress is wanted:** tests report to the app as they run. Joe called it "very
   valuable". Not designed: it needs a test-to-app reporting channel.
-- Open: a card showing this chat's active subs (working or asking, finished ones maybe for an hour
-  or two), and a way to see the images a sub produced. Joe raised both 2026-11-10; being designed by
-  sub "subchats-card".
 - Missing data today: no Links store, no chat-to-plan-doc link, no Memory viewer, no decisions log
   for plain (non-subchat) chats.
 - Ruled out: a standing comparison card (folds into the Preview window), separate Gates or
   Todo-progress cards (inside Plan), keeping the Decided card or a "new decisions only" card.
+
+## Subchats card (2026-11-10, sub "subchats-card", 3 rounds)
+
+Board: preview slug `subs-card`; rules sheet: `subs-card-rules`.
+
+- **Avatars only, right column under Plan.** Each avatar carries the state ring (red asks, yellow
+  works, green done). It lists working, queued and asking subs; an asking sub's question also stays
+  in Waiting on you. Reason: a strip under the title sat above Answers and Plan and broke "those two
+  always sit on top"; text rows were more than Joe wanted.
+- **Finished subs stay 1 hour, then fold under "+N earlier".** A display rule only: a sub is never
+  closed by it (pc-1664). The card does not draw when it has nothing to show.
+- **Model battery on each avatar:** fill = model, colour = effort. low `#ece6cf` (off white), medium
+  `#b3a67c` (grey with a yellow hint), high grey (the default, 99% of use), xhigh `#f2994a`, max
+  `#eb5757`. **Every battery in the app** takes this palette. Reason: compacts the information; the
+  colour sits on the battery, not near the ring, so a max-effort working sub never reads as asking.
+- **Click an avatar: details open below** with name, run time, the status bar's own context chip,
+  state or verdict, brief, one image with "+N" (opens all its images), the latest preview tile
+  (`ph-monitor-play`, the app's mockup icon) and a message box. No corner buttons. Joe on the message
+  box: "a input field would be super helpful here".
+- **A sub's images = every image in its transcript,** shown live while it works, only in the expanded
+  details. Needs a daemon scan of the sub's transcript (reuse history_scan).
+- **Right-click menu:** Open (full window), Open in new window, Latest preview, Pause, Pin/Unpin
+  sidemenu, Stop this turn, Change model or effort, Close (runs /close).
+- **Pin to sidemenu replaces Move to sidebar:** it only adds a sidebar shortcut, and the sub stays a
+  sub of its main chat. Reason: "if it was spawned as a subchat, its forever a subchat".
+- Ruled out: text rows, the card on the left or inside Plan or as a strip under the title, images per
+  row or a family-wide Images button, keeping finished subs 2 hours or the newest 3, effort colour on
+  a dot or the initials, high as orange, an Open-on-the-right chat panel, Message / Images / Rename /
+  Copy brief in the menu, Move to sidebar turning a sub into an ordinary chat, model/effort words and
+  message/turn counts in the details.
 
 ## Gone
 
