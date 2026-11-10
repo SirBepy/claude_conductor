@@ -9,7 +9,7 @@ let inflight = false;
 
 /** Said when /clear is typed in a sub's view. */
 export const SUB_CLEAR_REFUSAL =
-  "A subchat is a job defined by its brief, so /clear does not apply to it. Use Move to sidebar to turn it into an ordinary chat.";
+  "A subchat is a job defined by its brief, so /clear does not apply to it. Close it, or start a new chat for the other job.";
 
 export const clearSession: BuiltinHandler = async (_parsed, ctx: BuiltinContext) => {
   if (inflight) return;

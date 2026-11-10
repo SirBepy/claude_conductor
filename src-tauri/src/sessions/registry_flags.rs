@@ -165,6 +165,15 @@ impl Registry {
         }
     }
 
+    /// Pins or unpins a sub's sidebar shortcut. Returns whether anything changed.
+    pub fn set_pinned_to_sidebar(&self, session_id: &str, pinned: bool) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(i) = guard.get_mut(session_id) else { return false };
+        let changed = i.pinned_to_sidebar != pinned;
+        i.pinned_to_sidebar = pinned;
+        changed
+    }
+
     /// Marks a sub the daemon holds without a child, with the words its row shows
     /// ("waiting for header"); `None` clears it. Returns whether anything changed.
     pub fn set_waiting_for(&self, session_id: &str, waiting_for: Option<String>) -> bool {

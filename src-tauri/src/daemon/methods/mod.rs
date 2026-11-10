@@ -8,6 +8,7 @@
 pub(crate) mod channel;
 mod api_credit;
 mod answers;
+mod sub_view;
 mod ask;
 mod claude_ai_publish;
 mod context;
@@ -104,6 +105,7 @@ pub use machines::register_machines;
 pub use mcp_servers::register_mcp_servers;
 pub use api_credit::register_api_credit;
 pub use answers::register_answers;
+pub use sub_view::register_sub_view;
 pub use ask::register_ask;
 pub use permission::register_responders;
 pub use pr_review::register_pr_review;

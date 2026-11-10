@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // Reviewed 2026-11-08: view-more-menu.ts's live-chat ctx moved into chat-menu-ctx.ts (same fields, shared with the command palette); subs still have no row and this spec passed.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
 // Reviewed 2026-11-05: sidebar-entries.ts and view-more-menu.ts: a chat with subs keeps its sub summary after the mode is turned off, and a sub's own menu drops "Use subchats"; subs still have no row and this spec passes.

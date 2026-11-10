@@ -42,6 +42,8 @@ export interface ChatMenuCtx {
   /** This chat is itself a sub. A sub cannot have subs (depth 1), so "Use subchats"
    *  is not offered: an item that only ever ends in an error alert is not an item. */
   isSub?: boolean;
+  /** This sub has a sidebar shortcut (Pin to sidemenu); only read when `isSub`. */
+  isPinned?: boolean;
   isHidden: boolean;
   /** Jarvis-flagged sessions always auto-accept (Part A) - the toggle is
    *  disabled for them so flipping it off can't silently stall the fleet. */
@@ -187,19 +189,18 @@ export function buildChatItems(ctx: ChatMenuCtx): ItemDesc[] {
         ? "Not available until the chat starts"
         : (!sessionId ? "No session" : (ctx.readOnly ? "Only available for interactive chats" : undefined)),
     },
-    // Rare and deliberate, so it lives here and not on a button: a sub turns into an
-    // ordinary chat, and an ordinary chat can go back under a main chat.
+    // Rare and deliberate, so it lives here and not on a button: a sub gets a
+    // sidebar shortcut (and stays a sub of its main chat), and an ordinary chat can
+    // go back under a main chat.
     ctx.isSub
       ? {
-          icon: "arrow-square-out",
-          label: "Move to sidebar",
+          icon: ctx.isPinned ? "push-pin-slash" : "push-pin",
+          label: ctx.isPinned ? "Unpin from sidemenu" : "Pin to sidemenu",
           run: isDraft || !sessionId || ctx.mirrored
             ? undefined
             : async () => {
-                const { subchatNavFor } = await import("./active-session");
-                const { moveSubToSidebar } = await import("./subchat-view");
-                const pane = document.querySelector<HTMLElement>("#session-pane");
-                if (pane) await moveSubToSidebar(sessionId, subchatNavFor(pane));
+                const { setSubPinned } = await import("./subchat-view");
+                await setSubPinned(sessionId, !ctx.isPinned);
               },
           disabledReason: isDraft ? "Not available until the chat starts" : (ctx.mirrored ? NOT_ON_THIS_MACHINE : undefined),
         }
@@ -324,6 +325,142 @@ export function buildConfigureItems(ctx: ChatMenuCtx): ItemDesc[] {
       run: () => { state.statusbar?.beginLayoutEdit(); },
       disabledReason: !state.statusbar || (!isDraft && sessionId !== state.selectedId) ? "Open the chat first" : undefined,
     }]),
+  ];
+}
+
+// ── Subchats card avatar ─────────────────────────────────────────────────────
+
+/** What the dashboard's Subchats card knows about the sub it opened a menu on. */
+export interface SubCardMenuCtx {
+  subId: string;
+  /** The avatar: the model and effort sliders open beside it. */
+  anchor: HTMLElement;
+  model: string;
+  effort: string;
+  /** Not started yet (held behind another sub): no process to pause or stop. */
+  queued: boolean;
+  finished: boolean;
+  busy: boolean;
+  frozen: boolean;
+  pinned: boolean;
+  mirrored: boolean;
+  /** Read this sub in place in the main chat's window. */
+  open: () => void | Promise<void>;
+  /** The newest preview this sub pushed, or null when it has none. */
+  latestPreview: () => Promise<string | null>;
+  onAfterAction?: () => void;
+}
+
+/** The Subchats card's right-click menu (docs/chat-dashboard-design.md): Open,
+ *  Open in new window, Latest preview, Pause, Pin or Unpin sidemenu, Stop this
+ *  turn, Change model, Change effort, Close. Close sends the sub `/close`. */
+export function buildSubCardItems(ctx: SubCardMenuCtx): ItemDesc[] {
+  const id = ctx.subId;
+  const gone = ctx.mirrored ? NOT_ON_THIS_MACHINE : undefined;
+  const noProcess = ctx.queued ? "Not started yet" : undefined;
+  return [
+    { icon: "arrow-square-out", label: "Open", run: () => ctx.open() },
+    {
+      icon: "app-window",
+      label: "Open in new window",
+      run: isRemote() || ctx.mirrored
+        ? undefined
+        : async () => {
+            try { await invoke<void>("detach_window", { sessionId: id }); }
+            catch (err) { alert(`Could not open it in a new window: ${err}`); }
+          },
+      disabledReason: isRemote() ? "Not available on the phone" : gone,
+    },
+    {
+      icon: "monitor-play",
+      label: "Latest preview",
+      run: async () => {
+        const slug = await ctx.latestPreview();
+        const { PREVIEW_OPEN_EVENT } = await import("../../shared/chat/chat-preview-card");
+        const { showToast } = await import("../../shared/toast");
+        if (slug === null) { showToast("This sub has not pushed a preview yet."); return; }
+        window.dispatchEvent(new CustomEvent(PREVIEW_OPEN_EVENT, { detail: { slug } }));
+      },
+    },
+    {
+      icon: ctx.frozen ? "play-circle" : "pause-circle",
+      label: ctx.frozen ? "Resume" : "Pause",
+      run: ctx.queued || ctx.mirrored
+        ? undefined
+        : async () => {
+            try { await invoke<void>(ctx.frozen ? "unfreeze_session" : "freeze_session", { sessionId: id }); }
+            catch (err) { alert(`Failed to ${ctx.frozen ? "resume" : "pause"} it: ${err}`); }
+            ctx.onAfterAction?.();
+          },
+      disabledReason: noProcess ?? gone,
+    },
+    {
+      icon: ctx.pinned ? "push-pin-slash" : "push-pin",
+      label: ctx.pinned ? "Unpin from sidemenu" : "Pin to sidemenu",
+      run: ctx.mirrored
+        ? undefined
+        : async () => {
+            const { setSubPinned } = await import("./subchat-view");
+            await setSubPinned(id, !ctx.pinned);
+            ctx.onAfterAction?.();
+          },
+      disabledReason: gone,
+    },
+    {
+      icon: "stop-circle",
+      label: "Stop this turn",
+      run: ctx.busy && !ctx.mirrored
+        ? async () => { try { await invoke<void>("cancel_turn", { sessionId: id }); } catch { /* best-effort */ } }
+        : undefined,
+      disabledReason: ctx.busy ? gone : "Not working right now",
+    },
+    {
+      icon: "robot",
+      label: "Change model",
+      run: ctx.queued || ctx.mirrored
+        ? undefined
+        : async () => {
+            const { ModelPopover } = await import("./model-popover");
+            new ModelPopover().open(ctx.anchor, {
+              model: ctx.model,
+              sessionId: id,
+              onModelChange: undefined,
+              onCommit: () => ctx.onAfterAction?.(),
+            });
+          },
+      disabledReason: noProcess ?? gone,
+    },
+    {
+      icon: "gauge",
+      label: "Change effort",
+      run: ctx.queued || ctx.mirrored
+        ? undefined
+        : async () => {
+            const { EffortPopover } = await import("./effort-popover");
+            new EffortPopover().open(ctx.anchor, {
+              effort: ctx.effort,
+              sessionId: id,
+              onEffortChange: null,
+              onCommit: () => ctx.onAfterAction?.(),
+            });
+          },
+      disabledReason: noProcess ?? gone,
+    },
+    {
+      icon: "x-circle",
+      label: "Close",
+      danger: true,
+      // /close is the skill that retrospects, persists and ends the job properly;
+      // a bare clear would drop the sub's work on the floor.
+      run: ctx.queued || ctx.mirrored
+        ? undefined
+        : async () => {
+            const blocks: ContentBlock[] = [{ type: "text", text: "/close" }];
+            try { await invoke<void>("send_message", { sessionId: id, cwd: ".", blocks }); }
+            catch (err) { alert(`Could not send /close: ${err}`); }
+          },
+      disabledReason: noProcess ?? gone,
+    },
   ];
 }
 

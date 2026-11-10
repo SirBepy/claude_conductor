@@ -1,0 +1,271 @@
+/* The dashboard's Subchats card (subs-card.ts): avatars only, a state ring on
+   each and the model battery on its corner; details open below the clicked one. */
+.sx-row,
+.sx-earlier-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.sx-earlier-row {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--color-border);
+  opacity: 0.8;
+}
+.sx-earlier-row[hidden],
+.sx-det[hidden] {
+  display: none;
+}
+
+.sx-av {
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.sx-av:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+}
+.sx-av.on .sx-face {
+  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-alt));
+  color: var(--color-text);
+}
+.sx-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-surface-alt);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.sx-av:hover .sx-face {
+  color: var(--color-text);
+}
+/* The sidebar ring's own SVG, sized to the avatar. */
+.sx-face .avatar-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  overflow: visible;
+  pointer-events: none;
+}
+.sx-face .avatar-ring circle {
+  stroke-width: 3.2;
+}
+/* The battery sits on the avatar's corner, off the ring, so an effort colour
+   never reads as a state. */
+.sx-av .session-model-battery {
+  position: absolute;
+  right: -5px;
+  bottom: -4px;
+  padding: 1px 0;
+  border-radius: 4px;
+  background: var(--color-surface);
+  line-height: 1;
+}
+.sx-av .session-model-battery i {
+  font-size: 0.95rem;
+}
+.sx-earlier {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 13px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.sx-earlier:hover,
+.sx-earlier.on {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+
+/* ---- Details of the open sub ---- */
+.sx-det {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+.sx-det-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.sx-det-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.sx-det-time {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.sx-det-time b {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.sx-det-ctx:empty {
+  display: none;
+}
+.sx-det-state {
+  font-size: 12.5px;
+  color: var(--color-text);
+}
+.sx-det-state[data-kind="asking"] {
+  color: var(--color-danger);
+}
+.sx-det-state[data-kind="finished"] {
+  color: var(--color-success);
+}
+.sx-det-brief {
+  max-height: 96px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+.sx-det-media {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sx-det-media:not(:has(:not([hidden]))) {
+  display: none;
+}
+.sx-imgwrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sx-imgwrap[hidden],
+.sx-img[hidden],
+.sx-imgmore[hidden],
+.sx-pv[hidden],
+.sx-gallery[hidden],
+.sx-det-brief[hidden] {
+  display: none;
+}
+.sx-img {
+  width: 76px;
+  height: 52px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-surface-alt);
+  cursor: zoom-in;
+}
+.sx-img img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.sx-imgmore,
+.sx-pv {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 13px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.sx-pv {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+}
+.sx-pv span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sx-imgmore:hover,
+.sx-imgmore.on,
+.sx-pv:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+.sx-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 6px;
+}
+.sx-gal-img {
+  aspect-ratio: 3 / 2;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface-alt);
+  cursor: zoom-in;
+}
+.sx-gal-img img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.sx-msg {
+  display: flex;
+  gap: 6px;
+}
+.sx-msg-in {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-background);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.sx-msg-in:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.sx-msg-send {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--color-primary);
+  color: var(--color-background);
+  cursor: pointer;
+}

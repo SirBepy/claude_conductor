@@ -144,6 +144,8 @@ function buildRowOptions(args: {
   scheduledCount: number | undefined;
   heldCount: number | undefined;
   model: string;
+  /** Tints the model battery (effort-battery.css); absent reads as the default grey. */
+  effort?: string;
   drainChip: string;
   /** Set only for a session mirrored in from a paired peer machine (multi-
    *  machine federation); undefined/null for every locally-hosted row. */
@@ -181,7 +183,7 @@ function buildRowOptions(args: {
     machineBadge: machineBadgeHtml(args.machine, !!args.isLocalSession),
     // A main chat with subs shows "3x" where the model battery sits; one with
     // none yet keeps its battery.
-    portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${closeWaitChipHtml(args.mainChat?.closesWhenSubsFinish, tipAttr)}${args.mainChat && args.mainChat.subs.length > 0 ? subCountHtml(args.mainChat.subs.length) : modelBatteryHtml(args.model)}${args.drainChip}`,
+    portraitSecondary: `${frozenChipHtml(args.frozen, args.autoFrozen, tipAttr)}${closeWaitChipHtml(args.mainChat?.closesWhenSubsFinish, tipAttr)}${args.mainChat && args.mainChat.subs.length > 0 ? subCountHtml(args.mainChat.subs.length) : modelBatteryHtml(args.model, args.effort)}${args.drainChip}`,
     subDots: args.mainChat ? askingDotsHtml(args.mainChat.askingDots) : "",
   };
 }
@@ -265,6 +267,7 @@ export function sessionRowOptions(
     scheduledCount: ctx.scheduledCountMap.get(s.session_id),
     heldCount: s.held_count || undefined,
     model: s.model,
+    effort: s.effort,
     drainChip,
     machine: s.machine,
     isLocalSession: true,
@@ -303,6 +306,7 @@ export function draftRowOptions(
     scheduledCount: undefined,
     heldCount: undefined,
     model: pending.config.model,
+    effort: pending.config.effort,
     drainChip: "",
   });
 }
@@ -330,6 +334,7 @@ export function parkedRowOptions(d: ParkedDraft, kbdHint: string = ""): RowOptio
     scheduledCount: undefined,
     heldCount: undefined,
     model: d.config.model,
+    effort: d.config.effort,
     drainChip: "",
   });
 }

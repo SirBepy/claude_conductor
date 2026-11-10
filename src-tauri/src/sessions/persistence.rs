@@ -57,6 +57,9 @@ pub struct PersistedInteractive {
     /// A sub that called its finish tool: idle and hidden, can be continued.
     #[serde(default)]
     pub subchat_finished: bool,
+    /// A sub pinned to the sidebar; see `Instance::pinned_to_sidebar`.
+    #[serde(default)]
+    pub pinned_to_sidebar: bool,
     /// User-frozen flag (Chat menu's Freeze/Unfreeze toggle). Must survive a
     /// daemon restart same as every other Interactive field here - freeze
     /// never implies `ended_at`, so a frozen session stays in this snapshot.
@@ -115,6 +118,7 @@ pub fn save_snapshot(registry: &Registry, path: &Path) {
             worker_of: i.worker_of,
             subchat_of: i.subchat_of,
             subchat_finished: i.subchat_finished,
+            pinned_to_sidebar: i.pinned_to_sidebar,
             frozen: i.frozen,
             frozen_needs_continue: i.frozen_needs_continue,
             auto_frozen: i.auto_frozen,
@@ -226,6 +230,9 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         if s.subchat_finished {
             registry.set_subchat_finished(&s.session_id, true);
         }
+        if s.pinned_to_sidebar {
+            registry.set_pinned_to_sidebar(&s.session_id, true);
+        }
         if s.frozen {
             registry.set_frozen(&s.session_id, true);
         }
@@ -312,6 +319,7 @@ mod tests {
             worker_of: None,
             subchat_of: None,
             subchat_finished: false,
+            pinned_to_sidebar: false,
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,
@@ -334,6 +342,7 @@ mod tests {
         registry.upsert_interactive("sub-1", &cwd, "proj-x", "2026-11-04T00:00:00Z");
         registry.set_subchat_of("sub-1", Some("main-1".into()));
         registry.set_subchat_finished("sub-1", true);
+        registry.set_pinned_to_sidebar("sub-1", true);
         registry.upsert_interactive("plain", &cwd, "proj-x", "2026-11-04T00:00:00Z");
 
         save_snapshot(&registry, &path);
@@ -342,9 +351,11 @@ mod tests {
         let sub = restored.get("sub-1").expect("sub restored");
         assert_eq!(sub.subchat_of.as_deref(), Some("main-1"));
         assert!(sub.subchat_finished);
+        assert!(sub.pinned_to_sidebar, "a pin must outlive a daemon restart");
         let plain = restored.get("plain").expect("plain restored");
         assert_eq!(plain.subchat_of, None);
         assert!(!plain.subchat_finished);
+        assert!(!plain.pinned_to_sidebar);
     }
 
     #[test]

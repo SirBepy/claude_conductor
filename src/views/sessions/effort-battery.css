@@ -1,0 +1,28 @@
+/* Effort on every model battery in the app (docs/chat-dashboard-design.md,
+   "Subchats card"). The glyph's fill is the model; the colour is the effort:
+   low off white, medium grey with a yellow hint, xhigh orange, max red. High is
+   the default (99% of use) and keeps the battery's own grey, so it has no rule.
+   The same hexes live in EFFORT_COLORS (shared/chat/dashboard/subs-model.ts). */
+:root {
+  --effort-low: #ece6cf;
+  --effort-medium: #b3a67c;
+  --effort-xhigh: #f2994a;
+  --effort-max: #eb5757;
+}
+
+/* One block per tone covers the sidebar row, the history list, a sub's avatar
+   (all `.session-model-battery`) and the phone header's glyph. The active-row
+   selector repeats it because that row recolours its battery with a more specific
+   rule (session-row-portrait.css). */
+.session-model-battery[data-effort="low"],
+.sessions-list li.active .session-model-battery[data-effort="low"],
+.meta-cfg-model-battery[data-battery-effort="low"] { color: var(--effort-low); opacity: 1; }
+.session-model-battery[data-effort="medium"],
+.sessions-list li.active .session-model-battery[data-effort="medium"],
+.meta-cfg-model-battery[data-battery-effort="medium"] { color: var(--effort-medium); opacity: 1; }
+.session-model-battery[data-effort="xhigh"],
+.sessions-list li.active .session-model-battery[data-effort="xhigh"],
+.meta-cfg-model-battery[data-battery-effort="xhigh"] { color: var(--effort-xhigh); opacity: 1; }
+.session-model-battery[data-effort="max"],
+.sessions-list li.active .session-model-battery[data-effort="max"],
+.meta-cfg-model-battery[data-battery-effort="max"] { color: var(--effort-max); opacity: 1; }

@@ -262,6 +262,7 @@ mod tests {
             worker_of: None,
             subchat_of: None,
             subchat_finished: false,
+            pinned_to_sidebar: false,
             closing: false,
             turn_gen: 0,
             last_event_at: None,

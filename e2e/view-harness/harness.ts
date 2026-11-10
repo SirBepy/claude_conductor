@@ -265,7 +265,7 @@ const SESSION_DEFAULTS: Instance = {
   autopilot: false, jarvis: false, worker_of: null, closing: false,
   account_id: null, rate_limited_resets_at: null, rate_limited_type: null,
   frozen: false, auto_frozen: false, held_count: 0, local_task_running: false,
-  successor_of: null, subchat_of: null, subchat_finished: false, machine: null, progress: { plan: null, state_since: null },
+  successor_of: null, subchat_of: null, subchat_finished: false, pinned_to_sidebar: false, machine: null, progress: { plan: null, state_since: null },
 };
 
 /** Typed against the real `Instance` (src/types/ipc.generated.ts), so a field

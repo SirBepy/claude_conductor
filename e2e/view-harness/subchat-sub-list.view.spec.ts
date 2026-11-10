@@ -6,6 +6,7 @@
 // Reviewed 2026-11-05: sub-list.ts and main-chat.ts gained a "queued" kind (a sub held for the writer slot); this spec has no queued sub, so its rows are unchanged, and it passed after the change. The queued row is covered in subchat-writer-slot.view.spec.ts.
 // Reviewed 2026-11-05: the in-place header and the list rows name the sub's tier ("Opus high": the harness default) and a mirrored chat has no Move buttons; the header texts below carry the tier, everything else holds and it passes.
 // Reviewed 2026-11-08: the header three-dots button opens the command palette on desktop, so the Move to sidebar checks read the palette row instead of the Chat submenu; the actions they drive are the same.
+// Reviewed 2026-11-10 (dash lane 3): Move to sidebar is gone from the chat menu; Pin to sidemenu replaced it. The tests that drove it now pin, and a pinned sub gets a sidebar row while it stays a sub (back arrow, list entry); the phone test still calls the daemon's move_sub_to_sidebar RPC directly.
 // asserts: src/views/sessions/sub-list.ts, src/views/sessions/subchat-view.ts, src/views/sessions/active-session.ts, src/views/sessions/session-header.ts, src/views/sessions/state.ts, src/views/sessions/sessions-wiring.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/main-chat.ts
 import { test, expect, type Page } from "@playwright/test";
 import {
@@ -71,6 +72,7 @@ function invokeFor(sessions: unknown[], on: string[] = ["main"], pending: unknow
     list_slash_commands: [],
     send_message: null,
     move_sub_to_sidebar: null,
+    set_sub_pinned: null,
     detach_window: null,
     open_file_window: null,
     list_auto_accept: [],
@@ -79,20 +81,20 @@ function invokeFor(sessions: unknown[], on: string[] = ["main"], pending: unknow
   };
 }
 
-/** Per-session transcripts, and a stand-in daemon for "Move to sidebar": once the
- *  command is invoked, the listings stop reporting that row as a sub. */
+/** Per-session transcripts, and a stand-in daemon for "Pin to sidemenu": once the
+ *  command is invoked, the listings report that row as pinned (it stays a sub). */
 async function installBackend(page: Page): Promise<void> {
   await page.evaluate((hist) => {
     const tauri = (window as unknown as { __TAURI__: any }).__TAURI__;
     const orig = tauri.core.invoke;
-    const moved = new Set<string>();
-    (window as unknown as { __moved: Set<string> }).__moved = moved;
+    const pinned = new Set<string>();
+    (window as unknown as { __pinned: Set<string> }).__pinned = pinned;
     tauri.core.invoke = (cmd: string, args: any) => {
       if (cmd === "load_history_page") return Promise.resolve((hist as Record<string, unknown>)[args?.sessionId] ?? (hist as Record<string, unknown>).other);
-      if (cmd === "move_sub_to_sidebar") moved.add(args.sessionId);
+      if (cmd === "set_sub_pinned") { if (args.pinned) pinned.add(args.sessionId); else pinned.delete(args.sessionId); }
       if (cmd === "list_instances" || cmd === "get_active_sessions") {
         return orig(cmd, args).then((list: any[]) =>
-          list.map((s) => (moved.has(s.session_id) ? { ...s, subchat_of: null, subchat_finished: false } : s)));
+          list.map((s) => (pinned.has(s.session_id) ? { ...s, pinned_to_sidebar: true } : s)));
       }
       return orig(cmd, args);
     };
@@ -117,11 +119,11 @@ const row = (page: Page, id: string) => page.locator(`#sessions-list li[data-ses
 const title = (page: Page) => page.locator("#session-pane .session-header .title");
 const countBtn = (page: Page) => page.locator("#session-pane .session-header .sub-count-btn");
 const backBtn = (page: Page) => page.locator("#session-pane .session-header .sub-back-btn");
-// "Move to sidebar" is a chat-menu item, not a header button (Joe moved a sub by accident).
+// "Pin to sidemenu" is a chat-menu item, not a header button (Joe moved a sub by accident).
 const headerMoveBtn = (page: Page) => page.locator("#session-pane .session-header .sub-move-btn");
-const moveItem = (page: Page) => paletteRow(page, "Move to sidebar");
+const moveItem = (page: Page) => paletteRow(page, "Pin to sidemenu");
 async function openChatSubmenu(page: Page): Promise<void> {
-  await openPaletteFor(page, "Move to sidebar");
+  await openPaletteFor(page, "Pin to sidemenu");
 }
 const listRow = (page: Page, id: string) => page.locator(`.sub-list-popover .sub-row[data-sub-id="${id}"]`);
 
@@ -259,7 +261,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await capture(page, `sub-list-tier-${label}`);
     });
 
-    test("a sub of a chat mirrored from a paired machine offers no Move to sidebar, in the list or in its header", async ({ page }) => {
+    test("a sub of a chat mirrored from a paired machine offers no Pin to sidemenu, in the list or in its header", async ({ page }) => {
       const peer = { id: "m2", label: "Studio PC", online: true } as never;
       await mount(page, size, [{ ...MAIN, machine: peer }, { ...FOOTER, machine: peer }]);
       await openChat(page, "main");
@@ -371,25 +373,24 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(countBtn(page)).toHaveText("1");
     });
 
-    test("Move to sidebar from the header gives the sub a sidebar row and takes it off the list", async ({ page }) => {
+    test("Pin to sidemenu gives the sub a sidebar row and leaves it a sub of its main chat", async ({ page }) => {
       await mount(page, size, [MAIN, FOOTER, HEADER]);
       await openChat(page, "main");
       await openSubFromList(page, "sub-header");
       await openChatSubmenu(page);
       await moveItem(page).click();
-      await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "move_sub_to_sidebar").length).toBe(1);
-      expect((await invokeCalls(page)).find((c) => c.cmd === "move_sub_to_sidebar")!.args).toMatchObject({ sessionId: "sub-header" });
-      // It is an ordinary chat now: its own row, selected, and no sub chrome.
+      await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "set_sub_pinned").length).toBe(1);
+      expect((await invokeCalls(page)).find((c) => c.cmd === "set_sub_pinned")!.args).toMatchObject({ sessionId: "sub-header", pinned: true });
+      expect((await invokeCalls(page)).filter((c) => c.cmd === "move_sub_to_sidebar")).toHaveLength(0);
+      // A shortcut row appeared; the pane is still the sub's, with its back arrow.
       await expect(row(page, "sub-header")).toHaveCount(1);
-      await expect(row(page, "sub-header")).toHaveClass(/active/);
-      await expect(backBtn(page)).toHaveCount(0);
-      await expect(headerMoveBtn(page)).toHaveCount(0);
+      await expect(backBtn(page)).toBeVisible();
       await expect(title(page)).toHaveText("Header");
-      // And it left the main chat's list: one sub remains.
+      // And it is still on the main chat's list: both subs remain.
       await openChat(page, "main");
-      await expect(countBtn(page)).toHaveText("1");
+      await expect(countBtn(page)).toHaveText("2");
       await openList(page);
-      await expect(listRow(page, "sub-header")).toHaveCount(0);
+      await expect(listRow(page, "sub-header")).toHaveCount(1);
       await expect(listRow(page, "sub-footer")).toHaveCount(1);
     });
 
@@ -406,15 +407,17 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(countBtn(page)).toHaveText("2");
     });
 
-    test("the last sub leaving takes the count icon away", async ({ page }) => {
+    test("a pinned sub offers Unpin, and unpinning takes its sidebar row away again", async ({ page }) => {
       await mount(page, size, [MAIN, FOOTER]);
       await openChat(page, "main");
       await openSubFromList(page, "sub-footer");
       await openChatSubmenu(page);
       await moveItem(page).click();
       await expect(row(page, "sub-footer")).toHaveCount(1);
-      await openChat(page, "main");
-      await expect(countBtn(page)).toHaveCount(0);
+      await openPaletteFor(page, "Unpin from sidemenu");
+      await paletteRow(page, "Unpin from sidemenu").click();
+      await expect(row(page, "sub-footer")).toHaveCount(0);
+      expect((await invokeCalls(page)).filter((c) => c.cmd === "set_sub_pinned").map((c) => (c.args as { pinned: boolean }).pinned)).toEqual([true, false]);
     });
 
     test("a question the sub raises shows as a normal card while it is read in place", async ({ page }) => {
@@ -463,7 +466,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
 }
 
 test.describe("view-harness / sub list (phone transport)", () => {
-  test("the phone reads a sub in place, replies to it over REST, and moves it over the RPC", async ({ page }) => {
+  test("the phone reads a sub in place, replies to it over REST, and pins it over the RPC", async ({ page }) => {
     await page.setViewportSize(PHONE);
     const sent: string[] = [];
     await page.route("**/api/sessions/*/send", async (route) => {
@@ -492,7 +495,7 @@ test.describe("view-harness / sub list (phone transport)", () => {
     // The phone keeps the three-dots dropdown (no keyboard for the palette).
     await page.locator("#viewMoreBtn").click();
     await page.locator('.smore-item[data-sub-label="Chat"]').click();
-    await page.locator(".chat-menu-submenu .smore-item", { hasText: "Move to sidebar" }).click();
-    await expect.poll(() => rpcMethods).toContain("move_sub_to_sidebar");
+    await page.locator(".chat-menu-submenu .smore-item", { hasText: "Pin to sidemenu" }).click();
+    await expect.poll(() => rpcMethods).toContain("set_sub_pinned");
   });
 });

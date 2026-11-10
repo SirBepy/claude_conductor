@@ -180,6 +180,28 @@ export function buildRowMenuBlock(ctx: ChatMenuCtx, closeMenu: () => void): HTML
   return frag;
 }
 
+/**
+ * A flat block of items from any ItemDesc list, for menus that are not the
+ * "This chat" one: the dashboard's Subchats card right-click menu builds its
+ * items in chat-menu-items.ts and gets the same look, disabled reasons and
+ * danger styling as every other chat menu here.
+ */
+export function buildItemsBlock(items: ItemDesc[], closeMenu: () => void): HTMLElement {
+  const frag = document.createElement("div");
+  frag.className = "chat-menu-block";
+  for (const item of items) {
+    const btn = makeItem(item);
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (btn.classList.contains("is-disabled")) return;
+      closeMenu();
+      void item.run?.();
+    });
+    frag.appendChild(btn);
+  }
+  return frag;
+}
+
 /** Must be called once to close the active submenu on outside clicks.
  * Call this at module level so it's registered once. */
 document.addEventListener("click", (e) => {

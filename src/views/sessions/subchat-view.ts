@@ -2,8 +2,8 @@
 //
 // A sub opened in place is the ordinary chat view of a row the sidebar hides: the
 // same pane, renderer, composer and statusbar, selected by its own session id.
-// Only the header differs (a back arrow and a line saying whose sub it is; "Move to
-// sidebar" is a chat-menu item, chat-menu-items.ts), and everything that asks "which chat's window is this" goes
+// Only the header differs (a back arrow and a line saying whose sub it is; "Pin to
+// sidemenu" is a chat-menu item, chat-menu-items.ts), and everything that asks "which chat's window is this" goes
 // through `windowIdOf`, so the sidebar marks the main chat and the prompt gate
 // shows the main chat's cards. Whether a pane is a sub's is read from the
 // instance's `subchat_of` each time, never kept as view state, so a reload, the
@@ -19,7 +19,6 @@ import { state, windowIdOf } from "./state";
 import { isSubchat, sessionSubtitle } from "./sessions-helpers";
 import type { SessionHeader } from "./session-header";
 import { SubListButton, subInitials } from "./sub-list";
-import { clearPendingPrompt } from "./permission-modal/gating";
 import { refreshSessions, renderSidebar } from "./sidebar";
 
 /** What the chrome needs from the pane that owns it, so this file never imports
@@ -103,29 +102,22 @@ export async function backToMain(sub: Instance, nav: Pick<SubchatNav, "open">): 
   restoreMainScroll(mainId);
 }
 
-/** Turns `subId` into an ordinary chat for good (the daemon clears the parent
- *  link, the stored brief and the finished flag), then makes this window agree:
- *  its row appears in the sidebar, it leaves the list, and if it was the chat on
- *  screen the pane is rebuilt as a normal chat. */
-export async function moveSubToSidebar(subId: string, nav: SubchatNav): Promise<void> {
+/** Pins `subId` to the sidemenu, or takes the pin off. A pin only adds a sidebar
+ *  shortcut: the sub keeps its main chat, its cards and its place in the list
+ *  (Joe: "if it was spawned as a subchat, its forever a subchat"), so unlike the
+ *  old Move to sidebar nothing about the pane or its parked cards changes. */
+export async function setSubPinned(subId: string, pinned: boolean): Promise<void> {
   try {
-    await invoke<void>("move_sub_to_sidebar", { sessionId: subId });
+    await invoke<void>("set_sub_pinned", { sessionId: subId, pinned });
   } catch (err) {
-    console.error("[subchats] move_sub_to_sidebar failed", err);
-    showToast(`Could not move it to the sidebar: ${err}`);
+    console.error("[subchats] set_sub_pinned failed", err);
+    showToast(`Could not ${pinned ? "pin" : "unpin"} it: ${err}`);
     return;
   }
-  // Its parked card was stamped for the main chat's window. The daemon stamps from
-  // the registry on every listing, so dropping the stale park lets the next replay
-  // pull the card with the chat's own id.
-  clearPendingPrompt(subId);
   await refreshSessions();
   const listEl = document.querySelector<HTMLElement>("#sessions-list");
   if (listEl) renderSidebar(listEl);
   list?.update(state.sessions);
-  // The instances-changed the daemon published may have rebuilt the pane already.
-  const row = state.sessions.find((s) => s.session_id === subId);
-  if (state.selectedId === subId && row && syncSubchatChrome(row) === "rebuild") await nav.reopen(subId);
 }
 
 /** Dresses the header being built for `sess`: a sub gets its back arrow, "Move to
@@ -167,8 +159,8 @@ export function decorateSubchatHeader(header: SessionHeader, sess: Instance, nav
   back.addEventListener("click", () => { void backToMain(sess, nav); });
   header.leadSlot.prepend(back);
 
-  // "Move to sidebar" is in the chat menu (chat-menu-items.ts), not a header button:
-  // Joe once clicked it by accident and it is not a move he makes often.
+  // "Pin to sidemenu" is in the chat menu (chat-menu-items.ts), not a header button:
+  // Joe once clicked the old Move to sidebar by accident and it is not a move he makes often.
 }
 
 /** Follows an instances update for the chat on screen. "rebuild" means its role

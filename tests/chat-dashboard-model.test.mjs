@@ -128,10 +128,17 @@ describe("chat dashboard model", () => {
     const sub = (kind, id) => ({ kind: "message", text: "x", id, ts: 0, parentToolUseId: null, subCard: { id, ts: 0, parent_id: "main", kind, sub_id: "s1", verdict: "v", text: "x" } });
     c.r.messages.push(sub("blocker", "c1"));
     expect(zone(c.dash(), "waiting").items[0].message.id).toBe("c1");
-    expect(zone(c.dash(), "subchats")).toBeNull();
     c.r.messages.push(sub("finish", "c2"));
     expect(zone(c.dash(), "waiting")).toBeNull();
-    expect(zone(c.dash(), "subchats").cards.map((m) => m.id)).toEqual(["c2"]);
+  });
+
+  it("draws the Subchats card from the sub list it is given, not from the transcript", () => {
+    const c = chat().joe("go");
+    const sub = (id, kind, extra = {}) => ({ id, name: id, kind, closing: false, model: "claude-opus-4-8", effort: "high", progress: "", startedAt: null, finishedAt: null, ring: { kind: "none" }, ...extra });
+    expect(zone(c.dash(), "subchats")).toBeNull();
+    const d = c.dash({ now: 10_000_000, subs: [sub("a", "working"), sub("b", "asking")] });
+    expect(zone(d, "subchats").shown.map((i) => i.id)).toEqual(["b", "a"]);
+    expect([...d.right].map((z) => z.id)).toEqual(["subchats"]);
   });
 
   it("draws write_plan steps with their detail and counts finished ones", () => {

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // Reviewed 2026-11-09: the sidebar right-click menu is now a flat four-item list; its Close item is still the .smore-danger button this spec clicks, and it passes.
 // Reviewed 2026-11-05: sidebar-ctx-menu.ts passes `isSub` to the chat menu; the close approval card is unchanged and this spec passes.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.

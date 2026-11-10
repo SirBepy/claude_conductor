@@ -21,6 +21,10 @@ import { highlightCodeBlocks, highlightInlineCode } from "../../../shared/chat/c
 import { scrollToBottom } from "../../../shared/chat/chat-dom-renderer";
 import { initialUi, renderStrip, renderZone, type DashUi } from "./dashboard-zones";
 import { AnswersCard } from "./answers-card";
+import { SubsCard } from "./subs-card";
+import { collectSubItems } from "./subs-source";
+import { fetchSubCards } from "../../../shared/chat/subchat-cards";
+import type { SubCardItem } from "../../../shared/chat/dashboard/subs-model";
 import { CHAT_VIEW_CHANGED, dashboardEnabled } from "./chat-view-pref";
 import "./chat-dashboard.css";
 
@@ -47,6 +51,12 @@ export class ChatDashboard {
   private disposed = false;
   /** The Answers card keeps its own DOM inside the zone's host (answers-card.ts). */
   private readonly answers: AnswersCard;
+  /** So does the Subchats card (subs-card.ts). */
+  private readonly subs: SubsCard;
+  /** When each sub last finished, from the main chat's finish cards. */
+  private finishedAt: ReadonlyMap<string, number> = new Map();
+  private finishedSig = "";
+  private foldTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly onFlushed = (): void => this.schedule();
   private readonly onDocClick = (e: MouseEvent): void => {
     if (!this.ui.earlierOpen || this.stripEl.contains(e.target as Node)) return;
@@ -76,6 +86,16 @@ export class ChatDashboard {
       cwd: () => renderer.paginator.cwdHint ?? null,
       onSideChange: () => this.schedule(),
       decorate: (root) => this.decorate(root),
+    });
+    this.subs = new SubsCard({
+      mainId: () => renderer.sessionId ?? "",
+      cwd: () => renderer.paginator.cwdHint ?? null,
+      sessions: () => state.sessions,
+      openSub: async (subId) => {
+        const { subchatNavFor } = await import("../active-session");
+        await subchatNavFor(pane).open(subId);
+      },
+      rerender: () => this.schedule(),
     });
     this.barHome = this.bar?.parentElement ?? null;
 
@@ -154,12 +174,52 @@ export class ChatDashboard {
     // `hydrating` clears, so nothing is missed.
     if (this.renderer.hydrating) return;
     const busy = this.barMayMove();
-    const derived = deriveDashboard({ messages: this.renderer.messages, plan: this.renderer.dashPlan, busy, answers: this.answers.sideData() });
+    const now = Date.now();
+    const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
+    this.refreshFinishTimes(subItems);
+    const derived = deriveDashboard({ messages: this.renderer.messages, plan: this.renderer.dashPlan, busy, answers: this.answers.sideData(), subs: subItems, now });
     this.applyUiRules(derived);
     this.renderStripPart(derived);
     this.renderZones(derived, busy);
     this.renderAnswers(derived);
+    this.renderSubs(derived);
     this.placeBar(busy);
+  }
+
+  /** The instance list changed (sessions-wiring.ts's syncInstances): a sub's
+   *  state, model or pin may have moved. */
+  onSessionsChanged(): void {
+    this.schedule();
+  }
+
+  /** Finish times come from the main chat's finish cards (the log outlives a
+   *  restart), fetched again only when the set of finished subs changes. */
+  private refreshFinishTimes(items: readonly SubCardItem[]): void {
+    const sig = items.filter((i) => i.kind === "finished").map((i) => i.id).sort().join(",");
+    if (sig === this.finishedSig) return;
+    this.finishedSig = sig;
+    const sid = this.renderer.sessionId;
+    if (!sid || sig === "") return;
+    void fetchSubCards(sid).then((cards) => {
+      if (this.disposed) return;
+      const times = new Map<string, number>();
+      for (const c of cards) if (c.kind === "finish" && c.sub_id) times.set(c.sub_id, Math.max(times.get(c.sub_id) ?? 0, c.ts));
+      this.finishedAt = times;
+      this.schedule();
+    });
+  }
+
+  private renderSubs(state: DashboardState): void {
+    const zone = state.right.find((z) => z.id === "subchats");
+    const host = this.zoneEls.get("subchats")?.el.querySelector<HTMLElement>(".sx-host") ?? null;
+    if (zone && zone.id === "subchats" && host) this.subs.update(host, zone.state);
+    else this.subs.detach();
+    // A finished sub folds under "+N earlier" an hour after it finished, with no
+    // event to say so: draw again when the next one is due.
+    if (this.foldTimer !== null) clearTimeout(this.foldTimer);
+    this.foldTimer = null;
+    const due = zone && zone.id === "subchats" ? zone.state.foldsAt : null;
+    if (due !== null) this.foldTimer = setTimeout(() => this.schedule(), Math.min(Math.max(due - Date.now(), 0) + 50, 2 ** 31 - 1));
   }
 
   /** UI state that a new derive invalidates. */
@@ -301,6 +361,9 @@ export class ChatDashboard {
     this.timer = null;
     this.barObserver?.disconnect();
     this.answers.dispose();
+    this.subs.dispose();
+    if (this.foldTimer !== null) clearTimeout(this.foldTimer);
+    this.foldTimer = null;
     this.sendBarHome();
     document.removeEventListener("click", this.onDocClick, true);
     document.removeEventListener("keydown", this.onKey);

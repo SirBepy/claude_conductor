@@ -151,11 +151,18 @@ function renderPlan(s: ZoneState<"plan">, ctx: ZoneCtx): string {
 const listZone = (cls: string, icon: string, title: string) => (s: { cards: RenderedMessage[] }): string =>
   `<section class="cdash-zone cdash-list ${cls}">${head(icon, title)}<div class="cdash-stack">${s.cards.map(cardHtml).join("")}</div></section>`;
 
+/** A fixed host like Answers': the Subchats card (subs-card.ts) draws inside it,
+ *  so a re-derive never replaces the avatars under Joe's pointer or wipes the
+ *  message he is typing to a sub. */
+function renderSubchats(): string {
+  return `<section class="cdash-zone cdash-card cdash-subs">${head("ph-users-three", "Subchats")}<div class="sx-host"></div></section>`;
+}
+
 export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) => string } = {
   answers: renderAnswers,
   waiting: renderWaiting,
   plan: renderPlan,
-  subchats: listZone("cdash-subchats", "ph-users-three", "Subchats"),
+  subchats: renderSubchats,
   notes: listZone("cdash-notes", "ph-note", "Notes"),
   links: listZone("cdash-links", "ph-link", "Links and files"),
 };

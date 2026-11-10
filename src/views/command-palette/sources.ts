@@ -179,7 +179,8 @@ export function draftCommands(): PaletteCommand[] {
 const CANONICAL_LABEL: Record<string, string> = {
   "Unhide chat": "Hide chat",
   "Unfreeze chat": "Freeze chat",
-  "Move into main chat": "Move to sidebar",
+  "Move into main chat": "Pin to sidemenu",
+  "Unpin from sidemenu": "Pin to sidemenu",
 };
 
 function fromItems(items: ItemDesc[], titleOf: (label: string) => string): PaletteCommand[] {
