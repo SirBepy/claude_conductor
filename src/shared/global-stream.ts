@@ -47,6 +47,8 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
   // phone's `HttpTransport.listen` silently no-op'd and the live push never
   // arrived there.
   preview: "preview",
+  // A control value or page state saved from another window or the phone.
+  preview_state: "preview-state",
 };
 export const GLOBAL_KEBAB_EVENTS = new Set(Object.values(GLOBAL_EVENT_MAP));
 

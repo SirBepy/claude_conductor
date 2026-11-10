@@ -45,7 +45,7 @@ pub fn register_preview(router: &mut Router, state: Arc<DaemonState>) {
         });
     }
     // Saves one piece of what Joe left a preview at (a control value or the
-    // page's own state) and broadcasts `preview-state` so the docked panel, the
+    // page's own state) and broadcasts `preview_state` so the docked panel, the
     // pop-out window and the phone follow. Phone and desktop only: a paired peer
     // does not write another machine's view state.
     {

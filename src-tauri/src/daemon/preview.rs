@@ -444,7 +444,7 @@ fn prune_control_state(snap: &mut PreviewSnapshot) {
 }
 
 /// Sets (or, for `Value::Null`, clears) one `view_state` key and broadcasts it
-/// on the `preview-state` channel so every open window follows. Errors name
+/// on the `preview_state` notifier event (the webview hears it as `preview-state`) so every open window follows. Errors name
 /// the refusal; an unknown preview is `Ok(false)`.
 pub fn set_state_and_notify(
     state: &crate::daemon::state::DaemonState,
@@ -458,7 +458,7 @@ pub fn set_state_and_notify(
         set_state_at(&path, id, key, &value)?
     };
     if found {
-        state.notifier.publish("preview-state", serde_json::json!({ "id": id, "key": key, "value": value }));
+        state.notifier.publish("preview_state", serde_json::json!({ "id": id, "key": key, "value": value }));
     }
     Ok(found)
 }
@@ -682,7 +682,7 @@ mod tests {
     }
 
     #[test]
-    fn a_re_push_keeps_page_state_and_drops_control_values() {
+    fn a_re_push_keeps_page_state() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("preview-history.json");
         let id = push_at(&path, "t".into(), Some("deck".into()), "<p>1</p>".into(), "chat".into(), None).unwrap();
