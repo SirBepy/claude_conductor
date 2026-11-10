@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (dash lane 3, code-check fixes): comment rewording, a transport case split and a deleted unused getter; nothing this spec asserts changed.
 // Reviewed 2026-11-05: sub-list.ts's row button now opens the sub in a new window (data-popout) and the queued row still has none; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
 // Reviewed 2026-11-05: main-chat.ts, sub-list.ts and the hover card html gained a per-sub tier (and a closing flag); the queued row's text, dot and ring are unchanged and this spec passes.

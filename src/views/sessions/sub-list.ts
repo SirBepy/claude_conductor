@@ -41,7 +41,7 @@ export function subRingSpec(sub: SubStatus, inst: Instance | undefined): RingSpe
 }
 
 /** `canPopOut` is false where a window cannot be opened: the phone, which has no
- *  second window. The button never moves the sub; "Move to sidebar" is in the chat menu. */
+ *  second window. The button never moves the sub; "Pin to sidemenu" is in the chat menu. */
 function rowHtml(sub: SubStatus, inst: Instance | undefined, canPopOut: boolean): string {
   const name = escapeHtml(sub.name);
   return `<div class="sub-row" role="button" tabindex="0" data-sub-id="${escapeHtml(sub.id)}" data-kind="${sub.kind}" title="Read ${name}">

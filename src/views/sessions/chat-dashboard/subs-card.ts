@@ -103,11 +103,6 @@ export class SubsCard {
     this.data.clear();
   }
 
-  /** Test seam: the open sub's id. */
-  get openId(): string | null {
-    return this.selected;
-  }
-
   private item(id: string): SubCardItem | undefined {
     return [...(this.state?.shown ?? []), ...(this.state?.earlier ?? [])].find((i) => i.id === id);
   }
