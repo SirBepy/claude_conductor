@@ -12,11 +12,11 @@
 // view then draws nothing for it.
 
 import type { RenderedMessage } from "../chat-classifiers";
-import type { MessageKind } from "../chat-message-kinds";
+import { headlineOf, type MessageKind } from "../chat-message-kinds";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../chat-event-to-message";
 import type { PreviewMeta } from "../../../types/ipc.generated";
 import type { Visual } from "../message-visuals";
-import { buildAnswerItems, type AnswerItem, type AnswerSide } from "./answers-model";
+import { buildAnswerItems, plainUserText, type AnswerItem, type AnswerSide } from "./answers-model";
 import { buildSubsState, type SubCardItem, type SubsState } from "./subs-model";
 import { changedFiles, extractFiles, extractLinks, type ChangedFile, type FileItem, type LinkItem } from "./links-model";
 import { cardQuestionTexts, findOpenCardForPrompt } from "../question-texts";
@@ -29,28 +29,74 @@ export interface PlanStep {
   label: string;
   status: PlanStepStatus;
   detail?: string;
+  /** When the step first went active (ms), as recordPlan saw it. */
+  startedAt?: number;
+  /** When it first went done or skipped (ms); cleared if it is reopened. */
+  doneAt?: number;
 }
 
-/** The latest write_plan call, as ChatRenderer.dashPlan records it. `at` is how
- *  many message rows existed when it was written, so every row at index `at` or
- *  later came after it. ChatRenderer.remapIndices keeps it aligned when older
- *  pages are prepended or a row is spliced out. */
+/** One plan of the chat, as ChatRenderer.dashPlans records it: every write_plan
+ *  call of the same job updates one entry (recordPlan). `at` is how many message
+ *  rows existed at its first call, so the job's rows start there; `lastAt` is the
+ *  same for its latest call. ChatRenderer.remapIndices keeps both aligned when
+ *  older pages are prepended or a row is spliced out. */
 export interface DashboardPlan {
   steps: PlanStep[];
   at: number;
+  lastAt: number;
+  /** When its first write_plan call came (ms). */
+  startedAt: number;
+}
+
+/** One tool call of the turn in flight, as ChatRenderer.turnActions keeps it. */
+export interface TurnAction {
+  /** The tool_use id, so a call seen twice counts once. */
+  id?: string;
+  /** Phosphor icon class of the tool (tool-meta.ts toolSummary). */
+  icon: string;
+  /** What the status line says for it ("Reading api.ts"). */
+  label: string;
+  /** The bucket it counts under (tool-meta.ts canonicalTool). */
+  canon: string;
+  at: number;
+}
+
+/** Most a turn keeps: the line shows the latest few and counts the rest. */
+export const TURN_ACTIONS_MAX = 400;
+
+const COUNT_WORDS: Record<string, [string, string]> = {
+  Read: ["read", "read"],
+  Edit: ["edit", "edits"],
+  Bash: ["command", "commands"],
+  Grep: ["search", "searches"],
+  Search: ["web lookup", "web lookups"],
+  Agent: ["subagent", "subagents"],
+  Task: ["subagent", "subagents"],
+};
+
+/** "6 read · 2 edits · 1 command": the turn's calls by kind, biggest first.
+ *  Kinds with no word of their own (MCP tools, skills) count as "other". */
+export function turnCounts(actions: readonly TurnAction[]): string {
+  const by = new Map<string, number>();
+  for (const a of actions) {
+    const k = COUNT_WORDS[a.canon] ? a.canon : "other";
+    by.set(k, (by.get(k) ?? 0) + 1);
+  }
+  return [...by].sort((x, y) => y[1] - x[1]).map(([k, n]) => {
+    const w = COUNT_WORDS[k] ?? ["other", "other"];
+    return `${n} ${n === 1 ? w[0] : w[1]}`;
+  }).join(" · ");
 }
 
 export interface DashboardInput {
   messages: readonly RenderedMessage[];
-  plan: DashboardPlan | null;
-  /** A turn is running (or messages are held): the Plan card then draws even
-   *  with no steps, because it hosts the chat's status line. */
+  /** Every plan of the chat, oldest first. */
+  plans: readonly DashboardPlan[];
+  /** A turn is running (or messages are held): the Plan card's empty state then
+   *  says no plan yet instead of nothing planned. */
   busy?: boolean;
   /** What the daemon remembers for the Answers card, once loaded. */
   answers?: AnswerSide;
-  /** The Answers card holds an open thread (a question card's Ask opened one in
-   *  a chat with no answers yet): the zone draws to host it. */
-  answersThreadOpen?: boolean;
   /** This chat's subs, read from the instance list (subs-source.ts). */
   subs?: SubCardItem[];
   /** Clock for the Subchats card's one-hour fold; tests pass their own. */
@@ -145,10 +191,11 @@ export interface AnswersState {
 
 /** Only replies to Joe's questions count (answers-model.ts isAnswerRow): a
  *  request's plan or report never lands here. The card itself
- *  (chat-dashboard/answers-card.ts) decides which one shows. */
-export function deriveAnswers({ input }: DeriveCtx): AnswersState | null {
-  const items = buildAnswerItems(input.messages, input.answers);
-  return items.length > 0 || input.answersThreadOpen ? { items } : null;
+ *  (chat-dashboard/answers-card.ts) decides which one shows. It draws even with
+ *  no answer yet, so + (new question) is there from the start: Answers and Plan
+ *  are always on the dashboard (Joe, 2026-11-10). */
+export function deriveAnswers({ input }: DeriveCtx): AnswersState {
+  return { items: buildAnswerItems(input.messages, input.answers) };
 }
 
 export type WaitingItem =
@@ -206,57 +253,194 @@ export function deriveWaiting({ input, lastJoe }: DeriveCtx): WaitingState | nul
   return items.length > 0 ? { items, blocked: blockers.length > 0 } : null;
 }
 
-export interface PlanState {
+/** One job of the chat as the Plan card draws it: a plan with the messages
+ *  around it, or a report that came with no plan. */
+export interface PlanJob {
+  /** Stable while the job lives: the Plan card keys its open step and its
+   *  picked earlier plan on it. */
+  key: string;
+  plan: DashboardPlan | null;
   steps: PlanStep[];
-  /** Steps finished (done or skipped). */
-  done: number;
   /** The latest `plan`-kind message of this job: its text leads the card. */
   lead: RenderedMessage | null;
-  /** The finished job's report. When set, the Result takes the Plan card's spot. */
+  /** The job's report, once the turn that sent it closed. */
+  result: RenderedMessage | null;
+  /** One line naming the job in the earlier-plans list. */
+  title: string;
+  /** When it started (ms), null when nothing says. */
+  startedAt: number | null;
+}
+
+/** What the card's foot says while no turn runs. */
+export type IdleStatus =
+  | { kind: "wait"; since: number | null }
+  | { kind: "idle"; since: number | null };
+
+export interface PlanState {
+  /** empty: no job yet. current: the job in hand, running or just ended. last:
+   *  Joe wrote after it ended and no new plan came, so it stays, dimmed, as the
+   *  last job until one does (Joe, 2026-11-10: the plan never vanishes). */
+  mode: "empty" | "current" | "last";
+  job: PlanJob | null;
+  /** Jobs before `job`, oldest first. */
+  earlier: PlanJob[];
+  status: IdleStatus;
+  /** The shown job's steps, finished count, lead and report (empty when none). */
+  steps: PlanStep[];
+  done: number;
+  lead: RenderedMessage | null;
   result: RenderedMessage | null;
 }
 
-/** The job's report once the job has ended: the latest report Joe has not
- *  written past, provided the turn that sent it closed. A chat that never calls
+/** Row timestamps arrive in seconds from history and in ms from live rows. */
+export function rowMs(m: RenderedMessage): number {
+  return !m.ts ? 0 : m.ts < 1e10 ? m.ts * 1000 : m.ts;
+}
+
+function isReport(m: RenderedMessage): boolean {
+  return isOwnMessage(m) && messageKindOf(m) === "report";
+}
+
+/** A report counts once the turn that sent it closed. A chat that never calls
  *  report_turn_status (an old or external one) has no closing signal, so its
- *  report counts as final. */
-function finishedReport(msgs: readonly RenderedMessage[], lastJoe: number): number {
-  const r = lastIndexWhere(msgs, (m) => isOwnMessage(m) && messageKindOf(m) === "report");
-  if (r < 0 || r < lastJoe) return -1;
-  const anyStatus = msgs.some((m) => turnStatusOf(m) !== null);
-  if (!anyStatus) return r;
+ *  report counts at once. */
+function reportClosed(msgs: readonly RenderedMessage[], r: number): boolean {
+  if (!msgs.some((m) => turnStatusOf(m) !== null)) return true;
   for (let i = r + 1; i < msgs.length; i++) {
     const s = turnStatusOf(msgs[i]!);
-    if (s !== null && s !== "working") return r;
+    if (s !== null && s !== "working") return true;
   }
-  return -1;
+  return false;
 }
 
-/** A plan belongs to the current job unless that job already ended: a report
- *  sent after the plan and before Joe's latest message means he has moved on. */
-function planIsCurrent(msgs: readonly RenderedMessage[], plan: DashboardPlan, lastJoe: number): boolean {
-  if (lastJoe < plan.at) return true;
-  for (let i = plan.at; i < lastJoe; i++) {
-    const m = msgs[i]!;
-    if (isOwnMessage(m) && messageKindOf(m) === "report") return false;
-  }
-  return true;
+const TITLE_MAX = 90;
+
+function jobTitle(lead: RenderedMessage | null, joe: RenderedMessage | null, steps: readonly PlanStep[]): string {
+  const raw = lead?.text ? headlineOf(lead.text) : joe ? plainUserText(joe) : steps[0]?.label ?? "";
+  const t = raw.replace(/[*_`#>]/g, "").trim();
+  return t.length > TITLE_MAX ? `${t.slice(0, TITLE_MAX - 1)}…` : t;
 }
 
-export function derivePlan({ input, lastJoe }: DeriveCtx): PlanState | null {
-  const msgs = input.messages;
-  const plan = input.plan && planIsCurrent(msgs, input.plan, lastJoe) ? input.plan : null;
-  const steps = plan?.steps ?? [];
-  const resultAt = finishedReport(msgs, lastJoe);
-  // The lead is this job's: after the Joe message that started it, which is the
-  // one before the plan when there is a plan (later ones answered its questions).
-  const leadFrom = plan ? lastIndexWhere(msgs, isJoeMessage, Math.min(plan.at, msgs.length) - 1) : lastJoe;
-  const leadAt = lastIndexWhere(msgs, (m, i) => i > leadFrom && isOwnMessage(m) && messageKindOf(m) === "plan");
-  const result = resultAt >= 0 ? msgs[resultAt]! : null;
+/** The job a plan stands for: its rows run from the plan's first call up to the
+ *  Joe message that started the next plan (the next job's own plan message and
+ *  report come after it), or to the end. Its lead is a plan message after the
+ *  Joe message that started it (later Joe messages answered its questions). */
+function jobFor(msgs: readonly RenderedMessage[], plan: DashboardPlan, next: DashboardPlan | undefined): PlanJob {
+  const at = Math.min(plan.at, msgs.length);
+  let stop = msgs.length;
+  if (next) {
+    stop = Math.min(next.at, msgs.length);
+    const nextAsk = lastIndexWhere(msgs, isJoeMessage, stop - 1);
+    if (nextAsk >= at) stop = nextAsk;
+  }
+  const joeAt = lastIndexWhere(msgs, isJoeMessage, at - 1);
+  const leadAt = lastIndexWhere(msgs, (m, i) => i > joeAt && isOwnMessage(m) && messageKindOf(m) === "plan", stop - 1);
+  const r = lastIndexWhere(msgs, (m, i) => i >= at && isReport(m), stop - 1);
   const lead = leadAt >= 0 ? msgs[leadAt]! : null;
-  if (steps.length === 0 && !result && !lead && !input.busy) return null;
-  const done = steps.filter((s) => s.status === "done" || s.status === "skipped").length;
-  return { steps, done, lead, result };
+  return {
+    key: `p${plan.startedAt}`,
+    plan,
+    steps: plan.steps,
+    lead,
+    result: r >= 0 && reportClosed(msgs, r) ? msgs[r]! : null,
+    title: jobTitle(lead, joeAt >= 0 ? msgs[joeAt]! : null, plan.steps),
+    startedAt: plan.startedAt,
+  };
+}
+
+/** A chat with no plan yet can still have a job: a report, or a plan message
+ *  that came with no write_plan. */
+function planlessJob(msgs: readonly RenderedMessage[], lastJoe: number): PlanJob | null {
+  const r = lastIndexWhere(msgs, isReport);
+  const result = r >= 0 && reportClosed(msgs, r) ? msgs[r]! : null;
+  const leadAt = lastIndexWhere(msgs, (m, i) => i > lastJoe && isOwnMessage(m) && messageKindOf(m) === "plan");
+  const lead = leadAt >= 0 ? msgs[leadAt]! : null;
+  if (!result && !lead) return null;
+  const anchor = result ?? lead!;
+  const joeAt = lastIndexWhere(msgs, isJoeMessage, msgs.indexOf(anchor) - 1);
+  const startedAt = joeAt >= 0 ? rowMs(msgs[joeAt]!) || null : null;
+  return { key: `r${anchor.id ?? msgs.indexOf(anchor)}`, plan: null, steps: [], lead, result, title: jobTitle(lead, joeAt >= 0 ? msgs[joeAt]! : null, []), startedAt };
+}
+
+/** Waiting on Joe while a question card is open, otherwise idle since the
+ *  chat's latest row. The view knows a live turn's end better than a row's
+ *  stamp (live rows can carry none), so it may move `since` later. */
+function idleStatus(msgs: readonly RenderedMessage[], plans: readonly DashboardPlan[]): IdleStatus {
+  const q = lastIndexWhere(msgs, isOpenQuestion);
+  if (q >= 0) return { kind: "wait", since: rowMs(msgs[q]!) || null };
+  let since = 0;
+  for (const m of msgs) since = Math.max(since, rowMs(m));
+  // write_plan draws no row, so a step ticked after the last row counts too.
+  for (const s of plans.at(-1)?.steps ?? []) since = Math.max(since, s.doneAt ?? 0, s.startedAt ?? 0);
+  return { kind: "idle", since: since || null };
+}
+
+const finished = (s: PlanStep): boolean => s.status === "done" || s.status === "skipped";
+
+/** The Plan card is always drawn (docs/chat-dashboard-design.md "Plan card
+ *  across a chat's life"). The latest job stays on it until a new plan
+ *  replaces it; every job before that is one step back in its history. */
+export function derivePlan({ input, lastJoe }: DeriveCtx): PlanState {
+  const msgs = input.messages;
+  const plans = input.plans;
+  const jobs = plans.map((p, i) => jobFor(msgs, p, plans[i + 1]));
+  const job = jobs.at(-1) ?? planlessJob(msgs, lastJoe);
+  const earlier = jobs.length > 0 ? jobs.slice(0, -1) : [];
+  let mode: PlanState["mode"] = "empty";
+  if (job) {
+    const resultAt = job.result ? msgs.indexOf(job.result) : -1;
+    const allDone = job.steps.length > 0 && job.steps.every(finished);
+    // Ended and Joe has written since: a report before his message, or (no
+    // report) every step finished before he wrote.
+    const movedOn = resultAt >= 0 ? lastJoe > resultAt : allDone && !!job.plan && lastJoe > job.plan.lastAt;
+    mode = movedOn ? "last" : "current";
+  }
+  const steps = job?.steps ?? [];
+  return {
+    mode,
+    job,
+    earlier,
+    status: idleStatus(msgs, plans),
+    steps,
+    done: steps.filter(finished).length,
+    lead: job?.lead ?? null,
+    result: job?.result ?? null,
+  };
+}
+
+/** Records one write_plan call. Calls of the same job update its entry: a job
+ *  is the same while no report came since it started and the new steps share a
+ *  label with it. Otherwise it is a new plan and the old one becomes history.
+ *  Each step keeps when it first went active and when it finished; a step that
+ *  went straight to done started when the step before it finished. */
+export function recordPlan(
+  plans: readonly DashboardPlan[],
+  msgs: readonly RenderedMessage[],
+  steps: readonly PlanStep[],
+  now: number,
+): DashboardPlan[] {
+  const prev = plans.at(-1);
+  const at = msgs.length;
+  const reportSince = !!prev && msgs.some((m, i) => i >= prev.at && isReport(m));
+  const same = !!prev && !reportSince && steps.some((s) => prev.steps.some((p) => p.label === s.label));
+  const base = same ? prev : null;
+  const startedAt = base?.startedAt ?? now;
+  let lastDone: number | undefined;
+  const timed = steps.map((s): PlanStep => {
+    const old = base?.steps.find((p) => p.label === s.label);
+    let begun = old?.startedAt;
+    let ended = finished(s) ? old?.doneAt : undefined;
+    if (s.status === "active" && begun === undefined) begun = now;
+    if (finished(s) && ended === undefined) ended = now;
+    if (finished(s) && begun === undefined) begun = lastDone ?? startedAt;
+    if (ended !== undefined) lastDone = ended;
+    const out: PlanStep = { ...s };
+    if (begun !== undefined) out.startedAt = begun;
+    if (ended !== undefined) out.doneAt = ended;
+    return out;
+  });
+  const entry: DashboardPlan = { steps: timed, at: base?.at ?? at, lastAt: at, startedAt };
+  return base ? [...plans.slice(0, -1), entry] : [...plans, entry];
 }
 
 export interface CardListState {
@@ -296,7 +480,7 @@ export function deriveLinks({ input }: DeriveCtx): LinksState | null {
   if (!sectionOn(input.sections, "links")) return null;
   const links = extractLinks(input.messages);
   const files = extractFiles(input.messages);
-  if (links.length === 0 && files.length === 0 && !input.plan) return null;
+  if (links.length === 0 && files.length === 0 && input.plans.length === 0) return null;
   return { links, files };
 }
 

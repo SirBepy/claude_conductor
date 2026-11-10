@@ -171,3 +171,6 @@
 @keyframes axt-from-right { from { opacity: 0; transform: translateX(24px); } }
 @keyframes axt-from-left { from { opacity: 0; transform: translateX(-24px); } }
 @keyframes axpop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* No answer yet: quieter than All caught up, the same + to ask one. */
+.ax-empty .ax-cc-t { font-size: 16px; color: var(--color-text-muted); }
+.ax-empty .ax-cc-t i { font-size: 20px; color: var(--color-text-muted); }

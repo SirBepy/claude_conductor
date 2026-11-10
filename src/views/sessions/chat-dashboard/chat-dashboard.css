@@ -81,8 +81,7 @@
 .cdash-strip-msg .block + .block {
   margin-top: 4px;
 }
-.cdash-strip-btn,
-.cdash-flip {
+.cdash-strip-btn {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -98,8 +97,7 @@
   cursor: pointer;
 }
 .cdash-strip-btn:hover,
-.cdash-strip-btn.on,
-.cdash-flip:hover {
+.cdash-strip-btn.on {
   background: var(--color-surface-alt);
   color: var(--color-text);
 }
@@ -161,34 +159,17 @@
   user-select: text;
   -webkit-user-select: text;
 }
-.cdash-empty {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 2px;
-  font-size: 12.5px;
-  color: var(--color-text-muted);
-}
-.cdash-empty[hidden] {
-  display: none;
-}
 .cdash-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(250px, 1fr);
   gap: 18px;
   align-items: start;
 }
-.cdash-grid.is-single {
-  grid-template-columns: minmax(0, 1fr);
-}
 .cdash-col {
   display: flex;
   flex-direction: column;
   gap: 16px;
   min-width: 0;
-}
-.cdash-col[hidden] {
-  display: none;
 }
 /* The right column is what stays put, so it stays in view while the left scrolls. */
 .cdash-right {
@@ -214,17 +195,6 @@
   font-size: 11px;
   letter-spacing: 0;
   text-transform: none;
-}
-.cdash-flip {
-  height: 24px;
-  margin-left: auto;
-  padding: 0 9px;
-  font-size: 11.5px;
-  letter-spacing: 0;
-  text-transform: none;
-}
-.cdash-count + .cdash-flip {
-  margin-left: 8px;
 }
 /* 100%, never none: a bubble is fit-content (chat-messages-assistant.css), so
    with no cap a one-line code block widens it to the code's full length and the
@@ -266,6 +236,46 @@
   border: 1px solid var(--color-border);
   border-radius: 10px;
   background: var(--color-surface);
+}
+.cdash-plan {
+  overflow: hidden;
+}
+.cdash-plan .cdash-h {
+  min-height: 24px;
+}
+.cdash-h-t {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+.cdash-h-at {
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* The body slides the way Joe moved through the plans, like an Answers thread. */
+.cdash-pbody.in-r {
+  animation: cdash-slide-r 0.45s ease;
+}
+.cdash-pbody.in-l {
+  animation: cdash-slide-l 0.45s ease;
+}
+@keyframes cdash-slide-r {
+  from { opacity: 0; transform: translateX(24px); }
+}
+@keyframes cdash-slide-l {
+  from { opacity: 0; transform: translateX(-24px); }
+}
+.cdash-pnone {
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+/* The last job, kept after Joe moved on until a new plan replaces it. */
+.cdash-dim {
+  opacity: 0.62;
+  transition: opacity 0.6s;
 }
 .cdash-plan-lead {
   margin-bottom: 6px;
@@ -315,9 +325,28 @@ button.cdash-step:hover {
   color: var(--color-primary);
   animation: cdash-spin 1.4s linear infinite;
 }
-.cdash-step--skipped span {
+.cdash-step--skipped .cdash-step-l {
   text-decoration: line-through;
 }
+.cdash-step-b {
+  flex: 1;
+  min-width: 0;
+}
+/* An opened step: how long on its own row, when it ran on a line of its own. */
+.cdash-step-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.cdash-step-len {
+  margin-left: auto;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cdash-step-t,
 .cdash-step-d {
   display: block;
   margin: 2px 0 3px;
@@ -325,15 +354,181 @@ button.cdash-step:hover {
   font-style: normal;
   color: var(--color-text-muted);
 }
+.cdash-step-t {
+  font-variant-numeric: tabular-nums;
+}
+.cdash-result {
+  margin-top: 8px;
+}
 .cdash-result .mc-root .msg-copy-btn {
   display: none;
 }
 
-/* The status footer: the chat's own status line when it runs, a quiet Idle otherwise. */
+/* The pager: three fixed slots (older, the list, newer), so nothing moves. */
+.cdash-pnav {
+  display: inline-grid;
+  grid-template-columns: 24px minmax(48px, auto) 24px;
+  gap: 2px;
+  margin-left: auto;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.cdash-pnav button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.cdash-pnav .cdash-pnav-mid {
+  padding: 0 9px;
+}
+.cdash-pnav button[hidden] {
+  display: inline-flex;
+  visibility: hidden;
+}
+.cdash-pnav button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.cdash-pnav button:not(:disabled):hover,
+.cdash-pnav button.on {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+.cdash-pnav button.on {
+  border-color: var(--color-border);
+}
+
+/* The list of earlier plans: compact rows, no scrollbar, a fade where more wait. */
+.cdash-pl-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+.cdash-pl-search:focus-within {
+  border-color: var(--color-primary);
+}
+/* The label draws the box; the app's input styles would draw a second one. */
+.cdash-pl-search input {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text);
+  font: inherit;
+}
+.cdash-pl-wrap {
+  position: relative;
+}
+.cdash-pl {
+  max-height: 286px;
+  margin: 0 -4px;
+  padding: 0 4px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.cdash-pl::-webkit-scrollbar {
+  display: none;
+}
+.cdash-pl-wrap.has-more::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 36px;
+  pointer-events: none;
+  background: linear-gradient(transparent, var(--color-surface));
+}
+.cdash-pl-day {
+  margin: 8px 0 2px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.cdash-pl-day:first-child {
+  margin-top: 2px;
+}
+.cdash-pl-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: calc(100% + 8px);
+  margin: 0 -4px;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.cdash-pl-row[hidden],
+.cdash-pl-day[hidden] {
+  display: none;
+}
+.cdash-pl-row:hover,
+.cdash-pl-row.on {
+  background: var(--color-surface-alt);
+}
+.cdash-pl-row > i {
+  flex: none;
+  color: var(--color-success);
+}
+.cdash-pl-t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cdash-pl-row em {
+  flex: none;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Hover a row: its verdict in place of its time. */
+.cdash-pl-v {
+  display: none;
+}
+.cdash-pl-row:hover .cdash-pl-v {
+  display: inline;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-success);
+}
+.cdash-pl-row:hover .cdash-pl-at:has(+ .cdash-pl-v) {
+  display: none;
+}
+
+/* The foot: the chat's own status line while a turn runs, a resting line otherwise. */
 .cdash-status {
   margin-top: 10px;
 }
-.cdash-status:empty {
+.cdash-status:empty,
+.cdash-status[hidden] {
   display: none;
 }
 .cdash-pstatus {
@@ -346,6 +541,14 @@ button.cdash-step:hover {
   font-size: 12px;
   color: var(--color-text-muted);
 }
+.cdash-pstatus b {
+  font-weight: 500;
+  color: var(--color-text);
+}
+.cdash-pstatus.is-wait i,
+.cdash-pstatus.is-wait b {
+  color: var(--color-warning);
+}
 .cdash-pdot {
   flex: none;
   width: 8px;
@@ -353,13 +556,95 @@ button.cdash-step:hover {
   border-radius: 50%;
   background: var(--color-border);
 }
+/* On an earlier plan the foot is the way back: same look, a quiet arrow. */
+.cdash-status.is-away {
+  position: relative;
+  border-radius: 7px;
+  cursor: pointer;
+  outline: 1px solid transparent;
+}
+.cdash-status.is-away:hover,
+.cdash-status.is-away:focus-visible {
+  outline-color: var(--color-border);
+}
+.cdash-away-go {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  opacity: 0.7;
+  pointer-events: none;
+}
+.cdash-status.is-away .cdash-pstatus,
+.cdash-status.is-away .thinking-row {
+  padding-right: 28px;
+}
+.cdash-status.is-away .thinking-pause-btn {
+  display: none;
+}
 .cdash-status .session-thinking {
+  display: flex;
+  flex-direction: column-reverse;
   margin: 0;
   border-radius: 7px;
   background: var(--color-surface-alt);
 }
 .cdash-status .thinking-row {
   padding: 0 9px;
+}
+.cdash-status .thinking-icon {
+  flex: none;
+  margin-right: 6px;
+  color: var(--color-primary);
+  font-size: 14px;
+}
+.cdash-status .thinking-icon[hidden] {
+  display: none;
+}
+.cdash-status .thinking-caret {
+  transform: rotate(180deg);
+}
+.cdash-status .session-thinking.is-open .thinking-caret {
+  transform: none;
+}
+.thinking-counts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.thinking-trail {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+}
+.thinking-trail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.thinking-trail-row:nth-child(2) {
+  opacity: 0.75;
+}
+.thinking-trail-row:nth-child(3) {
+  opacity: 0.55;
+}
+.thinking-trail-row span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thinking-trail-row em {
+  font-style: normal;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* A narrow chat window stacks the columns instead of squeezing the right one. */
@@ -377,7 +662,9 @@ button.cdash-step:hover {
   to { transform: rotate(360deg); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cdash-step--active i {
+  .cdash-step--active i,
+  .cdash-pbody.in-l,
+  .cdash-pbody.in-r {
     animation: none;
   }
 }

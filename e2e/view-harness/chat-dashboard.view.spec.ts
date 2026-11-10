@@ -5,13 +5,13 @@
 // Reviewed 2026-11-10 (dash-extras): the Links and files, Preview window and Changes zones join ZONES, a Links card draws once a chat has a plan, and a question carries its message figures; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (dash-answers): the Answers zone is now the Answers card (answers-card.ts) drawing its verdict in .ax-face, so `.cdash-answers .mc-verdict` still holds; a kindless message moved to Notes. Passes.
 // Reviewed 2026-11-10: the question card pads the scroller cardPaddedScroller picks (this pane's transcript as before, or the chat dashboard's body while it shows), active-session.ts detaches the chat dashboard on dismount, and a read-only session keeps Messages; nothing this spec asserts changed, and it passes.
-// asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/chat-dashboard/chat-view-pref.ts, src/shared/chat/dashboard/dashboard-model.ts, src/views/sessions/active-session-mount.ts
+// asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/plan-card.ts, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/chat-dashboard/chat-view-pref.ts, src/shared/chat/dashboard/dashboard-model.ts, src/views/sessions/active-session-mount.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
 // A real chat opened in Dashboard view draws its zones from its own history:
 // Joe's latest message in the strip under the title, Answers and Waiting on
-// you in the left column, Plan (then the Result in its spot) in the right one,
+// you in the left column, Plan (with the Result under it once the job ends) in the right one,
 // the transcript hidden but still built underneath, and the composer where it
 // always is. In Messages view the same chat is the plain transcript.
 
@@ -101,7 +101,8 @@ test.describe("chat dashboard", () => {
     await expect(left.locator(".cdash-answers .mc-verdict")).toHaveText("Yes, once the board confirms");
     await expect(left.locator(".cdash-waiting")).toHaveClass(/is-blocked/);
     await expect(left.locator(".cdash-waiting .mc-verdict")).toHaveText("Stuck on the API key");
-    await expect(right.locator(".cdash-plan .cdash-count")).toHaveText("2/4");
+    await expect(right.locator(".cdash-plan .cdash-h-t")).toHaveText("Plan");
+    await expect(right.locator(".cdash-plan .cdash-step")).toHaveCount(4);
 
     // Left column is what Joe must look at, so it sits left of the plan.
     const lb = (await left.boundingBox())!;
@@ -109,7 +110,7 @@ test.describe("chat dashboard", () => {
     expect(lb.x + lb.width).toBeLessThanOrEqual(rb.x);
     expect(Math.abs(lb.y - rb.y)).toBeLessThan(2);
 
-    await right.locator("button.cdash-step").nth(1).click();
+    await right.locator("button.cdash-step", { hasText: "Link tr- numbers" }).click();
     await expect(right.locator(".cdash-step-d")).toHaveText("tr-12 becomes a link only after Trello confirms card 12.");
     await capture(pane(page), "chat-dashboard-mid-job");
 
@@ -120,18 +121,16 @@ test.describe("chat dashboard", () => {
     await capture(pane(page), "chat-dashboard-earlier-open");
   });
 
-  test("a finished job: the Result takes the Plan card's spot, Plan N/N flips back", async ({ page }) => {
+  test("a finished job: the Result sits under the finished plan's steps", async ({ page }) => {
     await openChat(page, FINISHED, "dashboard");
     const right = dash(page).locator(".cdash-right");
     await expect(right.locator(".cdash-result .mc-verdict")).toHaveText("Trello is in");
     await expect(right.locator(".cdash-result table")).toBeVisible();
     // Joe wrote after the blocker, so it no longer waits on him.
     await expect(dash(page).locator(".cdash-waiting")).toHaveCount(0);
-    await expect(right.locator("[data-act='show-plan']")).toHaveText("Plan 4/4");
+    await expect(right.locator(".cdash-plan.is-result .cdash-h-t")).toHaveText("Result");
+    await expect(right.locator(".cdash-plan.is-result .cdash-step--done")).toHaveCount(4);
     await capture(pane(page), "chat-dashboard-result");
-    await right.locator("[data-act='show-plan']").click();
-    await expect(right.locator(".cdash-plan .cdash-step")).toHaveCount(4);
-    await expect(right.locator("[data-act='show-result']")).toBeVisible();
   });
 
   test("a running turn: the status line sits at the foot of the Plan card, not above the message box", async ({ page }) => {

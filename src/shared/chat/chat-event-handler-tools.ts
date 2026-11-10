@@ -19,7 +19,9 @@ import {
   isShowPreviewTool,
   isWriteDraftTool,
   MCP_WRITE_PLAN_TOOL,
+  toolSummary,
 } from "./tool-meta";
+import { recordPlan, TURN_ACTIONS_MAX } from "./dashboard/dashboard-model";
 import type { RenderedMessage } from "./chat-classifiers";
 import {
   previewCardIndex,
@@ -170,7 +172,8 @@ export function handleToolUseEvent(
       r.turnFooters.ensureTodoChecklist(r.activeTurnChipKey);
       r.turnFooters.updateTodoSteps(r.activeTurnChipKey, steps);
     }
-    r.dashPlan = { steps, at: r.messages.length };
+    // Live events carry no timestamp of their own; history's carry the real one.
+    r.dashPlans = recordPlan(r.dashPlans, r.messages, steps, ts > 0 ? ts : Date.now());
     r.lastTodoActivity = steps.find((s) => s.status === "active")?.label ?? null;
     if (!r.hydrating) r.onTodoActivityUpdate?.(r.lastTodoActivity);
     return { touched: true, coalesce: false };
@@ -277,7 +280,12 @@ export function handleToolUseEvent(
     }
   }
   r.activityToolCanon = canonicalTool(ev.tool_name);
-  r.setActivity(describeActivityFull(ev.tool_name, ev.input), { detail: activityDetail(ev.tool_name, ev.input) });
+  const label = describeActivityFull(ev.tool_name, ev.input);
+  if (!r.turnActions.some((a) => a.id === ev.id)) {
+    r.turnActions.push({ id: ev.id, icon: toolSummary(ev.tool_name, ev.input).icon, label, canon: r.activityToolCanon, at: ts > 0 ? ts : Date.now() });
+    if (r.turnActions.length > TURN_ACTIONS_MAX) r.turnActions.splice(0, r.turnActions.length - TURN_ACTIONS_MAX);
+  }
+  r.setActivity(label, { detail: activityDetail(ev.tool_name, ev.input) });
   r.outstandingActivityToolIds.add(ev.id);
   return { touched: true, coalesce: false };
 }

@@ -10,7 +10,7 @@ import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
 const { resetTransportForTests } = await import("../src/shared/transport.ts");
-const { deriveDashboard, ZONES, isJoeMessage } = await import("../src/shared/chat/dashboard/dashboard-model.ts");
+const { deriveDashboard, ZONES, isJoeMessage, recordPlan, turnCounts } = await import("../src/shared/chat/dashboard/dashboard-model.ts");
 const { flushRenderNow } = await import("../src/shared/chat/flush-scheduler.ts");
 
 beforeEach(() => {
@@ -38,7 +38,7 @@ function chat() {
     plan(steps) { const id = `p${++seq}`; r.handleEvent(toolUseEvent(PLAN, { steps }, id)); r.handleEvent(ok(id)); return api; },
     status(status) { const id = `s${++seq}`; r.handleEvent(toolUseEvent(STATUS, { status }, id)); r.handleEvent(ok(id)); return api; },
     ask(question, id = `q${++seq}`) { r.handleEvent(toolUseEvent(ASK, { questions: [{ question, options: [{ label: "A" }] }] }, id)); return api; },
-    dash(extra = {}) { return deriveDashboard({ messages: r.messages, plan: r.dashPlan, ...extra }); },
+    dash(extra = {}) { return deriveDashboard({ messages: r.messages, plans: r.dashPlans, ...extra }); },
   };
   return api;
 }
@@ -47,11 +47,15 @@ const zone = (d, id) => [...d.left, ...d.right].find((z) => z.id === id)?.state 
 const ids = (zones) => zones.map((z) => z.id);
 
 describe("chat dashboard model", () => {
-  it("draws nothing for a chat with no events", () => {
+  it("draws only an empty Answers card and an empty Plan card for a chat with no events", () => {
     const d = chat().dash();
     expect(d.strip).toBeNull();
-    expect(d.left).toEqual([]);
-    expect(d.right).toEqual([]);
+    // Answers and Plan are always on the dashboard, even empty (Joe, 2026-11-10).
+    expect(ids(d.left)).toEqual(["answers"]);
+    expect(ids(d.right)).toEqual(["plan"]);
+    expect(zone(d, "answers").items).toEqual([]);
+    expect(zone(d, "plan").mode).toBe("empty");
+    expect(zone(d, "plan").status).toEqual({ kind: "idle", since: null });
   });
 
   it("puts Answers and Waiting on the left, Plan and the come-and-go cards on the right", () => {
@@ -83,7 +87,7 @@ describe("chat dashboard model", () => {
     const c = chat().joe("q");
     c.r.handleEvent(toolUseEvent(SEND, { kind: "answer", verdict: "No", text: "x" }, "bad"));
     c.r.handleEvent({ type: "tool_result", tool_use_id: "bad", output: { type: "text", text: "rejected" }, is_error: true, timestamp: 0 });
-    expect(zone(c.dash(), "answers")).toBeNull();
+    expect(zone(c.dash(), "answers").items).toEqual([]);
   });
 
   it("lists only Joe's own messages in the strip", () => {
@@ -138,7 +142,7 @@ describe("chat dashboard model", () => {
     expect(zone(c.dash(), "subchats")).toBeNull();
     const d = c.dash({ now: 10_000_000, subs: [sub("a", "working"), sub("b", "asking")] });
     expect(zone(d, "subchats").shown.map((i) => i.id)).toEqual(["b", "a"]);
-    expect([...d.right].map((z) => z.id)).toEqual(["subchats"]);
+    expect([...d.right].map((z) => z.id)).toEqual(["plan", "subchats"]);
   });
 
   it("draws write_plan steps with their detail and counts finished ones", () => {
@@ -173,20 +177,64 @@ describe("chat dashboard model", () => {
     expect(zone(c.dash(), "plan").result.card.verdict).toBe("Done");
   });
 
-  it("keeps the plan across Joe's answers mid-job, and drops it once a finished job is followed by a new message", () => {
+  it("keeps the plan across Joe's answers mid-job, and keeps the finished job as the last job once he writes again", () => {
     const c = chat().joe("job one").send({ kind: "plan", text: "First read, then build" }).plan([{ text: "Read", status: "active" }]).joe("answer to its question");
     let p = zone(c.dash(), "plan");
+    expect(p.mode).toBe("current");
     expect(p.steps).toHaveLength(1);
     expect(p.lead.text).toBe("First read, then build");
-    c.send({ kind: "report", verdict: "Done", text: "ok" }).status("done");
-    expect(zone(c.dash(), "plan").result).not.toBeNull();
-    c.joe("job two");
+    c.plan([{ text: "Read", status: "done" }]).send({ kind: "report", verdict: "Done", text: "ok" }).status("done");
     p = zone(c.dash(), "plan");
-    expect(p).toBeNull();
-    // A turn running with no plan yet still gets the card, which hosts the status line.
+    expect(p.mode).toBe("current");
+    expect(p.result.card.verdict).toBe("Done");
+    // The plan never vanishes: a new message with no new plan keeps the job, as the last one.
+    c.joe("a quick follow-up question");
     p = zone(c.dash({ busy: true }), "plan");
-    expect(p.steps).toEqual([]);
+    expect(p.mode).toBe("last");
+    expect(p.steps.map((s) => s.label)).toEqual(["Read"]);
+    expect(p.result.card.verdict).toBe("Done");
+    expect(p.earlier).toEqual([]);
+  });
+
+  it("puts a new plan on the card and the finished one behind it", () => {
+    const c = chat().joe("job one").plan([{ text: "Read", status: "done" }]).send({ kind: "report", verdict: "One done", text: "ok" }).status("done")
+      .joe("job two").send({ kind: "plan", text: "Two's own plan" }).plan([{ text: "Read", status: "active" }, { text: "Ship", status: "pending" }]);
+    const p = zone(c.dash(), "plan");
+    // Each job keeps its own lead: the second job's plan message never leads the first.
+    expect(p.lead.text).toBe("Two's own plan");
+    expect(p.earlier[0].lead).toBeNull();
+    expect(p.mode).toBe("current");
     expect(p.result).toBeNull();
+    expect(p.steps.map((s) => s.label)).toEqual(["Read", "Ship"]);
+    expect(p.earlier).toHaveLength(1);
+    expect(p.earlier[0].result.card.verdict).toBe("One done");
+    expect(p.earlier[0].title).toBe("job one");
+    expect(p.earlier[0].key).not.toBe(p.job.key);
+  });
+
+  it("names a job by its plan message, else by Joe's message, else by its first step", () => {
+    const c = chat().joe("sync trello").send({ kind: "plan", text: "Add a Trello source\nthen test it" }).plan([{ text: "Read", status: "done" }]).send({ kind: "report", verdict: "v", text: "t" })
+      .joe("now the due dates").plan([{ text: "Chip", status: "done" }]).send({ kind: "report", verdict: "v", text: "t" })
+      .plan([{ text: "Lone step", status: "active" }]);
+    const p = zone(c.dash(), "plan");
+    expect(p.earlier.map((j) => j.title)).toEqual(["Add a Trello source", "now the due dates"]);
+    // The third plan came with no message of its own after the report: Joe's last message names it.
+    expect(p.job.title).toBe("now the due dates");
+  });
+
+  it("keeps a report with no plan as the job, then as the last job", () => {
+    const c = chat().joe("x").send({ kind: "report", verdict: "Done", text: "ok" });
+    expect(zone(c.dash(), "plan").mode).toBe("current");
+    c.joe("thanks");
+    const p = zone(c.dash(), "plan");
+    expect(p.mode).toBe("last");
+    expect(p.job.plan).toBeNull();
+    expect(p.result.card.verdict).toBe("Done");
+  });
+
+  it("says the chat waits on Joe while a question card is open", () => {
+    const c = chat().joe("go").ask("Tabs or spaces?");
+    expect(zone(c.dash(), "plan").status.kind).toBe("wait");
   });
 
   it("collects calls and discoveries of the current job as notes, and the links an artifact names as links", () => {
@@ -195,16 +243,17 @@ describe("chat dashboard model", () => {
     const d = c.dash();
     expect(zone(d, "notes").cards.map((m) => m.card.kind)).toEqual(["discovery"]);
     expect(zone(d, "links").links.map((l) => l.url)).toEqual(["https://example.com/board"]);
-    expect(ids(d.right)).toEqual(["notes", "links"]);
+    expect(ids(d.right)).toEqual(["plan", "notes", "links"]);
   });
 
   it("keeps the recorded plan aligned when older rows are prepended or a row is spliced out", () => {
     const c = chat().joe("a").plan([{ text: "x", status: "active" }]);
-    const at = c.r.dashPlan.at;
+    const at = c.r.dashPlans[0].at;
     c.r.remapIndices((i) => i + 3);
-    expect(c.r.dashPlan.at).toBe(at + 3);
+    expect(c.r.dashPlans[0].at).toBe(at + 3);
+    expect(c.r.dashPlans[0].lastAt).toBe(at + 3);
     c.r.remapIndices((i) => (i > 0 ? i - 1 : i));
-    expect(c.r.dashPlan.at).toBe(at + 2);
+    expect(c.r.dashPlans[0].at).toBe(at + 2);
   });
 
   it("fires onFlushed after every flush, even one that drew no row", () => {
@@ -214,5 +263,62 @@ describe("chat dashboard model", () => {
     c.plan([{ text: "x", status: "active" }]);
     flushRenderNow(c.r);
     expect(n).toBeGreaterThan(0);
+  });
+});
+
+describe("recordPlan", () => {
+  const step = (label, status) => ({ label, status });
+
+  it("updates one entry for every call of the same job, stamping when each step ran", () => {
+    let plans = recordPlan([], [], [step("Read", "active"), step("Ship", "pending")], 1000);
+    plans = recordPlan(plans, [], [step("Read", "done"), step("Ship", "active")], 61_000);
+    plans = recordPlan(plans, [], [step("Read", "done"), step("Ship", "done")], 181_000);
+    expect(plans).toHaveLength(1);
+    expect(plans[0].startedAt).toBe(1000);
+    expect(plans[0].steps.map((s) => [s.startedAt, s.doneAt])).toEqual([[1000, 61_000], [61_000, 181_000]]);
+  });
+
+  it("starts a step that went straight to done when the step before it finished", () => {
+    let plans = recordPlan([], [], [step("A", "active"), step("B", "pending")], 1000);
+    plans = recordPlan(plans, [], [step("A", "done"), step("B", "done")], 5000);
+    expect(plans[0].steps[1].startedAt).toBe(5000);
+    plans = recordPlan([], [], [step("A", "done"), step("B", "done")], 9000);
+    expect(plans[0].steps.map((s) => s.startedAt)).toEqual([9000, 9000]);
+  });
+
+  it("clears a finish time when a step is reopened", () => {
+    let plans = recordPlan([], [], [step("A", "done")], 1000);
+    plans = recordPlan(plans, [], [step("A", "active")], 2000);
+    expect(plans[0].steps[0].doneAt).toBeUndefined();
+    expect(plans[0].steps[0].startedAt).toBe(1000);
+  });
+
+  it("starts a new plan when no step label carries over, or a report came since", () => {
+    let plans = recordPlan([], [], [step("A", "active")], 1000);
+    plans = recordPlan(plans, [], [step("B", "active")], 2000);
+    expect(plans).toHaveLength(2);
+    const report = { kind: "message", text: "t", card: { kind: "report", verdict: "v" }, ts: 0 };
+    plans = recordPlan(plans, [report], [step("B", "active")], 3000);
+    expect(plans).toHaveLength(3);
+    expect(plans[2].at).toBe(1);
+  });
+});
+
+describe("turn actions", () => {
+  it("counts a turn's calls by kind, biggest first", () => {
+    const a = (canon) => ({ icon: "ph-file", label: "x", canon, at: 0 });
+    expect(turnCounts([a("Read"), a("Read"), a("Edit"), a("Bash"), a("mcp:cc_conductor")])).toBe("2 read · 1 edit · 1 command · 1 other");
+    expect(turnCounts([])).toBe("");
+  });
+
+  it("records each tool call of the turn once, and starts over when Joe writes", () => {
+    const c = chat().joe("go");
+    c.r.handleEvent(toolUseEvent("Read", { file_path: "C:/a/api.ts" }, "t1"));
+    c.r.handleEvent(toolUseEvent("Read", { file_path: "C:/a/api.ts" }, "t1"));
+    c.r.handleEvent(toolUseEvent("Edit", { file_path: "C:/a/api.ts" }, "t2"));
+    expect(c.r.turnActions.map((x) => [x.canon, x.icon])).toEqual([["Read", "ph-file"], ["Edit", "ph-pencil-simple"]]);
+    expect(c.r.turnActions[1].label).toBe(c.r.lastActivity);
+    c.joe("next");
+    expect(c.r.turnActions).toEqual([]);
   });
 });

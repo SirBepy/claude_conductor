@@ -6,14 +6,12 @@
 
 import { escapeHtml } from "../../../shared/escape-html";
 import { localTime } from "../../../shared/formatters";
-import { renderBlocks, renderMarkdown, renderMessage } from "../../../shared/chat/chat-transforms";
-import { headlineOf } from "../../../shared/chat/chat-message-kinds";
+import { renderBlocks, renderMessage } from "../../../shared/chat/chat-transforms";
 import { renderQuestionCardHtml } from "../../../shared/chat/tool-views";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../../../shared/chat/chat-event-to-message";
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
-import type {
-  PlanStep, StripState, WaitingItem, ZoneId, ZoneState,
-} from "../../../shared/chat/dashboard/dashboard-model";
+import type { StripState, WaitingItem, ZoneId, ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
+import { initialPlanUi, renderPlan, type PlanUi } from "./plan-card";
 import { plainUserText } from "../../../shared/chat/dashboard/answers-model";
 import { renderVisuals } from "../../../shared/chat/message-visuals-render";
 import { basename } from "../../../shared/path-utils";
@@ -29,11 +27,7 @@ export type QuickViewId = (typeof QUICK_VIEWS)[number]["id"];
 
 /** What the dashboard remembers between derives. In memory only: none of it
  *  needs to survive a reload (each is one click to redo). */
-export interface DashUi {
-  /** The Result is up but Joe flipped the card back to the finished plan. */
-  showPlan: boolean;
-  /** Key (`index:label`) of the plan step whose detail line is open. */
-  openStep: string | null;
+export interface DashUi extends PlanUi {
   /** Index into the strip's messages Joe picked from "N earlier", or null for the latest. */
   stripPick: number | null;
   stripExpanded: boolean;
@@ -41,7 +35,7 @@ export interface DashUi {
 }
 
 export function initialUi(): DashUi {
-  return { showPlan: false, openStep: null, stripPick: null, stripExpanded: false, earlierOpen: false };
+  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false };
 }
 
 export interface ZoneCtx {
@@ -49,6 +43,8 @@ export interface ZoneCtx {
   /** The chat's status line is running (or holding messages): the Plan card
    *  hosts it, so its idle footer is left out. */
   busy: boolean;
+  /** When the view saw the last turn end (ms): the idle footer's "since". */
+  idleAt?: number | null;
   /** Whether each quick view has anything to read; a view not listed has not
    *  been looked up yet and draws as if it has. */
   quick?: Partial<Record<QuickViewId, boolean>>;
@@ -125,44 +121,8 @@ function renderWaiting(s: ZoneState<"waiting">): string {
     + `<div class="cdash-stack">${s.items.map(waitingItemHtml).join("")}</div></section>`;
 }
 
-const STEP_ICON: Record<PlanStep["status"], string> = {
-  done: "ph-check-circle",
-  active: "ph-circle-notch",
-  pending: "ph-circle",
-  skipped: "ph-minus-circle",
-};
-
-export const stepKey = (i: number, step: PlanStep): string => `${i}:${step.label}`;
-
-function stepHtml(step: PlanStep, key: string, open: boolean): string {
-  const icon = `<i class="ph ${STEP_ICON[step.status]}"></i>`;
-  const cls = `cdash-step cdash-step--${step.status}${open ? " open" : ""}`;
-  if (!step.detail) return `<div class="${cls}">${icon}<span>${escapeHtml(step.label)}</span></div>`;
-  const detail = open ? `<em class="cdash-step-d">${escapeHtml(step.detail)}</em>` : "";
-  return `<button type="button" class="${cls}" data-act="step" data-step="${escapeHtml(key)}" aria-expanded="${open}" title="${open ? "Hide what this step does" : "Show what this step does"}">${icon}<span>${escapeHtml(step.label)}${detail}</span></button>`;
-}
-
-/** The foot of the Plan card. The chat's real status line (Stop, elapsed, its
- *  detail block) is moved into the slot while it runs; idle, a quiet line says so. */
-function statusSlot(busy: boolean): string {
-  const idle = busy ? "" : `<div class="cdash-pstatus"><span class="cdash-pdot"></span><span>Idle</span></div>`;
-  return `<div class="cdash-status" data-slot="status">${idle}</div>`;
-}
-
-function renderPlan(s: ZoneState<"plan">, ctx: ZoneCtx): string {
-  const total = s.steps.length;
-  const count = total > 0 ? `${s.done}/${total}` : "";
-  if (s.result && !ctx.ui.showPlan) {
-    const flip = total > 0
-      ? `<button type="button" class="cdash-flip" data-act="show-plan" title="Show the finished plan"><i class="ph ph-list-checks"></i>Plan ${count}</button>` : "";
-    return `<section class="cdash-zone cdash-card cdash-result">${head("ph-flag-checkered", "Result", flip)}${cardHtml(s.result)}${statusSlot(ctx.busy)}</section>`;
-  }
-  const flip = s.result
-    ? `<button type="button" class="cdash-flip" data-act="show-result" title="Back to the result"><i class="ph ph-flag-checkered"></i>Result</button>` : "";
-  const extra = (count ? `<span class="cdash-count">${count}</span>` : "") + flip;
-  const lead = s.lead?.text ? `<div class="cdash-plan-lead">${renderMarkdown(headlineOf(s.lead.text))}</div>` : "";
-  const steps = s.steps.map((st, i) => stepHtml(st, stepKey(i, st), ctx.ui.openStep === stepKey(i, st))).join("");
-  return `<section class="cdash-zone cdash-card cdash-plan">${head("ph-list-checks", "Plan", extra)}${lead}${steps ? `<div class="cdash-steps">${steps}</div>` : ""}${statusSlot(ctx.busy)}</section>`;
+function renderPlanZone(s: ZoneState<"plan">, ctx: ZoneCtx): string {
+  return renderPlan(s, { ui: ctx.ui, busy: ctx.busy, idleAt: ctx.idleAt ?? null, card: cardHtml });
 }
 
 const LINK_ICON: Record<LinkItem["kind"], string> = {
@@ -230,7 +190,7 @@ function renderSubchats(): string {
 export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) => string } = {
   answers: renderAnswers,
   waiting: renderWaiting,
-  plan: renderPlan,
+  plan: renderPlanZone,
   subchats: renderSubchats,
   notes: listZone("cdash-notes", "ph-note", "Notes"),
   preview: renderPreviewWindow,

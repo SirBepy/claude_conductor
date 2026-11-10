@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-// asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/chat-view-pref.ts
+// asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/plan-card.ts, src/views/sessions/chat-dashboard/chat-view-pref.ts
 
 // The dashboard is drawn beside the transcript from the renderer's own rows:
-// Joe's strip on top, Answers and Waiting on the left, Plan (or Result) on the
-// right, the chat's status line moved into the Plan card while it runs, and
-// nothing at all added to the pane in Messages view.
+// Joe's strip on top, Answers and Waiting on the left, Plan (with the Result
+// once the job ends) on the right, the chat's status line moved into the Plan
+// card while it runs, and nothing at all added to the pane in Messages view.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
@@ -15,7 +15,6 @@ const { setSettings } = await import("../src/shared/state.ts");
 const { ChatDashboard, attachChatDashboard, applyChatViewSetting, detachChatDashboard } = await import("../src/views/sessions/chat-dashboard/chat-dashboard.ts");
 const { dashboardEnabled, readChatView } = await import("../src/views/sessions/chat-dashboard/chat-view-pref.ts");
 const { thinkingBarHtml } = await import("../src/views/sessions/session-thinking-bar.ts");
-const { sessionEvents } = await import("../src/shared/chat/event-store.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 
 const SEND = "mcp__cc_conductor__send_message";
@@ -135,22 +134,32 @@ describe("chat dashboard layout", () => {
     expect(left.querySelector(".mc-root .mc-verdict").textContent).toBe("Yes");
     // A chat with a plan is a job, so it also gets Links and files for its quick-view buttons.
     expect([...right.querySelectorAll(".cdash-slot")].map((e) => e.dataset.zone)).toEqual(["plan", "links"]);
-    expect(right.querySelector(".cdash-count").textContent).toBe("1/2");
-    expect(pane.querySelector(".cdash-grid").classList.contains("is-single")).toBe(false);
+    expect([...right.querySelectorAll(".cdash-step-l")].map((e) => e.textContent)).toEqual(["Read the tracker", "Add Trello"]);
+    // The steps say where the plan is; the header carries no N/M count.
+    expect(right.querySelector(".cdash-plan .cdash-h").textContent).toBe("Plan");
   });
 
-  it("opens a step's detail line on click", async () => {
+  it("opens a step on click: its detail line, when it ran on a line of its own, how long on its row", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
-    feed(r, [userEvent("go"), ...plan([{ text: "Read", status: "active", detail: "Reads the tracker code" }, { text: "Ship", status: "pending" }])]);
+    const T0 = new Date(2026, 10, 10, 14, 43).getTime();
+    r.handleEvent(userEvent("go"));
+    r.handleEvent(toolUseEvent(PLAN, { steps: [{ text: "Read", status: "active", detail: "Reads the tracker code" }, { text: "Ship", status: "pending" }] }, "pa", T0));
+    r.handleEvent(toolUseEvent(PLAN, { steps: [{ text: "Read", status: "done", detail: "Reads the tracker code" }, { text: "Ship", status: "active" }] }, "pb", T0 + 120_000));
     await tick();
     expect(pane.querySelector(".cdash-step-d")).toBeNull();
-    // A step with no detail line is not a button.
-    expect(pane.querySelectorAll("button.cdash-step")).toHaveLength(1);
+    expect(pane.querySelector(".cdash-step-t")).toBeNull();
+    // Both steps ran, so both open; a pending step with no detail would not.
+    expect(pane.querySelectorAll("button.cdash-step")).toHaveLength(2);
     pane.querySelector("button.cdash-step").click();
     expect(pane.querySelector(".cdash-step-d").textContent).toBe("Reads the tracker code");
-    pane.querySelector("button.cdash-step").click();
-    expect(pane.querySelector(".cdash-step-d")).toBeNull();
+    expect(pane.querySelector(".cdash-step-t").textContent).toMatch(/^\d.*:43.* to .*:45/);
+    expect(pane.querySelector(".cdash-step-len").textContent).toBe("2 min");
+    pane.querySelectorAll("button.cdash-step")[1].click();
+    expect(pane.querySelector(".cdash-step-len").textContent).toBe("running");
+    expect(pane.querySelector(".cdash-step-t").textContent).toMatch(/ to now$/);
+    pane.querySelectorAll("button.cdash-step")[1].click();
+    expect(pane.querySelector(".cdash-step-t")).toBeNull();
   });
 
   it("expands Joe's latest message on click and shows an earlier one picked from the list", async () => {
@@ -191,7 +200,7 @@ describe("chat dashboard layout", () => {
     expect(errors).toEqual([]);
   });
 
-  it("puts the Result in the Plan card's spot with a Plan N/N flip back", async () => {
+  it("puts the Result under the finished plan's steps, in the Plan card", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     feed(r, [
@@ -205,16 +214,13 @@ describe("chat dashboard layout", () => {
     expect(right.querySelector(".cdash-result .mc-verdict").textContent).toBe("Built, not pushed");
     expect(right.querySelector(".cdash-result .mc-sec--yours").textContent).toContain("Push it");
     expect(right.querySelector(".cdash-result table")).not.toBeNull();
-    expect(right.querySelector("[data-act='show-plan']").textContent).toBe("Plan 2/2");
-    right.querySelector("[data-act='show-plan']").click();
-    expect(right.querySelector(".cdash-plan")).not.toBeNull();
-    expect(right.querySelectorAll(".cdash-step")).toHaveLength(2);
-    right.querySelector("[data-act='show-result']").click();
-    expect(right.querySelector(".cdash-result")).not.toBeNull();
-    // The report is the Result, never an answer. The right column keeps its place.
-    expect(pane.querySelector(".cdash-left .cdash-slot")).toBeNull();
-    expect(pane.querySelector(".cdash-left").hidden).toBe(true);
-    expect(pane.querySelector(".cdash-grid").classList.contains("is-single")).toBe(false);
+    // The steps stay open above the Result, with no way to fold them away.
+    const card = right.querySelector(".cdash-plan.is-result");
+    expect(card.querySelector(".cdash-h").textContent).toBe("Result");
+    expect(card.querySelectorAll(".cdash-step--done")).toHaveLength(2);
+    expect(card.querySelector("[data-act='show-plan']")).toBeNull();
+    // The report is the Result, never an answer: Answers stays empty.
+    expect([...pane.querySelectorAll(".cdash-left .cdash-slot")].map((e) => e.dataset.zone)).toEqual(["answers"]);
   });
 
   it("lists a blocker, tinted red, and the open question card in Waiting on you", async () => {
@@ -255,7 +261,8 @@ describe("chat dashboard layout", () => {
     expect(pane.querySelector(".cdash-plan [data-slot='status'] .session-thinking")).toBe(bar);
     bar.setAttribute("hidden", "");
     await tick();
-    expect(pane.querySelector(".cdash-pstatus").textContent).toBe("Idle");
+    // The turn it saw end is when the chat went idle.
+    expect(pane.querySelector(".cdash-pstatus").textContent).toMatch(/^Idle since \d/);
     // Hidden, it goes home, so session-thinking-bar.ts shows it above the message box for held messages.
     expect(bar.parentElement).toBe(home);
   });
@@ -274,32 +281,15 @@ describe("chat dashboard layout", () => {
     expect(r.onFlushed).toBeNull();
   });
 
-  it("collapses a quick one-question chat to its answer card", async () => {
-    const { pane, r } = mountPane();
-    new ChatDashboard(pane, r);
-    feed(r, [userEvent("is it empty?"), ...send({ kind: "answer", verdict: "No", text: "It has two rows." })]);
-    await tick();
-    expect(pane.querySelector(".cdash-grid").classList.contains("is-single")).toBe(true);
-    expect(pane.querySelector(".cdash-right").hidden).toBe(true);
-    expect(pane.querySelectorAll(".cdash-slot")).toHaveLength(1);
-  });
-
-  it("shows a quiet hint for an empty chat, but not while its history is still loading", async () => {
+  it("keeps Answers and Plan on screen from the very start, empty", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     await tick();
-    expect(pane.querySelector(".cdash-empty").hidden).toBe(true);
-    const realIsLoaded = sessionEvents.isLoaded;
-    sessionEvents.isLoaded = () => true;
-    try {
-      r.sessionId = "s1";
-      feed(r, [toolUseEvent("Read", { file_path: "a.ts" }, "x1")]);
-      await tick();
-      expect(pane.querySelector(".cdash-empty").hidden).toBe(false);
-      expect(pane.querySelector(".cdash-strip").hidden).toBe(true);
-    } finally {
-      sessionEvents.isLoaded = realIsLoaded;
-    }
+    expect([...pane.querySelectorAll(".cdash-left .cdash-slot")].map((e) => e.dataset.zone)).toEqual(["answers"]);
+    expect([...pane.querySelectorAll(".cdash-right .cdash-slot")].map((e) => e.dataset.zone)).toEqual(["plan"]);
+    expect(pane.querySelector(".cdash-plan .cdash-pnone").textContent).toBe("Nothing planned yet.");
+    expect(pane.querySelector(".cdash-pstatus").textContent).toBe("Idle");
+    expect(pane.querySelector(".cdash-strip").hidden).toBe(true);
   });
 
   it("draws nothing while a history replay is half built", async () => {

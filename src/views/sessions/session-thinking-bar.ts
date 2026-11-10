@@ -4,6 +4,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { capActivityText, type ActivityDetail } from "../../shared/chat/tool-meta";
 import { refreshNextChips } from "./next-chip-strip";
 import { formatElapsed } from "../../shared/time";
+import { turnCounts, type TurnAction } from "../../shared/chat/dashboard/dashboard-model";
 
 /** The bar's markup, one copy for the established pane and the draft pane. The
  *  line is a button (it opens the detail block, the only route to Stop on a
@@ -14,7 +15,7 @@ export function thinkingBarHtml(): string {
     `<div class="thinking-detail" hidden></div>` +
     `<div class="thinking-row">` +
     `<button type="button" class="thinking-main" aria-expanded="false" disabled>` +
-    `<span class="thinking-text"></span><i class="ph ph-caret-up thinking-caret"></i></button>` +
+    `<i class="ph thinking-icon" hidden></i><span class="thinking-text"></span><i class="ph ph-caret-up thinking-caret"></i></button>` +
     `<span class="thinking-slot"><span class="thinking-elapsed"></span>` +
     `<button type="button" class="thinking-pause-btn" title="Stop turn" hidden><i class="ph ph-stop-circle"></i>Stop</button></span>` +
     `</div></div>`
@@ -115,6 +116,28 @@ export interface ThinkingBarSource {
   lastActivityDetail?: ActivityDetail | null;
   /** When the in-flight turn began (ms), 0 while unknown. */
   activeTurnStartedAtMs?: number;
+  /** The turn's tool calls so far (the dashboard's opened block lists them). */
+  turnActions?: readonly TurnAction[];
+}
+
+/** The chat dashboard moves this bar into its Plan card, where the plan already
+ *  shows the step: there the line says what Claude is doing right now (reading a
+ *  file, running a command), with the tool's icon, and its opened block counts
+ *  the turn's calls and lists the latest ones. */
+function inDashboard(pane: HTMLElement): boolean {
+  return pane.getAttribute("data-chat-view") === "dashboard";
+}
+
+/** The icon of the call the line describes, or a quiet default. */
+function activityIcon(): string {
+  const last = _src?.turnActions?.at(-1);
+  if (_activity && last && last.label === _activity) return last.icon;
+  return _activity ? "ph-wrench" : "ph-sparkle";
+}
+
+function agoText(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s ago` : `${Math.round(s / 60)}m ago`;
 }
 
 /** Repoint the bar at a newly mounted chat. Every field is overwritten, so a
@@ -205,6 +228,7 @@ export function updateThinkingBar(): void {
   // quick-reply chips show.
   refreshNextChips(pane);
   const textEl = bar.querySelector<HTMLElement>(".thinking-text");
+  const dash = inDashboard(pane);
   bar.classList.toggle("busy", busy);
   // The header cancel button (pending pane) only belongs mid-turn; hide it while
   // drafting so "Cancel turn" never shows when there's no turn to cancel.
@@ -221,7 +245,7 @@ export function updateThinkingBar(): void {
   if (!busy && !hasHeld) {
     bar.setAttribute("hidden", "");
     if (textEl) textEl.textContent = "";
-    renderDetail(bar, false, false);
+    renderDetail(bar, false, false, dash);
     state.heldMessages?.renderChip();
     return;
   }
@@ -232,15 +256,24 @@ export function updateThinkingBar(): void {
     // (the early return above covers idle-and-empty), so every label below it
     // describes a turn that is not running - `_activity` especially, which
     // keeps the last tool name and reads as "<tool>... - thinking…".
+    const silent = Date.now() - _lastEventAt > NOT_RESPONDING_MS;
     if (!busy) textEl.textContent = frozen ? "Frozen - will send once unfrozen" : "Waiting to send";
-    else if (_todoActivity !== null) textEl.textContent = _todoActivity;
+    else if (dash) {
+      if (_activity) textEl.textContent = _activityIdle ? `${_activity} - thinking…` : _activity;
+      else textEl.textContent = silent ? "Not responding - no output from the session" : "Thinking…";
+    } else if (_todoActivity !== null) textEl.textContent = _todoActivity;
     else if (_progressN !== null) textEl.textContent = `Step ${_progressN} of ${_progressM}`;
     else if (_activity) textEl.textContent = _activityIdle ? `${_activity} - thinking…` : _activity;
-    else if (Date.now() - _lastEventAt > NOT_RESPONDING_MS) {
+    else if (silent) {
       textEl.textContent = "Not responding - no output from the session";
     } else textEl.textContent = "Thinking…";
   }
-  renderDetail(bar, busy, showStop);
+  const icon = bar.querySelector<HTMLElement>(".thinking-icon");
+  if (icon) {
+    icon.hidden = !(dash && busy);
+    if (dash && busy) icon.className = `ph thinking-icon ${activityIcon()}`;
+  }
+  renderDetail(bar, busy, showStop, dash);
   paintElapsed();
   state.heldMessages?.renderChip();
 }
@@ -272,11 +305,13 @@ function paintElapsed(): void {
     || Date.now();
   const text = _wasBusy ? formatElapsed(Date.now() - start) : "";
   for (const n of bar.querySelectorAll<HTMLElement>(".thinking-elapsed")) n.textContent = text;
+  const now = Date.now();
+  for (const n of bar.querySelectorAll<HTMLElement>(".thinking-ago[data-at]")) n.textContent = agoText(now - Number(n.dataset.at));
 }
 
 /** The opened block: the full command or path, then tool, time, step. Redrawn only
  *  when its content changes, so a text selection inside it survives the stream. */
-function renderDetail(bar: HTMLElement, busy: boolean, showStop: boolean): void {
+function renderDetail(bar: HTMLElement, busy: boolean, showStop: boolean, dash = false): void {
   if (!busy) bar.classList.remove("is-open");
   const open = busy && bar.classList.contains("is-open");
   bar.querySelector(".thinking-main")?.setAttribute("aria-expanded", String(open));
@@ -289,9 +324,15 @@ function renderDetail(bar: HTMLElement, busy: boolean, showStop: boolean): void 
   }
   const d = _src?.lastActivityDetail ?? null;
   const step = _progressN !== null ? `Step ${_progressN} of ${_progressM}` : null;
-  const key = JSON.stringify([d, step, _todoActivity, showStop]);
+  const actions = dash ? _src?.turnActions ?? [] : [];
+  const key = JSON.stringify([d, step, _todoActivity, showStop, dash, actions.length, actions.at(-1)?.id ?? null]);
   if (host.dataset.key === key) return;
   host.dataset.key = key;
+  if (dash) {
+    host.innerHTML = dashDetailHtml(d, actions, showStop);
+    paintElapsed();
+    return;
+  }
   host.innerHTML =
     (d?.text
       ? `<div class="thinking-cmd"><code>${escapeHtml(capActivityText(d.text))}</code><button type="button" class="thinking-copy" title="Copy"><i class="ph ph-copy"></i></button></div>`
@@ -303,4 +344,19 @@ function renderDetail(bar: HTMLElement, busy: boolean, showStop: boolean): void 
     (_todoActivity ? `<span><i class="ph ph-check-square"></i>${escapeHtml(_todoActivity)}</span>` : "") +
     `</div>` +
     (showStop ? `<button type="button" class="thinking-stop-turn"><i class="ph ph-stop-circle"></i>Stop turn</button>` : "");
+}
+
+/** The dashboard's opened block: the full command, the turn's calls counted by
+ *  kind, and the few before the one on the line (the plan already says the step). */
+function dashDetailHtml(d: ActivityDetail | null, actions: readonly TurnAction[], showStop: boolean): string {
+  const cmd = d?.text
+    ? `<div class="thinking-cmd"><code>${escapeHtml(capActivityText(d.text))}</code><button type="button" class="thinking-copy" title="Copy"><i class="ph ph-copy"></i></button></div>`
+    : "";
+  const counts = actions.length > 0
+    ? `<div class="thinking-counts"><i class="ph ph-chart-bar"></i><span>This turn: ${escapeHtml(turnCounts(actions))}</span></div>` : "";
+  const before = actions.length > 1 ? actions.slice(-4, -1).reverse() : [];
+  const trail = before.length > 0
+    ? `<div class="thinking-trail">${before.map((a) => `<div class="thinking-trail-row"><i class="ph ${escapeHtml(a.icon)}"></i><span>${escapeHtml(a.label)}</span><em class="thinking-ago" data-at="${a.at}"></em></div>`).join("")}</div>` : "";
+  const stop = showStop ? `<button type="button" class="thinking-stop-turn"><i class="ph ph-stop-circle"></i>Stop turn</button>` : "";
+  return `${cmd}${counts}${trail}${stop}`;
 }
