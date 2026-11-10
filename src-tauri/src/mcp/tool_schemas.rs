@@ -42,6 +42,7 @@ pub fn tool_list_response(id: &Value, is_jarvis: bool, browser: bool, browser_sc
     // For every chat: the tool list is fixed at process start, and the tool
     // refuses itself when the chat has no subs.
     tools.extend(super::tool_schemas_subchat::chat_schemas());
+    tools.extend(super::tool_schemas_retro::retro_schemas());
 
     if is_jarvis {
         tools.extend(super::tool_schemas_jarvis::jarvis_schemas());

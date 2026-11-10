@@ -6,6 +6,7 @@ use serde_json::Value;
 
 use super::dispatch::forward_all_args;
 use super::relay::Ctx;
+use super::tool_schemas_retro::TOOL_MAIN_CHAT_RETRO;
 use super::tool_schemas_subchat::{TOOL_FINISH_SUBCHAT, TOOL_SHARED_MOCKUP, TOOL_SUBCHAT};
 
 /// Only advertised to a sub's `tools/list` (`CC_SUBCHAT`), but a `tools/call`
@@ -35,6 +36,15 @@ pub(super) fn subchat_tools(ctx: &Ctx, name: &str) -> Option<Value> {
             "/hooks/shared-mockup",
             forward_all_args(ctx.args, ctx.session_id),
             Some("shared_mockup refused"),
+            None,
+        )),
+        // A main chat's retro, written once before it closes. Listed for every
+        // chat (the tool list is fixed at process start); the daemon route
+        // refuses a sub and a chat without the mode.
+        TOOL_MAIN_CHAT_RETRO => Some(ctx.relay(
+            "/hooks/main-chat-retro",
+            forward_all_args(ctx.args, ctx.session_id),
+            Some("main_chat_retro refused"),
             None,
         )),
         _ => None,
