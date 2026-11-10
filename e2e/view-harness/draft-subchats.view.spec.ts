@@ -11,7 +11,7 @@ import { CONDUCTOR_CWD, LIST_ROWS, conductorHistory, conductorSnapshot, fakeShot
 const REAL = "real-main";
 const CWD = "C:/Projects/alpha";
 
-async function openDraft(page: Page, size: { width: number; height: number }): Promise<void> {
+async function openDraft(page: Page, size: { width: number; height: number }, subchatsOn = false): Promise<void> {
   await page.setViewportSize(size);
   await mountView(page, {
     view: "sessions",
@@ -20,6 +20,12 @@ async function openDraft(page: Page, size: { width: number; height: number }): P
       list_instances: [],
       get_active_sessions: [],
       list_subchats_on: [],
+      // A group's dashboard has no settings rail, so the switch is the row above the
+      // message box: the case this block covers (the phone, a group, a rail that never loads).
+      dashboard_list_targets: [{
+        target: { kind: "group", id: "g-alpha", name: "alpha", repos: [{ cwd: CWD, name: "alpha", project_id: null }] },
+        last_active_ms: 0, live_count: 0, question_count: 0, working_count: 0,
+      }],
       start_session: REAL,
       set_auto_accept: null,
       set_composer_draft: { updated_at: "2026-11-06T00:00:00.000Z" },
@@ -51,10 +57,10 @@ async function openDraft(page: Page, size: { width: number; height: number }): P
     };
   }, { real: REAL, row: sessionInstance({ session_id: REAL, name: "New chat", cwd: CWD, pid: 200, model: "opus", effort: "high", busy: false, awaiting: "done" }) });
   await page.waitForFunction(() => typeof (window as unknown as { __launchDraftForTest?: unknown }).__launchDraftForTest === "function");
-  await page.evaluate(() => {
-    (window as unknown as { __launchDraftForTest: (p: { path: string; name: string }, c: { model: string; effort: string; accountId: string }) => void })
-      .__launchDraftForTest({ path: "C:/Projects/alpha", name: "alpha" }, { model: "sonnet", effort: "low", accountId: "acc1" });
-  });
+  await page.evaluate((on) => {
+    (window as unknown as { __launchDraftForTest: (p: { path: string; name: string }, c: { model: string; effort: string; accountId: string; subchatsOn: boolean }) => void })
+      .__launchDraftForTest({ path: "C:/Projects/alpha", name: "alpha" }, { model: "sonnet", effort: "low", accountId: "acc1", subchatsOn: on });
+  }, subchatsOn);
   await page.locator("#session-pane .session-composer .composer-textarea").waitFor();
 }
 
@@ -199,7 +205,7 @@ test.describe("view-harness / Use subchats on a new-chat draft with a settings r
 
 for (const [label, size] of [["desktop", { width: 1280, height: 800 }], ["phone", { width: 393, height: 852 }]] as const) {
   test.describe(`view-harness / Use subchats on a new-chat draft (${label})`, () => {
-    test("the switch sits right above the message box, off by default", async ({ page }) => {
+    test("the switch sits right above the message box, off when the draft opens without it", async ({ page }) => {
       await openDraft(page, size);
       await expect(row(page)).toBeVisible();
       await expect(row(page).locator("input")).not.toBeChecked();
@@ -224,6 +230,31 @@ for (const [label, size] of [["desktop", { width: 1280, height: 800 }], ["phone"
       expect(args).toMatchObject({ subchatsOn: true, model: "opus", effort: "high" });
       // The row is gone once the draft became the chat.
       await expect(row(page)).toHaveCount(0);
+    });
+
+    test("a draft that opens with it on (the default) shows it on with the chip on Opus, and the first send carries the flag", async ({ page }) => {
+      await openDraft(page, size, true);
+      await expect(row(page).locator("input")).toBeChecked();
+      await expect(modelText(page)).toHaveText(/Opus/);
+      await page.locator("#session-pane .session-composer .composer-textarea").fill("build the site");
+      await page.locator("#session-pane .session-composer .composer-send").click();
+      await page.waitForFunction(() => (window as unknown as { __ccInvokeCalls: Array<{ cmd: string }> }).__ccInvokeCalls.some((c) => c.cmd === "start_session"));
+      const args = await page.evaluate(() =>
+        (window as unknown as { __ccInvokeCalls: Array<{ cmd: string; args: Record<string, unknown> }> }).__ccInvokeCalls.find((c) => c.cmd === "start_session")!.args);
+      expect(args).toMatchObject({ subchatsOn: true, model: "opus", effort: "high" });
+    });
+
+    test("switching the default off for one chat puts the project's model back and starts an ordinary chat", async ({ page }) => {
+      await openDraft(page, size, true);
+      await sw(page).click();
+      await expect(row(page).locator("input")).not.toBeChecked();
+      await expect(modelText(page)).toHaveText(/Sonnet/);
+      await page.locator("#session-pane .session-composer .composer-textarea").fill("quick question");
+      await page.locator("#session-pane .session-composer .composer-send").click();
+      await page.waitForFunction(() => (window as unknown as { __ccInvokeCalls: Array<{ cmd: string }> }).__ccInvokeCalls.some((c) => c.cmd === "start_session"));
+      const args = await page.evaluate(() =>
+        (window as unknown as { __ccInvokeCalls: Array<{ cmd: string; args: Record<string, unknown> }> }).__ccInvokeCalls.find((c) => c.cmd === "start_session")!.args);
+      expect(args).toMatchObject({ subchatsOn: false, model: "sonnet", effort: "low" });
     });
 
     test("left off, the first send starts an ordinary chat", async ({ page }) => {

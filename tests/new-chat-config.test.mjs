@@ -102,6 +102,16 @@ describe("resolveNewChatConfig", () => {
     expect(await resolveNewChatConfig(PATH)).toMatchObject({ model: "haiku", effort: "low" });
   });
 
+  it("starts with Use subchats on", async () => {
+    reads.settings = { default_account_id: "personal" };
+    expect((await resolveNewChatConfig(PATH)).subchatsOn).toBe(true);
+  });
+
+  it("starts a paired machine's chat with Use subchats on too", async () => {
+    apiMock.listMachineAccounts.mockResolvedValue({ accounts: [personal], default_account_id: "personal", project_account_id: null });
+    expect((await resolveNewChatConfig(PATH, "m1")).subchatsOn).toBe(true);
+  });
+
   it("rolls a character from the project's pool", async () => {
     reads.chars = [{ id: "gazlowe", label: "Gazlowe" }];
     expect((await resolveNewChatConfig(PATH)).characterId).toBe("gazlowe");

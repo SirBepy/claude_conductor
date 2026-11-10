@@ -95,6 +95,12 @@ function wire(host: HTMLElement, pane: ParentNode, config: SessionConfig): void 
 export function mountDraftSubchats(pane: HTMLElement, config: SessionConfig): void {
   unmountDraftSubchats(pane);
   _applied = null;
+  // A draft opens with the mode already on (resolveNewChatConfig), but its chips
+  // still show the project's model: move them to the main-chat model now, the way
+  // the switch would, so what the chips show is what the first spawn uses and
+  // switching off still puts the project's model back. A reopened draft whose
+  // user switched it off carries `false` and is left alone.
+  if (config.subchatsOn === true && !subchatsBlockedReason(config.accountId)) setOn(config, true);
   insertRow(pane, config, true);
   // The dashboard's rail loads after its snapshot, so the row stays unseen until we know
   // the rail is not coming; this covers a rail that fails to fill or never mounts.
