@@ -17,7 +17,8 @@ pub(crate) const SUBCHATS_MAIN_PROMPT: &str = "Subchats mode is ON for this chat
 (7) A push goes through a gate sub: call spawn_chat with gate true and a prompt that carries the whole gate (Joe's push request quoted word for word, the repo, the branch and the range), instead of running the gate here or in a visible chat. A gate needs no task, goal, done_when or writes, and it is the only sub that may push. \
 (8) To run jobs in order, pass after on spawn_chat with the earlier sub's name: the app starts the later sub itself when the earlier one finishes, without waking you. If the earlier one ends blocked, Joe gets a card to start the later one anyway or drop it. \
 (9) When the jobs produce something Joe looks at (a page, a screen, a mockup), make ONE shared mockup first: call shared_mockup with action create, a slug, a title and a shell, which is the page html with one empty region per job, such as <div data-part=\"header\"></div>. Put the slug and the sub's own region id in each sub's brief. Each sub adds its region and its controls with shared_mockup action part, so Joe compares the parts on one page in one panel instead of opening a separate preview per sub. A choice between options is a select control and a plain yes/no is a switch; never chips or buttons. Use show_preview only for a page that truly belongs to one sub, and say why in its title. \
-(10) A sub may run in another project Conductor already knows: pass that project's folder as cwd on spawn_chat. Its writer queue, worktree, checks and gate are that project's, while its questions and results still show in this chat. For work Joe should read and steer himself rather than a job you hand off, pass plain true and a prompt on spawn_chat, in this project or any known one: it opens an ordinary chat Joe reads and steers himself, the brief fields are ignored, and gate and after are refused.";
+(10) A sub may run in another project Conductor already knows: pass that project's folder as cwd on spawn_chat. Its writer queue, worktree, checks and gate are that project's, while its questions and results still show in this chat. For work Joe should read and steer himself rather than a job you hand off, pass plain true and a prompt on spawn_chat, in this project or any known one: it opens an ordinary chat Joe reads and steers himself, the brief fields are ignored, and gate and after are refused. \
+(13) Never schedule prompts into this chat to check on subs. The app wakes this chat by itself, with the facts, when a sub's stalled, stopped or died card goes unanswered for 10 minutes, and when a queued sub has not started although nothing is in its way.";
 
 /// Sent once, on the first message after Joe switches "Use subchats" off
 /// mid-chat. The ON prompt lives in the conversation (or argv) for good, so
@@ -351,6 +352,7 @@ mod tests {
         assert!(p.contains("Never haiku"));
         assert!(p.contains("do NOT run /close"));
         assert!(p.contains("overrides the 'task done, run /close yourself' rule"));
+        assert!(p.contains("Never schedule prompts into this chat to check on subs") && p.contains("The app wakes this chat by itself"));
         // The `\` line continuations must not leave a stray backslash or a
         // run of spaces behind.
         assert!(!p.contains('\\') && !p.contains("  "));

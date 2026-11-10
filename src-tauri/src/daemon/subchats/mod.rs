@@ -21,6 +21,7 @@ use std::sync::Arc;
 pub mod adopt;
 pub mod back;
 pub mod card_log;
+pub(crate) mod card_watch;
 pub mod cards;
 pub mod ceiling;
 pub mod checkup;
