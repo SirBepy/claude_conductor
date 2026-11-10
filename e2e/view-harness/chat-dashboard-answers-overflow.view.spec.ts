@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (answers-question-rewrite): the card asks the daemon for a short question only for an answer with no `question` and a message past 90 chars; this spec's answers carry their own, so it passes.
 // asserts: src/views/sessions/chat-dashboard/answers-card.ts, src/views/sessions/chat-dashboard/answers-card.css, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/chat-dashboard/dashboard-zones.ts
 import { test, expect, type Page, type Locator } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

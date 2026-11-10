@@ -25,6 +25,23 @@ pub async fn answers_mark(
         .map_err(|e| e.to_string())
 }
 
+/// Blocks for one cheap model call that writes the short question for an answer
+/// whose `send_message` carried none (the daemon stores it once per answer).
+#[tauri::command]
+pub async fn answers_rewrite_question(
+    session_id: String,
+    key: String,
+    joe: String,
+    answer: String,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .call("answers_rewrite_question", json!({"session_id": session_id, "key": key, "joe": joe, "answer": answer}))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Blocks for the Ask sidecar's whole run (seconds, not milliseconds).
 #[tauri::command]
 pub async fn answers_thread_send(

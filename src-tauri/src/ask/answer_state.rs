@@ -32,6 +32,11 @@ pub struct AnswerState {
     /// Questions Joe started with +, oldest first. Each one's thread is its answer.
     #[serde(default)]
     pub questions: Vec<NewQuestion>,
+    /// Answer key -> the short question a model wrote for an answer whose
+    /// `send_message` carried none, so it is written once per answer and not on
+    /// every render (`methods/answers.rs::rewrite_question`).
+    #[serde(default)]
+    pub rewrites: BTreeMap<String, String>,
 }
 
 impl AnswerState {
@@ -43,6 +48,10 @@ impl AnswerState {
                 self.read.remove(k);
             }
         }
+    }
+
+    pub fn set_rewrite(&mut self, key: &str, question: &str) {
+        self.rewrites.insert(key.to_string(), question.to_string());
     }
 
     pub fn link_thread(&mut self, key: &str, thread_id: &str) {
@@ -67,7 +76,7 @@ impl AnswerState {
     }
 }
 
-fn file_for(chat_session_id: &str) -> Result<PathBuf> {
+pub fn file_for(chat_session_id: &str) -> Result<PathBuf> {
     let safe: String = chat_session_id
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
@@ -108,11 +117,15 @@ pub fn load(chat_session_id: &str) -> AnswerState {
 
 /// Applies `f` to the stored state and saves it, returning the new state.
 pub fn update(chat_session_id: &str, f: impl FnOnce(&mut AnswerState)) -> Result<AnswerState> {
+    update_at(&file_for(chat_session_id)?, f)
+}
+
+/// `update` on an explicit file, so a test never touches the live data dir.
+pub fn update_at(path: &Path, f: impl FnOnce(&mut AnswerState)) -> Result<AnswerState> {
     let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let path = file_for(chat_session_id)?;
-    let mut state = load_from(&path);
+    let mut state = load_from(path);
     f(&mut state);
-    save_to(&path, &state)?;
+    save_to(path, &state)?;
     Ok(state)
 }
 

@@ -26,7 +26,7 @@ const ok = (id) => ({ type: "tool_result", tool_use_id: id, output: { type: "tex
 
 /** A daemon in memory: the store a reload reads back, and the Ask threads. */
 function fakeDaemon() {
-  const db = { store: emptyStore(), threads: [], marks: [], sends: [] };
+  const db = { store: emptyStore(), threads: [], marks: [], sends: [], rewrites: [], made: {} };
   let release = null;
   db.hold = () => new Promise((res) => { release = res; });
   db.release = () => release?.();
@@ -35,6 +35,14 @@ function fakeDaemon() {
     async mark(_sid, keys, read) {
       db.marks.push(keys);
       for (const k of keys) if (read) db.store.read[k] = Date.now(); else delete db.store.read[k];
+      return structuredClone(db.store);
+    },
+    async rewrite(_sid, key, joe, answer) {
+      db.rewrites.push({ key, joe, answer });
+      if (db.rewriteGate) await db.rewriteGate;
+      const q = db.made[key];
+      if (q === "fail") throw new Error("model call failed");
+      if (q) db.store.rewrites[key] = q;
       return structuredClone(db.store);
     },
     async send(req) {
@@ -186,6 +194,70 @@ describe("Answers card", () => {
     expect(q.getAttribute("title")).toBe("You wrote: does it read the shortcut tracker?");
     card(pane).querySelector(".ax-readmore").click();
     expect(face.classList.contains("open")).toBe(false);
+  });
+
+  it("shows a clipped preview of a long message until the model-written question arrives, asking once", async () => {
+    const LONG = "ok a few things: please bump the version and update the readme, then tidy the sidebar label, and also does the Trello token need write access to the board or is read enough for what we do? after that rename the old branch";
+    db.made = { w1: "Does the Trello token need write access?" };
+    let release;
+    db.rewriteGate = new Promise((res) => { release = res; });
+    const { pane, r } = mountPane("chat-rewrite");
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent(LONG), ...send({ kind: "answer", verdict: "No, read-only is enough", text: "It only reads." }, "w1")]);
+    await wait(30);
+    const line = () => card(pane).querySelector(".ax-qline");
+    expect(line().querySelector("span").textContent.length).toBeLessThanOrEqual(91);
+    expect(line().querySelector("span").textContent.endsWith("\u2026")).toBe(true);
+    expect(line().querySelector("span").textContent).not.toContain("rename the old branch");
+    expect(line().getAttribute("title")).toBe(`You wrote: ${LONG}`);
+    expect(db.rewrites).toEqual([{ key: "w1", joe: LONG, answer: "No, read-only is enough\nIt only reads." }]);
+
+    release();
+    await wait(30);
+    expect(line().querySelector("span").textContent).toBe("Does the Trello token need write access?");
+    // Re-rendering for another answer does not ask again for this one.
+    feed(r, [userEvent("and the key?"), ...send({ kind: "answer", verdict: "Same", text: "Same key." }, "w2")]);
+    await wait(30);
+    expect(db.rewrites.map((x) => x.key)).toEqual(["w1"]);
+  });
+
+  it("asks only for the newest few answers, one at a time, and a follow-up carries Joe's whole message", async () => {
+    const wall = (n) => `message ${n} ` + "word ".repeat(40);
+    let release;
+    db.rewriteGate = new Promise((res) => { release = res; });
+    const { pane, r } = mountPane("chat-window");
+    new ChatDashboard(pane, r);
+    for (let i = 1; i <= 7; i++) feed(r, [userEvent(wall(i)), ...send({ kind: "answer", verdict: `V${i}`, text: "t" }, `k${i}`)]);
+    await wait(30);
+    // One call in flight, newest first.
+    expect(db.rewrites.map((x) => x.key)).toEqual(["k7"]);
+    release();
+    await wait(60);
+    // Only the newest five are ever asked; k1 and k2 keep their preview.
+    expect(db.rewrites.map((x) => x.key)).toEqual(["k7", "k6", "k5", "k4", "k3"]);
+
+    db.rewriteGate = null;
+    // k7 is on the card with no rewrite stored (the fake returns none): its thread follow-up is told the whole message.
+    card(pane).querySelector("[data-ax='reply']").click();
+    await wait(30);
+    const ta = card(pane).querySelector(".ax-t-input");
+    ta.value = "and then?";
+    ta.dispatchEvent(new Event("input"));
+    card(pane).querySelector(".ax-t-send").click();
+    await wait();
+    expect(db.sends[0]).toMatchObject({ key: "k7", aboutQuestion: wall(7).replace(/\s+/g, " ").trim() });
+  });
+
+  it("keeps the preview when the model call fails and does not retry it", async () => {
+    db.made = { f1: "fail" };
+    const { pane, r } = mountPane("chat-rewrite-fail");
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent("ok a few things: please bump the version and update the readme, then tidy the sidebar label, and also does the Trello token need write access to the board or is read enough for what we do? after that rename the old branch"), ...send({ kind: "answer", verdict: "No", text: "t" }, "f1")]);
+    await wait(30);
+    feed(r, [userEvent("again?"), ...send({ kind: "answer", verdict: "Yes", text: "u" }, "f2")]);
+    await wait(30);
+    // A short message is its own question and costs no call.
+    expect(db.rewrites.map((x) => x.key)).toEqual(["f1"]);
   });
 
   it("threads in place, and a reply after Joe left makes the answer unread again", async () => {

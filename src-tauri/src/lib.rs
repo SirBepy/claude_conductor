@@ -440,6 +440,7 @@ pub fn run() {
             ipc::ask_list_threads,
             ipc::answers_state,
             ipc::answers_mark,
+            ipc::answers_rewrite_question,
             ipc::answers_thread_send,
             ipc::list_session_images,
             ipc::get_sub_brief,

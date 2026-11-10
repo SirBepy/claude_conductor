@@ -18,10 +18,13 @@ export interface AnswerStore {
   threads: Record<string, string>;
   /** Questions Joe started with +, oldest first. */
   questions: { thread_id: string; asked_at: number }[];
+  /** Answer key -> the short question the daemon had a model write for an answer
+   *  whose send_message carried none (daemon/methods/answers.rs). */
+  rewrites: Record<string, string>;
 }
 
 export function emptyStore(): AnswerStore {
-  return { read: {}, threads: {}, questions: [] };
+  return { read: {}, threads: {}, questions: [], rewrites: {} };
 }
 
 /** Everything the card reads besides the transcript. */
@@ -35,10 +38,15 @@ export interface AnswerItem {
   key: string;
   /** The row the card draws: the transcript's own, or one built from a + question's reply. */
   message: RenderedMessage;
-  /** The question as the card shows it: Claude's rewrite, else what Joe typed. */
+  /** The question as the card shows it: Claude's rewrite, else the daemon's stored
+   *  one, else a clipped preview of what Joe typed. */
   question: string;
-  /** What Joe typed, shown on hover in the thread when `question` is a rewrite. */
+  /** What Joe typed, shown on hover in the thread when `question` is not his own words. */
   raw: string | null;
+  /** The whole message this answer replies to, for the daemon's rewrite call. */
+  typed: string;
+  /** `question` is only a clipped preview of a long `typed`: no rewrite exists yet. */
+  provisional: boolean;
   /** When it was answered (ms). */
   at: number;
   verdict: string;
@@ -93,6 +101,19 @@ export function parseQuestionReply(reply: string): { question: string | null; ve
     else if (l !== "") break;
   }
   return { question, verdict, body: lines.slice(i).join("\n").trim() };
+}
+
+/** How much of Joe's own message stands in for a question until a short one is
+ *  written. His whole message can be a page long and name several things. */
+export const PREVIEW_MAX = 90;
+
+/** The start of his message, cut at a word and marked, never the whole wall of text. */
+export function clipPreview(text: string): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= PREVIEW_MAX) return t;
+  const cut = t.slice(0, PREVIEW_MAX);
+  const at = cut.lastIndexOf(" ");
+  return `${(at > PREVIEW_MAX / 2 ? cut.slice(0, at) : cut).replace(/[\s,;:.-]+$/, "")}\u2026`;
 }
 
 const capitalise = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
@@ -157,13 +178,18 @@ export function buildAnswerItems(messages: readonly RenderedMessage[], side?: An
     if (m.kind === "message") applyReadJudgement(m, chat, joeCount);
     if (!isAnswerRow(m) || !m.id) continue;
     const typed = joe ? plainUserText(joe) : "";
-    const rewrite = m.card?.question ?? null;
+    const rewrite = m.card?.question ?? side?.store.rewrites[m.id] ?? null;
+    const question = rewrite ?? clipPreview(typed);
+    // A message that fits the preview is already its own question; only a clipped one wants a rewrite.
+    const provisional = !rewrite && question !== typed;
     const thread = threadById(side, side?.store.threads[m.id]);
     const item: AnswerItem = {
       key: m.id,
       message: m,
-      question: rewrite ?? typed,
-      raw: rewrite && typed && rewrite !== typed ? typed : null,
+      question,
+      raw: typed && question !== typed ? typed : null,
+      typed,
+      provisional,
       at: toMs(m.ts),
       verdict: m.card?.verdict ?? "",
       text: m.text ?? "",
@@ -195,6 +221,8 @@ export function buildAnswerItems(messages: readonly RenderedMessage[], side?: An
       } as RenderedMessage,
       question,
       raw: question !== first.text.trim() ? first.text.trim() : null,
+      typed: first.text.trim(),
+      provisional: false,
       at: askMs(reply.ts) || askMs(q.asked_at),
       verdict,
       text,

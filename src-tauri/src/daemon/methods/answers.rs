@@ -11,7 +11,10 @@ use super::super::state::DaemonState;
 use crate::ask::answer_state::{self, AnswerState};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::future::Future;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -54,6 +57,109 @@ pub(crate) fn follow_up_context(question: &str, answer: &str) -> String {
     out
 }
 
+/// The most a rewritten question may run to, matching `send_message`'s own `question` cap.
+const QUESTION_MAX: usize = 200;
+/// What the rewrite call is given of each side. A pasted log in Joe's message
+/// or a long answer would only make the call slower; the question is in the
+/// first part of both.
+const JOE_MAX: usize = 4000;
+const ANSWER_MAX: usize = 2000;
+
+fn clip_chars(s: &str, max: usize) -> String {
+    s.trim().chars().take(max).collect()
+}
+
+/// The prompt for the one-shot call that turns Joe's whole message into the one
+/// short question the answer replies to. Joe's message often holds several
+/// requests; only the part the answer addresses is the question.
+pub(crate) fn rewrite_prompt(joe: &str, answer: &str) -> String {
+    format!(
+        "A developer sent his Claude Code chat the message below. Claude's reply follows it. The \
+message may hold several requests or points; the reply answers only one question in it.\n\n\
+Write that one question as a single clear sentence, in the developer's voice, at most {QUESTION_MAX} \
+characters, ending with a question mark. Reply with the question alone: no quotes, no label, no \
+preamble, no second line. Never use the em dash character. Do not use any tool.\n\n\
+<message>\n{}\n</message>\n\n<reply>\n{}\n</reply>",
+        clip_chars(joe, JOE_MAX),
+        clip_chars(answer, ANSWER_MAX)
+    )
+}
+
+/// The model's reply as a stored question: its first non-empty line, without a
+/// label or wrapping quotes, capped at `QUESTION_MAX`. `None` when nothing usable is left.
+pub(crate) fn clean_question(raw: &str) -> Option<String> {
+    let line = raw.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let line = line.trim_start_matches(|c: char| c == '*' || c == '>' || c == '-' || c.is_whitespace());
+    let line = match line.get(..9) {
+        Some(head) if head.eq_ignore_ascii_case("question:") => &line[9..],
+        _ => line,
+    };
+    let line = line.replace('\u{2014}', "-");
+    let line = line.trim().trim_matches(|c: char| matches!(c, '"' | '\'' | '*' | '`' | '\u{201c}' | '\u{201d}'));
+    let out = clip_chars(line, QUESTION_MAX);
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+/// Answers whose rewrite is running now ("<chat>/<key>"), so two windows on the
+/// same chat, or a reload, never start a second call for one answer.
+static IN_FLIGHT: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+struct FlightGuard(String);
+
+impl FlightGuard {
+    fn enter(id: String) -> Option<Self> {
+        let mut g = IN_FLIGHT.lock().unwrap_or_else(|p| p.into_inner());
+        if g.get_or_insert_with(HashSet::new).insert(id.clone()) {
+            Some(Self(id))
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for FlightGuard {
+    fn drop(&mut self) {
+        if let Some(set) = IN_FLIGHT.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+/// Writes the short question for one answer once, into the chat's answer state
+/// at `path`. `run` is the model call (injected so tests use a fake). An answer
+/// that already has one, or whose rewrite is already running, makes no call.
+/// A failed or empty call stores nothing, so a later load tries again.
+pub(crate) async fn rewrite_question<F, Fut>(
+    path: &Path,
+    flight_id: String,
+    key: &str,
+    joe: &str,
+    answer: &str,
+    run: F,
+) -> Result<AnswerState, String>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: Future<Output = Result<String, String>>,
+{
+    let current = answer_state::load_from(path);
+    if current.rewrites.contains_key(key) || joe.trim().is_empty() {
+        return Ok(current);
+    }
+    let Some(_guard) = FlightGuard::enter(flight_id) else { return Ok(current) };
+    // A call that finished between the check above and taking the guard has stored one already.
+    let current = answer_state::load_from(path);
+    if current.rewrites.contains_key(key) {
+        return Ok(current);
+    }
+    let reply = run(rewrite_prompt(joe, answer)).await?;
+    let question = clean_question(&reply).ok_or_else(|| "the model returned no question".to_string())?;
+    answer_state::update_at(path, |s| s.set_rewrite(key, &question)).map_err(|e| format!("{e:#}"))
+}
+
 fn state_json(s: &AnswerState) -> Result<Value, RpcError> {
     serde_json::to_value(s).map_err(|e| RpcError::internal(e.to_string()))
 }
@@ -87,6 +193,39 @@ pub fn register_answers(router: &mut Router, _state: Arc<DaemonState>) {
         let s = answer_state::update(&p.session_id, |s| s.mark(&p.keys, p.read, now_ms()))
             .map_err(|e| RpcError::internal(format!("{e:#}")))?;
         state_json(&s)
+    });
+
+    // Blocks for one cheap model call. The card asks once per answer that has no
+    // `question` of its own; the result is stored beside the read marks.
+    router.register("answers_rewrite_question", move |params, _ctx| async move {
+        #[derive(Deserialize)]
+        struct P {
+            session_id: String,
+            key: String,
+            joe: String,
+            #[serde(default)]
+            answer: String,
+        }
+        let p: P = parse(params)?;
+        let path = answer_state::file_for(&p.session_id).map_err(|e| RpcError::internal(format!("{e:#}")))?;
+        let state = rewrite_question(
+            &path,
+            format!("{}/{}", p.session_id, p.key),
+            &p.key,
+            &p.joe,
+            &p.answer,
+            |prompt| async move {
+                let session = uuid::Uuid::new_v4().to_string();
+                // Never resumed, so it leaves no session for History to list.
+                crate::ask::sidecar::run_readonly("Answer question", &prompt, None, &session, None, false)
+                    .await
+                    .map(|a| a.text)
+                    .map_err(|e| format!("{e:#}"))
+            },
+        )
+        .await
+        .map_err(RpcError::internal)?;
+        state_json(&state)
     });
 
     // Blocks for the sidecar's whole run. `key` names the answer the thread
@@ -156,6 +295,101 @@ mod tests {
         let c = card_question_context("  Where should the key live?\n\n- **Key modal**: in .env  ");
         assert!(c.contains("The card:\nWhere should the key live?\n\n- **Key modal**: in .env\n"));
         assert!(c.contains("\nQUESTION: ") && c.contains("\nVERDICT: "));
+    }
+
+    #[test]
+    fn the_rewrite_prompt_carries_both_sides_and_stays_bounded() {
+        let p = rewrite_prompt("fix the build and why is the card blank?", "Because the host is hidden");
+        assert!(p.contains("fix the build and why is the card blank?"));
+        assert!(p.contains("Because the host is hidden"));
+        let big = rewrite_prompt(&"x".repeat(50_000), &"y".repeat(50_000));
+        assert!(big.len() < JOE_MAX + ANSWER_MAX + 1500);
+    }
+
+    #[test]
+    fn a_model_reply_becomes_one_short_clean_question() {
+        assert_eq!(clean_question("\"Why is the card blank?\"\n\nExtra").as_deref(), Some("Why is the card blank?"));
+        assert_eq!(clean_question("Question: Why is it blank - really?").as_deref(), Some("Why is it blank - really?"));
+        assert_eq!(clean_question("Why is it blank \u{2014} really?").as_deref(), Some("Why is it blank - really?"));
+        assert_eq!(clean_question("\n  \n").as_deref(), None);
+        assert_eq!(clean_question(&"q".repeat(500)).unwrap().chars().count(), QUESTION_MAX);
+    }
+
+    fn block_on<T>(f: impl Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(f)
+    }
+
+    #[test]
+    fn a_rewrite_is_made_once_per_answer_and_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.answers.json");
+        let calls = std::cell::Cell::new(0);
+        let fake = |reply: &'static str| {
+            let calls = &calls;
+            move |_prompt: String| async move {
+                calls.set(calls.get() + 1);
+                Ok::<_, String>(reply.to_string())
+            }
+        };
+        let s = block_on(rewrite_question(&path, "c/a1".into(), "a1", "a long message", "an answer", fake("Why?"))).unwrap();
+        assert_eq!(s.rewrites.get("a1").map(String::as_str), Some("Why?"));
+        // The stored one is read back, with no second call.
+        let s = block_on(rewrite_question(&path, "c/a1".into(), "a1", "a long message", "an answer", fake("Other?"))).unwrap();
+        assert_eq!(s.rewrites.get("a1").map(String::as_str), Some("Why?"));
+        assert_eq!(calls.get(), 1);
+        assert_eq!(answer_state::load_from(&path).rewrites.len(), 1);
+    }
+
+    #[test]
+    fn a_failed_or_empty_call_stores_nothing_and_a_later_load_retries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.answers.json");
+        let err = block_on(rewrite_question(&path, "c/b".into(), "b", "msg", "ans", |_| async { Err::<String, _>("boom".into()) }));
+        assert_eq!(err.unwrap_err(), "boom");
+        let empty = block_on(rewrite_question(&path, "c/b".into(), "b", "msg", "ans", |_| async { Ok::<_, String>("  \n".into()) }));
+        assert!(empty.is_err());
+        assert!(answer_state::load_from(&path).rewrites.is_empty());
+        let ok = block_on(rewrite_question(&path, "c/b".into(), "b", "msg", "ans", |_| async { Ok::<_, String>("Q?".into()) })).unwrap();
+        assert_eq!(ok.rewrites.get("b").map(String::as_str), Some("Q?"));
+    }
+
+    #[test]
+    fn a_blank_message_makes_no_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.answers.json");
+        let s = block_on(rewrite_question(&path, "c/blank".into(), "blank", "  \n", "ans", |_| async {
+            panic!("a call was made for a blank message")
+        }))
+        .unwrap();
+        assert!(s.rewrites.is_empty());
+    }
+
+    #[test]
+    fn a_rewrite_stored_while_waiting_for_the_guard_is_not_called_for_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.answers.json");
+        // The other request's write lands as this one's guard is taken.
+        let other = path.clone();
+        let s = block_on(async {
+            let g = FlightGuard::enter("c/race".into()).unwrap();
+            drop(g);
+            answer_state::update_at(&other, |s| s.set_rewrite("race", "First?")).unwrap();
+            rewrite_question(&path, "c/race".into(), "race", "msg", "ans", |_| async { panic!("a second call started") }).await
+        })
+        .unwrap();
+        assert_eq!(s.rewrites.get("race").map(String::as_str), Some("First?"));
+    }
+
+    #[test]
+    fn a_rewrite_already_running_starts_no_second_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.answers.json");
+        let _held = FlightGuard::enter("c/busy".into()).unwrap();
+        let s = block_on(rewrite_question(&path, "c/busy".into(), "busy", "msg", "ans", |_| async {
+            panic!("a second call started")
+        }))
+        .unwrap();
+        assert!(s.rewrites.is_empty());
     }
 
     #[test]
