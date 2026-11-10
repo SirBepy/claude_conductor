@@ -174,11 +174,6 @@ export class AnswersCard {
     this.pumpRewrites();
   }
 
-  /** A thread is open: the dashboard draws the zone for it even with no answers. */
-  threadOpen(): boolean {
-    return this.thread !== null;
-  }
-
   /** A question card's Ask: a thread about that question, Joe's first message the
    *  question. Asking about the same card again goes back to its thread. */
   askAbout(ask: QuestionAsk): void {
@@ -449,6 +444,12 @@ export class AnswersCard {
       + `<button type="button" class="ax-tbtn" data-ax="new-q"><i class="ph ph-plus"></i>New question</button></span></div>`;
   }
 
+  /** No answer yet: the card still stands, so + is there from the start. */
+  private emptyFace(): string {
+    return `<div class="ax-cc ax-empty"><span class="ax-cc-t"><i class="ph ph-chat-circle-dots"></i>No answers yet</span>`
+      + `<span class="ax-cc-b"><button type="button" class="ax-tbtn" data-ax="new-q"><i class="ph ph-plus"></i>New question</button></span></div>`;
+  }
+
   private threadFace(): string {
     const fresh = isNew(this.thread);
     const item = fresh ? null : this.item(this.thread);
@@ -519,7 +520,7 @@ export class AnswersCard {
     const item = this.item(this.cur);
     const html = item
       ? shell(`${this.headerRow()}<div class="ax-in">${this.answerFace(item)}</div>`)
-      : shell(`<div class="ax-in">${this.caughtFace()}</div>`, "ax-caughtmode ax-frame-border ax-cu-both");
+      : shell(`<div class="ax-in">${this.items.length === 0 ? this.emptyFace() : this.caughtFace()}</div>`, "ax-caughtmode ax-frame-border ax-cu-both");
     // The HTML is compared without its animation class, so a flush that lands
     // mid-animation finds nothing changed and lets the motion finish.
     if (html === this.lastHtml && !anim) return;

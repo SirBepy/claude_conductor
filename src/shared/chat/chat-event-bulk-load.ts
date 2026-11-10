@@ -47,7 +47,8 @@ export async function bulkLoadEvents(r: ChatRenderer, events: ChatEvent[], opts:
   r.auqPendingResult = false;
   r.auqPreContent = null;
   r.fileEdits = [];
-  r.dashPlan = null;
+  r.dashPlans = [];
+  r.turnActions = [];
   r.lastActivity = null;
   r.lastActivityDetail = null;
   r.activityIdle = false;

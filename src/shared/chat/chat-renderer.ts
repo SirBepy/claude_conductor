@@ -45,7 +45,7 @@ import {
 import { applySkipMarks, findQuestionIndexById } from "./chat-question-card";
 import { fetchSubCards, mergeSubCards, normalizeCards, subCardEvent, type SubCardEntry } from "./subchat-cards";
 import { getTransport } from "../transport";
-import type { DashboardPlan } from "./dashboard/dashboard-model";
+import type { DashboardPlan, TurnAction } from "./dashboard/dashboard-model";
 
 export interface SessionMeta {
   model: string | null;
@@ -161,9 +161,14 @@ export class ChatRenderer {
   // Running tracker of the full todos array as of the last TodoWrite call.
   // NEVER reset at turn boundaries - only ever overwritten.
   lastTodosSnapshot: { content: string; status: string }[] | null = null;
-  // The latest write_plan call, kept for the chat dashboard (dashboard-model.ts).
-  // write_plan draws no transcript row, so this is the only record of it.
-  dashPlan: DashboardPlan | null = null;
+  // Every plan of the chat, oldest first, kept for the chat dashboard
+  // (dashboard-model.ts recordPlan). write_plan draws no transcript row, so
+  // this is the only record of it.
+  dashPlans: DashboardPlan[] = [];
+  // What the turn in flight has done, one entry per tool call, oldest first:
+  // the dashboard's status line lists the latest few and counts them by kind.
+  // Starts over with each turn Joe starts.
+  turnActions: TurnAction[] = [];
   // In-flight TodoWrite tool_use ids, so the paired tool_result can be
   // silently absorbed instead of rendered as a raw tool_result row.
   _todoWriteToolUseIds = new Set<string>();
@@ -337,7 +342,7 @@ export class ChatRenderer {
     this.silentStreakBoundaryIndex = mapOrNull(this.silentStreakBoundaryIndex);
     // `at` is a row count, not a row: a spliced row before it moves it back, one
     // at or after it (written later) leaves it where it is.
-    if (this.dashPlan) this.dashPlan = { ...this.dashPlan, at: fn(this.dashPlan.at) };
+    if (this.dashPlans.length > 0) this.dashPlans = this.dashPlans.map((p) => ({ ...p, at: fn(p.at), lastAt: fn(p.lastAt) }));
     if (this.dirtyIndices.size > 0) {
       const remapped = new Set<number>();
       for (const idx of this.dirtyIndices) {
@@ -422,7 +427,8 @@ export class ChatRenderer {
     this.channelMessages = undefined;
     this.subCardPool = [];
     this.subCardsPlaced.clear();
-    this.dashPlan = null;
+    this.dashPlans = [];
+    this.turnActions = [];
     this.fileEdits = [];
     this.lastActivity = null;
     this.lastActivityDetail = null;

@@ -160,6 +160,7 @@ export function handleUserMessageEvent(
   r.activeTurnIsContinuation = isSilent;
   r.activeTurnStreamedText = "";
   r.activeTurnStartedAtMs = ts > 0 ? ts : Date.now();
+  r.turnActions = [];
   r.activeTurnUsage = null;
   r.activeTurnFirstTs = ts > 0 ? ts : 0;
   r.activeTurnLastTs = r.activeTurnFirstTs;

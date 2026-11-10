@@ -14,13 +14,14 @@ import { handleCommitRefClick, handleCommitRefKeydown, resolveCommitRefs } from 
 import { linkifyTickets } from "../../../shared/chat/ticket-refs";
 import { hydrateAttachments } from "../../../shared/chat/attachment-hydrator";
 import { clampUserMessages } from "../../../shared/chat/turn-collapse";
-import { sessionEvents } from "../../../shared/chat/event-store";
 import { state } from "../state";
 import { handleDrillAnchorClick, handleDrillClick, linkifyDrillRefs } from "../../../shared/chat/drill-links";
 import { handleFileRefClick, handleFileRefContextMenu, handleFileRefKeydown, linkifyFilePaths, openFileRef } from "../../../shared/chat/file-refs";
 import { highlightCodeBlocks, highlightInlineCode } from "../../../shared/chat/code-highlighter";
 import { scrollToBottom } from "../../../shared/chat/chat-dom-renderer";
 import { initialUi, renderStrip, renderZone, QUICK_VIEWS, type DashUi, type QuickViewId } from "./dashboard-zones";
+import { filterPlanList, syncPlanListFade } from "./plan-card";
+import type { PlanState } from "../../../shared/chat/dashboard/dashboard-model";
 import { AnswersCard } from "./answers-card";
 import { QUESTION_ASK_EVENT, type QuestionAsk } from "../question-ask";
 import { HOST_ID } from "../permission-modal/host";
@@ -48,14 +49,17 @@ export class ChatDashboard {
   readonly el: HTMLElement;
   private readonly stripEl: HTMLElement;
   private readonly bodyEl: HTMLElement;
-  private readonly gridEl: HTMLElement;
   private readonly leftEl: HTMLElement;
   private readonly rightEl: HTMLElement;
-  private readonly emptyEl: HTMLElement;
   private readonly zoneEls = new Map<ZoneId, { el: HTMLElement; html: string }>();
   private stripHtml = "";
   private ui: DashUi = initialUi();
-  private resultId: string | null = null;
+  /** The Plan zone's last derive: the pager steps through its jobs. */
+  private plan: PlanState | null = null;
+  /** When this view saw the last turn end: live rows can carry no stamp, so
+   *  the idle footer's "since" comes from here when it is later. */
+  private idleAt: number | null = null;
+  private wasBusy = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private barObserver: MutationObserver | null = null;
   /** The chat's status line, and where it lives when the Plan card is not drawn. */
@@ -105,19 +109,21 @@ export class ChatDashboard {
     if (e.key === "Escape" && this.ui.earlierOpen) {
       this.ui.earlierOpen = false;
       this.render();
+    } else if (e.key === "Escape" && this.ui.planList && !e.defaultPrevented && this.ownsFocus()) {
+      // Only Esc meant for the dashboard: not one pressed in the composer, a
+      // modal, or while this chat's pane is hidden.
+      this.act("plan-list", this.el);
     }
   };
 
   constructor(readonly pane: HTMLElement, readonly renderer: ChatRenderer) {
     this.el = document.createElement("div");
     this.el.className = "cdash";
-    this.el.innerHTML = `<div class="cdash-strip" hidden></div><div class="cdash-body"><div class="cdash-empty" hidden><i class="ph ph-squares-four"></i>Answers, the plan and anything waiting on you show up here.</div><div class="cdash-grid"><div class="cdash-col cdash-left"></div><div class="cdash-col cdash-right"></div></div></div>`;
+    this.el.innerHTML = `<div class="cdash-strip" hidden></div><div class="cdash-body"><div class="cdash-grid"><div class="cdash-col cdash-left"></div><div class="cdash-col cdash-right"></div></div></div>`;
     this.stripEl = this.el.querySelector(".cdash-strip")!;
     this.bodyEl = this.el.querySelector(".cdash-body")!;
-    this.gridEl = this.el.querySelector(".cdash-grid")!;
     this.leftEl = this.el.querySelector(".cdash-left")!;
     this.rightEl = this.el.querySelector(".cdash-right")!;
-    this.emptyEl = this.el.querySelector(".cdash-empty")!;
     this.bar = pane.querySelector<HTMLElement>(".session-thinking");
     this.answers = new AnswersCard({
       sessionId: () => renderer.sessionId,
@@ -159,9 +165,36 @@ export class ChatDashboard {
     // An image in a card opens the chat-wide gallery, like one in the transcript.
     this.el.addEventListener("click", createHandleBlockImageClick(renderer));
     this.el.addEventListener("click", (e) => this.onClick(e));
+    // On an earlier plan the Plan card's foot is the way back. The chat's own
+    // status line may sit inside it, and its click would open its detail
+    // block, so this runs first, on the way down.
+    this.el.addEventListener("click", (e) => {
+      const away = (e.target as HTMLElement).closest<HTMLElement>(".cdash-status.is-away");
+      if (!away) return;
+      e.stopPropagation();
+      e.preventDefault();
+      this.act("plan-current", away);
+    }, true);
+    this.el.addEventListener("input", (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLInputElement) || !t.closest(".cdash-pl-search")) return;
+      this.ui.planSearch = t.value;
+      const card = t.closest<HTMLElement>(".cdash-plan");
+      if (card) {
+        filterPlanList(card, t.value);
+        syncPlanListFade(card);
+      }
+    });
+    this.el.addEventListener("scroll", (e) => {
+      const t = e.target as HTMLElement;
+      if (t.classList?.contains("cdash-pl")) syncPlanListFade(t.closest<HTMLElement>(".cdash-plan") ?? t);
+    }, true);
     this.el.addEventListener("keydown", (e) => {
       const t = e.target as HTMLElement;
-      if ((e.key === "Enter" || e.key === " ") && t.matches("[data-act='strip-expand']")) {
+      if ((e.key === "Enter" || e.key === " ") && t.matches(".cdash-status.is-away")) {
+        e.preventDefault();
+        this.act("plan-current", t);
+      } else if ((e.key === "Enter" || e.key === " ") && t.matches("[data-act='strip-expand']")) {
         e.preventDefault();
         this.act("strip-expand", t);
       }
@@ -222,14 +255,15 @@ export class ChatDashboard {
     if (this.renderer.hydrating) return;
     const busy = this.barMayMove();
     const now = Date.now();
+    if (this.wasBusy && !busy) this.idleAt = now;
+    this.wasBusy = busy;
     const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
     this.refreshFinishTimes(subItems);
     const derived = deriveDashboard({
       messages: this.renderer.messages,
-      plan: this.renderer.dashPlan,
+      plans: this.renderer.dashPlans,
       busy,
       answers: this.answers.sideData(),
-      answersThreadOpen: this.answers.threadOpen(),
       subs: subItems,
       now,
       previews: this.previews,
@@ -242,6 +276,8 @@ export class ChatDashboard {
     this.renderAnswers(derived);
     this.renderSubs(derived);
     this.placeBar(busy);
+    const planEl = this.zoneEls.get("plan")?.el;
+    if (planEl) syncPlanListFade(planEl);
     if (!this.previewsAsked && this.renderer.sessionId) {
       this.previewsAsked = true;
       void this.loadPreviews();
@@ -402,10 +438,11 @@ export class ChatDashboard {
   /** UI state that a new derive invalidates. */
   private applyUiRules(state: DashboardState): void {
     const plan = state.right.find((z) => z.id === "plan");
-    const resultId = plan && plan.id === "plan" ? plan.state.result?.id ?? null : null;
-    // A new Result always takes the spot, even if Joe had flipped to the plan.
-    if (resultId !== this.resultId) this.ui.showPlan = false;
-    this.resultId = resultId;
+    this.plan = plan && plan.id === "plan" ? plan.state : null;
+    const earlier = this.plan?.earlier ?? [];
+    // An earlier plan that is gone (a reload of a shorter page) falls back to the current one.
+    if (this.ui.planSel !== null && !earlier.some((j) => j.key === this.ui.planSel)) this.ui.planSel = null;
+    if (earlier.length === 0) this.ui.planList = false;
     const count = state.strip?.messages.length ?? 0;
     if (this.ui.stripPick !== null && this.ui.stripPick >= count) this.ui.stripPick = null;
   }
@@ -420,7 +457,7 @@ export class ChatDashboard {
   }
 
   private renderZones(state: DashboardState, busy: boolean): void {
-    const ctx = { ui: this.ui, busy, quick: this.quick };
+    const ctx = { ui: this.ui, busy, quick: this.quick, idleAt: this.idleAt };
     const live = new Set<ZoneId>();
     for (const [col, zones] of [[this.leftEl, state.left], [this.rightEl, state.right]] as const) {
       zones.forEach((z, i) => {
@@ -438,9 +475,20 @@ export class ChatDashboard {
           // Lift the status line out first: replacing the Plan card's HTML would
           // otherwise drop it from the document along with the old card.
           if (this.bar && entry.el.contains(this.bar)) this.sendBarHome();
+          // A redraw mid-typing must not take the plan search box from under Joe.
+          const active = document.activeElement;
+          const caret = active instanceof HTMLInputElement && entry.el.contains(active) ? active.selectionStart : null;
           entry.el.innerHTML = html;
           entry.html = html;
           this.decorate(entry.el);
+          if (z.id === "plan") {
+            filterPlanList(entry.el, this.ui.planSearch);
+            const input = entry.el.querySelector<HTMLInputElement>(".cdash-pl-search input");
+            if (input && caret !== null) {
+              input.focus();
+              input.setSelectionRange(caret, caret);
+            }
+          }
         }
         if (col.children[i] !== entry.el) col.insertBefore(entry.el, col.children[i] ?? null);
       });
@@ -451,18 +499,6 @@ export class ChatDashboard {
       entry.el.remove();
       this.zoneEls.delete(id);
     }
-    const leftN = state.left.length;
-    const rightN = state.right.length;
-    // A quick one-question chat collapses to its answer card. The right column
-    // keeps its place even with the left empty, so the Plan never jumps sideways
-    // when the first answer lands.
-    this.gridEl.classList.toggle("is-single", rightN === 0);
-    this.leftEl.hidden = leftN === 0;
-    this.rightEl.hidden = rightN === 0;
-    // Only once the history is in: an opening chat is not an empty one.
-    const sid = this.renderer.sessionId;
-    const loaded = !!sid && sessionEvents.isLoaded(sid);
-    this.emptyEl.hidden = !loaded || leftN + rightN > 0 || state.strip !== null;
   }
 
   private renderAnswers(state: DashboardState): void {
@@ -479,11 +515,20 @@ export class ChatDashboard {
   private placeBar(mayMove: boolean): void {
     if (!this.bar) return;
     const slot = this.el.querySelector<HTMLElement>("[data-slot='status']");
-    if (slot && mayMove) {
+    // The earlier-plans list hides the foot; a running turn's line (and its
+    // Stop) then waits above the message box instead of vanishing with it.
+    if (slot && mayMove && !slot.hidden) {
       if (this.bar.parentElement !== slot) slot.appendChild(this.bar);
     } else {
       this.sendBarHome();
     }
+  }
+
+  /** Focus is in this dashboard, or nowhere in particular. */
+  private ownsFocus(): boolean {
+    if (!this.el.isConnected) return false;
+    const a = document.activeElement;
+    return !a || a === document.body || this.el.contains(a);
   }
 
   private sendBarHome(): void {
@@ -527,9 +572,14 @@ export class ChatDashboard {
       case "strip-earlier": ui.earlierOpen = !ui.earlierOpen; break;
       case "strip-pick": ui.stripPick = Number(t.dataset.i); ui.earlierOpen = false; ui.stripExpanded = true; break;
       case "strip-latest": ui.stripPick = null; ui.stripExpanded = false; break;
-      case "show-plan": ui.showPlan = true; break;
-      case "show-result": ui.showPlan = false; break;
       case "step": ui.openStep = ui.openStep === t.dataset.step ? null : (t.dataset.step ?? null); break;
+      case "plan-prev":
+      case "plan-next":
+      case "plan-pick":
+      case "plan-list":
+      case "plan-current":
+        this.planNav(name, t);
+        return;
       default: return;
     }
     // The redraw replaces the control that was used; keyboard users keep their place.
@@ -538,6 +588,60 @@ export class ChatDashboard {
       ? `[data-act='step'][data-step="${t.dataset.step.replace(/["\\]/g, "\\$&")}"]` : `[data-act='${name}']`;
     this.render();
     if (hadFocus) this.el.querySelector<HTMLElement>(key)?.focus();
+  }
+
+  /** The Plan card's pager: older, newer, a pick from the list, the list itself
+   *  (a toggle back to what it was opened over), and back to the current plan.
+   *  The body slides the way Joe moved, like the Answers card's thread. */
+  private planNav(name: string, t: HTMLElement): void {
+    const ui = this.ui;
+    const earlier = this.plan?.earlier ?? [];
+    const idx = ui.planSel === null ? earlier.length : earlier.findIndex((j) => j.key === ui.planSel);
+    let dir: "in-l" | "in-r" = "in-r";
+    switch (name) {
+      case "plan-prev":
+        if (idx <= 0) return;
+        ui.planSel = earlier[idx - 1]!.key;
+        dir = "in-l";
+        break;
+      case "plan-next":
+        ui.planSel = idx + 1 < earlier.length ? earlier[idx + 1]!.key : null;
+        break;
+      case "plan-pick":
+        ui.planSel = t.dataset.key ?? null;
+        ui.planList = false;
+        break;
+      case "plan-list":
+        if (ui.planList) {
+          ui.planList = false;
+          ui.planSel = ui.planListFrom;
+          dir = "in-l";
+        } else {
+          if (earlier.length === 0) return;
+          ui.planListFrom = ui.planSel;
+          ui.planList = true;
+        }
+        break;
+      case "plan-current":
+        ui.planSel = null;
+        ui.planList = false;
+        dir = "in-l";
+        break;
+    }
+    ui.openStep = null;
+    const hadFocus = document.activeElement === t;
+    this.render();
+    const body = this.el.querySelector<HTMLElement>(".cdash-plan .cdash-pbody");
+    if (body) {
+      body.classList.remove("in-l", "in-r");
+      void body.offsetWidth;
+      body.classList.add(dir);
+    }
+    if (ui.planList) this.el.querySelector<HTMLInputElement>(".cdash-pl-search input")?.focus();
+    else if (hadFocus) {
+      const keep = name === "plan-prev" || name === "plan-next" ? name : "plan-list";
+      this.el.querySelector<HTMLElement>(`.cdash-plan [data-act='${keep}']:not([disabled])`)?.focus();
+    }
   }
 
   dispose(): void {

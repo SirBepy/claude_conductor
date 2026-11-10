@@ -37,7 +37,7 @@ function chat() {
     plan(steps) { const id = `p${++seq}`; r.handleEvent(toolUseEvent(PLAN, { steps }, id)); r.handleEvent(ok(id)); return api; },
     tool(name, input) { const id = `t${++seq}`; r.handleEvent(toolUseEvent(name, input, id)); r.handleEvent(ok(id)); return api; },
     ask(question) { r.handleEvent(toolUseEvent(ASK, { questions: [{ question, options: [{ label: "A" }] }] }, `q${++seq}`)); return api; },
-    dash(extra = {}) { return deriveDashboard({ messages: r.messages, plan: r.dashPlan, ...extra }); },
+    dash(extra = {}) { return deriveDashboard({ messages: r.messages, plans: r.dashPlans, ...extra }); },
   };
   return api;
 }
