@@ -282,6 +282,11 @@ pub struct Instance {
     /// row and context and wakes on a follow-up. Never implies `ended_at`.
     #[serde(default)]
     pub subchat_finished: bool,
+    /// Joe pinned this sub to the sidebar (chat menu "Pin to sidemenu"). Only
+    /// adds a sidebar shortcut: the sub stays a sub of its main chat. Survives a
+    /// restart through the registry snapshot.
+    #[serde(default)]
+    pub pinned_to_sidebar: bool,
     /// Set only for a row mirrored in from a paired peer machine (multi-
     /// machine federation) - `None` means this session lives on THIS
     /// daemon. Stamped by `daemon::machines::all_instances`, never by the
@@ -514,6 +519,7 @@ mod tests {
             successor_of: None,
             subchat_of: Some("main-1".into()),
             subchat_finished: true,
+            pinned_to_sidebar: false,
             machine: None,
         };
         let raw = serde_json::to_string(&i).unwrap();

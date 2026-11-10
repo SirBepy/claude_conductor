@@ -57,11 +57,18 @@ describe("the chat menu item", () => {
   });
   const item = (label, over) => buildChatItems(ctx(over)).find((i) => i.label === label);
 
-  it("offers Move into main chat on an ordinary chat and Move to sidebar on a sub, never both", () => {
+  it("offers Move into main chat on an ordinary chat and Pin to sidemenu on a sub, never both", () => {
     expect(item("Move into main chat", {})?.run).toBeTypeOf("function");
-    expect(item("Move to sidebar", {})).toBeUndefined();
-    expect(item("Move to sidebar", { isSub: true })?.run).toBeTypeOf("function");
+    expect(item("Pin to sidemenu", {})).toBeUndefined();
+    expect(item("Pin to sidemenu", { isSub: true })?.run).toBeTypeOf("function");
     expect(item("Move into main chat", { isSub: true })).toBeUndefined();
+    expect(item("Move to sidebar", { isSub: true })).toBeUndefined();
+  });
+
+  it("offers Unpin from sidemenu on a pinned sub, and disables the pin for a mirrored one", () => {
+    expect(item("Unpin from sidemenu", { isSub: true, isPinned: true })?.run).toBeTypeOf("function");
+    expect(item("Pin to sidemenu", { isSub: true, isPinned: true })).toBeUndefined();
+    expect(item("Pin to sidemenu", { isSub: true, mirrored: true })?.run).toBeUndefined();
   });
 
   it("disables it, with the reason, for a main chat, a mirrored chat and a draft", () => {

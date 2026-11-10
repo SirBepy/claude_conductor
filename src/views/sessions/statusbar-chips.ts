@@ -235,20 +235,25 @@ export function renderGitChip(ctx: ChipRenderCtx): string {
   return `<span class="sb-chip sb-git sb-git-btn${animClass(ctx.animatedKeys, "git")}" role="button" tabindex="0" title="${escapeHtml(title.join(", "))}">${body}</span>`;
 }
 
+/** The context chip for a known status: the status bar's own markup, also drawn
+ *  by the dashboard's Subchats card for a sub's details. */
+export function contextChipHtml(c: ContextStatus, asTokens: boolean, fadeClass = ""): string {
+  const raw = c.pct_used;
+  const estimated = c.confidence !== "proven";
+  if (raw >= 100) console.warn("[ctx-100] context pinned at 100% (daemon)", { occupancy: String(c.occupancy), window: String(c.window), model: c.model, confidence: c.confidence });
+  const cls = raw >= 80 ? " danger" : raw >= 50 ? " warn" : "";
+  const occ = Number(c.occupancy).toLocaleString();
+  const win = Number(c.window).toLocaleString();
+  const note = estimated ? " (estimated)" : "";
+  const pctStr = raw < 1 && raw > 0 ? "<1" : String(Math.min(100, Math.round(raw)));
+  const body = asTokens ? `${formatTokenCount(Number(c.occupancy), { decimals: 0 })} / ${formatTokenCount(Number(c.window), { decimals: 0 })}` : `${pctStr}%`;
+  return `<span class="sb-chip sb-context${cls}${fadeClass}" title="${occ} / ${win} tokens (conversation + system prompt + tools)${note}"><i class="ph ph-stack"></i>${body}</span>`;
+}
+
 export function renderContext(asTokens: boolean, ctx: ChipRenderCtx): string {
   const key = asTokens ? "context_tokens" : "context_pct";
   if (ctx.ctxStatus) {
-    const c = ctx.ctxStatus;
-    const raw = c.pct_used;
-    const estimated = c.confidence !== "proven";
-    if (raw >= 100) console.warn("[ctx-100] context pinned at 100% (daemon)", { occupancy: String(c.occupancy), window: String(c.window), model: c.model, confidence: c.confidence });
-    const cls = raw >= 80 ? " danger" : raw >= 50 ? " warn" : "";
-    const occ = Number(c.occupancy).toLocaleString();
-    const win = Number(c.window).toLocaleString();
-    const note = estimated ? " (estimated)" : "";
-    const pctStr = raw < 1 && raw > 0 ? "<1" : String(Math.min(100, Math.round(raw)));
-    const body = asTokens ? `${formatTokenCount(Number(c.occupancy), { decimals: 0 })} / ${formatTokenCount(Number(c.window), { decimals: 0 })}` : `${pctStr}%`;
-    return `<span class="sb-chip sb-context${cls}${animClass(ctx.animatedKeys, key)}" title="${occ} / ${win} tokens (conversation + system prompt + tools)${note}"><i class="ph ph-stack"></i>${body}</span>`;
+    return contextChipHtml(ctx.ctxStatus, asTokens, animClass(ctx.animatedKeys, key));
   } else if (ctx.startedAt === null && !ctx.metaLoaded) {
     // startedAt is null only pre-start (pending pane); with no meta streamed
     // in yet, nothing is actually loading, so 0% beats a skeleton.

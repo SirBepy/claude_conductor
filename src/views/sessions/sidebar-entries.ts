@@ -60,7 +60,7 @@ export function buildSidebarEntries(
   recordChainLinks(state.sessions);
   const superseded = supersededPredecessors(state.sessions);
   const listSessions = state.sessions.filter(
-    (s) => !isJarvisOrWorker(s) && !isSubchat(s) && !superseded.has(s.session_id),
+    (s) => !isJarvisOrWorker(s) && (!isSubchat(s) || s.pinned_to_sidebar === true) && !superseded.has(s.session_id),
   );
   // The viewed chat's parked prompt is already shown as a card; don't also flag
   // its row with the attention alarm (backgrounded parked prompts still badge).

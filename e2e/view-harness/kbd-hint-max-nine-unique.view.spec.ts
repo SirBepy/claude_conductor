@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
 // Reviewed 2026-11-05: sidebar-entries.ts now builds a chat's sub summary from "has subs" instead of the mode alone (the group still follows the mode); these rows have no subs, so their order and hints are unchanged and this spec passes.
 // Reviewed 2026-11-05 (hidden subs): sidebar-entries.ts now drops a row with subchat_of before numbering; this spec's rows have none, so the Ctrl badge contract is unchanged and it passed after the change.

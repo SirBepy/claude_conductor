@@ -15,6 +15,7 @@ import type { RenderedMessage } from "../chat-classifiers";
 import type { MessageKind } from "../chat-message-kinds";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../chat-event-to-message";
 import { buildAnswerItems, type AnswerItem, type AnswerSide } from "./answers-model";
+import { buildSubsState, type SubCardItem, type SubsState } from "./subs-model";
 
 export const TURN_STATUS_TOOL = "mcp__cc_conductor__report_turn_status";
 
@@ -43,6 +44,10 @@ export interface DashboardInput {
   busy?: boolean;
   /** What the daemon remembers for the Answers card, once loaded. */
   answers?: AnswerSide;
+  /** This chat's subs, read from the instance list (subs-source.ts). */
+  subs?: SubCardItem[];
+  /** Clock for the Subchats card's one-hour fold; tests pass their own. */
+  now?: number;
 }
 
 /** Context every derive gets, computed once per derive pass. */
@@ -217,23 +222,11 @@ export interface CardListState {
   cards: RenderedMessage[];
 }
 
-const SUBCHAT_CARDS_SHOWN = 4;
-
-/** Placeholder for lane `dash-subchats`: the newest card of each sub (finished
- *  reports, all-finished notes), newest first. A sub's blocker shows in Waiting
- *  on you instead. */
-export function deriveSubchats({ input }: DeriveCtx): CardListState | null {
-  const seen = new Set<string>();
-  const cards: RenderedMessage[] = [];
-  for (let i = input.messages.length - 1; i >= 0 && cards.length < SUBCHAT_CARDS_SHOWN; i--) {
-    const m = input.messages[i]!;
-    if (m.kind !== "message" || !m.subCard || m.failed || m.retracted) continue;
-    const key = m.subCard.sub_id || m.subCard.id;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (m.subCard.kind !== "blocker") cards.push(m);
-  }
-  return cards.length > 0 ? { cards } : null;
+/** The Subchats card (subs-model.ts has the rules): this chat's subs as avatars,
+ *  from the instance list the view passes in, never from the transcript. An
+ *  asking sub's question stays in Waiting on you as well. */
+export function deriveSubchats({ input }: DeriveCtx): SubsState | null {
+  return buildSubsState(input.subs ?? [], input.now ?? Date.now());
 }
 
 const NOTE_KINDS: ReadonlySet<MessageKind | "legacy"> = new Set(["call", "discovery", "handoff", "correction", "legacy"]);

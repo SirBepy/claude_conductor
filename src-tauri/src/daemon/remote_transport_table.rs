@@ -118,6 +118,20 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // this is refused from a peer. The client hides "Move to sidebar" on a mirrored
     // chat (`isMirrored`) so the refusal is never what Joe finds out by clicking.
     ("move_sub_to_sidebar", P),
+    // The Subchats card's Pin to sidemenu (it replaced Move to sidebar in the chat
+    // menu, which the phone shares). Phone only for the same reason as the row
+    // above: whether a sub gets a sidebar shortcut is its host's decision, so a
+    // paired peer is refused. It only sets a flag on a sub; nothing leaves the PC.
+    ("set_sub_pinned", P),
+    // Opaque gallery ids of every image in one sub's transcript, no bytes (the
+    // ids go to dashboard_gallery_image, itself P). Phone only: the phone reads
+    // its own transcripts already, while a paired peer would be handed another
+    // machine's transcript file paths to probe.
+    ("list_session_images", P),
+    // The three brief lines (task, goal, done when) of one sub, for the card's
+    // details. Phone only, for the same reason as the rows above; a peer's
+    // mirrored sub keeps its brief on its host.
+    ("get_sub_brief", P),
     // Phone only, for the same reason: the phone's chat menu offers "Move into main
     // chat" and needs the picker's default. Both are refused from a peer, since
     // which main chat a chat belongs to is its host's decision, and the daemon
@@ -931,6 +945,14 @@ mod tests {
         assert!(allowed("move_sub_to_sidebar", &Transport::Phone));
         assert!(!allowed("move_sub_to_sidebar", &Transport::PeerMachine("x".into())));
         assert!(allowed("send_message", &Transport::Phone));
+    }
+
+    #[test]
+    fn the_subchats_card_methods_are_phone_only() {
+        for m in ["set_sub_pinned", "list_session_images", "get_sub_brief"] {
+            assert!(allowed(m, &Transport::Phone), "{m}");
+            assert!(!allowed(m, &Transport::PeerMachine("x".into())), "{m}");
+        }
     }
 
     #[test]

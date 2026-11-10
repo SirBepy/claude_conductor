@@ -487,6 +487,18 @@ export class HttpTransport implements Transport {
         return this.rpc<T>("move_sub_to_sidebar", {
           session_id: args.session_id ?? args.sessionId,
         });
+      // Pin to sidemenu and a sub's image list: phone rows in
+      // remote_transport_table.rs; unmapped, the shared chat-menu item would throw.
+      case "set_sub_pinned":
+        return this.rpc<T>("set_sub_pinned", {
+          session_id: args.session_id ?? args.sessionId,
+          pinned: args.pinned,
+        });
+      case "get_sub_brief":
+      case "list_session_images":
+        return this.rpc<T>("list_session_images", {
+          session_id: args.session_id ?? args.sessionId,
+        });
       // "Move into main chat" and its picker default: phone rows in
       // remote_transport_table.rs; unmapped, the phone's menu item would throw.
       case "move_chat_into_main":

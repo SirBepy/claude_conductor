@@ -20,6 +20,7 @@ import { visibleInterval } from "../../shared/visible-interval";
 import { startHiddenSessionsSync } from "./hidden-sessions-sync";
 import { startMachineProfileSync } from "./machine-icons";
 import { installSubchatRequestListeners, syncSubchatChrome, viewedSubsMainId } from "./subchat-view";
+import { currentChatDashboard } from "./chat-dashboard/chat-dashboard";
 
 /** Ambient Tauri event API surface, as declared on `Window.__TAURI__` in
  * shared/ipc.ts. Threaded through the wiring helpers below instead of each
@@ -256,6 +257,8 @@ export async function wireInstancesChangedListener(
     renderSidebar(listEl);
     updateThinkingBar();
     rateLimitBanner.update(state.sessions);
+    // The Subchats card reads the same list the sidebar just drew.
+    currentChatDashboard()?.onSessionsChanged();
     // If the initial mount's session restore failed (daemon not yet connected),
     // restore now on the first instances-changed that populates the list.
     // Desktop-only (see the initial-mount restore above for why mobile skips this).

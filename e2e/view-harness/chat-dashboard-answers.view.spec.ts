@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (dash lane 3): chat-dashboard.ts and dashboard-zones.ts gained the Subchats card's host and wiring; this spec's chats have no subs and the Answers card is untouched, so it passes.
 // asserts: src/views/sessions/chat-dashboard/answers-card.ts, src/views/sessions/chat-dashboard/answers-card.css, src/views/sessions/chat-dashboard/answers-api.ts, src/shared/chat/dashboard/answers-model.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

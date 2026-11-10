@@ -23,6 +23,7 @@ export function liveChatMenuCtx(sessionId: string, onAfterAction?: () => void): 
     subchatsOn: isSubchatsOn(sessionId),
     subchatsBlockedReason: subchatsBlockedReason(sess?.account_id),
     isSub: !!sess && isSubchat(sess),
+    isPinned: sess?.pinned_to_sidebar === true,
     isHidden: loadHiddenSessions().has(sessionId),
     isJarvis: sess?.jarvis === true,
     isFrozen: sess?.frozen === true,

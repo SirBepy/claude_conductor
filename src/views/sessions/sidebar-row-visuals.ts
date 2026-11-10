@@ -3,6 +3,8 @@ import { characterIconUrl } from "./session-characters";
 import { scheduledTooltip, heldTooltip } from "./sessions-helpers";
 import { modelFamilyFromId } from "../../shared/effort-presets";
 import { modelLabel } from "../../shared/model-name";
+import { effortColor } from "../../shared/chat/dashboard/subs-model";
+import "./effort-battery.css";
 
 // Model as a battery whose fill is the family's rank - compare fill, don't
 // decode a symbol. One colour: the rail's five chat-state hues own that
@@ -18,11 +20,15 @@ export function modelRankIcon(model: string): string {
   return rank ? RANK_ICON[rank]! : "";
 }
 
-/** Battery glyph for a session's model, or "" for an unrecognised family. */
-export function modelBatteryHtml(model: string): string {
+/** Battery glyph for a session's model, or "" for an unrecognised family. The
+ *  fill is the model; `effort` tints it (effort-battery.css), and a missing or
+ *  default one keeps the battery's own grey. */
+export function modelBatteryHtml(model: string, effort = ""): string {
   const icon = modelRankIcon(model);
   if (!icon) return "";
-  return `<span class="session-model-battery" data-tip="${escapeHtml(modelLabel(model))}"><i class="ph-bold ${icon}"></i></span>`;
+  const e = effortColor(effort) ? ` data-effort="${escapeHtml(effort.trim().toLowerCase())}"` : "";
+  const tip = effort ? `${modelLabel(model)}, ${effort}` : modelLabel(model);
+  return `<span class="session-model-battery" data-tip="${escapeHtml(tip)}"${e}><i class="ph-bold ${icon}"></i></span>`;
 }
 
 /** Shared shape for scheduled/held markers: an icon + optional count span,

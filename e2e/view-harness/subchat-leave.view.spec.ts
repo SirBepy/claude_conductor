@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // Reviewed 2026-11-09: chat-menu.ts gained buildRowMenuBlock for the sidebar row menu; the header menu this spec drives is unchanged and it passes.
 // Reviewed 2026-11-08: session-controls.ts gained startNewChatInProject (the palette's New chat in <project>); leaving a sub is unchanged and this spec passed.
 // Reviewed 2026-11-05: subchat-view.ts's sub list button now opens a new window instead of moving the sub; leaving a sub is unchanged and this spec passes.

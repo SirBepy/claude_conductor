@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // asserts: src/views/sessions/sidebar.ts, src/views/sessions/sidebar-rows.ts, src/views/sessions/sidebar-entries.ts
 import { test, expect } from "@playwright/test";
 import { mountSessionsList, sessionInstance } from "./harness";

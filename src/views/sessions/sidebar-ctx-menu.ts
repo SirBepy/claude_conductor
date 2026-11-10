@@ -109,6 +109,7 @@ export function openCtxMenu(
     subchatsOn: isSubchatsOn(sessionId),
     subchatsBlockedReason: subchatsBlockedReason(sess.account_id),
     isSub: isSubchat(sess),
+    isPinned: sess.pinned_to_sidebar === true,
     isHidden,
     isJarvis: sess.jarvis === true,
     isFrozen: sess.frozen === true,
