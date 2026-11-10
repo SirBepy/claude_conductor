@@ -9,6 +9,7 @@ export type ReportsTab = "outcomes" | "gallery" | "files";
 export const BUILTIN_CARDS: ReadonlyArray<{ id: string, label: string }> = [
   { id: "your_todos", label: "Your todos" },
   { id: "chats", label: "Chats" },
+  { id: "due", label: "Due" },
   { id: "next_up", label: "Next up" },
   { id: "ship", label: "Ship state" },
   { id: "running", label: "Running" },
