@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const calls = [];
+let saved = {};
 const NOW = "2026-11-05T00:00:00.000Z";
 const metas = [
   { id: "shared-1", slug: "portfolio", title: "Portfolio", source: "chat", session_id: "main", version: 2, created_at: NOW, shared: true, versions: [] },
@@ -28,7 +29,7 @@ vi.mock("../src/shared/ipc", () => ({
   invoke: (cmd, args) => {
     calls.push({ cmd, args });
     if (cmd === "list_previews") return Promise.resolve(metas);
-    if (cmd === "get_preview") return Promise.resolve(args.id === "shared-1" ? sharedSnap : { ...metas.find((m) => m.id === args.id), html: "<p>x</p>" });
+    if (cmd === "get_preview") return Promise.resolve(args.id === "shared-1" ? { ...structuredClone(sharedSnap), view_state: saved } : { ...metas.find((m) => m.id === args.id), html: "<p>x</p>" });
     if (cmd === "render_preview_doc") return Promise.resolve("about:blank");
     if (cmd === "list_slash_commands") return Promise.resolve([]);
     return Promise.resolve(undefined);
@@ -53,6 +54,7 @@ function mount() {
 
 beforeEach(() => {
   calls.length = 0;
+  saved = {};
   document.body.innerHTML = "";
   state.sessions = [
     inst("main"),
@@ -153,6 +155,25 @@ describe("shared mockup controls", () => {
     frame.dispatchEvent(new Event("load"));
     expect(post).toHaveBeenCalledWith({ cc: "control", part: "header", id: "photo", value: "on" }, "*");
     tab.destroy();
+  });
+
+  it("saves a changed control on the daemon, and a value saved elsewhere is applied to a newly staged frame", async () => {
+    const { root, tab, post, frame } = await openShared();
+    root.querySelector('.pvs-chip[data-owner="sub-hero"]').click();
+    root.querySelector('[role="switch"]').click();
+    expect(calls.filter((c) => c.cmd === "set_preview_state").map((c) => c.args)).toEqual([
+      { id: "shared-1", key: "ctl|header|photo", value: "on" },
+    ]);
+    tab.destroy();
+
+    // A second window (or a reload) opens the page: the daemon already holds the value.
+    saved = { "ctl|header|style": "ember" };
+    const again = await openShared();
+    post.mockClear();
+    again.frame.dispatchEvent(new Event("load"));
+    expect(again.post).toHaveBeenCalledWith({ cc: "control", part: "header", id: "style", value: "ember" }, "*");
+    again.tab.destroy();
+    void frame; void root;
   });
 
   it("a dedicated page carries the Only tag and a back arrow to the shared page, and hides the row", async () => {

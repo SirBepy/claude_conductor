@@ -237,7 +237,7 @@ mod tests {
         };
         let snap = |slug: &str, prev: Vec<PreviousVersion>| PreviewSnapshot {
             id: slug.into(), slug: slug.into(), title: slug.into(), html: "<p></p>".into(), source: "chat".into(),
-            session_id: None, version: 2, created_at: "2026-02-01T00:00:00.000Z".into(), published: None, previous: prev, shared: None,
+            session_id: None, version: 2, created_at: "2026-02-01T00:00:00.000Z".into(), published: None, previous: prev, shared: None, view_state: Default::default(),
         };
         let mut list = vec![
             snap("new", vec![page("n", "2026-01-03T00:00:00.000Z"), page("n-old", "2026-01-02T00:00:00.000Z")]),
@@ -261,6 +261,7 @@ mod tests {
             id: "m".into(), slug: "m".into(), title: "m".into(), html: "<p></p>".into(), source: "chat".into(),
             session_id: None, version: 2, created_at: "2026-02-01T00:00:00.000Z".into(), published: None, previous: vec![archived],
             shared: Some(SharedMockup { owner_session_id: "s".into(), shell: String::new(), parts: vec![part] }),
+            view_state: Default::default(),
         }];
         trim_to_budget(&mut list);
         assert!(list[0].previous.is_empty(), "the shared copy counts toward the budget, so the archived version goes");

@@ -845,6 +845,8 @@ export class HttpTransport implements Transport {
           ...(args.version != null ? { version: args.version } : {}),
         });
       }
+      case "set_preview_state":
+        return this.rpc<T>("set_preview_state", { id: args.id, key: args.key, value: args.value ?? null });
       // One raster image off the daemon host's disk (ask_user_question option
       // pictures, status-bar images). The daemon confines the path to project
       // roots and raster extensions; session_id also routes a mirrored chat's

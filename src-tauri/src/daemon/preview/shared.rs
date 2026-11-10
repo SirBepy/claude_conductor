@@ -350,6 +350,7 @@ fn create_at(path: &Path, state: &DaemonState, caller: &str, body: &Value) -> Va
         published: None,
         previous: Vec::new(),
         shared: Some(SharedMockup { owner_session_id: caller.to_string(), shell, parts: Vec::new() }),
+        view_state: Default::default(),
     });
     save(path, &mut list);
     json!({ "ok": true, "id": id, "regions": found })

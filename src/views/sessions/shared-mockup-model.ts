@@ -54,6 +54,18 @@ export function controlKey(snapId: string, partId: string, controlId: string): s
   return `${snapId}|${partId}|${controlId}`;
 }
 
+/** The daemon-side `view_state` key a control's value is saved under. */
+export function stateKey(partId: string, controlId: string): string {
+  return `ctl|${partId}|${controlId}`;
+}
+
+/** Inverse of [`stateKey`]; null for any other key (the page's own `page` state). */
+export function parseStateKey(key: string): { partId: string; controlId: string } | null {
+  const [tag, partId, controlId, ...rest] = key.split("|");
+  if (tag !== "ctl" || !partId || !controlId || rest.length > 0) return null;
+  return { partId, controlId };
+}
+
 /** The value in force: what Joe set in this panel, else the control's default. */
 export function controlValue(values: ReadonlyMap<string, string>, snapId: string, oc: OwnerControl): string {
   return values.get(controlKey(snapId, oc.partId, oc.control.id)) ?? oc.control.default;

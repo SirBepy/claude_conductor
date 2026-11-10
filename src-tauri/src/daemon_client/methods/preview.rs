@@ -43,6 +43,11 @@ impl PersistentClient {
         self.call("get_preview", get_preview_params(id, session_id, version)).await
     }
 
+    /// Saves one view-state key of a preview (`Value::Null` clears it).
+    pub async fn set_preview_state(&self, id: &str, key: &str, value: Value) -> Result<Value, ClientError> {
+        self.call("set_preview_state", json!({"id": id, "key": key, "value": value})).await
+    }
+
     /// One raster image off the HOST's disk for a chat mirrored from a paired
     /// machine (option-preview pictures, agent-surfaced images). The host
     /// confines the path; see `daemon/methods/registry/image_read.rs`.

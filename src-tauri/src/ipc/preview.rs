@@ -56,6 +56,20 @@ pub async fn get_preview(
     serde_json::from_value(v).map_err(|e| e.to_string())
 }
 
+/// Saves one piece of a preview's view state (a control value or the page's own
+/// state); `value` null clears it. The daemon broadcasts `preview-state`.
+#[tauri::command]
+pub async fn set_preview_state(
+    id: String,
+    key: String,
+    value: Option<serde_json::Value>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.set_preview_state(&id, &key, value.unwrap_or(serde_json::Value::Null)).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Stages a preview document and returns the URL for the panel's iframe. Goes
 /// through Rust because the webview's own `fetch` here is cross-origin, and the
 /// hooks server answers its CORS preflight with 405 - the request never left the

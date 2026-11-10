@@ -2,13 +2,13 @@
 // sits between the panel header and the canvas; clicking a sub opens that sub's
 // controls (a dropdown per choice, a switch per yes/no) in a popover that stays
 // inside the panel. A change is posted into the already-staged frame, so the
-// page never reloads. Control values live in this object only: nothing here
-// needs to outlive the panel.
+// page never reloads. Control values are saved on the snapshot's daemon-side
+// view_state, so a pop-out window, a reload and a re-pushed page all get them back.
 
 import "./shared-mockup.css";
 import { escapeHtml } from "../../shared/escape-html";
 import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
-import { clampPos, controlKey, controlValue, freshChips, ownerChips, type OwnerChip, type OwnerControl } from "./shared-mockup-model";
+import { clampPos, controlKey, controlValue, freshChips, ownerChips, parseStateKey, stateKey, type OwnerChip, type OwnerControl } from "./shared-mockup-model";
 import { familySubs, ownerTag } from "./shared-mockup-scope";
 import { subInitials } from "./sub-list";
 
@@ -20,6 +20,8 @@ export interface SharedBarHost {
   /** A sub's own (dedicated) previews, for the link at the popover's foot. */
   dedicatedOf(ownerId: string): PreviewMeta[];
   open(previewId: string): void;
+  /** Saves one control value on the preview (daemon-side, so other windows follow). */
+  persist(snap: PreviewSnapshot, key: string, value: string): void;
 }
 
 export class SharedBar {
@@ -58,6 +60,7 @@ export class SharedBar {
     }
     const sameSnap = this.snap?.id === snap.id;
     this.snap = snap;
+    this.loadSaved(snap);
     this.chips = ownerChips(snap.shared, familySubs(this.host.scope()));
     const seen = this.seen.get(snap.id);
     if (!seen) {
@@ -70,6 +73,26 @@ export class SharedBar {
     if (!sameSnap) this.closePop();
     if (this.openId && !this.chips.some((c) => c.id === this.openId && c.controls.length > 0)) this.closePop();
     this.drawStrip();
+    if (this.openId) this.drawPop();
+  }
+
+  /** Pulls the values saved on `snap` into the working map. */
+  private loadSaved(snap: PreviewSnapshot): void {
+    for (const [key, value] of Object.entries(snap.view_state ?? {})) {
+      const ref = parseStateKey(key);
+      if (ref && typeof value === "string") this.values.set(controlKey(snap.id, ref.partId, ref.controlId), value);
+    }
+  }
+
+  /** A control value saved from another window (or the phone): show it and push it into the frame. */
+  applyRemote(previewId: string, key: string, value: unknown): void {
+    const ref = parseStateKey(key);
+    if (!ref || !this.snap || this.snap.id !== previewId) return;
+    const k = controlKey(previewId, ref.partId, ref.controlId);
+    if (typeof value === "string") this.values.set(k, value);
+    else this.values.delete(k);
+    const oc = this.find(ref.partId, ref.controlId);
+    if (oc) this.post(oc, controlValue(this.values, previewId, oc));
     if (this.openId) this.drawPop();
   }
 
@@ -190,6 +213,7 @@ export class SharedBar {
   private set(oc: OwnerControl, value: string): void {
     this.values.set(controlKey(this.snap!.id, oc.partId, oc.control.id), value);
     this.post(oc, value);
+    this.host.persist(this.snap!, stateKey(oc.partId, oc.control.id), value);
     // Redraw so a switch shows its new state; the popover's size may change, so clamp again.
     this.drawPop();
   }

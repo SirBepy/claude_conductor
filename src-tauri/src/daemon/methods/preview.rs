@@ -44,6 +44,30 @@ pub fn register_preview(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+    // Saves one piece of what Joe left a preview at (a control value or the
+    // page's own state) and broadcasts `preview-state` so the docked panel, the
+    // pop-out window and the phone follow. Phone and desktop only: a paired peer
+    // does not write another machine's view state.
+    {
+        let state = state.clone();
+        router.register("set_preview_state", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P {
+                    id: String,
+                    key: String,
+                    #[serde(default)]
+                    value: serde_json::Value,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let found = crate::daemon::preview::set_state_and_notify(&state, &p.id, &p.key, p.value)
+                    .map_err(RpcError::invalid_params)?;
+                Ok(json!({ "ok": found }))
+            }
+        });
+    }
     // Mirrors the desktop `list_previews` command -> Vec<PreviewMeta>, newest
     // (most-recently-pushed/replaced) first. No html - see PreviewMeta.
     // `session_id` narrows the list to that chat's previews. It also routes the
@@ -213,6 +237,7 @@ mod tests {
             published: None,
             previous: Vec::new(),
             shared: None,
+            view_state: Default::default(),
         }
     }
 
