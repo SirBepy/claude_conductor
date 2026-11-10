@@ -13,7 +13,7 @@ use crate::project_dashboard::snapshot_parts::{scheduled_row, soonest_scheduled}
 use crate::project_dashboard::targets::{chat_in_repo, resolve_target};
 use crate::project_dashboard::{
     store, CommitRow, DashChatRow, DashTodo, DashboardSnapshot, DashboardTarget, DashboardTargetRef,
-    PlanItem, RepoRef, RepoShip, Scope, ScheduledRow, ServerRow, TodoStats,
+    DueSummary, PlanItem, RepoRef, RepoShip, Scope, ScheduledRow, ServerRow, TodoStats,
 };
 use crate::sessions::user_todos::TodoState;
 use crate::sessions::{scheduled_items, user_todos};
@@ -64,6 +64,7 @@ struct StoredRows {
     todos: Vec<DashTodo>,
     plan: Vec<PlanItem>,
     todo_stats: TodoStats,
+    due: DueSummary,
     scheduled: Vec<ScheduledRow>,
     recent: Vec<DashChatRow>,
 }
@@ -94,6 +95,7 @@ fn read_stored(repos: &[RepoRef], live_ids: &HashSet<String>, live_in_target: us
         todos,
         plan,
         todo_stats: crate::project_dashboard::todo_stats::read_stats(&cwds),
+        due: crate::project_dashboard::todo_due::read_due(&cwds),
         scheduled,
         recent: recent_chats(repos, live_ids, live_in_target),
     }
@@ -256,6 +258,7 @@ pub(super) async fn snapshot(state: &Arc<DaemonState>, target_ref: DashboardTarg
         chats_recent: stored.recent,
         plan: stored.plan,
         todo_stats: stored.todo_stats,
+        due: stored.due,
         scheduled: stored.scheduled,
         ship,
         servers: servers.into_iter().flatten().collect(),

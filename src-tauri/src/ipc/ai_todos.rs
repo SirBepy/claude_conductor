@@ -30,6 +30,8 @@ pub struct AiTodoEntry {
     pub worth: Option<u8>,
     /// `complexity=X` from the cleanup comment, as written (e.g. `HARD`).
     pub complexity: Option<String>,
+    /// The `**Due:**` line as a valid `YYYY-MM-DD`; `None` when absent or malformed.
+    pub due: Option<String>,
     /// A live claim exists: a chat is working on it.
     pub claimed: bool,
     /// The PLAN.md `## ` heading the id sits under; `None` when unplanned.

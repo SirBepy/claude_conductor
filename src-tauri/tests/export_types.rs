@@ -37,7 +37,7 @@ use claude_conductor_lib::sessions::message_drafts::{
 use claude_conductor_lib::people::Person;
 use claude_conductor_lib::project_dashboard::{
     CardAction, CardConfig, CardDisplay, CardProgress, CardResult, CardSegments, CardSource, CardView, CommitRow, DashChatRow, DashTodo,
-    DashboardHistory, DashboardListRow, DashboardSnapshot, DashboardTarget, DashboardTargetRef, FileRow, GalleryItem,
+    DashboardHistory, DashboardListRow, DashboardSnapshot, DashboardTarget, DashboardTargetRef, DueDay, DueId, DueSummary, FileRow, GalleryItem,
     GroupDef, LabelValue, OutcomeRow, PlanItem, QuickAction, RepoRef, RepoShip, RowValue, Scope,
     ScheduledRow, SegmentItem, ServerRow, StatSpec, TodoDay, TodoStats,
 };
@@ -250,6 +250,9 @@ fn emit_ipc_types() {
     out.push_str(&decl::<ServerRow>());
     out.push_str(&decl::<TodoDay>());
     out.push_str(&decl::<TodoStats>());
+    out.push_str(&decl::<DueId>());
+    out.push_str(&decl::<DueDay>());
+    out.push_str(&decl::<DueSummary>());
     out.push_str(&decl::<DashboardSnapshot>());
     out.push_str(&decl::<QuickAction>());
     out.push_str(&decl::<OutcomeRow>());

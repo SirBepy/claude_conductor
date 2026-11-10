@@ -16,11 +16,14 @@ export type DashTodo = { id: string, project_id: string, text: string, origin_se
 export type DashChatRow = { session_id: string, title: string, status: "question" | "working" | "your_turn" | "waiting" | "ended", repo_cwd: string, at_ms: number }
 export type PlanItem = { id: string | null, text: string, section: string, priority: boolean, repo_cwd: string }
 export type TodoStats = Gen.TodoStats
+export type DueId = { id: string, repo_cwd: string }
+export type DueDay = { date: string, count: number, ids: DueId[] }
+export type DueSummary = { days: DueDay[], missed_ids: DueId[] }
 export type ScheduledRow = { id: string, label: string, fire_at_ms: number, repo_cwd: string }
 export type CommitRow = { short_sha: string, message: string, timestamp_ms: number, pushed: boolean }
 export type RepoShip = { cwd: string, name: string, branch: string, ahead: number, behind: number, has_upstream: boolean, dirty_count: number, recent_commits: CommitRow[] }
 export type ServerRow = { name: string, port: number, repo_cwd: string }
-export type DashboardSnapshot = { target: DashboardTarget, your_todos: DashTodo[], chats_running: DashChatRow[], chats_recent: DashChatRow[], plan: PlanItem[], todo_stats: TodoStats, scheduled: ScheduledRow[], ship: RepoShip[], servers: ServerRow[], cards: CardView[], hidden_builtins: string[], pinned_actions: string[] }
+export type DashboardSnapshot = { target: DashboardTarget, your_todos: DashTodo[], chats_running: DashChatRow[], chats_recent: DashChatRow[], plan: PlanItem[], todo_stats: TodoStats, due: DueSummary, scheduled: ScheduledRow[], ship: RepoShip[], servers: ServerRow[], cards: CardView[], hidden_builtins: string[], pinned_actions: string[] }
 export type QuickAction = { command: string, count: number }
 export type OutcomeRow = { session_id: string, title: string, text: string, at_ms: number, repo_cwd: string }
 export type GalleryItem = { id: string, session_id: string, title: string, at_ms: number, repo_cwd: string }
@@ -59,6 +62,9 @@ export type _ContractChecks = [
   Assert<Fits<CommitRow, Gen.CommitRow>>,
   Assert<Fits<RepoShip, Gen.RepoShip>>,
   Assert<Fits<ServerRow, Gen.ServerRow>>,
+  Assert<Fits<DueId, Gen.DueId>>,
+  Assert<Fits<DueDay, Gen.DueDay>>,
+  Assert<Fits<DueSummary, Gen.DueSummary>>,
   Assert<Fits<DashboardSnapshot, Gen.DashboardSnapshot>>,
   Assert<Fits<QuickAction, Gen.QuickAction>>,
   Assert<Fits<OutcomeRow, Gen.OutcomeRow>>,
