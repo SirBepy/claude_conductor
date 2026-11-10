@@ -102,8 +102,20 @@ test.describe("quick reply chips", () => {
       const { state } = await import("/views/sessions/state.ts");
       state.composer!.clearComposer();
     });
-    await expect(chip(page)).toBeVisible();
     expect(await page.evaluate(() => (window as unknown as { __draftActivity: number }).__draftActivity)).toBe(0);
+  });
+
+  // send() empties the box before the daemon has answered, and the chat still reads as finished until then: the
+  // strip must stay hidden through that window for an image send exactly as it does for a text send.
+  test("sending an image alone keeps the chips hidden while the send is in flight", async ({ page }) => {
+    await mountChat(page, {}, { paste_attachment: "C:/tmp/pasted.png" });
+    await attach(page);
+    await page.locator("#session-pane .composer-attachments .attachment").first().waitFor();
+    await page.waitForFunction(() => document.querySelectorAll(".composer-attachments .attachment.uploading").length === 0);
+    await box(page).press("Enter");
+    await expect(page.locator("#session-pane .composer-attachments .attachment")).toHaveCount(0);
+    await page.waitForTimeout(400);
+    await expect(page.locator("#session-pane .next-chip-slot")).toBeHidden();
   });
 
   test("the message box stays where it was when the chips hide", async ({ page }) => {

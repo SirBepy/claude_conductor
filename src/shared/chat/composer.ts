@@ -126,6 +126,7 @@ export class Composer {
   // Wall-clock of the last keystroke; feeds isComposing() so an auto-flush
   // doesn't fire out from under the user mid-type.
   private lastKeyAt = 0;
+  private attChangeQuiet = false;
   private undo: ComposerUndo;
   private highlight: ComposerHighlight;
   private cv: ComposerVoice;
@@ -203,7 +204,7 @@ export class Composer {
       getMachineId: () => this.opts.getMachineId?.() ?? null,
       // An attached or pasted image changes whether the draft is empty without
       // any keystroke, and the quick-reply strip above the box hides on that.
-      onChange: () => { this.updateSendState(); this.opts.onAttachmentsChange?.(); },
+      onChange: () => { this.updateSendState(); if (!this.attChangeQuiet) this.opts.onAttachmentsChange?.(); },
     });
     this.strayInput = new ComposerStrayInput({
       getTextarea: () => this.textarea,
@@ -945,7 +946,12 @@ export class Composer {
     // Reset voice state; stop an in-flight recording so a send mid-dictation
     // doesn't leave the controller running against stale anchor positions.
     this.cv.reset();
-    this.att.clear();
+    // Silent: clearComposer runs at send time, while the chat still reads as
+    // finished until the daemon answers, so refreshing the quick-reply strip
+    // here would bring it back under the "Sending... Undo" bar. A text-only
+    // clear never refreshed it either.
+    this.attChangeQuiet = true;
+    try { this.att.clear(); } finally { this.attChangeQuiet = false; }
     this.updateSendState();
     // Explicit clear: send/discard only, never blur or navigate-away.
     if (this.sessionId) {
