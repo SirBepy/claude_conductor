@@ -14,6 +14,13 @@ use std::sync::Mutex;
 /// `claude` processes (each ~280 MB; 2026-11-10 measure: 13 running used 3.6 GB
 /// of 31.7 GB), so the real limits are subscription rate limits and how many subs
 /// Joe can follow in one window; Joe set 10 on 2026-11-10.
+///
+/// A soft cap on purpose: only a new `spawn_chat` and "Move into main chat"
+/// check it. A queued sub (`held::launch_held`, the writer queue) starts when its
+/// turn comes without re-checking, so a main chat at 10 started subs with queued
+/// ones can pass 10 while they start. A queued sub was accepted while it held no
+/// slot, and refusing it again at start would leave it waiting on a slot that
+/// nothing announces; the overrun is bounded by the queue Joe already approved.
 pub const MAX_RUNNING: usize = 10;
 
 /// Everything the spawn needs once the rules have passed. Holding it keeps the
