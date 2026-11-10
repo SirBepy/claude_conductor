@@ -36,6 +36,9 @@ export class ComposerStrayInput {
     if (isFormControlElement(document.activeElement)) return null;
     const cardFieldSelector =
       `#${QUESTION_CARD_HOST_ID} .prompt-q__other-input, #${QUESTION_CARD_HOST_ID} .prompt-extra-input`;
+    // A submitted card waits out its Undo window inert: typing meant for the next
+    // message goes to the composer, not into a card that is about to close.
+    if (document.getElementById(QUESTION_CARD_HOST_ID)?.inert) return textarea;
     let cardInput = document.querySelector<HTMLTextAreaElement>(cardFieldSelector);
     // The review step has no text box until "Add a note" is tapped, so a
     // typed character opens it (its click handler is synchronous) instead of

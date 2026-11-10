@@ -53,20 +53,9 @@
   }
 }
 
-/* A card answer has no Send to cover: the card is already gone. */
-.send-grace-floating {
+/* A question card is frozen under its Undo: this box is laid over the pressed
+   control by question-ui-hold.ts, outside the card (which is inert). */
+.send-grace-cover {
   position: fixed;
-  left: 50%;
-  bottom: 24px;
   z-index: 3100;
-  display: flex;
-  gap: 10px;
-  transform: translateX(-50%);
-}
-
-.send-grace-floating .send-grace-undo {
-  position: relative;
-  inset: auto;
-  width: var(--control-h);
-  height: var(--control-h);
 }
