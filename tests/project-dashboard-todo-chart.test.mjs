@@ -17,7 +17,7 @@ const days = Array.from({ length: 40 }, (_, i) => day(`2026-09-${String(i + 1).p
 
 function ctx(todo_stats, hidden_builtins = []) {
   return {
-    snap: { target: { kind: "project", repos: [] }, hidden_builtins, todo_stats },
+    snap: { target: { kind: "project", repos: [] }, hidden_builtins, todo_stats, due: { days: [], missed_ids: [] } },
     act: { setTodoRange: vi.fn() },
   };
 }

@@ -129,3 +129,21 @@
 .pd-html-frame { display: block; width: 100%; height: 60px; border: 0; background: transparent; color-scheme: normal; }
 /* Stands in for a frame in the first-send fading copy, which must not reload it. */
 .pd-html-frame-ghost { display: block; width: 100%; background: inherit; }
+
+/* Due card: five day cells (count over label), then a red pill for the missed. */
+.pd-due-days { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.pd-due-day {
+  box-sizing: border-box; padding: 5px 4px; text-align: center; cursor: pointer;
+  border: 1px solid var(--color-border); border-radius: 8px; background: transparent; color: var(--color-text); font: inherit;
+}
+.pd-due-day:hover { background: var(--color-surface); }
+.pd-due-day.is-today { border-color: var(--color-primary); }
+.pd-due-day.on { background: color-mix(in srgb, var(--color-primary) 18%, transparent); }
+.pd-due-n { display: block; font-size: 14px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.pd-due-day.is-zero .pd-due-n { opacity: 0.4; }
+.pd-due-l { display: block; font-size: 11px; color: var(--sb-muted, var(--color-text-muted)); }
+.pd-due-missed {
+  display: inline-block; margin-top: 8px; padding: 1px 8px; border: 0; border-radius: 999px; cursor: pointer; font: inherit; font-size: 12px;
+  color: var(--color-danger); background: color-mix(in srgb, var(--color-danger) 16%, transparent);
+}
+.pd-due-missed.on { background: color-mix(in srgb, var(--color-danger) 30%, transparent); }

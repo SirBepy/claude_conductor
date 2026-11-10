@@ -43,6 +43,8 @@ export interface DashActions {
   /** Clipboard, with a toast naming `what` was copied. */
   copyText(text: string, what: string): void;
   toggleTodo(todo: DashTodo): void;
+  /** Due card: highlights that day's (or the missed) todos in the Backlog panel and opens it; the same cell again clears. */
+  toggleDue(selection: string): void;
   refreshCard(id: string): void;
   /** The project menu, under a button (the page header's kebab). */
   openMenu(anchor: HTMLElement): void;

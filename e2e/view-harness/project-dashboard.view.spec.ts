@@ -5,11 +5,11 @@ import { test, expect, type Page } from "@playwright/test";
 // Reviewed 2026-11-05: session-controls.ts's Ctrl+W goes back to the main chat when a sub is open instead of closing it; this spec opens no sub and presses no close key, so its contract is unaffected. Passed after the change.
 // Reviewed 2026-10-28: a dashboard file row and the PLAN.md link now open the app's Files window instead of VS Code, and the file menu adds Open; this spec asserts neither the open command nor that menu, so its contract is unaffected. Passed after the change.
 // Reviewed 2026-10-27 (dash-cards.ts gained a segmented-bar branch, drawn only for a card whose result carries `segments`; this spec's fixtures carry none, and it passed unchanged).
-// asserts: src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/dashboard-page.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/dash-sections.ts, src/views/sessions/project-dashboard/dash-cards.ts, src/views/sessions/project-dashboard/dash-reports.ts, src/views/sessions/project-dashboard/dash-header.ts, src/views/sessions/project-dashboard/dash-modals.ts, src/views/sessions/project-dashboard/dash-menu.ts, src/views/sessions/project-dashboard/dash-chats.ts, src/views/sessions/project-dashboard/dash-history-modal.ts, src/views/sessions/project-dashboard/dash-usage.ts, src/views/sessions/project-dashboard/dash-todo-chart.ts, src/views/sessions/project-dashboard/dash-line-chart.ts, src/views/sessions/project-dashboard/dash-motion.ts, src/views/sessions/project-dashboard/quick-track.ts, src/views/sessions/project-dashboard/paging.ts, src/views/sessions/session-header.ts, src/views/sessions/pending-pane.ts, src/views/sessions/session-controls.ts, src/views/sessions/state.ts
-import { capture, fireEvent, mountSessionsList, sessionInstance, waitForStableBox } from "./harness";
+// asserts: src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/dashboard-page.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/dash-sections.ts, src/views/sessions/project-dashboard/dash-cards.ts, src/views/sessions/project-dashboard/dash-reports.ts, src/views/sessions/project-dashboard/dash-header.ts, src/views/sessions/project-dashboard/dash-modals.ts, src/views/sessions/project-dashboard/dash-menu.ts, src/views/sessions/project-dashboard/dash-chats.ts, src/views/sessions/project-dashboard/dash-history-modal.ts, src/views/sessions/project-dashboard/dash-usage.ts, src/views/sessions/project-dashboard/dash-todo-chart.ts, src/views/sessions/project-dashboard/due-model.ts, src/views/sessions/backlog-panel/due-highlight.ts, src/views/sessions/backlog-panel/backlog-render.ts, src/views/sessions/project-dashboard/dash-line-chart.ts, src/views/sessions/project-dashboard/dash-motion.ts, src/views/sessions/project-dashboard/quick-track.ts, src/views/sessions/project-dashboard/paging.ts, src/views/sessions/session-header.ts, src/views/sessions/pending-pane.ts, src/views/sessions/session-controls.ts, src/views/sessions/state.ts
+import { capture, fireEvent, invokeCalls, mountSessionsList, sessionInstance, waitForStableBox } from "./harness";
 import { expectIconButtonsCentred } from "./icon-centering";
 import {
-  CONDUCTOR_CWD, LIST_ROWS, ZIRTUE_CWDS, conductorHistory, conductorSnapshot, fakeShot, zirtueHistory, zirtueSnapshot,
+  CONDUCTOR_CWD, LIST_ROWS, ZIRTUE_CWDS, conductorHistory, conductorSnapshot, dueSummary, fakeShot, zirtueHistory, zirtueSnapshot,
 } from "./project-dashboard-fixtures";
 
 // The project dashboard against a fake dashboard backend, through its real
@@ -525,6 +525,48 @@ test.describe("view-harness / project dashboard", () => {
     await expect(next.locator("[data-pd-pager]")).toContainText("1/2");
     await next.locator('[data-pd-pager] button[title="Next"]').click();
     await expect(next.locator(".pd-row").first()).toContainText("#90");
+  });
+
+  test("the Due card shows counts and labels only, a missed pill and Do all due; a click toggles a day's highlight; Do all sends the ids", async ({ page }) => {
+    await mountWithDashboard(page);
+    await page.evaluate((due) => {
+      (window as unknown as { __ccDashBackend: { snapshots: Record<string, { due: unknown }> } }).__ccDashBackend.snapshots["p-conductor"]!.due = due;
+    }, dueSummary());
+    await openPageFrom(page, "s-q");
+
+    const due = card(page, "due");
+    await expect(due).toBeVisible();
+    await expect(due.locator(".pd-count")).toHaveText("8");
+    await expect(due.locator("[data-pd-due-all]")).toHaveText("Do all due (4)");
+    await expect(due.locator("[data-pd-due-day] .pd-due-n")).toHaveText(["2", "1", "0", "3", "0"]);
+    await expect(due.locator("[data-pd-due-day]").first().locator(".pd-due-l")).toHaveText("Today");
+    await expect(due.locator("[data-pd-due-day]").first()).toHaveClass(/is-today/);
+    await expect(due.locator("[data-pd-due-missed]")).toHaveText("2 missed");
+    expect(await due.innerText()).not.toMatch(/pc-\d/);
+    // The first of the half-width cards: top of the first column.
+    await expect(page.locator(".pd-col").first().locator("[data-pd-card]").first()).toHaveAttribute("data-pd-card", "due");
+    await capture(page, "dashboard-due-card");
+
+    const day = due.locator("[data-pd-due-day]").nth(3);
+    await day.click();
+    await expect(day).toHaveClass(/\bon\b/);
+    await day.click();
+    await expect(day).not.toHaveClass(/\bon\b/);
+
+    await due.locator("[data-pd-due-all]").click();
+    // The new chat takes the pane with the message: sent, or (the fake backend
+    // starts no chat) handed back to the message box.
+    const message = "/auto-do-todos pc-1601,pc-1602,pc-1674,pc-1675";
+    await expect.poll(async () => JSON.stringify(await invokeCalls(page)) + await page.locator("#session-pane textarea").evaluateAll(
+      (els) => els.map((e) => (e as HTMLTextAreaElement).value).join("|"),
+    )).toContain(message);
+  });
+
+  test("the Due card is absent when nothing is due or missed", async ({ page }) => {
+    await mountWithDashboard(page);
+    await openPageFrom(page, "s-q");
+    await expect(card(page, "next_up")).toBeVisible();
+    await expect(card(page, "due")).toHaveCount(0);
   });
 
   test("quick actions stay on one line led by New chat, and a wheel turn scrolls them sideways with a passing scrollbar", async ({ page }) => {

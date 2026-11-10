@@ -22,6 +22,7 @@ import {
 } from "./backlog-model";
 import { listHtml, readerHtml } from "./backlog-render";
 import { BACKLOG_OPEN_EVENT, takePendingTodoId } from "./backlog-open-event";
+import { onDueHighlight } from "./due-highlight";
 import { attachBacklogDrag } from "./backlog-drag";
 import "./backlog-panel.css";
 
@@ -56,6 +57,7 @@ class BacklogPanel implements BacklogPanelHandle {
   /** Last list markup written, so an unchanged refetch leaves the DOM (and the
    *  user's scroll and hover) alone. */
   private lastList = "";
+  private disposeDue: () => void = () => {};
   private lastDoc = new Map<string, string>();
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private errorTimer: ReturnType<typeof setTimeout> | null = null;
@@ -101,6 +103,7 @@ class BacklogPanel implements BacklogPanelHandle {
     root.addEventListener("change", this.onChange);
     window.addEventListener(BACKLOG_OPEN_EVENT, this.onOpenRequest);
     this.wantedId = takePendingTodoId();
+    this.disposeDue = onDueHighlight(() => this.renderList());
     this.disposeDrag = attachBacklogDrag({
       list: this.listEl,
       enabled: () => this.canAct() && !this.busy,
@@ -286,7 +289,7 @@ class BacklogPanel implements BacklogPanelHandle {
     this.panel.dataset.view = this.view;
     this.emptyEl.hidden = !empty;
     this.listEl.hidden = none;
-    const html = b && !none ? listHtml(buildListGroups(b), { selectedId: this.selectedId(), draggable: this.canAct() }) : "";
+    const html = b && !none ? listHtml(buildListGroups(b), { selectedId: this.selectedId(), draggable: this.canAct(), cwd: this.cwd }) : "";
     if (html !== this.lastList) {
       this.lastList = html;
       this.listEl.innerHTML = html;
@@ -557,6 +560,7 @@ class BacklogPanel implements BacklogPanelHandle {
     this.resizeObs?.disconnect();
     window.removeEventListener("focus", this.focusHandler);
     window.removeEventListener(BACKLOG_OPEN_EVENT, this.onOpenRequest);
+    this.disposeDue();
     this.root.removeEventListener("click", this.onClick);
     this.root.removeEventListener("change", this.onChange);
     if (this.toastTimer) clearTimeout(this.toastTimer);

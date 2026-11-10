@@ -45,6 +45,7 @@ export function projectSnapshot(over = {}) {
       { id: "1264", text: "Hyperfocus the mobile todos", section: "Priorities", priority: true, repo_cwd: CONDUCTOR.cwd },
       { id: "506", text: "Android push via FCM", section: "Backlog", priority: false, repo_cwd: CONDUCTOR.cwd },
     ],
+    due: { days: [], missed_ids: [] },
     scheduled: [{ id: "sc1", label: "/loop-todos cycle", fire_at_ms: NOW + 3_600_000, repo_cwd: CONDUCTOR.cwd }],
     ship: [ship(CONDUCTOR.cwd, "conductor", "master", 2, 0)],
     servers: [{ name: "vite dev server", port: 1420, repo_cwd: CONDUCTOR.cwd }],
@@ -98,7 +99,7 @@ export function groupSnapshot(over = {}) {
       { session_id: "z-w", title: "ACH retry backoff", status: "working", repo_cwd: biller.cwd, at_ms: min(3) },
     ],
     chats_recent: [{ session_id: "z-old", title: "Loan export CSV columns", status: "ended", repo_cwd: admin.cwd, at_ms: min(120) }],
-    plan: [], scheduled: [],
+    plan: [], scheduled: [], due: { days: [], missed_ids: [] },
     ship: [ship(app.cwd, "zng-app", "release/2.14", 3, 0), ship(admin.cwd, "zng-admin", "sc-4810", 0, 0), ship(biller.cwd, "zng-biller", "sc-4821", 1, 2), ship(api.cwd, "zng-api", "main", 0, 0)],
     servers: [],
     cards: [

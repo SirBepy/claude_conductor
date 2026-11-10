@@ -14,6 +14,9 @@ import { updateThinkingBar } from "../session-thinking-bar";
 import { state } from "../state";
 import type { DashActions, DashCtx } from "./dash-parts";
 import { withCommand } from "./format";
+import { selectionIds, toggleSelection } from "./due-model";
+import { BACKLOG_OPEN_EVENT } from "../backlog-panel/backlog-open-event";
+import { dueSelection, setDueHighlight } from "../backlog-panel/due-highlight";
 import { openReportsModal, showImageOverlay } from "./dash-reports";
 import { openHistoryModal } from "./dash-history-modal";
 import { copy, openProjectMenu } from "./dash-menu";
@@ -164,6 +167,13 @@ export function makeActions(host: ActionHost): DashActions {
           host.patch((c) => { if (wasDone) c.doneTodos.add(todo.id); else c.doneTodos.delete(todo.id); });
           showToast(`Could not update the todo: ${String(err)}`);
         });
+    },
+    toggleDue: (sel) => {
+      const next = toggleSelection(dueSelection(), sel);
+      setDueHighlight(next, selectionIds(host.ctx().snap.due, next));
+      // No id in the event: the panel just opens, and keeps the row it had.
+      if (next) window.dispatchEvent(new CustomEvent(BACKLOG_OPEN_EVENT));
+      host.patch(() => {});
     },
     refreshCard: (id) => {
       host.patch((c) => { c.refreshing.add(id); });
