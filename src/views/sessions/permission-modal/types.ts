@@ -181,7 +181,8 @@ export interface QuestionUIOpts {
    *  sub's card shows in its main chat. */
   displayId?: string;
   questions: Question[];
-  titleIcon: string;
+  /** Overrides the question icon; unset draws the stacked question bubble. */
+  titleIcon?: string;
   rightChipHtml?: string;
   submitLabel: string;
   submitIcon: string;

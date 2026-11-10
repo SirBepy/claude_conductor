@@ -14,6 +14,7 @@ import type { RenderedMessage } from "./chat-transforms";
 import { renderMarkdown, truncateForSummary } from "./chat-transforms";
 import { canonicalTool, isAskQuestionTool } from "./tool-meta";
 import { escapeHtml } from "../escape-html";
+import { questionIconHtml } from "../question-icon";
 import { basename } from "../path-utils";
 import { asObj, strField } from "../obj-utils";
 
@@ -322,7 +323,7 @@ export function renderQuestionCardHtml(m: RenderedMessage): string {
   const resolutionHtml = resolutionInner ? `<span class="question-card-summary-resolution">${resolutionInner}</span>` : "";
   // No degraded-builtin badge here: the daemon stamps it on the prompt payload,
   // not the tool_use input this renders from. The live card carries it instead.
-  const summary = `<summary class="question-card-summary"><i class="ph ph-chat-circle-dots"></i><span class="question-card-label">${escapeHtml(truncated)}</span>${badge}<i class="ph ph-caret-down question-card-chevron"></i>${resolutionHtml}</summary>`;
+  const summary = `<summary class="question-card-summary">${questionIconHtml()}<span class="question-card-label">${escapeHtml(truncated)}</span>${badge}<i class="ph ph-caret-down question-card-chevron"></i>${resolutionHtml}</summary>`;
   // Shown only when expanded (inside <details>) - escapeHtml not
   // renderMarkdown, since this is user-typed prose, not Claude's markdown.
   const extraHtml = m.extraText

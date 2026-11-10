@@ -3,6 +3,7 @@
 // question-ui-templates.ts, so this file keeps only the stateful orchestration.
 
 import { escapeHtml } from "../../../shared/escape-html";
+import { questionIconHtml } from "../../../shared/question-icon";
 import { handleTicketHover, handleTicketHoverOut, linkifyTickets } from "../../../shared/chat/ticket-refs";
 import { renderCardShell } from "./host";
 import {
@@ -282,10 +283,10 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         : "";
       // Overrides the caller's icon rather than relying on that 0.45-opacity
       // badge: unplugged glyph = this card did not come from the MCP tool.
-      const titleIcon = opts.degradedBuiltin ? "ph-plugs" : (opts.titleIcon || "ph-chat-circle-dots");
+      const titleIcon = opts.degradedBuiltin ? "ph-plugs" : opts.titleIcon;
       // Same header on phone and desktop (Joe, 2026-10-26): minimize sits far
       // right on both, and Skip lives on the minimized bar (collapsedHtml).
-      const titleHtml = `<span class="prompt-card__title"><i class="ph ${titleIcon}"></i></span>`;
+      const titleHtml = `<span class="prompt-card__title">${titleIcon ? `<i class="ph ${titleIcon}"></i>` : questionIconHtml()}</span>`;
       // The picker already names every asker, so the sub's own name chip only
       // shows while it is the lone asker in this window.
       const chips = opts.askers?.() ?? null;
