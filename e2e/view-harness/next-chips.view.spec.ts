@@ -1,7 +1,7 @@
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu and the effort battery colours change nothing this spec asserts; its failing test also fails on HEAD without these changes.
 // Reviewed 2026-11-10: the question card pads the scroller cardPaddedScroller picks (this pane's transcript as before, or the chat dashboard's body while it shows), active-session.ts detaches the chat dashboard on dismount, and a read-only session keeps Messages; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
-// asserts: src/views/sessions/next-chips.ts, src/views/sessions/next-chip-strip.ts, src/views/sessions/session-thinking-bar.ts, src/views/sessions/active-session.ts, src/views/sessions/active-session-composer.ts
+// asserts: src/views/sessions/next-chips.ts, src/views/sessions/next-chip-strip.ts, src/views/sessions/session-thinking-bar.ts, src/views/sessions/active-session.ts, src/views/sessions/active-session-composer.ts, src/shared/chat/composer.ts
 // Reviewed 2026-11-03: selectSession now returns when the chat was switched away during the statusbar settings read; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-01: the working bar lost its card and gained an opened block (session-thinking-bar.ts); this spec drives only the chip strip above it and passes.
 import { expect, test, type Page } from "@playwright/test";
@@ -64,6 +64,32 @@ test.describe("quick reply chips", () => {
     await box(page).fill("");
     await expect(chip(page)).toHaveText(["/close"]);
     await expect(chip(page)).toBeVisible();
+  });
+
+  // No keystroke happens when an image is attached, so the strip has to hear about it from the attachment set.
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  const attach = (page: Page) =>
+    page.locator("#session-pane .composer-file-input").setInputFiles([{ name: "shot.png", mimeType: "image/png", buffer: PNG }]);
+
+  test("an image alone, with no text, hides the chips, and removing it brings them back", async ({ page }) => {
+    await mountChat(page, {}, { paste_attachment: "C:/tmp/pasted.png" });
+    await expect(chip(page)).toBeVisible();
+    await attach(page);
+    await page.locator("#session-pane .composer-attachments .attachment").first().waitFor();
+    await expect(page.locator("#session-pane .next-chip-slot")).toBeHidden();
+    await expect(box(page)).toHaveValue("");
+    await page.locator("#session-pane .composer-attachments .attachment .rm").first().click();
+    await expect(chip(page)).toBeVisible();
+  });
+
+  test("the message box stays where it was when the chips hide", async ({ page }) => {
+    await mountChat(page, {}, { paste_attachment: "C:/tmp/pasted.png" });
+    await expect(chip(page)).toBeVisible();
+    const before = (await page.locator("#session-pane .composer-shell").boundingBox())!;
+    await box(page).pressSequentially("it");
+    await expect(page.locator("#session-pane .next-chip-slot")).toBeHidden();
+    const after = (await page.locator("#session-pane .composer-shell").boundingBox())!;
+    expect(after.y + after.height).toBeCloseTo(before.y + before.height, 0);
   });
 
   test("a chip filling the box hides the strip like typing does", async ({ page }) => {
@@ -216,6 +242,16 @@ for (const [label, size] of [["desktop", { width: 1280, height: 800 }], ["phone"
 
 test.describe("quick reply chips on the phone", () => {
   test.use({ viewport: { width: 390, height: 780 } });
+
+  test("an image alone hides the row on the phone too", async ({ page }) => {
+    await mountChat(page, {}, { paste_attachment: "C:/tmp/pasted.png" });
+    await expect(chip(page)).toBeVisible();
+    await page.locator("#session-pane .composer-file-input").setInputFiles([
+      { name: "shot.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64") },
+    ]);
+    await page.locator("#session-pane .composer-attachments .attachment").first().waitFor();
+    await expect(page.locator("#session-pane .next-chip-slot")).toBeHidden();
+  });
 
   test("the row stays inside the screen", async ({ page }) => {
     await mountChat(page);
