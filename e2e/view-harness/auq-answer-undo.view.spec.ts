@@ -2,7 +2,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 
-// An answer waits out a grace window behind an Undo bar before it reaches the
+// An answer waits out a grace window behind a small Undo button before it reaches the
 // daemon (claude resumes the moment it gets one, so a sent answer cannot be
 // taken back). Undo brings the card back with the picked option still ticked.
 // The harness turns the window off for every other spec; this one sets a real,

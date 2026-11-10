@@ -1,5 +1,5 @@
 // Grace window for sends and card answers: the action waits a few seconds
-// behind an "Undo" bar instead of reaching claude at once. claude starts
+// behind a small Undo button instead of reaching claude at once. claude starts
 // answering the moment it receives a message, so the only way to take one
 // back is to not have sent it yet. One pending action per key (a chat id);
 // a newer action on the same key fires the older one first, so order holds.
@@ -26,9 +26,9 @@ let flushOnLeave = false;
 
 export interface GraceOpts {
   key: string;
-  /** What is being held, shown in the bar. */
+  /** What is being held, shown as the button's tooltip. */
   label: string;
-  /** Where the bar goes; the composer's slot, or {@link floatingGraceMount}. */
+  /** Where the button goes: over the composer's Send, or {@link floatingGraceMount}. */
   mount: HTMLElement;
   /** Runs once the window lapses (or earlier, when flushed). */
   fire: () => Promise<void> | void;
@@ -55,19 +55,17 @@ export function startGrace(o: GraceOpts): Promise<void> {
 }
 
 function buildBar(label: string, ms: number, onUndo: () => void): HTMLElement {
-  const bar = document.createElement("div");
-  bar.className = "send-grace-bar";
-  bar.setAttribute("role", "status");
-  bar.style.setProperty("--send-grace-ms", `${ms}ms`);
-  bar.innerHTML =
-    `<i class="ph ph-paper-plane-tilt send-grace-icon"></i>` +
-    `<span class="send-grace-label"></span>` +
-    `<button type="button" class="send-grace-undo"><i class="ph ph-arrow-u-up-left"></i>Undo</button>` +
-    `<span class="send-grace-fuse" aria-hidden="true"></span>`;
-  const text = bar.querySelector<HTMLElement>(".send-grace-label");
-  if (text) text.textContent = label;
-  bar.querySelector<HTMLButtonElement>(".send-grace-undo")?.addEventListener("click", onUndo);
-  return bar;
+  // Deliberately tiny and quiet: one muted button with a ring that drains over
+  // the window. The held text goes in the tooltip, never on screen.
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "send-grace-undo";
+  btn.title = `Undo - ${label}`;
+  btn.setAttribute("aria-label", `Undo - ${label}`);
+  btn.style.setProperty("--send-grace-ms", `${ms}ms`);
+  btn.innerHTML = `<i class="ph ph-arrow-u-up-left"></i><span class="send-grace-ring" aria-hidden="true"></span>`;
+  btn.addEventListener("click", onUndo);
+  return btn;
 }
 
 /** A short single-line preview of what is being held. */
