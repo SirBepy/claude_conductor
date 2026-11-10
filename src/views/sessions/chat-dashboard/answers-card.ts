@@ -412,6 +412,8 @@ export class AnswersCard {
     const anim = this.anim;
     this.anim = "";
     if (this.thread !== null) {
+      // Picks up a Grow done in another chat's card since this one last drew.
+      if (host.classList.contains("ax-th-tall") !== threadTall) this.fitTall();
       this.renderThread(host, anim);
       return;
     }
@@ -586,7 +588,8 @@ export class AnswersCard {
   /** Set on the zone's own host, so the thread grows without a re-render and its
    *  message box (and anything typed in it) stays put. */
   private growThread(): void {
-    threadTall = !threadTall;
+    // From what this card shows, not the shared flag, which another chat may have flipped since.
+    threadTall = !this.host?.classList.contains("ax-th-tall");
     this.fitTall();
     if (threadTall) this.host?.scrollIntoView({ block: "start", behavior: "smooth" });
   }

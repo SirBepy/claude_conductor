@@ -155,7 +155,8 @@ test("a thread opens tall, wraps its question, and grows to the window", async (
   await page.waitForTimeout(400);
   // Tall is the dashboard's visible height, so the message box stays on screen.
   const room = await page.locator("#session-pane .cdash-body").evaluate((el) => el.clientHeight);
-  expect(Math.round((await thread.boundingBox())!.height)).toBe(Math.max(460, room - 24));
+  expect(room - 24).toBeGreaterThan(460);
+  expect(Math.round((await thread.boundingBox())!.height)).toBe(room - 24);
   const comp = (await c.locator(".ax-tcomp").boundingBox())!;
   const view = (await page.locator("#session-pane .cdash-body").boundingBox())!;
   expect(comp.y + comp.height).toBeLessThanOrEqual(view.y + view.height + 1);
