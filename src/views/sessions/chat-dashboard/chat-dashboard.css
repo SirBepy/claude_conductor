@@ -1,0 +1,375 @@
+/* Chat dashboard (chat-dashboard.ts). The transcript stays in the pane, built
+   as usual, and is only hidden while the dashboard shows. */
+.session-pane[data-chat-view="dashboard"] > .session-messages {
+  display: none;
+}
+
+.cdash {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Joe's message strip, under the chat title ---- */
+.cdash-strip {
+  position: relative;
+  flex: none;
+  padding: 8px max(20px, calc((100% - 1100px) / 2)) 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+.cdash-strip[hidden] {
+  display: none;
+}
+.cdash-strip-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.cdash-strip-l {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-top: 4px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.cdash-strip-l em {
+  font-style: normal;
+  margin-left: 2px;
+}
+.cdash-strip-msg {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.45;
+  cursor: pointer;
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* Clamped to two whole lines at rest: a reminder, not the message. On an
+   inner box, because the outer one's padding would show a sliver of line 3. */
+.cdash-strip-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.cdash-strip-msg.open {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.cdash-strip-msg.open .cdash-strip-text {
+  display: block;
+}
+.cdash-strip-msg:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+.cdash-strip-msg .block.text p {
+  margin: 0;
+}
+.cdash-strip-msg .block + .block {
+  margin-top: 4px;
+}
+.cdash-strip-btn,
+.cdash-flip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cdash-strip-btn:hover,
+.cdash-strip-btn.on,
+.cdash-flip:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+.cdash-pop {
+  position: absolute;
+  right: max(20px, calc((100% - 1100px) / 2));
+  top: 100%;
+  z-index: 30;
+  width: min(440px, calc(100% - 40px));
+  max-height: 300px;
+  overflow: auto;
+  padding: 6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+}
+.cdash-pop-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.cdash-pop-row:hover,
+.cdash-pop-row.on {
+  background: var(--color-surface-alt);
+}
+.cdash-pop-t {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cdash-pop-row em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* ---- Body and columns ---- */
+.cdash-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 14px max(20px, calc((100% - 1100px) / 2)) 18px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.cdash-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 2px;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+.cdash-empty[hidden] {
+  display: none;
+}
+.cdash-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(250px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.cdash-grid.is-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+.cdash-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.cdash-col[hidden] {
+  display: none;
+}
+/* The right column is what stays put, so it stays in view while the left scrolls. */
+.cdash-right {
+  grid-column: 2;
+  position: sticky;
+  top: 0;
+}
+
+/* ---- Zone frames: small uppercase label, the real cards inside ---- */
+.cdash-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 7px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.cdash-count {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.cdash-flip {
+  height: 24px;
+  margin-left: auto;
+  padding: 0 9px;
+  font-size: 11.5px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.cdash-count + .cdash-flip {
+  margin-left: 8px;
+}
+.cdash-zone .msg {
+  max-width: none;
+  margin: 0;
+}
+.cdash-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Waiting on you: amber, red once anything blocks. */
+.cdash-waiting .cdash-h {
+  color: var(--color-warning);
+}
+.cdash-waiting.is-blocked .cdash-h {
+  color: var(--color-danger);
+}
+.cdash-waiting .msg.question-card {
+  cursor: pointer;
+}
+.cdash-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: -2px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+
+/* Plan and Result: the right column's card. */
+.cdash-card {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+}
+.cdash-plan-lead {
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  color: var(--color-text);
+}
+.cdash-plan-lead p {
+  margin: 0;
+}
+.cdash-steps {
+  display: flex;
+  flex-direction: column;
+}
+.cdash-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  width: calc(100% + 8px);
+  margin: 0 -4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  transition: color 0.4s;
+}
+button.cdash-step {
+  cursor: pointer;
+}
+button.cdash-step:hover {
+  background: var(--color-surface-alt);
+}
+.cdash-step i {
+  margin-top: 2px;
+}
+.cdash-step--done i {
+  color: var(--color-success);
+}
+.cdash-step--active,
+.cdash-step.open {
+  color: var(--color-text);
+}
+.cdash-step--active i {
+  color: var(--color-primary);
+  animation: cdash-spin 1.4s linear infinite;
+}
+.cdash-step--skipped span {
+  text-decoration: line-through;
+}
+.cdash-step-d {
+  display: block;
+  margin: 2px 0 3px;
+  font-size: 11.5px;
+  font-style: normal;
+  color: var(--color-text-muted);
+}
+.cdash-result .mc-root .msg-copy-btn {
+  display: none;
+}
+
+/* The status footer: the chat's own status line when it runs, a quiet Idle otherwise. */
+.cdash-status {
+  margin-top: 10px;
+}
+.cdash-status:empty {
+  display: none;
+}
+.cdash-pstatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: var(--color-surface-alt);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.cdash-pdot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-border);
+}
+.cdash-status .session-thinking {
+  margin: 0;
+  border-radius: 7px;
+  background: var(--color-surface-alt);
+}
+.cdash-status .thinking-row {
+  padding: 0 9px;
+}
+
+/* A narrow chat window stacks the columns instead of squeezing the right one. */
+@media (max-width: 720px) {
+  .cdash-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cdash-right {
+    grid-column: 1;
+    position: static;
+  }
+}
+
+@keyframes cdash-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cdash-step--active i {
+    animation: none;
+  }
+}

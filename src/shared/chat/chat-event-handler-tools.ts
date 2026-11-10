@@ -170,6 +170,7 @@ export function handleToolUseEvent(
       r.turnFooters.ensureTodoChecklist(r.activeTurnChipKey);
       r.turnFooters.updateTodoSteps(r.activeTurnChipKey, steps);
     }
+    r.dashPlan = { steps, at: r.messages.length };
     r.lastTodoActivity = steps.find((s) => s.status === "active")?.label ?? null;
     if (!r.hydrating) r.onTodoActivityUpdate?.(r.lastTodoActivity);
     return { touched: true, coalesce: false };

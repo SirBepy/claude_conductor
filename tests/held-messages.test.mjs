@@ -116,6 +116,37 @@ describe("HeldMessages — staging + chip", () => {
     expect(wrap.querySelector(".held-count").textContent).toBe("1");
   });
 
+  it("finds the badge slot from the pane while the status line sits in the dashboard's Plan card", () => {
+    const pane = document.createElement("div");
+    pane.className = "session-pane";
+    const card = document.createElement("div");
+    const anchor = document.createElement("div");
+    card.appendChild(anchor);
+    const wrap = document.createElement("div");
+    wrap.className = "composer-send-wrap";
+    wrap.innerHTML = `<span class="held-chip-slot"></span>`;
+    pane.append(card, wrap);
+    document.body.appendChild(pane);
+    const held = new HeldMessages();
+    held.attach({
+      sessionId: "sess-A",
+      chipSlot: wrap.querySelector(".held-chip-slot"),
+      anchor,
+      send: vi.fn(async () => {}),
+      interrupt: vi.fn(async () => {}),
+      getDraftBlocks: () => [],
+      isDraftEmpty: () => true,
+      isComposing: () => false,
+      clearComposer: vi.fn(),
+      getIsBusy: () => true,
+      onChange: () => held.renderChip(),
+    });
+    held.stage(textBlocks("one"));
+    wrap.innerHTML = `<span class="held-chip-slot"></span>`;
+    held.renderChip();
+    expect(wrap.querySelector(".held-count").textContent).toBe("1");
+  });
+
   it("keeps Interrupt & send out of the badge and inside the opened list", () => {
     const { held, chipSlot, anchor } = makeHarness();
     held.stage(textBlocks("one"));

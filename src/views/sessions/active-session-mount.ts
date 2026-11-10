@@ -23,6 +23,7 @@ import { scrollToBottom } from "../../shared/chat/chat-dom-renderer";
 import { flushRenderNow } from "../../shared/chat/flush-scheduler";
 import { isRawViewEnabled } from "../../shared/chat/message-filter-pref";
 import { perfPhase } from "../../shared/perf";
+import { attachChatDashboard } from "./chat-dashboard/chat-dashboard";
 import {
   takeRetainedChat,
   retainChat,
@@ -173,6 +174,9 @@ export function wireRenderer(
   // inherited the previous chat's progress/todo label, since those only ever
   // cleared on an activity-to-null push that a busy chat never sends.
   syncThinkingBar(renderer);
+  // Dashboard view (Settings > Chat defaults): drawn beside the transcript,
+  // which keeps rendering underneath. A no-op in Messages view and on the phone.
+  attachChatDashboard(pane, renderer);
 }
 
 /** Re-show a cached chat: swap the pane's empty `.session-messages` for the

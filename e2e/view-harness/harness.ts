@@ -123,6 +123,18 @@ export interface MountOptions {
   entry?: Entry;
   /** View-specific command responses, merged over the boot seed. */
   invoke?: InvokeMap;
+  /** Which chat view an opened chat draws (Settings > Chat defaults). Default
+   *  "messages": the app itself defaults to the dashboard, but every spec written
+   *  before it drives the transcript, so a spec opts into the dashboard by name.
+   *  A spec whose own `get_settings` already sets `chatView` keeps it. */
+  chatView?: "dashboard" | "messages";
+}
+
+/** Stamps the chat view onto the mocked settings, unless they already carry one. */
+function withChatView(map: InvokeMap, view: "dashboard" | "messages"): InvokeMap {
+  const s = map.get_settings;
+  if (!s || typeof s !== "object" || Array.isArray(s) || "chatView" in s) return map;
+  return { ...map, get_settings: { ...(s as Record<string, unknown>), chatView: view } };
 }
 
 /**
@@ -131,7 +143,7 @@ export interface MountOptions {
  */
 export async function mountView(page: Page, opts: MountOptions = {}): Promise<void> {
   const entry: Entry = opts.entry ?? "index";
-  const invokeMap: InvokeMap = { ...BOOT_SEED[entry], ...(opts.invoke ?? {}) };
+  const invokeMap: InvokeMap = withChatView({ ...BOOT_SEED[entry], ...(opts.invoke ?? {}) }, opts.chatView ?? "messages");
 
   await page.addInitScript(installMockTauri, { invokeMap });
 

@@ -9,6 +9,7 @@ import {
 } from "../../../../shared/effort-presets";
 import { settingsData } from "../../../sessions/new-session-cache";
 import { settingsHeader, toggleRow } from "../../ui";
+import { CHAT_VIEW_CHANGED, CHAT_VIEW_KEY, readChatView, type ChatView } from "../../../sessions/chat-dashboard/chat-view-pref";
 import "./chat-defaults.css";
 
 /** Parse a comma-separated models string into a trimmed, deduped, non-empty list. */
@@ -21,7 +22,7 @@ function parseModels(raw: string): string[] {
   return out;
 }
 
-function template(models: string[], sort: SessionSort, def: { model: string; effort: string }, chips: boolean) {
+function template(models: string[], sort: SessionSort, def: { model: string; effort: string }, chips: boolean, view: ChatView) {
   return html`
     <div class="view view-settings-chat-defaults">
       ${settingsHeader("Chat defaults")}
@@ -57,6 +58,16 @@ function template(models: string[], sort: SessionSort, def: { model: string; eff
               <option value="drain" ?selected=${sort === "drain"}>Token drain</option>
             </select>
           </div>
+          ${isRemote()
+            ? ""
+            : html`<div class="kit-row">
+                <span class="kit-row-label">Chat view</span>
+                <select id="chatDefaultsChatView" class="kit-select">
+                  <option value="dashboard" ?selected=${view === "dashboard"}>Dashboard</option>
+                  <option value="messages" ?selected=${view === "messages"}>Messages</option>
+                </select>
+              </div>
+              <p class="cd-hint">Dashboard shows a chat's answers, plan and what waits on you as cards. Messages shows the full transcript.</p>`}
           ${toggleRow({
             label: "Quick reply chips",
             inputId: "chatDefaultsNextChips",
@@ -92,7 +103,15 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
   if (!models.includes(def.model)) models = [...models, def.model];
 
   // Default on: an absent key resolves to true.
-  render(template(models, sort, def, getSettings().nextActionChips !== false), root);
+  render(template(models, sort, def, getSettings().nextActionChips !== false, readChatView(getSettings())), root);
+
+  root.querySelector<HTMLSelectElement>("#chatDefaultsChatView")?.addEventListener("change", (e) => {
+    const value: ChatView = (e.currentTarget as HTMLSelectElement).value === "messages" ? "messages" : "dashboard";
+    void updateSettings((fresh) => ({ ...fresh, [CHAT_VIEW_KEY]: value }))
+      // updateSettings refreshes the settings cache first, so an open chat reads the new value.
+      .then(() => document.dispatchEvent(new CustomEvent(CHAT_VIEW_CHANGED)))
+      .catch((err) => console.error("[chat-defaults] saving the chat view failed", err));
+  });
 
   root.querySelector<HTMLInputElement>("#chatDefaultsNextChips")?.addEventListener("change", (e) => {
     const checked = (e.currentTarget as HTMLInputElement).checked;

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10: flushRender fires onFlushed, and the chat dashboard can move the status line into its Plan card in Dashboard view only; the harness pins Messages view and this spec passes.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-02: the line is --control-h-sm tall on desktop and --control-h on a phone (it was 28 / 40px); the asserts below hold.
 // Reviewed 2026-11-03: selectSession now returns when the chat was switched away during the statusbar settings read; this spec's contract is unchanged and it passes.

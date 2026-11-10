@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10: flushRender fires onFlushed and the write_plan branch records ChatRenderer.dashPlan; neither touches the PR card, and this spec passes.
 // Reviewed 2026-11-05: handleToolUseEvent/handleToolResultEvent gained the subchat send row; every other tool is handled as before - this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-01: chat-dom-renderer.ts gained describeActivityFull and chat-event-handler-tools.ts now passes the working bar an activity detail; the pr_preview card path is untouched and this spec passes.
 // Reviewed 2026-10-30 (user-message attachment tray): chat-dom-renderer.ts now groups a USER message's attachment chips into a tray; this spec only asserts assistant pr_preview cards, so its contract is unchanged.

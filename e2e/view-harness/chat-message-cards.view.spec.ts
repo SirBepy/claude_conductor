@@ -1,3 +1,4 @@
+// Reviewed 2026-11-10: chat-dom-renderer.ts's flushRender also fires the renderer's onFlushed hook (the chat dashboard's re-derive); no row or card markup changed, and this spec passes in Messages view.
 // Reviewed 2026-11-05: chat-message-card.ts gained an optional quiet `tagNote` after a sub's tag and chat-message-cards.css two rules for it; a card without one draws as before, and this spec passes.
 // Reviewed 2026-11-05: chat-message-cards.css gained the .passed-row rule only; no card rule changed - this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-06: chat-message-card.ts draws a card's optional `visuals` under its body, and chat-pagination.ts / chat-event-handler-tools.ts revise them on update_message; a card without visuals draws as before.
