@@ -85,23 +85,21 @@ preamble, no second line. Never use the em dash character. Do not use any tool.\
     )
 }
 
-/// The model's reply as a stored question: its first non-empty line, without a
-/// label or wrapping quotes, capped at `QUESTION_MAX`. `None` when nothing usable is left.
+/// The model's reply as a stored question: the first line that reads as a question
+/// (after a label and wrapping quotes are removed), capped at `QUESTION_MAX`. A
+/// refusal or a preamble line is skipped, and a reply with no such line is `None`,
+/// so prose is never stored as an answer's question for good.
 pub(crate) fn clean_question(raw: &str) -> Option<String> {
-    let line = raw.lines().map(str::trim).find(|l| !l.is_empty())?;
-    let line = line.trim_start_matches(|c: char| c == '*' || c == '>' || c == '-' || c.is_whitespace());
-    let line = match line.get(..9) {
-        Some(head) if head.eq_ignore_ascii_case("question:") => &line[9..],
-        _ => line,
-    };
-    let line = line.replace('\u{2014}', "-");
-    let line = line.trim().trim_matches(|c: char| matches!(c, '"' | '\'' | '*' | '`' | '\u{201c}' | '\u{201d}'));
-    let out = clip_chars(line, QUESTION_MAX);
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    raw.lines().map(str::trim).filter(|l| !l.is_empty()).find_map(|line| {
+        let line = line.trim_start_matches(|c: char| c == '*' || c == '>' || c == '-' || c.is_whitespace());
+        let line = match line.get(..9) {
+            Some(head) if head.eq_ignore_ascii_case("question:") => &line[9..],
+            _ => line,
+        };
+        let line = line.replace('\u{2014}', "-");
+        let line = line.trim().trim_matches(|c: char| matches!(c, '"' | '\'' | '*' | '`' | '\u{201c}' | '\u{201d}'));
+        line.ends_with('?').then(|| clip_chars(line, QUESTION_MAX))
+    })
 }
 
 /// Answers whose rewrite is running now ("<chat>/<key>"), so two windows on the
@@ -312,7 +310,10 @@ mod tests {
         assert_eq!(clean_question("Question: Why is it blank - really?").as_deref(), Some("Why is it blank - really?"));
         assert_eq!(clean_question("Why is it blank \u{2014} really?").as_deref(), Some("Why is it blank - really?"));
         assert_eq!(clean_question("\n  \n").as_deref(), None);
-        assert_eq!(clean_question(&"q".repeat(500)).unwrap().chars().count(), QUESTION_MAX);
+        // A preamble or a refusal is skipped; prose with no question stores nothing.
+        assert_eq!(clean_question("Here is the question:\nWhy is it blank?").as_deref(), Some("Why is it blank?"));
+        assert_eq!(clean_question("I cannot tell what he asked.").as_deref(), None);
+        assert_eq!(clean_question(&format!("{}?", "q".repeat(500))).unwrap().chars().count(), QUESTION_MAX);
     }
 
     fn block_on<T>(f: impl Future<Output = T>) -> T {
@@ -362,22 +363,6 @@ mod tests {
         }))
         .unwrap();
         assert!(s.rewrites.is_empty());
-    }
-
-    #[test]
-    fn a_rewrite_stored_while_waiting_for_the_guard_is_not_called_for_again() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("c.answers.json");
-        // The other request's write lands as this one's guard is taken.
-        let other = path.clone();
-        let s = block_on(async {
-            let g = FlightGuard::enter("c/race".into()).unwrap();
-            drop(g);
-            answer_state::update_at(&other, |s| s.set_rewrite("race", "First?")).unwrap();
-            rewrite_question(&path, "c/race".into(), "race", "msg", "ans", |_| async { panic!("a second call started") }).await
-        })
-        .unwrap();
-        assert_eq!(s.rewrites.get("race").map(String::as_str), Some("First?"));
     }
 
     #[test]

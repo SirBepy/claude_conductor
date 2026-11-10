@@ -125,6 +125,8 @@ export class AnswersCard {
   /** Answers whose short question was asked for in this window, win or lose: a failed call is not retried until a reload. */
   private readonly rewriteTried = new Set<string>();
   private rewriteBusy = false;
+  /** Counts the chats this window has shown, so a call still running for an old one cannot release the current chat's turn. */
+  private rewriteEpoch = 0;
   /** Joe has used the card since it loaded: a late load must not move it under him. */
   private touched = false;
   private anim = "";
@@ -213,6 +215,7 @@ export class AnswersCard {
     if (!next) return;
     this.rewriteTried.add(next.key);
     this.rewriteBusy = true;
+    const epoch = this.rewriteEpoch;
     const answer = [next.verdict, next.text].filter(Boolean).join("\n");
     answersApi().rewrite(sid, next.key, next.typed, answer)
       .then((store) => {
@@ -223,6 +226,7 @@ export class AnswersCard {
       })
       .catch((err) => console.warn("[answers-card] writing the short question failed; the preview stays", err))
       .finally(() => {
+        if (epoch !== this.rewriteEpoch) return;
         this.rewriteBusy = false;
         this.pumpRewrites();
       });
@@ -271,6 +275,7 @@ export class AnswersCard {
       this.failedAsk.clear();
       this.rewriteTried.clear();
       this.rewriteBusy = false;
+      this.rewriteEpoch++;
     }
     const cached = cachedSide(sid);
     if (cached) {
