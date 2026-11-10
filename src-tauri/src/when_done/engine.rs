@@ -70,7 +70,7 @@ enum Countdown {
 enum WatchOutcome {
     /// Ready to count down. `forced` is true only when a nightly overdue
     /// cutoff forced this through regardless of busy/away state - the
-    /// countdown must not let a nightly interrupt check reverse that.
+    /// countdown must not let its idle/away re-check reverse that.
     Ready { forced: bool },
     /// Cancelled, or gave up (either the no-progress runaway guard, or a
     /// nightly overdue cutoff set to cancel rather than force).
@@ -237,8 +237,8 @@ async fn watch(deps: &EngineDeps, mode: ArmMode, action: TerminalAction, overdue
 
 /// Phase: CountingDown. 30s, decrement + emit each second. `forced` is set
 /// when a nightly overdue cutoff forced entry into this phase; while true, the
-/// nightly interrupt check below is skipped, since the whole point of forcing
-/// was to stop waiting on the user/chats.
+/// idle/away re-check below is skipped, since the whole point of forcing was
+/// to stop waiting on the user/chats. A postpone still interrupts.
 async fn countdown(deps: &EngineDeps, mode: ArmMode, forced: bool) -> Countdown {
     if (deps.is_cancelled)() {
         return Countdown::Cancelled;
