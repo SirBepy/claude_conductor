@@ -81,12 +81,6 @@ pub(crate) fn decided_view(log: Option<String>) -> QuickView {
     }
 }
 
-/// Claude Code's folder name for a working directory: every character that is
-/// not a letter or digit becomes `-`.
-pub(crate) fn encode_cwd(cwd: &Path) -> String {
-    cwd.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
-}
-
 /// The project's Auto Memory folder. The session's transcript sits in
 /// `projects/<encoded cwd>/`, so its parent is the safest anchor (it is right
 /// whatever account wrote it). Without a transcript the encoded cwd is looked
@@ -96,7 +90,7 @@ pub(crate) fn memory_dir(transcript: Option<&Path>, cwd: &Path, projects_root: O
     if let Some(dir) = transcript.and_then(Path::parent).map(|p| p.join("memory")).filter(|p| p.is_dir()) {
         return Some(dir);
     }
-    let want = encode_cwd(cwd);
+    let want = crate::tokens::encode_cwd_as_project_dir(cwd);
     let found = std::fs::read_dir(projects_root?)
         .ok()?
         .flatten()
@@ -164,7 +158,7 @@ pub fn register_quick_views(router: &mut Router, state: Arc<DaemonState>) {
                     decided_view(crate::daemon::subchats::decisions::read_log(i.subchat_of.as_deref().unwrap_or(&sid)))
                 }
                 ("memory", Some(i)) => {
-                    let root = dirs::home_dir().map(|h| h.join(".claude").join("projects"));
+                    let root = crate::tokens::claude_projects_dir();
                     memory_view(memory_dir(i.transcript_path.as_deref(), &i.cwd, root.as_deref()).as_deref())
                 }
                 _ => unavailable(&view),
@@ -216,14 +210,6 @@ mod tests {
         assert!(v.message.contains("Nothing decided"));
         let v = decided_view(Some("# decisions\n- D1".into()));
         assert_eq!(v.docs[0].name, "decisions.md");
-    }
-
-    #[test]
-    fn the_encoded_cwd_matches_claude_codes_folder_name() {
-        assert_eq!(
-            encode_cwd(Path::new(r"c:\Users\tecno\Desktop\Projects\claude_usage_in_taskbar")),
-            "c--Users-tecno-Desktop-Projects-claude-usage-in-taskbar"
-        );
     }
 
     #[test]
