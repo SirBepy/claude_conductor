@@ -145,6 +145,25 @@
   display: none;
 }
 
+/* Shown while a scheduled message is being edited (Composer.beginScheduledEdit). */
+.composer-edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  padding: 0 2px 6px;
+}
+
+.composer-edit-bar[hidden] {
+  display: none;
+}
+
+.composer-edit-bar > i {
+  color: var(--color-primary);
+}
+
 .composer-scope-warning > i {
   color: var(--color-warning);
 }
