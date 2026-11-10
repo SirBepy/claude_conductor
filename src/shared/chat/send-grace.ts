@@ -28,7 +28,7 @@ export interface GraceOpts {
   key: string;
   /** What is being held, shown as the button's tooltip. */
   label: string;
-  /** Where the button goes: over the composer's Send, or {@link floatingGraceMount}. */
+  /** Where the button goes: a positioned box laid over the control that was pressed. */
   mount: HTMLElement;
   /** Runs once the window lapses (or earlier, when flushed). */
   fire: () => Promise<void> | void;
@@ -111,15 +111,4 @@ export function remountGraceBar(key: string, mount: HTMLElement): void {
  *  leaving a chat never leaves its Undo button floating over another. */
 export function detachGraceBar(key: string): void {
   pending.get(key)?.bar.remove();
-}
-
-/** Fixed bottom-centre host for answers, whose card is already gone. */
-export function floatingGraceMount(): HTMLElement {
-  let host = document.querySelector<HTMLElement>(".send-grace-floating");
-  if (!host) {
-    host = document.createElement("div");
-    host.className = "send-grace-floating";
-    document.body.appendChild(host);
-  }
-  return host;
 }

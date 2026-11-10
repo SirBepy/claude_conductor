@@ -172,6 +172,17 @@ export interface AskerChip {
   blocking?: boolean;
 }
 
+/** A submitted card kept frozen on screen (see `QuestionUIOpts.holdOnSubmit`). */
+export interface HeldCard {
+  /** Where the Undo button goes: laid over the control that was pressed. */
+  mount: HTMLElement;
+  /** Close the card; its answer is on its way. */
+  release: () => void;
+  /** Give the card back exactly as it was. False when the card was closed from
+   *  outside meanwhile (a chat switch): the caller must show it again. */
+  thaw: () => boolean;
+}
+
 export interface QuestionUIOpts {
   /** Prompt id, so the card can be torn down externally (expiry / resolved elsewhere). */
   id?: string;
@@ -216,11 +227,16 @@ export interface QuestionUIOpts {
   /** Set on a hidden sub's card: Joe does not read the sub, so the card names it
    *  and its one-line job. `task` is omitted while the daemon has none. */
   from?: { name?: string; task?: string };
+  /** With `holdOnSubmit`, the card is not closed on submit/skip: it stays frozen
+   *  on screen and the handler gets `held` to close it (`release`) or give it
+   *  back (`thaw`), so an Undo can sit over the pressed button. */
+  holdOnSubmit?: boolean;
   onSubmit: (
     answers: Answers,
     extras: { additionalMessage: string; attachments: AuqAttachment[] },
+    held?: HeldCard,
   ) => void | Promise<void>;
-  onCancel: () => void | Promise<void>;
+  onCancel: (held?: HeldCard) => void | Promise<void>;
   cancelLabel: string;
   /** Partial answers to restore when re-surfacing a parked card. */
   initialDraft?: QuestionDraft;

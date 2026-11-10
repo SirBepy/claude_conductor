@@ -26,11 +26,11 @@ import {
   gateDiag,
 } from "./gating";
 import { askerChips } from "./askers";
-import type { Answers, Question, QuestionDraft, QuestionRequestedPayload, QuestionUIOpts } from "./types";
+import type { Answers, HeldCard, Question, QuestionDraft, QuestionRequestedPayload, QuestionUIOpts } from "./types";
 import { rerenderSidebar, surfaceNextForDisplay, surfaceParkedPrompt } from "./index";
 import { dropIfAlreadyAnswered } from "./answered-gate";
 import { setLiveQuestionProgress } from "../question-progress";
-import { startGrace, graceLabel, floatingGraceMount } from "../../../shared/chat/send-grace";
+import { startGrace, graceLabel } from "../../../shared/chat/send-grace";
 import { needsCardSkipMark, skipQuestionCard } from "../../../shared/chat/chat-question-card";
 import { flushRenderNow } from "../../../shared/chat/flush-scheduler";
 
@@ -319,15 +319,24 @@ export async function showQuestionCard(
 
   // Several chats can have a card at once; each holds its own answer.
   const graceKey = shownOn ?? payload.session_id ?? payload.id;
-  const withGrace = (label: string, fire: () => Promise<void> | void): Promise<void> => {
+  // The card stays frozen on screen for the window with the Undo over the button
+  // that was pressed; the fire closes it, and Undo hands it back untouched.
+  const withGrace = (label: string, held: HeldCard | undefined, fire: () => Promise<void> | void): Promise<void> => {
+    // holdOnSubmit always supplies it; without a card to cover there is nothing to undo.
+    if (!held) return Promise.resolve(fire());
     // Parked replays (a chat switch back) must not re-show a card whose answer is on hold.
     heldForGrace.add(payload.id);
     return startGrace({
       key: graceKey,
       label,
-      mount: floatingGraceMount(),
-      fire: () => { heldForGrace.delete(payload.id); return fire(); },
-      onUndo: () => { heldForGrace.delete(payload.id); void showQuestionCard(payload, undefined, opts); },
+      mount: held.mount,
+      fire: () => { heldForGrace.delete(payload.id); held.release(); return fire(); },
+      onUndo: () => {
+        heldForGrace.delete(payload.id);
+        // A chat switch closed the frozen card and the composer carried the Undo
+        // over to its Send: the card comes back the long way.
+        if (!held.thaw()) void showQuestionCard(payload, undefined, opts);
+      },
     });
   };
 
@@ -361,7 +370,8 @@ export async function showQuestionCard(
       scheduleAuqPush(payload.session_id, payload.id, draft);
       syncQuestionProgress(payload.session_id, payload.id, questions, draft);
     },
-    onSubmit: (answers, extras) => withGrace(graceLabel("Answer", answerSummary(answers)), () => deliverAnswer(answers, extras)),
-    onCancel: () => withGrace("Skipping this question", deliverSkip),
+    holdOnSubmit: true,
+    onSubmit: (answers, extras, held) => withGrace(graceLabel("Answer", answerSummary(answers)), held, () => deliverAnswer(answers, extras)),
+    onCancel: (held) => withGrace("Skipping this question", held, deliverSkip),
   });
 }

@@ -3,9 +3,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 
-// An answer waits out a grace window behind a small Undo button before it reaches the
-// daemon (claude resumes the moment it gets one, so a sent answer cannot be
-// taken back). Undo brings the card back with the picked option still ticked.
+// An answer waits out a grace window before it reaches the daemon (claude
+// resumes the moment it gets one, so a sent answer cannot be taken back). The
+// card stays on screen, frozen, with the composer's small Undo button laid over
+// the button that was pressed; Undo gives the card back with the pick still ticked.
 // The harness turns the window off for every other spec; this one sets a real,
 // short one.
 
@@ -37,30 +38,46 @@ const respondCalls = (page: Page): Promise<number> =>
   );
 
 test.describe("view-harness / answer grace window", () => {
-  test("Undo brings the card back with the pick kept, and nothing reaches the daemon", async ({ page }) => {
+  test("Undo sits over the pressed button, and gives the card back with nothing sent", async ({ page }) => {
     await mountView(page, { invoke: { respond_question: true, send_message: null } });
     await openCard(page);
 
     const card = page.locator(".prompt-card");
     await card.locator('.prompt-opt input[data-label="B"]').click();
-    await card.locator(".prompt-answer-send").click();
+    const send = card.locator(".prompt-answer-send");
+    const before = await send.boundingBox();
+    await send.click();
 
-    await expect(card).toHaveCount(0);
+    // The card is still there, frozen, with Undo in the place Submit was.
+    await expect(card).toBeVisible();
     const undo = page.locator(".send-grace-undo");
     await expect(undo).toBeVisible();
+    const over = await undo.boundingBox();
+    expect(Math.abs(over!.x - before!.x)).toBeLessThan(2);
+    expect(Math.abs(over!.y - before!.y)).toBeLessThan(2);
+    expect(Math.abs(over!.width - before!.width)).toBeLessThan(2);
+    expect(await page.evaluate(() => (document.getElementById("prompt-card-host") as HTMLElement & { inert: boolean }).inert)).toBe(true);
     expect(await respondCalls(page)).toBe(0);
+    // No floating copy at the bottom of the screen any more.
+    await expect(page.locator(".send-grace-floating")).toHaveCount(0);
 
     await undo.click();
     await expect(card).toBeVisible();
     await expect(card.locator('.prompt-opt input[data-label="B"]')).toBeChecked();
     await expect(undo).toHaveCount(0);
+    expect(await page.evaluate(() => (document.getElementById("prompt-card-host") as HTMLElement & { inert: boolean }).inert)).toBe(false);
 
     // Past the original window: the undone answer must never fire.
     await page.waitForTimeout(GRACE_MS + 400);
     expect(await respondCalls(page)).toBe(0);
+
+    // The card is live again: it can be answered, and that answer goes through.
+    await card.locator('.prompt-opt input[data-label="A"]').click();
+    await card.locator(".prompt-answer-send").click();
+    await expect.poll(() => respondCalls(page), { timeout: GRACE_MS + 2000 }).toBe(1);
   });
 
-  test("an answer left alone is delivered once the window lapses", async ({ page }) => {
+  test("an answer left alone is delivered once the window lapses, and the card closes", async ({ page }) => {
     await mountView(page, { invoke: { respond_question: true, send_message: null } });
     await openCard(page);
 
@@ -69,8 +86,63 @@ test.describe("view-harness / answer grace window", () => {
     await card.locator(".prompt-answer-send").click();
 
     await expect(page.locator(".send-grace-undo")).toBeVisible();
+    await expect(card).toBeVisible();
     expect(await respondCalls(page)).toBe(0);
     await expect.poll(() => respondCalls(page), { timeout: GRACE_MS + 2000 }).toBe(1);
     await expect(page.locator(".send-grace-undo")).toHaveCount(0);
+    await expect(card).toHaveCount(0);
+  });
+
+  test("typing the next message while the card is held goes to the composer, and the Undo follows the card", async ({ page }) => {
+    await mountView(page, { invoke: { respond_question: true, send_message: null } });
+    await openCard(page);
+    await page.evaluate(async () => {
+      const relay = await import("/shared/chat/composer-stray-input.ts");
+      const box = document.createElement("textarea");
+      box.id = "fake-composer";
+      document.body.appendChild(box);
+      new relay.ComposerStrayInput({ getTextarea: () => box, isDisabled: () => false, handlePaste: () => {} }).mount();
+    });
+
+    const card = page.locator(".prompt-card");
+    await card.locator('.prompt-opt input[data-label="B"]').click();
+    await card.locator(".prompt-answer-send").click();
+    await expect(page.locator(".send-grace-undo")).toBeVisible();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+    await page.keyboard.type("next");
+    await expect(page.locator("#fake-composer")).toHaveValue("next");
+    await expect(card.locator(".prompt-q__other-input")).toHaveValue("");
+
+    // The card moves (the composer it hangs from grew): the Undo stays over its button.
+    await page.evaluate(() => { document.getElementById("prompt-card-host")!.style.transform = "translateY(-40px)"; });
+    await expect.poll(async () => {
+      const a = await page.locator(".send-grace-undo").boundingBox();
+      const b = await card.locator(".prompt-answer-send").boundingBox();
+      return Math.abs(a!.y - b!.y);
+    }).toBeLessThan(2);
+  });
+
+  test("an Undo reached after the frozen card was closed from outside shows the card again", async ({ page }) => {
+    await mountView(page, { invoke: { respond_question: true, send_message: null } });
+    await openCard(page);
+
+    const card = page.locator(".prompt-card");
+    await card.locator('.prompt-opt input[data-label="B"]').click();
+    await card.locator(".prompt-answer-send").click();
+    await expect(page.locator(".send-grace-undo")).toBeVisible();
+
+    // A chat switch closes the card; the composer then carries the Undo to its
+    // Send, whose Undo shortcut is undoGrace on the chat's key.
+    await page.evaluate(async () => {
+      const ui = await import("/views/sessions/permission-modal/question-ui.ts");
+      const grace = await import("/shared/chat/send-grace.ts");
+      ui.dismissQuestionCard();
+      grace.undoGrace("sess-1");
+    });
+
+    await expect(card).toBeVisible();
+    await page.waitForTimeout(GRACE_MS + 400);
+    expect(await respondCalls(page)).toBe(0);
   });
 });
