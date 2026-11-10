@@ -33,6 +33,7 @@
 
 pub use crate::claude_ai_publish::PublishedLink;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use ts_rs::TS;
@@ -108,7 +109,20 @@ pub struct PreviewSnapshot {
     /// (dedicated) preview, which is every entry written before this existed.
     #[serde(default)]
     pub shared: Option<SharedMockup>,
+    /// What Joe left the page at: control values (`ctl|<part>|<control>` -> "value")
+    /// and the page's own state (`page` -> anything the page reported through
+    /// `ccPreview.state.save`). Daemon-side so the docked panel, the pop-out
+    /// window and the phone all read and write one copy.
+    #[serde(default)]
+    #[ts(type = "Record<string, unknown>")]
+    pub view_state: BTreeMap<String, serde_json::Value>,
 }
+
+/// Prefix of the `view_state` keys that hold a shared mockup's control values.
+pub const CONTROL_STATE_PREFIX: &str = "ctl|";
+/// Bounds on `view_state`, so a runaway page cannot bloat the persisted history file.
+pub const MAX_STATE_KEYS: usize = 200;
+pub const MAX_STATE_VALUE_BYTES: usize = 64 * 1024;
 
 /// Metadata-only projection for the history rail (`list_previews`) - omits
 /// `html` so listing 30 snapshots doesn't ship megabytes of markup the caller
@@ -207,6 +221,9 @@ fn write_atomic(path: &Path, list: &[PreviewSnapshot]) -> bool {
 /// the sweep. Files go first and the sweep last, so a crash between the steps
 /// leaves orphan files (swept next time), never a version with no html.
 fn save(path: &Path, list: &mut [PreviewSnapshot]) {
+    for snap in list.iter_mut() {
+        prune_control_state(snap);
+    }
     flush_archive(path, list);
     if write_atomic(path, list) {
         sweep_archive(path, list);
@@ -295,6 +312,7 @@ pub(crate) fn push_at(
             published: None,
             previous: Vec::new(),
             shared: None,
+            view_state: BTreeMap::new(),
         });
         save(path, &mut list);
         return Ok(id);
@@ -316,6 +334,7 @@ pub(crate) fn push_at(
         published: None,
         previous: Vec::new(),
         shared: None,
+        view_state: BTreeMap::new(),
     });
     save(path, &mut list);
     Ok(id)
@@ -408,6 +427,64 @@ fn set_published_at(path: &Path, id: &str, link: PublishedLink) -> Option<Previe
     let meta = PreviewMeta::from(&*snap);
     save(path, &mut list);
     Some(meta)
+}
+
+/// Drops the saved control values whose control the page no longer has (a plain
+/// re-push has no shell, a shared edit may remove a part or a control); values
+/// that still match stay, and the page's own `page` state is left for the new
+/// page to use or ignore.
+fn prune_control_state(snap: &mut PreviewSnapshot) {
+    let live: std::collections::HashSet<String> = snap
+        .shared
+        .iter()
+        .flat_map(|m| m.parts.iter())
+        .flat_map(|p| p.controls.iter().map(move |c| format!("{CONTROL_STATE_PREFIX}{}|{}", p.id, c.id)))
+        .collect();
+    snap.view_state.retain(|k, _| !k.starts_with(CONTROL_STATE_PREFIX) || live.contains(k));
+}
+
+/// Sets (or, for `Value::Null`, clears) one `view_state` key and broadcasts it
+/// on the `preview-state` channel so every open window follows. Errors name
+/// the refusal; an unknown preview is `Ok(false)`.
+pub fn set_state_and_notify(
+    state: &crate::daemon::state::DaemonState,
+    id: &str,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<bool, String> {
+    let Some(path) = store_path() else { return Ok(false) };
+    let found = {
+        let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_state_at(&path, id, key, &value)?
+    };
+    if found {
+        state.notifier.publish("preview-state", serde_json::json!({ "id": id, "key": key, "value": value }));
+    }
+    Ok(found)
+}
+
+pub(crate) fn set_state_at(path: &Path, id: &str, key: &str, value: &serde_json::Value) -> Result<bool, String> {
+    if key.is_empty() || key.len() > 200 {
+        return Err("state key must be 1-200 bytes".to_string());
+    }
+    if !(key == "page" || key.starts_with(CONTROL_STATE_PREFIX)) {
+        return Err(format!("unknown state key: {key}"));
+    }
+    if value.to_string().len() > MAX_STATE_VALUE_BYTES {
+        return Err(format!("state value over {MAX_STATE_VALUE_BYTES} bytes"));
+    }
+    let mut list = load_list(path);
+    let Some(snap) = list.iter_mut().find(|s| s.id == id) else { return Ok(false) };
+    if value.is_null() {
+        snap.view_state.remove(key);
+    } else {
+        if !snap.view_state.contains_key(key) && snap.view_state.len() >= MAX_STATE_KEYS {
+            return Err(format!("more than {MAX_STATE_KEYS} state keys"));
+        }
+        snap.view_state.insert(key.to_string(), value.clone());
+    }
+    save(path, &mut list);
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -587,5 +664,50 @@ mod tests {
         assert_eq!(listed[0].slug, "s1");
         assert_eq!(listed[0].version, 2);
         assert_eq!(listed[1].slug, "s2");
+    }
+
+    #[test]
+    fn view_state_is_saved_cleared_and_validated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        let id = push_at(&path, "t".into(), Some("deck".into()), "<p>1</p>".into(), "chat".into(), None).unwrap();
+        assert!(set_state_at(&path, &id, "page", &serde_json::json!({"slide": 5})).unwrap());
+        assert_eq!(get_at(&path, &id).unwrap().view_state["page"], serde_json::json!({"slide": 5}));
+        assert!(set_state_at(&path, &id, "page", &serde_json::Value::Null).unwrap());
+        assert!(get_at(&path, &id).unwrap().view_state.is_empty());
+        assert!(!set_state_at(&path, "missing", "page", &serde_json::json!(1)).unwrap(), "unknown id is not an error");
+        assert!(set_state_at(&path, &id, "other", &serde_json::json!(1)).is_err());
+        let big = serde_json::json!("x".repeat(MAX_STATE_VALUE_BYTES + 1));
+        assert!(set_state_at(&path, &id, "page", &big).is_err());
+    }
+
+    #[test]
+    fn a_re_push_keeps_page_state_and_drops_control_values() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("preview-history.json");
+        let id = push_at(&path, "t".into(), Some("deck".into()), "<p>1</p>".into(), "chat".into(), None).unwrap();
+        set_state_at(&path, &id, "page", &serde_json::json!({"slide": 5})).unwrap();
+        push_at(&path, "t".into(), Some("deck".into()), "<p>2</p>".into(), "chat".into(), None).unwrap();
+        let state = get_at(&path, &id).unwrap().view_state;
+        assert_eq!(state.get("page"), Some(&serde_json::json!({"slide": 5})));
+    }
+
+    #[test]
+    fn control_values_survive_only_while_their_control_exists() {
+        use super::shared::{Control, Part, SharedMockup};
+        let control = |id: &str| Control { id: id.into(), label: id.into(), kind: "switch".into(), options: vec![], default: "off".into() };
+        let part = Part { id: "header".into(), owner_session_id: "s".into(), owner_name: "n".into(), html: String::new(), css: String::new(), controls: vec![control("dense")] };
+        let mut snap = PreviewSnapshot {
+            id: "a".into(), slug: "a".into(), title: "a".into(), html: String::new(), source: "chat".into(), session_id: None, version: 1,
+            created_at: String::new(), published: None, previous: Vec::new(),
+            shared: Some(SharedMockup { owner_session_id: "s".into(), shell: String::new(), parts: vec![part] }),
+            view_state: BTreeMap::new(),
+        };
+        for k in ["ctl|header|dense", "ctl|header|gone", "ctl|footer|dense", "page"] {
+            snap.view_state.insert(k.into(), serde_json::json!("v"));
+        }
+        prune_control_state(&mut snap);
+        let kept: Vec<&str> = snap.view_state.keys().map(String::as_str).collect();
+        assert_eq!(kept, vec!["ctl|header|dense", "page"]);
     }
 }

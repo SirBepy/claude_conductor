@@ -20,6 +20,7 @@ import { mountPreviewWindowShell, type RailController, type RailTabDeps, type Ra
 import { isMirrored } from "./sessions-helpers";
 import { state } from "./state";
 import { mountPreviewStage } from "./preview-canvas";
+import { PageStateBridge } from "./preview-page-state";
 import { applyPreviewTemplate } from "./preview-panel-document";
 import { SharedBar, renderKindTag } from "./shared-mockup-bar";
 import "../../shared/chat/caret-popup/popup.css";
@@ -42,6 +43,9 @@ class PreviewTab implements RailTabHandle {
   private composer: PvComposerHandle | null = null;
   /** The shared mockup's row of subs and controls popover. */
   private bar: SharedBar;
+  /** Carries the page's own saved state (slide, tab) to and from the daemon. */
+  private pageState: PageStateBridge;
+  private unlistenState: (() => void) | null = null;
 
   constructor(root: HTMLElement, deps: RailTabDeps) {
     this.root = root;
@@ -62,6 +66,14 @@ class PreviewTab implements RailTabHandle {
       scope: () => this.sel.sessionId,
       dedicatedOf: (ownerId) => this.sel.snapshots.filter((s) => !s.shared && s.session_id === ownerId),
       open: (id) => void this.sel.selectSnapshot(id),
+      persist: (snap, key, value) => this.saveViewState(snap.id, key, value),
+    });
+    this.pageState = new PageStateBridge({
+      frame: () => this.root.querySelector<HTMLIFrameElement>(".pv-iframe"),
+      // An archived version is a read-only look back: its position is not the page's.
+      id: () => (this.sel.selectedVersion === null ? this.sel.selected?.id ?? null : null),
+      stored: () => (this.sel.selectedVersion === null ? this.sel.selected?.view_state?.page : undefined),
+      save: (id, value) => this.saveViewState(id, "page", value),
     });
     this.composer = mountPvComposer(this.root, this.pvComposerDeps());
     this.root.addEventListener("click", (e) => this.onClick(e));
@@ -119,6 +131,11 @@ class PreviewTab implements RailTabHandle {
     this.composer?.destroy();
     this.composer = null;
     this.bar.destroy();
+    this.pageState.destroy();
+    if (this.unlistenState) {
+      try { this.unlistenState(); } catch { /* ignore */ }
+      this.unlistenState = null;
+    }
     closePvHistory();
   }
 
@@ -131,6 +148,35 @@ class PreviewTab implements RailTabHandle {
     } catch (err) {
       console.warn("[preview-panel] listen(preview) failed", err);
     }
+    try {
+      this.unlistenState = await getTransport().listen<{ id: string; key: string; value: unknown }>(
+        "preview-state",
+        (p) => this.onRemoteState(p),
+      );
+    } catch (err) {
+      console.warn("[preview-panel] listen(preview-state) failed", err);
+    }
+  }
+
+  /** Keeps this window's copy current and saves it on the daemon. */
+  private saveViewState(id: string, key: string, value: unknown): void {
+    this.sel.setViewState(id, key, value);
+    invoke("set_preview_state", { id, key, value: value ?? null }).catch((err) => {
+      // A chat mirrored from a paired machine keeps its previews on the host, which this daemon cannot write.
+      console.warn("[preview-panel] set_preview_state failed", err);
+    });
+  }
+
+  /** The daemon's `preview-state` broadcast: this window's own writes echo back
+   *  as a no-op because the value already matches; another window's or the
+   *  phone's change moves the page and the controls here. */
+  private onRemoteState(p: { id: string; key: string; value: unknown } | undefined): void {
+    if (!p?.id || !p.key) return;
+    const previous = this.sel.selected?.id === p.id ? this.sel.selected.view_state?.[p.key] : undefined;
+    this.sel.setViewState(p.id, p.key, p.value);
+    if (this.sel.selected?.id !== p.id || this.sel.selectedVersion !== null) return;
+    if (p.key === "page") this.pageState.follow(previous, p.value);
+    else this.bar.applyRemote(p.id, p.key, p.value);
   }
 
   // ── Actions ──────────────────────────────────────────────────────────────
@@ -251,10 +297,15 @@ class PreviewTab implements RailTabHandle {
     if (!selected) return;
     const canvas = this.root.querySelector<HTMLElement>(".pv-canvas");
     if (!canvas) return;
+    // A save the old page made inside the debounce is filed under the old preview.
+    this.pageState.flush();
     const stage = mountPreviewStage(canvas, this.deviceWidth, selected.html);
     if (!stage) return;
     // A fresh document starts from the shell's defaults, so what Joe changed is applied again.
-    stage.iframe.addEventListener("load", () => this.bar.replay());
+    stage.iframe.addEventListener("load", () => {
+      this.bar.replay();
+      this.pageState.restore();
+    });
     await stage.ready;
   }
 }

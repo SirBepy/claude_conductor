@@ -2,6 +2,7 @@
 // split off of preview-panel.ts). Pure functions, zero PreviewPanel instance
 // state - they build the CSP/sandbox-relevant iframe document string.
 
+import { PAGE_STATE_SCRIPT } from "./preview-page-state";
 import { PAGE_ZOOM_SCRIPT } from "./preview-page-zoom";
 import { previewTemplateHead } from "./preview-templates";
 
@@ -80,10 +81,12 @@ export function applyPreviewTemplate(html: string): string {
  * makes this meta the sole governing policy.
  *
  * `zoom` adds the in-page pinch/wheel zoom (preview-page-zoom.ts) the Preview
- * panel wants; the inline chat card scrolls with the chat, so it leaves it off. */
-export function buildPreviewDocumentHtml(html: string, opts: { zoom?: boolean } = {}): string {
+ * panel wants; the inline chat card scrolls with the chat, so it leaves it off.
+ * `state` adds the `ccPreview.state` save/restore channel (preview-page-state.ts),
+ * only meaningful where the panel can keep what the page saves. */
+export function buildPreviewDocumentHtml(html: string, opts: { zoom?: boolean; state?: boolean } = {}): string {
   const templated = applyPreviewTemplate(html);
-  const withHead = spliceHead(templated, `${INNER_CSP_META}${DIAGNOSTICS_HEAD_SCRIPT}${opts.zoom ? PAGE_ZOOM_SCRIPT : ""}`);
+  const withHead = spliceHead(templated, `${INNER_CSP_META}${DIAGNOSTICS_HEAD_SCRIPT}${opts.zoom ? PAGE_ZOOM_SCRIPT : ""}${opts.state ? PAGE_STATE_SCRIPT : ""}`);
   // The LAST </body>, not the first: a mockup's own inline script commonly
   // builds HTML strings containing the literal text "</body>" (e.g. an
   // AI-generated mockup that itself renders HTML), and .replace() with no

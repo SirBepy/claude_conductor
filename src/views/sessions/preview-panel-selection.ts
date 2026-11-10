@@ -179,6 +179,18 @@ export class PreviewSelection {
     this.view.renderPage();
   }
 
+  /** Records one saved view-state key on every copy of the snapshot this window holds
+   *  (the one in view and the cached pages), so a revisit does not show a stale value.
+   *  A null value clears the key. */
+  setViewState(id: string, key: string, value: unknown): void {
+    const copies = [this.selected, ...this.snapshotCache.values()].filter((s): s is PreviewSnapshot => s?.id === id);
+    for (const snap of copies) {
+      const state = (snap.view_state ??= {});
+      if (value === null || value === undefined) delete state[key];
+      else state[key] = value;
+    }
+  }
+
   /** `preview` notifier broadcast handler. A push for the active chat opens the
    * panel while it is closed (Joe, 2026-07-20: no opt-out on auto-refresh),
    * EXCEPT a `show_preview` push, which already rendered as a card in the

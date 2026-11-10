@@ -351,6 +351,9 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // a peer gets strictly less than the phone's whole-timeline read.
     ("list_previews", PM),
     ("get_preview", PM),
+    // P: the phone saves the control values and page state it changes, same as
+    // the desktop. Not PM: a peer must not write a preview this machine hosts.
+    ("set_preview_state", P),
     // Read-only: one raster image (png/jpg/gif/webp/bmp, size-capped) under a
     // registered project root, a session cwd or the chat-attachments dir.
     // The ask_user_question option previews and the status bar's

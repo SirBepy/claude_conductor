@@ -26,7 +26,7 @@ export function mountPreviewStage(canvas: HTMLElement, deviceWidth: DeviceWidth,
     // `render_preview_doc` resolves per-transport: desktop stages on the hook
     // server (preview_render.rs), remote stages same-origin on the
     // remote-access server (remote_preview_render.rs).
-    const doc = buildPreviewDocumentHtml(html, { zoom: true });
+    const doc = buildPreviewDocumentHtml(html, { zoom: true, state: true });
     try {
       iframe.src = await invoke<string>("render_preview_doc", { html: doc });
     } catch (err) {
