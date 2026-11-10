@@ -86,6 +86,11 @@ export async function resolveNewChatConfig(
     model: data.model,
     effort: data.effort,
     autoAccept: data.autoAccept,
+    // On for every draft: its switch (draft-subchats.ts) turns it off for one chat, and
+    // nothing remembers that, so the next draft is on again. The account above is never
+    // an API-credit one (resolveInitialAccountId skips them), the only kind that refuses
+    // the mode; picking one in the draft switches it off there.
+    subchatsOn: true,
     accountId: data.accountId,
     characterId,
     machineId,

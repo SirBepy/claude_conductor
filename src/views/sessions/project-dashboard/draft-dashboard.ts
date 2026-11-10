@@ -125,6 +125,9 @@ export function mountDraftDashboard(
       // Widens the draft's column past the chat's 900px to make room for the rail (sessions.css).
       wrap.classList.add("has-rail");
       wrap.appendChild(handle.rail);
+      // The settings are what a draft is opened to flip before the first send, so
+      // they fill from the draft's own folder now rather than after the snapshot.
+      handle.fillRail(project.path);
     } else {
       onNoRail?.();
     }

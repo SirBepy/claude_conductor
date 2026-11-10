@@ -113,6 +113,35 @@ describe("draft dashboard", () => {
     expect(renderSettings.mock.calls[0][1]).toBe("C:/Projects/conductor");
   });
 
+  it("the rail fills from the draft's folder before the dashboard snapshot answers", async () => {
+    renderSettings.mockClear();
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const { invoke } = await import("../src/shared/ipc.ts");
+    const answer = invoke.getMockImplementation();
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "dashboard_snapshot") await gate;
+      return answer(cmd, args);
+    });
+    try {
+      const pane = draftPane();
+      mountDraftDashboard(pane, { path: "C:/Projects/conductor" }, state.mountId);
+      await vi.waitFor(() => expect(pane.querySelector(".pd-draft > .pd-rail .rail-stub")).not.toBeNull());
+      const rail = pane.querySelector(".pd-draft > .pd-rail");
+      // The snapshot is still pending: nothing of the dashboard is painted yet.
+      expect(pane.querySelector(".pd-root .pd-reports")).toBeNull();
+      expect(rail.hidden).toBe(false);
+      expect(renderSettings.mock.calls[0][1]).toBe("C:/Projects/conductor");
+      release();
+      await vi.waitFor(() => expect(pane.querySelector(".pd-root .pd-reports")).not.toBeNull());
+      // The snapshot's first paint does not fill the rail a second time.
+      expect(renderSettings).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      invoke.mockImplementation(answer);
+    }
+  });
+
   it("a group's draft has no rail: its repos each own their settings", async () => {
     snapshot = groupSnapshot();
     const pane = await mountDraft(ZIRTUE_REPOS[0].cwd);

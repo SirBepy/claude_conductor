@@ -52,6 +52,10 @@ export interface DashboardHandle {
   rail: HTMLElement | null;
   /** The quick-action chip row; the caller places it (above a draft's message box, under the page). */
   chips: HTMLElement;
+  /** Fills the rail for `cwd` without waiting for the snapshot, whose first paint
+   *  would otherwise decide when the settings appear. A no-op once the rail is
+   *  filled, with no rail, or while the rail is not in the document yet. */
+  fillRail(cwd: string): void;
   /** Refetch now, bypassing the debounce. */
   refresh(): void;
   destroy(): void;
@@ -152,6 +156,30 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
   let galleryRunning = false;
   const unlisteners: Unlisten[] = [];
 
+  // Idempotent: the first caller wins, so a draft that fills the rail from its own
+  // folder before the snapshot lands is not refilled by the snapshot's first paint.
+  const fillRail = (cwd: string): void => {
+    if (!rail || railFilled || destroyed || !rail.isConnected) return;
+    railFilled = true;
+    rail.hidden = false;
+    // Takes its place in the layout now but stays unseen until its rows are
+    // in, then fades in after the dashboard's own wave (at once when the rail
+    // is filled ahead of the snapshot, so there is no wave to wait for).
+    rail.style.opacity = "0";
+    rail.innerHTML = `<div class="pd-rail-title">Project settings</div><div class="pd-rail-body"></div>`;
+    // A rail that fails to fill must not take the dashboard's paint down with it.
+    const shown = rail;
+    const railBody = shown.querySelector<HTMLElement>(".pd-rail-body")!;
+    renderProjectSettings(railBody, cwd)
+      .then(() => { if (!destroyed) deps.railExtra?.(railBody); })
+      .catch((err) => console.warn("[project-dashboard] project settings rail failed", err))
+      .finally(() => {
+        if (destroyed) return;
+        shown.style.opacity = "";
+        playRailEntrance(shown, entrance?.tailDelay() ?? 0);
+      });
+  };
+
   const paint = (): void => {
     if (destroyed) return;
     // A draft stays empty until there is something to show: its message box is the point of the pane.
@@ -167,25 +195,7 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     // The settings controls find their rows by document id, so they render once
     // the rail is on screen, never while it is still detached.
     const repo = ctx.snap.target.repos[0];
-    if (rail && !railFilled && repo && root.isConnected && rail.isConnected) {
-      railFilled = true;
-      rail.hidden = false;
-      // Takes its place in the layout now but stays unseen until its rows are
-      // in, then fades in after the dashboard's own wave.
-      rail.style.opacity = "0";
-      rail.innerHTML = `<div class="pd-rail-title">Project settings</div><div class="pd-rail-body"></div>`;
-      // A rail that fails to fill must not take the dashboard's paint down with it.
-      const shown = rail;
-      const railBody = shown.querySelector<HTMLElement>(".pd-rail-body")!;
-      renderProjectSettings(railBody, repo.cwd)
-        .then(() => { if (!destroyed) deps.railExtra?.(railBody); })
-        .catch((err) => console.warn("[project-dashboard] project settings rail failed", err))
-        .finally(() => {
-          if (destroyed) return;
-          shown.style.opacity = "";
-          playRailEntrance(shown, entrance?.tailDelay() ?? 0);
-        });
-    }
+    if (repo && root.isConnected) fillRail(repo.cwd);
     for (const hook of [...ctx.paintHooks]) hook();
     // Once, on the first paint with content; later paints (live events) must
     // not replay it, only fade in a section rebuilt while it still runs.
@@ -365,5 +375,5 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
   paint();
   void loadSnapshot();
 
-  return { root, rail, chips, refresh: () => void loadSnapshot(), destroy };
+  return { root, rail, chips, fillRail, refresh: () => void loadSnapshot(), destroy };
 }
