@@ -1,6 +1,9 @@
-// The srcdoc document an option's `preview` HTML renders in. The frame is
-// `sandbox=""` (no scripts, opaque origin) and inherits the app's CSP, so the
-// fragment can only ever be markup + CSS. It loads the app's OWN stylesheets,
+// The srcdoc document an option's `preview` HTML renders in. The card's frames
+// are `sandbox=""` (no scripts, opaque origin) and inherit the app's CSP, so
+// the fragment can only ever be markup + CSS. The fullscreen frame is
+// `sandbox="allow-same-origin"` so the parent can read the page height; it
+// must never also get `allow-scripts`, which together with same-origin would
+// lift the sandbox. It loads the app's OWN stylesheets,
 // which is what lets Claude draw with the real classes and tokens instead of a
 // hand-made imitation of the app.
 

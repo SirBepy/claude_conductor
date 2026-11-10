@@ -85,7 +85,9 @@
   touch-action: none;
 }
 /* The frame lays out at the full view size ("screen width", Joe 2026-10-25)
- * and the canvas around it is what zooms. pointer-events none on the frame so
+ * and the canvas around it is what zooms. A page taller than the view gets an
+ * inline height and scale from fitFrameToView (preview-fullscreen.ts), so this
+ * height is the default for a page that fits. pointer-events none on the frame so
  * every pointer lands on the canvas, the element the zoom handler drives. */
 .auq-fs__canvas {
   position: absolute;
