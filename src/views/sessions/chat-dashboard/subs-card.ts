@@ -314,6 +314,9 @@ export class SubsCard {
       gal.innerHTML = "";
     }
     const tiles = gal.querySelectorAll(".sx-gal-img").length;
+    // Tiles are never removed, so after a close and reopen the limit is back at one page while the
+    // earlier pages are still drawn: catch the limit up, or "more" would add nothing until it passes them.
+    if (tiles > this.galleryLimit) this.galleryLimit = tiles;
     for (const id of ids.slice(tiles, this.galleryLimit)) {
       const b = document.createElement("button");
       b.type = "button";
@@ -340,7 +343,8 @@ export class SubsCard {
     }
     const label = `Show ${Math.min(rest, GALLERY_PAGE)} more (${rest} left)`;
     if (more.textContent !== label) more.textContent = label;
-    gal.appendChild(more);
+    // The per-second patch lands here too; re-appending the last child would drop a click in progress.
+    if (gal.lastElementChild !== more) gal.appendChild(more);
   }
 
   private async previewOf(mainId: string, subId: string): Promise<PreviewRef | null> {
