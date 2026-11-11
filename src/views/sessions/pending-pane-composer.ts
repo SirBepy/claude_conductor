@@ -163,7 +163,11 @@ export function wirePendingComposer(
       }
     },
     onSend: async (blocks: ContentBlock[]) => {
-      if (state.mountId !== myMount) return;
+      // The Sessions view was remounted while this send waited out its Undo
+      // window. Throwing (not returning) hands the text back to the composer,
+      // which stores it as this draft's text; a quiet return would drop the
+      // first message of the chat.
+      if (state.mountId !== myMount) throw new Error("sessions view remounted before the first message went out");
       const promptText = blocksToText(blocks);
       if (!promptText.trim()) return;
 
