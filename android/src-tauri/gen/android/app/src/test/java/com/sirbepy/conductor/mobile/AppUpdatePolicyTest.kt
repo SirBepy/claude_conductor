@@ -27,4 +27,14 @@ class AppUpdatePolicyTest {
     assertFalse(AppUpdatePolicy.shouldCheck("com.android.vending.evil"))
     assertFalse(AppUpdatePolicy.shouldCheck("COM.ANDROID.VENDING"))
   }
+
+  @Test
+  fun theUpdateDialogWaitsWhileTheAppIsLocked() {
+    assertFalse(AppUpdatePolicy.startNow(locked = true))
+  }
+
+  @Test
+  fun theUpdateDialogStartsOnceTheAppIsUnlocked() {
+    assertTrue(AppUpdatePolicy.startNow(locked = false))
+  }
 }
