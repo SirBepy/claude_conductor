@@ -241,8 +241,14 @@ describe("Question card across reload, daemon restart and answer", () => {
       async () => (await browser.execute(() => document.querySelectorAll(".msg.assistant:not(.streaming)").length)) >= 1,
       { timeout: 60000, interval: 500, timeoutMsg: "fake claude's reply never finalized" }
     );
+    // The reply can finalize before the sidebar swaps the draft's placeholder row for the real
+    // one, so the active row's id is waited for, not read once.
+    await browser.waitUntil(async () => !!(await activeSessionId()), {
+      timeout: 15000,
+      interval: 250,
+      timeoutMsg: "no active session row with a session id after the first turn",
+    });
     sessionId = await activeSessionId();
-    assert.ok(sessionId, "no active session row after the first turn");
 
     // The endpoint holds the response until a client confirms the render (up to 8s), so don't
     // await it before looking at the screen.
