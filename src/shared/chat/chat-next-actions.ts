@@ -29,9 +29,10 @@ export function parseNextActions(input: unknown): string[] | undefined {
 
 /** True for a row that starts a turn. Joe's own message starts one; so does a
  *  question card (its answer is folded into the card, with no user row) and a
- *  wake or peer turn (a system row with a metaKind). */
+ *  wake or peer turn (a system row with a metaKind). A hook-refused ask is a
+ *  failed question row that draws nothing, so it starts nothing. */
 export function startsTurn(m: RenderedMessage): boolean {
-  return m.kind === "user" || m.kind === "question" || (m.kind === "system" && !!m.metaKind);
+  return m.kind === "user" || (m.kind === "question" && !m.failed) || (m.kind === "system" && !!m.metaKind);
 }
 
 /** The newest message's chips, if it was sent after the last thing that starts

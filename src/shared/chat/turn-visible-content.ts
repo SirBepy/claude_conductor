@@ -33,8 +33,11 @@ export function turnProducedVisibleContent(r: ChatRenderer): boolean {
         if (!m.failed && !m.subCard && m.card?.kind !== "ack") return true;
         break;
       case "user":
-      case "question":
         return true;
+      case "question":
+        // A hook-refused ask is kept as a failed row for indexing but draws nothing.
+        if (!m.failed) return true;
+        break;
       case "system":
         if (m.noiseLabel) return true;
         break;
