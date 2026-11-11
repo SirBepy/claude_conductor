@@ -542,7 +542,7 @@ fn queued_note(state: &DaemonState, sub_id: &str) -> Option<Value> {
 /// pushes, neither can ever move: the extra sentence says not to.
 fn queued_text(behind: &str, gate: bool) -> String {
     let mut note = format!(
-        "Queued, not started: only one sub changes files at a time in this project and \"{behind}\" has the writer slot. This sub starts by itself when it is free, in queue order, and you are not woken. This sub's own card already shows Joe it is waiting, so send no message or card of your own about it. Only when Joe's window shows no card for it, say so in one short line, and that he can say \"use worktrees\" to run writers side by side."
+        "Queued, not started: only one sub changes files at a time in this project and \"{behind}\" has the writer slot. This sub starts by itself when it is free, in queue order, and you are not woken when it starts. This sub's own card already shows Joe it is waiting, so send no message or card of your own about it. Only when Joe's window shows no card for it, say so in one short line, and that he can say \"use worktrees\" to run writers side by side."
     );
     if gate {
         note.push_str(" This sub is a gate and waits for the writer to finish: do not tell that writer to hold back its commit or push until the gate pushes, or neither will ever start.");
