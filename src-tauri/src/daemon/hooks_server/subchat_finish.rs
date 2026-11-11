@@ -51,6 +51,12 @@ pub(super) async fn on_finish_subchat(
         Ok(a) => a,
         Err(e) => return refusal(e),
     };
+    // A sub's job ends here, not at report_turn_status: refused once while
+    // its plan has open steps (daemon::plan_close).
+    let gen = ctx.state.registry.current_turn_gen(&session_id);
+    if let Some(error) = ctx.state.plan_close.check_end(&session_id, gen, "finish_subchat") {
+        return refusal(error);
+    }
     match request_finish(&ctx.state, &session_id, args).await {
         Ok(text) => (StatusCode::OK, Json(json!({"ok": true, "text": text}))),
         Err(e) => refusal(e),
@@ -97,6 +103,22 @@ mod tests {
         let v = call(&c, good(&sub)).await;
         assert_eq!(v["ok"], json!(true), "{v}");
         assert!(crate::daemon::subchats::runtime::runtime().finish_pending(&sub));
+    }
+
+    /// A sub whose plan still has open steps is refused once, naming them, and
+    /// nothing is queued; the next finish in the same turn goes through.
+    #[tokio::test]
+    async fn a_finish_with_an_open_plan_is_refused_once() {
+        use crate::types::PlanStepSnapshot;
+        let c = ctx();
+        let sub = make_sub(&c, "route-openplan");
+        c.state.plan_close.record(&sub, &[PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() }]);
+        let v = call(&c, good(&sub)).await;
+        assert_eq!(v["ok"], json!(false));
+        assert!(v["error"].as_str().unwrap().contains("call finish_subchat again"), "{v}");
+        assert!(!crate::daemon::subchats::runtime::runtime().finish_pending(&sub));
+        let again = call(&c, good(&sub)).await;
+        assert_eq!(again["ok"], json!(true), "{again}");
     }
 
     /// A kindless-style call (no verdict) and a malformed one are `ok:false`

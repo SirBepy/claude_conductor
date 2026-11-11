@@ -325,6 +325,10 @@ button.cdash-step:hover {
   color: var(--color-primary);
   animation: cdash-spin 1.4s linear infinite;
 }
+/* Left open: the job ended before this step was ticked off. */
+.cdash-step--left {
+  opacity: 0.7;
+}
 .cdash-step--skipped .cdash-step-l {
   text-decoration: line-through;
 }

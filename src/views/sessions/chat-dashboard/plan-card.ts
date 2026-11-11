@@ -84,19 +84,24 @@ function stepHtml(job: PlanJob, i: number, step: PlanStep, ui: PlanUi): string {
   const ran = step.startedAt !== undefined;
   const opens = ran || !!step.detail;
   const open = opens && ui.openStep === key;
-  const icon = `<i class="ph ${STEP_ICON[step.status]}"></i>`;
-  const cls = `cdash-step cdash-step--${step.status}${open ? " open" : ""}`;
+  // A finished job's step still pending or active was never ticked off: it is
+  // not running, so it gets no spinner, and says so on hover.
+  const left = job.ended && (step.status === "pending" || step.status === "active");
+  const icon = `<i class="ph ${left ? "ph-circle-dashed" : STEP_ICON[step.status]}"></i>`;
+  const cls = `cdash-step cdash-step--${left ? "left" : step.status}${open ? " open" : ""}`;
+  const leftTip = left ? ` title="Not ticked off before the job ended"` : "";
   const label = `<span class="cdash-step-l">${escapeHtml(step.label)}</span>`;
-  if (!opens) return `<div class="${cls}">${icon}<span class="cdash-step-b">${label}</span></div>`;
+  if (!opens) return `<div class="${cls}"${leftTip}>${icon}<span class="cdash-step-b">${label}</span></div>`;
   let len = "";
   let range = "";
   if (open && ran) {
     const end = step.doneAt;
-    len = `<em class="cdash-step-len">${end !== undefined ? spanText(end - step.startedAt!) : "running"}</em>`;
-    range = `<em class="cdash-step-t">${escapeHtml(clock(step.startedAt!))} to ${end !== undefined ? escapeHtml(clock(end)) : "now"}</em>`;
+    len = `<em class="cdash-step-len">${end !== undefined ? spanText(end - step.startedAt!) : left ? "not ticked off" : "running"}</em>`;
+    range = `<em class="cdash-step-t">${escapeHtml(clock(step.startedAt!))} to ${end !== undefined ? escapeHtml(clock(end)) : left ? "the job's end" : "now"}</em>`;
   }
   const detail = open && step.detail ? `<em class="cdash-step-d">${escapeHtml(step.detail)}</em>` : "";
-  return `<button type="button" class="${cls}" data-act="step" data-step="${escapeHtml(key)}" aria-expanded="${open}" title="${open ? "Hide its details" : "Show when it ran"}">${icon}`
+  const tip = left ? "Not ticked off before the job ended" : open ? "Hide its details" : "Show when it ran";
+  return `<button type="button" class="${cls}" data-act="step" data-step="${escapeHtml(key)}" aria-expanded="${open}" title="${tip}">${icon}`
     + `<span class="cdash-step-b"><span class="cdash-step-row">${label}${len}</span>${range}${detail}</span></button>`;
 }
 

@@ -157,6 +157,9 @@ pub struct DaemonState {
     /// `after_meeting` gate. Idle (no thread, no OS calls) until one of them
     /// asks - see `daemon::meeting_monitor`.
     pub meeting: Arc<crate::daemon::meeting_monitor::MeetingMonitor>,
+    /// Refuses a job end once while the chat's plan has open steps - see
+    /// `daemon::plan_close`.
+    pub plan_close: crate::daemon::plan_close::PlanCloseGate,
     /// Every chat sound and phone push goes through it - see `daemon::notify_gate`.
     pub notify_gate: crate::daemon::notify_gate::NotifyGate,
 }
@@ -208,6 +211,7 @@ impl DaemonState {
             api_credit: crate::daemon::api_credit::ApiCreditHub::new(),
             meeting: Arc::new(crate::daemon::meeting_monitor::MeetingMonitor::new()),
             notify_gate: crate::daemon::notify_gate::NotifyGate::new(),
+            plan_close: crate::daemon::plan_close::PlanCloseGate::new(),
         });
         // Weak, because the registry lives inside the state it would point back at.
         let weak = Arc::downgrade(&state);
