@@ -23,7 +23,7 @@ import { openPalette, closePalette } from "../../command-palette/palette-ui";
 import type { PaletteCommand } from "../../command-palette/types";
 import type { AskThread } from "../../../types/ipc.generated";
 import {
-  historyGroups, isUnread, nextUnread, ownText, parseQuestionReply, threadFollowUps, threadText, withoutSuggestion,
+  historyGroups, isLivePending, isUnread, isWaiting, nextWaiting, ownText, parseQuestionReply, threadFollowUps, threadText, withoutSuggestion,
   type AnswerItem, type AnswerSide, type AnswerStore,
 } from "../../../shared/chat/dashboard/answers-model";
 import type { ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
@@ -363,23 +363,32 @@ export class AnswersCard {
   /** Picks the answer to show, and brings a newly landed unread one in. */
   private reconcile(): void {
     if (this.cur === undefined) {
-      this.cur = nextUnread(this.items, this.store())?.key ?? null;
+      this.cur = nextWaiting(this.items, this.store())?.key ?? null;
       for (const i of this.items) this.seen.add(i.key);
       return;
     }
     const fresh = this.items.filter((i) => !this.seen.has(i.key));
     for (const i of fresh) this.seen.add(i.key);
+    // A handed-off question's answer fills the row that stood for it: only the text moves.
+    if (this.cur !== null && !this.item(this.cur)) {
+      const filled = this.items.find((i) => i.handoff === this.cur);
+      if (filled) {
+        this.cur = filled.key;
+        this.anim = "mid:ax-g-rise-in";
+      }
+    }
     const shown = this.item(this.cur);
-    if (this.cur !== null && !shown) this.cur = nextUnread(this.items, this.store())?.key ?? null;
+    if (this.cur !== null && !shown) this.cur = nextWaiting(this.items, this.store())?.key ?? null;
     if (this.thread && !isNew(this.thread) && !this.item(this.thread)) this.thread = null;
-    const landed = fresh.filter((i) => this.unread(i)).at(-1);
+    // A question just handed to a sub lands like an answer, so Joe sees at once that it is being checked.
+    const landed = fresh.filter((i) => isWaiting(i, this.store())).at(-1);
     if (landed && this.thread !== null) this.landedInThread = landed.key;
     // The newest answer always takes the card, even over an older unread one,
     // which waits behind History's badge and the Next button. Only a thread holds
     // it back. An older answer surfacing late (an earlier history page) never
     // displaces the one on the card, and while Got it's text leaves, its own timer
     // picks the newest unread, which is this one.
-    if (landed && this.thread === null && this.isNewerThanCur(landed) && !this.gotBusy) {
+    if (landed && landed.key !== this.cur && this.thread === null && this.isNewerThanCur(landed) && !this.gotBusy) {
       this.cur = landed.key;
       this.anim = "ax-fade";
     }
@@ -430,6 +439,27 @@ export class AnswersCard {
 
   private readMoreLabel(): string {
     return this.open ? `Show less<i class="ph ph-caret-up"></i>` : `Read more<i class="ph ph-caret-down"></i>`;
+  }
+
+  /** A question handed to a sub, before its answer: the question itself, and what
+   *  the sub is doing in place of the verdict. Nothing to open or reply to yet. */
+  private pendingFace(item: AnswerItem): string {
+    const p = item.pending!;
+    const live = isLivePending(item);
+    const raw = item.raw ? ` title="You wrote: ${esc(item.raw)}"` : "";
+    const mark = live || p.state === "writing" ? `<span class="ax-spin"></span>` : `<i class="ph ph-warning-circle"></i>`;
+    const note = p.note ? `<div class="ax-pend-note" title="${esc(p.note)}">${esc(p.note)}</div>` : "";
+    const store = this.store();
+    const others = this.items.filter((i) => i.key !== item.key && isWaiting(i, store)).length;
+    // Still at work, so there is nothing to mark read: Next is the way to the others.
+    const acts = live
+      ? (others ? btn("next", "ph-arrow-down", "Next", `Show the next one (${others} more)`, "ax-next", `<b class="ax-btn-n">${others} more</b>`) : "")
+      : this.checkBtn(item);
+    return `<div class="ax-face ax-pos-bottom-left ax-align-center ax-pending" data-ans="${esc(item.key)}" data-pending="${p.state}">`
+      + `<div class="ax-mid"><div class="ax-tb"><div class="ax-row"><div class="ax-text ax-pend">`
+      + `<time class="ax-pend-t">${esc(timeOf(item.at))}</time><div class="ax-pend-q"${raw}>${esc(item.question)}</div>`
+      + `<div class="ax-pend-line">${mark}<span>${esc(p.line)}</span></div>${note}</div></div></div></div>`
+      + `<div class="ax-actions ax-actions--bottom-left">${acts}</div></div>`;
   }
 
   private answerFace(item: AnswerItem): string {
@@ -531,7 +561,7 @@ export class AnswersCard {
     this.destroyWire();
     const item = this.item(this.cur);
     const html = item
-      ? shell(`${this.headerRow()}<div class="ax-in">${this.answerFace(item)}</div>`)
+      ? shell(`${this.headerRow()}<div class="ax-in">${item.pending ? this.pendingFace(item) : this.answerFace(item)}</div>`)
       : shell(`<div class="ax-in">${this.items.length === 0 ? this.emptyFace() : this.caughtFace()}</div>`, "ax-caughtmode ax-frame-border ax-cu-both");
     // The HTML is compared without its animation class, so a flush that lands
     // mid-animation finds nothing changed and lets the motion finish.
@@ -605,6 +635,7 @@ export class AnswersCard {
     switch (act) {
       case "gotit": return this.gotIt();
       case "close": return this.putAway();
+      case "next": return this.nextOne();
       case "reply": return this.openThread();
       case "new-q": return this.newQuestion();
       case "close-thread": return this.closeThread();
@@ -616,7 +647,7 @@ export class AnswersCard {
         return;
     }
     // Anywhere on the answer that is not a control opens or folds it, the header included.
-    if (this.thread === null && this.host?.querySelector(".ax-face") && t.closest(".ax-shell")
+    if (this.thread === null && this.host?.querySelector(".ax-face:not(.ax-pending)") && t.closest(".ax-shell")
       && !t.closest("a, button, input, textarea, .attachment-chip, [role='button']") && !selecting) {
       this.toggleOpen();
     }
@@ -626,7 +657,7 @@ export class AnswersCard {
    *  CSS, so no re-render and nothing flickers. An open card stays open across Got it. */
   private toggleOpen(): void {
     const host = this.host;
-    const face = host?.querySelector<HTMLElement>(".ax-face");
+    const face = host?.querySelector<HTMLElement>(".ax-face:not(.ax-pending)");
     if (!host || !face) return;
     this.touched = true;
     this.open = !this.open;
@@ -651,8 +682,9 @@ export class AnswersCard {
     setTimeout(() => {
       this.gotBusy = false;
       if (this.disposed) return;
-      // Walk back: the next newest unread comes in; with none left, All caught up fades in.
-      const next = nextUnread(this.items, this.store());
+      // Walk back: the next newest unread comes in, then a question still being
+      // checked; with none left, All caught up fades in.
+      const next = nextWaiting(this.items, this.store());
       this.cur = next?.key ?? null;
       this.anim = next ? "mid:ax-g-rise-in" : "ax-c-fade";
       this.lastHtml = "";
@@ -663,7 +695,17 @@ export class AnswersCard {
   /** The grey check on a read answer puts it away: the next unread, or All caught up. */
   private putAway(): void {
     this.touched = true;
-    this.cur = nextUnread(this.items, this.store())?.key ?? null;
+    this.cur = nextWaiting(this.items, this.store())?.key ?? null;
+    this.anim = "ax-fade";
+    this.render();
+  }
+
+  /** From a question still being checked to the next unread answer or question. */
+  private nextOne(): void {
+    const next = nextWaiting(this.items, this.store(), this.cur ?? undefined);
+    if (!next) return;
+    this.touched = true;
+    this.cur = next.key;
     this.anim = "ax-fade";
     this.render();
   }
@@ -759,8 +801,8 @@ export class AnswersCard {
     const curItem = this.item(this.cur);
     const landed = this.item(this.landedInThread);
     this.landedInThread = null;
-    if (landed && this.unread(landed) && this.isNewerThanCur(landed)) this.cur = landed.key;
-    else if (!curItem) this.cur = nextUnread(this.items, this.store())?.key ?? null;
+    if (landed && isWaiting(landed, this.store()) && this.isNewerThanCur(landed)) this.cur = landed.key;
+    else if (!curItem) this.cur = nextWaiting(this.items, this.store())?.key ?? null;
     this.lastHtml = "";
     this.render();
     // The card was minimized for the thread; leaving it brings the card back.
@@ -855,9 +897,11 @@ export class AnswersCard {
     const keys = this.items.filter((i) => this.unread(i)).map((i) => i.key);
     this.touched = true;
     this.markRead(keys);
-    this.cur = null;
+    // A question still being checked stays on the card; it has nothing to mark read.
+    const live = nextWaiting(this.items, this.store());
+    this.cur = live?.key ?? null;
     this.thread = null;
-    this.anim = "ax-c-fade";
+    this.anim = live ? "ax-fade" : "ax-c-fade";
     this.lastHtml = "";
     this.render();
   }
@@ -880,7 +924,7 @@ export class AnswersCard {
         rows.push({
           id,
           title: it.question || it.verdict,
-          icon: g.id === "unread" ? "circle-wavy" : "check",
+          icon: g.id === "pending" ? "hourglass-medium" : g.id === "unread" ? "circle-wavy" : "check",
           group: timeOf(it.at),
           // Thread text rides keywords, which the ranker scores below a hit in the
           // title, so a hit in the question always outranks one found only in a thread.

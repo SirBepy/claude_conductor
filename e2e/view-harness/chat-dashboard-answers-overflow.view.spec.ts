@@ -1,4 +1,5 @@
 // Reviewed 2026-11-11 (plan-close): chat-dashboard.css gained the `.cdash-step--left` rule only; nothing this spec asserts changed, and it passes.
+// Reviewed 2026-11-11 (answers pending row): answers-model.ts adds a row per question handed to a sub (spawn_chat, read-only, report_back) until its answer fills it, and the dashboard passes the sub list only once it holds this chat; this spec has no hand-off, nothing it asserts changed, and it passes.
 // Reviewed 2026-11-11 (dashboard Drafts card): a new left-column zone draws write_draft drafts, the draft card takes an optional version and Edit form, and the dashboard reads the drafts store; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (answers-question-rewrite): the card asks the daemon for a short question only for an answer with no `question` and a message past 90 chars; this spec's answers carry their own, so it passes.
 // Reviewed 2026-11-11 (warm Ask threads): answers-card.ts streams a reply and calls answers_thread_prewarm on open (an unmocked call only logs a warning); this spec passes unchanged.

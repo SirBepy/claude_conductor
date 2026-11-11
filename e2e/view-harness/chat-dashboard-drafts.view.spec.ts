@@ -1,4 +1,5 @@
 // Reviewed 2026-11-11 (plan-close): dashboard-model.ts's jobs gained an `ended` flag the Plan card uses to draw never-ticked steps as left open; nothing this spec asserts changed, and it passes.
+// Reviewed 2026-11-11 (answers pending row): answers-model.ts adds a row per question handed to a sub (spawn_chat, read-only, report_back) until its answer fills it, and the dashboard passes the sub list only once it holds this chat; this spec has no hand-off, nothing it asserts changed, and it passes.
 // asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/dashboard-extras.css, src/shared/chat/dashboard/dashboard-model.ts, src/shared/chat/dashboard/drafts-model.ts, src/shared/chat/chat-draft-card.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

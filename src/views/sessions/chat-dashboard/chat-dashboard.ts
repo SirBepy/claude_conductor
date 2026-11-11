@@ -290,7 +290,8 @@ export class ChatDashboard {
       plans: this.renderer.dashPlans,
       busy,
       answers: this.answers.sideData(),
-      subs: subItems,
+      // Not loaded yet is not "no subs": the Answers card would call every sub gone.
+      subs: state.sessions.some((s) => s.session_id === this.renderer.sessionId) ? subItems : undefined,
       now,
       previews: this.previews,
       draftStore: this.draftStore,
