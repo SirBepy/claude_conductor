@@ -450,22 +450,36 @@ jobs:
       TAG: ${{ needs.check.outputs.tag }}
       VERSION: ${{ needs.check.outputs.version }}
     steps:
-      - name: Download macOS artifacts
+      # Every platform's staged files, not just macOS: latest.json is rebuilt from
+      # this run's artifacts instead of read back from the live release. If a
+      # swap ever dies after the old latest.json was deleted, a rerun of this job
+      # would otherwise have nothing to download and merge into.
+      - name: Download platform artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts/
-          name: release-darwin-aarch64
+          pattern: release-*
+          merge-multiple: true
 
-      - name: Merge darwin-aarch64 into the live latest.json
+      - name: Generate latest.json with every platform
         shell: bash
+        working-directory: artifacts
         run: |
-          mkdir cur
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir cur
-          # Refuse to mix platforms from two different releases into one manifest.
-          test "$(jq -r .version cur/latest.json)" = "$VERSION"
-          jq --slurpfile m artifacts/darwin-aarch64.json \
-            '.platforms["darwin-aarch64"] = $m[0]' cur/latest.json > artifacts/latest.json
-          cat artifacts/latest.json
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          PLATFORMS="{}"
+          for f in *.json; do
+            KEY="${f%.json}"
+            PLATFORMS=$(jq --arg k "$KEY" --slurpfile p "$f" \
+              '. + {($k): $p[0]}' <<< "$PLATFORMS")
+          done
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "Release $VERSION" \
+            --arg pub_date "$DATE" \
+            --argjson platforms "$PLATFORMS" \
+            '{version:$version, notes:$notes, pub_date:$pub_date, platforms:$platforms}' \
+            > latest.json
+          cat latest.json
 
       - name: Upload macOS assets
         shell: bash
