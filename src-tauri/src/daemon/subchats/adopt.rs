@@ -123,6 +123,9 @@ pub async fn move_into_main(state: &Arc<DaemonState>, chat_id: &str, main_id: &s
     let head = super::git::head(&inst.cwd);
     crate::sessions::chat_config::set_subchat(chat_id, Some(placeholder_brief(main_id, task, head)));
     state.registry.set_subchat_of(chat_id, Some(main_id.to_string()));
+    // A pin kept from an earlier stint as a sub (a row saved before leaving the
+    // role cleared it) is not the shortcut Joe chose for this one.
+    state.registry.set_pinned_to_sidebar(chat_id, false);
     state.registry.set_subchat_finished(chat_id, false);
     runtime::runtime().reset(chat_id);
     if let Some(session) = live {
@@ -215,10 +218,24 @@ mod tests {
         main_chat(&st, "rt-main");
         chat(&st, "rt-plain", ".");
         move_into_main(&st, "rt-plain", "rt-main").await.unwrap();
+        st.registry.set_pinned_to_sidebar("rt-plain", true);
         crate::daemon::subchats::move_to_sidebar(&st, "rt-plain").await.unwrap();
         assert!(st.registry.get("rt-plain").unwrap().subchat_of.is_none());
+        assert!(!st.registry.get("rt-plain").unwrap().pinned_to_sidebar, "leaving the sub role drops the pin");
         move_into_main(&st, "rt-plain", "rt-main").await.unwrap();
         assert!(crate::daemon::subchats::is_sub(&st.registry.get("rt-plain").unwrap()));
+        assert!(!st.registry.get("rt-plain").unwrap().pinned_to_sidebar, "it returns unpinned");
+    }
+
+    #[tokio::test]
+    async fn moving_in_clears_a_stale_pin_left_on_the_row() {
+        let _data = TempDataDir::new();
+        let st = state();
+        main_chat(&st, "sp-main");
+        chat(&st, "sp-plain", ".");
+        st.registry.set_pinned_to_sidebar("sp-plain", true);
+        move_into_main(&st, "sp-plain", "sp-main").await.unwrap();
+        assert!(!st.registry.get("sp-plain").unwrap().pinned_to_sidebar);
     }
 
     #[tokio::test]

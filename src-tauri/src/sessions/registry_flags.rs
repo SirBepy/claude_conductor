@@ -153,6 +153,11 @@ impl Registry {
         let mut guard = self.inner.lock().unwrap();
         if let Some(i) = guard.get_mut(session_id) {
             i.subchat_of = parent;
+            // A pin is a sub's sidebar shortcut: a chat that leaves the role must
+            // not come back pinned if it is moved under a main chat again.
+            if i.subchat_of.is_none() {
+                i.pinned_to_sidebar = false;
+            }
         }
     }
 
@@ -394,6 +399,22 @@ mod tests {
 
     fn fresh_settings() -> Mutex<Settings> {
         Mutex::new(Settings::default())
+    }
+
+    #[test]
+    fn leaving_the_sub_role_drops_the_sidebar_pin_and_a_new_parent_keeps_it() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("s", Path::new("/tmp/x"), &settings, "2026-11-11T00:00:00Z");
+        registry.set_subchat_of("s", Some("main-a".into()));
+        assert!(registry.set_pinned_to_sidebar("s", true));
+        // A respawn moves the family under the successor: the shortcut stays.
+        registry.set_subchat_of("s", Some("main-b".into()));
+        assert!(registry.get("s").unwrap().pinned_to_sidebar);
+        registry.set_subchat_of("s", None);
+        assert!(!registry.get("s").unwrap().pinned_to_sidebar);
+        registry.set_subchat_of("s", Some("main-a".into()));
+        assert!(!registry.get("s").unwrap().pinned_to_sidebar, "moved back under a main chat, it is not pinned again");
     }
 
     #[test]
