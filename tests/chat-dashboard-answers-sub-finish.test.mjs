@@ -46,7 +46,7 @@ describe("a sub's finish as the answer", () => {
     expect(a.handoff).toBe("handoff:s1");
     expect([a.verdict, a.text, a.question]).toEqual(["The composer grabs focus", "Focus on open.", "Why does Gboard swipe fail in the composer?"]);
     expect(a.raw).toBe("why does gboard swipe break?");
-    expect(a.author).toEqual({ name: "phone-ime", model: "opus", effort: "high" });
+    expect(a.author).toEqual({ name: "phone-ime", model: "opus", effort: "high", subId: "sub-1" });
     expect(a.message.card.kind).toBe("answer");
   });
 

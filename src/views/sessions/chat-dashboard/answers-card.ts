@@ -23,7 +23,7 @@ import { openPalette, closePalette } from "../../command-palette/palette-ui";
 import type { PaletteCommand } from "../../command-palette/types";
 import type { AskThread } from "../../../types/ipc.generated";
 import {
-  historyGroups, isLivePending, isUnread, isWaiting, nextWaiting, ownText, parseQuestionReply, threadFollowUps, threadText, withoutSuggestion,
+  canHandOff, historyGroups, isLivePending, isUnread, isWaiting, nextWaiting, ownText, parseQuestionReply, threadFollowUps, threadHandoffText, threadText, withoutSuggestion,
   type AnswerItem, type AnswerSide, type AnswerStore,
 } from "../../../shared/chat/dashboard/answers-model";
 import type { ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
@@ -63,6 +63,12 @@ export interface AnswersCardDeps {
   decorate(root: HTMLElement): void;
   /** Opens the question card a thread was asked from, minimized while Joe asked. */
   expandQuestion(): void;
+  /** The sub's row still exists, so Send thread to chat can reach it. */
+  subAlive(subId: string): boolean;
+  /** Send thread to chat: delivers the text as Joe's message to `subId` (the sub
+   *  that wrote the answer) or, when null or gone, to this chat. `build` gets
+   *  whether it lands on that sub. False when the send failed or had no chat. */
+  handOff(subId: string | null, build: (onSub: boolean) => string): Promise<boolean>;
 }
 
 const esc = escapeHtml;
@@ -138,6 +144,10 @@ export class AnswersCard {
   private wiredFor: string | null = null;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  /** Threads handed to the chat, by key: the thread's message count then, so the
+   *  button reads Sent until the thread grows. In memory: it only spares a double click. */
+  private readonly handedOff = new Map<string, number>();
+  private readonly handingOff = new Set<string>();
   /** The reply so far of a question in flight, per thread key, as it streams. */
   private streaming = new Map<string, string>();
   /** Refits a tall thread when the dashboard's height changes. */
@@ -545,10 +555,53 @@ export class AnswersCard {
     }
     const err = this.errors.get(key);
     if (err) parts.push(`<div class="ax-error">${esc(err)}</div>`);
+    if (item && !asking && canHandOff(item)) parts.push(this.handOffRow(item));
     if (!parts.length) {
       return `<div class="ax-empty"><i class="ph ph-chat-teardrop-dots"></i><span>Ask anything. Your first message is the question; Claude's reply lands in Answers.</span></div>`;
     }
     return parts.join("");
+  }
+
+  /** Under the latest reply: hands the whole thread to the chat that wrote the answer. */
+  private handOffRow(item: AnswerItem): string {
+    const sub = item.author?.subId;
+    const to = sub && this.deps.subAlive(sub) ? item.author!.name : "chat";
+    const sent = this.handedOff.get(item.key) === (item.thread?.messages.length ?? 0);
+    const busy = this.handingOff.has(item.key);
+    const label = sent ? `Sent to ${to}` : `Send thread to ${to}`;
+    const tip = sent
+      ? "Sent as your message. Reply in the thread and it can be sent again"
+      : `Send this whole thread to ${to === "chat" ? "the chat" : to} as your message. Text in the box below goes with it as your ask`;
+    return `<div class="ax-handoff"><button type="button" class="ax-tbtn ax-handoff-btn" data-ax="handoff" title="${esc(tip)}"${sent || busy ? " disabled" : ""}>`
+      + `<i class="ph ${sent ? "ph-check" : "ph-share-fat"}"></i>${esc(label)}</button></div>`;
+  }
+
+  private async handOff(): Promise<void> {
+    const key = this.thread;
+    const item = this.item(key);
+    if (!key || !item || !canHandOff(item) || this.handingOff.has(key) || this.pending.has(key)) return;
+    const box = this.wiredFor === key ? this.wire?.textarea ?? null : null;
+    const ask = box?.value ?? "";
+    this.handingOff.add(key);
+    this.render();
+    let ok = false;
+    try {
+      // A sub's answer that lands in this chat is not this chat's own words.
+      ok = await this.deps.handOff(item.author?.subId ?? null, (onSub) => threadHandoffText(item, ask, !item.author || onSub));
+    } catch (err) {
+      console.warn("[answers-card] send thread to chat failed", err);
+    }
+    this.handingOff.delete(key);
+    if (this.disposed) return;
+    if (ok) {
+      this.handedOff.set(key, item.thread?.messages.length ?? 0);
+      // The ask went with the thread; a box Joe has since changed is his again.
+      if (box && this.wire?.textarea === box && box.value === ask && ask) {
+        box.value = "";
+        this.wire.core.handleInput();
+      }
+    }
+    this.render();
   }
 
   private destroyWire(): void {
@@ -651,6 +704,7 @@ export class AnswersCard {
       case "new-q": return this.newQuestion();
       case "close-thread": return this.closeThread();
       case "grow-thread": return this.growThread();
+      case "handoff": return void this.handOff();
       case "history": return this.history();
       case "toggle":
         if (t.closest("a, button, .attachment-chip, [data-file-ref]") && !t.closest(".ax-readmore")) return;

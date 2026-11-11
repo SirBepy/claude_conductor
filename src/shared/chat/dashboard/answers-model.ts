@@ -41,6 +41,8 @@ export interface AnswerAuthor {
   name: string;
   model: string;
   effort: string;
+  /** The sub's session id, where Send thread to chat delivers; null when the card did not carry it. */
+  subId: string | null;
 }
 
 export interface AnswerItem {
@@ -474,7 +476,7 @@ export function buildAnswerItems(
         seenAt: 0,
         pending: null,
         handoff: ask ? HANDOFF_PREFIX + ask.spawnId : null,
-        author: { name: card.sub_name || ask?.subName || "a sub", model: card.model ?? "", effort: card.effort ?? "" },
+        author: { name: card.sub_name || ask?.subName || "a sub", model: card.model ?? "", effort: card.effort ?? "", subId: card.sub_id ?? null },
       };
       items.push(item);
       chat.push({ item, joeBefore: joeCount });
@@ -659,6 +661,37 @@ export function historyGroups(items: readonly AnswerItem[], store: AnswerStore):
     .filter((id) => by[id].length > 0)
     .map((id) => ({ id, label: GROUP_LABEL[id], items: by[id] }));
   return { groups, headings: groups.length >= 2 };
+}
+
+/** Send thread to chat has something to hand over: a reply the chat that
+ *  wrote the answer never saw. That is any follow-up, or a + question's whole
+ *  thread (the chat never saw the question either). */
+export function canHandOff(item: AnswerItem): boolean {
+  return !item.pending && (item.asked || threadFollowUps(item).length > 0);
+}
+
+/** The message Send thread to chat delivers as Joe's: a quote line naming the
+ *  answer (so an older one is still clear), what he typed in the thread's box
+ *  as the ask, then the thread verbatim. `toAuthor` is false when it lands in
+ *  a chat other than the one that wrote the answer (its sub is gone). The chat
+ *  never saw the thread: it ran in the read-only Ask sidecar, so its replies are
+ *  labelled apart from the answer. */
+export function threadHandoffText(item: AnswerItem, ask: string, toAuthor = true): string {
+  const lines = [`> Re: ${oneLine(item.verdict || item.question)}`, ""];
+  lines.push(ask.trim() || (item.asked
+    ? "I asked this in a side thread you have not seen. Pick it up from where it ended."
+    : "I talked this answer through in a side thread you have not seen. Pick it up from where it ended."));
+  lines.push("", "The thread, from my Answers card (a read-only side chat):", "");
+  const opening = (item.typed || item.question).trim();
+  if (opening) lines.push(`**Me:** ${opening}`, "");
+  // A + question's first reply came from the thread; a sub's answer that lands
+  // in the main chat (the sub is gone) is not the main chat's own words.
+  const label = item.asked ? "Thread" : toAuthor ? "Your answer" : item.author ? `${item.author.name}'s answer` : "The answer";
+  lines.push(`**${label}:** ${[item.verdict, item.text].filter((t) => t.trim()).join("\n\n")}`);
+  for (const m of threadFollowUps(item)) {
+    lines.push("", m.role === "user" ? `**Me:** ${m.text.trim()}` : `**Thread:** ${withoutSuggestion(m.text).trim()}`);
+  }
+  return lines.join("\n");
 }
 
 /** Everything a thread said, for History's search. */

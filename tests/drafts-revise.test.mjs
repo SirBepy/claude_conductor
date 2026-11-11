@@ -15,7 +15,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // calls the module-local `sendRevision` directly, not through its own export.
 const { invokeMock, sendWithFailureRecoveryMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
-  sendWithFailureRecoveryMock: vi.fn().mockResolvedValue(undefined),
+  sendWithFailureRecoveryMock: vi.fn().mockResolvedValue(true),
 }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: (...a) => invokeMock(...a) }));
 vi.mock("../src/views/sessions/send-with-failure-recovery.ts", () => ({
@@ -103,7 +103,7 @@ describe("DraftsEditor Revise menu", () => {
 
   beforeEach(() => {
     invokeMock.mockReset().mockResolvedValue(undefined);
-    sendWithFailureRecoveryMock.mockReset().mockResolvedValue(undefined);
+    sendWithFailureRecoveryMock.mockReset().mockResolvedValue(true);
     // The draft's origin_session_id ("origin") is deliberately absent, so
     // sendRevision must fall back to the editor's own sessionId ("here") -
     // exercising the same fallback this test exercised when `sendRevision`
@@ -249,5 +249,20 @@ describe("DraftsEditor Revise menu", () => {
     expect(text).toContain("Your last version (v1):\n> Hey Bruno, the backfill is slow.");
     expect(text).toContain("My version (v2):\n> Bruno, it slips.");
     await vi.waitFor(() => expect(edited.querySelector(".dr-learn").textContent).toBe("Sent to Claude"));
+  });
+
+  it("never reads Sent to Claude when the send failed", async () => {
+    sendWithFailureRecoveryMock.mockResolvedValue(false);
+    const edited = await mountEditor(
+      [
+        { n: 1, body: "Hey Bruno, the backfill is slow.", author: "ai", note: "first pass", created_at: "2026-10-01T00:00:00Z" },
+        { n: 2, body: "Bruno, it slips.", author: "user", note: "your edit", created_at: "2026-10-01T00:00:00Z" },
+      ],
+      2,
+    );
+    edited.querySelector("[data-learn]").click();
+    await vi.waitFor(() => expect(sendWithFailureRecoveryMock).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(edited.querySelector(".dr-learn").textContent).not.toBe("Sent to Claude");
   });
 });

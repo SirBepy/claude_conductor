@@ -1,3 +1,4 @@
+// Reviewed 2026-11-11 (Send thread to chat): an Answers-card thread with a follow-up gains a hand-off button under its latest reply, the dashboard wires its send through sendRevision, and AnswerAuthor carries the sub's id; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-11 (phone keyboard): a chat no longer focuses its composer on open at phone width; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-11 (plan-close): chat-dashboard.css gained the `.cdash-step--left` rule only; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-11 (answers pending row): answers-model.ts adds a row per question handed to a sub (spawn_chat, read-only, report_back) until its answer fills it, and the dashboard passes the sub list only once it holds this chat; this spec has no hand-off, nothing it asserts changed, and it passes.

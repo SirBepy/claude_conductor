@@ -149,6 +149,11 @@
 .ax-spin { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid var(--color-border); border-top-color: var(--color-secondary); animation: axspin 0.7s linear infinite; }
 @keyframes axspin { to { transform: rotate(360deg); } }
 .ax-error { font-size: 0.88rem; line-height: 1.45; color: var(--color-danger); border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent); background: color-mix(in srgb, var(--color-danger) 10%, transparent); border-radius: 6px; padding: 6px 9px; overflow-wrap: anywhere; }
+/* Send thread to chat: one quiet text button under the latest reply */
+.ax-handoff { display: flex; margin: 2px 0 4px; }
+.ax-handoff-btn { height: 28px; padding: 0 10px; font-size: 12.5px; }
+.ax-handoff-btn:disabled { cursor: default; opacity: 0.75; }
+.ax-handoff-btn:disabled:hover { background: none; }
 .ax-tcomp { padding: 8px 10px 10px; border-top: 1px solid color-mix(in srgb, var(--color-text) 10%, transparent); }
 /* History rows (the palette overlay lives outside the card) */
 .ax-cp-tag { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; padding: 0 6px; border-radius: 4px; background: color-mix(in srgb, var(--color-primary) 16%, transparent); color: var(--color-text); font-size: 11px; }

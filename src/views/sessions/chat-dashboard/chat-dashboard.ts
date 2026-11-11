@@ -23,6 +23,7 @@ import { initialUi, renderStrip, renderZone, QUICK_VIEWS, type DashUi, type Quic
 import { filterPlanList, syncPlanListFade } from "./plan-card";
 import type { PlanState } from "../../../shared/chat/dashboard/dashboard-model";
 import { AnswersCard } from "./answers-card";
+import { sendRevision } from "../drafts-revise";
 import { QUESTION_ASK_EVENT, type QuestionAsk } from "../question-ask";
 import { HOST_ID } from "../permission-modal/host";
 import { SubsCard } from "./subs-card";
@@ -157,6 +158,16 @@ export class ChatDashboard {
       expandQuestion: () => {
         const sid = renderer.sessionId;
         if (sid) expandActiveCard({ sessionId: sid });
+      },
+      subAlive: (subId) => state.sessions.some((s) => s.session_id === subId),
+      handOff: async (subId, build) => {
+        const own = renderer.sessionId;
+        if (!own) return false;
+        // A sub's answer goes back to that sub while its row exists; a gone sub's to this chat.
+        const toSub = !!subId && state.sessions.some((s) => s.session_id === subId);
+        // sendRevision is the shared "send as Joe's message to that chat, else this
+        // one" path (busy chat: held, failed: marked and toasted), not draft-specific.
+        return sendRevision(toSub ? subId! : own, own, build(toSub));
       },
     });
     this.subs = new SubsCard({
