@@ -11,20 +11,10 @@
 
 import path from "node:path";
 import { selectProjectRow } from "../helpers/select-project.js";
-import { openNewChatPicker, turnSubchatsOff } from "../helpers/new-chat.js";
+import { openNewChatPicker, pickAccountIfAsked, turnSubchatsOff } from "../helpers/new-chat.js";
 
 const PROJECT_NAME = path.basename(process.cwd());
 const QUESTION = "DASH_ANSWER does the dashboard show this answer?";
-
-// 2+ accounts with no default/binding: the first send is refused and the account picker
-// opens. Pick the first chip and resend (same as reload-dup).
-async function pickAccountIfAsked() {
-  const modalChip = await $(".cam-modal-card [data-acc-id]");
-  if (await modalChip.waitForExist({ timeout: 2000 }).then(() => true, () => false)) {
-    await modalChip.click();
-    await (await $(".session-composer .composer-send")).click();
-  }
-}
 
 const text = (sel) => browser.execute((s) => document.querySelector(s)?.textContent ?? null, sel);
 

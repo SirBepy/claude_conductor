@@ -26,7 +26,7 @@ import os from "node:os";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { selectProjectRow } from "../helpers/select-project.js";
-import { turnSubchatsOff } from "../helpers/new-chat.js";
+import { openNewChatPicker, pickAccountIfAsked, turnSubchatsOff } from "../helpers/new-chat.js";
 
 const PROJECT_NAME = path.basename(process.cwd());
 const DATA_DIR = path.join(os.homedir(), "AppData", "Roaming", "claude-conductor");
@@ -83,28 +83,11 @@ function pendingOnDisk() {
   }
 }
 
-// Same account-picker dance as reload-dup.e2e.js: 2+ accounts and no default refuses the
-// first send and opens the picker.
-async function pickAccountIfAsked() {
-  const modalChip = await $(".cam-modal-card [data-acc-id]");
-  if (await modalChip.waitForExist({ timeout: 2000 }).then(() => true, () => false)) {
-    await modalChip.click();
-    await (await $(".session-composer .composer-send")).click();
-  }
-}
-
 async function startNewChat() {
   // The overflow menu is the user's route (reload-dup.e2e.js drives it), but after a reload the
   // menu closed again before its New chat entry became clickable, in three runs out of three. The
   // entry's own handler is bound at mount, so clicking the node directly starts the same draft.
-  await browser.waitUntil(
-    async () => browser.execute(() => {
-      const b = document.getElementById("newSessionBtn");
-      return !!b && !b.disabled;
-    }),
-    { timeout: 30000, interval: 500, timeoutMsg: "#newSessionBtn never got enabled" }
-  );
-  await browser.execute(() => document.getElementById("newSessionBtn").click());
+  await openNewChatPicker();
   await selectProjectRow(PROJECT_NAME);
   await (await $(".session-composer .composer-textarea")).waitForExist({ timeout: 20000 });
   await turnSubchatsOff();

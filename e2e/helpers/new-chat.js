@@ -13,6 +13,17 @@ export async function openNewChatPicker() {
   await browser.execute(() => document.getElementById("newSessionBtn").click());
 }
 
+// 2+ accounts with no default or binding: the first send is refused and the account picker opens
+// (pending-pane-composer.ts), and the refused text is put back in the composer. Pick the first
+// chip and resend. A no-op when no picker shows up within 2s.
+export async function pickAccountIfAsked() {
+  const modalChip = await $(".cam-modal-card [data-acc-id]");
+  if (await modalChip.waitForExist({ timeout: 2000 }).then(() => true, () => false)) {
+    await modalChip.click();
+    await (await $(".session-composer .composer-send")).click();
+  }
+}
+
 // A new draft starts with "Use subchats" on (draft-subchats.ts): a quiet chat that draws only
 // send_message cards, with the model moved to Opus. The specs that exercise a plain chat (a text
 // reply, the transcript rows) switch it off for their one chat, the way a user would.
