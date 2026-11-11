@@ -93,7 +93,8 @@ function quote(text: string): string {
 }
 
 /** Lands on the authoring chat when it is still open, else on the chat the
- *  panel is scoped to - the body is in the prompt, so either can act on it. */
+ *  panel is scoped to - the body is in the prompt, so either can act on it.
+ *  False when there was no chat or the send failed; held for a busy chat counts as sent. */
 export async function sendRevision(originId: string, fallbackId: string, text: string): Promise<boolean> {
   const inst =
     state.sessions.find((s) => s.session_id === originId) ??
@@ -105,16 +106,17 @@ export async function sendRevision(originId: string, fallbackId: string, text: s
   const sessionId = inst.session_id;
   const blocks: ContentBlock[] = [{ type: "text", text }];
   const onScreen = state.renderer?.currentSessionId() === sessionId;
+  let sent = true;
   await sendOrStage(
     blocks,
     async () => {
       const optimistic = { type: "user_message", content: blocks, timestamp: BigInt(Date.now()) } as ChatEvent;
       sessionEvents.pushSynthetic(sessionId, optimistic);
-      await sendWithFailureRecovery(sessionId, String(inst.cwd ?? "."), blocks, optimistic);
+      sent = await sendWithFailureRecovery(sessionId, String(inst.cwd ?? "."), blocks, optimistic);
     },
     { checkActive: onScreen },
   );
-  return true;
+  return sent;
 }
 
 export function reviseMenuHtml(scoped: boolean): string {

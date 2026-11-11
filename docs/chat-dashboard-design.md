@@ -98,6 +98,21 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
   it moves). A thread starts with Joe's question and the answer (not counted as a back-and-forth),
   then compact bubbles. No thread summary: the thread button carries the count, plus a blinking dot
   while Claude replies. Hovering the thread header never hides the answer.
+- **Send thread to chat (Joe, 2026-11-11, todo pc-1706).** "i talk smth thru in a thread, and then me
+  and the thread figure smth out, i want it to be able to hand over that transcript to the main
+  chat, or any other chat who made the answer". A quiet text button under a thread's latest reply
+  sends the whole thread as Joe's message: a `> Re: <verdict>` quote line (so an older answer is
+  still clear), what he typed in the thread's box as the ask (else "pick it up from where it
+  ended"), then the thread verbatim (his question, the answer, every follow-up). It goes to the
+  chat that wrote the answer: a sub's answer to that sub while its row exists, everything else to
+  this chat, through the same send-or-hold path as the draft Revise menu (`sendRevision`). It
+  shows only when the thread holds something that chat never saw (a follow-up, or a + question's
+  whole thread), and reads "Sent to chat" until the thread grows. Model: `canHandOff` and
+  `threadHandoffText` in `answers-model.ts`. Ruled out the same day: quick-reply options on the
+  answer face ("if we just stop at a question, and i have to tell you to continue... we did smth
+  wrong. i should always see my options in a ask user question": a choice for Joe is a question
+  card, never buttons on an answer), thread-proposed instructions (the box's text is the ask), a
+  "Write my own" item, and the old `SUGGESTED:` line (the sidecar still writes none).
 - **Questions always show rewritten** as clear questions; Joe's original wording shows only on hover
   over the question inside the thread. An answer whose `send_message` had no `question`
   and whose message is longer than a one-line preview (90 chars) shows a clipped preview first, never

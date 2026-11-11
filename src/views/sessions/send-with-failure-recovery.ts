@@ -8,16 +8,19 @@ import { state } from "./state";
 
 /** Shared "retryable send + catch + mark the bubble failed" path (ai_todo 800),
  * used by the established composer and both pending-pane send sites so the
- * failed-send policy lives in one place instead of drifting copies. */
+ * failed-send policy lives in one place instead of drifting copies. Resolves
+ * true when the message went out or was held for the chat's turn end, false
+ * when it failed (already marked and toasted here). */
 export async function sendWithFailureRecovery(
   sessionId: string,
   cwd: string,
   blocks: ContentBlock[],
   optimisticEvent: ChatEvent,
-): Promise<void> {
+): Promise<boolean> {
   const attempt = (): Promise<void> => invoke<void>("send_message", { sessionId, cwd, blocks });
   try {
     await attempt();
+    return true;
   } catch (err) {
     // Refused mid-turn (todo 873): the same outcome as the composer's own busy
     // check, decided one race later. Queue the blocks and drop the optimistic
@@ -25,7 +28,7 @@ export async function sendWithFailureRecovery(
     if (isSessionBusyError(err) && state.heldMessages?.stageFor(sessionId, blocks)) {
       sessionEvents.removeSynthetic(sessionId, optimisticEvent);
       if (state.renderer?.currentSessionId() === sessionId) void state.renderer.loadFromStore(cwd);
-      return;
+      return true;
     }
     // An API-credit refusal is an expected stop, not a fault: it is never
     // queued (nothing frees the credit by waiting for the turn to end), and it
@@ -44,5 +47,6 @@ export async function sendWithFailureRecovery(
       sessionEvents.removeSynthetic(sessionId, optimisticEvent);
     }
     showToast(blockedReason ?? `Send failed: ${err}`);
+    return false;
   }
 }
