@@ -162,8 +162,11 @@ jobs:
   # One call of the reusable desktop-build.yml per platform instead of a matrix, so
   # `tag` and `publish-windows` wait on the Windows build alone and macOS
   # publishes on its own via `publish-macos`. Intel macOS and Linux stay paused
-  # (paused 2026-08-12, arm64 restored 2026-08-31): another call here brings one
-  # back, and its os-guarded staging steps in desktop-build.yml already exist.
+  # (paused 2026-08-12, arm64 restored 2026-08-31): bringing one back takes another
+  # call here, its own publish step for its assets (publish-windows and
+  # publish-macos upload only their own file types), and a `needs` edge from
+  # publish-macos so its latest.json entry is ready when that job rebuilds it.
+  # Its os-guarded staging steps in desktop-build.yml already exist.
   build-windows:
     needs: check
     if: needs.check.outputs.should_release == 'true'
@@ -487,9 +490,20 @@ jobs:
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             artifacts/*.dmg artifacts/*.app.tar.gz artifacts/*.app.tar.gz.sig
 
+      # --clobber deletes the old latest.json before uploading the new one, so a
+      # failed upload would leave the release without it and every client's update
+      # check would 404. Retry so a transient API error does not strand that state.
       - name: Swap in the merged latest.json
         shell: bash
-        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber artifacts/latest.json
+        run: |
+          for attempt in 1 2 3; do
+            if gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber artifacts/latest.json; then
+              exit 0
+            fi
+            echo "latest.json upload failed (attempt $attempt of 3)"
+            sleep $((attempt * 5))
+          done
+          exit 1
 
   # Named upload-*, not publish-*, so the build watcher's skipped-publish check
   # does not fire on the many releases where android/ is unchanged and this is

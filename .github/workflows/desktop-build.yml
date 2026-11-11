@@ -80,8 +80,11 @@ jobs:
           # `cargo test --test export_types`: a full debug compile of the crate
           # (about 10 minutes) just to write src/types/ipc.generated.ts. A release
           # bundle only needs the vite build; the test job generates the types
-          # and typechecks, and vite does not read that file.
-          jq --arg v "$VERSION" '.version = $v | .build.beforeBuildCommand = "pnpm exec vite build"' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
+          # and typechecks, and vite does not read that file. --ignore-scripts
+          # keeps the same `npm run build` invocation but skips the pre/post
+          # hooks (explicitly named scripts still run), so no new tool has to
+          # resolve on the PATH of tauri-cli's shell.
+          jq --arg v "$VERSION" '.version = $v | .build.beforeBuildCommand = "npm run build --ignore-scripts"' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
           mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
           # Cargo.toml: only `^version = "..."` lines hit (deps use `  version = ...`
           # with leading whitespace inside inline tables). `-i.bak` is the form

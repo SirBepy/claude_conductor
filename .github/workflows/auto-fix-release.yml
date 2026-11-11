@@ -81,19 +81,20 @@ jobs:
           while IFS= read -r job; do
             [ -z "$job" ] && continue
             # build-windows* covers the reusable-workflow job ("build-windows / build").
-            # build-macos, publish-macos and upload-android are deliberately absent:
-            # they run after the tag exists, so `check` skips a same-version
-            # re-push and an auto-fix commit would never ship. A macOS-only failure
-            # needs `gh run rerun <id> --failed` or a version bump.
+            # Only jobs that fail BEFORE the tag exists are listed: once `tag` has
+            # pushed, `check` skips a same-version re-push, so an auto-fix commit
+            # for build-macos, publish-windows, publish-macos, android or
+            # upload-android would never ship. Those need `gh run rerun <id> --failed`
+            # or a version bump.
             case "$job" in
-              check|build-windows*|android*|tag|publish-windows) allow=true ;;
+              check|build-windows*|tag) allow=true ;;
             esac
           done <<< "$failed"
           if [ "$allow" = "true" ]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::Only jobs auto-fix cannot repair failed (a red test needs a human; a macOS or Android failure after the tag exists needs 'gh run rerun --failed' or a version bump). Auto-fix will not run."
+            echo "::warning::Only jobs auto-fix cannot repair failed (a red test needs a human; a failure after the tag exists, in macOS, Android or a publish job, needs 'gh run rerun --failed' or a version bump). Auto-fix will not run."
           fi
 
       - name: Fetch failed logs
