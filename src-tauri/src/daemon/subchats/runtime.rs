@@ -15,7 +15,10 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 /// Where a sub is in the sequence the Stop hook runs when it ends a turn
-/// without finishing and with nothing pending (spec section 9).
+/// without finishing and with nothing pending (spec section 9). One round is
+/// block, nudge, card, and at most one more card if Joe's "Nudge again" fails
+/// too. A turn opened by anything but a stall nudge (a send from the main chat
+/// or Joe) starts a new round, so every card follows a nudge the daemon tried.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SubStage {
     /// Nothing has been done about it yet.
@@ -23,8 +26,16 @@ pub enum SubStage {
     Fresh,
     /// The Stop hook has used its one block.
     Blocked,
-    /// The daemon has nudged once; the next unfinished end goes to Joe.
+    /// The daemon has nudged once; if the nudge's own turn ends unfinished, Joe
+    /// gets the card.
     Nudged,
+    /// Joe has the card for this round.
+    Carded,
+    /// Joe picked "Nudge again" on the card.
+    JoeNudged,
+    /// Joe's nudge did not help either and he was told what is known. Nothing
+    /// more is raised this round.
+    GaveUp,
 }
 
 #[derive(Default)]
@@ -45,8 +56,15 @@ struct Entry {
     /// starts a new stretch.
     decisions_delivered: bool,
     /// Text for the next due nudge when it is not [`super::NUDGE_TEXT`]: a finish
-    /// dropped at commit has to say why, since the sub did call `finish_subchat`.
-    nudge_text: Option<&'static str>,
+    /// dropped at commit has to say why, since the sub did call `finish_subchat`,
+    /// and Joe's "Nudge again" can carry his note.
+    nudge_text: Option<String>,
+    /// The armed nudge is Joe's own "Nudge again", deferred past a busy turn. Kept
+    /// apart from the stage, which the interrupted turn's Stop hook resets.
+    nudge_from_joe: bool,
+    /// Turn gen opened by the last stall nudge (the daemon's or Joe's), so the
+    /// Stop hook can tell a nudge's own turn from one a new message opened.
+    nudge_gen: Option<u64>,
     /// First sweep that found this sub with no live child and no finish. A card
     /// goes up only if it is still childless a grace period later, so a respawn
     /// in progress is not mistaken for a death.
@@ -97,6 +115,11 @@ impl Runtime {
         self.with(sub_id, |e| e.nudge_due = true);
     }
 
+    /// Whether a nudge is armed for the current turn's end, without taking it.
+    pub fn nudge_armed(&self, sub_id: &str) -> bool {
+        self.with(sub_id, |e| e.nudge_due)
+    }
+
     pub fn take_nudge_due(&self, sub_id: &str) -> bool {
         self.with(sub_id, |e| std::mem::take(&mut e.nudge_due))
     }
@@ -125,12 +148,35 @@ impl Runtime {
     }
 
     /// Arms the next due nudge with its own wording (see `Entry::nudge_text`).
-    pub fn set_nudge_text(&self, sub_id: &str, text: &'static str) {
-        self.with(sub_id, |e| e.nudge_text = Some(text));
+    /// New wording is a new nudge, so it is not Joe's until marked again.
+    pub fn set_nudge_text(&self, sub_id: &str, text: &str) {
+        self.with(sub_id, |e| {
+            e.nudge_text = Some(text.to_string());
+            e.nudge_from_joe = false;
+        });
     }
 
-    pub fn take_nudge_text(&self, sub_id: &str) -> Option<&'static str> {
+    pub fn take_nudge_text(&self, sub_id: &str) -> Option<String> {
         self.with(sub_id, |e| e.nudge_text.take())
+    }
+
+    /// Marks the armed nudge as Joe's own.
+    pub fn set_nudge_from_joe(&self, sub_id: &str) {
+        self.with(sub_id, |e| e.nudge_from_joe = true);
+    }
+
+    pub fn take_nudge_from_joe(&self, sub_id: &str) -> bool {
+        self.with(sub_id, |e| std::mem::take(&mut e.nudge_from_joe))
+    }
+
+    /// Records the turn gen a stall nudge just opened.
+    pub fn note_nudge_gen(&self, sub_id: &str, gen: u64) {
+        self.with(sub_id, |e| e.nudge_gen = Some(gen));
+    }
+
+    /// Whether turn `gen` was opened by a stall nudge.
+    pub fn is_nudge_turn(&self, sub_id: &str, gen: u64) -> bool {
+        self.with(sub_id, |e| e.nudge_gen == Some(gen))
     }
 
     /// Drops a nudge that was armed for a turn end that will never come.
@@ -138,6 +184,7 @@ impl Runtime {
         self.with(sub_id, |e| {
             e.nudge_due = false;
             e.nudge_text = None;
+            e.nudge_from_joe = false;
         });
     }
 
@@ -182,6 +229,8 @@ impl Runtime {
             e.nudge_due = false;
             e.decisions_delivered = false;
             e.nudge_text = None;
+            e.nudge_from_joe = false;
+            e.nudge_gen = None;
             e.childless_since = None;
             e.death_carded = false;
         });

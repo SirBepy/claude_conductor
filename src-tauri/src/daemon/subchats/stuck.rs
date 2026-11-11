@@ -128,6 +128,12 @@ pub async fn sweep_dead(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> 
             rt.clear_childless(&id);
             continue;
         }
+        // A writer queued for the slot is woken by it, and the wake respawns a
+        // child that is gone, so a missing one is a wait, not a death.
+        if super::writers::waiting_behind(state, &id).is_some() {
+            rt.clear_childless(&id);
+            continue;
+        }
         if (env.is_live)(&id) {
             rt.clear_childless(&id);
             continue;
@@ -372,6 +378,22 @@ mod tests {
         let text = cards[0]["payload"]["questions"][0]["question"].as_str().unwrap();
         assert!(text.contains("not running") && text.contains("restarted"), "{text}");
         assert!(run_dead(&st, false, 120).await.is_empty(), "one card per death, not one per tick");
+    }
+
+    /// 2026-11-11: phone-ime-voice-swipe, queued for the writer slot, was carded
+    /// as a process that died. A queued writer is woken by the slot, and the wake
+    /// respawns it.
+    #[tokio::test]
+    async fn a_sub_queued_for_the_writer_slot_with_no_process_is_not_carded() {
+        let (st, sub) = idle_sub("dead-queued");
+        let key = std::path::PathBuf::from("/tmp/cc-test-dead-queued");
+        super::super::writers::queue_behind_for_test(&key, "dead-queued-holder", &sub);
+        run_dead(&st, false, 0).await;
+        assert!(run_dead(&st, false, 120).await.is_empty(), "waiting is not dying");
+        assert!(st.list_prompts().await.is_empty());
+        super::super::writers::forget_project_for_test(&key);
+        run_dead(&st, false, 130).await;
+        assert_eq!(run_dead(&st, false, 300).await, [sub], "out of the queue, a missing process is a death again");
     }
 
     #[tokio::test]

@@ -383,8 +383,23 @@ pub fn check_write(state: &Arc<DaemonState>, sub_id: &str) -> WriteCheck {
 /// What the guard says to a sub that must wait.
 pub fn wait_refusal(holder: &str) -> String {
     format!(
-        "Another sub (\"{holder}\") holds this project's writer slot, so your edit is refused: only one sub changes files at a time. You are queued. Do not edit files and do not look for another way to write them. Read, plan and test what you can, or end your turn: you are sent a message the moment the slot is yours."
+        "Another sub (\"{holder}\") holds this project's writer slot, so your edit is refused: only one sub changes files at a time. You are queued. Do not edit files and do not look for another way to write them. Read, plan and test what you can, then end your turn without calling finish_subchat: while you are queued, ending a turn is not counted as unfinished, and you are sent a message the moment the slot is yours."
     )
+}
+
+/// The name of the sub holding the slot `sub_id` is queued for, while it waits in
+/// any slot's queue (a running sub woken later, or one not started yet). `None`
+/// once the slot is its own or it waits for nothing. The Stop hook and the stall
+/// sweeps read it: a queued sub ending its turn is doing what the guard told it.
+/// A slot whose holder is gone (a release that never came) does not count: the
+/// sweep starts the next sub there, and until then the sub is judged as usual,
+/// so a missed release can never hide a stall.
+pub fn waiting_behind(state: &DaemonState, sub_id: &str) -> Option<String> {
+    let mut table = table();
+    let slot = table.values_mut().find(|s| s.queue.iter().any(|e| e.sub_id == sub_id))?;
+    slot.heal(state);
+    slot.holder.as_ref()?;
+    Some(behind(state, slot))
 }
 
 /// Lets go of everything `sub_id` holds or waits for, and starts whoever is next.
@@ -703,6 +718,18 @@ pub(crate) fn restore_inner(state: &Arc<DaemonState>) -> Vec<Start> {
 #[cfg(test)]
 pub(crate) fn forget_project_for_test(cwd: &Path) {
     table().remove(&project_key(cwd));
+}
+
+/// Queues `waiter` behind `holder` in the slot of `cwd` as a running sub woken
+/// later, for tests outside this module that need a sub waiting on the slot. The
+/// holder is a fresh claim, so it counts as live without a sub row of its own.
+#[cfg(test)]
+pub(crate) fn queue_behind_for_test(cwd: &Path, holder: &str, waiter: &str) {
+    let mut table = table();
+    let slot = slot_in(&mut table, &project_key(cwd));
+    slot.holder = Some(holder.to_string());
+    slot.claimed_at = Some(std::time::Instant::now());
+    slot.queue.push(Entry { sub_id: waiter.to_string(), kind: Kind::Wake, after_merges: false });
 }
 
 #[cfg(test)]

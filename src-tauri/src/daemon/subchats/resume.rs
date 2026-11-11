@@ -182,19 +182,40 @@ pub async fn nudge(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> Result
     Ok(())
 }
 
+/// A stall nudge (the daemon's own after a block, or Joe's "Nudge again"), with
+/// the turn it opens recorded, so the Stop hook can tell that turn's end from one
+/// a new message opened.
+pub(crate) async fn send_stall_nudge(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> Result<(), LifecycleError> {
+    nudge(state, sub_id, text).await?;
+    super::runtime::runtime().note_nudge_gen(sub_id, state.registry.current_turn_gen(sub_id));
+    Ok(())
+}
+
+/// The nudge text for Joe's "Nudge again", with the note he typed beside it.
+fn joe_nudge_text(note: Option<&str>) -> String {
+    match note {
+        Some(n) => format!("{NUDGE_TEXT}\n\nJoe's note with this nudge: {n}"),
+        None => NUDGE_TEXT.to_string(),
+    }
+}
+
 /// Joe's "Nudge again". An idle sub is nudged at once. A sub with a live child
 /// still mid-turn (the stalled one) is interrupted and nudged when that turn's
 /// result line lands, because a write into a busy child re-opens the race
 /// `refuse_if_busy` exists for.
-pub async fn request_nudge(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), LifecycleError> {
+pub async fn request_nudge(state: &Arc<DaemonState>, sub_id: &str, note: Option<&str>) -> Result<(), LifecycleError> {
     let rt = super::runtime::runtime();
-    // Joe has seen the card, so the next unfinished end goes straight back to him.
-    rt.set_stage(sub_id, super::runtime::SubStage::Nudged);
+    // If this nudge's turn ends unfinished too, Joe is told it did not help
+    // rather than asked the same question again.
+    rt.set_stage(sub_id, super::runtime::SubStage::JoeNudged);
+    let text = joe_nudge_text(note);
     let live_and_busy = state.sessions.contains_key(sub_id) && lifecycle::is_busy(state, sub_id);
     if live_and_busy {
+        rt.set_nudge_text(sub_id, &text);
+        rt.set_nudge_from_joe(sub_id);
         return defer_nudge_until_turn_ends(sub_id, lifecycle::cancel_turn(&state.sessions, sub_id)).await;
     }
-    nudge(state, sub_id, NUDGE_TEXT).await
+    send_stall_nudge(state, sub_id, &text).await
 }
 
 /// Arms the nudge for the turn end the interrupt will cause. Armed before the
@@ -341,12 +362,19 @@ mod tests {
         assert!(nudge(&st, &id, NUDGE_TEXT).await.is_err());
     }
 
+    #[test]
+    fn joes_note_rides_with_his_nudge() {
+        assert_eq!(joe_nudge_text(None), NUDGE_TEXT);
+        let t = joe_nudge_text(Some("the gate is dropped, carry on"));
+        assert!(t.starts_with(NUDGE_TEXT) && t.ends_with("Joe's note with this nudge: the gate is dropped, carry on"), "{t}");
+    }
+
     #[tokio::test]
-    async fn request_nudge_marks_the_sub_nudged_so_the_next_unfinished_end_asks_joe() {
+    async fn request_nudge_marks_the_sub_joe_nudged_so_a_failure_is_told_not_asked_again() {
         let st = state();
         let id = sub(&st, "reqnudge");
-        let _ = request_nudge(&st, &id).await;
-        assert_eq!(super::super::runtime::runtime().stage(&id), super::super::runtime::SubStage::Nudged);
+        let _ = request_nudge(&st, &id, None).await;
+        assert_eq!(super::super::runtime::runtime().stage(&id), super::super::runtime::SubStage::JoeNudged);
         assert!(!super::super::runtime::runtime().take_nudge_due(&id), "an idle sub is nudged now, not deferred");
     }
 

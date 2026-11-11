@@ -2,7 +2,8 @@
 //! Two causes share it: a sub that ended turns without finishing even after the
 //! Stop hook's block and the daemon's nudge (`Unfinished`), and a sub that has
 //! written nothing for [`super::stuck::STUCK_AFTER`] (`Stuck`). Each sub has at
-//! most one open card per cause.
+//! most one open card per cause. When Joe's own "Nudge again" fails too, the
+//! card he gets says so ([`raise_nudge_failed`]) rather than asking again.
 
 use super::cards::{self, CardAnswer, CardOption, RaisedCard, END_IT, NUDGE_AGAIN, OPEN_IT};
 use super::resume;
@@ -54,6 +55,39 @@ impl Stall {
 pub const NO_TRANSPORT_NOTE: &str =
     "Its link to the daemon's tools is down, so it cannot call finish_subchat or ask you anything. Nudging it will not help.";
 
+/// What the daemon itself knows is in the sub's way, said on every stall card.
+fn known_blocker(state: &DaemonState, sub_id: &str) -> Option<String> {
+    super::writers::waiting_behind(state, sub_id)
+        .map(|holder| format!("It is waiting for the edit slot, which \"{holder}\" holds; it is woken when the slot is free."))
+}
+
+/// How much of the transcript's end is read for the sub's last words.
+const TAIL_BYTES: u64 = 256 * 1024;
+const MAX_WORDS_CHARS: usize = 300;
+
+/// The sub's own last text, which is the best account of why it stopped when
+/// nothing the daemon tracks explains it.
+fn last_words_in(path: &std::path::Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(TAIL_BYTES))).ok()?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    let words = text
+        .lines()
+        .rev()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .find_map(|v| crate::tokens::assistant_text(&v))?;
+    let flat = words.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut clipped: String = flat.chars().take(MAX_WORDS_CHARS).collect();
+    if flat.chars().count() > MAX_WORDS_CHARS {
+        clipped.push_str("...");
+    }
+    (!clipped.is_empty()).then_some(clipped)
+}
+
 /// How the card names the sub. Its title is the best label the registry has;
 /// the real task line arrives with the spawn brief (a later step).
 fn label(state: &DaemonState, sub_id: &str) -> String {
@@ -84,6 +118,62 @@ pub async fn raise_noted_quietly(state: &Arc<DaemonState>, sub_id: &str, stall: 
 }
 
 async fn raise_with(state: &Arc<DaemonState>, sub_id: &str, stall: Stall, note: Option<&str>, quiet: bool) -> Option<String> {
+    let mut question = stall.question(&label(state, sub_id), note);
+    if let Some(blocker) = known_blocker(state, sub_id) {
+        question = question.replacen("\n\nWhat should happen to it?", &format!("\n\n{blocker}\n\nWhat should happen to it?"), 1);
+    }
+    let options = vec![
+        CardOption::new(OPEN_IT, "Read it where it stopped"),
+        CardOption::new(NUDGE_AGAIN, "Remind it how to finish"),
+        CardOption::new(END_IT, "Stop it for good"),
+    ];
+    put_up(state, sub_id, stall, stall.header(), question, options, quiet).await
+}
+
+/// The card for a sub that ended its turn unfinished again right after Joe's own
+/// "Nudge again". Asking him the same question would only repeat a nudge that
+/// already failed twice, so it says what is known instead: a blocker the daemon
+/// tracks, the transport note, and the sub's own last words. No nudge option.
+pub async fn raise_nudge_failed(state: &Arc<DaemonState>, sub_id: &str, note: Option<&str>) -> Option<String> {
+    let who = label(state, sub_id);
+    let words = crate::context_status::resolve_transcript(&state.registry, sub_id).and_then(|p| last_words_in(&p));
+    let mut known: Vec<String> = Vec::new();
+    known.extend(known_blocker(state, sub_id));
+    known.extend(note.map(str::to_string));
+    known.extend(words.map(|w| format!("Its last words: \"{w}\"")));
+    if known.is_empty() {
+        known.push("It said nothing about why.".to_string());
+    }
+    let question = format!(
+        "**{who}** still ended its turn without finishing after your nudge, so another nudge did not help and will not.\n\n{}\n\nWhat should happen to it?",
+        known.join("\n\n")
+    );
+    let options = vec![
+        CardOption::new(OPEN_IT, "Read it and reply to it yourself"),
+        CardOption::new(END_IT, "Stop it for good"),
+    ];
+    put_up(state, sub_id, Stall::Unfinished, "Nudge did not help", question, options, false).await
+}
+
+/// Takes down this sub's open card for `stall`, if one is up. For a sub found to
+/// be waiting on something the daemon tracks: the card is about a stall that is
+/// not one.
+pub async fn withdraw(state: &Arc<DaemonState>, sub_id: &str, stall: Stall) {
+    if let Some(id) = cards::open_card_for(state, stall.card_kind(), sub_id).await {
+        cards::withdraw_card(state, &id).await;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn put_up(
+    state: &Arc<DaemonState>,
+    sub_id: &str,
+    stall: Stall,
+    header: &str,
+    question: String,
+    options: Vec<CardOption>,
+    quiet: bool,
+) -> Option<String> {
     let parent = state.registry.get(sub_id)?.subchat_of?;
     if cards::open_card_for(state, stall.card_kind(), sub_id).await.is_some() {
         return None;
@@ -92,13 +182,9 @@ async fn raise_with(state: &Arc<DaemonState>, sub_id: &str, stall: Stall, note: 
         kind: stall.card_kind(),
         display_session_id: parent.clone(),
         sub_id: Some(sub_id.to_string()),
-        header: stall.header().to_string(),
-        question: stall.question(&label(state, sub_id), note),
-        options: vec![
-            CardOption::new(OPEN_IT, "Read it where it stopped"),
-            CardOption::new(NUDGE_AGAIN, "Remind it how to finish"),
-            CardOption::new(END_IT, "Stop it for good"),
-        ],
+        header: header.to_string(),
+        question,
+        options,
         domain: None,
     };
     let raised = if quiet { cards::raise_quiet_card(state, card).await } else { cards::raise_card(state, card).await };
@@ -115,15 +201,29 @@ async fn raise_with(state: &Arc<DaemonState>, sub_id: &str, stall: Stall, note: 
     Some(id)
 }
 
-/// What each answer to a stalled-sub card does. Nothing here is sent to a model
-/// except the daemon's own nudge text.
+/// Splits a picked option from the note Joe typed beside it. The card sends both
+/// in one string, `<label> (note: <text>)` (`withOptionNote` in the webview).
+fn split_note(choice: &str) -> (&str, Option<&str>) {
+    const MARK: &str = " (note: ";
+    if let Some(inner) = choice.strip_suffix(')') {
+        if let Some(at) = inner.find(MARK) {
+            let note = inner[at + MARK.len()..].trim();
+            return (&inner[..at], (!note.is_empty()).then_some(note));
+        }
+    }
+    (choice, None)
+}
+
+/// What each answer to a stalled-sub card does. Nothing is sent to a model but
+/// the daemon's own nudge text and Joe's own note on "Nudge again".
 pub(crate) async fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, parent: &str, answer: CardAnswer) {
-    let CardAnswer::Picked(choice) = answer else { return };
+    let CardAnswer::Picked(picked) = answer else { return };
+    let (choice, note) = split_note(&picked);
     // The window to open belongs to the sub's parent now, which is not the one
     // that raised the card when a `respawn` moved the sub since.
     let live_parent = state.registry.get(sub_id).and_then(|i| i.subchat_of).unwrap_or_else(|| parent.to_string());
     let parent = live_parent.as_str();
-    match choice.as_str() {
+    match choice {
         OPEN_IT => {
             // Opening a sub in place is the main chat window's job (step 7); this
             // is the seam it listens on.
@@ -133,12 +233,20 @@ pub(crate) async fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, parent:
             );
         }
         NUDGE_AGAIN => {
+            // A queued writer is started or woken when the slot is its own; a nudge
+            // now opens a turn whose every edit is refused. Joe's note still goes.
+            if note.is_none() {
+                if let Some(holder) = super::writers::waiting_behind(state, sub_id) {
+                    log::info!("subchats: {sub_id} is queued for the writer slot behind {holder:?}, not nudged");
+                    return;
+                }
+            }
             // A sub that never started has no conversation to resume; it is
             // started from its brief instead.
             if super::held::start_never_started(state, sub_id).await {
                 return;
             }
-            if let Err(e) = resume::request_nudge(state, sub_id).await {
+            if let Err(e) = resume::request_nudge(state, sub_id, note).await {
                 log::warn!("subchats: nudge for {sub_id} failed: {e}");
             }
         }
@@ -212,6 +320,71 @@ mod tests {
 
         apply_answer(&st, &sub, &main, CardAnswer::Picked(END_IT.into())).await;
         assert!(st.registry.get(&sub).unwrap().ended_at.is_some());
+    }
+
+    /// 2026-11-11: Joe typed a note beside "Nudge again" twice ("tell it now it
+    /// can continue") and both picks were logged as unknown answers and dropped.
+    #[test]
+    fn a_pick_with_a_note_is_read_as_its_option() {
+        assert_eq!(split_note("Nudge again (note: go on, the gate is gone)"), (NUDGE_AGAIN, Some("go on, the gate is gone")));
+        assert_eq!(split_note("Nudge again"), (NUDGE_AGAIN, None));
+        assert_eq!(split_note("End it (note:  )"), (END_IT, None));
+        assert_eq!(split_note("Open it (note: a (nested) aside)"), (OPEN_IT, Some("a (nested) aside")));
+    }
+
+    #[tokio::test]
+    async fn a_pick_with_a_note_is_acted_on_instead_of_ignored() {
+        let (st, main, sub) = state_with_sub("stall-noted");
+        apply_answer(&st, &sub, &main, CardAnswer::Picked("End it (note: it is done, leave it)".into())).await;
+        assert!(st.registry.get(&sub).unwrap().ended_at.is_some(), "the noted pick reached its option");
+    }
+
+    #[tokio::test]
+    async fn a_plain_nudge_again_leaves_a_writer_queued_for_the_slot_alone() {
+        use super::super::runtime::{runtime, SubStage};
+        let (st, main, sub) = state_with_sub("stall-queued");
+        let key = std::path::PathBuf::from("/tmp/cc-test-stall-queued");
+        super::super::writers::queue_behind_for_test(&key, "stall-queued-holder", &sub);
+        apply_answer(&st, &sub, &main, CardAnswer::Picked(NUDGE_AGAIN.into())).await;
+        assert_eq!(runtime().stage(&sub), SubStage::Fresh, "not nudged: the slot wakes it");
+        assert!(st.list_prompts().await.is_empty(), "and not started from its brief either");
+        super::super::writers::forget_project_for_test(&key);
+    }
+
+    #[tokio::test]
+    async fn a_stall_card_names_the_writer_slot_holder_when_the_sub_is_queued() {
+        let (st, _main, sub) = state_with_sub("stall-names");
+        let key = std::path::PathBuf::from("/tmp/cc-test-stall-names");
+        super::super::writers::queue_behind_for_test(&key, "stall-names-holder", &sub);
+        st.registry.upsert_interactive("stall-names-holder", std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        st.registry.set_name("stall-names-holder", "waiting-on-grouping".to_string());
+        st.registry.set_subchat_of("stall-names-holder", Some("stall-names-main".to_string()));
+        raise(&st, &sub, Stall::Stuck).await.expect("raised");
+        let q = st.list_prompts().await[0]["payload"]["questions"][0]["question"].as_str().unwrap().to_string();
+        assert!(q.contains("edit slot") && q.contains("waiting-on-grouping"), "{q}");
+        super::super::writers::forget_project_for_test(&key);
+    }
+
+    #[test]
+    fn the_last_words_are_the_newest_assistant_text_flattened_and_clipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let line = |role: &str, text: &str| {
+            serde_json::json!({"type": role, "message": {"role": role, "content": [{"type": "text", "text": text}]}}).to_string()
+        };
+        let body = [
+            line("assistant", "older words"),
+            line("assistant", "Still queued behind
+Gate 2."),
+            line("user", "a later user line"),
+        ]
+        .join("
+");
+        std::fs::write(&path, body).unwrap();
+        assert_eq!(last_words_in(&path).as_deref(), Some("Still queued behind Gate 2."));
+        std::fs::write(&path, line("assistant", &"x".repeat(1000))).unwrap();
+        assert!(last_words_in(&path).unwrap().chars().count() <= MAX_WORDS_CHARS + 3);
+        assert_eq!(last_words_in(&dir.path().join("missing.jsonl")), None);
     }
 
     #[tokio::test]

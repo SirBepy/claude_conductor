@@ -52,24 +52,32 @@ pub(crate) async fn turn_end_for(state: &Arc<DaemonState>, sub_id: &str, session
 /// documents the cycle). Detached for the same reason.
 fn spawn_nudge_if_due(state: &Arc<DaemonState>, sub_id: &str) {
     if runtime().take_nudge_due(sub_id) {
-        let text = runtime().take_nudge_text(sub_id).unwrap_or(resume::NUDGE_TEXT);
+        let text = runtime().take_nudge_text(sub_id).unwrap_or_else(|| resume::NUDGE_TEXT.to_string());
+        let from_joe = runtime().take_nudge_from_joe(sub_id);
         let (state, sub) = (state.clone(), sub_id.to_string());
         tokio::spawn(async move {
-            fire_due_nudge(&state, &sub, text).await;
+            fire_due_nudge(&state, &sub, &text, from_joe).await;
         });
     }
 }
 
-/// Sends a due nudge unless the sub has a question waiting for Joe. A turn that
-/// ended on a card is not an unfinished one, and telling it "you ended your turn
-/// without a question waiting" would be false and would start a second turn
-/// under the open card. Returns whether a nudge was attempted.
-pub(crate) async fn fire_due_nudge(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> bool {
+/// Sends a due nudge unless the sub has a question waiting for Joe or is queued
+/// for the writer slot (the daemon's own nudge only; `from_joe` is his "Nudge
+/// again", which he asked for and which can carry his note). A turn that ended on a card is not an unfinished one, and
+/// telling it "you ended your turn without a question waiting" would be false and
+/// would start a second turn under the open card. A queued writer ended its turn
+/// because the write guard told it to, and is woken when the slot is its own.
+/// Returns whether a nudge was attempted.
+pub(crate) async fn fire_due_nudge(state: &Arc<DaemonState>, sub_id: &str, text: &str, from_joe: bool) -> bool {
     if crate::daemon::lifecycle::has_open_prompt(state, sub_id).await {
         log::info!("subchats: nudge for {sub_id} skipped, a question is waiting for Joe");
         return false;
     }
-    if let Err(e) = resume::nudge(state, sub_id, text).await {
+    if let Some(holder) = super::writers::waiting_behind(state, sub_id).filter(|_| !from_joe) {
+        log::info!("subchats: nudge for {sub_id} skipped, it is queued for the writer slot behind {holder:?}");
+        return false;
+    }
+    if let Err(e) = resume::send_stall_nudge(state, sub_id, text).await {
         log::warn!("subchats: nudge for {sub_id} failed: {e}");
     }
     true
@@ -258,9 +266,9 @@ mod tests {
     async fn a_due_nudge_is_not_sent_to_a_sub_with_a_question_waiting_for_joe() {
         let (st, sub) = state_with_sub("te-nudge-card");
         st.add_prompt("q-nudge", "question-requested", serde_json::json!({"session_id": sub, "seq": 1}), true).await;
-        assert!(!fire_due_nudge(&st, &sub, resume::NUDGE_TEXT).await, "its turn ended on a card, not unfinished");
+        assert!(!fire_due_nudge(&st, &sub, resume::NUDGE_TEXT, false).await, "its turn ended on a card, not unfinished");
         st.remove_prompt("q-nudge").await;
-        assert!(fire_due_nudge(&st, &sub, resume::NUDGE_TEXT).await, "with no card it goes out");
+        assert!(fire_due_nudge(&st, &sub, resume::NUDGE_TEXT, false).await, "with no card it goes out");
     }
 
     #[test]
@@ -327,6 +335,29 @@ mod tests {
         st.registry.set_busy(&sub, true);
         st.registry.set_busy(&sub, false); // busy_watchdog at 20 minutes
         assert!(died_note_if_unnoticed(&st, &sub, false, false, None).is_some(), "no result line ever ended gen 1");
+    }
+
+    /// Joe's "Nudge again" on a busy queued sub is armed, then the interrupted
+    /// turn's Stop hook resets the stage (a queued sub is exempt). His nudge must
+    /// still go at that turn end; the daemon's own nudge must not.
+    #[tokio::test]
+    async fn the_daemons_nudge_skips_a_queued_writer_but_joes_deferred_one_still_goes() {
+        let (st, sub) = state_with_sub("te-queued");
+        let key = std::path::PathBuf::from("/tmp/cc-test-te-queued");
+        super::super::writers::queue_behind_for_test(&key, "te-queued-holder", &sub);
+        runtime().set_nudge_due(&sub);
+        assert!(!fire_due_nudge(&st, &sub, resume::NUDGE_TEXT, runtime().take_nudge_from_joe(&sub)).await, "the slot wakes it");
+        // Joe's deferred nudge, with the stage already reset as the Stop hook leaves it.
+        runtime().set_nudge_text(&sub, "with Joe's note");
+        runtime().set_nudge_from_joe(&sub);
+        runtime().set_stage(&sub, SubStage::Fresh);
+        assert!(fire_due_nudge(&st, &sub, "with Joe's note", runtime().take_nudge_from_joe(&sub)).await, "Joe asked for this one");
+        assert!(!runtime().take_nudge_from_joe(&sub), "the mark is spent with the nudge");
+        // A finish dropped at commit re-arms with its own wording: no longer Joe's.
+        runtime().set_nudge_from_joe(&sub);
+        runtime().set_nudge_text(&sub, "finish dropped");
+        assert!(!runtime().take_nudge_from_joe(&sub), "the daemon's own nudge does not inherit Joe's mark");
+        super::super::writers::forget_project_for_test(&key);
     }
 
     #[tokio::test]
