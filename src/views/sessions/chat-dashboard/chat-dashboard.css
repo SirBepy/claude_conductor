@@ -165,6 +165,8 @@
 .cdash-body .drill-pop {
   position: fixed;
   bottom: auto;
+  /* Above the strip's earlier-messages dropdown (.cdash-pop, 30). */
+  z-index: 31;
 }
 .cdash-grid {
   display: grid;

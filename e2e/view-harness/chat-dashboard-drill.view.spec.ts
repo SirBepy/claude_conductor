@@ -40,6 +40,21 @@ async function openDash(page: Page, width: number): Promise<void> {
   }, CHANNEL);
 }
 
+test("the popup closes when the dashboard body scrolls or the window resizes, instead of being stranded", async ({ page }) => {
+  await openDash(page, 1280);
+  const open = async (): Promise<void> => {
+    if (!(await page.locator("#session-pane .cdash .mc-more[open]").count())) await page.locator("#session-pane .cdash .mc-more > summary").first().click();
+    await page.locator("#session-pane .cdash .drill-chip").first().click();
+    await expect(page.locator("#session-pane .cdash .drill-pop")).toHaveCount(1);
+  };
+  await open();
+  await page.evaluate(() => document.querySelector(".cdash-body")!.dispatchEvent(new Event("scroll")));
+  await expect(page.locator(".drill-pop")).toHaveCount(0);
+  await open();
+  await page.setViewportSize({ width: 1100, height: 860 });
+  await expect(page.locator(".drill-pop")).toHaveCount(0);
+});
+
 for (const width of [1280, 760]) {
   test(`the detail popup is fully visible inside the dashboard body at ${width}px`, async ({ page }) => {
     await openDash(page, width);
