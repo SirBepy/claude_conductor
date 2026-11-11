@@ -19,7 +19,7 @@ function today(hour: number, minute = 0): string {
 
 const NEW_CHAT_KIND = {
   type: "new_chat", cwd: "C:/Projects/alpha", model: "claude-opus-5", effort: "high",
-  account_id: null, placeholder_id: null, character_id: null, auto_accept: false,
+  account_id: null, placeholder_id: null, character_id: null, auto_accept: false, subchats_on: false,
 } as const;
 
 const BASE: ScheduledItem = {
