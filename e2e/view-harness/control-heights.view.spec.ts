@@ -1,3 +1,4 @@
+// Reviewed 2026-11-11 (embedded Composer option for the Subchats card's message box, `:is(.composer-shell, .sx-msg)` field rules in sessions.css): a chat's own composer renders and registers exactly as before; nothing this spec asserts changed.
 // Reviewed 2026-11-10: pd-cards.css gained the Due card rules (day cells, missed pill); this spec measures no Due control, so its contract is unchanged and it passes.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: project-settings.css gained one rule, .ps-group-title (a heading line for the new Subchats group); no control height or the controls this spec measures changed, and it passed after the change.

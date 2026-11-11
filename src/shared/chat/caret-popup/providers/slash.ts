@@ -12,16 +12,23 @@ export class SlashProvider implements SuggestProvider<SlashEntry> {
   private unlisten: (() => void) | null = null;
   private projectDir: string | null = null;
   private fetchSeq = 0;
+  private stopped = false;
 
   async start(projectDir: string | null): Promise<void> {
     this.projectDir = projectDir;
+    this.stopped = false;
     await this.refetch();
-    this.unlisten = await getTransport().listen("slash-commands-changed", () => {
+    const off = await getTransport().listen("slash-commands-changed", () => {
       void this.refetch();
     });
+    // stop() ran while the fetch and the listen were in flight: nothing would
+    // ever call this listener's unlisten, so it would outlive its provider.
+    if (this.stopped) off();
+    else this.unlisten = off;
   }
 
   stop(): void {
+    this.stopped = true;
     this.unlisten?.();
     this.unlisten = null;
   }

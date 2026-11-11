@@ -7,6 +7,11 @@
 import { invoke } from "../../../shared/ipc";
 import { escapeHtml } from "../../../shared/escape-html";
 import { showToast } from "../../../shared/toast";
+import { Composer } from "../../../shared/chat/composer";
+import { isSessionBusyError } from "../../../shared/session-busy";
+import { apiCreditBlockedReason } from "../../../shared/api-credit-blocked";
+import type { ContentBlock } from "../../../types/ipc.generated";
+import { state } from "../state";
 import { openLightbox } from "../../../shared/chat/lightbox";
 import { PREVIEW_OPEN_EVENT } from "../../../shared/chat/chat-preview-card";
 import { fetchSubCards } from "../../../shared/chat/subchat-cards";
@@ -74,6 +79,12 @@ export class SubsCard {
   private timer: ReturnType<typeof setInterval> | null = null;
   private tick = 0;
   private loadSeq = 0;
+  /** The message box under the open sub's details: the chat's own Composer, so a
+   *  sub is typed to the same way as any chat (skills popup, image paste, send
+   *  button, keyboard rules). One at a time, torn down with the details. */
+  private composer: Composer | null = null;
+  /** The offline label the composer was built under (see patchDetails). */
+  private mountedOffline: string | null = null;
 
   constructor(private readonly deps: SubsCardDeps) {}
 
@@ -87,7 +98,6 @@ export class SubsCard {
       host.innerHTML = `<div class="sx-row"></div><div class="sx-earlier-row" hidden></div><div class="sx-det" hidden></div>`;
       host.addEventListener("click", (e) => this.onClick(e));
       host.addEventListener("contextmenu", (e) => this.onContext(e));
-      host.addEventListener("submit", (e) => this.onSubmit(e));
     }
     this.state = state;
     const all = state ? [...state.shown, ...state.earlier] : [];
@@ -99,6 +109,7 @@ export class SubsCard {
 
   /** The zone is gone (the card has nothing to show). */
   detach(): void {
+    this.unmountComposer();
     this.host = null;
     this.state = null;
     this.stopTimer();
@@ -241,6 +252,7 @@ export class SubsCard {
     if (!det) return;
     const it = this.selected ? this.item(this.selected) : undefined;
     if (!it) {
+      this.unmountComposer();
       det.hidden = true;
       det.innerHTML = "";
       this.detFor = null;
@@ -248,14 +260,15 @@ export class SubsCard {
     }
     det.hidden = false;
     if (this.detFor !== it.id) {
+      this.unmountComposer();
       this.detFor = it.id;
       det.dataset.sub = it.id;
       det.innerHTML = `<div class="sx-det-top"><span class="sx-det-name"></span><span class="sx-det-time" title="Run time"><i class="ph ph-timer"></i><b></b></span><span class="sx-det-ctx"></span></div>`
         + `<div class="sx-det-state"></div><div class="sx-det-brief" hidden></div>`
         + `<div class="sx-det-media"><span class="sx-imgwrap" hidden><button type="button" class="sx-img" data-act="image" title="Open the image"><img alt=""></button><button type="button" class="sx-imgmore" data-act="gallery" hidden></button></span><button type="button" class="sx-pv" data-act="preview" hidden><i class="ph ph-monitor-play"></i><span></span></button></div>`
         + `<div class="sx-gallery" hidden></div>`
-        + `<form class="sx-msg"><input type="text" class="sx-msg-in" autocomplete="off"><button type="submit" class="sx-msg-send" title="Send" aria-label="Send"><i class="ph ph-paper-plane-tilt"></i></button></form>`;
-      det.querySelector<HTMLInputElement>(".sx-msg-in")!.placeholder = `Message ${it.name}`;
+        + `<div class="sx-msg"></div>`;
+      this.mountComposer(det.querySelector<HTMLElement>(".sx-msg")!, it.id);
       void this.load(it.id);
     }
     this.patchDetails();
@@ -304,6 +317,14 @@ export class SubsCard {
     const gal = det.querySelector<HTMLElement>(".sx-gallery")!;
     gal.hidden = !this.galleryOpen || d.imageIds.length < 2;
     if (!gal.hidden) this.renderGallery(gal, d.imageIds);
+    // A paired machine going offline or coming back while the box is open. The composer wires
+    // its Enter, Send and paste only when it was built enabled, so a flip is a rebuild (the
+    // draft is stored per sub, so it survives).
+    const offline = this.offlineLabel(it.id);
+    if (this.composer && offline !== this.mountedOffline) {
+      this.unmountComposer();
+      this.mountComposer(det.querySelector<HTMLElement>(".sx-msg")!, it.id);
+    }
   }
 
   /** Fills the gallery up to `galleryLimit` tiles. A tile is added once and never rebuilt, so the
@@ -391,22 +412,69 @@ export class SubsCard {
     if (seq === this.loadSeq && this.selected === id) this.patchDetails();
   }
 
-  private onSubmit(e: Event): void {
-    const form = (e.target as HTMLElement).closest<HTMLFormElement>("form.sx-msg");
-    if (!form || !this.selected) return;
-    e.preventDefault();
-    const input = form.querySelector<HTMLInputElement>(".sx-msg-in")!;
-    const text = input.value.trim();
-    if (!text) return;
-    const id = this.selected;
-    input.value = "";
-    // The daemon routes a send to a sub through subchats/reply.rs's route_send,
-    // so a finished or paused one resumes the way it does from its own window.
-    invoke("send_message", { sessionId: id, cwd: this.deps.cwd() ?? ".", blocks: [{ type: "text", text }] })
-      .catch((err) => {
-        input.value = text;
-        showToast(`Send failed: ${err}`);
-      });
+  /** The host machine's label while this sub's machine is offline, else null. */
+  private offlineLabel(subId: string): string | null {
+    const m = this.instance(subId)?.machine;
+    return m && m.online === false ? m.label : null;
+  }
+
+  private unmountComposer(): void {
+    this.composer?.destroy();
+    this.composer = null;
+  }
+
+  /** Mounts the chat's Composer on `root` aimed at `subId`. `embedded` keeps it from
+   *  taking the process-wide hooks (type-anywhere relay, lightbox caption, Escape,
+   *  push-to-talk) from the main chat's own composer; it is not focused on mount,
+   *  which on a phone would leave the keyboard without voice and swipe. */
+  private mountComposer(root: HTMLElement, subId: string): void {
+    const inst = (): Instance | undefined => this.instance(subId);
+    const cwd = (): string => String(inst()?.cwd ?? this.deps.cwd() ?? ".");
+    const composer = new Composer(root, {
+      embedded: true,
+      projectDir: inst()?.cwd ?? this.deps.cwd() ?? null,
+      getRenderer: () => null,
+      // A working sub holds the message like any busy chat; the held controller sends
+      // it when the sub's turn ends, whichever chat is on screen.
+      // Also while older held messages wait for it: a new one goes in behind them, so
+      // the sub reads them in the order they were sent.
+      isBusy: () => inst()?.busy === true || state.heldMessages?.hasItemsFor(subId) === true,
+      isOffline: () => this.offlineLabel(subId),
+      onStage: (blocks) => {
+        const held = state.heldMessages?.stageFor(subId, blocks) ?? false;
+        // The chat's own composer shows a held chip beside Send; this box has none, and the
+        // text vanishing from it would read as lost.
+        if (held) showToast(this.heldNotice(subId));
+        return held;
+      },
+      onSend: (blocks) => this.send(subId, cwd(), blocks),
+    });
+    composer.setSessionId(subId, { readOnly: false });
+    this.composer = composer;
+    this.mountedOffline = this.offlineLabel(subId);
+  }
+
+  private heldNotice(subId: string): string {
+    return `${this.item(subId)?.name ?? "The sub"} is mid-turn. Your message goes out when it finishes.`;
+  }
+
+  /** The daemon routes a send to a sub through subchats/reply.rs's route_send,
+   *  so a finished or paused one resumes the way it does from its own window.
+   *  A refusal mid-turn is queued; any other failure throws so the composer puts
+   *  the text and its images back. */
+  private async send(subId: string, cwd: string, blocks: ContentBlock[]): Promise<void> {
+    try {
+      await invoke<void>("send_message", { sessionId: subId, cwd, blocks });
+    } catch (err) {
+      if (isSessionBusyError(err) && state.heldMessages?.stageFor(subId, blocks)) {
+        showToast(this.heldNotice(subId));
+        return;
+      }
+      const blocked = apiCreditBlockedReason(err);
+      if (blocked === null) console.error("[subs-card] send_message failed", err);
+      showToast(blocked ?? `Send failed: ${err}`);
+      throw err;
+    }
   }
 
   // ---- Clock ---------------------------------------------------------------------------

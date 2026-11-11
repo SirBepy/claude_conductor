@@ -16,7 +16,7 @@
 
 import { invoke } from "../ipc";
 import { mimeToIcon } from "./attachment-hydrator";
-import { openLightbox } from "./lightbox";
+import { openLightbox, type LightboxComposerBridge } from "./lightbox";
 // tauri-plugin-clipboard-api pulls in valibot@0.40.0, which has a ReDoS in
 // EMOJI_REGEX (GHSA-vqpr-j7v3-hqw9, valibot >=0.31.0 <1.2.0). Verified unreachable:
 // v.emoji()/EMOJI_REGEX is never called anywhere in the plugin's guest-js source
@@ -62,6 +62,10 @@ export interface ComposerAttachmentsCallbacks {
   /** Fired whenever the attachment/pasted-block set (re)renders, so the
    * composer can react (it refreshes Send's ready fill). */
   onChange: () => void;
+  /** Whose draft a preview's caption box edits. Omitted = the chat's own composer
+   * (the lightbox's registered bridge); an embedded composer passes itself so a
+   * caption typed on its image never lands in the chat's draft. */
+  getLightboxBridge?: () => LightboxComposerBridge | undefined;
 }
 
 export class ComposerAttachments {
@@ -262,7 +266,7 @@ export class ComposerAttachments {
           const img = document.createElement("img");
           img.src = `data:${a.mime};base64,${a.data}`;
           img.alt = a.filename;
-          img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }));
+          img.addEventListener("click", () => openLightbox({ type: "image", mime: a.mime, base64: a.data, filename: a.filename }, this.cb.getLightboxBridge?.()));
           div.appendChild(img);
         }
       } else {
@@ -271,7 +275,7 @@ export class ComposerAttachments {
         const label = document.createElement("span");
         label.textContent = a.filename;
         div.appendChild(label);
-        div.addEventListener("click", () => openPreviewIfSupported(a));
+        div.addEventListener("click", () => openPreviewIfSupported(a, this.cb.getLightboxBridge?.()));
       }
       decorateAttachmentChip(div, a);
 
@@ -300,7 +304,7 @@ export class ComposerAttachments {
       label.textContent = b.name;
       div.appendChild(label);
       div.addEventListener("click", () =>
-        openLightbox({ type: "text", content: b.text, filename: b.name }),
+        openLightbox({ type: "text", content: b.text, filename: b.name }, this.cb.getLightboxBridge?.()),
       );
 
       const rm = document.createElement("button");
@@ -390,14 +394,14 @@ export class ComposerAttachments {
   }
 }
 
-function openPreviewIfSupported(a: Attachment): void {
+function openPreviewIfSupported(a: Attachment, bridge?: LightboxComposerBridge): void {
   if (!a.data) return;
   if (a.mime === "application/pdf") {
-    openLightbox({ type: "pdf", base64: a.data, filename: a.filename });
+    openLightbox({ type: "pdf", base64: a.data, filename: a.filename }, bridge);
   } else if (a.mime.startsWith("text/") || a.mime === "application/json") {
     try {
       const text = atob(a.data);
-      openLightbox({ type: "text", content: text, filename: a.filename });
+      openLightbox({ type: "text", content: text, filename: a.filename }, bridge);
     } catch {
       /* non-UTF8 content, no preview */
     }
