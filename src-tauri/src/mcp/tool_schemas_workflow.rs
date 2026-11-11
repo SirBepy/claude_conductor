@@ -153,7 +153,7 @@ pub fn workflow_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_SHOW_PREVIEW,
-            "description": "Render HTML for the user to LOOK at - a mockup, a chart, a timeline, a diagram. The card lands inline in the chat, expanded, and he can promote it to the side panel from there. Use it whenever the answer is easier to see than to read; a table in your message text is the fallback, not the goal. In a chat that has subs, or that is one, a page several jobs contribute to goes through shared_mockup instead (one shared page, each sub adds its region and controls); use show_preview there only for a page that belongs to one chat alone, and say why in its title. In any mockup a choice between options is a dropdown (a native select) and a plain yes/no is a switch; never chip rows or buttons as options.\n\nThe HTML is self-contained: it renders in a sandboxed frame with no access to the app, so inline `<style>`/`<script>` and CDN links all work, but nothing relative resolves - no `<link href=\"./x.css\">`. Never iframe another page by a `/hooks/preview-render/` URL: it lives in daemon memory, goes blank after a restart, and the push is refused. Put the page's html in `html` itself.\n\nThe panel wraps every page in a centered, padded page template and gives it pinch and Ctrl+wheel zoom, so write no body padding, max-width or zoom controls (your own CSS still wins). Only a page that owns its whole layout, such as an app shell, opts out with `<meta name=\"preview-template\" content=\"bare\">` in its head.\n\n`slug` is the identity. Pushing the same slug again REPLACES that card in place rather than stacking a second one, so iterate on a design by re-pushing one slug.",
+            "description": "Render HTML for the user to LOOK at - a mockup, a chart, a timeline, a diagram. The card lands inline in the chat, expanded, and he can promote it to the side panel from there. Use it whenever the answer is easier to see than to read; a table in your message text is the fallback, not the goal. In a chat that has subs, or that is one, a page several jobs contribute to goes through shared_mockup instead (one shared page, each sub adds its region and controls); use show_preview there only for a page that belongs to one chat alone, and say why in its title. In any mockup a choice between options is a dropdown (a native select) and a plain yes/no is a switch; never chip rows or buttons as options.\n\nThe HTML is self-contained: it renders in a sandboxed frame with no access to the app, so inline `<style>`/`<script>` and CDN links all work, but nothing relative resolves - no `<link href=\"./x.css\">`. Never iframe another page by a `/hooks/preview-render/` URL: it lives in daemon memory, goes blank after a restart, and the push is refused. Put the page's html in `html` itself.\n\nThe panel wraps every page in a centered, padded page template and gives it pinch and Ctrl+wheel zoom, so write no body padding, max-width or zoom controls (your own CSS still wins). Only a page that owns its whole layout, such as an app shell, opts out with `<meta name=\"preview-template\" content=\"bare\">` in its head.\n\nA page with a position worth keeping (a slide deck's slide, the open tab) can remember it. Once the card is in the side panel or a pop-out window, the page gets `window.ccPreview.state.save(value)` to call on every change and `window.ccPreview.state.onRestore(fn)` to register once at load; `fn(value)` runs with the saved value, and again when another window of the same preview changes it. The value is any JSON under 64KB. Both calls exist only in the panel and pop-out, not in the inline card, so guard them with `if (window.ccPreview)`.\n\n`slug` is the identity. Pushing the same slug again REPLACES that card in place rather than stacking a second one, so iterate on a design by re-pushing one slug.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -323,6 +323,18 @@ mod tests {
         let description = show["description"].as_str().unwrap();
         assert!(description.contains("page template"));
         assert!(description.contains(r#"<meta name="preview-template" content="bare">"#));
+    }
+
+    // A page only keeps its slide across a pop-out if the model calls the two
+    // functions the panel injects; no chat learns they exist from anywhere else.
+    #[test]
+    fn show_preview_description_teaches_the_page_state_api() {
+        let schemas = workflow_schemas();
+        let show = schemas.iter().find(|s| s["name"] == TOOL_SHOW_PREVIEW).expect("show_preview schema");
+        let description = show["description"].as_str().unwrap();
+        assert!(description.contains("ccPreview.state.save(value)"));
+        assert!(description.contains("ccPreview.state.onRestore(fn)"));
+        assert!(description.contains("64KB"));
     }
 
     #[test]
