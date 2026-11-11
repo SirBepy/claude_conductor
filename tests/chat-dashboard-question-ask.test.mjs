@@ -115,7 +115,9 @@ describe("a question card's Ask", () => {
     const { pane, r } = mountPane("chat-q");
     new ChatDashboard(pane, r);
     await wait();
-    expect(card(pane), "no answers yet: no Answers card").toBeNull();
+    // No answers yet: the Answers card stands empty (it always draws), with no thread.
+    expect(card(pane).querySelector(".ax-empty")).not.toBeNull();
+    expect(card(pane).querySelector(".ax-thread")).toBeNull();
 
     expect(askAboutQuestion(QUESTION), "the dashboard takes the ask, so the card minimizes").toBe(true);
     await until(() => input(pane), "the thread's box");
@@ -151,7 +153,7 @@ describe("a question card's Ask", () => {
     askAboutQuestion(QUESTION, "q-1");
     await until(() => input(pane), "the thread's box");
     card(pane).querySelector("[data-ax='close-thread']").click();
-    await until(() => !card(pane), "the zone to go");
+    await until(() => card(pane)?.querySelector(".ax-empty"), "the empty card again");
     askAboutQuestion(QUESTION, "q-1");
     await until(() => input(pane), "the thread's box");
     expect(kind(pane)).toBe("About a question");
@@ -250,6 +252,7 @@ describe("a question card's Ask", () => {
     document.body.appendChild(elsewhere);
     expect(askAboutQuestion(QUESTION), "the card is not in this dashboard's pane").toBe(false);
     await wait();
-    expect(card(pane)).toBeNull();
+    expect(card(pane).querySelector(".ax-thread"), "no thread opened").toBeNull();
+    expect(card(pane).querySelector(".ax-empty")).not.toBeNull();
   });
 });
