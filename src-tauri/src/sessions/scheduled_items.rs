@@ -53,6 +53,11 @@ pub enum ScheduledKind {
         /// never carrying it).
         #[serde(default)]
         auto_accept: bool,
+        /// The draft's "Use subchats" switch at scheduling time, so the fired
+        /// chat starts as a main chat like one sent now. `#[serde(default)]`
+        /// keeps pre-existing items deserializable (they load as `false`).
+        #[serde(default)]
+        subchats_on: bool,
     },
     /// Send `prompt` into the Jarvis singleton (todo 272 memory-hygiene
     /// chunk). Deliberately carries NO session id, unlike `Message`: Jarvis's
@@ -571,6 +576,7 @@ mod tests {
         upsert_at(&path, item(ScheduledKind::NewChat {
             cwd: "C:/proj2".into(), model: "opus".into(), effort: "high".into(), account_id: None,
             placeholder_id: None, character_id: None, auto_accept: false,
+            subchats_on: false,
         }));
         assert_eq!(list_at(&path).len(), 2);
     }

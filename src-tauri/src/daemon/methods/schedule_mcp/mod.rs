@@ -184,6 +184,7 @@ fn build_item(
                 // so it must not wear the scheduling session's face.
                 character_id: None,
                 auto_accept: inherited.auto_accept,
+                subchats_on: false,
             }
         }
         other => return Err(format!("unknown target {other:?}; expected new_chat or this_chat")),

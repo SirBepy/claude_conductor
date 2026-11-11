@@ -145,6 +145,7 @@ export function wirePendingComposer(
             placeholder_id: placeholderId,
             character_id: config.characterId ?? null,
             auto_accept: config.autoAccept !== false,
+            subchats_on: config.subchatsOn === true,
           };
       // Awaited and rethrown: the composer already cleared the draft and only
       // a rejection from here puts the text back (and keeps it from announcing

@@ -413,6 +413,7 @@ mod tests {
                 ScheduledKind::NewChat {
                     cwd: "C:/y".into(), model: "opus".into(), effort: "high".into(),
                     account_id: None, placeholder_id: None, character_id: None, auto_accept: false,
+                    subchats_on: false,
                 },
                 "x".into(),
                 "2026-01-01T00:00:00Z".into(),
