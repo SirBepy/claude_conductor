@@ -74,6 +74,16 @@ describe("the row's words", () => {
     expect(renderPassedRow(done)).toContain("Passed to <b>Header</b>");
   });
 
+  it("keeps a follow-up's question and, once the daemon answers, the ids of the subs it reached", () => {
+    const row = passedRowFromToolUse("p1", { action: "send", sub: "ime", question: "  Is it the same\n on desktop? " }, T0);
+    expect(row.passedQuestion).toBe("Is it the same on desktop?");
+    expect(row.passedSubIds).toBeUndefined();
+    const done = applyPassedResult(row, { type: "text", text: JSON.stringify({ ok: true, passed_to: ["phone-ime"], sub_ids: ["sub-1"] }) }, false);
+    expect(done.passedSubIds).toEqual(["sub-1"]);
+    expect(done.passedQuestion).toBe("Is it the same on desktop?");
+    expect(passedRowFromToolUse("p2", { action: "send", sub: "ime" }, T0).passedQuestion).toBeUndefined();
+  });
+
   it("a send to all says all running subs", () => {
     const row = passedRowFromToolUse("p1", { action: "send", all: true }, T0);
     const done = applyPassedResult(row, { type: "text", text: JSON.stringify({ ok: true, passed_to: ["A", "B"] }) }, false);

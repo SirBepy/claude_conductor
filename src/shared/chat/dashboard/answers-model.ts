@@ -36,8 +36,15 @@ export interface AnswerSide {
   threads: readonly AskThread[];
 }
 
+/** The sub whose finish card is the answer, and the tier it ran at. */
+export interface AnswerAuthor {
+  name: string;
+  model: string;
+  effort: string;
+}
+
 export interface AnswerItem {
-  /** The send_message tool_use id, or `ask:<thread id>` for a + question's reply. */
+  /** The send_message tool_use id, a sub's finish card id, or `ask:<thread id>` for a + question's reply. */
   key: string;
   /** The row the card draws: the transcript's own, or one built from a + question's reply. */
   message: RenderedMessage;
@@ -68,6 +75,8 @@ export interface AnswerItem {
   /** On an answer that filled a handed-off question's row: that row's key, so
    *  the card turns the same row into the answer instead of drawing a second one. */
   handoff: string | null;
+  /** The sub that answered, on an answer that is a sub's finish card; null on the chat's own. */
+  author: AnswerAuthor | null;
 }
 
 /** Where a handed-off question stands. The first five wait on the sub, so the
@@ -81,7 +90,7 @@ export type HandoffState =
 const LIVE_STATES: ReadonlySet<HandoffState> = new Set(["sending", "checking", "queued", "asking", "blocked"]);
 
 export interface Handoff {
-  /** The spawn_chat tool_use id. */
+  /** The spawn_chat tool_use id, or the `subchat send` one for a follow-up question. */
   spawnId: string;
   /** From the spawn's result; null until it lands or when it was refused. */
   subId: string | null;
@@ -172,6 +181,25 @@ export function isAnswerRow(m: RenderedMessage): boolean {
     && (m.card?.kind === "answer" || m.card?.kind === "rating");
 }
 
+/** A sub's finish card that answers one of Joe's questions: the daemon stamps the
+ *  question the main chat handed it (spawn_chat or `subchat send`), and the card
+ *  is the answer itself, with nothing relayed by the main chat. */
+export function isSubAnswer(m: RenderedMessage): boolean {
+  return m.kind === "message" && !m.failed && !m.retracted
+    && m.subCard?.kind === "finish" && !!m.subCard.question?.trim();
+}
+
+const TONES: ReadonlySet<string> = new Set(["good", "bad", "neutral"]);
+
+/** The row the card draws for a sub's answer: the finish card's verdict, text and points as an answer. */
+function subAnswerRow(card: SubCardEntry): RenderedMessage {
+  const tone = card.tone && TONES.has(card.tone) ? card.tone as "good" | "bad" | "neutral" : undefined;
+  return {
+    kind: "message", id: card.id, text: card.text ?? "", ts: card.ts, parentToolUseId: null,
+    card: { kind: "answer", verdict: card.verdict, tone, points: card.points?.length ? card.points : undefined },
+  } as RenderedMessage;
+}
+
 function isJoeRow(m: RenderedMessage): boolean {
   return m.kind === "user" && !m.authorSessionId && plainUserText(m) !== "";
 }
@@ -239,19 +267,46 @@ const sameWords = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+
 // Only words that never open an instruction: "Can you", "Have a look", "Do an audit" are jobs without their mark.
 const QUESTION_START = /^(why|what|how|which|who|whose|where|when|is|are|was|were|does|did)\b/i;
 
-/** Rule 11's hand-off is the one spawn_chat that is read-only and reports back:
- *  a job that writes, a gate or a respawn is never a question. Read off the call
+const oneLine = (s: string): string => s.replace(/\s+/g, " ").trim();
+const clipTask = (t: string): string => (t.length > 200 ? clipPreview(t) : t);
+
+/** Rule 11's hand-off: a spawn_chat carrying `question`, or, in a chat started
+ *  before that field, the one spawn that is read-only and reports back. A job
+ *  that writes, a gate or a respawn is never a question. Read off the call
  *  itself, so no step the main chat has to remember decides whether the row shows. */
 function handoffOf(m: RenderedMessage): { task: string; full: string; name: string } | null {
   if (m.kind !== "tool_use" || m.tool !== SPAWN_CHAT_TOOL || m.parentToolUseId || !m.id) return null;
   const i = asRecord(m.input);
-  if (i.report_back !== true || i.writes === true || i.gate === true || i.respawn === true) return null;
-  const task = str(i.task).replace(/\s+/g, " ").trim();
+  if (i.writes === true || i.gate === true || i.respawn === true) return null;
+  const asked = oneLine(str(i.question));
+  if (asked) return { task: clipTask(asked), full: asked, name: str(i.name).trim() };
+  if (i.report_back !== true) return null;
+  const task = oneLine(str(i.task));
   // Rule 11 hands off "one clear question"; a read-only research job the main
   // chat runs for its own next step ("Find where X lives") reports back too, but
   // it is not Joe's question. A question that lost its mark still starts like one.
   if (!task.endsWith("?") && !QUESTION_START.test(task)) return null;
-  return { task: task.length > 200 ? clipPreview(task) : task, full: task, name: str(i.name).trim() };
+  return { task: clipTask(task), full: task, name: str(i.name).trim() };
+}
+
+/** A follow-up question passed to a sub that already exists (`subchat send` with
+ *  `question`, drawn as the "Passed to X" row with the daemon's reply folded in):
+ *  its pending row waits for that sub's next finish. */
+function followUpAsk(m: RenderedMessage, typed: string, joeCount: number): SpawnAsk | null {
+  if (m.kind !== "passed" || !m.passedQuestion || !m.id) return null;
+  const full = m.passedQuestion;
+  const ask: SpawnAsk = {
+    spawnId: m.id, task: clipTask(full), fullTask: full, subName: m.passedTo ?? "", at: toMs(m.ts), typed,
+    joeCount, resultSeen: false, subId: null, refused: null, finish: null, blocker: null, answered: false, cut: false, finishJoe: -1,
+  };
+  if (m.failed) {
+    ask.resultSeen = true;
+    ask.refused = "It did not reach the sub.";
+  } else if (m.passedSubIds) {
+    ask.resultSeen = true;
+    ask.subId = m.passedSubIds[0] ?? null;
+  }
+  return ask;
 }
 
 /** The spawn's result: the sub's id, or why the daemon refused it. */
@@ -345,6 +400,7 @@ export function buildAnswerItems(
   let joeCount = 0;
   let statusOf: string | null = null;
   const turnEnds = new Set<string>();
+  const subAnswered = new Set<string>();
   for (const m of messages) {
     if (isJoeRow(m)) {
       joe = m;
@@ -358,6 +414,11 @@ export function buildAnswerItems(
     // message all come before any of their results.
     if (isJoeRow(m) || (m.kind === "tool_result" && m.tool_use_id && turnEnds.has(m.tool_use_id))) {
       for (const a of asks) if (!a.resultSeen) cutOff(a);
+    }
+    const follow = followUpAsk(m, joe ? plainUserText(joe) : "", joeCount);
+    if (follow) {
+      asks.push(follow);
+      continue;
     }
     const spawn = handoffOf(m);
     if (spawn) {
@@ -382,7 +443,8 @@ export function buildAnswerItems(
     const card = m.subCard;
     if (card?.sub_id && (card.kind === "finish" || card.kind === "blocker")) {
       for (const a of asks) {
-        if (a.subId !== card.sub_id) continue;
+        // An answered question is done; a later round belongs to the follow-up asked since.
+        if (a.subId !== card.sub_id || a.answered) continue;
         if (card.kind === "finish") {
           a.finish = card;
           a.finishJoe = joeCount;
@@ -390,8 +452,40 @@ export function buildAnswerItems(
         else a.blocker = card;
       }
     }
+    if (card && isSubAnswer(m)) {
+      const ask = asks.find((a) => a.subId === card.sub_id && !a.answered && a.finish === card) ?? null;
+      if (ask) ask.answered = true;
+      const typed = ask ? ask.typed : joe ? plainUserText(joe) : "";
+      const question = oneLine(card.question ?? "");
+      const thread = threadById(side, side?.store.threads[card.id]);
+      const item: AnswerItem = {
+        key: card.id,
+        message: subAnswerRow(card),
+        question,
+        raw: typed && question !== typed ? typed : null,
+        typed,
+        provisional: false,
+        at: toMs(card.ts),
+        verdict: card.verdict,
+        text: card.text ?? "",
+        thread,
+        replies: userCount(thread),
+        asked: false,
+        seenAt: 0,
+        pending: null,
+        handoff: ask ? HANDOFF_PREFIX + ask.spawnId : null,
+        author: { name: card.sub_name || ask?.subName || "a sub", model: card.model ?? "", effort: card.effort ?? "" },
+      };
+      items.push(item);
+      chat.push({ item, joeBefore: joeCount });
+      subAnswered.add(`${joeCount}|${normVerdict(card.verdict)}`);
+      continue;
+    }
     if (m.kind === "message") applyReadJudgement(m, chat, joeCount);
     if (!isAnswerRow(m) || !m.id) continue;
+    // A main chat that still relays a sub's answer (one started before the sub's
+    // finish became the answer) would draw it twice.
+    if (subAnswered.has(`${joeCount}|${normVerdict(m.card?.verdict ?? "")}`)) continue;
     const ask = handoffFor(m, asks, statusOf, joeCount);
     if (ask) ask.answered = true;
     statusOf = null;
@@ -418,6 +512,7 @@ export function buildAnswerItems(
       seenAt: 0,
       pending: null,
       handoff: ask ? HANDOFF_PREFIX + ask.spawnId : null,
+      author: null,
     };
     items.push(item);
     chat.push({ item, joeBefore: joeCount });
@@ -450,6 +545,7 @@ export function buildAnswerItems(
       seenAt: 0,
       pending: { spawnId: ask.spawnId, subId: ask.subId, subName: subLabel(ask, sub), ...state },
       handoff: null,
+      author: null,
     });
   }
   for (const q of side?.store.questions ?? []) {
@@ -483,6 +579,7 @@ export function buildAnswerItems(
       seenAt: 0,
       pending: null,
       handoff: null,
+      author: null,
     });
   }
   return items.sort((a, b) => a.at - b.at);

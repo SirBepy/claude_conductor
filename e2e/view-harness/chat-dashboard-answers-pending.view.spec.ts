@@ -91,7 +91,7 @@ test.describe("Answers card: handed-off questions", () => {
     await expect(historyCount(page)).toHaveAttribute("title", /^All 1 answer/);
     await expect(c.locator("[data-ax='gotit']")).toBeVisible();
     await c.locator(".ax-readmore").click();
-    await expect(c.locator(".ax-qline span")).toHaveText("Is master ready for /release now?");
+    await expect(c.locator(".ax-face")).toHaveClass(/open/);
     await page.waitForTimeout(400);
     await capture(pane(page), "answers-pending-answered");
   });
@@ -234,5 +234,40 @@ test.describe("Answers card: handed-off questions", () => {
     await expect(historyCount(page)).toHaveAttribute("title", /^All 1 answer/);
     await c.locator("[data-ax='gotit']").click();
     await expect(c.locator(".ax-cc-t")).toHaveText("All caught up");
+  });
+  test("a sub's finish carrying the question is the answer: it fills the row under the sub's name, and a follow-up gets its own", async ({ page }) => {
+    const finish = (round: number, ts: number, verdict: string, text: string, question: string) => ({
+      id: `finish-sub-1-${round}`, ts, parent_id: MAIN, kind: "finish", sub_id: "sub-1", sub_name: "phone-ime", round,
+      model: "opus", effort: "high", verdict, tone: "good", text, question, points: [], done: [], not_done: [], waiting_on: [], your_move: [],
+    });
+    const ms = AT * 1000;
+    await openChat(page, [
+      user("why does gboard voice and swipe break in the phone composer?", AT),
+      ...tool(SPAWN, { name: "phone-ime", task: "Why do Gboard voice and swipe fail?", question: "Why do Gboard voice and swipe fail in the phone composer?", goal: "Find out.", done_when: "A one-line answer.", writes: false, review: false }, "s1", AT + 5, JSON.stringify({ ok: true, session_id: "sub-1" })),
+      ...ack(AT + 6),
+      ...done(),
+      user("is it the same on desktop?", AT + 200),
+      ...tool(SUBCHAT, { action: "send", sub: "phone-ime", question: "Does the same focus bug hit the desktop composer?" }, "f1", AT + 201, JSON.stringify({ ok: true, passed_to: ["phone-ime"], sub_ids: ["sub-1"] })),
+      ...ack(AT + 202),
+      ...done(),
+    ], [sub("sub-1", "phone-ime")], [
+      finish(1, ms + 100_000, "The composer grabs focus on open", "Opening a chat focuses the composer from code, so Gboard connects as a plain field: no voice, no swipe.", "Why do Gboard voice and swipe fail in the phone composer?"),
+    ]);
+    const c = card(page);
+    // The sub's card is the answer, under the sub's name, with no question on its face.
+    const face = c.locator(".ax-face:not(.ax-pending)");
+    await expect(face.locator(".mc-verdict")).toHaveText("The composer grabs focus on open");
+    await expect(face.locator(".ax-by-name")).toHaveText("phone-ime");
+    await expect(face.locator(".ax-by .sx-face")).toHaveText("PH");
+    await expect(face).not.toContainText("Why do Gboard voice and swipe fail");
+    const av = (await face.locator(".ax-by-av").boundingBox())!;
+    expect(av.width).toBeLessThan(30);
+    // The follow-up waits on a row of its own.
+    await expect(historyCount(page)).toHaveAttribute("title", /^All 2 answers/);
+    await page.waitForTimeout(400);
+    await capture(pane(page), "answers-sub-finish-answer");
+    await c.locator("[data-ax='gotit']").click();
+    await expect(c.locator(".ax-face.ax-pending .ax-pend-line")).toHaveText("Checking... (phone-ime)");
+    await expect(c.locator(".ax-pend-q")).toHaveText("Does the same focus bug hit the desktop composer?");
   });
 });

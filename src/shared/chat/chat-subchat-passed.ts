@@ -18,6 +18,7 @@ interface SendInput {
   action?: unknown;
   sub?: unknown;
   all?: unknown;
+  question?: unknown;
 }
 
 const asInput = (input: unknown): SendInput => (input && typeof input === "object" ? (input as SendInput) : {});
@@ -32,7 +33,8 @@ export function passedRowFromToolUse(id: string, input: unknown, ts: number): Re
   const i = asInput(input);
   const all = i.all === true;
   const sub = typeof i.sub === "string" ? i.sub.trim() : "";
-  return { kind: "passed", id, ts, parentToolUseId: null, passedAll: all, passedTo: all ? "" : sub };
+  const question = typeof i.question === "string" ? i.question.replace(/\s+/g, " ").trim() : "";
+  return { kind: "passed", id, ts, parentToolUseId: null, passedAll: all, passedTo: all ? "" : sub, ...(question ? { passedQuestion: question } : {}) };
 }
 
 function outputText(output: ContentBlock | undefined): string {
@@ -44,18 +46,18 @@ function outputText(output: ContentBlock | undefined): string {
  *  "could not pass" line instead of a claim that did not happen. */
 export function applyPassedResult(row: RenderedMessage, output: ContentBlock | undefined, isError: boolean): RenderedMessage {
   if (isError) return { ...row, failed: true };
-  let parsed: { ok?: unknown; passed_to?: unknown; held_for?: unknown } | null = null;
+  let parsed: { ok?: unknown; passed_to?: unknown; held_for?: unknown; sub_ids?: unknown } | null = null;
   try {
     parsed = JSON.parse(outputText(output));
   } catch {
     parsed = null;
   }
   if (!parsed || parsed.ok === false) return { ...row, failed: true };
-  const names = [parsed.passed_to, parsed.held_for]
-    .flatMap((v) => (Array.isArray(v) ? v : []))
-    .filter((n): n is string => typeof n === "string" && n.length > 0);
-  if (row.passedAll) return { ...row, passedTo: names.join(", ") };
-  return names.length > 0 ? { ...row, passedTo: names.join(", ") } : row;
+  const strings = (v: unknown): string[] => (Array.isArray(v) ? v : []).filter((n): n is string => typeof n === "string" && n.length > 0);
+  const names = [...strings(parsed.passed_to), ...strings(parsed.held_for)];
+  const reached = { passedSubIds: strings(parsed.sub_ids) };
+  if (row.passedAll) return { ...row, ...reached, passedTo: names.join(", ") };
+  return names.length > 0 ? { ...row, ...reached, passedTo: names.join(", ") } : { ...row, ...reached };
 }
 
 /** One quiet line. No card chrome, no buttons: a row Joe glances at. */

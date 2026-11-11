@@ -73,6 +73,10 @@ pub struct FinishRecord {
     pub git_head_at_finish: Option<String>,
     #[serde(default)]
     pub finished_at: String,
+    /// The question of Joe's this round answers, taken off the brief when the
+    /// finish was committed. Its card is then drawn as an answer.
+    #[serde(default)]
+    pub question: Option<String>,
 }
 
 /// A `finish_subchat` call, decoded leniently and checked for the fields this
@@ -431,10 +435,17 @@ pub(crate) fn commit_finish_at(
     record.round = previous_round + 1;
     record.git_head_at_finish = super::git::head(&inst.cwd);
     record.finished_at = chrono::Utc::now().to_rfc3339();
+    record.question = brief.as_ref().and_then(|b| b.question.clone());
     if let Some(r) = owned_root.as_deref() {
         if let Err(e) = write_record_in(r, &record) {
             log::warn!("subchats: could not store {sub_id}'s finish record: {e}");
         }
+    }
+    // One question, one answer: a later round answers it again only when a
+    // follow-up hands it a new one.
+    if let Some(mut b) = brief.filter(|b| b.question.is_some()) {
+        b.question = None;
+        crate::sessions::chat_config::set_subchat(sub_id, Some(b));
     }
     state.registry.set_subchat_finished(sub_id, true);
     rt.reset(sub_id);
@@ -834,6 +845,26 @@ mod tests {
         assert!(!rec.finished_at.is_empty());
         assert!(super::super::test_support::finished_calls().contains(&sub), "on_finished fired");
         assert!(!super::super::runtime::runtime().finish_pending(&sub), "the request is consumed");
+    }
+
+    #[test]
+    fn a_question_on_the_brief_moves_onto_the_finish_record_and_off_the_brief() {
+        let _data_dir = super::super::TempDataDir::new();
+        let st = state();
+        let sub = make_sub(&st, "fq", Path::new("."));
+        super::super::store_sub_brief(&sub, "fq-main");
+        let mut brief = crate::sessions::chat_config::get(&sub).unwrap().subchat.unwrap();
+        brief.question = Some("Why does Gboard swipe fail?".into());
+        crate::sessions::chat_config::set_subchat(&sub, Some(brief));
+        let data = tempfile::tempdir().unwrap();
+        for expected in [Some("Why does Gboard swipe fail?"), None] {
+            super::super::runtime::runtime()
+                .set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
+            assert!(commit_finish_at(Some(data.path()), &st, &sub, None, None));
+            assert_eq!(read_record_in(data.path(), &sub).unwrap().question.as_deref(), expected, "one question, one answer");
+        }
+        let brief = crate::sessions::chat_config::get(&sub).unwrap().subchat.unwrap();
+        assert!(brief.question.is_none(), "the brief is cleared once a finish carries the question");
     }
 
     #[test]

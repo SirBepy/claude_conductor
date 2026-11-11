@@ -7,7 +7,9 @@
 //! - `list`: each sub's name, status, tier and one-line task.
 //! - `status {sub}`: its verdict, summary, facts and progress.
 //! - `log`: the main chat's decisions log.
-//! - `send {sub | all, writes?, text?}`: passes a message to a sub.
+//! - `send {sub | all, writes?, text?, question?}`: passes a message to a sub.
+//!   A `question` marks it as one of Joe's questions: the sub's next finish
+//!   card carries it and is drawn as the answer, so the main chat relays nothing.
 //!
 //! Results stay short, because this feature exists to keep the main chat's
 //! context small. What a sub wrote (verdict, summary) comes back in a tool
@@ -299,6 +301,15 @@ fn record_writes(sub_id: &str) {
     }
 }
 
+/// Records on the sub's brief the question of Joe's its next finish answers,
+/// which `finish::commit_finish_at` moves onto the finish card.
+fn record_question(sub_id: &str, question: &str) {
+    if let Some(mut brief) = brief_of(sub_id) {
+        brief.question = Some(question.to_string());
+        crate::sessions::chat_config::set_subchat(sub_id, Some(brief));
+    }
+}
+
 fn is_live_busy(state: &DaemonState, sub_id: &str) -> bool {
     state.registry.get(sub_id).is_some_and(|i| i.busy) && state.sessions.contains_key(sub_id)
 }
@@ -532,7 +543,12 @@ where
         return refusal(format!("No running sub to send to. This chat's subs: {}.", names(subs)));
     }
     let writes = args["writes"].as_bool() == Some(true);
+    let question = match super::brief::question_arg(args["question"].as_str()) {
+        Ok(q) => q,
+        Err(e) => return refusal(e),
+    };
     let (mut passed, mut held, mut failed) = (Vec::new(), Vec::new(), Vec::new());
+    let mut reached: Vec<String> = Vec::new();
     let mut not_started: Vec<String> = Vec::new();
     let mut waiting_for_writer: Vec<(String, String)> = Vec::new();
     for sub in &targets {
@@ -554,6 +570,12 @@ where
             }
         };
         let from_joe = joe_for_this_sub.is_some();
+        let text = match &question {
+            Some(q) => format!("{text}
+
+{}{q}", super::brief::QUESTION_JOB),
+            None => text,
+        };
         if writes {
             record_writes(&sub.session_id);
             // One sub changes files at a time: this one takes the slot or queues
@@ -567,6 +589,10 @@ where
                 if from_joe {
                     joe_message::mark_passed(caller, &sub.session_id);
                 }
+                if let Some(q) = &question {
+                    record_question(&sub.session_id, q);
+                }
+                reached.push(sub.session_id.clone());
                 match d {
                     Delivery::Passed => passed.push(name),
                     Delivery::Held => held.push(name),
@@ -584,7 +610,11 @@ where
         (true, false) => "Joe's message, word for word",
         _ => "your text, framed as from the main chat",
     };
-    let mut out = json!({"ok": true, "passed_to": passed, "message": message});
+    // `sub_ids` lets the Answers card tie a question's pending row to the sub whose finish fills it.
+    let mut out = json!({"ok": true, "passed_to": passed, "message": message, "sub_ids": reached});
+    if question.is_some() {
+        out["question_note"] = json!("The sub's finish is drawn as the answer in Joe's Answers card: do not relay it.");
+    }
     if !held.is_empty() {
         out["held_for"] = json!(held);
         out["held_note"] = json!("these subs were mid-turn: the message reaches them at their next step");
@@ -1083,6 +1113,32 @@ mod tests {
         let other = call(&st, &main, json!({"action": "send", "sub": "Header"}), &sent).await;
         assert_eq!(other["ok"], json!(true), "the same message may go to a different sub");
         assert_eq!(sent.lock().unwrap().len(), 2);
+    }
+
+    /// A follow-up question rides on the sub's brief to its next finish card,
+    /// which is the answer: the sub is told so, and the main chat relays nothing.
+    #[tokio::test]
+    async fn send_with_a_question_records_it_tells_the_sub_and_names_the_sub_it_reached() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-q");
+        sub(&st, &main, "tool-q-a", "Footer", "t");
+        sub(&st, &main, "tool-q-b", "Header", "t");
+        let joe = "is the design too far behind?";
+        joe_message::note_sent(&main, joe, false, None);
+        let v = call(&st, &main, json!({"action": "send", "sub": "Footer", "question": " Is the design too far behind to build now? "}), &sent).await;
+        assert_eq!(v["ok"], json!(true), "{v}");
+        assert_eq!(v["sub_ids"], json!(["tool-q-a"]));
+        assert!(v["question_note"].as_str().unwrap().contains("do not relay it"), "{v}");
+        assert_eq!(brief_of("tool-q-a").unwrap().question.as_deref(), Some("Is the design too far behind to build now?"));
+        assert!(brief_of("tool-q-b").unwrap().question.is_none(), "only the target changes");
+        let text = sent.lock().unwrap()[0].1.clone();
+        assert!(text.starts_with(joe), "Joe's words come first, word for word: {text}");
+        assert!(text.contains(super::super::brief::QUESTION_JOB), "{text}");
+
+        joe_message::note_sent(&main, "and the header?", false, None);
+        let long = call(&st, &main, json!({"action": "send", "sub": "Header", "question": "q".repeat(201)}), &sent).await;
+        assert_eq!(long["ok"], json!(false), "{long}");
+        assert!(brief_of("tool-q-b").unwrap().question.is_none(), "a refused send records nothing");
     }
 
     #[tokio::test]
