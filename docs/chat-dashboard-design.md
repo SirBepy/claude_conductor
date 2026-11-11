@@ -109,6 +109,28 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
   main chat's own `answer` rows, so the main chat sends the one `answer` itself after the sub
   finishes (its rewritten question in `question`, the sub's verdict and text), and sends an `ack`
   (not shown) in the hand-off turn.
+- **A handed-off question shows at once as a pending row (Joe's card, 2026-11-11).** Problem: for
+  the minutes the sub works, the card showed nothing and Joe thought his question was ignored.
+  `answers-model.ts` reads the hand-off off the `spawn_chat` tool_use itself (read-only, `report_back`
+  true, not a gate or respawn, and a `task` that is a question: ends in "?" or starts with a question
+  word, so a research job the main chat runs for its own next step draws nothing), so no step the
+  main chat has to remember decides whether it shows.
+  The row is the rewritten question (`task`) where the verdict will be, with "Checking... (<sub>)"
+  under it; it lands like an answer and takes the card. Its state comes from the spawn's result (sub
+  id, or the refusal), the sub's finish and blocker cards, and the instance list: queued, asking,
+  stuck, finished (the answer is on its way), could not answer (finish tone bad), ended without an
+  answer (gone from the list: dropped, closed, crashed) and not handed off (refused, unless retried in
+  the same turn). While the sub works there is nothing to mark read; Next walks to the others. Once
+  the sub is done the row takes Got it, so a main chat that never answers cannot leave a row Joe
+  cannot clear. The answer fills the same row: it is linked by repeating the question, else by the
+  `subchat status` call before it naming the sub, else as the hand-off whose sub finished since Joe
+  last wrote (the wake turn `report_back` starts), and an answer naming no question of its own takes
+  the oldest hand-off whose sub finished. A spawn whose turn ended before its result counts
+  as not handed off. Several pending show newest first, after the unread answers; History lists them
+  under Being checked. Everything is derived from the transcript and the instance list, so a reload
+  rebuilds it. Known limits: a sub moved out of the sub role leaves the list too, so its row reads as
+  ended until its answer arrives; a sub that sent a blocker reads as stuck until it finishes, even
+  after Joe unblocks it; "ended" is judged on the next redraw, not on a timer.
 - **Question card icon:** `ph-chat-circle` with `ph-question-mark` stacked inside it; the dotted
   chat bubble moves to Answers (2026-11-10). Built in lane 5: `shared/question-icon.ts` draws it for
   the live card, the read-only card and the transcript card's summary; the Answers header already

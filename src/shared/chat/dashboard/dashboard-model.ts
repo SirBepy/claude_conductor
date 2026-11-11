@@ -39,7 +39,8 @@ export interface DashboardInput {
   busy?: boolean;
   /** What the daemon remembers for the Answers card, once loaded. */
   answers?: AnswerSide;
-  /** This chat's subs, read from the instance list (subs-source.ts). */
+  /** This chat's subs, read from the instance list (subs-source.ts); absent
+   *  while that list does not hold this chat yet. */
   subs?: SubCardItem[];
   /** Clock for the Subchats card's one-hour fold; tests pass their own. */
   now?: number;
@@ -129,7 +130,7 @@ export interface AnswersState {
  *  no answer yet, so + (new question) is there from the start: Answers and Plan
  *  are always on the dashboard (Joe, 2026-11-10). */
 export function deriveAnswers({ input }: DeriveCtx): AnswersState {
-  return { items: buildAnswerItems(input.messages, input.answers) };
+  return { items: buildAnswerItems(input.messages, input.answers, input.subs, input.now) };
 }
 
 export type WaitingItem =
