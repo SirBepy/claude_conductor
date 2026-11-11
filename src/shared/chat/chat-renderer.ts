@@ -45,7 +45,7 @@ import {
 import { applySkipMarks, findQuestionIndexById } from "./chat-question-card";
 import { fetchSubCards, mergeSubCards, normalizeCards, subCardEvent, type SubCardEntry } from "./subchat-cards";
 import { getTransport } from "../transport";
-import type { DashboardPlan, TurnAction } from "./dashboard/dashboard-model";
+import type { DashboardPlan, TurnAction } from "./dashboard/plan-record";
 
 export interface SessionMeta {
   model: string | null;
