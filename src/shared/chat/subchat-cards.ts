@@ -83,6 +83,9 @@ export interface SubCardEntry {
   facts?: SubFacts | null;
   sum?: SubSumFacts | null;
   set_key?: string | null;
+  /** On a finish card: the question of Joe's this round answers. Such a card is
+   *  the answer itself in the dashboard's Answers card (answers-model.ts). */
+  question?: string | null;
 }
 
 const KINDS: readonly string[] = ["finish", "blocker", "all_finished", "when_done"];

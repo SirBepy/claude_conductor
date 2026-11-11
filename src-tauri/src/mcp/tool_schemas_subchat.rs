@@ -25,7 +25,8 @@ pub fn chat_schemas() -> Vec<Value> {
                 "sub": {"type": "string", "description": "A sub's name, a unique start of it, or its id. For status, send and drop."},
                 "all": {"type": "boolean", "description": "send to every running sub instead of one. Finished subs are not woken."},
                 "writes": {"type": "boolean", "description": "send: the follow-up needs the sub to edit files. Only one sub edits files at a time in a project: if another holds the writer slot this sub is queued for it, and the result says so."},
-                "text": {"type": "string", "description": "send: your own instruction, only when there is no message from Joe to copy. It reaches the sub framed as coming from the main chat."}
+                "text": {"type": "string", "description": "send: your own instruction, only when there is no message from Joe to copy. It reaches the sub framed as coming from the main chat."},
+                "question": {"type": "string", "maxLength": 200, "description": "send: when Joe's follow-up asks for information, his question rewritten as one clear question (at most 200 chars). The sub's finish is then drawn as the answer in his Answers card, so you relay nothing."}
             },
             "required": ["action"]
         }
@@ -110,7 +111,7 @@ mod tests {
         let s = all.iter().find(|t| t["name"] == TOOL_SUBCHAT).unwrap();
         assert_eq!(s["name"], TOOL_SUBCHAT);
         let props = s["inputSchema"]["properties"].as_object().unwrap();
-        for k in ["action", "sub", "all", "writes", "text"] {
+        for k in ["action", "sub", "all", "writes", "text", "question"] {
             assert!(props.contains_key(k), "{k}");
         }
         let actions: Vec<&str> = props["action"]["enum"].as_array().unwrap().iter().filter_map(Value::as_str).collect();

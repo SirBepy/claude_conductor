@@ -106,6 +106,28 @@ const verdict = (pane) => card(pane).querySelector(".ax-face .mc-verdict")?.text
 const click = (pane, act) => card(pane).querySelector(`[data-ax='${act}']`).click();
 
 describe("Answers card", () => {
+  it("draws a sub's finish that carries Joe's question as the answer, under the sub's name", async () => {
+    const { subCardEvent } = await import("../src/shared/chat/subchat-cards.ts");
+    const { pane, r } = mountPane("chat-sub-answer");
+    new ChatDashboard(pane, r);
+    feed(r, [
+      userEvent("why does gboard swipe break?"),
+      subCardEvent({
+        id: "finish-sub-1-1", ts: 2000, parent_id: "chat-sub-answer", kind: "finish", sub_id: "sub-1", sub_name: "phone-ime", round: 1,
+        model: "opus", effort: "high", verdict: "The composer grabs focus on open", text: "Focus on open turns voice off.", question: "Why does Gboard swipe fail?",
+      }),
+    ]);
+    await drawn(pane);
+    expect(verdict(pane)).toBe("The composer grabs focus on open");
+    const by = card(pane).querySelector(".ax-face .ax-by");
+    expect(by.querySelector(".ax-by-name").textContent).toBe("phone-ime");
+    expect(by.querySelector(".sx-face").textContent).toBe("PH");
+    expect(by.querySelector(".session-model-battery")).not.toBeNull();
+    expect(card(pane).querySelector(".ax-face").textContent).not.toContain("Why does Gboard swipe fail?");
+    click(pane, "reply");
+    expect(card(pane).querySelector(".ax-thead-v").textContent).toBe("Why does Gboard swipe fail?");
+  });
+
   it("walks Got it back through every unread answer to All caught up, storing each read", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
@@ -176,7 +198,7 @@ describe("Answers card", () => {
     expect(card(pane).querySelector("[data-ax='gotit']")).not.toBeNull();
   });
 
-  it("opens Read more with the rewritten question, time first, and keeps it open across Got it", async () => {
+  it("opens Read more and keeps it open across Got it; the face shows when, never Joe's question", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     threeAnswers(r);
@@ -190,13 +212,13 @@ describe("Answers card", () => {
     await wait(260);
     click(pane, "gotit");
     await wait(260);
-    // Still open two answers later; a1 carries a rewrite, and Joe's words sit in its tip.
+    // Still open two answers later. Joe reads the answer, not his question: it
+    // opens the thread instead (Joe, 2026-11-11). The chat's own answer has no author.
     const face = card(pane).querySelector(".ax-face");
     expect(face.classList.contains("open")).toBe(true);
-    const q = face.querySelector(".ax-qline");
-    expect(q.querySelector("span").textContent).toBe("Does Trello reuse the Shortcut tracker?");
-    expect(q.firstElementChild.tagName).toBe("TIME");
-    expect(q.getAttribute("title")).toBe("You wrote: does it read the shortcut tracker?");
+    expect(face.textContent).not.toContain("Does Trello reuse the Shortcut tracker?");
+    expect(face.querySelector(".ax-by time")).not.toBeNull();
+    expect(face.querySelector(".ax-by-name")).toBeNull();
     card(pane).querySelector(".ax-readmore").click();
     expect(face.classList.contains("open")).toBe(false);
   });
@@ -210,16 +232,17 @@ describe("Answers card", () => {
     new ChatDashboard(pane, r);
     feed(r, [userEvent(LONG), ...send({ kind: "answer", verdict: "No, read-only is enough", text: "It only reads." }, "w1")]);
     await wait(30);
-    const line = () => card(pane).querySelector(".ax-qline");
-    expect(line().querySelector("span").textContent.length).toBeLessThanOrEqual(91);
-    expect(line().querySelector("span").textContent.endsWith("\u2026")).toBe(true);
-    expect(line().querySelector("span").textContent).not.toContain("rename the old branch");
-    expect(line().getAttribute("title")).toBe(`You wrote: ${LONG}`);
+    // The question heads the answer's thread, never its face.
+    click(pane, "reply");
+    const line = () => card(pane).querySelector(".ax-thead-v");
+    expect(line().textContent.length).toBeLessThanOrEqual(91);
+    expect(line().textContent.endsWith("\u2026")).toBe(true);
+    expect(line().textContent).not.toContain("rename the old branch");
     expect(db.rewrites).toEqual([{ key: "w1", joe: LONG, answer: "No, read-only is enough\nIt only reads." }]);
 
     release();
     await wait(30);
-    expect(line().querySelector("span").textContent).toBe("Does the Trello token need write access?");
+    expect(line().textContent).toBe("Does the Trello token need write access?");
     // Re-rendering for another answer does not ask again for this one.
     feed(r, [userEvent("and the key?"), ...send({ kind: "answer", verdict: "Same", text: "Same key." }, "w2")]);
     await wait(30);
@@ -273,7 +296,8 @@ describe("Answers card", () => {
     await drawn(pane);
     click(pane, "history");
     const rows = [...document.querySelectorAll(".cp-row .cp-title")].map((e) => e.textContent);
-    expect(rows).toEqual(["write access?", "tr- links?", "Does Trello reuse the Shortcut tracker?"]);
+    // Rows are titled by the verdict, the answer Joe reads.
+    expect(rows).toEqual(["No, read-only is enough", "Yes, once the board confirms", "It copies Shortcut's shape"]);
     // One group (all read): no headings.
     expect(document.querySelector(".ax-sec")).toBeNull();
     document.querySelectorAll(".cp-row")[1].click();

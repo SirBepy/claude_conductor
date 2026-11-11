@@ -257,6 +257,11 @@ export interface RenderedMessage {
    *  (above) turns it into "Could not pass to X". */
   passedTo?: string;
   passedAll?: boolean;
+  /** `kind:"passed"` only: the follow-up question this send hands the sub, whose
+   *  next finish card is its answer (answers-model.ts). */
+  passedQuestion?: string;
+  /** `kind:"passed"` only, once the daemon answered: the ids of the subs it reached. */
+  passedSubIds?: string[];
   /** Boundary between a `/respawn` successor and the chat it took over from -
    *  everything above the row belongs to the predecessor. Injected by the
    *  event store on a chain hop, never present in any transcript. */

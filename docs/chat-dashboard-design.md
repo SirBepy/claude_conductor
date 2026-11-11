@@ -76,18 +76,24 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
   right; all three stay on the bottom edge whatever the text does. Reason: a fixed resting height
   stops the card resizing on every answer; 210 picked on a slider after trying 140-300. A verdict
   caps at 2 lines at rest.
-- **Read more is always there.** It, or a click anywhere off the buttons, opens the card: Joe's
-  question (rewritten, time first) above, full text below, animated by height plus fade. An open
-  card stays open across Got it. The Read more text glows a little while the card is hovered.
+- **Read more is always there.** It, or a click anywhere off the buttons, opens the card's full text,
+  animated by height plus fade. An open card stays open across Got it. The Read more text glows a
+  little while the card is hovered.
+- **Who answered, never the question, sits above the verdict (Joe, 2026-11-11).** A line with the
+  sub's avatar (the Subchats card's initials and model battery, small), its name and the time; the
+  chat's own answer shows only the time. Joe's question is not on the face, open or closed: "more
+  often than not, i dont care about what i asked", and it heads the answer's thread anyway.
 - **Got it** is a quiet green check that turns grey once read; the same icon in the same place,
   never a Close button. Reason: a Close button made him forget what it does, and a green fill
   competed with the green verdict. "Rise" animates only the text; header and buttons never move.
   The last Got it fades to **All caught up**: centred, bigger, no last question, the answer card's
   border plus Plan's background, with History and New question.
 - **History** is one command-palette list: Mark all N as read, then Unread / Read with a thread /
-  Read, newest first; a heading shows only when there are two groups or more. Rows show the
-  rewritten question only, and the search covers threads too. Reason: question plus verdict per row
-  was "too much text"; a separate unread button was merged into it.
+  Read, newest first; a heading shows only when there are two groups or more. Rows show the verdict
+  only (a row still being checked shows its question, having no verdict yet), and the search covers
+  the question and threads too. Reason: question plus verdict per row was "too much text"; a separate
+  unread button was merged into it; the verdict, not the question, since 2026-11-11 (same reason as
+  the face).
 - **Threads open in place,** sliding in from the right, with no scrollbar flash (the card clips while
   it moves). A thread starts with Joe's question and the answer (not counted as a back-and-forth),
   then compact bubbles. No thread summary: the thread button carries the count, plus a blinking dot
@@ -103,18 +109,32 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
   follows from "questions always show rewritten". A + question keeps a thread first, and its reply lands as an
   unread answer. A reply after leaving a thread makes the answer unread again.
 - **The main chat never answers a question itself:** it rewrites it and hands it to a sub, keeping
-  the original (2026-11-10). Built in lane 5 as rules (1) and (11) of `SUBCHATS_MAIN_PROMPT`
-  (`daemon/claude_config/args.rs`). A sub's own `send_message` answer never reaches the main chat's
-  window (only a blocker does, `hooks_server/messages/mod.rs`), and the Answers card reads only the
-  main chat's own `answer` rows, so the main chat sends the one `answer` itself after the sub
-  finishes (its rewritten question in `question`, the sub's verdict and text), and sends an `ack`
-  (not shown) in the hand-off turn.
+  the original (2026-11-10). Rules (1), (4) and (11) of `SUBCHATS_MAIN_PROMPT`
+  (`daemon/claude_config/args.rs`).
+- **The sub's finish is the answer; the main chat relays nothing (2026-11-11).** Until then the main
+  chat sent the `answer` itself after a `report_back` wake. That covered a first question but not a
+  follow-up: rule (4) passed it to the existing sub with `subchat send`, nothing told the main chat to
+  answer, and transcripts showed it sending a `report`, an `artifact` or nothing, so the reply lived
+  only in the sub's finish card, which the dashboard draws only as a 40-char verdict in the Subchats
+  card. Joe: "the questions i get from subchats dont get answered to me in the main chat". Now
+  `spawn_chat` and `subchat send` take `question` (the rewritten question, at most 200 chars); the
+  daemon keeps it on the sub's brief, moves it onto the next finish record and its card
+  (`CardEntry.question`) at `finish::commit_finish_at`, and clears it, so one question gets one
+  answer. The sub is told in its first message, or after Joe's words in a follow-up
+  (`brief::QUESTION_JOB`), that its finish verdict and text are the answer. `answers-model.ts`
+  `isSubAnswer` turns such a card into the answer, authored by the sub; a finish without a question
+  (a job) is never an answer. A main chat that still relays (one spawned before this) has its relay
+  dropped when the sub's card already gave that verdict since Joe last wrote. The `report_back`
+  path stays readable for older transcripts.
 - **A handed-off question shows at once as a pending row (Joe's card, 2026-11-11).** Problem: for
   the minutes the sub works, the card showed nothing and Joe thought his question was ignored.
-  `answers-model.ts` reads the hand-off off the `spawn_chat` tool_use itself (read-only, `report_back`
-  true, not a gate or respawn, and a `task` that is a question: ends in "?" or starts with a question
-  word, so a research job the main chat runs for its own next step draws nothing), so no step the
-  main chat has to remember decides whether it shows.
+  `answers-model.ts` reads the hand-off off the `spawn_chat` tool_use itself (not a gate, respawn or
+  writing job, and a `question` field; in an older transcript, `report_back` true and a `task` that
+  is a question: ends in "?" or starts with a question word, so a research job the main chat runs for
+  its own next step draws nothing), so no step the main chat has to remember decides whether it
+  shows. A follow-up question is read off the "Passed to X" row a `subchat send` with `question`
+  draws (`passedQuestion`, plus `passedSubIds` from the daemon's reply), and waits for that sub's
+  next finish.
   The row is the rewritten question (`task`) where the verdict will be, with "Checking... (<sub>)"
   under it; it lands like an answer and takes the card. Its state comes from the spawn's result (sub
   id, or the refusal), the sub's finish and blocker cards, and the instance list: queued, asking,
@@ -161,7 +181,8 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
     opened doesnt mean i read it"; any message he sends marks everything read (skipped answers would
     go read too); no read state at all.
 - Ruled out: an earlier-questions list inside the card, a deck of unread, threads under the answer
-  or in a drawer, thread summaries, the question shown at rest or in a tooltip, a More button, fixed
+  or in a drawer, thread summaries, the question shown on the face (at rest, on Read more, or behind
+  an icon) or in a tooltip, a More button, fixed
   heights of 240/280/320 or growing with content, the slide/crossfade/blur/scale Got it presets.
 
 ### Asking about a question card (approved 2026-11-10, sub "question-card-ask")

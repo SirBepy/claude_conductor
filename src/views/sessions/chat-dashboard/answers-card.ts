@@ -30,6 +30,8 @@ import type { ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
 import type { QuestionAsk } from "../question-ask";
 import { answersApi, cachedSide, emptySide, rememberSide } from "./answers-api";
 import { cardHtml } from "./dashboard-zones";
+import { subInitials } from "../sub-list";
+import { modelBatteryHtml } from "../sidebar-row-visuals";
 import "./answers-card.css";
 
 /** Thread keys of + questions that have no answer yet: `new:<n>`, one per
@@ -462,9 +464,18 @@ export class AnswersCard {
       + `<div class="ax-actions ax-actions--bottom-left">${acts}</div></div>`;
   }
 
+  /** Who answered and when. Joe's question is not on the face: he reads the
+   *  answer, and the question opens its thread (Joe, 2026-11-11). */
+  private byLine(item: AnswerItem): string {
+    const time = `<time>${esc(timeOf(item.at))}</time>`;
+    const a = item.author;
+    if (!a) return `<div class="ax-by">${time}</div>`;
+    return `<div class="ax-by"><span class="ax-by-av"><span class="sx-face">${esc(subInitials(a.name))}</span>${modelBatteryHtml(a.model, a.effort)}</span>`
+      + `<span class="ax-by-name">${esc(a.name)}</span>${time}</div>`;
+  }
+
   private answerFace(item: AnswerItem): string {
-    const raw = item.raw ? ` title="You wrote: ${esc(item.raw)}"` : "";
-    const q = item.question ? `<div class="ax-qline"${raw}><time>${esc(timeOf(item.at))}</time><span>${esc(item.question)}</span></div>` : "";
+    const q = this.byLine(item);
     const rm = `<span class="ax-readmore ax-rm-bottom-right" data-ax="toggle">${this.readMoreLabel()}</span>`;
     return `<div class="ax-face ax-pos-bottom-left ax-align-center has-more${this.open ? " open" : ""}" data-ans="${esc(item.key)}">`
       + `<div class="ax-mid"><div class="ax-tb"><div class="ax-row"><div class="ax-text" data-ax="toggle">${q}${cardInner(item)}</div></div></div></div>`
@@ -907,7 +918,8 @@ export class AnswersCard {
   }
 
   /** One command-palette list: Mark all N as read, then Unread / Read with a
-   *  thread / Read, newest first. Rows show the question; search covers threads. */
+   *  thread / Read, newest first. Rows show the verdict, the answer Joe reads; search
+   *  covers the question and the threads too. */
   private history(): void {
     const store = this.store();
     const { groups, headings } = historyGroups(this.items, store);
@@ -923,12 +935,13 @@ export class AnswersCard {
         groupOf.set(id, g.label);
         rows.push({
           id,
-          title: it.question || it.verdict,
+          // A row still being checked has no verdict of its own yet, only its status line.
+          title: it.pending ? it.question || it.verdict : it.verdict || it.question,
           icon: g.id === "pending" ? "hourglass-medium" : g.id === "unread" ? "circle-wavy" : "check",
           group: timeOf(it.at),
           // Thread text rides keywords, which the ranker scores below a hit in the
-          // title, so a hit in the question always outranks one found only in a thread.
-          keywords: [it.verdict, it.raw ?? "", it.text, threadText(it)],
+          // title, so a hit in the verdict always outranks one found only in a thread.
+          keywords: [it.question, it.raw ?? "", it.text, threadText(it)],
           run: () => this.show(it.key),
         });
       }

@@ -88,11 +88,11 @@ test.describe("Answers card", () => {
     expect(box.x + box.width - (rm.x + rm.width)).toBeLessThan(30);
     await capture(pane(page), "answers-unread");
 
-    // Read more opens the rewritten question above the full text.
+    // Read more opens the full text under the time; Joe's question is not on the face, it heads the thread.
     await c.locator(".ax-readmore").click();
     await expect(c.locator(".ax-face")).toHaveClass(/open/);
-    await expect(c.locator(".ax-qline span")).toHaveText("Does the Trello token need write access?");
-    await expect(c.locator(".ax-qline time")).not.toHaveText("");
+    await expect(c.locator(".ax-by time")).not.toHaveText("");
+    await expect(c.locator(".ax-face")).not.toContainText("Does the Trello token need write access?");
     await page.waitForTimeout(400);
     await capture(pane(page), "answers-read-more");
 
@@ -125,7 +125,7 @@ test.describe("Answers card", () => {
       await page.locator(".cp-row", { hasText: title }).click();
     };
     // Joe goes back to the oldest answer, still unread.
-    await pick("Does Trello reuse the Shortcut tracker, or start from scratch?");
+    await pick("It copies Shortcut's shape");
     await expect(c.locator(".ax-face .mc-verdict")).toHaveText("It copies Shortcut's shape");
     await expect(c.locator("[data-ax='gotit']")).toBeVisible();
 
@@ -141,7 +141,7 @@ test.describe("Answers card", () => {
     await expect(c.locator("[data-ax='history'] b")).toHaveText("2");
 
     // The judged answer shows as read; with others unread its check is the way to the next one.
-    await pick("Does Trello reuse the Shortcut tracker, or start from scratch?");
+    await pick("It copies Shortcut's shape");
     await expect(c.locator("[data-ax='gotit']")).toHaveCount(0);
     const next = c.locator(".ax-next[data-ax='close']");
     await expect(next).toContainText("3 more");
@@ -157,7 +157,8 @@ test.describe("Answers card", () => {
     await expect(c.locator(".ax-cc-t")).toHaveText("All caught up");
     await c.locator(".ax-cc [data-ax='history']").click();
     const rows = page.locator(".cp-row .cp-title");
-    await expect(rows).toHaveText(["Does the Trello token need write access?", "Do tr- numbers link the way Shortcut's sc- numbers do?", "Does Trello reuse the Shortcut tracker, or start from scratch?"]);
+    // Titled by the verdict, the answer Joe reads; the question is searched, and heads the thread.
+    await expect(rows).toHaveText(["No, read-only is enough", "Yes, once the board confirms", "It copies Shortcut's shape"]);
     await expect(page.locator(".cp-input")).toHaveAttribute("placeholder", "Search 3 answers and their threads");
     await capture(page.locator(".cp"), "answers-history");
     await page.locator(".cp-row").nth(1).click();

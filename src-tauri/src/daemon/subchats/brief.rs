@@ -40,6 +40,24 @@ pub struct SubchatArgs {
     /// Every other spawn already makes one, so this changes nothing there.
     #[serde(default)]
     pub plain: Option<bool>,
+    /// Joe's question this job answers, rewritten as one clear question. Its
+    /// finish card is then the answer in his Answers card (`QUESTION_MAX` chars).
+    #[serde(default)]
+    pub question: Option<String>,
+}
+
+/// The longest question `spawn_chat` and `subchat send` take: the Answers card's
+/// own limit for a rewritten question.
+pub const QUESTION_MAX: usize = 200;
+
+/// A question argument trimmed, or why it is refused. Blank is no question.
+pub fn question_arg(v: Option<&str>) -> Result<Option<String>, String> {
+    let Some(q) = v.map(str::trim).filter(|q| !q.is_empty()) else { return Ok(None) };
+    let n = q.chars().count();
+    if n > QUESTION_MAX {
+        return Err(format!("question is {n} chars, over {QUESTION_MAX}: rewrite it as one shorter question."));
+    }
+    Ok(Some(q.to_string()))
 }
 
 fn default_review() -> bool {
@@ -98,6 +116,12 @@ pub struct SubchatBrief {
     /// the brief so a restart, a finish and a continue all find the same tree.
     #[serde(default)]
     pub worktree_at: Option<WorktreeInfo>,
+    /// The question of Joe's that this sub's next finish answers: set by the
+    /// spawn or by a `subchat send` that carries one, moved onto the finish
+    /// record (`finish::commit_finish_at`) and cleared there, so a later round
+    /// that answers nothing is not drawn as an answer.
+    #[serde(default)]
+    pub question: Option<String>,
 }
 
 /// Where a worktree sub lives and what it merges back into.
@@ -165,6 +189,7 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
     if args.writes == Some(true) && files.is_empty() {
         missing.push("files (the paths it may write, required because writes is true)");
     }
+    let question = question_arg(args.question.as_deref())?;
     if !missing.is_empty() {
         return Err(format!(
             "Subchats mode: this spawn_chat call is missing {}. Send it again with every one of them filled in; the sub sees nothing but this brief. If this is a push gate (code-check, e2e, push), pass gate: true with the gate's prompt instead: a gate needs none of these fields.",
@@ -187,8 +212,14 @@ pub fn validate(name: Option<&str>, args: &SubchatArgs, parent: &str) -> Result<
         gate: false,
         upstream_at_spawn: None,
         worktree_at: None,
+        question,
     })
 }
+
+/// Opens the line of a first message, or of a follow-up, that hands a sub one
+/// of Joe's questions. Its finish card is drawn as the answer, so the verdict and
+/// text have to be the answer itself, not a report on the work.
+pub const QUESTION_JOB: &str = "This answers Joe's question, and your finish_subchat verdict and text are the answer he reads in his Answers card, so make them the answer itself, not a report on what you did. The question: ";
 
 /// The task a gate sub's card shows, since it is spawned without one.
 pub const GATE_TASK: &str = "Gate and push";
@@ -219,6 +250,7 @@ pub fn gate_brief(prompt: Option<&str>, parent: &str) -> Result<SubchatBrief, St
         gate: true,
         upstream_at_spawn: None,
         worktree_at: None,
+        question: None,
     })
 }
 
@@ -237,6 +269,9 @@ pub fn compose_first_message(brief: &SubchatBrief, extra: Option<&str>) -> Strin
     );
     if !brief.decisions.is_empty() {
         out.push_str(&format!("\n\nDecisions already made (treat as settled):\n{}", brief.decisions));
+    }
+    if let Some(q) = &brief.question {
+        out.push_str(&format!("\n\n{QUESTION_JOB}{q}"));
     }
     out.push_str(
         "\n\nIf you cannot finish the job as briefed, you may stop and report it as blocked instead of forcing a result. \
@@ -318,6 +353,21 @@ mod tests {
             assert!(msg.contains(needle), "missing {needle:?} in:\n{msg}");
         }
         assert!(!msg.contains('\u{2014}'), "no em dash in generated text");
+    }
+
+    #[test]
+    fn a_question_is_kept_on_the_brief_told_to_the_sub_and_refused_past_its_cap() {
+        let mut args = complete();
+        args.question = Some("  Why does Gboard swipe fail?  ".into());
+        let b = validate(Some("ime"), &args, "main").unwrap();
+        assert_eq!(b.question.as_deref(), Some("Why does Gboard swipe fail?"));
+        let first = compose_first_message(&b, None);
+        assert!(first.contains(&format!("{QUESTION_JOB}Why does Gboard swipe fail?")), "{first}");
+        assert!(!compose_first_message(&validate(Some("x"), &complete(), "main").unwrap(), None).contains(QUESTION_JOB));
+        args.question = Some("x".repeat(QUESTION_MAX + 1));
+        let err = validate(Some("ime"), &args, "main").unwrap_err();
+        assert!(err.contains("question is 201 chars"), "{err}");
+        assert_eq!(question_arg(Some("   ")), Ok(None), "blank is no question");
     }
 
     #[test]

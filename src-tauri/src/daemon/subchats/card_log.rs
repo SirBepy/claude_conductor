@@ -87,6 +87,10 @@ pub struct CardEntry {
     /// never draws a second one.
     #[serde(default)]
     pub set_key: Option<String>,
+    /// On a finish card: the question of Joe's this round answers. The chat
+    /// draws such a card as the answer in his Answers card, under the sub's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
 }
 
 /// Serializes the read-check-append of the log within the process: two subs
@@ -393,6 +397,7 @@ pub(crate) fn draw_finish_at(
         waiting_on: record.waiting_on.clone(),
         your_move: record.your_move.clone(),
         facts: Some(facts),
+        question: record.question.clone(),
         ..CardEntry::default()
     };
     if store_and_announce(state, root, &finish_entry) {
@@ -582,6 +587,34 @@ mod tests {
         record(root, sub, round, "Built, not pushed");
         st.registry.set_subchat_finished(sub, true);
         draw_finish_at(root, st, sub, transcript)
+    }
+
+    #[test]
+    fn a_finish_that_answers_a_question_carries_it_on_its_card_and_one_that_does_not_has_no_key() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        let (_main, subs) = world(&st, "ansq", Path::new("."), &["ime", "header"]);
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("subchats");
+        std::fs::create_dir_all(&dir).unwrap();
+        let rec = FinishRecord {
+            sub_id: subs[0].clone(),
+            round: 1,
+            verdict: "The composer grabs focus on open".into(),
+            question: Some("Why does Gboard swipe fail?".into()),
+            ..FinishRecord::default()
+        };
+        std::fs::write(dir.join(format!("{}.finish.json", subs[0])), serde_json::to_string(&rec).unwrap()).unwrap();
+        st.registry.set_subchat_finished(&subs[0], true);
+        let drawn = draw_finish_at(root.path(), &st, &subs[0], None);
+        let card = drawn.iter().find(|e| e.kind == KIND_FINISH).unwrap();
+        assert_eq!(card.question.as_deref(), Some("Why does Gboard swipe fail?"));
+
+        let plain = finish_sub(&st, root.path(), &subs[1], 1);
+        let card = plain.iter().find(|e| e.kind == KIND_FINISH).unwrap();
+        assert!(card.question.is_none());
+        let json = serde_json::to_value(card).unwrap();
+        assert!(json.get("question").is_none(), "a job's finish is not drawn as an answer: {json}");
     }
 
     #[test]
