@@ -6,7 +6,7 @@
 // (a reload), the card walks back through unread answers to All caught up, and
 // a thread reply after Joe left makes its answer unread again.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
@@ -26,7 +26,7 @@ const ok = (id) => ({ type: "tool_result", tool_use_id: id, output: { type: "tex
 
 /** A daemon in memory: the store a reload reads back, and the Ask threads. */
 function fakeDaemon() {
-  const db = { store: emptyStore(), threads: [], marks: [], sends: [], rewrites: [], made: {} };
+  const db = { store: emptyStore(), threads: [], marks: [], sends: [], rewrites: [], made: {}, prewarms: [] };
   let release = null;
   db.hold = () => new Promise((res) => { release = res; });
   db.release = () => release?.();
@@ -45,8 +45,10 @@ function fakeDaemon() {
       if (q) db.store.rewrites[key] = q;
       return structuredClone(db.store);
     },
-    async send(req) {
+    async prewarm(sid, key) { db.prewarms.push([sid, key]); },
+    async send(req, onDelta) {
       db.sends.push(req);
+      for (const d of db.deltas ?? []) onDelta?.(d);
       if (db.gate) await db.gate;
       const id = db.store.threads[req.key] ?? `th${db.threads.length + 1}`;
       let t = db.threads.find((x) => x.id === id);
@@ -84,6 +86,9 @@ function mountPane(sessionId = "chat-1") {
 const send = (input, id = `m${++seq}`) => [toolUseEvent(SEND, input, id), ok(id)];
 const feed = (r, events) => { for (const ev of events) r.handleEvent(ev); };
 const wait = (ms = 10) => new Promise((res) => setTimeout(res, ms));
+/** Until the card has drawn its answer or All caught up: the first draw waits on
+ *  the fake daemon's load, which a busy machine can push past a fixed wait. */
+const drawn = (pane) => vi.waitFor(() => expect(card(pane)?.querySelector(".ax-face, .ax-cc")).toBeTruthy(), { timeout: 3000 });
 
 function threeAnswers(r) {
   feed(r, [
@@ -105,7 +110,7 @@ describe("Answers card", () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     threeAnswers(r);
-    await wait();
+    await drawn(pane);
     expect(verdict(pane)).toBe("No, read-only is enough");
     // History's badge counts the OTHER unread answers.
     expect(card(pane).querySelector("[data-ax='history'] b").textContent).toBe("2");
@@ -165,7 +170,7 @@ describe("Answers card", () => {
     const { pane, r } = mountPane("chat-reload");
     new ChatDashboard(pane, r);
     threeAnswers(r);
-    await wait(30);
+    await drawn(pane);
     // a3 and a2 were read on the other window: the card opens on a1, the last unread.
     expect(verdict(pane)).toBe("It copies Shortcut's shape");
     expect(card(pane).querySelector("[data-ax='gotit']")).not.toBeNull();
@@ -175,7 +180,7 @@ describe("Answers card", () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     threeAnswers(r);
-    await wait();
+    await drawn(pane);
     expect(card(pane).querySelector(".ax-face").classList.contains("open")).toBe(false);
     // A click anywhere off the buttons opens it too.
     card(pane).querySelector(".ax-text .mc-verdict").click();
@@ -265,7 +270,7 @@ describe("Answers card", () => {
     const { pane, r } = mountPane("chat-thread");
     new ChatDashboard(pane, r);
     threeAnswers(r);
-    await wait(30);
+    await drawn(pane);
     click(pane, "history");
     const rows = [...document.querySelectorAll(".cp-row .cp-title")].map((e) => e.textContent);
     expect(rows).toEqual(["write access?", "tr- links?", "Does Trello reuse the Shortcut tracker?"]);
@@ -301,12 +306,52 @@ describe("Answers card", () => {
     expect(card(pane).querySelector("[data-ax='reply'] .ax-btn-n").textContent).toBe("1");
   });
 
+  it("starts the thread's process when it opens and streams the reply into it", async () => {
+    db.store.read = { a1: 1, a2: 1, a3: 1 };
+    const { pane, r } = mountPane("chat-stream");
+    new ChatDashboard(pane, r);
+    threeAnswers(r);
+    await drawn(pane);
+    click(pane, "new-q");
+    // A new question warms the spare before Joe has typed a word.
+    expect(db.prewarms).toEqual([["chat-stream", null]]);
+
+    let open;
+    db.gate = new Promise((res) => { open = res; });
+    // A new question's reply opens with the two lines the card parses; they stay hidden while it streams.
+    const head = "QUESTION: Does Trello need a paid plan?\nVERDICT: No, free works\n\n";
+    db.deltas = [`${head}The free`, `${head}The free plan has the API.`];
+    const ta = card(pane).querySelector(".ax-t-input");
+    ta.value = "does trello need a paid plan?";
+    ta.dispatchEvent(new Event("input"));
+    card(pane).querySelector(".ax-t-send").click();
+    await wait();
+    const live = card(pane).querySelector(".ax-tbody .ax-live");
+    expect(live.textContent).toContain("No, free works");
+    expect(live.textContent).toContain("The free plan has the API.");
+    expect(live.textContent).not.toContain("QUESTION:");
+    expect(card(pane).querySelector(".ax-tbody .ax-thinking")).toBeNull();
+    open();
+    await wait(30);
+    expect(card(pane).querySelector(".ax-tbody .ax-live")).toBeNull();
+
+    // Opening an answer's thread warms that thread's own process.
+    click(pane, "close-thread");
+    click(pane, "history");
+    document.querySelectorAll(".cp-row")[1].click();
+    await wait();
+    db.prewarms.length = 0;
+    click(pane, "reply");
+    expect(db.prewarms.length).toBe(1);
+    expect(db.prewarms[0][1]).not.toBeNull();
+  });
+
   it("starts a + question whose reply lands as an unread answer", async () => {
     db.store.read = { a1: 1, a2: 1, a3: 1 };
     const { pane, r } = mountPane("chat-new");
     new ChatDashboard(pane, r);
     threeAnswers(r);
-    await wait(30);
+    await drawn(pane);
     expect(card(pane).querySelector(".ax-cc-t").textContent).toContain("All caught up");
     click(pane, "new-q");
     expect(card(pane).querySelector(".ax-thead-k").textContent).toBe("New question");
@@ -328,7 +373,7 @@ describe("Answers card", () => {
     const { pane, r } = mountPane("chat-back");
     new ChatDashboard(pane, r);
     threeAnswers(r);
-    await wait(30);
+    await drawn(pane);
     click(pane, "history");
     document.querySelectorAll(".cp-row")[0].click();
     await wait();
@@ -362,7 +407,7 @@ describe("Answers card", () => {
     const { pane, r } = mountPane("chat-fail");
     new ChatDashboard(pane, r);
     threeAnswers(r);
-    await wait(30);
+    await drawn(pane);
     // a1 is unread; Joe picks the read a2 from History (Mark all, a1, a3, a2), opens its thread and goes Back.
     click(pane, "history");
     expect([...document.querySelectorAll(".cp-section")].map((e) => e.textContent)).toEqual(["Unread", "Read"]);
@@ -394,7 +439,7 @@ describe("Answers card", () => {
     const { pane, r } = mountPane("chat-late-fail");
     new ChatDashboard(pane, r);
     threeAnswers(r);
-    await wait(30);
+    await drawn(pane);
     let fail = null;
     const gate = new Promise((res) => { fail = res; });
     db.api.send = async () => { await gate; throw new Error("sidecar went away"); };

@@ -166,7 +166,7 @@ fn parse<T: for<'de> Deserialize<'de>>(params: Option<Value>) -> Result<T, RpcEr
     serde_json::from_value(params.unwrap_or(Value::Null)).map_err(|e| RpcError::invalid_params(e.to_string()))
 }
 
-pub fn register_answers(router: &mut Router, _state: Arc<DaemonState>) {
+pub fn register_answers(router: &mut Router, state: Arc<DaemonState>) {
     router.register("answers_state", move |params, _ctx| async move {
         #[derive(Deserialize)]
         struct P {
@@ -226,11 +226,40 @@ pub fn register_answers(router: &mut Router, _state: Arc<DaemonState>) {
         state_json(&state)
     });
 
-    // Blocks for the sidecar's whole run. `key` names the answer the thread
-    // follows up on; no `key` starts a + question, whose thread then stands for
-    // its own answer, and `about_question` on such a question is the question
-    // card it was asked from.
-    router.register("answers_thread_send", move |params, _ctx| async move {
+    // Opening a thread: its warm process starts while Joe types (Joe, 2026-11-11:
+    // "a pretty big chance im gonna be asking the thread something if i clicked
+    // on the thread button"). `key` names an answer whose thread may already have
+    // a session to resume; none means a new question, which gets the spare.
+    router.register("answers_thread_prewarm", move |params, _ctx| async move {
+        #[derive(Deserialize)]
+        struct P {
+            session_id: String,
+            #[serde(default)]
+            key: Option<String>,
+        }
+        let p: P = parse(params)?;
+        let key = p.key.as_deref().map(str::trim).filter(|k| !k.is_empty());
+        let thread = key
+            .and_then(|k| answer_state::load(&p.session_id).thread_of(k))
+            .and_then(|id| crate::ask::store::load(&p.session_id).into_iter().find(|t| t.id == id));
+        let (tid, resume) = match &thread {
+            Some(t) => (Some(t.id.as_str()), t.sidecar_session_id.as_deref()),
+            None => (None, None),
+        };
+        crate::ask::warm::prewarm(tid, resume).await.map_err(|e| RpcError::internal(format!("{e:#}")))?;
+        Ok(json!({ "ok": true }))
+    });
+
+    // Blocks for the sidecar's whole run, streaming the reply as
+    // `answers_thread_delta` {session_id, stream_id, text} with the text so far
+    // (an empty text means a retry started over). `key` names the answer the
+    // thread follows up on; no `key` starts a + question, whose thread then
+    // stands for its own answer, and `about_question` on such a question is the
+    // question card it was asked from.
+    let notifier = state.notifier.clone();
+    router.register("answers_thread_send", move |params, _ctx| {
+        let notifier = notifier.clone();
+        async move {
         #[derive(Deserialize)]
         struct P {
             session_id: String,
@@ -243,9 +272,12 @@ pub fn register_answers(router: &mut Router, _state: Arc<DaemonState>) {
             about_question: String,
             #[serde(default)]
             about_answer: String,
+            #[serde(default)]
+            stream_id: Option<String>,
         }
         let p: P = parse(params)?;
         let key = p.key.as_deref().map(str::trim).filter(|k| !k.is_empty());
+        let mut on_delta = delta_publisher(notifier, p.session_id.clone(), p.stream_id.clone());
         // A link to a thread missing from the store (its file lost or unreadable)
         // starts a fresh thread instead of failing every later follow-up with
         // "no Ask thread".
@@ -263,6 +295,7 @@ pub fn register_answers(router: &mut Router, _state: Arc<DaemonState>) {
             &p.question,
             p.cwd.as_deref(),
             Some(&context),
+            &mut on_delta,
         )
         .await
         .map_err(RpcError::internal)?;
@@ -272,12 +305,59 @@ pub fn register_answers(router: &mut Router, _state: Arc<DaemonState>) {
         })
         .map_err(|e| RpcError::internal(format!("{e:#}")))?;
         Ok(json!({ "thread": thread, "state": state }))
+        }
     });
+}
+
+/// How often a streaming reply is pushed to the window: often enough to read as
+/// live, rarely enough that a fast reply is not hundreds of events.
+const DELTA_EVERY: std::time::Duration = std::time::Duration::from_millis(60);
+
+/// Publishes the reply so far for `stream_id`, at most every `DELTA_EVERY`; an
+/// empty text (a retry starting over) always goes out. No `stream_id`, nothing
+/// is published: the caller does not listen.
+fn delta_publisher(
+    notifier: crate::daemon::notifier::Notifier,
+    session_id: String,
+    stream_id: Option<String>,
+) -> impl FnMut(&str) + Send {
+    let mut last: Option<std::time::Instant> = None;
+    move |text: &str| {
+        let Some(stream_id) = &stream_id else { return };
+        let now = std::time::Instant::now();
+        if !text.is_empty() && last.is_some_and(|t| now.duration_since(t) < DELTA_EVERY) {
+            return;
+        }
+        last = Some(now);
+        notifier.publish(
+            "answers_thread_delta",
+            json!({ "session_id": session_id, "stream_id": stream_id, "text": text }),
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_streaming_reply_is_published_throttled_and_a_restart_always_goes_out() {
+        let n = crate::daemon::notifier::Notifier::new();
+        let mut rx = n.subscribe();
+        let mut publish = delta_publisher(n.clone(), "chat".into(), Some("s1".into()));
+        publish("a");
+        publish("ab");
+        publish("");
+        let first = rx.recv().await.unwrap();
+        assert_eq!(first["method"], "answers_thread_delta");
+        assert_eq!(first["params"], json!({"session_id": "chat", "stream_id": "s1", "text": "a"}));
+        assert_eq!(rx.recv().await.unwrap()["params"]["text"], "", "the throttled 'ab' is skipped, the restart is not");
+        assert!(rx.try_recv().is_err());
+
+        let mut silent = delta_publisher(n.clone(), "chat".into(), None);
+        silent("x");
+        assert!(rx.try_recv().is_err(), "no stream id, no events");
+    }
 
     #[test]
     fn follow_up_context_names_the_question_and_the_answer() {

@@ -3,6 +3,7 @@
 // tests and the view harness can drive the card without a daemon.
 
 import { invoke } from "../../../shared/ipc";
+import { getTransport } from "../../../shared/transport";
 import type { AskThread } from "../../../types/ipc.generated";
 import { emptyStore, type AnswerSide, type AnswerStore } from "../../../shared/chat/dashboard/answers-model";
 
@@ -23,7 +24,17 @@ export interface AnswersApi {
   mark(sessionId: string, keys: string[], read: boolean): Promise<AnswerStore>;
   /** Has the daemon write the short question for an answer that carries none; stored once per answer. */
   rewrite(sessionId: string, key: string, joe: string, answer: string): Promise<AnswerStore>;
-  send(req: ThreadSend): Promise<{ thread: AskThread; state: AnswerStore }>;
+  /** `onDelta` gets the reply so far while it streams; "" means a retry started over. */
+  send(req: ThreadSend, onDelta?: (text: string) => void): Promise<{ thread: AskThread; state: AnswerStore }>;
+  /** Starts the thread's warm process while Joe types: `key` is the answer whose
+   *  thread opened, null for a new question. Fire and forget. */
+  prewarm?(sessionId: string, key: string | null): Promise<void>;
+}
+
+/** One `answers-thread-delta` event (daemon/methods/answers.rs). */
+interface ThreadDelta {
+  stream_id?: string;
+  text?: string;
 }
 
 /** The daemon answers with serde's shape; anything missing reads as empty. */
@@ -51,16 +62,33 @@ const daemonApi: AnswersApi = {
   async rewrite(sessionId, key, joe, answer) {
     return normaliseStore(await invoke<unknown>("answers_rewrite_question", { sessionId, key, joe, answer }));
   },
-  async send(req) {
-    const out = await invoke<{ thread: AskThread; state: unknown }>("answers_thread_send", {
-      sessionId: req.sessionId,
-      key: req.key,
-      question: req.question,
-      cwd: req.cwd,
-      aboutQuestion: req.aboutQuestion ?? null,
-      aboutAnswer: req.aboutAnswer ?? null,
-    });
-    return { thread: out.thread, state: normaliseStore(out.state) };
+  async send(req, onDelta) {
+    const streamId = onDelta ? crypto.randomUUID() : null;
+    // Listening starts before the send, so no early delta is missed.
+    const unlisten = streamId
+      ? await getTransport()
+        .listen<ThreadDelta>("answers-thread-delta", (d) => {
+          if (d?.stream_id === streamId && typeof d.text === "string") onDelta!(d.text);
+        })
+        .catch(() => () => {})
+      : () => {};
+    try {
+      const out = await invoke<{ thread: AskThread; state: unknown }>("answers_thread_send", {
+        sessionId: req.sessionId,
+        key: req.key,
+        question: req.question,
+        cwd: req.cwd,
+        aboutQuestion: req.aboutQuestion ?? null,
+        aboutAnswer: req.aboutAnswer ?? null,
+        streamId,
+      });
+      return { thread: out.thread, state: normaliseStore(out.state) };
+    } finally {
+      unlisten();
+    }
+  },
+  async prewarm(sessionId, key) {
+    await invoke("answers_thread_prewarm", { sessionId, key });
   },
 };
 

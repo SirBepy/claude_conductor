@@ -23,7 +23,7 @@ import { openPalette, closePalette } from "../../command-palette/palette-ui";
 import type { PaletteCommand } from "../../command-palette/types";
 import type { AskThread } from "../../../types/ipc.generated";
 import {
-  historyGroups, isUnread, nextUnread, ownText, threadFollowUps, threadText, withoutSuggestion,
+  historyGroups, isUnread, nextUnread, ownText, parseQuestionReply, threadFollowUps, threadText, withoutSuggestion,
   type AnswerItem, type AnswerSide, type AnswerStore,
 } from "../../../shared/chat/dashboard/answers-model";
 import type { ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
@@ -136,6 +136,8 @@ export class AnswersCard {
   private wiredFor: string | null = null;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  /** The reply so far of a question in flight, per thread key, as it streams. */
+  private streaming = new Map<string, string>();
   /** Refits a tall thread when the dashboard's height changes. */
   private roomWatch: ResizeObserver | null = null;
   private readonly onClick = (e: MouseEvent): void => this.click(e);
@@ -197,6 +199,7 @@ export class AnswersCard {
       this.focusOnDraw = false;
       this.focusInput();
     }
+    this.prewarm(isNew(key) ? null : key);
     this.deps.onSideChange();
   }
 
@@ -489,7 +492,16 @@ export class AnswersCard {
     const failedQ = this.failedAsk.get(key);
     if (failedQ) parts.push(`<div class="msg user ax-q">${renderMarkdown(failedQ, true)}</div>`);
     const asking = this.pending.get(key);
-    if (asking) parts.push(`<div class="msg user ax-q">${renderMarkdown(asking, true)}</div>`, `<div class="ax-thinking"><span class="ax-spin"></span>reading...</div>`);
+    if (asking) {
+      parts.push(`<div class="msg user ax-q">${renderMarkdown(asking, true)}</div>`);
+      // A new question's reply opens with the QUESTION/VERDICT lines the card
+      // parses; they stay hidden while it streams, as they do once it lands.
+      const so = this.streaming.get(key) ?? "";
+      const live = isNew(key) ? parseQuestionReply(so) : { verdict: null, body: so };
+      parts.push(live.body.trim()
+        ? `<div class="ax-live">${bubble(live.verdict ?? "", live.body)}</div>`
+        : `<div class="ax-thinking"><span class="ax-spin"></span>reading...</div>`);
+    }
     const err = this.errors.get(key);
     if (err) parts.push(`<div class="ax-error">${esc(err)}</div>`);
     if (!parts.length) {
@@ -561,10 +573,12 @@ export class AnswersCard {
       const html = this.threadBodyHtml();
       // Only new content scrolls to the bottom, so a flush never yanks Joe back while he reads up.
       if (body.dataset.html !== html) {
+        // A streaming reply redraws often: follow it down only if Joe was at the bottom.
+        const following = !body.dataset.html || body.scrollHeight - body.scrollTop - body.clientHeight < 40;
         body.dataset.html = html;
         body.innerHTML = html;
         this.deps.decorate(body);
-        body.scrollTop = body.scrollHeight;
+        if (following) body.scrollTop = body.scrollHeight;
       }
     }
     this.wire?.sync();
@@ -673,6 +687,14 @@ export class AnswersCard {
     this.anim = "ax-t-slide-open";
     this.render();
     this.focusInput();
+    this.prewarm(item.key);
+  }
+
+  /** Opening a thread starts its warm process while Joe types (daemon ask/warm.rs). */
+  private prewarm(key: string | null): void {
+    const sid = this.deps.sessionId();
+    if (!sid) return;
+    answersApi().prewarm?.(sid, key)?.catch((err) => console.warn("[answers-card] prewarm failed", err));
   }
 
   private newQuestion(): void {
@@ -687,6 +709,7 @@ export class AnswersCard {
     this.anim = "ax-t-slide-open";
     this.render();
     this.focusInput();
+    this.prewarm(null);
   }
 
   /** Set on the zone's own host, so the thread grows without a re-render and its
@@ -763,6 +786,11 @@ export class AnswersCard {
     const wasRead = item ? !this.unread(item) : false;
     const card = isNew(key) ? this.about.get(key) : undefined;
     this.render();
+    const onDelta = (text: string): void => {
+      if (this.disposed || this.deps.sessionId() !== sid || !this.pending.has(key)) return;
+      this.streaming.set(key, text);
+      if (this.thread === key) this.render();
+    };
     void answersApi().send({
       sessionId: sid,
       key: isNew(key) ? null : key,
@@ -772,8 +800,9 @@ export class AnswersCard {
       // would tell the Ask sidecar a truncated question.
       aboutQuestion: card?.about ?? (item?.provisional ? item.typed : item?.question),
       aboutAnswer: item ? [item.verdict, item.text].filter(Boolean).join("\n") : undefined,
-    })
+    }, onDelta)
       .then(({ thread, state }) => {
+        this.streaming.delete(key);
         if (this.disposed || this.deps.sessionId() !== sid) return;
         this.pending.delete(key);
         this.upsertThread(thread, state);
@@ -811,6 +840,7 @@ export class AnswersCard {
         this.deps.onSideChange();
       })
       .catch((err) => {
+        this.streaming.delete(key);
         if (this.disposed) return;
         this.pending.delete(key);
         this.errors.set(key, String((err as { message?: string })?.message ?? err));

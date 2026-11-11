@@ -46,6 +46,9 @@ const DELIBERATELY_UNHANDLED_SNAKE = {
 /** Kebab-case event names a `src/` listener subscribes to that are
  *  intentionally absent from `GLOBAL_EVENT_MAP`, each with the reason. */
 const DESKTOP_ONLY_KEBAB = {
+  "answers-thread-delta":
+    "the Answers card that streams it is drawn only in Dashboard view, which the " +
+    "phone never shows, so its deltas stay off the phone's global stream.",
   "settings-changed": "Tauri-only ev.listen; phone has no window.__TAURI__.",
   "daemon-status-changed": "Tauri-only ev.listen; phone has no window.__TAURI__.",
   "permission-requested": "Tauri-only ev.listen; delivered to the phone via the prompt poll instead.",

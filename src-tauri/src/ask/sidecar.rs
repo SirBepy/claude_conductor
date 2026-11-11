@@ -1,5 +1,6 @@
-//! Spawns the read-only `claude -p` sidecar that answers one Ask question.
-//! Gate order: drift owns the NotLoggedIn message, so it runs before
+//! The read-only `claude -p` sidecar: its gates, its arguments and its prompt.
+//! Answers-card threads run it as warm processes (`warm.rs`); a one-shot job
+//! (the decisions checkup) runs `run_readonly`. Gate order: drift owns the NotLoggedIn message, so it runs before
 //! credentials and billing.
 
 use crate::chat::billing::check_metered_billing;
@@ -39,7 +40,7 @@ const BARE_RUN: [&str; 2] = ["--safe-mode", "--strict-mcp-config"];
 /// The actual read-only guarantee. `Task` too: a subagent would not inherit
 /// it. `WebSearch`/`WebFetch` are denied, not merely left un-pre-approved:
 /// no `--permission-prompt-tool`/`--permission-mode` is set on
-/// this spawn (see `ask()` below), so an un-pre-approved tool that isn't
+/// a sidecar spawn (see `cli_args` below), so an un-pre-approved tool that isn't
 /// explicitly denied would still run silently in this non-interactive `-p`
 /// session instead of being blocked. Joe decided 2026-10-19 to drop both -
 /// 16 Ask sessions since 2026-09-22 made zero WebSearch/WebFetch calls - so
@@ -51,6 +52,7 @@ const DENIED_TOOLS: &str =
     "Edit Write NotebookEdit Bash BashOutput KillShell PowerShell Task WebSearch WebFetch";
 
 /// What came back from one sidecar run.
+#[derive(Debug)]
 pub struct AskAnswer {
     pub text: String,
     /// The sidecar's session id, so the next question can `--resume` it.
@@ -109,7 +111,7 @@ You can read, and only read. Never propose that you will change something yourse
 }
 
 /// The full `claude` CLI argv for one Ask run (excluding the binary path
-/// itself and stdio/env/cwd, which `ask()` sets on the `Command` directly).
+/// itself and stdio/env/cwd, which `Gate::command` sets on the `Command`).
 /// Extracted so a test can pin exactly what reaches the process - including
 /// that nothing here sets `--permission-prompt-tool`/`--permission-mode`/
 /// `--dangerously-skip-permissions`, which would let a tool absent from
@@ -120,24 +122,8 @@ You can read, and only read. Never propose that you will change something yourse
 /// sessions (a follow-up resumes them); a one-shot job that only returns text,
 /// like the decisions checkup, does not.
 fn cli_args(prompt: &str, resume: Option<&str>, new_session_id: &str, persist: bool) -> Vec<String> {
-    let mut args = vec![
-        "-p".to_string(),
-        prompt.to_string(),
-        "--model".to_string(),
-        ASK_MODEL.to_string(),
-        "--effort".to_string(),
-        ASK_EFFORT.to_string(),
-        "--tools".to_string(),
-        TOOL_SET.to_string(),
-        "--allowedTools".to_string(),
-        ALLOWED_TOOLS.to_string(),
-        "--disallowedTools".to_string(),
-        DENIED_TOOLS.to_string(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-    ];
-    args.extend(BARE_RUN.iter().map(|a| a.to_string()));
+    let mut args = vec!["-p".to_string(), prompt.to_string()];
+    args.extend(readonly_args());
     match resume {
         Some(id) => {
             args.push("--resume".to_string());
@@ -154,34 +140,41 @@ fn cli_args(prompt: &str, resume: Option<&str>, new_session_id: &str, persist: b
     args
 }
 
-/// Runs one question. `resume` continues an existing sidecar thread; `None`
-/// starts a fresh one with `new_session_id`.
-pub async fn ask(
-    question: &str,
-    transcript: Option<&Path>,
-    cwd: Option<&str>,
-    resume: Option<&str>,
-    new_session_id: &str,
-) -> Result<AskAnswer> {
-    let prompt = build_prompt(question, transcript, cwd);
-    run_readonly("Ask", &prompt, resume, new_session_id, None, true).await
+/// Model, effort, the read-only tool set and the bare run: everything a sidecar
+/// run needs whether it takes one prompt (`cli_args`) or stays up for a thread
+/// (`warm.rs`).
+pub(crate) fn readonly_args() -> Vec<String> {
+    let mut args = vec![
+        "--model".to_string(),
+        ASK_MODEL.to_string(),
+        "--effort".to_string(),
+        ASK_EFFORT.to_string(),
+        "--tools".to_string(),
+        TOOL_SET.to_string(),
+        "--allowedTools".to_string(),
+        ALLOWED_TOOLS.to_string(),
+        "--disallowedTools".to_string(),
+        DENIED_TOOLS.to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+    ];
+    args.extend(BARE_RUN.iter().map(|a| a.to_string()));
+    args
 }
 
-/// Runs one read-only sonnet `claude -p` job with a caller-built `prompt` and
-/// returns its final text. Everything `ask` guarantees holds for any caller
-/// (subscription accounts only, the billing gate, Read/Grep/Glob and nothing
-/// that writes or reaches the network). `account_id` pins the account the job
-/// bills, else the default one is used; `what` names the caller in errors.
-/// `persist` false leaves no session behind (see `cli_args`), which is only
-/// right for a caller that never resumes.
-pub async fn run_readonly(
-    what: &str,
-    prompt: &str,
-    resume: Option<&str>,
-    new_session_id: &str,
-    account_id: Option<&str>,
-    persist: bool,
-) -> Result<AskAnswer> {
+/// An account that passed every gate a read-only sidecar run needs: a
+/// subscription account (never API credit), no drift, live credentials, no
+/// metered-billing env.
+pub(crate) struct Gate {
+    pub account_id: String,
+    spawn_env: crate::accounts::env::SpawnEnv,
+    run_dir: std::path::PathBuf,
+}
+
+/// Resolves `account_id` (else the default account) and runs the gates.
+/// `what` names the caller in errors.
+pub(crate) fn prepare(what: &str, account_id: Option<&str>) -> Result<Gate> {
     let account = match account_id {
         Some(id) => {
             let default_id = crate::settings::paths::settings_file()
@@ -199,20 +192,46 @@ pub async fn run_readonly(
     let spawn_env = crate::accounts::env::SpawnEnv::for_account(&account.config_dir);
     let effective_env = spawn_env.effective_env(std::env::vars());
     check_metered_billing(&|k| effective_env.get(k).cloned()).map_err(|e| anyhow!("{e}"))?;
-
     // Run in the app-data dir, never the repo, so a stray CLAUDE.md can't be
     // picked up as instructions for a question that only needed to read.
     let run_dir = crate::settings::paths::ensure_data_dir().context("resolve app-data dir")?;
+    Ok(Gate { account_id: account.id, spawn_env, run_dir })
+}
 
-    let mut cmd = tokio::process::Command::new(crate::util::claude_bin::program());
-    cmd.args(cli_args(prompt, resume, new_session_id, persist));
-    cmd.current_dir(&run_dir)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    spawn_env.apply_tokio(&mut cmd);
-    hide_console_tokio(&mut cmd);
-    cmd.kill_on_drop(true);
+impl Gate {
+    /// A `claude` command for this account with `args`, stdout and stderr piped;
+    /// the caller sets stdin.
+    pub(crate) fn command(&self, args: Vec<String>) -> tokio::process::Command {
+        let mut cmd = tokio::process::Command::new(crate::util::claude_bin::program());
+        cmd.args(args);
+        cmd.current_dir(&self.run_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        self.spawn_env.apply_tokio(&mut cmd);
+        hide_console_tokio(&mut cmd);
+        cmd.kill_on_drop(true);
+        cmd
+    }
+}
+
+/// Runs one read-only sonnet `claude -p` job with a caller-built `prompt` and
+/// returns its final text. Everything `ask` guarantees holds for any caller
+/// (subscription accounts only, the billing gate, Read/Grep/Glob and nothing
+/// that writes or reaches the network). `account_id` pins the account the job
+/// bills, else the default one is used; `what` names the caller in errors.
+/// `persist` false leaves no session behind (see `cli_args`), which is only
+/// right for a caller that never resumes.
+pub async fn run_readonly(
+    what: &str,
+    prompt: &str,
+    resume: Option<&str>,
+    new_session_id: &str,
+    account_id: Option<&str>,
+    persist: bool,
+) -> Result<AskAnswer> {
+    let gate = prepare(what, account_id)?;
+    let mut cmd = gate.command(cli_args(prompt, resume, new_session_id, persist));
+    cmd.stdin(std::process::Stdio::null());
 
     let mut child = cmd.spawn().context("spawn claude")?;
     crate::util::process::guard_orphan_tree(&child);

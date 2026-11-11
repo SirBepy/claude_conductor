@@ -1,4 +1,5 @@
 // Reviewed 2026-11-11 (dashboard Drafts card): a new left-column zone draws write_draft drafts and the dashboard reads the drafts store; nothing this spec asserts changed, and it passes.
+// Reviewed 2026-11-11 (warm Ask threads): answers-card.ts streams a reply and calls answers_thread_prewarm on open (an unmocked call only logs a warning); this spec passes unchanged.
 // asserts: src/views/sessions/permission-modal/question-ui-render.ts, src/views/sessions/question-ask.ts, src/views/sessions/chat-dashboard/answers-card.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/permission-modal-shell.css
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";

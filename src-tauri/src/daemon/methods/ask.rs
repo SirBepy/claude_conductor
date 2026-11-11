@@ -5,7 +5,7 @@
 
 use super::super::rpc::{Router, RpcError};
 use super::super::state::DaemonState;
-use crate::ask::{sidecar, store};
+use crate::ask::{sidecar, store, turns, warm};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -20,17 +20,17 @@ fn now_ms() -> i64 {
 static SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Runs one question and persists both sides. `thread_id` `None` starts a new
-/// thread; an existing `sidecar_session_id` is what makes a follow-up a resume.
-/// `context` is put ahead of the question in the prompt of a thread's FIRST
-/// question only (a follow-up resumes a session that already holds it) and is
-/// never stored, so the thread shows what Joe typed. The Answers card uses it to
-/// say which answer or question card a thread is about.
+/// thread. `context` says which answer or question card a thread is about: it
+/// opens a new thread's first prompt and the seed of a recycled one, and is never
+/// stored, so the thread shows what Joe typed. The question runs on the thread's
+/// warm process (`ask::warm`), and `on_delta` gets the reply so far as it streams.
 pub(crate) async fn ask_send_with(
     session_id: &str,
     thread_id: Option<&str>,
     question: &str,
     cwd: Option<&str>,
     context: Option<&str>,
+    on_delta: &mut (dyn FnMut(&str) + Send),
 ) -> Result<store::AskThread, String> {
     let question = question.trim();
     if question.is_empty() {
@@ -38,26 +38,32 @@ pub(crate) async fn ask_send_with(
     }
 
     let threads = store::load(session_id);
-    let (thread_id, resume) = match thread_id {
+    let (thread_id, resume, history) = match thread_id {
         Some(id) => {
             let t = threads.iter().find(|t| t.id == id).ok_or_else(|| format!("no Ask thread {id}"))?;
-            (t.id.clone(), t.sidecar_session_id.clone())
+            (t.id.clone(), t.sidecar_session_id.clone(), t.messages.clone())
         }
-        None => (uuid::Uuid::new_v4().to_string(), None),
+        None => (uuid::Uuid::new_v4().to_string(), None, Vec::new()),
     };
     let transcript = crate::chat::history::locate_transcript(session_id, cwd).ok();
-    let fresh_id = uuid::Uuid::new_v4().to_string();
+    let context = context.map(str::trim).filter(|c| !c.is_empty());
+    let lead = context.map(|c| format!("{c}\n\n")).unwrap_or_default();
 
-    let prompted = match context.map(str::trim).filter(|c| !c.is_empty()) {
-        Some(c) if resume.is_none() => format!("{c}\n\n{question}"),
-        _ => question.to_string(),
+    let first = sidecar::build_prompt(&format!("{lead}{question}"), transcript.as_deref(), cwd);
+    let (follow, seed) = if resume.is_none() {
+        turns::start(&thread_id, transcript.as_deref());
+        (first.clone(), first.clone())
+    } else {
+        let since = turns::since_last(&thread_id, transcript.as_deref());
+        let seed_question = format!("{lead}{}{since}His new question:\n{question}", earlier(&history));
+        (
+            format!("{since}His follow-up:\n{question}"),
+            sidecar::build_prompt(&seed_question, transcript.as_deref(), cwd),
+        )
     };
-    let answer = sidecar::ask(
-        &prompted,
-        transcript.as_deref(),
-        cwd,
-        resume.as_deref(),
-        &fresh_id,
+    let answer = warm::send(
+        warm::Turn { thread_id: &thread_id, resume: resume.as_deref(), first: &first, follow: &follow, seed: &seed },
+        on_delta,
     )
     .await
     .map_err(|e| format!("{e:#}"))?;
@@ -92,6 +98,29 @@ pub(crate) async fn ask_send_with(
     Ok(out)
 }
 
+/// The thread so far, for a recycled process that starts without it. The newest
+/// exchanges win when it is long; the tool output the old process read is not
+/// carried, only what was said.
+fn earlier(history: &[store::AskMessage]) -> String {
+    const MAX: usize = 12_000;
+    let mut lines: Vec<String> = Vec::new();
+    let mut total = 0;
+    for m in history.iter().rev() {
+        let who = if m.role == "user" { "Joe" } else { "You" };
+        let line = format!("{who}: {}", m.text.trim());
+        if total + line.len() > MAX && !lines.is_empty() {
+            break;
+        }
+        total += line.len() + 1;
+        lines.push(line);
+    }
+    if lines.is_empty() {
+        return String::new();
+    }
+    lines.reverse();
+    format!("Earlier in this thread:\n{}\n\n", lines.join("\n"))
+}
+
 pub fn register_ask(router: &mut Router, _state: Arc<DaemonState>) {
     #[derive(serde::Deserialize)]
     struct SessionOnly {
@@ -111,13 +140,24 @@ mod tests {
 
     #[tokio::test]
     async fn ask_send_rejects_empty_question() {
-        let err = ask_send_with("sid", None, "   ", None, None).await.unwrap_err();
+        let err = ask_send_with("sid", None, "   ", None, None, &mut |_: &str| {}).await.unwrap_err();
         assert!(err.contains("empty"), "{err}");
     }
 
     #[tokio::test]
     async fn ask_send_rejects_unknown_thread_before_spawning() {
-        let err = ask_send_with("sid", Some("no-such-thread"), "hi", None, None).await.unwrap_err();
+        let err = ask_send_with("sid", Some("no-such-thread"), "hi", None, None, &mut |_: &str| {}).await.unwrap_err();
         assert!(err.contains("no Ask thread"), "{err}");
+    }
+
+    #[test]
+    fn a_recycled_thread_is_seeded_with_what_was_said_newest_kept() {
+        let m = |role: &str, text: String| store::AskMessage { role: role.to_string(), text, ts: 0 };
+        assert_eq!(earlier(&[]), "");
+        let short = earlier(&[m("user", "why?".into()), m("assistant", "Because.".into())]);
+        assert_eq!(short, "Earlier in this thread:\nJoe: why?\nYou: Because.\n\n");
+        let long: Vec<_> = (0..20).map(|i| m("user", format!("{i} {}", "x".repeat(1_000)))).collect();
+        let out = earlier(&long);
+        assert!(out.contains("Joe: 19 ") && !out.contains("Joe: 0 "), "the newest exchanges are kept");
     }
 }
