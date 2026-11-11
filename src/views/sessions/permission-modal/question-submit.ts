@@ -50,6 +50,14 @@ function syncQuestionProgress(sessionId: string | undefined, promptId: string, q
 /** Prompt ids whose answer or skip is waiting out its grace window. */
 const heldForGrace = new Set<string>();
 
+/** The selected chat's composer draft as a comparable string, "" when the chat is
+ *  not on screen or its box is empty. */
+export function composerDraftSignature(sid: string | undefined): string {
+  if (!sid || state.selectedId !== sid || !state.heldMessages) return "";
+  const attach = state.heldMessages.getAttached();
+  return attach && !attach.isDraftEmpty() ? JSON.stringify(attach.getDraftBlocks()) : "";
+}
+
 /** One line of what was picked or typed, for the Undo button's tooltip. */
 function answerSummary(answers: Answers): string {
   return Object.values(answers)
@@ -175,7 +183,11 @@ export async function showQuestionCard(
   const daemonCard = payload.daemon_card === true;
   // The answer's real delivery. Runs after the grace window, so everything that
   // marks the prompt answered waits with it and an Undo leaves the card as it was.
-  const deliverAnswer: QuestionUIOpts["onSubmit"] = async (answers, extras) => {
+  const deliverAnswer = async (
+    answers: Answers,
+    extras: Parameters<QuestionUIOpts["onSubmit"]>[1],
+    draftAtClick: string,
+  ): Promise<void> => {
     // Mark the slot answered NOW, synchronously, before any
     // await below - the daemon's `prompt-resolved` poll that would
     // otherwise clear this slot can lag a full round trip behind a
@@ -246,7 +258,10 @@ export async function showQuestionCard(
       // Unrelated to the card - staged as its own item so it joins any
       // already-queued prose, never merged with the card's own extras.
       const attach = state.heldMessages.getAttached();
-      if (attach && !attach.isDraftEmpty()) {
+      // Only the box exactly as it was when Submit was pressed rides along. The
+      // composer stays live through the grace window, so anything different now
+      // is a next message still being typed: it stays in the box, unsent.
+      if (attach && !attach.isDraftEmpty() && composerDraftSignature(sid) === draftAtClick) {
         state.heldMessages.stage(attach.getDraftBlocks());
         attach.clearComposer();
       }
@@ -317,7 +332,10 @@ export async function showQuestionCard(
     if (fromSub && payload.session_id) await tellSubSkipped(payload.session_id);
   };
 
-  // Several chats can have a card at once; each holds its own answer.
+  // Several chats can have a card at once; each holds its own answer. The key is the
+  // chat id, the same one the chat's composer holds its send under: after a chat
+  // switch the composer carries this card's Undo button and Ctrl+Z, and a send in
+  // the chat fires the held answer first.
   const graceKey = shownOn ?? payload.session_id ?? payload.id;
   // The card stays frozen on screen for the window with the Undo over the button
   // that was pressed; the fire closes it, and Undo hands it back untouched.
@@ -371,7 +389,10 @@ export async function showQuestionCard(
       syncQuestionProgress(payload.session_id, payload.id, questions, draft);
     },
     holdOnSubmit: true,
-    onSubmit: (answers, extras, held) => withGrace(graceLabel("Answer", answerSummary(answers)), held, () => deliverAnswer(answers, extras)),
+    onSubmit: (answers, extras, held) => {
+      const draftAtClick = composerDraftSignature(askerId);
+      return withGrace(graceLabel("Answer", answerSummary(answers)), held, () => deliverAnswer(answers, extras, draftAtClick));
+    },
     onCancel: (held) => withGrace("Skipping this question", held, deliverSkip),
   });
 }
