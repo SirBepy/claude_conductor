@@ -18,7 +18,7 @@ const BASE: ScheduledItem = {
   id: "base",
   kind: {
     type: "new_chat", cwd: "C:/Projects/alpha", model: "claude-opus-5", effort: "high",
-    account_id: null, placeholder_id: null, character_id: null, auto_accept: false,
+    account_id: null, placeholder_id: null, character_id: null, auto_accept: false, subchats_on: false,
   },
   prompt: "x",
   fire_at: today(12),
