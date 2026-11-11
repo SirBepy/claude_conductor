@@ -22,8 +22,7 @@ import "./builtins/register";
 import "./caret-popup/popup.css";
 import { ComposerAttachments, type Attachment, type PastedBlock } from "./composer-attachments";
 import { loadDraft, saveDraft, clearDraft } from "./composer-persistence";
-import { recordSent, moveSentOutbox, popLastSent } from "./sent-outbox";
-import { startGrace, undoGrace, graceLabel, remountGraceBar, flushGraceOwnedBy, rekeyGrace } from "./send-grace";
+import { recordSent, moveSentOutbox } from "./sent-outbox";
 import { ComposerDraftSync } from "./composer-draft-sync";
 import { openFrozenChoice } from "./composer-frozen-choice";
 import { ComposerUndo } from "./composer-undo";
@@ -178,7 +177,6 @@ export class Composer {
       hasHeld: opts.hasHeld,
       popLastHeld: opts.popLastHeld,
       sendQueuedNow: opts.sendQueuedNow,
-      undoPendingSend: () => undoGrace(this.graceKey()),
     });
     this.cv = new ComposerVoice({
       onAfterEdit: () => { this.autoResize(); this.updateHighlight(); this.updateSendState(); this.persistDraft(); this.opts.onDraftActivity?.(); },
@@ -259,10 +257,6 @@ export class Composer {
   }
 
   destroy(): void {
-    // A send still inside its Undo window goes out now: its Undo restores into
-    // this composer's DOM, which is about to be gone, so the button would only
-    // cancel the send and show the text nowhere.
-    flushGraceOwnedBy(this);
     clearLightboxComposerBridge(this.lightboxBridge);
     this.strayInput.destroy();
     document.removeEventListener("visibilitychange", this._visibilityHandler);
@@ -298,9 +292,6 @@ export class Composer {
       this.att.migrateSession(prevId!, id);
       moveSentOutbox(prevId!, id);
     }
-    // A held send follows its chat across the rename (timer, Undo button and
-    // Ctrl+Z all key on the id); render() below moves the button to the new DOM.
-    if (isRename) rekeyGrace(prevId!, id);
     this.sessionId = id;
     this.baseReadOnly = !!opts.readOnly;
     this.disabled = this.baseReadOnly || !!this.opts.isOffline?.();
@@ -451,9 +442,6 @@ export class Composer {
     this.scopeWarn.bind(this.root.querySelector<HTMLElement>(".composer-scope-warning"));
     this.root.querySelector(".composer-edit-cancel")?.addEventListener("click", () => this.cancelScheduledEdit());
     this.renderEditBar();
-    // The rebuilt DOM dropped a still-pending send's Undo button; put it back.
-    const graceSlot = this.root.querySelector<HTMLElement>(".composer-send-wrap");
-    if (graceSlot) remountGraceBar(this.graceKey(), graceSlot);
     this.sendBtn = this.root.querySelector<HTMLButtonElement>(".composer-send");
     this.micBtn = this.root.querySelector<HTMLButtonElement>(".composer-mic");
     this.att.bind(this.root);
@@ -861,41 +849,19 @@ export class Composer {
     }
 
     if (empty) return;
-    this.sending = true;
     const blocks = this.undo.buildBlocks(text);
     const savedAttachments = this.att.attachments;
     const savedPastedBlocks = this.att.pastedBlocks;
+    // The box is empty from here on, so a second Enter is a no-op by itself.
+    // `sending` stays false across onSend on purpose: a first send that spawns a
+    // chat can take seconds, and the next message must not be dropped silently
+    // meanwhile.
     this.clearComposer(false);
-    const slot = this.root.querySelector<HTMLElement>(".composer-send-wrap");
-    const fire = async (): Promise<void> => {
-      try {
-        await this.opts.onSend(blocks);
-      } catch (err) {
-        console.error("[Composer] onSend failed", err);
-        this.restoreDraft(text, savedAttachments, savedPastedBlocks);
-      }
-    };
     try {
-      // Held for the grace window so an accidental Enter can be taken back
-      // before claude has seen it; without a Send button to cover it sends now.
-      if (!slot) await fire();
-      else {
-        await startGrace({
-          key: this.graceKey(),
-          label: graceLabel("Sending", text),
-          mount: slot,
-          owner: this,
-          fire,
-          onUndo: () => {
-            // The text goes back in front of whatever has been typed since,
-            // and out of the Ctrl+Z outbox, which would offer it a second time.
-            if (this.sessionId) popLastSent(this.sessionId);
-            this.restoreDraft(text, savedAttachments, savedPastedBlocks);
-          },
-        });
-      }
-    } finally {
-      this.sending = false;
+      await this.opts.onSend(blocks);
+    } catch (err) {
+      console.error("[Composer] onSend failed", err);
+      this.restoreDraft(text, savedAttachments, savedPastedBlocks);
     }
   }
 
@@ -925,14 +891,6 @@ export class Composer {
     if (label) label.textContent = edit ? `Editing scheduled message (${edit.label}). Send keeps the schedule.` : "";
   }
 
-  /** Chat id the grace window is keyed on (every real composer has one: the draft
-   *  pane's is its placeholder id). A card answer held on the same chat shares this
-   *  key on purpose: the composer carries its Undo button across a chat switch, and a
-   *  newer send fires the older held action first. */
-  private graceKey(): string {
-    return this.sessionId ?? "composer";
-  }
-
   /** Focus the textarea. Public so the held-messages controller can return
    * focus here after closing the unsent-messages dropdown. */
   focus(): void {
@@ -943,9 +901,9 @@ export class Composer {
    * the held-messages controller can clear after bundling the draft.
    * `refreshStrip` false is for the two real-send paths only: they clear at send
    * time, while the chat still reads as finished until the daemon answers, so a
-   * refresh would bring the quick-reply strip back under the "Sending... Undo"
-   * bar. Every other clear (schedule, discard, slash command) must refresh, or
-   * the strip stays hidden over an empty box. */
+   * refresh would bring the quick-reply strip back for that gap. Every other
+   * clear (schedule, discard, slash command) must refresh, or the strip stays
+   * hidden over an empty box. */
   clearComposer(refreshStrip = true): void {
     if (this.textarea) this.textarea.value = "";
     this.autoResize();
@@ -965,11 +923,11 @@ export class Composer {
     }
   }
 
-  /** Undo a `clearComposer()` after a failed send or an Undo press: puts the
-   * text, attachments and pasted blocks back, in front of anything typed since. */
+  /** Undo a `clearComposer()` after a failed send: puts the text, attachments
+   * and pasted blocks back, in front of anything typed since. */
   private restoreDraft(text: string, attachments: Attachment[], pastedBlocks: PastedBlock[]): void {
-    // In front of anything typed since the clear (the grace window leaves the
-    // box live), so Undo never overwrites what the user carried on writing.
+    // In front of anything typed since the clear (the box stays live while the
+    // send is in flight), so a failure never overwrites what the user carried on writing.
     const typed = this.textarea?.value ?? "";
     if (this.textarea) {
       this.textarea.value = typed.trim() ? `${text}

@@ -8,9 +8,7 @@ import { createQuestionCardRenderer } from "./question-ui-render";
 import { cardPaddedScroller } from "./question-ui-layout";
 import type { QuestionRenderState } from "./question-ui-render";
 import { handleQuestionCardKey } from "./question-keyboard";
-import type { Answers, HeldCard, OptionNotes, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
-import { freezeCard, SKIP_CONTROLS, SUBMIT_CONTROLS } from "./question-ui-hold";
-import type { CardFreeze } from "./question-ui-hold";
+import type { Answers, OptionNotes, Question, QuestionDraft, QuestionUIOpts, Selection } from "./types";
 import {
   isQuestionAnswered,
   computeAnswer,
@@ -139,7 +137,7 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     // attachments strip instead when it still owns focus.
     onChange: () => {
       // An upload can finish after the card was answered or closed.
-      if (tornDown || frozen) return;
+      if (tornDown) return;
       const active = document.activeElement as HTMLElement | null;
       const isTyping = Boolean(active) && host.contains(active)
         && (active!.classList.contains("prompt-q__other-input") || active!.classList.contains("prompt-extra-input")
@@ -171,7 +169,6 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     // The Settings popup covers this card: Ctrl+Enter or an arrow typed there
     // must not answer or page a question nobody can see.
     if (isSettingsPopupOpen()) return;
-    if (frozen) return;
     if (e.key === "Escape") {
       handleEscape();
       return;
@@ -216,7 +213,6 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
    *  fb230ef3's scroll-yank incident), so typing and any tab advance are
    *  skipped while a field is focused; everything else adopts freely. */
   const mergeFreshDraft = (remote: QuestionDraft): void => {
-    if (frozen) return;
     const active = document.activeElement as HTMLElement | null;
     const typingOther = Boolean(active) && host.contains(active) && active!.classList.contains("prompt-q__other-input");
     const typingExtra = Boolean(active) && host.contains(active) && active!.classList.contains("prompt-extra-input");
@@ -276,14 +272,9 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   // second pass would cancel the NEXT card's debounced push and restore this
   // card's saved scroll/padding over the live one.
   let tornDown = false;
-  // Set while a submitted card waits out the grace window (opts.holdOnSubmit):
-  // nothing below may rebuild or change the card until it is released or thawed.
-  let frozen: CardFreeze | null = null;
   const teardown = () => {
     if (tornDown) return;
     tornDown = true;
-    frozen?.thaw();
-    frozen = null;
     backDisposer?.();
     backDisposer = null;
     slashPopup.destroyAll();
@@ -340,7 +331,6 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
 
   let awaitingUploads = false;
   const submit = () => {
-    if (frozen) return;
     // A pasted image still uploading has no path yet and would be dropped
     // from the answer, so hold the submit until it lands. The card stays up
     // meanwhile with the chip's spinner showing why.
@@ -364,38 +354,13 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
       }
     });
     const extras = { additionalMessage: state.additionalMessage.trim(), attachments: [...auqAttachments.attachments] };
-    if (opts.holdOnSubmit) {
-      void opts.onSubmit(answers, extras, holdCard(SUBMIT_CONTROLS));
-      return;
-    }
     teardown();
     void opts.onSubmit(answers, extras);
   };
 
   const cancel = () => {
-    if (frozen) return;
-    if (opts.holdOnSubmit) {
-      void opts.onCancel(holdCard(SKIP_CONTROLS));
-      return;
-    }
     teardown();
     void opts.onCancel();
-  };
-
-  /** Freezes the card in place so the caller can lay an Undo over `controls`. */
-  const holdCard = (controls: string[]): HeldCard => {
-    const f = freezeCard(host, controls);
-    frozen = f;
-    return {
-      mount: f.cover,
-      release: teardown,
-      thaw: () => {
-        if (tornDown) return false;
-        f.thaw();
-        if (frozen === f) frozen = null;
-        return true;
-      },
-    };
   };
 
   // Escape must never skip the question: a skipped card sends NO answer at
@@ -417,7 +382,6 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
     // registration; consume it so the fall-through below can't step the
     // view-navigation stack behind the open image.
     if (document.querySelector(`.${LIGHTBOX_OVERLAY_CLASS}`)) return true;
-    if (frozen) return true;
     // Back must never skip the question: a skipped card sends NO answer, and
     // Android's back is far too easy to hit by accident to spend a prompt on.
     // It collapses the card to its bar instead, back to the chat with the
@@ -474,6 +438,6 @@ export function renderQuestionUI(opts: QuestionUIOpts): void {
   };
 
   renderer.render();
-  disposeViewportWatch = onMobileViewportChange(() => { if (!frozen) renderer.onViewportCrossing(); });
+  disposeViewportWatch = onMobileViewportChange(() => renderer.onViewportCrossing());
   confirmQuestionRendered(opts.id, opts.sessionId);
 }

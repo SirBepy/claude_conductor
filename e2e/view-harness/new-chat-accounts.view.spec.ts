@@ -1,3 +1,4 @@
+// Reviewed 2026-11-11: the Undo hold on sends and card answers is gone (a send or answer goes out at once); nothing this spec asserts depends on it, and it passes.
 // Reviewed 2026-11-09: the desktop header no longer renders the three-dots (#viewMoreBtn, phone only now); this spec waits on the header and opens things with the keyboard instead.
 // asserts: src/views/sessions/new-chat-config.ts, src/views/sessions/pending-pane-composer.ts, src/views/sessions/account-picker-logic.ts
 import { test, expect, type Page } from "@playwright/test";

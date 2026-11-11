@@ -1,3 +1,4 @@
+// Reviewed 2026-11-11 (undo-send removed): a send goes out at once now; nothing this spec asserts depends on the old hold, and its "sub's in-place view" test fails the same way on pristine HEAD.
 // Reviewed 2026-11-11 (phone keyboard): opening a chat no longer focuses the composer at phone width, and setDraftText takes an optional focus flag; nothing this spec asserts changed. Its "sub's in-place view never shows /close" test fails on desktop and phone alike (waiting for the sub-list popover row), so not from this phone-only change.
 // Reviewed 2026-11-11 (plan-card-lifecycle): session-thinking-bar.ts gained a dashboard-only line (the tool's icon and action) and opened block; the harness pins Messages view, so nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu and the effort battery colours change nothing this spec asserts; its failing test also fails on HEAD without these changes.
