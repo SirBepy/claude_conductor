@@ -23,6 +23,10 @@ private const val PLAY_STORE_PACKAGE = "com.android.vending"
 // adb-installed build has no update source, so it skips the check silently.
 object AppUpdatePolicy {
   fun shouldCheck(installerPackage: String?): Boolean = installerPackage == PLAY_STORE_PACKAGE
+
+  // Play's update dialog is its own activity, so launching it while the app lock
+  // is up would cover the unlock prompt.
+  fun startNow(locked: Boolean): Boolean = !locked
 }
 
 // Flexible flow: Play downloads the new build in the background while the app
@@ -36,6 +40,9 @@ class InAppUpdate(
   private var manager: AppUpdateManager? = null
   private var downloaded = false
   private var snackbar: Snackbar? = null
+
+  // An update found while the app lock is up, started by offerRestartIfReady.
+  private var pendingStart: AppUpdateInfo? = null
 
   private val listener = InstallStateUpdatedListener { state ->
     if (state.installStatus() == InstallStatus.DOWNLOADED) {
@@ -59,7 +66,9 @@ class InAppUpdate(
               offerRestart()
             }
             info.updateAvailability() == UpdateAvailability.UPDATE_AVAILABLE &&
-              info.isUpdateTypeAllowed(AppUpdateType.FLEXIBLE) -> startFlexible(m, info)
+              info.isUpdateTypeAllowed(AppUpdateType.FLEXIBLE) -> {
+              if (AppUpdatePolicy.startNow(isLocked())) startFlexible(m, info) else pendingStart = info
+            }
           }
         }
         .addOnFailureListener { Log.w(TAG, "update check failed", it) }
@@ -76,12 +85,18 @@ class InAppUpdate(
     }
     snackbar?.dismiss()
     snackbar = null
+    // The next onStart fetches fresh info, so a held one would only go stale.
+    pendingStart = null
   }
 
   // The app lock covers the window until the owner unlocks, so a download that
-  // finished meanwhile is offered then.
+  // finished meanwhile is offered then, and an update found meanwhile starts then.
   fun offerRestartIfReady() {
     if (downloaded) offerRestart()
+    val info = pendingStart ?: return
+    pendingStart = null
+    val m = manager ?: return
+    startFlexible(m, info)
   }
 
   private fun startFlexible(m: AppUpdateManager, info: AppUpdateInfo) {
