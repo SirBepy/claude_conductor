@@ -4,7 +4,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { capActivityText, type ActivityDetail } from "../../shared/chat/tool-meta";
 import { refreshNextChips } from "./next-chip-strip";
 import { formatElapsed } from "../../shared/time";
-import { turnCounts, type TurnAction } from "../../shared/chat/dashboard/dashboard-model";
+import { turnCounts, type TurnAction } from "../../shared/chat/dashboard/plan-record";
 
 /** The bar's markup, one copy for the established pane and the draft pane. The
  *  line is a button (it opens the detail block, the only route to Stop on a

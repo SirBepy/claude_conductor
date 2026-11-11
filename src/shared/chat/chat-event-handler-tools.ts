@@ -21,7 +21,7 @@ import {
   MCP_WRITE_PLAN_TOOL,
   toolSummary,
 } from "./tool-meta";
-import { recordPlan, TURN_ACTIONS_MAX } from "./dashboard/dashboard-model";
+import { recordPlan, TURN_ACTIONS_MAX } from "./dashboard/plan-record";
 import type { RenderedMessage } from "./chat-classifiers";
 import {
   previewCardIndex,
