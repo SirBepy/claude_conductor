@@ -180,9 +180,10 @@ export function tryHandleQuestionResult(
   r: ChatRenderer,
   ev: Extract<ChatEvent, { type: "tool_result" }>,
 ): boolean {
-  // An AUQ result never renders a row. Only one that CARRIES the resolution may
-  // set `.text`: the fire-and-forget channel answers with a receipt (deny
-  // handshake, `{"acknowledged":true}`), which strands the card and blocks the fold.
+  // An AUQ result never renders a row. Besides the hook-refused branch below,
+  // only a result that CARRIES the resolution may set `.text`: the
+  // fire-and-forget channel answers with a receipt (deny handshake,
+  // `{"acknowledged":true}`), which strands the card and blocks the fold.
   const qIdx = r.messages.findIndex(
     (m) => m.kind === "question" && m.id === ev.tool_use_id,
   );

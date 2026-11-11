@@ -223,7 +223,8 @@ export function renderQuestionsView(
   const cards: string[] = [];
   for (const i of order) {
     const m = messages[i];
-    if (!m) continue;
+    // A hook-refused ask draws no card, so it must not list as awaiting an answer either.
+    if (!m || (m.kind === "question" && m.failed)) continue;
     const isTopLevel = m.kind === "question";
     const folded = !!m.id && !!ids?.has(m.id);
     const isNestedToolUse = m.kind === "tool_use"
