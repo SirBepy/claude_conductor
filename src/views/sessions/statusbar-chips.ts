@@ -240,7 +240,6 @@ export function renderGitChip(ctx: ChipRenderCtx): string {
 export function contextChipHtml(c: ContextStatus, asTokens: boolean, fadeClass = ""): string {
   const raw = c.pct_used;
   const estimated = c.confidence !== "proven";
-  if (raw >= 100) console.warn("[ctx-100] context pinned at 100% (daemon)", { occupancy: String(c.occupancy), window: String(c.window), model: c.model, confidence: c.confidence });
   const cls = raw >= 80 ? " danger" : raw >= 50 ? " warn" : "";
   const occ = Number(c.occupancy).toLocaleString();
   const win = Number(c.window).toLocaleString();
@@ -253,6 +252,9 @@ export function contextChipHtml(c: ContextStatus, asTokens: boolean, fadeClass =
 export function renderContext(asTokens: boolean, ctx: ChipRenderCtx): string {
   const key = asTokens ? "context_tokens" : "context_pct";
   if (ctx.ctxStatus) {
+    // Here, not in contextChipHtml: the Subchats card rebuilds that chip every second for a pinned sub.
+    const c = ctx.ctxStatus;
+    if (c.pct_used >= 100) console.warn("[ctx-100] context pinned at 100% (daemon)", { occupancy: String(c.occupancy), window: String(c.window), model: c.model, confidence: c.confidence });
     return contextChipHtml(ctx.ctxStatus, asTokens, animClass(ctx.animatedKeys, key));
   } else if (ctx.startedAt === null && !ctx.metaLoaded) {
     // startedAt is null only pre-start (pending pane); with no meta streamed

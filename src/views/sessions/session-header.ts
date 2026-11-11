@@ -2,7 +2,7 @@ import { escapeHtml } from "../../shared/escape-html";
 import { typeSwap } from "../../shared/title-typewriter";
 import { modelLabel as shortModelName } from "../../shared/model-name";
 import { modelRankIcon } from "./sidebar-row-visuals";
-import { effortColor } from "../../shared/chat/dashboard/subs-model";
+import { tintedEffort } from "../../shared/chat/dashboard/subs-model";
 import { projBadgeHtml } from "./sidebar-row-visuals";
 
 // Phone effort label: 3-4 letters because the header row has no room for the word.
@@ -181,7 +181,8 @@ export class SessionHeader {
     const rankIcon = modelRankIcon(model ?? "");
     this._cfgModelBatteryEl.className = `ph-bold meta-cfg-model-battery ${rankIcon}`;
     // The phone shows the model as this glyph, so effort tints it (effort-battery.css).
-    if (effortColor(effort)) this._cfgModelBatteryEl.dataset.batteryEffort = effort.trim().toLowerCase();
+    const tint = tintedEffort(effort);
+    if (tint) this._cfgModelBatteryEl.dataset.batteryEffort = tint;
     else delete this._cfgModelBatteryEl.dataset.batteryEffort;
     // An unranked family has no battery glyph, so the phone shows the name
     // instead of an empty, still-clickable span.

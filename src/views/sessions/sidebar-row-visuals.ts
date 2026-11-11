@@ -3,7 +3,7 @@ import { characterIconUrl } from "./session-characters";
 import { scheduledTooltip, heldTooltip } from "./sessions-helpers";
 import { modelFamilyFromId } from "../../shared/effort-presets";
 import { modelLabel } from "../../shared/model-name";
-import { effortColor } from "../../shared/chat/dashboard/subs-model";
+import { tintedEffort } from "../../shared/chat/dashboard/subs-model";
 import "./effort-battery.css";
 
 // Model as a battery whose fill is the family's rank - compare fill, don't
@@ -26,7 +26,8 @@ export function modelRankIcon(model: string): string {
 export function modelBatteryHtml(model: string, effort = ""): string {
   const icon = modelRankIcon(model);
   if (!icon) return "";
-  const e = effortColor(effort) ? ` data-effort="${escapeHtml(effort.trim().toLowerCase())}"` : "";
+  const tint = tintedEffort(effort);
+  const e = tint ? ` data-effort="${escapeHtml(tint)}"` : "";
   const tip = effort ? `${modelLabel(model)}, ${effort}` : modelLabel(model);
   return `<span class="session-model-battery" data-tip="${escapeHtml(tip)}"${e}><i class="ph-bold ${icon}"></i></span>`;
 }
