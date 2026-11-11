@@ -80,17 +80,20 @@ jobs:
           allow=false
           while IFS= read -r job; do
             [ -z "$job" ] && continue
-            # Wildcards cover the reusable-workflow jobs ("build-windows / build")
-            # and the per-platform publish jobs (publish-windows, publish-macos).
+            # build-windows* covers the reusable-workflow job ("build-windows / build").
+            # build-macos, publish-macos and upload-android are deliberately absent:
+            # they run after the tag exists, so `check` skips a same-version
+            # re-push and an auto-fix commit would never ship. A macOS-only failure
+            # needs `gh run rerun <id> --failed` or a version bump.
             case "$job" in
-              check|build*|android*|tag|publish*|upload-android) allow=true ;;
+              check|build-windows*|android*|tag|publish-windows) allow=true ;;
             esac
           done <<< "$failed"
           if [ "$allow" = "true" ]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::Only non-build jobs failed (e.g. test). The red test blocks the release and needs a human; auto-fix will not run."
+            echo "::warning::Only jobs auto-fix cannot repair failed (a red test needs a human; a macOS or Android failure after the tag exists needs 'gh run rerun --failed' or a version bump). Auto-fix will not run."
           fi
 
       - name: Fetch failed logs
