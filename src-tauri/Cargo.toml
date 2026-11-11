@@ -9,7 +9,11 @@ default-run = "claude-conductor"
 
 [lib]
 name = "claude_conductor_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# rlib only: both bins link it as an rlib, and nothing loads a staticlib or cdylib
+# of this crate (android/ is its own crate with no path dependency on this one).
+# Each extra crate type would run its own whole-crate fat LTO in the release
+# build, about 8 to 11 minutes of CI per platform.
+crate-type = ["rlib"]
 
 [[bin]]
 name = "cc-conductor-daemon"
@@ -111,6 +115,15 @@ mockito = "1"
 # integration test fast-forwards its 1s ticks + 30s countdown instead of waiting
 # real wall-clock seconds. Dev-only: not pulled into the release binary.
 tokio = { version = "1", features = ["test-util"] }
+
+# Dev and test builds keep file and line numbers for backtraces but skip full
+# debuginfo: on Windows the PDB link of one ~150k-line crate dominates a cold
+# `cargo test --lib`. Release is untouched.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = 0
 
 [profile.release]
 codegen-units = 1
