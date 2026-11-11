@@ -224,4 +224,32 @@ describe("second-step picks", () => {
     await flush();
     expect(document.querySelector(".cp-empty").textContent).toContain("no repo");
   });
+
+  describe("stage notes", () => {
+    const withNotes = (loadNotes) => [cmd("sw", "Switch branch", {
+      run: undefined,
+      stage: { placeholder: "Pick a branch", load: async () => branches(), loadNotes },
+    })];
+    const notes = () => [...document.querySelectorAll(".cp-note")].map((e) => e.textContent);
+
+    it("draws the stage's warning lines under the list and removes them on going back", async () => {
+      openPalette({ sync: () => withNotes(async () => ["2 uncommitted files will come with you"]), later: [] });
+      expect(notes()).toEqual([]);
+      key("Enter");
+      await flush();
+      expect(notes()).toEqual(["2 uncommitted files will come with you"]);
+      expect(document.querySelector(".cp-notes").hidden).toBe(false);
+      key("Backspace");
+      expect(notes()).toEqual([]);
+      expect(document.querySelector(".cp-notes").hidden).toBe(true);
+    });
+
+    it("still lists the rows when the notes cannot be read", async () => {
+      openPalette({ sync: () => withNotes(async () => { throw new Error("no git"); }), later: [] });
+      key("Enter");
+      await flush();
+      expect(titles()).toEqual(["main", "feature/x"]);
+      expect(notes()).toEqual([]);
+    });
+  });
 });

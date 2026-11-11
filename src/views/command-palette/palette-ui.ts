@@ -66,12 +66,14 @@ export function openPalette(sources: PaletteSources): void {
     + `<div class="cp-field"><i class="ph ph-magnifying-glass cp-lead"></i>`
     + `<input class="cp-input" placeholder="Search commands, chats, projects and settings" aria-label="Search commands" spellcheck="false" autocomplete="off" /></div>`
     + `<div class="cp-list" role="listbox"></div>`
+    + `<div class="cp-notes" hidden></div>`
     + `<div class="cp-error" hidden></div>`
     + `</div>`;
   const input = overlay.querySelector<HTMLInputElement>(".cp-input")!;
   const list = overlay.querySelector<HTMLElement>(".cp-list")!;
   const lead = overlay.querySelector<HTMLElement>(".cp-lead")!;
   const errorBox = overlay.querySelector<HTMLElement>(".cp-error")!;
+  const notesBox = overlay.querySelector<HTMLElement>(".cp-notes")!;
 
   const remember = sources.remember !== false;
   const recents = remember ? loadRecents() : [];
@@ -90,6 +92,16 @@ export function openPalette(sources: PaletteSources): void {
   function setError(text: string | null): void {
     errorBox.hidden = text === null;
     errorBox.textContent = text ?? "";
+  }
+
+  function setNotes(lines: string[]): void {
+    notesBox.hidden = lines.length === 0;
+    notesBox.replaceChildren(...lines.map((text) => {
+      const row = document.createElement("div");
+      row.className = "cp-note";
+      row.textContent = text;
+      return row;
+    }));
   }
 
   function render(): void {
@@ -149,10 +161,14 @@ export function openPalette(sources: PaletteSources): void {
       .then((items) => { mine.items = items; })
       .catch((err) => { mine.items = []; mine.failed = `Couldn't load: ${String(err)}`; })
       .finally(() => { if (stage === mine) refilter(true); });
+    def.loadNotes?.()
+      .then((lines) => { if (stage === mine) setNotes(lines); })
+      .catch(() => {});
   }
 
   function leaveStage(): void {
     stage = null;
+    setNotes([]);
     input.value = "";
     input.placeholder = basePlaceholder;
     lead.className = "ph ph-magnifying-glass cp-lead";

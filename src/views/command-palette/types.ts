@@ -6,6 +6,9 @@
 export interface PaletteStage {
   placeholder: string;
   load: () => Promise<PaletteCommand[]>;
+  /** Warning lines drawn under the list, read alongside `load`. A read that
+   *  throws draws nothing: a note never blocks the rows. */
+  loadNotes?: () => Promise<string[]>;
 }
 
 export interface PaletteCommand {

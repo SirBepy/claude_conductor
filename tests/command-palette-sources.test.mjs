@@ -116,6 +116,52 @@ describe("this chat rows", () => {
     expect(invokeMock).toHaveBeenCalledWith("checkout_branch", { cwd: "C:\\Users\\tecno\\Desktop\\Projects\\demo", name: "dev" });
   });
 
+  describe("Switch branch warnings", () => {
+    const cwd = "C:\\Users\\tecno\\Desktop\\Projects\\demo";
+    const notes = async (dirty, instances) => {
+      state.sessions = [live("a", "Alpha")];
+      state.selectedId = "a";
+      invokeMock.mockImplementation(async (cmd) => {
+        if (cmd === "get_git_dirty") {
+          if (dirty instanceof Error) throw dirty;
+          return dirty;
+        }
+        if (cmd === "list_instances") return instances;
+        return undefined;
+      });
+      return thisChatCommands().find((r) => r.title === "Switch branch").stage.loadNotes();
+    };
+
+    it("says how many uncommitted files will come along, in Code mode's words", async () => {
+      expect(await notes(["a.ts"], [])).toEqual(["1 uncommitted file will come with you"]);
+      expect(await notes(["a.ts", "b.ts"], [])).toEqual(["2 uncommitted files will come with you"]);
+    });
+
+    it("warns when another live session is in the same repo", async () => {
+      const peer = { session_id: "b", cwd, ended_at: null };
+      expect(await notes([], [peer])).toEqual(["Another Conductor session is active in this repo"]);
+    });
+
+    it("ignores this chat itself, an ended session and one in another repo", async () => {
+      const own = { session_id: "a", cwd, ended_at: null };
+      const ended = { session_id: "b", cwd, ended_at: "2026-01-01" };
+      const elsewhere = { session_id: "c", cwd: "C:\\other", ended_at: null };
+      expect(await notes([], [own, ended, elsewhere])).toEqual([]);
+    });
+
+    it("lists the peer warning first, then the dirty one", async () => {
+      const peer = { session_id: "b", cwd, ended_at: null };
+      expect(await notes(["a.ts"], [peer])).toEqual([
+        "Another Conductor session is active in this repo",
+        "1 uncommitted file will come with you",
+      ]);
+    });
+
+    it("counts a failed dirty read as nothing to warn about", async () => {
+      expect(await notes(new Error("git missing"), [])).toEqual([]);
+    });
+  });
+
   it("disables Switch branch for a chat on another machine", () => {
     state.sessions = [live("a", "Alpha", { machine: { id: "m1", label: "Laptop" } })];
     state.selectedId = "a";

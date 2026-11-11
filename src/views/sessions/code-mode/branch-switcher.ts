@@ -6,6 +6,7 @@
 import { escapeHtml } from "../../../shared/escape-html";
 import { invoke } from "../../../shared/ipc";
 import type { BranchEntry, Instance } from "../../../types/ipc.generated";
+import { PEER_SESSION_WARNING, dirtyWarning, peerSessionActive } from "./branch-warnings";
 import "./branch-switcher.css";
 
 export interface BranchSwitcherOpts {
@@ -70,7 +71,7 @@ export class BranchSwitcher {
     this.branches = branches;
     this.context = {
       dirty,
-      peerActive: instances.some((i) => i.cwd === cwd && i.session_id !== sessionId && i.ended_at === null),
+      peerActive: peerSessionActive(instances, cwd, sessionId),
     };
     this.render();
   }
@@ -103,11 +104,11 @@ export class BranchSwitcher {
     const host = this.host;
     if (!host) return;
     const peerWarn = this.context?.peerActive
-      ? `<div class="gc-peer-warn"><i class="ph ph-users"></i><span>Another Conductor session is active in this repo</span></div>`
+      ? `<div class="gc-peer-warn"><i class="ph ph-users"></i><span>${PEER_SESSION_WARNING}</span></div>`
       : "";
-    const dirtyCount = this.context?.dirty.length ?? 0;
-    const dirtyWarn = dirtyCount > 0
-      ? `<div class="gc-dirty-warn"><i class="ph ph-warning-circle"></i><span>${dirtyCount} uncommitted file${dirtyCount === 1 ? "" : "s"} will come with you</span></div>`
+    const dirtyText = dirtyWarning(this.context?.dirty.length ?? 0);
+    const dirtyWarn = dirtyText
+      ? `<div class="gc-dirty-warn"><i class="ph ph-warning-circle"></i><span>${dirtyText}</span></div>`
       : "";
     const error = this.error
       ? `<div class="sb-git-pop-error"><i class="ph ph-warning"></i>${escapeHtml(this.error)}</div>`

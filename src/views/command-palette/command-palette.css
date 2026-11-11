@@ -159,6 +159,13 @@
   font-size: 0.85rem;
 }
 
+.cp-note {
+  padding: 7px 12px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-warning);
+  font-size: 0.78rem;
+}
+
 .cp-error {
   padding: 8px 12px;
   border-top: 1px solid var(--color-border);

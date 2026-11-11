@@ -23,7 +23,8 @@ import {
   buildOpenProjectItems,
   type ItemDesc,
 } from "../sessions/chat-menu-items";
-import type { BranchEntry } from "../../types/ipc.generated";
+import type { BranchEntry, Instance } from "../../types/ipc.generated";
+import { branchWarnings, peerSessionActive } from "../sessions/code-mode/branch-warnings";
 import { SETTINGS_PAGES, SETTING_ENTRIES } from "./settings-index";
 import { focusSettingRow } from "./settings-focus";
 import type { PaletteCommand } from "./types";
@@ -238,6 +239,16 @@ function branchCommand(cwd: string | null, sessionId: string, mirrored: boolean)
           // which the palette shows under the list.
           run: b.current ? () => {} : () => invoke<void>("checkout_branch", { cwd, name: b.name }),
         }));
+      },
+      // Same two reads and words as Code mode's branch switcher; each read that
+      // fails counts as "nothing to warn about" so the list never waits on them.
+      loadNotes: async () => {
+        if (!cwd) return [];
+        const [dirty, instances] = await Promise.all([
+          invoke<string[]>("get_git_dirty", { cwd, sessionId }).then((d) => d ?? []).catch(() => [] as string[]),
+          invoke<Instance[]>("list_instances").then((i) => i ?? []).catch(() => [] as Instance[]),
+        ]);
+        return branchWarnings(dirty, peerSessionActive(instances, cwd, sessionId));
       },
     },
   };
