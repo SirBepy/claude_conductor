@@ -157,10 +157,13 @@ pub(super) async fn pump_global_events(mut socket: WebSocket, state: Arc<DaemonS
 /// are filtered: one for a chat hosted here passes (the peer mirrors that chat
 /// and can already read its previews), a session-less one or one for any other
 /// chat never does. `preview_state` never passes: it names no chat, and a peer
-/// does not follow or write another machine's view state. Every other method passes.
+/// does not follow or write another machine's view state. `answers_thread_delta`
+/// never passes either: it streams an Ask reply's text, and the answers RPCs are
+/// desktop-pipe only, so that text has no business on another machine. Every
+/// other method passes.
 fn peer_may_see_preview(frame: &serde_json::Value, is_local: impl Fn(&str) -> bool) -> bool {
     match frame.get("method").and_then(serde_json::Value::as_str) {
-        Some("preview_state") => return false,
+        Some("preview_state" | "answers_thread_delta") => return false,
         Some("preview") => {}
         _ => return true,
     }
@@ -403,6 +406,8 @@ mod tests {
         assert!(peer_may_see_preview(&other, is_local), "other methods pass");
         let state = serde_json::json!({"jsonrpc": "2.0", "method": "preview_state", "params": {"id": "p", "key": "page", "value": 5}});
         assert!(!peer_may_see_preview(&state, is_local), "view state is not a peer's to follow");
+        let delta = serde_json::json!({"jsonrpc": "2.0", "method": "answers_thread_delta", "params": {"session_id": "local", "stream_id": "s", "text": "reply so far"}});
+        assert!(!peer_may_see_preview(&delta, is_local), "an Ask reply stream stays on this machine");
     }
 
     #[test]
