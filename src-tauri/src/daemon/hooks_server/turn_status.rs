@@ -126,7 +126,7 @@ mod tests {
             PlanStepSnapshot { text: "Read".into(), status: "done".into() },
             PlanStepSnapshot { text: "Commit".into(), status: "active".into() },
         ];
-        c.state.plan_close.record("p", &open);
+        c.state.plan_close.record("p", c.state.registry.current_turn_gen("p"), &open);
         let q = on_report_status(AxState(c.clone()), Json(json!({"session_id": "p", "status": "question"}))).await.into_response();
         assert_eq!(body_json(q).await, json!({"ok": true}));
         let first = body_json(on_report_status(AxState(c.clone()), Json(json!({"session_id": "p", "status": "done"}))).await.into_response()).await;
@@ -142,8 +142,9 @@ mod tests {
     async fn done_goes_through_once_write_plan_closed_every_step() {
         use crate::types::PlanStepSnapshot;
         let c = ctx();
-        c.state.plan_close.record("c", &[PlanStepSnapshot { text: "Read".into(), status: "active".into() }]);
-        c.state.plan_close.record("c", &[PlanStepSnapshot { text: "Read".into(), status: "done".into() }]);
+        let gen = c.state.registry.current_turn_gen("c");
+        c.state.plan_close.record("c", gen, &[PlanStepSnapshot { text: "Read".into(), status: "active".into() }]);
+        c.state.plan_close.record("c", gen, &[PlanStepSnapshot { text: "Read".into(), status: "done".into() }]);
         let r = on_report_status(AxState(c.clone()), Json(json!({"session_id": "c", "status": "done"}))).await.into_response();
         assert_eq!(body_json(r).await, json!({"ok": true}));
     }

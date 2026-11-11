@@ -183,6 +183,16 @@ describe("the Plan card across a chat's life", () => {
     expect(card(pane).querySelectorAll(".cdash-step--done")).toHaveLength(1);
   });
 
+  it("reads no job end from a done the daemon refused, so the plan keeps running", async () => {
+    const { pane, r, feed } = mount();
+    feed([userEvent("go"), ...plan([{ text: "Read", status: "done" }, { text: "Commit", status: "active" }])]);
+    r.handleEvent(toolUseEvent(STATUS, { status: "done" }, "refused-done"));
+    r.handleEvent({ type: "tool_result", tool_use_id: "refused-done", output: { type: "text", text: "{\"ok\":false,\"error\":\"Not ended yet: your plan still has 1 open step\"}" }, is_error: false, timestamp: 0 });
+    await tick();
+    expect(card(pane).querySelector(".cdash-step--left")).toBeNull();
+    expect(card(pane).querySelectorAll(".cdash-step--active")).toHaveLength(1);
+  });
+
   it("says the chat waits on Joe's answer while a question card is open", async () => {
     const { pane, feed } = mount();
     feed([userEvent("go"), toolUseEvent("mcp__cc_conductor__ask_user_question", { questions: [{ question: "Tabs?", options: [{ label: "Tabs" }] }] }, "q1"), ok("q1")]);

@@ -13,7 +13,7 @@
 
 import type { RenderedMessage } from "../chat-classifiers";
 import { headlineOf, type MessageKind } from "../chat-message-kinds";
-import { isOwnMessage, isReport, messageKindOf, stepFinished, type DashboardPlan, type PlanStep } from "./plan-record";
+import { isOwnMessage, isReport, messageKindOf, stepFinished, TURN_STATUS_TOOL, type DashboardPlan, type PlanStep } from "./plan-record";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../chat-event-to-message";
 import type { PreviewMeta } from "../../../types/ipc.generated";
 import type { Visual } from "../message-visuals";
@@ -23,7 +23,7 @@ import { changedFiles, extractFiles, extractLinks, type ChangedFile, type FileIt
 import { buildDraftsState, type DraftStoreSide, type DraftsState } from "./drafts-model";
 import { cardQuestionTexts, findOpenCardForPrompt } from "../question-texts";
 
-export const TURN_STATUS_TOOL = "mcp__cc_conductor__report_turn_status";
+export { TURN_STATUS_TOOL } from "./plan-record";
 
 export {
   isOwnMessage, isReport, messageKindOf, recordPlan, stepFinished, turnCounts, TURN_ACTIONS_MAX,
@@ -92,8 +92,9 @@ export function isOpenQuestion(m: RenderedMessage): boolean {
   return m.kind === "question" && m.text === undefined && !m.failed;
 }
 
+/** The status a report_turn_status row set; a refused one set none. */
 function turnStatusOf(m: RenderedMessage): string | null {
-  if (m.kind !== "tool_use" || m.tool !== TURN_STATUS_TOOL) return null;
+  if (m.kind !== "tool_use" || m.tool !== TURN_STATUS_TOOL || m.failed) return null;
   const s = (m.input as { status?: unknown } | null)?.status;
   return typeof s === "string" ? s : null;
 }

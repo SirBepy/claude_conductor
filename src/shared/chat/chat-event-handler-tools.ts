@@ -21,7 +21,7 @@ import {
   MCP_WRITE_PLAN_TOOL,
   toolSummary,
 } from "./tool-meta";
-import { recordPlan, TURN_ACTIONS_MAX } from "./dashboard/plan-record";
+import { recordPlan, refusedOutput, TURN_ACTIONS_MAX, TURN_STATUS_TOOL } from "./dashboard/plan-record";
 import type { RenderedMessage } from "./chat-classifiers";
 import {
   previewCardIndex,
@@ -315,6 +315,14 @@ export function handleToolResultEvent(
       r.dirtyIndices.add(mIdx);
     }
     return { touched: true, coalesce: false };
+  }
+  // A report_turn_status the daemon refused (ok:false, e.g. done while the plan
+  // still had open steps, daemon/plan_close.rs) did not happen: marked failed so
+  // the dashboard reads no turn end from it.
+  const sIdx = r.messages.findIndex((m) => m.kind === "tool_use" && m.tool === TURN_STATUS_TOOL && m.id === ev.tool_use_id);
+  if (sIdx >= 0 && (ev.is_error || refusedOutput(ev.output))) {
+    r.messages[sIdx] = { ...r.messages[sIdx]!, failed: true };
+    r.dirtyIndices.add(sIdx);
   }
   // A `subchat send` answer: absorbed into its "Passed to X" row.
   const pIdx = r.messages.findIndex((m) => m.kind === "passed" && m.id === ev.tool_use_id);
