@@ -269,12 +269,6 @@ export class Composer {
     window.removeEventListener("focus", this._windowFocusHandler);
     shortcuts.unregister("blur-composer");
     this.draftSync.flush(); // not cancel - a teardown mid-debounce must not lose the last edit
-    // An edit left open dies with this composer while the original stays
-    // scheduled; a surviving draft would later send as a duplicate.
-    if (this.scheduledEdit && this.sessionId) {
-      clearDraft(this.sessionId);
-      void this.draftSync.clear(this.sessionId);
-    }
     this.ptt.destroy();
     if (this.noticeTimer) {
       clearTimeout(this.noticeTimer);
@@ -1068,6 +1062,11 @@ ${typed}` : text;
 
   private persistDraft(): void {
     if (!this.sessionId) return;
+    // An open scheduled-message edit lives in memory only: a reload or crash
+    // that skips destroy() would otherwise bring its text back as an ordinary
+    // draft with no edit bar, and sending that duplicates the still-scheduled
+    // original. Whatever draft was stored before the edit stays untouched.
+    if (this.scheduledEdit) return;
     const text = this.textarea?.value ?? "";
     if (text) saveDraft(this.sessionId, text);
     else clearDraft(this.sessionId);
