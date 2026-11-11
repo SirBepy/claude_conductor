@@ -12,6 +12,7 @@ import { mountDraftDashboard, unmountDraftDashboard } from "./project-dashboard/
 import { wirePendingComposer } from "./pending-pane-composer";
 import { mountDraftSubchats, mountDraftSubchatsCard, revealDraftSubchats, unmountDraftSubchats } from "./draft-subchats";
 import { decorateSubchatHeader } from "./subchat-view";
+import { isMobileViewport } from "../../shared/mobile-viewport";
 
 let _pendingHeader: SessionHeader | null = null;
 
@@ -51,9 +52,14 @@ export async function renderPendingPane(
     pickAccount: () => { void changePendingAccount(config, placeholderId, project.path, pane); },
   });
 
+  // Phone: no focus on open. Android WebView connects the keyboard to a
+  // textarea focused from code as a raw key stream (TYPE_NULL), and tapping
+  // the already-focused box never reconnects it, so Gboard loses voice,
+  // swipe and suggestions. The user's own tap does the real focus.
+  const focusOnOpen = !isMobileViewport();
   const ta = pane.querySelector<HTMLTextAreaElement>(".composer-textarea");
-  if (draftText && state.mountId === myMount) state.composer?.setDraftText(draftText, false);
-  else if (ta) ta.focus();
+  if (draftText && state.mountId === myMount) state.composer?.setDraftText(draftText, false, focusOnOpen);
+  else if (ta && focusOnOpen) ta.focus();
 
   if (config.initialMessage) {
     const msg = config.initialMessage;

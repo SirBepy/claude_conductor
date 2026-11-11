@@ -1,3 +1,4 @@
+// Reviewed 2026-11-11 (phone keyboard): pending-flow.ts changed comments only; it passes.
 // asserts: src/views/sessions/project-picker.ts, src/views/sessions/pending-flow.ts
 // Reviewed 2026-11-08: pending-flow.ts gained startNewSessionInProject (the palette's New chat in <project>), which this spec never calls; the picker path it drives is unchanged and it passed.
 // Reviewed 2026-10-20 (Mac-mirrored project icon fix): project-picker.ts's row render now passes a machineId to renderAvatar - this spec never selects a peer machine, so it stays null and the markup is unchanged.
