@@ -949,7 +949,7 @@ mod tests {
         assert!(!st.registry.get(&sub).unwrap().subchat_finished);
         assert!(read_record_in(data.path(), &sub).is_none());
         assert!(rt.take_nudge_due(&sub), "the sub is told, since nothing else will");
-        assert_eq!(rt.take_nudge_text(&sub), Some(FINISH_DROPPED_DIRTY_NUDGE));
+        assert_eq!(rt.take_nudge_text(&sub).as_deref(), Some(FINISH_DROPPED_DIRTY_NUDGE));
         // Committed, the same finish goes through.
         super::super::git::test_repo::git(&root, &["add", "late.txt"]);
         super::super::git::test_repo::git(&root, &["commit", "-q", "-m", "late"]);
@@ -957,7 +957,7 @@ mod tests {
         // sub is told so with the review wording, not the dirty one.
         rt.set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
         assert!(!commit_finish_at(Some(data.path()), &st, &sub, None, Some(tp.clone())));
-        assert_eq!(rt.take_nudge_text(&sub), Some(FINISH_DROPPED_REVIEW_NUDGE));
+        assert_eq!(rt.take_nudge_text(&sub).as_deref(), Some(FINISH_DROPPED_REVIEW_NUDGE));
         rt.take_nudge_due(&sub);
         append_lines(&tp, &[agent_use("rev-late", "Agent"), tool_result("rev-late", false, "Looks right.")]);
         rt.set_pending_finish(

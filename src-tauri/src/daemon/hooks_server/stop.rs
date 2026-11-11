@@ -120,6 +120,7 @@ pub(super) async fn on_stop(
             if let Some(reason) = sub_stop(
                 &ctx.state,
                 &session_id,
+                gen,
                 payload.stop_hook_active,
                 activity,
                 status,
@@ -313,11 +314,15 @@ fn report_send_verdict(
 /// child, so it goes up at once.
 ///
 /// Exempt, so the turn simply ends: a `finish_subchat` this turn, a pending
-/// question or permission card, background work, and a pause (`subchats::pause`:
-/// a freeze, a gaming-mode park, a rate limit).
+/// question or permission card, background work, a pause (`subchats::pause`:
+/// a freeze, a gaming-mode park, a rate limit), and a place in the writer
+/// slot's queue: the write guard told that sub to end its turn and wait, and it
+/// is woken when the slot is its own.
+#[allow(clippy::too_many_arguments)]
 async fn sub_stop(
     state: &Arc<crate::daemon::state::DaemonState>,
     sub_id: &str,
+    gen: u64,
     stop_hook_active: Option<bool>,
     activity: crate::sessions::registry_turn::TurnActivity,
     status: Option<&str>,
@@ -339,12 +344,20 @@ async fn sub_stop(
     let now = chrono::Utc::now().timestamp();
     let paused = state.registry.get(sub_id).is_some_and(|i| crate::daemon::subchats::pause::is_paused(&i, now));
     let card_waiting = crate::daemon::lifecycle::has_open_prompt(state, sub_id).await;
+    let slot_wait = crate::daemon::subchats::writers::waiting_behind(state, sub_id);
+    if let Some(holder) = slot_wait.as_deref() {
+        log::info!("hook /hooks/stop: sub {sub_id} ended a turn queued for the writer slot behind {holder:?}, not unfinished");
+        // A card raised before it queued is about a stall that is now a wait.
+        stall::withdraw(state, sub_id, Stall::Unfinished).await;
+    }
     let facts = SubTurnFacts {
         finishing,
-        exempt: background || paused || card_waiting,
+        exempt: background || paused || card_waiting || slot_wait.is_some(),
         stop_hook_active: stop_hook_active == Some(true),
         question_without_card: status == Some("question") && !question_card_posted,
         mcp_attached,
+        nudge_turn: rt.is_nudge_turn(sub_id, gen),
+        nudge_pending: rt.nudge_armed(sub_id),
     };
     let (next, outcome) = sub_turn_end(rt.stage(sub_id), facts);
     rt.set_stage(sub_id, next);
@@ -372,6 +385,15 @@ async fn sub_stop(
             let (state, sub) = (state.clone(), sub_id.to_string());
             tokio::spawn(async move {
                 stall::raise_noted(&state, &sub, Stall::Unfinished, Some(stall::NO_TRANSPORT_NOTE)).await;
+            });
+            None
+        }
+        SubTurnEnd::CardNudgeFailed => {
+            log::warn!("hook /hooks/stop: sub {sub_id} still unfinished after Joe's nudge, telling him instead of asking again");
+            let note = (!mcp_attached).then_some(stall::NO_TRANSPORT_NOTE);
+            let (state, sub) = (state.clone(), sub_id.to_string());
+            tokio::spawn(async move {
+                stall::raise_nudge_failed(&state, &sub, note).await;
             });
             None
         }
@@ -582,7 +604,8 @@ mod tests {
         activity: TurnActivity,
         status: Option<&str>,
     ) -> Option<&'static str> {
-        sub_stop(st, sub, Some(active), activity, status, false, true).await
+        let gen = st.registry.current_turn_gen(sub);
+        sub_stop(st, sub, gen, Some(active), activity, status, false, true).await
     }
 
     async fn wait_for_a_card(st: &Arc<DaemonState>) -> Vec<serde_json::Value> {
@@ -608,12 +631,94 @@ mod tests {
         assert!(runtime().take_nudge_due(&sub), "the daemon nudges once the turn is over");
         assert!(st.list_prompts().await.is_empty(), "no card yet");
         // The nudged turn also ends unfinished: now Joe gets the card.
+        runtime().note_nudge_gen(&sub, st.registry.current_turn_gen(&sub));
         assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, Some("done")).await, None);
         let cards = wait_for_a_card(&st).await;
         assert_eq!(cards.len(), 1, "exactly one card");
         assert_eq!(cards[0]["payload"]["card_kind"], "subchat_unfinished");
         assert_eq!(cards[0]["payload"]["display_session_id"], "stop-seq-main");
         assert!(!runtime().take_nudge_due(&sub), "the card path sends no further nudge");
+    }
+
+    fn question_of(card: &serde_json::Value) -> String {
+        card["payload"]["questions"][0]["question"].as_str().unwrap_or_default().to_string()
+    }
+
+    fn labels_of(card: &serde_json::Value) -> Vec<String> {
+        card["payload"]["questions"][0]["options"]
+            .as_array()
+            .map(|o| o.iter().filter_map(|x| x["label"].as_str().map(str::to_string)).collect())
+            .unwrap_or_default()
+    }
+
+    /// 2026-11-11: Joe picked "Nudge again", the sub stopped again seconds later,
+    /// and the identical card came back, round after round. His failed nudge now
+    /// draws one card that says it did not help, and nothing after that.
+    #[tokio::test]
+    async fn a_nudge_again_that_fails_never_brings_back_the_same_card() {
+        use crate::daemon::subchats::cards::{withdraw_card, NUDGE_AGAIN};
+        let (st, sub) = state_with_sub("stop-joenudge");
+        runtime().set_stage(&sub, SubStage::Nudged);
+        runtime().note_nudge_gen(&sub, st.registry.current_turn_gen(&sub));
+        stop(&st, &sub, false, TurnActivity::Idle, None).await;
+        let first = wait_for_a_card(&st).await.remove(0);
+        // Joe picks "Nudge again": the card goes and his nudge opens a turn.
+        withdraw_card(&st, first["id"].as_str().unwrap()).await;
+        runtime().set_stage(&sub, SubStage::JoeNudged);
+        runtime().note_nudge_gen(&sub, st.registry.current_turn_gen(&sub));
+        assert_eq!(stop(&st, &sub, false, TurnActivity::Idle, None).await, None, "not blocked: Joe already nudged it");
+        let second = wait_for_a_card(&st).await.remove(0);
+        assert_ne!(question_of(&second), question_of(&first), "not the same question again");
+        assert!(question_of(&second).contains("did not help"), "{}", question_of(&second));
+        assert!(!labels_of(&second).iter().any(|l| l == NUDGE_AGAIN), "a nudge already failed twice: {:?}", labels_of(&second));
+        // A further end of that turn raises nothing more.
+        withdraw_card(&st, second["id"].as_str().unwrap()).await;
+        stop(&st, &sub, true, TurnActivity::Idle, None).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(st.list_prompts().await.is_empty());
+    }
+
+    /// 2026-11-11: phone-ime-voice-swipe and display-misfit-log were queued for
+    /// the writer slot, the guard told them to end their turn, and each turn end
+    /// was blocked, nudged and carded. A queued sub ending its turn is waiting.
+    #[tokio::test]
+    async fn a_sub_queued_for_the_writer_slot_is_not_blocked_nudged_or_carded() {
+        use crate::daemon::subchats::{git::test_repo, store_sub_brief, writers, TempDataDir};
+        let _data = TempDataDir::new();
+        let (_dir, root) = test_repo::init();
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let mut ids = Vec::new();
+        for tag in ["slot-holder", "slot-waiter"] {
+            let (main, id) = (format!("{tag}-main"), format!("{tag}-sub"));
+            st.registry.upsert_interactive(&main, &root, "proj", "2026-11-05T00:00:00Z");
+            st.registry.upsert_interactive(&id, &root, "proj", "2026-11-05T00:00:00Z");
+            st.registry.set_subchat_of(&id, Some(main.clone()));
+            st.registry.set_name(&id, tag.to_string());
+            store_sub_brief(&id, &main);
+            let mut b = crate::sessions::chat_config::get(&id).unwrap().subchat.unwrap();
+            b.writes = true;
+            crate::sessions::chat_config::set_subchat(&id, Some(b));
+            ids.push(id);
+        }
+        let (holder, waiter) = (&ids[0], &ids[1]);
+        assert_eq!(writers::check_write(&st, holder), writers::WriteCheck::Allow);
+        assert!(matches!(writers::check_write(&st, waiter), writers::WriteCheck::Wait { .. }), "the waiter is queued");
+        // Every end of every kind of turn, nudged or not, stays quiet.
+        for (active, nudge) in [(false, false), (true, false), (false, true)] {
+            if nudge {
+                runtime().set_stage(waiter, SubStage::Nudged);
+                runtime().note_nudge_gen(waiter, st.registry.current_turn_gen(waiter));
+            }
+            assert_eq!(stop(&st, waiter, active, TurnActivity::Idle, Some("done")).await, None);
+            assert_eq!(runtime().stage(waiter), SubStage::Fresh);
+            assert!(!runtime().take_nudge_due(waiter), "never nudged");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(st.list_prompts().await.is_empty(), "never carded");
+        // Once the slot is its own, an unfinished end is unfinished again.
+        writers::release(&st, holder);
+        assert!(writers::waiting_behind(&st, waiter).is_none());
+        assert_eq!(stop(&st, waiter, false, TurnActivity::Idle, Some("done")).await, Some(SUB_NOT_FINISHED_REASON));
     }
 
     #[tokio::test]
@@ -698,7 +803,7 @@ mod tests {
     #[tokio::test]
     async fn a_sub_without_a_reachable_mcp_transport_is_not_blocked_but_gets_a_card() {
         let (st, sub) = state_with_sub("stop-nomcp");
-        let r = sub_stop(&st, &sub, Some(false), TurnActivity::Idle, None, false, false).await;
+        let r = sub_stop(&st, &sub, 0, Some(false), TurnActivity::Idle, None, false, false).await;
         assert_eq!(r, None, "finish_subchat is unreachable, so demanding it is an unsatisfiable loop");
         let cards = wait_for_a_card(&st).await;
         assert_eq!(cards.len(), 1, "a silent sub with no way to speak must not sit unseen");
@@ -708,7 +813,7 @@ mod tests {
         assert!(text.contains("link to the daemon's tools is down"), "{text}");
         assert!(!runtime().take_nudge_due(&sub), "a nudge asks for what it cannot do");
         // Asking again while the card is open adds nothing.
-        sub_stop(&st, &sub, Some(false), TurnActivity::Idle, None, false, false).await;
+        sub_stop(&st, &sub, 0, Some(false), TurnActivity::Idle, None, false, false).await;
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert_eq!(st.list_prompts().await.len(), 1);
     }

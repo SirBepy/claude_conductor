@@ -125,6 +125,9 @@ pub(super) enum SubTurnEnd {
     /// The same card, raised without blocking the turn, because the sub has no MCP
     /// transport and so cannot finish or ask.
     CardNoTransport,
+    /// Joe's "Nudge again" did not get it to finish either. A different card says
+    /// so with what is known, instead of asking him the same question again.
+    CardNudgeFailed,
 }
 
 /// Everything the sub decision reads, gathered by `stop.rs`.
@@ -143,26 +146,50 @@ pub(super) struct SubTurnFacts {
     /// `finish_subchat` and `ask_user_question` are reachable. When the MCP
     /// transport is down neither can be called, so there is nothing to demand.
     pub mcp_attached: bool,
+    /// This turn was opened by a stall nudge (the daemon's or Joe's "Nudge
+    /// again"), not by a new message from the main chat or Joe.
+    pub nudge_turn: bool,
+    /// A nudge is armed for this turn's end: Joe's "Nudge again" interrupted the
+    /// turn and sends the nudge once it is over. The interrupted turn is not the
+    /// one his nudge is judged by.
+    pub nudge_pending: bool,
 }
 
 /// The sub half of the turn-end decision, and the stage it leaves the sub in.
 /// A sub ending a turn without finishing and with nothing pending is blocked
 /// once, then nudged once by the daemon, then Joe gets a card (spec section 9).
-/// Pure so the whole sequence is testable without a session.
+/// If he picks "Nudge again" and that turn ends unfinished too, he gets one last
+/// card that says so, never the same question again. Pure so the whole sequence
+/// is testable without a session.
 ///
 /// `Allow` for a finishing or exempt turn resets the sequence: the sub is doing
-/// something legitimate, so a later unfinished end starts from the top.
+/// something legitimate, so a later unfinished end starts from the top. So does
+/// a turn a new message opened once the round is past its block: the sub was
+/// given something new, so it is blocked and nudged again before Joe is asked.
 pub(super) fn sub_turn_end(stage: SubStage, f: SubTurnFacts) -> (SubStage, SubTurnEnd) {
+    // The turn Joe's own nudge interrupted is not judged at all, even when it is
+    // exempt: resetting here would lose his round, and his nudge's turn would then
+    // walk the block-nudge-card sequence and ask him the same question again.
+    if f.nudge_pending {
+        return (stage, SubTurnEnd::Allow);
+    }
     if f.finishing || f.exempt {
         return (SubStage::Fresh, SubTurnEnd::Allow);
+    }
+    let past_block = matches!(stage, SubStage::Nudged | SubStage::Carded | SubStage::JoeNudged | SubStage::GaveUp);
+    let stage = if past_block && !f.nudge_turn { SubStage::Fresh } else { stage };
+    match stage {
+        SubStage::JoeNudged => return (SubStage::GaveUp, SubTurnEnd::CardNudgeFailed),
+        // Joe was told; until something new reaches the sub, nothing is raised.
+        SubStage::GaveUp | SubStage::Carded => return (stage, SubTurnEnd::Allow),
+        _ => {}
     }
     // With the transport down neither `finish_subchat` nor `ask_user_question` can
     // be called, so a block or a nudge would demand what the sub cannot do. Letting
     // the turn end silently would leave Joe nothing to see, though, so he gets the
-    // card at once. The stage goes to Nudged so a later unfinished end is a card
-    // again, as in the normal sequence.
+    // card at once.
     if !f.mcp_attached {
-        return (SubStage::Nudged, SubTurnEnd::CardNoTransport);
+        return (SubStage::Carded, SubTurnEnd::CardNoTransport);
     }
     match stage {
         // `stop_hook_active` set on a first end means something else already
@@ -172,7 +199,7 @@ pub(super) fn sub_turn_end(stage: SubStage, f: SubTurnFacts) -> (SubStage, SubTu
             (SubStage::Blocked, SubTurnEnd::Block(reason))
         }
         SubStage::Fresh | SubStage::Blocked => (SubStage::Nudged, SubTurnEnd::Nudge),
-        SubStage::Nudged => (SubStage::Nudged, SubTurnEnd::Card),
+        _ => (SubStage::Carded, SubTurnEnd::Card),
     }
 }
 
@@ -243,15 +270,54 @@ mod tests {
         SubTurnFacts { mcp_attached: true, ..SubTurnFacts::default() }
     }
 
+    fn nudged() -> SubTurnFacts {
+        SubTurnFacts { nudge_turn: true, ..facts() }
+    }
+
     #[test]
     fn a_sub_is_blocked_once_then_nudged_once_then_carded() {
         let (s, a) = sub_turn_end(SubStage::Fresh, facts());
         assert_eq!((s, a), (SubStage::Blocked, SubTurnEnd::Block(SUB_NOT_FINISHED_REASON)));
         let retry = SubTurnFacts { stop_hook_active: true, ..facts() };
         assert_eq!(sub_turn_end(SubStage::Blocked, retry), (SubStage::Nudged, SubTurnEnd::Nudge));
-        assert_eq!(sub_turn_end(SubStage::Nudged, facts()), (SubStage::Nudged, SubTurnEnd::Card));
-        // Joe's "nudge again" leaves the stage Nudged, so the next unfinished end is a card again.
-        assert_eq!(sub_turn_end(SubStage::Nudged, facts()).1, SubTurnEnd::Card);
+        assert_eq!(sub_turn_end(SubStage::Nudged, nudged()), (SubStage::Carded, SubTurnEnd::Card));
+    }
+
+    /// 2026-11-11: Joe pressed "Nudge again" and got the identical card back
+    /// within seconds, again and again for one sub. A failed nudge of his gets one
+    /// card that says so, and then nothing until something new reaches the sub.
+    #[test]
+    fn a_failed_nudge_again_never_raises_the_same_card() {
+        assert_eq!(sub_turn_end(SubStage::JoeNudged, nudged()), (SubStage::GaveUp, SubTurnEnd::CardNudgeFailed));
+        assert_eq!(sub_turn_end(SubStage::GaveUp, nudged()), (SubStage::GaveUp, SubTurnEnd::Allow));
+        // An end while the round's card is up raises nothing more.
+        assert_eq!(sub_turn_end(SubStage::Carded, nudged()), (SubStage::Carded, SubTurnEnd::Allow));
+    }
+
+    /// Joe's "Nudge again" on a busy sub interrupts its turn and nudges once that
+    /// turn ends. The interrupted turn's own end must neither start a new round
+    /// (block, then a second nudge before his card) nor raise anything.
+    #[test]
+    fn the_turn_joes_nudge_interrupted_ends_quietly_and_keeps_his_round() {
+        let interrupted = SubTurnFacts { nudge_pending: true, ..facts() };
+        assert_eq!(sub_turn_end(SubStage::JoeNudged, interrupted), (SubStage::JoeNudged, SubTurnEnd::Allow));
+        let exempt_too = SubTurnFacts { nudge_pending: true, exempt: true, ..facts() };
+        assert_eq!(sub_turn_end(SubStage::JoeNudged, exempt_too), (SubStage::JoeNudged, SubTurnEnd::Allow), "background work does not lose his round");
+        assert_eq!(sub_turn_end(SubStage::JoeNudged, nudged()), (SubStage::GaveUp, SubTurnEnd::CardNudgeFailed));
+    }
+
+    /// The same day: after the first card every later unfinished end, each one
+    /// opened by a message from the main chat, went straight to the card with no
+    /// block and no nudge, so Joe asked why the app had not tried a nudge itself.
+    #[test]
+    fn a_turn_a_new_message_opened_starts_a_new_round_with_a_block() {
+        for stage in [SubStage::Nudged, SubStage::Carded, SubStage::JoeNudged, SubStage::GaveUp] {
+            assert_eq!(
+                sub_turn_end(stage, facts()),
+                (SubStage::Blocked, SubTurnEnd::Block(SUB_NOT_FINISHED_REASON)),
+                "{stage:?}"
+            );
+        }
     }
 
     #[test]
@@ -262,7 +328,7 @@ mod tests {
 
     #[test]
     fn every_exemption_allows_and_resets_whatever_the_stage() {
-        for stage in [SubStage::Fresh, SubStage::Blocked, SubStage::Nudged] {
+        for stage in [SubStage::Fresh, SubStage::Blocked, SubStage::Nudged, SubStage::Carded, SubStage::JoeNudged, SubStage::GaveUp] {
             for f in [
                 SubTurnFacts { finishing: true, ..facts() },
                 SubTurnFacts { exempt: true, ..facts() },
@@ -277,8 +343,11 @@ mod tests {
     fn a_sub_with_no_mcp_transport_gets_a_card_and_is_never_blocked_or_nudged() {
         let down = SubTurnFacts { mcp_attached: false, ..facts() };
         for stage in [SubStage::Fresh, SubStage::Blocked, SubStage::Nudged] {
-            assert_eq!(sub_turn_end(stage, down), (SubStage::Nudged, SubTurnEnd::CardNoTransport), "{stage:?}");
+            assert_eq!(sub_turn_end(stage, down), (SubStage::Carded, SubTurnEnd::CardNoTransport), "{stage:?}");
         }
+        // Joe's nudge failing is still said once, not asked again.
+        let down_nudged = SubTurnFacts { nudge_turn: true, ..down };
+        assert_eq!(sub_turn_end(SubStage::JoeNudged, down_nudged).1, SubTurnEnd::CardNudgeFailed);
         // A block text would tell a sub to call tools it cannot reach.
         let retry = SubTurnFacts { stop_hook_active: true, ..down };
         assert_eq!(sub_turn_end(SubStage::Fresh, retry).1, SubTurnEnd::CardNoTransport);
