@@ -6,7 +6,7 @@
 // opens the panel, the figures beside an approval question, and the Changes
 // card behind Joe's section switch.
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { userEvent, toolUseEvent } from "./helpers/chat-events.mjs";
 
 const { ChatRenderer } = await import("../src/shared/chat/chat-renderer.ts");
@@ -105,7 +105,8 @@ describe("Links and files", () => {
     feed(r, [userEvent("go"), ...plan([{ text: "s", status: "active" }])]);
     await tick();
     // The first draw looked each view up: Decided has nothing, so it reads muted.
-    expect(pane.querySelector("[data-view='decided']").classList.contains("is-none")).toBe(true);
+    // The lookup lands a redraw later, which a loaded machine can take past one tick.
+    await vi.waitFor(() => expect(pane.querySelector("[data-view='decided']").classList.contains("is-none")).toBe(true));
     expect(pane.querySelector("[data-view='plan']").classList.contains("is-none")).toBe(false);
     pane.querySelector("[data-view='decided']").click();
     await tick();
