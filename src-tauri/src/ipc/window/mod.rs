@@ -47,7 +47,7 @@ pub use schedule::*;
 /// the dev/test build is unmistakable next to a real install. Release builds
 /// (`cargo tauri build`) return the title unchanged.
 pub(crate) fn test_title(base: &str) -> String {
-    if cfg!(debug_assertions) {
+    if crate::util::is_dev_build() {
         format!("Test - {base}")
     } else {
         base.to_string()
@@ -61,7 +61,7 @@ pub(crate) fn test_title(base: &str) -> String {
 /// entry (the overlay sets `skip_taskbar`, so it has none); a test pins the
 /// call sites.
 pub(crate) fn apply_dev_window_icon(window: &tauri::WebviewWindow) {
-    if !cfg!(debug_assertions) {
+    if !crate::util::is_dev_build() {
         return;
     }
     // Recolouring decodes and re-encodes a PNG, so do it once per process.
