@@ -229,13 +229,27 @@ async function fetchDelta(): Promise<void> {
   // same tick it always did.
   if (persistence) await hydrate();
   const gen = generation;
-  const since = cursor ?? floor ?? (persistence ? windowStart() : null);
-  const fresh = (await invoke<UsageSnapshot[]>("get_history", {
+  let since = cursor ?? floor ?? (persistence ? windowStart() : null);
+  let fresh = (await invoke<UsageSnapshot[]>("get_history", {
     limit: null,
     accountId: null,
     since,
   })) || [];
   if (gen !== generation) return;
+  // A PC that last polled before the window starts has nothing in it. Anchor the
+  // window on that PC's newest row instead, so its charts show the last data it
+  // has rather than "No history recorded yet". Only on the first fetch: after
+  // it the floor is set and an empty answer just means no new rows.
+  if (persistence && floor === null && since !== null && fresh.length === 0) {
+    const newest = (await invoke<UsageSnapshot[]>("get_history", { limit: 1, accountId: null, since: null })) || [];
+    if (gen !== generation) return;
+    const newestTs = newest[0] ? unixSeconds(newest[0].captured_at) : Number.NaN;
+    if (newestTs < since) {
+      since = newestTs - WINDOW_DAYS * 86_400;
+      fresh = (await invoke<UsageSnapshot[]>("get_history", { limit: null, accountId: null, since })) || [];
+      if (gen !== generation) return;
+    }
+  }
   if (persistence && floor === null) floor = since;
   let grew = false;
   for (const snap of fresh) {

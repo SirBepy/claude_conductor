@@ -126,6 +126,41 @@ describe("persisted usage history", () => {
     expect(callsOf("get_history")[0].since).toBe(NOW / 1000 - 15 * DAY);
   });
 
+  it("a PC whose newest row is older than the window still gives its last 15 days of data", async () => {
+    const store = memoryStore();
+    enableUsageHistoryPersistence(store);
+    const stale = [snap(daysAgo(40)), snap(daysAgo(30)), snap(daysAgo(20))];
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd !== "get_history") return undefined;
+      if (args.limit === 1) return stale.slice(-1);
+      const since = args.since ?? 0;
+      return stale.filter((s) => unix(s.captured_at) >= since);
+    });
+
+    const records = await loadUsageHistory();
+    await flush();
+
+    // 40 days ago is outside the 15 days before the newest row, the other two are in.
+    expect(records).toHaveLength(2);
+    expect(store.saved.cursor).toBe(unix(daysAgo(20)));
+    expect(store.saved.floor).toBe(unix(daysAgo(20)) - 15 * DAY);
+
+    // The next poll continues from the newest row instead of probing again.
+    invoke.mockClear();
+    await loadUsageHistory();
+    expect(callsOf("get_history")).toEqual([{ limit: null, accountId: null, since: unix(daysAgo(20)) }]);
+  });
+
+  it("a PC with no history at all asks for its newest row once and stays empty", async () => {
+    enableUsageHistoryPersistence(memoryStore());
+    invoke.mockResolvedValue([]);
+
+    expect(await loadUsageHistory()).toEqual([]);
+    expect(await loadUsageHistory()).toEqual([]);
+
+    expect(callsOf("get_history").filter((c) => c.limit === 1)).toHaveLength(1);
+  });
+
   it("drops saved rows older than the window on load", async () => {
     const store = memoryStore({
       rows: [snap(daysAgo(20)), snap(daysAgo(1))],
