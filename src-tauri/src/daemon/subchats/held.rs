@@ -275,7 +275,7 @@ fn subs_of(state: &DaemonState, parent: &str) -> Vec<Instance> {
 /// the same name rules the `subchat` tool uses. `Ok(None)` means start now (the
 /// named sub already finished cleanly); `Ok(Some)` means hold. A name that
 /// matches none or several is refused with the subs listed, and so is a sub that
-/// already ended blocked: the main agent is awake right now to tell Joe, and a
+/// already ended blocked: that sub's own card tells Joe, and a
 /// card for a job that was never registered would have nothing to start.
 pub fn plan_after(state: &DaemonState, parent: &str, query: &str) -> Result<Option<HoldPlan>, String> {
     let subs = subs_of(state, parent);
@@ -285,7 +285,7 @@ pub fn plan_after(state: &DaemonState, parent: &str, query: &str) -> Result<Opti
         AfterState::Clean => Ok(None),
         AfterState::Pending => Ok(Some(HoldPlan { target_id: target.session_id.clone(), target_name: name })),
         AfterState::Blocked(why) => Err(format!(
-            "after: {name} ended blocked ({why}), so a job waiting for it would never start. Tell Joe, and spawn this job without after if he says to go on without it."
+            "after: {name} ended blocked ({why}), so a job waiting for it would never start. Joe's card for that sub already tells him, so say nothing of your own; spawn this job without after only if he says to go on without it."
         )),
     }
 }
@@ -1012,6 +1012,7 @@ mod tests {
         test_support::finish_record("pb-bad", "Blocked", None);
         let err = plan_after(&st, "pb-main", "bad").unwrap_err();
         assert!(err.contains("ended blocked") && err.contains("without after"), "{err}");
+        assert!(!err.contains("Tell Joe") && err.contains("say nothing of your own"), "the blocked sub's card tells Joe: {err}");
     }
 
     // ── holding ────────────────────────────────────────────────────────────

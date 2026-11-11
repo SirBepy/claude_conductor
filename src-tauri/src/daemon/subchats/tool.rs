@@ -1167,7 +1167,8 @@ mod tests {
         assert_eq!(second["queued_for_writer"][0]["sub"], json!("Header"));
         assert_eq!(second["queued_for_writer"][0]["behind"], json!("Footer"));
         let note = second["queued_note"].as_str().unwrap();
-        assert!(note.contains("queued for the writer slot behind Footer") && note.contains("Tell Joe"), "{note}");
+        assert!(note.contains("queued for the writer slot behind Footer"), "{note}");
+        assert!(!note.contains("Tell Joe") && note.contains("send no message or card of your own"), "the sub's own card tells Joe, the main chat does not repeat it: {note}");
         // The list and the status show it as queued, with the reason.
         let list = call(&st, &main, json!({"action": "list"}), &sent).await;
         let header = list["subs"].as_array().unwrap().iter().find(|r| r["name"] == "Header").unwrap();
