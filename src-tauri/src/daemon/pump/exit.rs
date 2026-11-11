@@ -183,6 +183,7 @@ async fn report_nonzero_exit(
 mod tests {
     use super::*;
     use crate::chat::parser::ParserContext;
+    use crate::daemon::pump::close::prompt_is_close_now;
 
     /// A `/close` turn whose first content is tool_use (no preceding text) must
     /// still be flagged on death, since closing_flagged arms on stream_event, not AssistantDelta.
@@ -196,7 +197,7 @@ mod tests {
         registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-08-01T00:00:00Z");
 
         // Mirrors turn_is_close's check without needing a live Session/ChildStdin.
-        let last_prompt = "/close";
+        let last_prompt = "/close --now";
         let mut ctx = ParserContext::new_live();
         let mut saw_stream_turn = false;
         let mut closing_flagged = false;
@@ -207,7 +208,7 @@ mod tests {
             ctx.feed(format!("{line}\n").as_bytes());
             if !saw_stream_turn && ctx.take_stream_event_seen() {
                 saw_stream_turn = true;
-                if last_prompt.trim_start().starts_with("/close") {
+                if prompt_is_close_now(last_prompt) {
                     closing_flagged = true;
                 }
             }

@@ -187,8 +187,10 @@ pub(crate) async fn run_stdout_pump(
                             // The chat is working again, whoever started the turn (a
                             // send or a wake), so what it next waits on is news.
                             state_for_pump.notify_gate.turn_started(&pump_session.session_id);
-                            // Mark the row "Closing" now (daemon-authoritative, no text marker)
-                            // so every window's sidebar shows it; close_requested drives teardown.
+                            // A `/close --now` prompt marks the row "Closing" at turn start
+                            // (daemon-authoritative, no text marker). A plain `/close` raises it
+                            // itself via `close_session(stage="started")` once its closing phases
+                            // begin; close_requested drives teardown either way.
                             if turn_is_close(&pump_session) {
                                 closing_flagged = true;
                                 dirty |= state_for_pump.registry.set_closing(&pump_session.session_id, true);
