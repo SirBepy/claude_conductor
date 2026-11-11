@@ -163,6 +163,12 @@ test.describe("chat dashboard / Subchats card", () => {
     expect(await reads()).toBe(25);
     await det(page).locator(".sx-gal-more").click();
     await expect(tiles).toHaveCount(36);
+    // Closing and reopening keeps the drawn tiles; the label counts from them and "more" still adds.
+    await det(page).locator(".sx-imgmore").click();
+    await expect(det(page).locator(".sx-gallery")).toBeHidden();
+    await det(page).locator(".sx-imgmore").click();
+    await expect(tiles).toHaveCount(36);
+    await expect(det(page).locator(".sx-gal-more")).toHaveText("Show 4 more (4 left)");
     await det(page).locator(".sx-gal-more").click();
     await expect(tiles).toHaveCount(40);
     await expect(det(page).locator(".sx-gal-more")).toHaveCount(0);
