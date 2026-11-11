@@ -152,9 +152,9 @@ export async function resumeDraft(pane: HTMLElement): Promise<void> {
   state.composer = null;
 
   setActiveSession(pending.placeholderId);
-  // Same ordering fix as launchNewSession (todo 879): reveal the pane before
-  // mounting it, not after - renderPendingPane()'s composer autofocus is a
-  // no-op while `.session-pane` still carries the mobile-list display:none.
+  // Same ordering as launchNewSession: reveal the pane before mounting it, so
+  // the pane is never mounted under the mobile-list display:none.
+  // renderPendingPane() skips its composer focus at phone width.
   const root = document.querySelector<HTMLElement>(".view-sessions");
   root?.setAttribute("data-mobile-pane", "chat");
   await renderPendingPane(
@@ -280,13 +280,12 @@ export async function launchNewSession(
   savePendingSession(state.pendingNewSession);
   setActiveSession(placeholderId);
 
-  // Mobile single-pane: reveal the chat pane BEFORE mounting it, not after -
-  // renderPendingPane()'s own composer autofocus (pending-pane.ts's trailing
-  // `ta.focus()`) is a no-op while an ancestor still carries display:none
-  // (sessions-mobile.css's `:not([data-mobile-pane="chat"]) .session-pane`),
-  // which only this attribute controls (todo 879). Desktop ignores this
-  // attribute - it only drives the ≤768px media query - so hoisting it here
-  // changes nothing there.
+  // Mobile single-pane: reveal the chat pane BEFORE mounting it, so it is
+  // never mounted under an ancestor's display:none (sessions-mobile.css's
+  // `:not([data-mobile-pane="chat"]) .session-pane`), which only this
+  // attribute controls. renderPendingPane() skips its composer focus at
+  // phone width (pending-pane.ts). Desktop ignores this attribute - it only
+  // drives the ≤768px media query - so hoisting it here changes nothing there.
   const root = document.querySelector<HTMLElement>(".view-sessions");
   root?.setAttribute("data-mobile-pane", "chat");
 

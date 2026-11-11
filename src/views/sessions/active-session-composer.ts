@@ -19,6 +19,7 @@ import { isBlocked, formatClockLabel, capitalize, getCachedAccount } from "../..
 import { loadHiddenSessions, saveHiddenSessions } from "./sessions-helpers";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
 import { refreshNextChips } from "./next-chip-strip";
+import { isMobileViewport } from "../../shared/mobile-viewport";
 
 /** Attach the composer + held-messages controller, including the `sendBundle`
  * closure both use to actually send to the daemon. */
@@ -187,6 +188,8 @@ export function mountComposer(
   // Opening a chat should leave you able to paste, not just type: the
   // type-anywhere relay covers keystrokes, but a real focus is what makes
   // Ctrl+V, drag-drop and the caret land where you expect. Last, so nothing
-  // wired above takes the focus back.
-  if (!readOnly) composer.focus();
+  // wired above takes the focus back. Not on a phone: Android WebView then
+  // connects the keyboard as a raw key stream (no voice, swipe or
+  // suggestions) and a tap on the already-focused box never reconnects it.
+  if (!readOnly && !isMobileViewport()) composer.focus();
 }

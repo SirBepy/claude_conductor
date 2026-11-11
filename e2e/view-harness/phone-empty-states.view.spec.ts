@@ -1,3 +1,4 @@
+// Reviewed 2026-11-11 (phone keyboard): pending-flow.ts changed comments only; it passes.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // Reviewed 2026-11-08: pending-flow.ts gained startNewSessionInProject (the palette's New chat in <project>); the empty-state copy this spec asserts is unchanged and it passed.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.

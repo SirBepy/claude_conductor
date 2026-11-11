@@ -29,6 +29,9 @@ import { mountView, SESSIONS_BASE_INVOKE } from "./harness";
 //    set the attribute before mounting, mirroring the already-correct
 //    pattern in active-session.ts's selectSession().
 //
+// At phone width the draft no longer focuses the composer at all (see the
+// mobile test below), so cause 2 now only guards the pane reveal order.
+//
 // Both are exercised here via the REAL startNewSession() -> pickProject() ->
 // launchNewSession() flow (no bypass), with every
 // backend call mocked.
@@ -98,7 +101,13 @@ test.describe("view-harness / new-chat composer focus after the picker closes", 
     await assertComposerHoldsFocus(page);
   });
 
-  test("mobile: composer holds focus once the pane is revealed", async ({ page }) => {
+  // Phone: the draft does NOT focus the composer on open. In Android WebView a
+  // textarea focused from code gets the keyboard as a raw key stream
+  // (EditorInfo TYPE_NULL), and a tap on the already-focused box never
+  // reconnects it, so Gboard shows "Voice input not supported here" and drops
+  // swipe and suggestions (reproduced on a Pixel emulator, 2026-11-11). The
+  // user's own tap must be the focus.
+  test("mobile: composer is not focused on open, and a tap focuses it", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mountSessionsEntry(page);
     // .sessions-fab is the phone entry point to the same startNewSession()
@@ -107,6 +116,11 @@ test.describe("view-harness / new-chat composer focus after the picker closes", 
     await page.locator("#sessionsFab").waitFor();
     await page.locator("#sessionsFab").click();
     await pickProjectIntoDraft(page);
-    await assertComposerHoldsFocus(page);
+    const ta = page.locator("#session-pane .session-composer .composer-textarea");
+    await ta.waitFor();
+    await page.waitForTimeout(400);
+    await expect(ta).not.toBeFocused();
+    await ta.click();
+    await expect(ta).toBeFocused();
   });
 });

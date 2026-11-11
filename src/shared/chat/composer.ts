@@ -987,13 +987,15 @@ ${typed}` : text;
   /** Replace the draft's text. `clearAttachments` (default true) also wipes
    * staged attachments/pasted blocks - used by the scheduled-message-edit
    * caller, which only stores a flattened prompt string. The lightbox caption
-   * round-trip passes false so dismissing a preview never drops attachments. */
-  setDraftText(text: string, clearAttachments = true): void {
+   * round-trip passes false so dismissing a preview never drops attachments.
+   * `focus` false is for a chat opening on a phone, where a focus from code
+   * leaves Android's keyboard without voice, swipe or suggestions. */
+  setDraftText(text: string, clearAttachments = true, focus = true): void {
     this.undo.resetChain();
     if (clearAttachments) this.att.clear();
     if (this.textarea) {
       this.textarea.value = text;
-      this.textarea.focus();
+      if (focus) this.textarea.focus();
     }
     this.autoResize();
     this.updateHighlight();

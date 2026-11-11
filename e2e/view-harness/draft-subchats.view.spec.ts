@@ -1,3 +1,4 @@
+// Reviewed 2026-11-11 (phone keyboard): pending-pane.ts no longer focuses the composer on open at phone width; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10: dashboard.ts gained the Due card in its half-width list, absent unless a todo is due; this spec seeds no due todo, so its contract is unchanged and it passes.
 // asserts: src/views/sessions/draft-subchats.ts, src/views/sessions/pending-pane.ts, src/views/sessions/pending-pane-composer.ts, src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/project-config.ts
 import { test, expect, type Page } from "@playwright/test";
