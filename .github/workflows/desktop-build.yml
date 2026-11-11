@@ -1,0 +1,229 @@
+# Reusable desktop build, called once per platform from tauri-release.yml. A
+# separate job per platform (not a matrix) lets `tag` and the Windows publish
+# wait on the Windows build alone, so macOS ships on its own when it finishes.
+name: Desktop build
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        type: string
+        required: true
+      target:
+        type: string
+        required: true
+      updater_key:
+        type: string
+        required: true
+      os_label:
+        type: string
+        required: true
+      arch_label:
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      product_slug:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ inputs.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      # 89513f79 dropped package-lock.json and gitignored it, which silently broke
+      # this job: setup-node's npm cache and `npm ci` both require that file.
+      # pnpm-lock.yaml is the real lockfile; action-setup reads the pnpm version
+      # from package.json's packageManager field and must run before setup-node.
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            libssl-dev \
+            libgtk-3-dev \
+            libasound2-dev
+
+      - name: Sync version into tauri.conf.json, Cargo.toml, and package.json
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          # tauri.conf.json: source of truth for Tauri bundler.
+          # beforeBuildCommand is `npm run build`, whose prebuild hook runs
+          # `cargo test --test export_types`: a full debug compile of the crate
+          # (about 10 minutes) just to write src/types/ipc.generated.ts. A release
+          # bundle only needs the vite build; the test job generates the types
+          # and typechecks, and vite does not read that file.
+          jq --arg v "$VERSION" '.version = $v | .build.beforeBuildCommand = "pnpm exec vite build"' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
+          mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
+          # Cargo.toml: only `^version = "..."` lines hit (deps use `  version = ...`
+          # with leading whitespace inside inline tables). `-i.bak` is the form
+          # both GNU sed (Linux) and BSD sed (macOS) accept.
+          sed -i.bak -E "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          rm src-tauri/Cargo.toml.bak
+          # package.json: already the source of truth, write back to be explicit.
+          jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch tip; the repo has no release tags, so a toolchain bump means re-resolving this sha by hand
+        with:
+          targets: ${{ inputs.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+          key: ${{ inputs.target }}
+          cache-on-failure: true
+
+      - name: Install Tauri CLI
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: tauri-cli
+
+      # Self-signed identity so the macOS code requirement is the cert, not the
+      # per-build ad-hoc hash, and a Keychain "Always Allow" survives updates.
+      # codesign refuses an untrusted identity, hence add-trusted-cert. Skipped
+      # (ad-hoc build) when the secrets are unset.
+      - name: Import macOS signing identity
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MAC_SIGNING_P12: ${{ secrets.MAC_SIGNING_P12 }}
+          MAC_SIGNING_P12_PASSWORD: ${{ secrets.MAC_SIGNING_P12_PASSWORD }}
+        run: |
+          if [ -z "$MAC_SIGNING_P12" ]; then
+            echo "MAC_SIGNING_P12 unset, building ad-hoc signed"
+            exit 0
+          fi
+          KC="$RUNNER_TEMP/signing.keychain-db"
+          KC_PW=$(uuidgen)
+          echo "$MAC_SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p "$KC_PW" "$KC"
+          security set-keychain-settings "$KC"
+          security unlock-keychain -p "$KC_PW" "$KC"
+          security import "$RUNNER_TEMP/signing.p12" -k "$KC" -P "$MAC_SIGNING_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PW" "$KC" > /dev/null
+          security list-keychains -d user -s "$KC" login.keychain-db
+          security find-certificate -c "Claude Conductor Self-Signed" -p "$KC" > "$RUNNER_TEMP/signing.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$KC" "$RUNNER_TEMP/signing.pem"
+          rm -f "$RUNNER_TEMP/signing.p12"
+          security find-identity -p codesigning "$KC"
+          echo "APPLE_SIGNING_IDENTITY=Claude Conductor Self-Signed" >> "$GITHUB_ENV"
+
+      - name: Build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Committed src-tauri/.cargo/config.toml pins build.target-dir to a
+          # dev-machine-only D: path (be0d209f), which hid the bundle from the
+          # staging steps and broke every 0.2.53 platform. Env outranks config.
+          CARGO_TARGET_DIR: target
+        working-directory: src-tauri
+        # Invoke cargo-tauri directly, not `cargo tauri`. On macOS runners
+        # (seen on macos-14) `/opt/homebrew/bin/cargo` is a rustup-init shim that shadows the real
+        # `~/.cargo/bin/cargo` and breaks subcommand dispatch with
+        # "error: unexpected argument 'tauri' found / Usage: rustup-init".
+        # Calling cargo-tauri (the actual binary installed by tauri-cli) skips
+        # that lookup entirely.
+        run: cargo-tauri build --target ${{ inputs.target }}
+
+      - name: Stage Windows artifacts
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: src-tauri/target/${{ inputs.target }}/release/bundle/nsis
+        run: |
+          TAG="${{ inputs.tag }}"
+          VERSION="${{ inputs.version }}"
+          SLUG="${{ inputs.product_slug }}"
+          mkdir -p "$GITHUB_WORKSPACE/release-staging"
+          EXE_FILE=$(ls *_x64-setup.exe | head -n 1)
+          ASSET="${SLUG}_${VERSION}_${{ inputs.os_label }}_${{ inputs.arch_label }}.exe"
+          cp "$EXE_FILE" "$GITHUB_WORKSPACE/release-staging/$ASSET"
+          cp "${EXE_FILE}.sig" "$GITHUB_WORKSPACE/release-staging/${ASSET}.sig"
+          SIG=$(cat "${EXE_FILE}.sig")
+          URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/${TAG}/${ASSET}"
+          jq -n --arg sig "$SIG" --arg url "$URL" \
+            '{signature:$sig, url:$url}' \
+            > "$GITHUB_WORKSPACE/release-staging/${{ inputs.updater_key }}.json"
+
+      - name: Stage macOS artifacts
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: src-tauri/target/${{ inputs.target }}/release/bundle
+        run: |
+          TAG="${{ inputs.tag }}"
+          VERSION="${{ inputs.version }}"
+          SLUG="${{ inputs.product_slug }}"
+          mkdir -p "$GITHUB_WORKSPACE/release-staging"
+          # Updater payload: .app.tar.gz + .sig (createUpdaterArtifacts=true).
+          APP_TGZ=$(ls macos/*.app.tar.gz | head -n 1)
+          ASSET_TGZ="${SLUG}_${VERSION}_${{ inputs.os_label }}_${{ inputs.arch_label }}.app.tar.gz"
+          cp "$APP_TGZ" "$GITHUB_WORKSPACE/release-staging/$ASSET_TGZ"
+          cp "${APP_TGZ}.sig" "$GITHUB_WORKSPACE/release-staging/${ASSET_TGZ}.sig"
+          SIG=$(cat "${APP_TGZ}.sig")
+          URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/${TAG}/${ASSET_TGZ}"
+          jq -n --arg sig "$SIG" --arg url "$URL" \
+            '{signature:$sig, url:$url}' \
+            > "$GITHUB_WORKSPACE/release-staging/${{ inputs.updater_key }}.json"
+          # DMG for first-time installs.
+          DMG_FILE=$(ls dmg/*.dmg | head -n 1)
+          ASSET_DMG="${SLUG}_${VERSION}_${{ inputs.os_label }}_${{ inputs.arch_label }}.dmg"
+          cp "$DMG_FILE" "$GITHUB_WORKSPACE/release-staging/$ASSET_DMG"
+
+      - name: Stage Linux artifacts
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: src-tauri/target/${{ inputs.target }}/release/bundle
+        run: |
+          TAG="${{ inputs.tag }}"
+          VERSION="${{ inputs.version }}"
+          SLUG="${{ inputs.product_slug }}"
+          mkdir -p "$GITHUB_WORKSPACE/release-staging"
+          # AppImage doubles as updater payload + portable run; signed in place.
+          APPIMG=$(ls appimage/*.AppImage | head -n 1)
+          ASSET_APP="${SLUG}_${VERSION}_${{ inputs.os_label }}_${{ inputs.arch_label }}.AppImage"
+          cp "$APPIMG" "$GITHUB_WORKSPACE/release-staging/$ASSET_APP"
+          cp "${APPIMG}.sig" "$GITHUB_WORKSPACE/release-staging/${ASSET_APP}.sig"
+          SIG=$(cat "${APPIMG}.sig")
+          URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/${TAG}/${ASSET_APP}"
+          jq -n --arg sig "$SIG" --arg url "$URL" \
+            '{signature:$sig, url:$url}' \
+            > "$GITHUB_WORKSPACE/release-staging/${{ inputs.updater_key }}.json"
+          # DEB for apt-managed installs.
+          DEB=$(ls deb/*.deb | head -n 1)
+          ASSET_DEB="${SLUG}_${VERSION}_${{ inputs.os_label }}_${{ inputs.arch_label }}.deb"
+          cp "$DEB" "$GITHUB_WORKSPACE/release-staging/$ASSET_DEB"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-${{ inputs.updater_key }}
+          path: release-staging/

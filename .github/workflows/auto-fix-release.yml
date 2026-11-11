@@ -80,9 +80,10 @@ jobs:
           allow=false
           while IFS= read -r job; do
             [ -z "$job" ] && continue
-            # Only the matrix jobs need a wildcard ("build (windows-latest, ...)").
+            # Wildcards cover the reusable-workflow jobs ("build-windows / build")
+            # and the per-platform publish jobs (publish-windows, publish-macos).
             case "$job" in
-              check|build*|android*|tag|publish) allow=true ;;
+              check|build*|android*|tag|publish*|upload-android) allow=true ;;
             esac
           done <<< "$failed"
           if [ "$allow" = "true" ]; then
