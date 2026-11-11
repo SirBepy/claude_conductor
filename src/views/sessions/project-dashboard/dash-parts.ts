@@ -30,6 +30,9 @@ export interface DashActions {
    *  starts a chat on the project's usual model, asking only what it must
    *  (which repo of a group, an account when none is the default). */
   runCardAction(anchor: HTMLElement, message: string): void;
+  /** The Due card's "Do all due": like runCardAction, but the chat starts in one repo
+   *  (asking which when several own due todos) and is handed only that repo's ids. */
+  runDueAll(anchor: HTMLElement): void;
   /** Leave the standalone page for the chat that was open before it. */
   back(): void;
   openIn(anchor: HTMLElement, kind: "vscode" | "terminal" | "explorer"): void;

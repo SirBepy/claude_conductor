@@ -349,7 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn builtin_list_is_the_nine_cards() {
+    fn builtin_list_holds_the_current_cards() {
         assert_eq!(BUILTIN_CARDS.len(), 10);
         assert!(BUILTIN_CARDS.contains(&"due"));
         assert!(BUILTIN_CARDS.contains(&"usage"));

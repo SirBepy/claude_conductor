@@ -26,6 +26,8 @@ import { dueCard, nextUp, running, shipState, yourTodos } from "./dash-sections"
 import { assignColumns, naturalHeight } from "../../../shared/balance";
 import { playEntrance, playRailEntrance, type Entrance } from "./dash-motion";
 import { cardRefreshSecs, staleCardIds } from "./format";
+import { reconcileSelection, selectionIds } from "./due-model";
+import { dueSelection, setDueHighlight } from "../backlog-panel/due-highlight";
 import type { CardResult, DashboardHistory, DashboardTargetRef, DashSnapshot } from "./types";
 
 import "./pd-dashboard.css";
@@ -316,6 +318,10 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
       if (destroyed || mine !== snapSeq) return;
       if (!snap) throw new Error("no snapshot for this target");
       const first = !ctx;
+      // The highlight is process-wide, so a dashboard starts with none of another's, and a later
+      // snapshot re-keys it to the todos now in that cell (or drops it when the cell is gone).
+      const keep = first ? null : reconcileSelection(snap.due, dueSelection());
+      setDueHighlight(keep, selectionIds(snap.due, keep));
       if (!ctx) {
         ctx = {
           mode: deps.mode, usage: { range: "30d", records: null }, todoRange: "30d",
@@ -354,6 +360,7 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
   function destroy(): void {
     if (destroyed) return;
     destroyed = true;
+    setDueHighlight(null, []);
     refetch.cancel();
     window.clearInterval(staleTimer);
     onResize.cancel();

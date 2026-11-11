@@ -5,9 +5,10 @@
 // the missed pill, the Backlog panel's highlight set, the message it sends).
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { dash, mount, resetDashboard, state } from "./helpers/project-dashboard-cards-setup.mjs";
-import { projectSnapshot } from "./helpers/project-dashboard-fixtures.mjs";
+import { dash, mount, resetDashboard, state, resolveNewChatConfig } from "./helpers/project-dashboard-cards-setup.mjs";
+import { projectSnapshot, groupRow, ZIRTUE_REPOS } from "./helpers/project-dashboard-fixtures.mjs";
 
+const { mountDashboard } = await import("../src/views/sessions/project-dashboard/dashboard.ts");
 const model = await import("../src/views/sessions/project-dashboard/due-model.ts");
 const highlight = await import("../src/views/sessions/backlog-panel/due-highlight.ts");
 
@@ -37,11 +38,37 @@ describe("due model", () => {
   });
 
   it("hands over the missed ids plus today's, each once, and nothing else", () => {
-    expect(model.doAllIds(DUE)).toEqual(["pc-8", "pc-9", "pc-1", "pc-2"]);
-    const dup = { days: [day("2026-11-10", [{ id: "pc-8", repo_cwd: "C:/Projects/other" }])], missed_ids: ids(8) };
-    expect(model.doAllIds(dup)).toEqual(["pc-8"]);
+    expect(model.doAllIds(DUE).map((d) => d.id)).toEqual(["pc-8", "pc-9", "pc-1", "pc-2"]);
+    // The same todo listed as missed and as due today (same repo, spelled two ways) counts once.
+    const twice = { days: [day("2026-11-10", [{ id: "pc-8", repo_cwd: "C:\\Projects\\Conductor\\" }])], missed_ids: ids(8) };
+    expect(model.doAllIds(twice)).toHaveLength(1);
     expect(model.doAllMessage(DUE)).toBe("/auto-do-todos pc-8,pc-9,pc-1,pc-2");
     expect(model.doAllMessage({ days: DUE.days.map((d, i) => (i === 0 ? day(d.date, []) : d)), missed_ids: [] })).toBeNull();
+  });
+
+  const OTHER = "C:/Projects/other";
+  const GROUP_DUE = {
+    days: [day("2026-11-10", [{ id: "pc-1", repo_cwd: CWD }, { id: "pc-1", repo_cwd: OTHER }, { id: "ot-5", repo_cwd: OTHER }])],
+    missed_ids: [{ id: "pc-8", repo_cwd: CWD }],
+  };
+
+  it("keeps an id that two repos share as two todos, so the count is right", () => {
+    expect(model.doAllIds(GROUP_DUE)).toHaveLength(4);
+    expect(model.doAllRepos(GROUP_DUE)).toEqual([{ cwd: CWD, count: 2 }, { cwd: OTHER, count: 2 }]);
+  });
+
+  it("hands one repo only its own ids", () => {
+    expect(model.doAllMessage(GROUP_DUE, CWD)).toBe("/auto-do-todos pc-8,pc-1");
+    expect(model.doAllMessage(GROUP_DUE, "C:\\Projects\\Other\\")).toBe("/auto-do-todos pc-1,ot-5");
+    expect(model.doAllMessage(GROUP_DUE, "C:/Projects/none")).toBeNull();
+  });
+
+  it("keeps a selection only while its cell still exists", () => {
+    expect(model.reconcileSelection(DUE, null)).toBeNull();
+    expect(model.reconcileSelection(DUE, "missed")).toBe("missed");
+    expect(model.reconcileSelection(NONE, "missed")).toBeNull();
+    expect(model.reconcileSelection(DUE, "2026-11-12")).toBe("2026-11-12");
+    expect(model.reconcileSelection(DUE, "2026-10-01")).toBeNull();
   });
 
   it("toggles: the same cell clears, another replaces", () => {
@@ -135,5 +162,71 @@ describe("Due card", () => {
     due(root).querySelector("[data-pd-due-all]").click();
     await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalledTimes(1));
     expect(state.launchNewChatCallback.mock.calls[0][1].initialMessage).toBe("/auto-do-todos pc-8,pc-9,pc-1,pc-2");
+  });
+
+  it("in a group, Do all due asks which repo and sends only that repo's ids", async () => {
+    const [app, , , api] = ZIRTUE_REPOS;
+    const groupDue = {
+      days: [day("2026-11-10", [{ id: "pc-1", repo_cwd: app.cwd }, { id: "pc-1", repo_cwd: api.cwd }, { id: "pc-2", repo_cwd: api.cwd }])],
+      missed_ids: [],
+    };
+    dash.snapshot = projectSnapshot({ target: groupRow().target, due: groupDue });
+    resolveNewChatConfig.mockResolvedValue({});
+    state.launchNewChatCallback = vi.fn();
+    const root = await mount({ kind: "group", id: "g1" });
+    const btn = due(root).querySelector("[data-pd-due-all]");
+    expect(btn.textContent).toBe("Do all due (3)");
+    btn.click();
+    const items = () => [...document.querySelectorAll(".session-more-menu .smore-item")];
+    await vi.waitFor(() => expect(items()).toHaveLength(2));
+    expect(items().map((b) => b.textContent)).toEqual(["zng-app (1)", "zng-api (2)"]);
+    items()[1].click();
+    await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalledTimes(1));
+    const [project, config] = state.launchNewChatCallback.mock.calls[0];
+    expect(project.path).toBe(api.cwd);
+    expect(config.initialMessage).toBe("/auto-do-todos pc-1,pc-2");
+  });
+});
+
+describe("the due highlight follows its dashboard", () => {
+  beforeEach(() => { resetDashboard(); highlight.setDueHighlight(null, []); });
+
+  it("is gone once the dashboard is torn down", async () => {
+    dash.snapshot = projectSnapshot({ due: DUE });
+    const h = mountDashboard({ kind: "project", id: "p1" }, { mode: "page", pane: document.body, leave: vi.fn(), back: vi.fn(), deselect: vi.fn() });
+    document.body.appendChild(h.root);
+    await vi.waitFor(() => expect(h.root.querySelector("[data-pd-due-missed]")).not.toBeNull());
+    h.root.querySelector("[data-pd-due-missed]").click();
+    expect(highlight.dueSelection()).toBe("missed");
+    h.destroy();
+    expect(highlight.dueSelection()).toBeNull();
+    expect(highlight.isDueHit("pc-8", CWD)).toBe(false);
+  });
+
+  it("does not carry over to the next dashboard that opens", async () => {
+    highlight.setDueHighlight("missed", ids(8));
+    dash.snapshot = projectSnapshot({ due: DUE });
+    const root = await mount({ kind: "project", id: "p2" });
+    expect(highlight.dueSelection()).toBeNull();
+    expect(root.querySelector("[data-pd-due-day].on, [data-pd-due-missed].on")).toBeNull();
+    expect(highlight.isDueHit("pc-8", CWD)).toBe(false);
+  });
+
+  it("re-keys to the new snapshot's todos, and drops a day that left the window", async () => {
+    dash.snapshot = projectSnapshot({ due: DUE });
+    const h = mountDashboard({ kind: "project", id: "p1" }, { mode: "page", pane: document.body, leave: vi.fn(), back: vi.fn(), deselect: vi.fn() });
+    document.body.appendChild(h.root);
+    await vi.waitFor(() => expect(h.root.querySelectorAll("[data-pd-due-day]")).toHaveLength(5));
+    h.root.querySelectorAll("[data-pd-due-day]")[1].click();
+    expect(highlight.isDueHit("pc-3", CWD)).toBe(true);
+    dash.snapshot = projectSnapshot({ due: { ...DUE, days: DUE.days.map((d, i) => (i === 1 ? day(d.date, ids(7)) : d)) } });
+    h.refresh();
+    await vi.waitFor(() => expect(highlight.isDueHit("pc-7", CWD)).toBe(true));
+    expect(highlight.isDueHit("pc-3", CWD)).toBe(false);
+    dash.snapshot = projectSnapshot({ due: { ...DUE, days: DUE.days.slice(2) } });
+    h.refresh();
+    await vi.waitFor(() => expect(highlight.dueSelection()).toBeNull());
+    expect(highlight.isDueHit("pc-7", CWD)).toBe(false);
+    h.destroy();
   });
 });
