@@ -136,3 +136,106 @@ describe("send grace window", () => {
     expect(textarea.value).toBe("lost send\n\nnewer words");
   });
 });
+
+describe("a held send and its composer's lifetime", () => {
+  it("tearing the composer down inside the window sends at once instead of orphaning an Undo", async () => {
+    const onSend = vi.fn(async () => {});
+    const { composer, textarea } = await mountWithGrace({ onSend });
+    typeInto(textarea, "switching away now");
+    vi.useFakeTimers();
+    pressKey(textarea, "Enter");
+    expect(onSend).not.toHaveBeenCalled();
+
+    composer.destroy();
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0][0][0].text).toBe("switching away now");
+
+    // The chat's next composer has no Undo to offer and nothing left to send.
+    const next = await mountWithGrace({ onSend });
+    expect(undoBtn(next.root)).toBeNull();
+    vi.advanceTimersByTime(10_000);
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("a send that fails after the teardown keeps its text in the chat's stored draft", async () => {
+    const onSend = vi.fn(async () => { throw new Error("daemon gone"); });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { composer, textarea } = await mountWithGrace({ onSend });
+    typeInto(textarea, "must survive");
+    pressKey(textarea, "Enter");
+    composer.destroy();
+
+    const { loadDraft } = await import("../src/shared/chat/composer-persistence.ts");
+    await vi.waitFor(() => expect(loadDraft("sess-1")).toBe("must survive"));
+  });
+
+  it("destroying a composer does not fire a send another composer is holding", async () => {
+    const onSend = vi.fn(async () => {});
+    const a = await mountWithGrace({ onSend });
+    const b = await mountWithGrace({ onSend: vi.fn(async () => {}) });
+    typeInto(a.textarea, "held by a");
+    vi.useFakeTimers();
+    pressKey(a.textarea, "Enter");
+
+    b.composer.destroy();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(undoBtn(a.root)).not.toBeNull();
+  });
+
+  it("a rename inside the window keeps the Undo button, Ctrl+Z and the timer working", async () => {
+    const onSend = vi.fn(async () => {});
+    const { composer, textarea, root } = await mountWithGrace({ onSend });
+    typeInto(textarea, "first message of a new chat");
+    vi.useFakeTimers();
+    pressKey(textarea, "Enter");
+    await vi.advanceTimersByTimeAsync(0); // the send has released its re-entry guard
+    composer.setSessionId("real-1");
+
+    const btn = undoBtn(root);
+    expect(btn).not.toBeNull();
+    btn.click();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(root.querySelector(".composer-textarea").value).toBe("first message of a new chat");
+
+    // Same again, left alone: the timer still fires under the new id.
+    pressKey(root.querySelector(".composer-textarea"), "Enter");
+    await vi.advanceTimersByTimeAsync(3001);
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("Ctrl+Z after a rename undoes the held send", async () => {
+    const onSend = vi.fn(async () => {});
+    const { composer, textarea, root } = await mountWithGrace({ onSend });
+    typeInto(textarea, "renamed then undone");
+    vi.useFakeTimers();
+    pressKey(textarea, "Enter");
+    composer.setSessionId("real-2");
+
+    const box = root.querySelector(".composer-textarea");
+    pressKey(box, "z", { ctrlKey: true });
+    expect(box.value).toBe("renamed then undone");
+    vi.advanceTimersByTime(10_000);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("a send in a chat fires that chat's held card answer first, and a card answer on another chat stays put", async () => {
+    const { startGrace } = await import("../src/shared/chat/send-grace.ts");
+    const order = [];
+    const onSend = vi.fn(async (blocks) => { order.push(`send:${blocks[0].text}`); });
+    const { textarea } = await mountWithGrace({ onSend });
+    vi.useFakeTimers();
+    const mount = document.createElement("div");
+    document.body.appendChild(mount);
+    const card = (key) => startGrace({ key, label: "Answer", mount, fire: () => { order.push(`card:${key}`); }, onUndo: () => {} });
+    await card("sess-1");
+    await card("other-chat");
+
+    typeInto(textarea, "after the card");
+    pressKey(textarea, "Enter");
+
+    expect(order).toEqual(["card:sess-1"]);
+    await vi.advanceTimersByTimeAsync(3001);
+    expect(order).toEqual(["card:sess-1", "card:other-chat", "send:after the card"]);
+    mount.remove();
+  });
+});
