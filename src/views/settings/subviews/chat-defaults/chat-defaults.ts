@@ -27,6 +27,7 @@ function parseModels(raw: string): string[] {
 const DASHBOARD_SECTIONS: ReadonlyArray<{ id: string; label: string; tooltip: string }> = [
   { id: "links", label: "Links and files", tooltip: "Links the chat produced and the files it touched, with the Bigger plan, Decided and Project memory buttons." },
   { id: "preview", label: "Preview window", tooltip: "A small live tile of the chat's newest preview that opens the preview panel." },
+  { id: "drafts", label: "Drafts", tooltip: "Messages Claude wrote for you to send somewhere else, with Copy and Edit. Copied ones fold away." },
   { id: "changes", label: "Changes", tooltip: "The files the chat edited since your last message. Off unless you turn it on." },
 ];
 

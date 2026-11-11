@@ -20,6 +20,7 @@ import type { Visual } from "../message-visuals";
 import { buildAnswerItems, plainUserText, type AnswerItem, type AnswerSide } from "./answers-model";
 import { buildSubsState, type SubCardItem, type SubsState } from "./subs-model";
 import { changedFiles, extractFiles, extractLinks, type ChangedFile, type FileItem, type LinkItem } from "./links-model";
+import { buildDraftsState, type DraftStoreSide, type DraftsState } from "./drafts-model";
 import { cardQuestionTexts, findOpenCardForPrompt } from "../question-texts";
 
 export const TURN_STATUS_TOOL = "mcp__cc_conductor__report_turn_status";
@@ -45,6 +46,8 @@ export interface DashboardInput {
   /** This chat's previews and its subs' (list_previews scoped to the chat's
    *  family), newest first, once loaded. */
   previews?: readonly PreviewMeta[];
+  /** The drafts store, once read (drafts-model.ts). */
+  draftStore?: DraftStoreSide;
   /** Joe's per-section overrides (Settings > Chat defaults), by zone id. */
   sections?: Readonly<Record<string, boolean>>;
   /** The question card open by the message box for this chat, if any: Waiting
@@ -61,7 +64,7 @@ export interface OpenCardRef {
 /** Zones Joe can switch off or on in Settings. The value is the default when he
  *  has not chosen: Changes is off for him ("i know i wont be caring about
  *  them", 2026-11-10), the others are on. Any other zone always draws. */
-export const SECTION_DEFAULTS: Readonly<Record<string, boolean>> = { links: true, preview: true, changes: false };
+export const SECTION_DEFAULTS: Readonly<Record<string, boolean>> = { links: true, preview: true, drafts: true, changes: false };
 
 export function sectionOn(sections: Readonly<Record<string, boolean>> | undefined, id: string): boolean {
   return sections?.[id] ?? SECTION_DEFAULTS[id] ?? true;
@@ -403,6 +406,15 @@ export function derivePreviewWindow({ input }: DeriveCtx): PreviewWindowState | 
   return newest ? { newest, others: list.length - 1 } : null;
 }
 
+/** Drafts: messages Claude wrote for Joe to send somewhere else (write_draft),
+ *  one card per draft, newest open, copied ones folded (drafts-model.ts). On
+ *  the left, since a draft is his to send, and it stays until he copies it,
+ *  unlike Waiting on you, which clears when he writes again (2026-11-11). */
+export function deriveDrafts({ input }: DeriveCtx): DraftsState | null {
+  if (!sectionOn(input.sections, "drafts")) return null;
+  return buildDraftsState(input.messages, input.draftStore);
+}
+
 export interface ChangesState {
   files: ChangedFile[];
 }
@@ -432,6 +444,7 @@ function zone<T>(def: ZoneDef<T>): ZoneDef<T> {
 export const ZONES = {
   answers: zone({ column: "left", order: 10, derive: deriveAnswers }),
   waiting: zone({ column: "left", order: 20, derive: deriveWaiting }),
+  drafts: zone({ column: "left", order: 30, derive: deriveDrafts }),
   plan: zone({ column: "right", order: 10, derive: derivePlan }),
   subchats: zone({ column: "right", order: 20, derive: deriveSubchats }),
   notes: zone({ column: "right", order: 30, derive: deriveNotes }),

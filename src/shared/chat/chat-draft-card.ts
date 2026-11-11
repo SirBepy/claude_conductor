@@ -106,9 +106,17 @@ function actionLabel(m: RenderedMessage): string {
   }
 }
 
+/** What the dashboard's Drafts card changes on the same markup: it already
+ *  knows the version, and its ⤢ reads as Edit, since the Drafts panel it opens
+ *  is where a draft is edited. */
+export interface DraftCardOpts {
+  version?: string;
+  edit?: boolean;
+}
+
 /** Card markup. Painted from the tool_use input alone, so it is on screen
  *  before the daemon answers; `mountDraftCard` swaps in the store's copy. */
-export function renderDraftCardHtml(m: RenderedMessage): string {
+export function renderDraftCardHtml(m: RenderedMessage, opts: DraftCardOpts = {}): string {
   const isDrop = m.draftAction === "drop";
   const label = actionLabel(m);
   const who = m.draftRecipient ? `<span class="dc-to">${escapeHtml(m.draftRecipient)}</span>` : "";
@@ -120,11 +128,13 @@ export function renderDraftCardHtml(m: RenderedMessage): string {
     + who
     + topic
     + `<span class="dc-grow"></span>`
-    + `<span class="dc-ver"></span>`
+    + `<span class="dc-ver">${escapeHtml(opts.version ?? "")}</span>`
     + (isDrop
       ? ""
       : `<button type="button" class="dc-act" data-draft-copy title="Copy the message"><i class="ph ph-copy"></i><span>Copy</span></button>`
-        + `<button type="button" class="dc-act dc-pop" data-draft-pop title="Open in the Drafts panel"><i class="ph ph-arrows-out-simple"></i></button>`)
+        + (opts.edit
+          ? `<button type="button" class="dc-act dc-pop" data-draft-pop title="Edit in the Drafts panel"><i class="ph ph-pencil-simple"></i><span>Edit</span></button>`
+          : `<button type="button" class="dc-act dc-pop" data-draft-pop title="Open in the Drafts panel"><i class="ph ph-arrows-out-simple"></i></button>`))
     + `<i class="ph ph-caret-down dc-chevron" data-draft-toggle title="Fold"></i>`
     + `</div>`
     + `<div class="dc-body">${renderMarkdown(m.draftBody ?? "")}</div>`
@@ -254,11 +264,14 @@ export async function ensureDraftCardsLive(): Promise<void> {
 export function copyDraftCard(el: HTMLElement, btn: HTMLElement): void {
   const body = el.querySelector<HTMLElement>(".dc-body");
   if (!body) return;
-  const html = body.innerHTML;
-  const plain = markdownOf.get(el) ?? (body.textContent ?? "").trim();
-  copyDualPayload(html, plain, btn, () => {
-    const id = el.dataset.draftId;
-    const sessionId = el.dataset.draftSession;
+  copyDraft(body, markdownOf.get(el) ?? (body.textContent ?? "").trim(), btn, el.dataset.draftId, el.dataset.draftSession);
+}
+
+/** Copies a drawn draft body (`plain` is its markdown) and marks the draft
+ *  copied. Shared with the dashboard's Drafts card, which knows the markdown
+ *  and the id itself. */
+export function copyDraft(body: HTMLElement, plain: string, btn: HTMLElement, id: string | undefined, sessionId: string | null | undefined): void {
+  copyDualPayload(body.innerHTML, plain, btn, () => {
     if (!id || !sessionId) return;
     void invoke("set_draft_state", { sessionId, id, next: "copied" })
       .catch((err) => console.error("[draft-card] set_draft_state failed", err));

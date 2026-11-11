@@ -16,6 +16,8 @@ import { plainUserText } from "../../../shared/chat/dashboard/answers-model";
 import { renderVisuals } from "../../../shared/chat/message-visuals-render";
 import { basename } from "../../../shared/path-utils";
 import type { LinkItem } from "../../../shared/chat/dashboard/links-model";
+import type { DraftItem } from "../../../shared/chat/dashboard/drafts-model";
+import { renderDraftCardHtml } from "../../../shared/chat/chat-draft-card";
 
 /** The quick-view buttons in the Links and files card. */
 export const QUICK_VIEWS = [
@@ -32,10 +34,15 @@ export interface DashUi extends PlanUi {
   stripPick: number | null;
   stripExpanded: boolean;
   earlierOpen: boolean;
+  /** Drafts Joe opened or folded by hand, by DraftItem key. Without an entry
+   *  the newest draft to send is open and every other one folded. */
+  draftOpen: Record<string, boolean>;
+  /** The "N copied" fold of the Drafts card is open. */
+  copiedOpen: boolean;
 }
 
 export function initialUi(): DashUi {
-  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false };
+  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false, draftOpen: {}, copiedOpen: false };
 }
 
 export interface ZoneCtx {
@@ -177,6 +184,32 @@ function renderChanges(s: ZoneState<"changes">): string {
   return `<section class="cdash-zone cdash-card cdash-changes">${head("ph-git-diff", "Changes", `<span class="cdash-count">${s.files.length} ${s.files.length === 1 ? "file" : "files"}</span>`)}${rows}</section>`;
 }
 
+/** One draft: the transcript's own draft card markup, with the version filled
+ *  in and ⤢ shown as Edit (it opens the Drafts panel on this draft). */
+function draftHtml(d: DraftItem, open: boolean): string {
+  const m = {
+    kind: "draft",
+    draftAction: d.sent ? "sent" : "add",
+    draftTopic: d.topic,
+    draftRecipient: d.recipient,
+    draftBody: d.body,
+  } as RenderedMessage;
+  const cls = `msg draft-card${open ? " open" : ""}${d.copied ? " copied" : ""}${d.id ? "" : " unresolved"}`;
+  return `<div class="${cls}" data-dd-key="${escapeHtml(d.key)}">${renderDraftCardHtml(m, { version: d.version, edit: true })}</div>`;
+}
+
+function renderDrafts(s: ZoneState<"drafts">, ctx: ZoneCtx): string {
+  const open = (d: DraftItem, byDefault: boolean): boolean => ctx.ui.draftOpen[d.key] ?? byDefault;
+  const toSend = s.toSend.map((d, i) => draftHtml(d, open(d, i === 0))).join("");
+  const n = s.copied.length;
+  const fold = n > 0
+    ? `<button type="button" class="cdash-drafts-fold" data-act="drafts-copied" aria-expanded="${ctx.ui.copiedOpen}"><i class="ph ph-check"></i>${n} copied<i class="ph ${ctx.ui.copiedOpen ? "ph-caret-up" : "ph-caret-down"}"></i></button>`
+      + (ctx.ui.copiedOpen ? s.copied.map((d) => draftHtml(d, open(d, false))).join("") : "")
+    : "";
+  const count = `<span class="cdash-count">${s.toSend.length > 0 ? `${s.toSend.length} to send` : "all copied"}</span>`;
+  return `<section class="cdash-zone cdash-card cdash-drafts">${head("ph-paper-plane-tilt", "Drafts", count)}<div class="cdash-stack">${toSend}${fold}</div></section>`;
+}
+
 const listZone = (cls: string, icon: string, title: string) => (s: { cards: RenderedMessage[] }): string =>
   `<section class="cdash-zone cdash-card cdash-list ${cls}">${head(icon, title)}<div class="cdash-stack">${s.cards.map(cardHtml).join("")}</div></section>`;
 
@@ -190,6 +223,7 @@ function renderSubchats(): string {
 export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) => string } = {
   answers: renderAnswers,
   waiting: renderWaiting,
+  drafts: renderDrafts,
   plan: renderPlanZone,
   subchats: renderSubchats,
   notes: listZone("cdash-notes", "ph-note", "Notes"),

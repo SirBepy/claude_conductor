@@ -1,3 +1,4 @@
+// Reviewed 2026-11-11 (dashboard Drafts card): a new left-column zone draws write_draft drafts and the dashboard reads the drafts store; nothing this spec asserts changed, and it passes.
 // asserts: src/views/sessions/chat-dashboard/plan-card.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/chat-dashboard/answers-card.ts, src/views/sessions/session-thinking-bar.ts, src/shared/chat/dashboard/dashboard-model.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
