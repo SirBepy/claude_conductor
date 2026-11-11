@@ -84,8 +84,9 @@ const CARD_EDGE = 8;
 
 let open: { chip: HTMLElement; card: HTMLElement; close: () => void } | null = null;
 
-/** Sizes the card (fixed height, so every detail has the same shape) and puts
- *  it directly above its message, left-aligned with it but kept inside the
+/** Inside the chat dashboard the card is fixed and centred in the dashboard
+ *  body instead. Otherwise sizes the card (fixed height, so every detail has
+ *  the same shape) and puts it directly above its message, left-aligned with it but kept inside the
  *  scroller. When the message has less than a card of content above it (the
  *  very top of the chat) it opens below instead. Then scrolls the chat so the
  *  whole card is on screen. */
@@ -149,7 +150,13 @@ function openDrill(chip: HTMLElement, detail: ChatDetail, host: HTMLElement): vo
     close();
     chip.focus({ preventScroll: true });
   };
+  // A dashboard card is fixed (see placeCard), so it keeps its viewport rect: a
+  // scroll or resize would leave it stranded off its chip, so either closes it.
+  const dash = msg.closest<HTMLElement>(".cdash-body");
+  const onShift = (): void => close();
   const close = (): void => {
+    dash?.removeEventListener("scroll", onShift);
+    window.removeEventListener("resize", onShift);
     card.remove();
     chip.removeEventListener("keydown", onKey);
     chip.setAttribute("aria-expanded", "false");
@@ -171,6 +178,8 @@ function openDrill(chip: HTMLElement, detail: ChatDetail, host: HTMLElement): vo
   chip.setAttribute("aria-expanded", "true");
   open = { chip, card, close };
   placeCard(card, msg, host);
+  dash?.addEventListener("scroll", onShift, { passive: true });
+  window.addEventListener("resize", onShift);
   card.focus({ preventScroll: true });
 }
 
