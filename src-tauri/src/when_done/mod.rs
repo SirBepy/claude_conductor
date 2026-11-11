@@ -38,17 +38,20 @@ pub async fn arm_when_done(
     action: TerminalAction,
     app: AppHandle,
 ) -> Result<ProtocolState, String> {
-    Ok(arm(&app, action, ArmMode::Manual, None))
+    Ok(arm(&app, action, ArmMode::Manual, None, None))
 }
 
 /// Shared by the manual command and the nightly scheduler: reset to a fresh
 /// Watching state, spawn the engine in `mode`, emit, and return the new state.
 /// `overdue` is the nightly cutoff (`None` for a manual arm, which has none).
+/// `app_uptime` is how long the app has run, passed only by the nightly arm so a
+/// run that falls due right after the PC was switched on starts out postponed.
 pub(crate) fn arm(
     app: &AppHandle,
     action: TerminalAction,
     mode: ArmMode,
     overdue: Option<Overdue>,
+    app_uptime: Option<std::time::Duration>,
 ) -> ProtocolState {
     let state = app.state::<AppState>();
     // Abort any existing engine task and reset to a fresh Watching state.
@@ -57,8 +60,7 @@ pub(crate) fn arm(
         if let Some(handle) = inner.task.take() {
             handle.abort();
         }
-        inner.state = ProtocolState::watching(action);
-        inner.snooze_until = None;
+        nightly::arm_then_postpone(&mut inner, action, app_uptime, std::time::Instant::now(), snooze::unix_ms_now());
         inner.state.clone()
     };
 
