@@ -42,8 +42,24 @@ pub async fn answers_rewrite_question(
         .map_err(|e| e.to_string())
 }
 
-/// Blocks for the Ask sidecar's whole run (seconds, not milliseconds).
+/// Starts the thread's warm process while Joe types; returns at once.
 #[tauri::command]
+pub async fn answers_thread_prewarm(
+    session_id: String,
+    key: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client
+        .call("answers_thread_prewarm", json!({"session_id": session_id, "key": key}))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Blocks for the Ask sidecar's whole run (seconds, not milliseconds); the
+/// reply streams meanwhile as `answers-thread-delta` events for `stream_id`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn answers_thread_send(
     session_id: String,
     key: Option<String>,
@@ -51,6 +67,7 @@ pub async fn answers_thread_send(
     cwd: Option<String>,
     about_question: Option<String>,
     about_answer: Option<String>,
+    stream_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
@@ -64,6 +81,7 @@ pub async fn answers_thread_send(
                 "cwd": cwd,
                 "about_question": about_question.unwrap_or_default(),
                 "about_answer": about_answer.unwrap_or_default(),
+                "stream_id": stream_id,
             }),
         )
         .await

@@ -38,6 +38,9 @@ pub fn kill_all_sessions(state: &DaemonState) {
     for entry in state.sessions.iter() {
         crate::util::kill::kill_tree(entry.pid);
     }
+    // The Answers card's warm Ask processes too: a live one keeps the runtime
+    // from shutting down (ask/warm.rs).
+    crate::ask::warm::shutdown();
 }
 
 /// Daemon process entry. Called by the standalone `cc-conductor-daemon` bin

@@ -323,6 +323,12 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "preview_state" => {
             let _ = app.emit("preview-state", params);
         }
+        // An Answers-card thread's reply so far, as it streams
+        // (`methods::answers`). Payload is { session_id, stream_id, text }; the
+        // card shows it until the RPC's own result lands.
+        "answers_thread_delta" => {
+            let _ = app.emit("answers-thread-delta", params);
+        }
         // A stalled-sub or stopped-sub card's "Open it" (`subchats::stall`), and the
         // checkup card's "Open the log" (`subchats::checkup`). Pure forwards: the
         // main chat's window opens the sub in place / the file viewer, and only the

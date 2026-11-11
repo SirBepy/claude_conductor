@@ -442,6 +442,7 @@ pub fn run() {
             ipc::answers_mark,
             ipc::answers_rewrite_question,
             ipc::answers_thread_send,
+            ipc::answers_thread_prewarm,
             ipc::list_session_images,
             ipc::get_sub_brief,
             ipc::set_sub_pinned,
