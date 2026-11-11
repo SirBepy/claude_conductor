@@ -3,17 +3,22 @@ use crate::daemon::state::DaemonState;
 use crate::sessions::registry_turn::TurnActivity;
 use std::sync::Arc;
 
-/// True when the turn currently running was opened by the user typing `/close`.
+/// True when `prompt` is `/close --now`, the one form whose turn marks the row
+/// Closing from the prompt alone. A plain `/close` finishes open work and may ask
+/// Joe a question first, so its skill raises Closing itself with
+/// `close_session(stage="started")` once the closing phases begin; `--now` skips
+/// finishing, so it has no such pause to wait out.
+pub(crate) fn prompt_is_close_now(prompt: &str) -> bool {
+    let mut tokens = prompt.split_whitespace();
+    tokens.next() == Some("/close") && tokens.any(|tok| tok == "--now")
+}
+
+/// True when the turn currently running was opened by a `/close --now` prompt.
 /// Drives the daemon-authoritative `closing` row state (no text marker). The
 /// actual teardown still waits for the explicit `close_session` MCP tool, so a
-/// `/close --dont-close` shows "Closing" mid-run then stands back down.
+/// `/close --now --dont-close` shows "Closing" mid-run then stands back down.
 pub(crate) fn turn_is_close(session: &Session) -> bool {
-    session
-        .last_prompt
-        .lock()
-        .ok()
-        .map(|p| p.trim_start().starts_with("/close"))
-        .unwrap_or(false)
+    session.last_prompt.lock().ok().map(|p| prompt_is_close_now(&p)).unwrap_or(false)
 }
 
 /// Whether this turn's `closing` row state is still up and needs the turn-end
@@ -190,6 +195,20 @@ mod tests {
         st.registry.set_closing("s", true);
         assert!(close_in_flight(&st.registry, "s", false), "skill-raised closing needs turn-end cleanup too");
         assert!(!close_in_flight(&st.registry, "unknown", false));
+    }
+
+    /// A plain `/close` (or a trailing one) must not raise Closing from its prompt:
+    /// it may spend turns finishing work or asking Joe first, and the skill raises
+    /// Closing itself when its closing phases start. Only `/close --now` does.
+    #[test]
+    fn only_close_now_arms_closing_from_the_prompt() {
+        assert!(!prompt_is_close_now("/close"));
+        assert!(!prompt_is_close_now("  /close --dont-close"));
+        assert!(!prompt_is_close_now("fix the typo /close"));
+        assert!(!prompt_is_close_now("/closer --now"));
+        assert!(!prompt_is_close_now("please run --now"));
+        assert!(prompt_is_close_now("/close --now"));
+        assert!(prompt_is_close_now("  /close --dont-close --now"));
     }
 
     fn held_texts(st: &Arc<DaemonState>, sid: &str) -> Vec<String> {
