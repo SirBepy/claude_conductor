@@ -123,6 +123,11 @@ describe("mainChatInfo", () => {
     expect(info.subs.map((s) => s.kind)).toEqual(["asking", "asking", "finished"]);
   });
 
+  it("keeps a closing sub in the hover list while a finished one drops out", () => {
+    const sessions = [main, sub("a", { busy: false, subchat_finished: true }), sub("b", { closing: true })];
+    expect(mainChatInfo(main, sessions).hoverRows.map((r) => r.name)).toEqual(["b"]);
+  });
+
   it("does not count a question already answered, a working sub or a finished one", () => {
     const sessions = [main, sub("a"), sub("b", { busy: false, subchat_finished: true })];
     park("a", "main");
