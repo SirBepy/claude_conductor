@@ -280,7 +280,18 @@ async fn accept_loop(endpoint: Endpoint, target_port: u16, limits: Limits) {
     log::info!("iroh tunnel: accept loop ended");
 }
 
+/// The log line for a connection QUIC closed. `age` is how long it lived: a phone
+/// "Reconnecting" report is matched to a line by time, and a 30s-old close (the
+/// idle timeout of a phone that slept) reads differently from an hour-old one.
+/// The client's kind is not logged: a paired machine dials with a throwaway
+/// endpoint key (`machines::iroh_dial`), so `remote` names neither a machine nor a
+/// registered phone.
+fn close_line(remote: &str, error: &str, age: std::time::Duration, paths: &str) -> String {
+    format!("iroh tunnel: connection from {remote} closed after {}s: {error} paths=[{paths}]", age.as_secs())
+}
+
 async fn serve_connection(conn: iroh::endpoint::Connection, target_port: u16, limits: Limits) {
+    let opened = std::time::Instant::now();
     let streams = Arc::new(tokio::sync::Semaphore::new(limits.max_streams_per_connection));
     // Woken when a forwarded stream ends, so the idle clock re-arms even though
     // the loop is parked in `accept_bi`.
@@ -321,7 +332,7 @@ async fn serve_connection(conn: iroh::endpoint::Connection, target_port: u16, li
                     .map(|p| format!("{}{}", if p.is_selected() { "*" } else { "" }, p.remote_addr()))
                     .collect::<Vec<_>>()
                     .join(",");
-                log::info!("iroh tunnel: connection from {} closed: {e} paths=[{paths}]", conn.remote_id());
+                log::info!("{}", close_line(&conn.remote_id().to_string(), &e.to_string(), opened.elapsed(), &paths));
                 return;
             }
         };
@@ -377,6 +388,12 @@ mod tests {
     #[test]
     fn alpn_matches_android_copy() {
         assert_eq!(ALPN, b"conductor/remote/0");
+    }
+
+    #[test]
+    fn the_close_line_carries_the_connections_age_next_to_the_reason_and_paths() {
+        let line = close_line("abc123", "timed out", std::time::Duration::from_millis(41_900), "*relay,10.0.0.2:1");
+        assert_eq!(line, "iroh tunnel: connection from abc123 closed after 41s: timed out paths=[*relay,10.0.0.2:1]");
     }
 
     #[test]
