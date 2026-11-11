@@ -1,7 +1,7 @@
 // The chat dashboard's data model (docs/chat-dashboard-design.md). Pure: it
 // reads the rows the ChatRenderer already derived from the chat's events
 // (send_message cards, question cards, report_turn_status calls, Joe's own
-// messages) plus the latest write_plan call, and says what each zone shows.
+// messages) plus every write_plan call of the chat, and says what each zone shows.
 // Nothing here touches the DOM, so the transcript renderer never learns the
 // dashboard exists and every rule below is testable on plain arrays.
 //
