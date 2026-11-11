@@ -38,6 +38,7 @@ async function mountChat(page: Page): Promise<void> {
         { name: "master", current: true, short_sha: "abc1234", upstream: null },
         { name: "feature/palette", current: false, short_sha: "def5678", upstream: null },
       ],
+      get_git_dirty: ["src/a.ts", "src/b.ts"],
     },
   });
   await page.locator("#sessions-list li[data-session-id]").first().click();
@@ -79,6 +80,12 @@ test("Switch branch is a second step listing the repo's branches", async ({ page
   await page.locator(`${OVERLAY} .cp-input`).fill("switch branch");
   await page.keyboard.press("Enter");
   await expect(page.locator(".cp-row .cp-title")).toHaveText(["master", "feature/palette"]);
+  // The same two warnings Code mode's branch switcher shows before a checkout
+  // (the harness's second chat shares this chat's folder).
+  await expect(page.locator(".cp-note")).toHaveText([
+    "Another Conductor session is active in this repo",
+    "2 uncommitted files will come with you",
+  ]);
   await capture(page, "command-palette-branch-stage");
   await page.keyboard.press("Backspace");
   await expect(page.locator(`${OVERLAY} .cp-input`)).toHaveAttribute("placeholder", /Search commands/);
