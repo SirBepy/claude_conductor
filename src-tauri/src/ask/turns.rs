@@ -69,7 +69,7 @@ pub fn since_last(thread_id: &str, transcript: Option<&Path>) -> Since {
     Since { text, next: Some(next) }
 }
 
-/// Forgets a thread, for tests and for a thread whose process was recycled.
+/// Forgets a thread's offset, for tests.
 #[cfg(test)]
 pub fn forget(thread_id: &str) {
     OFFSETS.lock().unwrap_or_else(|p| p.into_inner()).remove(thread_id);

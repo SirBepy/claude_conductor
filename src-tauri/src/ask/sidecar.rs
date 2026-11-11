@@ -215,7 +215,7 @@ impl Gate {
 }
 
 /// Runs one read-only sonnet `claude -p` job with a caller-built `prompt` and
-/// returns its final text. Everything `ask` guarantees holds for any caller
+/// returns its final text. Everything `prepare` and `readonly_args` guarantee holds for any caller
 /// (subscription accounts only, the billing gate, Read/Grep/Glob and nothing
 /// that writes or reaches the network). `account_id` pins the account the job
 /// bills, else the default one is used; `what` names the caller in errors.
