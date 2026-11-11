@@ -22,7 +22,7 @@ pub fn setup(app: &AppHandle) -> Result<()> {
     let idle_bytes = icon::render(&IconCtx {
         updating: false,
         in_meeting: false,
-        dev: cfg!(debug_assertions),
+        dev: crate::util::is_dev_build(),
         // Correct value isn't known until the daemon's first `instances_changed`;
         // `render_tray_now(app)` at the end of `setup` repaints from `AppState`.
         input_needed: false,
@@ -215,7 +215,7 @@ pub fn render_tray_now(app: &AppHandle) {
     };
     let in_meeting = state.meeting_active.load(Ordering::Relaxed);
     let input_needed = state.input_needed.load(Ordering::Relaxed);
-    let ctx = IconCtx { updating, in_meeting, dev: cfg!(debug_assertions), input_needed };
+    let ctx = IconCtx { updating, in_meeting, dev: crate::util::is_dev_build(), input_needed };
 
     let bytes = icon::render(&ctx);
     let Some(tray) = app.tray_by_id(TRAY_ID) else { return; };

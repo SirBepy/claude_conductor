@@ -5,6 +5,27 @@ pub mod process;
 pub mod secret_store;
 pub mod supervisor_client;
 
+/// True in a `cargo tauri dev` / debug build, the one meaning of "dev build" the
+/// visible markers share (tray icon, window title and taskbar icon). The
+/// autostart guard in `bootstrap.rs` is deliberately a wider test that also
+/// counts `cfg!(dev)`, so it does not call this.
+pub(crate) const fn is_dev_build() -> bool {
+    cfg!(debug_assertions)
+}
+
+#[cfg(test)]
+mod dev_build_tests {
+    use super::is_dev_build;
+
+    #[test]
+    fn dev_build_follows_debug_assertions() {
+        assert_eq!(is_dev_build(), cfg!(debug_assertions));
+        // `cargo test` builds with debug assertions, so the dev markers apply there.
+        #[cfg(debug_assertions)]
+        assert!(is_dev_build());
+    }
+}
+
 /// Shared lock for any test in this crate that mutates a process-global env
 /// var (`CC_DATA_DIR`, `CC_DAEMON_INSTANCE`, ...). The default `--lib` run
 /// uses 4 threads (`src-tauri/.cargo/config.toml`'s `RUST_TEST_THREADS`), so
