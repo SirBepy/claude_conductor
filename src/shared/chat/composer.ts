@@ -39,6 +39,14 @@ import * as shortcuts from "../shortcuts";
 export { discardComposerDraft, moveComposerDraft } from "./composer-persistence";
 
 export interface ComposerOptions {
+  /** A second composer living beside the chat's own (the dashboard Subchats card's
+   * message box). It keeps every field behaviour (skills popup, image paste, send
+   * button, keyboard rules) but registers none of the process-wide hooks the chat's
+   * own composer owns: the type-anywhere relay (two relays would each insert the
+   * same keystroke), the lightbox caption bridge, the Escape shortcut and
+   * push-to-talk. Without this, mounting or destroying it would take those from
+   * the chat's composer. */
+  embedded?: boolean;
   onSend: (blocks: ContentBlock[]) => Promise<void> | void;
   projectDir?: string | null;
   getRenderer?: () => ChatRenderer | null;
@@ -203,6 +211,7 @@ export class Composer {
       // An attached or pasted image changes whether the draft is empty without
       // any keystroke, and the quick-reply strip above the box hides on that.
       onChange: () => { this.updateSendState(); if (!this.attChangeQuiet) this.opts.onAttachmentsChange?.(); },
+      getLightboxBridge: () => (this.opts.embedded ? this.lightboxBridge : undefined),
     });
     this.strayInput = new ComposerStrayInput({
       getTextarea: () => this.textarea,
@@ -238,9 +247,10 @@ export class Composer {
     this.file = new FileProvider();
     this.file.start(opts.projectDir ?? null);
     this.render();
-    this.strayInput.mount();
     document.addEventListener("visibilitychange", this._visibilityHandler);
     window.addEventListener("focus", this._windowFocusHandler);
+    if (opts.embedded) return;
+    this.strayInput.mount();
     shortcuts.register("blur-composer", () => { this.textarea?.blur(); });
     this.ptt.mount();
     // The lightbox's caption box hands its text to whichever Composer is
@@ -257,13 +267,15 @@ export class Composer {
   }
 
   destroy(): void {
-    clearLightboxComposerBridge(this.lightboxBridge);
-    this.strayInput.destroy();
+    if (!this.opts.embedded) clearLightboxComposerBridge(this.lightboxBridge);
     document.removeEventListener("visibilitychange", this._visibilityHandler);
     window.removeEventListener("focus", this._windowFocusHandler);
-    shortcuts.unregister("blur-composer");
     this.draftSync.flush(); // not cancel - a teardown mid-debounce must not lose the last edit
-    this.ptt.destroy();
+    if (!this.opts.embedded) {
+      this.strayInput.destroy();
+      shortcuts.unregister("blur-composer");
+      this.ptt.destroy();
+    }
     if (this.noticeTimer) {
       clearTimeout(this.noticeTimer);
       this.noticeTimer = null;
@@ -275,7 +287,7 @@ export class Composer {
     this.slash = null;
     this.file?.stop();
     this.file = null;
-    _composerInstanceCount = Math.max(0, _composerInstanceCount - 1);
+    if (!this.opts.embedded) _composerInstanceCount = Math.max(0, _composerInstanceCount - 1);
   }
 
   setSessionId(id: string, opts: { readOnly?: boolean } = {}): void {
@@ -429,7 +441,7 @@ export class Composer {
               <i class="ph ph-paper-plane-right"></i>
             </button>
             <span class="composer-send-ring" aria-hidden="true"></span>
-            <span class="held-chip-slot"></span>
+            ${this.opts.embedded ? "" : '<span class="held-chip-slot"></span>'}
           </div>
         </div>
       </div>
@@ -723,6 +735,13 @@ export class Composer {
     }
 
     const builtin = text ? parseBuiltin(text) : null;
+    // The handlers act on the chat window around the composer (clear starts a
+    // fresh chat in the pane, cost writes to its transcript). An embedded
+    // composer has no such window, so the draft stays put and says where to go.
+    if (builtin && this.opts.embedded) {
+      this.showNotice(`/${builtin.name} works in the chat itself. Open it to use it.`);
+      return;
+    }
     if (builtin) {
       this.sending = true;
       const handler = HANDLERS[builtin.name];

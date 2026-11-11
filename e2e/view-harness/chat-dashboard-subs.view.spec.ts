@@ -1,6 +1,6 @@
 // Reviewed 2026-11-10 (stale question cards): the answer card announces itself so the dashboard leaves the question open by the message box out of Waiting on you, Skip settles its transcript card in place, a reopen swaps to the daemon prompt only when it asks the same, and Skip marks naming an old daemon id fall back to time matching; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (dash lane 3, code-check fixes): comment rewording, a transport case split and a deleted unused getter; nothing this spec asserts changed.
-// asserts: src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/subs-source.ts, src/views/sessions/chat-dashboard/sub-card-menu.ts, src/views/sessions/chat-dashboard/subs-card.css, src/shared/chat/dashboard/subs-model.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/effort-battery.css
+// asserts: src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/subs-source.ts, src/views/sessions/chat-dashboard/sub-card-menu.ts, src/views/sessions/chat-dashboard/subs-card.css, src/shared/chat/dashboard/subs-model.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/effort-battery.css, src/shared/chat/composer.ts, src/views/sessions/sessions.css
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
@@ -32,6 +32,10 @@ const DONE = sub("sub-done", "Colours", 105, { subchat_finished: true, awaiting:
 const OLD = sub("sub-old", "Fonts", 106, { subchat_finished: true, awaiting: "done", progress: { plan: null, state_since: ago(3 * 60 * MIN) } });
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+const SLASH_ENTRIES = [
+  { name: "close", args: null, description: "Session retrospective", source: { kind: "user-skill" } },
+  { name: "commit", args: null, description: "Commit changes", source: { kind: "user-skill" } },
+];
 const SEND = "mcp__cc_conductor__send_message";
 const PLAN_TOOL = "mcp__cc_conductor__write_plan";
 let n = 0;
@@ -174,26 +178,117 @@ test.describe("chat dashboard / Subchats card", () => {
     await expect(det(page).locator(".sx-gal-more")).toHaveCount(0);
   });
 
-  test("the message box sends to that sub", async ({ page }) => {
-    await openMain(page, [MAIN, WORK]);
-    await av(page, "sub-work").click();
-    const box = det(page).locator(".sx-msg-in");
-    await expect(box).toHaveAttribute("placeholder", "Message Footer");
+  test("the message box is the chat's composer and sends to that sub", async ({ page }) => {
+    await openMain(page, [MAIN, WORK, DONE]);
+    await av(page, "sub-done").click();
+    const box = det(page).locator(".sx-msg .composer-textarea");
+    await expect(box).toBeVisible();
+    // The real thing: attach button, send chip with its gesture hint, not a bare input.
+    await expect(det(page).locator(".sx-msg .composer-send")).toBeVisible();
+    await expect(det(page).locator(".sx-msg .composer-attach-in, .sx-msg .composer-attach").first()).toBeAttached();
     await box.fill("use the new logo");
     await box.press("Enter");
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "send_message").length).toBe(1);
     const call = (await invokeCalls(page)).find((c) => c.cmd === "send_message")!;
-    expect(call.args).toMatchObject({ sessionId: "sub-work", blocks: [{ type: "text", text: "use the new logo" }] });
+    expect(call.args).toMatchObject({ sessionId: "sub-done", blocks: [{ type: "text", text: "use the new logo" }] });
     await expect(box).toHaveValue("");
+
+    // The send button sends too.
+    await box.fill("and the footer");
+    await det(page).locator(".sx-msg .composer-send").click();
+    await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "send_message").length).toBe(2);
+  });
+
+  test("a message to a sub that is mid-turn is held for it instead of failing", async ({ page }) => {
+    await openMain(page, [MAIN, WORK]);
+    await av(page, "sub-work").click();
+    const box = det(page).locator(".sx-msg .composer-textarea");
+    await box.fill("when you get to it");
+    await box.press("Enter");
+    await expect(box).toHaveValue("");
+    await expect(page.locator(".toast, #toast-host .toast").filter({ hasText: "Footer" })).toBeVisible();
+    expect((await invokeCalls(page)).filter((c) => c.cmd === "send_message")).toHaveLength(0);
+  });
+
+  test("typing / in the message box lists skills, and picking one inserts it", async ({ page }) => {
+    await openMain(page, [MAIN, WORK, DONE], { list_slash_commands: SLASH_ENTRIES });
+    await av(page, "sub-done").click();
+    const box = det(page).locator(".sx-msg .composer-textarea");
+    await box.fill("/cl");
+    const popup = page.locator(".caret-popup:not([hidden])");
+    await expect(popup).toBeVisible();
+    await expect(popup.locator(".row .head")).toHaveText("/close");
+    // Not cut off by the dashboard's scrolling column it opens upward inside.
+    const pop = (await popup.boundingBox())!;
+    const col = (await page.locator("#session-pane .cdash-right").boundingBox())!;
+    expect(pop.y).toBeGreaterThanOrEqual(col.y - 1);
+    await popup.locator(".row").click();
+    await expect(box).toHaveValue("/close ");
+  });
+
+  test("a pasted image attaches to the message and goes to the sub with it", async ({ page }) => {
+    await openMain(page, [MAIN, WORK, DONE], { paste_attachment: "C:/tmp/pasted.png" });
+    await av(page, "sub-done").click();
+    const box = det(page).locator(".sx-msg .composer-textarea");
+    await box.focus();
+    await page.evaluate(() => {
+      const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+      const file = new File([png], "paste.png", { type: "image/png" });
+      const evt = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(evt, "clipboardData", {
+        value: { items: [{ kind: "file", type: "image/png", getAsFile: () => file }], files: [file], types: ["Files"], getData: () => "" },
+      });
+      document.querySelector(".sx-det .sx-msg .composer-textarea")!.dispatchEvent(evt);
+    });
+    await expect(det(page).locator(".sx-msg .composer-attachments img")).toBeVisible();
+    await box.fill("see this");
+    // Previewing the image edits THIS box's draft in the caption, not the chat composer's.
+    await det(page).locator(".sx-msg .composer-attachments img").click();
+    await expect(page.locator(".lightbox-composer")).toHaveValue("see this");
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".lightbox-composer")).toHaveCount(0);
+    await expect(box).toHaveValue("see this");
+    await box.press("Enter");
+    await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "send_message").length).toBe(1);
+    const call = (await invokeCalls(page)).find((c) => c.cmd === "send_message")!;
+    const blocks = (call.args as { blocks: Array<{ text: string }> }).blocks;
+    expect(call.args).toMatchObject({ sessionId: "sub-done" });
+    expect(blocks[0]!.text).toBe("see this");
+    expect(blocks[1]!.text).toMatch(/^<file:C:\/tmp\/pasted\.png::/);
+    // The upload is filed under the sub, so the image lands in its chat folder.
+    const upload = (await invokeCalls(page)).find((c) => c.cmd === "paste_attachment")!;
+    expect(upload.args).toMatchObject({ sessionId: "sub-done" });
+  });
+
+  test("a keystroke aimed at nothing lands in the chat's own composer once, not in the card's box", async ({ page }) => {
+    await openMain(page, [MAIN, WORK]);
+    await av(page, "sub-work").click();
+    // The chat's composer mounts again AFTER the card's box exists (a reselect does this), so a
+    // second type-anywhere relay on the card's box would now run first and take the key.
+    await page.evaluate(async () => {
+      const mod = await import("/views/sessions/active-session-composer.ts");
+      mod.mountComposer(document.querySelector<HTMLElement>("#session-pane")!, { session_id: "main", cwd: "C:/Projects/cv-site" } as never, "main", false);
+      (document.activeElement as HTMLElement | null)?.blur();
+    });
+    await page.keyboard.press("q");
+    const own = page.locator("#session-pane .session-composer .composer-textarea");
+    await expect(own).toHaveValue("q");
+    await expect(det(page).locator(".sx-msg .composer-textarea")).toHaveValue("");
+  });
+
+  test("opening the details does not focus the message box", async ({ page }) => {
+    await openMain(page, [MAIN, WORK]);
+    await av(page, "sub-work").click();
+    await expect(det(page).locator(".sx-msg .composer-textarea")).not.toBeFocused();
   });
 
   test("a redraw while the sub is open keeps what was typed", async ({ page }) => {
     await openMain(page, [MAIN, WORK]);
     await av(page, "sub-work").click();
-    await det(page).locator(".sx-msg-in").fill("half a thought");
+    await det(page).locator(".sx-msg .composer-textarea").fill("half a thought");
     await page.evaluate(() => (window as unknown as { __ccListeners: Map<string, Set<(e: { payload: unknown }) => void>> }).__ccListeners.get("instances-changed")?.forEach((cb) => cb({ payload: [] })));
     await page.waitForTimeout(300);
-    await expect(det(page).locator(".sx-msg-in")).toHaveValue("half a thought");
+    await expect(det(page).locator(".sx-msg .composer-textarea")).toHaveValue("half a thought");
   });
 
   test("the right-click menu lists the eight actions and each one acts on that sub", async ({ page }) => {

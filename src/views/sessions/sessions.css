@@ -883,7 +883,7 @@
  * shadow rather than a border so the field adds no layout px and stays exactly
  * as tall as the Send chip beside it; --composer-input-border is zeroed so the
  * highlight backdrop and the textarea still agree on their content box. */
-.composer-shell .composer-input-wrap:not(#prompt-card-host *) {
+:is(.composer-shell, .sx-msg) .composer-input-wrap:not(#prompt-card-host *) {
   background: var(--color-surface);
   border-radius: 6px;
   box-shadow: inset 0 0 0 1px var(--color-border);
@@ -894,18 +894,18 @@
 /* :not(#prompt-card-host *): the phone question page mounts inside this
  * shell and renders the Preview panel's reply bar, which keeps its own
  * border, fill and radius. */
-.composer-shell .composer-textarea:not(#prompt-card-host *) {
+:is(.composer-shell, .sx-msg) .composer-textarea:not(#prompt-card-host *) {
   border-radius: 6px;
 }
 
 /* :has(textarea:focus), not :focus-within: the AUQ prompt-card's host mounts
  * inside .session-composer (a descendant), so :focus-within would also glow
  * the field while only the question card's own free-text input is focused. */
-.composer-shell .composer-input-wrap:not(#prompt-card-host *):has(.composer-textarea:focus) {
+:is(.composer-shell, .sx-msg) .composer-input-wrap:not(#prompt-card-host *):has(.composer-textarea:focus) {
   box-shadow: inset 0 0 0 1px var(--color-primary), 0 0 0 3px rgba(157, 125, 252, 0.12);
 }
 
-.composer-shell .composer-textarea:not(#prompt-card-host *):focus {
+:is(.composer-shell, .sx-msg) .composer-textarea:not(#prompt-card-host *):focus {
   outline: none;
 }
 
