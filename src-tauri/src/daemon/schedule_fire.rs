@@ -34,10 +34,10 @@ pub(crate) async fn fire_kind(state: &Arc<DaemonState>, item: &ScheduledItem) ->
             fire_message(state, session_id, cwd, &item.prompt).await?;
             Ok(Some(session_id.clone()))
         }
-        ScheduledKind::NewChat { cwd, model, effort, account_id, character_id, auto_accept, .. } => {
+        ScheduledKind::NewChat { cwd, model, effort, account_id, character_id, auto_accept, subchats_on, .. } => {
             fire_new_chat(
                 state, cwd, model, effort, account_id.as_deref(),
-                character_id.as_deref(), *auto_accept, &item.prompt,
+                character_id.as_deref(), *auto_accept, *subchats_on, &item.prompt,
             ).await
         }
         ScheduledKind::JarvisHygiene => fire_jarvis_hygiene(state, &item.prompt).await,
@@ -193,6 +193,10 @@ async fn respawn_for_message(
 /// session via two follow-up client calls, `pending-pane.ts`, that a
 /// scheduled fire has no client to make). Carried onto the new session id via
 /// the shared helper's own `auto_accept`/`character_id` params.
+///
+/// `subchats_on` is persisted under the id the child is about to get, before the
+/// spawn, because `lifecycle::spawn` reads `chat-config.json` while building argv
+/// (the `start_session` RPC does the same for a chat sent now).
 async fn fire_new_chat(
     state: &Arc<DaemonState>,
     cwd: &str,
@@ -201,8 +205,16 @@ async fn fire_new_chat(
     account_id: Option<&str>,
     character_id: Option<&str>,
     auto_accept: bool,
+    subchats_on: bool,
     prompt: &str,
 ) -> Result<Option<String>, String> {
+    let mode_sid = prepare_fired_mode(
+        state,
+        subchats_on,
+        account_id,
+        &crate::accounts::load_registry(),
+        crate::sessions::chat_config::set_subchats_on,
+    )?;
     let params = StartSessionParams {
         cwd: PathBuf::from(cwd),
         model: model.to_string(),
@@ -210,9 +222,17 @@ async fn fire_new_chat(
         resume_id: None,
         account_id: account_id.map(|s| s.to_string()),
         fork: false,
-        new_session_id: None,
+        new_session_id: mode_sid.clone(),
     };
-    let session = lifecycle::spawn_session(state, params).await.map_err(err_to_string)?;
+    let spawned = lifecycle::spawn_session(state, params).await;
+    if spawned.is_err() {
+        if let Some(sid) = mode_sid.as_deref() {
+            // Nothing spawned, so no chat should be left holding the mode.
+            crate::sessions::chat_config::set_subchats_on(sid, false);
+            crate::daemon::subchats::publish_mode_changed(state);
+        }
+    }
+    let session = spawned.map_err(err_to_string)?;
     let sid = session.session_id.clone();
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -230,6 +250,27 @@ async fn fire_new_chat(
     Ok(Some(sid))
 }
 
+/// The pre-spawn half of a fired new chat that asked for subchats: picks the id
+/// the child will get, persists the mode under it and nudges clients. `None` when
+/// the item did not ask. Refuses an API-credit account the same way the
+/// `start_session` RPC does; the fire then fails with that reason instead of
+/// starting an ordinary chat the draft never asked for.
+fn prepare_fired_mode(
+    state: &DaemonState,
+    subchats_on: bool,
+    account_id: Option<&str>,
+    accounts: &[crate::accounts::Account],
+    persist: impl FnOnce(&str, bool),
+) -> Result<Option<String>, String> {
+    if !subchats_on {
+        return Ok(None);
+    }
+    let sid = uuid::Uuid::new_v4().to_string();
+    crate::daemon::subchats::prepare_new_main(state, &sid, account_id, accounts, persist)
+        .map_err(|e| e.message)?;
+    Ok(Some(sid))
+}
+
 fn err_to_string(e: LifecycleError) -> String {
     e.to_string()
 }
@@ -243,6 +284,67 @@ mod tests {
 
     fn test_state() -> Arc<DaemonState> {
         DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
+    }
+
+    fn account(id: &str, kind: crate::accounts::AccountKind) -> crate::accounts::Account {
+        crate::accounts::Account {
+            id: id.into(),
+            label: id.into(),
+            colour: "#fff".into(),
+            icon: "key".into(),
+            config_dir: PathBuf::from("C:/home/.claude-x"),
+            chrome_profile_dir: PathBuf::from("C:/appdata/chrome-profiles/x"),
+            email: String::new(),
+            org_uuid: "ORG".into(),
+            subscription_tier: String::new(),
+            created_at: "2026-11-04T00:00:00Z".into(),
+            fleet_eligible: false,
+            kind,
+        }
+    }
+
+    #[test]
+    fn a_fired_new_chat_with_subchats_on_persists_the_mode_under_the_id_it_will_spawn_with() {
+        let state = test_state();
+        let wrote = std::cell::RefCell::new(Vec::new());
+        let accounts = [account("sub-1", crate::accounts::AccountKind::Subscription)];
+        let sid = prepare_fired_mode(&state, true, Some("sub-1"), &accounts, |id, v| {
+            wrote.borrow_mut().push((id.to_string(), v))
+        })
+        .expect("a subscription account may start with the mode on")
+        .expect("the spawn needs the id the mode was written under");
+        assert_eq!(*wrote.borrow(), vec![(sid, true)]);
+    }
+
+    #[test]
+    fn a_fired_new_chat_without_subchats_writes_nothing_and_keeps_a_daemon_chosen_id() {
+        let state = test_state();
+        let wrote = std::cell::RefCell::new(Vec::new());
+        let sid = prepare_fired_mode(&state, false, None, &[], |id, v| wrote.borrow_mut().push((id.to_string(), v))).unwrap();
+        assert_eq!(sid, None);
+        assert!(wrote.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_fired_new_chat_on_an_api_credit_account_fails_before_any_spawn_or_write() {
+        let state = test_state();
+        let wrote = std::cell::RefCell::new(Vec::new());
+        let accounts = [account("api-1", crate::accounts::AccountKind::ApiCredit)];
+        let err = prepare_fired_mode(&state, true, Some("api-1"), &accounts, |id, v| {
+            wrote.borrow_mut().push((id.to_string(), v))
+        })
+        .expect_err("an ordinary chat must not start in place of the requested main chat");
+        assert!(err.contains("API-credit"), "{err}");
+        assert!(wrote.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_new_chat_item_from_before_the_field_loads_with_subchats_off() {
+        let old = r#"{"type":"new_chat","cwd":"C:/p","model":"opus","effort":"high","account_id":null}"#;
+        match serde_json::from_str::<ScheduledKind>(old).unwrap() {
+            ScheduledKind::NewChat { subchats_on, .. } => assert!(!subchats_on),
+            other => panic!("expected NewChat, got {other:?}"),
+        }
     }
 
     #[tokio::test]
