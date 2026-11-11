@@ -723,11 +723,27 @@ pub(crate) fn recover_lost(state: &Arc<DaemonState>) -> Vec<String> {
     rebuilt
 }
 
+/// Rebuilds the lost hold of `sub_id` alone, even if it was rebuilt once already
+/// (a message to the sub or Joe's nudge asked for it), and lets the writer queue
+/// pick it up when it waits for the slot. Returns whether the sub is held
+/// afterwards; false means nothing could rebuild it.
+pub(crate) fn rebuild_lost_hold(state: &Arc<DaemonState>, sub_id: &str, has_transcript: &(dyn Fn(&str) -> bool + Sync)) -> bool {
+    if let Some(set) = RECOVERED.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        set.remove(sub_id);
+    }
+    let (_, for_slot) = recover_lost_with(state, has_transcript, &|inst| inst.session_id == sub_id);
+    if for_slot {
+        super::writers::requeue_held(state);
+    }
+    is_held(sub_id)
+}
+
 /// Joe's "nudge" on a sub that never started. It has no conversation, so
 /// `--resume` would fail with "No conversation found" and raise the same card
 /// again. Instead its hold is rebuilt (even if it was rebuilt once already: Joe
-/// asked) and the held pass starts it if what it waits for is done. Returns false
-/// for a sub that did start, which a real nudge is for.
+/// asked) and the held pass starts it if what it waits for is done. When nothing
+/// can rebuild the hold, Joe gets the launch-failed card. Returns false for a sub
+/// that did start, which a real nudge is for.
 pub(crate) async fn start_never_started_with<F, Fut>(
     state: &Arc<DaemonState>,
     sub_id: &str,
@@ -744,14 +760,12 @@ where
     if !was_held && !is_lost_hold(state, &inst, &held_now, has_transcript) {
         return false;
     }
-    if !was_held {
-        if let Some(set) = RECOVERED.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
-            set.remove(sub_id);
-        }
-        let (_, for_slot) = recover_lost_with(state, has_transcript, &|inst| inst.session_id == sub_id);
-        if for_slot {
-            super::writers::requeue_held(state);
-        }
+    if !was_held && !rebuild_lost_hold(state, sub_id, has_transcript) {
+        // A worktree sub, an `after` that no longer names anything, a missing
+        // brief: nothing here can start it, so say so rather than spend the answer.
+        let stand_in = Held { sub_id: sub_id.to_string(), reason: String::new(), after: None, after_name: String::new(), launch: LaunchSpec::default() };
+        raise_decision(state, &stand_in, Why::LaunchFailed("its start instructions could not be rebuilt".to_string())).await;
+        return true;
     }
     set_parked(sub_id, false);
     release_ready(state, launch).await;
@@ -1502,5 +1516,25 @@ mod tests {
         assert!(start_never_started_with(&st, "ns-lost", &has, launcher(&c)).await);
         assert_eq!(*c.lock().unwrap(), ["ns-lost"]);
         assert!(!start_never_started_with(&st, "ns-ran", &has, launcher(&c)).await, "it has a conversation to resume");
+    }
+
+    /// A worktree sub's hold is not rebuilt here (its tree has its own start path),
+    /// so a nudge that reports "handled" would spend Joe's answer with nothing started.
+    #[tokio::test]
+    async fn a_nudge_on_a_never_started_sub_that_cannot_be_rebuilt_raises_a_card_instead_of_doing_nothing() {
+        let _d = TempDataDir::new();
+        let st = state();
+        lost_sub(&st, "nw-main", "nw-tree", "footer", None);
+        let mut brief: super::super::SubchatBrief = crate::sessions::chat_config::get("nw-tree").unwrap().subchat.unwrap();
+        brief.worktree_at = Some(serde_json::from_value(serde_json::json!({"cwd": "x", "path": "x", "branch": "b"})).unwrap());
+        crate::sessions::chat_config::set_subchat("nw-tree", Some(brief));
+        let c = calls();
+        assert!(start_never_started_with(&st, "nw-tree", &no_transcript, launcher(&c)).await, "it is a never-started sub, so the nudge is handled");
+        assert!(c.lock().unwrap().is_empty(), "nothing could be launched");
+        assert!(!is_held("nw-tree"));
+        let cards = cards_of_kind(&st).await;
+        assert_eq!(cards.len(), 1, "Joe is told, not left with a spent answer");
+        assert_eq!(option_labels(&cards[0]), [TRY_AGAIN, DROP_IT]);
+        assert!(cards[0]["payload"]["questions"][0]["question"].as_str().unwrap().contains("could not be rebuilt"));
     }
 }
