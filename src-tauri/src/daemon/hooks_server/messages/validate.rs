@@ -197,8 +197,12 @@ pub(super) fn validate_send(body: &SendMessageBody) -> Result<(), String> {
         ("your_move", &body.your_move),
     ];
     for (name, rows) in report_rows {
-        if rows.is_some() && kind != "report" {
-            return Err(format!("{name} is only for report, not {kind}: remove it"));
+        // A blocker may also name what it waits on when that is not Joe (a sub, a
+        // CI run): the dashboard then keeps it out of "Waiting on you".
+        let allowed = kind == "report" || (name == "waiting_on" && kind == "blocker");
+        if rows.is_some() && !allowed {
+            let only = if name == "waiting_on" { "report or blocker" } else { "report" };
+            return Err(format!("{name} is only for {only}, not {kind}: remove it"));
         }
         check_rows(name, rows, MAX_ROWS, MAX_ROW)?;
     }

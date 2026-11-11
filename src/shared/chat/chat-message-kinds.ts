@@ -82,6 +82,8 @@ export function parseMessageCard(input: unknown): MessageCard | undefined {
     card.waitingOn = strList(raw.waiting_on);
     card.yourMove = strList(raw.your_move);
   }
+  // A blocker names what it waits on when that is not Joe (the dashboard's Waiting zones).
+  if (kind === "blocker") card.waitingOn = strList(raw.waiting_on);
   if (kind === "correction") card.was = str(raw.was);
   if (kind === "answer") {
     const q = str(raw.question);

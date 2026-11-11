@@ -136,6 +136,41 @@ describe("chat dashboard model", () => {
     expect(zone(c.dash(), "waiting")).toBeNull();
   });
 
+  it("keeps a blocker that waits on something else out of Waiting on you and names the target", () => {
+    const c = chat()
+      .joe("go")
+      .send({ kind: "blocker", verdict: "Fix waits behind the gate", text: "Held", waiting_on: ["Gate 2"] })
+      .send({ kind: "blocker", verdict: "Stuck on auth", text: "No token" });
+    const d = c.dash();
+    // Only the unmarked blocker is Joe's to read.
+    expect(zone(d, "waiting").items.map((i) => i.message.card.verdict)).toEqual(["Stuck on auth"]);
+    const e = zone(d, "waitingElsewhere");
+    expect(e.label).toBe("Waiting on Gate 2");
+    expect(e.items.map((i) => i.message.card.verdict)).toEqual(["Fix waits behind the gate"]);
+    // Same lifecycle as the other blockers: Joe writing again clears it.
+    c.joe("ok");
+    expect(zone(c.dash(), "waitingElsewhere")).toBeNull();
+  });
+
+  it("with only a blocker waiting elsewhere, Waiting on you is not drawn at all", () => {
+    const c = chat().joe("go").send({ kind: "blocker", verdict: "Held", text: "x", waiting_on: ["Gate 2", "CI"] });
+    const d = c.dash();
+    expect(zone(d, "waiting")).toBeNull();
+    expect(zone(d, "waitingElsewhere").label).toBe("Waiting on Gate 2, CI");
+  });
+
+  it("names a queued sub's blocker from the sub's waiting_for and a sub card's waiting_on rows", () => {
+    const c = chat().joe("go");
+    const card = (id, sub, extra = {}) => ({ kind: "message", text: "x", id, ts: 0, parentToolUseId: null, subCard: { id, ts: 0, parent_id: "main", kind: "blocker", sub_id: sub, verdict: "v", text: "x", ...extra } });
+    const item = (id, kind, progress) => ({ id, name: id, kind, closing: false, model: "m", effort: "high", progress, startedAt: null, finishedAt: null, ring: { kind: "none" } });
+    c.r.messages.push(card("c1", "s1"), card("c2", "s2"), card("c3", "s3", { waiting_on: ["the release gate"] }));
+    const d = c.dash({ subs: [item("s1", "queued", "edit slot held by Gate 2"), item("s2", "working", "step 1 of 3")] });
+    // s2 is working and names nothing: it stays Joe's to read.
+    expect(zone(d, "waiting").items.map((i) => i.message.id)).toEqual(["c2"]);
+    expect(zone(d, "waitingElsewhere").items.map((i) => i.message.id)).toEqual(["c1", "c3"]);
+    expect(zone(d, "waitingElsewhere").label).toBe("Waiting on edit slot held by Gate 2, the release gate");
+  });
+
   it("draws the Subchats card from the sub list it is given, not from the transcript", () => {
     const c = chat().joe("go");
     const sub = (id, kind, extra = {}) => ({ id, name: id, kind, closing: false, model: "claude-opus-4-8", effort: "high", progress: "", startedAt: null, finishedAt: null, ring: { kind: "none" }, ...extra });

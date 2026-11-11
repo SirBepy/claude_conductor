@@ -128,6 +128,14 @@ function renderWaiting(s: ZoneState<"waiting">): string {
     + `<div class="cdash-stack">${s.items.map(waitingItemHtml).join("")}</div></section>`;
 }
 
+/** Blockers waiting on something other than Joe: amber-free, titled with what
+ *  they wait on. The label comes from the model, which takes it from structured
+ *  fields only. */
+function renderWaitingElsewhere(s: ZoneState<"waitingElsewhere">): string {
+  return `<section class="cdash-zone cdash-card cdash-waiting-else">${head("ph-hourglass-medium", s.label)}`
+    + `<div class="cdash-stack">${s.items.map((it) => cardHtml(it.message)).join("")}</div></section>`;
+}
+
 function renderPlanZone(s: ZoneState<"plan">, ctx: ZoneCtx): string {
   return renderPlan(s, { ui: ctx.ui, busy: ctx.busy, idleAt: ctx.idleAt ?? null, card: cardHtml });
 }
@@ -223,6 +231,7 @@ function renderSubchats(): string {
 export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) => string } = {
   answers: renderAnswers,
   waiting: renderWaiting,
+  waitingElsewhere: renderWaitingElsewhere,
   drafts: renderDrafts,
   plan: renderPlanZone,
   subchats: renderSubchats,
