@@ -4,8 +4,8 @@
 //! using `ValidatedJson`, and the `ok:false` reply of every other relay route
 //! that goes through `reply` (a handler error: bad arguments, an unknown
 //! session). Refusals that are expected control flow (a disabled browser, a
-//! sub's close refusal, a secret prompt that timed out) answer `ok:false`
-//! directly and are not recorded. The chat draws nothing for a rejection (a
+//! sub's close refusal, a secret prompt that timed out, Joe declining the
+//! schedule new-chat card) answer `ok:false` directly and are not recorded. The chat draws nothing for a rejection (a
 //! caller that retries until it passes would stack one pill per attempt), so
 //! this file is where a pattern (the same field wrong again and again) gets
 //! read, by `scripts/release-report.ps1` at release time.

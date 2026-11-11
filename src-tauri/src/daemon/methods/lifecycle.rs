@@ -13,6 +13,10 @@ mod notifier;
 mod settings;
 mod shutdown;
 mod start_session;
+#[cfg(test)]
+mod machine_target_tests;
+#[cfg(test)]
+mod start_session_subchats_tests;
 
 use crate::daemon::lifecycle::LifecycleError;
 use crate::daemon::rpc::{Router, RpcError};

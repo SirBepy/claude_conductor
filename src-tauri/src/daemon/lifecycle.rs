@@ -68,9 +68,14 @@ pub(crate) const SPAWN_DEFAULT_EFFORT: &str = "high";
 /// `inst`'s recorded model and effort, each falling back to the spawn default
 /// when empty. The pair every respawn of a registry row launches with.
 pub(crate) fn model_effort_or_default(inst: &crate::types::Instance) -> (String, String) {
-    let model = if inst.model.is_empty() { SPAWN_DEFAULT_MODEL.to_string() } else { inst.model.clone() };
-    let effort = if inst.effort.is_empty() { SPAWN_DEFAULT_EFFORT.to_string() } else { inst.effort.clone() };
-    (model, effort)
+    spawn_pair_or_default(&inst.model, &inst.effort)
+}
+
+/// The one place "empty means the spawn default" is spelled out.
+fn spawn_pair_or_default(model: &str, effort: &str) -> (String, String) {
+    let model = if model.is_empty() { SPAWN_DEFAULT_MODEL } else { model };
+    let effort = if effort.is_empty() { SPAWN_DEFAULT_EFFORT } else { effort };
+    (model.to_string(), effort.to_string())
 }
 
 /// Model and effort are launch-only CLI flags, so a live child keeps the pair it
@@ -78,9 +83,7 @@ pub(crate) fn model_effort_or_default(inst: &crate::types::Instance) -> (String,
 /// [`SPAWN_DEFAULT_EFFORT`]), so a registry row that never recorded either does
 /// not read as a change.
 fn launch_differs(live_model: &str, live_effort: &str, want_model: &str, want_effort: &str) -> bool {
-    let model = |m: &str| if m.is_empty() { SPAWN_DEFAULT_MODEL.to_string() } else { m.to_string() };
-    let effort = |e: &str| if e.is_empty() { SPAWN_DEFAULT_EFFORT.to_string() } else { e.to_string() };
-    model(live_model) != model(want_model) || effort(live_effort) != effort(want_effort)
+    spawn_pair_or_default(live_model, live_effort) != spawn_pair_or_default(want_model, want_effort)
 }
 
 /// Would a respawn kill a turn that is running right now: the chat is mid-turn
