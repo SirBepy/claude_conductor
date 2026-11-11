@@ -31,6 +31,7 @@ pub mod meeting_monitor;
 pub mod methods;
 pub mod notifier;
 pub mod notify_gate;
+pub mod plan_close;
 pub mod preview;
 pub mod pump;
 pub mod push;

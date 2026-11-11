@@ -165,6 +165,24 @@ describe("the Plan card across a chat's life", () => {
     expect(shown.map((r) => r.querySelector(".cdash-pl-t").textContent)).toEqual(["job 3 trello"]);
   });
 
+  it("draws a step the model never ticked off as left open, not running, once the job ended", async () => {
+    const { pane, feed } = mount();
+    feed([userEvent("go"), ...plan([{ text: "Read", status: "done" }, { text: "Commit", status: "active" }, { text: "Push", status: "pending" }])]);
+    await tick();
+    // Still running: the active step spins.
+    expect(card(pane).querySelectorAll(".cdash-step--active")).toHaveLength(1);
+    expect(card(pane).querySelector(".cdash-step--left")).toBeNull();
+    // The turn ends done without closing the plan.
+    feed(status("done"));
+    await tick();
+    expect(card(pane).querySelector(".cdash-step--active")).toBeNull();
+    const left = [...card(pane).querySelectorAll(".cdash-step--left")];
+    expect(left.map((s) => s.querySelector(".cdash-step-l").textContent)).toEqual(["Commit", "Push"]);
+    expect(left[0].querySelector("i").classList.contains("ph-circle-dashed")).toBe(true);
+    expect(left[0].title).toBe("Not ticked off before the job ended");
+    expect(card(pane).querySelectorAll(".cdash-step--done")).toHaveLength(1);
+  });
+
   it("says the chat waits on Joe's answer while a question card is open", async () => {
     const { pane, feed } = mount();
     feed([userEvent("go"), toolUseEvent("mcp__cc_conductor__ask_user_question", { questions: [{ question: "Tabs?", options: [{ label: "Tabs" }] }] }, "q1"), ok("q1")]);

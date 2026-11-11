@@ -202,6 +202,11 @@ export interface PlanJob {
   title: string;
   /** When it started (ms), null when nothing says. */
   startedAt: number | null;
+  /** The job has ended (a closed report, or a `done` turn status after its
+   *  plan's latest call): a step still pending or active was left open, not
+   *  running, and the card draws it so (Opus and Sonnet both leave a third of
+   *  finished plans open, daemon/plan_close.rs). */
+  ended: boolean;
 }
 
 /** What the card's foot says while no turn runs. */
@@ -273,14 +278,17 @@ function jobFor(msgs: readonly RenderedMessage[], plan: DashboardPlan, next: Das
   const leadAt = lastIndexWhere(msgs, (m, i) => i > joeAt && isOwnMessage(m) && messageKindOf(m) === "plan", stop - 1);
   const r = lastIndexWhere(msgs, (m, i) => i >= at && isReport(m), stop - 1);
   const lead = leadAt >= 0 ? msgs[leadAt]! : null;
+  const result = r >= 0 && reportClosed(msgs, r) ? msgs[r]! : null;
+  const doneAfter = msgs.some((m, i) => i >= plan.lastAt && i < stop && turnStatusOf(m) === "done");
   return { end: stop, job: {
     key: `p${plan.id}`,
     plan,
     steps: plan.steps,
     lead,
-    result: r >= 0 && reportClosed(msgs, r) ? msgs[r]! : null,
+    result,
     title: jobTitle(lead, joeAt >= 0 ? msgs[joeAt]! : null, plan.steps),
     startedAt: plan.startedAt,
+    ended: !!result || doneAfter,
   } };
 }
 
@@ -296,7 +304,7 @@ function planlessJob(msgs: readonly RenderedMessage[], lastJoe: number, from = 0
   const anchor = result ?? lead!;
   const joeAt = lastIndexWhere(msgs, isJoeMessage, msgs.indexOf(anchor) - 1);
   const startedAt = joeAt >= 0 ? rowMs(msgs[joeAt]!) || null : null;
-  return { key: `r${anchor.id ?? msgs.indexOf(anchor)}`, plan: null, steps: [], lead, result, title: jobTitle(lead, joeAt >= 0 ? msgs[joeAt]! : null, []), startedAt };
+  return { key: `r${anchor.id ?? msgs.indexOf(anchor)}`, plan: null, steps: [], lead, result, title: jobTitle(lead, joeAt >= 0 ? msgs[joeAt]! : null, []), startedAt, ended: !!result };
 }
 
 /** Waiting on Joe while a question card is open, otherwise idle since the

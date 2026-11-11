@@ -76,11 +76,13 @@ pub(super) async fn on_write_plan(
             // The sidebar ring and hover card read the plan off the Instance,
             // so keep the latest one and tell every surface when it changed.
             if !body.session_id.is_empty() {
-                let snapshot = body
+                let snapshot: Vec<PlanStepSnapshot> = body
                     .steps
                     .iter()
                     .map(|s| PlanStepSnapshot { text: s.text.trim().to_string(), status: s.status.clone() })
                     .collect();
+                // The job end checks the latest plan for open steps (plan_close.rs).
+                ctx.state.plan_close.record(&body.session_id, &snapshot);
                 if ctx.state.registry.set_plan(&body.session_id, Some(snapshot)) {
                     crate::daemon::machines::publish_instances_changed(&ctx.state);
                 }

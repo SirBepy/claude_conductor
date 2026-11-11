@@ -98,6 +98,20 @@ test.describe("the Plan card across a chat's life", () => {
     await capture(pane(page), "plan-4-result");
   });
 
+  test("a job that ended with steps never ticked off draws them as left open, not running", async ({ page }) => {
+    const labels = ["Read the tracker code", "Add the Trello source", "Map labels to tags", "Write tests", "Commit"];
+    await openChat(page, [
+      user("sync trello cards into the todo list", min(0)),
+      ...tool(PLAN, { steps: steps(labels, 0) }, min(1)),
+      ...tool(PLAN, { steps: steps(labels, 3) }, min(4)),
+      ...tool(STATUS, { status: "done" }, min(6)),
+    ]);
+    await expect(plan(page).locator(".cdash-step--active")).toHaveCount(0);
+    await expect(plan(page).locator(".cdash-step--left")).toHaveCount(2);
+    await expect(plan(page).locator(".cdash-step--left i.ph-circle-dashed")).toHaveCount(2);
+    await capture(pane(page), "plan-12-left-open");
+  });
+
   test("a follow-up with no new plan keeps the job, dimmed, as the last job", async ({ page }) => {
     await openChat(page, [...TRELLO, ...FOLLOW_UP]);
     await expect(plan(page)).toHaveClass(/is-last/);

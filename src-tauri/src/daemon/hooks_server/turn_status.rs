@@ -50,6 +50,16 @@ pub(super) async fn on_report_status(
         ctx.state.registry.current_turn_gen(session_id),
         waiting_on.is_some(),
     );
+    // A `done` ends the job: refused once while the plan has open steps
+    // (daemon::plan_close). A plain ok:false, not a rejected send: the call is
+    // well formed, and the model reads the reason and fixes the plan.
+    if status == "done" && !session_id.is_empty() {
+        let gen = ctx.state.registry.current_turn_gen(session_id);
+        if let Some(error) = ctx.state.plan_close.check_end(session_id, gen, "report_turn_status") {
+            log::info!("daemon: /turn/report-status session={session_id} done refused: plan has open steps");
+            return (StatusCode::OK, Json(serde_json::json!({"ok": false, "error": error})));
+        }
+    }
     match turn_status::report_status(&ctx.state, session_id, status, title, waiting_on) {
         Ok(v) => (StatusCode::OK, Json(v)),
         Err(e) => rejected_sends::reply("/turn/report-status", session_id, e),
@@ -103,6 +113,39 @@ mod tests {
         let c = ctx();
         let _ = on_report_status(AxState(c.clone()), Json(body)).await.into_response();
         assert_eq!(c.state.registry.peek_reported_status("s").unwrap().waiting_on, None);
+    }
+
+    /// A `done` while the plan has open steps is refused once, naming them, and
+    /// records nothing; the same turn's second `done` goes through. A `question`
+    /// never ends the job, so a plan paused on Joe is not refused.
+    #[tokio::test]
+    async fn done_is_refused_once_while_the_plan_has_open_steps() {
+        use crate::types::PlanStepSnapshot;
+        let c = ctx();
+        let open = vec![
+            PlanStepSnapshot { text: "Read".into(), status: "done".into() },
+            PlanStepSnapshot { text: "Commit".into(), status: "active".into() },
+        ];
+        c.state.plan_close.record("p", &open);
+        let q = on_report_status(AxState(c.clone()), Json(json!({"session_id": "p", "status": "question"}))).await.into_response();
+        assert_eq!(body_json(q).await, json!({"ok": true}));
+        let first = body_json(on_report_status(AxState(c.clone()), Json(json!({"session_id": "p", "status": "done"}))).await.into_response()).await;
+        assert_eq!(first["ok"], json!(false));
+        assert!(first["error"].as_str().unwrap().contains("\"Commit\" (active)"), "{first}");
+        assert_eq!(c.state.registry.peek_reported_status("p").unwrap().status, "question", "the refused done recorded nothing");
+        let second = on_report_status(AxState(c.clone()), Json(json!({"session_id": "p", "status": "done"}))).await.into_response();
+        assert_eq!(body_json(second).await, json!({"ok": true}));
+        assert_eq!(c.state.registry.peek_reported_status("p").unwrap().status, "done");
+    }
+
+    #[tokio::test]
+    async fn done_goes_through_once_write_plan_closed_every_step() {
+        use crate::types::PlanStepSnapshot;
+        let c = ctx();
+        c.state.plan_close.record("c", &[PlanStepSnapshot { text: "Read".into(), status: "active".into() }]);
+        c.state.plan_close.record("c", &[PlanStepSnapshot { text: "Read".into(), status: "done".into() }]);
+        let r = on_report_status(AxState(c.clone()), Json(json!({"session_id": "c", "status": "done"}))).await.into_response();
+        assert_eq!(body_json(r).await, json!({"ok": true}));
     }
 
     #[tokio::test]

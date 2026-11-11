@@ -1,3 +1,4 @@
+// Reviewed 2026-11-11 (plan-close): chat-dashboard.css gained the `.cdash-step--left` rule only; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-11 (dashboard Drafts card): a new left-column zone draws write_draft drafts, the draft card takes an optional version and Edit form, and the dashboard reads the drafts store; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (question-card-ask): the Ask panel and its strip/dial entries are gone, a question card's Ask (shown only in Dashboard view) minimizes the card and opens a thread in the Answers card, and the thread classes moved from ask-* to ax-*; nothing this spec asserts changed, and it passes.
 // asserts: src/views/sessions/chat-dashboard/chat-dashboard.css, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/active-session.ts, src/views/sessions/active-session-mount.ts, src/views/sessions/pending-pane.ts
