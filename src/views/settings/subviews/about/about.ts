@@ -15,7 +15,7 @@ import { readShellVersion } from "../../../../shared/shell-version";
 // Same on every platform: the release ends up with a signed darwin-aarch64
 // updater entry, so the Mac installs in-app like Windows does. publish-macos adds
 // it after Windows ships, so a Mac check made in that gap reports "error", even
-// for a Mac already on the newest version (the plugin resolves the platform entry
+// when nothing newer exists for that Mac (the plugin resolves the platform entry
 // before it compares versions). The tray shows a disabled "Update failed" item
 // for the same state, and an "On startup" Mac only rechecks on launch or Retry.
 export function deriveUpdateDeps(state: UpdateState): AboutUpdateDeps {

@@ -119,14 +119,13 @@ jobs:
       # --lib only: the integration tests under src-tauri/tests/ are #[ignore]'d
       # and spawn a real daemon plus a real `claude`, which CI has no account for.
       # --no-fail-fast so a red lib test still lets export_types write the types,
-      # and the three steps below run on `!cancelled()` so one run reports every
-      # red check, as it did when the Rust tests ran last.
+      # and the three steps below run on `!cancelled()` so a red Rust test does
+      # not hide the typecheck, CSS and vitest results.
       - name: Generate IPC types and run Rust unit tests
         env:
-          # Committed src-tauri/.cargo/config.toml pins build.target-dir to a
-          # dev-machine-only D: path. Env outranks config; without this the
-          # target dir is unwritable here. Same trap that broke every 0.2.53
-          # platform in the build job.
+          # A committed absolute build.target-dir once broke every 0.2.53 platform
+          # (it has since moved to the global ~/.cargo/config.toml, which CI does
+          # not have). Env outranks any config, so this stays as the guard.
           CARGO_TARGET_DIR: target
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --test export_types --no-fail-fast
 
