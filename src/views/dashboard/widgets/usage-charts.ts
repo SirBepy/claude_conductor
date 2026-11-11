@@ -16,6 +16,7 @@
 // (split out per .for_bepy/ai_todos/177-split-usage-charts-widget-file.md).
 
 import { hourToMs } from "../../../shared/time";
+import { SESSION_WINDOW_MS, WEEKLY_WINDOW_MS } from "../../../shared/formatters";
 import { api } from "../../../shared/api";
 import type { UsageRecord } from "../../../shared/api";
 import { wireProjectListClicks } from "./project-list";
@@ -57,16 +58,11 @@ export async function fetchHistory(accountId: string | null, fromMs?: number): P
   }
 }
 
-/** The 5h session and 7d weekly window lengths. The page windows and the history
- *  prefetch share them so the prefetch always spans what the chart shows. */
-const SESSION_MS = 5 * 3_600_000;
-const WEEK_MS = 7 * 24 * 3_600_000;
-
 /** History for the chart's current page. The phone holds only the recent days,
  *  so a chart paged back asks for the window it shows plus the one before it
  *  (which decides the "previous" arrow); inside the held days that is a no-op. */
 export function fetchHistoryForPage(metric: "session" | "weekly", accountId: string | null): Promise<UsageRecord[]> {
-  const windowMs = metric === "session" ? SESSION_MS : WEEK_MS;
+  const windowMs = metric === "session" ? SESSION_WINDOW_MS : WEEKLY_WINDOW_MS;
   return fetchHistory(accountId, Date.now() - (getPageOffset(metric) + 2) * windowMs);
 }
 
@@ -96,12 +92,12 @@ export function sessionWindow(history: UsageRecord[]): WindowState {
   const sessionEndMs = latest.session_resets_at
     ? new Date(latest.session_resets_at).getTime()
     : Date.now() + 3_600_000;
-  const shiftMs = sessionPageOffset * SESSION_MS;
+  const shiftMs = sessionPageOffset * SESSION_WINDOW_MS;
   const endMs = sessionEndMs - shiftMs;
-  const startMs = endMs - SESSION_MS;
+  const startMs = endMs - SESSION_WINDOW_MS;
   const hasPrev = history.some((r) => {
     const t = hourToMs(r.hour);
-    return t >= startMs - SESSION_MS && t < startMs;
+    return t >= startMs - SESSION_WINDOW_MS && t < startMs;
   });
   return {
     startMs, endMs, hasPrev,
@@ -117,12 +113,12 @@ export function weeklyWindow(history: UsageRecord[]): WindowState {
   const weeklyEndMs = latest.weekly_resets_at
     ? new Date(latest.weekly_resets_at).getTime()
     : Date.now() + 3_600_000;
-  const shiftMs = weeklyPageOffset * WEEK_MS;
+  const shiftMs = weeklyPageOffset * WEEKLY_WINDOW_MS;
   const endMs = weeklyEndMs - shiftMs;
-  const startMs = endMs - WEEK_MS;
+  const startMs = endMs - WEEKLY_WINDOW_MS;
   const hasPrev = history.some((r) => {
     const t = hourToMs(r.hour);
-    return t >= startMs - WEEK_MS && t < startMs;
+    return t >= startMs - WEEKLY_WINDOW_MS && t < startMs;
   });
   return {
     startMs, endMs, hasPrev,
