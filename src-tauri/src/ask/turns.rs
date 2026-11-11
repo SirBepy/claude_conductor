@@ -29,25 +29,44 @@ pub fn start(thread_id: &str, transcript: Option<&Path>) {
     }
 }
 
+/// The text to put ahead of a follow-up, and where the thread reads from next.
+pub struct Since {
+    pub text: String,
+    next: Option<u64>,
+}
+
+impl Since {
+    /// Moves the thread past what this follow-up carried. Called only once the
+    /// answer came back: a failed question keeps its turns for the next try.
+    pub fn commit(self, thread_id: &str) {
+        if let Some(next) = self.next {
+            OFFSETS.lock().unwrap_or_else(|p| p.into_inner()).insert(thread_id.to_string(), next);
+        }
+    }
+}
+
 /// What to put ahead of a follow-up: the turns added since the thread last read,
 /// or a pointer to the transcript when this daemon never saw the thread start.
-pub fn since_last(thread_id: &str, transcript: Option<&Path>) -> String {
-    let Some(path) = transcript else { return String::new() };
+pub fn since_last(thread_id: &str, transcript: Option<&Path>) -> Since {
+    let Some(path) = transcript else { return Since { text: String::new(), next: None } };
     let known = OFFSETS.lock().unwrap_or_else(|p| p.into_inner()).get(thread_id).copied();
     let Some(offset) = known else {
-        start(thread_id, Some(path));
-        return format!(
-            "The chat may have moved on since your last answer. Its transcript is at:\n{}\nRead the newest turns there if this question needs them.\n\n",
-            path.display()
-        );
+        return Since {
+            text: format!(
+                "The chat may have moved on since your last answer. Its transcript is at:\n{}\nRead the newest turns there if this question needs them.\n\n",
+                path.display()
+            ),
+            next: std::fs::metadata(path).ok().map(|m| m.len()),
+        };
     };
     let (bytes, next) = read_from(path, offset);
-    OFFSETS.lock().unwrap_or_else(|p| p.into_inner()).insert(thread_id.to_string(), next);
     let turns = render(&bytes);
-    if turns.is_empty() {
-        return String::new();
-    }
-    format!("Since his last question, the chat went on (newest last):\n{turns}\n\n")
+    let text = if turns.is_empty() {
+        String::new()
+    } else {
+        format!("Since his last question, the chat went on (newest last):\n{turns}\n\n")
+    };
+    Since { text, next: Some(next) }
 }
 
 /// Forgets a thread, for tests and for a thread whose process was recycled.
@@ -252,20 +271,24 @@ mod tests {
         let tid = format!("t-{}", uuid::Uuid::new_v4());
 
         start(&tid, Some(&path));
-        assert_eq!(since_last(&tid, Some(&path)), "");
+        assert_eq!(since_last(&tid, Some(&path)).text, "");
 
         let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
         f.write_all(line(serde_json::json!({"type":"user","message":{"content":"new one"}})).as_bytes()).unwrap();
         f.write_all(br#"{"type":"user","message":{"content":"half"#).unwrap();
         f.flush().unwrap();
         let first = since_last(&tid, Some(&path));
-        assert!(first.contains("Joe: new one"), "{first}");
-        assert!(!first.contains("before the thread"));
-        assert!(!first.contains("half"));
+        assert!(first.text.contains("Joe: new one"), "{}", first.text);
+        assert!(!first.text.contains("before the thread"));
+        assert!(!first.text.contains("half"));
+        // Not committed (the question failed): the next try carries the same turns.
+        let retry = since_last(&tid, Some(&path));
+        assert_eq!(retry.text, first.text);
+        retry.commit(&tid);
 
         f.write_all(b"\"}}\n").unwrap();
         f.flush().unwrap();
-        let second = since_last(&tid, Some(&path));
+        let second = since_last(&tid, Some(&path)).text;
         assert!(second.contains("Joe: half") && !second.contains("new one"), "{second}");
         forget(&tid);
         let _ = std::fs::remove_dir_all(&dir);
@@ -276,7 +299,7 @@ mod tests {
         let tid = format!("t-{}", uuid::Uuid::new_v4());
         let path = std::env::temp_dir().join(format!("cc-turns-missing-{}.jsonl", uuid::Uuid::new_v4()));
         std::fs::write(&path, "").unwrap();
-        let out = since_last(&tid, Some(&path));
+        let out = since_last(&tid, Some(&path)).text;
         assert!(out.contains("transcript is at") && out.contains(&path.display().to_string()), "{out}");
         forget(&tid);
         let _ = std::fs::remove_file(&path);

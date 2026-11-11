@@ -90,6 +90,9 @@ pub fn shutdown() {
 /// One live `claude` process.
 pub(crate) struct WarmProc {
     child: tokio::process::Child,
+    /// Kept from spawn: `child.id()` is gone once `try_wait` has reaped an
+    /// exited child, and the shutdown list must still drop this pid.
+    pid: Option<u32>,
     stdin: tokio::process::ChildStdin,
     rx: mpsc::UnboundedReceiver<Out>,
     stderr: Arc<std::sync::Mutex<String>>,
@@ -106,7 +109,8 @@ impl WarmProc {
         cmd.stdin(std::process::Stdio::piped());
         let mut child = cmd.spawn().context("spawn claude")?;
         crate::util::process::guard_orphan_tree(&child);
-        if let Some(pid) = child.id() {
+        let pid = child.id();
+        if let Some(pid) = pid {
             LIVE.lock().unwrap_or_else(|p| p.into_inner()).push(pid);
         }
         let stdin = child.stdin.take().context("claude stdin")?;
@@ -138,7 +142,7 @@ impl WarmProc {
                 }
             }
         });
-        Ok(Self { child, stdin, rx, stderr, account_id, session_id, context_tokens: 0, last_used: Instant::now(), hang })
+        Ok(Self { child, pid, stdin, rx, stderr, account_id, session_id, context_tokens: 0, last_used: Instant::now(), hang })
     }
 
     fn alive(&mut self) -> bool {
@@ -185,7 +189,7 @@ impl WarmProc {
 impl Drop for WarmProc {
     fn drop(&mut self) {
         // kill_on_drop ends the child itself; the pid only leaves the shutdown list.
-        if let Some(pid) = self.child.id() {
+        if let Some(pid) = self.pid {
             LIVE.lock().unwrap_or_else(|p| p.into_inner()).retain(|p| *p != pid);
         }
     }
@@ -200,8 +204,9 @@ pub(crate) enum Start {
 /// Makes a process; the real one runs `claude`, tests run a fake.
 pub(crate) type Spawner = dyn Fn(&Start) -> Result<WarmProc> + Send + Sync;
 
-fn spawn_claude(start: &Start) -> Result<WarmProc> {
-    let gate = sidecar::prepare("Ask", None)?;
+/// The argv of a warm process: stream-json in and out, plus exactly the cold
+/// run's read-only set (`sidecar::readonly_args`).
+fn warm_args(start: &Start) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         "--input-format".to_string(),
@@ -209,17 +214,19 @@ fn spawn_claude(start: &Start) -> Result<WarmProc> {
         "--include-partial-messages".to_string(),
     ];
     args.extend(sidecar::readonly_args());
+    match start {
+        Start::New(id) => args.extend(["--session-id".to_string(), id.clone()]),
+        Start::Resume(id) => args.extend(["--resume".to_string(), id.clone()]),
+    }
+    args
+}
+
+fn spawn_claude(start: &Start) -> Result<WarmProc> {
+    let gate = sidecar::prepare("Ask", None)?;
     let id = match start {
-        Start::New(id) => {
-            args.extend(["--session-id".to_string(), id.clone()]);
-            id.clone()
-        }
-        Start::Resume(id) => {
-            args.extend(["--resume".to_string(), id.clone()]);
-            id.clone()
-        }
+        Start::New(id) | Start::Resume(id) => id.clone(),
     };
-    let cmd = gate.command(args);
+    let cmd = gate.command(warm_args(start));
     WarmProc::start(cmd, gate.account_id, id, HANG)
 }
 
@@ -431,6 +438,22 @@ mod tests {
         let res = r#"{"type":"result","subtype":"success","is_error":false,"result":"Hi there","session_id":"s1"}"#;
         assert!(matches!(parse_out(res), Some(Out::Done(r)) if r.text == "Hi there"));
         assert!(parse_out(r#"{"type":"system","subtype":"init"}"#).is_none());
+    }
+
+    #[test]
+    fn a_warm_process_gets_the_read_only_set_and_no_permission_bypass() {
+        for start in [Start::New("n".into()), Start::Resume("r".into())] {
+            let args = warm_args(&start);
+            for a in sidecar::readonly_args() {
+                assert!(args.contains(&a), "{a} missing from {args:?}");
+            }
+            assert!(!args.iter().any(|a| {
+                a == "--permission-prompt-tool" || a == "--permission-mode" || a == "--dangerously-skip-permissions"
+            }));
+            assert!(args.windows(2).any(|w| w[0] == "--input-format" && w[1] == "stream-json"));
+        }
+        assert!(warm_args(&Start::Resume("r".into())).windows(2).any(|w| w == ["--resume", "r"]));
+        assert!(warm_args(&Start::New("n".into())).windows(2).any(|w| w == ["--session-id", "n"]));
     }
 
     #[test]
@@ -690,6 +713,18 @@ while ($null -ne ($l = [Console]::In.ReadLine())) {
         let pid = w.child.id().unwrap();
         assert!(LIVE.lock().unwrap().contains(&pid));
         drop(w);
+        assert!(!LIVE.lock().unwrap().contains(&pid));
+
+        // One that died and was reaped (child.id() is None by then) leaves it too,
+        // or a shutdown would kill whatever process later reuses that pid.
+        let mut dead = sp(&Start::New("gone-x".into())).unwrap();
+        let pid = dead.pid.unwrap();
+        let t0 = Instant::now();
+        while dead.alive() && t0.elapsed() < Duration::from_secs(15) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(dead.child.id().is_none(), "reaped");
+        drop(dead);
         assert!(!LIVE.lock().unwrap().contains(&pid));
     }
 

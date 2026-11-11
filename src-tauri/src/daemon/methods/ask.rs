@@ -50,15 +50,16 @@ pub(crate) async fn ask_send_with(
     let lead = context.map(|c| format!("{c}\n\n")).unwrap_or_default();
 
     let first = sidecar::build_prompt(&format!("{lead}{question}"), transcript.as_deref(), cwd);
-    let (follow, seed) = if resume.is_none() {
+    let (follow, seed, since) = if resume.is_none() {
         turns::start(&thread_id, transcript.as_deref());
-        (first.clone(), first.clone())
+        (first.clone(), first.clone(), None)
     } else {
         let since = turns::since_last(&thread_id, transcript.as_deref());
-        let seed_question = format!("{lead}{}{since}His new question:\n{question}", earlier(&history));
+        let seed_question = format!("{lead}{}{}His new question:\n{question}", earlier(&history), since.text);
         (
-            format!("{since}His follow-up:\n{question}"),
+            format!("{}His follow-up:\n{question}", since.text),
             sidecar::build_prompt(&seed_question, transcript.as_deref(), cwd),
+            Some(since),
         )
     };
     let answer = warm::send(
@@ -67,6 +68,9 @@ pub(crate) async fn ask_send_with(
     )
     .await
     .map_err(|e| format!("{e:#}"))?;
+    if let Some(since) = since {
+        since.commit(&thread_id);
+    }
 
     // Read again after the sidecar's run, under a lock: another thread of this
     // chat (the Answers card runs several at once) may have been saved
