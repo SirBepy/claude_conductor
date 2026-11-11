@@ -138,6 +138,30 @@ mod tests {
         assert_eq!(c.state.registry.peek_reported_status("p").unwrap().status, "done");
     }
 
+    /// The real wiring: a plan written through the write_plan route in this turn
+    /// is what a done in the same turn is checked against; once a new turn opens
+    /// (set_busy bumps turn_gen), that plan no longer refuses anything.
+    #[tokio::test]
+    async fn the_write_plan_route_feeds_the_gate_for_its_own_turn_only() {
+        use super::super::plan::on_write_plan;
+        use super::super::validated_json::ValidatedJson;
+        let c = ctx();
+        c.state.registry.upsert_interactive("w", std::path::Path::new("."), "proj", "2026-11-11T00:00:00Z");
+        c.state.registry.set_busy("w", true);
+        let plan = json!({"session_id": "w", "steps": [{"text": "Read", "status": "done"}, {"text": "Ship", "status": "active"}]});
+        let _ = on_write_plan(AxState(c.clone()), ValidatedJson(serde_json::from_value(plan).unwrap())).await.into_response();
+        let refused = body_json(on_report_status(AxState(c.clone()), Json(json!({"session_id": "w", "status": "done"}))).await.into_response()).await;
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains("\"Ship\" (active)"), "{refused}");
+
+        let plan2 = json!({"session_id": "w", "steps": [{"text": "Again", "status": "pending"}]});
+        let _ = on_write_plan(AxState(c.clone()), ValidatedJson(serde_json::from_value(plan2).unwrap())).await.into_response();
+        c.state.registry.set_busy("w", false);
+        c.state.registry.set_busy("w", true);
+        let next_turn = on_report_status(AxState(c.clone()), Json(json!({"session_id": "w", "status": "done"}))).await.into_response();
+        assert_eq!(body_json(next_turn).await, json!({"ok": true}), "an earlier turn's plan never refuses");
+    }
+
     #[tokio::test]
     async fn done_goes_through_once_write_plan_closed_every_step() {
         use crate::types::PlanStepSnapshot;
