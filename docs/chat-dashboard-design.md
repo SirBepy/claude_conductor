@@ -220,6 +220,14 @@ disappears when the plan is done": it dropped the moment he wrote after a finish
 - **Step times show only when a step is clicked open:** "14:43 to 14:45" on its own line under the
   step (room for more details later), the length ("2 min", "running") on the step's own row. Times
   come from when write_plan first marked a step active and done.
+- **A finished job's plan is closed by the daemon's gate, not the model's memory** (2026-11-11). Of
+  1,584 transcripts that called write_plan, 574 ended the job with the last plan still holding
+  pending or active steps (Opus 5.5: 348 of 1,150; Sonnet 5.5: 208 of 382), so the card showed a
+  finished job as running. `report_turn_status(done)` and a sub's `finish_subchat` are refused once,
+  naming the open steps, while the latest plan has any (`daemon/plan_close.rs`); the model marks them
+  done or skipped and ends again, and a second end in the same turn always goes through. A step still
+  open once the job has ended (a closed report, or a `done` status after the plan's latest call) is
+  drawn as left open: a dashed circle, no spinner, "Not ticked off before the job ended" on hover.
 - **The status line says what Claude is doing,** not which step it is on (the plan already shows
   that): the tool's icon, "Editing todo-chip.ts", the turn's time and Stop. It must look right with
   no plan at all. Clicking it opens the turn's calls counted by kind ("6 read · 2 edits · 1 command")
