@@ -7,7 +7,7 @@
 
 import path from "node:path";
 import { selectProjectRow } from "../helpers/select-project.js";
-import { openNewChatPicker, turnSubchatsOff } from "../helpers/new-chat.js";
+import { openNewChatPicker, pickAccountIfAsked, turnSubchatsOff } from "../helpers/new-chat.js";
 
 const PROJECT_NAME = path.basename(process.cwd());
 
@@ -16,17 +16,6 @@ async function msgCounts() {
     user: document.querySelectorAll(".msg.user").length,
     assistant: document.querySelectorAll(".msg.assistant").length,
   }));
-}
-
-// 2+ accounts with no default/binding: the first send is refused and the
-// account picker opens (pending-pane-composer.ts). Pick the first chip and
-// resend; the refused text is put back in the composer.
-async function pickAccountIfAsked() {
-  const modalChip = await $(".cam-modal-card [data-acc-id]");
-  if (await modalChip.waitForExist({ timeout: 2000 }).then(() => true, () => false)) {
-    await modalChip.click();
-    await (await $(".session-composer .composer-send")).click();
-  }
 }
 
 async function startNewChatPickingFirstProject() {
