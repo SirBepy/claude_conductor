@@ -1,7 +1,9 @@
 name: Auto-Fix Release Failure
 
-# Watches the Tauri Release workflow on master. If a build-side job fails (a red
-# `test` job alone is left for a human, see "Determine failure scope"), pulls the failed
+# Watches the Tauri Release workflow on master. If a job that runs before the tag
+# exists fails (`check`, `build-windows`, `tag`; a red `test` job alone is left
+# for a human and a failure after the tag needs a rerun, see "Determine failure
+# scope"), pulls the failed
 # step logs, hands them to Claude Code, lets it patch the repo, and pushes the
 # fix back to master so Tauri Release re-runs. Hard-capped at 2 consecutive
 # auto-fix commits to prevent loops.

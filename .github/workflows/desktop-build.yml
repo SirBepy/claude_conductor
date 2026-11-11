@@ -145,9 +145,11 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Committed src-tauri/.cargo/config.toml pins build.target-dir to a
-          # dev-machine-only D: path (be0d209f), which hid the bundle from the
-          # staging steps and broke every 0.2.53 platform. Env outranks config.
+          # The staging steps read the bundle from src-tauri/target, so the target
+          # dir is pinned here. A committed absolute build.target-dir once hid the
+          # bundle from them and broke every 0.2.53 platform (it has since moved to
+          # the global ~/.cargo/config.toml, which CI does not have); env outranks
+          # any config, so this stays as the guard against that coming back.
           CARGO_TARGET_DIR: target
         working-directory: src-tauri
         # Invoke cargo-tauri directly, not `cargo tauri`. On macOS runners
