@@ -7,7 +7,7 @@
 // (dashboard-model.ts) and redraws only the zones whose HTML changed.
 
 import type { ChatRenderer } from "../../../shared/chat/chat-renderer";
-import { deriveDashboard, type DashboardState, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
+import { deriveDashboard, sectionOn, type DashboardState, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
 import { handleAttachmentClick, handleCopyClick, handlePastedLogClick, handleSlashClick, handleTableFullscreen } from "../../../shared/chat/chat-click-handlers";
 import { createHandleBlockImageClick } from "../../../shared/chat/chat-renderer-click-handlers";
 import { handleCommitRefClick, handleCommitRefKeydown, resolveCommitRefs } from "../../../shared/chat/commit-refs";
@@ -37,7 +37,9 @@ import { getTransport } from "../../../shared/transport";
 import { PREVIEW_OPEN_EVENT } from "../../../shared/chat/chat-preview-card";
 import { buildPreviewDocumentHtml } from "../preview-panel-document";
 import { scopeRoot } from "../shared-mockup-scope";
-import type { PreviewMeta, PreviewSnapshot } from "../../../types/ipc.generated";
+import type { MessageDraft, PreviewMeta, PreviewSnapshot } from "../../../types/ipc.generated";
+import { draftIdsOf, type DraftItem, type DraftStoreSide } from "../../../shared/chat/dashboard/drafts-model";
+import { DRAFT_OPEN_EVENT, copyDraft } from "../../../shared/chat/chat-draft-card";
 import { ACTIVE_QUESTION_EVENT, activeCardFor, expandActiveCard } from "../permission-modal/question-state";
 import "./chat-dashboard.css";
 import "./dashboard-extras.css";
@@ -46,6 +48,9 @@ import "./dashboard-extras.css";
 export const DASH_ATTR = "data-chat-view";
 
 export class ChatDashboard {
+  /** How long after a failed drafts store read the next one may run. A static
+   *  so a test can shorten it. */
+  static draftRetryMs = 5000;
   readonly el: HTMLElement;
   private readonly stripEl: HTMLElement;
   private readonly bodyEl: HTMLElement;
@@ -88,6 +93,24 @@ export class ChatDashboard {
   /** Which quick views have something to read (see ensureQuick). */
   private quick: Partial<Record<QuickViewId, boolean>> = {};
   private quickAsked = false;
+  /** The drafts store as last read, for the Drafts card (drafts-model.ts). */
+  private draftStore: DraftStoreSide | undefined;
+  /** The draft ids the chat's rows named at the last read: a new one reads again.
+   *  Null until the first read, which runs even with no draft row in view, since
+   *  the chat's drafts can sit on an older history page. */
+  private draftSig: string | null = null;
+  /** After a failed read, when to try again (a read is cheap, a loop is not). */
+  private draftRetryAt = 0;
+  /** Reads failed in a row. A chat the daemon does not know (a paired
+   *  machine's mirrored one) fails every time, so retries stop after a few. */
+  private draftFails = 0;
+  /** Numbers each store read, so an older read that answers late never
+   *  replaces a newer one. */
+  private draftReq = 0;
+  private unlistenDrafts: (() => void) | null = null;
+  private draftsTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The Drafts card's items as last drawn, by key, for Copy. */
+  private draftItems = new Map<string, DraftItem>();
   /** Files the Links and files card lists: a plan doc the chat names can stand in for PLAN.md. */
   private linkedFiles: string[] = [];
   private readonly onFlushed = (): void => this.schedule();
@@ -221,6 +244,7 @@ export class ChatDashboard {
     renderer.onFlushed = this.onFlushed;
     builtHidden.add(renderer);
     void this.subscribePreviews();
+    void this.subscribeDrafts();
     this.render();
   }
 
@@ -258,6 +282,7 @@ export class ChatDashboard {
     const now = Date.now();
     if (this.wasBusy && !busy) this.idleAt = now;
     this.wasBusy = busy;
+    this.ensureDrafts();
     const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
     this.refreshFinishTimes(subItems);
     const derived = deriveDashboard({
@@ -268,10 +293,12 @@ export class ChatDashboard {
       subs: subItems,
       now,
       previews: this.previews,
+      draftStore: this.draftStore,
       sections: readSections(getSettings()),
       openCard: this.renderer.sessionId ? activeCardFor(this.renderer.sessionId) : null,
     });
     this.applyUiRules(derived);
+    this.keepDraftItems(derived);
     this.renderStripPart(derived);
     this.renderZones(derived, busy);
     this.renderAnswers(derived);
@@ -351,6 +378,91 @@ export class ChatDashboard {
         }
       })();
     }
+  }
+
+  // ---- Drafts card -------------------------------------------------------------------
+
+  /** Reads the drafts store whenever the chat names a draft the last read did
+   *  not know, so a new draft shows the store's own version label at once. */
+  private ensureDrafts(): void {
+    const sid = this.renderer.sessionId;
+    if (!sid || !sectionOn(readSections(getSettings()), "drafts")) return;
+    const ids = draftIdsOf(this.renderer.messages);
+    const sig = ids.join(",");
+    if (sig === this.draftSig || Date.now() < this.draftRetryAt) return;
+    this.draftSig = sig;
+    void this.loadDrafts(ids);
+  }
+
+  private async loadDrafts(ids: readonly string[]): Promise<void> {
+    const sid = this.renderer.sessionId;
+    if (!sid) return;
+    const req = ++this.draftReq;
+    try {
+      const view = await invoke<{ drafts: MessageDraft[] }>("list_message_drafts", { sessionId: sid });
+      if (this.disposed || req !== this.draftReq) return;
+      this.draftFails = 0;
+      this.draftStore = { drafts: Array.isArray(view?.drafts) ? view.drafts : [], ids: [...ids], sessionId: sid };
+      this.schedule();
+    } catch (err) {
+      console.warn("[chat-dashboard] list_message_drafts failed", err);
+      if (req !== this.draftReq || ++this.draftFails >= 3) return;
+      const delay = ChatDashboard.draftRetryMs * 2 ** (this.draftFails - 1);
+      this.draftSig = null;
+      this.draftRetryAt = Date.now() + delay;
+      setTimeout(() => this.schedule(), delay + 50);
+    }
+  }
+
+  /** A copy, a panel edit or a later revise changes the store: read it again.
+   *  Kebab, not the snake_case name the daemon publishes (see chat-draft-card.ts). */
+  private async subscribeDrafts(): Promise<void> {
+    try {
+      const un = await getTransport().listen("message-drafts-changed", () => {
+        if (this.draftsTimer !== null) return;
+        this.draftsTimer = setTimeout(() => {
+          this.draftsTimer = null;
+          void this.loadDrafts(draftIdsOf(this.renderer.messages));
+        }, 150);
+      });
+      if (this.disposed) un();
+      else this.unlistenDrafts = un;
+    } catch (err) {
+      console.warn("[chat-dashboard] listen(message-drafts-changed) failed", err);
+    }
+  }
+
+  private keepDraftItems(state: DashboardState): void {
+    this.draftItems.clear();
+    const zone = state.left.find((z) => z.id === "drafts");
+    if (!zone || zone.id !== "drafts") return;
+    for (const d of [...zone.state.toSend, ...zone.state.copied]) this.draftItems.set(d.key, d);
+  }
+
+  /** Copy, Edit and the fold chevron of a draft in the Drafts card. Edit hands
+   *  the draft to the Drafts panel, which is where drafts are edited. */
+  private onDraftClick(e: MouseEvent): boolean {
+    const target = e.target as HTMLElement;
+    const card = target.closest<HTMLElement>(".cdash-drafts .msg.draft-card[data-dd-key]");
+    if (!card || !this.el.contains(card)) return false;
+    const item = this.draftItems.get(card.dataset.ddKey ?? "");
+    if (!item) return false;
+    const copy = target.closest<HTMLElement>("[data-draft-copy]");
+    if (copy) {
+      const body = card.querySelector<HTMLElement>(".dc-body");
+      if (body) copyDraft(body, item.body, copy, item.id ?? undefined, this.renderer.sessionId);
+      return true;
+    }
+    if (target.closest("[data-draft-pop]")) {
+      if (item.id) window.dispatchEvent(new CustomEvent(DRAFT_OPEN_EVENT, { detail: { id: item.id } }));
+      return true;
+    }
+    if (target.closest("[data-draft-toggle]")) {
+      this.ui.draftOpen[item.key] = !card.classList.contains("open");
+      this.render();
+      return true;
+    }
+    return false;
   }
 
   // ---- Quick views -------------------------------------------------------------------
@@ -550,6 +662,7 @@ export class ChatDashboard {
   }
 
   private onClick(e: MouseEvent): void {
+    if (this.onDraftClick(e)) return;
     const t = (e.target as HTMLElement).closest<HTMLElement>("[data-act]");
     if (!t || !this.el.contains(t)) return;
     // A link or chip inside Joe's message keeps its own click.
@@ -573,6 +686,7 @@ export class ChatDashboard {
       case "strip-earlier": ui.earlierOpen = !ui.earlierOpen; break;
       case "strip-pick": ui.stripPick = Number(t.dataset.i); ui.earlierOpen = false; ui.stripExpanded = true; break;
       case "strip-latest": ui.stripPick = null; ui.stripExpanded = false; break;
+      case "drafts-copied": ui.copiedOpen = !ui.copiedOpen; break;
       case "step": ui.openStep = ui.openStep === t.dataset.step ? null : (t.dataset.step ?? null); break;
       case "plan-prev":
       case "plan-next":
@@ -657,6 +771,10 @@ export class ChatDashboard {
     this.foldTimer = null;
     this.unlistenPreview?.();
     this.unlistenPreview = null;
+    this.unlistenDrafts?.();
+    this.unlistenDrafts = null;
+    if (this.draftsTimer !== null) clearTimeout(this.draftsTimer);
+    this.draftsTimer = null;
     if (this.previewTimer !== null) clearTimeout(this.previewTimer);
     this.previewTimer = null;
     this.sendBarHome();

@@ -265,6 +265,31 @@ disappears when the plan is done": it dropped the moment he wrote after a finish
 - Ruled out: a standing comparison card (folds into the Preview window), separate Gates or
   Todo-progress cards (inside Plan), keeping the Decided card or a "new decisions only" card.
 
+## Drafts (2026-11-11, sub "dash-drafts")
+
+Board: preview slug `dash-drafts`. Before this, the dashboard drew no `write_draft` rows at all: a
+draft Claude wrote for Joe to send elsewhere (a Slack reply, an email, a ticket comment) only showed
+in the Drafts panel.
+
+- **Its own Drafts card, left column under Waiting on you** (zone `drafts`, order 30). Reason: a
+  draft is Joe's to send, and it stays until he copies it, while Waiting on you clears when he
+  writes again; a draft's body is also long and would crowd the questions there.
+- **One card per draft, not per call.** A revise updates the card in place with the store's current
+  text and version ("v3 · your edit"); a draft with wordings for several people gets one card per
+  wording. Earlier versions stay in the Drafts panel's history. The newest draft is open, older ones
+  fold to their one-line head, and a draft from an earlier job in the chat stays until copied.
+- **Copy and Edit.** Copy marks the draft copied (as the transcript card does); Edit (the pencil
+  where the transcript card has its pop-out arrow) opens the Drafts panel on that draft, which stays
+  the one editor. Joe's pick: no second editor inside the dashboard.
+- **Copied drafts fold under "N copied"** at the bottom of the card, a click away; a wording Claude
+  posted itself counts as copied. A dropped, archived or deleted draft leaves the card.
+- **A Settings switch** (Settings > Chat defaults, the Drafts row under Chat view), on by default.
+- Built from `shared/chat/dashboard/drafts-model.ts` (pure: the chat's draft rows plus the store
+  read through `list_message_drafts`, re-read on `message-drafts-changed`), the card reuses the
+  transcript's `renderDraftCardHtml`.
+- Ruled out: drafts inside Waiting on you, draft chips in Links and files, editing inside the
+  dashboard card, dropping copied drafts off the dashboard.
+
 ## Subchats card (2026-11-10, sub "subchats-card", 3 rounds)
 
 Board: preview slug `subs-card`; rules sheet: `subs-card-rules`.

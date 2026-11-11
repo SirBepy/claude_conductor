@@ -276,3 +276,36 @@
   margin: 0;
   color: var(--color-text-muted);
 }
+
+/* Drafts (dashboard-zones.ts renderDrafts): the transcript's draft card, made
+   to fill the column instead of sitting centred at 90%, and without its "Draft
+   message" label, which the card's own Drafts header already says. */
+.cdash-drafts .msg.draft-card {
+  align-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+}
+.cdash-drafts .dc-label {
+  display: none;
+}
+.cdash-drafts-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cdash-drafts-fold:hover {
+  color: var(--color-text);
+}
+.cdash-drafts-fold:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
