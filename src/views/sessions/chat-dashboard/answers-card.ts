@@ -4,8 +4,8 @@
 //
 // One card holds everything: the newest unread answer at a fixed 210px rest,
 // Got it walking back through the unread ones to All caught up, Read more
-// opening the rewritten question and the full text, History as the command
-// palette, and threads opening in place. A thread is an Ask thread: follow-ups
+// opening the full text (Joe's question heads the thread, never the face),
+// History as the command palette, and threads opening in place. A thread is an Ask thread: follow-ups
 // run the read-only Ask sidecar (daemon/methods/answers.rs), so there is no
 // second spawn path. A question card's Ask opens a thread here too (askAbout).
 // Read marks live in the daemon, so a Got it survives a reload, a restart and
