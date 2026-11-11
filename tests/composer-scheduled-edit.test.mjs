@@ -62,6 +62,37 @@ describe("composer scheduled-message edit mode", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("an open edit never reaches storage or the draft sync, so a reload cannot bring it back as a draft", async () => {
+    const invoke = tauriMock();
+    const { composer, textarea } = await mountComposer();
+    composer.beginScheduledEdit("remind me", { label: "x", onSave: vi.fn(async () => {}) });
+    textarea.value = "remind me, edited";
+    textarea.dispatchEvent(new window.Event("input", { bubbles: true }));
+
+    const { loadDraft } = await import("../src/shared/chat/composer-persistence.ts");
+    expect(loadDraft("sess-1")).toBe("");
+    destroyMounted(); // flushes the draft sync's debounce, as a teardown does
+    expect(invoke.mock.calls.filter(([cmd]) => cmd === "set_composer_draft")).toEqual([]);
+
+    // The chat reopening after a reload that skipped nothing: an empty box, no edit bar.
+    const next = await mountComposer();
+    expect(next.textarea.value).toBe("");
+    expect(bar(next.root).hidden).toBe(true);
+  });
+
+  it("an edit abandoned by a teardown leaves the draft that was stored before it untouched", async () => {
+    tauriMock();
+    const { composer, textarea } = await mountComposer();
+    textarea.value = "half-written note";
+    textarea.dispatchEvent(new window.Event("input", { bubbles: true }));
+    composer.beginScheduledEdit("remind me", { label: "x", onSave: vi.fn(async () => {}) });
+    destroyMounted();
+
+    const next = await mountComposer();
+    expect(next.textarea.value).toBe("half-written note");
+    expect(bar(next.root).hidden).toBe(true);
+  });
+
   it("Cancel edit clears the draft and never saves or sends", async () => {
     tauriMock();
     const onSend = vi.fn(async () => {});
