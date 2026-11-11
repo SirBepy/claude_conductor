@@ -68,7 +68,7 @@ jobs:
   # Gates the tag, so a red check stops the release before anything is published
   # to the auto-updater. Runs alongside the builds rather than before them (each is
   # ~20 min): the tag and publish jobs wait on it, so a red test still ships
-  # nothing and only costs one unused build. Fast checks only: the wdio e2e suite needs a built
+  # nothing and only costs the unused builds. Fast checks only: the wdio e2e suite needs a built
   # binary and a display, and the 31 #[ignore]'d integration tests spawn a real
   # `claude`, so neither belongs in front of every push to master.
   test:
@@ -113,11 +113,14 @@ jobs:
 
       # src/types/ipc.generated.ts is gitignored and written by the export_types
       # test (ts-rs), so without it tsc fails on every `../types/ipc.generated`
-      # import. One cargo invocation for both test targets, so the crate compiles
-      # once instead of twice in a row; the types are written before Typecheck.
+      # import. One cargo invocation for both test targets, so cargo builds them
+      # concurrently instead of one invocation after the other; the types are
+      # written before Typecheck.
       # --lib only: the integration tests under src-tauri/tests/ are #[ignore]'d
       # and spawn a real daemon plus a real `claude`, which CI has no account for.
-      # --no-fail-fast so a red lib test still lets export_types write the types.
+      # --no-fail-fast so a red lib test still lets export_types write the types,
+      # and the three steps below run on `!cancelled()` so one run reports every
+      # red check, as it did when the Rust tests ran last.
       - name: Generate IPC types and run Rust unit tests
         env:
           # Committed src-tauri/.cargo/config.toml pins build.target-dir to a
@@ -128,12 +131,15 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib --test export_types --no-fail-fast
 
       - name: Typecheck
+        if: ${{ !cancelled() }}
         run: pnpm tsc --noEmit
 
       - name: Check CSS custom properties
+        if: ${{ !cancelled() }}
         run: pnpm run check:css-vars
 
       - name: Frontend unit tests
+        if: ${{ !cancelled() }}
         run: pnpm vitest run --poolOptions.threads.maxThreads=5 --poolOptions.threads.minThreads=1
 
   # Waits on the Windows build too, so a failed Windows build never leaves an
@@ -494,6 +500,7 @@ jobs:
       # failed upload would leave the release without it and every client's update
       # check would 404. Retry so a transient API error does not strand that state.
       - name: Swap in the merged latest.json
+        id: swap
         shell: bash
         run: |
           for attempt in 1 2 3; do
@@ -501,6 +508,30 @@ jobs:
               exit 0
             fi
             echo "latest.json upload failed (attempt $attempt of 3)"
+            sleep $((attempt * 5))
+          done
+          exit 1
+
+      # If every swap attempt failed, the release has no latest.json and Windows
+      # clients' update check would 404 too. Put the Windows-only manifest back so
+      # Windows keeps updating; the run stays red and a rerun redoes the merge.
+      - name: Restore the Windows-only latest.json after a failed swap
+        if: ${{ failure() && steps.swap.outcome == 'failure' }}
+        shell: bash
+        working-directory: artifacts
+        run: |
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "Release $VERSION" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --slurpfile w windows-x86_64.json \
+            '{version:$version, notes:$notes, pub_date:$pub_date, platforms:{"windows-x86_64":$w[0]}}' \
+            > windows-only.json
+          mv windows-only.json latest.json
+          for attempt in 1 2 3; do
+            if gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber latest.json; then
+              exit 0
+            fi
             sleep $((attempt * 5))
           done
           exit 1
