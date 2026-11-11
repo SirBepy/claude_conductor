@@ -13,6 +13,7 @@ import { isRemote } from "../../shared/transport";
 import { CLOSES_WHEN_SUBS_FINISH } from "./sidebar-row-visuals";
 import { planProgress, ringHtml, type RingSpec } from "./sidebar-ring";
 import { PopoverShell } from "./statusbar-popover-shell";
+import { isFolded } from "../../shared/chat/dashboard/subs-model";
 
 export interface SubListHandlers {
   /** Read this sub in place. */
@@ -51,6 +52,14 @@ function rowHtml(sub: SubStatus, inst: Instance | undefined, canPopOut: boolean)
   </div>`;
 }
 
+/** When a sub finished, or null when nothing dates it: the finish card, else the instance's last busy/idle flip. */
+function finishTime(s: SubStatus, byId: ReadonlyMap<string, Instance>, finishedAt: ReadonlyMap<string, number>): number | null {
+  const card = finishedAt.get(s.id);
+  if (card !== undefined) return card;
+  const flip = Date.parse(byId.get(s.id)?.progress?.state_since ?? "");
+  return Number.isNaN(flip) ? null : flip;
+}
+
 /** Finished subs, the one that finished last first. `finishedAt` holds the time of each
  *  sub's latest finish card (the log outlives a restart); a sub without one falls back
  *  to the instance's last busy/idle flip, and one with neither keeps the order it came
@@ -60,36 +69,42 @@ export function newestFinishedFirst(
   byId: ReadonlyMap<string, Instance>,
   finishedAt: ReadonlyMap<string, number> = new Map(),
 ): SubStatus[] {
-  const at = (s: SubStatus): number => {
-    const card = finishedAt.get(s.id);
-    if (card !== undefined) return card;
-    const flip = Date.parse(byId.get(s.id)?.progress?.state_since ?? "");
-    return Number.isNaN(flip) ? 0 : flip;
-  };
   return rows
-    .map((row, i) => ({ row, i, t: at(row) }))
+    .map((row, i) => ({ row, i, t: finishTime(row, byId, finishedAt) ?? 0 }))
     .sort((a, b) => b.t - a.t || b.i - a.i)
     .map((e) => e.row);
 }
 
 /** The popover body. Asking subs sit with the running ones: they are not done. A
  *  queued sub has no claude process yet, so it gets its own group: filing it under
- *  Running said "working" about a sub that is only waiting for a slot or another sub. */
+ *  Running said "working" about a sub that is only waiting for a slot or another sub.
+ *  A finished sub older than the dashboard card's hour folds under "+N earlier" (a
+ *  display rule: the sub stays resumable). `now` is what the hour is measured against;
+ *  `showEarlier` lists the folded ones under the "+N earlier" row. */
 export function subListHtml(
   subs: readonly SubStatus[],
   sessions: readonly Instance[],
   canPopOut = true,
   finishedAt: ReadonlyMap<string, number> = new Map(),
   closesWhenSubsFinish = false,
+  now = Date.now(),
+  showEarlier = false,
 ): string {
   const byId = new Map(sessions.map((s) => [s.session_id, s]));
   const running = subs.filter((s) => s.kind !== "finished" && s.kind !== "queued");
   const queued = subs.filter((s) => s.kind === "queued");
   const finished = newestFinishedFirst(subs.filter((s) => s.kind === "finished"), byId, finishedAt);
-  const section = (label: string, rows: readonly SubStatus[]): string =>
-    rows.length ? `<h5 class="sub-list-head">${label}</h5>${rows.map((s) => rowHtml(s, byId.get(s.id), canPopOut)).join("")}` : "";
+  const folded = (s: SubStatus): boolean => isFolded({ kind: s.kind, closing: s.closing, finishedAt: finishTime(s, byId, finishedAt) }, now);
+  const recent = finished.filter((s) => !folded(s));
+  const earlier = finished.filter(folded);
+  const rows = (list: readonly SubStatus[]): string => list.map((s) => rowHtml(s, byId.get(s.id), canPopOut)).join("");
+  const section = (label: string, list: readonly SubStatus[], tail = ""): string =>
+    list.length || tail ? `<h5 class="sub-list-head">${label}</h5>${rows(list)}${tail}` : "";
+  const earlierRow = earlier.length
+    ? `<button type="button" class="sub-earlier" data-earlier aria-expanded="${showEarlier}">${showEarlier ? "Hide earlier" : `+${earlier.length} earlier`}</button>${showEarlier ? rows(earlier) : ""}`
+    : "";
   const note = closesWhenSubsFinish ? `<p class="sub-list-note">${escapeHtml(CLOSES_WHEN_SUBS_FINISH)}</p>` : "";
-  return note + section("Running", running) + section("Queued", queued) + section("Finished", finished);
+  return note + section("Running", running) + section("Queued", queued) + section("Finished", recent, earlierRow);
 }
 
 /** The count icon in a main chat's header and the list behind it. Owns its button:
@@ -100,6 +115,8 @@ export class SubListButton {
   private readonly shell = new PopoverShell();
   /** When each sub last finished, from the main chat's card log (see `newestFinishedFirst`). */
   private finishedAt: ReadonlyMap<string, number> = new Map();
+  /** Whether "+N earlier" is expanded. Per open: a closed list starts folded again. */
+  private earlierOpen = false;
 
   constructor(
     private readonly slot: HTMLElement,
@@ -180,10 +197,14 @@ export class SubListButton {
 
   private openList(subs: readonly SubStatus[], sessions: readonly Instance[], waiting = false): void {
     if (!this.btn) return;
-    this.shell.open(this.btn, subListHtml(subs, sessions, !isRemote(), this.finishedAt, waiting), {
+    this.shell.open(this.btn, subListHtml(subs, sessions, !isRemote(), this.finishedAt, waiting, Date.now(), this.earlierOpen), {
       className: "sub-list-popover",
-      onClose: () => this.btn?.classList.remove("on"),
+      onClose: () => { this.earlierOpen = false; this.btn?.classList.remove("on"); },
       wire: (el) => {
+        el.querySelector<HTMLElement>("[data-earlier]")?.addEventListener("click", () => {
+          this.earlierOpen = !this.earlierOpen;
+          this.openList(subs, sessions, waiting);
+        });
         el.querySelectorAll<HTMLElement>(".sub-row").forEach((row) => {
           const id = row.dataset.subId!;
           const activate = (): void => {

@@ -43,7 +43,7 @@ const KIND_ORDER: Record<SubCardKind, number> = { asking: 0, working: 1, queued:
 /** A finished sub is past its hour only when its finish time is KNOWN to be old.
  *  One with no date is kept out of the way (older than anything we can prove),
  *  except while it is still closing. */
-function isFolded(it: SubCardItem, now: number): boolean {
+export function isFolded(it: Pick<SubCardItem, "kind" | "closing" | "finishedAt">, now: number): boolean {
   if (it.kind !== "finished" || it.closing) return false;
   if (it.finishedAt === null) return true;
   return now - it.finishedAt >= FINISHED_KEEP_MS;

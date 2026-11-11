@@ -36,7 +36,8 @@ const PLAN = [
 
 const MAIN = chat("main", "CV redesign", 101);
 const FOOTER = sub("sub-footer", "Footer", 102, { progress: { plan: [...PLAN] as never, state_since: null } });
-const HEADER = sub("sub-header", "Header", 103, { subchat_finished: true, awaiting: "done" });
+// state_since dates the finish, which keeps it inside the sub list's one-hour fold.
+const HEADER = sub("sub-header", "Header", 103, { subchat_finished: true, awaiting: "done", progress: { plan: null, state_since: new Date().toISOString() } });
 const PLAIN = chat("plain", "Plain chat", 110);
 
 const q = (n: number) => ({ question: `Question ${n}?`, header: `Q${n}`, options: [{ label: "Yes" }, { label: "No" }] });

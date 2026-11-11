@@ -100,7 +100,8 @@ export function mainChatInfo(main: Instance, sessions: readonly Instance[]): Mai
   const ownRows: SubStatus[] = [];
   if (ownAsking) ownRows.push({ id: main.session_id, name: "This chat", kind: "asking", progress: progressText(main, "asking"), tier: "", closing: false });
   if (closesWhenSubsFinish) ownRows.push({ id: main.session_id, name: "This chat", kind: "finished", progress: "closing when subs finish", tier: "", closing: false });
-  const hoverRows = [...ownRows, ...subs];
+  // A finished sub is resumable from the header list; the hover stays about what is happening now.
+  const hoverRows = [...ownRows, ...subs.filter((s) => s.kind !== "finished")];
   return {
     subs,
     askingDots: subs.filter((s) => s.kind === "asking").length + (ownAsking ? 1 : 0),
