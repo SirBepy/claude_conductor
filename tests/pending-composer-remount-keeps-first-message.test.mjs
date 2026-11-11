@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 // asserts: src/views/sessions/pending-pane-composer.ts
 
-// The first message of a new chat waits out the Undo window, and leaving Sessions
-// and coming back inside it remounts the view. The held send used to return
-// quietly on the stale mount, so the message reached no chat and no draft. It must
-// land back in the draft pane's stored draft instead.
+// A draft pane wired by a Sessions mount that has since been replaced must not
+// swallow the first message of a new chat. The send used to return quietly on the
+// stale mount, so the message reached no chat and no draft. It must land back in
+// the draft pane's stored draft instead.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { tauriMock } from "./helpers/composer-mount.mjs";

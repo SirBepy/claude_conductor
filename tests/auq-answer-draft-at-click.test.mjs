@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 // asserts: src/views/sessions/permission-modal/question-submit.ts
 
-// A card answer waits out the Undo grace window with the composer still live. The
-// composer draft that rides along with the answer is the box as it was when Submit
-// was pressed; a next message typed during the window must not be staged, cleared
-// from the box and sent mid-sentence bundled with the answer.
+// Delivery contract of a card answer (renderQuestionUI is stubbed here): the
+// composer draft in the box when the answer is delivered rides along with it, and
+// Skip settles the card. The card's own close-on-Submit is covered by the
+// view-harness auq-* specs.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn((cmd) => {
@@ -47,7 +47,6 @@ vi.mock("../src/views/sessions/permission-modal/permission-card.ts", () => ({
 const idx = await import("../src/views/sessions/permission-modal/index.ts");
 const gating = await import("../src/views/sessions/permission-modal/gating.ts");
 const { state } = await import("../src/views/sessions/state.ts");
-const { flushAllGrace } = await import("../src/shared/chat/send-grace.ts");
 
 let n = 0;
 const fresh = (p) => `${p}-${++n}`;
@@ -69,15 +68,8 @@ async function mountCard() {
   return renderCalls.at(-1);
 }
 
-/** Press Submit: the card is held for the window, the box is whatever `draft` is. */
-async function submit(opts) {
-  const heldCard = { mount: document.createElement("div"), release: vi.fn(), thaw: vi.fn(() => true) };
-  await opts.onSubmit({ "Which?": "A" }, { additionalMessage: "", attachments: [] }, heldCard);
-}
-
 beforeEach(() => {
   vi.useFakeTimers();
-  globalThis.__ccSendGraceMs = 3000;
   renderCalls.length = 0;
   invokeMock.mockClear();
   draft = [];
@@ -95,43 +87,29 @@ beforeEach(() => {
   gating.setSelectedSessionId(null);
 });
 
-afterEach(() => {
-  flushAllGrace();
-  vi.useRealTimers();
-  globalThis.__ccSendGraceMs = 0;
-});
-
-describe("a card answer held in its Undo window", () => {
-  it("still carries the draft that was in the box when Submit was pressed", async () => {
+describe("a card answer", () => {
+  it("is delivered at once on Submit, carrying the draft that was in the box", async () => {
     draft = text("typed before the click");
     const opts = await mountCard();
-    await submit(opts);
-    await vi.advanceTimersByTimeAsync(3001);
+    // No timer is advanced after Submit: a hold window would leave this unsent.
+    await opts.onSubmit({ "Which?": "A" }, { additionalMessage: "", attachments: [] });
 
     expect(held.stage).toHaveBeenCalledWith(text("typed before the click"));
     expect(held.flushHeldWithDraft).toHaveBeenCalledTimes(1);
     expect(draft).toEqual([]);
+    vi.useRealTimers();
   });
 
-  it("leaves a next message typed during the window in the box instead of sending it mid-sentence", async () => {
+  it("is delivered at once with an empty box, and Skip settles the card at once", async () => {
     const opts = await mountCard();
-    await submit(opts);
-    draft = text("half a sentence I am still typ");
-    await vi.advanceTimersByTimeAsync(3001);
-
+    await opts.onSubmit({ "Which?": "B" }, { additionalMessage: "", attachments: [] });
     expect(held.stage).not.toHaveBeenCalled();
     expect(held.flushHeldWithDraft).toHaveBeenCalledTimes(1);
-    expect(draft).toEqual(text("half a sentence I am still typ"));
-  });
 
-  it("does not stage a draft that grew during the window either", async () => {
-    draft = text("before");
-    const opts = await mountCard();
-    await submit(opts);
-    draft = text("before and then more");
-    await vi.advanceTimersByTimeAsync(3001);
-
-    expect(held.stage).not.toHaveBeenCalled();
-    expect(draft).toEqual(text("before and then more"));
+    invokeMock.mockClear();
+    const next = await mountCard();
+    await next.onCancel();
+    expect(invokeMock).toHaveBeenCalledWith("respond_question", expect.objectContaining({ skipped: true }));
+    vi.useRealTimers();
   });
 });

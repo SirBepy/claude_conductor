@@ -19,8 +19,6 @@ export interface ComposerUndoDeps {
   hasHeld?: () => boolean;
   popLastHeld?: () => ContentBlock[] | null;
   sendQueuedNow?: () => Promise<void> | void;
-  /** Take back a send still inside its grace window; true when one was. */
-  undoPendingSend?: () => boolean;
 }
 
 export class ComposerUndo {
@@ -52,14 +50,10 @@ export class ComposerUndo {
     void this.deps.send();
   }
 
-  /** Ctrl/Cmd+Z: take back a send still in its grace window, else pop the
-   *  last queued message back into the draft, then the sent-outbox. Both empty declines, handing back to native text-undo. */
+  /** Ctrl/Cmd+Z: pop the last queued message back into the draft, then the
+   *  sent-outbox. Both empty declines, handing back to native text-undo. */
   handleUndoQueued(): boolean {
     if (!this.deps.isDraftEmpty() && !this.undoChainActive) return false;
-    if (this.deps.undoPendingSend?.()) {
-      this.undoChainActive = true;
-      return true;
-    }
     const blocks = this.deps.popLastHeld?.();
     const sessionId = this.deps.getSessionId();
     const popped = blocks ? blocksToText(blocks) : (sessionId ? popLastSent(sessionId) : null);
