@@ -66,8 +66,8 @@ jobs:
           fi
 
   # Gates the tag, so a red check stops the release before anything is published
-  # to the auto-updater. Runs alongside `build` rather than before it (each is
-  # ~20 min): the tag and publish jobs wait on both, so a red test still ships
+  # to the auto-updater. Runs alongside the builds rather than before them (each is
+  # ~20 min): the tag and publish jobs wait on it, so a red test still ships
   # nothing and only costs one unused build. Fast checks only: the wdio e2e suite needs a built
   # binary and a display, and the 31 #[ignore]'d integration tests spawn a real
   # `claude`, so neither belongs in front of every push to master.
@@ -111,14 +111,21 @@ jobs:
           key: test-x86_64-pc-windows-msvc
           cache-on-failure: true
 
-      # src/types/ipc.generated.ts is gitignored and written by this test (ts-rs),
-      # so without it tsc fails on every `../types/ipc.generated` import. The
-      # build job gets it from `pnpm run build`'s prebuild; this job calls
-      # `vite build` directly, so it has to run the generator itself.
-      - name: Generate IPC types
+      # src/types/ipc.generated.ts is gitignored and written by the export_types
+      # test (ts-rs), so without it tsc fails on every `../types/ipc.generated`
+      # import. One cargo invocation for both test targets, so the crate compiles
+      # once instead of twice in a row; the types are written before Typecheck.
+      # --lib only: the integration tests under src-tauri/tests/ are #[ignore]'d
+      # and spawn a real daemon plus a real `claude`, which CI has no account for.
+      # --no-fail-fast so a red lib test still lets export_types write the types.
+      - name: Generate IPC types and run Rust unit tests
         env:
+          # Committed src-tauri/.cargo/config.toml pins build.target-dir to a
+          # dev-machine-only D: path. Env outranks config; without this the
+          # target dir is unwritable here. Same trap that broke every 0.2.53
+          # platform in the build job.
           CARGO_TARGET_DIR: target
-        run: cargo test --manifest-path src-tauri/Cargo.toml --test export_types
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --test export_types --no-fail-fast
 
       - name: Typecheck
         run: pnpm tsc --noEmit
@@ -129,21 +136,12 @@ jobs:
       - name: Frontend unit tests
         run: pnpm vitest run --poolOptions.threads.maxThreads=5 --poolOptions.threads.minThreads=1
 
-      # --lib only: the integration tests under src-tauri/tests/ are #[ignore]'d
-      # and spawn a real daemon plus a real `claude`, which CI has no account for.
-      - name: Rust unit tests
-        env:
-          # Committed src-tauri/.cargo/config.toml pins build.target-dir to a
-          # dev-machine-only D: path. Env outranks config; without this the
-          # target dir is unwritable here. Same trap that broke every 0.2.53
-          # platform in the build job below.
-          CARGO_TARGET_DIR: target
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
-
-  # Waits on build too, so a failed build never leaves an orphan tag behind that
-  # makes `check` skip the next push's release of the same version.
+  # Waits on the Windows build too, so a failed Windows build never leaves an
+  # orphan tag behind that makes `check` skip the next push's release of the same
+  # version. macOS does not gate the tag: it ships later from publish-macos, and a
+  # red macOS leg leaves a Windows-only release to rerun with `gh run rerun --failed`.
   tag:
-    needs: [check, test, build]
+    needs: [check, test, build-windows]
     if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     # The only job that pushes to the repo: the tag push below authenticates with
@@ -161,211 +159,40 @@ jobs:
           git tag "${{ needs.check.outputs.tag }}"
           git push origin "${{ needs.check.outputs.tag }}"
 
-  build:
+  # One call of the reusable desktop-build.yml per platform instead of a matrix, so
+  # `tag` and `publish-windows` wait on the Windows build alone and macOS
+  # publishes on its own via `publish-macos`. Intel macOS and Linux stay paused
+  # (paused 2026-08-12, arm64 restored 2026-08-31): another call here brings one
+  # back, and its os-guarded staging steps in desktop-build.yml already exist.
+  build-windows:
     needs: check
     if: needs.check.outputs.should_release == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            updater_key: windows-x86_64
-            os_label: windows
-            arch_label: x64
-          - os: macos-15
-            target: aarch64-apple-darwin
-            updater_key: darwin-aarch64
-            os_label: macos
-            arch_label: arm64
-          # Intel macOS and Linux stay paused (paused 2026-08-12, arm64 restored
-          # 2026-08-31); their os-guarded staging steps below simply never fire.
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          submodules: recursive
-          persist-credentials: false
+    uses: ./.github/workflows/desktop-build.yml
+    secrets: inherit
+    with:
+      os: windows-latest
+      target: x86_64-pc-windows-msvc
+      updater_key: windows-x86_64
+      os_label: windows
+      arch_label: x64
+      tag: ${{ needs.check.outputs.tag }}
+      version: ${{ needs.check.outputs.version }}
+      product_slug: ${{ needs.check.outputs.product_slug }}
 
-      # 89513f79 dropped package-lock.json and gitignored it, which silently broke
-      # this job: setup-node's npm cache and `npm ci` both require that file.
-      # pnpm-lock.yaml is the real lockfile; action-setup reads the pnpm version
-      # from package.json's packageManager field and must run before setup-node.
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: "20"
-          cache: "pnpm"
-
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            build-essential \
-            libssl-dev \
-            libgtk-3-dev \
-            libasound2-dev
-
-      - name: Sync version into tauri.conf.json, Cargo.toml, and package.json
-        shell: bash
-        run: |
-          VERSION="${{ needs.check.outputs.version }}"
-          # tauri.conf.json: source of truth for Tauri bundler.
-          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
-          mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
-          # Cargo.toml: only `^version = "..."` lines hit (deps use `  version = ...`
-          # with leading whitespace inside inline tables). `-i.bak` is the form
-          # both GNU sed (Linux) and BSD sed (macOS) accept.
-          sed -i.bak -E "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-          rm src-tauri/Cargo.toml.bak
-          # package.json: already the source of truth, write back to be explicit.
-          jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp
-          mv package.json.tmp package.json
-
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch tip; the repo has no release tags, so a toolchain bump means re-resolving this sha by hand
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: src-tauri
-          key: ${{ matrix.target }}
-          cache-on-failure: true
-
-      - name: Install Tauri CLI
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
-        with:
-          tool: tauri-cli
-
-      # Self-signed identity so the macOS code requirement is the cert, not the
-      # per-build ad-hoc hash, and a Keychain "Always Allow" survives updates.
-      # codesign refuses an untrusted identity, hence add-trusted-cert. Skipped
-      # (ad-hoc build) when the secrets are unset.
-      - name: Import macOS signing identity
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          MAC_SIGNING_P12: ${{ secrets.MAC_SIGNING_P12 }}
-          MAC_SIGNING_P12_PASSWORD: ${{ secrets.MAC_SIGNING_P12_PASSWORD }}
-        run: |
-          if [ -z "$MAC_SIGNING_P12" ]; then
-            echo "MAC_SIGNING_P12 unset, building ad-hoc signed"
-            exit 0
-          fi
-          KC="$RUNNER_TEMP/signing.keychain-db"
-          KC_PW=$(uuidgen)
-          echo "$MAC_SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
-          security create-keychain -p "$KC_PW" "$KC"
-          security set-keychain-settings "$KC"
-          security unlock-keychain -p "$KC_PW" "$KC"
-          security import "$RUNNER_TEMP/signing.p12" -k "$KC" -P "$MAC_SIGNING_P12_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PW" "$KC" > /dev/null
-          security list-keychains -d user -s "$KC" login.keychain-db
-          security find-certificate -c "Claude Conductor Self-Signed" -p "$KC" > "$RUNNER_TEMP/signing.pem"
-          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$KC" "$RUNNER_TEMP/signing.pem"
-          rm -f "$RUNNER_TEMP/signing.p12"
-          security find-identity -p codesigning "$KC"
-          echo "APPLE_SIGNING_IDENTITY=Claude Conductor Self-Signed" >> "$GITHUB_ENV"
-
-      - name: Build
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Committed src-tauri/.cargo/config.toml pins build.target-dir to a
-          # dev-machine-only D: path (be0d209f), which hid the bundle from the
-          # staging steps and broke every 0.2.53 platform. Env outranks config.
-          CARGO_TARGET_DIR: target
-        working-directory: src-tauri
-        # Invoke cargo-tauri directly, not `cargo tauri`. On macOS runners
-        # (seen on macos-14) `/opt/homebrew/bin/cargo` is a rustup-init shim that shadows the real
-        # `~/.cargo/bin/cargo` and breaks subcommand dispatch with
-        # "error: unexpected argument 'tauri' found / Usage: rustup-init".
-        # Calling cargo-tauri (the actual binary installed by tauri-cli) skips
-        # that lookup entirely.
-        run: cargo-tauri build --target ${{ matrix.target }}
-
-      - name: Stage Windows artifacts
-        if: runner.os == 'Windows'
-        shell: bash
-        working-directory: src-tauri/target/${{ matrix.target }}/release/bundle/nsis
-        run: |
-          TAG="${{ needs.check.outputs.tag }}"
-          VERSION="${{ needs.check.outputs.version }}"
-          SLUG="${{ needs.check.outputs.product_slug }}"
-          mkdir -p "$GITHUB_WORKSPACE/release-staging"
-          EXE_FILE=$(ls *_x64-setup.exe | head -n 1)
-          ASSET="${SLUG}_${VERSION}_${{ matrix.os_label }}_${{ matrix.arch_label }}.exe"
-          cp "$EXE_FILE" "$GITHUB_WORKSPACE/release-staging/$ASSET"
-          cp "${EXE_FILE}.sig" "$GITHUB_WORKSPACE/release-staging/${ASSET}.sig"
-          SIG=$(cat "${EXE_FILE}.sig")
-          URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/${TAG}/${ASSET}"
-          jq -n --arg sig "$SIG" --arg url "$URL" \
-            '{signature:$sig, url:$url}' \
-            > "$GITHUB_WORKSPACE/release-staging/${{ matrix.updater_key }}.json"
-
-      - name: Stage macOS artifacts
-        if: runner.os == 'macOS'
-        shell: bash
-        working-directory: src-tauri/target/${{ matrix.target }}/release/bundle
-        run: |
-          TAG="${{ needs.check.outputs.tag }}"
-          VERSION="${{ needs.check.outputs.version }}"
-          SLUG="${{ needs.check.outputs.product_slug }}"
-          mkdir -p "$GITHUB_WORKSPACE/release-staging"
-          # Updater payload: .app.tar.gz + .sig (createUpdaterArtifacts=true).
-          APP_TGZ=$(ls macos/*.app.tar.gz | head -n 1)
-          ASSET_TGZ="${SLUG}_${VERSION}_${{ matrix.os_label }}_${{ matrix.arch_label }}.app.tar.gz"
-          cp "$APP_TGZ" "$GITHUB_WORKSPACE/release-staging/$ASSET_TGZ"
-          cp "${APP_TGZ}.sig" "$GITHUB_WORKSPACE/release-staging/${ASSET_TGZ}.sig"
-          SIG=$(cat "${APP_TGZ}.sig")
-          URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/${TAG}/${ASSET_TGZ}"
-          jq -n --arg sig "$SIG" --arg url "$URL" \
-            '{signature:$sig, url:$url}' \
-            > "$GITHUB_WORKSPACE/release-staging/${{ matrix.updater_key }}.json"
-          # DMG for first-time installs.
-          DMG_FILE=$(ls dmg/*.dmg | head -n 1)
-          ASSET_DMG="${SLUG}_${VERSION}_${{ matrix.os_label }}_${{ matrix.arch_label }}.dmg"
-          cp "$DMG_FILE" "$GITHUB_WORKSPACE/release-staging/$ASSET_DMG"
-
-      - name: Stage Linux artifacts
-        if: runner.os == 'Linux'
-        shell: bash
-        working-directory: src-tauri/target/${{ matrix.target }}/release/bundle
-        run: |
-          TAG="${{ needs.check.outputs.tag }}"
-          VERSION="${{ needs.check.outputs.version }}"
-          SLUG="${{ needs.check.outputs.product_slug }}"
-          mkdir -p "$GITHUB_WORKSPACE/release-staging"
-          # AppImage doubles as updater payload + portable run; signed in place.
-          APPIMG=$(ls appimage/*.AppImage | head -n 1)
-          ASSET_APP="${SLUG}_${VERSION}_${{ matrix.os_label }}_${{ matrix.arch_label }}.AppImage"
-          cp "$APPIMG" "$GITHUB_WORKSPACE/release-staging/$ASSET_APP"
-          cp "${APPIMG}.sig" "$GITHUB_WORKSPACE/release-staging/${ASSET_APP}.sig"
-          SIG=$(cat "${APPIMG}.sig")
-          URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/${TAG}/${ASSET_APP}"
-          jq -n --arg sig "$SIG" --arg url "$URL" \
-            '{signature:$sig, url:$url}' \
-            > "$GITHUB_WORKSPACE/release-staging/${{ matrix.updater_key }}.json"
-          # DEB for apt-managed installs.
-          DEB=$(ls deb/*.deb | head -n 1)
-          ASSET_DEB="${SLUG}_${VERSION}_${{ matrix.os_label }}_${{ matrix.arch_label }}.deb"
-          cp "$DEB" "$GITHUB_WORKSPACE/release-staging/$ASSET_DEB"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-${{ matrix.updater_key }}
-          path: release-staging/
+  build-macos:
+    needs: check
+    if: needs.check.outputs.should_release == 'true'
+    uses: ./.github/workflows/desktop-build.yml
+    secrets: inherit
+    with:
+      os: macos-15
+      target: aarch64-apple-darwin
+      updater_key: darwin-aarch64
+      os_label: macos
+      arch_label: arm64
+      tag: ${{ needs.check.outputs.tag }}
+      version: ${{ needs.check.outputs.version }}
+      product_slug: ${{ needs.check.outputs.product_slug }}
 
   android:
     needs: check
@@ -555,25 +382,24 @@ jobs:
           name: android-debug-apk
           path: android/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
 
-  publish:
-    needs: [check, tag, build, android]
-    # !cancelled() rather than success(): the android job is skipped on releases
-    # that did not touch android/, and a skipped need would otherwise skip publish
-    # too. The desktop build and the tag still have to have passed; the tag check
-    # is what keeps a red `test` (which runs beside `build`, not before it) from
-    # publishing.
-    if: ${{ !cancelled() && needs.check.outputs.should_release == 'true' && needs.build.result == 'success' && needs.tag.result == 'success' }}
+  # Creates the release and makes it "latest" with a Windows-only latest.json, so
+  # Windows ships without waiting for macOS or Android. `tag` already required a
+  # green `test` and the Windows build. Until publish-macos lands, the updater
+  # endpoint has no darwin-aarch64 entry and tauri-plugin-updater returns an
+  # error for a Mac client (not "no update"): it clears when macOS finishes.
+  publish-windows:
+    needs: [check, tag, build-windows]
+    if: ${{ !cancelled() && needs.check.outputs.should_release == 'true' && needs.build-windows.result == 'success' && needs.tag.result == 'success' }}
     runs-on: ubuntu-latest
     # softprops/action-gh-release creates the release with the job token.
     permissions:
       contents: write
     steps:
-      - name: Download all artifacts
+      - name: Download Windows artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts/
-          pattern: release-*
-          merge-multiple: true
+          name: release-windows-x86_64
 
       - name: Generate latest.json
         shell: bash
@@ -602,15 +428,84 @@ jobs:
           files: |
             artifacts/*.exe
             artifacts/*.exe.sig
-            artifacts/*.app.tar.gz
-            artifacts/*.app.tar.gz.sig
-            artifacts/*.dmg
-            artifacts/*.deb
-            artifacts/*.AppImage
-            artifacts/*.AppImage.sig
-            artifacts/*.apk
             artifacts/latest.json
           tag_name: ${{ needs.check.outputs.tag }}
           name: ${{ needs.check.outputs.product_name }} v${{ needs.check.outputs.version }}
           draft: false
           make_latest: "true"
+
+  # Adds macOS to the release publish-windows created; never publishes alone, and
+  # `gh run rerun --failed` reruns just this leg if macOS fails. The assets go up
+  # first so they exist before latest.json points at them; latest.json goes last
+  # because replacing it deletes and re-uploads it (GitHub has no atomic asset
+  # replace), a window of a few seconds where the updater URL answers 404.
+  publish-macos:
+    needs: [check, publish-windows, build-macos]
+    if: ${{ !cancelled() && needs.check.outputs.should_release == 'true' && needs.publish-windows.result == 'success' && needs.build-macos.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.check.outputs.tag }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: artifacts/
+          name: release-darwin-aarch64
+
+      - name: Merge darwin-aarch64 into the live latest.json
+        shell: bash
+        run: |
+          mkdir cur
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir cur
+          # Refuse to mix platforms from two different releases into one manifest.
+          test "$(jq -r .version cur/latest.json)" = "$VERSION"
+          jq --slurpfile m artifacts/darwin-aarch64.json \
+            '.platforms["darwin-aarch64"] = $m[0]' cur/latest.json > artifacts/latest.json
+          cat artifacts/latest.json
+
+      - name: Upload macOS assets
+        shell: bash
+        run: |
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            artifacts/*.dmg artifacts/*.app.tar.gz artifacts/*.app.tar.gz.sig
+
+      - name: Swap in the merged latest.json
+        shell: bash
+        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber artifacts/latest.json
+
+  # Named upload-*, not publish-*, so the build watcher's skipped-publish check
+  # does not fire on the many releases where android/ is unchanged and this is
+  # skipped. Needs publish-windows so the release exists, but nothing waits on it.
+  upload-android:
+    needs: [check, publish-windows, android]
+    if: ${{ !cancelled() && needs.check.outputs.should_release == 'true' && needs.publish-windows.result == 'success' && needs.android.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.check.outputs.tag }}
+    steps:
+      # A pattern, not a name: an unsigned android run uploads no release-*
+      # artifact, and a missing name would fail the job instead of attaching nothing.
+      - name: Download Android artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: artifacts/
+          pattern: release-android-*
+          merge-multiple: true
+
+      - name: Attach the APK
+        shell: bash
+        run: |
+          shopt -s nullglob
+          apks=(artifacts/*.apk)
+          if [ ${#apks[@]} -eq 0 ]; then
+            echo "No signed APK was staged; nothing to attach."
+            exit 0
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${apks[@]}"
