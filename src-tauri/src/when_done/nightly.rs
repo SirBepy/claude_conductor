@@ -4,13 +4,13 @@
 //! Settings > System view; read fresh every tick so a save applies at once.
 
 use super::engine::Overdue;
-use super::snooze::snooze_in_state;
-use super::{arm, ArmMode, OverdueAction, ProtocolPhase, TerminalAction};
+use super::snooze::apply_snooze;
+use super::{arm, ArmMode, OverdueAction, ProtocolPhase, ProtocolState, TerminalAction, WhenDoneInner};
 use crate::state::AppState;
 use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::Deserialize;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 const TICK: Duration = Duration::from_secs(30);
 /// How late past the set time an arm still happens, for a PC that was asleep or
@@ -85,6 +85,24 @@ fn start_postpone_mins(app_uptime: Duration) -> Option<u32> {
     (app_uptime < RECENT_START).then_some(START_POSTPONE_MINS)
 }
 
+/// Resets `inner` to a fresh Watching run of `action`, then postpones it when
+/// `app_uptime` (passed only by the nightly arm) says the app just started. One
+/// step under the caller's lock, so the postponed state is what `arm` emits and
+/// the engine never sees an un-snoozed run it would fire right after boot.
+pub(super) fn arm_then_postpone(
+    inner: &mut WhenDoneInner,
+    action: TerminalAction,
+    app_uptime: Option<Duration>,
+    now: Instant,
+    now_unix_ms: i64,
+) {
+    inner.state = ProtocolState::watching(action);
+    inner.snooze_until = None;
+    let Some(mins) = app_uptime.and_then(start_postpone_mins) else { return };
+    log::info!("when_done: app started {app_uptime:?} ago, PC just switched on, postponing the nightly run {mins} min");
+    apply_snooze(inner, now, now_unix_ms, mins);
+}
+
 /// Start the nightly scheduler loop. Runs for the app's lifetime. Windows only:
 /// the away gate reads `daemon::idle::idle_secs`, which is 0 elsewhere, so a
 /// nightly arm there could never fire and would block every later night.
@@ -113,12 +131,7 @@ pub fn spawn(app: AppHandle) {
             }
             log::info!("when_done: nightly arm ({action:?}, overdue {overdue_action:?} after {overdue_after:?})");
             let overdue = Overdue { deadline: Instant::now() + overdue_after, action: overdue_action };
-            arm(&app, action, ArmMode::Nightly, Some(overdue));
-            if let Some(mins) = start_postpone_mins(started.elapsed()) {
-                log::info!("when_done: app started {:?} ago, PC just switched on, postponing the nightly run {mins} min", started.elapsed());
-                let new_state = snooze_in_state(&state, mins);
-                let _ = app.emit("when-done-state", new_state);
-            }
+            arm(&app, action, ArmMode::Nightly, Some(overdue), Some(started.elapsed()));
         }
     });
 }
@@ -168,6 +181,30 @@ mod tests {
         assert_eq!(start_postpone_mins(Duration::from_secs(29 * 60)), Some(30));
         assert_eq!(start_postpone_mins(Duration::from_secs(30 * 60)), None);
         assert_eq!(start_postpone_mins(Duration::from_secs(8 * 3600)), None);
+    }
+
+    #[test]
+    fn a_nightly_arm_soon_after_app_start_ends_up_snoozed() {
+        let mut inner = WhenDoneInner::default();
+        let now = Instant::now();
+        arm_then_postpone(&mut inner, TerminalAction::Shutdown, Some(Duration::from_secs(5 * 60)), now, 1_000_000);
+        assert_eq!(inner.state.phase, ProtocolPhase::Watching);
+        assert_eq!(inner.snooze_until, Some(now + Duration::from_secs(30 * 60)));
+        assert_eq!(inner.state.snoozed_until_unix_ms, Some(1_000_000 + 30 * 60_000));
+    }
+
+    #[test]
+    fn a_nightly_arm_on_a_long_running_app_and_a_manual_arm_are_not_snoozed() {
+        for uptime in [Some(Duration::from_secs(8 * 3600)), None] {
+            let mut inner = WhenDoneInner::default();
+            // A leftover snooze from an earlier run must not survive the re-arm.
+            inner.snooze_until = Some(Instant::now());
+            inner.state.snoozed_until_unix_ms = Some(1);
+            arm_then_postpone(&mut inner, TerminalAction::Sleep, uptime, Instant::now(), 0);
+            assert_eq!(inner.state.phase, ProtocolPhase::Watching, "{uptime:?}");
+            assert_eq!(inner.snooze_until, None, "{uptime:?}");
+            assert_eq!(inner.state.snoozed_until_unix_ms, None, "{uptime:?}");
+        }
     }
 
     #[test]

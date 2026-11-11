@@ -20,7 +20,7 @@ fn can_snooze(phase: ProtocolPhase) -> bool {
 
 /// Postpone `inner` by `minutes` from `now`. Returns whether it applied.
 /// `now_unix_ms` is only the display copy of the end time.
-fn apply_snooze(inner: &mut WhenDoneInner, now: Instant, now_unix_ms: i64, minutes: u32) -> bool {
+pub(super) fn apply_snooze(inner: &mut WhenDoneInner, now: Instant, now_unix_ms: i64, minutes: u32) -> bool {
     if !can_snooze(inner.state.phase) {
         return false;
     }
@@ -30,16 +30,21 @@ fn apply_snooze(inner: &mut WhenDoneInner, now: Instant, now_unix_ms: i64, minut
     true
 }
 
+/// Wall-clock now in unix ms, the display copy `apply_snooze` stores beside the
+/// monotonic end time.
+pub(super) fn unix_ms_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
+}
+
 /// Postpone the run held in `AppState` by `minutes` and return the new state. A
 /// no-op (returns the current state) when nothing is armed or it is firing.
 /// A tauri command must live in `when_done/mod.rs` (the macro's hidden items are
 /// not re-exported from a submodule), so `snooze_when_done` there calls this.
 pub(super) fn snooze_in_state(state: &AppState, minutes: u32) -> ProtocolState {
-    let now_unix_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as i64);
     let mut inner = state.when_done.lock().unwrap();
-    apply_snooze(&mut inner, Instant::now(), now_unix_ms, minutes);
+    apply_snooze(&mut inner, Instant::now(), unix_ms_now(), minutes);
     inner.state.clone()
 }
 
