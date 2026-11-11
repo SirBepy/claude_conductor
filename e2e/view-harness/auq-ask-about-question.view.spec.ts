@@ -64,7 +64,8 @@ test("Ask minimizes the card, opens a thread on the question in Answers, and Bac
   // Half-typed answer that must survive the detour.
   const other = page.locator(".prompt-card__answer-bar .prompt-q__other-input");
   await other.fill("partial thought");
-  await expect(answers(page)).toHaveCount(0);
+  // No answers yet: the Answers card stands empty (it always draws), with no thread.
+  await expect(answers(page).locator(".ax-empty")).toBeVisible();
 
   await page.locator('.prompt-card [data-act="ask-inline"]').click();
   await expect(page.locator(".prompt-collapsed")).toBeVisible();

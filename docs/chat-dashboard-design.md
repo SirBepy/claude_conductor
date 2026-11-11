@@ -151,7 +151,8 @@ Board: preview slug `ask-ux-options` (real app shots of the three options).
   and opens on the question and its options as the first bubble; the box is focused. Joe's first
   message is his question; the sidecar is told which card it is about (`card_question_context` in
   `daemon/methods/answers.rs`), and the reply lands in Answers like a + question, rewritten question
-  and verdict included. The zone draws for the thread even in a chat with no answers yet.
+  and verdict included. The Answers card always draws (see Layout), so it hosts the thread even in a
+  chat with no answers yet.
 - **Back reopens the card** with any half-typed answer intact; Back from any other thread does not.
   Asking about the same card again returns to its thread. The card's bar stays at the bottom the
   whole time, so it can be answered without leaving the thread.
