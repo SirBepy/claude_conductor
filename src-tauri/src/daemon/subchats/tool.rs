@@ -460,16 +460,27 @@ enum Delivery {
     NotStarted,
 }
 
-async fn deliver<F, Fut>(state: &Arc<DaemonState>, sub: &Instance, text: &str, resume: &F) -> Result<Delivery, String>
+async fn deliver<F, Fut>(
+    state: &Arc<DaemonState>,
+    sub: &Instance,
+    text: &str,
+    resume: &F,
+    has_transcript: &(dyn Fn(&str) -> bool + Sync),
+) -> Result<Delivery, String>
 where
     F: Fn(String, String) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<(), ContinueError>> + Send + 'static,
 {
     let id = sub.session_id.clone();
-    // A sub the daemon still holds has no conversation, so `--resume` would fail
-    // ("No conversation found") and lose the text. It waits on disk and in the
-    // held queue, which reaches the sub at the first step of its first turn.
-    if super::held::is_held(&id) {
+    // A sub that never started (held, or its hold was lost) has no conversation, so
+    // `--resume` would fail ("No conversation found") and lose the text. It waits on
+    // disk and in the held queue, which reaches the sub at the first step of its
+    // first turn. A lost hold is rebuilt for this one sub so that turn can come;
+    // when it cannot be rebuilt the text still waits for whatever starts the sub.
+    if super::held::never_started(state, sub, has_transcript) {
+        if !super::held::is_held(&id) {
+            super::held::rebuild_lost_hold(state, &id, has_transcript);
+        }
         let entry = followup::add(&id, text);
         hold_linked(state, &id, text, &entry);
         return Ok(Delivery::NotStarted);
@@ -487,7 +498,14 @@ where
     }
 }
 
-async fn send<F, Fut>(state: &Arc<DaemonState>, caller: &str, subs: &[Instance], args: &Value, resume: F) -> Value
+async fn send<F, Fut>(
+    state: &Arc<DaemonState>,
+    caller: &str,
+    subs: &[Instance],
+    args: &Value,
+    resume: F,
+    has_transcript: &(dyn Fn(&str) -> bool + Sync),
+) -> Value
 where
     F: Fn(String, String) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<(), ContinueError>> + Send + 'static,
@@ -544,7 +562,7 @@ where
                 waiting_for_writer.push((name.clone(), behind));
             }
         }
-        match deliver(state, sub, &text, &resume).await {
+        match deliver(state, sub, &text, &resume, has_transcript).await {
             Ok(d) => {
                 if from_joe {
                     joe_message::mark_passed(caller, &sub.session_id);
@@ -593,10 +611,18 @@ where
 /// with `ok`; an `ok:false` carries the fix in `error`.
 pub async fn run(state: &Arc<DaemonState>, caller: &str, args: &Value) -> Value {
     let owner = state.clone();
-    run_with(state, caller, args, real_facts, move |sub_id, text| {
-        let state = owner.clone();
-        async move { super::continue_sub(&state, &sub_id, &text).await }
-    })
+    let has = |id: &str| crate::context_status::resolve_transcript(&state.registry, id).is_some();
+    run_with(
+        state,
+        caller,
+        args,
+        real_facts,
+        move |sub_id, text| {
+            let state = owner.clone();
+            async move { super::continue_sub(&state, &sub_id, &text).await }
+        },
+        &has,
+    )
     .await
 }
 
@@ -623,9 +649,17 @@ fn drop_action(state: &Arc<DaemonState>, subs: &[Instance], query: &str) -> Valu
     json!({"ok": true, "dropped": name, "note": "ended without ever running; it no longer counts toward the cap, and a sub waiting for it asks Joe on a card"})
 }
 
-/// [`run`] with the facts reader and the "wake this sub with this text" step
-/// injected, so a test starts no `claude` and runs no git.
-pub async fn run_with<F, Fut>(state: &Arc<DaemonState>, caller: &str, args: &Value, facts: FactsFn, resume: F) -> Value
+/// [`run`] with the facts reader, the "wake this sub with this text" step and the
+/// "does this sub have a transcript" lookup injected, so a test starts no `claude`,
+/// runs no git and reads no transcript folder.
+pub async fn run_with<F, Fut>(
+    state: &Arc<DaemonState>,
+    caller: &str,
+    args: &Value,
+    facts: FactsFn,
+    resume: F,
+    has_transcript: &(dyn Fn(&str) -> bool + Sync),
+) -> Value
 where
     F: Fn(String, String) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<(), ContinueError>> + Send + 'static,
@@ -645,7 +679,7 @@ where
         "list" => list(&subs),
         "status" => status(state, &subs, sub, facts),
         "log" => log_action(caller),
-        "send" => send(state, caller, &subs, args, resume).await,
+        "send" => send(state, caller, &subs, args, resume, has_transcript).await,
         "drop" => drop_action(state, &subs, sub),
         other => refusal(format!("action must be list, status, log, send or drop, not \"{other}\".")),
     }
@@ -709,7 +743,12 @@ mod tests {
     }
 
     async fn call(st: &Arc<DaemonState>, caller: &str, args: Value, sent: &Sent) -> Value {
-        run_with(st, caller, &args, some_facts, resume_ok(sent)).await
+        run_with(st, caller, &args, some_facts, resume_ok(sent), &ran).await
+    }
+
+    /// Every sub in these tests counts as having run, as one with a transcript does.
+    fn ran(_: &str) -> bool {
+        true
     }
 
     fn setup(tag: &str) -> (Arc<DaemonState>, String, Sent) {
@@ -821,7 +860,7 @@ mod tests {
         // A working sub reports its status; facts it cannot read say so.
         sub(&st, &main, "tool-status-b", "Nav", "t");
         st.registry.set_busy("tool-status-b", true);
-        let v = run_with(&st, &main, &json!({"action": "status", "sub": "Nav"}), no_facts, resume_ok(&sent)).await;
+        let v = run_with(&st, &main, &json!({"action": "status", "sub": "Nav"}), no_facts, resume_ok(&sent), &ran).await;
         assert_eq!(v["status"], json!("working"));
         assert_eq!(v["facts"], json!("not available"));
         assert!(v.get("verdict").is_none(), "a working sub has no verdict yet");
@@ -983,7 +1022,7 @@ mod tests {
         let (st, main, sent) = setup("tool-busy");
         sub(&st, &main, "tool-busy-a", "Footer", "t");
         joe_message::note_sent(&main, "also make it sticky", false, None);
-        let v = run_with(&st, &main, &json!({"action": "send", "sub": "Footer"}), no_facts, resume_busy(&sent)).await;
+        let v = run_with(&st, &main, &json!({"action": "send", "sub": "Footer"}), no_facts, resume_busy(&sent), &ran).await;
         assert_eq!(v["ok"], json!(true), "{v}");
         assert_eq!(v["held_for"], json!(["Footer"]));
         let held = st.draft_store.get("tool-busy-a").held;
@@ -1116,7 +1155,7 @@ mod tests {
         // A message cannot reach a sub that has not started: say so instead of failing oddly.
         joe_message::note_sent(&main, "hello", false, None);
         let held = |id: String, _text: String| std::future::ready(Err(ContinueError::Held(id)));
-        let sent_to = run_with(&st, &main, &json!({"action": "send", "sub": "Footer"}), no_facts, held).await;
+        let sent_to = run_with(&st, &main, &json!({"action": "send", "sub": "Footer"}), no_facts, held, &ran).await;
         assert_eq!(sent_to["ok"], json!(false), "{sent_to}");
         assert!(sent_to["error"].as_str().unwrap().contains("has not started yet"), "{sent_to}");
     }
@@ -1211,7 +1250,7 @@ mod tests {
         let (st, main, sent) = setup("tool-persist");
         sub(&st, &main, "tool-persist-a", "Footer", "t");
         joe_message::note_sent(&main, "also make it sticky", false, None);
-        let v = run_with(&st, &main, &json!({"action": "send", "sub": "Footer"}), no_facts, resume_busy(&sent)).await;
+        let v = run_with(&st, &main, &json!({"action": "send", "sub": "Footer"}), no_facts, resume_busy(&sent), &ran).await;
         assert_eq!(v["held_for"], json!(["Footer"]));
         let on_disk = followup::list_in(&data_root(), "tool-persist-a");
         assert_eq!(on_disk.iter().map(|h| h.text.as_str()).collect::<Vec<_>>(), ["also make it sticky"]);
@@ -1333,5 +1372,30 @@ mod tests {
         assert_eq!(out["not_started"], json!(["Queued"]));
         assert!(sent.lock().unwrap().is_empty(), "a --resume of a chat that never ran fails, so none is tried");
         assert_eq!(followup::list_in(&data_root(), "tool-nostart-q").len(), 1, "the text waits on disk for its first turn");
+    }
+
+    /// The 2026-11-10 incident: a sub registered long ago, with no hold left and no
+    /// transcript, took the `--resume` path and failed with "No conversation found".
+    #[tokio::test]
+    async fn a_message_to_a_sub_whose_hold_was_lost_waits_for_it_and_resumes_nothing() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-lost");
+        sub(&st, &main, "tool-lost-t", "Target", "t");
+        st.registry.set_busy("tool-lost-t", true);
+        sub(&st, &main, "tool-lost-q", "Lost", "t");
+        let mut brief: super::super::SubchatBrief = crate::sessions::chat_config::get("tool-lost-q").unwrap().subchat.unwrap();
+        brief.after = Some("Target".into());
+        crate::sessions::chat_config::set_subchat("tool-lost-q", Some(brief));
+        assert!(!super::super::held::is_held("tool-lost-q"), "its hold is gone");
+
+        let never_ran = |_: &str| false;
+        let args = json!({"action": "send", "sub": "Lost", "text": "also do the footer"});
+        let out = run_with(&st, &main, &args, some_facts, resume_ok(&sent), &never_ran).await;
+
+        assert_eq!(out["ok"], json!(true), "{out}");
+        assert_eq!(out["not_started"], json!(["Lost"]));
+        assert!(sent.lock().unwrap().is_empty(), "a --resume of a chat that never ran fails, so none is tried");
+        assert_eq!(followup::list_in(&data_root(), "tool-lost-q").len(), 1, "the text waits on disk for its first turn");
+        assert!(super::super::held::is_held("tool-lost-q"), "the hold is rebuilt so its first turn can come");
     }
 }
