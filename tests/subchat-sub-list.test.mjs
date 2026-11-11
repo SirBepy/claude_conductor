@@ -67,12 +67,52 @@ describe("sub list rows", () => {
   });
 
   it("groups running above finished and escapes the name", () => {
-    const all = [main, sub("<b>Footer</b>"), sub("Header", { subchat_finished: true, busy: false })];
+    const all = [main, sub("<b>Footer</b>"), sub("Header", { subchat_finished: true, busy: false, progress: { plan: null, state_since: new Date().toISOString() } })];
     const html = subListHtml(mainChatInfo(main, all).subs, all);
     expect(html.indexOf("Running")).toBeLessThan(html.indexOf("Finished"));
     expect(html).not.toContain("<b>Footer</b>");
     expect(html).toContain("&lt;b&gt;Footer&lt;/b&gt;");
     expect(html).toContain('data-kind="finished"');
+  });
+
+  describe("finished subs past the dashboard card's hour", () => {
+    const NOW = Date.parse("2026-11-11T12:00:00Z");
+    const at = (minutesAgo) => ({ progress: { plan: null, state_since: new Date(NOW - minutesAgo * 60_000).toISOString() } });
+    const all = [
+      main, sub("Run1"),
+      sub("Fresh", { busy: false, subchat_finished: true, ...at(10) }),
+      sub("Old1", { busy: false, subchat_finished: true, ...at(120) }),
+      sub("Old2", { busy: false, subchat_finished: true, ...at(300) }),
+      sub("Undated", { busy: false, subchat_finished: true }),
+    ];
+    const ids = (html) => [...html.matchAll(/data-sub-id="(\w+)"/g)].map((m) => m[1]);
+    const subs = mainChatInfo(main, all).subs;
+
+    it("keeps the recent ones and folds the rest behind one +N earlier row", () => {
+      const html = subListHtml(subs, all, true, new Map(), false, NOW);
+      expect(ids(html)).toEqual(["Run1", "Fresh"]);
+      expect(html).toContain("+3 earlier");
+      expect(html).toContain('aria-expanded="false"');
+    });
+
+    it("lists the folded ones, newest first, once the row is expanded", () => {
+      const html = subListHtml(subs, all, true, new Map(), false, NOW, true);
+      expect(ids(html)).toEqual(["Run1", "Fresh", "Old1", "Old2", "Undated"]);
+      expect(html).toContain("Hide earlier");
+    });
+
+    it("never folds a running, queued or asking sub, nor a finish card inside the hour", () => {
+      const cards = new Map([["Old1", NOW - 5 * 60_000]]);
+      expect(ids(subListHtml(subs, all, true, cards, false, NOW))).toEqual(["Run1", "Old1", "Fresh"]);
+      const held = sub("Held", { busy: false, ...at(500), progress: { plan: null, state_since: new Date(NOW - 500 * 60_000).toISOString(), waiting_for: "waiting for Run1" } });
+      const mixed = [main, held];
+      expect(ids(subListHtml(mainChatInfo(main, mixed).subs, mixed, true, new Map(), false, NOW))).toEqual(["Held"]);
+    });
+
+    it("draws no +N earlier row when nothing is folded", () => {
+      const few = [main, sub("Fresh", { busy: false, subchat_finished: true, ...at(10) })];
+      expect(subListHtml(mainChatInfo(main, few).subs, few, true, new Map(), false, NOW)).not.toContain("earlier");
+    });
   });
 
   it("draws no heading for an empty group", () => {

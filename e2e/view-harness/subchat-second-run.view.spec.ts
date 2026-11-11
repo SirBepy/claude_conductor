@@ -23,6 +23,8 @@ const sub = (id: string, name: string, pid: number, over: Over = {}) =>
 const finished = (id: string, name: string, pid: number, over: Over = {}) =>
   sub(id, name, pid, { subchat_finished: true, awaiting: "done", ...over });
 
+// Inside the sub list's one-hour fold, so these finished subs are listed rather than folded under "+N earlier".
+const RECENT = Date.now() - 5 * 60_000;
 const finishCard = (subId: string, ts: number) => ({
   id: `finish-${subId}-1`, ts, parent_id: "main", kind: "finish", sub_id: subId, sub_name: subId, round: 1, verdict: "Done", text: "ok",
 });
@@ -107,7 +109,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
 
     test("Finished lists the sub that finished last first, by its finish card, whatever order the rows came in", async ({ page }) => {
       const subs = [finished("sub-a", "Alpha", 102), finished("sub-b", "Bravo", 103), finished("sub-c", "Charlie", 104)];
-      const cards = [finishCard("sub-a", 3000), finishCard("sub-b", 9000), finishCard("sub-c", 6000)];
+      const cards = [finishCard("sub-a", RECENT + 3000), finishCard("sub-b", RECENT + 9000), finishCard("sub-c", RECENT + 6000)];
       await mount(page, size, [chat("main", "CV redesign", 101), ...subs], cards);
       await openMain(page);
       await countBtn(page).click();
@@ -119,7 +121,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
 
     test("a long list scrolls inside the popover and never runs off the screen", async ({ page }) => {
       const subs = Array.from({ length: 24 }, (_, i) => finished(`sub-${i}`, `Job ${i}`, 200 + i));
-      const cards = subs.map((s, i) => finishCard(s.session_id, 1000 + i * 10));
+      const cards = subs.map((s, i) => finishCard(s.session_id, RECENT + i * 10));
       await mount(page, size, [chat("main", "CV redesign", 101), ...subs], cards);
       await openMain(page);
       await expect(countBtn(page)).toContainText("24");

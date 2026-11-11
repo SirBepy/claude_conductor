@@ -119,7 +119,7 @@ describe("mainChatInfo", () => {
     park("b", "main");
     const info = mainChatInfo(main, sessions);
     expect(info.askingDots).toBe(3);
-    expect(info.hoverRows.map((r) => r.name)).toEqual(["This chat", "a", "b", "c"]);
+    expect(info.hoverRows.map((r) => r.name)).toEqual(["This chat", "a", "b"]);
     expect(info.subs.map((s) => s.kind)).toEqual(["asking", "asking", "finished"]);
   });
 
