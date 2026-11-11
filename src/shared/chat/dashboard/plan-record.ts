@@ -84,6 +84,19 @@ export function messageKindOf(m: RenderedMessage): MessageKind | "legacy" {
   return m.card?.kind ?? "legacy";
 }
 
+export const TURN_STATUS_TOOL = "mcp__cc_conductor__report_turn_status";
+
+/** A tool result whose JSON body says `ok: false`: the daemon refused the call. */
+export function refusedOutput(output: unknown): boolean {
+  const o = output as { type?: unknown; text?: unknown } | null | undefined;
+  if (!o || o.type !== "text" || typeof o.text !== "string" || !o.text.includes('"ok"')) return false;
+  try {
+    return (JSON.parse(o.text) as { ok?: unknown }).ok === false;
+  } catch {
+    return false;
+  }
+}
+
 /** A report the main agent sent that draws. */
 export function isReport(m: RenderedMessage): boolean {
   return isOwnMessage(m) && messageKindOf(m) === "report";

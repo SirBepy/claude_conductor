@@ -112,7 +112,8 @@ mod tests {
         use crate::types::PlanStepSnapshot;
         let c = ctx();
         let sub = make_sub(&c, "route-openplan");
-        c.state.plan_close.record(&sub, &[PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() }]);
+        let gen = c.state.registry.current_turn_gen(&sub);
+        c.state.plan_close.record(&sub, gen, &[PlanStepSnapshot { text: "Ship it".into(), status: "pending".into() }]);
         let v = call(&c, good(&sub)).await;
         assert_eq!(v["ok"], json!(false));
         assert!(v["error"].as_str().unwrap().contains("call finish_subchat again"), "{v}");

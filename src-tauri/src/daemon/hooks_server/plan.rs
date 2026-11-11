@@ -82,7 +82,8 @@ pub(super) async fn on_write_plan(
                     .map(|s| PlanStepSnapshot { text: s.text.trim().to_string(), status: s.status.clone() })
                     .collect();
                 // The job end checks the latest plan for open steps (plan_close.rs).
-                ctx.state.plan_close.record(&body.session_id, &snapshot);
+                let gen = ctx.state.registry.current_turn_gen(&body.session_id);
+                ctx.state.plan_close.record(&body.session_id, gen, &snapshot);
                 if ctx.state.registry.set_plan(&body.session_id, Some(snapshot)) {
                     crate::daemon::machines::publish_instances_changed(&ctx.state);
                 }
