@@ -12,8 +12,9 @@ import { settingsHeader } from "../../ui";
 import { isRemote } from "../../../../shared/transport";
 import { readShellVersion } from "../../../../shared/shell-version";
 
-// Same on every platform: the release publishes a signed darwin-aarch64
-// updater entry, so the Mac installs in-app like Windows does.
+// Same on every platform: the release ends up with a signed darwin-aarch64
+// updater entry, so the Mac installs in-app like Windows does. publish-macos adds
+// it after Windows ships, so a Mac check made in that gap reports "error".
 export function deriveUpdateDeps(state: UpdateState): AboutUpdateDeps {
   if (state.state === "downloaded") {
     return {

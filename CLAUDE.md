@@ -8,7 +8,8 @@ Cross-platform Tauri 2 app (Rust + vanilla JS webview). Usage monitoring via coo
 
 Type: other (Tauri 2 / Rust + vanilla JS webview)
 Deploy: GitHub Releases; CI builds Windows (NSIS) and Apple Silicon macOS (DMG, restored 2026-08-31). Intel macOS and Linux (DMG / DEB + AppImage) stay paused mid-feature-work, to be restored per dev
-`src-tauri/tauri.conf.json`'s committed `version` is intentionally stale locally, CI-owned: `.github/workflows/tauri-release.yml:115-128` jq-rewrites it (and Cargo.toml, package.json) to the real version before every release build.
+`src-tauri/tauri.conf.json`'s committed `version` is intentionally stale locally, CI-owned: the "Sync version" step in `.github/workflows/desktop-build.yml` jq-rewrites it (and Cargo.toml, package.json) to the real version before every release build, and also points the CI copy's `beforeBuildCommand` at a plain vite build so the release skips the npm `prebuild` debug compile.
+**Release shape: Windows publishes first.** `tauri-release.yml` builds Windows and macOS as separate calls of `desktop-build.yml`. `tag` and `publish-windows` wait on the Windows build only; `publish-macos` adds the macOS assets and its `latest.json` entry afterwards, and `upload-android` attaches the APK. Until `publish-macos` lands, `latest.json` has no `darwin-aarch64` entry and a Mac client's update check ERRORS (tauri-plugin-updater `TargetsNotFound`), it does not report "no update". If macOS fails after Windows shipped, rerun with `gh run rerun <run-id> --failed`, never a full rerun or a same-version push: `check` skips once the tag exists, so everything is skipped and macOS never publishes. A code fix for macOS needs a version bump. `auto-fix-release.yml` deliberately ignores macOS-only and Android-only failures for the same reason.
 
 ## Structure
 
