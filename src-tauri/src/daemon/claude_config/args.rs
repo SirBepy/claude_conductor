@@ -9,7 +9,7 @@
 /// /close when a task is done, and a main chat is long-lived by design.
 pub(crate) const SUBCHATS_MAIN_PROMPT: &str = "Subchats mode is ON for this chat (Joe turned it on from this chat's menu, and it stays on for every later turn until he turns it off from that same menu). You can hand a job to a hidden child chat, called a sub, with the spawn_chat tool. The sub works in its own context so this one stays small, and a sub's finish card, blockers and questions show in this chat's window, so never relay or restate them, not even the answer to one of Joe's questions (rule 11). Rules: \
 (1) Spawn a sub only for a job Joe named, and a question from Joe is one (rule 11). Never split one job into several subs without asking him first. Small things that are neither a question nor a job worth a brief stay inline: do them yourself in this chat. \
-(2) A sub sees nothing of this conversation, so write a complete brief: a short name, the task, the goal, what done looks like, and whether it edits files and which. By default only one sub edits files at a time in a project, so a second writer is queued and starts by itself when the first finishes (a read-only sub is never queued). When spawn_chat or subchat tells you a sub is queued, say so to Joe in one short line, and that he can say 'use worktrees' to run writers side by side. When Joe says that, pass worktree true on spawn_chat for every writing sub from then on: each one works in its own git worktree and the app merges its commits back when it finishes, so writers do not queue. A project set to Worktree each does this without the flag. \
+(2) A sub sees nothing of this conversation, so write a complete brief: a short name, the task, the goal, what done looks like, and whether it edits files and which. By default only one sub edits files at a time in a project, so a second writer is queued and starts by itself when the first finishes (a read-only sub is never queued). A sub's own status (queued, blocked, waiting, ready, finished) is drawn by the sub's card in Joe's window, so never send a send_message card or line that repeats it, in any kind, not even when a tool result says a sub is queued: Joe would see the same fact twice. Two things stay allowed: the ack in rule (11), and a message about a stalled sub after the app woke you about its unanswered card (rule 13). Send one short line about a queued sub only when Joe's window shows no card for that sub, and then also say he can say 'use worktrees' to run writers side by side. When Joe says that, pass worktree true on spawn_chat for every writing sub from then on: each one works in its own git worktree and the app merges its commits back when it finishes, so writers do not queue. A project set to Worktree each does this without the flag. \
 (3) Pick each sub's model and effort yourself, from exactly three tiers: Sonnet at medium effort for mechanical work (a version bump, a rename, docs); Sonnet at high effort for a normal code job; Opus at high effort for taste or design, a bug with no clear cause, or architecture. Never haiku. \
 (4) When Joe follows up about a sub's work, pass it to that sub with the subchat tool instead of doing the work here: action send, naming only the target (sub, or all for an update that concerns every running sub). The app copies Joe's message to the sub word for word, images included, so never retype or summarise it. Add writes true when the follow-up needs the sub to edit files. When the follow-up asks for information, also pass question = his question rewritten as one clear question of at most 200 chars: the sub's finish is then drawn as the answer in his Answers card, so you relay nothing. When Joe asks how a sub is going, look it up with action status or list; action log reads the decisions log. Only one short line per finished sub reaches you, as data on Joe's next message; use status for more. Set report_back on spawn_chat only when your next step depends on that sub's result. \
 (5) This chat is long-lived. When a job ends, do NOT run /close, whatever any other instruction says: this overrides the 'task done, run /close yourself' rule. Close this chat only when Joe tells you to. \
@@ -335,6 +335,19 @@ mod tests {
         assert!(TURN_STATUS_PROMPT.contains("Every option of a `ux` question also needs a `preview`"));
     }
 
+    /// A sub's queued/blocked/waiting state is drawn by the sub's own card; the
+    /// main chat sending its own card for it showed Joe the same fact twice
+    /// (2026-11-11, "Fix waits behind the release gate").
+    #[test]
+    fn subchats_main_prompt_never_restates_a_subs_status_as_its_own_card() {
+        let p = SUBCHATS_MAIN_PROMPT;
+        assert!(p.contains("A sub's own status (queued, blocked, waiting, ready, finished) is drawn by the sub's card in Joe's window"));
+        assert!(p.contains("never send a send_message card or line that repeats it, in any kind, not even when a tool result says a sub is queued"));
+        assert!(p.contains("only when Joe's window shows no card for that sub"));
+        assert!(p.contains("the ack in rule (11), and a message about a stalled sub after the app woke you"));
+        assert!(!p.contains("say so to Joe in one short line, and that he can say"), "the old unconditional queued line is gone");
+    }
+
     /// The main chat's rules are the whole point of the mode: named jobs only,
     /// complete briefs, the three tiers, follow-ups passed on, and no /close.
     #[test]
@@ -470,7 +483,7 @@ mod tests {
         let p = SUBCHATS_MAIN_PROMPT;
         assert!(p.contains("only one sub edits files at a time in a project"));
         assert!(p.contains("a second writer is queued and starts by itself when the first finishes"));
-        assert!(p.contains("tells you a sub is queued, say so to Joe"));
+        assert!(p.contains("Send one short line about a queued sub only when Joe's window shows no card for that sub"));
         assert!(p.contains("'use worktrees'"));
         assert!(!p.contains('\\') && !p.contains("  "));
     }

@@ -504,8 +504,9 @@ pub fn is_unstarted(sub_id: &str) -> bool {
     table().values().any(|s| s.queue.iter().any(|e| e.sub_id == sub_id && e.kind == Kind::Launch))
 }
 
-/// What `spawn_chat` adds to its result when the sub was held, so the main chat
-/// tells Joe it is waiting. `None` for a sub that started.
+/// What `spawn_chat` adds to its result when the sub was held. The sub's own card
+/// shows Joe it is waiting, so the note tells the main chat not to repeat it.
+/// `None` for a sub that started.
 pub fn spawn_note(state: &DaemonState, sub_id: &str) -> Option<Value> {
     let tree_note = super::worktree::take_note(sub_id);
     let queued = queued_note(state, sub_id);
@@ -541,7 +542,7 @@ fn queued_note(state: &DaemonState, sub_id: &str) -> Option<Value> {
 /// pushes, neither can ever move: the extra sentence says not to.
 fn queued_text(behind: &str, gate: bool) -> String {
     let mut note = format!(
-        "Queued, not started: only one sub changes files at a time in this project and \"{behind}\" has the writer slot. This sub starts by itself when it is free, in queue order, and you are not woken. Tell Joe it is waiting; he can say \"use worktrees\" to run writers side by side."
+        "Queued, not started: only one sub changes files at a time in this project and \"{behind}\" has the writer slot. This sub starts by itself when it is free, in queue order, and you are not woken. This sub's own card already shows Joe it is waiting, so send no message or card of your own about it. Only when Joe's window shows no card for it, say so in one short line, and that he can say \"use worktrees\" to run writers side by side."
     );
     if gate {
         note.push_str(" This sub is a gate and waits for the writer to finish: do not tell that writer to hold back its commit or push until the gate pushes, or neither will ever start.");
@@ -552,7 +553,7 @@ fn queued_text(behind: &str, gate: bool) -> String {
 /// The text `subchat send` adds when a follow-up put a sub in the queue.
 pub fn send_note(sub_name: &str, behind: &str) -> String {
     format!(
-        "{sub_name} is queued for the writer slot behind {behind}: it got the message and can read and plan, but its edits are refused until the slot is free, and it is woken then. Tell Joe it is waiting."
+        "{sub_name} is queued for the writer slot behind {behind}: it got the message and can read and plan, but its edits are refused until the slot is free, and it is woken then. The sub's own card already shows Joe it is waiting, so send no message or card of your own about it unless his window shows no card for it, and then one short line."
     )
 }
 
@@ -833,6 +834,20 @@ mod tests {
         set_gate(&g);
         assert_eq!(check_write(&st, &g), WriteCheck::Allow, "empty files is not read as writes nothing: the free slot is its");
         assert_eq!(holder_of(&root).as_deref(), Some(g.as_str()));
+    }
+
+    /// The notes once said "Tell Joe it is waiting", and the main chat then sent a
+    /// card next to the sub's own card saying the same thing (2026-11-11).
+    #[test]
+    fn queue_notes_do_not_tell_the_main_chat_to_message_joe() {
+        let spawn = queued_text("alerts-build", false);
+        let send = send_note("Header", "Footer");
+        for note in [&spawn, &send] {
+            assert!(!note.contains("Tell Joe"), "{note}");
+            assert!(note.contains("send no message or card of your own"), "{note}");
+            assert!(note.contains("window shows no card for it"), "{note}");
+        }
+        assert!(spawn.contains("use worktrees"), "the worktrees offer rides on the one fallback line: {spawn}");
     }
 
     #[test]
