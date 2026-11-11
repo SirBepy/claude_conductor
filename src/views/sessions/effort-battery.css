@@ -2,7 +2,8 @@
    "Subchats card"). The glyph's fill is the model; the colour is the effort:
    low off white, medium grey with a yellow hint, xhigh orange, max red. High is
    the default (99% of use) and keeps the battery's own grey, so it has no rule.
-   The same hexes live in EFFORT_COLORS (shared/chat/dashboard/subs-model.ts). */
+   These vars are the only place the hexes live; TINTED_EFFORTS
+   (shared/chat/dashboard/subs-model.ts) lists the efforts that have a rule here. */
 :root {
   --effort-low: #ece6cf;
   --effort-medium: #b3a67c;

@@ -5,8 +5,9 @@
 // every model battery in the app takes.
 
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 
-const { buildSubsState, FINISHED_KEEP_MS, effortColor, EFFORT_COLORS, formatRunTime } = await import("../src/shared/chat/dashboard/subs-model.ts");
+const { buildSubsState, FINISHED_KEEP_MS, tintedEffort, TINTED_EFFORTS, formatRunTime } = await import("../src/shared/chat/dashboard/subs-model.ts");
 const { modelBatteryHtml } = await import("../src/views/sessions/sidebar-row-visuals.ts");
 
 const NOW = 1_800_000_000_000;
@@ -81,14 +82,23 @@ describe("Subchats card list", () => {
 });
 
 describe("effort palette", () => {
-  it("is Joe's five colours, with high left as the battery's own grey", () => {
-    expect(EFFORT_COLORS).toEqual({ low: "#ece6cf", medium: "#b3a67c", high: null, xhigh: "#f2994a", max: "#eb5757" });
-    expect(effortColor("max")).toBe("#eb5757");
-    expect(effortColor(" XHigh ")).toBe("#f2994a");
-    expect(effortColor("high")).toBeNull();
-    expect(effortColor("")).toBeNull();
-    expect(effortColor(undefined)).toBeNull();
-    expect(effortColor("turbo")).toBeNull();
+  it("tints four efforts and leaves high as the battery's own grey", () => {
+    expect([...TINTED_EFFORTS]).toEqual(["low", "medium", "xhigh", "max"]);
+    expect(tintedEffort("max")).toBe("max");
+    expect(tintedEffort(" XHigh ")).toBe("xhigh");
+    expect(tintedEffort("high")).toBeNull();
+    expect(tintedEffort("")).toBeNull();
+    expect(tintedEffort(undefined)).toBeNull();
+    expect(tintedEffort("turbo")).toBeNull();
+  });
+
+  it("has its colours in the stylesheet alone: a --effort-* var and a battery rule per tinted effort, none for high", () => {
+    const css = readFileSync(new URL("../src/views/sessions/effort-battery.css", import.meta.url), "utf8");
+    for (const e of TINTED_EFFORTS) {
+      expect(css, `${e} var`).toMatch(new RegExp(`--effort-${e}:\\s*#[0-9a-f]{6}`, "i"));
+      expect(css, `${e} rule`).toContain(`.session-model-battery[data-effort="${e}"]`);
+    }
+    expect(css).not.toMatch(/--effort-high|data-effort="high"/);
   });
 
   it("tints a model battery by effort and leaves the default one plain", () => {

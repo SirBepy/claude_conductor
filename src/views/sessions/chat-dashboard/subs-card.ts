@@ -50,6 +50,10 @@ const emptyData = (): SubData => ({ brief: null, verdict: null, imageIds: [], th
 /** Seconds between data refreshes while a sub's details are open (the clock ticks every second). */
 const REFRESH_EVERY = 5;
 
+/** Images the details gallery loads per page. Each tile is one daemon read of a full data URL, so a sub
+ *  with hundreds of screenshots must not fire them all when the gallery opens. */
+export const GALLERY_PAGE = 12;
+
 export function avatarHtml(it: SubCardItem, ring: string, selected: boolean): string {
   const name = escapeHtml(it.name);
   return `<button type="button" class="sx-av${selected ? " on" : ""}" data-sub="${escapeHtml(it.id)}" data-kind="${it.kind}" aria-pressed="${selected}" title="${name}: ${escapeHtml(it.progress)}" aria-label="${name}, ${escapeHtml(it.progress)}">`
@@ -62,6 +66,8 @@ export class SubsCard {
   private selected: string | null = null;
   private earlierOpen = false;
   private galleryOpen = false;
+  /** How many gallery tiles the open sub may show; grows by one page per "more". */
+  private galleryLimit = GALLERY_PAGE;
   private readonly data = new Map<string, SubData>();
   private rowSig = "";
   private detFor: string | null = null;
@@ -151,6 +157,12 @@ export class SubsCard {
     }
     if (t.closest("[data-act='gallery']")) {
       this.galleryOpen = !this.galleryOpen;
+      this.galleryLimit = GALLERY_PAGE;
+      this.patchDetails();
+      return;
+    }
+    if (t.closest("[data-act='gallery-more']")) {
+      this.galleryLimit += GALLERY_PAGE;
       this.patchDetails();
       return;
     }
@@ -176,6 +188,7 @@ export class SubsCard {
     else {
       this.selected = id;
       this.galleryOpen = false;
+      this.galleryLimit = GALLERY_PAGE;
     }
     this.rowSig = "";
     this.renderRow();
@@ -186,6 +199,7 @@ export class SubsCard {
   private close(): void {
     this.selected = null;
     this.galleryOpen = false;
+    this.galleryLimit = GALLERY_PAGE;
     this.detFor = null;
   }
 
@@ -289,22 +303,44 @@ export class SubsCard {
     set(".sx-pv span", d.preview?.title ?? "");
     const gal = det.querySelector<HTMLElement>(".sx-gallery")!;
     gal.hidden = !this.galleryOpen || d.imageIds.length < 2;
-    if (!gal.hidden && gal.dataset.for !== d.imageIds.join(",")) {
-      gal.dataset.for = d.imageIds.join(",");
+    if (!gal.hidden) this.renderGallery(gal, d.imageIds);
+  }
+
+  /** Fills the gallery up to `galleryLimit` tiles. A tile is added once and never rebuilt, so the
+   *  per-second patch costs nothing and an open page keeps its already-loaded images. */
+  private renderGallery(gal: HTMLElement, ids: readonly string[]): void {
+    if (gal.dataset.for !== ids.join(",")) {
+      gal.dataset.for = ids.join(",");
       gal.innerHTML = "";
-      for (const id of d.imageIds) {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "sx-gal-img";
-        b.dataset.act = "grid-image";
-        void imageUrl(id).then((url) => {
-          if (!url) return;
-          b.dataset.url = url;
-          b.innerHTML = `<img alt="" src="${url}">`;
-        });
-        gal.appendChild(b);
-      }
     }
+    const tiles = gal.querySelectorAll(".sx-gal-img").length;
+    for (const id of ids.slice(tiles, this.galleryLimit)) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "sx-gal-img";
+      b.dataset.act = "grid-image";
+      const img = document.createElement("img");
+      img.alt = "";
+      b.appendChild(img);
+      void imageUrl(id).then((url) => {
+        if (!url) return;
+        b.dataset.url = url;
+        img.src = url;
+      });
+      gal.appendChild(b);
+    }
+    const rest = ids.length - Math.min(ids.length, this.galleryLimit);
+    let more = gal.querySelector<HTMLButtonElement>(".sx-gal-more");
+    if (rest <= 0) { more?.remove(); return; }
+    if (!more) {
+      more = document.createElement("button");
+      more.type = "button";
+      more.className = "sx-gal-more";
+      more.dataset.act = "gallery-more";
+    }
+    const label = `Show ${Math.min(rest, GALLERY_PAGE)} more (${rest} left)`;
+    if (more.textContent !== label) more.textContent = label;
+    gal.appendChild(more);
   }
 
   private async previewOf(mainId: string, subId: string): Promise<PreviewRef | null> {

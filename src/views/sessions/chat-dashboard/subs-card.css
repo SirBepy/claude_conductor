@@ -240,6 +240,21 @@
   height: 100%;
   object-fit: cover;
 }
+.sx-gal-more {
+  grid-column: 1 / -1;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sx-gal-more:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
 .sx-msg {
   display: flex;
   gap: 6px;

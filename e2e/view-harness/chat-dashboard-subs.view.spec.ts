@@ -140,6 +140,34 @@ test.describe("chat dashboard / Subchats card", () => {
     await expect(det(page)).toBeHidden();
   });
 
+  test("a sub with many images opens its gallery one page at a time, never all at once", async ({ page }) => {
+    await openMain(page, [MAIN, WORK], { list_session_images: { images: Array.from({ length: 40 }, (_, i) => ({ id: `img${i}` })) } });
+    await av(page, "sub-work").click();
+    await expect(det(page).locator(".sx-imgmore")).toHaveText("+39");
+    const reads = async (): Promise<number> => (await invokeCalls(page)).filter((c) => c.cmd === "dashboard_gallery_image").length;
+    const tiles = det(page).locator(".sx-gallery .sx-gal-img");
+    // Only the newest image's thumbnail is read until the gallery opens.
+    await expect.poll(reads).toBe(1);
+    await det(page).locator(".sx-imgmore").click();
+    await expect(tiles).toHaveCount(12);
+    await expect.poll(reads).toBe(13);
+    await expect(tiles.first().locator("img")).toHaveAttribute("src", PNG);
+    await expect(det(page).locator(".sx-gal-more")).toHaveText("Show 12 more (28 left)");
+    await capture(det(page), "subs-card-gallery-first-page");
+    await det(page).locator(".sx-gal-more").click();
+    await expect(tiles).toHaveCount(24);
+    await expect.poll(reads).toBe(25);
+    // The per-second redraw and the 5s refresh add no tile and no read.
+    await page.waitForTimeout(1500);
+    await expect(tiles).toHaveCount(24);
+    expect(await reads()).toBe(25);
+    await det(page).locator(".sx-gal-more").click();
+    await expect(tiles).toHaveCount(36);
+    await det(page).locator(".sx-gal-more").click();
+    await expect(tiles).toHaveCount(40);
+    await expect(det(page).locator(".sx-gal-more")).toHaveCount(0);
+  });
+
   test("the message box sends to that sub", async ({ page }) => {
     await openMain(page, [MAIN, WORK]);
     await av(page, "sub-work").click();

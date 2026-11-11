@@ -65,20 +65,17 @@ export function buildSubsState(items: readonly SubCardItem[], now: number): Subs
 
 // ---- Effort palette --------------------------------------------------------------
 
-/** Battery colour by effort (Joe, 2026-11-10). `high` is the default and 99% of
- *  use, so it keeps the battery's own grey: null. The colour sits on the battery
- *  and not on the ring, so a max-effort working sub never reads as asking. */
-export const EFFORT_COLORS: Readonly<Record<string, string | null>> = {
-  low: "#ece6cf",
-  medium: "#b3a67c",
-  high: null,
-  xhigh: "#f2994a",
-  max: "#eb5757",
-};
+/** The efforts that tint a battery (Joe, 2026-11-10). `high` is the default and 99% of
+ *  use, so it keeps the battery's own grey. The colours are the `--effort-*` vars in
+ *  effort-battery.css, their one owner: this set only says which efforts have one.
+ *  The colour sits on the battery and not on the ring, so a max-effort working sub
+ *  never reads as asking. */
+export const TINTED_EFFORTS: ReadonlySet<string> = new Set(["low", "medium", "xhigh", "max"]);
 
-/** The colour an effort tints its battery, or null for the default grey. */
-export function effortColor(effort: string | null | undefined): string | null {
-  return EFFORT_COLORS[String(effort ?? "").trim().toLowerCase()] ?? null;
+/** The `data-effort` value an effort tints its battery with, or null for the default grey. */
+export function tintedEffort(effort: string | null | undefined): string | null {
+  const e = String(effort ?? "").trim().toLowerCase();
+  return TINTED_EFFORTS.has(e) ? e : null;
 }
 
 /** "mm:ss" under an hour, "h:mm:ss" past it. */
