@@ -327,9 +327,10 @@ jobs:
           fi
           cp "$APK" "release-staging/${SLUG}_${VERSION}_android_arm64.apk"
 
-      # Named release-* so the publish job's download pattern picks it up. Staging
-      # holds only the .apk: publish treats every *.json there as an updater
-      # platform entry, and the APK has no updater channel.
+      # Named release-android-* so upload-android's download pattern picks it up.
+      # Staging holds only the .apk: publish-macos also downloads every release-*
+      # and treats each *.json as an updater platform entry, and the APK has no
+      # updater channel.
       - name: Upload artifacts
         if: steps.signing.outputs.signed == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
