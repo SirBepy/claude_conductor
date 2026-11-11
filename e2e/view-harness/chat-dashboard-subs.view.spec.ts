@@ -208,6 +208,8 @@ test.describe("chat dashboard / Subchats card", () => {
     await expect(box).toHaveValue("");
     await expect(page.locator(".toast, #toast-host .toast").filter({ hasText: "Footer" })).toBeVisible();
     expect((await invokeCalls(page)).filter((c) => c.cmd === "send_message")).toHaveLength(0);
+    // Held for that sub (the held controller files it with the daemon), where the idle sweep sends it when the turn ends.
+    await expect.poll(async () => (await invokeCalls(page)).some((c) => c.cmd === "add_held_message" && (c.args as { sessionId?: string }).sessionId === "sub-work")).toBe(true);
   });
 
   test("typing / in the message box lists skills, and picking one inserts it", async ({ page }) => {

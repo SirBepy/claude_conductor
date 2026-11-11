@@ -317,13 +317,16 @@ export class SubsCard {
     const gal = det.querySelector<HTMLElement>(".sx-gallery")!;
     gal.hidden = !this.galleryOpen || d.imageIds.length < 2;
     if (!gal.hidden) this.renderGallery(gal, d.imageIds);
-    // A paired machine going offline or coming back while the box is open. The composer wires
-    // its Enter, Send and paste only when it was built enabled, so a flip is a rebuild (the
-    // draft is stored per sub, so it survives).
-    const offline = this.offlineLabel(it.id);
-    if (this.composer && offline !== this.mountedOffline) {
-      this.unmountComposer();
-      this.mountComposer(det.querySelector<HTMLElement>(".sx-msg")!, it.id);
+    // A paired machine going offline or coming back while the box is open. Going offline only
+    // disables the box in place (a draft in progress survives). A box built while offline never
+    // wired Enter, Send or paste, so coming back is a rebuild (the draft is stored per sub).
+    if (this.composer) {
+      if (this.mountedOffline && !this.offlineLabel(it.id)) {
+        this.unmountComposer();
+        this.mountComposer(det.querySelector<HTMLElement>(".sx-msg")!, it.id);
+      } else {
+        this.composer.refreshOfflineState();
+      }
     }
   }
 
@@ -436,9 +439,7 @@ export class SubsCard {
       getRenderer: () => null,
       // A working sub holds the message like any busy chat; the held controller sends
       // it when the sub's turn ends, whichever chat is on screen.
-      // Also while older held messages wait for it: a new one goes in behind them, so
-      // the sub reads them in the order they were sent.
-      isBusy: () => inst()?.busy === true || state.heldMessages?.hasItemsFor(subId) === true,
+      isBusy: () => inst()?.busy === true,
       isOffline: () => this.offlineLabel(subId),
       onStage: (blocks) => {
         const held = state.heldMessages?.stageFor(subId, blocks) ?? false;
