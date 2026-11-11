@@ -46,7 +46,13 @@ const send = (input) => { const id = `m${++seq}`; return [toolUseEvent(SEND, inp
 const plan = (steps) => { const id = `p${++seq}`; return [toolUseEvent(PLAN, { steps }, id), ok(id)]; };
 const status = (s) => { const id = `s${++seq}`; return [toolUseEvent(STATUS, { status: s }, id), ok(id)]; };
 
-/** Lets the dashboard's coalesced derive run. */
+/** Waits for the dashboard's coalesced derive to have drawn what `check` asserts.
+ *  A fixed delay flaked under load (the derive and the status bar's observer
+ *  chain several timers), so every expectation that needs a draw polls instead. */
+const settled = (check) => vi.waitFor(check, { timeout: 5000, interval: 5 });
+
+/** A short pause for the cases that assert something is NOT drawn: they cannot
+ *  poll for an absence, and a pause that runs short there only passes early. */
 const tick = () => new Promise((res) => setTimeout(res, 5));
 
 describe("chat view setting", () => {
@@ -118,25 +124,26 @@ describe("chat dashboard layout", () => {
       ...send({ kind: "answer", verdict: "Yes", text: "Once the board confirms." }),
       ...plan([{ text: "Read the tracker", status: "done", detail: "How Shortcut reads ids" }, { text: "Add Trello", status: "active" }]),
     ]);
-    await tick();
-    // The dashboard sits before the transcript, which keeps rendering underneath.
-    expect(pane.firstElementChild).toBe(dash.el);
-    expect(pane.querySelector(".session-messages .mc-root")).not.toBeNull();
+    await settled(() => {
+      // The dashboard sits before the transcript, which keeps rendering underneath.
+      expect(pane.firstElementChild).toBe(dash.el);
+      expect(pane.querySelector(".session-messages .mc-root")).not.toBeNull();
 
-    const strip = pane.querySelector(".cdash-strip");
-    expect(strip.hidden).toBe(false);
-    expect(strip.querySelector(".cdash-strip-msg").textContent).toContain("does it link tr- numbers?");
-    expect(strip.querySelector("[data-act='strip-earlier']").textContent).toContain("1 earlier");
+      const strip = pane.querySelector(".cdash-strip");
+      expect(strip.hidden).toBe(false);
+      expect(strip.querySelector(".cdash-strip-msg").textContent).toContain("does it link tr- numbers?");
+      expect(strip.querySelector("[data-act='strip-earlier']").textContent).toContain("1 earlier");
 
-    const left = pane.querySelector(".cdash-left");
-    const right = pane.querySelector(".cdash-right");
-    expect([...left.querySelectorAll(".cdash-slot")].map((e) => e.dataset.zone)).toEqual(["answers"]);
-    expect(left.querySelector(".mc-root .mc-verdict").textContent).toBe("Yes");
-    // A chat with a plan is a job, so it also gets Links and files for its quick-view buttons.
-    expect([...right.querySelectorAll(".cdash-slot")].map((e) => e.dataset.zone)).toEqual(["plan", "links"]);
-    expect([...right.querySelectorAll(".cdash-step-l")].map((e) => e.textContent)).toEqual(["Read the tracker", "Add Trello"]);
-    // The steps say where the plan is; the header carries no N/M count.
-    expect(right.querySelector(".cdash-plan .cdash-h").textContent).toBe("Plan");
+      const left = pane.querySelector(".cdash-left");
+      const right = pane.querySelector(".cdash-right");
+      expect([...left.querySelectorAll(".cdash-slot")].map((e) => e.dataset.zone)).toEqual(["answers"]);
+      expect(left.querySelector(".mc-root .mc-verdict").textContent).toBe("Yes");
+      // A chat with a plan is a job, so it also gets Links and files for its quick-view buttons.
+      expect([...right.querySelectorAll(".cdash-slot")].map((e) => e.dataset.zone)).toEqual(["plan", "links"]);
+      expect([...right.querySelectorAll(".cdash-step-l")].map((e) => e.textContent)).toEqual(["Read the tracker", "Add Trello"]);
+      // The steps say where the plan is; the header carries no N/M count.
+      expect(right.querySelector(".cdash-plan .cdash-h").textContent).toBe("Plan");
+    });
   });
 
   it("opens a step on click: its detail line, when it ran on a line of its own, how long on its row", async () => {
@@ -146,11 +153,10 @@ describe("chat dashboard layout", () => {
     r.handleEvent(userEvent("go"));
     r.handleEvent(toolUseEvent(PLAN, { steps: [{ text: "Read", status: "active", detail: "Reads the tracker code" }, { text: "Ship", status: "pending" }] }, "pa", T0));
     r.handleEvent(toolUseEvent(PLAN, { steps: [{ text: "Read", status: "done", detail: "Reads the tracker code" }, { text: "Ship", status: "active" }] }, "pb", T0 + 120_000));
-    await tick();
+    // Both steps ran, so both open; a pending step with no detail would not.
+    await settled(() => expect(pane.querySelectorAll("button.cdash-step")).toHaveLength(2));
     expect(pane.querySelector(".cdash-step-d")).toBeNull();
     expect(pane.querySelector(".cdash-step-t")).toBeNull();
-    // Both steps ran, so both open; a pending step with no detail would not.
-    expect(pane.querySelectorAll("button.cdash-step")).toHaveLength(2);
     pane.querySelector("button.cdash-step").click();
     expect(pane.querySelector(".cdash-step-d").textContent).toBe("Reads the tracker code");
     expect(pane.querySelector(".cdash-step-t").textContent).toMatch(/^\d.*:43.* to .*:45/);
@@ -166,8 +172,8 @@ describe("chat dashboard layout", () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     feed(r, [userEvent("first message"), userEvent("second message")]);
-    await tick();
     const msg = () => pane.querySelector(".cdash-strip-msg");
+    await settled(() => expect(msg().textContent).toContain("second message"));
     msg().click();
     expect(msg().classList.contains("open")).toBe(true);
     pane.querySelector("[data-act='strip-earlier']").click();
@@ -185,7 +191,7 @@ describe("chat dashboard layout", () => {
     new ChatDashboard(pane, r);
     const DATA = "iVBORw0KGgo=";
     feed(r, [{ type: "user_message", content: [{ type: "text", text: "look" }, { type: "image", mime: "image/png", data: DATA }], timestamp: 0 }]);
-    await tick();
+    await settled(() => expect(pane.querySelector(".cdash-strip").hidden).toBe(false));
     // The card's own copy of the image: a different element from the transcript's,
     // so element identity cannot find its gallery slot.
     const img = document.createElement("img");
@@ -209,8 +215,8 @@ describe("chat dashboard layout", () => {
       ...send({ kind: "report", verdict: "Built, not pushed", text: "Two commits", your_move: ["Push it"], visuals: [{ type: "table", columns: ["A"], rows: [["1"]] }] }),
       ...status("done"),
     ]);
-    await tick();
     const right = pane.querySelector(".cdash-right");
+    await settled(() => expect(right.querySelector(".cdash-result .mc-verdict")?.textContent).toBe("Built, not pushed"));
     expect(right.querySelector(".cdash-result .mc-verdict").textContent).toBe("Built, not pushed");
     expect(right.querySelector(".cdash-result .mc-sec--yours").textContent).toContain("Push it");
     expect(right.querySelector(".cdash-result table")).not.toBeNull();
@@ -232,14 +238,15 @@ describe("chat dashboard layout", () => {
       ok("q1"),
       ...send({ kind: "blocker", verdict: "Stuck on auth", text: "No token" }),
     ]);
-    await tick();
-    const w = pane.querySelector(".cdash-waiting");
-    expect(w.classList.contains("is-blocked")).toBe(true);
-    const stack = [...w.querySelector(".cdash-stack").children];
-    expect(stack[0].querySelector(".mc-verdict").textContent).toBe("Stuck on auth");
-    const q = w.querySelector(".msg.question-card");
-    expect(q.dataset.questionId).toBe("q1");
-    expect(q.textContent).toContain("Tabs or spaces?");
+    await settled(() => {
+      const w = pane.querySelector(".cdash-waiting");
+      expect(w.classList.contains("is-blocked")).toBe(true);
+      const stack = [...w.querySelector(".cdash-stack").children];
+      expect(stack[0].querySelector(".mc-verdict").textContent).toBe("Stuck on auth");
+      const q = w.querySelector(".msg.question-card");
+      expect(q.dataset.questionId).toBe("q1");
+      expect(q.textContent).toContain("Tabs or spaces?");
+    });
   });
 
   it("moves the chat's status line into the Plan card while it runs, and back when the card goes", async () => {
@@ -251,18 +258,19 @@ describe("chat dashboard layout", () => {
     expect(bar.parentElement).toBe(home);
     // A turn starts: the bar shows itself, and the Plan card draws to host it.
     bar.removeAttribute("hidden");
-    await tick();
-    const slot = pane.querySelector(".cdash-plan [data-slot='status']");
-    expect(slot).not.toBeNull();
-    expect(bar.parentElement).toBe(slot);
+    await settled(() => {
+      const slot = pane.querySelector(".cdash-plan [data-slot='status']");
+      expect(slot).not.toBeNull();
+      expect(bar.parentElement).toBe(slot);
+    });
     // New plan steps redraw the card; the bar survives the redraw.
     feed(r, [userEvent("go"), ...plan([{ text: "One", status: "active" }])]);
-    await tick();
-    expect(pane.querySelector(".cdash-plan [data-slot='status'] .session-thinking")).toBe(bar);
+    await settled(() => {
+      expect(pane.querySelector(".cdash-plan [data-slot='status'] .session-thinking")).toBe(bar);
+    });
     bar.setAttribute("hidden", "");
-    await tick();
     // The turn it saw end is when the chat went idle.
-    expect(pane.querySelector(".cdash-pstatus").textContent).toMatch(/^Idle since \d/);
+    await settled(() => expect(pane.querySelector(".cdash-pstatus").textContent).toMatch(/^Idle since \d/));
     // Hidden, it goes home, so session-thinking-bar.ts shows it above the message box for held messages.
     expect(bar.parentElement).toBe(home);
   });
@@ -272,8 +280,7 @@ describe("chat dashboard layout", () => {
     const dash = new ChatDashboard(pane, r);
     const bar = pane.querySelector(".session-thinking");
     bar.removeAttribute("hidden");
-    await tick();
-    expect(bar.closest(".cdash")).not.toBeNull();
+    await settled(() => expect(bar.closest(".cdash")).not.toBeNull());
     dash.dispose();
     expect(bar.parentElement.classList.contains("composer-shell")).toBe(true);
     expect(bar.nextElementSibling.classList.contains("session-composer")).toBe(true);
@@ -284,8 +291,7 @@ describe("chat dashboard layout", () => {
   it("keeps Answers and Plan on screen from the very start, empty", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
-    await tick();
-    expect([...pane.querySelectorAll(".cdash-left .cdash-slot")].map((e) => e.dataset.zone)).toEqual(["answers"]);
+    await settled(() => expect([...pane.querySelectorAll(".cdash-left .cdash-slot")].map((e) => e.dataset.zone)).toEqual(["answers"]));
     expect([...pane.querySelectorAll(".cdash-right .cdash-slot")].map((e) => e.dataset.zone)).toEqual(["plan"]);
     expect(pane.querySelector(".cdash-plan .cdash-pnone").textContent).toBe("Nothing planned yet.");
     expect(pane.querySelector(".cdash-pstatus").textContent).toBe("Idle");
@@ -301,17 +307,15 @@ describe("chat dashboard layout", () => {
     expect(pane.querySelector(".cdash-waiting")).toBeNull();
     r.hydrating = false;
     r.onFlushed();
-    await tick();
-    expect(pane.querySelector(".cdash-waiting")).not.toBeNull();
+    await settled(() => expect(pane.querySelector(".cdash-waiting")).not.toBeNull());
   });
 
   it("draws a finished history replay once it has loaded, with no later event to trigger it", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     await r.loadHistory([userEvent("go"), ...send({ kind: "blocker", verdict: "Stuck", text: "x" })]);
-    await tick();
     expect(r.hydrating).toBe(false);
-    expect(pane.querySelector(".cdash-waiting")).not.toBeNull();
+    await settled(() => expect(pane.querySelector(".cdash-waiting")).not.toBeNull());
   });
 
   it("keeps the status line above the message box while messages are held", async () => {
@@ -326,8 +330,7 @@ describe("chat dashboard layout", () => {
       expect(bar.parentElement.classList.contains("composer-shell")).toBe(true);
       state.heldMessages = { hasItemsForActive: () => false };
       bar.classList.add("busy");
-      await tick();
-      expect(bar.parentElement.dataset.slot).toBe("status");
+      await settled(() => expect(bar.parentElement.dataset.slot).toBe("status"));
     } finally {
       state.heldMessages = prevHeld;
     }

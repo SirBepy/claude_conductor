@@ -123,12 +123,17 @@ describe("a late side-fetch answer is applied in place", () => {
     const loading = r.loadFromStore();
     // Past the 500ms grace the load carries on without the marks; answer them
     // as soon as that happens, whichever side of the hydrate it lands on.
-    setTimeout(() => answerMarks([{ timestamp: 1, question_id: null }]), 520);
+    let answered = false;
+    setTimeout(() => { answered = true; answerMarks([{ timestamp: 1, question_id: null }]); }, 520);
     await loading;
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    // The late answer is applied in a microtask chain once it is given, so one
+    // macrotask after it fired is the end of anything it could still rebuild. A
+    // fixed sleep here ran out under load while the hydrate was still going.
+    await vi.waitFor(() => expect(answered).toBe(true), { timeout: 10_000, interval: 10 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(r.messages).toHaveLength(events.length);
     expect(install).toHaveBeenCalledTimes(1);
     expect(invokeMock.mock.calls.filter(([c]) => c === "load_history_page")).toHaveLength(1);
-  }, 20_000);
+  }, 60_000);
 });
