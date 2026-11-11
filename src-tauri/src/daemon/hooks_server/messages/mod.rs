@@ -507,8 +507,25 @@ mod tests {
 
             let answer = json!({"session_id": "s", "kind": "answer", "verdict": "Yes", "text": "t", name: ["r"]});
             let e = error_of(&send_json(answer).await);
-            assert!(e.contains(&format!("{name} is only for report, not answer")), "{e}");
+            let only = if name == "waiting_on" { "report or blocker" } else { "report" };
+            assert!(e.contains(&format!("{name} is only for {only}, not answer")), "{e}");
         }
+    }
+
+    /// `waiting_on` names what a blocker waits on when it is not Joe; the other
+    /// report rows stay report-only.
+    #[tokio::test]
+    async fn a_blocker_may_carry_waiting_on_and_no_other_report_row() {
+        let blocker = |extra: serde_json::Value| {
+            let mut b = json!({"session_id": "s", "kind": "blocker", "verdict": "Waits on Gate 2", "text": "t"});
+            b.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            b
+        };
+        assert_eq!(send_json(blocker(json!({"waiting_on": ["Gate 2"]}))).await["ok"], json!(true));
+        let nine: Vec<_> = (0..9).map(|_| "r").collect();
+        assert!(error_of(&send_json(blocker(json!({"waiting_on": nine}))).await).contains("waiting_on has 9 items, over 8"));
+        let e = error_of(&send_json(blocker(json!({"your_move": ["x"]}))).await);
+        assert!(e.contains("your_move is only for report, not blocker"), "{e}");
     }
 
     #[tokio::test]

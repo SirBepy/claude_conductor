@@ -144,6 +144,31 @@ export interface WaitingState {
   blocked: boolean;
 }
 
+/** A blocker that waits on something other than Joe, with what it waits on. */
+export interface ElsewhereItem {
+  message: RenderedMessage;
+  /** The names to print, from structured data only (see blockerTargets). */
+  waitingOn: string[];
+}
+
+export interface ElsewhereState {
+  items: ElsewhereItem[];
+  /** "Waiting on Gate 2", every distinct target of the items joined. */
+  label: string;
+}
+
+/** What a blocker waits on when that is not Joe, or [] when it waits on him
+ *  (the default: an unmarked blocker is for him to read). Only structured data
+ *  counts, never the prose: a send_message blocker's `waiting_on` rows, a sub's
+ *  blocker card `waiting_on` rows, or a sub that is queued behind something (its
+ *  row's `waiting_for`, which the Subchats card prints as its progress). */
+function blockerTargets(m: RenderedMessage, subs: readonly SubCardItem[] | undefined): string[] {
+  const rows = m.subCard ? m.subCard.waiting_on : m.card?.waitingOn;
+  if (rows?.length) return [...rows];
+  const queued = m.subCard?.sub_id ? subs?.find((s) => s.id === m.subCard!.sub_id && s.kind === "queued") : undefined;
+  return queued?.progress.trim() ? [queued.progress.trim()] : [];
+}
+
 
 /** The tables and charts of the send_message that came with a question card:
  *  the nearest own message before it in the same stretch (Joe has not written
@@ -174,18 +199,43 @@ export function deriveWaiting({ input, lastJoe }: DeriveCtx): WaitingState | nul
   msgs.forEach((m, i) => {
     if (isOwnMessage(m) && i > lastJoe) {
       const k = messageKindOf(m);
-      if (k === "blocker") blockers.push({ type: "blocker", message: m });
-      else if (k === "do_this") doThis.push({ type: "do_this", message: m });
+      if (k === "blocker") {
+        if (blockerTargets(m, input.subs).length === 0) blockers.push({ type: "blocker", message: m });
+      } else if (k === "do_this") doThis.push({ type: "do_this", message: m });
     } else if (m.kind === "message" && m.subCard?.kind === "blocker" && !m.failed && !m.retracted) {
       const sub = m.subCard.sub_id;
       const later = !!sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub);
-      if (!later) blockers.push({ type: "blocker", message: m });
+      if (!later && blockerTargets(m, input.subs).length === 0) blockers.push({ type: "blocker", message: m });
     } else if (isOpenQuestion(m) && i !== onScreen) {
       questions.push({ type: "question", message: m, questions: cardQuestionTexts(m), figures: figuresBefore(msgs, i) });
     }
   });
   const items = [...blockers, ...doThis, ...questions];
   return items.length > 0 ? { items, blocked: blockers.length > 0 } : null;
+}
+
+/** Blockers that wait on something other than Joe, drawn apart from Waiting on
+ *  you under a label naming the target (Joe, 2026-11-11: "Waiting on you??? i
+ *  dont think it is waiting on me... it would be handy to know what its
+ *  waiting on"). The same lifecycle as the blockers above: an own blocker
+ *  counts until Joe writes again, a sub's until that sub sends a later card. */
+export function deriveWaitingElsewhere({ input, lastJoe }: DeriveCtx): ElsewhereState | null {
+  const msgs = input.messages;
+  const items: ElsewhereItem[] = [];
+  msgs.forEach((m, i) => {
+    let live: boolean;
+    if (isOwnMessage(m)) live = i > lastJoe && messageKindOf(m) === "blocker";
+    else if (m.kind === "message" && m.subCard?.kind === "blocker" && !m.failed && !m.retracted) {
+      const sub = m.subCard.sub_id;
+      live = !(sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub));
+    } else live = false;
+    if (!live) return;
+    const waitingOn = blockerTargets(m, input.subs);
+    if (waitingOn.length > 0) items.push({ message: m, waitingOn });
+  });
+  if (items.length === 0) return null;
+  const names = [...new Set(items.flatMap((it) => it.waitingOn))];
+  return { items, label: `Waiting on ${names.join(", ")}` };
 }
 
 /** One job of the chat as the Plan card draws it: a plan with the messages
@@ -454,6 +504,7 @@ function zone<T>(def: ZoneDef<T>): ZoneDef<T> {
 export const ZONES = {
   answers: zone({ column: "left", order: 10, derive: deriveAnswers }),
   waiting: zone({ column: "left", order: 20, derive: deriveWaiting }),
+  waitingElsewhere: zone({ column: "left", order: 25, derive: deriveWaitingElsewhere }),
   drafts: zone({ column: "left", order: 30, derive: deriveDrafts }),
   plan: zone({ column: "right", order: 10, derive: derivePlan }),
   subchats: zone({ column: "right", order: 20, derive: deriveSubchats }),

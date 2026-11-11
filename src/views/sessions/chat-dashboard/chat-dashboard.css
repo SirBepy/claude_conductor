@@ -217,6 +217,16 @@
 .cdash-waiting.is-blocked .cdash-h {
   color: var(--color-danger);
 }
+/* Blockers waiting on something other than Joe: muted, since nothing is his to do. */
+.cdash-waiting-else .cdash-h {
+  color: var(--color-text-muted);
+}
+/* The title is every target joined, each up to 120 chars, so it wraps instead of
+   running past the card. */
+.cdash-waiting-else .cdash-h-t {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .cdash-waiting .msg.question-card {
   cursor: pointer;
 }
