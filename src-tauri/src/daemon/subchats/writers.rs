@@ -532,11 +532,21 @@ fn queued_note(state: &DaemonState, sub_id: &str) -> Option<Value> {
     Some(json!({
         "queued": true,
         "queue_position": position,
-        "note": format!(
-            "Queued, not started: only one sub changes files at a time in this project and \"{}\" has the writer slot. This sub starts by itself when it is free, in queue order, and you are not woken. Tell Joe it is waiting; he can say \"use worktrees\" to run writers side by side.",
-            behind(state, slot)
-        ),
+        "note": queued_text(&behind(state, slot), brief.gate),
     }))
+}
+
+/// The queue note's text. A gate waits for the writer slot like any writer, so
+/// when the main chat has told that writer to hold its commit until the gate
+/// pushes, neither can ever move: the extra sentence says not to.
+fn queued_text(behind: &str, gate: bool) -> String {
+    let mut note = format!(
+        "Queued, not started: only one sub changes files at a time in this project and \"{behind}\" has the writer slot. This sub starts by itself when it is free, in queue order, and you are not woken. Tell Joe it is waiting; he can say \"use worktrees\" to run writers side by side."
+    );
+    if gate {
+        note.push_str(" This sub is a gate and waits for the writer to finish: do not tell that writer to hold back its commit or push until the gate pushes, or neither will ever start.");
+    }
+    note
 }
 
 /// The text `subchat send` adds when a follow-up put a sub in the queue.
@@ -823,6 +833,43 @@ mod tests {
         set_gate(&g);
         assert_eq!(check_write(&st, &g), WriteCheck::Allow, "empty files is not read as writes nothing: the free slot is its");
         assert_eq!(holder_of(&root).as_deref(), Some(g.as_str()));
+    }
+
+    #[test]
+    fn a_queued_gate_is_told_not_to_make_the_writer_hold_back_its_commit() {
+        let writer = queued_text("alerts-build", false);
+        assert!(writer.contains("\"alerts-build\" has the writer slot"), "{writer}");
+        assert!(!writer.contains("gate"), "a plain writer gets no gate advice: {writer}");
+        let gate = queued_text("alerts-build", true);
+        assert!(gate.starts_with(&writer), "the gate sentence is added, nothing is replaced");
+        assert!(gate.contains("do not tell that writer to hold back its commit or push until the gate pushes"), "{gate}");
+    }
+
+    #[test]
+    fn the_note_of_a_gate_queued_behind_a_writer_carries_the_gate_sentence() {
+        let _data = TempDataDir::new();
+        let (_d, root) = project();
+        let st = state();
+        let (_writer, queued) = spawn_writer(&st, "writer", &root, "do A");
+        assert!(!queued);
+        let mut gate_brief = brief(true);
+        gate_brief.gate = true;
+        let d = decide_spawn(&st, &gate_brief, &root);
+        assert!(d.queued, "the writer holds the slot");
+        let (parent, id) = ("gate-main".to_string(), d.sid.clone());
+        st.registry.upsert_interactive(&parent, &root, "proj", "2026-11-05T00:00:00Z");
+        st.registry.upsert_interactive(&id, &root, "proj", "2026-11-05T00:00:00Z");
+        st.registry.set_subchat_of(&id, Some(parent.clone()));
+        st.registry.set_name(&id, "gate".to_string());
+        store_sub_brief(&id, &parent);
+        set_gate(&id);
+        held::hold(
+            &st,
+            Held { sub_id: id.clone(), reason: QUEUED_TEXT.into(), after: None, after_name: String::new(), launch: spec(&root, "push") },
+        )
+        .unwrap();
+        let note = spawn_note(&st, &id).expect("a queued gate reports it");
+        assert!(note["note"].as_str().unwrap().contains("hold back its commit"), "{note}");
     }
 
     #[test]
