@@ -90,6 +90,21 @@ let open: { chip: HTMLElement; card: HTMLElement; close: () => void } | null = n
  *  very top of the chat) it opens below instead. Then scrolls the chat so the
  *  whole card is on screen. */
 function placeCard(card: HTMLElement, msg: HTMLElement, host: HTMLElement): void {
+  // In the chat dashboard the bubble sits inside clipping boxes (.cdash-body's
+  // overflow-x, the card's own clip), so an absolute card above it is cut off.
+  // A fixed card escapes them: it is centred in the dashboard body instead.
+  const dash = msg.closest<HTMLElement>(".cdash-body");
+  if (dash) {
+    const dr = dash.getBoundingClientRect();
+    const w = Math.min(CARD_W, dash.clientWidth - 2 * CARD_EDGE);
+    const h = Math.min(CARD_H, dash.clientHeight - 2 * CARD_EDGE);
+    card.classList.remove("below");
+    card.style.width = `${w}px`;
+    card.style.height = `${h}px`;
+    card.style.left = `${dr.left + dash.clientLeft + (dash.clientWidth - w) / 2}px`;
+    card.style.top = `${dr.top + dash.clientTop + (dash.clientHeight - h) / 2}px`;
+    return;
+  }
   const hr = host.getBoundingClientRect();
   const mr = msg.getBoundingClientRect();
   // clientWidth/clientLeft, not the rect's width: the rect includes the

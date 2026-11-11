@@ -159,6 +159,13 @@
   user-select: text;
   -webkit-user-select: text;
 }
+/* A detail popup (drill-links.ts) opened from a dashboard card: fixed, so the
+   body's overflow clip and the card's own clip cannot cut it; left/top/size are
+   set from JS to centre it in the body. */
+.cdash-body .drill-pop {
+  position: fixed;
+  bottom: auto;
+}
 .cdash-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(250px, 1fr);
