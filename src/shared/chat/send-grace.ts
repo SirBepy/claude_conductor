@@ -15,10 +15,12 @@ export function graceMs(): number {
 }
 
 interface Pending {
+  key: string;
   timer: ReturnType<typeof setTimeout>;
   fire: () => Promise<void> | void;
   onUndo: () => void;
   bar: HTMLElement;
+  owner?: object;
 }
 
 const pending = new Map<string, Pending>();
@@ -34,6 +36,10 @@ export interface GraceOpts {
   fire: () => Promise<void> | void;
   /** Runs on Undo, to put the draft back. */
   onUndo: () => void;
+  /** The object whose `fire`/`onUndo` close over its own DOM (a Composer). Lets that
+   *  object's teardown flush exactly its own held action and nothing another holder
+   *  parked under the same key. */
+  owner?: object;
 }
 
 /** Hold `fire` for the grace window. With a zero window it runs now and the
@@ -47,10 +53,12 @@ export function startGrace(o: GraceOpts): Promise<void> {
     // A window closing inside the grace period must not eat the message.
     window.addEventListener("pagehide", () => flushAllGrace());
   }
-  const bar = buildBar(o.label, ms, () => undoGrace(o.key));
-  o.mount.appendChild(bar);
-  const timer = setTimeout(() => flushGrace(o.key), ms);
-  pending.set(o.key, { timer, fire: o.fire, onUndo: o.onUndo, bar });
+  // The timer and the button read `entry.key` at the moment they run: a rekey moves it.
+  const entry = { key: o.key, fire: o.fire, onUndo: o.onUndo, owner: o.owner } as Pending;
+  entry.bar = buildBar(o.label, ms, () => undoGrace(entry.key));
+  o.mount.appendChild(entry.bar);
+  entry.timer = setTimeout(() => flushGrace(entry.key), ms);
+  pending.set(o.key, entry);
   return Promise.resolve();
 }
 
@@ -85,6 +93,26 @@ export function flushGrace(key: string): void {
   void Promise.resolve(p.fire());
 }
 
+/** Fire whatever `owner` is holding now. A holder that is being torn down calls this:
+ *  its Undo would restore into DOM that is about to be gone, so the action goes out
+ *  instead of waiting on a button nobody can reach. */
+export function flushGraceOwnedBy(owner: object): void {
+  for (const [key, p] of [...pending]) if (p.owner === owner) flushGrace(key);
+}
+
+/** Move the pending action from `from` to `to` (a placeholder chat id becoming the
+ *  real one), so its timer, Undo button and Ctrl+Z follow the chat. A different
+ *  action already pending on `to` fires first, same as any newer action on a key. */
+export function rekeyGrace(from: string, to: string): void {
+  if (from === to) return;
+  const p = pending.get(from);
+  if (!p) return;
+  pending.delete(from);
+  flushGrace(to);
+  p.key = to;
+  pending.set(to, p);
+}
+
 export function flushAllGrace(): void {
   for (const key of [...pending.keys()]) flushGrace(key);
 }
@@ -105,10 +133,4 @@ export function undoGrace(key: string): boolean {
 export function remountGraceBar(key: string, mount: HTMLElement): void {
   const p = pending.get(key);
   if (p) mount.appendChild(p.bar);
-}
-
-/** Detach a button from its mount without touching the pending action, so
- *  leaving a chat never leaves its Undo button floating over another. */
-export function detachGraceBar(key: string): void {
-  pending.get(key)?.bar.remove();
 }

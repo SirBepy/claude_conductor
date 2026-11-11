@@ -23,7 +23,7 @@ import "./caret-popup/popup.css";
 import { ComposerAttachments, type Attachment, type PastedBlock } from "./composer-attachments";
 import { loadDraft, saveDraft, clearDraft } from "./composer-persistence";
 import { recordSent, moveSentOutbox, popLastSent } from "./sent-outbox";
-import { startGrace, undoGrace, graceLabel, remountGraceBar, detachGraceBar } from "./send-grace";
+import { startGrace, undoGrace, graceLabel, remountGraceBar, flushGraceOwnedBy, rekeyGrace } from "./send-grace";
 import { ComposerDraftSync } from "./composer-draft-sync";
 import { openFrozenChoice } from "./composer-frozen-choice";
 import { ComposerUndo } from "./composer-undo";
@@ -259,6 +259,10 @@ export class Composer {
   }
 
   destroy(): void {
+    // A send still inside its Undo window goes out now: its Undo restores into
+    // this composer's DOM, which is about to be gone, so the button would only
+    // cancel the send and show the text nowhere.
+    flushGraceOwnedBy(this);
     clearLightboxComposerBridge(this.lightboxBridge);
     this.strayInput.destroy();
     document.removeEventListener("visibilitychange", this._visibilityHandler);
@@ -300,9 +304,9 @@ export class Composer {
       this.att.migrateSession(prevId!, id);
       moveSentOutbox(prevId!, id);
     }
-    // Leaving a chat must not leave its Undo button over the next one. The held
-    // send still fires on its own timer.
-    if (prevId !== id) detachGraceBar(this.graceKey());
+    // A held send follows its chat across the rename (timer, Undo button and
+    // Ctrl+Z all key on the id); render() below moves the button to the new DOM.
+    if (isRename) rekeyGrace(prevId!, id);
     this.sessionId = id;
     this.baseReadOnly = !!opts.readOnly;
     this.disabled = this.baseReadOnly || !!this.opts.isOffline?.();
@@ -886,6 +890,7 @@ export class Composer {
           key: this.graceKey(),
           label: graceLabel("Sending", text),
           mount: slot,
+          owner: this,
           fire,
           onUndo: () => {
             // The text goes back in front of whatever has been typed since,
@@ -926,7 +931,10 @@ export class Composer {
     if (label) label.textContent = edit ? `Editing scheduled message (${edit.label}). Send keeps the schedule.` : "";
   }
 
-  /** Chat id the grace window is keyed on; the pending-draft composer has none yet. */
+  /** Chat id the grace window is keyed on (every real composer has one: the draft
+   *  pane's is its placeholder id). A card answer held on the same chat shares this
+   *  key on purpose: the composer carries its Undo button across a chat switch, and a
+   *  newer send fires the older held action first. */
   private graceKey(): string {
     return this.sessionId ?? "composer";
   }
