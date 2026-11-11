@@ -47,6 +47,8 @@ function writeTextPref(on: boolean): void {
   try { localStorage.setItem(TEXT_PREF_KEY, on ? "on" : "off"); } catch { /* private mode: in-memory only */ }
 }
 
+const MAX_REFITS = 4;
+
 /** A page taller than the view would be cut off at the bottom: the frame's
  *  document clips its own overflow and nothing scrolls it. So the frame is laid
  *  out at the page's full height (same width as the view, so the layout stays
@@ -60,9 +62,19 @@ function fitFrameToView(frame: HTMLIFrameElement, view: HTMLElement): void {
   // frame already stretched to a past height would report that height again.
   frame.style.height = "";
   frame.style.transform = "";
-  const pageH = doc.scrollHeight;
+  let pageH = doc.scrollHeight;
   if (pageH <= viewH + 1) return;
   frame.style.height = `${pageH}px`;
+  // Parts sized in vh grow once the frame is stretched, so the height just
+  // measured is short for the stretched layout. Re-measure until it settles; a
+  // page whose vh parts add up to a full viewport or more never settles, so the
+  // loop is bounded and that page keeps its last (still clipped) height.
+  for (let i = 0; i < MAX_REFITS; i++) {
+    const grown = doc.scrollHeight;
+    if (grown <= pageH + 1) break;
+    pageH = grown;
+    frame.style.height = `${pageH}px`;
+  }
   frame.style.transformOrigin = "top center";
   frame.style.transform = `scale(${viewH / pageH})`;
 }

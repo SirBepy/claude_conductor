@@ -81,6 +81,28 @@ test.describe("view-harness / AUQ fullscreen preview", () => {
     }).toBe(true);
   });
 
+  test("a page with vh-sized parts is still fully shown after the frame is stretched to its height", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    // A vh part grows when the frame is stretched, so the height measured at the
+    // view's size is too short for the stretched layout.
+    const vh = (label: string) =>
+      `<div style="background:var(--color-surface);color:var(--color-text)"><div style="height:20vh">${label}</div><div style="height:1500px"></div><div class="bottom-mark" style="height:24px">bottom of ${label}</div></div>`;
+    const q: Question = {
+      question: "Vh?", header: "Vh", domain: "ux",
+      options: ["A", "B"].map((label) => ({ label, description: `${label} desc`, preview: vh(label) })),
+    };
+    await openCard(page, [q]);
+    await page.locator(".prompt-panel.is-active .prompt-opt__expand").first().click();
+    await expect(page.locator(fs)).toBeVisible();
+    const mark = page.frameLocator(`${fs} .auq-fs__frame`).locator(".bottom-mark");
+    await expect(mark).toBeVisible();
+    await expect.poll(async () => {
+      const view = await page.locator(`${fs} .auq-fs__view`).boundingBox();
+      const box = await mark.boundingBox();
+      return Boolean(view && box && box.y >= view.y - 1 && box.y + box.height <= view.y + view.height + 1);
+    }).toBe(true);
+  });
+
   test("desktop: a tile opens fullscreen at the full view size, arrows page, Select advances", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await openCard(page, [visual("First", ["A", "B", "C"]), visual("Second", ["D", "E"]), plain]);
