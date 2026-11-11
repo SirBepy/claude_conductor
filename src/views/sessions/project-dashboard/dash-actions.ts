@@ -14,7 +14,7 @@ import { updateThinkingBar } from "../session-thinking-bar";
 import { state } from "../state";
 import type { DashActions, DashCtx } from "./dash-parts";
 import { withCommand } from "./format";
-import { selectionIds, toggleSelection } from "./due-model";
+import { doAllMessage, doAllRepos, normCwd, selectionIds, toggleSelection } from "./due-model";
 import { BACKLOG_OPEN_EVENT } from "../backlog-panel/backlog-open-event";
 import { dueSelection, setDueHighlight } from "../backlog-panel/due-highlight";
 import { openReportsModal, showImageOverlay } from "./dash-reports";
@@ -67,16 +67,45 @@ const repoMenu = createMoreMenu<[RepoRef[]]>({
   },
 });
 
-/** The repo an action applies to: the only repo, or the user's pick. */
-export async function pickRepo(c: DashCtx, anchor: HTMLElement): Promise<RepoRef | null> {
-  const repos = c.snap.target.repos;
+/** The repo an action applies to: the only repo, or the user's pick. `among` narrows the choice
+ *  to the repos the action concerns; `label` renames a repo in the menu without changing what is returned. */
+export async function pickRepo(
+  c: DashCtx, anchor: HTMLElement, among?: RepoRef[], label?: (r: RepoRef) => string,
+): Promise<RepoRef | null> {
+  const repos = among ?? c.snap.target.repos;
   if (repos.length === 1) return repos[0] ?? null;
   if (repos.length === 0) return null;
+  const shown = label ? repos.map((r) => ({ ...r, name: label(r) })) : repos;
   return new Promise<RepoRef | null>((resolve) => {
     let done = false;
-    settleRepo = (r) => { if (done) return; done = true; settleRepo = null; resolve(r); };
-    repoMenu.open(anchor, repos);
+    settleRepo = (r) => {
+      if (done) return;
+      done = true; settleRepo = null;
+      resolve(r ? repos.find((x) => x.cwd === r.cwd) ?? null : null);
+    };
+    repoMenu.open(anchor, shown);
   });
+}
+
+/** Starts a chat in `repo` on the project's usual model, sending `message` at once. */
+async function startCardChat(host: ActionHost, repo: RepoRef, message: string): Promise<void> {
+  const project = { path: repo.cwd, name: repo.name };
+  let config;
+  let needsAccount;
+  try {
+    config = await resolveNewChatConfig(project.path);
+    needsAccount = await accountPickNeeded(config, project.path);
+  } catch (err) {
+    showToast(`Could not start the chat: ${String(err)}`);
+    return;
+  }
+  host.leave();
+  // The message embeds third-party card text, so this chat never inherits
+  // the project's auto-accept: an injected instruction must hit a prompt.
+  // With no account resolved it waits in the message box instead of
+  // auto-sending into the account gate.
+  const launch = needsAccount ? { draftText: message } : { initialMessage: message };
+  state.launchNewChatCallback?.(project, { ...config, autoAccept: false, ...launch });
 }
 
 function fillComposer(command: string): void {
@@ -120,23 +149,24 @@ export function makeActions(host: ActionHost): DashActions {
       void (async () => {
         const repo = await pickRepo(host.ctx(), anchor);
         if (!repo) return;
-        const project = { path: repo.cwd, name: repo.name };
-        let config;
-        let needsAccount;
-        try {
-          config = await resolveNewChatConfig(project.path);
-          needsAccount = await accountPickNeeded(config, project.path);
-        } catch (err) {
-          showToast(`Could not start the chat: ${String(err)}`);
-          return;
-        }
-        host.leave();
-        // The message embeds third-party card text, so this chat never inherits
-        // the project's auto-accept: an injected instruction must hit a prompt.
-        // With no account resolved it waits in the message box instead of
-        // auto-sending into the account gate.
-        const launch = needsAccount ? { draftText: message } : { initialMessage: message };
-        state.launchNewChatCallback?.(project, { ...config, autoAccept: false, ...launch });
+        await startCardChat(host, repo, message);
+      })();
+    },
+    runDueAll: (anchor) => {
+      const due = host.ctx().snap.due;
+      if (host.ctx().mode === "draft") {
+        const all = doAllMessage(due);
+        if (all) void state.composer?.sendText(all);
+        return;
+      }
+      void (async () => {
+        const owners = doAllRepos(due);
+        const repos = host.ctx().snap.target.repos.filter((r) => owners.some((o) => normCwd(o.cwd) === normCwd(r.cwd)));
+        const countOf = (r: RepoRef): number => owners.find((o) => normCwd(o.cwd) === normCwd(r.cwd))?.count ?? 0;
+        const repo = await pickRepo(host.ctx(), anchor, repos, (r) => `${r.name} (${countOf(r)})`);
+        if (!repo) return;
+        const message = doAllMessage(due, repo.cwd);
+        if (message) await startCardChat(host, repo, message);
       })();
     },
     back: () => host.back(),
