@@ -12,9 +12,10 @@
 //! another chat has uncommitted changes in the same files never comes here at all:
 //! `merge_followup` keeps it pending and lands it once the files are clean.
 //!
-//! One wake per problem: a sub that already has a recorded problem gets its record
-//! updated and no second wake, until [`resolved`] clears it (the sub started, its
-//! commits landed, the main chat dropped it, or the sub ended).
+//! One wake per problem: a sub whose recorded problem is the same kind gets its
+//! record updated and no second wake, until [`clear`] or [`resolved`] ends it (the
+//! sub started, its commits landed, the main chat dropped it, the sub ended, or it
+//! was sent a message, which starts a new round).
 //!
 //! The wake is `is_meta` text, so it is built from ids, a name kept to plain
 //! characters and fixed words. What git or the launch said (paths, branch names,
@@ -121,12 +122,14 @@ pub fn notice(name: &str, sub_id: &str, problem: Problem) -> String {
     )
 }
 
-/// Records `sub_id`'s problem and wakes its main chat, once: a sub whose problem
-/// is already recorded only has its record updated. Returns whether it woke.
+/// Records `sub_id`'s problem and wakes its main chat, once per kind: a sub whose
+/// recorded problem is the same kind only has its record updated. Returns whether
+/// it woke.
 pub fn report(state: &Arc<DaemonState>, sub_id: &str, problem: Problem, detail: String, files: Vec<String>) -> bool {
     let first = {
         let mut g = PROBLEMS.lock().unwrap_or_else(|p| p.into_inner());
-        g.get_or_insert_with(HashMap::new).insert(sub_id.to_string(), Record { problem, detail, files }).is_none()
+        let before = g.get_or_insert_with(HashMap::new).insert(sub_id.to_string(), Record { problem, detail, files });
+        before.is_none_or(|b| b.problem != problem)
     };
     if !first || is_quiet(sub_id) {
         return false;
@@ -141,7 +144,8 @@ pub fn report(state: &Arc<DaemonState>, sub_id: &str, problem: Problem, detail: 
     true
 }
 
-/// Forgets `sub_id`'s problem, so the next one wakes the main chat again.
+/// Forgets `sub_id`'s problem, so the next one wakes the main chat again. Also
+/// called when the sub is sent a message: what it does next is a new round.
 pub fn clear(sub_id: &str) {
     if let Some(m) = PROBLEMS.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
         m.remove(sub_id);
@@ -226,6 +230,8 @@ mod tests {
         assert!(current("pl-sub").is_none());
         assert!(report(&st, "pl-sub", Problem::MergeRefused, "refused".into(), vec![]));
         assert_eq!(wakes(&st, "pl-main").len(), 2, "a new problem after a resolved one wakes again");
+        assert!(report(&st, "pl-sub", Problem::Conflict, "conflict".into(), vec![]));
+        assert_eq!(wakes(&st, "pl-main").len(), 3, "a different kind of problem is news too");
         clear("pl-sub");
     }
 

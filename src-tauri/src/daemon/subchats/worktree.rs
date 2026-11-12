@@ -764,8 +764,9 @@ pub fn land(sub_id: &str, info: &WorktreeInfo) -> Landing {
     land_with(sub_id, info, &mut |_| {})
 }
 
-/// Draws the `blocker` card for a refused landing. `root` is the data dir, `None`
-/// for the real one.
+/// Draws a `blocker` card in the main chat's window: only for a worktree that had
+/// to stay after its sub ended, so its unmerged commits are not forgotten. `root`
+/// is the data dir, `None` for the real one.
 fn report(state: &Arc<DaemonState>, sub_id: &str, root: Option<&Path>, b: &Blocked) {
     let card = BlockerCard { text: b.text.clone(), verdict: b.verdict.to_string(), tone: Some("bad".into()), points: b.points.clone() };
     match root {
