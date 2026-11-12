@@ -223,6 +223,47 @@ Topics inside one main chat (grouping subs by the job they belong to), the route
 `pc-1682`, and one chat for all projects (`pc-1682` section D). Not planned in detail until A to D
 have run for a while.
 
+### Review changes (2026-11-12)
+
+A hostile read-only review of this plan found these, and the plan changes accordingly:
+
+- **Compaction must not corrupt the window or the dashboard.** No code handles `compact_boundary`,
+  `isCompactSummary` or `pre_tokens` (grep of `src-tauri/src`), so the CLI's continuation summary
+  could render as a giant message from Joe and skew `dashboard-model.ts` (job leads and `joeAt`
+  read Joe's messages). B1 includes parser and dashboard handling for the summary and the `/compact`
+  lines.
+- **The daemon's `/compact` is not Joe's message.** `subchats/joe_message.rs` `note_sent` would
+  treat it as typed text and it could consume `back.rs`'s line-back queue. B1 sends it on a path
+  that consumes nothing, with a test.
+- **Verbatim words survive.** Briefs stay faithful because the main chat quotes Joe word for word
+  (1.6); a summary loses that. The focus text keeps Joe's recent messages verbatim, and S1 checks it.
+- **The existing SessionStart hook.** `hooks/installer.rs` already installs a matcher-less
+  SessionStart hook; `hooks_server/lifecycle.rs` registers its session as External. A compaction
+  firing it must not clobber the Interactive row (kind, name, `subchat_of`). S1 checks it.
+- **Messages and wakes during a compaction** (Joe typing, a sub finishing) must be queued, never
+  lost or doubled, and the busy flag must clear. S1 and B1 test it.
+- **Default threshold is Joe's call.** `hooks_server/context_cap.rs:1-6` records his 2026-10-14
+  rule that a context cap is opt-in. B1 ships with compaction off by default (CLI default about
+  967K stays) and a per-chat or per-project threshold; turning it on by default goes to Joe with S1's
+  numbers.
+- **B2 is a build, not a check,** and runs before C2 and D1: the dashboard reads only the loaded
+  history page (`docs/chat-dashboard-design.md`, open item), so after a compaction older cards drop
+  out.
+- **A mis-click close is costly in a forever chat:** `closing.rs` deletes the Ask stores
+  (`src-tauri/src/ask/store.rs:72-77`) and ends finished subs. D adds a confirm on closing a
+  project's main chat.
+- **The prompt snapshot** means a rule change reaches an old main chat only at its next compaction;
+  "Compact now" doubles as the way to roll a rule out.
+- **A6's offset cache** also persists the maximum occupancy seen, since `context_status.rs` infers
+  the 1M window from it.
+- **A4 drops the `subchat send` text-only change:** `tool.rs` copies Joe's message on purpose so the
+  main chat can never paraphrase him. The misrouted message is a main-chat prompt problem; left open.
+- **A2:** all 21 restarts were external kills, so `pump/exit.rs` does not run for most; the real fix
+  is `sweep_dead` plus the boot-time resume. The exit-code branch is optional.
+- **Corrections:** an inline answer costs about a twentieth of a question sub, not a fifth; the
+  auto-accept file is `daemon/session_registration.rs`, and the setting
+  `spawned_chats_inherit_auto_accept` already offers an off switch.
+
 ## 4. Proposals for Joe
 
 ### 4.1 Rule 11, answering questions
@@ -231,11 +272,15 @@ Today every question becomes a sub. Proposal: the main chat answers inline when 
 from what it already has (sub status, git state, the decisions log, the plan) or from at most three
 small reads, and still hands off anything needing an investigation, a build or a test run. An
 inline answer is a `send_message` of kind `answer`, so it still lands in the Answers card. Expected:
-"where are we" answered in seconds; about a fifth of the cost per question.
+"where are we" answered in seconds, at about a twentieth of the cost per question. Strongest
+argument against: inline reads put tool output into the main chat, which is what fills it (1.2), so
+the cap on reads matters.
 
 ### 4.2 CLAUDE.md size
 
 The project CLAUDE.md is 42K chars, loaded by every chat and every sub (about 10K tokens each) and
 re-sent to every live chat on every edit. Proposal: keep rules and commands in CLAUDE.md, move the
 module maps (subchats, multi-machine, browser, dashboard) to `docs/architecture/*.md` with a
-one-line pointer each.
+one-line pointer each. Strongest argument against: the maps stop subs re-reading files to find their
+way (re-reading is one of the waste signals in 1.3), so a sub working in that area must still read
+its map; split by who needs it rather than dropping the maps.
