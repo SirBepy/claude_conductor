@@ -226,7 +226,9 @@ pub(crate) async fn fleet_status(state: &Arc<DaemonState>, jarvis_session_id: &s
 /// Jarvis's own workers, so Jarvis can't resolve (allow OR deny) a prompt
 /// belonging to an unrelated session on the machine.
 ///
-/// A worker's question is refused and stays pending for Joe. The ordinary
+/// A worker's question is refused and stays pending for Joe, on the card the
+/// Jarvis window shows for it (`display_session_id` is the Jarvis,
+/// `subchats::routing`). The ordinary
 /// auto-accept path never answers a question either
 /// (`hooks_server::permission::is_auto_accept_eligible`), so a worker asking
 /// one is the one point where a human still sees what the fleet is doing,
@@ -262,7 +264,8 @@ pub(crate) async fn respond_worker_prompt(
         )
         .await),
         "question-requested" => Err(
-            "worker questions are for Joe to answer - this one stays pending on his screen".to_string(),
+            "worker questions are for Joe to answer, so Jarvis cannot answer this one. Tell Joe the worker is waiting on a question: its card is for him to answer in the Jarvis window"
+                .to_string(),
         ),
         _ => Ok(false),
     }

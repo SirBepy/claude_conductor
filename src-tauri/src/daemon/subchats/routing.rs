@@ -24,14 +24,16 @@ not re-send it with send_message: your chat is hidden, so nobody would read it. 
 finish_subchat while the card is open, because that is refused. End your turn now without finishing, \
 and carry on when his answer arrives as a new message.";
 
-/// The chat whose window shows `session_id`'s cards: its parent when it is a
-/// sub, else the session itself. A Jarvis worker has no `subchat_of`, so it
-/// stays its own display chat and keeps today's routing.
+/// The chat whose window shows `session_id`'s cards: its main chat when it is a
+/// sub, its Jarvis when it is a Jarvis worker, else the session itself. A worker
+/// has no sidebar row (the list filters `worker_of` rows), so its own id would
+/// name a window that cannot be opened. The two fields stay distinct: a sub is
+/// never `worker_of`, and only `subchat_of` makes a row a sub.
 pub fn display_session_id(state: &DaemonState, session_id: &str) -> String {
     state
         .registry
         .get(session_id)
-        .and_then(|i| i.subchat_of)
+        .and_then(|i| i.subchat_of.or(i.worker_of))
         .unwrap_or_else(|| session_id.to_string())
 }
 
@@ -139,6 +141,19 @@ mod tests {
     }
 
     #[test]
+    fn a_jarvis_workers_prompt_names_its_jarvis_as_the_display_chat_without_sub_fields() {
+        let st = state();
+        chat(&st, "jarvis");
+        chat(&st, "worker");
+        st.registry.set_worker_of("worker", Some("jarvis".into()));
+        let mut payload = json!({"id": "q1", "session_id": "worker"});
+        stamp_prompt_routing(&st, &mut payload, Some("worker"));
+        assert_eq!(payload["session_id"], "worker", "the answer target never moves");
+        assert_eq!(payload["display_session_id"], "jarvis");
+        assert!(payload.get("sub_name").is_none() && payload.get("sub_task").is_none(), "a worker is not a sub");
+    }
+
+    #[test]
     fn a_normal_chats_prompt_displays_on_itself_and_carries_no_sub_fields() {
         let st = state();
         chat(&st, "solo");
@@ -147,18 +162,6 @@ mod tests {
         assert_eq!(payload["display_session_id"], "solo");
         assert!(payload.get("sub_name").is_none());
         assert!(payload.get("sub_task").is_none());
-    }
-
-    #[test]
-    fn a_jarvis_workers_prompt_keeps_displaying_on_the_worker() {
-        let st = state();
-        chat(&st, "jarvis");
-        chat(&st, "worker");
-        st.registry.set_worker_of("worker", Some("jarvis".into()));
-        let mut payload = json!({"id": "q1", "session_id": "worker"});
-        stamp_prompt_routing(&st, &mut payload, Some("worker"));
-        assert_eq!(payload["display_session_id"], "worker", "worker_of must not reroute a card");
-        assert!(payload.get("sub_name").is_none());
     }
 
     #[test]
