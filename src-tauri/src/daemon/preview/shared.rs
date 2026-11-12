@@ -162,6 +162,12 @@ fn safe_css(css: &str) -> String {
 /// part's own script could post the same shape at itself.
 const CONTROL_SCRIPT: &str = "<script>window.addEventListener(\"message\",function(e){var d=e.data;if(e.source!==window.parent||!d||d.cc!==\"control\")return;if(d.part===\"shell\"){var r=document.querySelector(\"[data-cc-root]\")||document.body||document.documentElement;r.setAttribute(\"data-\"+d.id,String(d.value));return;}var els=document.querySelectorAll(\"[data-part]\");for(var i=0;i<els.length;i++){if(els[i].getAttribute(\"data-part\")===d.part){els[i].setAttribute(\"data-\"+d.id,String(d.value));}}});</script>";
 
+/// Tells the panel which region an Alt-click (desktop) or a 500ms long-press
+/// (phone) landed in: the nearest ancestor with `data-part`, else "shell". The
+/// capture-phase handler swallows the click so an Alt-clicked link does not
+/// navigate and the click that ends a long-press does not act.
+const ELEMENT_SCRIPT: &str = "<script>(function(){function reg(t){while(t&&t.nodeType===1){var p=t.getAttribute(\"data-part\");if(p)return p;t=t.parentElement;}return \"shell\";}function send(t,x,y){parent.postMessage({cc:\"element\",region:reg(t),x:x,y:y},\"*\");}var tm=null,lp=false;function stop(){if(tm){clearTimeout(tm);tm=null;}}document.addEventListener(\"click\",function(e){if(!e.altKey&&!lp)return;e.preventDefault();e.stopPropagation();if(lp){lp=false;return;}send(e.target,e.clientX,e.clientY);},true);document.addEventListener(\"touchstart\",function(e){stop();var t=e.touches[0],el=e.target;tm=setTimeout(function(){tm=null;lp=true;send(el,t.clientX,t.clientY);},500);},{passive:true});document.addEventListener(\"touchmove\",stop,{passive:true});document.addEventListener(\"touchend\",stop,{passive:true});document.addEventListener(\"touchcancel\",stop,{passive:true});})();</script>";
+
 /// The page the panel renders: the shell with every filled region replaced by
 /// its part (default control values as `data-*`, css wrapped in `@scope` so one
 /// sub's rules cannot reach another's region) and the control listener.
@@ -190,8 +196,14 @@ pub fn compose(shell: &str, parts: &[Part], shell_controls: &[Control]) -> Strin
     mark_root(&mut out, shell_controls);
     let lower = out.to_ascii_lowercase();
     match lower.rfind("</body>") {
-        Some(i) => out.insert_str(i, CONTROL_SCRIPT),
-        None => out.push_str(CONTROL_SCRIPT),
+        Some(i) => {
+            out.insert_str(i, ELEMENT_SCRIPT);
+            out.insert_str(i, CONTROL_SCRIPT);
+        }
+        None => {
+            out.push_str(CONTROL_SCRIPT);
+            out.push_str(ELEMENT_SCRIPT);
+        }
     }
     out
 }
@@ -620,6 +632,15 @@ mod tests {
         assert!(doc.contains("<section class=\"x\" data-part=\"footer\"> </section>"), "an unfilled region stays as the shell wrote it: {doc}");
         assert!(doc.contains("addEventListener(\"message\""), "the control listener is in the page");
         assert!(doc.find("<script>").unwrap() > doc.find("</main>").unwrap());
+    }
+
+    #[test]
+    fn compose_puts_the_element_click_reporter_in_the_page() {
+        let doc = compose(SHELL, &[], &[]);
+        assert!(doc.contains("cc:\"element\""), "the page reports an element click to the panel: {doc}");
+        assert!(doc.contains("altKey"), "desktop reports on Alt-click: {doc}");
+        assert!(doc.contains("touchstart") && doc.contains("500"), "phone reports on a 500ms long-press: {doc}");
+        assert!(doc.contains("data-part") && doc.contains("\"shell\""), "no enclosing region reports as the shell: {doc}");
     }
 
     #[test]

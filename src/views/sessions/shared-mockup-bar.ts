@@ -1,4 +1,4 @@
-// The shared mockup's row of subs and the draggable controls popover. The row
+// The shared mockup's row of subs (and the page's own "Page" entry) and the draggable controls popover. The row
 // sits between the panel header and the canvas; clicking a sub opens that sub's
 // controls (a dropdown per choice, a switch per yes/no) in a popover that stays
 // inside the panel. A change is posted into the already-staged frame, so the
@@ -8,7 +8,7 @@
 import "./shared-mockup.css";
 import { escapeHtml } from "../../shared/escape-html";
 import type { PreviewMeta, PreviewSnapshot } from "../../types/ipc.generated";
-import { clampPos, controlKey, controlValue, freshChips, ownerChips, parseStateKey, stateKey, type OwnerChip, type OwnerControl } from "./shared-mockup-model";
+import { clampPos, controlKey, controlValue, freshChips, ownerChips, parseStateKey, SHELL_ID, stateKey, type OwnerChip, type OwnerControl } from "./shared-mockup-model";
 import { familySubs, ownerTag } from "./shared-mockup-scope";
 import { subInitials } from "./sub-list";
 
@@ -115,7 +115,7 @@ export class SharedBar {
     this.strip.hidden = false;
     const chips = this.chips.map((c) => {
       const tag = ownerTag(c.id);
-      const dot = tag?.avatarHtml ?? `<span class="sub-dot pvs-dot">${escapeHtml(subInitials(c.name))}</span>`;
+      const dot = c.id === SHELL_ID ? `<i class="ph ph-layout pvs-page-icon"></i>` : tag?.avatarHtml ?? `<span class="sub-dot pvs-dot">${escapeHtml(subInitials(c.name))}</span>`;
       if (c.controls.length === 0) {
         return `<span class="pvs-chip idle" data-owner="${escapeHtml(c.id)}" title="${escapeHtml(c.name)} has not added any controls yet">${dot}${escapeHtml(c.name)}</span>`;
       }

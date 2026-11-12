@@ -233,3 +233,79 @@
   margin-left: auto;
   font-size: 10px;
 }
+
+/* ── Element message box (Alt-click / long-press on the page) ─────────── */
+
+.pvm-box {
+  position: absolute;
+  z-index: 5;
+  width: 250px;
+  padding: 8px 12px 12px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.pvm-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+  padding-right: 22px;
+  margin-bottom: 6px;
+}
+.pvm-head .pvs-x {
+  right: -6px;
+  top: 0;
+}
+.pvm-to {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.pvm-text {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 6px 8px;
+  background: var(--color-background);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+}
+.pvm-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+.pvm-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+.pvm-status[data-error="true"] {
+  color: #e5484d;
+}
+.pvm-status[data-ok="true"] {
+  color: var(--color-text);
+}
+.pvm-send {
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pvm-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

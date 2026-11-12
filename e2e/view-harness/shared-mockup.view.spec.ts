@@ -8,7 +8,8 @@ import { mountSessionsLayout, mountView, capture, fireEvent, invokeCalls, sessio
 // of its controls (dropdown per choice, switch per yes/no) that never leaves the
 // panel; a change reaches the staged frame with no reload; the picker lists
 // Shared then Dedicated and a dedicated page leads back. Real clicks and real
-// mouse drags, with the page staged in a real sandboxed frame.
+// mouse drags, with the page staged in a real sandboxed frame. The Page entry
+// and the Alt-click message box (pc-1668) are covered in shared-mockup-message.view.spec.ts.
 
 const PANEL = '.sp-panel[data-active="preview"]';
 const NOW = new Date().toISOString();

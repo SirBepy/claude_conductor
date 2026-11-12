@@ -856,6 +856,8 @@ export class HttpTransport implements Transport {
           ...(args.version != null ? { version: args.version } : {}),
         });
       }
+      case "message_shared_element":
+        return this.rpc<T>("message_shared_element", { id: args.id, element: args.element, text: args.text });
       case "set_preview_state":
         return this.rpc<T>("set_preview_state", { id: args.id, key: args.key, value: args.value ?? null });
       // One raster image off the daemon host's disk (ask_user_question option
