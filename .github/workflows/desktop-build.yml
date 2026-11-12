@@ -158,7 +158,7 @@ jobs:
         # "error: unexpected argument 'tauri' found / Usage: rustup-init".
         # Calling cargo-tauri (the actual binary installed by tauri-cli) skips
         # that lookup entirely.
-        run: cargo-tauri build --target ${{ inputs.target }}
+        run: cargo-tauri build --target ${{ inputs.target }} -- --no-default-features
 
       - name: Stage Windows artifacts
         if: runner.os == 'Windows'
