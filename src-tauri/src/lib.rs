@@ -451,6 +451,7 @@ pub fn run() {
             ipc::flag_shown_badly,
             ipc::start_queued_sub,
             ipc::drop_queued_sub,
+            ipc::compact_now,
             ipc::chat_quick_view,
             ipc::publish_to_claude_ai,
             ipc::voice_clean_transcript,
