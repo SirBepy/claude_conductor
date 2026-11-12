@@ -38,9 +38,10 @@ pub fn spawn(state: Arc<DaemonState>) {
             // After the sweeps that raise stall cards: a card Joe left unanswered
             // wakes the main chat, so it never has to poll its subs on a timer.
             crate::daemon::subchats::card_watch::tick_at(&state, now, clock.resumed_at).await;
-            // The same tick counts each sub's model calls and busy time against its
-            // ceiling, and settles the subs of a main chat that ended without asking.
-            crate::daemon::subchats::ceiling::sweep_now(&state, now).await;
+            // The same tick counts each sub's model calls against its ceiling and
+            // watches its context, and settles the subs of a main chat that ended
+            // without asking.
+            crate::daemon::subchats::ceiling::sweep_now(&state).await;
             crate::daemon::subchats::closing::heal_orphans(&state).await;
         }
     });

@@ -25,7 +25,6 @@ pub mod card_log;
 pub(crate) mod card_watch;
 pub mod cards;
 pub mod ceiling;
-pub mod checkup;
 pub mod closing;
 pub mod compaction;
 pub mod decisions;
@@ -143,7 +142,7 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
 
 /// Everything that follows a sub finishing, once its work has landed.
 fn finished_rest(state: &Arc<DaemonState>, sub_id: &str) {
-    // The decisions log and, from it, the checkup counter.
+    // The decisions log.
     decisions::on_finished(state, sub_id);
     card_log::on_finished(state, sub_id);
     // The one line Joe's next message to the main chat carries, and the opt-in

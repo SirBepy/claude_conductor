@@ -28,7 +28,7 @@ fn a_subs_question_is_in_scope_once_the_sub_joined_through_its_armed_parent() {
 fn a_card_the_daemon_raised_is_never_auto_answered() {
     use std::collections::HashSet;
     let armed: HashSet<String> = ["main".to_string()].into_iter().collect();
-    for kind in ["subchat_ceiling", "subchat_stuck", "subchat_close", "subchat_unfinished"] {
+    for kind in ["subchat_ceiling", "subchat_context_low", "subchat_stuck", "subchat_close", "subchat_unfinished"] {
         let card = json!({"id": "c1", "session_id": "main", "display_session_id": "main", "daemon_card": true, "card_kind": kind});
         assert!(!prompt_in_armed_scope(&armed, &card), "{kind} stays for Joe");
     }

@@ -329,15 +329,11 @@ async fn handle_daemon_notification(app: &tauri::AppHandle, method: &str, params
         "answers_thread_delta" => {
             let _ = app.emit("answers-thread-delta", params);
         }
-        // A stalled-sub or stopped-sub card's "Open it" (`subchats::stall`), and the
-        // checkup card's "Open the log" (`subchats::checkup`). Pure forwards: the
-        // main chat's window opens the sub in place / the file viewer, and only the
-        // window showing `display_session_id` acts on them.
+        // A stalled-sub or stopped-sub card's "Open it" (`subchats::stall`). Pure
+        // forward: the main chat's window opens the sub in place, and only the window
+        // showing `display_session_id` acts on it.
         "subchat_open_requested" => {
             let _ = app.emit("subchat-open-requested", params);
-        }
-        "subchat_log_open_requested" => {
-            let _ = app.emit("subchat-log-open-requested", params);
         }
         // The set of "Use subchats" chats changed: a flip from another surface, or a
         // respawn successor taking the mode (`subchats::publish_mode_changed`). Pure

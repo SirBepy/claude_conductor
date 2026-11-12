@@ -1,11 +1,17 @@
-//! A ceiling on each sub: past [`CALLS_STEP`] model calls or [`BUSY_STEP`] of busy
-//! time, Joe gets a card, keep going or stop, instead of the sub being killed
-//! (spec section 9). A rate limit blocks the whole account, so this is also what
-//! stops a runaway sub from burning it.
+//! Two cards about a running sub, both read from its transcript on `busy_watchdog`'s
+//! 60 second tick, like the stuck sweep:
 //!
-//! The check rides `busy_watchdog`'s 60 second tick, like the stuck sweep.
+//! - **A ceiling of [`CALLS_STEP`] model calls**: Joe gets a card, keep going or
+//!   stop, instead of the sub being killed (spec section 9). A rate limit blocks
+//!   the whole account, so this is also what stops a runaway sub from burning it.
+//! - **Context nearly full** (at [`CONTEXT_WARN_PERCENT`] of the window): the one
+//!   thing that makes a long job go wrong.
 //!
-//! How the two figures are counted, and how far to trust them:
+//! How long a sub has been working is deliberately NOT a trigger. A "running for 3
+//! hours" card told Joe nothing he could act on (2026-11-12): a sub on a long job
+//! with room left in its context is fine.
+//!
+//! How the figures are counted, and how far to trust them:
 //! - **Model calls** are the distinct `message.id` values on the main thread of
 //!   the sub's transcript, which is one per API response however many content
 //!   blocks (text, several tool calls) the response was written as. They are read
@@ -13,29 +19,29 @@
 //!   only what was appended. This is exact for the main thread, and it undercounts
 //!   a sub's own built-in subagents, whose calls land in separate files. After a
 //!   daemon restart the count is rebuilt from the file, so it does not reset.
-//! - **Busy time** is sampled: each tick adds the time since the previous tick
-//!   when the sub is busy, not paused and not waiting on a card. It is accurate to
-//!   about a tick (a minute) per busy stretch, it never counts frozen, idle or
-//!   waiting time, and it restarts from zero when the daemon does, so it can
-//!   undercount across a restart. A gap longer than [`MAX_TICK`] (the machine
-//!   slept) adds only [`MAX_TICK`].
+//! - **Context** is the latest main-thread usage line (input plus cache read plus
+//!   cache creation) scored by `context_status::score_parts`, the same window
+//!   heuristic the status chip uses, so the card and the chip agree. It is read by
+//!   the same incremental pass as the calls.
 //!
 //! One card per crossing: while a sub's card is up it raises no other, and
-//! answering moves the ceiling up so the same crossing never draws a second.
+//! answering moves the ceiling up (or, for context, marks the sub warned) so the
+//! same crossing never draws a second.
 //!
 //! What a restart must not forget is stored per sub in
-//! `<data_dir>/subchats/<sub_id>.ceiling.json`: the raised limits, and where the
-//! current round starts in the transcript. Without it, "Keep going" would be asked
-//! again after every restart for a sub already past 300 calls.
+//! `<data_dir>/subchats/<sub_id>.ceiling.json`: the raised call limit, whether the
+//! context warning was given, and where the current round starts in the
+//! transcript. Without it, "Keep going" would be asked again after every restart
+//! for a sub already past 300 calls.
 //!
 //! A round is one stretch of work between a spawn or a continue and the next
 //! finish. A continued sub is a new job, so its call count starts at the continue
-//! (the transcript offset recorded then), not at the sub's first message.
+//! (the transcript offset recorded then), not at the sub's first message, and its
+//! context warning is armed again.
 
 use super::cards::{self, CardAnswer, CardOption, RaisedCard};
 use crate::daemon::state::DaemonState;
 use crate::types::Instance;
-use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -45,13 +51,13 @@ use std::sync::{Arc, Mutex};
 /// Model calls before the first card, and the amount "Keep going" adds. Joe's
 /// numbers, from the measured p90 of 138 calls for subagents and 360 for chats.
 pub const CALLS_STEP: u64 = 300;
-/// Busy time before the first card, and the amount "Keep going" adds.
-pub const BUSY_STEP: Duration = Duration::hours(3);
-/// The most one tick may add to the busy clock.
-pub const MAX_TICK: Duration = Duration::minutes(2);
+/// The share of the context window a sub may fill before Joe is told, in percent.
+pub const CONTEXT_WARN_PERCENT: u64 = 90;
 
 /// `card_kind` of the ceiling card.
 pub const KIND: &str = "subchat_ceiling";
+/// `card_kind` of the context warning.
+pub const CONTEXT_KIND: &str = "subchat_context_low";
 pub const KEEP_GOING: &str = "Keep going";
 pub const STOP_IT: &str = "Stop it";
 
@@ -64,42 +70,40 @@ pub struct Cursor {
     offset: u64,
     last_id: Option<String>,
     calls: u64,
+    /// The newest main-thread context size read, and the largest one (the window
+    /// heuristic's sticky correction needs it), with the model of that line.
+    occupancy: u64,
+    max_occupancy: u64,
+    model: String,
 }
 
 struct Entry {
     calls_limit: u64,
-    busy_limit: Duration,
-    busy: Duration,
-    last_tick: Option<DateTime<Utc>>,
-    /// A card for this crossing is up (or being raised).
+    /// A card for this sub is up (or being raised).
     carded: bool,
+    /// The context warning was given this round, so it is not given again.
+    context_warned: bool,
     cursor: Cursor,
 }
 
 impl Default for Entry {
     fn default() -> Self {
-        Self {
-            calls_limit: CALLS_STEP,
-            busy_limit: BUSY_STEP,
-            busy: Duration::zero(),
-            last_tick: None,
-            carded: false,
-            cursor: Cursor::default(),
-        }
+        Self { calls_limit: CALLS_STEP, carded: false, context_warned: false, cursor: Cursor::default() }
     }
 }
 
 static TABLE: Mutex<Option<HashMap<String, Entry>>> = Mutex::new(None);
 
-/// What survives a restart of one entry.
+/// What survives a restart of one entry. A file an older build wrote may still
+/// carry `busy_limit_secs`; it is ignored.
 #[derive(Serialize, Deserialize, Default, PartialEq, Debug)]
 struct Saved {
     #[serde(default)]
     calls_limit: u64,
     #[serde(default)]
-    busy_limit_secs: i64,
-    #[serde(default)]
     start_offset: u64,
+    #[serde(default)]
+    context_warned: bool,
 }
 
 fn saved_path(root: &std::path::Path, sub_id: &str) -> PathBuf {
@@ -112,15 +116,13 @@ impl Entry {
         if saved.calls_limit >= CALLS_STEP {
             e.calls_limit = saved.calls_limit;
         }
-        if saved.busy_limit_secs >= BUSY_STEP.num_seconds() {
-            e.busy_limit = Duration::seconds(saved.busy_limit_secs);
-        }
+        e.context_warned = saved.context_warned;
         e.cursor = Cursor { floor: saved.start_offset, offset: saved.start_offset, ..Cursor::default() };
         e
     }
 
     fn to_saved(&self) -> Saved {
-        Saved { calls_limit: self.calls_limit, busy_limit_secs: self.busy_limit.num_seconds(), start_offset: self.cursor.floor }
+        Saved { calls_limit: self.calls_limit, start_offset: self.cursor.floor, context_warned: self.context_warned }
     }
 }
 
@@ -130,13 +132,14 @@ fn load(sub_id: &str) -> Entry {
     saved.map_or_else(Entry::default, Entry::from_saved)
 }
 
-/// Writes the entry's limits and round start, or removes the file when they are
-/// the defaults, so only a sub that has something to remember has a file.
+/// Writes the entry's limit, warning flag and round start, or removes the file
+/// when they are the defaults, so only a sub that has something to remember has a
+/// file.
 fn save(sub_id: &str, entry: &Entry) {
     let Some(root) = super::decisions::data_root() else { return };
     let path = saved_path(&root, sub_id);
     let saved = entry.to_saved();
-    let defaults = Saved { calls_limit: CALLS_STEP, busy_limit_secs: BUSY_STEP.num_seconds(), start_offset: 0 };
+    let defaults = Saved { calls_limit: CALLS_STEP, start_offset: 0, context_warned: false };
     if saved == defaults {
         let _ = std::fs::remove_file(&path);
         return;
@@ -167,13 +170,13 @@ pub(super) fn forget_stored(sub_id: &str) {
     forget(sub_id);
 }
 
-/// A finished sub was continued: its next stretch is a new job. The call count,
-/// the busy clock and both limits start over, counting from `start_offset` (the
-/// transcript's length now), so a sub continued many times does not reach the
-/// ceiling on the sum of its rounds.
+/// A finished sub was continued: its next stretch is a new job. The call count and
+/// the call limit start over, and the context warning is armed again, counting
+/// from `start_offset` (the transcript's length now), so a sub continued many
+/// times does not reach the ceiling on the sum of its rounds.
 pub fn start_round(sub_id: &str, start_offset: u64) {
     with_entry(sub_id, |e| {
-        *e = Entry::from_saved(Saved { calls_limit: CALLS_STEP, busy_limit_secs: BUSY_STEP.num_seconds(), start_offset });
+        *e = Entry::from_saved(Saved { calls_limit: CALLS_STEP, start_offset, context_warned: false });
         save(sub_id, e);
     });
 }
@@ -187,9 +190,10 @@ pub fn on_continued(state: &DaemonState, sub_id: &str) {
 }
 
 /// Counts the model calls in `appended` (whole lines of a transcript) into
-/// `cursor`. Sidechain lines (a subagent's own thread, in the files that mix
-/// them) are not the sub's calls. Consecutive lines with one `message.id` are one
-/// API response written as several content blocks.
+/// `cursor`, and keeps the newest context size. Sidechain lines (a subagent's own
+/// thread, in the files that mix them) are neither the sub's calls nor its
+/// context. Consecutive lines with one `message.id` are one API response written
+/// as several content blocks.
 pub fn count_calls(appended: &str, cursor: &mut Cursor) {
     for line in appended.lines() {
         // Cheap filter before parsing: most lines are tool results and user turns.
@@ -199,6 +203,14 @@ pub fn count_calls(appended: &str, cursor: &mut Cursor) {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
         if v["type"].as_str() != Some("assistant") || v["isSidechain"].as_bool() == Some(true) {
             continue;
+        }
+        // A zero usage row is the CLI's synthetic error line, not a real request.
+        if let Some((occupancy, model)) = crate::context_status::usage_from_line(&v).filter(|(o, _)| *o > 0) {
+            cursor.occupancy = occupancy;
+            cursor.max_occupancy = cursor.max_occupancy.max(occupancy);
+            if let Some(model) = model {
+                cursor.model = model;
+            }
         }
         let Some(id) = v["message"]["id"].as_str() else { continue };
         if cursor.last_id.as_deref() != Some(id) {
@@ -233,33 +245,40 @@ pub fn read_calls(path: &std::path::Path, cursor: &mut Cursor) -> Option<u64> {
 }
 
 /// Everything the sweep reads from outside the registry, injected so a test runs
-/// it on a fake clock with no transcript on disk.
+/// it with no transcript on disk.
 pub struct Env<'a> {
-    pub now: DateTime<Utc>,
-    /// The sub's total model calls so far. Production reads its transcript.
+    /// Reads the sub's transcript into the cursor and returns its total model
+    /// calls so far. Production reads the file.
     pub calls: &'a (dyn Fn(&Instance, &mut Cursor) -> Option<u64> + Sync),
 }
 
-/// Why a card is due, in the card's own words.
-fn reasons(calls: u64, calls_limit: u64, busy: Duration, busy_limit: Duration) -> Vec<String> {
-    let mut out = Vec::new();
-    if calls >= calls_limit {
-        out.push(format!("{calls} model calls (ceiling {calls_limit})"));
+/// The sub's context as the cursor last saw it: `(used, window)` in tokens. `None`
+/// until a main-thread usage line with a model has been read.
+fn context_of(cursor: &Cursor) -> Option<(u64, u64)> {
+    if cursor.occupancy == 0 || cursor.model.is_empty() {
+        return None;
     }
-    if busy >= busy_limit {
-        out.push(format!("{} of work (ceiling {})", hours(busy), hours(busy_limit)));
-    }
-    out
+    let status = crate::context_status::score_parts(cursor.occupancy, cursor.max_occupancy, &cursor.model);
+    Some((status.occupancy, status.window))
 }
 
-fn hours(d: Duration) -> String {
-    let m = d.num_minutes();
-    if m >= 60 && m % 60 != 0 {
-        format!("{}h {}m", m / 60, m % 60)
-    } else if m >= 60 {
-        format!("{}h", m / 60)
+/// Whether `used` of `window` tokens is at or past the warning share. Integer
+/// arithmetic, since a rounded percentage would warn a point early.
+fn context_is_low(used: u64, window: u64) -> bool {
+    window > 0 && used.saturating_mul(100) >= window.saturating_mul(CONTEXT_WARN_PERCENT)
+}
+
+/// What is due for one sub, with the figures its card shows.
+enum Due {
+    Calls { calls: u64, limit: u64 },
+    Context { used: u64, window: u64 },
+}
+
+fn tokens(n: u64) -> String {
+    if n >= 1_000_000 && n % 1_000_000 == 0 {
+        format!("{}M", n / 1_000_000)
     } else {
-        format!("{m}m")
+        format!("{}K", n / 1000)
     }
 }
 
@@ -272,10 +291,9 @@ fn label(state: &DaemonState, sub_id: &str) -> String {
         .unwrap_or_else(|| "A sub".to_string())
 }
 
-/// Counts every running sub and raises a card for each one past a ceiling that
-/// has none. Returns the ids carded.
+/// Reads every running sub's transcript and raises a card for each one past its
+/// call ceiling or nearly out of context that has none. Returns the ids carded.
 pub async fn sweep(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> {
-    let now_ts = env.now.timestamp();
     let mut carded = Vec::new();
     for inst in state.registry.list() {
         let id = inst.session_id.clone();
@@ -283,77 +301,104 @@ pub async fn sweep(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> {
         if inst.ended_at.is_some() || inst.subchat_finished {
             continue;
         }
-        // A sub queued behind another has not run, so there is nothing to count.
+        // A sub queued behind another has not run, so there is nothing to read.
         if super::held::is_held(&id) {
             continue;
         }
-        // A sub waiting on Joe is not working, so his thinking time is not its busy time.
-        let waiting = crate::daemon::lifecycle::has_open_prompt(state, &id).await;
-        let counting = inst.busy && !waiting && !super::pause::is_paused(&inst, now_ts);
         // The first look at a long transcript reads all of it. Do that on a copy of
         // the cursor with the table free, so no other sub's bookkeeping waits.
         let mut cursor = with_entry(&id, |e| e.cursor.clone());
         let read = (env.calls)(&inst, &mut cursor);
         let due = with_entry(&id, |e| {
             e.cursor = cursor;
-            let elapsed = e.last_tick.map_or(Duration::zero(), |t| (env.now - t).max(Duration::zero()).min(MAX_TICK));
-            e.last_tick = Some(env.now);
-            if counting {
-                e.busy += elapsed;
-            }
-            let calls = read.unwrap_or(e.cursor.calls);
-            if e.carded || (calls < e.calls_limit && e.busy < e.busy_limit) {
+            // One card at a time per sub.
+            if e.carded {
                 return None;
             }
+            let calls = read.unwrap_or(e.cursor.calls);
+            if calls >= e.calls_limit {
+                e.carded = true;
+                return Some(Due::Calls { calls, limit: e.calls_limit });
+            }
+            let (used, window) = context_of(&e.cursor).filter(|(u, w)| !e.context_warned && context_is_low(*u, *w))?;
+            // Marked in memory only: a raised card is dropped by a restart, and the
+            // file must not claim a warning Joe never saw. The answer stores it.
             e.carded = true;
-            Some((calls, e.calls_limit, e.busy, e.busy_limit))
+            e.context_warned = true;
+            Some(Due::Context { used, window })
         });
-        let Some((calls, calls_limit, busy, busy_limit)) = due else { continue };
-        if raise(state, &id, &parent, calls, calls_limit, busy, busy_limit).await {
+        let Some(due) = due else { continue };
+        if raise(state, &id, &parent, &due).await {
             carded.push(id);
         } else {
-            with_entry(&id, |e| e.carded = false);
+            with_entry(&id, |e| {
+                e.carded = false;
+                // A card that could not be drawn was not a warning given.
+                if matches!(due, Due::Context { .. }) {
+                    e.context_warned = false;
+                }
+            });
         }
     }
     carded
 }
 
-async fn raise(
-    state: &Arc<DaemonState>,
-    sub_id: &str,
-    parent: &str,
-    calls: u64,
-    calls_limit: u64,
-    busy: Duration,
-    busy_limit: Duration,
-) -> bool {
-    if cards::open_card_for(state, KIND, sub_id).await.is_some() {
+async fn raise(state: &Arc<DaemonState>, sub_id: &str, parent: &str, due: &Due) -> bool {
+    let kind = match due {
+        Due::Calls { .. } => KIND,
+        Due::Context { .. } => CONTEXT_KIND,
+    };
+    if cards::open_card_for(state, kind, sub_id).await.is_some() {
         return true;
     }
-    let why = reasons(calls, calls_limit, busy, busy_limit).join(" and ");
+    let name = label(state, sub_id);
+    let (header, question, options) = match due {
+        Due::Calls { calls, limit } => (
+            "Sub past its ceiling",
+            format!("**{name}** has used {calls} model calls (ceiling {limit}). That is a lot for one job.\n\nShould it keep going?"),
+            vec![
+                CardOption::new(KEEP_GOING, "Raise the ceiling by the same amount"),
+                CardOption::new(STOP_IT, "End it for good"),
+            ],
+        ),
+        Due::Context { used, window } => (
+            "Sub is nearly out of context",
+            format!(
+                "**{name}** has filled {}% of its context window ({} of {} tokens). A sub that runs out of room can lose track of its earlier work.\n\nShould it keep going?",
+                used.saturating_mul(100) / window.max(&1),
+                tokens(*used),
+                tokens(*window)
+            ),
+            vec![
+                CardOption::new(KEEP_GOING, "It carries on, and you are not warned about it again"),
+                CardOption::new(STOP_IT, "End it for good"),
+            ],
+        ),
+    };
     let card = RaisedCard {
-        kind: KIND,
+        kind,
         display_session_id: parent.to_string(),
         sub_id: Some(sub_id.to_string()),
-        header: "Sub past its ceiling".to_string(),
-        question: format!(
-            "**{}** has used {why}. That is a lot for one job.\n\nShould it keep going?",
-            label(state, sub_id)
-        ),
-        options: vec![
-            CardOption::new(KEEP_GOING, "Raise the ceiling by the same amount"),
-            CardOption::new(STOP_IT, "End it for good"),
-        ],
+        header: header.to_string(),
+        question,
+        options,
         domain: None,
     };
+    let context = matches!(due, Due::Context { .. });
     match cards::raise_card(state, card).await {
         Ok(handle) => {
             let (state, sub) = (state.clone(), sub_id.to_string());
-            handle.on_answer(move |answer| async move { apply_answer(&state, &sub, answer) });
+            handle.on_answer(move |answer| async move {
+                if context {
+                    apply_context_answer(&state, &sub, answer);
+                } else {
+                    apply_answer(&state, &sub, answer);
+                }
+            });
             true
         }
         Err(e) => {
-            log::warn!("subchats: could not raise the ceiling card for {sub_id}: {e}");
+            log::warn!("subchats: could not raise the {kind} card for {sub_id}: {e}");
             false
         }
     }
@@ -374,23 +419,37 @@ pub(crate) fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, answer: CardA
         while e.cursor.calls >= e.calls_limit {
             e.calls_limit += CALLS_STEP;
         }
-        while e.busy >= e.busy_limit {
-            e.busy_limit = e.busy_limit + BUSY_STEP;
-        }
         e.carded = false;
         save(sub_id, e);
     });
 }
 
+/// The context card's answer. "Stop it" ends the sub; anything else leaves it
+/// running and stores that the warning was given, so the same sub is never warned
+/// twice in a round, restarts included. A card still open at a restart is not
+/// stored: it is gone, so the next tick raises it again.
+pub(crate) fn apply_context_answer(state: &Arc<DaemonState>, sub_id: &str, answer: CardAnswer) {
+    if matches!(&answer, CardAnswer::Picked(p) if p == STOP_IT) {
+        super::end_sub(state, sub_id);
+        forget(sub_id);
+        return;
+    }
+    with_entry(sub_id, |e| {
+        e.carded = false;
+        e.context_warned = true;
+        save(sub_id, e);
+    });
+}
+
 /// The production sweep, called from the busy watchdog's tick.
-pub async fn sweep_now(state: &Arc<DaemonState>, now: DateTime<Utc>) {
+pub async fn sweep_now(state: &Arc<DaemonState>) {
     let calls = |inst: &Instance, cursor: &mut Cursor| {
         let path = crate::context_status::resolve_transcript(&state.registry, &inst.session_id)?;
         read_calls(&path, cursor)
     };
-    let env = Env { now, calls: &calls };
+    let env = Env { calls: &calls };
     for id in sweep(state, &env).await {
-        log::warn!("subchats: sub {id} is past its ceiling, raised a card");
+        log::warn!("subchats: sub {id} is past a ceiling or short of context, raised a card");
     }
 }
 
@@ -401,6 +460,9 @@ mod tests {
     use crate::daemon::settings_cache::SettingsCache;
     use crate::types::Settings;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// A 1M-window model, so 900K is the warning line.
+    const BIG: &str = "claude-opus-4-8";
 
     fn busy_sub(tag: &str) -> (Arc<DaemonState>, String) {
         let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
@@ -413,28 +475,40 @@ mod tests {
         (st, sub)
     }
 
-    /// One tick at `base + minute`, with the sub reporting `calls` model calls.
-    async fn tick(st: &Arc<DaemonState>, base: DateTime<Utc>, minute: i64, calls: u64) -> Vec<String> {
+    /// One tick with the sub reporting `calls` model calls and a context of `used`
+    /// tokens on `model` (0 for none read yet).
+    async fn tick_ctx(st: &Arc<DaemonState>, calls: u64, used: u64, model: &str) -> Vec<String> {
         let reader = AtomicU64::new(calls);
         let read = |_: &Instance, c: &mut Cursor| {
             c.calls = reader.load(Ordering::SeqCst);
+            c.occupancy = used;
+            c.max_occupancy = c.max_occupancy.max(used);
+            c.model = model.to_string();
             Some(c.calls)
         };
-        sweep(st, &Env { now: base + Duration::minutes(minute), calls: &read }).await
+        sweep(st, &Env { calls: &read }).await
+    }
+
+    /// One tick with `calls` model calls and no context read.
+    async fn tick(st: &Arc<DaemonState>, calls: u64) -> Vec<String> {
+        tick_ctx(st, calls, 0, "").await
     }
 
     async fn the_card(st: &Arc<DaemonState>) -> Option<serde_json::Value> {
         st.list_prompts().await.into_iter().find(|p| p["payload"]["card_kind"] == KIND)
     }
 
+    async fn the_context_card(st: &Arc<DaemonState>) -> Option<serde_json::Value> {
+        st.list_prompts().await.into_iter().find(|p| p["payload"]["card_kind"] == CONTEXT_KIND)
+    }
+
     #[tokio::test]
     async fn the_calls_ceiling_fires_at_the_named_count_and_not_before() {
         assert_eq!(CALLS_STEP, 300);
         let (st, sub) = busy_sub("ceil-calls");
-        let base = Utc::now();
-        assert!(tick(&st, base, 0, 299).await.is_empty(), "299 calls is under the ceiling");
+        assert!(tick(&st, 299).await.is_empty(), "299 calls is under the ceiling");
         assert!(the_card(&st).await.is_none());
-        assert_eq!(tick(&st, base, 1, 300).await, [sub], "300 is the ceiling");
+        assert_eq!(tick(&st, 300).await, [sub], "300 is the ceiling");
         let card = the_card(&st).await.expect("a card");
         assert_eq!(card["payload"]["display_session_id"], "ceil-calls-main");
         assert_eq!(card["payload"]["sub_id"], "ceil-calls-sub");
@@ -466,90 +540,43 @@ mod tests {
             },
         )
         .unwrap();
-        let base = Utc::now();
         // Figures that would card a running sub at once: it has not run.
-        assert!(tick(&st, base, 0, 10_000).await.is_empty());
-        assert!(the_card(&st).await.is_none());
+        assert!(tick_ctx(&st, 10_000, 990_000, BIG).await.is_empty());
+        assert!(the_card(&st).await.is_none() && the_context_card(&st).await.is_none());
         crate::daemon::subchats::held::release(&st, &sub);
-        assert_eq!(tick(&st, base, 1, 10_000).await, [sub], "released, the ordinary ceiling applies again");
+        assert_eq!(tick(&st, 10_000).await, [sub], "released, the ordinary ceiling applies again");
     }
 
+    /// Joe 2026-11-12: "this subchat has been running for 3 hours" is not a problem
+    /// by itself. A sub busy for a day, with calls and context well under their
+    /// lines, draws nothing.
     #[tokio::test]
-    async fn the_busy_time_ceiling_fires_at_three_hours_and_not_before() {
-        assert_eq!(BUSY_STEP, Duration::hours(3));
-        let (st, sub) = busy_sub("ceil-time");
-        let base = Utc::now();
-        // One tick a minute: 179 minutes busy is under, the 180th crosses.
-        for m in 0..=179 {
-            assert!(tick(&st, base, m, 5).await.is_empty(), "minute {m}");
+    async fn a_sub_busy_for_many_hours_with_room_left_draws_no_card() {
+        let (st, _sub) = busy_sub("ceil-long");
+        for _ in 0..(24 * 60) {
+            assert!(tick_ctx(&st, 5, 100_000, BIG).await.is_empty());
         }
-        assert!(the_card(&st).await.is_none(), "179 minutes of busy time is under three hours");
-        assert_eq!(tick(&st, base, 180, 5).await, [sub]);
-        let q = the_card(&st).await.unwrap()["payload"]["questions"][0]["question"].as_str().unwrap().to_string();
-        assert!(q.contains("3h of work"), "{q}");
-    }
-
-    #[tokio::test]
-    async fn frozen_idle_waiting_and_parked_time_does_not_count_as_busy_time() {
-        let _data = crate::daemon::subchats::TempDataDir::new();
-        let base = Utc::now();
-        // Idle: not busy.
-        let (st, sub) = busy_sub("ceil-idle");
-        st.registry.set_busy(&sub, false);
-        for m in 0..=400 {
-            assert!(tick(&st, base, m, 5).await.is_empty());
-        }
-        // Frozen.
-        let (st, sub) = busy_sub("ceil-frozen");
-        st.registry.set_frozen(&sub, true);
-        for m in 0..=400 {
-            assert!(tick(&st, base, m, 5).await.is_empty());
-        }
-        // Parked by gaming mode.
-        let (st, sub) = busy_sub("ceil-parked");
-        crate::daemon::gaming_mode::set_file_for_test(&[&sub]);
-        for m in 0..=400 {
-            assert!(tick(&st, base, m, 5).await.is_empty());
-        }
-        crate::daemon::gaming_mode::set_file_for_test(&[]);
-        // Waiting on a card of its own.
-        let (st, sub) = busy_sub("ceil-waiting");
-        st.add_prompt("q-ceil", "question-requested", serde_json::json!({"session_id": sub, "seq": 1}), true).await;
-        for m in 0..=400 {
-            assert!(tick(&st, base, m, 5).await.is_empty());
-        }
-        // Rate limited.
-        let (st, sub) = busy_sub("ceil-rate");
-        st.registry.set_account(&sub, "acct");
-        st.registry.set_rate_limited_for_account("acct", base.timestamp() + 20 * 3600, "five_hour");
-        for m in 0..=400 {
-            assert!(tick(&st, base, m, 5).await.is_empty());
-        }
-    }
-
-    #[tokio::test]
-    async fn a_machine_sleep_adds_one_tick_not_the_whole_gap() {
-        let (st, _sub) = busy_sub("ceil-sleep");
-        let base = Utc::now();
-        tick(&st, base, 0, 5).await;
-        // Ten hours pass between two ticks: the machine slept.
-        assert!(tick(&st, base, 600, 5).await.is_empty(), "the gap is capped at one tick");
+        assert!(st.list_prompts().await.is_empty(), "a long run alone is never a card");
     }
 
     #[tokio::test]
     async fn one_crossing_draws_one_card_however_many_ticks_see_it() {
         let (st, _sub) = busy_sub("ceil-once");
-        let base = Utc::now();
-        assert_eq!(tick(&st, base, 0, 301).await.len(), 1);
+        assert_eq!(tick(&st, 301).await.len(), 1);
         for m in 1..20 {
-            assert!(tick(&st, base, m, 320 + m as u64).await.is_empty(), "the open card is not repeated");
+            assert!(tick(&st, 320 + m).await.is_empty(), "the open card is not repeated");
         }
         assert_eq!(st.list_prompts().await.len(), 1);
     }
 
-    /// Joe's pick on the open ceiling card, through the card's own answer path.
-    async fn answer_card(st: &Arc<DaemonState>, pick: Option<&str>) {
-        let card = the_card(st).await.expect("a ceiling card is up");
+    /// Joe's pick on the open card of `kind`, through the card's own answer path.
+    async fn answer_card_of(st: &Arc<DaemonState>, kind: &str, pick: Option<&str>) {
+        let card = st
+            .list_prompts()
+            .await
+            .into_iter()
+            .find(|p| p["payload"]["card_kind"] == kind)
+            .expect("the card is up");
         let id = card["id"].as_str().unwrap().to_string();
         match pick {
             Some(p) => {
@@ -565,17 +592,20 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
+    async fn answer_card(st: &Arc<DaemonState>, pick: Option<&str>) {
+        answer_card_of(st, KIND, pick).await;
+    }
+
     #[tokio::test]
     async fn keep_going_raises_the_ceiling_by_the_same_amount_and_the_next_crossing_is_a_new_card() {
         let _data = crate::daemon::subchats::TempDataDir::new();
         let (st, sub) = busy_sub("ceil-keep");
-        let base = Utc::now();
-        tick(&st, base, 0, 300).await;
+        tick(&st, 300).await;
         answer_card(&st, Some(KEEP_GOING)).await;
         assert!(the_card(&st).await.is_none(), "the answered card is gone");
-        assert!(tick(&st, base, 1, 301).await.is_empty(), "300 more calls are allowed");
-        assert!(tick(&st, base, 2, 599).await.is_empty());
-        assert_eq!(tick(&st, base, 3, 600).await, [sub], "the ceiling is now 600");
+        assert!(tick(&st, 301).await.is_empty(), "300 more calls are allowed");
+        assert!(tick(&st, 599).await.is_empty());
+        assert_eq!(tick(&st, 600).await, [sub], "the ceiling is now 600");
         assert!(the_card(&st).await.is_some(), "a genuinely new card, since the first was answered");
     }
 
@@ -590,14 +620,13 @@ mod tests {
     async fn keep_going_survives_a_daemon_restart() {
         let _data = crate::daemon::subchats::TempDataDir::new();
         let (st, sub) = busy_sub("ceil-restart");
-        let base = Utc::now();
-        tick(&st, base, 0, 300).await;
+        tick(&st, 300).await;
         answer_card(&st, Some(KEEP_GOING)).await;
         simulate_restart(&sub);
-        assert!(tick(&st, base, 5, 301).await.is_empty(), "Joe said keep going; a restart must not ask again at 300");
+        assert!(tick(&st, 301).await.is_empty(), "Joe said keep going; a restart must not ask again at 300");
         assert!(the_card(&st).await.is_none());
         simulate_restart(&sub);
-        assert_eq!(tick(&st, base, 6, 600).await, [sub], "the raised ceiling of 600 is still the one that fires");
+        assert_eq!(tick(&st, 600).await, [sub], "the raised ceiling of 600 is still the one that fires");
     }
 
     /// A sub continued after it finished is on a new job, so its 300 calls count
@@ -617,25 +646,24 @@ mod tests {
             }
         };
         let read = |_: &Instance, c: &mut Cursor| read_calls(&path, c);
-        let base = Utc::now();
-        let sweep_at = |minute: i64| {
+        let sweep_once = || {
             let (st, read) = (st.clone(), &read);
-            async move { sweep(&st, &Env { now: base + Duration::minutes(minute), calls: read }).await }
+            async move { sweep(&st, &Env { calls: read }).await }
         };
 
         // Round one ran 400 calls and finished; Joe continues the sub.
         append(0, 400);
         start_round(&sub, std::fs::metadata(&path).unwrap().len());
-        assert!(sweep_at(0).await.is_empty(), "400 calls from the last round are not this round's");
+        assert!(sweep_once().await.is_empty(), "400 calls from the last round are not this round's");
 
         append(400, 100);
-        assert!(sweep_at(1).await.is_empty());
+        assert!(sweep_once().await.is_empty());
         simulate_restart(&sub);
-        assert!(sweep_at(2).await.is_empty(), "after a restart the round still starts at the continue");
+        assert!(sweep_once().await.is_empty(), "after a restart the round still starts at the continue");
         assert_eq!(with_entry(&sub, |e| e.cursor.calls), 100, "the count did not fall back to 0 or jump to the lifetime 500");
 
         append(500, 200);
-        assert_eq!(sweep_at(3).await, [sub.clone()], "300 calls into this round");
+        assert_eq!(sweep_once().await, [sub.clone()], "300 calls into this round");
     }
 
     #[test]
@@ -649,6 +677,17 @@ mod tests {
         // A round that starts at the top with default limits has nothing to remember.
         start_round("ceil-nothing", 0);
         assert!(!saved_path(&root, "ceil-nothing").exists());
+    }
+
+    #[test]
+    fn a_file_an_older_build_wrote_with_a_busy_limit_still_loads() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let root = crate::daemon::subchats::decisions::data_root().unwrap();
+        let path = saved_path(&root, "ceil-old");
+        crate::util::write_json_atomic(&path, r#"{"calls_limit":600,"busy_limit_secs":21600,"start_offset":42}"#).unwrap();
+        let e = load("ceil-old");
+        assert_eq!((e.calls_limit, e.cursor.floor, e.context_warned), (600, 42, false));
+        assert!(!path.with_extension("json.bad").exists(), "an old file is not a damaged one");
     }
 
     #[tokio::test]
@@ -669,7 +708,7 @@ mod tests {
             c.calls = 5;
             Some(5)
         };
-        sweep(&st, &Env { now: Utc::now(), calls: &read }).await;
+        sweep(&st, &Env { calls: &read }).await;
         assert!(free_at_some_point.load(Ordering::SeqCst), "the table lock was held across the transcript read");
     }
 
@@ -677,64 +716,172 @@ mod tests {
     async fn keep_going_after_an_overshoot_clears_the_figure_instead_of_asking_again_at_once() {
         let _data = crate::daemon::subchats::TempDataDir::new();
         let (st, sub) = busy_sub("ceil-over");
-        let base = Utc::now();
-        tick(&st, base, 0, 650).await;
+        tick(&st, 650).await;
         apply_answer(&st, &sub, CardAnswer::Picked(KEEP_GOING.into()));
-        assert!(tick(&st, base, 1, 651).await.is_empty(), "650 is past 600, so the next ceiling is 900");
+        assert!(tick(&st, 651).await.is_empty(), "650 is past 600, so the next ceiling is 900");
     }
 
     #[tokio::test]
     async fn skip_keeps_the_sub_going_and_stop_ends_it() {
         let _data = crate::daemon::subchats::TempDataDir::new();
         let (st, sub) = busy_sub("ceil-skip");
-        let base = Utc::now();
-        tick(&st, base, 0, 300).await;
+        tick(&st, 300).await;
         answer_card(&st, None).await;
         assert!(st.registry.get(&sub).unwrap().ended_at.is_none());
-        assert!(tick(&st, base, 1, 301).await.is_empty(), "a Skip is not a minute-by-minute nag");
+        assert!(tick(&st, 301).await.is_empty(), "a Skip is not a minute-by-minute nag");
 
         let (st, sub) = busy_sub("ceil-stop");
-        tick(&st, base, 0, 300).await;
+        tick(&st, 300).await;
         answer_card(&st, Some(STOP_IT)).await;
         assert!(st.registry.get(&sub).unwrap().ended_at.is_some(), "Stop goes through end_sub");
-        assert!(tick(&st, base, 1, 900).await.is_empty(), "an ended sub is not counted again");
-    }
-
-    #[tokio::test]
-    async fn busy_time_crossing_is_re_armed_by_keep_going_too() {
-        let _data = crate::daemon::subchats::TempDataDir::new();
-        let (st, _sub) = busy_sub("ceil-time-keep");
-        let base = Utc::now();
-        for m in 0..=180 {
-            tick(&st, base, m, 5).await;
-        }
-        assert!(the_card(&st).await.is_some());
-        answer_card(&st, Some(KEEP_GOING)).await;
-        for m in 181..=359 {
-            assert!(tick(&st, base, m, 5).await.is_empty(), "minute {m}");
-        }
-        assert_eq!(tick(&st, base, 360, 5).await.len(), 1, "another three hours on, the ceiling is crossed again");
-        assert!(the_card(&st).await.is_some());
+        assert!(tick(&st, 900).await.is_empty(), "an ended sub is not counted again");
     }
 
     #[tokio::test]
     async fn finished_ended_and_ordinary_chats_are_never_counted() {
-        let base = Utc::now();
         let (st, sub) = busy_sub("ceil-fin");
         st.registry.set_subchat_finished(&sub, true);
-        assert!(tick(&st, base, 0, 900).await.is_empty());
+        assert!(tick_ctx(&st, 900, 990_000, BIG).await.is_empty());
         let (st, sub) = busy_sub("ceil-end");
         st.registry.mark_ended(&sub, crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
-        assert!(tick(&st, base, 0, 900).await.is_empty());
+        assert!(tick_ctx(&st, 900, 990_000, BIG).await.is_empty());
         let (st, _sub) = busy_sub("ceil-plain");
         st.registry.set_subchat_of("ceil-plain-sub", None);
-        assert!(tick(&st, base, 0, 900).await.is_empty());
+        assert!(tick_ctx(&st, 900, 990_000, BIG).await.is_empty());
+    }
+
+    // ---- context nearly full -------------------------------------------------
+
+    #[tokio::test]
+    async fn the_context_warning_fires_at_ninety_percent_of_the_window_and_not_before() {
+        assert_eq!(CONTEXT_WARN_PERCENT, 90);
+        let (st, sub) = busy_sub("ctx-line");
+        assert!(tick_ctx(&st, 5, 899_999, BIG).await.is_empty(), "899,999 of 1,000,000 is under the line");
+        assert!(the_context_card(&st).await.is_none());
+        assert_eq!(tick_ctx(&st, 5, 900_000, BIG).await, [sub], "900,000 is 90%");
+        let card = the_context_card(&st).await.expect("a context card");
+        assert_eq!(card["payload"]["display_session_id"], "ctx-line-main");
+        assert_eq!(card["payload"]["sub_id"], "ctx-line-sub");
+        let q = card["payload"]["questions"][0]["question"].as_str().unwrap();
+        assert!(q.contains("**header**") && q.contains("90%") && q.contains("900K of 1M"), "{q}");
+        let labels: Vec<&str> =
+            card["payload"]["questions"][0]["options"].as_array().unwrap().iter().map(|o| o["label"].as_str().unwrap()).collect();
+        assert_eq!(labels, [KEEP_GOING, STOP_IT]);
+        assert!(the_card(&st).await.is_none(), "it is not the calls ceiling card");
+    }
+
+    /// A small window is judged by its own size: 180K of a 200K model is the line.
+    #[tokio::test]
+    async fn a_small_window_model_is_warned_by_its_own_size() {
+        let (st, sub) = busy_sub("ctx-small");
+        assert!(tick_ctx(&st, 5, 179_000, "claude-sonnet-4-5").await.is_empty());
+        assert_eq!(tick_ctx(&st, 5, 180_000, "claude-sonnet-4-5").await, [sub]);
+        let q = the_context_card(&st).await.unwrap()["payload"]["questions"][0]["question"].as_str().unwrap().to_string();
+        assert!(q.contains("180K of 200K"), "{q}");
+    }
+
+    /// No usage line read yet is no information, not a full window.
+    #[tokio::test]
+    async fn an_unread_context_or_an_unknown_model_never_warns() {
+        let (st, _sub) = busy_sub("ctx-none");
+        assert!(tick_ctx(&st, 5, 0, BIG).await.is_empty());
+        assert!(tick_ctx(&st, 5, 990_000, "").await.is_empty(), "a window cannot be judged without a model");
+        assert!(st.list_prompts().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_context_warning_is_given_once_whatever_the_answer_and_across_a_restart() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = busy_sub("ctx-once");
+        assert_eq!(tick_ctx(&st, 5, 950_000, BIG).await.len(), 1);
+        for _ in 0..5 {
+            assert!(tick_ctx(&st, 5, 960_000, BIG).await.is_empty(), "the open card is not repeated");
+        }
+        answer_card_of(&st, CONTEXT_KIND, Some(KEEP_GOING)).await;
+        assert!(the_context_card(&st).await.is_none(), "the answered card is gone");
+        assert!(tick_ctx(&st, 5, 970_000, BIG).await.is_empty(), "keep going means not warned again");
+        simulate_restart(&sub);
+        assert!(tick_ctx(&st, 5, 980_000, BIG).await.is_empty(), "a restart does not warn a second time");
+        // A Skip is the same.
+        let (st, _sub) = busy_sub("ctx-skip");
+        tick_ctx(&st, 5, 950_000, BIG).await;
+        answer_card_of(&st, CONTEXT_KIND, None).await;
+        assert!(tick_ctx(&st, 5, 960_000, BIG).await.is_empty());
+        assert!(st.registry.get("ctx-skip-sub").unwrap().ended_at.is_none(), "a skip stops nothing");
+    }
+
+    /// A restart drops an open card, so a warning Joe never saw is raised again
+    /// rather than lost: the file only learns of it from his answer.
+    #[tokio::test]
+    async fn a_restart_with_the_context_card_unanswered_raises_it_again() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = busy_sub("ctx-lost");
+        assert_eq!(tick_ctx(&st, 5, 950_000, BIG).await.len(), 1);
+        // The restart: the table entry and the in-memory card are gone.
+        simulate_restart(&sub);
+        let (st, sub) = busy_sub("ctx-lost");
+        assert_eq!(tick_ctx(&st, 5, 955_000, BIG).await, [sub], "nothing was stored, so the warning comes again");
+    }
+
+    #[tokio::test]
+    async fn stop_it_on_the_context_card_ends_the_sub() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = busy_sub("ctx-stop");
+        tick_ctx(&st, 5, 950_000, BIG).await;
+        answer_card_of(&st, CONTEXT_KIND, Some(STOP_IT)).await;
+        assert!(st.registry.get(&sub).unwrap().ended_at.is_some());
+    }
+
+    /// A continued sub is a new job, so it is warned again if its context fills again.
+    #[tokio::test]
+    async fn continuing_a_sub_arms_the_context_warning_again() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = busy_sub("ctx-continue");
+        tick_ctx(&st, 5, 950_000, BIG).await;
+        answer_card_of(&st, CONTEXT_KIND, Some(KEEP_GOING)).await;
+        start_round(&sub, 0);
+        assert_eq!(tick_ctx(&st, 5, 950_000, BIG).await, [sub], "a new round, a new warning");
+    }
+
+    /// Both lines crossed at once: one card at a time, calls first. The context
+    /// warning is not lost, it waits for the sub's open card to be answered.
+    #[tokio::test]
+    async fn two_crossings_at_once_draw_one_card_and_the_context_one_follows() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = busy_sub("ctx-both");
+        assert_eq!(tick_ctx(&st, 300, 950_000, BIG).await, [sub.clone()]);
+        assert!(the_card(&st).await.is_some() && the_context_card(&st).await.is_none());
+        assert!(tick_ctx(&st, 301, 951_000, BIG).await.is_empty());
+        answer_card(&st, Some(KEEP_GOING)).await;
+        assert_eq!(tick_ctx(&st, 302, 952_000, BIG).await, [sub]);
+        assert!(the_context_card(&st).await.is_some());
+    }
+
+    #[test]
+    fn a_stored_warning_flag_survives_in_the_file_and_the_defaults_leave_none() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let root = crate::daemon::subchats::decisions::data_root().unwrap();
+        with_entry("ctx-file", |e| {
+            e.context_warned = true;
+            save("ctx-file", e);
+        });
+        assert!(saved_path(&root, "ctx-file").exists());
+        assert!(load("ctx-file").context_warned);
+        start_round("ctx-file", 0);
+        assert!(!saved_path(&root, "ctx-file").exists(), "a fresh round with defaults has nothing to remember");
     }
 
     // ---- the transcript counter ----------------------------------------------
 
     fn line(id: &str, extra: &str) -> String {
         format!(r#"{{"type":"assistant"{extra},"message":{{"id":"{id}","role":"assistant","content":[]}}}}"#)
+    }
+
+    /// An assistant line carrying a usage block, as the CLI writes it.
+    fn usage_line(id: &str, extra: &str, input: u64, cache_read: u64, cache_creation: u64, model: &str) -> String {
+        format!(
+            r#"{{"type":"assistant"{extra},"message":{{"id":"{id}","model":"{model}","role":"assistant","content":[],"usage":{{"input_tokens":{input},"cache_read_input_tokens":{cache_read},"cache_creation_input_tokens":{cache_creation},"output_tokens":5}}}}}}"#
+        )
     }
 
     #[test]
@@ -753,6 +900,27 @@ mod tests {
             .join("\n");
         count_calls(&text, &mut c);
         assert_eq!(c.calls, 1);
+    }
+
+    /// The context is the newest main-thread request's size: input plus both cache
+    /// figures. A subagent's smaller context and a synthetic zero row are not it.
+    #[test]
+    fn the_context_is_the_newest_main_thread_usage_and_ignores_subagents_and_zero_rows() {
+        let mut c = Cursor::default();
+        let text = [
+            usage_line("msg_1", "", 10, 500_000, 20_000, BIG),
+            usage_line("msg_2", "", 12, 640_000, 10_000, BIG),
+            usage_line("msg_sub", r#","isSidechain":true"#, 5, 30_000, 0, "claude-haiku-5-5"),
+            usage_line("msg_err", "", 0, 0, 0, "<synthetic>"),
+        ]
+        .join("\n");
+        count_calls(&text, &mut c);
+        assert_eq!((c.occupancy, c.max_occupancy, c.model.as_str()), (650_012, 650_012, BIG));
+        assert_eq!(context_of(&c), Some((650_012, 1_000_000)));
+        // It follows the conversation down too (after a compaction), while the
+        // largest size seen is kept for the window's sticky correction.
+        count_calls(&usage_line("msg_3", "", 10, 90_000, 0, BIG), &mut c);
+        assert_eq!((c.occupancy, c.max_occupancy), (90_010, 650_012));
     }
 
     #[test]
@@ -776,5 +944,24 @@ mod tests {
         std::fs::write(&path, format!("{}\n", line("z", ""))).unwrap();
         assert_eq!(read_calls(&path, &mut c), Some(1));
         assert_eq!(read_calls(&dir.path().join("missing.jsonl"), &mut c), None);
+    }
+
+    /// End to end through the real transcript reader: a sub whose transcript ends
+    /// at 92% of a 1M window is warned, and one at 40% is not.
+    #[tokio::test]
+    async fn a_real_transcript_near_the_window_raises_the_context_card() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "{}", usage_line("msg_1", "", 10, 400_000, 0, BIG)).unwrap();
+        drop(f);
+        let read = |_: &Instance, c: &mut Cursor| read_calls(&path, c);
+        let (st, sub) = busy_sub("ctx-real");
+        assert!(sweep(&st, &Env { calls: &read }).await.is_empty(), "40% is fine");
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        writeln!(f, "{}", usage_line("msg_2", "", 10, 920_000, 0, BIG)).unwrap();
+        assert_eq!(sweep(&st, &Env { calls: &read }).await, [sub]);
+        assert!(the_context_card(&st).await.is_some());
     }
 }

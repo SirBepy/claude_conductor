@@ -455,15 +455,6 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await page.waitForTimeout(200);
       await expect(title(page)).toHaveText("Plain chat");
     });
-
-    test("the checkup card's Open the log opens the file viewer for the main chat's window", async ({ page }) => {
-      await mount(page, size, [MAIN, FOOTER]);
-      await openChat(page, "main");
-      await fireEvent(page, "subchat-log-open-requested", [{ display_session_id: "main", path: "C:/data/subchats/main.decisions.md" }]);
-      await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "open_file_window").length).toBe(1);
-      const call = (await invokeCalls(page)).find((c) => c.cmd === "open_file_window")!;
-      expect(String((call.args as { path: string }).path).replace(/\\/g, "/")).toBe("C:/data/subchats/main.decisions.md");
-    });
   });
 }
 

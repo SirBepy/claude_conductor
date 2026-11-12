@@ -35,9 +35,8 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
   machines_changed: "machines-changed",
   api_credit_status_changed: "api-credit-status-changed",
   subchat_card: "subchat-card",
-  // The main chat's window opens a sub, or the decisions log, from a daemon card.
+  // The main chat's window opens a sub from a daemon card.
   subchat_open_requested: "subchat-open-requested",
-  subchat_log_open_requested: "subchat-log-open-requested",
   // A "Use subchats" flip from another surface, or a respawn successor taking the
   // mode: every client re-reads the set of mode-on chats.
   subchats_on_changed: "subchats-on-changed",
