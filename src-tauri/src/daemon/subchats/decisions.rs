@@ -332,6 +332,10 @@ pub(crate) fn move_log_in(root: &Path, old_parent_id: &str, new_parent_id: &str)
             log::warn!("subchats: not moving the decisions log {old_parent_id} -> {new_parent_id}: the destination already has one");
         } else if let Err(e) = std::fs::rename(&from, &to) {
             log::warn!("subchats: could not move the decisions log {old_parent_id} -> {new_parent_id}: {e}");
+        } else {
+            // The successor's session id is a new recall key; the old chat's
+            // digest stays as it was.
+            write_main_digest_in(root, new_parent_id, &load_in(root, new_parent_id));
         }
     }
 }
@@ -443,6 +447,9 @@ pub(crate) fn append_in(root: &Path, parent_id: &str, date: &str, items: Vec<New
         return Ok(ids);
     }
     save_in(root, parent_id, &entries)?;
+    // Every change to a log funnels through here, so the main chat's digest
+    // cannot fall behind it.
+    write_main_digest_in(root, parent_id, &entries);
     Ok(ids)
 }
 
@@ -615,12 +622,12 @@ pub(crate) fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     write_digest_in(&root, &who, &record);
 }
 
-// ---- the /close digest feed -----------------------------------------------
+// ---- the recall digest feed -----------------------------------------------
 
 /// The body `recall.py digest-save` takes on stdin: `## Done`, `## Decided`,
 /// `## Rejected` and `## Open`, with `none` under an empty one. `None` when the
-/// sub decided and ruled out nothing, the same bar `/close` applies ("skip a
-/// session with no decision or rejected option worth keeping").
+/// sub decided and ruled out nothing: a session with no decision or rejected
+/// option gets no digest.
 pub fn digest_body(who: &str, record: &FinishRecord) -> Option<String> {
     let decided: Vec<&String> = record.decided.iter().filter(|r| !is_nothing(r)).collect();
     let ruled: Vec<&String> = record.ruled_out.iter().filter(|r| !is_nothing(r)).collect();
@@ -651,17 +658,83 @@ pub fn digest_body(who: &str, record: &FinishRecord) -> Option<String> {
     ))
 }
 
+/// The digest body for one main chat, built from its decisions log alone. Only
+/// live entries count: a closed one was replaced, so it is no longer what the
+/// chat decided. Decided holds Joe's card answers and the subs' decided rows;
+/// Done names each sub that reported a decided or ruled-out row (the log keeps
+/// no verdict or headline); Open is always `none` because the log holds
+/// decisions only. `None` when no live entry decides or rules out anything.
+pub fn main_digest_body(entries: &[Entry]) -> Option<String> {
+    let live: Vec<&Entry> = entries.iter().filter(|e| e.is_live()).collect();
+    let who_of = |e: &Entry| -> String {
+        if e.kind == Kind::Card {
+            if e.who == "main chat" { "Joe".to_string() } else { format!("Joe, via sub \"{}\"", e.who) }
+        } else {
+            format!("sub \"{}\"", e.who)
+        }
+    };
+    let bullet = |e: &Entry| -> String {
+        let text = match (&e.question, e.kind) {
+            (Some(q), Kind::Card) => format!("Q: {} A: {}", one_line(q), one_line(&e.body)),
+            _ => one_line(&e.body),
+        };
+        format!("- D{} ({}): {}\n", e.id, who_of(e), text)
+    };
+    let section = |kinds: &[Kind]| -> String {
+        let rows: String = live.iter().filter(|e| kinds.contains(&e.kind)).map(|e| bullet(e)).collect();
+        if rows.is_empty() { "none\n".to_string() } else { rows }
+    };
+    let decided = section(&[Kind::Card, Kind::Decided]);
+    let rejected = section(&[Kind::RuledOut]);
+    if decided == "none\n" && rejected == "none\n" {
+        return None;
+    }
+    // Closed entries still prove the sub finished.
+    let mut subs: Vec<(Option<&str>, &str)> = Vec::new();
+    for e in entries.iter().filter(|e| matches!(e.kind, Kind::Decided | Kind::RuledOut)) {
+        let key = (e.sub.as_deref(), e.who.as_str());
+        if !subs.contains(&key) {
+            subs.push(key);
+        }
+    }
+    let done: String = if subs.is_empty() {
+        "none\n".to_string()
+    } else {
+        subs.iter().map(|(_, who)| format!("- Sub \"{who}\" finished and reported its decisions\n")).collect()
+    };
+    Some(format!("## Done\n{done}## Decided\n{decided}## Rejected\n{rejected}## Open\nnone\n"))
+}
+
+/// The id rule both digest writers share: recall keys the file by session id,
+/// and a path separator or dot in it could leave the folder.
+fn digest_path_in(root: &Path, session_id: &str) -> Option<PathBuf> {
+    if session_id.is_empty() || session_id.contains(['/', '\\', '.']) {
+        return None;
+    }
+    Some(root.join("subchats").join(format!("{session_id}.digest.md")))
+}
+
 /// Keeps `<data_dir>/subchats/<sub_id>.digest.md`. Not written into
 /// `~/.claude/memory-archive/digests`: that store belongs to the global `recall`
 /// tool, which also redacts secrets and looks the session up in its own index.
 fn write_digest_in(root: &Path, who: &str, record: &FinishRecord) {
     let Some(body) = digest_body(who, record) else { return };
-    if record.sub_id.is_empty() || record.sub_id.contains(['/', '\\', '.']) {
-        return;
-    }
-    let path = root.join("subchats").join(format!("{}.digest.md", record.sub_id));
+    let Some(path) = digest_path_in(root, &record.sub_id) else { return };
     if let Err(e) = crate::util::write_json_atomic(&path, &body) {
         log::warn!("subchats: could not write {}'s digest: {e}", record.sub_id);
+    }
+}
+
+/// Keeps `<data_dir>/subchats/<main chat id>.digest.md` current with the chat's
+/// decisions log, in the folder and format a sub's digest uses, so recall
+/// ingests both the same way. A main chat never closes, so no model turn writes
+/// this: the daemon rewrites it whenever the log changes. Main and sub chats are
+/// distinct sessions, so the two files never share a name.
+fn write_main_digest_in(root: &Path, parent_id: &str, entries: &[Entry]) {
+    let Some(body) = main_digest_body(entries) else { return };
+    let Some(path) = digest_path_in(root, parent_id) else { return };
+    if let Err(e) = crate::util::write_json_atomic(&path, &body) {
+        log::warn!("subchats: could not write {parent_id}'s digest: {e}");
     }
 }
 
@@ -1187,6 +1260,73 @@ mod tests {
         let only_rejected = digest_body("x", &rec("s", &["nothing"], &["Flexbox"])).unwrap();
         assert!(only_rejected.contains("## Decided\nnone\n"));
         assert!(digest_body("x", &rec("s", &["nothing"], &["nothing"])).is_none());
+    }
+
+    const MAIN_ID: &str = "11111111-2222-3333-4444-555555555555";
+
+    fn digest_file(root: &Path, id: &str) -> std::path::PathBuf {
+        root.join("subchats").join(format!("{id}.digest.md"))
+    }
+
+    #[test]
+    fn the_main_digest_body_lists_live_decisions_and_rejections_in_order_without_replaced_ones() {
+        let root = tempfile::tempdir().unwrap();
+        append_in(root.path(), "m", "d", vec![NewEntry { sub: None, kind: Kind::Card, who: "main chat".into(), question: Some("Footer?".into()), body: "Sticky".into() }]).unwrap();
+        record_finish_in(root.path(), "m", "header", &rec("s1", &["Footer is static", "Use CSS grid"], &["Flexbox"]), "d");
+        record_finish_in(root.path(), "m", "header", &rec("s1", &["replaces D2: Footer is fixed"], &[]), "d");
+        let body = main_digest_body(&load_in(root.path(), "m")).unwrap();
+        assert_eq!(
+            body,
+            "## Done\n- Sub \"header\" finished and reported its decisions\n\
+             ## Decided\n- D1 (Joe): Q: Footer? A: Sticky\n- D3 (sub \"header\"): Use CSS grid\n- D5 (sub \"header\"): Footer is fixed\n\
+             ## Rejected\n- D4 (sub \"header\"): Flexbox\n\
+             ## Open\nnone\n"
+        );
+        assert!(!body.contains("Footer is static"), "a replaced entry is left out");
+    }
+
+    #[test]
+    fn an_empty_log_gives_no_main_digest_and_writes_no_file() {
+        assert!(main_digest_body(&[]).is_none());
+        let root = tempfile::tempdir().unwrap();
+        write_main_digest_in(root.path(), MAIN_ID, &[]);
+        assert!(!digest_file(root.path(), MAIN_ID).exists());
+        assert!(record_finish_in(root.path(), MAIN_ID, "x", &rec("s", &["nothing"], &["none"]), "d").is_empty());
+        assert!(!digest_file(root.path(), MAIN_ID).exists());
+    }
+
+    #[test]
+    fn adding_an_entry_rewrites_the_main_digest_with_the_new_row() {
+        let root = tempfile::tempdir().unwrap();
+        record_finish_in(root.path(), MAIN_ID, "footer", &rec("s", &["Use CSS grid"], &[]), "d");
+        let first = std::fs::read_to_string(digest_file(root.path(), MAIN_ID)).unwrap();
+        assert!(first.contains("Use CSS grid") && !first.contains("skip link"), "{first}");
+        append_in(root.path(), MAIN_ID, "d", vec![NewEntry { sub: None, kind: Kind::Card, who: "main chat".into(), question: Some("Skip link?".into()), body: "Yes".into() }]).unwrap();
+        let second = std::fs::read_to_string(digest_file(root.path(), MAIN_ID)).unwrap();
+        assert!(second.contains("Use CSS grid") && second.contains("Q: Skip link? A: Yes"), "{second}");
+    }
+
+    #[test]
+    fn a_moved_log_gets_a_digest_under_the_successor_id() {
+        let root = tempfile::tempdir().unwrap();
+        record_finish_in(root.path(), "old-main", "a", &rec("s", &["Use CSS grid"], &[]), "d");
+        move_log_in(root.path(), "old-main", MAIN_ID);
+        assert!(std::fs::read_to_string(digest_file(root.path(), MAIN_ID)).unwrap().contains("Use CSS grid"));
+    }
+
+    #[test]
+    fn a_main_chat_id_with_a_separator_or_dot_writes_no_digest() {
+        let root = tempfile::tempdir().unwrap();
+        for id in ["a/b", "a\\b", "a.b", "..", ""] {
+            record_finish_in(root.path(), id, "x", &rec("s", &["Use CSS grid"], &[]), "d");
+        }
+        let digests = std::fs::read_dir(root.path().join("subchats"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".digest.md"))
+            .count();
+        assert_eq!(digests, 0);
+        assert!(!root.path().join("a").exists() && !root.path().join("subchats").join("a").exists());
     }
 
     #[test]
