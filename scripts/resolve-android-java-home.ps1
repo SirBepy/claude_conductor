@@ -18,6 +18,10 @@ function Get-JavaMajorVersion {
     param([Parameter(Mandatory)][string]$JavaHome)
     $javaExe = Join-Path $JavaHome "bin\java.exe"
     if (-not (Test-Path $javaExe)) { return $null }
+    # java -version writes to stderr; Windows PowerShell 5.1 turns each stderr line into an
+    # error record, which is fatal when a caller (bootstrap-worktree.ps1) runs with
+    # $ErrorActionPreference = 'Stop'. Scope the preference to this call.
+    $ErrorActionPreference = 'Continue'
     $output = & $javaExe -version 2>&1 | Out-String
     # Old versioning (<=8): `java version "1.8.0_392"` - major is the second group.
     # Modern versioning (9+): `openjdk version "21.0.6"` - major is the first group.
