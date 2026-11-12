@@ -93,7 +93,7 @@ describe("draftRouteTarget", () => {
     setProjectMainChatsForTest([PROJECT]);
     adoptSubchatsOn("main");
     state.sessions = [inst({ session_id: "main", name: "CV redesign" })];
-    state.pendingNewSession = { placeholderId: "p1", projectPath: "C:/Projects/cv", projectName: "cv", config, realId: null, firstMessageSent: false };
+    state.pendingNewSession = { placeholderId: "p1", projectPath: "C:/Projects/cv", projectName: "cv", config: { ...config }, realId: null, firstMessageSent: false };
   });
 
   it("sends the first message to the project's main chat", () => {
@@ -106,6 +106,14 @@ describe("draftRouteTarget", () => {
     forceDraftPlain();
     expect(state.pendingNewSession.config.plainChat).toBe(true);
     expect(draftRouteTarget(state.pendingNewSession.config)).toBeNull();
+  });
+
+  it("forceDraftPlain leaves a draft with no main chat to route to untouched", () => {
+    document.body.innerHTML = `<div id="session-pane"></div>`;
+    state.sessions = [];
+    forceDraftPlain();
+    expect(state.pendingNewSession.config.plainChat).toBeUndefined();
+    expect(state.pendingNewSession.config.subchatsOn).toBe(true);
   });
 
   it("never swallows a draft that opened with its own message (a card chat, /pickup)", () => {
