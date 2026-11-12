@@ -38,6 +38,8 @@ mod reply;
 pub mod joe_message;
 pub mod merge_followup;
 pub mod pause;
+pub mod pending_merges;
+pub mod plumbing;
 pub mod project;
 pub mod queued;
 pub(crate) mod queue_watch;

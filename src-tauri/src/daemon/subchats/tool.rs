@@ -1,5 +1,5 @@
 //! The `subchat` MCP tool: how a main chat looks up and talks to its subs
-//! (spec section 5). One tool with five actions, listed for every chat because
+//! (spec section 5). One tool with seven actions, listed for every chat because
 //! the MCP tool list is fixed when the server process starts and cannot follow
 //! a mid-chat toggle. A chat with no subs, and a sub itself, get a refusal
 //! naming the fix.
@@ -10,6 +10,10 @@
 //! - `send {sub | all, writes?, text?, question?}`: passes a message to a sub.
 //!   A `question` marks it as one of Joe's questions: the sub's next finish
 //!   card carries it and is drawn as the answer, so the main chat relays nothing.
+//! - `retry {sub}`, `merge {sub}`, `drop {sub}`: how the main chat fixes a sub's
+//!   plumbing after the app woke it about it (`plumbing`): start a sub that could
+//!   not start, land a finished sub's refused merge, or end a sub that never ran
+//!   (and give up a refused merge, leaving the commits on the sub's branch).
 //!
 //! Results stay short, because this feature exists to keep the main chat's
 //! context small. What a sub wrote (verdict, summary) comes back in a tool
@@ -302,6 +306,20 @@ fn status(state: &Arc<DaemonState>, subs: &[Instance], query: &str, facts: Facts
         Some(f) => json!(facts_line(&f)),
         None => json!("not available"),
     };
+    if let Some(p) = super::plumbing::current(&sub.session_id) {
+        let mut problem = json!({"kind": p.problem.word(), "detail": p.detail});
+        if !p.files.is_empty() {
+            problem["files"] = json!(p.files);
+        }
+        out["problem"] = problem;
+        out["problem_note"] = json!("app plumbing, not the sub's work: fix it with retry, merge, send or drop, and ask Joe only if it needs his decision");
+    }
+    if let Some(p) = super::pending_merges::get(&sub.session_id) {
+        out["merge_pending"] = json!(format!(
+            "its merge waits for uncommitted changes in the main checkout ({}) and lands by itself once they are committed; nothing to do",
+            p.files.join(", ")
+        ));
+    }
     out
 }
 
@@ -695,15 +713,48 @@ pub async fn run(state: &Arc<DaemonState>, caller: &str, args: &Value) -> Value 
 
 /// `drop`: ends a sub that never started (it is queued, or its hold was lost), for
 /// a job the main chat no longer wants. It never ran, so nothing is lost, and its
-/// row stops counting toward the cap. A sub that ran is Joe's to end, from its
-/// card or the chat menu, so it is refused here.
+/// row stops counting toward the cap. On a finished sub whose merge was refused it
+/// gives the merge up instead: the commits stay on the sub's branch and a sub
+/// waiting for it goes on. Any other sub that ran is Joe's to end, from its card or
+/// the chat menu, so it is refused here.
 fn drop_action(state: &Arc<DaemonState>, subs: &[Instance], query: &str) -> Value {
     let sub = match resolve(subs, query) {
         Ok(s) => s,
         Err(e) => return refusal(e),
     };
+    if sub.ended_at.is_none() && super::merge_followup::unresolved(&sub.session_id) {
+        let branch = super::worktree::info_of(&sub.session_id).map(|i| i.branch).unwrap_or_default();
+        super::merge_followup::leave(state, &sub.session_id);
+        return json!({"ok": true, "left": label(sub), "note": format!("its merge is given up: its commits stay on branch {branch}, and a sub waiting for it starts")});
+    }
     match super::queued::drop_now(state, &sub.session_id) {
         Ok(name) => json!({"ok": true, "dropped": name, "note": "ended without ever running; it no longer counts toward the cap, and a sub waiting for it asks Joe on a card"}),
+        Err(e) => refusal(e),
+    }
+}
+
+/// `retry`: starts a sub the app could not start, by the code behind the old "Try
+/// again" card.
+async fn retry_action(state: &Arc<DaemonState>, subs: &[Instance], query: &str) -> Value {
+    let sub = match resolve(subs, query) {
+        Ok(s) => s,
+        Err(e) => return refusal(e),
+    };
+    match super::held::retry(state, &sub.session_id).await {
+        Ok(()) => json!({"ok": true, "started": label(sub)}),
+        Err(e) => refusal(e),
+    }
+}
+
+/// `merge`: lands a finished worktree sub's commits now, by the code behind the old
+/// "Merge again" card.
+async fn merge_action(state: &Arc<DaemonState>, subs: &[Instance], query: &str) -> Value {
+    let sub = match resolve(subs, query) {
+        Ok(s) => s,
+        Err(e) => return refusal(e),
+    };
+    match super::merge_followup::merge_now(state, &sub.session_id).await {
+        Ok(what) => json!({"ok": true, "merged": what}),
         Err(e) => refusal(e),
     }
 }
@@ -740,7 +791,9 @@ where
         "log" => log_action(caller),
         "send" => send(state, caller, &subs, args, resume, has_transcript).await,
         "drop" => drop_action(state, &subs, sub),
-        other => refusal(format!("action must be list, status, log, send or drop, not \"{other}\".")),
+        "retry" => retry_action(state, &subs, sub).await,
+        "merge" => merge_action(state, &subs, sub).await,
+        other => refusal(format!("action must be list, status, log, send, retry, merge or drop, not \"{other}\".")),
     }
 }
 
@@ -1330,12 +1383,62 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unknown_action_names_the_five() {
+    async fn an_unknown_action_names_all_seven() {
         let _d = super::super::TempDataDir::new();
         let (st, main, sent) = setup("tool-action");
         sub(&st, &main, "tool-action-a", "Footer", "t");
         let v = call(&st, &main, json!({"action": "nuke"}), &sent).await;
-        assert!(v["error"].as_str().unwrap().contains("list, status, log, send or drop"));
+        assert!(v["error"].as_str().unwrap().contains("list, status, log, send, retry, merge or drop"));
+    }
+
+    /// What failed reaches the main chat here, as tool data, never in the wake.
+    #[tokio::test]
+    async fn status_shows_a_plumbing_problem_and_a_pending_merge() {
+        use super::super::plumbing::{self, Problem};
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-plumb");
+        sub(&st, &main, "tool-plumb-a", "Footer", "t");
+        plumbing::report(&st, "tool-plumb-a", Problem::CouldNotStart, "the bootstrap script failed".into(), vec![]);
+        super::super::pending_merges::store("tool-plumb-a", vec!["src/x.rs".into()]);
+        let v = call(&st, &main, json!({"action": "status", "sub": "Footer"}), &sent).await;
+        assert_eq!(v["problem"]["kind"], "could_not_start", "{v}");
+        assert!(v["problem"]["detail"].as_str().unwrap().contains("bootstrap"));
+        assert!(v["problem_note"].as_str().unwrap().contains("ask Joe only if"));
+        assert!(v["merge_pending"].as_str().unwrap().contains("src/x.rs"));
+        plumbing::clear("tool-plumb-a");
+        let v = call(&st, &main, json!({"action": "status", "sub": "Footer"}), &sent).await;
+        assert!(v.get("problem").is_none());
+    }
+
+    #[tokio::test]
+    async fn retry_and_merge_reach_their_code_and_refuse_with_the_fix() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-rm");
+        sub(&st, &main, "tool-rm-a", "Footer", "t");
+        let v = call(&st, &main, json!({"action": "retry", "sub": "Footer"}), &sent).await;
+        assert_eq!(v["ok"], false);
+        assert!(v["error"].as_str().unwrap().contains("no failed start"), "{v}");
+        let v = call(&st, &main, json!({"action": "merge", "sub": "Footer"}), &sent).await;
+        assert_eq!(v["ok"], false);
+        assert!(v["error"].as_str().unwrap().contains("no worktree"), "{v}");
+        assert!(sent.lock().unwrap().is_empty(), "neither wakes the sub");
+    }
+
+    /// `drop` on a finished sub whose merge was refused gives the merge up, as the
+    /// old "Leave it" did, so a sub waiting for it goes on.
+    #[tokio::test]
+    async fn drop_on_a_refused_merge_leaves_the_commits_on_the_branch() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-leave");
+        sub(&st, &main, "tool-leave-a", "Footer", "t");
+        st.registry.set_subchat_finished("tool-leave-a", true);
+        super::super::pending_merges::store("tool-leave-a", vec!["a.txt".into()]);
+        assert!(super::super::merge_followup::unresolved("tool-leave-a"));
+        let v = call(&st, &main, json!({"action": "drop", "sub": "Footer"}), &sent).await;
+        assert_eq!(v["ok"], true, "{v}");
+        assert_eq!(v["left"], "Footer");
+        assert!(!super::super::merge_followup::unresolved("tool-leave-a"));
+        assert!(st.registry.get("tool-leave-a").unwrap().ended_at.is_none(), "the sub itself is not ended");
     }
 
     async fn until(mut done: impl FnMut() -> bool) -> bool {

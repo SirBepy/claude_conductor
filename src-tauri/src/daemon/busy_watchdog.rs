@@ -43,6 +43,8 @@ pub fn spawn(state: Arc<DaemonState>) {
             // without asking.
             crate::daemon::subchats::ceiling::sweep_now(&state).await;
             crate::daemon::subchats::closing::heal_orphans(&state).await;
+            // A merge refused over another chat's uncommitted files lands once they are clean.
+            crate::daemon::subchats::merge_followup::retry_pending(&state).await;
         }
     });
 }

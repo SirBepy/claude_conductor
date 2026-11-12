@@ -46,11 +46,11 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-/// Card kind for a held sub that needs Joe: its target ended blocked, or it
-/// could not start.
+/// Card kind for a held sub that needs Joe: its target ended blocked. A sub that
+/// could not start is plumbing, so it wakes the main chat instead (`plumbing`),
+/// which starts it again with `subchat retry` ([`retry`]).
 pub const CARD_KIND: &str = "subchat_held";
 pub const START_ANYWAY: &str = "Start it anyway";
-pub const TRY_AGAIN: &str = "Try again";
 pub const DROP_IT: &str = "Drop it";
 
 /// Everything needed to start the child later, as `spawn_chat` would have.
@@ -435,8 +435,50 @@ pub(crate) async fn launch_claimed(state: &Arc<DaemonState>, sub_id: &str) -> Re
     crate::sessions::chat_state::set_busy(sub_id, true);
     crate::daemon::machines::publish_instances_changed(state);
     crate::sessions::persistence::save_snapshot_default(&state.registry);
+    // It runs: an earlier failed start is no longer a problem.
+    super::plumbing::resolved(state, sub_id);
     log::info!("subchats: started held sub {sub_id} (it waited for {})", entry.after_name);
     Ok(())
+}
+
+/// `subchat retry`: starts a held sub again whose start failed, as the old "Try
+/// again" card did. Only a sub whose start failed qualifies; any other queued sub
+/// starts by itself when what it waits for is done. `launch` is injected so a test
+/// starts no `claude`. A failure keeps it held and parked, and is the tool's
+/// result rather than another wake.
+pub async fn retry_with<F, Fut>(state: &Arc<DaemonState>, sub_id: &str, launch: F) -> Result<(), String>
+where
+    F: Fn(Arc<DaemonState>, String) -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
+    let name = state.registry.get(sub_id).map(|i| super::tool::label(&i)).unwrap_or_else(|| sub_id.chars().take(8).collect());
+    // Not every parked sub: one whose target ended blocked was parked by Joe's
+    // skip, and starting it is his decision.
+    let failed = super::plumbing::current(sub_id).is_some_and(|r| r.problem == super::plumbing::Problem::CouldNotStart);
+    if !is_held(sub_id) || !failed {
+        return Err(format!(
+            "{name} has no failed start to retry: retry is for a sub the app could not start. A queued sub starts by itself when what it waits for is done (action status says what that is)."
+        ));
+    }
+    set_parked(sub_id, false);
+    let _quiet = super::plumbing::quiet(sub_id);
+    match launch(state.clone(), sub_id.to_string()).await {
+        Ok(()) => {
+            super::plumbing::resolved(state, sub_id);
+            Ok(())
+        }
+        Err(e) => {
+            log::warn!("subchats: retrying held sub {sub_id} failed: {e}");
+            super::plumbing::report(state, sub_id, super::plumbing::Problem::CouldNotStart, e.clone(), Vec::new());
+            set_parked(sub_id, true);
+            Err(format!("{name} still could not start: {e}"))
+        }
+    }
+}
+
+/// [`retry_with`] against the real launcher.
+pub async fn retry(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), String> {
+    retry_with(state, sub_id, production_launch).await
 }
 
 /// Ends a held sub that will not run: Joe dropped it, or its main chat is gone.
@@ -481,7 +523,7 @@ pub(crate) enum Why {
     LaunchFailed(String),
 }
 
-/// Boxed because the card's answer can raise another card (a "Try again" that
+/// Boxed because the card's answer runs this again (a "Start it anyway" that
 /// fails), which makes this future contain itself; the compiler cannot prove such
 /// a future is `Send` unless the cycle goes through a trait object.
 pub(crate) fn raise_decision(state: &Arc<DaemonState>, held: &Held, why: Why) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
@@ -491,27 +533,24 @@ pub(crate) fn raise_decision(state: &Arc<DaemonState>, held: &Held, why: Why) ->
 
 async fn raise_decision_now(state: &Arc<DaemonState>, held: &Held, why: Why) {
     let sub_id = held.sub_id.as_str();
+    let (target, why) = match why {
+        // A failed start is plumbing: the main chat is told, Joe is not asked.
+        Why::LaunchFailed(err) => {
+            super::plumbing::report(state, sub_id, super::plumbing::Problem::CouldNotStart, err, Vec::new());
+            return;
+        }
+        Why::TargetBlocked { target, why } => (target, why),
+    };
     if cards::open_card_for(state, CARD_KIND, sub_id).await.is_some() {
         return;
     }
     let Some(parent) = state.registry.get(sub_id).and_then(|i| i.subchat_of) else { return };
     let name = state.registry.get(sub_id).and_then(|i| i.name).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "A sub".to_string());
-    let (question, options) = match &why {
-        Why::TargetBlocked { target, why } => (
-            format!("**{target}** ended blocked ({why}), and **{name}** was waiting for it.\n\nStart {name} anyway, or drop it?"),
-            vec![
-                CardOption::new(START_ANYWAY, "Run it now, without the earlier job"),
-                CardOption::new(DROP_IT, "Do not run it"),
-            ],
-        ),
-        Why::LaunchFailed(err) => (
-            format!("**{name}** could not start: {err}\n\nTry again, or drop it?"),
-            vec![
-                CardOption::new(TRY_AGAIN, "Start it again now"),
-                CardOption::new(DROP_IT, "Do not run it"),
-            ],
-        ),
-    };
+    let question = format!("**{target}** ended blocked ({why}), and **{name}** was waiting for it.\n\nStart {name} anyway, or drop it?");
+    let options = vec![
+        CardOption::new(START_ANYWAY, "Run it now, without the earlier job"),
+        CardOption::new(DROP_IT, "Do not run it"),
+    ];
     let card = RaisedCard {
         kind: CARD_KIND,
         display_session_id: parent,
@@ -532,14 +571,14 @@ async fn raise_decision_now(state: &Arc<DaemonState>, held: &Held, why: Why) {
 
 /// What each answer to the held-sub card does. A skip parks the sub until the
 /// next restart rather than asking again every minute, and so does a failed
-/// "Start it anyway": its next card is Joe's to answer, not the tick's to retry.
+/// "Start it anyway": the main chat is woken about it and retries it, not the tick.
 pub(crate) async fn apply_answer<F, Fut>(state: &Arc<DaemonState>, sub_id: &str, answer: CardAnswer, launch: &F)
 where
     F: Fn(Arc<DaemonState>, String) -> Fut,
     Fut: Future<Output = Result<(), String>>,
 {
     match answer {
-        CardAnswer::Picked(choice) if choice == START_ANYWAY || choice == TRY_AGAIN => {
+        CardAnswer::Picked(choice) if choice == START_ANYWAY => {
             set_parked(sub_id, false);
             if let Err(e) = launch(state.clone(), sub_id.to_string()).await {
                 log::warn!("subchats: held sub {sub_id} could not start: {e}");
@@ -752,7 +791,7 @@ pub(crate) fn rebuild_lost_hold(state: &Arc<DaemonState>, sub_id: &str, has_tran
 /// `--resume` would fail with "No conversation found" and raise the same card
 /// again. Instead its hold is rebuilt (even if it was rebuilt once already: Joe
 /// asked) and the held pass starts it if what it waits for is done. When nothing
-/// can rebuild the hold, Joe gets the launch-failed card. Returns false for a sub
+/// can rebuild the hold, the main chat is told it could not start. Returns false for a sub
 /// that did start, which a real nudge is for.
 pub(crate) async fn start_never_started_with<F, Fut>(
     state: &Arc<DaemonState>,
@@ -932,6 +971,11 @@ mod tests {
 
     async fn cards_of_kind(st: &Arc<DaemonState>) -> Vec<serde_json::Value> {
         st.list_prompts().await.into_iter().filter(|p| p["payload"]["card_kind"] == CARD_KIND).collect()
+    }
+
+    /// The main chat's queued wakes, oldest first.
+    fn wakes(st: &DaemonState, main: &str) -> Vec<String> {
+        st.repo_channel_wakes.lock().unwrap().get(main).map(|q| q.iter().map(|l| l.text.clone()).collect()).unwrap_or_default()
     }
 
     fn option_labels(card: &serde_json::Value) -> Vec<String> {
@@ -1214,8 +1258,10 @@ mod tests {
         assert_eq!(*seen.lock().unwrap(), ["rs-held"], "the finish that happened while down releases it");
     }
 
+    /// Fails on the old code, which put a "could not start: Try again / Drop it" card
+    /// in front of Joe.
     #[tokio::test]
-    async fn a_failed_start_keeps_the_sub_held_asks_joe_once_and_is_not_retried_every_tick() {
+    async fn a_failed_start_keeps_the_sub_held_wakes_the_main_chat_once_and_asks_joe_nothing() {
         let _d = TempDataDir::new();
         let st = state();
         sub_of(&st, "fl-main", "fl-target", "header");
@@ -1224,12 +1270,66 @@ mod tests {
         let seen = calls();
         release_ready(&st, failing_launcher(&seen)).await;
         release_ready(&st, failing_launcher(&seen)).await;
-        assert_eq!(seen.lock().unwrap().len(), 1, "a failure is Joe's to answer, not the tick's to retry");
+        assert_eq!(seen.lock().unwrap().len(), 1, "a failure is the main chat's to retry, not the tick's");
         assert!(is_held("fl-held"), "nothing is lost");
-        let cards = cards_of_kind(&st).await;
-        assert_eq!(cards.len(), 1);
-        assert_eq!(option_labels(&cards[0]), [TRY_AGAIN, DROP_IT]);
-        assert!(cards[0]["payload"]["questions"][0]["question"].as_str().unwrap().contains("no account is set up"));
+        assert!(st.list_prompts().await.is_empty(), "no card for Joe");
+        assert_eq!(wakes(&st, "fl-main").len(), 1, "the main chat is woken once");
+        assert!(wakes(&st, "fl-main")[0].contains("could not start") && wakes(&st, "fl-main")[0].contains("action retry"));
+        let rec = super::super::plumbing::current("fl-held").unwrap();
+        assert!(rec.detail.contains("no account is set up"), "status carries the error: {}", rec.detail);
+        super::super::plumbing::clear("fl-held");
+    }
+
+    /// `subchat retry` starts it by the code behind the old "Try again", and the
+    /// problem is gone once it runs.
+    #[tokio::test]
+    async fn retry_starts_a_sub_whose_start_failed_and_refuses_one_that_merely_waits() {
+        let _d = TempDataDir::new();
+        let st = state();
+        sub_of(&st, "rt-main", "rt-target", "header");
+        hold_behind(&st, "rt-main", "rt-waits", "footer", "rt-target", "header");
+        let seen = calls();
+        let err = retry_with(&st, "rt-waits", launcher(&seen)).await.unwrap_err();
+        assert!(err.contains("no failed start"), "{err}");
+        assert!(seen.lock().unwrap().is_empty(), "a sub that only waits is not started out of order");
+
+        st.registry.set_subchat_finished("rt-target", true);
+        release_ready(&st, failing_launcher(&seen)).await;
+        assert!(super::super::plumbing::current("rt-waits").is_some());
+        // Still failing: the tool says so, and the main chat is not woken a second time.
+        let err = retry_with(&st, "rt-waits", failing_launcher(&seen)).await.unwrap_err();
+        assert!(err.contains("still could not start") && err.contains("no account is set up"), "{err}");
+        assert_eq!(wakes(&st, "rt-main").len(), 1);
+        assert!(is_held("rt-waits"));
+        // Fixed: it starts.
+        retry_with(&st, "rt-waits", launcher(&seen)).await.unwrap();
+        assert_eq!(seen.lock().unwrap().last().map(String::as_str), Some("rt-waits"));
+        assert!(!is_held("rt-waits"));
+        assert!(super::super::plumbing::current("rt-waits").is_none(), "resolved");
+    }
+
+    /// A held card still open when the sub starts comes down with the problem.
+    #[tokio::test]
+    async fn a_held_card_still_open_closes_when_the_sub_starts() {
+        let _d = TempDataDir::new();
+        let st = state();
+        sub_of(&st, "hc-main", "hc-target", "header");
+        st.registry.mark_ended("hc-target", crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
+        hold_behind(&st, "hc-main", "hc-held", "footer", "hc-target", "header");
+        let seen = calls();
+        release_ready(&st, launcher(&seen)).await;
+        assert_eq!(cards_of_kind(&st).await.len(), 1, "the blocked target asks Joe");
+        super::super::plumbing::report(&st, "hc-held", super::super::plumbing::Problem::CouldNotStart, "x".into(), vec![]);
+        retry_with(&st, "hc-held", launcher(&seen)).await.unwrap();
+        let mut gone = false;
+        for _ in 0..200 {
+            if cards_of_kind(&st).await.is_empty() {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(gone, "the card about it closed once it started");
     }
 
     #[tokio::test]
@@ -1568,7 +1668,7 @@ mod tests {
     /// A worktree sub's hold is not rebuilt here (its tree has its own start path),
     /// so a nudge that reports "handled" would spend Joe's answer with nothing started.
     #[tokio::test]
-    async fn a_nudge_on_a_never_started_sub_that_cannot_be_rebuilt_raises_a_card_instead_of_doing_nothing() {
+    async fn a_nudge_on_a_never_started_sub_that_cannot_be_rebuilt_wakes_the_main_chat_instead_of_doing_nothing() {
         let _d = TempDataDir::new();
         let st = state();
         lost_sub(&st, "nw-main", "nw-tree", "footer", None);
@@ -1579,9 +1679,9 @@ mod tests {
         assert!(start_never_started_with(&st, "nw-tree", &no_transcript, launcher(&c)).await, "it is a never-started sub, so the nudge is handled");
         assert!(c.lock().unwrap().is_empty(), "nothing could be launched");
         assert!(!is_held("nw-tree"));
-        let cards = cards_of_kind(&st).await;
-        assert_eq!(cards.len(), 1, "Joe is told, not left with a spent answer");
-        assert_eq!(option_labels(&cards[0]), [TRY_AGAIN, DROP_IT]);
-        assert!(cards[0]["payload"]["questions"][0]["question"].as_str().unwrap().contains("could not be rebuilt"));
+        assert!(cards_of_kind(&st).await.is_empty(), "no card for Joe");
+        assert_eq!(wakes(&st, "nw-main").len(), 1, "the main chat is told, so the answer is not spent on nothing");
+        assert!(super::super::plumbing::current("nw-tree").unwrap().detail.contains("could not be rebuilt"));
+        super::super::plumbing::clear("nw-tree");
     }
 }

@@ -779,21 +779,17 @@ fn report(state: &Arc<DaemonState>, sub_id: &str, root: Option<&Path>, b: &Block
 }
 
 /// Lands the sub's commits. A refusal is handed to `merge_followup`, which tells
-/// the sub or asks Joe on a card, and returns the `blocker` card to draw (if any).
+/// the sub, keeps the merge pending, or wakes the main chat; never a card for Joe.
 pub fn land_and_report(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo) -> Landing {
     let landing = land(sub_id, info);
     match &landing {
-        Landing::Blocked(b) => {
-            if let Some(card) = super::merge_followup::on_blocked(state, sub_id, info, b) {
-                report(state, sub_id, None, &card);
-            }
-        }
-        _ => super::merge_followup::on_landed(sub_id),
+        Landing::Blocked(b) => super::merge_followup::on_blocked(state, sub_id, info, b),
+        _ => super::merge_followup::on_landed(state, sub_id),
     }
     landing
 }
 
-/// [`land_and_report`] as a merge in its own right (a retry Joe asked for): counted
+/// [`land_and_report`] as a merge in its own right (a retry by the tick or the main chat): counted
 /// like the one `defer` runs, so a gate that asks meanwhile waits for it.
 pub(super) fn land_counted(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo) -> Landing {
     let key = project_key(Path::new(&info.repo));
@@ -862,7 +858,8 @@ fn update_blocker(info: &WorktreeInfo, update: Update) -> Option<Blocked> {
 
 /// A continued sub's first step: its branch is brought up to date with the target
 /// before its message is sent. A conflict does not stop the message (the sub is
-/// the one who resolves it); it draws a `blocker` card.
+/// the one who resolves it); like any failure here it wakes the main chat
+/// (`plumbing`), never a card for Joe.
 pub async fn before_continue(state: &Arc<DaemonState>, sub_id: &str) {
     let Some(info) = info_of(sub_id) else { return };
     // A closed sub brought back is not closed any more: the boot sweep must not
@@ -885,26 +882,20 @@ pub async fn before_continue(state: &Arc<DaemonState>, sub_id: &str) {
         if b.cause == Cause::Conflict && super::merge_followup::unresolved(sub_id) {
             return;
         }
-        report(state, sub_id, None, &b);
+        super::plumbing::report(state, sub_id, super::plumbing::Problem::NotUpToDate, b.text, b.points);
     }
 }
 
 /// Runs in the held launch, before the child starts: sets the tree up and brings
-/// its branch up to date. `Err` stops the launch and has drawn a `blocker` card,
-/// so a sub never runs in a tree that is not ready.
+/// its branch up to date. `Err` stops the launch, so a sub never runs in a tree
+/// that is not ready; the launch's caller hands the error to the main chat.
 pub async fn before_launch(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), String> {
     let Some(info) = info_of(sub_id) else { return Ok(()) };
     let setup_info = info.clone();
     let setup = tokio::task::spawn_blocking(move || ensure_setup(&setup_info)).await.unwrap_or_else(|e| Err(e.to_string()));
     if let Err(why) = setup {
-        let b = Blocked {
-            verdict: "Worktree setup failed",
-            text: format!("Its worktree at {} could not be set up: {why}. The sub was not started.", info.path),
-            points: Vec::new(),
-            cause: Cause::Other,
-        };
-        report(state, sub_id, None, &b);
-        return Err(format!("its worktree could not be set up: {why}"));
+        log::warn!("subchats: the worktree of {sub_id} at {} could not be set up: {why}", info.path);
+        return Err(format!("its worktree at {} could not be set up: {why}", info.path));
     }
     before_continue(state, sub_id).await;
     Ok(())
@@ -1431,6 +1422,11 @@ mod tests {
         card_log::read(parent).into_iter().filter(|c| c.kind == card_log::KIND_BLOCKER).collect()
     }
 
+    /// The wakes queued for `parent`, the main chat a plumbing problem goes to.
+    fn wakes(st: &DaemonState, parent: &str) -> usize {
+        st.repo_channel_wakes.lock().unwrap().get(parent).map_or(0, |q| q.len())
+    }
+
     // ---- when it applies ----------------------------------------------------------
 
     #[test]
@@ -1576,7 +1572,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dirty_overlap_refuses_draws_a_blocker_card_naming_the_file_and_clobbers_nothing() {
+    fn a_dirty_overlap_refuses_keeps_the_merge_pending_on_the_file_and_clobbers_nothing() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         let st = state();
@@ -1590,9 +1586,10 @@ mod tests {
         assert_eq!(raw(&root.join("base.txt")), b"mine, not committed\n", "not a byte of it was touched");
         assert_eq!(git::head(&root).unwrap(), head_before, "the target did not move");
         assert_eq!(count(Path::new(&info.path), &format!("{}..HEAD", branch_ref(&info.target))), Some(1), "the commit is safe");
-        let cards = blockers("overlap-main");
-        assert_eq!(cards.len(), 1, "{cards:?}");
-        assert!(cards[0].points.contains(&"base.txt".to_string()) && cards[0].text.contains("uncommitted"), "{:?}", cards[0]);
+        assert!(b.text.contains("uncommitted"), "{}", b.text);
+        assert!(blockers("overlap-main").is_empty(), "another chat's edit is nobody's card");
+        assert_eq!(wakes(&st, "overlap-main"), 0, "and wakes nobody");
+        assert_eq!(super::super::pending_merges::get(&id).unwrap().files, vec!["base.txt".to_string()]);
     }
 
     /// A file git ignores is invisible to the dirty check, so a sub that commits
@@ -1617,9 +1614,9 @@ mod tests {
         assert_eq!(raw(&root.join("secret.env")), b"API_KEY=mine\n", "not a byte of the ignored file was touched");
         assert_eq!(git::head(&root).unwrap(), head_before, "the target did not move");
         assert_eq!(count(&wt, &format!("{}..HEAD", branch_ref(&info.target))), Some(1), "the commit is safe");
-        let cards = blockers("ignored-main");
-        assert_eq!(cards.len(), 1, "{cards:?}");
-        assert!(cards[0].points.contains(&"secret.env".to_string()), "{:?}", cards[0]);
+        assert!(blockers("ignored-main").is_empty(), "no card for Joe");
+        assert_eq!(wakes(&st, "ignored-main"), 1, "the main chat is handed it");
+        assert!(super::super::plumbing::current(&id).unwrap().files.contains(&"secret.env".to_string()));
     }
 
     #[test]
@@ -1636,7 +1633,7 @@ mod tests {
     }
 
     #[test]
-    fn a_merge_conflict_draws_a_blocker_card_keeps_the_commits_and_a_resolved_finish_merges() {
+    fn a_merge_conflict_keeps_the_commits_draws_no_card_and_a_resolved_finish_merges() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         let st = state();
@@ -1652,9 +1649,9 @@ mod tests {
         assert_eq!(count(&wt, &format!("{}..HEAD", branch_ref(&info.target))), Some(1), "its commit is not lost");
         assert!(run(&wt, &["status", "--porcelain"]).out.is_empty(), "the rebase was aborted, not left half done");
         assert_eq!(read(&root.join("base.txt")), "peer's line\n");
-        let cards = blockers("conflict-main");
-        assert_eq!(cards.len(), 1);
-        assert_eq!(cards[0].points, vec!["base.txt".to_string()]);
+        assert!(blockers("conflict-main").is_empty(), "no card for Joe");
+        // No runtime here to tell the sub on, so the main chat is handed it.
+        assert_eq!(super::super::plumbing::current(&id).unwrap().files, vec!["base.txt".to_string()]);
         // The sub resolves it the way the card told it to, then finishes again.
         let t = branch_ref(&info.target);
         assert!(!run(&wt, &["rebase", &t]).ok, "the sub's own rebase hits the same conflict");
@@ -1713,7 +1710,8 @@ mod tests {
         assert!(b.text.contains("elsewhere") && b.text.contains(&info.target), "{}", b.text);
         assert_eq!(git::head(&root), other_head, "the wrong branch was not touched");
         assert!(!root.join("a.txt").exists());
-        assert_eq!(blockers("switched-main").len(), 1);
+        assert!(blockers("switched-main").is_empty());
+        assert_eq!(wakes(&st, "switched-main"), 1);
     }
 
     #[test]
@@ -1783,7 +1781,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_continue_that_conflicts_draws_a_blocker_card_and_leaves_the_branch_alone() {
+    async fn a_continue_that_conflicts_wakes_the_main_chat_and_leaves_the_branch_alone() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         let st = state();
@@ -1793,9 +1791,10 @@ mod tests {
         let before = git::head(Path::new(&info.path));
         before_continue(&st, &id).await;
         assert_eq!(git::head(Path::new(&info.path)), before, "nothing was rewritten");
-        let cards = blockers("cont-conflict-main");
-        assert_eq!(cards.len(), 1);
-        assert_eq!(cards[0].points, vec!["base.txt".to_string()]);
+        assert!(blockers("cont-conflict-main").is_empty(), "no card for Joe");
+        assert_eq!(wakes(&st, "cont-conflict-main"), 1);
+        let rec = super::super::plumbing::current(&id).unwrap();
+        assert_eq!((rec.problem, rec.files), (super::super::plumbing::Problem::NotUpToDate, vec!["base.txt".to_string()]));
     }
 
     // ---- setting up ---------------------------------------------------------------------------
@@ -1823,7 +1822,7 @@ mod tests {
 
     #[cfg(windows)]
     #[tokio::test]
-    async fn a_failing_bootstrap_script_draws_a_blocker_card_and_stops_the_launch() {
+    async fn a_failing_bootstrap_script_stops_the_launch_and_draws_no_card() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         std::fs::create_dir_all(root.join("scripts")).unwrap();
@@ -1832,10 +1831,8 @@ mod tests {
         let (id, _info) = new_sub(&st, "badscript", &root);
         let err = before_launch(&st, &id).await.expect_err("a broken tree must not start a sub");
         assert!(err.contains("could not be set up"), "{err}");
-        let cards = blockers("badscript-main");
-        assert_eq!(cards.len(), 1);
-        assert_eq!(cards[0].verdict, "Worktree setup failed");
-        assert!(cards[0].text.contains("bootstrap-worktree.ps1"), "{}", cards[0].text);
+        assert!(err.contains("bootstrap-worktree.ps1"), "{err}");
+        assert!(blockers("badscript-main").is_empty(), "the launch's caller hands it to the main chat");
     }
 
     #[cfg(windows)]
