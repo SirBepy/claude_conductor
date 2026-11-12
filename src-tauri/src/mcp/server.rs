@@ -545,13 +545,14 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         POSTED_URLS.with(|u| u.borrow_mut().clear());
         POSTED_BODIES.with(|b| b.borrow_mut().clear());
-        let args = json!({"verdict": "Done", "text": "ok", "decided": ["nothing"], "ruled_out": ["nothing"], "reviewer_tool_use_id": "toolu_1"});
+        let args = json!({"verdict": "Done", "text": "ok", "decided": ["nothing"], "ruled_out": ["nothing"], "learned": ["nothing"], "reviewer_tool_use_id": "toolu_1"});
         dispatch_tool_with(&rt, &json!(1), "finish_subchat", &args, "sub-1", 1234, fake_http_post);
         let posted = POSTED_URLS.with(|u| u.borrow().clone());
         assert!(posted.iter().any(|u| u.ends_with("/subchats/finish")), "posted {posted:?}");
         let body = POSTED_BODIES.with(|b| b.borrow()[0].clone());
         assert_eq!(body["reviewer_tool_use_id"], json!("toolu_1"));
         assert_eq!(body["decided"], json!(["nothing"]));
+        assert_eq!(body["learned"], json!(["nothing"]));
         assert_eq!(body["session_id"], json!("sub-1"));
     }
 
