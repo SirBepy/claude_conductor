@@ -34,11 +34,12 @@ export function template() {
         </button>` : ""}
       </div>
       <!--
-        Host for the controls that now live inside the "more options" overflow
-        menu. They render here (hidden) so their existing handlers in
-        sessions.ts still bind by id at mount; openViewMoreMenu() relocates the
-        live nodes into the menu on open and moves them back on close, keeping
-        the bound listeners intact.
+        Host for the controls that live inside the phone's "more options"
+        overflow menu. They render here (hidden) so their existing handlers in
+        sessions.ts still bind by id at mount; toggleViewMoreMenu() relocates
+        the live nodes into the menu on open and moves them back on close,
+        keeping the bound listeners intact. On the desktop the host stays
+        hidden and the nodes are only bound by id.
       -->
       <div id="view-more-host" hidden>
         <button

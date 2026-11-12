@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 //
-// The Chats header menu's General section: on the desktop it carries New chat
-// only, because History lives on the project dashboard, Preview is a tab in the
-// chat's tool strip and Scheduled is the right rail's Schedule icon. The phone
-// has none of those yet, so it keeps History, Preview and Scheduled here.
+// The phone's Chats header menu: its General section carries New chat, History,
+// Preview and Scheduled, and it has no desktop-only "When done" row. The button
+// that opens it renders on the phone only (template.ts), so the desktop is not
+// exercised here.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -44,20 +44,18 @@ describe("Chats header menu, General section", () => {
     localStorage.clear();
   });
 
-  it("on the desktop has no History, Preview or Scheduled, and gives the buttons back to the host on close", () => {
-    transport.remote = false;
-    toggleViewMoreMenu(mountHeader());
-    const items = generalItems();
-    expect(items).toContain("New chat");
-    for (const gone of ["History", "Preview", "Scheduled"]) expect(items.join("|")).not.toContain(gone);
-    closeViewMoreMenu();
-    expect(document.querySelectorAll("#view-more-host > button")).toHaveLength(3);
-  });
-
-  it("on the phone keeps History, Preview and Scheduled", () => {
+  it("on the phone has New chat, History, Preview and Scheduled, and no When done", () => {
     transport.remote = true;
     toggleViewMoreMenu(mountHeader());
     const items = generalItems().join("|");
     for (const kept of ["New chat", "History", "Preview", "Scheduled"]) expect(items).toContain(kept);
+    expect(items).not.toContain("When done");
+  });
+
+  it("gives the relocated buttons back to the host on close", () => {
+    transport.remote = true;
+    toggleViewMoreMenu(mountHeader());
+    closeViewMoreMenu();
+    expect(document.querySelectorAll("#view-more-host > button")).toHaveLength(3);
   });
 });
