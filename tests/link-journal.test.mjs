@@ -48,6 +48,7 @@ beforeEach(() => {
   globalThis.localStorage = makeLocalStorage();
   globalThis.window = makeWindow();
   globalThis.document = Object.assign(new EventTarget(), { visibilityState: "visible" });
+  globalThis.location = { hostname: "127.0.0.1", port: "27300" };
 });
 
 afterEach(() => {
@@ -136,6 +137,34 @@ describe("flush", () => {
     expect(linesOf(1)[0]).toContain(" visible");
   });
 
+  it("a refused batch (kept 0) stays pending and the next flush resends it", async () => {
+    const j = await fresh();
+    j.note("visible");
+    h.call.mockResolvedValueOnce({ ok: true, kept: 0 });
+    await j.flush();
+    vi.advanceTimersByTime(7000);
+    await j.flush();
+    expect(h.call).toHaveBeenCalledTimes(2);
+    expect(linesOf(1)).toEqual(linesOf(0));
+    vi.advanceTimersByTime(7000);
+    await j.flush();
+    expect(h.call).toHaveBeenCalledTimes(2); // accepted the second time (no kept field)
+  });
+
+  it("an answer with kept above 0, or with no kept at all (an older PC), counts as accepted", async () => {
+    for (const answer of [{ ok: true, kept: 3 }, { ok: true }, undefined, null]) {
+      h.call.mockReset();
+      h.call.mockResolvedValue(answer);
+      const j = await fresh();
+      j.note("visible");
+      await j.flush();
+      vi.advanceTimersByTime(7000);
+      await j.flush();
+      expect(h.call).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(7000);
+    }
+  });
+
   it("never calls more often than every 6s", async () => {
     const j = await fresh();
     j.note("visible");
@@ -175,9 +204,53 @@ describe("tunnel journal (Android shell)", () => {
     const j = await fresh();
     j.note("visible");
     await j.flush();
-    expect(fetchMock).toHaveBeenCalledWith("/__tunnel/journal", { cache: "no-store" });
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:27301/", expect.objectContaining({ cache: "no-store" }));
     expect(linesOf(0)).toHaveLength(1);
     expect(linesOf(0)[0]).toContain(" p visible");
+  });
+
+  it("reads the journal port (page port + 1), never the page's own origin, with no credentials or headers", async () => {
+    globalThis.window = makeWindow({ ConductorPush: {} });
+    fetchMock.mockResolvedValue(jsonAnswer({ v: 1, events: [] }));
+    const j = await fresh();
+    j.note("visible");
+    await j.flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://127.0.0.1:27301/");
+    expect(init.headers).toBeUndefined();
+    expect(init.credentials).toBeUndefined();
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("skips the tunnel fetch when the page is not on 127.0.0.1 with a numeric port", async () => {
+    globalThis.window = makeWindow({ ConductorPush: {} });
+    for (const loc of [
+      { hostname: "192.168.1.5", port: "27300" },
+      { hostname: "localhost", port: "27300" },
+      { hostname: "127.0.0.1", port: "" },
+    ]) {
+      globalThis.location = loc;
+      const j = await fresh();
+      j.note("visible");
+      await j.flush();
+      expect(linesOf(h.call.mock.calls.length - 1)).toHaveLength(1);
+      vi.advanceTimersByTime(7000);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("gives up on a stuck journal port after 3s and still uploads the page's events", async () => {
+    globalThis.window = makeWindow({ ConductorPush: {} });
+    fetchMock.mockImplementation(
+      (_url, init) => new Promise((_res, rej) => init.signal.addEventListener("abort", () => rej(new Error("aborted")))),
+    );
+    const j = await fresh();
+    j.note("visible");
+    const done = j.flush();
+    await vi.advanceTimersByTimeAsync(3100);
+    await done;
+    expect(linesOf(0)).toHaveLength(1);
   });
 
   it("ignores a JSON body without v 1 and an events array", async () => {
