@@ -70,8 +70,10 @@ describe("htmlToMarkdown", () => {
     expect(md("<p><a>bare</a></p>")).toBe("bare");
   });
 
-  it("quotes a blockquote line by line", () => {
-    expect(md("<blockquote><p>one</p><p>two</p></blockquote>")).toBe("> one\n\n> two");
+  // A blank `>` line keeps both paragraphs in ONE quote; a bare blank line
+  // would split them into two quotes (and a speaker line from its words).
+  it("quotes a blockquote line by line, as one quote", () => {
+    expect(md("<blockquote><p>one</p><p>two</p></blockquote>")).toBe("> one\n>\n> two");
   });
 
   it("turns a br into a newline rather than dropping it", () => {

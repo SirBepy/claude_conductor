@@ -3,6 +3,7 @@ import type { ContentBlock } from "../../types/ipc.generated";
 import { escapeHtml } from "../escape-html";
 import { parseFileEdit } from "./file-edits";
 import { keepFilePathsLiteral } from "./file-ref-match";
+import { quoteSpeakers } from "./markdown-quote";
 import { renderEditWindow } from "./edit-window";
 import { renderMessageCard } from "./chat-message-card";
 import { renderSubCard } from "./chat-subchat-card";
@@ -51,6 +52,8 @@ const mdBreaks = new MarkdownIt({
 mdBreaks.linkify.tlds("md", false);
 md.use(keepFilePathsLiteral);
 mdBreaks.use(keepFilePathsLiteral);
+md.use(quoteSpeakers);
+mdBreaks.use(quoteSpeakers);
 
 // Every markdown instance here keeps html:false. Assistant text is not a trust
 // boundary - it is shaped by whatever files, tool results and web pages the
@@ -354,22 +357,4 @@ export function renderMessage(m: RenderedMessage): string {
 export function renderMarkdown(text: string, breaks = false): string {
   const inst = breaks ? mdBreaks : md;
   return markTodoRefs(markCommitCandidates(highlightKeywords(wrapTables(linkifyInlineCodeUrls(highlightSlashMentions(inst.render(text)), inst)))));
-}
-
-export function wrapBlockquotes(container: HTMLElement): void {
-  const quotes = Array.from(
-    container.querySelectorAll<HTMLElement>(".msg.assistant blockquote:not([data-wrapped])"),
-  ).filter((bq) => !bq.closest(".drill-pop")); // an open detail card is never re-processed
-  for (const bq of quotes) {
-    bq.dataset.wrapped = "true";
-    const wrapper = document.createElement("div");
-    wrapper.className = "copyable-block card-block";
-    bq.parentNode!.insertBefore(wrapper, bq);
-    wrapper.appendChild(bq);
-    const btn = document.createElement("button");
-    btn.className = "copy-btn";
-    btn.setAttribute("aria-label", "Copy");
-    btn.innerHTML = '<i class="ph ph-copy"></i>';
-    wrapper.appendChild(btn);
-  }
 }

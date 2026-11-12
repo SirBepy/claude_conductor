@@ -5,7 +5,7 @@
 // pieces of instance state and TS has no partial classes. `r`'s members are the
 // internal contract; behavior is byte-identical to the pre-split methods.
 
-import { wrapBlockquotes, RenderedMessage, renderMessage } from "./chat-transforms";
+import { RenderedMessage, renderMessage } from "./chat-transforms";
 import { highlightCodeBlocks, highlightInlineCode } from "./code-highlighter";
 import { hydrateAttachments } from "./attachment-hydrator";
 import { resolveCommitRefs } from "./commit-refs";
@@ -140,7 +140,6 @@ export function flushRender(r: ChatRenderer): void {
   if (touchedEls.length === 0) return;
   for (const el of touchedEls) {
     void highlightCodeBlocks(el);
-    wrapBlockquotes(el);
     highlightInlineCode(el);
     linkifyDrillRefs(el, r.container);
     linkifyFilePaths(el);

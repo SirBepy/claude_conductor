@@ -1,3 +1,4 @@
+// Reviewed 2026-11-12 (quotes as reply bubbles): renderMarkdown tags every blockquote .md-quote and lifts a leading **Name:** onto a speaker line, the transcript no longer wraps a quote in a copy card (.card-block is gone), and the draft editor's blockquote rule moved into the shared one; nothing this spec asserts changed, and it passes (chat-message-cards and subchat-passed fail their phone-width overflow tests on pristine HEAD too).
 // Reviewed 2026-11-10: chat-dom-renderer.ts's flushRender also fires the renderer's onFlushed hook; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-05: renderMessage gained a "passed" row kind (the quiet "Passed to X" line); every other kind renders as before - this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-01: chat-dom-renderer.ts gained describeActivityFull for the working bar's label; the PR card path this spec drives is untouched and it passes.
