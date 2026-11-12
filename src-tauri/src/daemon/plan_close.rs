@@ -52,6 +52,11 @@ impl PlanCloseGate {
         guard.insert(session_id.to_string(), Track { open, turn_gen, warned: false });
     }
 
+    /// The chat ended: drop its plan track so the map holds only live chats.
+    pub fn forget(&self, session_id: &str) {
+        self.inner.lock().unwrap().remove(session_id);
+    }
+
     /// A job end (`done`, `finish_subchat`): the refusal to send back, or None to
     /// let it through. `retry` names the tool to call again.
     pub fn check_end(&self, session_id: &str, turn_gen: u64, retry: &str) -> Option<String> {
@@ -86,6 +91,17 @@ mod tests {
 
     fn step(text: &str, status: &str) -> PlanStepSnapshot {
         PlanStepSnapshot { text: text.to_string(), status: status.to_string() }
+    }
+
+    #[test]
+    fn forgetting_a_chat_drops_its_plan_track() {
+        let g = PlanCloseGate::new();
+        g.record("a", 1, &[step("Read", "pending")]);
+        g.record("b", 1, &[step("Read", "pending")]);
+        g.forget("a");
+        assert_eq!(g.inner.lock().unwrap().len(), 1);
+        assert!(g.check_end("a", 1, "x").is_none());
+        assert!(g.check_end("b", 1, "x").is_some());
     }
 
     #[test]

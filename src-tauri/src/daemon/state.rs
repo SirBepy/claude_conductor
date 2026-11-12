@@ -222,6 +222,9 @@ impl DaemonState {
         let weak = Arc::downgrade(&state);
         state.registry.set_ended_hook(Arc::new(move |sid| {
             if let Some(state) = weak.upgrade() {
+                // Per-chat maps that would otherwise keep one entry per chat until restart.
+                state.notify_gate.forget(sid);
+                state.plan_close.forget(sid);
                 crate::daemon::subchats::on_chat_ended(&state, sid);
             }
         }));
@@ -306,6 +309,12 @@ impl DaemonState {
     /// request as a change. The clear is spawned so no prompt path waits on the relay.
     pub fn fire_prompts_resolved(&self, session_id: &str) {
         self.notify_gate.reset(session_id);
+        self.clear_resolved_banner(session_id);
+    }
+
+    /// The banner half of [`Self::fire_prompts_resolved`], for a caller that
+    /// already reset the notify gate under the prompts lock.
+    pub(crate) fn clear_resolved_banner(&self, session_id: &str) {
         let Some(pm) = self.push.get().cloned() else { return };
         let sid = session_id.to_string();
         tokio::spawn(async move {
@@ -319,6 +328,17 @@ mod tests {
     use super::*;
     use crate::daemon::session::new_session_map;
     use crate::types::Settings;
+
+    #[test]
+    fn ending_a_chat_prunes_its_notify_gate_and_plan_close_entries() {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        st.registry.upsert_interactive("c1", std::path::Path::new("."), "proj", "2026-11-12T00:00:00Z");
+        st.notify_gate.turn_started("c1");
+        st.plan_close.record("c1", 1, &[crate::types::PlanStepSnapshot { text: "a".into(), status: "pending".into() }]);
+        st.registry.mark_ended("c1", crate::types::EndReason::Manual, "2026-11-12T00:01:00Z");
+        assert_eq!(st.notify_gate.turn("c1"), 0, "turn count dropped");
+        assert!(st.plan_close.check_end("c1", 1, "x").is_none(), "plan track dropped");
+    }
 
     #[tokio::test]
     async fn state_constructs_with_empty_registry_and_pending() {

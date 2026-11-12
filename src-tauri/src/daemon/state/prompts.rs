@@ -29,13 +29,18 @@ impl DaemonState {
             let resolved = removed
                 .and_then(|v| v["payload"]["session_id"].as_str().map(str::to_string))
                 .filter(|sid| !any_prompt_for(&prompts, sid));
+            // Reset under the prompts lock: a new prompt's `add_prompt` waits for
+            // it, so the Push that prompt then offers is never the one cleared.
+            if let Some(sid) = &resolved {
+                self.notify_gate.reset(sid);
+            }
             (resolved, durable)
         };
         if was_durable_question {
             self.persist_pending_questions().await;
         }
         if let Some(sid) = resolved {
-            self.fire_prompts_resolved(&sid);
+            self.clear_resolved_banner(&sid);
         }
     }
 
