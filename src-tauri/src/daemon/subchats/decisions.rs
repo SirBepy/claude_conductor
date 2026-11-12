@@ -44,9 +44,8 @@ const STORED_CAP: usize = 4000;
 
 const FILE_HEADER: &str = "# Decisions log\n\nWritten by the Conductor daemon only. Do not edit. Entries are never deleted: one that a later entry replaces is marked `Closed by` and is no longer current. `card` entries are Joe's own answers to a question card, word for word. `finish` entries are what a sub reported when it finished.\n";
 
-/// Serializes every read-modify-write of every log (and the checkup counters
-/// that share a respawn move). Contention is a handful of tiny files a few
-/// times an hour, so one lock beats one per file.
+/// Serializes every read-modify-write of every log. Contention is a handful of
+/// tiny files a few times an hour, so one lock beats one per file.
 static LOG_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -278,7 +277,7 @@ pub fn parse(text: &str) -> Vec<Entry> {
 /// The app data dir. Under `cfg(test)` it is `None` unless `CC_DATA_DIR` points
 /// somewhere, so a unit test that reaches the finish seam without a scratch
 /// folder (the turn-end tests do) cannot write into the developer's real app
-/// data, where a checkup counter would start his first-week window.
+/// data.
 pub(crate) fn data_root() -> Option<PathBuf> {
     #[cfg(test)]
     if std::env::var_os("CC_DATA_DIR").is_none() {
@@ -314,8 +313,7 @@ pub fn read_log(parent_id: &str) -> Option<String> {
     (!text.trim().is_empty()).then_some(text)
 }
 
-/// Moves a log to the chat that took over (`respawn`), counters included, so the
-/// successor's first checkup does not start the week over. A destination that
+/// Moves a log to the chat that took over (`respawn`). A destination that
 /// already has a log is left alone: overwriting it would lose entries.
 pub fn move_log(old_parent_id: &str, new_parent_id: &str) {
     if let Some(root) = data_root() {
@@ -336,7 +334,6 @@ pub(crate) fn move_log_in(root: &Path, old_parent_id: &str, new_parent_id: &str)
             log::warn!("subchats: could not move the decisions log {old_parent_id} -> {new_parent_id}: {e}");
         }
     }
-    super::checkup::move_counters_in(root, old_parent_id, new_parent_id);
 }
 
 fn load_in(root: &Path, parent_id: &str) -> Vec<Entry> {
@@ -599,8 +596,10 @@ pub(crate) async fn record_card_message(state: &Arc<DaemonState>, request_id: &s
 
 // ---- finish ---------------------------------------------------------------
 
-/// What `on_finished` calls: files the sub's finish rows, writes its digest, and
-/// lets the checkup counter know. Reads the record the finish path just stored.
+/// What `on_finished` calls: files the sub's finish rows and writes its digest.
+/// Reads the record the finish path just stored. Nothing here ever raises a card
+/// or runs a model: a "checkup" of the log used to, and Joe could not tell what
+/// it was asking.
 pub(crate) fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     let Some(root) = data_root() else { return };
     let Some(record) = super::finish::read_record_in(&root, sub_id) else { return };
@@ -614,7 +613,6 @@ pub(crate) fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     let ids = record_finish_in(&root, &parent, &who, &record, &today());
     log::info!("subchats: {sub_id} added {} decision log entries to {parent}", ids.len());
     write_digest_in(&root, &who, &record);
-    super::checkup::after_finish(state, &parent, record.round);
 }
 
 // ---- the /close digest feed -----------------------------------------------
@@ -1204,5 +1202,30 @@ mod tests {
         crate::daemon::subchats::on_finished(&st, "of-sub");
         assert_eq!(live_bodies(&root, "of-main"), ["Use CSS grid", "Flexbox"]);
         assert!(root.join("subchats").join("of-sub.digest.md").exists());
+    }
+
+    /// Joe could not tell what the "Decisions checkup" card asked, so finishing subs
+    /// never raises a card or runs a model any more, however many of them finish
+    /// (the old checkup fired on a main chat's 1st finish and then every 5th).
+    #[tokio::test]
+    async fn finishing_subs_raises_no_checkup_card_and_keeps_no_checkup_counter() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let st = state();
+        let root = data_root().unwrap();
+        for n in 1..=6 {
+            let sub = format!("nc-sub-{n}");
+            sub_of(&st, "nc-main", &sub, &format!("job {n}"));
+            let mut r = rec(&sub, &[&format!("Decision {n}")], &["nothing"]);
+            r.parent_id = Some("nc-main".into());
+            crate::util::write_json_atomic(&root.join("subchats").join(format!("{sub}.finish.json")), &serde_json::to_string(&r).unwrap()).unwrap();
+            crate::daemon::subchats::on_finished(&st, &sub);
+        }
+        // The old checkup ran detached, so give it the time it would have needed.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let checkup_cards: Vec<_> =
+            st.list_prompts().await.into_iter().filter(|p| p["payload"]["card_kind"] == "subchat_checkup").collect();
+        assert!(checkup_cards.is_empty(), "{checkup_cards:?}");
+        assert!(!root.join("subchats").join("checkups.json").exists(), "nothing counts finishes for a checkup");
+        assert_eq!(live_bodies(&root, "nc-main").len(), 6, "the log itself is still written");
     }
 }

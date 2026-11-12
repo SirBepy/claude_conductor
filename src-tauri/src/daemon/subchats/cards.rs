@@ -1,5 +1,5 @@
 //! Cards the daemon itself raises for Joe: a stalled sub, a parent that cannot
-//! close with subs running, a sub past its ceiling, a checkup finding. One
+//! close with subs running, a sub past its ceiling or short of context. One
 //! function, [`raise_card`], so every later step uses the same path.
 //!
 //! A raised card is an ordinary question card to everything that renders and

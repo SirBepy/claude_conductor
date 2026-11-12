@@ -96,7 +96,7 @@ pub fn score_context(occupancies: &[u64], model: &str) -> Option<ContextStatus> 
 
 /// [`score_context`] from the two numbers it actually needs, so a reader that
 /// keeps a running `(last, max)` instead of every occupancy scores identically.
-fn score_parts(occupancy: u64, max_occupancy: u64, model: &str) -> ContextStatus {
+pub(crate) fn score_parts(occupancy: u64, max_occupancy: u64, model: &str) -> ContextStatus {
     let mut window = model_window(model);
     let sticky_fired = max_occupancy > 200_000;
     if sticky_fired {
@@ -132,7 +132,7 @@ fn score_parts(occupancy: u64, max_occupancy: u64, model: &str) -> ContextStatus
 /// Returns `(occupancy, model)` where occupancy = input + cache_read +
 /// cache_creation, and model is the message.model field if present. Returns
 /// None for lines that carry no `message.usage.input_tokens` block.
-fn usage_from_line(v: &serde_json::Value) -> Option<(u64, Option<String>)> {
+pub(crate) fn usage_from_line(v: &serde_json::Value) -> Option<(u64, Option<String>)> {
     // Same lookup order as walker.rs: prefer message.usage, fall back to usage.
     let usage = v
         .get("message")

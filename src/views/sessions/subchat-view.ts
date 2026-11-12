@@ -12,7 +12,6 @@
 import { invoke } from "../../shared/ipc";
 import { getTransport } from "../../shared/transport";
 import { showToast } from "../../shared/toast";
-import { openFileRef } from "../../shared/chat/file-refs";
 import type { Instance } from "../../types/ipc.generated";
 import { tierLabel } from "../../shared/model-name";
 import { state, windowIdOf } from "./state";
@@ -203,15 +202,7 @@ export async function installSubchatRequestListeners(nav: SubchatNav): Promise<(
       openSub(p.display_session_id!, p.sub_id, nav);
     },
   );
-  const offLog = await transport.listen<{ display_session_id?: string; path?: string }>(
-    "subchat-log-open-requested",
-    (p) => {
-      if (!p?.path || !inThisWindow(p.display_session_id)) return;
-      openFileRef(p.path);
-    },
-  );
   return () => {
     offOpen();
-    offLog();
   };
 }

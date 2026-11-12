@@ -371,9 +371,8 @@ export async function wireInstancesChangedListener(
       state.heldMessages?.markDelivered(sid, payload.ids ?? []);
     },
   );
-  // A daemon card's "Open it" / "Open the log" (the stalled-sub and checkup
-  // cards) reach this window as notifier events; the window showing the card's
-  // main chat opens the sub in place or the file viewer.
+  // A daemon card's "Open it" (the stalled-sub card) reaches this window as a
+  // notifier event; the window showing the card's main chat opens the sub in place.
   state.unlistenSubchat = await installSubchatRequestListeners({
     open: (id) => selectSession(id, pane),
     reopen: async (id) => {

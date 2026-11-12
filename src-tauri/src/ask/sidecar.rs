@@ -1,6 +1,6 @@
 //! The read-only `claude -p` sidecar: its gates, its arguments and its prompt.
 //! Answers-card threads run it as warm processes (`warm.rs`); a one-shot job
-//! (the decisions checkup) runs `run_readonly`. Gate order: drift owns the NotLoggedIn message, so it runs before
+//! that only returns text runs `run_readonly`. Gate order: drift owns the NotLoggedIn message, so it runs before
 //! credentials and billing.
 
 use crate::chat::billing::check_metered_billing;
@@ -120,7 +120,7 @@ You can read, and only read. Never propose that you will change something yourse
 /// `persist` false adds `--no-session-persistence`: the run leaves no session
 /// file, so it never shows in a history list and cannot be resumed. Ask keeps its
 /// sessions (a follow-up resumes them); a one-shot job that only returns text,
-/// like the decisions checkup, does not.
+/// does not.
 fn cli_args(prompt: &str, resume: Option<&str>, new_session_id: &str, persist: bool) -> Vec<String> {
     let mut args = vec!["-p".to_string(), prompt.to_string()];
     args.extend(readonly_args());
@@ -408,8 +408,8 @@ mod tests {
         assert!(resumed.windows(2).any(|w| w == ["--resume".to_string(), "old-sid".to_string()]));
     }
 
-    /// Ask resumes its sessions, so they are kept. A checkup never resumes, and
-    /// its sessions showed up in the global History as "You are a checkup reader".
+    /// Ask resumes its sessions, so they are kept. A one-shot job never resumes, and
+    /// its sessions showed up in the global History under the job's prompt.
     #[test]
     fn only_a_job_that_never_resumes_asks_the_cli_to_keep_no_session() {
         let flag = "--no-session-persistence".to_string();

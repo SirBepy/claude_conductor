@@ -1,6 +1,6 @@
 //! Why a sub that went quiet or stopped without finishing is not in trouble.
 //! One answer for the Stop hook, the stuck sweep, the dead-process sweep, the
-//! exit handler and the ceiling's busy clock, so they cannot drift apart.
+//! exit handler and the busy-sub checks, so they cannot drift apart.
 //!
 //! Three things pause a sub without the sub's say-so, and only one of them
 //! sets `Instance::frozen`:
