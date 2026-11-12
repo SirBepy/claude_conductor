@@ -296,10 +296,19 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>) {
                     i += 1;
                 }
             }
+            // `${VAR}` is one argument, not three segments split at the braces.
+            '$' if chars.get(i + 1) == Some(&'{') => {
+                has_word = true;
+                i = chars[i..].iter().position(|&c| c == '}').map_or(chars.len(), |p| i + p + 1);
+                continue;
+            }
             '`' | '$' if c == '`' || chars.get(i + 1) == Some(&'(') => {
                 end_word!();
                 let (inner, next) = substitution(&chars, i);
                 nested.push(inner);
+                // The substitution stands for one argument: `git -C $(pwd) push` must
+                // keep `-C`'s value out of the subcommand.
+                has_word = true;
                 i = next;
                 continue;
             }
@@ -550,6 +559,10 @@ mod tests {
             "# don't push yet\ngit commit -m x\ngit push",
             "bash <<'EOF'\ngit push\nEOF",
             "until git push; do sleep 2; done",
+            "git -C $(git rev-parse --show-toplevel) push",
+            "git -C `pwd` push origin x",
+            "git -C ${REPO} push",
+            "git push origin ${BRANCH}",
             "gh pr -R owner/repo merge 3",
             "gh pr --repo owner/repo merge 3 --squash",
             "echo it\\'s; git push",
