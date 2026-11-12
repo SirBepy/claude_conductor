@@ -37,7 +37,7 @@ import { getSettings } from "../../../shared/state";
 import { getTransport } from "../../../shared/transport";
 import { PREVIEW_OPEN_EVENT } from "../../../shared/chat/chat-preview-card";
 import { buildPreviewDocumentHtml } from "../preview-panel-document";
-import { scopeRoot } from "../shared-mockup-scope";
+import { ownerTag, scopeRoot } from "../shared-mockup-scope";
 import type { MessageDraft, PreviewMeta, PreviewSnapshot } from "../../../types/ipc.generated";
 import { draftIdsOf, type DraftItem, type DraftStoreSide } from "../../../shared/chat/dashboard/drafts-model";
 import { DRAFT_OPEN_EVENT, copyDraft } from "../../../shared/chat/chat-draft-card";
@@ -80,7 +80,8 @@ export class ChatDashboard {
   private finishedAt: ReadonlyMap<string, number> = new Map();
   private finishedSig = "";
   private foldTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The chat's and its subs' previews, newest first (list_previews). */
+  /** The family's previews, newest first (list_previews scoped to the main
+   *  chat); the Preview card keeps this chat's own and folds the rest. */
   private previews: PreviewMeta[] = [];
   /** The list is read once the renderer knows its chat: attach() sets the id
    *  after this dashboard is built. */
@@ -305,6 +306,7 @@ export class ChatDashboard {
       subs: state.sessions.some((s) => s.session_id === this.renderer.sessionId) ? subItems : undefined,
       now,
       previews: this.previews,
+      sessionId: this.renderer.sessionId,
       draftStore: this.draftStore,
       sections: readSections(getSettings()),
       openCard: this.renderer.sessionId ? activeCardFor(this.renderer.sessionId) : null,
@@ -340,6 +342,10 @@ export class ChatDashboard {
       console.warn("[chat-dashboard] list_previews failed", err);
     }
   }
+
+  /** A sub by its name; the main chat as such, since a sub read in place sees its parent's previews too. */
+  private readonly previewOwner = (owner: string): string =>
+    ownerTag(owner)?.name ?? (owner === scopeRoot(this.renderer.sessionId) ? "Main chat" : "Another chat");
 
   /** Any push re-reads the list; a burst (a shared mockup's parts) is one read. */
   private async subscribePreviews(): Promise<void> {
@@ -582,7 +588,7 @@ export class ChatDashboard {
   }
 
   private renderZones(state: DashboardState, busy: boolean): void {
-    const ctx = { ui: this.ui, busy, quick: this.quick, idleAt: this.idleAt };
+    const ctx = { ui: this.ui, busy, quick: this.quick, idleAt: this.idleAt, previewOwner: this.previewOwner };
     const live = new Set<ZoneId>();
     for (const [col, zones] of [[this.leftEl, state.left], [this.rightEl, state.right]] as const) {
       zones.forEach((z, i) => {
@@ -699,6 +705,7 @@ export class ChatDashboard {
       case "strip-pick": ui.stripPick = Number(t.dataset.i); ui.earlierOpen = false; ui.stripExpanded = true; break;
       case "strip-latest": ui.stripPick = null; ui.stripExpanded = false; break;
       case "drafts-copied": ui.copiedOpen = !ui.copiedOpen; break;
+      case "pv-others": ui.pvOthersOpen = !ui.pvOthersOpen; break;
       case "step": ui.openStep = ui.openStep === t.dataset.step ? null : (t.dataset.step ?? null); break;
       case "plan-prev":
       case "plan-next":

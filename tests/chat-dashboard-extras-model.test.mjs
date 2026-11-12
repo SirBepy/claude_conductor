@@ -126,17 +126,26 @@ describe("Links and files", () => {
 });
 
 describe("Preview window", () => {
-  it("shows the newest preview and how many more the panel holds", () => {
+  it("keeps only this chat's previews as its own, newest first, and groups the family's rest by chat", () => {
     const c = chat().joe("show me");
-    expect(zone(c.dash(), "preview")).toBeNull();
-    const state = zone(c.dash({ previews: [meta("new"), meta("old"), meta("older")] }), "preview");
-    expect(state.newest.id).toBe("new");
-    expect(state.others).toBe(2);
+    expect(zone(c.dash({ sessionId: "s" }), "preview")).toBeNull();
+    const previews = [meta("sub-new", { session_id: "sub" }), meta("new"), meta("main", { session_id: "m" }), meta("old"), meta("sub-old", { session_id: "sub" }), meta("terminal", { session_id: null })];
+    const state = zone(c.dash({ sessionId: "s", previews }), "preview");
+    expect(state.own.map((m) => m.id)).toEqual(["new", "old"]);
+    expect(state.others.map((g) => [g.owner, g.items.map((m) => m.id)])).toEqual([["sub", ["sub-new", "sub-old"]], ["m", ["main"]]]);
+    expect(state.otherCount).toBe(3);
+  });
+
+  it("draws for a chat that made none only when the family made some, and never before the chat id is known", () => {
+    const c = chat().joe("show me");
+    const theirs = zone(c.dash({ sessionId: "s", previews: [meta("x", { session_id: "m" })] }), "preview");
+    expect(theirs).toEqual({ own: [], others: [{ owner: "m", items: [meta("x", { session_id: "m" })] }], otherCount: 1 });
+    expect(zone(c.dash({ previews: [meta("p")] }), "preview")).toBeNull();
   });
 
   it("is switched off by Joe's section choice", () => {
     const c = chat().joe("show me");
-    expect(zone(c.dash({ previews: [meta("p")], sections: { preview: false } }), "preview")).toBeNull();
+    expect(zone(c.dash({ sessionId: "s", previews: [meta("p")], sections: { preview: false } }), "preview")).toBeNull();
   });
 });
 

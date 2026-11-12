@@ -18,6 +18,7 @@ import { basename } from "../../../shared/path-utils";
 import type { LinkItem } from "../../../shared/chat/dashboard/links-model";
 import type { DraftItem } from "../../../shared/chat/dashboard/drafts-model";
 import { renderDraftCardHtml } from "../../../shared/chat/chat-draft-card";
+import type { PreviewMeta } from "../../../types/ipc.generated";
 
 /** The quick-view buttons in the Links and files card. */
 export const QUICK_VIEWS = [
@@ -39,10 +40,12 @@ export interface DashUi extends PlanUi {
   draftOpen: Record<string, boolean>;
   /** The "N copied" fold of the Drafts card is open. */
   copiedOpen: boolean;
+  /** The Preview card's "N more by other chats" fold is open. */
+  pvOthersOpen: boolean;
 }
 
 export function initialUi(): DashUi {
-  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false, draftOpen: {}, copiedOpen: false };
+  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false, draftOpen: {}, copiedOpen: false, pvOthersOpen: false };
 }
 
 export interface ZoneCtx {
@@ -55,6 +58,8 @@ export interface ZoneCtx {
   /** Whether each quick view has anything to read; a view not listed has not
    *  been looked up yet and draws as if it has. */
   quick?: Partial<Record<QuickViewId, boolean>>;
+  /** The name a Preview card group is labelled with, by the chat that pushed it. */
+  previewOwner?: (sessionId: string) => string;
 }
 
 // renderMessage is the costly part of a derive pass and a row object is
@@ -178,13 +183,48 @@ function renderLinks(s: ZoneState<"links">, ctx: ZoneCtx): string {
 
 const PREVIEW_VIEW_W = 1280;
 
-function renderPreviewWindow(s: ZoneState<"preview">): string {
-  const m = s.newest;
-  const more = s.others > 0 ? `<span class="cdash-pv-more">+${s.others} more in the panel</span>` : "";
-  return `<section class="cdash-zone cdash-card cdash-preview">${head("ph-monitor-play", "Preview window")}`
-    + `<button type="button" class="cdash-pv-tile" data-act="open-preview" data-slug="${escapeHtml(m.slug)}" data-pv-id="${escapeHtml(m.id)}" data-pv-version="${m.version}" title="Open in the preview panel" style="--pv-w:${PREVIEW_VIEW_W}px">`
-    + `<iframe class="cdash-pv-frame" sandbox="allow-scripts" tabindex="-1" aria-hidden="true"></iframe></button>`
-    + `<div class="cdash-pv-foot"><span class="cdash-pv-title">${escapeHtml(m.title)}</span>${more}</div></section>`;
+/** One live miniature of a preview; chat-dashboard.ts's mountTiles stages its page. */
+function previewTile(m: PreviewMeta, thumb: boolean): string {
+  const tip = thumb ? `${m.title}: open in the preview panel` : "Open in the preview panel";
+  return `<button type="button" class="cdash-pv-tile${thumb ? " is-thumb" : ""}" data-act="open-preview" data-slug="${escapeHtml(m.slug)}" data-pv-id="${escapeHtml(m.id)}" data-pv-version="${m.version}" title="${escapeHtml(tip)}" style="--pv-w:${PREVIEW_VIEW_W}px">`
+    + `<iframe class="cdash-pv-frame" sandbox="allow-scripts" tabindex="-1" aria-hidden="true"></iframe></button>`;
+}
+
+/** Thumbnails drawn per strip. Each is a live scripted frame plus two IPC calls
+ *  to stage, so a chat with dozens of previews ends in a "+N" tile that opens the
+ *  panel (which lists them all) instead of mounting every page. */
+const PV_STRIP_MAX = 8;
+
+function pvStrip(items: readonly PreviewMeta[]): string {
+  if (items.length === 0) return "";
+  const shown = items.slice(0, PV_STRIP_MAX).map((m) => previewTile(m, true)).join("");
+  const rest = items.length - PV_STRIP_MAX;
+  const more = rest > 0
+    ? `<button type="button" class="cdash-pv-rest" data-act="open-preview" data-slug="${escapeHtml(items[PV_STRIP_MAX]!.slug)}" title="Open the rest in the preview panel">+${rest}</button>` : "";
+  return `<div class="cdash-pv-strip">${shown}${more}</div>`;
+}
+
+/** Clock time, not "5m ago": the card redraws only when its HTML changes, and a
+ *  ticking age would rebuild (and reload) every tile's frame once a minute. */
+function pvStamp(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : `<span class="cdash-pv-age">${escapeHtml(localTime(d))}</span>`;
+}
+
+function renderPreviewWindow(s: ZoneState<"preview">, ctx: ZoneCtx): string {
+  const [newest, ...older] = s.own;
+  const count = s.own.length > 0 ? `<span class="cdash-count">${s.own.length}</span>` : "";
+  const top = newest
+    ? previewTile(newest, false)
+      + `<div class="cdash-pv-foot"><span class="cdash-pv-title">${escapeHtml(newest.title)}</span>${newest.created_at ? pvStamp(newest.created_at) : ""}</div>`
+      + pvStrip(older)
+    : `<p class="cdash-pv-none">This chat made no previews.</p>`;
+  const open = ctx.ui.pvOthersOpen;
+  const fold = s.otherCount > 0
+    ? `<button type="button" class="cdash-pv-others" data-act="pv-others" aria-expanded="${open}"><i class="ph ph-stack"></i>${s.otherCount} more by other chats<i class="ph ${open ? "ph-caret-up" : "ph-caret-down"}"></i></button>`
+      + (open ? s.others.map((g) => `<div class="cdash-pv-group"><div class="cdash-pv-owner">${escapeHtml(ctx.previewOwner?.(g.owner) ?? "Another chat")}</div>${pvStrip(g.items)}</div>`).join("") : "")
+    : "";
+  return `<section class="cdash-zone cdash-card cdash-preview">${head("ph-monitor-play", "Previews", count)}${top}${fold}</section>`;
 }
 
 function renderChanges(s: ZoneState<"changes">): string {

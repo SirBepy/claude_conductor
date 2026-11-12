@@ -331,6 +331,24 @@ disappears when the plan is done": it dropped the moment he wrote after a finish
 - Ruled out: a standing comparison card (folds into the Preview window), separate Gates or
   Todo-progress cards (inside Plan), keeping the Decided card or a "new decisions only" card.
 
+## Previews per chat (2026-11-12, sub "per-chat-previews")
+
+- **A chat's Preview card shows only the previews that chat pushed, all of them.** Joe, 2026-11-11:
+  "maybe that chat didnt even have a preview that it showed... maybe it showed 3. i should be able
+  to easily and at a glance see what previews were done in a specific chat". Before, every chat
+  showed the newest preview of its whole family, so a sub or a chat that made none showed another
+  chat's page.
+- **Layout: newest big, the rest as a strip of small thumbnails** under it (Joe picked it over a
+  2-per-row grid and list rows). A click on any tile opens it in the preview panel.
+- **The family's other previews sit behind a fold,** "N more by other chats", grouped and named by
+  the chat that pushed them (a sub by its name, the parent as "Main chat"). Joe: "we should somehow
+  indicate that there are other previews already made". A chat that made none but whose family
+  made some draws the card with "This chat made no previews." and the fold; no previews anywhere
+  draws no card.
+- Owner = the chat that pushed the live version (`PreviewMeta.session_id`), so a slug another chat
+  re-pushes moves to that chat, and the shared mockup belongs to the main chat.
+- Ruled out: listing the subs' previews grouped in the main chat's own list (the fold covers it).
+
 ## Drafts (2026-11-11, sub "dash-drafts")
 
 Board: preview slug `dash-drafts`. Before this, the dashboard drew no `write_draft` rows at all: a

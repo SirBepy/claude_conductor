@@ -152,9 +152,75 @@
   white-space: nowrap;
   color: var(--color-text);
 }
-.cdash-pv-more {
+.cdash-pv-age {
   margin-left: auto;
   flex: none;
+}
+/* The chat's older previews, and each other chat's, as a row of small tiles
+   that scrolls sideways rather than growing the card. */
+.cdash-pv-strip {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  overflow-x: auto;
+}
+/* The scale is measured from the tile once it is on screen; the default is the
+   72px tile's own (72 / 1280), for a card drawn while its pane is hidden. */
+.cdash-pv-tile.is-thumb {
+  --pv-scale: 0.05625;
+  flex: none;
+  width: 72px;
+  border-radius: 6px;
+}
+.cdash-pv-rest {
+  flex: none;
+  width: 48px;
+  aspect-ratio: 16 / 10;
+  align-self: flex-start;
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cdash-pv-rest:hover {
+  color: var(--color-text);
+  border-color: var(--color-primary);
+}
+.cdash-pv-none {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.cdash-pv-others {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cdash-pv-others:hover {
+  color: var(--color-text);
+}
+.cdash-pv-others:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.cdash-pv-owner {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.cdash-pv-group .cdash-pv-strip {
+  margin-top: 4px;
 }
 
 /* ---- Changes ---- */
