@@ -132,7 +132,7 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
   from what it already has (subchat status or list, git state, the decisions log, the plan) or needs at
   most three small reads, as a `send_message` of kind `answer` with the `question` field (its rewrite
   of his question) so it lands in the Answers card. A question needing an investigation, a build or a
-  test run still goes to a read-only sub by the question-field path below. Rules (1), (4) and (11) of
+  test run still goes to a read-only sub by the question-field path below. Rules (1), (2), (4) and (11) of
   `SUBCHATS_MAIN_PROMPT` (`daemon/claude_config/args.rs`). A main chat keeps the prompt it was
   started with until it compacts or is respawned.
 - **The sub's finish is the answer; the main chat relays nothing (2026-11-11).** Until then the main
