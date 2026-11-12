@@ -93,6 +93,10 @@ pub struct DaemonState {
     /// alongside the text, which `jarvis_wakes`'s plain-`String` queue doesn't
     /// need.
     pub repo_channel_wakes: crate::daemon::repo_channel_wake::WakeQueue,
+    /// Where the daemon-built notices in `repo_channel_wakes` are kept so a
+    /// killed daemon still delivers them. Unset until
+    /// `repo_channel_wake::restore_at_boot` runs, so tests never write a file.
+    pub repo_channel_wake_file: OnceLock<std::path::PathBuf>,
     /// Cross-surface draft sync (composer text, AUQ partial answers, held
     /// messages) - see `draft_store.rs` module doc. In-memory only, never
     /// persisted; `held_count` on `Instance` is the separate broadcast signal.
@@ -196,6 +200,7 @@ impl DaemonState {
             killed_subagents: std::sync::Mutex::new(HashMap::new()),
             jarvis_wakes: crate::daemon::jarvis_wake::new_queue(),
             repo_channel_wakes: crate::daemon::repo_channel_wake::new_queue(),
+            repo_channel_wake_file: OnceLock::new(),
             draft_store: DraftStore::new(),
             start_tokens: crate::daemon::start_tokens::StartTokens::new(),
             prompt_seq: AtomicU64::new(0),

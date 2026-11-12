@@ -381,6 +381,19 @@ pub const FINISH_DROPPED_DIRTY_NUDGE: &str = "Your finish_subchat call was not a
 /// Constant, so it is safe as `is_meta` text.
 pub const FINISH_DROPPED_REVIEW_NUDGE: &str = "Your finish_subchat call was not accepted, because you edited files after your reviewer ran. Run a fresh subagent on your final diff in the foreground, fix what it finds, commit, then call finish_subchat again.";
 
+/// The registry snapshot write, to the real file, or under `root` in tests so a
+/// test registry never overwrites the live one.
+fn save_registry_snapshot(root: Option<&Path>, state: &DaemonState) {
+    match root {
+        None => crate::sessions::persistence::save_snapshot_default(&state.registry),
+        Some(r) => {
+            let Ok(live) = crate::settings::paths::interactive_sessions_file() else { return };
+            let Some(name) = live.file_name() else { return };
+            crate::sessions::persistence::save_snapshot(&state.registry, &r.join(name));
+        }
+    }
+}
+
 /// [`commit_finish`] with the data dir and the transcript injected, so tests
 /// write to a tempdir and read a scratch transcript.
 pub(crate) fn commit_finish_at(
@@ -448,6 +461,9 @@ pub(crate) fn commit_finish_at(
         crate::sessions::chat_config::set_subchat(sub_id, Some(b));
     }
     state.registry.set_subchat_finished(sub_id, true);
+    // Saved now, not at exit: the daemon is killed, never shut down cleanly, so
+    // the exit save never runs and the sub would come back unfinished.
+    save_registry_snapshot(root, state);
     rt.reset(sub_id);
     if let Some(session) = session {
         // Set before the kill: Windows stamps exit code 1 on a terminated
@@ -865,6 +881,22 @@ mod tests {
         }
         let brief = crate::sessions::chat_config::get(&sub).unwrap().subchat.unwrap();
         assert!(brief.question.is_none(), "the brief is cleared once a finish carries the question");
+    }
+
+    /// The daemon is killed, never shut down, so the exit save never runs: the
+    /// snapshot must already say finished when the commit returns.
+    #[test]
+    fn the_saved_registry_snapshot_already_says_finished_when_the_commit_returns() {
+        let st = state();
+        let sub = make_sub(&st, "snapfin", Path::new("."));
+        let data = tempfile::tempdir().unwrap();
+        super::super::runtime::runtime()
+            .set_pending_finish(&sub, FinishRecord { sub_id: sub.clone(), ..FinishRecord::default() });
+        assert!(commit_finish_at(Some(data.path()), &st, &sub, None, None));
+        let live = crate::settings::paths::interactive_sessions_file().unwrap();
+        let saved = crate::sessions::persistence::load_snapshot(&data.path().join(live.file_name().unwrap()));
+        let row = saved.iter().find(|s| s.session_id == sub).expect("the sub is in the saved snapshot");
+        assert!(row.subchat_finished, "a kill right after the finish must not bring the sub back unfinished");
     }
 
     #[test]

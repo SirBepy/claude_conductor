@@ -22,7 +22,9 @@
 
 use crate::daemon::lifecycle;
 use crate::daemon::state::DaemonState;
-use std::collections::{HashMap, HashSet, VecDeque};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -81,12 +83,119 @@ pub fn new_queue() -> WakeQueue {
 /// as possible, but `drain` alone decides when it's actually safe to write
 /// into the target's stdin.
 pub fn enqueue(state: &Arc<DaemonState>, target_session_id: &str, author_session_id: &str, text: String) {
-    let mut queues = state.repo_channel_wakes.lock().unwrap();
-    let pending = queues.entry(target_session_id.to_string()).or_default();
-    if pending.len() >= MAX_QUEUED_LINES {
-        pending.pop_front();
+    let dropped_notice = {
+        let mut queues = state.repo_channel_wakes.lock().unwrap();
+        let pending = queues.entry(target_session_id.to_string()).or_default();
+        let dropped = if pending.len() >= MAX_QUEUED_LINES { pending.pop_front() } else { None };
+        pending.push_back(QueuedLine { author_session_id: author_session_id.to_string(), text, code_built: false });
+        dropped.is_some_and(|l| l.code_built)
+    };
+    if dropped_notice {
+        persist_notices(state);
     }
-    pending.push_back(QueuedLine { author_session_id: author_session_id.to_string(), text, code_built: false });
+}
+
+/// The file the daemon-built notices are kept in: `<app_data>/report-wakes[suffix].json`,
+/// suffixed per daemon instance so a test or dev daemon never reads the real one.
+pub fn notices_path(app_data: &Path) -> PathBuf {
+    let suffix = crate::daemon::instance::instance_suffix();
+    app_data.join(format!("report-wakes{suffix}.json"))
+}
+
+/// On-disk shape of the pending daemon notices, keyed by target session.
+/// Peer lines are not kept: their text lives in the repo channel's own store,
+/// and the recipient reads it with `read_messages` whenever it next runs.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct NoticeFile {
+    #[serde(default)]
+    notices: BTreeMap<String, Vec<String>>,
+}
+
+/// Serializes snapshot-and-write so two writers cannot land an older snapshot
+/// after a newer one.
+static PERSIST_LOCK: Mutex<()> = Mutex::new(());
+
+/// Writes every daemon notice still queued to [`DaemonState::repo_channel_wake_file`].
+/// A no-op until [`restore_at_boot`] has set the path. Failures are logged:
+/// a wake must not fail because the data folder is read-only.
+fn persist_notices(state: &DaemonState) {
+    let Some(path) = state.repo_channel_wake_file.get() else { return };
+    let _order = PERSIST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let file = {
+        let queues = state.repo_channel_wakes.lock().unwrap();
+        let mut file = NoticeFile::default();
+        for (target, lines) in queues.iter() {
+            let texts: Vec<String> = lines.iter().filter(|l| l.code_built).map(|l| l.text.clone()).collect();
+            if !texts.is_empty() {
+                file.notices.insert(target.clone(), texts);
+            }
+        }
+        file
+    };
+    let json = match serde_json::to_string_pretty(&file) {
+        Ok(s) => s,
+        Err(e) => return log::warn!("repo_channel_wake: could not serialize pending notices: {e}"),
+    };
+    if let Err(e) = crate::util::write_json_atomic(path, &json) {
+        log::warn!("repo_channel_wake: could not write pending notices to {}: {e}", path.display());
+    }
+}
+
+/// Loads the notices a previous daemon left in `path` into the queue and keeps
+/// persisting to it from here on. Returns the targets that got notices back.
+/// A notice for a session the registry no longer has, or one that has ended,
+/// is dropped: nothing could ever drain it. An unreadable file is kept aside
+/// as `.bad` and read as empty.
+fn load_persisted(state: &DaemonState, path: &Path) -> Vec<String> {
+    if state.repo_channel_wake_file.get().is_some() {
+        return Vec::new();
+    }
+    let file: NoticeFile = crate::daemon::subchats::jsonfile::read_or_keep(path);
+    let mut restored = Vec::new();
+    {
+        let mut queues = state.repo_channel_wakes.lock().unwrap();
+        for (target, texts) in file.notices {
+            if texts.is_empty() {
+                continue;
+            }
+            if !state.registry.get(&target).is_some_and(|i| i.ended_at.is_none()) {
+                log::info!("repo_channel_wake: dropping {} pending notice(s) for {target}, which is gone", texts.len());
+                continue;
+            }
+            let pending = queues.entry(target.clone()).or_default();
+            for text in texts {
+                if pending.len() >= MAX_QUEUED_LINES {
+                    pending.pop_front();
+                }
+                pending.push_back(QueuedLine { author_session_id: String::new(), text, code_built: true });
+            }
+            restored.push(target);
+        }
+    }
+    // Set only once the old notices are in the queue: a notice queued before
+    // this point would otherwise write a file holding only itself.
+    let _ = state.repo_channel_wake_file.set(path.to_path_buf());
+    persist_notices(state);
+    restored
+}
+
+/// Boot step, after the registry snapshot is restored: brings back the notices
+/// a killed daemon had not delivered yet (a sub that finished while its main
+/// chat was busy) and starts their drains, which wait for each target's idle.
+pub fn restore_at_boot(state: &Arc<DaemonState>, app_data: &Path) {
+    let targets = load_persisted(state, &notices_path(app_data));
+    if targets.is_empty() {
+        return;
+    }
+    log::info!("repo_channel_wake: restored pending notices for {} session(s)", targets.len());
+    // Test daemons (wdio, daemon_client tests) must never spend a real turn; the
+    // notices stay queued for the target's next turn end.
+    if std::env::var_os("CC_DAEMON_NO_AUTOSTART").is_some() {
+        return;
+    }
+    for target in targets {
+        spawn_drain(state, &target);
+    }
 }
 
 /// Queues a wake whose whole body the daemon built from ids and status, with no
@@ -94,12 +203,15 @@ pub fn enqueue(state: &Arc<DaemonState>, target_session_id: &str, author_session
 /// same coalescing as a peer wake; it is delivered as `is_meta` text with no
 /// author, so it renders as a system note rather than as a peer's message.
 pub fn enqueue_notice(state: &Arc<DaemonState>, target_session_id: &str, notice: String) {
-    let mut queues = state.repo_channel_wakes.lock().unwrap();
-    let pending = queues.entry(target_session_id.to_string()).or_default();
-    if pending.len() >= MAX_QUEUED_LINES {
-        pending.pop_front();
+    {
+        let mut queues = state.repo_channel_wakes.lock().unwrap();
+        let pending = queues.entry(target_session_id.to_string()).or_default();
+        if pending.len() >= MAX_QUEUED_LINES {
+            pending.pop_front();
+        }
+        pending.push_back(QueuedLine { author_session_id: String::new(), text: notice, code_built: true });
     }
-    pending.push_back(QueuedLine { author_session_id: String::new(), text: notice, code_built: true });
+    persist_notices(state);
 }
 
 /// Moves the daemon-built notices queued for `from` (a finished sub's
@@ -107,19 +219,25 @@ pub fn enqueue_notice(state: &Arc<DaemonState>, target_session_id: &str, notice:
 /// turn end and would never drain them. Peer lines stay behind, as they always
 /// have on a respawn. Returns how many moved; the caller starts the drain.
 pub fn move_notices(state: &Arc<DaemonState>, from: &str, to: &str) -> usize {
-    let mut queues = state.repo_channel_wakes.lock().unwrap();
-    let Some(old) = queues.get_mut(from) else { return 0 };
-    let (notices, peers): (VecDeque<QueuedLine>, VecDeque<QueuedLine>) = std::mem::take(old).into_iter().partition(|l| l.code_built);
-    *old = peers;
-    let n = notices.len();
-    if n > 0 {
-        let pending = queues.entry(to.to_string()).or_default();
-        for line in notices {
-            if pending.len() >= MAX_QUEUED_LINES {
-                pending.pop_front();
+    let n = {
+        let mut queues = state.repo_channel_wakes.lock().unwrap();
+        let Some(old) = queues.get_mut(from) else { return 0 };
+        let (notices, peers): (VecDeque<QueuedLine>, VecDeque<QueuedLine>) = std::mem::take(old).into_iter().partition(|l| l.code_built);
+        *old = peers;
+        let n = notices.len();
+        if n > 0 {
+            let pending = queues.entry(to.to_string()).or_default();
+            for line in notices {
+                if pending.len() >= MAX_QUEUED_LINES {
+                    pending.pop_front();
+                }
+                pending.push_back(line);
             }
-            pending.push_back(line);
         }
+        n
+    };
+    if n > 0 {
+        persist_notices(state);
     }
     n
 }
@@ -204,6 +322,7 @@ where
         crate::sessions::chat_state::set_busy(target_session_id, true);
         crate::daemon::machines::publish_instances_changed(&state);
     }
+    let had_notices = lines.iter().any(|l| l.code_built);
     if failed {
         let mut queues = state.repo_channel_wakes.lock().unwrap();
         let pending = queues.entry(target_session_id.to_string()).or_default();
@@ -212,6 +331,13 @@ where
                 pending.push_front(line);
             }
         }
+    }
+    // Written after the send rather than when the lines were taken, so a daemon
+    // killed mid-send delivers the notice twice rather than never. Another notice
+    // queued during the send writes the file without the in-flight lines; a kill
+    // inside that window is the one loss left.
+    if had_notices {
+        persist_notices(state);
     }
 }
 
@@ -594,6 +720,99 @@ mod tests {
         let pending = queues.get("s1").expect("still queued");
         assert_eq!(pending.len(), 1);
         assert!(pending[0].code_built, "it is still a daemon notice after the requeue");
+    }
+
+    fn recorded_drain(state: &Arc<DaemonState>, target: &str) -> Vec<(String, String)> {
+        let sent: Arc<std::sync::Mutex<Vec<(String, String)>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let fut = drain_with(state, target, |text, author, _count| {
+            let sent = sent.clone();
+            async move {
+                sent.lock().unwrap().push((text, author));
+                Ok::<(), String>(())
+            }
+        });
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(fut);
+        let out = sent.lock().unwrap().clone();
+        out
+    }
+
+    /// A sub finished while its main chat was busy, then the daemon was killed.
+    /// The new daemon delivers the notice once the main chat is idle; a peer line
+    /// queued beside it is not brought back (its text is in the channel store).
+    #[test]
+    fn a_notice_queued_before_a_restart_is_delivered_after_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = notices_path(dir.path());
+
+        let before = test_state();
+        live(&before, "main", "proj-1");
+        before.registry.set_busy("main", true);
+        assert!(load_persisted(&before, &path).is_empty(), "nothing on disk yet");
+        enqueue_notice(&before, "main", "Sub \"A\" (id 1) has finished.".into());
+        enqueue(&before, "main", "peer-a", "peer text".into());
+        drop(before);
+
+        let after = test_state();
+        live(&after, "main", "proj-1");
+        assert_eq!(load_persisted(&after, &path), vec!["main".to_string()]);
+        let sent = recorded_drain(&after, "main");
+        assert_eq!(sent, vec![("Sub \"A\" (id 1) has finished.".to_string(), CODE_BUILT_AUTHOR.to_string())]);
+
+        // Delivered, so a second restart has nothing left to send.
+        let again = test_state();
+        live(&again, "main", "proj-1");
+        assert!(load_persisted(&again, &path).is_empty(), "a delivered notice is not sent twice");
+    }
+
+    #[test]
+    fn a_failed_delivery_keeps_the_notice_on_disk_and_a_moved_one_follows_its_new_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = notices_path(dir.path());
+        let before = test_state();
+        live(&before, "old", "proj-1");
+        live(&before, "new", "proj-1");
+        load_persisted(&before, &path);
+        enqueue_notice(&before, "old", "Sub finished.".into());
+        assert_eq!(move_notices(&before, "old", "new"), 1);
+        let fut = drain_with(&before, "new", |_t, _a, _c| async { Err::<(), String>("write failed".into()) });
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(fut);
+
+        let after = test_state();
+        live(&after, "old", "proj-1");
+        live(&after, "new", "proj-1");
+        assert_eq!(load_persisted(&after, &path), vec!["new".to_string()]);
+    }
+
+    #[test]
+    fn a_notice_for_a_gone_session_is_dropped_and_an_unreadable_file_is_kept_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = notices_path(dir.path());
+        let before = test_state();
+        live(&before, "ended", "proj-1");
+        load_persisted(&before, &path);
+        enqueue_notice(&before, "ended", "Sub finished.".into());
+        enqueue_notice(&before, "ghost", "Sub finished.".into());
+
+        let after = test_state();
+        live(&after, "ended", "proj-1");
+        after.registry.mark_ended("ended", crate::types::EndReason::Manual, "2026-07-30T00:00:01Z");
+        assert!(load_persisted(&after, &path).is_empty(), "nothing could ever drain these");
+        assert!(after.repo_channel_wakes.lock().unwrap().is_empty());
+
+        std::fs::write(&path, "{ not json").unwrap();
+        let broken = test_state();
+        assert!(load_persisted(&broken, &path).is_empty());
+        let mut bad = path.file_name().unwrap().to_os_string();
+        bad.push(".bad");
+        assert_eq!(std::fs::read_to_string(path.with_file_name(bad)).unwrap(), "{ not json");
+    }
+
+    #[test]
+    fn with_no_file_set_nothing_is_written() {
+        // Tests and the app side never call restore_at_boot, so they never write.
+        let state = test_state();
+        enqueue_notice(&state, "s1", "Sub finished.".into());
+        assert!(state.repo_channel_wake_file.get().is_none());
     }
 
     #[test]
