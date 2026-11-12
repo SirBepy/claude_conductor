@@ -404,6 +404,102 @@ Board: preview slug `subs-card`; rules sheet: `subs-card-rules`.
   Copy brief in the menu, Move to sidebar turning a sub into an ordinary chat, model/effort words and
   message/turn counts in the details.
 
+## Seeing what subs are doing (2026-11-12, sub "forever-board", phase C and D1 of docs/forever-chat-plan.md)
+
+Board: preview slug `forever-chat-board` (Today and Proposed per gap, drawn with the app's real
+render functions; scratch source `.for_bepy/mockups/mockup-forever-board.ts` in that sub's
+worktree). Problem: in one week 24% of what Joe typed in main chats was status-seeking or
+confusion ("where are we at", "it says youre idle...", "what chat is this even?").
+Joe did not stamp the board as a whole ("im not sure, we might have to think a bit more on this
+one"), so only the picks below are settled; the rest is listed under Open.
+
+Settled:
+
+- **C1. A sub that is not making progress draws a dim ring plus a small corner glyph:** clock =
+  queued, pause = paused, hourglass = usage limit, moon = stopped without finishing (turn ended,
+  not finished). Working, asking and finished keep today's rings. The glyph sits on the corner
+  opposite the battery, so it never reads as effort or as asking. Picked over a dim ring alone.
+- **C1. A real hover card replaces the avatar's native `title`:** the sidebar row card's chrome
+  (`buildHoverCardHtml`) with the state in words, the step it is on, time running, context, and its
+  last action ("Editing footer.css, 18s ago"). A queued sub's card says what it waits for and its
+  place in line; a usage-limited one when it resets.
+- **C1. The Plan card's foot counts the subs** instead of "Idle since" while any sub is not finished:
+  "2 working · 2 asking · 2 queued · 3 stopped", then "This chat idle since 03:17" on a muted second
+  line. It stays the Plan card's own foot, so the no-Status-zone rule holds. Ruled out: a second line
+  with the newest sub action (it is a running status).
+- **C1. The main chat's sidebar ring glows while any sub works.** Joe: "but fix the green one...
+  currently sometimes it goes green and never stops being green... thats rly annoying". The stuck
+  green ring is a bug to fix in the same build.
+- **C4. A queued sub's place in line shows in its hover card only** (no number on the avatar). Its
+  menu gains **Start now** (starts it at once in its own worktree, without waiting) and **Drop**
+  (danger; it never started, so only its brief goes). The items a queued sub cannot use (Pause, Stop
+  this turn, Change model, Change effort, Close) come out of the top level; Joe: "myb instead of
+  leaving them out, they can be in a submenu inside of this submenu? idk" (open, see below).
+- **C5. Every card names who asks.** The main chat's own question card gets a chip reading **Main
+  chat** (its words: "what chat is this even? the main one?"); a sub's chip shows the sub's avatar
+  (initials, ring, battery) like the Answers author line, also when it is the only asker. Cards the
+  daemon raises about a sub (stopped, stuck, close) name that sub. Picked over "This chat".
+- **D1. A new chat in a project that has a main chat goes to that main chat:** one line where the
+  Use subchats switch sits ("Goes to CV redesign, cv-site's main chat") and a **Plain chat
+  instead** switch. Picked over opening the main chat at once. The Main chats group lists one row
+  per project; closing the main chat clears the project's pointer.
+- **No family totals under the Result.** Joe: "i never actually used this... infact, i kinda
+  dislike it... i guess myb in like 2 weeks we can reconsider if theres a place for this... but for
+  now id actually say to get rid of this". This covers the Result card; whether the existing
+  `all_finished` card in Messages view stays is not decided.
+
+Build list (settled parts only):
+
+1. `main-chat.ts` / `sub-list.ts` / `subs-model.ts`: per-sub states queued, paused, usage limit,
+   stopped without finishing (needs an "idle, not finished" signal on `Instance`: last turn ended,
+   `subchat_finished` false), each with its ring and glyph; the avatar's `title` replaced by a hover
+   card built on `buildHoverCardHtml` plus a last-action line (needs the sub's latest tool call and
+   its time on `Instance` or a cheap read).
+2. `plan-card.ts` `idleLine`: the counts foot whenever the chat has an unfinished sub.
+3. `sidebar-ring.ts` `mainChatRingSpec`: working glow while any sub works; find and fix the green
+   ring that never clears.
+4. Queued sub: place in line and reason on `Instance` (the writer queue's position exists in
+   `writers.rs`; `after` targets in `held.rs`); hover card lines; `buildSubCardItems` gets Start now
+   and Drop (new daemon RPCs, desktop pipe only) and drops or nests the items a queued sub cannot use.
+5. Question, permission and secret cards: a "Main chat" chip on the main chat's own card, the sub's
+   avatar chip on a sub's card whatever the asker count (`fromChipHtml` call sites in
+   `question-ui-render.ts`, `permission-card.ts`, `secret-card.ts`), and the sub's name on
+   `cards::raise_card` cards.
+6. D1: a main-chat pointer in the project's config (`#[serde(default)]`), set when a main chat
+   starts and cleared on close; the new-chat draft shows the "Goes to" line and the Plain chat
+   switch; Main chats lists one row per project.
+
+Open (Joe's words; the main chat decides how to take them up):
+
+- **C2, a finished job's result.** "it could be handy to think of a good card like that, but we
+  sohuld rly thoroughly think thru what should be shown here as info, also, we sohuld have a way to
+  dismiss it". And: "myb evena a way to close it off if i know we wont be talking to it anymore (idk
+  if theres a benefit to taht, myb the fact that then less chats are going to be doing the close
+  skill all at once?)". Note: a dismiss here is Joe's own ask for job results; the no-dismiss rule
+  above is about answers.
+- **C3, "where we are".** "im not sure i understand the differences... we could have a 'expand view'
+  button in the subchats card header, and myb it shows a popup or smth of just alllll of the chats,
+  and its statuses, like that first option you showed". So the leaning is an expand button in the
+  Subchats card header opening the code-built list (one line per sub, grouped by state, plus the
+  family's uncommitted, unmerged and unpushed), not a fourth quick-view button; not stamped yet.
+- **D1, the Main chats row.** "i think we dont need to put a title on a main chat anymore, just the
+  project name. what do you think? and then the dots under the project name?" Claude's view: yes,
+  with one main chat per project the project name is the row's identity; line two holds the asking
+  dots and the working count, the same counts as the Plan foot.
+- **The queued sub's unusable menu items** as a nested submenu instead of left out ("idk").
+- **Profile photos on question cards:** "showing profile photos in the question cards too to show
+  what chat is doing the question cards". Extends C5: the asker's avatar picture (a character
+  portrait where the chat has one) rather than initials.
+- **Is the architecture ready for a forever chat?** "at that point, we should start auto closing
+  some of the old chats? right? and also, we should probably start auto compressing the main chat,
+  right? ... i feel like theres a lot here that we didnt really think thru yet". Auto-compacting the
+  main chat is phase B (S1 spike, B1 compaction manager) of docs/forever-chat-plan.md. Auto-closing
+  old subs runs against two earlier calls (closing finished subs on a timer is ruled out here, and
+  the plan keeps finished subs), so it needs Joe's decision with the trade-off shown: a finished sub
+  is idle and frozen (`main-chat.ts`); what grows with age is name collisions, list length and the
+  never-pruned per-sub files (forever-chat-plan section 1.8 and A4). Whether a frozen sub still holds
+  a process or memory was not checked here.
+
 ## Build (started 2026-11-10, overnight, unattended)
 
 Joe's calls on 2026-11-10, before he went to sleep:
