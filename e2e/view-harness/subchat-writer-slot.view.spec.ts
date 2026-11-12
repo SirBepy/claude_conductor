@@ -1,4 +1,4 @@
-// Reviewed 2026-11-12 (compaction): project-settings.ts gained a Compaction group; the "project settings" tests here wait on #subchatWritersSelect, which no source file renders any more (ProjectConfig.subchat_writers is parsed and ignored), so those six fail with or without this change; the queued-sub tests pass.
+// Reviewed 2026-11-12 (release gate): the project settings tests waited on #subchatWritersSelect, which no source file renders since the Subs changing files toggle went (ProjectConfig.subchat_writers is parsed and ignored); they now cover the Check a sub's work row alone, and the queued-sub tests are unchanged.
 // Reviewed 2026-11-10 (dash lane 3, code-check fixes): comment rewording, a transport case split and a deleted unused getter; nothing this spec asserts changed.
 // Reviewed 2026-11-05: sub-list.ts's row button now opens the sub in a new window (data-popout) and the queued row still has none; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.
@@ -10,8 +10,8 @@ import {
   capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance,
 } from "./harness";
 
-// Subchats step 10: the two project settings rows (Check a sub's work, Subs
-// changing files) show, save and survive a reload, and a sub held for its
+// Subchats step 10: the project settings row (Check a sub's work) shows, saves
+// and survives a reload, and a sub held for its
 // project's writer slot reads as queued in the sub list and the sidebar hover.
 // Drives the real project settings renderer and the real sessions view at
 // desktop and phone width.
@@ -53,7 +53,7 @@ async function renderSettings(page: Page): Promise<void> {
     document.body.appendChild(host);
     await renderProjectSettings(host, cwd);
   }, CWD);
-  await page.locator("#project-config-host #subchatWritersSelect option").first().waitFor({ state: "attached" });
+  await page.locator("#project-config-host #subchatCheckSelect option").first().waitFor({ state: "attached" });
 }
 
 for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
@@ -69,21 +69,17 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await renderSettings(page);
     }
 
-    test("both rows show with their defaults, inside the rail", async ({ page }) => {
+    test("the row shows with its default, inside the rail", async ({ page }) => {
       await mount(page);
       const check = page.locator("#subchatCheckSelect");
-      const files = page.locator("#subchatWritersSelect");
       await expect(check).toBeVisible();
-      await expect(files).toBeVisible();
       await expect(check).toHaveValue("facts_and_reviewer");
-      await expect(files).toHaveValue("one_at_a_time");
       await expect(check.locator("option")).toHaveText(["Facts and a reviewer", "Facts only"]);
-      await expect(files.locator("option")).toHaveText(["One at a time", "Worktree each"]);
       // The rail also carries the MCP servers group, so name the one asserted.
       await expect(page.locator(".ps-group-title", { hasText: "Subchats" })).toHaveText("Subchats");
       // Nothing spills out of the 270px rail.
       const host = (await page.locator("#project-config-host").boundingBox())!;
-      for (const sel of [check, files]) {
+      for (const sel of [check]) {
         const box = (await sel.boundingBox())!;
         expect(box.x).toBeGreaterThanOrEqual(host.x);
         expect(box.x + box.width).toBeLessThanOrEqual(host.x + host.width + 0.5);
@@ -95,24 +91,17 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await mount(page);
       await page.locator("#subchatCheckSelect").selectOption("facts_only");
       await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "update_project").length).toBe(1);
-      let calls = (await invokeCalls(page)).filter((c) => c.cmd === "update_project");
+      const calls = (await invokeCalls(page)).filter((c) => c.cmd === "update_project");
       expect((calls[0]!.args as { patch: unknown }).patch).toEqual({ subchat_check: "facts_only" });
 
-      await page.locator("#subchatWritersSelect").selectOption("worktree_each");
-      await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "update_project").length).toBe(2);
-      calls = (await invokeCalls(page)).filter((c) => c.cmd === "update_project");
-      expect((calls[1]!.args as { patch: unknown }).patch).toEqual({ subchat_writers: "worktree_each" });
-
-      // A fresh render, as after reopening the popup, reads both back.
+      // A fresh render, as after reopening the popup, reads it back.
       await renderSettings(page);
       await expect(page.locator("#subchatCheckSelect")).toHaveValue("facts_only");
-      await expect(page.locator("#subchatWritersSelect")).toHaveValue("worktree_each");
     });
 
     test("a stored value from the project shows on first render", async ({ page }) => {
-      await mount(page, { subchat_check: "facts_only", subchat_writers: "worktree_each" });
+      await mount(page, { subchat_check: "facts_only" });
       await expect(page.locator("#subchatCheckSelect")).toHaveValue("facts_only");
-      await expect(page.locator("#subchatWritersSelect")).toHaveValue("worktree_each");
     });
   });
 }
