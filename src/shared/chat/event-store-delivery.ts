@@ -217,9 +217,10 @@ export class DeliveryPolicy {
         return `n:${ev.body}`;
       // The same boundary reaches the window live (stdout) and again from the
       // transcript (watcher, page reconcile); the figures identify it. A
-      // figure-less boundary still gets a sig: this dedup is cross-source and
-      // short-lived, so two real compactions minutes apart both survive it
-      // (the renderer's own all-time check, sameCompaction, skips those).
+      // figure-less boundary (no metadata: every line the compact spike saw
+      // had it) shares one sig, so a page reconcile can fold a second such
+      // compaction into the first; the live dedup is cross-source and lasts
+      // seconds, and the renderer's all-time check (sameCompaction) skips them.
       case "compacted":
         return `c:${ev.pre_tokens}:${ev.post_tokens}:${ev.duration_ms}`;
       default:
