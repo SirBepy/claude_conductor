@@ -123,9 +123,18 @@ Board: preview slug `mockup-answers`; full spec: preview slug `answers-spec`.
   failed call keeps the preview until a reload. No earlier decision for an AI call existed; this one
   follows from "questions always show rewritten". A + question keeps a thread first, and its reply lands as an
   unread answer. A reply after leaving a thread makes the answer unread again.
-- **The main chat never answers a question itself:** it rewrites it and hands it to a sub, keeping
-  the original (2026-11-10). Rules (1), (4) and (11) of `SUBCHATS_MAIN_PROMPT`
-  (`daemon/claude_config/args.rs`).
+- **The main chat answers simple questions itself; investigations go to a sub (2026-11-12).** The
+  2026-11-10 rule was that the main chat never answers a question itself (it rewrote it and handed it
+  to a sub, keeping the original). Evidence (`docs/forever-chat-plan.md` 1.3 and 4.1): question subs
+  made Joe wait 6 minutes (median, only 3 of 13 under 3 minutes) and cost about 20 times an inline
+  turn, and his "where are we" questions went through a sub although the main chat had the answer.
+  Joe's pick on a card, "Answer simple ones inline": the main chat answers inline when the answer comes
+  from what it already has (subchat status or list, git state, the decisions log, the plan) or needs at
+  most three small reads, as a `send_message` of kind `answer` with the `question` field (its rewrite
+  of his question) so it lands in the Answers card. A question needing an investigation, a build or a
+  test run still goes to a read-only sub by the question-field path below. Rules (1), (4) and (11) of
+  `SUBCHATS_MAIN_PROMPT` (`daemon/claude_config/args.rs`). A main chat keeps the prompt it was
+  started with until it compacts or is respawned.
 - **The sub's finish is the answer; the main chat relays nothing (2026-11-11).** Until then the main
   chat sent the `answer` itself after a `report_back` wake. That covered a first question but not a
   follow-up: rule (4) passed it to the existing sub with `subchat send`, nothing told the main chat to
