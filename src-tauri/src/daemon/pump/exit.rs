@@ -36,7 +36,13 @@ pub(crate) async fn run_pump_exit(
     let was_busy = state_for_pump.registry.get(&pump_session.session_id).is_some_and(|i| i.busy);
     if is_interactive {
         // Clear busy in case the process exited mid-turn without a result line.
-        if state_for_pump.registry.set_busy_false_if_gen(&pump_session.session_id, pump_turn_gen) {
+        // The registry flag always clears, since this run has no child for it.
+        // The persisted one stays when the machine or the daemon is going down:
+        // that turn was cut off, and the next boot's `resume_interrupted` reads
+        // it to continue the turn. An idle child was not busy, so it is never
+        // resumed either way.
+        let shutdown = crate::daemon::subchats::turn_end::is_shutdown_exit(peek_exit_code(&mut child).await);
+        if state_for_pump.registry.set_busy_false_if_gen(&pump_session.session_id, pump_turn_gen) && !shutdown {
             crate::sessions::chat_state::set_busy(&pump_session.session_id, false);
         }
         // Ghost prompts: an open AskUserQuestion/permission prompt can only
@@ -125,6 +131,17 @@ pub(crate) async fn run_pump_exit(
     // surfaces gets a card. After the wait so the card can quote the last error.
     if is_interactive {
         crate::daemon::subchats::turn_end::on_process_died(&state_for_pump, &pump_session, was_busy, exit);
+    }
+}
+
+/// The child's exit code if it has exited by now. Stdout's EOF is normally the
+/// process ending, so this returns at once; bounded so a child that closed
+/// stdout and lingers does not hold the cleanup. The status is cached, so the
+/// later `wait` returns the same one.
+async fn peek_exit_code(child: &mut tokio::process::Child) -> Option<i32> {
+    match tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await {
+        Ok(Ok(status)) => status.code(),
+        _ => None,
     }
 }
 
@@ -221,5 +238,55 @@ mod tests {
             registry.set_awaiting("s", Some(CLOSE_FAILED_AWAITING.to_string()));
         }
         assert_eq!(registry.get("s").unwrap().awaiting.as_deref(), Some(CLOSE_FAILED_AWAITING));
+    }
+
+    /// Runs the real exit handler on a child that exits with `code`, for a sub
+    /// whose turn was open. Returns the persisted busy flag the next boot reads
+    /// and the cards raised.
+    #[cfg(windows)]
+    async fn exit_mid_turn(tag: &str, code: i64) -> (bool, Vec<serde_json::Value>) {
+        use crate::daemon::session::new_session_map;
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::types::Settings;
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (main, sub) = (format!("{tag}-main"), format!("{tag}-sub"));
+        st.registry.upsert_interactive(&main, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        st.registry.upsert_interactive(&sub, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        st.registry.set_subchat_of(&sub, Some(main));
+        st.registry.set_busy(&sub, true);
+        crate::sessions::chat_state::set_busy(&sub, true);
+        let gen = st.registry.current_turn_gen(&sub);
+        let mut child = tokio::process::Command::new("cmd")
+            .args(["/C", "exit", &code.to_string()])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn probe child");
+        let stdin = child.stdin.take().expect("piped stdin");
+        let pid = child.id().unwrap_or(0);
+        let session = Session::new(sub.clone(), std::env::temp_dir(), "m".into(), "high".into(), pid, stdin, None, None, "acct".into());
+        run_pump_exit(child, session, st.sessions.clone(), st.clone(), gen, false).await;
+        // The death card is raised on a detached task.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let busy = crate::sessions::chat_state::get(&sub).is_some_and(|c| c.busy);
+        (busy, st.list_prompts().await)
+    }
+
+    /// An OS shutdown closes the child's console first (exit 0xC000013A). The
+    /// turn was cut off, not lost: the persisted busy flag must survive so the
+    /// next boot's `resume_interrupted` continues it, and no death card is raised.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn an_os_shutdown_exit_keeps_the_turn_for_the_next_boot_and_raises_no_card() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (busy, cards) = exit_mid_turn("exit-shutdown", -1073741510).await;
+        assert!(busy, "the next boot must see the turn as cut off");
+        assert!(cards.is_empty(), "no death card for a shutdown: {cards:?}");
+        // Any other mid-turn exit is a death, as before.
+        let (busy, cards) = exit_mid_turn("exit-crash", 1).await;
+        assert!(!busy);
+        assert_eq!(cards.len(), 1, "{cards:?}");
+        assert_eq!(cards[0]["payload"]["card_kind"], "subchat_unfinished");
     }
 }

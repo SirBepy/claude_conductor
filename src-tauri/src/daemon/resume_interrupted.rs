@@ -8,7 +8,8 @@
 //! still going when the daemon died; restored as-is it would read Done. Each
 //! gets a silent "continue", the same resend `unfreeze_session` uses.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use crate::daemon::state::DaemonState;
 use crate::sessions::chat_state::ChatState;
@@ -44,6 +45,55 @@ pub fn interrupted_sessions(
         .collect()
 }
 
+/// Chats waiting for their turn in [`spawn_resumes`]' staggered queue, and the
+/// ones whose "continue" did not go through. The subchats dead sweep reads both:
+/// a sub about to be resumed has no child yet and must not be carded as dead,
+/// and a sub whose resume failed is a cut-off turn nothing else will surface.
+#[derive(Default)]
+struct Pending {
+    queued: HashSet<String>,
+    failed: HashSet<String>,
+}
+
+static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
+
+fn with_pending<R>(f: impl FnOnce(&mut Pending) -> R) -> R {
+    let mut guard = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    f(guard.get_or_insert_with(Pending::default))
+}
+
+/// Whether this chat is still waiting for its auto-continue.
+pub fn is_queued(session_id: &str) -> bool {
+    with_pending(|p| p.queued.contains(session_id))
+}
+
+/// Whether this chat was cut off mid-turn by the last daemon exit and its
+/// auto-continue failed, so its turn is still open with no process.
+pub fn resume_failed(session_id: &str) -> bool {
+    with_pending(|p| p.failed.contains(session_id))
+}
+
+/// A live process was seen for the chat: whatever its resume did, it is running.
+pub fn forget(session_id: &str) {
+    with_pending(|p| {
+        p.queued.remove(session_id);
+        p.failed.remove(session_id);
+    });
+}
+
+pub(crate) fn queue(session_ids: &[String]) {
+    with_pending(|p| p.queued.extend(session_ids.iter().cloned()));
+}
+
+pub(crate) fn settle(session_id: &str, resumed: bool) {
+    with_pending(|p| {
+        p.queued.remove(session_id);
+        if !resumed {
+            p.failed.insert(session_id.to_string());
+        }
+    });
+}
+
 /// Resends "continue" to each of `session_ids`, respawning its `claude`
 /// process. The pump flips the chat back to busy on the turn's first event.
 pub fn spawn_resumes(state: Arc<DaemonState>, session_ids: Vec<String>) {
@@ -58,12 +108,16 @@ pub fn spawn_resumes(state: Arc<DaemonState>, session_ids: Vec<String>) {
         );
         return;
     }
+    // Before the task starts, so the dead sweep never sees one of them unqueued.
+    queue(&session_ids);
     tokio::spawn(async move {
         for sid in session_ids {
             log::info!("resume_interrupted: auto-continuing {sid}, cut off mid-turn by the last daemon exit");
-            if let Err(e) = crate::daemon::lifecycle::send_message_with_respawn(&state, &sid, "continue", false).await {
+            let sent = crate::daemon::lifecycle::send_message_with_respawn(&state, &sid, "continue", false).await;
+            if let Err(e) = &sent {
                 log::warn!("resume_interrupted: auto-continue failed for {sid}: {e}");
             }
+            settle(&sid, sent.is_ok());
             tokio::time::sleep(STAGGER).await;
         }
     });
