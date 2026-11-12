@@ -2,6 +2,7 @@
 //! channel and turn-status/messaging tool schemas. Content is byte-identical
 //! to before.
 
+use crate::daemon::subchats::QUESTION_MAX;
 use serde_json::{json, Value};
 
 // Inter-agent coordination-channel tools: unconditionally advertised (unlike
@@ -189,7 +190,7 @@ pub fn coordination_schemas() -> Vec<Value> {
                     "your_move": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 120}, "description": "report only: ONLY rows Joe himself must act on, at most 8 of 120 chars. Whatever he must do goes here, not in the text."},
                     "was": {"type": "string", "maxLength": 100, "description": "correction only: the earlier claim being corrected, at most 100 chars."},
                     "copy": {"type": "string", "maxLength": 4000, "description": "do_this only: a paste-ready payload (a command, a message), at most 4000 chars."},
-                    "question": {"type": "string", "maxLength": 200, "description": "answer only, optional: Joe's question rewritten as one clear question (\"Does the Trello token need write access?\"), at most 200 chars. The dashboard's Answers card shows it above the answer instead of his own wording."},
+                    "question": {"type": "string", "maxLength": QUESTION_MAX, "description": "answer only, optional: Joe's question rewritten as one clear question (\"Does the Trello token need write access?\"), at most 200 chars. The dashboard's Answers card shows it above the answer instead of his own wording."},
                     "read_answers": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 40}, "description": "Any kind, optional: the verdicts of your earlier answer or rating messages that Joe's latest message shows he read, each copied exactly. See READ ANSWERS."},
                     "details": details_schema(),
                     "visuals": visuals_schema(),

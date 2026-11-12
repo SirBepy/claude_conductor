@@ -9,7 +9,7 @@
 mod brief;
 pub mod spawn;
 
-pub use brief::{SubchatArgs, SubchatBrief, WorktreeInfo};
+pub use brief::{SubchatArgs, SubchatBrief, WorktreeInfo, QUESTION_MAX};
 
 use crate::accounts::Account;
 use crate::daemon::claude_config::{append_system_prompt, SUBCHATS_MAIN_PROMPT, SUBCHAT_GATE_PROMPT, SUBCHAT_SUB_PROMPT};

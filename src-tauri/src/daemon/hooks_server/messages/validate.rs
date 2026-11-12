@@ -44,7 +44,7 @@ const MAX_ROWS: usize = 8;
 const MAX_ROW: usize = 120;
 const MAX_WAS: usize = 100;
 const MAX_COPY: usize = 4000;
-const MAX_QUESTION: usize = 200;
+use crate::daemon::subchats::QUESTION_MAX as MAX_QUESTION;
 
 /// How long a kind's `text` may be. Past the cap the prose belongs in `details`,
 /// which sits behind a click; the card shows `text` at full size.
