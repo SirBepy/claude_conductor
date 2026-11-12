@@ -138,6 +138,8 @@ pub(super) fn on_blocked(state: &Arc<DaemonState>, sub_id: &str, info: &Worktree
 async fn tell(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo, files: &[String]) {
     if let Err(e) = send_to_sub(state, sub_id, &tell_text(info, files)).await {
         log::warn!("subchats: could not tell {sub_id} to resolve its conflict: {e}");
+        // Not told after all: `merge_now` must not answer "the sub was told to rebase".
+        set_told(sub_id, false);
         state.registry.set_subchat_finished(sub_id, true);
         crate::daemon::machines::publish_instances_changed(state);
         let detail = format!("Its commits conflict with {}, and it could not be told to resolve that: {e}.", info.target);
@@ -505,6 +507,7 @@ mod tests {
             assert_eq!(wakes(&st, &main).len(), 1);
             assert!(st.list_prompts().await.is_empty());
             assert!(st.registry.get(&id).unwrap().subchat_finished, "it did not start working");
+            assert!(!was_told(&id), "a failed tell must not leave the sub marked as told");
         });
     }
 
