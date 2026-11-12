@@ -178,13 +178,14 @@ pub fn read_digest(path: &Path, before_seq: Option<u64>) -> Result<Vec<ChatEvent
         *clock += 1;
         (scans.remove(path).unwrap_or_default(), *clock)
     };
-    scan.used = now;
     advance(path, &mut scan)?;
+    // After the scan: one that started over for a shorter file reset it.
+    scan.used = now;
     let upper = before_seq.unwrap_or(u64::MAX);
     let out = scan.events.iter().filter(|(o, _)| *o < upper).map(|(_, e)| e.clone()).collect();
     let mut guard = CACHE.lock().unwrap_or_else(|p| p.into_inner());
     let (_, scans) = guard.get_or_insert_with(|| (0, HashMap::new()));
-    if scans.len() >= CACHE_MAX {
+    if !scans.contains_key(path) && scans.len() >= CACHE_MAX {
         if let Some(oldest) = scans.iter().min_by_key(|(_, s)| s.used).map(|(p, _)| p.clone()) {
             scans.remove(&oldest);
         }

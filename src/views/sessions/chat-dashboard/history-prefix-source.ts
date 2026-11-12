@@ -79,6 +79,7 @@ export class HistoryPrefixSource {
   private gen = 0;
   /** Failed digest reads since the last built prefix. */
   private retries = 0;
+  private retriesFor: string | null = null;
 
   constructor(private readonly renderer: ChatRenderer, private readonly changed: () => void) {}
 
@@ -126,6 +127,11 @@ export class HistoryPrefixSource {
     const unplaced = this.renderer.subCardPool.filter((c) => !this.renderer.subCardsPlaced.has(c.id)).length;
     const key = `${cursorKey(sid, cursor)}|${this.renderer.paginator.skipMarks.length}|${unplaced}`;
     if (key === this.key) return;
+    // Another chat gets its own tries at a failing digest read.
+    if (sid !== this.retriesFor) {
+      this.retriesFor = sid;
+      this.retries = 0;
+    }
     this.key = key;
     const gen = ++this.gen;
     // Rows from the old prefix would overlap a page that grew upward.

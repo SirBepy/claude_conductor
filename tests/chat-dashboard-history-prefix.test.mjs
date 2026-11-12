@@ -251,6 +251,25 @@ describe("history above the page, edge cases", { timeout: 30000 }, () => {
     pagedDash.dispose();
   });
 
+  it("a chat whose first digest read fails gets its own retry, even after another chat spent them all", async () => {
+    const events = foreverTranscript(30, 12);
+    const paged = await openChat(events, { paged: true });
+    const serveDigest = invokeMock.getMockImplementation();
+    let failures = 1;
+    invokeMock.mockImplementation((cmd, args) => {
+      if (cmd === "load_dashboard_digest" && failures-- > 0) return Promise.reject(new Error("daemon not up yet"));
+      return serveDigest(cmd, args);
+    });
+    const { HistoryPrefixSource } = await import("../src/views/sessions/chat-dashboard/history-prefix-source.ts");
+    const source = new HistoryPrefixSource(paged.r, () => source.rows());
+    // The pane showed a paired machine's chat before, whose reads all failed.
+    source.retries = 3;
+    source.retriesFor = "a-mirrored-chat";
+    source.rows();
+    await settled(() => expect(source.rows().messages.length).toBeGreaterThan(paged.r.messages.length));
+    source.dispose();
+  });
+
   it("a prefix built for one chat never joins another chat's rows", async () => {
     const events = foreverTranscript(30, 12);
     const paged = await openChat(events, { paged: true });
