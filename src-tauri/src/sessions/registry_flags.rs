@@ -1,6 +1,9 @@
 use super::registry::Registry;
 use crate::types::{Instance, PlanStepSnapshot};
 
+/// How often a sub's changing "last action" is worth a registry publish.
+pub const ACTION_PUBLISH_EVERY: chrono::Duration = chrono::Duration::seconds(10);
+
 impl Registry {
     /// Set the self-reported turn status. `None` clears it (e.g. when a new
     /// turn starts). No-op if session is unknown.
@@ -167,6 +170,9 @@ impl Registry {
         let mut guard = self.inner.lock().unwrap();
         if let Some(i) = guard.get_mut(session_id) {
             i.subchat_finished = finished;
+            if finished {
+                i.progress.stopped_unfinished = None;
+            }
         }
     }
 
@@ -187,7 +193,66 @@ impl Registry {
         if i.progress.waiting_for == waiting_for {
             return false;
         }
+        if waiting_for.is_none() {
+            // A place in line means nothing once the sub no longer waits.
+            i.progress.queue_place = None;
+            i.progress.queue_behind = None;
+        }
         i.progress.waiting_for = waiting_for;
+        true
+    }
+
+    /// Stamps a waiting sub's place in the writer queue (1 = next) and the sub
+    /// holding the slot it waits behind. `None` takes both off (a hold that waits on
+    /// an `after` target has no place). Returns whether anything changed.
+    pub fn set_queue_place(&self, session_id: &str, place: Option<(u32, String)>) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(i) = guard.get_mut(session_id) else { return false };
+        let (place, behind) = match place {
+            Some((p, b)) => (Some(p), Some(b)),
+            None => (None, None),
+        };
+        if i.progress.queue_place == place && i.progress.queue_behind == behind {
+            return false;
+        }
+        i.progress.queue_place = place;
+        i.progress.queue_behind = behind;
+        true
+    }
+
+    /// Records a sub's latest tool call in words. Returns whether the row is worth
+    /// publishing now: the first action, or one at least [`ACTION_PUBLISH_EVERY`]
+    /// after the last published one. Between those the row is current in the
+    /// registry and rides the next publish, because a tool call lands every second or
+    /// two and the hover card only needs seconds. Only a sub keeps one; any other
+    /// chat is a no-op false.
+    pub fn note_action(&self, session_id: &str, action: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(i) = guard.get_mut(session_id) else { return false };
+        if i.subchat_of.is_none() {
+            return false;
+        }
+        i.progress.last_action = Some(action.to_string());
+        i.progress.last_action_at = Some(now.to_rfc3339());
+        drop(guard);
+        // The throttle's clock is the last PUBLISHED call, not the last call: under a
+        // steady tool stream the latter would never let a publish through.
+        let mut published = self.action_published.lock().unwrap();
+        let publish = published.get(session_id).is_none_or(|t| now.signed_duration_since(*t) >= ACTION_PUBLISH_EVERY);
+        if publish {
+            published.insert(session_id.to_string(), now);
+        }
+        publish
+    }
+
+    /// Mirrors gaming mode's park onto the row. Returns whether it changed.
+    pub fn set_parked(&self, session_id: &str, parked: bool) -> bool {
+        let mut guard = self.inner.lock().unwrap();
+        let Some(i) = guard.get_mut(session_id) else { return false };
+        if i.progress.is_parked() == parked {
+            return false;
+        }
+        i.progress.parked = parked.then_some(true);
         true
     }
 
@@ -387,6 +452,15 @@ fn note_busy_flip(i: &mut Instance, now_busy: bool) {
     i.progress.state_since = Some(chrono::Utc::now().to_rfc3339());
     if now_busy {
         i.progress.plan = None;
+        i.progress.stopped_unfinished = None;
+    } else {
+        // A queued sub's turn "ends" without having run, and a finished or ended one
+        // stopped on purpose; neither is a sub that stopped short.
+        i.progress.stopped_unfinished = (i.subchat_of.is_some()
+            && !i.subchat_finished
+            && i.progress.waiting_for.is_none()
+            && i.ended_at.is_none())
+        .then_some(true);
     }
 }
 
@@ -669,6 +743,119 @@ mod tests {
         registry.set_busy("sub", true);
         registry.set_busy("sub", false); // the RPC's failure path
         assert!(registry.get("sub").unwrap().subchat_finished);
+    }
+
+    fn sub_row(registry: &Registry, id: &str) {
+        registry.upsert_interactive(id, Path::new("/tmp/x"), "proj", "2026-11-12T00:00:00Z");
+        registry.set_subchat_of(id, Some("main".into()));
+    }
+
+    #[test]
+    fn a_sub_whose_turn_ended_without_finishing_is_stopped_until_it_runs_finishes_or_ends() {
+        let registry = Registry::new();
+        sub_row(&registry, "sub");
+        assert!(!registry.get("sub").unwrap().progress.is_stopped(), "it has not run a turn yet");
+
+        registry.set_busy("sub", true);
+        assert!(!registry.get("sub").unwrap().progress.is_stopped(), "working");
+        registry.set_busy("sub", false);
+        assert!(registry.get("sub").unwrap().progress.is_stopped(), "the turn ended and it never finished");
+
+        registry.set_busy("sub", true);
+        assert!(!registry.get("sub").unwrap().progress.is_stopped(), "running again");
+        registry.set_busy("sub", false);
+        registry.set_subchat_finished("sub", true);
+        assert!(!registry.get("sub").unwrap().progress.is_stopped(), "finishing after the turn ended clears it");
+
+        sub_row(&registry, "sub2");
+        registry.set_busy("sub2", true);
+        registry.set_subchat_finished("sub2", true);
+        registry.set_busy("sub2", false);
+        assert!(!registry.get("sub2").unwrap().progress.is_stopped(), "finishing before the turn ended never sets it");
+
+        sub_row(&registry, "sub3");
+        registry.set_busy("sub3", true);
+        registry.set_busy("sub3", false);
+        registry.mark_ended("sub3", crate::types::EndReason::Manual, "2026-11-12T01:00:00Z");
+        assert!(!registry.get("sub3").unwrap().progress.is_stopped(), "an ended sub is not stopped short");
+    }
+
+    #[test]
+    fn a_plain_chat_and_a_queued_sub_never_read_as_stopped() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("plain", Path::new("/tmp/x"), &settings, "2026-11-12T00:00:00Z");
+        registry.set_busy("plain", true);
+        registry.set_busy("plain", false);
+        assert!(!registry.get("plain").unwrap().progress.is_stopped(), "only a sub can stop short of finishing");
+
+        sub_row(&registry, "queued");
+        registry.set_waiting_for("queued", Some("waiting for header".into()));
+        registry.set_busy("queued", true);
+        registry.set_busy("queued", false);
+        assert!(!registry.get("queued").unwrap().progress.is_stopped(), "waiting in line is not stopping");
+    }
+
+    #[test]
+    fn a_place_in_line_lives_exactly_as_long_as_the_wait() {
+        let registry = Registry::new();
+        sub_row(&registry, "q");
+        registry.set_waiting_for("q", Some("waiting for the writer before it".into()));
+        assert!(registry.set_queue_place("q", Some((2, "Header".into()))));
+        assert!(!registry.set_queue_place("q", Some((2, "Header".into()))), "same place, nothing to publish");
+        let p = registry.get("q").unwrap().progress;
+        assert_eq!((p.queue_place, p.queue_behind.as_deref()), (Some(2), Some("Header")));
+
+        assert!(registry.set_queue_place("q", Some((1, "Header".into()))), "moving up is a change");
+        registry.set_waiting_for("q", None);
+        let p = registry.get("q").unwrap().progress;
+        assert_eq!((p.queue_place, p.queue_behind), (None, None), "no longer waiting, so no place");
+
+        registry.set_waiting_for("q", Some("waiting for header".into()));
+        registry.set_queue_place("q", Some((1, "x".into())));
+        registry.mark_ended("q", crate::types::EndReason::Manual, "2026-11-12T01:00:00Z");
+        assert_eq!(registry.get("q").unwrap().progress.queue_place, None, "an ended sub holds no place");
+    }
+
+    #[test]
+    fn a_subs_last_action_is_kept_after_the_turn_and_published_at_most_every_ten_seconds() {
+        let registry = Registry::new();
+        sub_row(&registry, "sub");
+        let t0 = chrono::DateTime::parse_from_rfc3339("2026-11-12T10:00:00Z").unwrap().with_timezone(&chrono::Utc);
+        let at = |s: i64| t0 + chrono::Duration::seconds(s);
+
+        assert!(registry.note_action("sub", "Reading a.rs", at(0)), "the first action publishes");
+        assert!(!registry.note_action("sub", "Editing b.rs", at(3)), "inside the window: stored, not published");
+        let p = registry.get("sub").unwrap().progress;
+        assert_eq!(p.last_action.as_deref(), Some("Editing b.rs"), "the row is current even when not published");
+        assert_eq!(p.last_action_at.as_deref(), Some(at(3).to_rfc3339().as_str()), "with the time of the call itself");
+        assert!(!registry.note_action("sub", "Editing c.rs", at(9)));
+        assert!(registry.note_action("sub", "Editing d.rs", at(10)), "ten seconds after the last PUBLISHED one");
+
+        registry.set_busy("sub", true);
+        registry.set_busy("sub", false);
+        assert_eq!(registry.get("sub").unwrap().progress.last_action.as_deref(), Some("Editing d.rs"), "a stopped sub still shows where it stopped");
+    }
+
+    #[test]
+    fn only_a_sub_keeps_a_last_action() {
+        let registry = Registry::new();
+        let settings = fresh_settings();
+        registry.record_interactive_session("plain", Path::new("/tmp/x"), &settings, "2026-11-12T00:00:00Z");
+        assert!(!registry.note_action("plain", "Editing x", chrono::Utc::now()));
+        assert!(registry.get("plain").unwrap().progress.last_action.is_none());
+        assert!(!registry.note_action("ghost", "Editing x", chrono::Utc::now()));
+    }
+
+    #[test]
+    fn the_park_flag_follows_gaming_mode_and_reports_real_changes_only() {
+        let registry = Registry::new();
+        sub_row(&registry, "sub");
+        assert!(registry.set_parked("sub", true));
+        assert!(!registry.set_parked("sub", true));
+        assert!(registry.get("sub").unwrap().progress.is_parked());
+        assert!(registry.set_parked("sub", false));
+        assert!(!registry.set_parked("ghost", true));
     }
 
     #[test]

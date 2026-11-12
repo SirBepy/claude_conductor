@@ -220,6 +220,10 @@ impl Registry {
         if inst.end_reason.is_some() { return false; }
         inst.end_reason = Some(reason);
         inst.ended_at = Some(when.to_string());
+        // An ended row is not "stopped short" and waits for nothing.
+        inst.progress.stopped_unfinished = None;
+        inst.progress.queue_place = None;
+        inst.progress.queue_behind = None;
         drop(guard);
         // Non-interactive kinds never hit `expire_prompts_for_session`'s reset,
         // so a session-end sweep here is the only cleanup they get. Also the

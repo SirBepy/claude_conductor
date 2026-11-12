@@ -38,6 +38,10 @@ pub fn register_gaming_mode(router: &mut Router, state: Arc<DaemonState>) {
                 .await
                 .map_err(|e| RpcError::internal(e.to_string()))?;
             publish(&state, &summary);
+            // Rows carry the park (`SessionProgress::parked`), so a flip must reach them now, not on the next tick.
+            if crate::daemon::subchats::pause::sync_parked(&state) {
+                crate::daemon::machines::publish_instances_changed(&state);
+            }
             Ok(serde_json::to_value(&summary).unwrap_or(Value::Null))
         }
     });

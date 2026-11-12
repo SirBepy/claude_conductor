@@ -806,6 +806,7 @@ pub fn on_target_done(state: &Arc<DaemonState>) {
 /// the daemon was down. Called once the registry is restored.
 pub fn on_boot(state: &Arc<DaemonState>) {
     restamp(state);
+    super::pause::sync_parked(state);
     crate::daemon::machines::publish_instances_changed(state);
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         let state = state.clone();

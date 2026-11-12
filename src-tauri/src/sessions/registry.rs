@@ -82,6 +82,10 @@ pub struct Registry {
     /// (todo 824 remaining 1). Positive proof the MCP transport is alive this
     /// turn, independent of whether report_turn_status/send_message landed.
     pub(super) mcp_tool_used_gen: Mutex<HashMap<String, u64>>,
+    /// `session_id` -> when a sub's latest-action change was last worth a publish
+    /// (`note_action`), so a steady tool stream publishes every few seconds, not
+    /// on every call. Never sent anywhere.
+    pub(super) action_published: Mutex<HashMap<String, chrono::DateTime<chrono::Utc>>>,
     /// Called with the session id each time `mark_ended` flips a row to ended.
     /// Every close path (the menu, SessionEnd, a process exit, `close_session`)
     /// ends in `mark_ended`, so this is the one place a daemon-side reaction to
@@ -105,6 +109,7 @@ impl Registry {
             builtin_ask_attempts: Mutex::new(HashMap::new()),
             pending_turn_gen: Mutex::new(HashMap::new()),
             mcp_tool_used_gen: Mutex::new(HashMap::new()),
+            action_published: Mutex::new(HashMap::new()),
             ended_hook: Mutex::new(None),
         }
     }

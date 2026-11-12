@@ -40,6 +40,7 @@ pub mod joe_message;
 pub mod merge_followup;
 pub mod pause;
 pub mod project;
+pub mod queued;
 pub(crate) mod queue_watch;
 mod resume;
 pub mod retro;

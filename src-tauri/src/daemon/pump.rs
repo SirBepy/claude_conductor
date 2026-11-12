@@ -16,6 +16,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 pub(crate) mod close;
 mod exit;
+mod last_action;
 mod turn_boundary;
 use close::{close_in_flight, close_stand_down_is_failure, ended_already, finalize_close, turn_is_close, CLOSE_FAILED_AWAITING};
 use exit::run_pump_exit;
@@ -268,6 +269,7 @@ pub(crate) async fn run_stdout_pump(
                                     .unwrap_or_else(|| "?".into());
                                 log::debug!("daemon publish: {variant} for {}", pump_session.session_id);
                             }
+                            last_action::note(&state_for_pump, &pump_session.session_id, turn.is_live(), &ev);
                             broadcast::publish(&pump_session, ev);
                             if let Some(awaiting) = turn_done_awaiting {
                                 // Turn over: drop the shared stream accumulator so a
