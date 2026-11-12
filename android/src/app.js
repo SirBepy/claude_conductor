@@ -199,6 +199,17 @@
     setConnecting(true);
     try {
       const port = await tunnelInvoke("start_iroh_tunnel", tunnelArgs(endpointId));
+      // A failed page load has no retry (the shell is already gone), so the PC
+      // is dialed first. The pairing code is only carried by the handoff URL
+      // below, so a failed probe never spends it.
+      try {
+        await tunnelInvoke("probe_iroh_tunnel", { endpointId });
+      } catch (err) {
+        console.error("iroh probe failed:", err);
+        setConnecting(false);
+        enterFailedState(UNREACHABLE_MESSAGE);
+        return;
+      }
       rememberIroh(endpointId);
       const target = new URL(`http://127.0.0.1:${port}/`);
       if (pairCode) target.searchParams.set("pair", pairCode);
@@ -351,6 +362,10 @@
   async function attemptIrohConnect(endpointId, pairCode, token) {
     try {
       const port = await tunnelInvoke("start_iroh_tunnel", tunnelArgs(endpointId));
+      if (token.cancelled) return false;
+      // Dials the PC before leaving the shell: a failed page load has no
+      // retry, a failed probe returns to the loop's backoff.
+      await tunnelInvoke("probe_iroh_tunnel", { endpointId });
       if (token.cancelled) return false;
       const target = new URL(`http://127.0.0.1:${port}/`);
       if (pairCode) target.searchParams.set("pair", pairCode);

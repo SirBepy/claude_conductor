@@ -16,6 +16,8 @@ use log::{error, info, warn};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
+use crate::journal::{self, Journal};
+
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Must match `src-tauri/src/daemon/iroh_tunnel.rs::ALPN` exactly.
@@ -103,6 +105,19 @@ const OPEN_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
 const EARLY_BUFFER_CAP: usize = 256 * 1024;
 
 const WATCHDOG_TICK: Duration = Duration::from_secs(2);
+
+/// How much later than `WATCHDOG_TICK` a tick may arrive on the wall clock
+/// before it is journaled as late; scheduler jitter stays far below it.
+const TICK_LATE_SLACK: Duration = Duration::from_secs(3);
+
+/// The journal request a loopback client may send; the tunnel answers it itself.
+const JOURNAL_REQUEST_PREFIX: &[u8] = b"GET /__tunnel/journal HTTP/1.";
+
+/// Most bytes `forward` reads before it decides whether a request is the journal's.
+const REQUEST_HEAD_CAP: usize = 256;
+
+/// A client silent this long before its request line is complete is dropped.
+const REQUEST_HEAD_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A wall-clock gap this much longer than one watchdog tick means the process
 /// was frozen or the phone slept. `tokio::time` runs on CLOCK_MONOTONIC, which
@@ -196,6 +211,11 @@ pub async fn start_iroh_tunnel(
         msg
     })?;
     info!("iroh bound in {}ms", bind_started.elapsed().as_millis());
+    journal::global().record(
+        ms_of(SystemTime::now()),
+        "bind",
+        &format!("id={} ms={}", short_id(&endpoint.id()), bind_started.elapsed().as_millis()),
+    );
     let candidates = port_candidates(&remote_id, legacy.unwrap_or(false));
     // A candidate held by an old tunnel is freed first, so the new PC still
     // lands on its own deterministic port and keeps that origin's token.
@@ -212,6 +232,24 @@ pub async fn start_iroh_tunnel(
     let tunnel = Arc::new(Tunnel::new(endpoint, remote_id.into(), Box::new(|| Box::pin(bind_endpoint()))));
     running.insert(remote_id, RunningTunnel::spawn(listener, port, tunnel));
     Ok(port)
+}
+
+/// Dials the PC through the running tunnel for `endpoint_id` and returns the
+/// milliseconds it took, so the shell can tell a reachable PC from a dead one
+/// before it navigates the WebView (a failed page load has no retry).
+#[tauri::command]
+pub async fn probe_iroh_tunnel(state: tauri::State<'_, IrohTunnelState>, endpoint_id: String) -> Result<u64, String> {
+    probe_in(&state, &endpoint_id).await
+}
+
+async fn probe_in(state: &IrohTunnelState, endpoint_id: &str) -> Result<u64, String> {
+    let remote_id: EndpointId = endpoint_id.parse().map_err(|e| format!("bad endpoint id: {e}"))?;
+    // Cloned out so the state lock is not held across the dial.
+    let tunnel = state.0.lock().await.get(&remote_id).map(|running| running.tunnel.clone());
+    let tunnel = tunnel.ok_or_else(|| "no tunnel for this PC".to_string())?;
+    let started = Instant::now();
+    tunnel.connection().await.map_err(|e| e.to_string())?;
+    Ok(started.elapsed().as_millis() as u64)
 }
 
 async fn bind_endpoint() -> Result<Endpoint, String> {
@@ -258,6 +296,8 @@ struct Tunnel {
     /// id, so a fresh endpoint would otherwise wait on n0's address lookup before
     /// it could start the handshake.
     relay_hint: std::sync::Mutex<Option<RelayUrl>>,
+    /// The process-wide journal (`journal::global`); a field so a test can read a private one.
+    journal: Arc<Journal>,
 }
 
 type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
@@ -290,6 +330,25 @@ type Rebuild = Box<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output 
 
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+fn ms_of(t: SystemTime) -> u64 {
+    t.duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// The first 8 hex characters of an endpoint id: enough for a PC log line to be
+/// matched to this phone, never the whole id.
+fn short_id(id: &EndpointId) -> String {
+    id.as_bytes()[..4].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// `relay`, `direct` or `none` for the path QUIC sends on; never an address.
+fn selected_path_kind(paths: &[(bool, TransportAddr)]) -> &'static str {
+    match paths.iter().find(|(selected, _)| *selected) {
+        Some((_, TransportAddr::Relay(_))) => "relay",
+        Some((_, TransportAddr::Ip(_))) => "direct",
+        _ => "none",
+    }
 }
 
 /// The address to dial: the PC's own, plus the relay it was last reached on.
@@ -352,11 +411,17 @@ impl Tunnel {
             last_alive: AtomicU64::new(now_secs()),
             clock: Arc::new(SystemTime::now),
             relay_hint: std::sync::Mutex::new(None),
+            journal: journal::global(),
         }
     }
 
     fn wall_secs(&self) -> u64 {
         (self.clock)().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    }
+
+    /// Journal entry stamped by the tunnel's own (injectable) wall clock.
+    fn note(&self, kind: &str, detail: &str) {
+        self.journal.record(ms_of((self.clock)()), kind, detail);
     }
 
     fn dial_addr(&self) -> EndpointAddr {
@@ -381,14 +446,17 @@ impl Tunnel {
                 let old = std::mem::replace(&mut *self.endpoint.lock().unwrap_or_else(|p| p.into_inner()), fresh);
                 tokio::spawn(async move { old.close().await });
                 info!("rebound a fresh iroh endpoint in {}ms", started.elapsed().as_millis());
+                self.note("rebind", &format!("ok id={} ms={}", short_id(&self.endpoint().id()), started.elapsed().as_millis()));
                 true
             }
             Ok(Err(e)) => {
                 warn!("rebind failed after {}ms: {e}", started.elapsed().as_millis());
+                self.note("rebind", &format!("fail {e}"));
                 false
             }
             Err(_) => {
                 warn!("rebind timed out after {}s", REBIND_TIMEOUT.as_secs());
+                self.note("rebind", &format!("fail timed out after {}s", REBIND_TIMEOUT.as_secs()));
                 false
             }
         }
@@ -407,9 +475,10 @@ impl Tunnel {
 
     /// Closes and clears the cached connection. Takes the guard's contents, not
     /// `invalidate`: the connection mutex is not reentrant.
-    fn drop_locked(guard: &mut Option<Connection>, why: &str) {
+    fn drop_locked(&self, guard: &mut Option<Connection>, why: &str) {
         if let Some(conn) = guard.take() {
             info!("dropping tunnel connection: {why}");
+            self.note("drop", why);
             conn.close(VarInt::from_u32(0), why.as_bytes());
         }
     }
@@ -458,13 +527,15 @@ impl Tunnel {
         // handed out, not left to the watchdog's next tick.
         let resumed = self.take_resume();
         if let Some(secs) = resumed {
-            Self::drop_locked(&mut slot.conn, &format!("resumed after {secs}s asleep (seen by connection())"));
+            self.note("resume", &format!("secs={secs} by=connection"));
+            self.drop_locked(&mut slot.conn, &format!("resumed after {secs}s asleep (seen by connection())"));
             slot.needs_fresh_endpoint = true;
         } else if let Some(conn) = slot.conn.as_ref() {
             match conn.close_reason() {
                 None => return Ok(conn.clone()),
                 Some(reason) => {
                     info!("tunnel connection closed ({reason}), redialing");
+                    self.note("closed", &reason.to_string());
                     slot.needs_fresh_endpoint = true;
                 }
             }
@@ -498,6 +569,7 @@ impl Tunnel {
                 }
                 Dialed::Slept(secs) if sleeps < MAX_SLEEP_RESTARTS => {
                     info!("dial slept {secs}s, restarting on a fresh endpoint");
+                    self.note("slept", &format!("secs={secs}"));
                     // This stop is the wake-up; nobody else reports it again.
                     self.last_alive.store(self.wall_secs(), Ordering::SeqCst);
                     sleeps += 1;
@@ -509,14 +581,18 @@ impl Tunnel {
                 }
                 Dialed::Slept(secs) => {
                     warn!("tunnel connect {attempt}/{DIAL_ATTEMPTS} slept {secs}s again, giving up on it");
+                    self.note("slept", &format!("secs={secs}"));
+                    self.note("dial_fail", &format!("attempt={attempt} slept"));
                     last_err = "tunnel connect slept".into();
                 }
                 Dialed::Failed(e) => {
                     warn!("tunnel connect {attempt}/{DIAL_ATTEMPTS} failed after {}ms warm={warm}: {e}", started.elapsed().as_millis());
+                    self.note("dial_fail", &format!("attempt={attempt} {e}"));
                     last_err = e;
                 }
                 Dialed::TimedOut => {
                     warn!("tunnel connect {attempt}/{DIAL_ATTEMPTS} timed out after {}s warm={warm}", timeout.as_secs());
+                    self.note("dial_fail", &format!("attempt={attempt} timed out"));
                     last_err = "tunnel connect timed out".into();
                 }
             }
@@ -546,6 +622,15 @@ impl Tunnel {
             started.elapsed().as_millis(),
             path_summary(&paths),
             resumed.is_some()
+        );
+        self.note(
+            "dial_ok",
+            &format!(
+                "ms={} attempt={attempt} warm={warm} hint={hint} resumed={} path={}",
+                started.elapsed().as_millis(),
+                resumed.is_some(),
+                selected_path_kind(&paths)
+            ),
         );
         slot.conn = Some(conn.clone());
         slot.failure = None;
@@ -583,10 +668,23 @@ impl Tunnel {
             if slot.conn.as_ref().map(Connection::stable_id) != Some(failed) {
                 return;
             }
-            Self::drop_locked(&mut slot.conn, why);
+            self.drop_locked(&mut slot.conn, why);
             slot.needs_fresh_endpoint = true;
         }
         self.network_change().await;
+    }
+
+    /// Notes a watchdog tick that arrived much later than its period on the wall
+    /// clock: the one line that tells a frozen or suspended process from an awake
+    /// one. Needs no lock, and `prev` moves to the new tick either way.
+    fn check_tick_late(&self, prev: &mut SystemTime) {
+        let now = (self.clock)();
+        if let Ok(gap) = now.duration_since(*prev) {
+            if gap > WATCHDOG_TICK + TICK_LATE_SLACK {
+                self.note("tick_late", &format!("late_ms={}", (gap - WATCHDOG_TICK).as_millis()));
+            }
+        }
+        *prev = now;
     }
 
     /// One watchdog tick. The lock is taken BEFORE the gap is consumed: if the
@@ -596,7 +694,8 @@ impl Tunnel {
     async fn watchdog_tick(&self) {
         let mut guard = self.conn.lock().await;
         if let Some(secs) = self.take_resume() {
-            Self::drop_locked(&mut guard.conn, &format!("resumed after {secs}s asleep"));
+            self.note("resume", &format!("secs={secs} by=watchdog"));
+            self.drop_locked(&mut guard.conn, &format!("resumed after {secs}s asleep"));
             guard.needs_fresh_endpoint = true;
             drop(guard);
             self.network_change().await;
@@ -613,11 +712,13 @@ impl Tunnel {
                 // stream, so redial once.
                 Ok(Err(e)) => {
                     warn!("open_bi failed: {e}");
+                    self.note("stream_fail", &format!("open_bi {e}"));
                     last_err = e.into();
                     self.invalidate(conn.stable_id(), "could not open a stream").await;
                 }
                 Err(_) => {
                     warn!("open_bi timed out: stream limit reached");
+                    self.note("stream_fail", "open_bi timed out");
                     return Err("open_bi timed out".into());
                 }
             }
@@ -634,8 +735,10 @@ fn is_resume_gap(prev: SystemTime, now: SystemTime) -> bool {
 /// byte sent on it disappears until the idle timeout. Dropping it on resume
 /// makes the WebView's first requests redial instead of hanging.
 async fn resume_watchdog(tunnel: Arc<Tunnel>) {
+    let mut prev = (tunnel.clock)();
     loop {
         tokio::time::sleep(WATCHDOG_TICK).await;
+        tunnel.check_tick_late(&mut prev);
         tunnel.watchdog_tick().await;
     }
 }
@@ -660,6 +763,43 @@ async fn accept_loop(listener: TcpListener, tunnel: Arc<Tunnel>) {
     }
 }
 
+enum RequestHead {
+    Journal,
+    Forward,
+    /// The peer closed, errored or stayed silent past `REQUEST_HEAD_TIMEOUT`.
+    Closed,
+}
+
+/// Reads into `early` until it is known whether the request is the journal's:
+/// the first line is complete, `REQUEST_HEAD_CAP` bytes arrived, or the bytes
+/// can no longer be the start of the journal request line. The last rule keeps a
+/// client that speaks a non-HTTP protocol, or waits for a reply after a short
+/// write, from being held until the timeout. Every byte read stays in `early`.
+async fn read_request_head(tcp_read: &mut (impl tokio::io::AsyncRead + Unpin), early: &mut Vec<u8>) -> RequestHead {
+    use tokio::io::AsyncReadExt;
+    let deadline = tokio::time::Instant::now() + REQUEST_HEAD_TIMEOUT;
+    let mut chunk = [0u8; 512];
+    loop {
+        let line_end = early.iter().position(|b| *b == b'\n');
+        let n = JOURNAL_REQUEST_PREFIX.len();
+        let could_be_journal = if early.len() <= n { JOURNAL_REQUEST_PREFIX.starts_with(&early[..]) } else { early.starts_with(JOURNAL_REQUEST_PREFIX) };
+        if !could_be_journal {
+            return RequestHead::Forward;
+        }
+        if line_end.is_some() || early.len() >= REQUEST_HEAD_CAP {
+            let line = &early[..line_end.unwrap_or(early.len())];
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            // `HTTP/1.` plus exactly one version digit.
+            let is_journal = line.len() == n + 1 && line.starts_with(JOURNAL_REQUEST_PREFIX) && line[n].is_ascii_digit();
+            return if is_journal { RequestHead::Journal } else { RequestHead::Forward };
+        }
+        match tokio::time::timeout_at(deadline, tcp_read.read(&mut chunk)).await {
+            Ok(Ok(read)) if read > 0 => early.extend_from_slice(&chunk[..read]),
+            _ => return RequestHead::Closed,
+        }
+    }
+}
+
 /// Splice one accepted TCP connection onto a bi-stream of the shared connection.
 /// While the stream is being opened (possibly behind a long dial) the socket is
 /// watched: a peer that already closed it, such as a request the page aborted,
@@ -669,6 +809,31 @@ async fn forward(tcp: TcpStream, tunnel: &Tunnel) -> Result<(), BoxError> {
     use tokio::io::AsyncReadExt;
     let (mut tcp_read, mut tcp_write) = tokio::io::split(tcp);
     let mut early: Vec<u8> = Vec::new();
+    // The journal is answered here, before any dial: it must be readable exactly
+    // when the PC is unreachable, and reading it must not start a connect.
+    match read_request_head(&mut tcp_read, &mut early).await {
+        RequestHead::Closed => return Ok(()),
+        RequestHead::Journal => {
+            let body = tunnel.journal.snapshot_json(ms_of((tunnel.clock)()));
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            tokio::io::AsyncWriteExt::write_all(&mut tcp_write, head.as_bytes()).await?;
+            tokio::io::AsyncWriteExt::write_all(&mut tcp_write, body.as_bytes()).await?;
+            tokio::io::AsyncWriteExt::shutdown(&mut tcp_write).await?;
+            // Unread request bytes at close would reset the socket and could
+            // cut the response off, so the rest of the request is read out.
+            let mut sink = [0u8; 1024];
+            while let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(1), tcp_read.read(&mut sink)).await {
+                if n == 0 {
+                    break;
+                }
+            }
+            return Ok(());
+        }
+        RequestHead::Forward => {}
+    }
     let (mut send, mut recv) = {
         let open = tunnel.open_stream();
         tokio::pin!(open);
@@ -796,13 +961,15 @@ mod tests {
         let counter = accepted.clone();
         tokio::spawn(async move {
             while let Some(incoming) = server.accept().await {
-                // A dial the client abandoned (its endpoint closed mid-handshake)
-                // must not end the accept loop for the dials that follow.
-                let Ok(conn) = incoming.await else { continue };
-                counter.fetch_add(1, Ordering::SeqCst);
-                // Keeps `conn` alive past the reply write, unlike a one-shot
-                // task - dropping it early resets the stream before PONG lands.
+                let counter = counter.clone();
+                // One task per dial, as the daemon does: a dial the client
+                // abandoned mid-handshake would otherwise hold up every dial
+                // behind it until its handshake times out.
                 tokio::spawn(async move {
+                    let Ok(conn) = incoming.await else { return };
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    // `conn` stays alive past the reply write: dropping it early
+                    // resets the stream before PONG lands.
                     while let Ok((mut send, mut recv)) = conn.accept_bi().await {
                         tokio::spawn(async move {
                             let mut got = vec![0u8; 4];
@@ -962,30 +1129,74 @@ mod tests {
         assert_eq!(accepted.load(Ordering::SeqCst), 1);
     }
 
+    /// The UDP port the endpoint's socket is bound to. `ip_addrs()` lists one entry
+    /// per interface, all on that port, plus a public address learned from the
+    /// outside whose port is the NAT's mapping, not a port bound here (nothing
+    /// listens on it over loopback). The set is unordered, so taking the first
+    /// IPv4 entry picked the mapped one about half the time. The bound port is
+    /// the one most entries share.
+    fn local_v4_port(addr: &EndpointAddr) -> u16 {
+        let mut seen: std::collections::HashMap<u16, usize> = Default::default();
+        for a in addr.ip_addrs().filter(|a| a.is_ipv4()) {
+            *seen.entry(a.port()).or_default() += 1;
+        }
+        let best = seen.values().max().copied().expect("server v4 addr");
+        // With one entry per port there is no majority: prefer a private address.
+        let ports: Vec<u16> = seen.iter().filter(|(_, n)| **n == best).map(|(p, _)| *p).collect();
+        if let [only] = ports[..] {
+            return only;
+        }
+        addr.ip_addrs()
+            .find(|a| matches!(a, std::net::SocketAddr::V4(v) if v.ip().is_private() || v.ip().is_loopback()))
+            .or_else(|| addr.ip_addrs().find(|a| a.is_ipv4()))
+            .expect("server v4 addr")
+            .port()
+    }
+
     /// Forwards UDP between a loopback front port and `target`, dropping every
     /// datagram while `open` is false: a PC nobody answers for, until opened.
+    ///
+    /// Each client address gets its own socket towards `target`, like a NAT: the
+    /// abandoned endpoint keeps sending for a moment after the fresh one starts,
+    /// and with one shared return route the PC's replies would go to whichever
+    /// of the two spoke last.
     async fn udp_gate(target: std::net::SocketAddr, open: Arc<std::sync::atomic::AtomicBool>) -> std::net::SocketAddr {
-        let front = tokio::net::UdpSocket::bind(("127.0.0.1", 0)).await.expect("front");
-        let back = tokio::net::UdpSocket::bind(("127.0.0.1", 0)).await.expect("back");
-        back.connect(target).await.expect("connect");
+        let front = Arc::new(tokio::net::UdpSocket::bind(("127.0.0.1", 0)).await.expect("front"));
         let front_addr = front.local_addr().expect("addr");
         tokio::spawn(async move {
-            let mut client = None;
-            let (mut a, mut b) = ([0u8; 2048], [0u8; 2048]);
+            let mut routes: std::collections::HashMap<std::net::SocketAddr, Arc<tokio::net::UdpSocket>> = Default::default();
+            let mut buf = [0u8; 2048];
             loop {
-                tokio::select! {
-                    Ok((n, from)) = front.recv_from(&mut a) => {
-                        client = Some(from);
-                        if open.load(Ordering::SeqCst) {
-                            let _ = back.send(&a[..n]).await;
-                        }
-                    }
-                    Ok(n) = back.recv(&mut b) => {
-                        if let (true, Some(to)) = (open.load(Ordering::SeqCst), client) {
-                            let _ = front.send_to(&b[..n], to).await;
-                        }
-                    }
+                // On Windows a reply sent to a port that has just closed (the
+                // abandoned endpoint) comes back as a connection-reset error on
+                // the next receive. The socket is still good, so it is skipped.
+                let Ok((n, from)) = front.recv_from(&mut buf).await else {
+                    tokio::task::yield_now().await;
+                    continue;
+                };
+                if !open.load(Ordering::SeqCst) {
+                    continue;
                 }
+                let back = match routes.get(&from) {
+                    Some(back) => back.clone(),
+                    None => {
+                        let back = Arc::new(tokio::net::UdpSocket::bind(("127.0.0.1", 0)).await.expect("back"));
+                        back.connect(target).await.expect("connect");
+                        routes.insert(from, back.clone());
+                        let (replies, front) = (back.clone(), front.clone());
+                        tokio::spawn(async move {
+                            let mut buf = [0u8; 2048];
+                            loop {
+                                match replies.recv(&mut buf).await {
+                                    Ok(n) => drop(front.send_to(&buf[..n], from).await),
+                                    Err(_) => tokio::task::yield_now().await,
+                                }
+                            }
+                        });
+                        back
+                    }
+                };
+                let _ = back.send(&buf[..n]).await;
             }
         });
         front_addr
@@ -997,7 +1208,7 @@ mod tests {
     async fn a_dial_that_slept_is_abandoned_at_once_and_restarted_on_a_fresh_endpoint() {
         use std::sync::atomic::AtomicBool;
         let (server, accepted) = pong_server().await;
-        let port = server.ip_addrs().find(|a| a.is_ipv4()).expect("server v4 addr").port();
+        let port = local_v4_port(&server);
         let open = Arc::new(AtomicBool::new(false));
         let front = udp_gate(std::net::SocketAddr::from(([127, 0, 0, 1], port)), open.clone()).await;
         let remote = EndpointAddr::new(server.id).with_ip_addr(front);
@@ -1258,6 +1469,190 @@ mod tests {
         assert!(!tunnel.remote_known().await, "no state before the first dial");
         ping(port).await;
         assert!(tunnel.remote_known().await, "iroh keeps the remote after a dial");
+    }
+
+    /// A tunnel on a loopback port with a journal of its own, so a test reads
+    /// only what it caused. `edit` can swap the clock or the rebuild closure.
+    async fn private_tunnel(client: Endpoint, server: EndpointAddr, rebuild: Rebuild, edit: impl FnOnce(&mut Tunnel)) -> (Arc<Tunnel>, u16, Arc<Journal>) {
+        let journal = Arc::new(Journal::new());
+        let mut tunnel = Tunnel::new(client, server, rebuild);
+        tunnel.journal = journal.clone();
+        edit(&mut tunnel);
+        let tunnel = Arc::new(tunnel);
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        tokio::spawn(accept_loop(listener, tunnel.clone()));
+        (tunnel, port, journal)
+    }
+
+    /// Writes `chunks` (pausing between them) and reads until the server closes.
+    async fn raw_exchange(port: u16, chunks: &[&[u8]]) -> String {
+        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
+        for (i, chunk) in chunks.iter().enumerate() {
+            if i > 0 {
+                tokio::time::sleep(Duration::from_millis(150)).await;
+            }
+            sock.write_all(chunk).await.expect("send");
+        }
+        let mut out = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), sock.read_to_end(&mut out)).await.expect("timed out").expect("read");
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    fn assert_journal_response(reply: &str) {
+        assert!(reply.starts_with("HTTP/1.1 200 OK\r\n"), "{reply}");
+        assert!(reply.contains("Content-Type: application/json\r\n"), "{reply}");
+        assert!(reply.contains("Cache-Control: no-store\r\n"), "{reply}");
+        let body = reply.split("\r\n\r\n").nth(1).expect("body");
+        assert!(body.starts_with("{\"v\":1"), "{body}");
+        assert!(reply.contains(&format!("Content-Length: {}\r\n", body.len())), "{reply}");
+    }
+
+    /// Reading the journal works while the PC is unreachable and never dials.
+    #[tokio::test]
+    async fn the_journal_is_served_from_the_loopback_port_without_any_dial() {
+        let (server, accepted) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let (_tunnel, port, _) = private_tunnel(client, server, minimal_rebuild(), |_| {}).await;
+        assert_journal_response(&raw_exchange(port, &[b"GET /__tunnel/journal HTTP/1.1\r\nHost: x\r\n\r\n"]).await);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(accepted.load(Ordering::SeqCst), 0, "reading the journal must not reach the PC");
+    }
+
+    #[tokio::test]
+    async fn the_journal_is_served_when_every_dial_fails_and_triggers_none() {
+        let (server, _) = pong_server().await;
+        let dead = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        dead.close().await;
+        let rebinds = Arc::new(AtomicUsize::new(0));
+        let counter = rebinds.clone();
+        let rebuild: Rebuild = Box::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async { Err("no sockets".to_string()) })
+        });
+        let (_tunnel, port, _) = private_tunnel(dead, server, rebuild, |_| {}).await;
+        assert_journal_response(&raw_exchange(port, &[b"GET /__tunnel/journal HTTP/1.0\r\n\r\n"]).await);
+        assert_eq!(rebinds.load(Ordering::SeqCst), 0, "a dial would have rebound");
+    }
+
+    #[tokio::test]
+    async fn a_journal_request_line_split_across_two_writes_is_still_recognised() {
+        let (server, accepted) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let (_tunnel, port, _) = private_tunnel(client, server, minimal_rebuild(), |_| {}).await;
+        assert_journal_response(&raw_exchange(port, &[b"GET /__tun", b"nel/journal HTTP/1.1\r\n\r\n"]).await);
+        assert_eq!(accepted.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_request_that_only_resembles_the_journal_is_forwarded() {
+        let (server, accepted) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let (_tunnel, port, _) = private_tunnel(client, server, minimal_rebuild(), |_| {}).await;
+        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
+        // Not the journal path, and only four bytes: the PC's stub replies after exactly "PING".
+        sock.write_all(b"PING").await.expect("send");
+        let mut reply = vec![0u8; 4];
+        tokio::time::timeout(Duration::from_secs(10), sock.read_exact(&mut reply)).await.expect("timed out").expect("read");
+        assert_eq!(&reply, b"PONG");
+        assert_eq!(accepted.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_tick_that_arrives_late_on_the_wall_clock_is_journaled_and_a_normal_one_is_not() {
+        let (server, _) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let offset = Arc::new(AtomicU64::new(0));
+        let o = offset.clone();
+        let (tunnel, _, journal) = private_tunnel(client, server, minimal_rebuild(), |t| {
+            t.clock = Arc::new(move || SystemTime::now() + Duration::from_secs(o.load(Ordering::SeqCst)));
+        })
+        .await;
+        let mut prev = (tunnel.clock)();
+        tunnel.check_tick_late(&mut prev);
+        assert!(!journal.snapshot_json(0).contains("tick_late"), "a normal tick is not late");
+        offset.store(10, Ordering::SeqCst);
+        tunnel.check_tick_late(&mut prev);
+        let json = journal.snapshot_json(0);
+        assert!(json.contains("\"k\":\"tick_late\",\"d\":\"late_ms=8"), "{json}");
+        tunnel.check_tick_late(&mut prev);
+        assert_eq!(journal.snapshot_json(0).matches("tick_late").count(), 1, "the jump is reported once");
+    }
+
+    #[tokio::test]
+    async fn a_successful_dial_journals_dial_ok_and_a_failed_one_dial_fail() {
+        let (server, _) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let (tunnel, _, journal) = private_tunnel(client, server.clone(), minimal_rebuild(), |_| {}).await;
+        tunnel.connection().await.expect("dial");
+        let json = journal.snapshot_json(0);
+        assert!(json.contains("\"k\":\"dial_ok\""), "{json}");
+        assert!(json.contains("attempt=1 warm=false hint=false resumed=false path="), "{json}");
+
+        let dead = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        dead.close().await;
+        let rebuild: Rebuild = Box::new(|| {
+            Box::pin(async {
+                let e = Endpoint::builder(presets::Minimal).bind().await.map_err(|e| e.to_string())?;
+                e.close().await;
+                Ok(e)
+            })
+        });
+        let (dead_tunnel, _, dead_journal) = private_tunnel(dead, server, rebuild, |_| {}).await;
+        assert!(dead_tunnel.connection().await.is_err());
+        let json = dead_journal.snapshot_json(0);
+        assert!(json.contains("\"k\":\"dial_fail\",\"d\":\"attempt=1 "), "{json}");
+        assert!(json.contains("\"k\":\"rebind\",\"d\":\"ok id="), "{json}");
+        assert!(!json.contains("dial_ok"), "{json}");
+    }
+
+    #[tokio::test]
+    async fn a_dropped_connection_and_its_resume_are_journaled() {
+        let (server, _) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let (tunnel, _, journal) = private_tunnel(client, server, minimal_rebuild(), |_| {}).await;
+        tunnel.connection().await.expect("first dial");
+        stale(&tunnel);
+        tunnel.connection().await.expect("redial");
+        let json = journal.snapshot_json(0);
+        assert!(json.contains("\"k\":\"resume\",\"d\":\"secs="), "{json}");
+        assert!(json.contains("by=connection"), "{json}");
+        assert!(json.contains("\"k\":\"drop\""), "{json}");
+    }
+
+    fn running_on(tunnel: Arc<Tunnel>, listener: TcpListener) -> RunningTunnel {
+        let port = listener.local_addr().expect("addr").port();
+        RunningTunnel::spawn(listener, port, tunnel)
+    }
+
+    #[tokio::test]
+    async fn probe_succeeds_against_a_reachable_pc_and_fails_against_a_dead_one() {
+        let (server, accepted) = pong_server().await;
+        let remote_id = server.id;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let state = IrohTunnelState::default();
+        let running = running_on(Arc::new(Tunnel::new(client, server.clone(), minimal_rebuild())), listener);
+        state.0.lock().await.insert(remote_id, running);
+        probe_in(&state, &remote_id.to_string()).await.expect("reachable PC");
+        assert_eq!(accepted.load(Ordering::SeqCst), 1);
+        assert_eq!(probe_in(&state, &id(42).to_string()).await, Err("no tunnel for this PC".to_string()));
+
+        let dead = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        dead.close().await;
+        let dead_id = id(43);
+        let dead_remote = EndpointAddr::new(dead_id);
+        let rebuild: Rebuild = Box::new(|| {
+            Box::pin(async {
+                let e = Endpoint::builder(presets::Minimal).bind().await.map_err(|e| e.to_string())?;
+                e.close().await;
+                Ok(e)
+            })
+        });
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let running = running_on(Arc::new(Tunnel::new(dead, dead_remote, rebuild)), listener);
+        state.0.lock().await.insert(dead_id, running);
+        assert!(probe_in(&state, &dead_id.to_string()).await.is_err());
     }
 
     #[tokio::test]

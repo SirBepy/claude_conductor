@@ -1,6 +1,7 @@
 mod iroh_tunnel;
+mod journal;
 
-use iroh_tunnel::{is_tunnel_port, start_iroh_tunnel, IrohTunnelState};
+use iroh_tunnel::{is_tunnel_port, probe_iroh_tunnel, start_iroh_tunnel, IrohTunnelState};
 
 /// Bundled-shell entry point; the setup/health-check/handoff logic is in android/src/app.js.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -20,7 +21,7 @@ pub fn run() {
                 .build(),
         )
         .manage(IrohTunnelState::default())
-        .invoke_handler(tauri::generate_handler![start_iroh_tunnel])
+        .invoke_handler(tauri::generate_handler![start_iroh_tunnel, probe_iroh_tunnel])
         .setup(|_app| {
             #[cfg(mobile)]
             _app.handle().plugin(tauri_plugin_barcode_scanner::init())?;
