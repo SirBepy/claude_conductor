@@ -26,6 +26,7 @@ import {
   gateDiag,
 } from "./gating";
 import { askerChips } from "./askers";
+import { askerFaceOf } from "./asker-face";
 import type { Answers, Question, QuestionDraft, QuestionRequestedPayload, QuestionUIOpts } from "./types";
 import { rerenderSidebar, surfaceNextForDisplay, surfaceParkedPrompt } from "./index";
 import { dropIfAlreadyAnswered } from "./answered-gate";
@@ -310,10 +311,9 @@ export async function showQuestionCard(
     sessionId: payload.session_id,
     displayId: shownOn,
     questions,
-    // Joe does not read the sub, so its card names it and its one-line job.
-    from: fromSub
-      ? { name: payload.sub_name || state.sessions.find((s) => s.session_id === askerId)?.name?.trim() || "Subchat", task: payload.sub_task }
-      : undefined,
+    // Joe does not read the sub, so its card names it and its one-line job; the main
+    // chat's own card says "Main chat"; a daemon card names the sub it is about.
+    from: askerFaceOf(payload),
     askers: askerId && shownOn ? () => askerChips(shownOn, askerId) : undefined,
     onPickAsker: askerId ? (to) => pickAsker(askerId, to) : undefined,
     initialDraft,

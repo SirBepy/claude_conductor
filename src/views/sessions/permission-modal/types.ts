@@ -97,6 +97,8 @@ export interface QuestionRequestedPayload extends PromptRouting {
   /** Set by the daemon on a sub's final-stamp question: the facts it read from
    *  git and the sub's transcript, shown as chips under the picture. */
   final_stamp?: { sub_id?: string; facts: SubFacts };
+  /** The sub a daemon card is about (`cards::raise_card`), named in `sub_name`. */
+  sub_id?: string;
   /** Set by the daemon's builtin-AskUserQuestion hard-block fallback
    *  (hooks_server/question.rs) when the model ignored the redirect to the
    *  MCP tool - never present on the normal path. */
@@ -172,6 +174,19 @@ export interface AskerChip {
   blocking?: boolean;
 }
 
+/** The chat a card says it comes from. A sub is drawn as its avatar (initials, ring,
+ *  model battery) beside its name; the main chat as a plain "Main chat" chip. */
+export interface AskerFace {
+  name?: string;
+  /** The sub's one-line job. Omitted while the daemon has none. */
+  task?: string;
+  /** The sub's model and effort, for the battery on its avatar. */
+  model?: string;
+  effort?: string;
+  /** The main chat's own card: no avatar, the chip just reads "Main chat". */
+  main?: boolean;
+}
+
 export interface QuestionUIOpts {
   /** Prompt id, so the card can be torn down externally (expiry / resolved elsewhere). */
   id?: string;
@@ -211,9 +226,9 @@ export interface QuestionUIOpts {
   daemonCard?: boolean;
   /** A sub's final stamp: the fact chips drawn under the question's picture. */
   finalStamp?: { facts: SubFacts };
-  /** Set on a hidden sub's card: Joe does not read the sub, so the card names it
-   *  and its one-line job. `task` is omitted while the daemon has none. */
-  from?: { name?: string; task?: string };
+  /** Who asks, drawn as the header chip: a hidden sub (its avatar and name, with
+   *  its one-line job under the header), or the main chat. Unset for a plain chat. */
+  from?: AskerFace;
   onSubmit: (
     answers: Answers,
     extras: { additionalMessage: string; attachments: AuqAttachment[] },

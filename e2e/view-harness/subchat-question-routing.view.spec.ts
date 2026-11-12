@@ -144,7 +144,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await openChat(page, "main");
       await fireEvent(page, "question-requested", [ownPrompt("main", 2), subPrompt("sub-a", 1)]);
       await expect(chips(page)).toHaveCount(2);
-      expect(await chipNames(page)).toEqual(["Review session code", "This chat"]);
+      expect(await chipNames(page)).toEqual(["Review session code", "Main chat"]);
     });
 
     test("switching chips keeps a half-answered card's draft", async ({ page }) => {

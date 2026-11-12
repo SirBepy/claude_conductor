@@ -173,6 +173,15 @@ async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool) -> Resul
     // right away finds its responder.
     state.pending.lock().await.insert(card_id.clone(), tx);
 
+    // A card about a sub names it, so the card can say whose it is. Absent when the
+    // sub has no name yet; the card then falls back to the sub's row, then "Subchat".
+    let sub_name = card
+        .sub_id
+        .as_deref()
+        .and_then(|id| state.registry.get(id))
+        .and_then(|i| i.name)
+        .map(|n| n.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|n| !n.is_empty());
     let mut payload = json!({
         "id": card_id,
         "questions": [question_json(&card)],
@@ -188,6 +197,9 @@ async fn raise(state: &Arc<DaemonState>, card: RaisedCard, quiet: bool) -> Resul
         "daemon_card": true,
         "seq": state.next_prompt_seq(),
     });
+    if let Some(name) = sub_name {
+        payload["sub_name"] = json!(name);
+    }
     // An older card still open in this chat: same hint a model's question
     // gets, so a second card reads as a newer one rather than a duplicate.
     if state.session_has_pending_question(&display).await {
@@ -369,6 +381,30 @@ mod tests {
         assert_eq!(q["question"], "The header sub has gone quiet. What now?");
         assert_eq!(q["options"].as_array().unwrap().len(), 3);
         assert_eq!(st.registry.get("main").unwrap().awaiting.as_deref(), Some("question"), "the ring shows needs input");
+    }
+
+    /// C5: a card about a sub says whose it is. The payload carries the sub's row
+    /// name, and none for a card about no sub or a sub without a name.
+    #[tokio::test]
+    async fn a_card_about_a_sub_carries_the_sub_name() {
+        let st = state_with_chat("main");
+        st.registry.upsert_interactive("sub-1", std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        st.registry.set_name("sub-1", "Fix  login\ntest".to_string());
+        st.registry.upsert_interactive("sub-2", std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        let _named = raise_card(&st, card("main", Some("sub-1"))).await.unwrap();
+        let _unnamed = raise_card(&st, card("main", Some("sub-2"))).await.unwrap();
+        let _none = raise_card(&st, card("main", None)).await.unwrap();
+        let by_sub = |sub: Option<&str>, listed: &[Value]| -> Value {
+            listed
+                .iter()
+                .find(|p| p["payload"]["sub_id"].as_str() == sub)
+                .map(|p| p["payload"].clone())
+                .expect("card listed")
+        };
+        let listed = st.list_prompts().await;
+        assert_eq!(by_sub(Some("sub-1"), &listed)["sub_name"], "Fix login test");
+        assert!(by_sub(Some("sub-2"), &listed).get("sub_name").is_none(), "no row name, no sub_name");
+        assert!(by_sub(None, &listed).get("sub_name").is_none(), "a card about no sub names none");
     }
 
     /// First real run: a checkup raised a red dot and "input needed" on a chat with

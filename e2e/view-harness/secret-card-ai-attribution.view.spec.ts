@@ -1,3 +1,4 @@
+// Reviewed 2026-11-12: the card header's asker chip became an avatar for a sub and a "Main chat" chip for a main chat (C5, asker-face.ts); this spec's contract is unchanged and it passes.
 // asserts: src/views/sessions/permission-modal/secret-card.ts
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
