@@ -215,10 +215,11 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(listRow(page, "sub-footer").locator("[data-popout]")).toHaveCount(1);
       const order = await page.locator(".sub-list-popover .sub-row").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.subId));
       expect(order).toEqual(["sub-footer", "sub-queued", "sub-header"]);
-      // The ring is the working yellow, not the glowing or arc one a running sub gets.
+      // A queued sub is not progressing: a dim ring with a clock, never the working yellow, glow or arc.
       const dot = listRow(page, "sub-queued").locator(".sub-dot .avatar-ring circle");
-      await expect(dot.first()).toHaveAttribute("data-tone", "working");
+      await expect(dot.first()).toHaveAttribute("data-tone", "dim");
       await expect(dot.first()).not.toHaveClass(/is-glow/);
+      await expect(listRow(page, "sub-queued").locator(".sub-glyph i.ph-clock")).toBeVisible();
       await capture(page, `sub-list-queued-${label}`);
       // Reading it in place says it is waiting.
       await listRow(page, "sub-queued").click();

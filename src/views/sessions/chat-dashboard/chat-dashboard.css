@@ -572,6 +572,24 @@ button.cdash-step:hover {
 .cdash-pstatus.is-wait b {
   color: var(--color-warning);
 }
+/* The foot while the chat has an unfinished sub: the sub counts, then the chat's
+   own idle line, muted, so "idle" never reads as "nothing is happening". */
+.cdash-pstatus.is-subs {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.cdash-pcounts {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-text);
+}
+.cdash-pstatus-own {
+  padding-left: 22px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
 .cdash-pdot {
   flex: none;
   width: 8px;

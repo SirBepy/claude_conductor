@@ -34,6 +34,7 @@ export function collectSubItems(
       startedAt: inst?.started_at ?? null,
       finishedAt: sub.kind === "finished" ? finished : null,
       ring: subRingSpec(sub, inst),
+      hover: sub.hover,
     };
   });
 }

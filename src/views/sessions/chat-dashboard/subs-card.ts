@@ -20,8 +20,11 @@ import {
 } from "../../../shared/chat/dashboard/subs-model";
 import type { ContextStatus, Instance } from "../../../types/ipc.generated";
 import { ringHtml, type RingSpec } from "../sidebar-ring";
+import type { SubHoverInput } from "../sidebar-hover-card-html";
 import { modelBatteryHtml } from "../sidebar-row-visuals";
-import { subInitials } from "../sub-list";
+import { subGlyphHtml, subInitials } from "../sub-list";
+import { tierLabel } from "../../../shared/model-name";
+import { attachSubHover } from "./sub-hover";
 import { isMirrored } from "../sessions-helpers";
 import { contextChipHtml } from "../statusbar-chips";
 import { openSubCardMenu } from "./sub-card-menu";
@@ -59,10 +62,11 @@ const REFRESH_EVERY = 5;
  *  with hundreds of screenshots must not fire them all when the gallery opens. */
 export const GALLERY_PAGE = 12;
 
+/** No native `title`: the hover card (sub-hover.ts) says it, and two tooltips on one avatar would stack. */
 export function avatarHtml(it: SubCardItem, ring: string, selected: boolean): string {
   const name = escapeHtml(it.name);
-  return `<button type="button" class="sx-av${selected ? " on" : ""}" data-sub="${escapeHtml(it.id)}" data-kind="${it.kind}" aria-pressed="${selected}" title="${name}: ${escapeHtml(it.progress)}" aria-label="${name}, ${escapeHtml(it.progress)}">`
-    + `<span class="sx-face">${escapeHtml(subInitials(it.name))}${ring}</span>${modelBatteryHtml(it.model, it.effort)}</button>`;
+  return `<button type="button" class="sx-av${selected ? " on" : ""}" data-sub="${escapeHtml(it.id)}" data-kind="${it.kind}" aria-pressed="${selected}" aria-label="${name}, ${escapeHtml(it.progress)}">`
+    + `<span class="sx-face">${escapeHtml(subInitials(it.name))}${ring}</span>${subGlyphHtml(it.kind)}${modelBatteryHtml(it.model, it.effort)}</button>`;
 }
 
 export class SubsCard {
@@ -98,6 +102,7 @@ export class SubsCard {
       host.innerHTML = `<div class="sx-row"></div><div class="sx-earlier-row" hidden></div><div class="sx-det" hidden></div>`;
       host.addEventListener("click", (e) => this.onClick(e));
       host.addEventListener("contextmenu", (e) => this.onContext(e));
+      attachSubHover(host, (id) => this.hoverInput(id));
     }
     this.state = state;
     const all = state ? [...state.shown, ...state.earlier] : [];
@@ -126,6 +131,13 @@ export class SubsCard {
 
   private instance(id: string): Instance | undefined {
     return this.deps.sessions().find((s) => s.session_id === id);
+  }
+
+  /** The avatar hover card's input, read fresh on every tick so it tracks the sub while it is up. */
+  private hoverInput(id: string): Omit<SubHoverInput, "contextPct" | "now"> | null {
+    const it = this.item(id);
+    if (!it?.hover) return null;
+    return { name: it.name, tier: tierLabel(it.model, it.effort), kind: it.kind, hover: it.hover, startedAt: it.startedAt };
   }
 
   // ---- Row of avatars ------------------------------------------------------------

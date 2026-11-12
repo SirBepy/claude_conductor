@@ -5,7 +5,9 @@ import type { PlanStepSnapshot } from "../../types/ipc.generated";
  *  its colour says WHICH STATE, so no second marker is needed. */
 export type RingTone =
   | "working" | "question" | "done" | "waiting" | "rate-limited"
-  | "external" | "attention" | "close-failed" | "closing";
+  | "external" | "attention" | "close-failed" | "closing"
+  /** A sub that is not making progress (queued, paused, usage limit, stopped): a quiet full circle. */
+  | "dim";
 
 export type RingSpec =
   | { kind: "none" }
@@ -63,18 +65,22 @@ export function ringSpecFor(
   }
 }
 
-/** The ring of a Use-subchats main chat. It draws the main agent's own work, not
- *  its subs' (a sub's progress already has its dot and hover row): a plain
- *  working ring with no plan arc, and green once every sub has finished. A
+/** The ring of a Use-subchats main chat: a plain working ring with no plan arc
+ *  while the main agent works OR any sub has a turn running (`subsWorking`), so
+ *  the row never reads idle while work is happening behind it. Once nothing runs
+ *  the ring is the chat's own: green only while its finish is unread (`st-done`)
+ *  and none once Joe has read it. It used to stay green for as long as every sub
+ *  was finished, which is forever, and Joe's read of the chat never cleared it. A
  *  question or permission wait, a close and the error states draw as they do on
  *  any chat, so a parked card still reads `st-attention`. */
 export function mainChatRingSpec(
   dotClass: string,
   question: QuestionRingInfo | null | undefined,
-  allSubsFinished: boolean,
+  subsWorking: boolean,
 ): RingSpec {
   if (dotClass === "st-working") return { kind: "solid", tone: "working", glow: true };
-  if (allSubsFinished && (dotClass === "st-your-turn" || dotClass === "st-done")) return { kind: "solid", tone: "done" };
+  // Idle or unread-done: a sub's running turn is the only thing the row has to say.
+  if (subsWorking && (dotClass === "st-your-turn" || dotClass === "st-done")) return { kind: "solid", tone: "working", glow: true };
   return ringSpecFor(dotClass, null, question);
 }
 

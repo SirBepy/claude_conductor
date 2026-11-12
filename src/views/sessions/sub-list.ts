@@ -13,7 +13,7 @@ import { isRemote } from "../../shared/transport";
 import { CLOSES_WHEN_SUBS_FINISH } from "./sidebar-row-visuals";
 import { planProgress, ringHtml, type RingSpec } from "./sidebar-ring";
 import { PopoverShell } from "./statusbar-popover-shell";
-import { isFolded } from "../../shared/chat/dashboard/subs-model";
+import { IDLE_KINDS, isFolded } from "../../shared/chat/dashboard/subs-model";
 
 export interface SubListHandlers {
   /** Read this sub in place. */
@@ -30,13 +30,29 @@ export function subInitials(name: string): string {
   return letters.toUpperCase() || "?";
 }
 
+/** The corner glyph of a sub that is not progressing: the state in one small icon,
+ *  on the corner opposite the model battery so it never reads as effort or as an
+ *  ask. Working, asking and finished subs have none (their ring says it). */
+const SUB_GLYPH: Partial<Record<SubStatus["kind"], { icon: string; label: string }>> = {
+  queued: { icon: "ph-clock", label: "Queued" },
+  paused: { icon: "ph-pause", label: "Paused" },
+  limited: { icon: "ph-hourglass-medium", label: "Usage limit" },
+  stopped: { icon: "ph-moon", label: "Stopped without finishing" },
+};
+
+export function subGlyphHtml(kind: SubStatus["kind"]): string {
+  const g = SUB_GLYPH[kind];
+  return g ? `<span class="sub-glyph" data-glyph="${kind}" aria-hidden="true"><i class="ph ${g.icon}"></i></span>` : "";
+}
+
 /** Red asks for Joe, a plan draws its arc, a plan-less worker breathes, a finished
- *  sub is a solid green ring: the sidebar ring's own vocabulary. */
+ *  sub is a solid green ring: the sidebar ring's own vocabulary. A sub that is not
+ *  progressing (queued, paused, usage limit, stopped) is a dim full ring, never
+ *  yellow: a ring that looks alive means a running turn. */
 export function subRingSpec(sub: SubStatus, inst: Instance | undefined): RingSpec {
   if (sub.kind === "asking") return { kind: "solid", tone: "question", pulse: true };
   if (sub.kind === "finished") return { kind: "solid", tone: inst?.closing ? "closing" : "done" };
-  // Queued is yellow like working, but it has not started: no glow, no arc.
-  if (sub.kind === "queued") return { kind: "solid", tone: "working" };
+  if (IDLE_KINDS.has(sub.kind)) return { kind: "solid", tone: "dim" };
   const plan = planProgress(inst?.progress?.plan);
   return plan ? { kind: "plan", done: plan.done, total: plan.total } : { kind: "solid", tone: "working", glow: true };
 }
@@ -46,7 +62,7 @@ export function subRingSpec(sub: SubStatus, inst: Instance | undefined): RingSpe
 function rowHtml(sub: SubStatus, inst: Instance | undefined, canPopOut: boolean): string {
   const name = escapeHtml(sub.name);
   return `<div class="sub-row" role="button" tabindex="0" data-sub-id="${escapeHtml(sub.id)}" data-kind="${sub.kind}" title="Read ${name}">
-    <span class="sub-dot">${escapeHtml(subInitials(sub.name))}${ringHtml(subRingSpec(sub, inst))}</span>
+    <span class="sub-dot">${escapeHtml(subInitials(sub.name))}${ringHtml(subRingSpec(sub, inst))}${subGlyphHtml(sub.kind)}</span>
     <span class="sub-text"><span class="sub-name">${name}</span><span class="sub-meta"><span class="sub-status">${escapeHtml(sub.progress)}</span>${sub.tier ? `<span class="sub-tier">${escapeHtml(sub.tier)}</span>` : ""}</span></span>
     ${sub.kind === "queued" || !canPopOut ? "" : `<button type="button" class="sub-move" data-popout title="Open in new window" aria-label="Open ${name} in a new window"><i class="ph ph-arrow-square-out"></i></button>`}
   </div>`;
@@ -91,8 +107,11 @@ export function subListHtml(
   showEarlier = false,
 ): string {
   const byId = new Map(sessions.map((s) => [s.session_id, s]));
-  const running = subs.filter((s) => s.kind !== "finished" && s.kind !== "queued");
+  const running = subs.filter((s) => s.kind === "asking" || s.kind === "working");
   const queued = subs.filter((s) => s.kind === "queued");
+  // Paused, at the usage limit and stopped have a process (or had one) but no running turn:
+  // filing them under Running said "working" about a sub that is not.
+  const idle = subs.filter((s) => s.kind === "paused" || s.kind === "limited" || s.kind === "stopped");
   const finished = newestFinishedFirst(subs.filter((s) => s.kind === "finished"), byId, finishedAt);
   const folded = (s: SubStatus): boolean => isFolded({ kind: s.kind, closing: s.closing, finishedAt: finishTime(s, byId, finishedAt) }, now);
   const recent = finished.filter((s) => !folded(s));
@@ -104,7 +123,7 @@ export function subListHtml(
     ? `<button type="button" class="sub-earlier" data-earlier aria-expanded="${showEarlier}">${showEarlier ? "Hide earlier" : `+${earlier.length} earlier`}</button>${showEarlier ? rows(earlier) : ""}`
     : "";
   const note = closesWhenSubsFinish ? `<p class="sub-list-note">${escapeHtml(CLOSES_WHEN_SUBS_FINISH)}</p>` : "";
-  return note + section("Running", running) + section("Queued", queued) + section("Finished", recent, earlierRow);
+  return note + section("Running", running) + section("Queued", queued) + section("Not running", idle) + section("Finished", recent, earlierRow);
 }
 
 /** The count icon in a main chat's header and the list behind it. Owns its button:

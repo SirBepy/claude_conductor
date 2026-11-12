@@ -1,3 +1,4 @@
+// Reviewed 2026-11-12 (honest sub states): the main chat's ring no longer stays green once every sub finished and the chat is read, and glows while any sub works; a queued sub's hover dot is dim; the three hover tests expected a finished sub's row, which the hover has not listed since it keeps to what is happening now (main-chat.ts hoverRows), so they now expect only the unfinished rows.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // Reviewed 2026-11-05: a closing main chat with a running sub now stays in Main chats (it is the Wait for them choice); the closing test here uses a finished sub, everything else holds.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
@@ -254,22 +255,26 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(ringOf(page, "main")).not.toHaveClass(/is-track/);
     });
 
-    test("the ring: green only once every sub has finished", async ({ page }) => {
+    // Joe: "sometimes it goes green and never stops being green". It used to stay green for as
+    // long as every sub was finished; an idle, read main chat draws no ring, as any chat does.
+    test("the ring: not green once every sub has finished and the chat is read", async ({ page }) => {
       const finished = [
         sub("sub-a", "A", 102, { busy: false, awaiting: "done", subchat_finished: true }),
         sub("sub-b", "B", 103, { busy: false, awaiting: "done", subchat_finished: true }),
       ];
       await mount(page, size, [MAIN, ...finished]);
-      await expect(ringOf(page, "main")).toHaveCount(1);
-      await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "done");
+      await expect(row(page, "main")).toHaveCount(1);
+      await expect(row(page, "main").locator(".avatar-ring")).toHaveCount(0);
     });
 
-    test("the ring: no ring while any sub is still working, and none for a main chat with no subs", async ({ page }) => {
+    test("the ring: glows while any sub is still working, and none for a main chat with no subs", async ({ page }) => {
       const finished = sub("sub-a", "A", 102, { busy: false, awaiting: "done", subchat_finished: true });
       await mount(page, size, [MAIN, finished, sub("sub-b", "B", 103), EMPTY_MAIN]);
-      // An idle, read main chat with a sub still working: no ring at all.
-      await expect(row(page, "main").locator(".avatar-ring")).toHaveCount(0);
-      // No subs yet is not "all finished".
+      // An idle, read main chat with a sub still working: the same slow glow as its own work.
+      await expect(ringOf(page, "main")).toHaveCount(1);
+      await expect(ringOf(page, "main")).toHaveAttribute("data-tone", "working");
+      await expect(ringOf(page, "main")).toHaveClass(/is-glow/);
+      // No subs yet is not a sub working.
       await expect(row(page, "empty").locator(".avatar-ring")).toHaveCount(0);
     });
 
@@ -292,29 +297,28 @@ test.describe("view-harness / main chats sidebar (desktop hover)", () => {
     const card = page.locator(".cc-row-card");
     await expect(card).toBeVisible();
     const rows = card.locator(".hc-subrow");
-    await expect(rows).toHaveCount(4);
-    // Asking first, then working, then finished.
+    // The hover is about what is happening now: the finished Header sub is not listed (it is resumable from the header list).
+    await expect(rows).toHaveCount(3);
+    // Asking first, then working.
     await expect(rows.nth(0)).toContainText("Footer");
     await expect(rows.nth(0)).toContainText("0 of 5 answered");
     await expect(rows.nth(1)).toContainText("Contact");
     await expect(rows.nth(1)).toContainText("0 of 1 answered");
     await expect(rows.nth(2)).toContainText("Skills");
     await expect(rows.nth(2)).toContainText("step 3 of 6");
-    await expect(rows.nth(3)).toContainText("Header");
-    await expect(rows.nth(3)).toContainText("finished");
 
     const colours = await rows.evaluateAll((els) => els.map((el) => getComputedStyle(el.querySelector(".hc-dot")!).backgroundColor));
     const probe = await page.evaluate(() => {
       const paint = (v: string) => { const d = document.createElement("i"); d.style.background = `var(${v})`; document.body.appendChild(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c; };
-      return { red: paint("--st-question"), yellow: paint("--st-working"), green: paint("--st-done") };
+      return { red: paint("--st-question"), yellow: paint("--st-working") };
     });
-    expect(colours).toEqual([probe.red, probe.red, probe.yellow, probe.green]);
+    expect(colours).toEqual([probe.red, probe.red, probe.yellow]);
     // The chat's own state and plan blocks give way to the sub list.
     await expect(card.locator(".hc-state")).toHaveCount(0);
     await capture(page.locator("body"), "main-chats-hover-card");
   });
 
-  test("a sub held behind another is a yellow row that says what it waits for, and keeps the ring off green", async ({ page }) => {
+  test("a sub held behind another is a dim row that says what it waits for, and keeps the ring off green", async ({ page }) => {
     // `after`: the row exists and counts, but nothing has started it.
     const queued = sub("sub-queued", "Footer links", 106, {
       busy: false,
@@ -329,18 +333,19 @@ test.describe("view-harness / main chats sidebar (desktop hover)", () => {
     const card = page.locator(".cc-row-card");
     await expect(card).toBeVisible();
     const rows = card.locator(".hc-subrow");
-    await expect(rows).toHaveCount(2);
-    // Queued sits above finished.
+    // Only the queued sub: the finished one is not listed.
+    await expect(rows).toHaveCount(1);
     await expect(rows.nth(0)).toContainText("Footer links");
     await expect(rows.nth(0)).toContainText("waiting for Header");
     await expect(rows.nth(0)).toHaveClass(/is-queued/);
-    await expect(rows.nth(1)).toContainText("finished");
     const colours = await rows.evaluateAll((els) => els.map((el) => getComputedStyle(el.querySelector(".hc-dot")!).backgroundColor));
     const probe = await page.evaluate(() => {
       const paint = (v: string) => { const d = document.createElement("i"); d.style.background = `var(${v})`; document.body.appendChild(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c; };
-      return { yellow: paint("--st-working"), green: paint("--st-done") };
+      return { dim: paint("--color-text-muted"), yellow: paint("--st-working") };
     });
-    expect(colours).toEqual([probe.yellow, probe.green]);
+    // Not progressing: dim, never the working yellow.
+    expect(colours).toEqual([probe.dim]);
+    expect(colours[0]).not.toBe(probe.yellow);
     await capture(page.locator("body"), "main-chats-hover-card-queued");
   });
 
@@ -364,7 +369,7 @@ test.describe("view-harness / main chats sidebar (desktop hover)", () => {
 
   test("the hover card names each sub's tier beside its name, and a mode-off chat with subs still gets the list", async ({ page }) => {
     const sonnet = sub("sub-footer", "Footer", 102, { model: "claude-sonnet-4-5", effort: "medium" });
-    const opus = sub("sub-header", "Header", 105, { busy: false, awaiting: "done", subchat_finished: true });
+    const opus = sub("sub-header", "Header", 105);
     await mount(page, DESKTOP, [MAIN, sonnet, opus], []);
     const box = (await row(page, "main").boundingBox())!;
     await page.mouse.move(box.x + 6, box.y + box.height / 2);

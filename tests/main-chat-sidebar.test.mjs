@@ -41,9 +41,16 @@ describe("mainChatRingSpec", () => {
   it("is a plain working ring with no arc while the main agent works", () => {
     expect(mainChatRingSpec("st-working", null, false)).toEqual({ kind: "solid", tone: "working", glow: true });
   });
-  it("is green once every sub finished, on an idle chat", () => {
-    expect(mainChatRingSpec("st-your-turn", null, true)).toEqual({ kind: "solid", tone: "done" });
+  // Joe, 2026-11-12: "sometimes it goes green and never stops being green". The ring used to
+  // stay green for as long as every sub was finished, which is forever once they are; reading
+  // the chat (`st-your-turn`) must clear it, the way it does on any chat.
+  it("goes green only while the finish is unread, and clears once Joe has read the chat", () => {
+    expect(mainChatRingSpec("st-done", null, false)).toEqual({ kind: "solid", tone: "done" });
     expect(mainChatRingSpec("st-your-turn", null, false)).toEqual({ kind: "none" });
+  });
+  it("glows while any sub works, whether the chat itself is idle or unread-done", () => {
+    expect(mainChatRingSpec("st-your-turn", null, true)).toEqual({ kind: "solid", tone: "working", glow: true });
+    expect(mainChatRingSpec("st-done", null, true)).toEqual({ kind: "solid", tone: "working", glow: true });
   });
   it("lets the main agent's own work outrank green, and keeps question and attention rings", () => {
     expect(mainChatRingSpec("st-working", null, true).tone).toBe("working");
@@ -159,7 +166,8 @@ describe("mainChatInfo", () => {
       sub("old-limit", { rate_limited_resets_at: earlier }),
     ];
     const byId = Object.fromEntries(mainChatInfo(main, sessions).subs.map((s) => [s.id, s.progress]));
-    expect(byId).toMatchObject({ frozen: "paused", limited: "rate limited", "old-limit": "working" });
+    expect(byId).toMatchObject({ frozen: "paused", "old-limit": "working" });
+    expect(byId.limited).toMatch(/^usage limit, resets \d/);
   });
 
   it("ignores another chat's subs", () => {
@@ -211,11 +219,13 @@ describe("mainChatInfo", () => {
     expect(mainChatInfo(main, [main, queued("a", "waiting for header", { subchat_finished: true })]).subs[0].kind).toBe("finished");
   });
 
-  it("puts a queued sub on the hover card in the working yellow with its waiting text", () => {
+  // Queued, paused, usage limit and stopped read dim, not working yellow: the yellow means a running turn.
+  it("puts a queued sub on the hover card in the dim tone with its waiting text", () => {
     const info = mainChatInfo(main, [main, queued("footer")]);
     const html = buildHoverCardHtml({ title: "CV", project: "cv", st: "st-working", plan: null, question: null, stateSince: null, contextPct: null, now: 0, subs: info.hoverRows });
     expect(html).toContain("is-queued");
     expect(html).toContain("waiting for header");
-    expect(html).toContain("var(--st-working)");
+    expect(html).toContain("var(--color-text-muted)");
+    expect(html).not.toContain("var(--st-working)");
   });
 });

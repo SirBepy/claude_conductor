@@ -82,6 +82,9 @@ export interface ItemDesc {
   danger?: boolean;
   checkDot?: boolean;
   isOn?: boolean;
+  /** Items shown in a submenu beside this one; `run` is unused. The submenu opens even
+   *  when every child is disabled, so the reasons on them can be read. */
+  children?: ItemDesc[];
 }
 
 // ── Open project in ▸ ────────────────────────────────────────────────────────
@@ -398,12 +401,13 @@ export interface SubCardMenuCtx {
 
 /** The Subchats card's right-click menu (docs/chat-dashboard-design.md): Open,
  *  Open in new window, Latest preview, Pause, Pin or Unpin sidemenu, Stop this
- *  turn, Change model, Change effort, Close. Close sends the sub `/close`. */
+ *  turn, Change model, Change effort, Close. Close sends the sub `/close`. A queued
+ *  sub's menu is `queuedSubItems`: Start now and Drop, with the process-only items nested. */
 export function buildSubCardItems(ctx: SubCardMenuCtx): ItemDesc[] {
   const id = ctx.subId;
   const gone = ctx.mirrored ? NOT_ON_THIS_MACHINE : undefined;
   const noProcess = ctx.queued ? "Not started yet" : undefined;
-  return [
+  const items: ItemDesc[] = [
     { icon: "arrow-square-out", label: "Open", run: () => ctx.open() },
     {
       icon: "app-window",
@@ -506,6 +510,60 @@ export function buildSubCardItems(ctx: SubCardMenuCtx): ItemDesc[] {
           },
       disabledReason: noProcess ?? gone,
     },
+  ];
+  return ctx.queued ? queuedSubItems(ctx, items, gone) : items;
+}
+
+/** The items that act on a running process. A queued sub has none, so they leave its
+ *  top level (Joe: tuck them in a submenu rather than drop them, so the menu still
+ *  shows what a sub can do once it starts). */
+const NEEDS_A_PROCESS: ReadonlySet<string> = new Set(["Pause", "Resume", "Stop this turn", "Change model", "Change effort", "Close"]);
+
+/** A queued sub's menu: what it can do before it has a process (read it, start it at once,
+ *  pin it, drop it), with the process-only actions nested under one parent. Start now and
+ *  Drop are desktop-pipe-only RPCs (daemon/methods/sub_view.rs): the daemon refuses a sub
+ *  that has started, so a stale menu cannot end a running one. */
+function queuedSubItems(ctx: SubCardMenuCtx, all: ItemDesc[], gone: string | undefined): ItemDesc[] {
+  const id = ctx.subId;
+  const top = all.filter((i) => !NEEDS_A_PROCESS.has(i.label));
+  const nested = all.filter((i) => NEEDS_A_PROCESS.has(i.label));
+  const startNow: ItemDesc = {
+    icon: "play-circle",
+    label: "Start now",
+    run: ctx.mirrored
+      ? undefined
+      : async () => {
+          try { await invoke<void>("start_queued_sub", { sessionId: id }); }
+          catch (err) { alert(`Could not start it: ${err}`); }
+          ctx.onAfterAction?.();
+        },
+    disabledReason: gone,
+  };
+  const drop: ItemDesc = {
+    icon: "trash",
+    label: "Drop",
+    danger: true,
+    run: ctx.mirrored
+      ? undefined
+      : async () => {
+          try { await invoke<void>("drop_queued_sub", { sessionId: id }); }
+          catch (err) { alert(`Could not drop it: ${err}`); }
+          ctx.onAfterAction?.();
+        },
+    disabledReason: gone,
+  };
+  const afterStart: ItemDesc = {
+    icon: "clock-countdown",
+    label: "Once it has started",
+    children: nested,
+  };
+  const at = (label: string): number => top.findIndex((i) => i.label === label);
+  return [
+    ...top.slice(0, at("Latest preview") + 1),
+    startNow,
+    ...top.slice(at("Latest preview") + 1),
+    afterStart,
+    drop,
   ];
 }
 
