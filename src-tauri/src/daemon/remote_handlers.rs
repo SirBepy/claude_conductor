@@ -26,7 +26,8 @@ use crate::daemon::rpc::Transport;
 
 use super::remote_server::RemoteCtx;
 use super::remote_ws_pump::{
-    pump_events, pump_external_session_events, pump_global_events, pump_relayed_session_events,
+    chat_heartbeat_period, global_heartbeat_period, pump_events, pump_external_session_events, pump_global_events,
+    pump_relayed_session_events, StreamOpts,
 };
 
 // The TRANSPORT_TABLE allowlist, TransportMask and allowed() live in
@@ -372,6 +373,18 @@ pub(super) async fn rpc_dispatch(
 #[derive(Deserialize)]
 pub(super) struct StreamQuery {
     pub(super) token: String,
+    /// `hb=1` asks the per-chat stream for heartbeat frames; absent or anything
+    /// else leaves the stream without them.
+    #[serde(default)]
+    pub(super) hb: Option<String>,
+}
+
+/// Wire name for the device kind in the `[remote-ws]` log lines.
+fn stream_kind_name(kind: &DeviceKind) -> &'static str {
+    match kind {
+        DeviceKind::Phone => "phone",
+        DeviceKind::Machine => "peer",
+    }
 }
 
 pub(super) async fn stream_ws(
@@ -380,13 +393,18 @@ pub(super) async fn stream_ws(
     Query(q): Query<StreamQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    let (kind, _machine_id, _device_id) = match super::remote_server::authenticate_token(&ctx, q.token).await {
+    let (kind, _machine_id, device_id) = match super::remote_server::authenticate_token(&ctx, q.token).await {
         Ok(v) => v,
         Err(resp) => return resp,
     };
+    let opts = StreamOpts {
+        dev: device_id,
+        kind: stream_kind_name(&kind),
+        heartbeat: chat_heartbeat_period(q.hb.as_deref()),
+    };
     if let Some(session) = ctx.state.sessions.get(&id).map(|s| s.clone()) {
         let state = ctx.state.clone();
-        return super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_events(socket, state, id, session));
+        return super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_events(socket, state, id, session, opts));
     }
     // Not a daemon-hosted session - maybe an EXTERNAL (terminal) one this
     // daemon's own registry knows about: no `claude` child/pump of ours, so
@@ -409,7 +427,7 @@ pub(super) async fn stream_ws(
                 crate::chat::history::locate_transcript(&id, Some(&inst.cwd.to_string_lossy())).ok()
             });
             return match path {
-                Some(p) => super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_external_session_events(socket, p)),
+                Some(p) => super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_external_session_events(socket, p, id, opts)),
                 None => (StatusCode::NOT_FOUND, "no transcript for external session").into_response(),
             };
         }
@@ -432,7 +450,7 @@ pub(super) async fn stream_ws(
         return (StatusCode::NOT_FOUND, "no such session").into_response();
     };
     let state = ctx.state.clone();
-    super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_relayed_session_events(socket, state, peer, id))
+    super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_relayed_session_events(socket, state, peer, id, opts))
 }
 
 /// Not session-scoped: the remote (browser) equivalent of the internal
@@ -447,13 +465,14 @@ pub(super) async fn global_stream_ws(
 ) -> Response {
     // The upgraded socket runs outside auth_mw's TRANSPORT scope, so the
     // device kind is resolved here from the query token instead.
-    let (kind, _machine_id, _device_id) = match super::remote_server::authenticate_token(&ctx, q.token).await {
+    let (kind, _machine_id, device_id) = match super::remote_server::authenticate_token(&ctx, q.token).await {
         Ok(v) => v,
         Err(resp) => return resp,
     };
     let keep_jarvis = matches!(kind, DeviceKind::Phone);
+    let opts = StreamOpts { dev: device_id, kind: stream_kind_name(&kind), heartbeat: global_heartbeat_period() };
     let state = ctx.state.clone();
-    super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_global_events(socket, state, keep_jarvis))
+    super::remote_server::limited_ws(ws).on_upgrade(move |socket| pump_global_events(socket, state, keep_jarvis, opts))
 }
 
 #[cfg(test)]
