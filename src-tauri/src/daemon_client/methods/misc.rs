@@ -79,10 +79,17 @@ mod tests {
         // cc-conductor-daemon.exe's file handle open for a brief moment after
         // exit, making cargo's file-replace step fail with a transient
         // "Access is denied" (os error 5) rather than a real build error.
+        // The build targets the directory this test binary lives in
+        // (<target-dir>/debug/deps/x.exe). A relative CARGO_TARGET_DIR (CI sets
+        // `target`) resolves against the child's cwd, the package folder, while the
+        // outer cargo resolved it against the repo root: the daemon then landed in
+        // src-tauri/target after a cold six-minute compile and was never found.
+        let target_dir = std::env::current_exe().unwrap().ancestors().nth(3).map(std::path::Path::to_path_buf).expect("test binary has a target dir");
         let mut build_ok = false;
         for attempt in 0..3 {
             let build = Command::new("cargo")
                 .args(["build", "--bin", "cc-conductor-daemon"])
+                .env("CARGO_TARGET_DIR", &target_dir)
                 .current_dir(std::env::current_dir().unwrap())
                 .status()
                 .expect("cargo build");
