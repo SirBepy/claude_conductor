@@ -188,7 +188,7 @@ export function isForSelectedSession(eventSessionId: string | undefined): boolea
   if (!eventSessionId) return false;
   if (_selectedSessionId === eventSessionId) return true;
   // Removed: the closing-flag bypass fired in every window once commit
-  // a3ef1d1a made `closing` a broadcast daemon flag, bleeding the /close
+  // a3ef1d1a made `closing` a broadcast daemon flag, bleeding the closing
   // session's card onto whatever chat was on screen. Now follows the normal
   // park/replay path below.
   // During a brand-new session's first turn, selectedId is still the placeholder
@@ -211,7 +211,7 @@ export function isForSelectedSession(eventSessionId: string | undefined): boolea
 // we stash the payload keyed by session_id and replay it when the user selects
 // that chat. While a prompt is parked the sidebar marks the row as needing
 // attention so the user knows to switch back. This applies uniformly,
-// including to a session mid-`/close` - it gets no special inline-surface
+// including to a session whose close is held - it gets no special inline-surface
 // treatment (see `isForSelectedSession`).
 
 export type PendingPrompt =

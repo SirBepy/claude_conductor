@@ -32,7 +32,7 @@ description: Use when invoked via /local-session-chat. Loads full context for th
 
 **Sidebar sort options.** `status` (Working > Done-unread > YourTurn > External), `recent`, `name`. Persisted in localStorage key `cc_session_sort`. Row style (`classic` vs `portrait`, default portrait) in `cc_chat_row_style`.
 
-**Context-menu.** Per-row 3-dot menu: "New agent here", "Run /close" (interactive non-busy only), "Open in VS Code".
+**Context-menu.** Per-row 3-dot menu: "New agent here", "Close session", "Open in VS Code".
 
 **IPC types.** `Instance`, `ChatEvent`, `ContentBlock`, `ProjectGroup`, `GitInfo` — all from `src/types/ipc.generated.ts`.
 

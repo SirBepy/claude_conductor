@@ -3,7 +3,7 @@ import { mountSessionsList, sessionInstance } from "./harness";
 
 // Replaces the marker-based `e2e/specs/close-teardown.e2e.js` (ai_todo 147).
 // The daemon SETS `Instance.closing` (pump.rs:155-158, Rust-tested); this
-// asserts the sidebar reads it. Mocked daemon, so no billed /close turn.
+// asserts the sidebar reads it. Mocked daemon, so no real held close.
 
 function instance(over: Parameters<typeof sessionInstance>[0] = {}) {
   return sessionInstance({

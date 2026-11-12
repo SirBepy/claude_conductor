@@ -1,4 +1,5 @@
 // Reviewed 2026-11-12 (release gate): the project settings tests waited on #subchatWritersSelect, which no source file renders since the Subs changing files toggle went (ProjectConfig.subchat_writers is parsed and ignored); they now cover the Check a sub's work row alone, and the queued-sub tests are unchanged.
+// Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed.
 // Reviewed 2026-11-10 (dash lane 3, code-check fixes): comment rewording, a transport case split and a deleted unused getter; nothing this spec asserts changed.
 // Reviewed 2026-11-05: sub-list.ts's row button now opens the sub in a new window (data-popout) and the queued row still has none; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.

@@ -2,7 +2,7 @@
 // Reviewed 2026-11-12 (project main chat): the sidebar lists one Main chats row per project and the sessions mount re-reads each project's main-chat pointer; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (stale question cards): the answer card announces itself so the dashboard leaves the question open by the message box out of Waiting on you, Skip settles its transcript card in place, a reopen swaps to the daemon prompt only when it asks the same, and Skip marks naming an old daemon id fall back to time matching; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (dash lane 3, code-check fixes): comment rewording, a transport case split and a deleted unused getter; nothing this spec asserts changed.
-// asserts: src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/subs-source.ts, src/views/sessions/chat-dashboard/sub-card-menu.ts, src/views/sessions/chat-dashboard/subs-card.css, src/shared/chat/dashboard/subs-model.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/effort-battery.css, src/shared/chat/composer.ts, src/views/sessions/sessions.css
+// asserts: src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/subs-source.ts, src/views/sessions/chat-dashboard/sub-card-menu.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/close-chat.ts, src/views/sessions/chat-dashboard/subs-card.css, src/shared/chat/dashboard/subs-model.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/effort-battery.css, src/shared/chat/composer.ts, src/views/sessions/sessions.css
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
@@ -296,7 +296,7 @@ test.describe("chat dashboard / Subchats card", () => {
   });
 
   test("the right-click menu lists the eight actions and each one acts on that sub", async ({ page }) => {
-    await openMain(page, [MAIN, WORK, DONE]);
+    await openMain(page, [MAIN, WORK, DONE], { clear_session: false });
     await av(page, "sub-work").click({ button: "right" });
     const menu = page.locator(".sx-menu");
     await expect(menu.locator(".smore-item")).toHaveText([
@@ -319,10 +319,13 @@ test.describe("chat dashboard / Subchats card", () => {
     await page.locator(".sx-menu .smore-item", { hasText: "Open in new window" }).click();
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "detach_window").length).toBe(1);
 
-    await av(page, "sub-work").click({ button: "right" });
+    // A busy sub would first ask to discard its turn; a finished one closes at once.
+    await av(page, "sub-done").click({ button: "right" });
     await page.locator(".sx-menu .smore-item", { hasText: "Close" }).click();
-    await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "send_message").length).toBe(1);
-    expect((await invokeCalls(page)).find((c) => c.cmd === "send_message")!.args).toMatchObject({ sessionId: "sub-work", blocks: [{ type: "text", text: "/close" }] });
+    // Close ends the sub through the app's own close path; the sub is sent no message.
+    await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "clear_session").length).toBe(1);
+    expect((await invokeCalls(page)).find((c) => c.cmd === "clear_session")!.args).toMatchObject({ sessionId: "sub-done" });
+    expect((await invokeCalls(page)).filter((c) => c.cmd === "send_message")).toEqual([]);
   });
 
   test("Open reads the sub in place, and a queued sub cannot be paused, stopped or closed", async ({ page }) => {

@@ -1,12 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { SESSIONS_BASE_INVOKE, capture, mountSessionsList, mountView, sessionInstance } from "./harness";
+import { SESSIONS_BASE_INVOKE, capture, mountView, sessionInstance } from "./harness";
 
 // Capture-only proof shots for todo 569 (v0.2.59 shipped unverified visually):
-// the close_failed warning dot, and the <=768px rate-limit-banner kebab.
-const DESKTOP = { width: 1400, height: 900 };
+// the <=768px rate-limit-banner kebab.
 const PHONE = { width: 390, height: 780 };
-
-const CLOSE_FAILED_TIP = "Close did not confirm - the chat may still be open";
 
 // The transport hands JSON numbers back for this bigint-typed field, so the
 // fixture matches the wire shape rather than the generated type.
@@ -16,34 +13,6 @@ const resetsAtSecs = (msFromNow: number): bigint =>
 test.describe("@shot", () => {
   test.skip(!process.env.CC_SHOTS, "capture-only, run it with CC_SHOTS=1");
   test.use({ deviceScaleFactor: 2 });
-
-  test("close_failed warning dot", async ({ page }) => {
-    await page.setViewportSize(DESKTOP);
-    await mountSessionsList(page, [
-      sessionInstance({
-        session_id: "s-failed", name: "Closed chat", cwd: "C:/Projects/alpha",
-        awaiting: "close_failed",
-      }),
-      sessionInstance({
-        session_id: "s-idle", name: "Idle chat", cwd: "C:/Projects/beta",
-        pid: 101, awaiting: "done",
-      }),
-    ]);
-    await expect.poll(() => page.locator(".sessions-list .row-entering").count()).toBe(0);
-
-    const failedRow = page.locator("li[data-session-id='s-failed']");
-    const avatar = failedRow.locator(".session-avatar");
-    await expect(avatar).toHaveClass(/st-close-failed/);
-    await expect(avatar).toHaveAttribute("title", CLOSE_FAILED_TIP);
-    await expect(failedRow.locator(".avatar-ring circle")).toHaveAttribute("data-tone", "close-failed");
-    await expect(failedRow.locator(".avatar-warn")).toBeVisible();
-    // A finished, already-read chat has no ring at all.
-    await expect(page.locator("li[data-session-id='s-idle'] .avatar-ring")).toHaveCount(0);
-
-    console.log(`[tooltip] ${await avatar.getAttribute("title")}`);
-    await capture(failedRow.locator(".session-avatar-wrap"), "close-failed-dot");
-    await capture(page.locator("#sessions-list"), "close-failed-vs-idle-list");
-  });
 
   test("mobile rate-limit banner collapses to one kebab", async ({ page }) => {
     await page.setViewportSize(PHONE);

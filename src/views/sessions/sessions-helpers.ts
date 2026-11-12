@@ -218,7 +218,6 @@ export function stateTooltip(i: Instance, unread: Set<string>, attention: Set<st
     case "workingBg": return "Working in the background (subagents / tasks running)";
     case "waiting": return "Waiting on an external process (CI / a long command)";
     case "unread": case "idle":
-      if (i.awaiting === "close_failed") return "Close did not confirm - the chat may still be open";
       if (rateLimited.has(i.session_id)) return "Usage limit reached - will auto-resume on reset";
       return state === "unread" ? "Claude responded - click to read" : "Done - your turn";
   }
@@ -459,7 +458,6 @@ export function statusDotClass(
     case "working": case "workingBg": return markerToStatusClass("working");
     case "waiting": return markerToStatusClass("waiting");
     case "unread": case "idle":
-      if (i.awaiting === "close_failed") return markerToStatusClass("close_failed");
       if (rateLimited.has(i.session_id)) return "st-rate-limited";
       return state === "unread" ? "st-done" : markerToStatusClass("done");
   }

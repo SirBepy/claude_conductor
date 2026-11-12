@@ -404,7 +404,7 @@ Board: preview slug `subs-card`; rules sheet: `subs-card-rules`.
 - **A sub's images = every image in its transcript,** shown live while it works, only in the expanded
   details. Needs a daemon scan of the sub's transcript (reuse history_scan).
 - **Right-click menu:** Open (full window), Open in new window, Latest preview, Pause, Pin/Unpin
-  sidemenu, Stop this turn, Change model or effort, Close (runs /close).
+  sidemenu, Stop this turn, Change model or effort, Close (closes the sub through the app, as the row's Close session does).
 - **Pin to sidemenu replaces Move to sidebar:** it only adds a sidebar shortcut, and the sub stays a
   sub of its main chat. Reason: "if it was spawned as a subchat, its forever a subchat".
 - Ruled out: text rows, the card on the left or inside Plan or as a strip under the title, images per

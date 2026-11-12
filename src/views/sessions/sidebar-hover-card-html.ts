@@ -40,14 +40,13 @@ const STATE_LINES: Record<string, StateLine> = {
   "st-waiting": { label: "Waiting on a process", tone: "waiting", timer: "waiting" },
   "st-rate-limited": { label: "Usage limit, resumes on reset", tone: "rate-limited", timer: null },
   "st-external": { label: "External session", tone: "external", timer: null },
-  "st-close-failed": { label: "Close did not confirm", tone: "close-failed", timer: null },
   "st-closing": { label: "Closing", tone: "closing", timer: null },
 };
 
 const TONE_VAR: Record<RingTone | "idle", string> = {
   working: "var(--st-working)", question: "var(--st-question)", done: "var(--st-done)",
   waiting: "var(--st-waiting)", "rate-limited": "var(--chat-state-error)", external: "var(--st-external)",
-  attention: "var(--st-attention)", "close-failed": "var(--st-close-failed)",
+  attention: "var(--st-attention)",
   closing: "var(--chat-state-closing)", idle: "var(--st-your-turn)",
   dim: "var(--color-text-muted)",
 };

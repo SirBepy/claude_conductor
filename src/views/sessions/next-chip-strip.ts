@@ -4,16 +4,9 @@
 import { getSettings } from "../../shared/state";
 import { currentTurnNextActions } from "../../shared/chat/chat-next-actions";
 import { state } from "./state";
-import { isSubchatsOn, onSubchatsChange } from "./permission-modal/gating";
 import { withCommand } from "./project-dashboard/format";
 import { isSlashChip, nextChips, withReply } from "./next-chips";
 import "./next-chips.css";
-
-let _lastPane: HTMLElement | null = null;
-
-// A flip of the subchats mode changes the chip set without any instance update
-// (turning it on takes the built-in /close away), so the strip listens for it directly.
-onSubchatsChange(() => { if (_lastPane) refreshNextChips(_lastPane); });
 
 function onChipClick(chip: string, shift: boolean): void {
   const composer = state.composer;
@@ -37,7 +30,6 @@ function onChipClick(chip: string, shift: boolean): void {
  *  are only rebuilt when the chip list changed, because a rebuild under the
  *  cursor swallows the click that was about to land. */
 export function refreshNextChips(pane: HTMLElement): void {
-  _lastPane = pane;
   const slot = pane.querySelector<HTMLElement>(".next-chip-slot");
   if (!slot) return;
   // Hidden (not emptied) while a draft exists: the chips are suggestions for an
@@ -52,7 +44,6 @@ export function refreshNextChips(pane: HTMLElement): void {
   const chips = nextChips({
     enabled: getSettings().nextActionChips !== false,
     inst,
-    role: inst?.subchat_of ? "sub" : isSubchatsOn(id) ? "main" : undefined,
     hasHeld: !!state.heldMessages?.hasItemsForActive(),
     nextActions: renderer ? currentTurnNextActions(renderer.messages) : [],
   });

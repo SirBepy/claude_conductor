@@ -24,6 +24,7 @@ import { showToast } from "../../shared/toast";
 import { state } from "./state";
 import { changeCharacterForSession, changeAccountForSession } from "./active-session-account";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
+import { closeChat } from "./close-chat";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { openQuestionCards } from "./permission-modal/dismiss-open-questions";
 import type { ChatEvent, ContentBlock } from "../../types/ipc.generated";
@@ -401,7 +402,8 @@ export interface SubCardMenuCtx {
 
 /** The Subchats card's right-click menu (docs/chat-dashboard-design.md): Open,
  *  Open in new window, Latest preview, Pause, Pin or Unpin sidemenu, Stop this
- *  turn, Change model, Change effort, Close. Close sends the sub `/close`. A queued
+ *  turn, Change model, Change effort, Close. Close ends the sub through the
+ *  app's own close path, the one the row's Close session uses. A queued
  *  sub's menu is `queuedSubItems`: Start now and Drop, with the process-only items nested. */
 export function buildSubCardItems(ctx: SubCardMenuCtx): ItemDesc[] {
   const id = ctx.subId;
@@ -499,15 +501,7 @@ export function buildSubCardItems(ctx: SubCardMenuCtx): ItemDesc[] {
       icon: "x-circle",
       label: "Close",
       danger: true,
-      // /close is the skill that retrospects, persists and ends the job properly;
-      // a bare clear would drop the sub's work on the floor.
-      run: ctx.queued || ctx.mirrored
-        ? undefined
-        : async () => {
-            const blocks: ContentBlock[] = [{ type: "text", text: "/close" }];
-            try { await invoke<void>("send_message", { sessionId: id, cwd: ".", blocks }); }
-            catch (err) { alert(`Could not send /close: ${err}`); }
-          },
+      run: ctx.queued || ctx.mirrored ? undefined : () => closeChat(id),
       disabledReason: noProcess ?? gone,
     },
   ];

@@ -130,8 +130,8 @@ export function buildSidebarEntries(
   );
 
   // Rendered purely off the daemon-broadcast Instance.closing flag: the
-  // daemon sets it itself the moment a /close turn starts, so every window
-  // shows the Closing segment.
+  // daemon sets it itself when a main chat's close is held for its subs, so
+  // every window shows the Closing segment.
   // A chat with Use subchats on carries a summary of its subs (dots, "3x", ring,
   // hover) and sits in its own group. state.sessions, not listSessions: the list
   // above has already dropped the subs this reads.

@@ -5,7 +5,7 @@ import type { PlanStepSnapshot } from "../../types/ipc.generated";
  *  its colour says WHICH STATE, so no second marker is needed. */
 export type RingTone =
   | "working" | "question" | "done" | "waiting" | "rate-limited"
-  | "external" | "attention" | "close-failed" | "closing"
+  | "external" | "attention" | "closing"
   /** A sub that is not making progress (queued, paused, usage limit, stopped): a quiet full circle. */
   | "dim";
 
@@ -60,7 +60,6 @@ export function ringSpecFor(
     case "st-waiting": return { kind: "solid", tone: "waiting" };
     case "st-rate-limited": return { kind: "solid", tone: "rate-limited" };
     case "st-external": return { kind: "solid", tone: "external" };
-    case "st-close-failed": return { kind: "solid", tone: "close-failed" };
     default: return { kind: "none" };
   }
 }
