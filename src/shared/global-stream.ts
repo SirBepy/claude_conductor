@@ -14,6 +14,7 @@
 import type { Transport } from "./transport";
 import { remoteToken } from "./http-transport";
 import { visibleInterval } from "./visible-interval";
+import { isAndroidShell } from "./mobile/android-shell";
 import { markLiveDown, markLiveUp } from "./connection-state";
 
 type GlobalCallback = (payload: unknown) => void;
@@ -149,7 +150,7 @@ const DEGRADE_POLL_REASON =
 
 function startGlobalDegradePoll(): void {
   if (globalDegradePollTimer) return;
-  globalDegradePollTimer = visibleInterval(() => {
+  const poll = (): void => {
     if (globalDegradePollInFlight || !globalStreamOwner) return;
     const cbs = globalListeners.get("instances-changed");
     if (!cbs || cbs.size === 0) return;
@@ -159,7 +160,13 @@ function startGlobalDegradePoll(): void {
       .then(() => { fireGlobal("instances-changed", undefined); })
       .catch(() => { /* network blip - skip this tick */ })
       .finally(() => { globalDegradePollInFlight = false; });
-  }, GLOBAL_DEGRADE_POLL_MS, { whileHidden: true, reason: DEGRADE_POLL_REASON });
+  };
+  // The Android shell keeps polling a PC it cannot reach while hidden; the
+  // resume code reconnects the stream and the daemon sends a full snapshot on
+  // connect, so nothing is lost by pausing.
+  globalDegradePollTimer = isAndroidShell()
+    ? visibleInterval(poll, GLOBAL_DEGRADE_POLL_MS)
+    : visibleInterval(poll, GLOBAL_DEGRADE_POLL_MS, { whileHidden: true, reason: DEGRADE_POLL_REASON });
 }
 
 // KEEP-RUNNING (todo 1008): same reasoning as its degrade-poll companion - a

@@ -18,6 +18,7 @@
 
 import { getTransport } from "../../../shared/transport";
 import { visibleInterval } from "../../../shared/visible-interval";
+import { isAndroidShell } from "../../../shared/mobile/android-shell";
 import { reconcilePendingPrompts } from "./remote-prompt-poll";
 import { confirmQuestionRendered, dismissQuestionCard, extractQuestions } from "./question-ui";
 import { expandActiveCard, getActiveCardAsker, getActiveCardId, isActiveCardId, refreshActiveCardAskers } from "./question-state";
@@ -431,7 +432,7 @@ async function reconcileKnownPromptsOnRegainedVisibility(): Promise<void> {
  * demuxes each prompt into the same handlers. Without this, AskUserQuestion +
  * permission prompts raised during a phone-driven turn never surfaced.
  */
-function startRemotePromptPoll(): void {
+export function startRemotePromptPoll(): void {
   const emitted = new Map<string, boolean>();
   const cb = {
     onQuestion: handleQuestionRequested,
@@ -452,11 +453,33 @@ function startRemotePromptPoll(): void {
   // KEEP-RUNNING (todo 1008): AskUserQuestion + permission prompts raised
   // during a phone-driven turn must reach the user while they look
   // elsewhere - that's the whole point of this poll.
-  visibleInterval(() => void tick(), 700, {
-    whileHidden: true,
-    reason: "AskUserQuestion + permission prompts raised during a phone-driven turn must reach the user while they look elsewhere",
+  if (!isAndroidShell()) {
+    visibleInterval(() => void tick(), 700, {
+      whileHidden: true,
+      reason: "AskUserQuestion + permission prompts raised during a phone-driven turn must reach the user while they look elsewhere",
+    });
+    return;
+  }
+  // The Android shell keeps the process alive in the background, where 700ms
+  // dials the PC for nothing. It still polls, slower: the daemon waits 8s for
+  // a client to confirm a question card rendered (question.rs
+  // RENDER_CONFIRM_TIMEOUT) and the phone may be the only client, so the
+  // hidden period must stay well inside that window.
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const arm = (): void => {
+    if (timer !== undefined) clearInterval(timer);
+    const hidden = document.visibilityState === "hidden";
+    timer = setInterval(() => void tick(), hidden ? HIDDEN_PROMPT_POLL_MS : PROMPT_POLL_MS);
+  };
+  arm();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "hidden") void tick();
+    arm();
   });
 }
+
+const PROMPT_POLL_MS = 700;
+const HIDDEN_PROMPT_POLL_MS = 5_000;
 
 let installed = false;
 

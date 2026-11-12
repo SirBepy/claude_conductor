@@ -641,7 +641,7 @@ describe("HttpTransport.listen", () => {
     const received = [];
     const unlisten = await new HttpTransport().listen("chat:abc-123", (p) => received.push(p));
     expect(lastWs.url).toBe(
-      "wss://pc.tail.ts.net/api/sessions/abc-123/stream?token=tok123",
+      "wss://pc.tail.ts.net/api/sessions/abc-123/stream?token=tok123&hb=1",
     );
     lastWs.onmessage({ data: JSON.stringify({ type: "assistant_message" }) });
     lastWs.onmessage({ data: "not json" }); // ignored, no throw

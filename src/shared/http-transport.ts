@@ -65,6 +65,14 @@ const READ_TIMEOUT_MS = 15_000;
 const MUTATION_TIMEOUT_MS = 120_000;
 const SEND_TIMEOUT_MS = 30_000;
 const RETRY_DELAY_MS = 500;
+/** A chat socket that has heartbeated and then goes this long without any
+ *  frame is dead. The daemon heartbeats every 15s (remote_ws_pump.rs); two
+ *  missed beats plus slack, so one stalled relay hop does not read as death. */
+export const CHAT_STREAM_STALE_MS = 35_000;
+const CHAT_STREAM_CONNECT_LIMIT_MS = 10_000;
+const CHAT_STREAM_WATCHDOG_MS = 5_000;
+const WS_CONNECTING = 0;
+const WS_OPEN = 1;
 
 const READ_ONLY_METHOD = /^(list_|get_|load_|read_|resolve_|count_|tail_)|^(context_status|transcript_stats|chat_drains|character_asset_url|project_last_activity_at)$/;
 
@@ -945,37 +953,142 @@ export class HttpTransport implements Transport {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const url =
       `${proto}://${location.host}/api/sessions/${encodeURIComponent(id)}` +
-      `/stream?token=${encodeURIComponent(remoteToken())}`;
+      `/stream?token=${encodeURIComponent(remoteToken())}&hb=1`;
     let stopped = false;
-    let ws: WebSocket;
+    let ws: WebSocket | null = null;
     let retryDelay = 1000;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let everOpened = false;
+    // Per socket: only a socket that has heartbeated can be judged dead by
+    // silence, so an older daemon (no heartbeat) keeps today's behaviour.
+    let sawHeartbeat = false;
+    let lastFrameAt = 0;
+    let connectStartedAt = 0;
+
+    const scheduleRetry = (): void => {
+      if (stopped || retryTimer !== undefined) return;
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined;
+        connect();
+      }, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 30_000);
+    };
+
+    // A half-open socket's close handshake can take a long time to report, so
+    // a socket judged dead is detached and replaced here rather than waiting
+    // for its own onclose.
+    const dropSocket = (dead: WebSocket, immediate: boolean): void => {
+      dead.onclose = null;
+      dead.onmessage = null;
+      dead.onopen = null;
+      try {
+        dead.close();
+      } catch {
+        /* ignore */
+      }
+      if (ws === dead) ws = null;
+      if (immediate) {
+        retryDelay = 1000;
+        if (retryTimer !== undefined) {
+          clearTimeout(retryTimer);
+          retryTimer = undefined;
+        }
+        connect();
+      } else {
+        scheduleRetry();
+      }
+    };
 
     const connect = (): void => {
       if (stopped) return;
-      ws = new WebSocket(url);
-      ws.onmessage = (e: MessageEvent) => {
+      const sock = new WebSocket(url);
+      ws = sock;
+      sawHeartbeat = false;
+      lastFrameAt = Date.now();
+      connectStartedAt = lastFrameAt;
+      sock.onmessage = (e: MessageEvent) => {
+        lastFrameAt = Date.now();
         try {
-          cb(JSON.parse(e.data as string) as T);
+          const frame = JSON.parse(e.data as string) as { method?: string };
+          if (frame?.method === "heartbeat") {
+            sawHeartbeat = true;
+            return;
+          }
+          cb(frame as unknown as T);
         } catch {
           /* ignore non-JSON frames */
         }
       };
-      ws.onopen = () => { retryDelay = 1000; };
-      ws.onclose = () => {
+      sock.onopen = () => {
+        retryDelay = 1000;
+        lastFrameAt = Date.now();
+        // Frames sent while the socket was down are gone; the store turns this
+        // event into a transcript re-read (event-store-delivery.ts).
+        if (everOpened) cb({ type: "events_lagged", timestamp: Date.now() } as unknown as T);
+        everOpened = true;
+      };
+      sock.onclose = () => {
         // Mobile connections drop frequently (network handoff, screen sleep).
         // Reconnect with capped exponential backoff unless unlisten() was called.
-        if (stopped) return;
-        setTimeout(connect, retryDelay);
-        retryDelay = Math.min(retryDelay * 2, 30_000);
+        if (ws === sock) ws = null;
+        scheduleRetry();
       };
     };
     connect();
 
+    const staleOpenSocket = (sock: WebSocket): boolean =>
+      sock.readyState === WS_OPEN && sawHeartbeat && Date.now() - lastFrameAt > CHAT_STREAM_STALE_MS;
+
+    const watchdog = setInterval(() => {
+      const sock = ws;
+      if (stopped || !sock) return;
+      if (sock.readyState === WS_CONNECTING) {
+        if (Date.now() - connectStartedAt > CHAT_STREAM_CONNECT_LIMIT_MS) dropSocket(sock, false);
+        return;
+      }
+      if (staleOpenSocket(sock)) dropSocket(sock, false);
+    }, CHAT_STREAM_WATCHDOG_MS);
+
+    // Back in the app or the network returned: the backoff timer may be up to
+    // 30s away and a thawed socket may be dead without any close event.
+    const reconnectNow = (): void => {
+      if (stopped) return;
+      const sock = ws;
+      if (!sock) {
+        retryDelay = 1000;
+        if (retryTimer !== undefined) {
+          clearTimeout(retryTimer);
+          retryTimer = undefined;
+        }
+        connect();
+        return;
+      }
+      if (sock.readyState === WS_OPEN) {
+        if (staleOpenSocket(sock)) dropSocket(sock, true);
+        return;
+      }
+      // A dial that just started is left to finish: resume and online often
+      // land together.
+      if (sock.readyState === WS_CONNECTING && Date.now() - connectStartedAt < 1000) return;
+      dropSocket(sock, true);
+    };
+    const onVisibility = (): void => {
+      if (document.visibilityState === "visible") reconnectNow();
+    };
+    const hasDoc = typeof document !== "undefined" && typeof document.addEventListener === "function";
+    const hasWin = typeof window !== "undefined" && typeof window.addEventListener === "function";
+    if (hasDoc) document.addEventListener("visibilitychange", onVisibility);
+    if (hasWin) window.addEventListener("online", reconnectNow);
+
     return () => {
       if (stopped) return;
       stopped = true;
+      clearInterval(watchdog);
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+      if (hasDoc) document.removeEventListener("visibilitychange", onVisibility);
+      if (hasWin) window.removeEventListener("online", reconnectNow);
       try {
-        ws.close();
+        ws?.close();
       } catch {
         /* ignore */
       }
