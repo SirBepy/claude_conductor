@@ -166,7 +166,7 @@ const CONTROL_SCRIPT: &str = "<script>window.addEventListener(\"message\",functi
 /// (phone) landed in: the nearest ancestor with `data-part`, else "shell". The
 /// capture-phase handler swallows the click so an Alt-clicked link does not
 /// navigate and the click that ends a long-press does not act.
-const ELEMENT_SCRIPT: &str = "<script>(function(){function reg(t){while(t&&t.nodeType===1){var p=t.getAttribute(\"data-part\");if(p)return p;t=t.parentElement;}return \"shell\";}function send(t,x,y){parent.postMessage({cc:\"element\",region:reg(t),x:x,y:y},\"*\");}var tm=null,lp=false;function stop(){if(tm){clearTimeout(tm);tm=null;}}document.addEventListener(\"click\",function(e){if(!e.altKey&&!lp)return;e.preventDefault();e.stopPropagation();if(lp){lp=false;return;}send(e.target,e.clientX,e.clientY);},true);document.addEventListener(\"touchstart\",function(e){stop();var t=e.touches[0],el=e.target;tm=setTimeout(function(){tm=null;lp=true;send(el,t.clientX,t.clientY);},500);},{passive:true});document.addEventListener(\"touchmove\",stop,{passive:true});document.addEventListener(\"touchend\",stop,{passive:true});document.addEventListener(\"touchcancel\",stop,{passive:true});})();</script>";
+const ELEMENT_SCRIPT: &str = "<script>(function(){function reg(t){while(t&&t.nodeType===1){var p=t.getAttribute(\"data-part\");if(p)return p;t=t.parentElement;}return \"shell\";}function send(t,x,y){parent.postMessage({cc:\"element\",region:reg(t),x:x,y:y},\"*\");}var tm=null,lp=false;function stop(){if(tm){clearTimeout(tm);tm=null;}}document.addEventListener(\"click\",function(e){if(!e.altKey&&!lp)return;e.preventDefault();e.stopPropagation();if(lp){lp=false;return;}send(e.target,e.clientX,e.clientY);},true);document.addEventListener(\"touchstart\",function(e){stop();lp=false;var t=e.touches[0],el=e.target;tm=setTimeout(function(){tm=null;lp=true;send(el,t.clientX,t.clientY);},500);},{passive:true});document.addEventListener(\"touchmove\",stop,{passive:true});document.addEventListener(\"touchend\",stop,{passive:true});document.addEventListener(\"touchcancel\",stop,{passive:true});})();</script>";
 
 /// The page the panel renders: the shell with every filled region replaced by
 /// its part (default control values as `data-*`, css wrapped in `@scope` so one
@@ -640,6 +640,9 @@ mod tests {
         assert!(doc.contains("cc:\"element\""), "the page reports an element click to the panel: {doc}");
         assert!(doc.contains("altKey"), "desktop reports on Alt-click: {doc}");
         assert!(doc.contains("touchstart") && doc.contains("500"), "phone reports on a 500ms long-press: {doc}");
+        // A long-press that ends with no click (a contextmenu instead) must not
+        // leave the next ordinary tap swallowed.
+        assert!(doc.contains("function(e){stop();lp=false;"), "a new touch clears the long-press mark: {doc}");
         assert!(doc.contains("data-part") && doc.contains("\"shell\""), "no enclosing region reports as the shell: {doc}");
     }
 
