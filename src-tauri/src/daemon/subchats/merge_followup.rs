@@ -20,7 +20,7 @@
 
 use super::brief::WorktreeInfo;
 use super::card_log::{self, BlockerCard};
-use super::pending_merges;
+use super::pending_merges::{self, Cause as Pending};
 use super::plumbing::{self, Problem};
 use super::worktree::{self, Blocked, Cause, Landing};
 use crate::daemon::state::DaemonState;
@@ -32,12 +32,9 @@ use std::sync::{Arc, Mutex};
 /// landing, the main chat's `drop` or the sub ending.
 static CONFLICTS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
 
-/// Subs whose commits are not in the target and whose refusal is still being
-/// handled (told, pending, or with the main chat). A sub waiting on one of these
-/// with `after` keeps waiting: starting on a base that did not land would build on
-/// the wrong code. A pending merge counts from its file, so that holds across a
-/// restart.
-static UNRESOLVED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+/// Subs told about the conflict that refused their merge, until it lands, is
+/// dropped or the sub ends.
+static TOLD: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
 fn bump_conflicts(sub_id: &str) -> u32 {
     let mut g = CONFLICTS.lock().unwrap_or_else(|p| p.into_inner());
@@ -46,8 +43,8 @@ fn bump_conflicts(sub_id: &str) -> u32 {
     *n
 }
 
-fn set_unresolved(sub_id: &str, on: bool) {
-    let mut g = UNRESOLVED.lock().unwrap_or_else(|p| p.into_inner());
+fn set_told(sub_id: &str, on: bool) {
+    let mut g = TOLD.lock().unwrap_or_else(|p| p.into_inner());
     let set = g.get_or_insert_with(HashSet::new);
     if on {
         set.insert(sub_id.to_string());
@@ -56,9 +53,12 @@ fn set_unresolved(sub_id: &str, on: bool) {
     }
 }
 
-/// Whether `sub_id`'s refused merge is still being handled.
+/// Whether `sub_id`'s commits were refused and have not landed or been dropped. A
+/// sub waiting on it with `after` keeps waiting: starting on a base that did not
+/// land would build on the wrong code. Read from `pending_merges`, so it holds
+/// across a restart.
 pub fn unresolved(sub_id: &str) -> bool {
-    UNRESOLVED.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id)) || pending_merges::contains(sub_id)
+    pending_merges::contains(sub_id)
 }
 
 /// Forgets a sub's refusal: its commits landed, the main chat left them, or the
@@ -67,7 +67,7 @@ pub fn forget(sub_id: &str) {
     if let Some(m) = CONFLICTS.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
         m.remove(sub_id);
     }
-    set_unresolved(sub_id, false);
+    set_told(sub_id, false);
     pending_merges::remove(sub_id);
     plumbing::clear(sub_id);
 }
@@ -103,15 +103,15 @@ async fn send_to_sub(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> Resu
 
 /// Handles a refused landing. Nothing here draws a card for Joe.
 pub(super) fn on_blocked(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo, b: &Blocked) {
-    set_unresolved(sub_id, true);
+    let pending = if b.cause == Cause::DirtyOverlap { Pending::DirtyFiles } else { Pending::Refused };
+    pending_merges::store(sub_id, pending, b.points.clone());
     match b.cause {
         Cause::DirtyOverlap => {
-            pending_merges::store(sub_id, b.points.clone());
             log::info!("subchats: the merge of {sub_id} waits for uncommitted files in the main checkout: {}", b.points.join(", "));
         }
         Cause::Conflict => {
-            pending_merges::remove(sub_id);
             let first = bump_conflicts(sub_id) == 1;
+            set_told(sub_id, false);
             match tokio::runtime::Handle::try_current() {
                 Ok(handle) if first => {
                     // Out of "finished" now, not when the message lands: the next lines of
@@ -119,6 +119,7 @@ pub(super) fn on_blocked(state: &Arc<DaemonState>, sub_id: &str, info: &Worktree
                     // read the row, and this sub is working again.
                     state.registry.set_subchat_finished(sub_id, false);
                     crate::daemon::machines::publish_instances_changed(state);
+                    set_told(sub_id, true);
                     let (state, id, info, files) = (state.clone(), sub_id.to_string(), info.clone(), b.points.clone());
                     handle.spawn(async move { tell(&state, &id, &info, &files).await });
                 }
@@ -128,7 +129,6 @@ pub(super) fn on_blocked(state: &Arc<DaemonState>, sub_id: &str, info: &Worktree
             }
         }
         Cause::BranchSwitched | Cause::Other => {
-            pending_merges::remove(sub_id);
             plumbing::report(state, sub_id, Problem::MergeRefused, b.text.clone(), b.points.clone());
         }
     }
@@ -185,9 +185,9 @@ async fn merge_again(state: &Arc<DaemonState>, sub_id: &str) -> Option<Landing> 
 }
 
 /// Whether the sub was told about the conflict that refused its merge: only the
-/// first one in a row is.
+/// first one in a row is, and only with a runtime to tell it on.
 fn was_told(sub_id: &str) -> bool {
-    CONFLICTS.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(|m| m.get(sub_id)).copied() == Some(1)
+    TOLD.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id))
 }
 
 /// `subchat merge`: lands a finished worktree sub's commits now, by the code behind
@@ -236,7 +236,8 @@ fn still_dirty(info: &WorktreeInfo, files: &[String]) -> bool {
 
 /// One pass of the 60 second tick over the pending merges: a sub that ended or lost
 /// its worktree is forgotten, one that is working again is left to its next finish,
-/// and one whose files are clean is landed by the same code as `subchat merge`.
+/// one refused for another reason is left to the sub or the main chat, and one
+/// whose files are clean is landed by the same code as `subchat merge`.
 /// Returns the subs whose merge was tried.
 pub async fn retry_pending(state: &Arc<DaemonState>) -> Vec<String> {
     let mut tried = Vec::new();
@@ -249,7 +250,7 @@ pub async fn retry_pending(state: &Arc<DaemonState>) -> Vec<String> {
             forget(&p.sub_id);
             continue;
         }
-        if !inst.subchat_finished {
+        if !inst.subchat_finished || p.cause != Pending::DirtyFiles {
             continue;
         }
         let Some(info) = worktree::info_of(&p.sub_id) else { continue };
@@ -291,10 +292,11 @@ pub(crate) mod test_support {
 
     /// What a restart loses: the in-memory refusal state.
     pub fn forget_memory(sub_id: &str) {
-        super::set_unresolved(sub_id, false);
+        super::set_told(sub_id, false);
         if let Some(m) = super::CONFLICTS.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
             m.remove(sub_id);
         }
+        crate::daemon::subchats::plumbing::clear(sub_id);
     }
 }
 
@@ -620,6 +622,10 @@ mod tests {
             let err = merge_now(&st, &id).await.unwrap_err();
             assert!(err.starts_with("Not merged") && err.contains("elsewhere"), "{err}");
             assert_eq!(wakes(&st, &main).len(), 1);
+            // A restart keeps the refusal: a sub waiting for it keeps waiting.
+            test_support::forget_memory(&id);
+            assert!(unresolved(&id));
+            assert!(retry_pending(&st).await.is_empty(), "the tick never retries a refusal only the main chat can clear");
 
             g(&root, &["checkout", "-q", &info.target]);
             let ok = merge_now(&st, &id).await.unwrap();

@@ -314,11 +314,17 @@ fn status(state: &Arc<DaemonState>, subs: &[Instance], query: &str, facts: Facts
         out["problem"] = problem;
         out["problem_note"] = json!("app plumbing, not the sub's work: fix it with retry, merge, send or drop, and ask Joe only if it needs his decision");
     }
-    if let Some(p) = super::pending_merges::get(&sub.session_id) {
-        out["merge_pending"] = json!(format!(
-            "its merge waits for uncommitted changes in the main checkout ({}) and lands by itself once they are committed; nothing to do",
-            p.files.join(", ")
-        ));
+    match super::pending_merges::get(&sub.session_id) {
+        Some(p) if p.cause == super::pending_merges::Cause::DirtyFiles => {
+            out["merge_pending"] = json!(format!(
+                "its merge waits for uncommitted changes in the main checkout ({}) and lands by itself once they are committed; nothing to do",
+                p.files.join(", ")
+            ));
+        }
+        Some(_) => {
+            out["merge_pending"] = json!("its merge was refused and has not landed: action merge tries it again, action drop leaves its commits on its branch");
+        }
+        None => {}
     }
     out
 }
@@ -1399,7 +1405,7 @@ mod tests {
         let (st, main, sent) = setup("tool-plumb");
         sub(&st, &main, "tool-plumb-a", "Footer", "t");
         plumbing::report(&st, "tool-plumb-a", Problem::CouldNotStart, "the bootstrap script failed".into(), vec![]);
-        super::super::pending_merges::store("tool-plumb-a", vec!["src/x.rs".into()]);
+        super::super::pending_merges::store("tool-plumb-a", super::super::pending_merges::Cause::DirtyFiles, vec!["src/x.rs".into()]);
         let v = call(&st, &main, json!({"action": "status", "sub": "Footer"}), &sent).await;
         assert_eq!(v["problem"]["kind"], "could_not_start", "{v}");
         assert!(v["problem"]["detail"].as_str().unwrap().contains("bootstrap"));
@@ -1432,7 +1438,7 @@ mod tests {
         let (st, main, sent) = setup("tool-leave");
         sub(&st, &main, "tool-leave-a", "Footer", "t");
         st.registry.set_subchat_finished("tool-leave-a", true);
-        super::super::pending_merges::store("tool-leave-a", vec!["a.txt".into()]);
+        super::super::pending_merges::store("tool-leave-a", super::super::pending_merges::Cause::Refused, vec!["a.txt".into()]);
         assert!(super::super::merge_followup::unresolved("tool-leave-a"));
         let v = call(&st, &main, json!({"action": "drop", "sub": "Footer"}), &sent).await;
         assert_eq!(v["ok"], true, "{v}");
