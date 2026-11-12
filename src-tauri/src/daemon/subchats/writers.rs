@@ -1,11 +1,11 @@
-//! The writer slot: under "Subs changing files: One at a time", one sub per
-//! project edits files at a time (spec section 7). Cognition's rule applies:
-//! writes stay single-threaded. Read-only subs run freely. So does a writer in
-//! its own worktree (`worktree`), which cannot collide with anyone. A gate sub
-//! pushes from the main checkout, so it takes the slot like any writer and
-//! queues behind one: pushing while another sub is mid-write is what the slot
-//! prevents. Under "Worktree each" writers hold no slot, and a gate takes a
-//! project-wide slot that only other gates contend for, after the merges in flight.
+//! The writer slot (spec section 7). Every writing sub gets its own git worktree
+//! (`worktree`) and holds no slot, because its own tree is what keeps it from
+//! colliding. The slot is what is left for the subs that share the main
+//! checkout: a writer in a folder that cannot have a worktree (not a repo, a
+//! detached `HEAD`) or one spawned before every writer got a tree, which queue
+//! one at a time (Cognition's rule: writes stay single-threaded), and a gate sub,
+//! which pushes from the main checkout and takes a project-wide slot that only
+//! other gates contend for, after the merges in flight. Read-only subs run freely.
 //!
 //! Who is in the slot, per project (`project_key` of the sub's folder):
 //! - `holder`: the one sub allowed to edit now.
@@ -40,13 +40,11 @@
 //! slot is free.
 
 use super::held::{self, Held, LaunchSpec, Why};
-use super::project;
 use super::spawn::SubPlan;
 use super::{resume, tool, ContinueError};
 use crate::daemon::state::DaemonState;
 use crate::sessions::chat_config::ChatConfig;
 use crate::settings::identity::project_key;
-use crate::types::SubchatWriters;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -63,27 +61,25 @@ pub const QUEUED_TEXT: &str = "waiting for the writer before it";
 /// and not a sandbox, and names the way to write access.
 pub const READ_ONLY_REFUSAL: &str = "This sub is read-only (its brief said writes: false), so Edit, Write and NotebookEdit are refused. This is a guard, not a sandbox: Bash could still write a file, but do not use it to get around this. If the job needs file changes, finish with finish_subchat and say so: the main chat then sends you a follow-up with writes: true, which gives you write access.";
 
-/// Suffix of the slot a gate sub uses under "Worktree each", where writers do
-/// not use a slot at all: only other gates contend for it.
+/// Suffix of the slot a gate sub uses. Writers in their own worktree hold no
+/// slot at all, so only other gates contend for it.
 const GATE_SLOT: &str = "#gate";
 
 /// Which slot a sub with this brief takes, `None` when none applies.
 ///
 /// A read-only sub never takes one. A worktree sub never does either, because its
 /// own tree is what keeps it from colliding: that is read from the brief's stored
-/// tree, not from the project setting, since a sub spawned before the setting
-/// changed (or in a folder that could not have a worktree) still shares the main
-/// checkout and must queue. A gate sub pushes from the main checkout, so it takes
-/// the project's slot like any writer; under "Worktree each", where writers hold
-/// none, it takes a project-wide slot of its own that only other gates contend
-/// for. Every gate waits for merges in flight before it starts, so it pushes what
-/// the worktree subs just landed.
-fn slot_key(mode: SubchatWriters, brief: &super::SubchatBrief, cwd: &Path) -> Option<String> {
+/// tree, since a sub in a folder that could not have a worktree (or one spawned
+/// before every writer got one) still shares the main checkout and must queue. A
+/// gate sub pushes from the main checkout and takes a project-wide slot of its
+/// own that only other gates contend for. Every gate waits for merges in flight
+/// before it starts, so it pushes what the worktree subs just landed.
+fn slot_key(brief: &super::SubchatBrief, cwd: &Path) -> Option<String> {
     if !brief.writes || (brief.worktree_at.is_some() && !brief.gate) {
         return None;
     }
     let key = project_key(cwd);
-    Some(if brief.gate && mode == SubchatWriters::WorktreeEach { format!("{key}{GATE_SLOT}") } else { key })
+    Some(if brief.gate { format!("{key}{GATE_SLOT}") } else { key })
 }
 
 /// The project key a slot key belongs to, for the merge wait.
@@ -276,7 +272,7 @@ fn slot_in<'a>(table: &'a mut BTreeMap<String, Slot>, key: &str) -> &'a mut Slot
 /// with [`register_queued`]. A gate also queues while a merge is running.
 pub fn decide_spawn(state: &DaemonState, brief: &super::SubchatBrief, cwd: &Path) -> SpawnDecision {
     let sid = uuid::Uuid::new_v4().to_string();
-    let Some(key) = slot_key(project::writers_mode(state, cwd), brief, cwd) else {
+    let Some(key) = slot_key(brief, cwd) else {
         return SpawnDecision { sid, queued: false };
     };
     let mut table = table();
@@ -335,7 +331,7 @@ pub(crate) fn register_queued_row(
 pub fn request_slot(state: &Arc<DaemonState>, sub_id: &str) -> SlotOutcome {
     let Some(inst) = state.registry.get(sub_id) else { return SlotOutcome::Granted };
     let Some(brief) = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat) else { return SlotOutcome::Granted };
-    let Some(key) = slot_key(project::writers_mode(state, &inst.cwd), &brief, &inst.cwd) else {
+    let Some(key) = slot_key(&brief, &inst.cwd) else {
         return SlotOutcome::Granted;
     };
     let mut table = table();
@@ -472,7 +468,7 @@ pub async fn on_waiting_on_joe(state: &Arc<DaemonState>, sub_id: &str) {
 
 pub(crate) async fn on_waiting_on_joe_with(state: &Arc<DaemonState>, sub_id: &str, transcript: Option<std::path::PathBuf>) {
     let Some(inst) = state.registry.get(sub_id) else { return };
-    // Any slot, not the project's: a gate under "Worktree each" holds its own.
+    // Any slot, not the project's: a gate holds its own.
     if !table().values().any(|s| s.holder.as_deref() == Some(sub_id)) {
         return;
     }
@@ -491,7 +487,7 @@ pub fn holder_of(cwd: &Path) -> Option<String> {
     table().get(&project_key(cwd)).and_then(|s| s.holder.clone())
 }
 
-/// The gate sub holding the project-wide gate slot that "Worktree each" uses.
+/// The gate sub holding the project-wide gate slot.
 pub fn gate_holder_of(cwd: &Path) -> Option<String> {
     table().get(&format!("{}{GATE_SLOT}", project_key(cwd))).and_then(|s| s.holder.clone())
 }
@@ -543,7 +539,7 @@ fn queued_note(state: &DaemonState, sub_id: &str) -> Option<Value> {
     let inst = state.registry.get(sub_id)?;
     let brief = crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat)?;
     let table = table();
-    let slot = table.get(&slot_key(project::writers_mode(state, &inst.cwd), &brief, &inst.cwd)?)?;
+    let slot = table.get(&slot_key(&brief, &inst.cwd)?)?;
     let position = queue_position(slot, sub_id)?;
     Some(json!({
         "queued": true,
@@ -552,17 +548,18 @@ fn queued_note(state: &DaemonState, sub_id: &str) -> Option<Value> {
     }))
 }
 
-/// The queue note's text. A gate waits for the writer slot like any writer, so
-/// when the main chat has told that writer to hold its commit until the gate
-/// pushes, neither can ever move: the extra sentence says not to.
+/// The queue note's text. Only a sub on the main checkout queues: a gate behind
+/// another gate or a merge in flight, or a writer the project could not give a
+/// worktree.
 fn queued_text(behind: &str, gate: bool) -> String {
-    let mut note = format!(
-        "Queued, not started: only one sub changes files at a time in this project and \"{behind}\" has the writer slot. This sub starts by itself when it is free, in queue order, and you are not woken when it starts. This sub's own card already shows Joe it is waiting, so send no message or card of your own about it. Only when Joe's window shows no card for it, say so in one short line, and that he can say \"use worktrees\" to run writers side by side."
-    );
-    if gate {
-        note.push_str(" This sub is a gate and waits for the writer to finish: do not tell that writer to hold back its commit or push until the gate pushes, or neither will ever start.");
-    }
-    note
+    let why = if gate {
+        format!("only one gate sub pushes from the main checkout at a time, after the commits of finished subs are merged, and \"{behind}\" is ahead of it")
+    } else {
+        format!("this sub has no worktree of its own, so it shares the main checkout, where only one sub changes files at a time, and \"{behind}\" has the writer slot")
+    };
+    format!(
+        "Queued, not started: {why}. This sub starts by itself when it is free, in queue order, and you are not woken when it starts. This sub's own card already shows Joe it is waiting, so send no message or card of your own about it. Only when Joe's window shows no card for it, say so in one short line."
+    )
 }
 
 /// The text `subchat send` adds when a follow-up put a sub in the queue.
@@ -694,7 +691,7 @@ pub(crate) fn restore_inner(state: &Arc<DaemonState>) -> Vec<Start> {
         let (key, gate) = match brief {
             Some(mut b) => {
                 b.writes = true;
-                (slot_key(project::writers_mode(state, &inst.cwd), &b, &inst.cwd), b.gate)
+                (slot_key(&b, &inst.cwd), b.gate)
             }
             None => (Some(project_key(&inst.cwd)), false),
         };
@@ -855,12 +852,12 @@ mod tests {
         gate.gate = true;
         let d = decide_spawn(&st, &gate, &root);
         assert!(!d.queued, "nobody is writing");
-        assert_eq!(holder_of(&root).as_deref(), Some(d.sid.as_str()), "it holds the slot while it pushes");
+        assert_eq!(gate_holder_of(&root).as_deref(), Some(d.sid.as_str()), "it holds the gate slot while it pushes");
         release(&st, &d.sid);
         let g = sub(&st, "gate-g", &root, true);
         set_gate(&g);
         assert_eq!(check_write(&st, &g), WriteCheck::Allow, "empty files is not read as writes nothing: the free slot is its");
-        assert_eq!(holder_of(&root).as_deref(), Some(g.as_str()));
+        assert_eq!(gate_holder_of(&root).as_deref(), Some(g.as_str()));
     }
 
     /// The notes once said "Tell Joe it is waiting", and the main chat then sent a
@@ -874,21 +871,23 @@ mod tests {
             assert!(note.contains("send no message or card of your own"), "{note}");
             assert!(note.contains("window shows no card for it"), "{note}");
         }
-        assert!(spawn.contains("use worktrees"), "the worktrees offer rides on the one fallback line: {spawn}");
+        assert!(!spawn.contains("use worktrees"), "every writer gets a worktree, so there is nothing to offer: {spawn}");
     }
 
     #[test]
-    fn a_queued_gate_is_told_not_to_make_the_writer_hold_back_its_commit() {
+    fn a_queued_writer_and_a_queued_gate_are_each_told_what_they_wait_for() {
         let writer = queued_text("alerts-build", false);
-        assert!(writer.contains("\"alerts-build\" has the writer slot"), "{writer}");
+        assert!(writer.contains("\"alerts-build\" has the writer slot") && writer.contains("no worktree of its own"), "{writer}");
         assert!(!writer.contains("gate"), "a plain writer gets no gate advice: {writer}");
         let gate = queued_text("alerts-build", true);
-        assert!(gate.starts_with(&writer), "the gate sentence is added, nothing is replaced");
-        assert!(gate.contains("do not tell that writer to hold back its commit or push until the gate pushes"), "{gate}");
+        assert!(gate.contains("only one gate sub pushes") && gate.contains("\"alerts-build\" is ahead of it"), "{gate}");
+        assert!(!gate.contains("hold back its commit"), "a gate never waits for a writer, so nothing can deadlock on it: {gate}");
     }
 
+    /// Every writer works in its own tree, so a gate pushing from the main checkout
+    /// has no writer to wait for there, and a writer never waits for a gate.
     #[test]
-    fn the_note_of_a_gate_queued_behind_a_writer_carries_the_gate_sentence() {
+    fn a_gate_and_a_main_checkout_writer_never_queue_behind_each_other() {
         let _data = TempDataDir::new();
         let (_d, root) = project();
         let st = state();
@@ -897,21 +896,10 @@ mod tests {
         let mut gate_brief = brief(true);
         gate_brief.gate = true;
         let d = decide_spawn(&st, &gate_brief, &root);
-        assert!(d.queued, "the writer holds the slot");
-        let (parent, id) = ("gate-main".to_string(), d.sid.clone());
-        st.registry.upsert_interactive(&parent, &root, "proj", "2026-11-05T00:00:00Z");
-        st.registry.upsert_interactive(&id, &root, "proj", "2026-11-05T00:00:00Z");
-        st.registry.set_subchat_of(&id, Some(parent.clone()));
-        st.registry.set_name(&id, "gate".to_string());
-        store_sub_brief(&id, &parent);
-        set_gate(&id);
-        held::hold(
-            &st,
-            Held { sub_id: id.clone(), reason: QUEUED_TEXT.into(), after: None, after_name: String::new(), launch: spec(&root, "push") },
-        )
-        .unwrap();
-        let note = spawn_note(&st, &id).expect("a queued gate reports it");
-        assert!(note["note"].as_str().unwrap().contains("hold back its commit"), "{note}");
+        assert!(!d.queued, "the gate has a slot of its own");
+        let (_late, late_queued) = spawn_writer(&st, "late", &root, "do B");
+        assert!(late_queued, "two writers on the main checkout still take turns");
+        assert_eq!(queue_of(&root).len(), 1, "only the writer queues, never behind the gate");
     }
 
     #[test]
@@ -928,7 +916,7 @@ mod tests {
         assert_eq!(note["queued"], true);
         let text = note["note"].as_str().unwrap();
         assert!(text.contains("Queued, not started") && text.contains("first") && text.contains("not woken"), "{text}");
-        assert!(text.contains("use worktrees"), "Joe can ask for worktrees: {text}");
+        assert!(text.contains("no worktree of its own"), "says why it shares the main checkout: {text}");
         assert!(spawn_note(&st, &first).is_none(), "a sub that started has nothing to say");
         assert!(!text.contains('\u{2014}'));
     }
@@ -1369,13 +1357,10 @@ mod tests {
     fn a_worktree_sub_has_no_slot_and_a_read_only_sub_has_none_either() {
         let (_d, root) = project();
         let mut writer = brief(true);
-        for mode in [SubchatWriters::OneAtATime, SubchatWriters::WorktreeEach] {
-            assert!(slot_key(mode, &writer, &root).is_some(), "a writer on the main checkout shares the slot under {mode:?}: a folder that could not have a worktree falls back to it");
-            assert!(slot_key(mode, &brief(false), &root).is_none(), "a read-only sub holds nothing");
-        }
+        assert!(slot_key(&writer, &root).is_some(), "a writer on the main checkout shares the slot: a folder that could not have a worktree falls back to it");
+        assert!(slot_key(&brief(false), &root).is_none(), "a read-only sub holds nothing");
         writer.worktree_at = Some(tree_info());
-        assert!(slot_key(SubchatWriters::OneAtATime, &writer, &root).is_none(), "its own tree is what keeps it apart");
-        assert!(slot_key(SubchatWriters::WorktreeEach, &writer, &root).is_none());
+        assert!(slot_key(&writer, &root).is_none(), "its own tree is what keeps it apart");
     }
 
     #[test]
@@ -1392,65 +1377,26 @@ mod tests {
         assert_eq!(queue_of(&root), Vec::<String>::new());
     }
 
-    /// A gate pushes from the main checkout, so under "One at a time" it takes the
-    /// slot like any writer and waits for one that is mid-write.
     #[test]
-    fn a_gate_queues_behind_a_writer_under_one_at_a_time_and_a_writer_queues_behind_the_gate() {
+    fn a_gate_behind_another_gate_is_told_to_wait_not_read_as_read_only() {
         let _data = TempDataDir::new();
         let (_d, root) = project();
         let st = state();
-        let (writer, _) = spawn_writer(&st, "gate-h", &root, "A");
-        let mut gate = brief(true);
-        gate.gate = true;
-        let d = decide_spawn(&st, &gate, &root);
-        assert!(d.queued, "pushing while another sub is mid-write is what the slot prevents");
-        assert_eq!(queue_of(&root), vec![d.sid.clone()]);
-        // The writer finishes: the gate is handed the slot.
-        st.registry.upsert_interactive(&d.sid, &root, "proj", "2026-11-05T00:00:00Z");
-        st.registry.set_subchat_of(&d.sid, Some("gate-h-main".into()));
-        store_sub_brief(&d.sid, "gate-h-main");
-        set_gate(&d.sid);
-        st.registry.set_subchat_finished(&writer, true);
-        let mut table_guard = table();
-        let slot = table_guard.get_mut(&project_key(&root)).unwrap();
-        let starts = advance_locked(&st, slot);
-        assert_eq!(starts, vec![Start::Launch { sub_id: d.sid.clone() }]);
-        assert_eq!(slot.holder.as_deref(), Some(d.sid.as_str()));
-        drop(table_guard);
-        // And it is a writer to the guard: empty files is not read as writes nothing.
-        assert_eq!(check_write(&st, &d.sid), WriteCheck::Allow, "it holds the slot");
-        let (_late, late_queued) = spawn_writer(&st, "gate-late", &root, "B");
-        assert!(late_queued, "a writer waits for the gate to finish its push");
-    }
-
-    #[test]
-    fn a_gate_that_does_not_hold_the_slot_is_told_to_wait_not_read_as_read_only() {
-        let _data = TempDataDir::new();
-        let (_d, root) = project();
-        let st = state();
-        let (_writer, _) = spawn_writer(&st, "gate-w", &root, "A");
+        let first = sub(&st, "gate-w", &root, true);
+        set_gate(&first);
+        assert_eq!(check_write(&st, &first), WriteCheck::Allow);
         let g = sub(&st, "gate-g2", &root, true);
         set_gate(&g);
-        assert!(matches!(check_write(&st, &g), WriteCheck::Wait { .. }), "empty files must not read as read-only, and it must not edit beside a writer");
+        assert!(matches!(check_write(&st, &g), WriteCheck::Wait { .. }), "empty files must not read as read-only, and two gates must not push at once");
     }
 
-    fn worktree_each_project(root: &Path) -> Arc<DaemonState> {
-        let mut settings = Settings::default();
-        let raw = json!({
-            "id": "p1", "path": root, "name": "p", "created_at": "2026-11-05T00:00:00Z",
-            "subchat_writers": "worktree_each",
-        });
-        settings.projects.push(serde_json::from_value(raw).unwrap());
-        DaemonState::new(new_session_map(), SettingsCache::new(settings))
-    }
-
-    /// Under "Worktree each" writers hold no slot, so a gate takes a project-wide
-    /// slot that only other gates contend for.
+    /// Writers hold no slot, so a gate takes a project-wide slot that only other
+    /// gates contend for.
     #[test]
-    fn under_worktree_each_a_gate_contends_only_with_other_gates() {
+    fn a_gate_contends_only_with_other_gates() {
         let _data = TempDataDir::new();
         let (_d, root) = project();
-        let st = worktree_each_project(&root);
+        let st = state();
         let mut gate = brief(true);
         gate.gate = true;
         let first = decide_spawn(&st, &gate, &root);
@@ -1468,7 +1414,7 @@ mod tests {
     fn a_gate_waits_for_a_merge_in_flight_and_starts_when_it_ends() {
         let _data = TempDataDir::new();
         let (_d, root) = project();
-        let st = worktree_each_project(&root);
+        let st = state();
         let key = project_key(&root);
         super::super::worktree::begin_merge_for_test(&key);
         let mut gate = brief(true);

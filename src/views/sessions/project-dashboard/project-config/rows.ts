@@ -5,7 +5,7 @@ import type { Account } from "../../../../shared/api";
 import { accountIconBadgeHtml, isApiCreditAccount } from "../../../../shared/account-chip";
 import { invoke } from "../../../../shared/ipc";
 import { forgetTicketTracker, normalizeTrelloBoard } from "../../../../shared/chat/ticket-refs";
-import type { SubchatCheck, SubchatWriters, TrackerInfo } from "../../../../types/ipc.generated";
+import type { SubchatCheck, TrackerInfo } from "../../../../types/ipc.generated";
 import type { ProjectCfg } from "./project-cfg";
 import "../../../../shared/account-chip.css";
 
@@ -148,7 +148,7 @@ export function renderGamingModeRow(cwd: string): Promise<void> {
 
 interface ProjectSelectRow<V extends string> {
   selectId: string;
-  field: "subchat_check" | "subchat_writers";
+  field: "subchat_check";
   /** [stored value, label]; the first is the default a project without the field gets. */
   options: ReadonlyArray<readonly [V, string]>;
   toast: string;
@@ -196,18 +196,6 @@ export function renderSubchatCheckRow(cwd: string): Promise<void> {
     options: [["facts_and_reviewer", "Facts and a reviewer"], ["facts_only", "Facts only"]],
     toast: "Subs here are checked the new way from their next finish.",
     what: "sub check setting",
-  });
-}
-
-/** "Subs changing files": how subs that edit files share this project's tree.
- *  Read when a sub is spawned or asks to write. */
-export function renderSubchatWritersRow(cwd: string): Promise<void> {
-  return renderProjectSelectRow<SubchatWriters>(cwd, {
-    selectId: "subchatWritersSelect",
-    field: "subchat_writers",
-    options: [["one_at_a_time", "One at a time"], ["worktree_each", "Worktree each"]],
-    toast: "Subs changing files updated for new jobs.",
-    what: "sub file setting",
   });
 }
 

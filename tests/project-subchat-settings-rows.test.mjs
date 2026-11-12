@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-// Project settings > Subchats: "Check a sub's work" and "Subs changing files".
-// Pins: each select shows the project's stored value (or the default when the
+// Project settings > Subchats: "Check a sub's work". "Subs changing files" is
+// gone (every writing sub gets its own worktree, 2026-11-12).
+// Pins: the select shows the project's stored value (or the default when the
 // project has none), changing it calls update_project with that single field
 // via api.updateProject, a project with no config row is registered first, and
 // a failed save puts the select back on what is stored.
@@ -22,9 +23,8 @@ vi.mock("../src/shared/api.ts", () => ({
   },
 }));
 vi.mock("../src/shared/toast.ts", () => ({ showToast: vi.fn() }));
-const { renderSubchatCheckRow, renderSubchatWritersRow } = await import(
-  "../src/views/sessions/project-dashboard/project-config/rows.ts"
-);
+const rows = await import("../src/views/sessions/project-dashboard/project-config/rows.ts");
+const { renderSubchatCheckRow } = rows;
 
 const PROJECT = { id: "proj-alpha", path: "C:/proj/alpha" };
 
@@ -37,7 +37,7 @@ afterEach(() => {
 
 function mount() {
   const root = document.createElement("div");
-  root.innerHTML = `<select id="subchatCheckSelect"></select><select id="subchatWritersSelect"></select>`;
+  root.innerHTML = `<select id="subchatCheckSelect"></select>`;
   document.body.appendChild(root);
   return root;
 }
@@ -96,34 +96,7 @@ describe("Project settings > Check a sub's work", () => {
 });
 
 describe("Project settings > Subs changing files", () => {
-  it("offers the two modes and defaults to one at a time", async () => {
-    listProjects.mockResolvedValue([PROJECT]);
-    const select = mount().querySelector("#subchatWritersSelect");
-    await renderSubchatWritersRow("C:/proj/alpha");
-    expect(labels(select)).toEqual(["One at a time", "Worktree each"]);
-    expect(select.value).toBe("one_at_a_time");
-  });
-
-  it("shows the stored value and saves a change as that one field", async () => {
-    listProjects.mockResolvedValue([{ ...PROJECT, subchat_writers: "worktree_each" }]);
-    updateProject.mockResolvedValue(undefined);
-    const select = mount().querySelector("#subchatWritersSelect");
-    await renderSubchatWritersRow("C:/proj/alpha");
-    expect(select.value).toBe("worktree_each");
-    select.value = "one_at_a_time";
-    select.dispatchEvent(new Event("change"));
-    await vi.waitFor(() => expect(updateProject).toHaveBeenCalledWith("proj-alpha", { subchat_writers: "one_at_a_time" }));
-  });
-
-  it("leaves the check setting alone", async () => {
-    listProjects.mockResolvedValue([PROJECT]);
-    updateProject.mockResolvedValue(undefined);
-    const root = mount();
-    await renderSubchatWritersRow("C:/proj/alpha");
-    const select = root.querySelector("#subchatWritersSelect");
-    select.value = "worktree_each";
-    select.dispatchEvent(new Event("change"));
-    await vi.waitFor(() => expect(updateProject).toHaveBeenCalledTimes(1));
-    expect(updateProject.mock.calls[0][1]).toEqual({ subchat_writers: "worktree_each" });
+  it("is gone: no row renders it, since every writing sub gets its own worktree", () => {
+    expect(rows.renderSubchatWritersRow).toBeUndefined();
   });
 });

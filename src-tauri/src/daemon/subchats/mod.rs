@@ -366,7 +366,7 @@ fn worktree_note(info: &WorktreeInfo) -> String {
         format!(" Your commits are merged into \"{}\" when you finish.", info.target)
     };
     format!(
-        "You are working in a git worktree of this project on branch \"{}\", not in the main checkout.{merged} A worktree separates files only: build folders, dev servers, ports and any local database are still shared with the other chats, so do not stop, restart or overwrite something another chat may be using.",
+        "You are working in a git worktree of this project on branch \"{}\", not in the main checkout.{merged} A worktree separates files (and, for a tree the app gave its own build folder, Rust builds) only: dev servers, ports, any other build folder and any local database are still shared with the other chats, so do not stop, restart or overwrite something another chat may be using.",
         info.branch
     )
 }
@@ -796,7 +796,7 @@ mod tests {
         let p = prompt_of("wt-sub");
         assert!(p.contains(SUBCHAT_SUB_PROMPT), "the sub rules are still there");
         assert!(p.contains("git worktree") && p.contains("\"cc-sub-a1b2\""), "{p}");
-        assert!(p.contains("build folders, dev servers, ports and any local database are still shared"), "{p}");
+        assert!(p.contains("dev servers, ports, any other build folder and any local database are still shared"), "{p}");
         assert!(p.contains("merged into \"master\""), "{p}");
         assert_eq!(p.matches("You are working in a git worktree").count(), 1, "said once per launch");
         let plain = prompt_of("plain-sub2");
