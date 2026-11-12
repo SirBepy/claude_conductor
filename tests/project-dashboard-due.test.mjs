@@ -229,4 +229,13 @@ describe("the due highlight follows its dashboard", () => {
     expect(highlight.isDueHit("pc-7", CWD)).toBe(false);
     h.destroy();
   });
+  it("says so when no repo of the dashboard owns the due todos, instead of doing nothing", async () => {
+    document.body.innerHTML = '<div id="toastStack"></div>';
+    dash.snapshot = projectSnapshot({ due: { days: [day("2026-11-10", [{ id: "x-1", repo_cwd: "C:/Projects/elsewhere" }])], missed_ids: [] } });
+    state.launchNewChatCallback = vi.fn();
+    const root = await mount({ kind: "project", id: "p1" });
+    root.querySelector('[data-pd-card="due"] [data-pd-due-all]').click();
+    await vi.waitFor(() => expect(document.querySelector("#toastStack .toast-msg")?.textContent).toMatch(/due todos/i));
+    expect(state.launchNewChatCallback).not.toHaveBeenCalled();
+  });
 });

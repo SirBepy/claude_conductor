@@ -416,3 +416,19 @@ describe("usageByDay", () => {
     expect(usageByDay([rec("C:/p", "1/2/2026", 9), ...records], ["C:/p"], {}, "all", now)).toEqual(all);
   });
 });
+
+describe("Do all due in a draft", () => {
+  const [app, , , api] = ZIRTUE_REPOS;
+  const due = { days: [{ date: "2026-11-10", count: 3, ids: [{ id: "pc-1", repo_cwd: app.cwd }, { id: "pc-1", repo_cwd: api.cwd }, { id: "pc-2", repo_cwd: api.cwd }] }], missed_ids: [] };
+
+  it("sends only the ids of the repo the draft will start in", async () => {
+    snapshot = groupSnapshot({ due });
+    const sendText = vi.fn();
+    state.composer = { sendText };
+    state.pendingNewSession = { projectPath: api.cwd };
+    const pane = await mountDraft(api.cwd);
+    pane.querySelector("[data-pd-due-all]").click();
+    expect(sendText).toHaveBeenCalledWith("/auto-do-todos pc-1,pc-2");
+    state.pendingNewSession = null;
+  });
+});
