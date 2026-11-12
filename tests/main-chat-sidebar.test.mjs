@@ -67,6 +67,17 @@ describe("mainChatRingSpec", () => {
     expect(mainChatRingSpec("st-done", null, facts({ asking: true }))).toEqual({ kind: "solid", tone: "attention", pulse: true });
     expect(mainChatRingSpec("st-your-turn", null, facts({ asking: true }))).toEqual({ kind: "solid", tone: "attention", pulse: true });
   });
+  it("a sub that asks outranks one that works", () => {
+    const both = facts({ asking: true, working: true });
+    expect(mainChatRingSpec("st-your-turn", null, both)).toEqual({ kind: "solid", tone: "attention", pulse: true });
+    expect(mainChatRingSpec("st-done", null, both)).toEqual({ kind: "solid", tone: "attention", pulse: true });
+  });
+  it("a closing sub keeps the ring off green until it is gone", () => {
+    const closing = sub("a", { subchat_finished: true, busy: false, closing: true });
+    const info = mainChatInfo(inst({ session_id: "main" }), [inst({ session_id: "main" }), closing]);
+    const f = { working: info.anyWorking, asking: info.subs.some((s) => s.kind === "asking"), allFinished: info.allFinished, hasSubs: info.subs.length > 0 };
+    expect(mainChatRingSpec("st-done", null, f)).toEqual({ kind: "none" });
+  });
   it("lets the main agent's own work outrank green, and keeps question and attention rings", () => {
     expect(mainChatRingSpec("st-working", null, facts({ working: true, allFinished: true })).tone).toBe("working");
     expect(mainChatRingSpec("st-attention", { total: 3, answered: 1 }, facts({ working: true }))).toMatchObject({ kind: "segments", tone: "attention" });

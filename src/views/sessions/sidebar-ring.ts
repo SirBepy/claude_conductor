@@ -94,9 +94,10 @@ export function mainChatRingSpec(
 ): RingSpec {
   if (dotClass === "st-working") return { kind: "solid", tone: "working", glow: true };
   if (dotClass === "st-your-turn" || dotClass === "st-done") {
-    // Idle or unread-done: a running sub is the row's news, then a sub that asks.
-    if (subs.working) return { kind: "solid", tone: "working", glow: true };
+    // Idle or unread-done: a sub that asks needs Joe, so it outranks one that merely works (a
+    // parked question already does the same through `st-attention`).
     if (subs.asking) return { kind: "solid", tone: "attention", pulse: true };
+    if (subs.working) return { kind: "solid", tone: "working", glow: true };
     // Nothing is running or asking: green only when nothing is left unfinished.
     if (dotClass === "st-done" && subs.hasSubs && !subs.allFinished) return { kind: "none" };
   }
