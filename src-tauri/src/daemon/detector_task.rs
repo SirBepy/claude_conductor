@@ -1,6 +1,6 @@
 //! Daemon-side detector reconcile task. Every 5s walks live PIDs and marks
-//! ended instances; also refreshes session titles from `/close`-written
-//! rename overrides. Publishes `instances_changed` on every mutation.
+//! ended instances; also refreshes session titles from `custom-title` /
+//! `agent-name` rename overrides in the transcript. Publishes `instances_changed` on every mutation.
 
 use crate::daemon::state::DaemonState;
 use crate::sessions::registry::Registry;
@@ -92,7 +92,7 @@ pub fn spawn(state: Arc<DaemonState>) {
 }
 
 /// For each live session whose transcript mtime advanced since the last tick,
-/// refreshes its name: a `/close` rename override wins, else the AI title
+/// refreshes its name: a transcript rename override wins, else the AI title
 /// (frozen at the end of the first turn that produced one, see
 /// `ai_milestone_title`). This is what swaps a fresh chat's first-prompt name
 /// for its AI title live. The first user prompt
@@ -213,7 +213,7 @@ mod tests {
         reg.upsert_interactive("s1", std::path::Path::new("/tmp/x"), "proj", "2026-05-22T00:00:00Z");
         let dir = tempdir().unwrap();
         let path = dir.path().join("s1.jsonl");
-        // AI title plus a later human /close rename in the same transcript.
+        // AI title plus a later human rename in the same transcript.
         let body = format!("{}\n{}", assistant_title_jsonl("AI Title"), override_jsonl("Human Title"));
         std::fs::write(&path, body).unwrap();
         let mut mtimes = HashMap::new();

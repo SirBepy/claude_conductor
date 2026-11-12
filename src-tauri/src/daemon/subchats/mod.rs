@@ -71,7 +71,7 @@ pub use routing::{
 /// Whether `session_id` is a sub whose name is fixed. The name the main agent gave
 /// at spawn is how `subchat send` finds the sub and what the decisions log, the one
 /// line back and the cards call it, so no title from the sub's own transcript (a
-/// `/close` rename, its AI title, its first prompt) may replace it. A title the sub
+/// transcript rename, its AI title, its first prompt) may replace it. A title the sub
 /// writes also reaches the main chat's wake text through that name.
 pub fn name_is_fixed(registry: &crate::sessions::registry::Registry, session_id: &str) -> bool {
     registry.get(session_id).is_some_and(|i| is_sub(&i))

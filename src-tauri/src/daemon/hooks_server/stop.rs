@@ -205,7 +205,7 @@ pub(super) async fn on_stop(
             }
         }
         close_now_if_confirmed(&ctx.state, &session_id);
-        // Title: durable transcript record, mirrors /close's manual rename.
+        // Title: durable transcript record, mirrors a manual rename.
         // Best-effort - a write failure must never block the turn.
         // Not for a sub: its name was given at spawn and a title it wrote would
         // rename it on the next restart.
@@ -283,8 +283,7 @@ pub(super) async fn on_stop(
 /// that only after every other Stop hook finishes, which has run 4 minutes
 /// behind this hook (2026-11-05): long enough for Joe to type again, and that
 /// message resumed the chat the daemon was about to kill. `mark_ended` clears
-/// the flag, so the pump's EOF handler tells this close from a failed one by
-/// the row already being ended (`close::ended_already`).
+/// the flag, so the pump's EOF handler finds nothing left to tear down.
 fn close_now_if_confirmed(state: &Arc<crate::daemon::state::DaemonState>, session_id: &str) {
     if !state.registry.peek_close_requested(session_id) {
         return;
@@ -549,7 +548,6 @@ mod tests {
 
         let row = state.registry.get("s").unwrap();
         assert!(row.end_reason.is_some(), "the row must end at Stop, not at the result line");
-        assert!(crate::daemon::pump::close::ended_already(&state.registry, "s"), "the pump tells this close from a failed one by it");
         tokio::time::timeout(std::time::Duration::from_secs(5), child.wait())
             .await
             .expect("the child must be killed")

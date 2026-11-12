@@ -1,7 +1,7 @@
 //! Todo ids: `<device label>-<number>`, e.g. `pc-1407`, `mac2-0003`. One parser
 //! for every reader of `.claude/todos/` (file names, `PLAN.md` lines, claim
 //! files, ids a user types), so a spelling is accepted or refused the same way
-//! everywhere. Mirrors the contract in `~/.claude/skills/close/ai-todos-format.md`.
+//! everywhere. Mirrors the contract in `~/.claude/refs/ai-todos-format.md`.
 //!
 //! Padding is never significant on read (`pc-7` is `pc-0007`); the canonical
 //! spelling pads to four digits and grows past 9999 (`pc-10000`). A bare

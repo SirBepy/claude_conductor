@@ -1,112 +1,8 @@
 use crate::daemon::session::Session;
 use crate::daemon::state::DaemonState;
-use crate::sessions::registry_turn::TurnActivity;
 use std::sync::Arc;
 
-/// True when `prompt` is `/close --now`, the one form whose turn marks the row
-/// Closing from the prompt alone. A plain `/close` finishes open work and may ask
-/// Joe a question first, so its skill raises Closing itself with
-/// `close_session(stage="started")` once the closing phases begin; `--now` skips
-/// finishing, so it has no such pause to wait out.
-pub(crate) fn prompt_is_close_now(prompt: &str) -> bool {
-    let mut tokens = prompt.split_whitespace();
-    tokens.next() == Some("/close") && tokens.any(|tok| tok == "--now")
-}
-
-/// True when the turn currently running was opened by a `/close --now` prompt.
-/// Drives the daemon-authoritative `closing` row state (no text marker). The
-/// actual teardown still waits for the explicit `close_session` MCP tool, so a
-/// `/close --now --dont-close` shows "Closing" mid-run then stands back down.
-pub(crate) fn turn_is_close(session: &Session) -> bool {
-    session.last_prompt.lock().ok().map(|p| prompt_is_close_now(&p)).unwrap_or(false)
-}
-
-/// Whether this turn's `closing` row state is still up and needs the turn-end
-/// stand-down/teardown handling: armed by a `/close` prompt (`armed_by_prompt`),
-/// or raised mid-turn by the skill's own `close_session(stage="started")` call,
-/// which only the registry flag records. Without the second arm a chat marked
-/// Closing by the skill would stay Closing forever when its turn ended without
-/// confirming.
-pub(crate) fn close_in_flight(
-    registry: &crate::sessions::registry::Registry,
-    session_id: &str,
-    armed_by_prompt: bool,
-) -> bool {
-    // A chat that picked "Wait for them" on the close-with-subs card shows
-    // Closing until its last sub ends; a turn it runs meanwhile is not a stalled
-    // /close, and standing the row down would cancel the wait on screen. That holds
-    // for the /close turn that raised the card too: Joe can pick before it ends, and
-    // the turn's own end must not clear what he just chose.
-    if crate::daemon::subchats::closing::is_waiting(session_id) {
-        return false;
-    }
-    armed_by_prompt || registry.get(session_id).is_some_and(|i| i.closing)
-}
-
-/// True when the row is already ended, which is how the pump knows the Stop
-/// hook tore a confirmed close down before the result line or EOF arrived:
-/// `mark_ended` clears `close_requested`, so the flag no longer says so.
-pub(crate) fn ended_already(registry: &crate::sessions::registry::Registry, session_id: &str) -> bool {
-    registry.get(session_id).is_some_and(|i| i.end_reason.is_some())
-}
-
-/// Registry `awaiting` value for a `/close` turn that ended without ever
-/// confirming via the `close_session` tool (todo 436): the model deviated
-/// mid-chain rather than the tool call erroring. Reuses `awaiting` (the
-/// single status source) instead of a second flag.
-pub(crate) const CLOSE_FAILED_AWAITING: &str = "close_failed";
-
-/// True when `--dont-close` appears as its own whitespace-delimited token,
-/// not merely as a substring (todo 498 blind spot 4: a prompt that just
-/// mentions the flag, or types `--dont-close-yet`, must not be exempted).
-fn has_dont_close_arg(last_prompt: &str) -> bool {
-    last_prompt.split_whitespace().any(|tok| tok == "--dont-close")
-}
-
-/// True when a `/close` turn's stand-down (closing flagged, tool never
-/// confirmed) is a genuine failure rather than an intentional `--dont-close`
-/// dry run OR a legitimate in-progress pause. Pure so it's unit-testable
-/// without a live `Session`/`ChildStdin` (mirrors `hook_session_end_should_close`
-/// in `hooks_server::lifecycle`).
-///
-/// `activity` is the same Stop-hook ground truth `correct()` already uses to
-/// validate a self-reported turn status (todo 1221): `/close`'s own Phase 2
-/// can dispatch a background subagent and legitimately end its current turn
-/// on `report_turn_status("working")`, fully intending to confirm
-/// `close_session` on a LATER turn once that subagent returns. Without this
-/// check, every such turn was indistinguishable from a real deviation (the
-/// model killing the terminal instead of calling the tool, todo 436) and got
-/// flagged `close_failed` - which then read as "Done" in the sidebar segment
-/// grouping despite the session actively working. `Idle`/`Unknown` still flag
-/// as failure: only positive evidence of continued work exempts the stand-down.
-///
-/// `question_pending` is true when the turn ended on a posted question (the
-/// registry's `awaiting` is `question`). `/close` stops to ask when only the dev
-/// can unblock something and finishes on a later turn, so that stand-down is
-/// the chat waiting for an answer: calling it a failed close would also
-/// overwrite the question state the dev needs to see.
-pub(crate) fn close_stand_down_is_failure(
-    last_prompt: &str,
-    close_confirmed: bool,
-    activity: TurnActivity,
-    question_pending: bool,
-) -> bool {
-    !close_confirmed
-        && !question_pending
-        && !has_dont_close_arg(last_prompt)
-        && !matches!(
-            activity,
-            TurnActivity::Working | TurnActivity::WaitingOnProcess | TurnActivity::WaitingOnSchedule
-        )
-}
-
-/// EOF counterpart of `close_stand_down_is_failure`: skips the `--dont-close`
-/// exemption, since a process dying mid-turn is always a failure regardless of prompt.
-pub(crate) fn close_stand_down_is_failure_at_eof(close_confirmed_at_eof: bool) -> bool {
-    !close_confirmed_at_eof
-}
-
-/// Daemon-authoritative `/close` teardown: mark the session ended and force the
+/// Daemon-authoritative close teardown: mark the session ended and force the
 /// `claude` process tree down. Fired when the `close_session` MCP tool's
 /// `close_requested` flag is observed at turn end. Idempotent, so the
 /// result-line and EOF handlers can both call it safely.
@@ -126,7 +22,7 @@ pub(crate) fn finalize_close(state: &Arc<DaemonState>, session: &Session) {
     let now = chrono::Utc::now().to_rfc3339();
     if state.registry.mark_ended(&session.session_id, crate::types::EndReason::Manual, &now) {
         log::info!(
-            "daemon: session {} /close confirmed via close_session tool; marked ended, killing process tree",
+            "daemon: session {} close confirmed via close_session tool; marked ended, killing process tree",
             session.session_id
         );
     }
@@ -149,7 +45,7 @@ pub(crate) fn finalize_close(state: &Arc<DaemonState>, session: &Session) {
 /// until the predecessor ends. Finds the live session (if any) whose
 /// `successor_of` points at the session now closing and hands its held
 /// queue over at the very last moment teardown allows. A no-op for an
-/// ordinary `/close` with no respawn successor.
+/// ordinary close with no respawn successor.
 fn carry_held_messages_to_successor(state: &Arc<DaemonState>, closing_session_id: &str) {
     let successor_id = state
         .registry
@@ -185,30 +81,6 @@ mod tests {
             );
         }
         st
-    }
-
-    #[test]
-    fn close_in_flight_follows_the_prompt_or_the_registry_flag() {
-        let st = state_with_sessions(&["s"]);
-        assert!(!close_in_flight(&st.registry, "s", false));
-        assert!(close_in_flight(&st.registry, "s", true));
-        st.registry.set_closing("s", true);
-        assert!(close_in_flight(&st.registry, "s", false), "skill-raised closing needs turn-end cleanup too");
-        assert!(!close_in_flight(&st.registry, "unknown", false));
-    }
-
-    /// A plain `/close` (or a trailing one) must not raise Closing from its prompt:
-    /// it may spend turns finishing work or asking Joe first, and the skill raises
-    /// Closing itself when its closing phases start. Only `/close --now` does.
-    #[test]
-    fn only_close_now_arms_closing_from_the_prompt() {
-        assert!(!prompt_is_close_now("/close"));
-        assert!(!prompt_is_close_now("  /close --dont-close"));
-        assert!(!prompt_is_close_now("fix the typo /close"));
-        assert!(!prompt_is_close_now("/closer --now"));
-        assert!(!prompt_is_close_now("please run --now"));
-        assert!(prompt_is_close_now("/close --now"));
-        assert!(prompt_is_close_now("  /close --dont-close --now"));
     }
 
     fn held_texts(st: &Arc<DaemonState>, sid: &str) -> Vec<String> {
@@ -262,7 +134,7 @@ mod tests {
         assert_eq!(st.registry.get("old").unwrap().held_count, 0);
     }
 
-    /// An ordinary `/close` (no respawn, no successor) must be an inert
+    /// An ordinary close (no respawn, no successor) must be an inert
     /// no-op: nothing to find, nothing to move.
     #[test]
     fn sweep_is_a_noop_when_no_successor_exists() {
@@ -284,88 +156,5 @@ mod tests {
         st.draft_store.add_held("old", vec![ContentBlock::Text { text: "staged late".into() }]);
         carry_held_messages_to_successor(&st, "old");
         assert_eq!(held_texts(&st, "old"), ["staged late"], "an ended successor must not receive the carry");
-    }
-
-    /// The exact todo 436 bug: a real `/close` turn ends without the
-    /// `close_session` tool ever firing (model deviated, e.g. ran a
-    /// terminal-kill script instead) - must be flagged as a failure.
-    #[test]
-    fn close_stand_down_is_failure_when_never_confirmed() {
-        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Idle, false));
-    }
-
-    #[test]
-    fn close_stand_down_not_failure_when_confirmed() {
-        assert!(!close_stand_down_is_failure("/close", true, TurnActivity::Idle, false));
-    }
-
-    /// `--dont-close` is an intentional dry run; standing down unconfirmed
-    /// is expected there, not a failure.
-    #[test]
-    fn close_stand_down_not_failure_on_dont_close_flag() {
-        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle, false));
-    }
-
-    /// Todo 1221: a `/close` turn that dispatched a background subagent
-    /// (Phase 2) and correctly ended on `report_turn_status("working")`
-    /// must NOT be flagged a failure just because `close_session` hasn't
-    /// been called yet - the Stop hook's own ground truth says the model is
-    /// still genuinely working, not deviating.
-    #[test]
-    fn close_stand_down_not_failure_while_a_background_task_is_still_working() {
-        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::Working, false));
-        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::WaitingOnProcess, false));
-        assert!(!close_stand_down_is_failure("/close", false, TurnActivity::WaitingOnSchedule, false));
-    }
-
-    /// `Idle`/`Unknown` give no positive evidence of continued work, so the
-    /// pre-1221 failure behavior is unchanged for them.
-    #[test]
-    fn close_stand_down_still_a_failure_on_idle_or_unknown_activity() {
-        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Idle, false));
-        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Unknown, false));
-    }
-
-    /// A `/close` turn that ends on a posted question is waiting for the dev's
-    /// answer, not a failed close, whatever the Stop hook's activity says.
-    #[test]
-    fn close_stand_down_not_failure_while_a_question_is_pending() {
-        for activity in [TurnActivity::Idle, TurnActivity::Unknown] {
-            assert!(!close_stand_down_is_failure("/close", false, activity, true));
-        }
-        // Without a pending question the same turn is still a failure.
-        assert!(close_stand_down_is_failure("/close", false, TurnActivity::Idle, false));
-    }
-
-    /// The EOF branch's own logic (todo 467 blind spot 1), previously
-    /// untested: a process death mid-`/close` is always a failure.
-    #[test]
-    fn close_stand_down_is_failure_at_eof_when_never_confirmed() {
-        assert!(close_stand_down_is_failure_at_eof(false));
-        assert!(!close_stand_down_is_failure_at_eof(true));
-    }
-
-    /// Unlike the result-line path, EOF grants no `--dont-close` exemption - that
-    /// flag always completes normally, so reaching EOF still-closing is a genuine crash.
-    #[test]
-    fn eof_path_diverges_from_result_line_path_on_dont_close() {
-        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle, false));
-        assert!(close_stand_down_is_failure_at_eof(false));
-    }
-
-    /// Todo 498 blind spot 4: a genuine `--dont-close` argument still exempts.
-    #[test]
-    fn dont_close_word_boundary_exempts_genuine_flag() {
-        assert!(!close_stand_down_is_failure("/close --dont-close", false, TurnActivity::Idle, false));
-        assert!(!close_stand_down_is_failure("/close --dont-close please", false, TurnActivity::Idle, false));
-    }
-
-    /// A longer token that merely contains the string (a different flag name,
-    /// or embedded mid-word) must NOT be exempted - only an exact
-    /// whitespace-delimited token counts.
-    #[test]
-    fn dont_close_word_boundary_rejects_substring_mentions() {
-        assert!(close_stand_down_is_failure("/close --dont-close-yet", false, TurnActivity::Idle, false));
-        assert!(close_stand_down_is_failure("/close xx--dont-closexx", false, TurnActivity::Idle, false));
     }
 }

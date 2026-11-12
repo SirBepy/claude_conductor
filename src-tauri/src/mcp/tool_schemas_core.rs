@@ -96,16 +96,10 @@ pub fn core_schemas() -> Vec<Value> {
         }),
         json!({
             "name": TOOL_CLOSE,
-            "description": "Confirm this chat's /close teardown so the host app ends the session and kills the process at turn end. Call ONLY from the /close skill's final close step, and never on --dont-close or a failed chain. With stage \"started\" it instead tells the app the /close skill has begun closing (shows the chat as Closing) and tears nothing down; the final call without a stage is still what confirms.",
+            "description": "End this chat. Call it once, when the task is fully done and nothing is pending for Joe (after the save step), or when Joe tells you to close. The session ends when the turn completes, so end the turn right after the call. A sub cannot call it: a sub ends with finish_subchat. A main chat with running subs is held: Joe is asked on a card, and the call answers that the chat is not closed yet.",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "stage": {
-                        "type": "string",
-                        "enum": ["started"],
-                        "description": "Set to \"started\" when /close begins its closing phases. Leave it out on the final confirming call."
-                    }
-                }
+                "properties": {}
             }
         }),
     ]

@@ -1,9 +1,8 @@
 //! Pump-exit cleanup: everything `run_stdout_pump` does once stdout hits EOF
 //! or a read error. Split out of `pump.rs` (todo 685); shares no state with
-//! the read loop beyond the two values the loop latched (`pump_turn_gen`,
-//! `closing_flagged`).
+//! the read loop beyond the value the loop latched (`pump_turn_gen`).
 
-use super::close::{close_in_flight, close_stand_down_is_failure_at_eof, ended_already, finalize_close, CLOSE_FAILED_AWAITING};
+use super::close::finalize_close;
 use crate::daemon::session::{Session, SessionMap};
 use crate::daemon::state::DaemonState;
 use std::sync::Arc;
@@ -17,7 +16,6 @@ pub(crate) async fn run_pump_exit(
     map_for_pump: SessionMap,
     state_for_pump: Arc<DaemonState>,
     pump_turn_gen: u64,
-    closing_flagged: bool,
 ) {
     map_for_pump.remove(&pump_session.session_id);
     // A compaction this child was running is over, and messages Joe typed
@@ -81,32 +79,13 @@ pub(crate) async fn run_pump_exit(
         state_for_pump.clear_step_comments(&pump_session.session_id).await;
         // A process that died mid-commit never reaches its PostToolUse release.
         state_for_pump.release_commit_locks_held_by(&pump_session.session_id);
-        // /close's Phase 6 script also kills the `claude -p` child, which can
-        // take the process down BEFORE its result line flushes - so a close the
+        // A close can take the `claude -p` child down BEFORE its result line
+        // flushes - so a close the
         // `close_session` MCP tool confirmed must also be honored on EOF, not
         // just at TurnUsage. Idempotent with the result-line path: whichever
         // consumes `close_requested` first tears down; the other is a no-op.
         let close_confirmed_at_eof =
             state_for_pump.registry.take_close_requested(&pump_session.session_id);
-        // The turn is over either way - drop the broadcast closing flag
-        // before any snapshot below can persist `closing: true`. (No
-        // reassignment: the pump loop is done, the flag is never read again.)
-        if close_in_flight(&state_for_pump.registry, &pump_session.session_id, closing_flagged) {
-            if close_stand_down_is_failure_at_eof(close_confirmed_at_eof || ended_already(&state_for_pump.registry, &pump_session.session_id)) {
-                log::warn!(
-                    "daemon: session {} process exited mid-/close without close_session confirmation; chat still open",
-                    pump_session.session_id
-                );
-                state_for_pump.registry.set_awaiting(
-                    &pump_session.session_id,
-                    Some(CLOSE_FAILED_AWAITING.to_string()),
-                );
-                // So a daemon restart doesn't wipe the failure back to
-                // whatever awaiting was before this turn.
-                crate::sessions::persistence::save_snapshot_default(&state_for_pump.registry);
-            }
-            state_for_pump.registry.set_closing(&pump_session.session_id, false);
-        }
         if close_confirmed_at_eof {
             finalize_close(&state_for_pump, &pump_session);
             crate::sessions::persistence::save_snapshot_default(&state_for_pump.registry);
@@ -202,46 +181,6 @@ async fn report_nonzero_exit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::parser::ParserContext;
-    use crate::daemon::pump::close::prompt_is_close_now;
-
-    /// A `/close` turn whose first content is tool_use (no preceding text) must
-    /// still be flagged on death, since closing_flagged arms on stream_event, not AssistantDelta.
-    #[test]
-    fn text_free_tool_call_first_close_still_flagged_on_eof() {
-        use crate::sessions::registry::Registry;
-        use crate::types::Settings;
-
-        let registry = Registry::new();
-        let settings = std::sync::Mutex::new(Settings::default());
-        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-08-01T00:00:00Z");
-
-        // Mirrors turn_is_close's check without needing a live Session/ChildStdin.
-        let last_prompt = "/close --now";
-        let mut ctx = ParserContext::new_live();
-        let mut saw_stream_turn = false;
-        let mut closing_flagged = false;
-        for line in [
-            r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#,
-            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"Bash","input":{}}}}"#,
-        ] {
-            ctx.feed(format!("{line}\n").as_bytes());
-            if !saw_stream_turn && ctx.take_stream_event_seen() {
-                saw_stream_turn = true;
-                if prompt_is_close_now(last_prompt) {
-                    closing_flagged = true;
-                }
-            }
-        }
-        assert!(closing_flagged, "text-free tool-call-first /close must still arm closing_flagged");
-
-        // The process now dies mid-turn (EOF) before any close_session confirmation.
-        let close_confirmed_at_eof = false;
-        if closing_flagged && close_stand_down_is_failure_at_eof(close_confirmed_at_eof) {
-            registry.set_awaiting("s", Some(CLOSE_FAILED_AWAITING.to_string()));
-        }
-        assert_eq!(registry.get("s").unwrap().awaiting.as_deref(), Some(CLOSE_FAILED_AWAITING));
-    }
 
     /// Runs the real exit handler on a child that exits with `code`, for a sub
     /// whose turn was open. Returns the persisted busy flag the next boot reads
@@ -269,7 +208,7 @@ mod tests {
         let stdin = child.stdin.take().expect("piped stdin");
         let pid = child.id().unwrap_or(0);
         let session = Session::new(sub.clone(), std::env::temp_dir(), "m".into(), "high".into(), pid, stdin, None, None, "acct".into());
-        run_pump_exit(child, session, st.sessions.clone(), st.clone(), gen, false).await;
+        run_pump_exit(child, session, st.sessions.clone(), st.clone(), gen).await;
         // The death card is raised on a detached task.
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         let busy = crate::sessions::chat_state::get(&sub).is_some_and(|c| c.busy);

@@ -41,7 +41,7 @@ pub struct Registry {
     /// doing, per `daemon::hooks_server::activity`. A side map, not a field on
     /// `Instance`: internal to the daemon, never serialized to the frontend.
     pub(super) turn_activity: Mutex<HashMap<String, super::registry_turn::TurnActivity>>,
-    /// `session_id`s whose `/close` run has explicitly confirmed teardown via
+    /// `session_id`s whose chat has explicitly confirmed teardown via
     /// the `cc_conductor` `close_session` MCP tool (POSTed to
     /// `/sessions/close-confirm`). Set mid-turn by the tool call; consumed by
     /// the pump at turn end to mark_ended + kill the process. A side map, not

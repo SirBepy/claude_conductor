@@ -33,29 +33,13 @@ pub(super) struct SessionEndPayload {
 #[derive(Deserialize, Debug, Default)]
 pub(super) struct CloseConfirmPayload {
     pub session_id: String,
-    /// `"started"` marks the chat Closing without confirming teardown; absent
-    /// is the final confirmation.
-    #[serde(default)]
-    pub stage: Option<String>,
 }
 
 /// What a sub is told when it calls `close_session`.
 const SUB_CLOSE_REFUSAL: &str = "close_session does not apply to a sub: you do not close, you finish. Call finish_subchat when the job is done; the chat is then stopped and kept for follow-ups.";
 
-/// Applies one `close_session` call to the registry. `started` only raises the
-/// `closing` row state (returns true if that changed it, so the caller
-/// publishes); anything else is the confirmation that arms teardown at turn end.
-fn apply_close_stage(registry: &crate::sessions::registry::Registry, session_id: &str, stage: Option<&str>) -> bool {
-    if stage == Some("started") {
-        return registry.set_closing(session_id, true);
-    }
-    registry.set_close_requested(session_id);
-    false
-}
-
-/// `/sessions/close-confirm`: the `cc_conductor` `close_session` MCP tool -
-/// fired by the `/close` skill's final phase - POSTs here to confirm the chat
-/// really is being torn down (never on `--dont-close` or a failed chain). Sets
+/// `/sessions/close-confirm`: the `cc_conductor` `close_session` MCP tool
+/// POSTs here to confirm the chat really is being torn down. Sets
 /// the registry's one-shot `close_requested` flag; the session's stdout pump
 /// consumes it at turn end to mark_ended + kill the process tree. This is the
 /// deterministic replacement for parsing a `<cc-close:done>` text marker: a
@@ -65,29 +49,24 @@ pub(super) async fn on_close_confirm(
     Json(payload): Json<CloseConfirmPayload>,
 ) -> impl IntoResponse {
     log::info!(
-        "hook /sessions/close-confirm: session={} stage={}",
+        "hook /sessions/close-confirm: session={}",
         payload.session_id,
-        payload.stage.as_deref().unwrap_or("confirm")
     );
     // todo 824 remaining 1: reachable only via the MCP `close_session` tool.
     super::mark_mcp_tool_used(&ctx, &payload.session_id);
-    // Every chat is told by the global rules to run `/close`, so a sub reaches
-    // here by habit; only `finish_subchat` ends one, and it keeps the row.
+    // Every chat is told by the global rules to end itself with `close_session`
+    // when its job is done, so a sub reaches here by habit; only `finish_subchat`
+    // ends one, and it keeps the row.
     if ctx.state.registry.get(&payload.session_id).is_some_and(|i| crate::daemon::subchats::is_sub(&i)) {
         return (StatusCode::OK, Json(json!({"ok": false, "error": SUB_CLOSE_REFUSAL})));
     }
     // The confirmation is what arms teardown. A chat with running subs is not
     // closed on the model's word: Joe is asked on a card, and the model is told
-    // so, so it does not announce a close that has not happened. `started` only
-    // raises the Closing row state, which is the very state "Wait for them" shows.
-    if payload.stage.as_deref() != Some("started")
-        && crate::daemon::subchats::closing::request_close(&ctx.state, &payload.session_id)
-    {
+    // so, so it does not announce a close that has not happened.
+    if crate::daemon::subchats::closing::request_close(&ctx.state, &payload.session_id) {
         return (StatusCode::OK, Json(json!({"ok": false, "error": crate::daemon::subchats::closing::HELD_NOTE})));
     }
-    if apply_close_stage(&ctx.state.registry, &payload.session_id, payload.stage.as_deref()) {
-        crate::daemon::machines::publish_instances_changed(&ctx.state);
-    }
+    ctx.state.registry.set_close_requested(&payload.session_id);
     (StatusCode::OK, Json(json!({"ok": true})))
 }
 
@@ -269,24 +248,8 @@ mod tests {
         assert!(!hook_session_end_should_close(Some(InstanceKind::Interactive)));
     }
 
-    #[test]
-    fn close_stage_started_marks_closing_without_arming_teardown() {
-        use crate::sessions::registry::Registry;
-        let registry = Registry::new();
-        let settings = std::sync::Mutex::new(crate::types::Settings::default());
-        registry.record_interactive_session("s", std::path::Path::new("/tmp/x"), &settings, "2026-11-03T00:00:00Z");
-
-        assert!(apply_close_stage(&registry, "s", Some("started")), "the row flips to closing");
-        assert!(registry.get("s").unwrap().closing);
-        assert!(!registry.take_close_requested("s"), "started must not confirm teardown");
-        assert!(!apply_close_stage(&registry, "s", Some("started")), "a repeat changes nothing");
-
-        assert!(!apply_close_stage(&registry, "s", None));
-        assert!(registry.take_close_requested("s"), "the final call arms teardown");
-    }
-
-    async fn close_confirm(ctx: &Arc<HookCtx>, session: &str, stage: Option<&str>) -> serde_json::Value {
-        let payload = CloseConfirmPayload { session_id: session.to_string(), stage: stage.map(str::to_string) };
+    async fn close_confirm(ctx: &Arc<HookCtx>, session: &str) -> serde_json::Value {
+        let payload = CloseConfirmPayload { session_id: session.to_string() };
         let resp = on_close_confirm(AxState(ctx.clone()), Json(payload)).await.into_response();
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         serde_json::from_slice(&bytes).unwrap()
@@ -310,11 +273,9 @@ mod tests {
             ctx.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
         }
         ctx.state.registry.set_subchat_of("close-sub", Some("close-main".into()));
-        for stage in [None, Some("started")] {
-            let v = close_confirm(&ctx, "close-sub", stage).await;
-            assert_eq!(v["ok"], serde_json::json!(false), "{stage:?}");
-            assert!(v["error"].as_str().unwrap().contains("finish_subchat"), "{v}");
-        }
+        let v = close_confirm(&ctx, "close-sub").await;
+        assert_eq!(v["ok"], serde_json::json!(false));
+        assert!(v["error"].as_str().unwrap().contains("finish_subchat"), "{v}");
         assert!(!ctx.state.registry.take_close_requested("close-sub"), "no teardown is armed for a sub");
         assert!(!ctx.state.registry.get("close-sub").unwrap().closing);
     }
@@ -333,13 +294,25 @@ mod tests {
         let brief = crate::daemon::subchats::brief_for_test_gate("gclose-main");
         crate::sessions::chat_config::set_subchat("gclose-gate", Some(brief));
         assert!(crate::daemon::subchats::is_gate("gclose-gate"));
-        for stage in [None, Some("started")] {
-            let v = close_confirm(&ctx, "gclose-gate", stage).await;
-            assert_eq!(v["ok"], serde_json::json!(false), "{stage:?}");
-            assert!(v["error"].as_str().unwrap().contains("finish_subchat"), "{v}");
-        }
+        let v = close_confirm(&ctx, "gclose-gate").await;
+        assert_eq!(v["ok"], serde_json::json!(false));
+        assert!(v["error"].as_str().unwrap().contains("finish_subchat"), "{v}");
         assert!(!ctx.state.registry.take_close_requested("gclose-gate"), "no teardown is armed for a gate");
         assert!(crate::daemon::claude_config::SUBCHAT_GATE_PROMPT.contains("finish_subchat"));
+    }
+
+    /// The `stage` key is gone from the payload; a body that still carries it
+    /// (a daemon call from an older MCP process) must decode, and the call arms
+    /// teardown like any other rather than marking the row Closing.
+    #[tokio::test]
+    async fn a_close_confirm_body_that_still_carries_stage_decodes_and_arms_teardown() {
+        let payload: CloseConfirmPayload = serde_json::from_str(r#"{"session_id":"stage-old","stage":"started"}"#).unwrap();
+        let ctx = close_ctx();
+        ctx.state.registry.upsert_interactive("stage-old", std::path::Path::new("."), "proj", "2026-11-12T00:00:00Z");
+        let resp = on_close_confirm(AxState(ctx.clone()), Json(payload)).await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(ctx.state.registry.take_close_requested("stage-old"));
+        assert!(!ctx.state.registry.get("stage-old").unwrap().closing);
     }
 
     #[tokio::test]
@@ -349,10 +322,14 @@ mod tests {
             ctx.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
         }
         ctx.state.registry.set_subchat_of("close-sub2", Some("close-main2".into()));
-        assert_eq!(close_confirm(&ctx, "close-plain", None).await["ok"], serde_json::json!(true));
+        // A finished sub never holds its main chat's close.
+        ctx.state.registry.set_subchat_finished("close-sub2", true);
+        assert_eq!(close_confirm(&ctx, "close-plain").await["ok"], serde_json::json!(true));
         assert!(ctx.state.registry.take_close_requested("close-plain"));
         // The parent of a sub is not itself a sub.
-        assert_eq!(close_confirm(&ctx, "close-main2", Some("started")).await["ok"], serde_json::json!(true));
+        assert_eq!(close_confirm(&ctx, "close-main2").await["ok"], serde_json::json!(true));
+        assert!(ctx.state.registry.take_close_requested("close-main2"));
+        assert!(!ctx.state.registry.get("close-main2").unwrap().closing, "arming teardown does not mark the row closing");
     }
 
     async fn session_start(ctx: &Arc<HookCtx>, session: &str, source: &str) -> (StatusCode, serde_json::Value) {
