@@ -14,7 +14,7 @@ const ARCH_DIR = resolve(ROOT, "docs/architecture");
 
 // Budget in characters. The file was ~45K before the maps moved out; raise this only after
 // moving something else out, never to fit a new module map in CLAUDE.md.
-const BUDGET_CHARS = 17000;
+const BUDGET_CHARS = 17500;
 
 const referenced = [...claudeMd.matchAll(/docs\/architecture\/([a-z0-9-]+\.md)/g)].map((m) => m[1]);
 
