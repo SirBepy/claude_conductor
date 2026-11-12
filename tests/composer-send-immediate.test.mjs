@@ -79,4 +79,19 @@ describe("composer send", () => {
 
     expect(textarea.value).toBe("lost send");
   });
+
+  it("a frozen chat's Send now clears the box quietly, so the quick-reply strip does not return over the in-flight send", async () => {
+    vi.useRealTimers();
+    const onSend = vi.fn(async () => {});
+    const onAttachmentsChange = vi.fn();
+    const { textarea, root } = await mountComposer({ onSend, isFrozen: () => true, onAttachmentsChange });
+    typeInto(textarea, "unfreeze me");
+    root.querySelector(".composer-send").click();
+    await vi.waitFor(() => expect(document.querySelector("[data-choice='now']")).toBeTruthy());
+    onAttachmentsChange.mockClear();
+    document.querySelector("[data-choice='now']").click();
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(textarea.value).toBe("");
+    expect(onAttachmentsChange).not.toHaveBeenCalled();
+  });
 });

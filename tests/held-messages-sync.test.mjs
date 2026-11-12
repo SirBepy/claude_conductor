@@ -252,6 +252,19 @@ describe("HeldMessages - sendNow claims the daemon list before interrupting", ()
     expect(send).toHaveBeenCalledWith(textBlocks("still-held"));
   });
 
+  it("a send-now that sends the typed draft clears the box quietly, so the quick-reply strip stays hidden until the daemon answers", async () => {
+    addHeldMessage.mockResolvedValue({ id: 42, updated_at: "t" });
+    clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [42], injected_ids: [] });
+    const { held, attach, send } = makeHarness();
+    held.attach({ ...attach, isDraftEmpty: () => false, getDraftBlocks: () => textBlocks("typed draft") });
+    held.stage(textBlocks("still-held"));
+
+    await expect(held.sendNow()).resolves.toBe(true);
+
+    expect(send).toHaveBeenCalled();
+    expect(attach.clearComposer).toHaveBeenCalledWith(false);
+  });
+
   it("with injected_ids reported, skips the interrupt only for a confirmed injection", async () => {
     addHeldMessage.mockResolvedValue({ id: 41, updated_at: "t" });
     clearHeldMessages.mockResolvedValue({ updated_at: "t", removed_ids: [], injected_ids: [41] });

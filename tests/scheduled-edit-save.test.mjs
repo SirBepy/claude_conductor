@@ -44,4 +44,10 @@ describe("saveScheduledEdit", () => {
     await expect(saveScheduledEdit(ITEM, [{ type: "text", text: "x" }])).rejects.toThrow();
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === "schedule_update")).toBe(false);
   });
+
+  it("tells the composer the item is gone (so it leaves edit mode), not a retryable failure", async () => {
+    const { ScheduledEditGoneError } = await import("../src/shared/chat/scheduled-edit-gone.ts");
+    invokeMock.mockImplementation(async (cmd) => (cmd === "schedule_list" ? [] : undefined));
+    await expect(saveScheduledEdit(ITEM, [{ type: "text", text: "x" }])).rejects.toBeInstanceOf(ScheduledEditGoneError);
+  });
 });

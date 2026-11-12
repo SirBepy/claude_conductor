@@ -3,6 +3,7 @@
 
 import { invoke } from "../../shared/ipc";
 import { blocksToText } from "../../shared/chat/content-blocks";
+import { ScheduledEditGoneError } from "../../shared/chat/scheduled-edit-gone";
 import { formatFireAt } from "../../shared/chat/schedule-picker";
 import { showToast } from "../../shared/toast";
 import type { ContentBlock, ScheduledItem } from "../../types/ipc.generated";
@@ -21,7 +22,7 @@ export async function saveScheduledEdit(item: ScheduledItem, blocks: ContentBloc
   const current = all.find((i) => i.id === item.id);
   if (!current || current.status.type !== "pending") {
     showToast("That message was already sent or removed. Your text is still here.");
-    throw new Error("scheduled item no longer pending");
+    throw new ScheduledEditGoneError();
   }
   try {
     await invoke<void>("schedule_update", { item: { ...current, prompt } });

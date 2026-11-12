@@ -169,7 +169,7 @@ export function mountComposer(
       getDraftBlocks: () => composer.getDraftBlocks(),
       isDraftEmpty: () => composer.isDraftEmpty(),
       isComposing: () => composer.isComposing(),
-      clearComposer: () => composer.clearComposer(),
+      clearComposer: (refreshStrip) => composer.clearComposer(refreshStrip),
       focusComposer: () => composer.focus(),
       getIsBusy: () => isCurrentSessionBusy(),
       onChange: () => updateThinkingBar(),
