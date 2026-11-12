@@ -6,13 +6,19 @@ use super::stop_verdict::{
     SubTurnFacts, TurnEndVerdict, QUESTION_UNDELIVERED_REASON, TITLE_MISSING_REASON,
 };
 use super::HookCtx;
+use crate::context_status::tail::CursorStore;
 use crate::settings::paths;
+use crate::skill_usage::parser::SkillTail;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+
+/// Where each chat's skill-usage parse stopped in its transcript.
+static SKILL_CURSORS: std::sync::LazyLock<CursorStore<SkillTail>> =
+    std::sync::LazyLock::new(|| CursorStore::new("skills"));
 
 #[derive(Deserialize, Debug, Default)]
 pub(super) struct StopPayload {
@@ -229,8 +235,14 @@ pub(super) async fn on_stop(
             }
         };
         let transcript = PathBuf::from(transcript_path);
+        let cursor_key = session_id.clone();
+        // Only the lines appended since this chat's previous Stop: the cursor
+        // is per session and persisted, so a restart does not re-read the file
+        // and re-emit every past invocation.
         let events = tokio::task::spawn_blocking(move || {
-            crate::skill_usage::parser::parse_transcript(&transcript)
+            SKILL_CURSORS.with(crate::context_status::tail::cursor_dir().as_deref(), &cursor_key, |tail| {
+                crate::skill_usage::parser::parse_transcript_tail(&transcript, tail)
+            })
         })
         .await
         .unwrap_or_default();

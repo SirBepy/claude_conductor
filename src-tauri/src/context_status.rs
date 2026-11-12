@@ -91,7 +91,12 @@ fn is_claude_3_opus(lower: &str) -> bool {
 pub fn score_context(occupancies: &[u64], model: &str) -> Option<ContextStatus> {
     let occupancy = *occupancies.last()?;
     let max_occupancy = occupancies.iter().copied().max().unwrap_or(occupancy);
+    Some(score_parts(occupancy, max_occupancy, model))
+}
 
+/// [`score_context`] from the two numbers it actually needs, so a reader that
+/// keeps a running `(last, max)` instead of every occupancy scores identically.
+fn score_parts(occupancy: u64, max_occupancy: u64, model: &str) -> ContextStatus {
     let mut window = model_window(model);
     let sticky_fired = max_occupancy > 200_000;
     if sticky_fired {
@@ -112,7 +117,7 @@ pub fn score_context(occupancies: &[u64], model: &str) -> Option<ContextStatus> 
 
     let confidence = if sticky_fired { "proven" } else { "heuristic" };
 
-    Some(ContextStatus {
+    ContextStatus {
         model: model.to_string(),
         window,
         occupancy,
@@ -120,7 +125,7 @@ pub fn score_context(occupancies: &[u64], model: &str) -> Option<ContextStatus> 
         pct_used,
         pct_left,
         confidence: confidence.to_string(),
-    })
+    }
 }
 
 /// One usage line's contribution, extracted from a parsed JSONL value.
@@ -211,6 +216,295 @@ pub(crate) fn compute_context_status_visiting(
     }
 
     score_context(&occupancies, model.as_deref().unwrap_or(""))
+}
+
+/// A per-turn reader that only looks at the bytes appended to a transcript since
+/// its last call. The window heuristic above infers a 1M window from the MAXIMUM
+/// occupancy over the whole file, so the cursor keeps that running maximum (and
+/// the model) next to the byte offset; resuming from the offset alone would
+/// forget a peak that lies behind it and flip the window back to 200K. It is
+/// persisted for the same reason: a daemon restart must not lose the peak.
+pub(crate) mod tail {
+    use super::{score_parts, usage_from_line, ContextStatus};
+    use serde::{de::DeserializeOwned, Deserialize, Serialize};
+    use std::collections::HashMap;
+    use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
+
+    /// How much of the file's start is fingerprinted. A transcript is
+    /// append-only, so its first bytes never change; if they do, the file was
+    /// replaced (a rewrite that grew past the old offset passes the length
+    /// check but not this one) and the offset means nothing.
+    const HEAD_BYTES: u64 = 256;
+
+    /// Where a reader stopped: a byte offset on a line boundary plus the
+    /// fingerprint of the file's head at that time.
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    pub struct TailPos {
+        pub offset: u64,
+        head_len: u64,
+        head_hash: u64,
+    }
+
+    /// FNV-1a, written out rather than `DefaultHasher` because the value is
+    /// persisted and std documents that hasher's output as unstable across
+    /// releases; a changed hash would read as a replaced file.
+    fn fnv1a(bytes: &[u8]) -> u64 {
+        bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3))
+    }
+
+    fn head_hash(file: &mut std::fs::File, head_len: u64) -> Option<u64> {
+        file.seek(SeekFrom::Start(0)).ok()?;
+        let mut buf = vec![0u8; head_len as usize];
+        file.read_exact(&mut buf).ok()?;
+        Some(fnv1a(&buf))
+    }
+
+    /// Streams the complete lines after `from`. A trailing line with no newline
+    /// is taken only if it is already valid JSON (a half-written line never is,
+    /// since an object is unclosed until its last byte), so what a full read
+    /// would see is never skipped for good and a partial line is never half-read.
+    pub struct TailReader {
+        reader: BufReader<std::fs::File>,
+        pos: TailPos,
+        bytes: Vec<u8>,
+        /// True when `from` did not fit this file (shrunk or replaced) and
+        /// reading restarted at byte 0: the caller must drop its running state.
+        pub reset: bool,
+    }
+
+    impl TailReader {
+        pub fn open(path: &Path, from: &TailPos) -> Option<Self> {
+            let mut file = std::fs::File::open(path).ok()?;
+            let len = file.metadata().ok()?.len();
+            let mut pos = from.clone();
+            let mut reset = false;
+            if pos.offset > 0 {
+                let same = pos.offset <= len
+                    && pos.head_len <= len
+                    && head_hash(&mut file, pos.head_len) == Some(pos.head_hash);
+                if !same {
+                    pos = TailPos::default();
+                    reset = true;
+                }
+            }
+            file.seek(SeekFrom::Start(pos.offset)).ok()?;
+            Some(Self { reader: BufReader::new(file), pos, bytes: Vec::new(), reset })
+        }
+
+        /// The next line into `buf` (newline kept), with its start and end
+        /// offsets; None at the end of what is complete.
+        pub fn next_line(&mut self, buf: &mut String) -> Option<(u64, u64)> {
+            self.bytes.clear();
+            let n = self.reader.read_until(b'\n', &mut self.bytes).ok()?;
+            if n == 0 {
+                return None;
+            }
+            let complete = self.bytes.last() == Some(&b'\n');
+            if !complete && serde_json::from_slice::<serde::de::IgnoredAny>(&self.bytes).is_err() {
+                return None;
+            }
+            let start = self.pos.offset;
+            self.pos.offset += n as u64;
+            buf.clear();
+            buf.push_str(&String::from_utf8_lossy(&self.bytes));
+            Some((start, self.pos.offset))
+        }
+
+        /// The position to resume from. `offset` overrides where that is (a
+        /// caller that must re-read its last lines passes an earlier boundary).
+        pub fn finish(self, offset: Option<u64>) -> TailPos {
+            let offset = offset.unwrap_or(self.pos.offset).min(self.pos.offset);
+            let want = offset.min(HEAD_BYTES);
+            let mut pos = TailPos { offset, ..self.pos };
+            if pos.head_len != want {
+                let mut file = self.reader.into_inner();
+                match head_hash(&mut file, want) {
+                    Some(h) => {
+                        pos.head_len = want;
+                        pos.head_hash = h;
+                    }
+                    // Unreadable head: restart from 0 next time, never trust a
+                    // position that cannot be checked.
+                    None => pos = TailPos::default(),
+                }
+            }
+            pos
+        }
+    }
+
+    /// The running state of a transcript's usage lines, advanced by the tail only.
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    pub struct ContextCursor {
+        pos: TailPos,
+        /// Occupancy of the LAST usage line, the maximum over every usage line
+        /// so far (drives the 1M-window inference) and the last model seen.
+        last: Option<u64>,
+        max: u64,
+        model: Option<String>,
+        /// Sticky: true once the caller's line test matched any line.
+        #[serde(default)]
+        flagged: bool,
+        /// Counts every time the chat's context was rewritten under the same
+        /// session id: a compaction marker, occupancy at least halving between
+        /// two usage rows, or the file shrinking or being replaced (a CLI that
+        /// rotates its transcript on `/compact`). It only
+        /// ever grows, so a caller can tell "something I sent earlier may no
+        /// longer be in the model's context" by this number changing.
+        #[serde(default)]
+        epoch: u64,
+    }
+
+    /// Occupancy below which a halving is too small to read as a compaction.
+    const SHRINK_FLOOR: u64 = 20_000;
+
+    /// A compaction marker. UNVERIFIED against a real compacted transcript (none
+    /// exists yet, docs/forever-chat-plan.md 1.2): the plan names the CLI's
+    /// `compact_boundary` system event and the summary message's
+    /// `isCompactSummary`, so either counts; a count that only has to CHANGE
+    /// when a compaction happens does not mind both firing for one.
+    fn is_compaction_line(line: &str) -> bool {
+        (line.contains("compact_boundary") || line.contains("isCompactSummary"))
+            && serde_json::from_str::<serde_json::Value>(line.trim()).is_ok_and(|v| {
+                v.get("subtype").and_then(|s| s.as_str()) == Some("compact_boundary")
+                    || v.get("isCompactSummary").and_then(|b| b.as_bool()) == Some(true)
+            })
+    }
+
+    impl ContextCursor {
+        /// Folds in the lines appended since the last call. `flag_of` is the
+        /// caller's per-line test whose first hit is remembered. False when the
+        /// file cannot be opened (the state is left alone).
+        pub fn advance(&mut self, path: &Path, mut flag_of: impl FnMut(&str) -> bool) -> bool {
+            let Some(mut reader) = TailReader::open(path, &self.pos) else { return false };
+            if reader.reset {
+                let epoch = self.epoch + 1;
+                *self = Self::default();
+                self.epoch = epoch;
+            }
+            let mut line = String::new();
+            while reader.next_line(&mut line).is_some() {
+                if !self.flagged && flag_of(&line) {
+                    self.flagged = true;
+                }
+                if is_compaction_line(&line) {
+                    self.epoch += 1;
+                }
+                // Same exact prefilter as the full read: only a line holding
+                // "input_tokens" can carry a usage block.
+                if !line.contains("input_tokens") {
+                    continue;
+                }
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue };
+                let Some((occ, model)) = usage_from_line(&v) else { continue };
+                // A compaction needs no marker to be noticed: the context
+                // collapses between two consecutive usage rows, which normal
+                // growth never does. A false hit costs one extra rider resend.
+                if self.last.is_some_and(|prev| prev >= SHRINK_FLOOR && occ < prev / 2) {
+                    self.epoch += 1;
+                }
+                self.last = Some(occ);
+                self.max = self.max.max(occ);
+                if model.is_some() {
+                    self.model = model;
+                }
+            }
+            self.pos = reader.finish(None);
+            true
+        }
+
+        pub fn status(&self) -> Option<ContextStatus> {
+            Some(score_parts(self.last?, self.max, self.model.as_deref().unwrap_or("")))
+        }
+
+        pub fn flagged(&self) -> bool {
+            self.flagged
+        }
+
+        pub fn epoch(&self) -> u64 {
+            self.epoch
+        }
+    }
+
+    struct Slot<T> {
+        loaded: bool,
+        value: T,
+    }
+
+    /// Per-session cursors held in memory and mirrored to one small file each
+    /// under `dir`, so a restarted daemon resumes instead of re-reading (and,
+    /// for the skill parser, re-emitting) a whole transcript. Each session has
+    /// its own lock, so one chat's first full read does not stall another's turn.
+    pub struct CursorStore<T> {
+        kind: &'static str,
+        slots: Mutex<HashMap<String, Arc<Mutex<Slot<T>>>>>,
+    }
+
+    impl<T: Serialize + DeserializeOwned + Default + Clone + PartialEq> CursorStore<T> {
+        pub fn new(kind: &'static str) -> Self {
+            Self { kind, slots: Mutex::new(HashMap::new()) }
+        }
+
+        fn file(&self, dir: &Path, key: &str) -> PathBuf {
+            let safe: String =
+                key.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+            dir.join(format!("{safe}.{}.json", self.kind))
+        }
+
+        /// Runs `f` on the session's cursor (loaded from `dir` the first time
+        /// this process sees it) and saves it back when it changed. `dir: None`
+        /// keeps it in memory only.
+        pub fn with<R>(&self, dir: Option<&Path>, key: &str, f: impl FnOnce(&mut T) -> R) -> R {
+            let slot = {
+                let mut slots = self.slots.lock().unwrap_or_else(|e| e.into_inner());
+                slots.entry(key.to_string()).or_insert_with(|| Arc::new(Mutex::new(Slot { loaded: false, value: T::default() }))).clone()
+            };
+            let mut slot = slot.lock().unwrap_or_else(|e| e.into_inner());
+            if !slot.loaded {
+                slot.loaded = true;
+                if let Some(dir) = dir {
+                    if let Some(v) = std::fs::read_to_string(self.file(dir, key)).ok().and_then(|s| serde_json::from_str(&s).ok()) {
+                        slot.value = v;
+                    }
+                }
+            }
+            let before = slot.value.clone();
+            let out = f(&mut slot.value);
+            if let Some(dir) = dir {
+                if slot.value != before {
+                    let path = self.file(dir, key);
+                    let tmp = path.with_extension("json.tmp");
+                    let saved = std::fs::create_dir_all(dir)
+                        .and_then(|_| std::fs::write(&tmp, serde_json::to_vec(&slot.value).unwrap_or_default()))
+                        .and_then(|_| std::fs::rename(&tmp, &path));
+                    if let Err(e) = saved {
+                        log::warn!("transcript cursor {key}: save failed: {e}");
+                    }
+                }
+            }
+            out
+        }
+
+        /// Forgets every in-memory cursor, as a daemon restart does.
+        #[cfg(test)]
+        pub fn forget_memory(&self) {
+            self.slots.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        }
+    }
+
+    /// Where the cursors are saved, per daemon instance like the other state
+    /// files. None under test without `CC_DATA_DIR`, so a test never writes to
+    /// the real data folder.
+    pub fn cursor_dir() -> Option<PathBuf> {
+        #[cfg(test)]
+        if !crate::daemon::names_own_data_dir(std::env::var("CC_DATA_DIR").ok().as_deref()) {
+            return None;
+        }
+        crate::settings::paths::data_dir()
+            .ok()
+            .map(|d| d.join(format!("transcript-cursors{}", crate::daemon::instance::instance_suffix())))
+    }
 }
 
 /// Resolve the transcript path for a session and compute its ContextStatus.
@@ -461,5 +755,136 @@ mod tests {
         let wire = serde_json::to_value(Some(&s)).unwrap();
         assert_eq!(serde_json::from_value::<Option<ContextStatus>>(wire).unwrap(), Some(s));
         assert_eq!(serde_json::from_value::<Option<ContextStatus>>(serde_json::Value::Null).unwrap(), None);
+    }
+
+    // ---- incremental cursor ----
+
+    use super::tail::{ContextCursor, CursorStore};
+
+    fn usage_line(model: Option<&str>, input: u64) -> String {
+        let m = model.map(|m| format!(r#""model":"{m}","#)).unwrap_or_default();
+        format!(r#"{{"type":"assistant","message":{{{m}"usage":{{"input_tokens":{input},"cache_read_input_tokens":0}}}}}}"#)
+    }
+
+    fn append(path: &Path, line: &str) {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+        writeln!(f, "{line}").unwrap();
+    }
+
+    #[test]
+    fn the_cursor_matches_a_full_read_after_every_append() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        let lines = [
+            r#"{"type":"user","message":{"content":"hi"}}"#.to_string(),
+            usage_line(None, 5_000),
+            "garbage".to_string(),
+            usage_line(Some("claude-sonnet-4-5"), 250_000),
+            r#"{"type":"user","message":{"content":"more"}}"#.to_string(),
+            usage_line(Some("claude-sonnet-4-5"), 30_000),
+            usage_line(None, 31_000),
+        ];
+        let mut cursor = ContextCursor::default();
+        assert!(!cursor.advance(&path, |_| false), "no file yet");
+        assert_eq!(cursor.status(), compute_context_status(&path));
+        for l in &lines {
+            append(&path, l);
+            assert!(cursor.advance(&path, |_| false));
+            assert_eq!(cursor.status(), compute_context_status(&path), "after {l}");
+        }
+        let s = cursor.status().unwrap();
+        assert_eq!((s.occupancy, s.window, s.confidence.as_str()), (31_000, 1_000_000, "proven"));
+    }
+
+    #[test]
+    fn a_peak_behind_the_offset_still_proves_the_1m_window_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let saved = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        let store = CursorStore::<ContextCursor>::new("context-test");
+        let status = || {
+            store.with(Some(saved.path()), "sess", |c| {
+                c.advance(&path, |_| false);
+                c.status()
+            })
+        };
+        append(&path, &usage_line(Some("totally-unknown"), 250_000));
+        assert_eq!(status().unwrap().window, 1_000_000);
+        store.forget_memory(); // the daemon restarts; only the saved file remains
+        append(&path, &usage_line(Some("totally-unknown"), 30_000));
+        let after = status().unwrap();
+        assert_eq!(after.window, 1_000_000, "a cursor that kept only the offset would fall back to 200K");
+        assert_eq!(Some(after), compute_context_status(&path));
+    }
+
+    #[test]
+    fn a_restart_with_nothing_saved_reads_the_whole_file_and_still_gets_the_window_right() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        append(&path, &usage_line(Some("totally-unknown"), 250_000));
+        append(&path, &usage_line(Some("totally-unknown"), 30_000));
+        let store = CursorStore::<ContextCursor>::new("context-test-unsaved");
+        let status = store.with(None, "sess", |c| {
+            c.advance(&path, |_| false);
+            c.status()
+        });
+        assert_eq!(status, compute_context_status(&path));
+        assert_eq!(status.unwrap().window, 1_000_000);
+    }
+
+    #[test]
+    fn a_shrunk_or_replaced_file_is_read_from_the_start_and_bumps_the_epoch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        let mut c = ContextCursor::default();
+        append(&path, &usage_line(Some("claude-opus-4-8"), 250_000));
+        append(&path, &usage_line(Some("claude-opus-4-8"), 260_000));
+        c.advance(&path, |_| false);
+        assert_eq!(c.epoch(), 0);
+
+        std::fs::write(&path, usage_line(Some("claude-3-opus-1"), 1_000) + "\n").unwrap();
+        c.advance(&path, |_| false);
+        assert_eq!(c.status(), compute_context_status(&path), "the old peak is gone with the old file");
+        assert_eq!(c.status().unwrap().window, 200_000);
+        assert_eq!(c.epoch(), 1);
+
+        // Longer than the old offset, so only the head fingerprint can tell.
+        let long: Vec<String> = (0..30).map(|i| usage_line(Some("claude-sonnet-4-5"), 100 + i)).collect();
+        std::fs::write(&path, long.join("\n") + "\n").unwrap();
+        c.advance(&path, |_| false);
+        assert_eq!(c.status(), compute_context_status(&path));
+        assert_eq!(c.epoch(), 2);
+    }
+
+    #[test]
+    fn occupancy_collapsing_between_usage_rows_bumps_the_epoch_without_any_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        let mut c = ContextCursor::default();
+        for tokens in [30_000, 90_000, 400_000] {
+            append(&path, &usage_line(Some("claude-opus-4-8"), tokens));
+        }
+        c.advance(&path, |_| false);
+        assert_eq!(c.epoch(), 0, "growth is not a rewrite");
+        append(&path, &usage_line(Some("claude-opus-4-8"), 41_000));
+        c.advance(&path, |_| false);
+        assert_eq!(c.epoch(), 1, "400K down to 41K is a compaction");
+        append(&path, &usage_line(Some("claude-opus-4-8"), 25_000));
+        c.advance(&path, |_| false);
+        assert_eq!(c.epoch(), 1, "a small fall from 41K is within normal variation");
+        assert_eq!(c.status(), compute_context_status(&path));
+    }
+
+    #[test]
+    fn the_flag_stays_set_once_a_line_matched_even_when_later_reads_see_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        let mut c = ContextCursor::default();
+        append(&path, "needle");
+        c.advance(&path, |l| l.contains("needle"));
+        append(&path, "hay");
+        c.advance(&path, |l| l.contains("needle"));
+        assert!(c.flagged());
     }
 }
