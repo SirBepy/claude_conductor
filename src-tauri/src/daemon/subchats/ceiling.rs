@@ -436,6 +436,12 @@ pub(crate) fn apply_context_answer(state: &Arc<DaemonState>, sub_id: &str, answe
     }
     with_entry(sub_id, |e| {
         e.carded = false;
+        // A card taken down by code (the sub moved to the sidebar, its chat closed)
+        // was not seen, so it is not stored as a warning given.
+        if answer == CardAnswer::Withdrawn {
+            e.context_warned = false;
+            return;
+        }
         e.context_warned = true;
         save(sub_id, e);
     });
@@ -821,6 +827,21 @@ mod tests {
         simulate_restart(&sub);
         let (st, sub) = busy_sub("ctx-lost");
         assert_eq!(tick_ctx(&st, 5, 955_000, BIG).await, [sub], "nothing was stored, so the warning comes again");
+    }
+
+    /// A card withdrawn by code (Move to sidebar, a close) was never seen by Joe, so
+    /// it is neither stored as given nor ends the sub.
+    #[tokio::test]
+    async fn a_withdrawn_context_card_is_not_stored_as_a_warning_given() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let root = crate::daemon::subchats::decisions::data_root().unwrap();
+        let (st, sub) = busy_sub("ctx-withdrawn");
+        tick_ctx(&st, 5, 950_000, BIG).await;
+        apply_context_answer(&st, &sub, CardAnswer::Withdrawn);
+        assert!(!saved_path(&root, &sub).exists(), "nothing is stored for a card nobody saw");
+        assert!(st.registry.get(&sub).unwrap().ended_at.is_none());
+        simulate_restart(&sub);
+        assert_eq!(tick_ctx(&st, 5, 955_000, BIG).await.len(), 1, "the warning is still owed");
     }
 
     #[tokio::test]
