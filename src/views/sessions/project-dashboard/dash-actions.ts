@@ -45,6 +45,8 @@ export interface ActionHost {
   railExtra?(body: HTMLElement): void;
 }
 
+const NO_DUE_REPO = "None of the due todos belong to a repo of this dashboard, so there is nothing to start.";
+
 // One repo menu at a time; the pending promise settles on pick or dismiss.
 let settleRepo: ((r: RepoRef | null) => void) | null = null;
 
@@ -155,14 +157,18 @@ export function makeActions(host: ActionHost): DashActions {
     runDueAll: (anchor) => {
       const due = host.ctx().snap.due;
       if (host.ctx().mode === "draft") {
-        const all = doAllMessage(due);
+        // The draft starts in its own folder, so only that repo's ids can be resolved by the chat.
+        const cwd = state.pendingNewSession?.projectPath;
+        const all = cwd ? doAllMessage(due, cwd) : null;
         if (all) void state.composer?.sendText(all);
+        else showToast(NO_DUE_REPO);
         return;
       }
       void (async () => {
         const owners = doAllRepos(due);
         const repos = host.ctx().snap.target.repos.filter((r) => owners.some((o) => normCwd(o.cwd) === normCwd(r.cwd)));
         const countOf = (r: RepoRef): number => owners.find((o) => normCwd(o.cwd) === normCwd(r.cwd))?.count ?? 0;
+        if (repos.length === 0) { showToast(NO_DUE_REPO); return; }
         const repo = await pickRepo(host.ctx(), anchor, repos, (r) => `${r.name} (${countOf(r)})`);
         if (!repo) return;
         const message = doAllMessage(due, repo.cwd);
