@@ -15,11 +15,13 @@ use crate::daemon::state::DaemonState;
 
 use super::remote_handlers::{strip_hidden_instances, strip_hidden_instances_json};
 
-/// How often `pump_global_events` sends an app-level heartbeat text frame.
+/// How often a stream that beats (the global stream, and a per-chat stream
+/// opened with `hb=1`) sends an app-level heartbeat text frame.
 /// Browsers never surface native WS ping/pong to JS (`onclose` does not fire
 /// on a half-open/zombie socket - e.g. after the phone's screen was off long
-/// enough for the OS to freeze the connection without a clean FIN), so
-/// http-transport.ts's watchdog needs a text frame it can time against to
+/// enough for the OS to freeze the connection without a clean FIN), so the
+/// page's watchdogs (global-stream.ts, and the chat branch of
+/// http-transport.ts's `listen`) need a text frame they can time against to
 /// detect a silently-dead connection instead.
 const GLOBAL_HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
 
