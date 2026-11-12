@@ -1,6 +1,6 @@
 <#
 What the app recorded since the last release that a person should look at,
-shown by /release step 1d (`.claude/release-reports.txt`). Two sources:
+shown by /release step 1d (`.claude/release-reports.txt`). Three sources:
 
 1. `<data_dir>/rejected-sends.jsonl` (src-tauri/src/daemon/hooks_server/rejected_sends.rs):
    send_message / update_message validation failures, undecodable request
@@ -8,7 +8,12 @@ shown by /release step 1d (`.claude/release-reports.txt`). Two sources:
    plan, schedule, drafts, people, jarvis, channel, todos, dashboard card,
    subchat tool, shared mockup). The chat draws nothing for them, so the same
    shape many times means a tool schema or its error text steers callers wrong.
-2. The app log (`%LOCALAPPDATA%\com.sirbepy.claudeconductor\logs\*.log`, UTC):
+2. `<data_dir>/shown-badly.jsonl` (src-tauri/src/daemon/hooks_server/shown_badly.rs):
+   cards that showed Joe data badly, flagged by Joe from a card's menu
+   (source joe, with his note) or by the chat itself through send_message's
+   `unsure_how_to_show` (source claude, with its reason). Every row is listed:
+   they are meant to be fixed in a batch.
+3. The app log (`%LOCALAPPDATA%\com.sirbepy.claudeconductor\logs\*.log`, UTC):
    ERROR lines and WARN lines, grouped by target and message shape.
 
 The window starts at the last `VERSION:` commit, so every row shows in exactly
@@ -60,19 +65,36 @@ function Show([string]$title, $rows, [string]$keyName, [scriptblock]$key, [int]$
 
 Write-Output "Release report, $basis"
 
-# 1. Rejected relay calls
-$rejected = @()
-foreach ($name in 'rejected-sends.jsonl.old', 'rejected-sends.jsonl') {
-  $f = Join-Path $Data $name
-  if (-not (Test-Path $f)) { continue }
-  foreach ($line in @(ReadLinesShared $f)) {
-    try { $r = $line | ConvertFrom-Json } catch { continue }
-    if (([datetimeoffset]$r.at).UtcDateTime -ge $cutoff) { $rejected += $r }
+# One daemon jsonl log and its rotated `.old`, rows since the cutoff, oldest first.
+function ReadJsonl([string]$base) {
+  foreach ($name in "$base.old", $base) {
+    $f = Join-Path $Data $name
+    if (-not (Test-Path $f)) { continue }
+    foreach ($line in @(ReadLinesShared $f)) {
+      try { $r = $line | ConvertFrom-Json } catch { continue }
+      if (([datetimeoffset]$r.at).UtcDateTime -ge $cutoff) { $r }
+    }
   }
 }
+
+# 1. Rejected relay calls
+$rejected = @(ReadJsonl 'rejected-sends.jsonl')
 Show 'Rejected relay calls' $rejected 'route | kind | error shape' { "$($_.route) | $($_.kind) | $(Shape $_.error)" } 12
 
-# 2. App log. Line shape: [2026-11-06][03:34:19][target][LEVEL] message (UTC).
+# 2. Cards shown badly: a count per source and kind, then every row, since each
+# names one card to look at.
+$badly = @(ReadJsonl 'shown-badly.jsonl')
+Show 'Cards shown badly' $badly 'source | kind' { "$($_.source) | $($_.kind)" } 12
+if ($badly) {
+  $badly | Select-Object @{ n = 'at'; e = { ([datetimeoffset]$_.at).UtcDateTime.ToString('MM-dd HH:mm') } },
+    source, kind,
+    @{ n = 'chat'; e = { if ($_.chat_title) { $_.chat_title } else { $_.session_id.Substring(0, [Math]::Min(8, $_.session_id.Length)) } } },
+    @{ n = 'verdict'; e = { $_.message.verdict } },
+    @{ n = 'note'; e = { $_.note } } |
+    Format-Table -AutoSize -Wrap | Out-String -Width 200 | Write-Output
+}
+
+# 3. App log. Line shape: [2026-11-06][03:34:19][target][LEVEL] message (UTC).
 $pattern = '^\[(\d{4}-\d{2}-\d{2})\]\[(\d{2}:\d{2}:\d{2})\]\[([^\]]+)\]\[(ERROR|WARN)\] (.*)$'
 $entries = @()
 if (Test-Path $Logs) {

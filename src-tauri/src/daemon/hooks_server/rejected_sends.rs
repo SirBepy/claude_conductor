@@ -48,7 +48,7 @@ pub(super) fn reply(route: &str, session_id: &str, error: impl Into<String>) -> 
 }
 
 #[cfg(not(test))]
-fn log_root() -> Option<PathBuf> {
+pub(super) fn log_root() -> Option<PathBuf> {
     crate::settings::paths::data_dir().ok()
 }
 
@@ -61,16 +61,17 @@ thread_local! {
 }
 
 #[cfg(test)]
-fn log_root() -> Option<PathBuf> {
+pub(super) fn log_root() -> Option<PathBuf> {
     TEST_ROOT.with(|r| r.borrow().clone())
 }
 
-/// Test-only: sends this thread's records to `root` until the guard drops.
+/// Test-only: sends this thread's records (and `shown_badly`'s, which shares
+/// the root) to `root` until the guard drops.
 #[cfg(test)]
-pub(super) struct Capture;
+pub(crate) struct Capture;
 
 #[cfg(test)]
-pub(super) fn capture_in(root: &Path) -> Capture {
+pub(crate) fn capture_in(root: &Path) -> Capture {
     TEST_ROOT.with(|r| *r.borrow_mut() = Some(root.to_path_buf()));
     Capture
 }
@@ -101,13 +102,6 @@ fn clip(error: &str) -> String {
 }
 
 fn append_in(root: &Path, route: &str, session_id: &str, kind: Option<&str>, error: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let path = path_in(root);
-    std::fs::create_dir_all(root)?;
-    if std::fs::metadata(&path).map(|m| m.len() > ROTATE_BYTES).unwrap_or(false) {
-        let _ = std::fs::rename(&path, path.with_extension("jsonl.old"));
-    }
     let line = json!({
         "at": chrono::Utc::now().to_rfc3339(),
         "route": route,
@@ -115,6 +109,20 @@ fn append_in(root: &Path, route: &str, session_id: &str, kind: Option<&str>, err
         "kind": kind,
         "error": error,
     });
+    append_rotating(&path_in(root), &line)
+}
+
+/// Appends one JSON line to `path`, first moving a file past `ROTATE_BYTES` to
+/// `.jsonl.old`. Shared with `shown_badly`, whose log follows the same rules.
+pub(super) fn append_rotating(path: &Path, line: &Value) -> std::io::Result<()> {
+    use std::io::Write;
+    let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    if std::fs::metadata(path).map(|m| m.len() > ROTATE_BYTES).unwrap_or(false) {
+        let _ = std::fs::rename(path, path.with_extension("jsonl.old"));
+    }
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
     writeln!(f, "{line}")
 }

@@ -44,6 +44,8 @@ const MAX_ROWS: usize = 8;
 const MAX_ROW: usize = 120;
 const MAX_WAS: usize = 100;
 const MAX_COPY: usize = 4000;
+/// `unsure_how_to_show`: one short reason, like a point.
+const MAX_UNSURE: usize = 200;
 use crate::daemon::subchats::QUESTION_MAX as MAX_QUESTION;
 
 /// How long a kind's `text` may be. Past the cap the prose belongs in `details`,
@@ -255,6 +257,15 @@ pub(super) fn validate_send(body: &SendMessageBody) -> Result<(), String> {
             if n > MAX_VERDICT {
                 return Err(format!("read_answers item is {n} chars, over {MAX_VERDICT}: copy the answer's verdict exactly, not its text"));
             }
+        }
+    }
+    if let Some(reason) = body.unsure_how_to_show.as_deref() {
+        let n = reason.trim().chars().count();
+        if n == 0 {
+            return Err("unsure_how_to_show is empty: say in one line why you were not sure how to show this data, or leave the field out".to_string());
+        }
+        if n > MAX_UNSURE {
+            return Err(format!("unsure_how_to_show is {n} chars, over {MAX_UNSURE}: give the reason in one short line"));
         }
     }
     Ok(())

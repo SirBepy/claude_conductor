@@ -8,7 +8,7 @@ mod validate;
 use super::validated_json::ValidatedJson;
 use super::HookCtx;
 use axum::{extract::State as AxState, http::StatusCode, response::IntoResponse, Json};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use validate::{validate_details, validate_send};
@@ -24,7 +24,8 @@ const MAX_MESSAGE_LEN: usize = 8000;
 /// real windowing (anything sent since Joe's second-most-recent message).
 const MAX_ORDINAL: u64 = 64;
 
-#[derive(Deserialize, Default)]
+// Serialize: a send carrying `unsure_how_to_show` is logged with its whole input.
+#[derive(Deserialize, Serialize, Default)]
 pub(super) struct SendMessageBody {
     session_id: String,
     // `message` alias: the sibling UpdateMessageBody below has its OWN unrelated
@@ -75,6 +76,15 @@ pub(super) struct SendMessageBody {
     // naming the fix, never a body-decode error (see `visuals.rs`).
     #[serde(default)]
     visuals: Option<Vec<serde_json::Value>>,
+    // Any kind: why the chat was not sure how to show this data (which kind,
+    // visual or card fits). The message is still sent; the reason goes to the
+    // shown-badly log (`shown_badly.rs`) next to Joe's own flags.
+    #[serde(default)]
+    unsure_how_to_show: Option<String>,
+    // Not validated here (the chat reads the chips off the transcript); kept as a
+    // loose Value only so an unsure send's log row carries them like Joe's flag does.
+    #[serde(default)]
+    next_actions: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -93,7 +103,7 @@ pub(super) struct UpdateMessageBody {
 
 /// One click-to-open detail. The daemon does not store it: the frontend reads
 /// `details` from the tool_use input in the transcript, so this only validates.
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub(super) struct Detail {
     id: String,
     // Read by the frontend from the transcript, not here.
@@ -129,6 +139,18 @@ fn draw_sub_blocker(ctx: &HookCtx, body: &SendMessageBody) {
     );
 }
 
+/// A send the chat flagged with `unsure_how_to_show` goes to the shown-badly
+/// log, as the input it was sent with. Only a send that passed is logged, so a
+/// rejected try and its corrected resend count once.
+fn log_unsure(ctx: &HookCtx, body: &SendMessageBody) {
+    let Some(reason) = body.unsure_how_to_show.as_deref() else { return };
+    let mut input = serde_json::to_value(body).unwrap_or_default();
+    if let Some(map) = input.as_object_mut() {
+        map.retain(|k, v| !v.is_null() && k != "session_id" && k != "unsure_how_to_show");
+    }
+    super::shown_badly::record(&ctx.state, super::shown_badly::Source::Claude, &body.session_id, None, input, reason);
+}
+
 pub(super) async fn on_send_message(
     AxState(ctx): AxState<Arc<HookCtx>>,
     ValidatedJson(body): ValidatedJson<SendMessageBody>,
@@ -154,6 +176,7 @@ pub(super) async fn on_send_message(
     }
     ctx.state.registry.mark_message_sent(&body.session_id, gen);
     draw_sub_blocker(&ctx, &body);
+    log_unsure(&ctx, &body);
     log::debug!("session {} sent a message", body.session_id);
     (StatusCode::OK, Json(json!({"ok": true, "message": 1})))
 }
@@ -757,6 +780,43 @@ mod tests {
         .unwrap();
         let resp = on_update_message(AxState(c), ValidatedJson(good)).await.into_response();
         assert_eq!(body_json(resp).await["ok"], json!(true));
+    }
+
+    /// A send the chat marks `unsure_how_to_show` still goes out, and lands in the
+    /// shown-badly log once with its input and reason; a rejected try is not logged.
+    #[tokio::test]
+    async fn an_unsure_send_is_sent_and_logged_once_with_its_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let _capture = super::super::shown_badly::capture_in(dir.path());
+        let reason = "two blockers, one waits on a gate: not sure a blocker card fits";
+        let bad = send_json(json!({"session_id": "s", "kind": "blocker", "text": "x", "unsure_how_to_show": reason})).await;
+        assert!(error_of(&bad).contains("verdict"), "{bad}");
+        assert!(super::super::shown_badly::read_records(dir.path()).is_empty(), "a rejected try is not logged");
+
+        let ok = send_json(json!({"session_id": "s", "kind": "blocker", "verdict": "Waiting on Gate 2", "text": "x", "points": ["p"], "next_actions": ["/commit"], "unsure_how_to_show": reason})).await;
+        assert_eq!(ok, json!({"ok": true, "message": 1}));
+        let rows = super::super::shown_badly::read_records(dir.path());
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!((r["source"].as_str(), r["kind"].as_str(), r["note"].as_str()), (Some("claude"), Some("blocker"), Some(reason)));
+        assert_eq!(r["message"]["verdict"], "Waiting on Gate 2");
+        assert_eq!(r["message"]["points"], json!(["p"]));
+        assert_eq!(r["message"]["next_actions"], json!(["/commit"]));
+        let input = r["message"].as_object().unwrap();
+        assert!(!input.contains_key("unsure_how_to_show") && !input.contains_key("session_id"), "{input:?}");
+        assert!(!input.values().any(serde_json::Value::is_null), "unset fields are left out: {input:?}");
+    }
+
+    #[tokio::test]
+    async fn a_send_without_the_field_logs_nothing_and_a_bad_reason_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let _capture = super::super::shown_badly::capture_in(dir.path());
+        assert_eq!(send_json(report(json!({}))).await["ok"], json!(true));
+        assert!(super::super::shown_badly::read_records(dir.path()).is_empty());
+        let e = error_of(&send_json(report(json!({"unsure_how_to_show": "x".repeat(201)}))).await);
+        assert!(e.contains("unsure_how_to_show is 201 chars"), "{e}");
+        let e = error_of(&send_json(report(json!({"unsure_how_to_show": "  "}))).await);
+        assert!(e.contains("unsure_how_to_show is empty"), "{e}");
     }
 
     #[test]

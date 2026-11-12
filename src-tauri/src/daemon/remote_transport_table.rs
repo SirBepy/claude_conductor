@@ -132,6 +132,12 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // details. Phone only, for the same reason as the rows above; a peer's
     // mirrored sub keeps its brief on its host.
     ("get_sub_brief", P),
+    // A card menu's "Shown badly" flag (methods/registry/shown_badly.rs). The menu
+    // is shared with the phone and the call only appends the card and Joe's note
+    // to this PC's shown-badly log. Phone only: a peer never writes here, and a
+    // flag on a mirrored chat stays on this PC because the call names the chat
+    // `chat_id`, which machines/forward.rs does not route.
+    ("flag_shown_badly", P),
     // Phone only, for the same reason: the phone's chat menu offers "Move into main
     // chat" and needs the picker's default. Both are refused from a peer, since
     // which main chat a chat belongs to is its host's decision, and the daemon
@@ -963,6 +969,12 @@ mod tests {
             assert!(allowed(m, &Transport::Phone), "{m}");
             assert!(!allowed(m, &Transport::PeerMachine("x".into())), "{m}");
         }
+    }
+
+    #[test]
+    fn flagging_a_card_shown_badly_is_phone_only() {
+        assert!(allowed("flag_shown_badly", &Transport::Phone));
+        assert!(!allowed("flag_shown_badly", &Transport::PeerMachine("x".into())));
     }
 
     #[test]
