@@ -262,8 +262,8 @@ pub(crate) fn compute_context_status_visiting(
                 .and_then(compact_boundary_tokens)
             {
                 occupancies.push(post);
+                continue;
             }
-            continue;
         }
         if !line.contains("input_tokens") {
             continue;
@@ -474,8 +474,8 @@ pub(crate) mod tail {
                         if post > 0 {
                             self.last_nonzero = post;
                         }
+                        continue;
                     }
-                    continue;
                 }
                 // Same exact prefilter as the full read: only a line holding
                 // "input_tokens" can carry a usage block.
@@ -1005,6 +1005,21 @@ mod tests {
         assert_eq!(c.status().unwrap().occupancy, 45_093, "the next real row takes over");
         assert_eq!(c.status(), compute_context_status(&path));
         assert_eq!(c.epoch(), 1, "the boundary counts once, and the next row is not a second collapse");
+    }
+
+    /// A chat that talks about compaction writes the word into its own lines;
+    /// such a line is still an ordinary usage row.
+    #[test]
+    fn a_usage_line_that_mentions_compact_boundary_still_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        append(&path, &usage_line(Some("claude-sonnet-4-5"), 50_000));
+        let talking = r#"{"type":"assistant","message":{"model":"claude-sonnet-4-5","content":[{"type":"text","text":"the compact_boundary line"}],"usage":{"input_tokens":61000}}}"#;
+        append(&path, talking);
+        assert_eq!(compute_context_status(&path).unwrap().occupancy, 61_000);
+        let mut c = ContextCursor::default();
+        c.advance(&path, |_| false);
+        assert_eq!(c.status().unwrap().occupancy, 61_000);
     }
 
     #[test]

@@ -78,8 +78,12 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 // compaction manager and goes out as his next turn when it ends
                 // (`pump` hands it to `compaction::deliver_held`). Without this
                 // it was refused as SESSION_BUSY like any mid-turn send.
-                if live.is_some() && crate::daemon::subchats::compaction::hold_typed(&p.session_id, &p.text) {
-                    return Ok(json!({"ok": true, "held": "compaction"}));
+                if live.is_some() && crate::daemon::subchats::compaction::is_compacting(&p.session_id) {
+                    // A card answer settles its card now, not when the text goes out.
+                    crate::daemon::methods::permission::settle_answered_questions(&state, &p.session_id, &p.text).await;
+                    if crate::daemon::subchats::compaction::hold_typed(&p.session_id, &p.text) {
+                        return Ok(json!({"ok": true, "held": "compaction"}));
+                    }
                 }
                 // Refusing beats writing into a live child: the bump
                 // below would strand the running turn's own result line on the
