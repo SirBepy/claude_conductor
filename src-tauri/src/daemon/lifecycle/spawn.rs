@@ -26,6 +26,25 @@ pub async fn spawn_session_as(
     params: StartSessionParams,
     sub_parent: Option<&str>,
 ) -> Result<Arc<Session>, LifecycleError> {
+    let label = params
+        .new_session_id
+        .clone()
+        .or_else(|| params.resume_id.clone())
+        .unwrap_or_else(|| "(new)".into());
+    let spawned = spawn_session_inner(state, params, sub_parent).await;
+    // The caller only gets the error as an RPC reply (a toast in the app); without
+    // this line a spawn that never produced a child left nothing in the log.
+    if let Err(e) = &spawned {
+        log::warn!("daemon: spawning claude for session {label} failed: {e}");
+    }
+    spawned
+}
+
+async fn spawn_session_inner(
+    state: &Arc<DaemonState>,
+    params: StartSessionParams,
+    sub_parent: Option<&str>,
+) -> Result<Arc<Session>, LifecycleError> {
     let map = &state.sessions;
     if !is_valid_model(&params.model)
         || !VALID_EFFORTS.contains(&params.effort.as_str())
@@ -627,6 +646,45 @@ mod tests {
         .await;
         assert!(matches!(r, Err(LifecycleError::InvalidConfig(_, _))));
         assert_eq!(state.sessions.len(), 0);
+    }
+
+    /// Collects every log record so a test can assert a line was written.
+    struct Capture(std::sync::Mutex<Vec<String>>);
+    impl log::Log for Capture {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, r: &log::Record) {
+            self.0.lock().unwrap().push(format!("{} {}", r.level(), r.args()));
+        }
+        fn flush(&self) {}
+    }
+
+    #[tokio::test]
+    async fn a_failed_spawn_is_logged_at_warn() {
+        static CAP: Capture = Capture(std::sync::Mutex::new(Vec::new()));
+        log::set_logger(&CAP).expect("no other test installs a logger");
+        log::set_max_level(log::LevelFilter::Trace);
+        let state = test_state();
+        let r = spawn_session(
+            &state,
+            StartSessionParams {
+                cwd: std::path::PathBuf::from("Z:\\does\\not\\exist"),
+                model: "opus".into(),
+                effort: "high".into(),
+                resume_id: None,
+                account_id: None,
+                fork: false,
+                new_session_id: Some("spawn-fail-log".into()),
+            },
+        )
+        .await;
+        assert!(r.is_err());
+        let lines = CAP.0.lock().unwrap().clone();
+        assert!(
+            lines.iter().any(|l| l.starts_with("WARN") && l.contains("spawn-fail-log") && l.contains("failed")),
+            "a failed spawn must leave a WARN line naming the session: {lines:?}"
+        );
     }
 
     #[tokio::test]
