@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
-import { pidsToKill, snapshotValue } from "../e2e/helpers/daemon-pids.js";
+import { listDaemonPids, pidsToKill, snapshotValue } from "../e2e/helpers/daemon-pids.js";
 
 describe("pidsToKill", () => {
   it("kills nothing when the snapshot env is unset", () => {
@@ -34,6 +34,21 @@ describe("pidsToKill", () => {
 
   it("kills nothing when every running pid pre-existed", () => {
     expect(pidsToKill("111,222", ["111", "222"])).toEqual([]);
+  });
+});
+
+describe("listDaemonPids", () => {
+  it("returns null, never [], when the listing throws", () => {
+    expect(listDaemonPids(() => { throw new Error("powershell failed"); })).toBeNull();
+  });
+  it("parses one pid per line and an empty listing is []", () => {
+    expect(listDaemonPids(() => "111\r\n222\n\n")).toEqual(["111", "222"]);
+    expect(listDaemonPids(() => "")).toEqual([]);
+  });
+  it("a failed listing at both ends kills nothing", () => {
+    const failing = () => { throw new Error("x"); };
+    expect(snapshotValue(listDaemonPids(failing))).toBeUndefined();
+    expect(pidsToKill("111", listDaemonPids(failing))).toEqual([]);
   });
 });
 
