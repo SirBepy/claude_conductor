@@ -1,3 +1,4 @@
+// Reviewed 2026-11-12 (project main chat): a draft in a project with a main chat swaps this slot for "Goes to ..." (covered in project-main-chat.view.spec.ts); these drafts have no project pointer, so the Use subchats row and card behave as before, and it passes.
 // Reviewed 2026-11-11: the Undo hold on sends and card answers is gone (a send or answer goes out at once); nothing this spec asserts depends on it, and it passes.
 // Reviewed 2026-11-11 (phone keyboard): pending-pane.ts no longer focuses the composer on open at phone width; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10: dashboard.ts gained the Due card in its half-width list, absent unless a todo is due; this spec seeds no due todo, so its contract is unchanged and it passes.

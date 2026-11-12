@@ -190,6 +190,23 @@ pub(super) fn handle_project_account_set(app: &tauri::AppHandle, params: serde_j
     }
 }
 
+/// The daemon pointed a project at its main chat, or cleared the pointer
+/// (`subchats::main_pointer`). It already holds the value in its own cache; the
+/// app process merges the same value and persists it to settings.json.
+pub(super) fn handle_project_main_chat_set(app: &tauri::AppHandle, params: serde_json::Value) {
+    use tauri::Manager;
+    let Some(project_id) = params.get("project_id").and_then(|v| v.as_str()) else { return };
+    let session_id = params.get("session_id").and_then(|v| v.as_str());
+    let state = app.state::<crate::state::AppState>();
+    let mut settings_guard = state.settings.lock().unwrap();
+    if !crate::settings::set_project_main_chat(&mut settings_guard, project_id, session_id) {
+        return;
+    }
+    let snapshot = settings_guard.clone();
+    drop(settings_guard);
+    crate::settings::persist(app, &snapshot);
+}
+
 /// The daemon assigned a character to a session created on the remote
 /// (phone/browser) transport, where there is no app-process Tauri command to
 /// do this in-process (ipc/characters.rs's `ensure_session_character`).

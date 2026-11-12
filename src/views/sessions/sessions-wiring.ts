@@ -21,6 +21,8 @@ import { startHiddenSessionsSync } from "./hidden-sessions-sync";
 import { startMachineProfileSync } from "./machine-icons";
 import { installSubchatRequestListeners, syncSubchatChrome, viewedSubsMainId } from "./subchat-view";
 import { currentChatDashboard } from "./chat-dashboard/chat-dashboard";
+import { loadProjectMainChats, onProjectMainChatsChange } from "./project-main-chats";
+import { resyncOpenDraft } from "./draft-subchats";
 
 /** Ambient Tauri event API surface, as declared on `Window.__TAURI__` in
  * shared/ipc.ts. Threaded through the wiring helpers below instead of each
@@ -117,7 +119,8 @@ export async function wireDaemonStatusListeners(
     // (ensure on appearance, manual pick, or re-roll), then repaint the sidebar.
     unlistenSettingsChanged = await ev.listen("settings-changed", async () => {
       if (state.mountId !== myMount) return;
-      await loadSessionCharacters();
+      // A project's main-chat pointer is part of the settings the daemon just saved.
+      await Promise.all([loadSessionCharacters(), loadProjectMainChats()]);
       if (state.mountId !== myMount) return;
       renderSidebar(listEl);
     });
@@ -189,11 +192,26 @@ export async function wireDaemonStatusListeners(
     () => { void refreshCharacters(true); },
   );
 
+  // The pointer is also re-read on the daemon's mode nudge (a flip, a new main chat,
+  // a close), the one signal a phone gets, since it has no `settings-changed`. Whatever
+  // re-read it repaints the sidebar's Main chats group and the open draft's slot.
+  const unlistenMainChats = await getTransport().listen(
+    "subchats-on-changed",
+    () => { void loadProjectMainChats(); },
+  );
+  const stopMainChatsRepaint = onProjectMainChatsChange(() => {
+    if (state.mountId !== myMount) return;
+    renderSidebar(listEl);
+    resyncOpenDraft();
+  });
+
   return () => {
     if (unlistenDaemonStatus) { try { unlistenDaemonStatus(); } catch { /* ignore */ } }
     if (unlistenSettingsChanged) { try { unlistenSettingsChanged(); } catch { /* ignore */ } }
     try { unlistenSessionChars(); } catch { /* ignore */ }
     try { unlistenCharacters(); } catch { /* ignore */ }
+    try { unlistenMainChats(); } catch { /* ignore */ }
+    stopMainChatsRepaint();
   };
 }
 
@@ -255,6 +273,8 @@ export async function wireInstancesChangedListener(
     }
 
     renderSidebar(listEl);
+    // A rename or close of the project's main chat changes the open draft's "Goes to" line.
+    resyncOpenDraft();
     updateThinkingBar();
     rateLimitBanner.update(state.sessions);
     // The Subchats card reads the same list the sidebar just drew.

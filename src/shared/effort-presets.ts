@@ -13,6 +13,10 @@ export interface SessionConfig {
    *  chat (the daemon persists the flag before it launches the child). Absent
    *  or false = an ordinary chat. */
   subchatsOn?: boolean;
+  /** "Plain chat instead" on a draft in a project that has a main chat: start a chat
+   *  of its own (no subchats) instead of sending to the main chat. Absent or false =
+   *  the first message goes to the main chat while the project has one. */
+  plainChat?: boolean;
   /** Character chosen in the new-session pane; applied to the real session once it starts. */
   characterId?: string | null;
   /** When set, the pending pane auto-sends this text as the first message on mount. */

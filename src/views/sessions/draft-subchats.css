@@ -15,5 +15,31 @@
 .draft-subchats i { font-size: 14px; }
 .draft-subchats.is-on { color: var(--color-text); }
 .draft-subchats .switch { margin-left: 2px; }
+
+/* The same strip when the project has a main chat: where the chat goes, and the
+   switch that makes it a chat of its own instead. Shares the row's metrics. */
+.draft-main-route {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px max(12px, calc((100% - 900px) / 2)) 0;
+  padding-right: max(0px, calc(58px - max(12px, (100% - 900px) / 2)));
+  color: var(--sb-muted, var(--color-text-muted));
+  font: 12.5px/18px var(--font-mono, monospace);
+}
+.draft-main-route.is-pending { display: none; }
+.draft-main-route i { font-size: 14px; }
+.draft-main-route.is-on { color: var(--color-text); }
+.draft-main-route .dmr-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draft-main-route .dmr-line strong,
+.draft-main-route-card .dmr-line strong { font-weight: 600; color: var(--color-text); }
+.draft-main-route .draft-subchats-label { margin-left: auto; }
+.draft-main-route .switch { margin-left: 2px; }
+/* A class rule's display would beat the [hidden] attribute's default. */
+.draft-subchats[hidden],
+.draft-subchats-card[hidden],
+.draft-main-route[hidden],
+.draft-main-route-card[hidden] { display: none; }
 .draft-subchats .switch input:disabled + .slider,
 .draft-subchats-card .switch input:disabled + .slider { cursor: not-allowed; opacity: 0.5; }

@@ -107,6 +107,13 @@ pub struct ProjectConfig {
     /// How subs that edit files share this project's tree.
     #[serde(default)]
     pub subchat_writers: SubchatWriters,
+    /// The project's live main chat (a chat with "Use subchats" on): a new chat in
+    /// this project goes to it unless Joe picks "Plain chat instead", and the
+    /// sidebar's Main chats group lists it as the project's one row. Set when a main
+    /// chat starts, cleared when it closes; `daemon/subchats/main_pointer.rs` keeps
+    /// it true to the registry. An id that no longer names a live chat reads as none.
+    #[serde(default)]
+    pub main_chat_id: Option<String>,
 }
 
 /// Project setting "Check a sub's work". `FactsAndReviewer` is the default:
@@ -464,6 +471,7 @@ mod tests {
             default_effort: Some("high".into()),
             subchat_check: SubchatCheck::FactsOnly,
             subchat_writers: SubchatWriters::WorktreeEach,
+            main_chat_id: Some("main-1".into()),
         };
         let raw = serde_json::to_string(&p).unwrap();
         assert!(raw.contains(r#""subchat_check":"facts_only""#) && raw.contains(r#""subchat_writers":"worktree_each""#));
@@ -479,6 +487,7 @@ mod tests {
         let p: ProjectConfig = serde_json::from_str(raw).unwrap();
         assert_eq!(p.subchat_check, SubchatCheck::FactsAndReviewer);
         assert_eq!(p.subchat_writers, SubchatWriters::OneAtATime);
+        assert_eq!(p.main_chat_id, None, "a settings.json from before the pointer keeps loading");
     }
 
     #[test]
