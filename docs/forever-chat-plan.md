@@ -185,6 +185,10 @@ that fails without it.
   questions, recent decisions). After the `compact_boundary` it injects the family state through the
   `SessionStart` `compact` hook. The chat window shows one quiet row ("Compacted 312K to 41K"), and
   the chat menu gets "Compact now" (rare action, so menu, never a button).
+  Before it sends `/compact`, the daemon asks the main chat to run the save step
+  (`~/.claude/refs/save-step.md`) and to write its retro with `main_chat_retro`, because a forever
+  chat never reaches rule 12's close, and today the retro is written only when Joe tells the chat
+  to close.
 - **B2. History that keeps growing.** Confirm the window pages old history instead of bulk-loading
   every event (bulk-load cost follows event count: 712 events about 1.2s), and that the dashboard's
   durable cards (Answers, Subchats, Plan) do not depend on the loaded page
