@@ -32,22 +32,11 @@ mod tests {
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
     use crate::daemon::state::DaemonState;
-    use crate::meeting::{SignalSource, Sources};
+    use crate::meeting::Sources;
     use crate::types::Settings;
     use serde_json::{json, Value};
 
-    struct Fixed(Sources);
-    impl SignalSource for Fixed {
-        fn camera_in_use(&self) -> bool {
-            self.0.camera
-        }
-        fn mic_in_use(&self) -> bool {
-            self.0.mic
-        }
-        fn meeting_app_audio_active(&self, _allow: &[String]) -> bool {
-            self.0.audio
-        }
-    }
+    use crate::meeting::test_support::Fixed;
 
     async fn call(sources: Sources) -> Value {
         let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
