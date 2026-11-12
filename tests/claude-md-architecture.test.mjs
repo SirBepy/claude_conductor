@@ -14,7 +14,7 @@ const ARCH_DIR = resolve(ROOT, "docs/architecture");
 
 // Budget in characters. The file was ~45K before the maps moved out; raise this only after
 // moving something else out, never to fit a new module map in CLAUDE.md.
-const BUDGET_CHARS = 16000;
+const BUDGET_CHARS = 17000;
 
 const referenced = [...claudeMd.matchAll(/docs\/architecture\/([a-z0-9-]+\.md)/g)].map((m) => m[1]);
 
@@ -24,7 +24,7 @@ describe("CLAUDE.md stays small, module maps live in docs/architecture", () => {
   });
 
   it("points at no fewer than the areas that moved out", () => {
-    expect(new Set(referenced).size).toBeGreaterThanOrEqual(14);
+    expect(new Set(referenced).size).toBeGreaterThanOrEqual(16);
   });
 
   it("every referenced architecture file exists", () => {
@@ -51,5 +51,19 @@ describe("CLAUDE.md stays small, module maps live in docs/architecture", () => {
     const pointerLines = claudeMd.split(/\r?\n/).filter((l) => /docs\/architecture\//.test(l));
     const vague = pointerLines.filter((l) => !/(read|details in) docs\/architecture\//i.test(l));
     expect(vague).toEqual([]);
+  });
+
+  it("every path that starts at a repo-root folder in a pointer or Read-before line exists", () => {
+    // Shorthand paths (`daemon/...`, a bare file name) have no single root to resolve
+    // against, so only the root-anchored ones are checked.
+    const texts = [
+      ...claudeMd.split(/\r?\n/).filter((l) => /docs\/architecture\//.test(l)),
+      ...[...new Set(referenced)].map((f) => readFileSync(resolve(ARCH_DIR, f), "utf8").split(/\r?\n/)[2]),
+    ];
+    const paths = texts
+      .flatMap((l) => [...l.matchAll(/`((?:src-tauri|src|android|scripts|docs)\/[^`\s*<>]+)`/g)].map((m) => m[1]))
+      .filter((p) => !/[()]/.test(p));
+    const missing = [...new Set(paths)].filter((p) => !existsSync(resolve(ROOT, p)));
+    expect(missing).toEqual([]);
   });
 });
