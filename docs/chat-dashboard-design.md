@@ -432,13 +432,15 @@ Settled:
   green ring is a bug to fix in the same build.
 - **C4. A queued sub's place in line shows in its hover card only** (no number on the avatar). Its
   menu gains **Start now** (starts it at once in its own worktree, without waiting) and **Drop**
-  (danger; it never started, so only its brief goes). The items a queued sub cannot use (Pause, Stop
-  this turn, Change model, Change effort, Close) come out of the top level; Joe: "myb instead of
-  leaving them out, they can be in a submenu inside of this submenu? idk" (open, see below).
+  (danger; it never started, so only its brief goes); the card Joe answered named both. He kept
+  "Trim a queued sub's menu": the items a queued sub cannot use (Pause, Stop this turn, Change model,
+  Change effort, Close) leave its top level. Whether they go entirely or into a nested submenu is
+  open; Joe: "myb instead of leaving them out, they can be in a submenu inside of this submenu? idk".
 - **C5. Every card names who asks.** The main chat's own question card gets a chip reading **Main
   chat** (its words: "what chat is this even? the main one?"); a sub's chip shows the sub's avatar
   (initials, ring, battery) like the Answers author line, also when it is the only asker. Cards the
-  daemon raises about a sub (stopped, stuck, close) name that sub. Picked over "This chat".
+  daemon raises about a sub (stopped, stuck, close) name that sub. Picked over "This chat". (The
+  quote is from todo pc-1682's evidence, section A5.)
 - **D1. A new chat in a project that has a main chat goes to that main chat:** one line where the
   Use subchats switch sits ("Goes to CV redesign, cv-site's main chat") and a **Plain chat
   instead** switch. Picked over opening the main chat at once. The Main chats group lists one row
@@ -473,7 +475,7 @@ Open (Joe's words; the main chat decides how to take them up):
 
 - **C2, a finished job's result.** "it could be handy to think of a good card like that, but we
   sohuld rly thoroughly think thru what should be shown here as info, also, we sohuld have a way to
-  dismiss it". And: "myb evena a way to close it off if i know we wont be talking to it anymore (idk
+  dismiss it". And: "myb evena  way to close it off if i know we wont be talking to it anymore (idk
   if theres a benefit to taht, myb the fact that then less chats are going to be doing the close
   skill all at once?)". Note: a dismiss here is Joe's own ask for job results; the no-dismiss rule
   above is about answers.
