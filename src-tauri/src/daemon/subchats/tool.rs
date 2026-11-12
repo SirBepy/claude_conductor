@@ -110,17 +110,29 @@ fn subs_of(state: &DaemonState, parent: &str) -> Vec<Instance> {
     subs
 }
 
+/// The subs a miss or an ambiguity names. Ended ones come last and the rest is
+/// cut at [`LIST_CAP`], so a chat with hundreds of subs does not answer one wrong
+/// name with its whole history.
 fn names(subs: &[Instance]) -> String {
-    subs.iter().map(|i| format!("{} ({})", label(i), status_word(i))).collect::<Vec<_>>().join(", ")
+    let (open, ended): (Vec<&Instance>, Vec<&Instance>) = subs.iter().partition(|i| status_word(i) != "ended");
+    let all: Vec<&Instance> = open.into_iter().chain(ended).collect();
+    let mut out = all.iter().take(LIST_CAP).map(|i| format!("{} ({})", label(i), status_word(i))).collect::<Vec<_>>().join(", ");
+    if all.len() > LIST_CAP {
+        out.push_str(&format!(", and {} more", all.len() - LIST_CAP));
+    }
+    out
 }
 
 fn refusal(msg: impl Into<String>) -> Value {
     json!({"ok": false, "error": msg.into()})
 }
 
-/// Finds a sub by exact name, then unique name prefix, then id. Names compare
-/// without regard to case. A miss or an ambiguity names the subs, so the next
-/// call can be right.
+/// Finds a sub by exact name, then name prefix, then id. Names compare without
+/// regard to case. A main chat meant to live for weeks reuses a name after a sub
+/// ended, so within a tier a match that has not ended beats one that has, and
+/// matches that all carry the same name resolve to the newest of them. Only
+/// different names stay ambiguous. A miss or an ambiguity names the subs, so the
+/// next call can be right.
 pub fn resolve<'a>(subs: &'a [Instance], query: &str) -> Result<&'a Instance, String> {
     let q = query.trim();
     if q.is_empty() {
@@ -133,19 +145,24 @@ pub fn resolve<'a>(subs: &'a [Instance], query: &str) -> Result<&'a Instance, St
         .iter()
         .filter(|i| i.session_id == q || (q.len() >= 6 && i.session_id.starts_with(q)))
         .collect();
-    for found in [exact, prefix, by_id] {
-        match found.as_slice() {
-            [] => continue,
-            [one] => return Ok(one),
-            many => {
-                let list: Vec<String> = many.iter().map(|i| label(i)).collect();
-                return Err(format!(
-                    "\"{q}\" matches more than one sub ({}): use a longer name or an id. This chat's subs: {}.",
-                    list.join(", "),
-                    names(subs)
-                ));
-            }
+    for mut found in [exact, prefix, by_id] {
+        if found.len() > 1 && found.iter().any(|i| status_word(i) != "ended") {
+            found.retain(|i| status_word(i) != "ended");
         }
+        let first = match found.first() {
+            None => continue,
+            Some(first) => label(first).to_lowercase(),
+        };
+        if found.iter().all(|i| label(i).to_lowercase() == first) {
+            // `max_by_key` keeps the last of equal keys, and `subs` is oldest first.
+            return Ok(found.into_iter().max_by_key(|i| i.started_at.clone()).expect("found is not empty"));
+        }
+        let list: Vec<String> = found.iter().map(|i| label(i)).collect();
+        return Err(format!(
+            "\"{q}\" matches more than one sub ({}): use a longer name or an id. This chat's subs: {}.",
+            list.join(", "),
+            names(subs)
+        ));
     }
     Err(format!("No sub named \"{q}\". This chat's subs: {}.", names(subs)))
 }
@@ -204,12 +221,23 @@ fn real_facts(state: &Arc<DaemonState>, i: &Instance) -> Option<Facts> {
     Some(card_log::sub_facts(i, check, None, &log, transcript.as_deref()))
 }
 
-/// Every sub that has not ended, the newest [`LIST_CAP`] of them. An ended sub
-/// cannot take a message, and a long-lived main chat would otherwise answer every
-/// `list` with its whole history.
+/// Subs that need a look now: running, waiting on Joe, waiting to start, or stuck.
+fn is_active(i: &Instance) -> bool {
+    matches!(status_word(i), "working" | "asking" | "queued" | "frozen")
+}
+
+/// Up to [`LIST_CAP`] subs that have not ended: the active ones first, then the
+/// newest of the rest (idle, finished). An ended sub cannot take a message, and a
+/// long-lived main chat would otherwise answer every `list` with its whole
+/// history. Picking by start time alone hid an old working sub behind twenty newer
+/// finished ones.
 fn list(subs: &[Instance]) -> Value {
-    let open: Vec<&Instance> = subs.iter().filter(|i| status_word(i) != "ended").collect();
-    let shown = &open[open.len().saturating_sub(LIST_CAP)..];
+    let (active, rest): (Vec<&Instance>, Vec<&Instance>) =
+        subs.iter().filter(|i| status_word(i) != "ended").partition(|i| is_active(i));
+    let open_total = active.len() + rest.len();
+    let mut shown = active[active.len().saturating_sub(LIST_CAP)..].to_vec();
+    let room = LIST_CAP - shown.len();
+    shown.extend_from_slice(&rest[rest.len().saturating_sub(room)..]);
     let rows: Vec<Value> = shown
         .iter()
         .map(|i| {
@@ -218,12 +246,12 @@ fn list(subs: &[Instance]) -> Value {
         })
         .collect();
     let mut out = json!({"ok": true, "subs": rows});
-    if open.len() > shown.len() {
-        out["total"] = json!(open.len());
+    if open_total > shown.len() {
+        out["total"] = json!(open_total);
         out["note"] = json!(format!(
-            "showing the newest {} of {} subs; status <name> or an id reaches an older one",
+            "showing {} of {} subs (working, asking and queued first, then the newest others); status <name> or an id reaches an older one",
             shown.len(),
-            open.len()
+            open_total
         ));
     }
     out
@@ -1215,6 +1243,86 @@ mod tests {
         let sent_to = run_with(&st, &main, &json!({"action": "send", "sub": "Footer"}), no_facts, held, &ran).await;
         assert_eq!(sent_to["ok"], json!(false), "{sent_to}");
         assert!(sent_to["error"].as_str().unwrap().contains("has not started yet"), "{sent_to}");
+    }
+
+    /// A dropped sub's name is reused later in a long-lived main chat.
+    fn row(id: &str, name: &str, started: &str) -> Instance {
+        let st = state();
+        chat(&st, id);
+        st.registry.set_name(id, name.to_string());
+        let mut i = st.registry.get(id).unwrap();
+        i.started_at = started.to_string();
+        i
+    }
+
+    fn ended(mut i: Instance) -> Instance {
+        i.ended_at = Some("2026-11-06T00:00:00Z".into());
+        i.end_reason = Some(crate::types::EndReason::Manual);
+        i
+    }
+
+    #[test]
+    fn a_reused_name_resolves_to_the_live_sub_then_the_newest_and_only_different_names_are_ambiguous() {
+        let old_gone = ended(row("res-old", "retro", "2026-11-01T00:00:00Z"));
+        let live = row("res-live", "Retro", "2026-11-02T00:00:00Z");
+        // The dropped sub started later than the live one: liveness still wins.
+        let newer_gone = ended(row("res-newer-gone", "retro", "2026-11-03T00:00:00Z"));
+        let subs = vec![old_gone.clone(), live.clone(), newer_gone.clone()];
+        assert_eq!(resolve(&subs, "retro").unwrap().session_id, "res-live");
+        assert_eq!(resolve(&subs, "ret").unwrap().session_id, "res-live", "a prefix too");
+        // Only ended ones left: the newest of them.
+        let only_gone = vec![old_gone.clone(), newer_gone.clone()];
+        assert_eq!(resolve(&only_gone, "retro").unwrap().session_id, "res-newer-gone");
+        // Two live subs with the same name: the newest.
+        let twin = row("res-twin", "retro", "2026-11-04T00:00:00Z");
+        let two_live = vec![old_gone, live, twin, newer_gone];
+        assert_eq!(resolve(&two_live, "retro").unwrap().session_id, "res-twin");
+        // Different names are still ambiguous, and an ended one is not named in the error.
+        let subs = vec![row("res-a", "Footer", "2026-11-01T00:00:00Z"), row("res-b", "Footer polish", "2026-11-02T00:00:00Z"), ended(row("res-c", "Footer old", "2026-11-03T00:00:00Z"))];
+        let err = resolve(&subs, "Foo").unwrap_err();
+        assert!(err.contains("matches more than one") && !err.contains("(Footer, Footer polish, Footer old)"), "{err}");
+        assert!(err.contains("(Footer, Footer polish)"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn status_send_and_drop_reach_the_live_sub_when_a_dropped_one_had_the_name() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-reuse");
+        sub(&st, &main, "tool-reuse-old", "Retro", "t");
+        st.registry.mark_ended("tool-reuse-old", crate::types::EndReason::Manual, "2026-11-05T01:00:00Z");
+        sub(&st, &main, "tool-reuse-new", "Retro", "t");
+        let v = call(&st, &main, json!({"action": "status", "sub": "Retro"}), &sent).await;
+        assert_eq!(v["id"], json!("tool-reuse-new"), "{v}");
+        let v = call(&st, &main, json!({"action": "send", "sub": "Retro", "text": "go on"}), &sent).await;
+        assert_eq!(v["ok"], json!(true), "{v}");
+        assert_eq!(sent.lock().unwrap()[0].0, "tool-reuse-new");
+    }
+
+    #[test]
+    fn list_shows_working_asking_and_queued_subs_before_newer_finished_ones_within_the_cap() {
+        let mut subs = Vec::new();
+        // An old working sub, an old asking one and an old queued one ...
+        let mut working = row("lst-working", "Old working", "2026-10-01T00:00:00Z");
+        working.busy = true;
+        let mut asking = row("lst-asking", "Old asking", "2026-10-01T01:00:00Z");
+        asking.awaiting = Some("question".into());
+        let mut queued = row("lst-queued", "Old queued", "2026-10-01T02:00:00Z");
+        queued.progress.waiting_for = Some("waiting for the writer slot".into());
+        subs.extend([working, asking, queued]);
+        // ... behind 25 newer finished ones.
+        for n in 0..25 {
+            let mut f = row(&format!("lst-fin-{n:02}"), &format!("Finished {n}"), &format!("2026-11-01T00:{n:02}:00Z"));
+            f.subchat_finished = true;
+            subs.push(f);
+        }
+        let v = list(&subs);
+        let rows = v["subs"].as_array().unwrap();
+        assert_eq!(rows.len(), LIST_CAP, "still capped");
+        let names: Vec<&str> = rows.iter().map(|r| r["name"].as_str().unwrap()).collect();
+        assert_eq!(&names[..3], ["Old working", "Old asking", "Old queued"], "the live ones come first");
+        assert!(names.contains(&"Finished 24") && !names.contains(&"Finished 0"), "then the newest finished: {names:?}");
+        assert_eq!(v["total"], json!(28));
+        assert!(v["note"].as_str().unwrap().contains("20 of 28"), "{v}");
     }
 
     #[tokio::test]

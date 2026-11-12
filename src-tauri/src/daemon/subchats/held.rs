@@ -998,6 +998,19 @@ mod tests {
         assert!(err.contains("No sub named"), "another main chat's sub is not an option: {err}");
     }
 
+    /// A dropped sub's name is reused in a long-lived main chat: `after` waits for
+    /// the live one, the same as the `subchat` tool resolves it.
+    #[test]
+    fn after_a_reused_name_waits_for_the_live_sub_and_not_the_dropped_one() {
+        let _d = TempDataDir::new();
+        let st = state();
+        sub_of(&st, "pr-main", "pr-dropped", "docs");
+        st.registry.mark_ended("pr-dropped", crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
+        sub_of(&st, "pr-main", "pr-live", "docs");
+        let plan = plan_after(&st, "pr-main", "docs").unwrap().expect("the live sub runs, so it holds");
+        assert_eq!(plan.target_id, "pr-live");
+    }
+
     #[test]
     fn an_already_finished_target_means_start_now_and_an_already_blocked_one_is_refused() {
         let _d = TempDataDir::new();
