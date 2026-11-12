@@ -5,6 +5,7 @@
 //! `127.0.0.1:27183`, so auth and the never-public bind are both unchanged.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use iroh::endpoint::presets;
@@ -98,6 +99,8 @@ pub(crate) fn load_or_create_secret(app_data: &Path) -> SecretKey {
 #[derive(Default)]
 pub struct IrohTunnel {
     endpoint: RwLock<Option<Endpoint>>,
+    /// Set by `close`; `spawn`'s loop stops binding and exits once it is true.
+    shutting_down: AtomicBool,
 }
 
 impl IrohTunnel {
@@ -111,7 +114,26 @@ impl IrohTunnel {
     pub fn ticket(&self) -> Option<String> {
         self.endpoint_id().map(|id| id.to_string())
     }
+
+    /// Closes the endpoint so every connected phone and peer gets a QUIC
+    /// CONNECTION_CLOSE at once, instead of sitting on a dead link until its own
+    /// idle timeout when the daemon process just ends. Sets the shutting-down
+    /// flag first so `spawn`'s loop does not bind a fresh endpoint into the
+    /// emptied slot.
+    pub async fn close(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
+        let endpoint = self.endpoint.write().ok().and_then(|mut slot| slot.take());
+        if let Some(endpoint) = endpoint {
+            if tokio::time::timeout(CLOSE_TIMEOUT, endpoint.close()).await.is_err() {
+                log::warn!("iroh tunnel: close did not finish within {}s; exiting anyway", CLOSE_TIMEOUT.as_secs());
+            }
+        }
+    }
 }
+
+/// Bounds `IrohTunnel::close`: the daemon's exit must not hang on a dead network
+/// while the endpoint waits to flush its close frames.
+const CLOSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// How often the tunnel re-reads the remote-access switch. The switch lives in
 /// `remote-devices.json`, written by the app process, so polling a small file
@@ -144,6 +166,9 @@ pub fn spawn(app_data: PathBuf) -> Arc<IrohTunnel> {
         let target_port = resolve_port();
         let mut announced_off = false;
         loop {
+            if handle.shutting_down.load(Ordering::SeqCst) {
+                return;
+            }
             let enabled = DeviceRegistry::is_enabled(&app_data);
             let bound = handle.endpoint.read().ok().and_then(|slot| slot.clone());
             match (enabled, bound) {
@@ -151,6 +176,11 @@ pub fn spawn(app_data: PathBuf) -> Arc<IrohTunnel> {
                     announced_off = false;
                     match bind(secret.clone()).await {
                         Ok(endpoint) => {
+                            // `close` ran while this bind was in flight.
+                            if handle.shutting_down.load(Ordering::SeqCst) {
+                                endpoint.close().await;
+                                return;
+                            }
                             if let Ok(mut slot) = handle.endpoint.write() {
                                 *slot = Some(endpoint.clone());
                             }
@@ -612,6 +642,34 @@ mod tests {
             "the 2nd concurrent connection must be refused, got ok={}",
             matches!(second, Ok(Ok(_)))
         );
+    }
+
+    /// A daemon that exits calls `close()`; a connected phone then learns at once
+    /// (a QUIC CONNECTION_CLOSE) instead of sitting on a dead link until its own
+    /// 30s idle timeout.
+    #[tokio::test]
+    async fn close_tells_a_connected_client_the_daemon_is_gone() {
+        let port = holding_echo_server().await;
+        let server = Endpoint::builder(presets::Minimal).alpns(vec![ALPN.to_vec()]).bind().await.expect("server bind");
+        let addr = server.addr();
+        let tunnel = IrohTunnel::default();
+        *tunnel.endpoint.write().unwrap() = Some(server.clone());
+        tokio::spawn(accept_loop(server, port, Limits::default()));
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let conn = client.connect(addr, ALPN).await.expect("connect");
+        let _live = open_live_stream(&conn).await.expect("stream");
+        assert!(tunnel.endpoint_id().is_some());
+
+        tunnel.close().await;
+
+        let reason = tokio::time::timeout(std::time::Duration::from_secs(3), conn.closed())
+            .await
+            .expect("the client must see the close at once, not after its idle timeout");
+        assert!(
+            matches!(reason, iroh::endpoint::ConnectionError::ApplicationClosed(_) | iroh::endpoint::ConnectionError::ConnectionClosed(_)),
+            "expected a peer-sent close, got {reason:?}"
+        );
+        assert!(tunnel.endpoint_id().is_none(), "the slot must be empty after close");
     }
 
     #[tokio::test]

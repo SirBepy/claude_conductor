@@ -154,6 +154,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     methods::register_claude_ai_publish(&mut router, state.clone());
     methods::register_voice(&mut router, state.clone());
     methods::register_machines(&mut router, state.clone());
+    methods::register_link_journal(&mut router);
     methods::register_mcp_servers(&mut router);
     methods::register_api_credit(&mut router, state.clone());
     // Peer-facing halves of `spawn_chat`'s `machine` and `post_message`'s
@@ -230,7 +231,7 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // iroh tunnel to that same server: how phones and paired
     // machines reach this daemon. Binds and closes live with the remote-access
     // switch. Same best-effort contract.
-    let _iroh = iroh_tunnel::spawn(app_data.clone());
+    let iroh = iroh_tunnel::spawn(app_data.clone());
 
     // Idle-shutdown tick for the STT voice sidecar: every 60s, kill it if it has
     // been idle (zero active /ws/transcribe connections) past the 5-min timeout,
@@ -382,6 +383,9 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // child (and its subprocess tree) running with no pump task left to
     // reap it. Kill every live session's tree before exiting.
     kill_all_sessions(&state);
+    // Connected phones and peers get a close frame now instead of finding a dead
+    // link by their own idle timeout.
+    iroh.close().await;
     // Graceful teardown: never let the Python STT sidecar outlive the daemon.
     stt.kill().await;
     browser::get().shutdown().await;
