@@ -17,6 +17,7 @@ import { clampUserMessages } from "../../../shared/chat/turn-collapse";
 import { state } from "../state";
 import { handleDrillAnchorClick, handleDrillClick, linkifyDrillRefs } from "../../../shared/chat/drill-links";
 import { handleFileRefClick, handleFileRefContextMenu, handleFileRefKeydown, linkifyFilePaths, openFileRef } from "../../../shared/chat/file-refs";
+import { createShownBadlyContextMenu } from "../../../shared/chat/shown-badly";
 import { highlightCodeBlocks, highlightInlineCode } from "../../../shared/chat/code-highlighter";
 import { scrollToBottom } from "../../../shared/chat/chat-dom-renderer";
 import { initialUi, renderStrip, renderZone, QUICK_VIEWS, type DashUi, type QuickViewId } from "./dashboard-zones";
@@ -196,6 +197,8 @@ export class ChatDashboard {
     this.el.addEventListener("click", handleDrillAnchorClick);
     this.el.addEventListener("click", handleFileRefClick);
     this.el.addEventListener("contextmenu", handleFileRefContextMenu);
+    // Its cards are the transcript's rows, so "Shown badly" finds them in the same list.
+    this.el.addEventListener("contextmenu", createShownBadlyContextMenu(() => this.renderer));
     this.el.addEventListener("keydown", handleFileRefKeydown);
     this.el.addEventListener("click", handleTableFullscreen);
     // An image in a card opens the chat-wide gallery, like one in the transcript.

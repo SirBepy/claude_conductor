@@ -10,6 +10,7 @@ pub(super) mod lifecycle;
 mod listings;
 pub(super) mod new_session_bundle;
 mod project_meta;
+mod shown_badly;
 mod waiting_tail;
 
 use crate::daemon::rpc::Router;
@@ -24,6 +25,7 @@ pub fn register_chat_registry(router: &mut Router, state: Arc<DaemonState>) {
     project_meta::register_project_meta(router, state.clone());
     waiting_tail::register_waiting_tail(router, state.clone());
     new_session_bundle::register_new_session_bundle(router, state.clone());
+    shown_badly::register_shown_badly(router, state.clone());
     listings::register_listings(router, state);
 }
 

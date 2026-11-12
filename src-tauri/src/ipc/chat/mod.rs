@@ -21,6 +21,7 @@
 //!                  around `attachments::read_attachment`).
 //! - `terminal`   — external-terminal spawning: `open_session_in_terminal`,
 //!                  `open_terminal_in_directory`.
+//! - `shown_badly` - a card menu's "Shown badly" flag: `flag_shown_badly`.
 //!
 //! All `#[tauri::command]` items are re-exported here so the parent
 //! `ipc.rs` `pub use chat::*;` keeps surfacing the existing
@@ -33,6 +34,7 @@ pub mod history;
 pub mod history_list;
 pub mod lifecycle;
 pub mod run;
+pub mod shown_badly;
 pub mod start_retry;
 pub mod terminal;
 pub mod watcher;
@@ -60,5 +62,6 @@ pub use history_list::*;
 pub use lifecycle::*;
 pub use lifecycle::read_attachment;
 pub use run::*;
+pub use shown_badly::*;
 pub use terminal::*;
 pub use watcher::*;

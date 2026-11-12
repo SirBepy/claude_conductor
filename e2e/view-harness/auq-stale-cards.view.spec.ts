@@ -1,3 +1,4 @@
+// Reviewed 2026-11-12 (shown badly): chat-dashboard.ts adds a contextmenu listener for the card menu's "Shown badly" item (chat-shown-badly.view.spec.ts covers it); nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12 (Compact now): the chat menu gained a Compact now item; Dismiss open questions is unchanged and this spec passes.
 // Reviewed 2026-11-12: the card header's asker chip became an avatar for a sub and a "Main chat" chip for a main chat (C5, asker-face.ts); this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-12 (per-chat previews): the Preview card lists only the previews this chat pushed (newest big, the rest as a thumbnail strip) and folds the family's others behind "N more by other chats"; nothing this spec asserts changed, and it passes.

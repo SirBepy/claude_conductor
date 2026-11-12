@@ -489,6 +489,15 @@ export class HttpTransport implements Transport {
           session_id: args.session_id ?? args.sessionId,
           pinned: args.pinned,
         });
+      // A card menu's "Shown badly" flag: a phone row in remote_transport_table.rs;
+      // unmapped, the shared card menu item would throw on the phone.
+      case "flag_shown_badly":
+        return this.rpc<T>("flag_shown_badly", {
+          chat_id: args.chat_id ?? args.chatId,
+          message_id: args.message_id ?? args.messageId ?? null,
+          message: args.message,
+          note: args.note ?? null,
+        });
       case "get_sub_brief":
       case "list_session_images":
         return this.rpc<T>(command, {

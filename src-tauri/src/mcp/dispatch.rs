@@ -328,12 +328,12 @@ fn report_status_body(args: &Value, session_id: &str, roots: &[std::path::PathBu
     })
 }
 
-/// Every `send_message` argument the daemon route validates. `next_actions` is
-/// absent on purpose: the route ignores it and the chat reads it from the
-/// tool_use input in the transcript.
-const SEND_MESSAGE_FORWARDED: [&str; 14] = [
+/// Every `send_message` argument the route reads. `next_actions` is not
+/// validated (the chat reads it from the tool_use input in the transcript); it
+/// travels only so an `unsure_how_to_show` send's shown-badly row carries it.
+const SEND_MESSAGE_FORWARDED: [&str; 16] = [
     "details", "kind", "verdict", "tone", "points", "done", "not_done", "waiting_on", "your_move",
-    "was", "copy", "visuals", "question", "read_answers",
+    "was", "copy", "visuals", "question", "read_answers", "unsure_how_to_show", "next_actions",
 ];
 
 /// Turn status/title, chat messages, and the Your Todos panel.
@@ -477,7 +477,7 @@ mod tests {
         let tools = super::super::tool_schemas_coordination::coordination_schemas();
         let schema = tools.iter().find(|t| t["name"] == TOOL_SEND_MESSAGE).expect("send_message is registered");
         let props = schema["inputSchema"]["properties"].as_object().unwrap();
-        for key in props.keys().filter(|k| !matches!(k.as_str(), "text" | "next_actions")) {
+        for key in props.keys().filter(|k| k.as_str() != "text") {
             assert!(SEND_MESSAGE_FORWARDED.contains(&key.as_str()), "{key} is never relayed to the daemon");
         }
         for key in SEND_MESSAGE_FORWARDED {

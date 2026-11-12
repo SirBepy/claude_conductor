@@ -1,3 +1,4 @@
+// Reviewed 2026-11-12 (shown badly): http-transport.ts maps one new command, flag_shown_badly; nothing this spec drives changed, and it passes.
 // Reviewed 2026-11-12: the card header's asker chip became an avatar for a sub and a "Main chat" chip for a main chat (C5, asker-face.ts); this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-11: the Undo hold on sends and card answers is gone (a send or answer goes out at once); nothing this spec asserts depends on it, and it passes.
 // Reviewed 2026-11-10 (stale question cards): the answer card announces itself so the dashboard leaves the question open by the message box out of Waiting on you, Skip settles its transcript card in place, a reopen swaps to the daemon prompt only when it asks the same, and Skip marks naming an old daemon id fall back to time matching; nothing this spec asserts changed, and it passes.

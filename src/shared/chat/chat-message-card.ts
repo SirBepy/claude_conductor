@@ -223,11 +223,23 @@ function miniHtml(m: RenderedMessage, card: MessageCard, text: RenderText, extra
 /** The fold wrapper both forms sit in: the grid track is what animates from one to the other. */
 const fold = (cls: string, inner: string) => `<div class="mc-fold ${cls}"><div class="mc-clip"><div class="mc-pad">${inner}</div></div></div>`;
 
+/** What a card's root carries as `data-msg-id`, so a menu on the drawn card
+ *  (shown-badly.ts) finds its row again: the send_message tool_use id, or a
+ *  sub's card-log id for a sub's card in its main chat (which has no tool_use
+ *  of its own). */
+export function cardKeyOf(m: RenderedMessage): string | undefined {
+  if (m.kind !== "message" || !m.card) return undefined;
+  if (m.subCard) return `sub:${m.subCard.id}`;
+  return m.id;
+}
+
 /** The root keeps `msg assistant` and `data-details`: drill-links.ts, the copy
  *  button and `injectCta` all find a bubble by those. */
 export function renderMessageCard(m: RenderedMessage, card: MessageCard, text: RenderText, extras?: CardExtras): string {
   const dim = m.dimmed ? " dimmed" : "";
   const details = m.details?.length ? ` data-details="${escapeHtml(JSON.stringify(m.details))}"` : "";
+  const key = cardKeyOf(m);
+  const keyAttr = key ? ` data-msg-id="${escapeHtml(key)}"` : "";
   if (card.kind === "ack") {
     // Draws nothing; "Show raw activity" reveals it as the plain bubble it would otherwise have been.
     return `<div class="msg assistant chat-narration${dim}" data-card-kind="ack"${details}><button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button>${text(m.text ?? "")}</div>`;
@@ -235,7 +247,7 @@ export function renderMessageCard(m: RenderedMessage, card: MessageCard, text: R
   const was = card.was ? `<div class="mc-was"><i class="ph ph-arrow-elbow-down-right" aria-hidden="true"></i><s>${escapeHtml(card.was)}</s></div>` : "";
   const classes = `msg assistant mc-root${FYI.has(card.kind) ? " mc-fyi" : ""}${dim}`;
   return (
-    `<div class="${classes}" data-card-kind="${card.kind}"${extras ? ` data-sub-card="1"` : ""}${details}>` +
+    `<div class="${classes}" data-card-kind="${card.kind}"${extras ? ` data-sub-card="1"` : ""}${keyAttr}${details}>` +
     was +
     `<div class="mc-card mc-k-${card.kind}">` +
     `<button class="copy-btn msg-copy-btn" aria-label="Copy message"><i class="ph ph-copy"></i></button>` +

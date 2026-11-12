@@ -41,6 +41,9 @@ mod schedule;
 mod secret;
 mod main_chat_retro;
 mod shared_mockup;
+// pub(crate): `methods/registry/shown_badly.rs` records Joe's "Shown badly"
+// flag into the same log `send_message`'s `unsure_how_to_show` writes.
+pub(crate) mod shown_badly;
 mod spawn_chat;
 mod stop;
 mod stop_verdict;

@@ -2,6 +2,7 @@ import type { ChatEvent } from "../../types/ipc.generated";
 import { handleCommitRefClick, handleCommitRefKeydown } from "./commit-refs";
 import { handleDrillClick, handleDrillAnchorClick } from "./drill-links";
 import { handleFileRefClick, handleFileRefContextMenu, handleFileRefKeydown } from "./file-refs";
+import { createShownBadlyContextMenu } from "./shown-badly";
 import { handleTicketHover, handleTicketHoverOut } from "./ticket-refs";
 import { handleTurnMetaHover, handleTurnMetaHoverOut } from "./turn-meta-hover";
 import { sessionEvents } from "./event-store";
@@ -382,6 +383,7 @@ export class ChatRenderer {
     this.container.addEventListener("click", handleDrillAnchorClick);
     this.container.addEventListener("click", handleFileRefClick);
     this.container.addEventListener("contextmenu", handleFileRefContextMenu);
+    this.container.addEventListener("contextmenu", createShownBadlyContextMenu(() => this));
     this.container.addEventListener("keydown", handleFileRefKeydown);
     this.container.addEventListener("mouseover", handleTicketHover);
     this.container.addEventListener("mouseout", handleTicketHoverOut);

@@ -448,6 +448,7 @@ pub fn run() {
             ipc::list_session_images,
             ipc::get_sub_brief,
             ipc::set_sub_pinned,
+            ipc::flag_shown_badly,
             ipc::chat_quick_view,
             ipc::publish_to_claude_ai,
             ipc::voice_clean_transcript,
