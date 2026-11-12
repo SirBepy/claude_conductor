@@ -63,7 +63,17 @@ function subCtx(overrides = {}) {
   };
 }
 
-const closeItem = (ctx) => buildSubCardItems(ctx).find((i) => i.label === "Close");
+// A queued sub's menu nests the process-only items (Close among them) under
+// "Once it has started", so the lookup descends into children.
+const findClose = (items) => {
+  for (const i of items) {
+    if (i.label === "Close") return i;
+    const nested = i.children ? findClose(i.children) : undefined;
+    if (nested) return nested;
+  }
+  return undefined;
+};
+const closeItem = (ctx) => findClose(buildSubCardItems(ctx));
 
 describe("Subchats card menu: Close", () => {
   beforeEach(() => {
