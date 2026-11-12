@@ -16,6 +16,30 @@ import type { LoadSnapshot, LoadTracker } from "./load-progress";
  *  finish well inside this, so the strip stays out of normal use. */
 export const SLOW_REQUEST_MS = 4_000;
 
+/** Reads the phone issues on a timer or on resume with nobody waiting on the
+ *  answer. They still report failures, but a slow one must never raise the
+ *  "Waiting for your PC" strip: only a read the user is waiting on may. */
+export const BACKGROUND_READS: ReadonlySet<string> = new Set([
+  // 700ms prompt poll (views/sessions/permission-modal/index.ts)
+  "list_pending_prompts",
+  // degrade poll while the global stream is down (shared/global-stream.ts)
+  "list_instances",
+  // refetch on every visibilitychange to visible (views/sessions/hidden-sessions-sync.ts)
+  "get_hidden_chats",
+  // usage header re-render on a timer and on visibilitychange (views/sessions/usage-dials.ts)
+  "get_usage_map",
+  "list_accounts",
+  // live cross-device sync of an open question card (views/sessions/permission-modal/question-ui.ts)
+  "get_session_drafts",
+  // servers chip poll every 8s (views/sessions/statusbar-data.ts, servers-popover.ts)
+  "list_project_servers",
+]);
+
+/** How long the link must stay ok before a still-pending chat load is called
+ *  stalled. Counted only while the link is ok: a down or slow link already has
+ *  the strip as its message. */
+export const LOAD_STALL_MS = 8_000;
+
 export type LinkSnapshot =
   | { kind: "ok" }
   | { kind: "reconnecting"; elapsedMs: number }
@@ -57,6 +81,28 @@ export function reportRequestFailure(now = Date.now()): void {
 export function reportRequestSuccess(now = Date.now()): void {
   failing = false;
   refreshDownSince(now);
+}
+
+/** The page became visible again. Time spent hidden says nothing about the
+ *  link (timers were frozen, the strip's tick was paused), so every running
+ *  clock restarts from now. */
+export function noteResumed(now = Date.now()): void {
+  if (downSince !== null) downSince = now;
+  for (const entry of inFlight) entry.startedAt = now;
+}
+
+/** True once the link has been ok for LOAD_STALL_MS in a row; feed it from a
+ *  timer. Any non-ok reading restarts the count. */
+export function createStallClock(start = Date.now()): (now?: number) => boolean {
+  let okSince: number | null = linkSnapshot(start).kind === "ok" ? start : null;
+  return (now = Date.now()) => {
+    if (linkSnapshot(now).kind !== "ok") {
+      okSince = null;
+      return false;
+    }
+    okSince ??= now;
+    return now - okSince >= LOAD_STALL_MS;
+  };
 }
 
 /** Registers an in-flight request; call the returned function when it settles. */

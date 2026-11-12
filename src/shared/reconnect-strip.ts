@@ -5,7 +5,7 @@
  */
 
 import "./reconnect-strip.css";
-import { linkSnapshot, type LinkSnapshot } from "./connection-state";
+import { linkSnapshot, noteResumed, type LinkSnapshot } from "./connection-state";
 import { etaLabel } from "./load-dial";
 import { isRemote } from "./transport";
 import { visibleInterval } from "./visible-interval";
@@ -69,8 +69,19 @@ export function mountReconnectStrip(): () => void {
     el.hidden = false;
   };
   const stop = visibleInterval(tick, TICK_MS);
+  // Time spent hidden is not link time: restart every clock, and give the
+  // grace period back so a return never shows a stale count or an instant strip.
+  const onVisibility = (): void => {
+    if (document.visibilityState !== "visible") return;
+    noteResumed(Date.now());
+    notOkSince = null;
+    el.hidden = true;
+    tick();
+  };
+  document.addEventListener("visibilitychange", onVisibility);
   return () => {
     stop();
+    document.removeEventListener("visibilitychange", onVisibility);
     el.remove();
   };
 }
