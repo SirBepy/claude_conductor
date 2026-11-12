@@ -4,6 +4,7 @@
 
 import type { ContentBlock } from "../../types/ipc.generated";
 import { blocksToText } from "./content-blocks";
+import { formatTokenCount, formatTurnDuration } from "./turn-footer-format";
 import type { ChatDetail } from "./chat-details";
 import type { MessageCard } from "./chat-message-kinds";
 import type { SubCardEntry } from "./subchat-cards";
@@ -168,6 +169,10 @@ export interface RenderedMessage {
   /** Presentational-only ordinal, derived via `compactionOrdinal` - never
    *  used to decide turn structure; see `isCompaction`. */
   compactionN?: number;
+  /** Set on every compaction row: the figures behind its label and hover.
+   *  `isCompaction` (a turn boundary) is set only for a `/compact`; an
+   *  auto-compact row sits inside the turn it interrupted. */
+  compaction?: CompactionFigures;
   /** Set on an `is_meta` "Auto-continued" system note once 2+ consecutive
    *  silent turns merged into it (see turnProducedVisibleContent in
    *  turn-visible-content.ts). Renders as a trailing "×N" instead of a
@@ -288,7 +293,8 @@ export function isBoundaryMessage(m: RenderedMessage): boolean {
 export function compactionOrdinal(messages: RenderedMessage[], index: number): number {
   let n = 0;
   for (let i = 0; i <= index; i++) {
-    if (messages[i]?.isCompaction) n++;
+    const m = messages[i];
+    if (m?.isCompaction || m?.compaction) n++;
   }
   return n;
 }
@@ -312,15 +318,21 @@ export function compactionOrdinal(messages: RenderedMessage[], index: number): n
 // differ, "/commit pushnbump" vs "pushnbump", so the watcher's delivery
 // was never recognized as a duplicate and rendered as a second, chip-less
 // bubble underneath the real one.
+//
+// local-command-caveat: the CLI writes it (isMeta) in front of every local
+// command it runs, e.g. `/compact`. Stripped whole, so the line cleans to
+// nothing and draws no row; left in, it read as a "Scheduled wake" meta turn.
 const COMMAND_NAME_RE = /<command-name(?:\s[^>]*)?>([\s\S]*?)<\/command-name>/i;
-const COMMAND_BLOCK_RE = /<(?:command-name|command-message|local-command-stdout)(?:\s[^>]*)?>[\s\S]*?<\/(?:command-name|command-message|local-command-stdout)>/gi;
+const COMMAND_BLOCK_RE = /<(?:command-name|command-message|local-command-stdout|local-command-caveat)(?:\s[^>]*)?>[\s\S]*?<\/(?:command-name|command-message|local-command-stdout|local-command-caveat)>/gi;
 const COMMAND_ARGS_TAG_RE = /<\/?command-args(?:\s[^>]*)?>/gi;
 
-// When /compact runs, Claude Code injects the generated summary back into the
-// conversation as a user message with this wrapper. The summary can be thousands
-// of characters; rendering it as a normal user bubble is confusing and noisy.
-// Detect the wrapper and replace with a compact system notice instead.
-const COMPACT_COMMAND_RE = /<command-name>compact<\/command-name>/i;
+// The `/compact` command itself: the transcript line (`<command-name>/compact`,
+// leading slash as the CLI writes it) and the daemon's echo of the typed text
+// (`/compact <focus>`). Neither is a message: the compaction draws one row from
+// the `compacted` event (the CLI's compact_boundary line), and the summary the
+// CLI writes after it never reaches the frontend (chat/parser/compaction.rs).
+const COMPACT_COMMAND_RE = /<command-name>\/?compact<\/command-name>/i;
+const COMPACT_ECHO_RE = /^\s*\/compact(?:\s|$)/i;
 
 // Background-task completion events the harness injects as synthetic
 // user-role messages when `run_in_background: true` finishes. Multi-line
@@ -359,8 +371,40 @@ export function normalizeUserMessageText(text: string): string {
   return body ? `${name} ${body}` : name;
 }
 
+/** Only the first text block decides: a held message is rebuilt one block per
+ *  paragraph, and a later paragraph that starts with "/compact" must not hide
+ *  the whole message. */
 export function isCompactUserMessage(blocks: ContentBlock[]): boolean {
-  return blocks.some(b => b.type === "text" && COMPACT_COMMAND_RE.test(b.text));
+  const first = blocks.find((b) => b.type === "text");
+  return first?.type === "text" && (COMPACT_COMMAND_RE.test(first.text) || COMPACT_ECHO_RE.test(first.text));
+}
+
+/** The figures a compaction row shows, from the `compacted` event. */
+export interface CompactionFigures {
+  preTokens: number;
+  postTokens: number;
+  durationMs: number;
+  trigger: string;
+}
+
+/** Two rows for the same compaction carry the same figures. */
+export function sameCompaction(a: CompactionFigures, b: CompactionFigures): boolean {
+  return a.preTokens === b.preTokens && a.postTokens === b.postTokens && a.durationMs === b.durationMs;
+}
+
+/** The compaction row's label: "Compacted 85.8k to 9.9k", or a bare
+ *  "Context compacted" when the boundary line carried no figures. */
+export function compactionLabel(c: CompactionFigures): string {
+  if (c.preTokens > 0 && c.postTokens > 0) {
+    return `Compacted ${formatTokenCount(c.preTokens)} to ${formatTokenCount(c.postTokens)}`;
+  }
+  return "Context compacted";
+}
+
+/** The row's hover text: how long it took and whether Claude Code started it. */
+export function compactionTitle(c: CompactionFigures): string {
+  const how = c.trigger === "auto" ? "Claude Code compacted the context automatically" : "Context compacted";
+  return c.durationMs > 0 ? `${how} in ${formatTurnDuration(c.durationMs)}` : how;
 }
 
 export function cleanUserBlocks(blocks: ContentBlock[]): ContentBlock[] {

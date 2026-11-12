@@ -157,6 +157,19 @@ pub enum ChatEvent {
         /// `None` = no autopilot marker this turn.
         autopilot_changed: Option<bool>,
     },
+    /// The CLI compacted the conversation in place (`/compact`, or its own
+    /// auto-compact), raised from the `compact_boundary` system line both live
+    /// and on history load (`chat/parser/compaction.rs`). The window draws it as
+    /// one quiet row; the summary, command and caveat lines around it draw none.
+    Compacted {
+        /// Conversation tokens before and after, as the CLI measured them.
+        pre_tokens: u64,
+        post_tokens: u64,
+        duration_ms: u64,
+        /// "manual" (a `/compact`) or "auto"; empty when the line carried none.
+        trigger: String,
+        timestamp: i64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

@@ -13,6 +13,8 @@ use serde_json::Value;
 mod blocks;
 use blocks::{extract_content_blocks, strip_daemon_author_sentinel, strip_daemon_meta_sentinel};
 
+mod compaction;
+
 mod preview;
 // Re-exported at this path (not just `pub(super)`) because `daemon/pump.rs`
 // calls these via `crate::chat::parser::extract_cc_preview_push`.
@@ -279,7 +281,8 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
     let ts = event_timestamp(&v);
     let Some(ty) = v.get("type").and_then(|t| t.as_str()) else { return vec![]; };
     match ty {
-        // The init `system` line is what carries the session_id we care about.
+        // The init `system` line is what carries the session_id we care about,
+        // and `compact_boundary` is the one compaction row (`compaction.rs`).
         // Other system subtypes (hook_started / hook_response / SessionStart hook
         // re-emissions on each --resume turn) are noise for the chat surface and
         // are dropped here. The instance registry is fed via the dedicated
@@ -293,12 +296,17 @@ pub fn parse_line(line: &str) -> Vec<ChatEvent> {
                     cwd: v.get("cwd").and_then(|s| s.as_str()).unwrap_or("").to_string(),
                     timestamp: ts,
                 }]
+            } else if subtype == "compact_boundary" {
+                vec![compaction::boundary_event(&v, ts)]
             } else {
                 vec![]
             }
         }
         "user" => {
             let Some(content_val) = v.get("message").and_then(|m| m.get("content")) else { return vec![]; };
+            if compaction::is_compact_summary(&v) {
+                return vec![];
+            }
             // `isMeta:true` marks a turn Claude Code itself injected (a fired
             // ScheduleWakeup, autopilot/resume) rather than something the human
             // typed. A daemon-injected wake (repo-channel/Jarvis/schedule) has

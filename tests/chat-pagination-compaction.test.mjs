@@ -50,10 +50,9 @@ function turnUsageEvent({ outputTokens = 0, durationMs = 0 } = {}) {
   };
 }
 
-// The `/compact` summary wrapper chat-classifiers.ts's isCompactUserMessage
-// detects - a user_message event, not a distinct ChatEvent variant.
+// The `compacted` event the parser raises from the CLI's compact_boundary line.
 function compactEvent(ts = 0) {
-  return { type: "user_message", content: [{ type: "text", text: "<command-name>compact</command-name>" }], timestamp: ts };
+  return { type: "compacted", pre_tokens: 85837, post_tokens: 9860, duration_ms: 21335, trigger: "manual", timestamp: ts };
 }
 
 let _sessSeq = 0;
