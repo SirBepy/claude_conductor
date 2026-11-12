@@ -48,7 +48,24 @@ pub fn drop_now(state: &Arc<DaemonState>, sub_id: &str) -> Result<String, String
 /// start changes nothing (it stays held, in line and parked as it was) and says why.
 pub async fn start_now(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), String> {
     check_queued(state, sub_id)?;
-    held::launch_held(state, sub_id).await?;
+    // A gate waits for the commits of finished subs to land and for the gate before it,
+    // and its work (a push) is not something the write guard can refuse afterwards.
+    if super::is_gate(sub_id) {
+        return Err(format!("{} is a gate sub: it pushes from the main checkout after the merges in flight, so it starts by itself when they are done.", name_of(state, sub_id)));
+    }
+    // `launch_held` answers Ok to a caller that lost the launch claim, which would read here as
+    // "started" and release the slot of a launch that may still fail.
+    if held::launching(sub_id) {
+        return Err(format!("{} is already starting.", name_of(state, sub_id)));
+    }
+    let started = held::launch_held(state, sub_id).await;
+    if started.is_err() {
+        // A launch that failed after the spawn put the hold back without its place in line.
+        if writers::stamp_places_of(state, sub_id) {
+            crate::daemon::machines::publish_instances_changed(state);
+        }
+        return started;
+    }
     // Only once it runs: out of the line, or the queue would start it a second time
     // when its turn came. Doing this first would need a way back into the line on
     // failure, and putting it back re-queues every other parked sub with it.
@@ -109,6 +126,23 @@ mod tests {
         st.registry.set_busy(&ran, true);
         assert!(drop_now(&st, &ran).unwrap_err().contains("has started"));
         assert!(st.registry.get(&ran).unwrap().ended_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn start_now_refuses_a_gate_and_a_sub_whose_launch_is_already_in_flight() {
+        let _data = TempDataDir::new();
+        let st = state();
+        let gate = queued_sub(&st, "qd-gate");
+        let mut brief = crate::sessions::chat_config::get(&gate).unwrap().subchat.unwrap();
+        brief.gate = true;
+        crate::sessions::chat_config::set_subchat(&gate, Some(brief));
+        assert!(start_now(&st, &gate).await.unwrap_err().contains("gate sub"));
+        assert!(held::is_held(&gate), "a refused start leaves it queued");
+
+        let busy = queued_sub(&st, "qd-busy");
+        let _claim = held::claim_launch(&busy).expect("nobody is launching it yet");
+        assert!(start_now(&st, &busy).await.unwrap_err().contains("already starting"));
+        assert!(held::is_held(&busy));
     }
 
     #[tokio::test]
