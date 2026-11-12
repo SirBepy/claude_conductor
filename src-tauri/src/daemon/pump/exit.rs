@@ -20,6 +20,9 @@ pub(crate) async fn run_pump_exit(
     closing_flagged: bool,
 ) {
     map_for_pump.remove(&pump_session.session_id);
+    // A compaction this child was running is over, and messages Joe typed
+    // meanwhile move to the held queue instead of dying with it.
+    crate::daemon::subchats::compaction::on_child_exit(&state_for_pump, &pump_session.session_id, pump_session.pid);
     // Interactive sessions: the child lives across turns, so reaching here
     // means it died (crash, kill, freeze, daemon shutdown). Keep the registry
     // entry live so the sidebar keeps showing the session. The next

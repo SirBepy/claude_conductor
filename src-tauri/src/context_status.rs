@@ -163,6 +163,58 @@ fn usage_from_line(v: &serde_json::Value) -> Option<(u64, Option<String>)> {
     Some((occupancy, model))
 }
 
+/// `(pre_tokens, post_tokens)` of a compaction boundary line, in either shape
+/// the CLI writes it: `compact_metadata.post_tokens` on stdout (stream-json) and
+/// `compactMetadata.postTokens` in the transcript. `None` for any other line.
+/// `post_tokens` counts only the conversation that survived (the summary plus
+/// the few messages kept verbatim), not the system prompt and tools, so it is a
+/// floor for what the next request reads, not that request's size.
+pub(crate) fn compact_boundary_tokens(v: &serde_json::Value) -> Option<(u64, u64)> {
+    if v.get("subtype").and_then(|s| s.as_str()) != Some("compact_boundary") {
+        return None;
+    }
+    let meta = v.get("compact_metadata").or_else(|| v.get("compactMetadata"))?;
+    let num = |snake: &str, camel: &str| meta.get(snake).or_else(|| meta.get(camel)).and_then(|n| n.as_u64());
+    Some((num("pre_tokens", "preTokens").unwrap_or(0), num("post_tokens", "postTokens")?))
+}
+
+/// What one line of a live child's stdout says about its context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StreamContext {
+    /// An assistant line of the main conversation: input + cache read + cache
+    /// creation of the request that produced it.
+    Usage(u64),
+    /// The CLI compacted the conversation in place.
+    Compacted { pre: u64, post: u64 },
+}
+
+/// Reads [`StreamContext`] off one raw stdout line. A subagent's assistant line
+/// (`parent_tool_use_id` set) is skipped: its usage is the subagent's own
+/// context, not this chat's. A zero row is skipped too (the CLI writes zeros on
+/// a synthetic error line). Lines that cannot match are rejected by a substring
+/// test before any JSON is parsed, since this runs on every line of every turn.
+pub(crate) fn stream_line_context(line: &[u8]) -> Option<StreamContext> {
+    let text = std::str::from_utf8(line).ok()?;
+    let boundary = text.contains("compact_boundary");
+    if !boundary && !(text.contains("\"assistant\"") && text.contains("input_tokens")) {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(text.trim()).ok()?;
+    if boundary {
+        if let Some((pre, post)) = compact_boundary_tokens(&v) {
+            return Some(StreamContext::Compacted { pre, post });
+        }
+    }
+    if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+        return None;
+    }
+    if v.get("parent_tool_use_id").is_some_and(|p| !p.is_null()) {
+        return None;
+    }
+    let (occ, _) = usage_from_line(&v)?;
+    (occ > 0).then_some(StreamContext::Usage(occ))
+}
+
 /// Read a transcript JSONL and compute its ContextStatus. Robust to non-JSON
 /// and non-usage lines; returns None when the file is missing/unreadable or has
 /// no usage lines at all. Never panics.
@@ -200,6 +252,19 @@ pub(crate) fn compute_context_status_visiting(
             Err(_) => break,
         }
         visit(&line);
+        // A compaction rewrote the context: until the next assistant line the
+        // boundary's own count is the only true one, and the last usage line
+        // above it still holds the size from before.
+        if line.contains("compact_boundary") {
+            if let Some((_, post)) = serde_json::from_str::<serde_json::Value>(line.trim())
+                .ok()
+                .as_ref()
+                .and_then(compact_boundary_tokens)
+            {
+                occupancies.push(post);
+            }
+            continue;
+        }
         if !line.contains("input_tokens") {
             continue;
         }
@@ -225,7 +290,7 @@ pub(crate) fn compute_context_status_visiting(
 /// forget a peak that lies behind it and flip the window back to 200K. It is
 /// persisted for the same reason: a daemon restart must not lose the peak.
 pub(crate) mod tail {
-    use super::{score_parts, usage_from_line, ContextStatus};
+    use super::{compact_boundary_tokens, score_parts, usage_from_line, ContextStatus};
     use serde::{de::DeserializeOwned, Deserialize, Serialize};
     use std::collections::HashMap;
     use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
@@ -364,11 +429,10 @@ pub(crate) mod tail {
     /// Occupancy below which a halving is too small to read as a compaction.
     const SHRINK_FLOOR: u64 = 20_000;
 
-    /// A compaction marker. UNVERIFIED against a real compacted transcript (none
-    /// exists yet, docs/forever-chat-plan.md 1.2): the plan names the CLI's
-    /// `compact_boundary` system event and the summary message's
-    /// `isCompactSummary`, so either counts; a count that only has to CHANGE
-    /// when a compaction happens does not mind both firing for one.
+    /// A compaction marker: the CLI's `compact_boundary` system line or the
+    /// summary message's `isCompactSummary`. One compaction writes both
+    /// (docs/research/compact-spike.md section 3), so the epoch moves by two; a
+    /// count that only has to CHANGE when a compaction happens does not mind.
     fn is_compaction_line(line: &str) -> bool {
         (line.contains("compact_boundary") || line.contains("isCompactSummary"))
             && serde_json::from_str::<serde_json::Value>(line.trim()).is_ok_and(|v| {
@@ -395,6 +459,23 @@ pub(crate) mod tail {
                 }
                 if is_compaction_line(&line) {
                     self.epoch += 1;
+                }
+                // The boundary's own count stands until the next assistant line,
+                // which is where the usage of the stale pre-compaction row ends.
+                // It also becomes the row the collapse test compares against, so
+                // the first real row after it is not read as a second compaction.
+                if line.contains("compact_boundary") {
+                    if let Some((_, post)) = serde_json::from_str::<serde_json::Value>(line.trim())
+                        .ok()
+                        .as_ref()
+                        .and_then(compact_boundary_tokens)
+                    {
+                        self.last = Some(post);
+                        if post > 0 {
+                            self.last_nonzero = post;
+                        }
+                    }
+                    continue;
                 }
                 // Same exact prefilter as the full read: only a line holding
                 // "input_tokens" can carry a usage block.
@@ -893,6 +974,52 @@ mod tests {
         c.advance(&path, |_| false);
         assert_eq!(c.epoch(), 2, "a collapse after a zero row is still seen against the last real row");
         assert_eq!(c.status(), compute_context_status(&path));
+    }
+
+    /// The boundary line as the CLI writes it into the transcript (spike S1,
+    /// docs/research/compact-spike.md section 3, line 142).
+    fn transcript_boundary(pre: u64, post: u64) -> String {
+        format!(
+            r#"{{"type":"system","subtype":"compact_boundary","parentUuid":null,"isMeta":false,"content":"Conversation compacted","compactMetadata":{{"trigger":"manual","preTokens":{pre},"postTokens":{post},"durationMs":21335}}}}"#
+        )
+    }
+
+    /// Spike S1 measured `context_status` still saying 85,832 straight after a
+    /// compaction to 9,860, until the next assistant line. A check that runs
+    /// right after a compaction (the compaction manager, the context cap) must
+    /// see the boundary's count instead.
+    #[test]
+    fn a_compaction_boundary_is_the_occupancy_until_the_next_assistant_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.jsonl");
+        append(&path, &usage_line(Some("claude-sonnet-4-5"), 85_832));
+        append(&path, &transcript_boundary(85_837, 9_860));
+        let full = compute_context_status(&path).unwrap();
+        assert_eq!(full.occupancy, 9_860, "the stale pre-compaction row must not stand");
+        let mut c = ContextCursor::default();
+        c.advance(&path, |_| false);
+        assert_eq!(c.status(), Some(full), "the per-turn cursor agrees with the full read");
+
+        append(&path, &usage_line(Some("claude-sonnet-4-5"), 45_093));
+        c.advance(&path, |_| false);
+        assert_eq!(c.status().unwrap().occupancy, 45_093, "the next real row takes over");
+        assert_eq!(c.status(), compute_context_status(&path));
+        assert_eq!(c.epoch(), 1, "the boundary counts once, and the next row is not a second collapse");
+    }
+
+    #[test]
+    fn stream_lines_give_the_main_chats_usage_and_the_boundary_and_nothing_else() {
+        let main = br#"{"type":"assistant","message":{"model":"m","usage":{"input_tokens":10,"cache_read_input_tokens":40000,"cache_creation_input_tokens":5000}},"parent_tool_use_id":null}"#;
+        assert_eq!(stream_line_context(main), Some(StreamContext::Usage(45_010)));
+        let subagent = br#"{"type":"assistant","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":90000}},"parent_tool_use_id":"toolu_1"}"#;
+        assert_eq!(stream_line_context(subagent), None, "a subagent's context is not this chat's");
+        let zero = br#"{"type":"assistant","message":{"usage":{"input_tokens":0}},"parent_tool_use_id":null}"#;
+        assert_eq!(stream_line_context(zero), None);
+        let result = br#"{"type":"result","subtype":"success","usage":{"input_tokens":0,"output_tokens":0}}"#;
+        assert_eq!(stream_line_context(result), None, "a result line's usage is the turn's sum, not the context");
+        let boundary = br#"{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual","pre_tokens":85837,"post_tokens":9860}}"#;
+        assert_eq!(stream_line_context(boundary), Some(StreamContext::Compacted { pre: 85_837, post: 9_860 }));
+        assert_eq!(stream_line_context(br#"{"type":"system","subtype":"status","status":"compacting"}"#), None);
     }
 
     #[test]

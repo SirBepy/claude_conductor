@@ -6,6 +6,7 @@
 
 mod account_move;
 mod attach;
+mod compact;
 mod core;
 #[cfg(debug_assertions)]
 mod debug;
@@ -78,6 +79,7 @@ pub(super) fn err_to_rpc(e: LifecycleError) -> RpcError {
 /// `register_notifier`/`register_settings` already use for their groups.
 pub fn register(router: &mut Router, state: Arc<DaemonState>) {
     core::register_core(router, state.clone());
+    compact::register_compact(router, state.clone());
     account_move::register_account_move(router, state.clone());
     #[cfg(debug_assertions)]
     debug::register_debug(router, state.clone());

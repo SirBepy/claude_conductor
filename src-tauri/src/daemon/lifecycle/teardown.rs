@@ -87,11 +87,34 @@ fn subchats_note_for_message(
     told_note_for_message(text, now, told, SUBCHATS_MAIN_PROMPT, SUBCHATS_MAIN_OFF_NOTE)
 }
 
+/// Messages Joe typed while the chat could not take them (a compaction ran),
+/// sent now as ONE turn: one stdin line, the texts in typing order. Each text is
+/// echoed on its own, so every bubble the app drew when he sent it matches an
+/// echo instead of a joined copy appearing beside them.
+pub async fn send_typed_messages(session: &Arc<Session>, texts: &[String]) -> Result<(), LifecycleError> {
+    let joined = texts.join("\n\n");
+    send_message_inner_echo(session, &joined, false, None, false).await?;
+    for text in texts {
+        echo_user_message(session, text, false, None);
+    }
+    Ok(())
+}
+
 async fn send_message_inner(
     session: &Arc<Session>,
     text: &str,
     is_meta: bool,
     author_session_id: Option<&str>,
+) -> Result<(), LifecycleError> {
+    send_message_inner_echo(session, text, is_meta, author_session_id, true).await
+}
+
+async fn send_message_inner_echo(
+    session: &Arc<Session>,
+    text: &str,
+    is_meta: bool,
+    author_session_id: Option<&str>,
+    echo: bool,
 ) -> Result<(), LifecycleError> {
     // Remember the prompt: if this turn is rejected by a rate limit before
     // producing any output, the scheduled resume replays exactly this text.
@@ -146,6 +169,13 @@ async fn send_message_inner(
     let mut stdin = session.stdin.lock().await;
     stdin.write_all(&line).await?;
     stdin.flush().await?;
+    if echo {
+        echo_user_message(session, text, is_meta, author_session_id);
+    }
+    Ok(())
+}
+
+fn echo_user_message(session: &Session, text: &str, is_meta: bool, author_session_id: Option<&str>) {
     // Broadcast a marked user-message echo so the frontend can render the
     // user bubble regardless of which device sent it. The `remote_echo: true`
     // flag lets the frontend distinguish this synthesised event from the
@@ -168,6 +198,32 @@ async fn send_message_inner(
             author_session_id: author_session_id.map(|s| s.to_string()),
         },
     );
+}
+
+/// The stdin line [`send_bare_command`] writes: `text` as the whole content.
+fn bare_command_line(text: &str) -> Vec<u8> {
+    let msg = serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } });
+    let mut line = serde_json::to_vec(&msg).expect("serialize");
+    line.push(b'\n');
+    line
+}
+
+/// Writes a slash command the daemon itself issues (`/compact <focus>`) to the
+/// child, exactly as given. The CLI only runs a command when the text STARTS
+/// with `/`, so none of [`send_message`]'s decoration may apply: the meta
+/// sentinel in front stops the CLI treating it as a command (spike S1, h2), and
+/// a mention block or subchats note after it would become the command's
+/// arguments. It is also not a message from Joe, so it leaves every record a
+/// message updates alone: `joe_message` keeps Joe's real last message for
+/// `subchat send`, `last_prompt` keeps the text a rate-limit replay resends,
+/// and no `UserMessage` echo draws it as a Joe bubble. The caller owns the busy
+/// flag, as every sender does.
+pub async fn send_bare_command(session: &Arc<Session>, text: &str) -> Result<(), LifecycleError> {
+    debug_assert!(text.starts_with('/'), "a bare command starts with a slash: {text}");
+    let line = bare_command_line(text);
+    let mut stdin = session.stdin.lock().await;
+    stdin.write_all(&line).await?;
+    stdin.flush().await?;
     Ok(())
 }
 
@@ -451,6 +507,37 @@ mod tests {
         send_message(&session, typed, false).await.unwrap();
         send_message_with_author(&session, "from jarvis", "jarvis-1").await.unwrap();
         assert_eq!(joe_message::latest("joe-msg-s"), None, "an authored relay is not Joe typing");
+        let _ = child.kill().await;
+    }
+
+    /// The daemon's `/compact` reaches the child as the bare command and leaves
+    /// every per-message record alone: Joe's last message stays the one
+    /// `subchat send` passes on, a rate-limit replay would resend Joe's text,
+    /// not the command, and no echo draws it as Joe's bubble.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_bare_command_is_written_as_is_and_is_not_joes_message() {
+        use crate::daemon::session_test_support::spawn_fake_session;
+        use crate::daemon::subchats::joe_message;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        crate::sessions::chat_config::set_subchats_on("bare-s", true);
+        let map = new_session_map();
+        let mut child = spawn_fake_session(&map, "bare-s").await;
+        let session = map.get("bare-s").unwrap().clone();
+        session.subchats_told.store(false, std::sync::atomic::Ordering::SeqCst);
+        let mut events = crate::daemon::broadcast::subscribe(&session);
+
+        send_message(&session, "fix the footer", false).await.unwrap();
+        while events.try_recv().is_ok() {}
+        let command = "/compact Keep these word for word: \"fix the footer\"";
+        send_bare_command(&session, command).await.unwrap();
+
+        assert_eq!(joe_message::latest("bare-s").as_deref(), Some("fix the footer"), "the slot still holds Joe's message");
+        assert_eq!(joe_message::recent("bare-s"), vec!["fix the footer"]);
+        assert_eq!(session.last_prompt.lock().unwrap().as_str(), "fix the footer");
+        assert!(events.try_recv().is_err(), "no echo of the command");
+        let line: serde_json::Value = serde_json::from_slice(&bare_command_line(command)).unwrap();
+        assert_eq!(line["message"]["content"], command, "no sentinel, no mention block, no subchats note");
         let _ = child.kill().await;
     }
 
