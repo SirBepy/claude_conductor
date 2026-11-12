@@ -110,8 +110,8 @@ test.describe("view-harness / new-chat composer focus after the picker closes", 
   test("mobile: composer is not focused on open, and a tap focuses it", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mountSessionsEntry(page);
-    // .sessions-fab is the phone entry point to the same startNewSession()
-    // the desktop kebab's "+ New session" item calls (see new-session-cold-
+    // .sessions-fab is the phone entry point to startNewSession(), the same
+    // call the phone menu's New chat item makes (see new-session-cold-
     // cache.view.spec.ts) - no bypass of pickProject().
     await page.locator("#sessionsFab").waitFor();
     await page.locator("#sessionsFab").click();

@@ -49,7 +49,7 @@ test("the empty chats list centers a v-empty card on phone, pointing at +", asyn
   // "No active sessions" must survive unchanged - tests/sidebar-setup-stalled
   // .test.mjs's textContent assertion depends on it staying exactly this string.
   await expect(row).toContainText("No active sessions");
-  // Points at the + affordance (the phone FAB / desktop's kebab "New chat").
+  // Points at the + affordance (the phone FAB; the desktop has no + in the sidebar).
   await expect(empty.locator(".v-empty-hint")).toContainText("+");
 
   await capture(page.locator(".sessions-sidebar"), "phone-empty-states-sidebar");

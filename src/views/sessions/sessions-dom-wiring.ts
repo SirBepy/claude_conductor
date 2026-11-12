@@ -21,7 +21,6 @@ import { mountWhenDoneChip } from "./when-done-chip";
 import {
   closeViewMoreMenu,
   refreshViewMoreIndicator,
-  rerenderViewMenuProtocol,
   toggleViewMoreMenu,
 } from "./view-more-menu";
 import {
@@ -97,12 +96,10 @@ export async function wireOverflowMenu(
   }
 
   // Hydrate + subscribe to the global sleep/shutdown-when-done protocol state.
-  // The subscriber refreshes the more-button indicator dot and, if the menu is
-  // open, live-updates its protocol section (toggles + countdown chip).
+  // The subscriber refreshes the more-button indicator dot.
   const unlistenWhenDone = await initWhenDone();
   const unsubWhenDone = subscribeWhenDone(() => {
     refreshViewMoreIndicator();
-    rerenderViewMenuProtocol();
   });
   refreshViewMoreIndicator();
   const disposeChip = mountWhenDoneChip(root);

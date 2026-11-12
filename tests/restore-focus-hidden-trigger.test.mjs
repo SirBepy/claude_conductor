@@ -2,7 +2,7 @@
 // Todo 1021: project-picker.ts (and location-picker.ts, worktree-picker.ts,
 // same pattern) captured `document.activeElement` as the trigger at open and
 // called `trigger?.focus?.()` unconditionally on close. Opened from the
-// kebab menu's "New chat" item, view-more-menu.ts relocates that item back
+// phone menu's "New chat" item, view-more-menu.ts relocates that item back
 // into #view-more-host on close, which carries the native `hidden` attribute
 // (template.ts) - the trigger is still `.isConnected` but no longer
 // focusable, so `.focus()` silently no-ops and focus drops to <body>.

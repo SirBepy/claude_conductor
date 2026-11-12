@@ -1,29 +1,25 @@
-// ── View-level "more options" overflow menu (Variant B) ──────────────────────
+// ── Phone-only "more options" overflow menu (Variant B) ──────────────────────
+//
+// #viewMoreBtn renders on the phone transport only (template.ts); the desktop
+// reaches the same actions through the command palette, the project dashboard,
+// the chat tool strip and the right rail.
 //
 // Menu structure:
 //   GENERAL  (greyed label)
 //     New chat        (relocated from #view-more-host)
-//     History         (phone only; relocated from #view-more-host)
-//     Preview         (phone only; relocated from #view-more-host; toggles the HTML preview panel)
-//     Scheduled       (phone only; opens the standalone `session-schedule` window)
-//     When done ▸     (Sleep / Shutdown submenu; amber chip on parent when armed)
+//     History         (relocated from #view-more-host)
+//     Preview         (relocated from #view-more-host; toggles the HTML preview panel)
+//     Scheduled       (opens the standalone `session-schedule` window)
+//     Filter by project ▸ / Hidden ▸  (submenus)
 //   ──────
 //   THIS CHAT  (greyed label; only when a session or draft is selected)
 //     ... (built by chat-menu.ts / buildChatMenuBlock)
 //
-// Sort moved to Settings (Step 6). The sort label + select are no longer
-// relocated into this menu; they stay dormant in #view-more-host.
+// Sort lives in Settings; its label + select stay dormant in #view-more-host.
 
-import type { TerminalAction } from "../../types/ipc.generated";
 import { positionSubmenu } from "./position-dropdown";
 import { createMoreMenu } from "./more-menu-base";
-import {
-  armOrToggleWhenDone,
-  cancelWhenDone,
-  whenDoneArmed,
-  whenDoneMenuHtml,
-  whenDoneAction,
-} from "./when-done";
+import { whenDoneArmed } from "./when-done";
 import { state, windowIdOf } from "./state";
 import {
   buildChatMenuBlock,
@@ -36,21 +32,15 @@ import { liveChatMenuCtx } from "./chat-menu-ctx";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { openSchedule } from "../../shared/open-schedule";
 import { isRemote } from "../../shared/transport";
-import { cachedHasDeployWorkflow, refreshDeployWorkflowCache } from "./deploy-workflow-gate";
+import { cachedHasDeployWorkflow } from "./deploy-workflow-gate";
 import { renderSidebarRow, sessionRowOptions } from "./sidebar-rows";
 import { renderProjectRail } from "./project-rail";
 import { selectSession } from "./active-session";
 import { renderSidebar } from "./sidebar";
 
-let _whenDoneSubMenu: HTMLElement | null = null;
 // Filter-by-project and Hidden (below) share this: at most one of this
 // menu's own submenus is open at a time, so reopening one closes the other.
 let _viewSubMenu: HTMLElement | null = null;
-
-function closeWhenDoneSub(): void {
-  _whenDoneSubMenu?.remove();
-  _whenDoneSubMenu = null;
-}
 
 function closeViewSubMenu(): void {
   _viewSubMenu?.remove();
@@ -62,53 +52,12 @@ export function refreshViewMoreIndicator(): void {
   if (btn) btn.classList.toggle("has-indicator", whenDoneArmed());
 }
 
-/** Rebuild the when-done parent row text in an open menu (countdown changes). */
-export function rerenderViewMenuProtocol(): void {
-  const menu = viewMenu.element();
-  if (!menu) return;
-  const parentRow = menu.querySelector<HTMLElement>("[data-when-done-parent]");
-  if (!parentRow) return;
-  _updateWhenDoneParent(parentRow);
-}
-
-function _whenDoneParentText(): string {
-  const s = state.whenDone;
-  if (!s || s.phase === "disarmed") return "When done";
-  const action = whenDoneAction();
-  const label = action === "sleep" ? "Sleep" : action === "shutdown" ? "Shutdown" : "When done";
-  if (s.phase === "countingDown" && s.countdown_remaining_secs != null) {
-    return `${label} in ${s.countdown_remaining_secs}s`;
-  }
-  if (s.phase === "firing") return `${label} now...`;
-  // Aborted without firing (todo 894): quietly named in the collapsed parent
-  // row too, not just the opened submenu, so it reads differently from a
-  // currently-armed "{label} when done" at a glance.
-  if (s.phase === "gaveUp") return `${label}: gave up`;
-  return `${label} when done`;
-}
-
-function _updateWhenDoneParent(el: HTMLElement): void {
-  const armed = whenDoneArmed();
-  el.classList.toggle("is-on", armed);
-  const textSpan = el.querySelector<HTMLElement>(".when-done-parent-text");
-  if (textSpan) textSpan.textContent = _whenDoneParentText();
-  const dot = el.querySelector<HTMLElement>(".smore-check-dot");
-  if (armed && !dot) {
-    const d = document.createElement("span");
-    d.className = "smore-check-dot";
-    el.appendChild(d);
-  } else if (!armed && dot) {
-    dot.remove();
-  }
-}
-
 const viewMenu = createMoreMenu<[]>({
   className: "session-more-menu view-more-menu",
   isOutside: (target, menu, btn) =>
-    !menu.contains(target) && target !== btn && !_whenDoneSubMenu?.contains(target) && !_viewSubMenu?.contains(target),
+    !menu.contains(target) && target !== btn && !_viewSubMenu?.contains(target),
   /** Move the relocated host controls back before the menu DOM is dropped. */
   beforeClose: (menu) => {
-    closeWhenDoneSub();
     closeViewSubMenu();
     closeActiveChatSubmenu();
     const host = document.getElementById("view-more-host");
@@ -129,92 +78,32 @@ const viewMenu = createMoreMenu<[]>({
     genLabel.textContent = "General";
     menu.appendChild(genLabel);
 
-    // Relocate New chat (but NOT the sort select). History, Preview and Scheduled
-    // are only here on the phone: the desktop has the project dashboard's History
-    // button, the chat tool strip's Preview tab and the right rail's Schedule icon,
-    // and the phone has none of those yet.
+    // Relocate New chat, History and Preview (but NOT the sort select).
     if (host) {
-      const newBtn = host.querySelector("#newSessionBtn");
-      if (newBtn) menu.appendChild(newBtn);
-      if (isRemote()) {
-        const histBtn = host.querySelector("#historyBtn");
-        const previewBtn = host.querySelector("#previewToggleBtn");
-        if (histBtn) menu.appendChild(histBtn);
-        if (previewBtn) menu.appendChild(previewBtn);
+      for (const id of ["#newSessionBtn", "#historyBtn", "#previewToggleBtn"]) {
+        const btn = host.querySelector(id);
+        if (btn) menu.appendChild(btn);
       }
     }
 
-    if (isRemote()) {
-      // Scheduled: opens the standalone calendar window (open_schedule_window
-      // builds/focuses the `session-schedule` window). Works from either window
-      // since it's a plain backend command, not an in-window route.
-      const schedBtn = document.createElement("button");
-      schedBtn.className = "smore-item";
-      schedBtn.innerHTML = `<i class="ph ph-calendar-dots"></i><span>Scheduled</span>`;
-      schedBtn.addEventListener("click", () => {
-        openSchedule();
-        close();
-      });
-      menu.appendChild(schedBtn);
-    }
+    // Scheduled: opens the standalone calendar window (open_schedule_window
+    // builds/focuses the `session-schedule` window). Works from either window
+    // since it's a plain backend command, not an in-window route.
+    const schedBtn = document.createElement("button");
+    schedBtn.className = "smore-item";
+    schedBtn.innerHTML = `<i class="ph ph-calendar-dots"></i><span>Scheduled</span>`;
+    schedBtn.addEventListener("click", () => {
+      openSchedule();
+      close();
+    });
+    menu.appendChild(schedBtn);
 
-    // ── When done ▸ submenu parent ─────────────────────────────────────────
-    // No daemon RPC for get/arm/cancel_when_done (todo 1007): the hydrate read
-    // fails silently on the phone and the menu would show both toggles "off",
-    // indistinguishable from "nothing armed" - hide the item there instead.
-    if (!isRemote()) {
-      const whenDoneParent = document.createElement("button");
-      whenDoneParent.className = "smore-item smore-has-sub" + (whenDoneArmed() ? " is-on" : "");
-      whenDoneParent.dataset.whenDoneParent = "1";
-      whenDoneParent.innerHTML =
-        `<i class="ph ph-moon-stars"></i>` +
-        `<span class="when-done-parent-text">${_whenDoneParentText()}</span>` +
-        `<i class="ph ph-caret-right smore-sub-caret"></i>` +
-        (whenDoneArmed() ? `<span class="smore-check-dot"></span>` : "");
-      menu.appendChild(whenDoneParent);
-
-      whenDoneParent.addEventListener("click", (e) => {
-        e.stopPropagation();
-
-        if (_whenDoneSubMenu) {
-          closeWhenDoneSub();
-          return;
-        }
-
-        const sub = document.createElement("div");
-        sub.className = "session-more-menu smore-submenu";
-        sub.innerHTML = whenDoneMenuHtml();
-        document.body.appendChild(sub);
-        _whenDoneSubMenu = sub;
-
-        // Position the submenu to the right (or left if no room) of the parent item.
-        positionSubmenu(sub, whenDoneParent);
-
-        sub.addEventListener("click", (ev) => {
-          const target = ev.target as HTMLElement;
-          const cancelBtn = target.closest("[data-when-done-cancel]");
-          if (cancelBtn) {
-            void cancelWhenDone();
-            closeWhenDoneSub();
-            return;
-          }
-          const toggle = target.closest<HTMLButtonElement>("[data-when-done]");
-          if (toggle) {
-            const action = toggle.dataset.whenDone as TerminalAction;
-            void armOrToggleWhenDone(action);
-            closeWhenDoneSub();
-          }
-        });
-      });
-    }
-
-    // ── Filter by project / Hidden (phone only) ─────────────────────────────
-    // Critique P1/P2 (todo: mobile Chats overhaul): both used to live inline
-    // in the sidebar - the project rail as a permanent chip row, Hidden
-    // pinned to the list's bottom via margin-top:auto, directly under the
-    // floating "new chat" FAB. Desktop's sidebar has room for both and no
-    // FAB to collide with, so this stays phone-only; sidebar-entries.ts
-    // still renders both inline there, byte-unchanged.
+    // ── Filter by project / Hidden ──────────────────────────────────────────
+    // On the phone the project rail and Hidden live here instead of inline in
+    // the sidebar (a permanent chip row, and a Hidden row pinned under the
+    // floating "new chat" FAB); the desktop sidebar renders both inline
+    // (sidebar-entries.ts). The isRemote() guard keeps them out of the menu
+    // in any non-phone harness mount.
     if (isRemote()) {
       const listSessions = state.sessions.filter((s) => !isJarvisOrWorker(s) && !isSubchat(s));
 
@@ -346,7 +235,6 @@ const viewMenu = createMoreMenu<[]>({
             document.dispatchEvent(new CustomEvent("discard-pending-draft"));
           },
         };
-        if (!isRemote()) void refreshDeployWorkflowCache(cwd);
       }
 
       const block = buildChatMenuBlock(ctx, close);

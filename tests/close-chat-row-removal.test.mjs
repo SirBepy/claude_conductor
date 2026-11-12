@@ -65,7 +65,6 @@ vi.mock("../src/views/sessions/when-done.ts", () => ({
 vi.mock("../src/views/sessions/view-more-menu.ts", () => ({
   closeViewMoreMenu: vi.fn(),
   refreshViewMoreIndicator: vi.fn(),
-  rerenderViewMenuProtocol: vi.fn(),
   toggleViewMoreMenu: vi.fn(),
 }));
 vi.mock("../src/views/sessions/session-controls.ts", () => ({
