@@ -225,6 +225,21 @@ impl<T> NotifyGate<T> {
     }
 }
 
+impl<T> NotifyGate<T> {
+    /// The chat ended: drop its turn count and both channels' slots, so a chat
+    /// closed for good leaves nothing behind. A resumed chat starts counting again.
+    pub fn forget(&self, session_id: &str) {
+        self.turns.lock().unwrap().remove(session_id);
+        self.slots.lock().unwrap().retain(|(sid, _), _| sid != session_id);
+    }
+
+    #[cfg(test)]
+    fn tracked(&self, session_id: &str) -> (bool, usize) {
+        let slots = self.slots.lock().unwrap().keys().filter(|(sid, _)| sid == session_id).count();
+        (self.turns.lock().unwrap().contains_key(session_id), slots)
+    }
+}
+
 /// The turn that names a daemon-run chat's state; `None` for a session the
 /// registry does not know.
 pub fn turn_of(state: &DaemonState, session_id: &str) -> Option<u64> {
@@ -354,6 +369,21 @@ mod tests {
         assert!(run(&g, "s", done(g.turn("s")), "first", t0).is_some());
         g.turn_started("s");
         assert_eq!(run(&g, "s", done(g.turn("s")), "woken", t0 + secs(60)), Some("woken"));
+    }
+
+    #[test]
+    fn forgetting_a_chat_drops_its_turns_and_slots_and_no_other_chats() {
+        let g = NotifyGate::new();
+        let t0 = Instant::now();
+        g.turn_started("a");
+        g.turn_started("b");
+        g.offer("a", Channel::Sound, q(1), "x", t0);
+        g.offer("a", Channel::Push, q(1), "y", t0);
+        g.offer("b", Channel::Sound, q(1), "z", t0);
+        assert_eq!(g.tracked("a"), (true, 2));
+        g.forget("a");
+        assert_eq!(g.tracked("a"), (false, 0));
+        assert_eq!(g.tracked("b"), (true, 1), "another chat is untouched");
     }
 
     #[test]
