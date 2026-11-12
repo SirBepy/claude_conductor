@@ -354,6 +354,11 @@ pub(crate) mod tail {
         /// longer be in the model's context" by this number changing.
         #[serde(default)]
         epoch: u64,
+        /// The last usage row that was not zero: the collapse test compares
+        /// against it, so a zero row (a synthetic error entry) between a peak
+        /// and a compaction does not hide the collapse.
+        #[serde(default)]
+        last_nonzero: u64,
     }
 
     /// Occupancy below which a halving is too small to read as a compaction.
@@ -405,8 +410,11 @@ pub(crate) mod tail {
                 // one prompt late unless the marker test above fires. A zero
                 // row (a synthetic error entry) is not a collapse. A false hit
                 // costs one extra rider resend.
-                if occ > 0 && self.last.is_some_and(|prev| prev >= SHRINK_FLOOR && occ < prev / 2) {
-                    self.epoch += 1;
+                if occ > 0 {
+                    if self.last_nonzero >= SHRINK_FLOOR && occ < self.last_nonzero / 2 {
+                        self.epoch += 1;
+                    }
+                    self.last_nonzero = occ;
                 }
                 self.last = Some(occ);
                 self.max = self.max.max(occ);
@@ -881,6 +889,9 @@ mod tests {
         append(&path, &usage_line(Some("claude-opus-4-8"), 0));
         c.advance(&path, |_| false);
         assert_eq!(c.epoch(), 1, "a zero-usage row is not a collapse");
+        append(&path, &usage_line(Some("claude-opus-4-8"), 41_000));
+        c.advance(&path, |_| false);
+        assert_eq!(c.epoch(), 2, "a collapse after a zero row is still seen against the last real row");
         assert_eq!(c.status(), compute_context_status(&path));
     }
 
