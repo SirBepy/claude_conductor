@@ -65,22 +65,41 @@ export function ringSpecFor(
   }
 }
 
+/** What a Use-subchats main chat's ring needs to know about its subs. */
+export interface SubRingFacts {
+  /** At least one sub has a turn running. */
+  working: boolean;
+  /** At least one sub asks Joe something. */
+  asking: boolean;
+  /** At least one sub exists and every one has finished (none is closing). */
+  allFinished: boolean;
+  hasSubs: boolean;
+}
+
 /** The ring of a Use-subchats main chat: a plain working ring with no plan arc
- *  while the main agent works OR any sub has a turn running (`subsWorking`), so
- *  the row never reads idle while work is happening behind it. Once nothing runs
- *  the ring is the chat's own: green only while its finish is unread (`st-done`)
- *  and none once Joe has read it. It used to stay green for as long as every sub
- *  was finished, which is forever, and Joe's read of the chat never cleared it. A
- *  question or permission wait, a close and the error states draw as they do on
- *  any chat, so a parked card still reads `st-attention`. */
+ *  while the main agent works OR any sub has a turn running, so the row never
+ *  reads idle while work is happening behind it. The green done ring is for a
+ *  chat whose own turn is done AND whose subs are all finished (Joe, 2026-11-12:
+ *  "they should only glow green IF ALLLL of the subchats are done"): a sub that is
+ *  queued, paused, at its usage limit or stopped without finishing keeps the row
+ *  from green, and so does an asking one, which draws the attention pulse. Green
+ *  is also only for an unread finish (`st-done`): it used to stay for as long as
+ *  every sub was finished, which is forever, and reading the chat never cleared
+ *  it. A question or permission wait, a close and the error states draw as they
+ *  do on any chat, so a parked card still reads `st-attention`. */
 export function mainChatRingSpec(
   dotClass: string,
   question: QuestionRingInfo | null | undefined,
-  subsWorking: boolean,
+  subs: SubRingFacts,
 ): RingSpec {
   if (dotClass === "st-working") return { kind: "solid", tone: "working", glow: true };
-  // Idle or unread-done: a sub's running turn is the only thing the row has to say.
-  if (subsWorking && (dotClass === "st-your-turn" || dotClass === "st-done")) return { kind: "solid", tone: "working", glow: true };
+  if (dotClass === "st-your-turn" || dotClass === "st-done") {
+    // Idle or unread-done: a running sub is the row's news, then a sub that asks.
+    if (subs.working) return { kind: "solid", tone: "working", glow: true };
+    if (subs.asking) return { kind: "solid", tone: "attention", pulse: true };
+    // Nothing is running or asking: green only when nothing is left unfinished.
+    if (dotClass === "st-done" && subs.hasSubs && !subs.allFinished) return { kind: "none" };
+  }
   return ringSpecFor(dotClass, null, question);
 }
 

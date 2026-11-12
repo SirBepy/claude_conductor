@@ -38,28 +38,43 @@ describe("sessionSegment, Main chats", () => {
 
 describe("mainChatRingSpec", () => {
   const PLAN = [{ text: "a", status: "done" }, { text: "b", status: "active" }];
+  const facts = (over = {}) => ({ working: false, asking: false, allFinished: false, hasSubs: true, ...over });
+  const DONE_ALL = facts({ allFinished: true });
   it("is a plain working ring with no arc while the main agent works", () => {
-    expect(mainChatRingSpec("st-working", null, false)).toEqual({ kind: "solid", tone: "working", glow: true });
+    expect(mainChatRingSpec("st-working", null, facts())).toEqual({ kind: "solid", tone: "working", glow: true });
   });
   // Joe, 2026-11-12: "sometimes it goes green and never stops being green". The ring used to
   // stay green for as long as every sub was finished, which is forever once they are; reading
   // the chat (`st-your-turn`) must clear it, the way it does on any chat.
   it("goes green only while the finish is unread, and clears once Joe has read the chat", () => {
-    expect(mainChatRingSpec("st-done", null, false)).toEqual({ kind: "solid", tone: "done" });
-    expect(mainChatRingSpec("st-your-turn", null, false)).toEqual({ kind: "none" });
+    expect(mainChatRingSpec("st-done", null, DONE_ALL)).toEqual({ kind: "solid", tone: "done" });
+    expect(mainChatRingSpec("st-your-turn", null, DONE_ALL)).toEqual({ kind: "none" });
+  });
+  // Joe, 2026-11-12: "they should only glow green IF ALLLL of the subchats are done... only then".
+  it("is green only when every sub finished: one unfinished sub of several blocks it", () => {
+    expect(mainChatRingSpec("st-done", null, DONE_ALL)).toEqual({ kind: "solid", tone: "done" });
+    // Finished ones plus a queued, paused, usage-limited or stopped one: not all finished, none running.
+    expect(mainChatRingSpec("st-done", null, facts({ allFinished: false }))).toEqual({ kind: "none" });
+  });
+  it("a chat with no subs yet keeps the ordinary green for its own unread finish", () => {
+    expect(mainChatRingSpec("st-done", null, facts({ hasSubs: false }))).toEqual({ kind: "solid", tone: "done" });
   });
   it("glows while any sub works, whether the chat itself is idle or unread-done", () => {
-    expect(mainChatRingSpec("st-your-turn", null, true)).toEqual({ kind: "solid", tone: "working", glow: true });
-    expect(mainChatRingSpec("st-done", null, true)).toEqual({ kind: "solid", tone: "working", glow: true });
+    expect(mainChatRingSpec("st-your-turn", null, facts({ working: true }))).toEqual({ kind: "solid", tone: "working", glow: true });
+    expect(mainChatRingSpec("st-done", null, facts({ working: true }))).toEqual({ kind: "solid", tone: "working", glow: true });
+  });
+  it("shows the attention pulse while a sub asks, never green", () => {
+    expect(mainChatRingSpec("st-done", null, facts({ asking: true }))).toEqual({ kind: "solid", tone: "attention", pulse: true });
+    expect(mainChatRingSpec("st-your-turn", null, facts({ asking: true }))).toEqual({ kind: "solid", tone: "attention", pulse: true });
   });
   it("lets the main agent's own work outrank green, and keeps question and attention rings", () => {
-    expect(mainChatRingSpec("st-working", null, true).tone).toBe("working");
-    expect(mainChatRingSpec("st-attention", { total: 3, answered: 1 }, true)).toMatchObject({ kind: "segments", tone: "attention" });
-    expect(mainChatRingSpec("st-attention", null, false)).toEqual({ kind: "solid", tone: "attention", pulse: true });
+    expect(mainChatRingSpec("st-working", null, facts({ working: true, allFinished: true })).tone).toBe("working");
+    expect(mainChatRingSpec("st-attention", { total: 3, answered: 1 }, facts({ working: true }))).toMatchObject({ kind: "segments", tone: "attention" });
+    expect(mainChatRingSpec("st-attention", null, facts())).toEqual({ kind: "solid", tone: "attention", pulse: true });
   });
   it("never draws a plan arc", () => {
     expect(PLAN.length).toBe(2);
-    expect(mainChatRingSpec("st-working", null, false).kind).toBe("solid");
+    expect(mainChatRingSpec("st-working", null, facts()).kind).toBe("solid");
   });
 });
 

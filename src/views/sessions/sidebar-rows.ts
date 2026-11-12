@@ -172,7 +172,12 @@ function buildRowOptions(args: {
       badgeClass: "is-centred",
       extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount),
       ringHtml: ringHtml(args.mainChat
-        ? mainChatRingSpec(args.dotClass, args.question, args.mainChat.anyWorking)
+        ? mainChatRingSpec(args.dotClass, args.question, {
+            working: args.mainChat.anyWorking,
+            asking: args.mainChat.subs.some((s) => s.kind === "asking"),
+            allFinished: args.mainChat.allFinished,
+            hasSubs: args.mainChat.subs.length > 0,
+          })
         : ringSpecFor(args.dotClass, args.plan, args.question)),
       warn: args.dotClass === "st-close-failed",
       machineId: args.machine?.id ?? null,
