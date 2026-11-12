@@ -100,6 +100,10 @@ describe("draftRouteTarget", () => {
     expect(draftRouteTarget(config)?.chat.session_id).toBe("main");
   });
 
+  it("never swallows a draft that opened with its own message (a card chat, /pickup)", () => {
+    expect(draftRouteTarget({ ...config, initialMessage: "/pickup" })).toBeNull();
+  });
+
   it("goes nowhere with Plain chat instead on, for a chat on another machine, or without a main chat", () => {
     expect(draftRouteTarget({ ...config, plainChat: true })).toBeNull();
     expect(draftRouteTarget({ ...config, machineId: "peer" })).toBeNull();
