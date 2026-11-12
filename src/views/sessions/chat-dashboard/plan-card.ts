@@ -9,7 +9,7 @@
 import { escapeHtml } from "../../../shared/escape-html";
 import { localTime } from "../../../shared/formatters";
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
-import { headlineOf } from "../../../shared/chat/chat-message-kinds";
+import { bodyOf, headlineOf } from "../../../shared/chat/chat-message-kinds";
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
 import { rowMs, type IdleStatus, type PlanJob, type PlanState, type PlanStep } from "../../../shared/chat/dashboard/dashboard-model";
 import { subCountsText, type SubCounts } from "../../../shared/chat/dashboard/subs-model";
@@ -115,7 +115,12 @@ function stepsHtml(job: PlanJob, ui: PlanUi): string {
 
 /** A job's body: its lead, its steps, and its report once it has one. */
 function jobBody(job: PlanJob, ctx: PlanCtx): string {
-  const lead = job.lead?.text ? `<div class="cdash-plan-lead">${renderMarkdown(headlineOf(job.lead.text))}</div>` : "";
+  // The plan message's lines after its headline are the plan itself when Claude wrote no write_plan steps.
+  const body = job.lead?.text ? bodyOf(job.lead.text) : "";
+  const lead = job.lead?.text
+    ? `<div class="cdash-plan-lead">${renderMarkdown(headlineOf(job.lead.text))}</div>`
+      + (body ? `<div class="cdash-plan-body">${renderMarkdown(body)}</div>` : "")
+    : "";
   const result = job.result ? `<div class="cdash-result">${ctx.card(job.result)}</div>` : "";
   return `${lead}${stepsHtml(job, ctx.ui)}${result}`;
 }

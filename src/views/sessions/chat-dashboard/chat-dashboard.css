@@ -304,6 +304,29 @@
 .cdash-plan-lead p {
   margin: 0;
 }
+.cdash-plan-body {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.cdash-plan-body ul,
+.cdash-plan-body ol {
+  margin: 0;
+  padding-left: 18px;
+  list-style-position: outside;
+}
+.cdash-plan-body ul {
+  list-style-type: disc;
+}
+.cdash-plan-body ol {
+  list-style-type: decimal;
+}
+.cdash-plan-body > :first-child {
+  margin-top: 0;
+}
+.cdash-plan-body > :last-child {
+  margin-bottom: 0;
+}
 .cdash-steps {
   display: flex;
   flex-direction: column;
