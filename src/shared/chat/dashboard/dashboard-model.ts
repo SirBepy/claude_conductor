@@ -169,7 +169,10 @@ function blockerTargets(m: RenderedMessage, subs: readonly SubCardItem[] | undef
   const rows = m.subCard ? m.subCard.waiting_on : m.card?.waitingOn;
   if (rows?.length) return [...rows];
   const queued = m.subCard?.sub_id ? subs?.find((s) => s.id === m.subCard!.sub_id && s.kind === "queued") : undefined;
-  return queued?.progress.trim() ? [queued.progress.trim()] : [];
+  // The daemon words a queued sub's wait as "waiting for <sub>" or "waiting for the writer
+  // before it"; the label already says "Waiting on", so keep only what it waits on.
+  const what = queued?.progress.trim().replace(/^waiting (?:for|on) /i, "");
+  return what ? [what] : [];
 }
 
 

@@ -164,11 +164,11 @@ describe("chat dashboard model", () => {
     const card = (id, sub, extra = {}) => ({ kind: "message", text: "x", id, ts: 0, parentToolUseId: null, subCard: { id, ts: 0, parent_id: "main", kind: "blocker", sub_id: sub, verdict: "v", text: "x", ...extra } });
     const item = (id, kind, progress) => ({ id, name: id, kind, closing: false, model: "m", effort: "high", progress, startedAt: null, finishedAt: null, ring: { kind: "none" } });
     c.r.messages.push(card("c1", "s1"), card("c2", "s2"), card("c3", "s3", { waiting_on: ["the release gate"] }));
-    const d = c.dash({ subs: [item("s1", "queued", "edit slot held by Gate 2"), item("s2", "working", "step 1 of 3")] });
+    const d = c.dash({ subs: [item("s1", "queued", "waiting for Gate 2"), item("s2", "working", "step 1 of 3")] });
     // s2 is working and names nothing: it stays Joe's to read.
     expect(zone(d, "waiting").items.map((i) => i.message.id)).toEqual(["c2"]);
     expect(zone(d, "waitingElsewhere").items.map((i) => i.message.id)).toEqual(["c1", "c3"]);
-    expect(zone(d, "waitingElsewhere").label).toBe("Waiting on edit slot held by Gate 2, the release gate");
+    expect(zone(d, "waitingElsewhere").label).toBe("Waiting on Gate 2, the release gate");
   });
 
   it("draws the Subchats card from the sub list it is given, not from the transcript", () => {
