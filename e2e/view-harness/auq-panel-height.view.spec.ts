@@ -29,7 +29,6 @@ test("a short question's card height is not stretched to match a longer sibling 
         { question: "Quick pick?", header: "Quick", options: [{ label: "A" }, { label: "B" }] },
         { question: "Long one with many options?", header: "Long", options: longOptions },
       ],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

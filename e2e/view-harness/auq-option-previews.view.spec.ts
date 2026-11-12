@@ -44,7 +44,6 @@ async function openCard(page: Page, questions: Question[]): Promise<void> {
     window.__auqResult = {};
     mod.renderQuestionUI({
       questions: qs,
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

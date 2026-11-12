@@ -34,7 +34,6 @@ async function openCard(page: import("@playwright/test").Page, opts: { supportsE
         ];
     mod.renderQuestionUI({
       questions,
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

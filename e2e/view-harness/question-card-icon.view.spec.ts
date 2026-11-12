@@ -34,3 +34,29 @@ test("the live question card draws a question mark inside a chat bubble", async 
   expect(mark.x + mark.width).toBeLessThanOrEqual(bubble.x + bubble.width + 1);
   expect(mark.y + mark.height).toBeLessThanOrEqual(bubble.y + bubble.height + 1);
 });
+
+test("the read-only replay card draws the stacked icon and the transcript summary icon is primary-coloured", async ({ page }) => {
+  await mountView(page, { invoke: { list_slash_commands: [] } });
+  await page.evaluate(async () => {
+    const mod = await import("/views/sessions/permission-modal/permission-card.ts");
+    mod.showQuestionReplay({
+      kind: "question",
+      input: { questions: [{ question: "Which approach?", header: "Approach", options: [{ label: "A", description: "a" }] }] },
+    } as never);
+  });
+  const title = page.locator(".prompt-card__title .q-icon");
+  await expect(title).toHaveCount(1);
+  await expect(title.locator(".ph-question-mark")).toHaveCount(1);
+  // The summary icon's colour comes from question-icon.css now that the old `.ph:first-child` rule is gone.
+  const summary = page.locator(".question-card-summary > .q-icon");
+  await expect(summary).toHaveCount(1);
+  const [iconColor, primary] = await page.evaluate(() => {
+    const probe = document.createElement("i");
+    probe.style.color = "var(--color-primary)";
+    document.body.appendChild(probe);
+    const expected = getComputedStyle(probe).color;
+    probe.remove();
+    return [getComputedStyle(document.querySelector(".question-card-summary > .q-icon")!).color, expected];
+  });
+  expect(iconColor).toBe(primary);
+});

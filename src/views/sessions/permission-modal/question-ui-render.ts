@@ -287,7 +287,7 @@ export function createQuestionCardRenderer(deps: QuestionRenderDeps): QuestionCa
         : "";
       // Overrides the caller's icon rather than relying on that 0.45-opacity
       // badge: unplugged glyph = this card did not come from the MCP tool.
-      const titleIcon = opts.degradedBuiltin ? "ph-plugs" : opts.titleIcon;
+      const titleIcon = opts.degradedBuiltin ? "ph-plugs" : null;
       // Same header on phone and desktop (Joe, 2026-10-26): minimize sits far
       // right on both, and Skip lives on the minimized bar (collapsedHtml).
       const titleHtml = `<span class="prompt-card__title">${titleIcon ? `<i class="ph ${titleIcon}"></i>` : questionIconHtml()}</span>`;

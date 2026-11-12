@@ -77,7 +77,6 @@ test("the question card, an Answers bubble and the draft editor draw the same qu
     const ui = await import("/views/sessions/permission-modal/question-ui.ts");
     ui.renderQuestionUI({
       questions: [{ question: `${quote}\n\nShould Claude ship it?`, header: "Ship", domain: "arch", options: [{ label: "Yes" }, { label: "No" }] }],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

@@ -30,7 +30,6 @@ async function openCard(page: Page): Promise<void> {
         { question: "Which sections?", header: "Sections", multiSelect: true, options: [{ label: "Top strip" }, { label: "Kalendar" }] },
         { question: "Range?", header: "Range", options: [{ label: "6 months" }, { label: "12 months" }] },
       ],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

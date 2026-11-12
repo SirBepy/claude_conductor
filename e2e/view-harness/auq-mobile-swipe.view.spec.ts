@@ -34,7 +34,6 @@ async function openCard(page: Page): Promise<void> {
         { question: "Which approach?", header: "Approach", options: [{ label: "A" }, { label: "B" }] },
         { question: "Which features?", header: "Features", options: [{ label: "X" }, { label: "Y" }] },
       ],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

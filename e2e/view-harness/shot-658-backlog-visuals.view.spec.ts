@@ -49,7 +49,6 @@ async function renderCard(page: Page, cfg: CardCfg) {
     const mod = await import("/views/sessions/permission-modal/question-ui.ts");
     mod.renderQuestionUI({
       questions: [c.question],
-      titleIcon: "ph-chat-circle-dots",
       rightChipHtml: c.rightChipHtml,
       degradedBuiltin: c.degraded,
       submitLabel: "Submit",
@@ -92,7 +91,7 @@ test("646 - MCP and degraded question cards render differently", async ({ page }
   const mcp = await renderCard(page, { question: QUESTION, degraded: false });
   await expect(mcp).toBeVisible();
   await expect(mcp).toContainText("Which approach?");
-  await expect(mcp.locator(".prompt-card__title i")).toHaveClass(/ph-chat-circle-dots/);
+  await expect(mcp.locator(".prompt-card__title .q-icon")).toHaveCount(1);
   await expect(mcp.locator(".question-card-degraded-badge")).toHaveCount(0);
   await expect(mcp.locator(".prompt-card__tool")).toHaveCount(0);
   const mcpPng = await mcp.screenshot();

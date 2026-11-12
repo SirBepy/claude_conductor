@@ -33,7 +33,6 @@ async function openCard(page: import("@playwright/test").Page, withLightbox: boo
     window.__auqResult = {};
     questionUi.renderQuestionUI({
       questions: [{ question: "Which approach?", header: "Approach", options: [{ label: "A" }, { label: "B" }] }],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

@@ -23,7 +23,6 @@ test("a post-render reflow re-syncs the track height so the last option stays vi
     const mod = await import("/views/sessions/permission-modal/question-ui.ts");
     mod.renderQuestionUI({
       questions: [{ question: "Pick one?", options: opts }],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

@@ -25,7 +25,6 @@ test("typing a known /skill in the AUQ free-text field renders a purple cm-slash
     const mod = await import("/views/sessions/permission-modal/question-ui.ts");
     mod.renderQuestionUI({
       questions: [{ question: "Which approach?", header: "Approach", options: [{ label: "A" }, { label: "B" }] }],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",
