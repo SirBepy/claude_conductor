@@ -204,7 +204,8 @@
 
 .dr-tab {
   flex: 1;
-  padding: 6px 4px;
+  height: var(--control-h-sm);
+  padding: 0 4px;
   font: inherit;
   font-size: 12px;
   font-weight: 600;
@@ -258,7 +259,8 @@
   align-items: center;
   gap: 7px;
   width: 100%;
-  padding: 4px 6px;
+  height: var(--control-h-sm);
+  padding: 0 6px;
   text-align: left;
   font: inherit;
   font-size: 12px;
@@ -373,7 +375,8 @@
   align-items: center;
   gap: 5px;
   margin-left: 6px;
-  padding: 3px 8px;
+  height: var(--control-h-sm);
+  padding: 0 8px;
   font: inherit;
   font-size: 11.5px;
   font-weight: 600;

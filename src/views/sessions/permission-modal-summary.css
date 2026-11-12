@@ -74,7 +74,8 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 9px 10px;
+  height: var(--control-h);
+  padding: 0 10px;
   background: none;
   border: 1px dashed var(--color-border);
   border-radius: 8px;
