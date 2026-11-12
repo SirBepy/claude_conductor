@@ -2,7 +2,7 @@
 
 Developer reference for the federation feature: what each piece does, how a request travels, what
 is proven by tests, and what still needs a real two-machine check. User-facing docs live in
-`README.md` ("Multi-machine"); the module map lives in `CLAUDE.md`.
+`README.md` ("Multi-machine"); the module map lives in `docs/architecture/multi-machine.md`.
 
 ## Goals
 

@@ -281,6 +281,6 @@ the cap on reads matters.
 The project CLAUDE.md is 42K chars, loaded by every chat and every sub (about 10K tokens each) and
 re-sent to every live chat on every edit. Proposal: keep rules and commands in CLAUDE.md, move the
 module maps (subchats, multi-machine, browser, dashboard) to `docs/architecture/*.md` with a
-one-line pointer each. Strongest argument against: the maps stop subs re-reading files to find their
+one-line pointer each. Done 2026-11-12 (Joe: "Move the module maps out"): see `docs/architecture/` and `tests/claude-md-architecture.test.mjs`. Strongest argument against: the maps stop subs re-reading files to find their
 way (re-reading is one of the waste signals in 1.3), so a sub working in that area must still read
 its map; split by who needs it rather than dropping the maps.
