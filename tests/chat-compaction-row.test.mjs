@@ -166,6 +166,21 @@ describe("a compaction draws one quiet row", () => {
     expectOneQuietRow(r, container);
   });
 
+  it("a figure-less boundary delivered live and by the watcher draws one row", async () => {
+    const sid = `sess-compact-bare-${Math.random()}`;
+    const bus = makeBus();
+    globalThis.window.__TAURI__ = bus;
+    resetTransportForTests();
+    invokeRouter.queueOnce("load_history_page", { events: [userEvent(JOE, 1)], oldest_seq: 0, newest_seq: 1, has_more: false });
+    await sessionEvents.loadInitial(sid);
+    await sessionEvents.ensureWatchListener(sid);
+    const bare = { type: "compacted", pre_tokens: 0, post_tokens: 0, duration_ms: 0, trigger: "manual" };
+    bus.emit(`chat:${sid}`, { ...bare, timestamp: 0 });
+    bus.emit(`chat-watch:${sid}`, { ...bare, timestamp: 1794487235600 });
+    const { container } = rendererOver(sessionEvents.events(sid));
+    expect([...container.querySelectorAll(".compact-chip")].map((c) => c.textContent)).toEqual(["Context compacted"]);
+  });
+
   it("the same boundary delivered twice still draws one row", () => {
     const boundary = HISTORY.find((e) => e.type === "compacted");
     const { r, container } = rendererOver([userEvent(JOE, 1), assistantEvent("Noted.", 2), ...HISTORY, { ...boundary, timestamp: 0 }]);

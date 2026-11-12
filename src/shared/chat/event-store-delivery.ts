@@ -217,9 +217,10 @@ export class DeliveryPolicy {
         return `n:${ev.body}`;
       // The same boundary reaches the window live (stdout) and again from the
       // transcript (watcher, page reconcile); the figures identify it. A
-      // boundary without them identifies nothing, so it is never deduped.
+      // figure-less boundary still gets a sig: this dedup is cross-source and
+      // short-lived, so two real compactions minutes apart both survive it
+      // (the renderer's own all-time check, sameCompaction, skips those).
       case "compacted":
-        if (!Number(ev.pre_tokens) && !Number(ev.post_tokens) && !Number(ev.duration_ms)) return null;
         return `c:${ev.pre_tokens}:${ev.post_tokens}:${ev.duration_ms}`;
       default:
         return null;
