@@ -880,7 +880,7 @@ pub async fn before_continue(state: &Arc<DaemonState>, sub_id: &str) {
     if let Some(b) = blocker {
         // The sub was just told about this very conflict and is continuing to
         // resolve it, so a card saying "tell the sub" would only repeat itself.
-        if b.cause == Cause::Conflict && super::merge_followup::unresolved(sub_id) {
+        if b.cause == Cause::Conflict && super::merge_followup::was_told(sub_id) {
             return;
         }
         super::plumbing::report(state, sub_id, super::plumbing::Problem::NotUpToDate, b.text, b.points);
@@ -1796,6 +1796,22 @@ mod tests {
         assert_eq!(wakes(&st, "cont-conflict-main"), 1);
         let rec = super::super::plumbing::current(&id).unwrap();
         assert_eq!((rec.problem, rec.files), (super::super::plumbing::Problem::NotUpToDate, vec!["base.txt".to_string()]));
+    }
+
+    /// Only a sub told about this very conflict stays quiet: one whose merge waits
+    /// for another chat's files still has its stale branch reported.
+    #[tokio::test]
+    async fn a_continue_that_conflicts_while_a_merge_waits_for_files_still_wakes_the_main_chat() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (id, info) = new_sub(&st, "cont-pending", &root);
+        commit_file(Path::new(&info.path), "base.txt", "sub\n");
+        commit_file(&root, "base.txt", "peer\n");
+        super::super::pending_merges::store(&id, super::super::pending_merges::Cause::DirtyFiles, vec!["other.txt".into()]);
+        before_continue(&st, &id).await;
+        assert_eq!(wakes(&st, "cont-pending-main"), 1);
+        assert_eq!(super::super::plumbing::current(&id).unwrap().problem, super::super::plumbing::Problem::NotUpToDate);
     }
 
     // ---- setting up ---------------------------------------------------------------------------

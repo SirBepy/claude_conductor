@@ -23,7 +23,7 @@
 //! tool result, never through the wake.
 
 use crate::daemon::state::DaemonState;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// Which kind of plumbing problem a sub has.
@@ -77,32 +77,43 @@ pub struct Record {
     pub detail: String,
     /// The files git named, if any.
     pub files: Vec<String>,
+    /// Whether the main chat was woken about this kind of problem. A problem met
+    /// while the main chat handled it through the tool is recorded unwoken, so the
+    /// same kind met later on its own still wakes it.
+    pub woken: bool,
 }
 
 static PROBLEMS: Mutex<Option<HashMap<String, Record>>> = Mutex::new(None);
 
-/// Subs whose problem the main chat is handling right now through the tool: a
-/// refusal while it runs is the tool's result, not a wake.
-static QUIET: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+/// Subs whose problem the main chat is handling right now through the tool, with
+/// how many such calls are in flight: a refusal while one runs is the tool's
+/// result, not a wake. Counted, so two overlapping calls on one sub do not end
+/// each other's quiet.
+static QUIET: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
 
 /// Keeps [`report`] from waking the main chat about `sub_id` while it lives.
 pub(crate) struct QuietGuard(String);
 
 impl Drop for QuietGuard {
     fn drop(&mut self) {
-        if let Some(set) = QUIET.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
-            set.remove(&self.0);
+        if let Some(map) = QUIET.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+            if let Some(n) = map.get_mut(&self.0) {
+                *n -= 1;
+                if *n == 0 {
+                    map.remove(&self.0);
+                }
+            }
         }
     }
 }
 
 pub(crate) fn quiet(sub_id: &str) -> QuietGuard {
-    QUIET.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashSet::new).insert(sub_id.to_string());
+    *QUIET.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashMap::new).entry(sub_id.to_string()).or_insert(0) += 1;
     QuietGuard(sub_id.to_string())
 }
 
 fn is_quiet(sub_id: &str) -> bool {
-    QUIET.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id))
+    QUIET.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|m| m.contains_key(sub_id))
 }
 
 /// The problem `sub_id` has now, if any.
@@ -123,15 +134,19 @@ pub fn notice(name: &str, sub_id: &str, problem: Problem) -> String {
 }
 
 /// Records `sub_id`'s problem and wakes its main chat, once per kind: a sub whose
-/// recorded problem is the same kind only has its record updated. Returns whether
-/// it woke.
+/// main chat was already woken about the same kind only has its record updated.
+/// Returns whether it woke.
 pub fn report(state: &Arc<DaemonState>, sub_id: &str, problem: Problem, detail: String, files: Vec<String>) -> bool {
-    let first = {
+    let quiet = is_quiet(sub_id);
+    let wake = {
         let mut g = PROBLEMS.lock().unwrap_or_else(|p| p.into_inner());
-        let before = g.get_or_insert_with(HashMap::new).insert(sub_id.to_string(), Record { problem, detail, files });
-        before.is_none_or(|b| b.problem != problem)
+        let map = g.get_or_insert_with(HashMap::new);
+        let already = map.get(sub_id).is_some_and(|r| r.problem == problem && r.woken);
+        let wake = !already && !quiet;
+        map.insert(sub_id.to_string(), Record { problem, detail, files, woken: already || wake });
+        wake
     };
-    if !first || is_quiet(sub_id) {
+    if !wake {
         return false;
     }
     let Some(parent) = state.registry.get(sub_id).and_then(|i| i.subchat_of) else { return false };
@@ -246,6 +261,18 @@ mod tests {
         }
         assert!(wakes(&st, "pq-main").is_empty());
         assert!(current("pq-sub").is_some(), "still recorded for status");
+        // Two overlapping tool calls: the first to end does not end the other's quiet.
+        {
+            let _a = quiet("pq-sub");
+            {
+                let _b = quiet("pq-sub");
+            }
+            assert!(!report(&st, "pq-sub", Problem::MergeRefused, "refused again".into(), vec![]));
+        }
+        assert!(wakes(&st, "pq-main").is_empty());
+        // Met later on its own, the same kind still wakes: the tool's result was not a wake.
+        assert!(report(&st, "pq-sub", Problem::MergeRefused, "refused by the tick".into(), vec![]));
+        assert_eq!(wakes(&st, "pq-main").len(), 1);
         clear("pq-sub");
     }
 }

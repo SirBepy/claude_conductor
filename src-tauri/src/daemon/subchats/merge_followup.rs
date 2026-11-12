@@ -186,7 +186,7 @@ async fn merge_again(state: &Arc<DaemonState>, sub_id: &str) -> Option<Landing> 
 
 /// Whether the sub was told about the conflict that refused its merge: only the
 /// first one in a row is, and only with a runtime to tell it on.
-fn was_told(sub_id: &str) -> bool {
+pub(super) fn was_told(sub_id: &str) -> bool {
     TOLD.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id))
 }
 

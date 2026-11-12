@@ -729,6 +729,11 @@ fn drop_action(state: &Arc<DaemonState>, subs: &[Instance], query: &str) -> Valu
         Err(e) => return refusal(e),
     };
     if sub.ended_at.is_none() && super::merge_followup::unresolved(&sub.session_id) {
+        // A sub working again (told to resolve its conflict) merges at its next
+        // finish, so there is nothing to give up yet.
+        if !sub.subchat_finished {
+            return refusal(format!("{} is working on its refused merge and merges when it finishes, so there is nothing to drop.", label(sub)));
+        }
         let branch = super::worktree::info_of(&sub.session_id).map(|i| i.branch).unwrap_or_default();
         super::merge_followup::leave(state, &sub.session_id);
         return json!({"ok": true, "left": label(sub), "note": format!("its merge is given up: its commits stay on branch {branch}, and a sub waiting for it starts")});
@@ -1445,6 +1450,20 @@ mod tests {
         assert_eq!(v["left"], "Footer");
         assert!(!super::super::merge_followup::unresolved("tool-leave-a"));
         assert!(st.registry.get("tool-leave-a").unwrap().ended_at.is_none(), "the sub itself is not ended");
+    }
+
+    /// A sub told to resolve its conflict is working on it: dropping would claim a
+    /// merge was given up that still lands at its next finish.
+    #[tokio::test]
+    async fn drop_refuses_a_refused_merge_the_sub_is_working_on() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-busyleave");
+        sub(&st, &main, "tool-busyleave-a", "Footer", "t");
+        super::super::pending_merges::store("tool-busyleave-a", super::super::pending_merges::Cause::Refused, vec!["a.txt".into()]);
+        let v = call(&st, &main, json!({"action": "drop", "sub": "Footer"}), &sent).await;
+        assert_eq!(v["ok"], false, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("working on its refused merge"), "{v}");
+        assert!(super::super::merge_followup::unresolved("tool-busyleave-a"), "nothing was given up");
     }
 
     async fn until(mut done: impl FnMut() -> bool) -> bool {
