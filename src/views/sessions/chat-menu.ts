@@ -150,7 +150,8 @@ function makeCloseItem(ctx: ChatMenuCtx, closeMenu: () => void): HTMLButtonEleme
 /**
  * The sidebar row's right-click menu: four flat items, no submenus (Joe,
  * 2026-11-09): Copy PID, Freeze, Hide, Close. A draft row has no process to
- * freeze or hide, so it gets only Delete draft. Items come from the same
+ * freeze or hide, so it gets only Delete draft. A pinned sub's row also gets
+ * Unpin from sidemenu (the chat menu is the only other place to unpin). Items come from the same
  * builders as the full menu, so their labels, disabled reasons and actions
  * cannot drift from it.
  */
@@ -164,6 +165,8 @@ export function buildRowMenuBlock(ctx: ChatMenuCtx, closeMenu: () => void): HTML
       buildAgentItems(ctx).find((i) => i.label === "Copy PID"),
       chatItems.find((i) => /freeze chat$/i.test(i.label)),
       chatItems.find((i) => /hide chat$/i.test(i.label)),
+      // Only a pinned sub's row is in the sidemenu because of the pin, so only it needs the way out.
+      ctx.isSub && ctx.isPinned ? chatItems.find((i) => i.label === "Unpin from sidemenu") : undefined,
     ];
     for (const item of picks) {
       if (!item) continue;
