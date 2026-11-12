@@ -7,7 +7,7 @@
 
    STATE          HUE     HEX        MEANING
    ───────────────────────────────────────────────────────────────────────────
-   closing        red     #ef4444    Terminal: /close running, process dying.
+   closing        red     #ef4444    Terminal: a close held until the subs finish.
    needs-input    red     #ef4444    Claude is blocked on YOU: a question, a
                                       parked permission prompt, or attention.
                                       (question + attention share this family.)
@@ -23,12 +23,10 @@
                                       override; token reserved here so the slot
                                       is documented (sky-blue, distinct from the
                                       external azure so the two never collide).
-   error          orange  #fb923c    close_failed (todo 461): a `/close` turn
-                                      ended without the daemon confirming the
-                                      session actually closed. Also used
-                                      directly (not via --st-*) by the portrait
-                                      rate-limited dot so it doesn't duplicate
-                                      the red needs-input/closing family.
+   error          orange  #fb923c    Used directly (not via --st-*) by the
+                                      portrait rate-limited dot so it doesn't
+                                      duplicate the red needs-input/closing
+                                      family.
    ───────────────────────────────────────────────────────────────────────────
 
    Two families elsewhere in this file (and one in project-picker.css) share
@@ -86,8 +84,6 @@
   --st-rate-limited-line: rgba(239, 68, 68, 0.35);
   --st-attention:     var(--chat-state-needs-input);
   --st-attention-glow:var(--chat-state-needs-input-glow);
-  --st-close-failed:      var(--chat-state-error);
-  --st-close-failed-glow: var(--chat-state-error-glow);
   --st-external:      var(--chat-state-external);
   --st-external-glow: var(--chat-state-external-glow);
   --st-your-turn:     var(--chat-state-your-turn);

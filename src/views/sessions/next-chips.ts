@@ -3,10 +3,8 @@
 import type { Instance } from "../../types/ipc.generated";
 import { MAX_NEXT_ACTIONS } from "../../shared/chat/chat-next-actions";
 
-// The built-in /close plus the model's up to MAX_NEXT_ACTIONS replies (the tool
-// schema promises it three), so a full set of replies is never cut to two.
-export const MAX_NEXT_CHIPS = 1 + MAX_NEXT_ACTIONS;
-
+// `/close` is not a command any more, but old transcripts still carry it in their
+// stored replies, so it is dropped instead of offered.
 const CLOSE = "/close";
 
 export interface NextChipsCtx {
@@ -18,10 +16,6 @@ export interface NextChipsCtx {
   hasHeld: boolean;
   /** Replies Claude attached to its last message this turn (parseNextActions). */
   nextActions?: readonly string[];
-  /** What the open chat is to the subchats mode. A main chat is told never to close
-   *  by itself and a sub's job ends with its finish tool, so the built-in /close
-   *  offer fits neither; an ordinary chat (absent) gets it. */
-  role?: "main" | "sub";
 }
 
 /** A finished turn is `awaiting === "done"` in the registry. It is cleared on
@@ -54,16 +48,9 @@ export function withReply(draft: string, chip: string): string {
 export function nextChips(ctx: NextChipsCtx): string[] {
   if (!ctx.enabled || ctx.hasHeld || !ctx.inst || !turnFinished(ctx.inst)) return [];
   const chips: string[] = [];
-  const isClose = (action: string): boolean => action.split(/\s/, 1)[0]!.toLowerCase() === CLOSE;
-  // A main chat gets /close only when its own latest reply asks for it (its prompt
-  // keeps it open until Joe says so); a sub never does, whatever it wrote.
-  const askedClose = (ctx.nextActions ?? []).some(isClose);
-  const offerClose = ctx.role === "main" ? askedClose : ctx.role !== "sub";
-  if (offerClose) chips.push(CLOSE);
   for (const action of ctx.nextActions ?? []) {
-    // The strip already offers /close; a model-written one would duplicate it.
-    if (isClose(action)) continue;
+    if (action.split(/\s/, 1)[0]!.toLowerCase() === CLOSE) continue;
     if (!chips.some((c) => c.toLowerCase() === action.toLowerCase())) chips.push(action);
   }
-  return chips.slice(0, MAX_NEXT_CHIPS);
+  return chips.slice(0, MAX_NEXT_ACTIONS);
 }

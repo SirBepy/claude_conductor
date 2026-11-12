@@ -7,8 +7,8 @@ const done = { awaiting: "done", busy: false, closing: false, ended_at: null, fr
 const ctx = (over = {}, inst = {}) => ({ enabled: true, hasHeld: false, inst: { ...done, ...inst }, ...over });
 
 describe("nextChips", () => {
-  it("offers /close once the turn finished", () => {
-    expect(nextChips(ctx())).toEqual(["/close"]);
+  it("offers nothing of its own once the turn finished: /close is not a command", () => {
+    expect(nextChips(ctx())).toEqual([]);
   });
 
   it.each(["question", "working", "waiting", null])("offers nothing while awaiting is %s", (awaiting) => {
@@ -34,27 +34,32 @@ describe("nextChips", () => {
     expect(nextChips(ctx({ hasHeld: true }))).toEqual([]);
   });
 
-  it("lists the model's replies after /close", () => {
-    expect(nextChips(ctx({ nextActions: ["Yes, implement this", "/commit"] }))).toEqual(["/close", "Yes, implement this", "/commit"]);
+  it("lists the model's replies", () => {
+    expect(nextChips(ctx({ nextActions: ["Yes, implement this", "/commit"] }))).toEqual(["Yes, implement this", "/commit"]);
   });
 
-  it("shows all three of the model's replies after /close", () => {
-    expect(nextChips(ctx({ nextActions: ["A", "B", "C"] }))).toEqual(["/close", "A", "B", "C"]);
+  it("shows all three of the model's replies", () => {
+    expect(nextChips(ctx({ nextActions: ["A", "B", "C"] }))).toEqual(["A", "B", "C"]);
   });
 
-  it("never shows more than /close plus three replies", () => {
-    expect(nextChips(ctx({ nextActions: ["A", "B", "C", "D"] }))).toEqual(["/close", "A", "B", "C"]);
+  it("never shows more than three replies", () => {
+    expect(nextChips(ctx({ nextActions: ["A", "B", "C", "D"] }))).toEqual(["A", "B", "C"]);
   });
 
-  it("drops a model-written /close, which would duplicate the built-in one", () => {
-    expect(nextChips(ctx({ nextActions: ["/close it worked", "/CLOSE", "Go"] }))).toEqual(["/close", "Go"]);
+  it("drops a model-written /close, which an old chat still has stored", () => {
+    expect(nextChips(ctx({ nextActions: ["/close it worked", "/CLOSE", "Go"] }))).toEqual(["Go"]);
+    expect(nextChips(ctx({ nextActions: ["/close"] }))).toEqual([]);
+  });
+
+  it("keeps a reply that only starts like /close", () => {
+    expect(nextChips(ctx({ nextActions: ["/closet", "Go"] }))).toEqual(["/closet", "Go"]);
   });
 
   it("dedupes a reply that repeats another chip", () => {
-    expect(nextChips(ctx({ nextActions: ["Go", "go"] }))).toEqual(["/close", "Go"]);
+    expect(nextChips(ctx({ nextActions: ["Go", "go"] }))).toEqual(["Go"]);
   });
 
-  it("hides the model's replies on every gate that hides /close", () => {
+  it("hides the model's replies on every gate that hides the strip", () => {
     expect(nextChips(ctx({ nextActions: ["Go"] }, { awaiting: "question" }))).toEqual([]);
     expect(nextChips(ctx({ nextActions: ["Go"], enabled: false }))).toEqual([]);
     expect(nextChips(ctx({ nextActions: ["Go"], hasHeld: true }))).toEqual([]);
@@ -62,29 +67,6 @@ describe("nextChips", () => {
 
   it("offers nothing without a registry row (a draft)", () => {
     expect(nextChips({ enabled: true, hasHeld: false, inst: undefined })).toEqual([]);
-  });
-
-  // First real run: a main chat showed /close although its prompt says never to
-  // close by itself, and the same chip sat in a sub's in-place view.
-  describe("a main chat and a sub", () => {
-    it("hides the built-in /close in a main chat but keeps its replies", () => {
-      expect(nextChips(ctx({ role: "main" }))).toEqual([]);
-      expect(nextChips(ctx({ role: "main", nextActions: ["Yes, spawn it", "/commit"] }))).toEqual(["Yes, spawn it", "/commit"]);
-    });
-
-    it("shows /close in a main chat when its own latest reply asks for it", () => {
-      expect(nextChips(ctx({ role: "main", nextActions: ["/close", "Go"] }))).toEqual(["/close", "Go"]);
-      expect(nextChips(ctx({ role: "main", nextActions: ["Go", "/CLOSE now"] }))).toEqual(["/close", "Go"]);
-    });
-
-    it("never offers /close in a sub's view, whatever it wrote", () => {
-      expect(nextChips(ctx({ role: "sub" }))).toEqual([]);
-      expect(nextChips(ctx({ role: "sub", nextActions: ["/close", "Go"] }))).toEqual(["Go"]);
-    });
-
-    it("leaves an ordinary chat exactly as it was", () => {
-      expect(nextChips(ctx({ role: undefined }))).toEqual(["/close"]);
-    });
   });
 });
 

@@ -37,7 +37,7 @@ describe("ringSpecFor", () => {
     expect(ringSpecFor("st-attention", null, null)).toEqual({ kind: "solid", tone: "attention", pulse: true });
     for (const [cls, tone] of [
       ["st-waiting", "waiting"], ["st-rate-limited", "rate-limited"], ["st-external", "external"],
-      ["st-close-failed", "close-failed"], ["st-closing", "closing"],
+      ["st-closing", "closing"],
     ]) {
       expect(ringSpecFor(cls, null, null)).toEqual({ kind: "solid", tone });
     }

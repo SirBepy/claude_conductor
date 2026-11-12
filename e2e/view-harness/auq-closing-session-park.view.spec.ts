@@ -10,7 +10,7 @@ import { mountView } from "./harness";
 // Regression: since commit a3ef1d1a made the `closing` flag a daemon-registry
 // broadcast to EVERY window, isForSelectedSession's old bypass
 // (`state.sessions.some(s => s.session_id === eventSessionId && s.closing)`)
-// admitted a card for ANY session running /close into whichever chat's pane
+// admitted a card for ANY closing session into whichever chat's pane
 // happened to be on screen. Fixed by removing the bypass (gating.ts) so a
 // closing session's prompt parks and replays exactly like any other
 // non-selected session's prompt.
@@ -40,7 +40,7 @@ test.describe("view-harness / closing session's AUQ card does not bleed into the
       window.__questionModule = qm;
       window.__stateModule = sm;
 
-      // Session B is selected; session A is mid-/close (daemon-broadcast flag).
+      // Session B is selected; session A is closing (daemon-broadcast flag).
       sm.state.sessions = [
         { session_id: "sess-A", closing: true },
         { session_id: "sess-B", closing: false },

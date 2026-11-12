@@ -61,10 +61,10 @@ export function mountComposer(
     } as ChatEvent;
     sessionEvents.pushSynthetic(sessionId, optimisticEvent);
 
-    // The daemon owns the close lifecycle: it sets Instance.closing itself the
-    // moment a /close turn starts (broadcast via instances_changed, read by
-    // the sidebar) and tears the session down (mark_ended + kill process) on
-    // an explicit signal. The frontend no longer watches this turn for it.
+    // The daemon owns the close lifecycle: it sets Instance.closing itself when a
+    // main chat's close is held for its subs (broadcast via instances_changed, read
+    // by the sidebar) and tears the session down (mark_ended + kill process) on an
+    // explicit signal. The frontend does not watch this turn for it.
     const cwd = String(sess.cwd ?? ".");
 
     await sendWithFailureRecovery(sessionId, cwd, blocks, optimisticEvent);

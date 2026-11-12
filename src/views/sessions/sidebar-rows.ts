@@ -3,7 +3,7 @@ import type { Instance, MachineRef } from "../../types/ipc.generated";
 import { isRemote } from "../../shared/transport";
 import { markerToStatusClass } from "../../shared/status-icons";
 import { characterForSession } from "./session-characters";
-import { projectName, sessionSubtitle, statusDotClass, stateTooltip } from "./sessions-helpers";
+import { projectName, sessionSubtitle, statusDotClass } from "./sessions-helpers";
 import type { SessionSort } from "./sessions-helpers";
 import type { PendingNewSession, ParkedDraft } from "./state";
 import {
@@ -39,8 +39,6 @@ export interface RowOptions {
   cwd: string | null;
   /** `st-*` ring class applied to `.session-avatar` in every mode. */
   statusClass: string;
-  /** Hover text on `.session-avatar`. "" for every state but close_failed. */
-  statusTitle: string;
   avatarExtras?: LeadingExtras;
   /** Chat title, escaped plain text - the bold first line. "" for draft/parked - no name to show. */
   title: string;
@@ -73,7 +71,7 @@ export function renderSidebarRow(o: RowOptions): string {
     : `<span class="session-row-project"><span class="proj-name">${o.projectLabel}</span>${o.badges}${o.machineBadge}${o.subDots ?? ""}</span>
               ${chips}`;
   return `<li data-${o.idAttr}="${escapeHtml(o.id)}"${o.liExtraAttrs} class="${o.liClasses}">
-            ${leadingVisual(o.charId, o.statusClass, o.cwd, o.avatarExtras, o.statusTitle)}
+            ${leadingVisual(o.charId, o.statusClass, o.cwd, o.avatarExtras)}
             <div class="session-row-text${o.title ? " is-two-line" : ""}">
               ${text}
             </div>
@@ -118,8 +116,6 @@ function buildRowOptions(args: {
   projectLabel: string;
   /** Ring class for `.session-avatar` (landscape + portrait). */
   avatarStatusClass: string;
-  /** Hover text for `.session-avatar`. "" for every state but close_failed. */
-  statusTitle?: string;
   /** The `st-*` class the status ring is drawn from; differs from
    *  `avatarStatusClass` only for a closing live session. */
   dotClass: string;
@@ -167,7 +163,6 @@ function buildRowOptions(args: {
     charId: args.charId,
     cwd: args.cwd,
     statusClass: args.avatarStatusClass,
-    statusTitle: args.statusTitle ?? "",
     avatarExtras: {
       badgeClass: "is-centred",
       extra: scheduledCornerHtml(args.scheduledCount) + heldCornerHtml(args.heldCount),
@@ -179,7 +174,6 @@ function buildRowOptions(args: {
             hasSubs: args.mainChat.subs.length > 0,
           })
         : ringSpecFor(args.dotClass, args.plan, args.question)),
-      warn: args.dotClass === "st-close-failed",
       machineId: args.machine?.id ?? null,
     },
     title: escapeHtml(args.title),
@@ -236,12 +230,6 @@ export function sessionRowOptions(
     ? drainChipHtml(ctx.drainMap.get(s.session_id))
     : "";
   const statusClass = statusDotClass(s, ctx.unread, ctx.attention, ctx.question, ctx.rateLimited);
-  // Only close_failed gets a hover title today - the tooltip cascade
-  // (stateTooltip) exists for every state, but wiring the rest into the DOM
-  // is a separate concern from todo 461.
-  const statusTitle = statusClass === "st-close-failed"
-    ? stateTooltip(s, ctx.unread, ctx.attention, ctx.question, ctx.rateLimited)
-    : "";
   // Closing overrides the RING only, not statusClass/.session-avatar - statusDotClass has no closing awareness.
   const dotClass = isClosing ? "st-closing" : statusClass;
   return buildRowOptions({
@@ -260,7 +248,6 @@ export function sessionRowOptions(
     title: sessionSubtitle(s),
     projectLabel: projectName(s),
     avatarStatusClass: statusClass,
-    statusTitle,
     dotClass,
     plan: s.progress?.plan,
     question: questionProgressFor(s.session_id),

@@ -32,28 +32,6 @@
   display: none;
 }
 
-/* close_failed keeps a small warning mark bottom-left of the circle: its
-   orange ring is the same colour as rate-limited's, so the glyph is the only
-   spare channel that tells the two apart. The status RING itself lives in
-   sidebar-ring.css. */
-.sessions-list li.row-portrait .avatar-warn {
-  position: absolute;
-  left: 4px;
-  bottom: -2px;
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  border: 2px solid var(--color-surface-alt);
-  z-index: 11;
-  background: var(--st-close-failed);
-  box-shadow: 0 0 4px var(--st-close-failed-glow);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 8px;
-  color: var(--color-surface);
-}
-
 /* The ring is now the sole status signal for portrait rows - scoped to .row-portrait
    so classic keeps its stripes. 4-class specificity beats .closing.row-entering
    /-exiting (session-avatar.css) so closing-pulse's own animated box-shadow

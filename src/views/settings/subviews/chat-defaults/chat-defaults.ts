@@ -89,7 +89,7 @@ function template(models: string[], sort: SessionSort, def: { model: string; eff
             label: "Quick reply chips",
             inputId: "chatDefaultsNextChips",
             checked: chips,
-            tooltip: "After a chat finishes a turn, offer one-click replies above the message box, like /close. Click fills the box; Shift+click sends.",
+            tooltip: "After a chat finishes a turn, offer one-click replies above the message box, like /commit. Click fills the box; Shift+click sends.",
           })}
         </div>
 

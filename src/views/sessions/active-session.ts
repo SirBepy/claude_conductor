@@ -31,6 +31,7 @@ import { applyHeaderMerge } from "./mobile-header-merge";
 import { setThinkingActivity, thinkingBarHtml, wireThinkingBar } from "./session-thinking-bar";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { resolveNewChatConfig } from "./new-chat-config";
+import { closeChat } from "./close-chat";
 import { registerCta } from "../../shared/chat/cta-registry";
 import { mountStatusbar, mountRenderer } from "./active-session-mount";
 import { detachChatDashboard } from "./chat-dashboard/chat-dashboard";
@@ -46,7 +47,6 @@ import {
 
 const HEADER_STATUS_CLASSES = [
   "st-working", "st-question", "st-done", "st-your-turn", "st-external", "st-attention", "st-rate-limited",
-  "st-close-failed",
 ];
 
 /** True when opening this chat should ask the daemon's relay to attach to a
@@ -148,7 +148,7 @@ registerCta("pickup", {
     if (!sess) return;
     const project = { path: String(sess.cwd ?? ""), name: projectName(sess) };
     const config = await resolveNewChatConfig(project.path);
-    void state.composer?.sendText("/close");
+    await closeChat(sess.session_id);
     state.launchNewChatCallback?.(project, { ...config, initialMessage: "/pickup" });
   },
 });
