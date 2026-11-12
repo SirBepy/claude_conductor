@@ -42,9 +42,10 @@ function refFrom(raw: string, index: number): FileRef | null {
 // filename ending in a 2-5 character extension with a letter in it. Tokens may
 // carry `\` or `/` so a folder with a space (`C:\Users\Josip Muzic\CV.pdf`) joins
 // too. A joining word (`and`, `the`) means prose, not a name, so it stops this,
-// and so does any word before the last token that is all lowercase letters:
-// `C:\out\dir now holds a.txt` is a directory and a sentence, whereas the words
-// of a real name carry a capital, a digit or punctuation (`Muzic`, `Q3`, `-`).
+// and so do two or more all-lowercase words before the last token:
+// `C:\out\dir now holds a.txt` is a directory and a sentence. One lowercase
+// word still joins, since `meeting notes final.pdf` is a common real name; the
+// cost is that a one-word phrase (`dir holding a.txt`) still reads as a name.
 const CONTINUATION_RE = /((?: [^\s"'<>|&^%!*?:`()[\]{},;]+){1,5}?\.(?=[A-Za-z0-9]{0,4}[A-Za-z])[A-Za-z0-9]{2,5})(?![\w\\/-])/y;
 const PROSE_WORDS = new Set(["a", "an", "and", "or", "the", "to", "in", "on", "at", "as", "is", "of", "for", "with", "then", "but", "into", "from", "by", "if", "so", "also"]);
 
@@ -60,7 +61,7 @@ function spaceContinuation(text: string, end: number, raw: string): string {
   // A token opening with a separator is a second path, one opening with `-` a
   // flag (a lone `-` is a name's dash): both mean a command, not one name.
   if (tokens.some((t) => PROSE_WORDS.has(t.toLowerCase()) || /^[\\/]|^-./.test(t))) return "";
-  if (tokens.slice(0, -1).some((t) => /^[a-z]+$/.test(t))) return "";
+  if (tokens.slice(0, -1).filter((t) => /^[a-z]+$/.test(t)).length >= 2) return "";
   return m[1]!;
 }
 

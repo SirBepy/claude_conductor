@@ -249,10 +249,17 @@ describe("a path with a space in an inline code span", () => {
   it("does not swallow lowercase prose between a path and a later file name", () => {
     const names = (s) => findFileRefs(s).map((r) => r.path);
     expect(names(String.raw`C:\out\dir now holds a.txt`)).toEqual([String.raw`C:\out\dir`]);
-    expect(names("wrote /tmp/out/logs containing summary.txt")).toEqual(["/tmp/out/logs"]);
-    expect(names(String.raw`built C:\workuild produced result.json`)).toEqual([String.raw`C:\workuild`]);
+    expect(names("wrote /tmp/out/logs now containing summary.txt")).toEqual(["/tmp/out/logs"]);
+    expect(names(String.raw`built C:\work\out that produced result.json`)).toEqual([String.raw`C:\work\out`]);
     // A capitalised or punctuated name is still one file.
     expect(names(String.raw`saved C:\Docs\Quarterly Review Q3.pdf ok`)).toEqual([String.raw`C:\Docs\Quarterly Review Q3.pdf`]);
+  });
+
+  it("keeps a lowercase name of three words as one file", () => {
+    const names = (s) => findFileRefs(s).map((r) => r.path);
+    expect(names(String.raw`open C:\Docs\meeting notes final.pdf now`)).toEqual([String.raw`C:\Docs\meeting notes final.pdf`]);
+    expect(names("see /home/me/my vacation photos.jpg")).toEqual(["/home/me/my vacation photos.jpg"]);
+    expect(names(String.raw`in C:\Users\x\Downloads\annual report draft.docx`)).toEqual([String.raw`C:\Users\x\Downloads\annual report draft.docx`]);
   });
 
   it("leaves a span with markup inside it to the prose matcher", () => {
