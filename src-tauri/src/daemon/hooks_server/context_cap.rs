@@ -8,6 +8,7 @@
 //! left and landed respawns anywhere from 250k to 770k. It rides an existing
 //! turn, never a wake of its own.
 
+use crate::context_status::tail::{self, ContextCursor, CursorStore};
 use crate::daemon::state::DaemonState;
 use std::sync::Arc;
 
@@ -17,23 +18,50 @@ pub(crate) const CONTEXT_CAP_TOKENS: u64 = 150_000;
 
 const OPT_IN_SKILL: &str = "auto-respawn";
 
-pub(crate) fn render_for_injection(state: &Arc<DaemonState>, session_id: &str) -> Option<String> {
-    let path = crate::context_status::resolve_transcript(&state.registry, session_id)?;
-    note_for_transcript(&path)
+/// What one pass over the transcript tail learned about a chat.
+pub(crate) struct CapView {
+    /// The chat ran `/auto-respawn` (sticky once seen).
+    pub opted: bool,
+    status: Option<crate::context_status::ContextStatus>,
+    /// Changes whenever the chat's context was rewritten under the same session
+    /// id (a compaction, or the transcript being replaced); see `ContextCursor`.
+    pub epoch: u64,
 }
 
-fn note_for_transcript(path: &std::path::Path) -> Option<String> {
-    // The opt-in lives in the transcript itself, so it needs no stored state,
-    // survives a daemon restart, and dies with the chat: a successor has to run
-    // the skill again. It rides the occupancy score's own streaming pass, so the
-    // (tool-heavy, multi-megabyte) transcript is read once per turn and never
-    // held in memory whole; only lines naming the skill are parsed.
-    let mut opted = false;
-    let status = crate::context_status::compute_context_status_visiting(path, |line| {
-        opted = opted || line_opts_in(line);
-    })?;
-    let note = cap_note(status.occupancy)?;
-    opted.then_some(note)
+/// One cursor per session, advanced over only the bytes appended since the
+/// previous turn. A tool-heavy transcript runs to tens of megabytes and this
+/// ran on EVERY turn of every chat, opted in or not; now a turn costs its tail,
+/// and the first one after a daemon restart costs the same because the cursor
+/// (offset plus running state) is persisted.
+static CURSORS: std::sync::LazyLock<CursorStore<ContextCursor>> =
+    std::sync::LazyLock::new(|| CursorStore::new("context"));
+
+pub(crate) fn view(state: &Arc<DaemonState>, session_id: &str) -> Option<CapView> {
+    let path = crate::context_status::resolve_transcript(&state.registry, session_id)?;
+    view_of(&path, session_id, tail::cursor_dir().as_deref())
+}
+
+fn view_of(path: &std::path::Path, session_id: &str, dir: Option<&std::path::Path>) -> Option<CapView> {
+    // The opt-in lives in the transcript itself, so it dies with the chat (a
+    // successor has to run the skill again) and, being remembered in the
+    // persisted cursor, survives a daemon restart. Only lines naming the skill
+    // are parsed. The occupancy is scored from the cursor's running state, and
+    // only when the chat opted in (see `note_for_view`).
+    CURSORS.with(dir, session_id, |cursor| {
+        cursor.advance(path, line_opts_in).then(|| CapView {
+            opted: cursor.flagged(),
+            status: cursor.status(),
+            epoch: cursor.epoch(),
+        })
+    })
+}
+
+/// A chat that never opted in is answered before its occupancy is scored.
+pub(crate) fn note_for_view(view: &CapView) -> Option<String> {
+    if !view.opted {
+        return None;
+    }
+    cap_note(view.status.as_ref()?.occupancy)
 }
 
 fn cap_note(occupancy: u64) -> Option<String> {
@@ -87,6 +115,26 @@ mod tests {
             writeln!(f, "{l}").unwrap();
         }
         f
+    }
+
+    /// The cursor-based note for `path`, each file under its own session key.
+    fn note_for_transcript(path: &std::path::Path) -> Option<String> {
+        note_for_view(&view_of(path, &path.to_string_lossy(), None)?)
+    }
+
+    /// The previous implementation: one streaming pass over the whole file.
+    fn full_note(path: &std::path::Path) -> Option<String> {
+        let mut opted = false;
+        let status = crate::context_status::compute_context_status_visiting(path, |line| {
+            opted = opted || line_opts_in(line);
+        })?;
+        let note = cap_note(status.occupancy)?;
+        opted.then_some(note)
+    }
+
+    fn append(path: &std::path::Path, line: &str) {
+        let mut f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        writeln!(f, "{line}").unwrap();
     }
 
     fn opted_in(f: &tempfile::NamedTempFile) -> bool {
@@ -155,6 +203,99 @@ mod tests {
         use crate::daemon::session::new_session_map;
         use crate::daemon::settings_cache::SettingsCache;
         let state = DaemonState::new(new_session_map(), SettingsCache::new(crate::types::Settings::default()));
-        assert_eq!(render_for_injection(&state, "00000000-0000-4000-8000-00000000dead"), None);
+        assert!(view(&state, "00000000-0000-4000-8000-00000000dead").is_none());
+    }
+
+    const OPT_IN: &str = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"auto-respawn"}}]}}"#;
+
+    fn usage(tokens: u64) -> String {
+        format!(r#"{{"type":"assistant","message":{{"model":"claude-opus-4-8","usage":{{"input_tokens":{tokens}}}}}}}"#)
+    }
+
+    #[test]
+    fn reading_only_the_appended_lines_gives_the_full_reads_note_after_every_append() {
+        let f = transcript(&[r#"{"type":"user","message":{"content":"hi"}}"#]);
+        let lines = [usage(100_000), OPT_IN.to_string(), usage(120_000), "not json".into(), usage(200_000), usage(40_000), usage(260_000)];
+        assert_eq!(note_for_transcript(f.path()), full_note(f.path()));
+        for l in &lines {
+            append(f.path(), l);
+            assert_eq!(note_for_transcript(f.path()), full_note(f.path()), "after appending {l}");
+        }
+        assert!(note_for_transcript(f.path()).expect("past the cap").contains("260k"));
+    }
+
+    #[test]
+    fn an_opt_in_in_an_earlier_read_is_remembered_by_the_next_one() {
+        let f = transcript(&[OPT_IN]);
+        assert_eq!(note_for_transcript(f.path()), None, "opted in but under the cap");
+        append(f.path(), &usage(180_000));
+        assert!(note_for_transcript(f.path()).is_some(), "the opt-in lies behind the offset");
+    }
+
+    #[test]
+    fn a_shrunk_or_replaced_transcript_is_read_from_the_start() {
+        let f = transcript(&[OPT_IN, &usage(300_000)]);
+        assert!(note_for_transcript(f.path()).is_some());
+
+        // Shorter than the remembered offset.
+        std::fs::write(f.path(), format!("{}
+", usage(300_000))).unwrap();
+        assert_eq!(note_for_transcript(f.path()), None, "the new file never opted in");
+        assert_eq!(note_for_transcript(f.path()), full_note(f.path()));
+
+        // Longer than the remembered offset but a different file: only the head fingerprint tells.
+        let long: Vec<String> = std::iter::once(r#"{"type":"user","message":{"content":"a different first line"}}"#.to_string())
+            .chain(std::iter::repeat_with(|| usage(10)).take(40))
+            .chain([usage(250_000)])
+            .collect();
+        std::fs::write(f.path(), long.join("
+") + "
+").unwrap();
+        assert_eq!(note_for_transcript(f.path()), full_note(f.path()));
+        assert_eq!(note_for_transcript(f.path()), None, "still never opted in");
+    }
+
+    #[test]
+    fn a_half_written_last_line_is_left_for_the_next_read() {
+        let f = transcript(&[OPT_IN]);
+        let half = usage(250_000);
+        let mut raw = std::fs::OpenOptions::new().append(true).open(f.path()).unwrap();
+        write!(raw, "{}", &half[..half.len() - 10]).unwrap();
+        assert_eq!(note_for_transcript(f.path()), None);
+        write!(raw, "{}
+", &half[half.len() - 10..]).unwrap();
+        assert_eq!(note_for_transcript(f.path()), full_note(f.path()));
+        assert!(note_for_transcript(f.path()).is_some());
+    }
+
+    #[test]
+    fn the_opt_in_and_the_cursor_survive_a_daemon_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = transcript(&[OPT_IN, &usage(10_000)]);
+        let key = "restart-session";
+        let note = |f: &tempfile::NamedTempFile| view_of(f.path(), key, Some(dir.path())).and_then(|v| note_for_view(&v));
+        assert_eq!(note(&f), None);
+        CURSORS.forget_memory();
+        append(f.path(), &usage(210_000));
+        assert!(note(&f).expect("opt-in remembered across the restart").contains("210k"));
+        assert_eq!(note(&f), full_note(f.path()));
+    }
+
+    #[test]
+    fn a_chat_that_never_opted_in_is_answered_without_scoring_its_occupancy() {
+        let f = transcript(&[&usage(900_000)]);
+        let v = view_of(f.path(), "never-opted", None).unwrap();
+        assert!(!v.opted);
+        assert_eq!(note_for_view(&v), None);
+    }
+
+    #[test]
+    fn a_compaction_marker_changes_the_count_a_rider_keys_on() {
+        let f = transcript(&[OPT_IN]);
+        let before = view_of(f.path(), "compaction-count", None).unwrap().epoch;
+        append(f.path(), r#"{"type":"system","subtype":"compact_boundary","compactMetadata":{"preTokens":900000}}"#);
+        append(f.path(), r#"{"type":"user","message":{"content":"mentions compact_boundary in prose"}}"#);
+        let after = view_of(f.path(), "compaction-count", None).unwrap().epoch;
+        assert_eq!(after, before + 1, "a line that merely mentions the word is not a marker");
     }
 }
