@@ -387,9 +387,16 @@ export interface CompactionFigures {
   trigger: string;
 }
 
+/** True when a compaction carries figures that can identify it; a boundary
+ *  line without metadata reads as all zeros and must never match another. */
+export function hasCompactionFigures(c: CompactionFigures): boolean {
+  return c.preTokens > 0 || c.postTokens > 0 || c.durationMs > 0;
+}
+
 /** Two rows for the same compaction carry the same figures. */
 export function sameCompaction(a: CompactionFigures, b: CompactionFigures): boolean {
-  return a.preTokens === b.preTokens && a.postTokens === b.postTokens && a.durationMs === b.durationMs;
+  return hasCompactionFigures(a)
+    && a.preTokens === b.preTokens && a.postTokens === b.postTokens && a.durationMs === b.durationMs;
 }
 
 /** The compaction row's label: "Compacted 85.8k to 9.9k", or a bare

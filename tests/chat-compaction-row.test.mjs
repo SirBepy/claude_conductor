@@ -172,6 +172,14 @@ describe("a compaction draws one quiet row", () => {
     expectOneQuietRow(r, container);
   });
 
+  it("a second compaction is counted, and two without figures both draw", () => {
+    const bare = { type: "compacted", pre_tokens: 0, post_tokens: 0, duration_ms: 0, trigger: "manual", timestamp: 0 };
+    const second = { type: "compacted", pre_tokens: 52677, post_tokens: 10064, duration_ms: 19563, trigger: "manual", timestamp: 0 };
+    const { container } = rendererOver([userEvent(JOE, 1), ...HISTORY, userEvent("go on", 2), second, userEvent("more", 3), bare, userEvent("again", 4), bare]);
+    const chips = [...container.querySelectorAll(".compact-chip")].map((c) => c.textContent);
+    expect(chips).toEqual(["Compacted 85.8k to 9.9k", "Compacted 52.7k to 10.1k×2", "Context compacted×3", "Context compacted×4"]);
+  });
+
   it("an auto-compact inside a running turn joins that turn instead of splitting its footer", () => {
     const auto = { type: "compacted", pre_tokens: 160000, post_tokens: 12000, duration_ms: 30000, trigger: "auto", timestamp: 0 };
     const turnUsage = { type: "turn_usage", input_tokens: 12000, output_tokens: 300, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, total_cost_usd: 0, duration_ms: 90000, has_thinking: false, model: "m", awaiting: null, autopilot_changed: null };
