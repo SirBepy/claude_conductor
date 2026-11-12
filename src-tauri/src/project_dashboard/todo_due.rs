@@ -101,6 +101,26 @@ mod tests {
         assert_ne!(s.days[0].ids[0].repo_cwd, s.days[0].ids[1].repo_cwd);
     }
 
+    /// Timing probe on this repo's real todo folders: `cargo test --lib time_due_and_stats -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn time_due_and_stats_on_this_repo() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_string_lossy().into_owned();
+        let repos = [repo];
+        let _ = (read_items(&repos), super::super::todo_stats::read_stats(&repos));
+        let n = 20;
+        let t = std::time::Instant::now();
+        for _ in 0..n {
+            read_items(&repos);
+        }
+        let due = t.elapsed() / n;
+        let t = std::time::Instant::now();
+        for _ in 0..n {
+            super::super::todo_stats::read_stats(&repos);
+        }
+        println!("read_items {due:?} per call, read_stats {:?} per call", t.elapsed() / n);
+    }
+
     #[test]
     fn only_open_backlog_todos_with_a_valid_date_are_read() {
         let dir = tempfile::tempdir().unwrap();
