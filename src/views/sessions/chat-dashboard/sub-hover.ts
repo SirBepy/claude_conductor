@@ -73,8 +73,15 @@ function show(anchor: HTMLElement, id: string, resolve: SubHoverResolver): void 
   pending = null;
   render(anchor, id, resolve);
   // Time running and "18s ago" tick; the daemon's row only changes when the sub does.
+  // The card draws a row again when the sub's state changes, replacing the avatar under the pointer:
+  // follow it to the new one instead of dropping the card, which would not come back until the
+  // pointer left and returned.
   ticker = setInterval(() => {
-    if (!anchor.isConnected) return hideSubHover();
+    if (!anchor.isConnected) {
+      const next = document.querySelector<HTMLElement>(`.sx-av[data-sub="${CSS.escape(id)}"]`);
+      if (!next) return hideSubHover();
+      anchor = next;
+    }
     render(anchor, id, resolve);
   }, 1000);
   // The context figure is a daemon computation that arrives after the card is up.
@@ -84,6 +91,7 @@ function show(anchor: HTMLElement, id: string, resolve: SubHoverResolver): void 
       if (!r) return;
       ctxStatusCache.set(id, r);
       if (r.pct_used !== shown && current === id && anchor.isConnected) render(anchor, id, resolve);
+      // A disconnected anchor is picked up by the ticker on its next tick.
     })
     .catch(() => { /* no transcript yet: the line stays absent */ });
 }

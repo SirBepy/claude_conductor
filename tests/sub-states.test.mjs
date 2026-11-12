@@ -175,6 +175,9 @@ describe("hover card", () => {
       expect(stopped).toContain("Stopped without finishing");
       expect(stopped).toContain("Running tests");
       expect(stopped).toContain("2m ago");
+      // Nothing runs, so no clock counts up beside "Stopped without finishing".
+      expect(stopped).not.toContain("running ");
+      expect(buildSubHoverCardHtml(input(sub("a", { frozen: true })))).not.toContain("running ");
     } finally {
       vi.useRealTimers();
     }

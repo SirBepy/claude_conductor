@@ -32,7 +32,10 @@ export function openSubCardMenu(ctx: SubCardMenuCtx): HTMLElement {
 // sidebar-ctx-menu.ts, so no caller has to remember to.
 if (typeof document !== "undefined") {
   document.addEventListener("click", (e) => {
-    if (active && !active.contains(e.target as Node)) closeSubCardMenu();
+    // A nested submenu (chat-menu.ts openChildren) lives on the body, outside this menu, but a click
+    // in it is a click in the menu: closing here would strand the submenu a disabled child left open.
+    const target = e.target as HTMLElement;
+    if (active && !active.contains(target) && !target.closest?.(".chat-menu-submenu")) closeSubCardMenu();
   }, true);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && active) closeSubCardMenu();

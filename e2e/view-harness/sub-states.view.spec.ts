@@ -205,8 +205,15 @@ test.describe("honest sub states", () => {
     await expect(nested.locator(".smore-item.is-disabled")).toHaveCount(5);
     await capture(page, "sub-states-queued-menu");
 
+    // A disabled child does nothing, and neither level of the menu is torn down around it.
     await nested.locator(".smore-item", { hasText: "Pause" }).click();
     expect((await invokeCalls(page)).filter((c) => c.cmd === "freeze_session")).toHaveLength(0);
+    await expect(nested).toBeVisible();
+    await expect(menu).toBeVisible();
+    // An outside click closes both.
+    await page.mouse.click(5, 5);
+    await expect(nested).toHaveCount(0);
+    await expect(menu).toHaveCount(0);
   });
 
   test("Start now and Drop call the desktop RPCs for that sub", async ({ page }) => {
