@@ -12,9 +12,12 @@ const { stripView } = await import("../src/shared/reconnect-strip.ts");
 
 let sockets;
 class MockWebSocket {
+  static OPEN = 1;
   constructor(url) {
     this.url = url;
+    this.readyState = 0;
     this.close = vi.fn();
+    this.send = vi.fn();
     sockets.push(this);
   }
 }
@@ -28,6 +31,11 @@ function makeLocalStorage() {
     setItem: (k, v) => store.set(k, String(v)),
     removeItem: (k) => store.delete(k),
   };
+}
+
+function openSocket(ws) {
+  ws.readyState = 1;
+  ws.onopen();
 }
 
 /** A fetch that never answers but rejects like the browser when aborted. */
@@ -164,19 +172,21 @@ describe("strip copy", () => {
 });
 
 describe("global stream on resume", () => {
-  it("reconnects immediately instead of waiting out the backoff", async () => {
+  it("a closed socket is replaced at once, with no ping, instead of waiting out the backoff", async () => {
     vi.useFakeTimers();
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
     const unlisten = await new HttpTransport().listen("instances-changed", () => {});
     expect(sockets).toHaveLength(1);
-    sockets[0].onopen();
+    openSocket(sockets[0]);
     conn.markLiveUp();
     // The socket died while the phone slept: a backed-off retry is now pending.
     sockets[0].onclose();
     expect(sockets).toHaveLength(1);
 
+    sockets[0].readyState = 3;
     reconnectGlobalStreamIfStale();
     expect(sockets).toHaveLength(2);
+    expect(sockets[0].send).not.toHaveBeenCalled();
     // The pending backoff retry was cancelled, so no third socket appears.
     await vi.advanceTimersByTimeAsync(1_500);
     expect(sockets).toHaveLength(2);
@@ -187,7 +197,7 @@ describe("global stream on resume", () => {
     vi.useFakeTimers();
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
     const unlisten = await new HttpTransport().listen("instances-changed", () => {});
-    sockets[0].onopen();
+    openSocket(sockets[0]);
     sockets[0].onclose();
     // The phone slept: the wall clock moved on, no timer ran.
     vi.setSystemTime(Date.now() + 60_000);
@@ -202,10 +212,117 @@ describe("global stream on resume", () => {
     vi.useFakeTimers();
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
     const unlisten = await new HttpTransport().listen("instances-changed", () => {});
-    sockets[0].onopen();
+    openSocket(sockets[0]);
     reconnectGlobalStreamIfStale();
     expect(sockets).toHaveLength(1);
     expect(sockets[0].close).not.toHaveBeenCalled();
     unlisten();
+  });
+
+  async function staleOpenSocket() {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+    const unlisten = await new HttpTransport().listen("instances-changed", () => {});
+    openSocket(sockets[0]);
+    // The last frame is 12s old: past the 10s resume limit, inside the 15s heartbeat gap.
+    vi.setSystemTime(Date.now() + 12_000);
+    return unlisten;
+  }
+
+  it("probes a stale open socket and keeps it when a frame answers inside 3s", async () => {
+    const unlisten = await staleOpenSocket();
+    reconnectGlobalStreamIfStale();
+    expect(sockets[0].send).toHaveBeenCalledWith('{"jsonrpc":"2.0","method":"ping"}');
+    await vi.advanceTimersByTimeAsync(1_000);
+    sockets[0].onmessage({ data: '{"jsonrpc":"2.0","method":"heartbeat","params":{}}' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0].close).not.toHaveBeenCalled();
+    expect(conn.linkSnapshot().kind).toBe("ok");
+    unlisten();
+  });
+
+  it("replaces a stale open socket that stays silent for 3s after the ping", async () => {
+    const unlisten = await staleOpenSocket();
+    conn.markLiveUp();
+    reconnectGlobalStreamIfStale();
+    await vi.advanceTimersByTimeAsync(2_900);
+    expect(sockets).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sockets).toHaveLength(2);
+    expect(sockets[0].close).toHaveBeenCalled();
+    unlisten();
+  });
+
+  it("treats a throwing send as no answer and redials at once", async () => {
+    const unlisten = await staleOpenSocket();
+    sockets[0].send.mockImplementation(() => { throw new Error("dying"); });
+    reconnectGlobalStreamIfStale();
+    expect(sockets).toHaveLength(2);
+    unlisten();
+  });
+
+  it("sends one ping when resume and online land in the same tick", async () => {
+    const unlisten = await staleOpenSocket();
+    reconnectGlobalStreamIfStale();
+    reconnectGlobalStreamIfStale();
+    expect(sockets[0].send).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(3_100);
+    expect(sockets).toHaveLength(2);
+    unlisten();
+  });
+});
+
+describe("background reads", () => {
+  it("a stalled background poll never reads as slow", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+    void new HttpTransport().call("list_pending_prompts").catch(() => {});
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(conn.linkSnapshot().kind).toBe("ok");
+  });
+
+  it("a stalled read the user waits on still reads as slow", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+    void new HttpTransport().call("load_history_page", {}).catch(() => {});
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(conn.linkSnapshot().kind).toBe("slow");
+  });
+});
+
+describe("resume restarts link clocks", () => {
+  it("reports the down time from the resume, not from before the page was hidden", () => {
+    conn.markLiveUp(0);
+    conn.markLiveDown(1_000);
+    conn.noteResumed(400_000);
+    expect(conn.linkSnapshot(400_500)).toEqual({ kind: "reconnecting", elapsedMs: 500 });
+  });
+
+  it("counts an in-flight read from the resume", async () => {
+    const { LoadTracker } = await import("../src/shared/load-progress.ts");
+    conn.trackRequest("load_history_page", new LoadTracker("load_history_page", 0), 0);
+    conn.noteResumed(100_000);
+    expect(conn.linkSnapshot(101_000).kind).toBe("ok");
+    expect(conn.linkSnapshot(100_000 + conn.SLOW_REQUEST_MS + 1).kind).toBe("slow");
+  });
+});
+
+describe("load stall clock", () => {
+  it("does not fire while the link is down, and counts 8s from when it is ok again", () => {
+    const stalled = conn.createStallClock(0);
+    conn.markLiveUp(0);
+    conn.markLiveDown(0);
+    expect(stalled(10_000)).toBe(false);
+    conn.markLiveUp(10_000);
+    expect(stalled(10_000)).toBe(false);
+    expect(stalled(17_900)).toBe(false);
+    expect(stalled(18_000)).toBe(true);
+  });
+
+  it("fires after 8s of an ok link", () => {
+    const stalled = conn.createStallClock(0);
+    expect(stalled(7_900)).toBe(false);
+    expect(stalled(8_000)).toBe(true);
   });
 });

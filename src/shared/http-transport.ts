@@ -13,7 +13,7 @@ import {
   teardownGlobalStream,
 } from "./global-stream";
 import { beginLoad, readTrackedJson, type LoadTracker } from "./load-progress";
-import { reportRequestFailure, reportRequestSuccess, trackRequest } from "./connection-state";
+import { BACKGROUND_READS, reportRequestFailure, reportRequestSuccess, trackRequest } from "./connection-state";
 
 /** localStorage key holding the per-device bearer token the user pasted/paired. */
 export const REMOTE_TOKEN_KEY = "rc_token";
@@ -1089,7 +1089,7 @@ export class HttpTransport implements Transport {
     // `abandon` rather than `finish`, keeping its duration out of the median -
     // how long a 500 took says nothing about how long success takes.
     const tracker = beginLoad(method);
-    const untrack = isReadOnlyMethod(method) ? trackRequest(method, tracker) : () => {};
+    const untrack = isReadOnlyMethod(method) && !BACKGROUND_READS.has(method) ? trackRequest(method, tracker) : () => {};
     const stall = new StallTimer(timeoutMs);
     try {
       let res: Response;

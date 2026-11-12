@@ -40,4 +40,20 @@ describe("reconnect strip delay", () => {
     expect(strip()?.hidden).toBe(false);
     expect(strip()?.textContent).toContain("Reconnecting to your PC");
   });
+
+  it("restarts the grace period and the count when the page becomes visible again", () => {
+    conn.markLiveUp();
+    conn.markLiveDown();
+    vi.advanceTimersByTime(6_000);
+    expect(strip()?.hidden).toBe(false);
+    // Hidden for a long time: the strip's own tick does not run meanwhile.
+    vi.setSystemTime(Date.now() + 400_000);
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(strip()?.hidden).toBe(true);
+    vi.advanceTimersByTime(4_500);
+    expect(strip()?.hidden).toBe(true);
+    vi.advanceTimersByTime(1_000);
+    expect(strip()?.hidden).toBe(false);
+    expect(strip()?.textContent).toMatch(/Reconnecting to your PC… [56]s/);
+  });
 });

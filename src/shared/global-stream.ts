@@ -73,6 +73,9 @@ export const GLOBAL_STALE_MS = 10_000;
  *  A contract test pins the relation. */
 export const GLOBAL_WATCHDOG_STALE_MS = 35_000;
 const GLOBAL_WATCHDOG_INTERVAL_MS = 5_000;
+/** How long a probed socket gets to answer a ping with any frame. The daemon
+ *  answers at once; an older one ignores the ping, so silence means dead. */
+export const GLOBAL_PROBE_MS = 3_000;
 /** Degrade-path poll cadence, matching the interval the old per-listener poll
  *  used before this singleton existed. */
 const GLOBAL_DEGRADE_POLL_MS = 3_500;
@@ -86,6 +89,7 @@ let globalWatchdogTimer: (() => void) | undefined;
 let globalDegradePollTimer: (() => void) | undefined;
 let globalDegradePollInFlight = false;
 let globalReconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let globalProbeTimer: ReturnType<typeof setTimeout> | undefined;
 let globalResumeUnwire: (() => void) | undefined;
 /** The Transport instance that registered the currently-active global
  *  listeners. Only its `call()` can be used for the degrade-path poll (it
@@ -192,6 +196,7 @@ function connectGlobalStream(): void {
   globalWs = ws;
   ws.onmessage = (e: MessageEvent) => {
     globalLastFrameAt = Date.now();
+    clearGlobalProbe();
     markLiveUp();
     stopGlobalDegradePoll();
     let frame: { method?: string; params?: unknown };
@@ -212,6 +217,7 @@ function connectGlobalStream(): void {
   };
   ws.onclose = () => {
     if (globalWs === ws) globalWs = null;
+    clearGlobalProbe();
     if (globalWsStopped) return;
     // No live channel until the reconnect completes - degrade immediately
     // rather than waiting for the watchdog's next tick.
@@ -225,12 +231,45 @@ function connectGlobalStream(): void {
   };
 }
 
+function clearGlobalProbe(): void {
+  if (globalProbeTimer) {
+    clearTimeout(globalProbeTimer);
+    globalProbeTimer = undefined;
+  }
+}
+
 /** On resume (or the network coming back), a socket that has been silent past
- *  the stale window is dead even if `onclose` never fired, and a pending
- *  backoff retry may be up to 30s away. Both wait for nothing: reconnect now. */
+ *  the stale window may be dead even if `onclose` never fired, and a pending
+ *  backoff retry may be up to 30s away. A missing or not-open socket is
+ *  replaced at once. An open one is probed first: the daemon's heartbeat is
+ *  15s apart, so a healthy socket is routinely older than the stale window,
+ *  and any frame within `GLOBAL_PROBE_MS` of a ping proves it alive. */
 export function reconnectGlobalStreamIfStale(): void {
   if (globalWsStopped) return;
-  if (globalWs && Date.now() - globalLastFrameAt <= GLOBAL_STALE_MS) return;
+  if (globalProbeTimer) return; // one probe at a time
+  const ws = globalWs;
+  if (ws && Date.now() - globalLastFrameAt <= GLOBAL_STALE_MS) return;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send('{"jsonrpc":"2.0","method":"ping"}');
+    } catch {
+      redialGlobalStream();
+      return;
+    }
+    globalProbeTimer = setTimeout(() => {
+      globalProbeTimer = undefined;
+      // Only a socket still silent is replaced; a frame clears this timer, so
+      // reaching here means none came.
+      if (globalWs === ws) redialGlobalStream();
+    }, GLOBAL_PROBE_MS);
+    return;
+  }
+  redialGlobalStream();
+}
+
+function redialGlobalStream(): void {
+  if (globalWsStopped) return;
+  clearGlobalProbe();
   markLiveDown();
   startGlobalDegradePoll();
   globalRetryDelay = 1000;
@@ -247,8 +286,7 @@ export function reconnectGlobalStreamIfStale(): void {
     try { dead.close(); } catch { /* ignore */ }
   }
   globalWs = null;
-  // Counts the fresh socket as live until the watchdog says otherwise, so a
-  // visibilitychange and an `online` landing in the same tick dial once.
+  // Counts the fresh socket as live until the watchdog says otherwise.
   globalLastFrameAt = Date.now();
   connectGlobalStream();
 }
@@ -289,6 +327,7 @@ export function teardownGlobalStream(): void {
   if (globalWatchdogTimer) { globalWatchdogTimer(); globalWatchdogTimer = undefined; }
   if (globalResumeUnwire) { globalResumeUnwire(); globalResumeUnwire = undefined; }
   if (globalReconnectTimer) { clearTimeout(globalReconnectTimer); globalReconnectTimer = undefined; }
+  clearGlobalProbe();
   stopGlobalDegradePoll();
   if (globalWs) {
     try { globalWs.close(); } catch { /* ignore */ }

@@ -4,6 +4,7 @@
 // frontend view size budget.
 
 import { invoke } from "../../shared/ipc";
+import { createStallClock } from "../../shared/connection-state";
 import { ChatRenderer } from "../../shared/chat/chat-renderer";
 import { sessionEvents } from "../../shared/chat/event-store";
 import { mountChatLoadingOverlay, type ChatLoadingOverlay } from "../../shared/chat/chat-loading";
@@ -256,7 +257,7 @@ export async function mountRenderer(
   }, 150);
   let stallBanner: HTMLElement | null = null;
   let supersedeWatch: number | undefined;
-  const stallTimer = window.setTimeout(() => {
+  const showStallBanner = (): void => {
     if (loadSettled || state.mountId !== myMount || state.selectedId !== sessionId) return;
     // The chain this times includes the history read, two daemon-pipe calls
     // (skip marks, channel backlog) and the chunked bulk render, so a stall can
@@ -285,12 +286,20 @@ export async function mountRenderer(
       stallBanner?.remove();
       stallBanner = null;
     }, 500);
-  }, 8000);
+  };
+  // Counts only while the link is ok: on a down or slow link the strip is the
+  // message, and one read legitimately takes up to 30s there.
+  const stallDue = createStallClock();
+  const stallTimer = window.setInterval(() => {
+    if (!stallDue()) return;
+    window.clearInterval(stallTimer);
+    showStallBanner();
+  }, 500);
   const settleLoad = () => {
     doneOpen();
     loadSettled = true;
     window.clearTimeout(ringTimer);
-    window.clearTimeout(stallTimer);
+    window.clearInterval(stallTimer);
     window.clearInterval(supersedeWatch);
     supersedeWatch = undefined;
     dropRing();
