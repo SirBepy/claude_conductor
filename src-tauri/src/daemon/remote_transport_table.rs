@@ -373,6 +373,10 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // P: the phone saves the control values and page state it changes, same as
     // the desktop. Not PM: a peer must not write a preview this machine hosts.
     ("set_preview_state", P),
+    // P: a long-press on a shared mockup element on the phone messages the chat
+    // owning it, the same user-message path the phone's own sends use. Not PM: a
+    // peer must not post into this machine's chats through a preview.
+    ("message_shared_element", P),
     // Read-only: one raster image (png/jpg/gif/webp/bmp, size-capped) under a
     // registered project root, a session cwd or the chat-attachments dir.
     // The ask_user_question option previews and the status bar's

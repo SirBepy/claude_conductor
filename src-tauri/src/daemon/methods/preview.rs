@@ -71,8 +71,8 @@ pub fn register_preview(router: &mut Router, state: Arc<DaemonState>) {
     // Joe's message to one element of a shared mockup. The daemon
     // picks the chat that owns the element (a region's writer, the layout sub for
     // "shell", else the main chat), delivers `text` to it as a user message and
-    // queues one line for the main chat. Desktop pipe only: not in the transport
-    // table, so the phone and paired peers are refused.
+    // queues one line for the main chat. The transport table allows the phone
+    // (a long-press on an element) and refuses paired peers.
     {
         let state = state.clone();
         router.register("message_shared_element", move |params, _ctx| {
