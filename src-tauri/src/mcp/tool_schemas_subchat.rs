@@ -18,12 +18,12 @@ pub const TOOL_SHARED_MOCKUP: &str = "shared_mockup";
 pub fn chat_schemas() -> Vec<Value> {
     vec![shared_mockup_schema(), json!({
         "name": TOOL_SUBCHAT,
-        "description": "Only for a chat with Use subchats on: look up its subs and pass them a message (refuses with the fix when this chat has no subs, and from a sub). `list`: each sub's name, status, tier and task. `status` needs sub: its verdict, summary, facts and progress. `log`: the decisions log. `send` needs sub, or all=true for every running sub (an outside update such as a pasted Slack message). `send` passes Joe's latest message to the sub word for word, with his images; you only pick the target, never retype or summarise it. Set `text` only when Joe sent nothing to copy and you have an instruction of your own. `writes`=true when the follow-up needs the sub to edit files. A finished sub is woken with its context; a busy one gets it at its next step. `drop` needs sub: ends a sub that never started (queued), for a job no longer wanted. A sub is found by exact name, then prefix, then id; a sub that has not ended beats an ended one, and the newest wins among equal names.",
+        "description": "Only for a chat with Use subchats on: look up its subs and pass them a message (refuses with the fix when this chat has no subs, and from a sub). `list`: each sub's name, status, tier and task. `status` needs sub: its verdict, summary, facts and progress. `log`: the decisions log. `send` needs sub, or all=true for every running sub (an outside update such as a pasted Slack message). `send` passes Joe's latest message to the sub word for word, with his images; you only pick the target, never retype or summarise it. Set `text` only when Joe sent nothing to copy and you have an instruction of your own. `writes`=true when the follow-up needs the sub to edit files. A finished sub is woken with its context; a busy one gets it at its next step. `drop` needs sub: ends a sub that never started, or gives up a refused merge. `retry` needs sub: starts a sub that could not start. `merge` needs sub: lands a finished sub's refused merge. A sub is found by exact name, then prefix, then id; a sub that has not ended beats an ended one, and the newest wins among equal names.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["list", "status", "log", "send", "drop"]},
-                "sub": {"type": "string", "description": "A sub's name, a unique start of it, or its id. For status, send and drop."},
+                "action": {"type": "string", "enum": ["list", "status", "log", "send", "retry", "merge", "drop"]},
+                "sub": {"type": "string", "description": "A sub's name, a unique start of it, or its id. For status, send, retry, merge and drop."},
                 "all": {"type": "boolean", "description": "send to every running sub instead of one. Finished subs are not woken."},
                 "writes": {"type": "boolean", "description": "send: the follow-up needs the sub to edit files. Only one sub edits files at a time in a project: if another holds the writer slot this sub is queued for it, and the result says so."},
                 "text": {"type": "string", "description": "send: your own instruction, only when there is no message from Joe to copy. It reaches the sub framed as coming from the main chat."},
@@ -117,10 +117,11 @@ mod tests {
             assert!(props.contains_key(k), "{k}");
         }
         let actions: Vec<&str> = props["action"]["enum"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
-        assert_eq!(actions, ["list", "status", "log", "send", "drop"]);
+        assert_eq!(actions, ["list", "status", "log", "send", "retry", "merge", "drop"]);
         assert_eq!(s["inputSchema"]["required"], json!(["action"]));
         let d = s["description"].as_str().unwrap();
         assert!(d.contains("word for word") && d.contains("never retype"), "{d}");
+        assert!(d.contains("`retry` needs sub") && d.contains("`merge` needs sub") && d.contains("gives up a refused merge"), "{d}");
         assert!(!d.contains('\u{2014}'));
         assert!(d.chars().count() < 1100, "listed for every chat, so it stays short");
     }

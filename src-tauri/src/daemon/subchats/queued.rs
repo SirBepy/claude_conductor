@@ -159,7 +159,7 @@ mod tests {
         let id = queued_sub(&st, "qd-start");
         held::set_parked(&id, true);
         assert!(start_now(&st, &id).await.is_err());
-        assert!(held::is_held(&id), "a failed start keeps the sub queued so Try again still works");
+        assert!(held::is_held(&id), "a failed start keeps the sub queued so subchat retry still works");
         assert!(st.registry.get(&id).unwrap().ended_at.is_none());
     }
 }

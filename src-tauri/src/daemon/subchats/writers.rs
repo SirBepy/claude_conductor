@@ -443,7 +443,7 @@ pub fn release(state: &Arc<DaemonState>, sub_id: &str) {
 }
 
 /// [`release`] without forgetting a held recipe: a launch that failed keeps its
-/// held entry, so Joe's "Try again" can still start it.
+/// held entry, so the main chat's `subchat retry` can still start it.
 fn release_entry_only(state: &Arc<DaemonState>, sub_id: &str) {
     skip_queue(state, sub_id);
 }
@@ -642,7 +642,7 @@ pub(crate) async fn run_start(state: &Arc<DaemonState>, start: Start) {
             if let Err(e) = held::launch_held(state, &sub_id).await {
                 log::warn!("subchats: could not start queued sub {sub_id}: {e}");
                 // The next sub in line must not be stuck behind one that never
-                // started. The held recipe stays, so Joe's "Try again" on the card
+                // started. The held recipe stays, so the main chat's `subchat retry`
                 // still starts it (and it takes the slot again at its first write).
                 release_entry_only(state, &sub_id);
                 if let Some(entry) = held::all().into_iter().find(|h: &Held| h.sub_id == sub_id) {
@@ -1390,7 +1390,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_launch_that_fails_releases_the_slot_to_the_next_sub_keeps_the_recipe_and_asks_joe() {
+    async fn a_launch_that_fails_releases_the_slot_to_the_next_sub_keeps_the_recipe_and_tells_the_main_chat() {
         let _data = TempDataDir::new();
         let (_d, root) = project();
         let st = state();
@@ -1408,15 +1408,17 @@ mod tests {
         }
         run_start(&st, Start::Launch { sub_id: second.clone() }).await;
         // The failed start released the slot, so the third was handed it and its own
-        // launch was tried (and failed the same way): both are carded.
+        // launch was tried (and failed the same way): the main chat is told of both,
+        // and Joe gets no card about either.
         for _ in 0..50 {
             tokio::task::yield_now().await;
         }
-        let cards = st.list_prompts().await;
         for (id, what) in [(&second, "the one that failed"), (&third, "the one behind it")] {
-            assert!(cards.iter().any(|p| p["payload"]["sub_id"] == id.as_str()), "Joe is told {what} never started");
+            let rec = crate::daemon::subchats::plumbing::current(id);
+            assert!(rec.is_some_and(|r| r.problem == crate::daemon::subchats::plumbing::Problem::CouldNotStart), "the main chat is told {what} never started");
         }
-        assert!(held::is_held(&second), "the recipe stays, so Try again can start it");
+        assert!(st.list_prompts().await.is_empty(), "no card for Joe");
+        assert!(held::is_held(&second), "the recipe stays, so subchat retry can start it");
         assert_ne!(holder_of(&root).as_deref(), Some(second.as_str()));
     }
 

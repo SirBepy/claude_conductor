@@ -1,16 +1,18 @@
-//! What a refused worktree merge sets in motion, beyond the `blocker` card.
+//! What a refused worktree merge sets in motion. None of it raises a card for
+//! Joe: a refused merge is app plumbing (Joe, 2026-11-12), so it is either fixed
+//! by code or handed to the main chat (`plumbing`).
 //!
-//! A refusal is one of two kinds of problem. The sub can fix a conflict between
-//! its commits and the target, so it is told at once, through [`super::continue_sub`],
-//! to rebase, resolve and finish again. Nothing the sub does can fix the main
-//! checkout (uncommitted changes in a file the merge would change, or a switched
-//! branch), so that one goes to Joe on a card whose answers the code carries out:
-//! "Merge again" retries the merge by code, with no sub turn and no main-agent
-//! turn. Nothing here wakes the main agent.
-//!
-//! A second conflict in a row means telling the sub did not work, and goes to
-//! Joe the same way. The raised cards are never persisted (see `cards`), so after
-//! a restart the finish card's "not merged" chip is what is left of a refusal.
+//! - A conflict between the sub's commits and the target is the sub's to fix, so
+//!   the first one is told to it at once, through [`super::continue_sub`], to
+//!   rebase, resolve and finish again. A second conflict in a row, or a sub that
+//!   could not be told, wakes the main chat.
+//! - Uncommitted changes in the main checkout in a file the merge would change
+//!   belong to another chat mid-edit, which nobody should be asked about: the
+//!   merge is kept pending on disk (`pending_merges`) and the 60 second tick lands
+//!   it, by the same code as `subchat merge`, once none of those files is dirty.
+//! - Anything else (a switched branch, an ignored local file in the way, git
+//!   refusing the fast-forward) wakes the main chat, which lands it with
+//!   `subchat merge` once fixed, or leaves the commits on the branch with `drop`.
 //!
 //! Off the runtime: the merge runs on its own thread. [`super::worktree::defer`]
 //! enters the runtime that called `on_finished` on that thread, which is what lets
@@ -18,29 +20,23 @@
 
 use super::brief::WorktreeInfo;
 use super::card_log::{self, BlockerCard};
-use super::cards::{self, CardAnswer, CardOption, RaisedCard};
+use super::pending_merges;
+use super::plumbing::{self, Problem};
 use super::worktree::{self, Blocked, Cause, Landing};
 use crate::daemon::state::DaemonState;
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
-use std::pin::Pin;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-/// `card_kind` of the card for a conflict the sub did not resolve.
-pub const CONFLICT_KIND: &str = "subchat_conflict";
-/// `card_kind` of the card for a refusal only Joe can clear.
-pub const REFUSED_KIND: &str = "subchat_merge_refused";
-pub const TRY_AGAIN: &str = "Have it try again";
-pub const MERGE_AGAIN: &str = "Merge again";
-pub const LEAVE_IT: &str = "Leave it";
-
 /// Refused merges in a row per sub, counted from the first conflict until a
-/// landing, Joe's "Leave it" or the sub ending.
+/// landing, the main chat's `drop` or the sub ending.
 static CONFLICTS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
 
 /// Subs whose commits are not in the target and whose refusal is still being
-/// handled (told, or a card open). A sub waiting on one of these with `after`
-/// keeps waiting: starting on a base that did not land would build on the wrong code.
+/// handled (told, pending, or with the main chat). A sub waiting on one of these
+/// with `after` keeps waiting: starting on a base that did not land would build on
+/// the wrong code. A pending merge counts from its file, so that holds across a
+/// restart.
 static UNRESOLVED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
 fn bump_conflicts(sub_id: &str) -> u32 {
@@ -62,20 +58,24 @@ fn set_unresolved(sub_id: &str, on: bool) {
 
 /// Whether `sub_id`'s refused merge is still being handled.
 pub fn unresolved(sub_id: &str) -> bool {
-    UNRESOLVED.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id))
+    UNRESOLVED.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id)) || pending_merges::contains(sub_id)
 }
 
-/// Forgets a sub's refusal: its commits landed, Joe left it, or the sub ended.
+/// Forgets a sub's refusal: its commits landed, the main chat left them, or the
+/// sub ended.
 pub fn forget(sub_id: &str) {
     if let Some(m) = CONFLICTS.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
         m.remove(sub_id);
     }
     set_unresolved(sub_id, false);
+    pending_merges::remove(sub_id);
+    plumbing::clear(sub_id);
 }
 
 /// A landing that was not refused.
-pub(super) fn on_landed(sub_id: &str) {
+pub(super) fn on_landed(state: &Arc<DaemonState>, sub_id: &str) {
     forget(sub_id);
+    plumbing::resolved(state, sub_id);
 }
 
 /// What a sub is told when its commits conflict with the target. Built here from
@@ -84,15 +84,6 @@ pub fn tell_text(info: &WorktreeInfo, files: &[String]) -> String {
     let list = if files.is_empty() { "the files git named".to_string() } else { files.join(", ") };
     format!(
         "Your commits could not be merged into {t}: branch {b} conflicts with it in {list}. In your worktree run git rebase {t}, resolve the conflicts, finish the rebase, commit, and call finish_subchat again: it merges when you finish. This is routine, so resolve it yourself and do not ask Joe unless a conflict is a real choice.",
-        t = info.target,
-        b = info.branch,
-    )
-}
-
-/// The sentence the `blocker` card carries once the sub has been told.
-fn told_card_text(info: &WorktreeInfo) -> String {
-    format!(
-        "Its commits conflict with {t}. Nothing was merged, and its worktree keeps every commit. The sub was told to rebase branch {b} on {t}, resolve the conflict, commit and finish again, and is handling it: it merges when it finishes.",
         t = info.target,
         b = info.branch,
     )
@@ -110,203 +101,68 @@ async fn send_to_sub(state: &Arc<DaemonState>, sub_id: &str, text: &str) -> Resu
     super::resume::continue_sub(state, sub_id, text).await.map_err(|e| e.to_string())
 }
 
-/// Handles a refused landing. Returns the `blocker` card to draw, or `None` when
-/// a real card took its place. With no runtime to run the follow-up on (a plain
-/// test thread), the refusal is the old passive card.
-pub(super) fn on_blocked(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo, b: &Blocked) -> Option<Blocked> {
-    let Ok(handle) = tokio::runtime::Handle::try_current() else { return Some(b.clone()) };
-    let (state, id, info_owned) = (state.clone(), sub_id.to_string(), info.clone());
+/// Handles a refused landing. Nothing here draws a card for Joe.
+pub(super) fn on_blocked(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo, b: &Blocked) {
+    set_unresolved(sub_id, true);
     match b.cause {
+        Cause::DirtyOverlap => {
+            pending_merges::store(sub_id, b.points.clone());
+            log::info!("subchats: the merge of {sub_id} waits for uncommitted files in the main checkout: {}", b.points.join(", "));
+        }
         Cause::Conflict => {
-            let files = b.points.clone();
-            set_unresolved(sub_id, true);
-            if bump_conflicts(sub_id) == 1 {
-                // Out of "finished" now, not when the message lands: the next lines of
-                // finishing (a close waiting on its last sub, the "all finished" card)
-                // read the row, and this sub is working again.
-                state.registry.set_subchat_finished(sub_id, false);
-                crate::daemon::machines::publish_instances_changed(&state);
-                handle.spawn(async move { tell(&state, &id, &info_owned, &files).await });
-                return Some(Blocked { text: told_card_text(info), ..b.clone() });
+            pending_merges::remove(sub_id);
+            let first = bump_conflicts(sub_id) == 1;
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) if first => {
+                    // Out of "finished" now, not when the message lands: the next lines of
+                    // finishing (a close waiting on its last sub, the "all finished" card)
+                    // read the row, and this sub is working again.
+                    state.registry.set_subchat_finished(sub_id, false);
+                    crate::daemon::machines::publish_instances_changed(state);
+                    let (state, id, info, files) = (state.clone(), sub_id.to_string(), info.clone(), b.points.clone());
+                    handle.spawn(async move { tell(&state, &id, &info, &files).await });
+                }
+                _ => {
+                    plumbing::report(state, sub_id, Problem::Conflict, b.text.clone(), b.points.clone());
+                }
             }
-            handle.spawn(async move { raise_conflict(state, id, info_owned, files, None).await });
-            None
         }
-        Cause::DirtyOverlap | Cause::BranchSwitched => {
-            set_unresolved(sub_id, true);
-            let b = b.clone();
-            handle.spawn(async move { raise_refused(state, id, info_owned, b).await });
-            None
+        Cause::BranchSwitched | Cause::Other => {
+            pending_merges::remove(sub_id);
+            plumbing::report(state, sub_id, Problem::MergeRefused, b.text.clone(), b.points.clone());
         }
-        Cause::Other => Some(b.clone()),
     }
 }
 
-/// Tells the sub, and asks Joe if that did not work.
+/// Tells the sub, and wakes the main chat if that did not work.
 async fn tell(state: &Arc<DaemonState>, sub_id: &str, info: &WorktreeInfo, files: &[String]) {
     if let Err(e) = send_to_sub(state, sub_id, &tell_text(info, files)).await {
         log::warn!("subchats: could not tell {sub_id} to resolve its conflict: {e}");
         state.registry.set_subchat_finished(sub_id, true);
         crate::daemon::machines::publish_instances_changed(state);
-        raise_conflict(state.clone(), sub_id.to_string(), info.clone(), files.to_vec(), Some(e)).await;
+        let detail = format!("Its commits conflict with {}, and it could not be told to resolve that: {e}.", info.target);
+        plumbing::report(state, sub_id, Problem::Conflict, detail, files.to_vec());
     }
 }
 
-fn sub_label(state: &DaemonState, sub_id: &str) -> String {
-    state
-        .registry
-        .get(sub_id)
-        .and_then(|i| i.name)
-        .filter(|n| !n.trim().is_empty())
-        .unwrap_or_else(|| "A sub".to_string())
-}
-
-fn files_line(files: &[String]) -> String {
-    if files.is_empty() {
-        return String::new();
-    }
-    format!("\n\nFiles: {}", files.join(", "))
-}
-
-/// The passive card, for a refusal whose real card could not be raised.
-fn fallback_card(state: &Arc<DaemonState>, sub_id: &str, b: &Blocked) {
-    card_log::on_blocker(
-        state,
-        sub_id,
-        BlockerCard { text: b.text.clone(), verdict: b.verdict.to_string(), tone: Some("bad".into()), points: b.points.clone() },
-    );
-}
-
-/// A second conflict in a row, or a sub that could not be told. Boxed because the
-/// answer can raise this card again, which makes the future contain itself.
-fn raise_conflict(
-    state: Arc<DaemonState>,
-    sub_id: String,
-    info: WorktreeInfo,
-    files: Vec<String>,
-    why: Option<String>,
-) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-    Box::pin(async move {
-        if cards::open_card_for(&state, CONFLICT_KIND, &sub_id).await.is_some() {
-            return;
-        }
-        let Some(parent) = state.registry.get(&sub_id).and_then(|i| i.subchat_of) else { return };
-        let name = sub_label(&state, &sub_id);
-        let lead = match &why {
-            Some(e) => format!("**{name}** could not be told to resolve its conflict with {t}: {e}.", t = info.target),
-            None => format!("**{name}** still conflicts with {t} after it was told to resolve it.", t = info.target),
-        };
-        let card = RaisedCard {
-            kind: CONFLICT_KIND,
-            display_session_id: parent,
-            sub_id: Some(sub_id.clone()),
-            header: "Merge conflict".to_string(),
-            question: format!(
-                "{lead}{}\n\nNothing was merged and its commits are safe on branch {}. Have it try again, or leave it?",
-                files_line(&files),
-                info.branch
-            ),
-            options: vec![
-                CardOption::new(TRY_AGAIN, "Tell it again to rebase, resolve and finish"),
-                CardOption::new(LEAVE_IT, "Do nothing; the commits stay on its branch"),
-            ],
-            domain: None,
-        };
-        match cards::raise_card(&state, card).await {
-            Ok(handle) => {
-                let (state, sub) = (state.clone(), sub_id.clone());
-                handle.on_answer(move |answer| async move { answer_conflict(state, sub, info, files, answer).await });
-            }
-            Err(e) => {
-                log::warn!("subchats: could not raise the conflict card for {sub_id}: {e}");
-                let b = Blocked {
-                    verdict: "Merge conflict",
-                    text: format!("Its commits still conflict with {}. Nothing was merged and its worktree keeps every commit.", info.target),
-                    points: files,
-                    cause: Cause::Conflict,
-                };
-                fallback_card(&state, &sub_id, &b);
-            }
-        }
-    })
-}
-
-async fn answer_conflict(state: Arc<DaemonState>, sub_id: String, info: WorktreeInfo, files: Vec<String>, answer: CardAnswer) {
-    match answer {
-        CardAnswer::Picked(pick) if pick == TRY_AGAIN => {
-            state.registry.set_subchat_finished(&sub_id, false);
-            crate::daemon::machines::publish_instances_changed(&state);
-            tell(&state, &sub_id, &info, &files).await;
-        }
-        CardAnswer::Picked(pick) if pick == LEAVE_IT => leave(&state, &sub_id),
-        _ => {}
-    }
-}
-
-/// Joe left it: nothing is pending for this sub, so whatever waited on it goes on.
-fn leave(state: &Arc<DaemonState>, sub_id: &str) {
+/// The main chat's `subchat drop` on a sub whose merge was refused: its commits
+/// stay on its branch, nothing is pending for it any more, and whatever waited for
+/// it goes on.
+pub fn leave(state: &Arc<DaemonState>, sub_id: &str) {
     forget(sub_id);
+    plumbing::resolved(state, sub_id);
     super::held::on_target_done(state);
 }
 
-/// A refusal only Joe can clear: the main checkout is dirty in a file the merge
-/// would change, or it is on another branch.
-async fn raise_refused(state: Arc<DaemonState>, sub_id: String, info: WorktreeInfo, b: Blocked) {
-    if cards::open_card_for(&state, REFUSED_KIND, &sub_id).await.is_some() {
-        return;
-    }
-    let Some(parent) = state.registry.get(&sub_id).and_then(|i| i.subchat_of) else { return };
-    let name = sub_label(&state, &sub_id);
-    let why = match b.cause {
-        Cause::DirtyOverlap => format!(
-            "The main checkout has uncommitted changes in files **{name}** also changed, so its commits were not merged into {t} and nothing there was touched.{}\n\nCommit or move those changes, then merge again.",
-            files_line(&b.points),
-            t = info.target,
-        ),
-        _ => format!(
-            "The main checkout is not on {t} any more, so **{name}**'s commits were not merged and nothing there was touched.\n\nSwitch it back to {t}, then merge again.",
-            t = info.target,
-        ),
-    };
-    let card = RaisedCard {
-        kind: REFUSED_KIND,
-        display_session_id: parent,
-        sub_id: Some(sub_id.clone()),
-        header: "Not merged".to_string(),
-        question: format!("{why}\n\nIts commits are safe on branch {}.", info.branch),
-        options: vec![
-            CardOption::new(MERGE_AGAIN, "Try the merge again now, without the sub"),
-            CardOption::new(LEAVE_IT, "Do nothing; the commits stay on its branch"),
-        ],
-        domain: None,
-    };
-    match cards::raise_card(&state, card).await {
-        Ok(handle) => {
-            let (state, sub) = (state.clone(), sub_id.clone());
-            handle.on_answer(move |answer| async move { answer_refused(state, sub, answer).await });
-        }
-        Err(e) => {
-            log::warn!("subchats: could not raise the merge card for {sub_id}: {e}");
-            fallback_card(&state, &sub_id, &b);
-        }
-    }
-}
-
-async fn answer_refused(state: Arc<DaemonState>, sub_id: String, answer: CardAnswer) {
-    match answer {
-        CardAnswer::Picked(pick) if pick == MERGE_AGAIN => merge_again(&state, &sub_id).await,
-        CardAnswer::Picked(pick) if pick == LEAVE_IT => leave(&state, &sub_id),
-        _ => {}
-    }
-}
-
-/// "Merge again": the same landing the finish ran, by code. A refusal raises its
-/// own card again (inside `land_and_report`); a landing says so in the main chat.
-async fn merge_again(state: &Arc<DaemonState>, sub_id: &str) {
-    let Some(info) = worktree::info_of(sub_id) else { return };
+/// The same landing the finish ran, by code, with no sub turn and no main-agent
+/// turn. A refusal is handled inside `land_and_report` like any other; a landing
+/// says so in the main chat's window, where the finish card said "not merged".
+/// `None` when the sub has no worktree or the merge thread panicked.
+async fn merge_again(state: &Arc<DaemonState>, sub_id: &str) -> Option<Landing> {
+    let info = worktree::info_of(sub_id)?;
     let (st, id) = (state.clone(), sub_id.to_string());
     let landing = tokio::task::spawn_blocking(move || worktree::land_counted(&st, &id, &info)).await;
-    match landing {
+    match &landing {
         Ok(Landing::Merged) => {
             let target = worktree::info_of(sub_id).map(|i| i.target).unwrap_or_default();
             card_log::on_blocker(
@@ -325,6 +181,87 @@ async fn merge_again(state: &Arc<DaemonState>, sub_id: &str) {
         Ok(Landing::Blocked(_)) => {}
         Err(e) => log::warn!("subchats: the merge retry for {sub_id} panicked: {e}"),
     }
+    landing.ok()
+}
+
+/// Whether the sub was told about the conflict that refused its merge: only the
+/// first one in a row is.
+fn was_told(sub_id: &str) -> bool {
+    CONFLICTS.lock().unwrap_or_else(|p| p.into_inner()).as_ref().and_then(|m| m.get(sub_id)).copied() == Some(1)
+}
+
+/// `subchat merge`: lands a finished worktree sub's commits now, by the code behind
+/// the old "Merge again" card. `Ok` says what happened; `Err` says why nothing was
+/// merged, in git's and the app's words (a tool result, so paths are fine here).
+pub async fn merge_now(state: &Arc<DaemonState>, sub_id: &str) -> Result<String, String> {
+    let inst = state.registry.get(sub_id).ok_or_else(|| format!("unknown session: {sub_id}"))?;
+    let name = super::tool::label(&inst);
+    let Some(info) = worktree::info_of(sub_id) else {
+        return Err(format!("{name} has no worktree of its own, so there is nothing to merge: its edits are made in the main checkout."));
+    };
+    if inst.ended_at.is_some() || inst.end_reason.is_some() {
+        return Err(format!("{name} has ended. Its commits, if any, are on branch {}.", info.branch));
+    }
+    if !inst.subchat_finished {
+        return Err(format!("{name} has not finished: it merges by itself when it finishes."));
+    }
+    // A refusal is this call's result, not a wake.
+    let _quiet = plumbing::quiet(sub_id);
+    match merge_again(state, sub_id).await {
+        Some(Landing::Merged) => Ok(format!("{name}'s commits are now in {}.", info.target)),
+        Some(Landing::Nothing) => Ok(format!("{name}'s branch {} has nothing {} lacks, so there was nothing to merge.", info.branch, info.target)),
+        Some(Landing::Blocked(b)) => {
+            let files = if b.points.is_empty() { String::new() } else { format!(" Files: {}.", b.points.join(", ")) };
+            let next = match b.cause {
+                Cause::DirtyOverlap => " It stays pending and merges by itself once those files are committed in the main checkout.",
+                Cause::Conflict if was_told(sub_id) => " The sub was told to rebase, resolve it and finish again.",
+                Cause::Conflict => " Tell the sub to resolve it with action send.",
+                _ => "",
+            };
+            Err(format!("Not merged: {}{files}{next}", b.text))
+        }
+        None => Err(format!("The merge of {name} did not run; the app log says why.")),
+    }
+}
+
+/// Whether any of `files` (paths from the repo's top) is dirty in the main checkout
+/// of `info`. A git failure counts as dirty: nothing is merged on a guess.
+fn still_dirty(info: &WorktreeInfo, files: &[String]) -> bool {
+    let repo = Path::new(&info.repo);
+    let Some((true, top)) = super::git::run_git(repo, &["rev-parse", "--show-toplevel"]) else { return true };
+    let top = String::from_utf8_lossy(&top).trim().to_string();
+    let Some(dirty) = super::git::dirty_keys(repo) else { return true };
+    files.iter().any(|f| dirty.contains(&super::git::path_key(&format!("{top}/{f}"))))
+}
+
+/// One pass of the 60 second tick over the pending merges: a sub that ended or lost
+/// its worktree is forgotten, one that is working again is left to its next finish,
+/// and one whose files are clean is landed by the same code as `subchat merge`.
+/// Returns the subs whose merge was tried.
+pub async fn retry_pending(state: &Arc<DaemonState>) -> Vec<String> {
+    let mut tried = Vec::new();
+    for p in pending_merges::all() {
+        // A row this registry does not know is left alone: the watchdog's first tick
+        // runs before boot restores the registry (`boot.rs`), and forgetting the
+        // entry then would lose the merge.
+        let Some(inst) = state.registry.get(&p.sub_id) else { continue };
+        if inst.ended_at.is_some() || inst.end_reason.is_some() || worktree::info_of(&p.sub_id).is_none() {
+            forget(&p.sub_id);
+            continue;
+        }
+        if !inst.subchat_finished {
+            continue;
+        }
+        let Some(info) = worktree::info_of(&p.sub_id) else { continue };
+        let files = p.files.clone();
+        if tokio::task::spawn_blocking(move || still_dirty(&info, &files)).await.unwrap_or(true) {
+            continue;
+        }
+        log::info!("subchats: the files that held up the merge of {} are clean, merging it", p.sub_id);
+        merge_again(state, &p.sub_id).await;
+        tried.push(p.sub_id);
+    }
+    tried
 }
 
 #[cfg(test)]
@@ -351,20 +288,27 @@ pub(crate) mod test_support {
     pub fn fail_for(sub_id: &str) {
         FAILING.lock().unwrap_or_else(|p| p.into_inner()).get_or_insert_with(HashSet::new).insert(sub_id.to_string());
     }
+
+    /// What a restart loses: the in-memory refusal state.
+    pub fn forget_memory(sub_id: &str) {
+        super::set_unresolved(sub_id, false);
+        if let Some(m) = super::CONFLICTS.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+            m.remove(sub_id);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::methods::permission::respond_question_inner;
     use crate::daemon::session::new_session_map;
     use crate::daemon::settings_cache::SettingsCache;
+    use crate::daemon::subchats::cards::{self, CardOption, RaisedCard};
     use crate::daemon::subchats::git::test_repo;
     use crate::daemon::subchats::worktree::Prepare;
     use crate::daemon::subchats::{SubchatBrief, TempDataDir};
     use crate::sessions::chat_config;
     use crate::types::Settings;
-    use serde_json::json;
     use std::path::{Path, PathBuf};
 
     const TS: &str = "2026-11-05T00:00:00Z";
@@ -419,30 +363,13 @@ mod tests {
         false
     }
 
-    async fn card(st: &Arc<DaemonState>, kind: &str, sub: &str) -> Option<String> {
-        for _ in 0..400 {
-            if let Some(id) = cards::open_card_for(st, kind, sub).await {
-                return Some(id);
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        None
-    }
-
-    async fn pick(st: &Arc<DaemonState>, id: &str, label: &str) {
-        let prompts = st.list_prompts().await;
-        let question = prompts.iter().find(|p| p["id"].as_str() == Some(id)).unwrap()["payload"]["questions"][0]["question"].as_str().unwrap().to_string();
-        let mut answers = serde_json::Map::new();
-        answers.insert(question, json!(label));
-        respond_question_inner(st, id, serde_json::Value::Object(answers), false).await;
-    }
-
-    async fn card_json(st: &Arc<DaemonState>, id: &str) -> serde_json::Value {
-        st.list_prompts().await.into_iter().find(|p| p["id"].as_str() == Some(id)).unwrap()["payload"].clone()
-    }
-
     fn blockers(main: &str) -> Vec<crate::daemon::subchats::card_log::CardEntry> {
         card_log::read(main).into_iter().filter(|c| c.kind == card_log::KIND_BLOCKER).collect()
+    }
+
+    /// The main chat's queued wakes, oldest first.
+    fn wakes(st: &DaemonState, main: &str) -> Vec<String> {
+        st.repo_channel_wakes.lock().unwrap().get(main).map(|q| q.iter().map(|l| l.text.clone()).collect()).unwrap_or_default()
     }
 
     fn conflicting(root: &Path, info: &WorktreeInfo) {
@@ -454,9 +381,14 @@ mod tests {
         tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap()
     }
 
-    /// The first real run: the card said "Tell the sub to ..." and nobody did.
+    fn read(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap_or_default().replace("\r\n", "\n")
+    }
+
+    /// The first real run: the card said "Tell the sub to ..." and nobody did. Now
+    /// the sub is told, and neither Joe nor the main chat hears of it.
     #[test]
-    fn a_conflict_tells_the_sub_at_once_and_the_card_says_so() {
+    fn a_conflict_tells_the_sub_at_once_and_bothers_nobody_else() {
         let _data = TempDataDir::new();
         rt().block_on(async {
             let (_d, root) = test_repo::init();
@@ -474,11 +406,9 @@ mod tests {
             }
             assert!(!st.registry.get(&id).unwrap().subchat_finished, "it is working on it again");
             assert!(unresolved(&id));
-            let cards = blockers(&main);
-            assert_eq!(cards.len(), 1);
-            assert!(cards[0].text.contains("was told") && cards[0].text.contains("handling it"), "{}", cards[0].text);
-            assert_eq!(cards[0].points, vec!["base.txt".to_string()]);
-            assert!(cards::open_card_for(&st, CONFLICT_KIND, &id).await.is_none(), "no question yet");
+            assert!(blockers(&main).is_empty(), "no card in Joe's window");
+            assert!(st.list_prompts().await.is_empty(), "and no question");
+            assert!(wakes(&st, &main).is_empty(), "the sub handles it, so the main chat is not woken");
         });
     }
 
@@ -489,7 +419,7 @@ mod tests {
         rt().block_on(async {
             let (_d, root) = test_repo::init();
             let st = state();
-            let (_main, id, info) = finished_sub(&st, "resolved", &root);
+            let (main, id, info) = finished_sub(&st, "resolved", &root);
             conflicting(&root, &info);
             land(&st, &id, &info).await;
             assert!(unresolved(&id));
@@ -501,17 +431,18 @@ mod tests {
             g(&wt, &["-c", "core.editor=true", "rebase", "--continue"]);
             assert_eq!(land(&st, &id, &info).await, Landing::Merged);
             assert!(!unresolved(&id));
-            // A later conflict starts the count again: the sub is told, not asked about.
+            // A later conflict starts the count again: the sub is told, the main chat is not woken.
             commit_file(&wt, "base.txt", "again\n");
             commit_file(&root, "base.txt", "peer again\n");
             land(&st, &id, &info).await;
             assert!(until(|| test_support::sent_to(&id).len() == 2).await);
-            assert!(cards::open_card_for(&st, CONFLICT_KIND, &id).await.is_none());
+            assert!(wakes(&st, &main).is_empty());
         });
     }
 
+    /// Fails on the old code, which raised a "Merge conflict" card for Joe.
     #[test]
-    fn a_second_conflict_in_a_row_raises_a_real_card_and_try_again_tells_it_once_more() {
+    fn a_second_conflict_in_a_row_wakes_the_main_chat_once_and_raises_no_card() {
         let _data = TempDataDir::new();
         rt().block_on(async {
             let (_d, root) = test_repo::init();
@@ -520,26 +451,25 @@ mod tests {
             conflicting(&root, &info);
             land(&st, &id, &info).await;
             assert!(until(|| test_support::sent_to(&id).len() == 1).await);
-            // It finishes again without having fixed it.
+            // It finishes again without having fixed it, twice.
+            st.registry.set_subchat_finished(&id, true);
+            land(&st, &id, &info).await;
             st.registry.set_subchat_finished(&id, true);
             land(&st, &id, &info).await;
 
-            let card_id = card(&st, CONFLICT_KIND, &id).await.expect("the second conflict is a real card");
-            let payload = card_json(&st, &card_id).await;
-            assert_eq!(payload["display_session_id"], main.as_str());
-            let labels: Vec<&str> = payload["questions"][0]["options"].as_array().unwrap().iter().map(|o| o["label"].as_str().unwrap()).collect();
-            assert_eq!(labels, [TRY_AGAIN, LEAVE_IT]);
-            assert!(payload["questions"][0]["question"].as_str().unwrap().contains("base.txt"));
-            assert_eq!(blockers(&main).len(), 1, "only the first conflict drew the passive card");
-
-            pick(&st, &card_id, TRY_AGAIN).await;
-            assert!(until(|| test_support::sent_to(&id).len() == 2).await, "it was told again");
-            assert!(!st.registry.get(&id).unwrap().subchat_finished);
+            assert!(st.list_prompts().await.is_empty(), "no card for Joe");
+            let woken = wakes(&st, &main);
+            assert_eq!(woken.len(), 1, "one wake per problem: {woken:?}");
+            assert!(woken[0].contains("conflict") && woken[0].contains("action send") && woken[0].contains("action merge"), "{}", woken[0]);
+            let rec = plumbing::current(&id).expect("status can show it");
+            assert_eq!((rec.problem, rec.files), (Problem::Conflict, vec!["base.txt".to_string()]));
+            assert_eq!(test_support::sent_to(&id).len(), 1, "the sub is told only the first time");
+            assert!(unresolved(&id), "a sub waiting for it keeps waiting");
         });
     }
 
     #[test]
-    fn leave_it_does_nothing_more_and_lets_a_sub_waiting_behind_it_go() {
+    fn dropping_a_refused_merge_forgets_it_and_lets_a_sub_waiting_behind_it_go() {
         let _data = TempDataDir::new();
         rt().block_on(async {
             let (_d, root) = test_repo::init();
@@ -549,36 +479,38 @@ mod tests {
             land(&st, &id, &info).await;
             st.registry.set_subchat_finished(&id, true);
             land(&st, &id, &info).await;
-            assert!(unresolved(&id));
-            let card_id = card(&st, CONFLICT_KIND, &id).await.unwrap();
-            pick(&st, &card_id, LEAVE_IT).await;
-            assert!(until(|| !unresolved(&id)).await);
+            assert!(unresolved(&id) && plumbing::current(&id).is_some());
+            leave(&st, &id);
+            assert!(!unresolved(&id) && plumbing::current(&id).is_none());
             assert_eq!(test_support::sent_to(&id).len(), 1, "the sub is not told again");
             assert!(st.registry.get(&id).unwrap().subchat_finished);
         });
     }
 
     #[test]
-    fn a_sub_that_cannot_be_told_gets_a_real_card_instead_and_stays_finished() {
+    fn a_sub_that_cannot_be_told_wakes_the_main_chat_instead_and_stays_finished() {
         let _data = TempDataDir::new();
         rt().block_on(async {
             let (_d, root) = test_repo::init();
             let st = state();
-            let (_main, id, info) = finished_sub(&st, "untold", &root);
+            let (main, id, info) = finished_sub(&st, "untold", &root);
             test_support::fail_for(&id);
             conflicting(&root, &info);
             land(&st, &id, &info).await;
-            let card_id = card(&st, CONFLICT_KIND, &id).await.expect("a card, since telling failed");
-            let q = card_json(&st, &card_id).await["questions"][0]["question"].as_str().unwrap().to_string();
-            assert!(q.contains("could not be told") && q.contains("cannot continue"), "{q}");
+            assert!(until(|| plumbing::current(&id).is_some()).await, "the main chat is handed it");
+            let rec = plumbing::current(&id).unwrap();
+            assert!(rec.detail.contains("could not be told") && rec.detail.contains("cannot continue"), "{}", rec.detail);
+            assert_eq!(wakes(&st, &main).len(), 1);
+            assert!(st.list_prompts().await.is_empty());
             assert!(st.registry.get(&id).unwrap().subchat_finished, "it did not start working");
         });
     }
 
-    /// Nothing the sub does can clear the main checkout, so the sub is not told and the
-    /// card is Joe's, with a retry by code.
+    /// Another chat's uncommitted edits in the same file: nobody is asked, the merge
+    /// waits, and the tick lands it once the file is clean, with no sub turn. Fails on
+    /// the old code, which raised a "Not merged" card for Joe.
     #[test]
-    fn a_dirty_overlap_raises_a_card_naming_the_file_and_merge_again_lands_it_with_no_sub_turn() {
+    fn a_dirty_overlap_raises_nothing_and_the_tick_lands_it_once_the_files_are_clean() {
         let _data = TempDataDir::new();
         rt().block_on(async {
             let (_d, root) = test_repo::init();
@@ -589,62 +521,160 @@ mod tests {
 
             let landing = land(&st, &id, &info).await;
             assert!(matches!(landing, Landing::Blocked(ref b) if b.cause == Cause::DirtyOverlap));
-            let card_id = card(&st, REFUSED_KIND, &id).await.expect("a real card");
-            let payload = card_json(&st, &card_id).await;
-            let labels: Vec<&str> = payload["questions"][0]["options"].as_array().unwrap().iter().map(|o| o["label"].as_str().unwrap()).collect();
-            assert_eq!(labels, [MERGE_AGAIN, LEAVE_IT]);
-            assert!(payload["questions"][0]["question"].as_str().unwrap().contains("base.txt"));
-            assert!(test_support::sent_to(&id).is_empty(), "the sub cannot fix this and is not woken");
-            assert!(blockers(&main).is_empty(), "the real card replaced the passive one");
-            assert!(unresolved(&id));
-            assert!(st.registry.get(&id).unwrap().subchat_finished);
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert!(st.list_prompts().await.is_empty(), "no card for Joe");
+            assert!(blockers(&main).is_empty(), "not even a passive one");
+            assert!(wakes(&st, &main).is_empty(), "and the main chat is not woken");
+            assert!(plumbing::current(&id).is_none());
+            assert_eq!(pending_merges::get(&id).unwrap().files, vec!["base.txt".to_string()]);
+            assert!(unresolved(&id), "a sub waiting for it keeps waiting");
 
-            // Still dirty: merging again is refused again, and asks again.
-            pick(&st, &card_id, MERGE_AGAIN).await;
-            let again = loop_until_new_card(&st, &id, &card_id).await;
+            // Still dirty: the tick leaves it alone and touches nothing.
+            assert!(retry_pending(&st).await.is_empty());
             assert_eq!(std::fs::read(root.join("base.txt")).unwrap(), b"mine, not committed\n", "not a byte of it was touched");
 
-            // Joe commits his change elsewhere; merge again lands.
-            std::fs::write(root.join("base.txt"), "base\n").unwrap();
+            // The other chat commits or reverts its edit; the next tick lands it.
             g(&root, &["checkout", "-q", "--", "base.txt"]);
-            pick(&st, &again, MERGE_AGAIN).await;
-            assert!(until(|| root.join("base.txt").is_file() && std::fs::read_to_string(root.join("base.txt")).unwrap().replace("\r\n", "\n") == "the sub's version\n").await, "merged into the main checkout");
-            assert!(until(|| !unresolved(&id)).await);
+            assert_eq!(retry_pending(&st).await, vec![id.clone()]);
+            assert_eq!(read(&root.join("base.txt")), "the sub's version\n", "merged into the main checkout");
+            assert!(!unresolved(&id) && !pending_merges::contains(&id));
             assert!(test_support::sent_to(&id).is_empty(), "no sub turn at any point");
-            assert!(until(|| blockers(&main).iter().any(|b| b.verdict == "Merged")).await, "the main chat is told it landed");
+            assert!(wakes(&st, &main).is_empty(), "no main-chat turn either");
+            assert!(blockers(&main).iter().any(|b| b.verdict == "Merged"), "the window says it landed");
         });
     }
 
-    async fn loop_until_new_card(st: &Arc<DaemonState>, sub: &str, old: &str) -> String {
-        for _ in 0..600 {
-            if let Some(id) = cards::open_card_for(st, REFUSED_KIND, sub).await {
-                if id != old {
-                    return id;
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        panic!("no new card after merging again");
+    /// The pending merge is on disk: a restart neither forgets it nor lets a sub that
+    /// waits for it start on a base that did not land.
+    #[test]
+    fn a_pending_merge_survives_a_restart_and_lands_after_it() {
+        let _data = TempDataDir::new();
+        rt().block_on(async {
+            let (_d, root) = test_repo::init();
+            let before = state();
+            let (_main, id, info) = finished_sub(&before, "restart", &root);
+            commit_file(Path::new(&info.path), "base.txt", "the sub's version\n");
+            std::fs::write(root.join("base.txt"), "mine, not committed\n").unwrap();
+            land(&before, &id, &info).await;
+            crate::daemon::subchats::held::test_support::finish_record(&id, "Done", None);
+            crate::sessions::persistence::save_snapshot_default(&before.registry);
+
+            // A new process: the memory is gone, the registry comes back from the snapshot.
+            test_support::forget_memory(&id);
+            let after = state();
+            let path = crate::settings::paths::interactive_sessions_file().unwrap();
+            crate::sessions::persistence::populate_registry(&after.registry, crate::sessions::persistence::load_snapshot(&path));
+            assert!(after.registry.get(&id).is_some_and(|i| i.subchat_finished));
+            assert!(unresolved(&id), "still pending after the restart");
+            assert_eq!(crate::daemon::subchats::held::after_state(&after, &id), crate::daemon::subchats::held::AfterState::Pending);
+
+            g(&root, &["checkout", "-q", "--", "base.txt"]);
+            assert_eq!(retry_pending(&after).await, vec![id.clone()]);
+            assert_eq!(read(&root.join("base.txt")), "the sub's version\n");
+            assert_eq!(crate::daemon::subchats::held::after_state(&after, &id), crate::daemon::subchats::held::AfterState::Clean);
+        });
     }
 
     #[test]
-    fn a_switched_branch_raises_a_card_and_merge_again_lands_once_it_is_switched_back() {
+    fn a_pending_merge_of_a_sub_that_ended_is_forgotten_and_one_working_again_is_left_to_its_finish() {
         let _data = TempDataDir::new();
         rt().block_on(async {
             let (_d, root) = test_repo::init();
             let st = state();
-            let (_main, id, info) = finished_sub(&st, "switched", &root);
+            let (_main, id, info) = finished_sub(&st, "working", &root);
+            commit_file(Path::new(&info.path), "base.txt", "sub\n");
+            std::fs::write(root.join("base.txt"), "dirty\n").unwrap();
+            land(&st, &id, &info).await;
+            g(&root, &["checkout", "-q", "--", "base.txt"]);
+            st.registry.set_subchat_finished(&id, false);
+            assert!(retry_pending(&st).await.is_empty(), "a sub working again merges when it finishes");
+            assert!(pending_merges::contains(&id));
+            st.registry.mark_ended(&id, crate::types::EndReason::Manual, TS);
+            assert!(retry_pending(&st).await.is_empty());
+            assert!(!pending_merges::contains(&id) && !unresolved(&id));
+        });
+    }
+
+    /// A switched branch wakes the main chat (fails on the old code, a card for Joe),
+    /// and `subchat merge` lands it once it is switched back.
+    #[test]
+    fn a_switched_branch_wakes_the_main_chat_and_merge_now_lands_it_once_switched_back() {
+        let _data = TempDataDir::new();
+        rt().block_on(async {
+            let (_d, root) = test_repo::init();
+            let st = state();
+            let (main, id, info) = finished_sub(&st, "switched", &root);
             commit_file(Path::new(&info.path), "a.txt", "sub\n");
             g(&root, &["checkout", "-q", "-b", "elsewhere"]);
             let landing = land(&st, &id, &info).await;
             assert!(matches!(landing, Landing::Blocked(ref b) if b.cause == Cause::BranchSwitched));
-            let card_id = card(&st, REFUSED_KIND, &id).await.expect("a real card");
-            let q = card_json(&st, &card_id).await["questions"][0]["question"].as_str().unwrap().to_string();
-            assert!(q.contains(&info.target), "{q}");
-            assert!(test_support::sent_to(&id).is_empty());
+            assert!(st.list_prompts().await.is_empty(), "no card for Joe");
+            let woken = wakes(&st, &main);
+            assert_eq!(woken.len(), 1);
+            assert!(woken[0].contains("merge of its commits was refused") && woken[0].contains("action merge"), "{}", woken[0]);
+            assert!(!woken[0].contains("elsewhere"), "git's words stay out of the wake");
+            assert_eq!(plumbing::current(&id).unwrap().problem, Problem::MergeRefused);
+            assert!(plumbing::current(&id).unwrap().detail.contains("elsewhere"), "status shows them");
+
+            // Still switched: the tool says why and wakes nobody again.
+            let err = merge_now(&st, &id).await.unwrap_err();
+            assert!(err.starts_with("Not merged") && err.contains("elsewhere"), "{err}");
+            assert_eq!(wakes(&st, &main).len(), 1);
+
             g(&root, &["checkout", "-q", &info.target]);
-            pick(&st, &card_id, MERGE_AGAIN).await;
-            assert!(until(|| root.join("a.txt").is_file()).await, "merged after switching back");
+            let ok = merge_now(&st, &id).await.unwrap();
+            assert!(ok.contains("now in"), "{ok}");
+            assert!(root.join("a.txt").is_file(), "merged after switching back");
+            assert!(plumbing::current(&id).is_none() && !unresolved(&id));
+            assert!(test_support::sent_to(&id).is_empty(), "no sub turn");
+        });
+    }
+
+    #[test]
+    fn merge_now_refuses_a_sub_that_is_still_working_or_has_no_worktree() {
+        let _data = TempDataDir::new();
+        rt().block_on(async {
+            let (_d, root) = test_repo::init();
+            let st = state();
+            let (_main, id, _info) = finished_sub(&st, "busy", &root);
+            st.registry.set_subchat_finished(&id, false);
+            assert!(merge_now(&st, &id).await.unwrap_err().contains("has not finished"));
+            st.registry.upsert_interactive("plain-sub", &root, "proj", TS);
+            crate::daemon::subchats::store_sub_brief("plain-sub", "busy-main");
+            assert!(merge_now(&st, "plain-sub").await.unwrap_err().contains("no worktree"));
+        });
+    }
+
+    /// A card an older build raised about a refused merge comes down once it lands.
+    #[test]
+    fn an_open_plumbing_card_closes_when_its_merge_lands() {
+        let _data = TempDataDir::new();
+        rt().block_on(async {
+            let (_d, root) = test_repo::init();
+            let st = state();
+            let (main, id, info) = finished_sub(&st, "oldcard", &root);
+            commit_file(Path::new(&info.path), "a.txt", "sub\n");
+            let card = RaisedCard {
+                kind: plumbing::OLD_CARD_KINDS[1],
+                display_session_id: main.clone(),
+                sub_id: Some(id.clone()),
+                header: "Not merged".into(),
+                question: "Merge again?".into(),
+                options: vec![CardOption::new("Merge again", "x"), CardOption::new("Leave it", "y")],
+                domain: None,
+            };
+            let _h = cards::raise_card(&st, card).await.unwrap();
+            assert!(cards::open_card_for(&st, plumbing::OLD_CARD_KINDS[1], &id).await.is_some());
+            merge_now(&st, &id).await.unwrap();
+            let mut gone = false;
+            for _ in 0..400 {
+                if st.list_prompts().await.is_empty() {
+                    gone = true;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            assert!(gone, "the card came down");
         });
     }
 
@@ -681,9 +711,9 @@ mod tests {
             let (main, target, info) = finished_sub(&st, "after-1", &root);
             commit_file(Path::new(&info.path), "a.txt", "from after-1\n");
             // after-2 is registered and held behind it, with a folder that does not exist
-            // so the start it is given fails before any child is spawned: the card it
-            // raises is the proof that the start was attempted.
-            let waiting = "after-2".to_string();
+            // so the start it is given fails before any child is spawned: the main chat
+            // being told it could not start is the proof that the start was attempted.
+            let waiting = format!("after-2-{}", uuid::Uuid::new_v4());
             st.registry.upsert_interactive(&waiting, &root, "proj", TS);
             st.registry.set_subchat_of(&waiting, Some(main.clone()));
             st.registry.set_name(&waiting, "after-2".to_string());
@@ -707,27 +737,30 @@ mod tests {
             .unwrap();
             assert!(held::is_held(&waiting));
 
-            // The sweep is the only thing that can raise this card here, and the 60 second
-            // tick is not running: if it shows up at all it came from the finish.
+            // The sweep is the only thing that can start it here, and the 60 second
+            // tick is not running: if the start shows up at all it came from the finish.
             crate::daemon::subchats::on_finished(&st, &target);
             assert!(
-                card(&st, held::CARD_KIND, &waiting).await.is_some(),
+                until(|| plumbing::current(&waiting).is_some_and(|r| r.problem == Problem::CouldNotStart)).await,
                 "the waiting sub was not started by the finish"
             );
+            assert!(st.list_prompts().await.is_empty(), "its failed start is not Joe's card");
             assert_eq!(crate::daemon::subchats::git::head(&root), crate::daemon::subchats::git::head(Path::new(&info.path)), "and what it waited for had landed");
+            plumbing::clear(&waiting);
         });
     }
 
-    /// Without a runtime to run the follow-up on, the refusal is the old passive card.
+    /// Without a runtime nobody can tell the sub, so the main chat is woken instead.
     #[test]
-    fn with_no_runtime_a_refusal_still_draws_the_passive_blocker_card() {
+    fn with_no_runtime_a_conflict_wakes_the_main_chat_and_draws_no_card() {
         let _data = TempDataDir::new();
         let (_d, root) = test_repo::init();
         let st = state();
         let (main, id, info) = finished_sub(&st, "plain-thread", &root);
         conflicting(&root, &info);
         worktree::land_and_report(&st, &id, &info);
-        assert_eq!(blockers(&main).len(), 1);
+        assert!(blockers(&main).is_empty());
+        assert_eq!(wakes(&st, &main).len(), 1);
         assert!(test_support::sent_to(&id).is_empty());
     }
 }
