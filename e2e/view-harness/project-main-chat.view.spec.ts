@@ -128,6 +128,18 @@ test.describe("view-harness / a new chat goes to the project's main chat", () =>
     expect((await invokeCalls(page)).some((c) => c.cmd === "send_message")).toBe(false);
   });
 
+  test("a draft opened with its own message (a card chat, /pickup) starts a fresh chat, not a message to the main chat", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await mountView(page, { view: "sessions", invoke: invoke([MAIN, PLAIN], ["main-1"]) });
+    await page.waitForFunction(() => typeof (window as unknown as { __launchDraftForTest?: unknown }).__launchDraftForTest === "function");
+    await page.evaluate(() => {
+      (window as unknown as { __launchDraftForTest: (p: { path: string; name: string }, c: Record<string, unknown>) => void })
+        .__launchDraftForTest({ path: "C:/Projects/alpha", name: "alpha" }, { model: "sonnet", effort: "low", accountId: "acc1", subchatsOn: true, autoAccept: false, initialMessage: "/pickup" });
+    });
+    await expect.poll(async () => (await invokeCalls(page)).some((c) => c.cmd === "start_session")).toBe(true);
+    expect((await invokeCalls(page)).some((c) => c.cmd === "send_message")).toBe(false);
+  });
+
   test("a pointer to a chat that closed is ignored", async ({ page }) => {
     const closed = { ...MAIN, ended_at: "2026-11-12T10:00:00Z" };
     await openDraft(page, [closed, PLAIN], ["main-1"]);

@@ -9,7 +9,7 @@ vi.mock("../src/shared/api.ts", () => ({ api: { listProjects: (...a) => listProj
 const { adoptSubchatsOn } = await import("../src/views/sessions/permission-modal/gating.ts");
 const { loadProjectMainChats, mainChatFor, listedAsProjectMain, setProjectMainChatsForTest, onProjectMainChatsChange } =
   await import("../src/views/sessions/project-main-chats.ts");
-const { draftRouteTarget } = await import("../src/views/sessions/draft-subchats.ts");
+const { draftRouteTarget, forceDraftPlain } = await import("../src/views/sessions/draft-subchats.ts");
 const { state } = await import("../src/views/sessions/state.ts");
 
 const inst = (over = {}) => ({
@@ -98,6 +98,14 @@ describe("draftRouteTarget", () => {
 
   it("sends the first message to the project's main chat", () => {
     expect(draftRouteTarget(config)?.chat.session_id).toBe("main");
+  });
+
+  it("forceDraftPlain makes the open draft a plain chat (a card action typed into it)", () => {
+    document.body.innerHTML = `<div id="session-pane"></div>`;
+    expect(draftRouteTarget(config)?.chat.session_id).toBe("main");
+    forceDraftPlain();
+    expect(state.pendingNewSession.config.plainChat).toBe(true);
+    expect(draftRouteTarget(state.pendingNewSession.config)).toBeNull();
   });
 
   it("never swallows a draft that opened with its own message (a card chat, /pickup)", () => {
