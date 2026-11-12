@@ -117,6 +117,16 @@ test.describe("the Plan card across a chat's life", () => {
     await capture(pane(page), "plan-12-left-open");
   });
 
+  test("a plan message's lines after its headline stay on the card, so a plan with no write_plan steps can be read", async ({ page }) => {
+    await openChat(page, [
+      user("build the Greek release", min(0)),
+      ...tool(SEND, { kind: "plan", text: "Proposed plan for the Greek build:\n\n- Commit the signing-team change\n- Bump to +15 and upload to TestFlight" }, min(1)),
+    ]);
+    await expect(plan(page).locator(".cdash-plan-lead")).toHaveText("Proposed plan for the Greek build:");
+    await expect(plan(page).locator(".cdash-plan-body li")).toHaveText(["Commit the signing-team change", "Bump to +15 and upload to TestFlight"]);
+    await capture(plan(page), "plan-13-message-body");
+  });
+
   test("a follow-up with no new plan keeps the job, dimmed, as the last job", async ({ page }) => {
     await openChat(page, [...TRELLO, ...FOLLOW_UP]);
     await expect(plan(page)).toHaveClass(/is-last/);
