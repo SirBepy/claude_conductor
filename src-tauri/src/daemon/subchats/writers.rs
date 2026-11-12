@@ -226,14 +226,39 @@ fn advance_locked(state: &DaemonState, slot: &mut Slot) -> Vec<Start> {
         }
         slot.holder = Some(entry.sub_id.clone());
         starts.push(match entry.kind {
-            Kind::Launch => Start::Launch { sub_id: entry.sub_id },
+            Kind::Launch => {
+                // It holds the slot and is being started: no longer a place in line.
+                state.registry.set_queue_place(&entry.sub_id, None);
+                Start::Launch { sub_id: entry.sub_id }
+            }
             Kind::Wake => {
                 state.registry.set_waiting_for(&entry.sub_id, None);
                 Start::Wake { sub_id: entry.sub_id }
             }
         });
     }
+    stamp_places(state, slot);
     starts
+}
+
+/// Writes each queued entry's place in line (1 = next) and the sub it waits behind
+/// onto its row, for the dashboard's hover card. The place is a fact of the queue
+/// that moves whenever someone ahead leaves, so every queue change ends here.
+/// Returns whether any row changed.
+fn stamp_places(state: &DaemonState, slot: &Slot) -> bool {
+    let who = behind(state, slot);
+    let mut changed = false;
+    for (i, entry) in slot.queue.iter().enumerate() {
+        changed |= state.registry.set_queue_place(&entry.sub_id, Some((i as u32 + 1, who.clone())));
+    }
+    changed
+}
+
+/// [`stamp_places`] for the slot `sub_id` queues in, for a row registered after its
+/// entry joined the queue ([`decide_spawn`] pushes before the row exists).
+fn stamp_places_of(state: &DaemonState, sub_id: &str) -> bool {
+    let table = table();
+    table.values().find(|s| s.queue.iter().any(|e| e.sub_id == sub_id)).is_some_and(|slot| stamp_places(state, slot))
 }
 
 /// Takes a queued entry's "waiting" state off its row and, for an unstarted sub,
@@ -320,8 +345,14 @@ pub(crate) fn register_queued_row(
     plan: &mut SubPlan,
     sid: &str,
 ) -> Result<String, String> {
-    held::register_held_row(state, caller_session_id, name, inherited, spec, plan, sid.to_string(), QUEUED_TEXT.to_string(), None)
-        .inspect_err(|_| release_entry_only(state, sid))
+    let registered =
+        held::register_held_row(state, caller_session_id, name, inherited, spec, plan, sid.to_string(), QUEUED_TEXT.to_string(), None)
+            .inspect_err(|_| release_entry_only(state, sid))?;
+    // The row went out before its place was known; send it again with the place.
+    if stamp_places_of(state, sid) {
+        crate::daemon::machines::publish_instances_changed(state);
+    }
+    Ok(registered)
 }
 
 /// Asks for the writer slot for a running or finished sub: the one door
@@ -351,6 +382,10 @@ pub fn request_slot(state: &Arc<DaemonState>, sub_id: &str) -> SlotOutcome {
     let outcome = SlotOutcome::Queued { behind: behind(state, slot), position: slot.queue.len() };
     drop(table);
     state.registry.set_waiting_for(sub_id, Some(QUEUED_TEXT.to_string()));
+    // After the wait is marked, and only if the entry is still queued: a start that
+    // slipped in between has already cleared it, and a place stamped before that
+    // would outlive the wait.
+    stamp_places_of(state, sub_id);
     crate::daemon::machines::publish_instances_changed(state);
     outcome
 }
@@ -403,32 +438,43 @@ pub fn waiting_behind(state: &DaemonState, sub_id: &str) -> Option<String> {
 /// Joe with its work committed. A sub still waiting as an unstarted Launch loses
 /// its held recipe too: it was ended, and must never start later.
 pub fn release(state: &Arc<DaemonState>, sub_id: &str) {
-    let starts = leave(state, sub_id, true);
-    finish_release(state, starts);
+    let (starts, changed) = leave(state, sub_id, true);
+    finish_release(state, starts, changed);
 }
 
 /// [`release`] without forgetting a held recipe: a launch that failed keeps its
 /// held entry, so Joe's "Try again" can still start it.
 fn release_entry_only(state: &Arc<DaemonState>, sub_id: &str) {
-    let starts = leave(state, sub_id, false);
-    finish_release(state, starts);
+    skip_queue(state, sub_id);
 }
 
-fn finish_release(state: &Arc<DaemonState>, starts: Vec<Start>) {
-    if !starts.is_empty() {
+/// Takes `sub_id` out of every writer queue and slot without forgetting its held
+/// recipe, and starts whoever is next: for a sub Joe starts ahead of its turn.
+pub(crate) fn skip_queue(state: &Arc<DaemonState>, sub_id: &str) {
+    let (starts, changed) = leave(state, sub_id, false);
+    finish_release(state, starts, changed);
+}
+
+/// `changed`: the queue moved (someone left it or let go of the slot), so the rows
+/// behind carry a new place even when nobody started.
+fn finish_release(state: &Arc<DaemonState>, starts: Vec<Start>, changed: bool) {
+    if changed || !starts.is_empty() {
         crate::daemon::machines::publish_instances_changed(state);
     }
     run_starts(state, starts);
 }
 
-fn leave(state: &Arc<DaemonState>, sub_id: &str, forget_recipe: bool) -> Vec<Start> {
+/// Returns what to start and whether `sub_id` held or waited in any slot.
+fn leave(state: &Arc<DaemonState>, sub_id: &str, forget_recipe: bool) -> (Vec<Start>, bool) {
     let key = state.registry.get(sub_id).map(|i| project_key(&i.cwd));
     let mut starts = Vec::new();
     let mut removed: Vec<Entry> = Vec::new();
+    let mut owned = false;
     {
         let mut table = table();
         for (k, slot) in table.iter_mut() {
             let owns = slot.holder.as_deref() == Some(sub_id) || slot.queue.iter().any(|e| e.sub_id == sub_id);
+            owned |= owns;
             // A row that is gone cannot name its project, so every slot is searched.
             if !owns && key.as_deref() != Some(k.as_str()) {
                 continue;
@@ -449,11 +495,14 @@ fn leave(state: &Arc<DaemonState>, sub_id: &str, forget_recipe: bool) -> Vec<Sta
     }
     for entry in &removed {
         match entry.kind {
-            Kind::Launch if !forget_recipe => {}
+            // Still held, but no longer in line: the place it had is stale.
+            Kind::Launch if !forget_recipe => {
+                state.registry.set_queue_place(&entry.sub_id, None);
+            }
             _ => clear_wait(state, entry),
         }
     }
-    starts
+    (starts, owned)
 }
 
 /// A sub just posted a question card for Joe. If it holds the slot and every
@@ -657,7 +706,7 @@ pub fn sweep(state: &Arc<DaemonState>) {
     for entry in &stale {
         clear_wait(state, entry);
     }
-    finish_release(state, starts);
+    finish_release(state, starts, !stale.is_empty());
 }
 
 // ---- restart --------------------------------------------------------------------
@@ -677,7 +726,8 @@ pub fn restore(state: &Arc<DaemonState>) {
 /// while the daemon runs; an entry already queued or holding is left as it is.
 pub(crate) fn requeue_held(state: &Arc<DaemonState>) {
     let starts = restore_inner(state);
-    finish_release(state, starts);
+    // The rebuilt entries just got their places.
+    finish_release(state, starts, true);
 }
 
 pub(crate) fn restore_inner(state: &Arc<DaemonState>) -> Vec<Start> {
@@ -947,6 +997,8 @@ mod tests {
         assert_eq!(sid, decision.sid, "the row has the id the slot queued");
         let inst = st.registry.get(&sid).unwrap();
         assert_eq!(inst.progress.waiting_for.as_deref(), Some(QUEUED_TEXT));
+        assert_eq!(inst.progress.queue_place, Some(1), "registering stamps the place the slot gave it");
+        assert_eq!(inst.progress.queue_behind.as_deref(), Some("reg-a"), "and the sub it waits behind");
         assert_eq!(super::super::tool::status_word(&inst), "queued");
         assert!(super::super::spawn::running_subs(&st.registry, "reg-main").iter().any(|i| i.session_id == sid), "it is an unfinished sub (closing waits on it) but holds no cap slot");
         assert!(!super::super::spawn::started_subs(&st, "reg-main").iter().any(|i| i.session_id == sid));
@@ -1015,6 +1067,32 @@ mod tests {
         // main chat and no wake for the main agent.
         assert!(super::super::back::peek("chain2-main").is_none());
         assert!(st.repo_channel_wakes.lock().unwrap().values().all(|q| q.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn a_queued_writers_place_rides_its_row_and_moves_up_as_those_ahead_leave() {
+        let _data = TempDataDir::new();
+        let (_d, root) = project();
+        let st = state();
+        let (first, _) = spawn_writer(&st, "plc-a", &root, "A");
+        let (b, _) = spawn_writer(&st, "plc-b", &root, "B");
+        let (c, _) = spawn_writer(&st, "plc-c", &root, "C");
+        assert!(stamp_places_of(&st, &b));
+        let place = |id: &str| {
+            let p = st.registry.get(id).unwrap().progress;
+            (p.queue_place, p.queue_behind)
+        };
+        assert_eq!(place(&b), (Some(1), Some("plc-a".to_string())));
+        assert_eq!(place(&c), (Some(2), Some("plc-a".to_string())));
+        assert!(!stamp_places_of(&st, &b), "nothing moved, nothing to publish");
+
+        release(&st, &b);
+        assert_eq!(place(&b), (None, None), "a sub that left the line has no place");
+        assert_eq!(place(&c), (Some(1), Some("plc-a".to_string())), "the one behind it moved up");
+
+        release(&st, &first);
+        assert_eq!(holder_of(&root).as_deref(), Some(c.as_str()));
+        assert_eq!(place(&c), (None, None), "once it holds the slot it is starting, not waiting in line");
     }
 
     #[test]

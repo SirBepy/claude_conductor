@@ -335,6 +335,52 @@ pub struct SessionProgress {
     #[serde(default)]
     #[ts(optional)]
     pub waiting_for: Option<String>,
+    /// A sub's place in the writer queue while `waiting_for` is set, 1 = next. `None`
+    /// for a sub that waits on an `after` target (its `waiting_for` names it) and for
+    /// any sub not waiting. Cleared with `waiting_for`; in memory only.
+    #[serde(default)]
+    #[ts(optional)]
+    pub queue_place: Option<u32>,
+    /// Name of the sub holding the writer slot a queued sub waits behind; set and
+    /// cleared with `queue_place`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub queue_behind: Option<String>,
+    /// A sub's last turn ended and it never called finish: set when its busy flag
+    /// falls, cleared when a turn starts, when it finishes or when it ends. Says
+    /// nothing about WHY it stopped, so a client puts asking, paused and queued
+    /// first. In memory only (a restart ends every turn). `Some(true)` or absent:
+    /// an `Option` so a client that builds a `progress` by literal need not name it.
+    #[serde(default)]
+    #[ts(optional)]
+    pub stopped_unfinished: Option<bool>,
+    /// The latest tool call of a sub in words ("Editing footer.css") and when it
+    /// was made (RFC3339). Replaced by each call and kept after the turn ends, so a
+    /// stopped sub still shows where it stopped. In memory only.
+    #[serde(default)]
+    #[ts(optional)]
+    pub last_action: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub last_action_at: Option<String>,
+    /// Gaming mode parked this chat (`gaming_mode::is_parked`). Mirrored onto the
+    /// row because a park freezes nothing, so no other flag says it. `Some(true)`
+    /// or absent, like `stopped_unfinished`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub parked: Option<bool>,
+}
+
+impl SessionProgress {
+    /// The sub's last turn ended and it never finished (see `stopped_unfinished`).
+    pub fn is_stopped(&self) -> bool {
+        self.stopped_unfinished == Some(true)
+    }
+
+    /// Gaming mode parked this chat (see `parked`).
+    pub fn is_parked(&self) -> bool {
+        self.parked == Some(true)
+    }
 }
 
 /// Shape served to the webview. Same as `Instance` for now; kept as a

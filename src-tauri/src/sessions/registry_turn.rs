@@ -281,6 +281,7 @@ impl Registry {
         self.builtin_ask_attempts.lock().unwrap().remove(session_id);
         self.pending_turn_gen.lock().unwrap().remove(session_id);
         self.mcp_tool_used_gen.lock().unwrap().remove(session_id);
+        self.action_published.lock().unwrap().remove(session_id);
     }
 }
 

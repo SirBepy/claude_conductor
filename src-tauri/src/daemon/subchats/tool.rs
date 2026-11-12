@@ -702,18 +702,10 @@ fn drop_action(state: &Arc<DaemonState>, subs: &[Instance], query: &str) -> Valu
         Ok(s) => s,
         Err(e) => return refusal(e),
     };
-    let name = label(sub);
-    if status_word(sub) == "ended" {
-        return refusal(format!("{name} has already ended."));
+    match super::queued::drop_now(state, &sub.session_id) {
+        Ok(name) => json!({"ok": true, "dropped": name, "note": "ended without ever running; it no longer counts toward the cap, and a sub waiting for it asks Joe on a card"}),
+        Err(e) => refusal(e),
     }
-    let has = |id: &str| crate::context_status::resolve_transcript(&state.registry, id).is_some();
-    if !super::held::never_started(state, sub, &has) {
-        return refusal(format!(
-            "{name} has started, so drop does not apply: only a sub that never ran is dropped. Ask Joe to end it from its card or the chat menu."
-        ));
-    }
-    super::held::drop_held(state, &sub.session_id);
-    json!({"ok": true, "dropped": name, "note": "ended without ever running; it no longer counts toward the cap, and a sub waiting for it asks Joe on a card"})
 }
 
 /// [`run`] with the facts reader, the "wake this sub with this text" step and the

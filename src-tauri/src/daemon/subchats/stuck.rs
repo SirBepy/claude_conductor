@@ -205,6 +205,9 @@ pub async fn sweep_now(state: &Arc<DaemonState>, now: DateTime<Utc>, resumed_at:
     // The writer slot's safety net: a holder or waiter ended by a path that did
     // not release it stops blocking the next sub.
     super::writers::sweep(state);
+    if super::pause::sync_parked(state) {
+        crate::daemon::machines::publish_instances_changed(state);
+    }
     // Last, after every pass that could have started it: a sub still waiting
     // with nothing in its way is told to its main chat.
     super::queue_watch::tick(state, now);

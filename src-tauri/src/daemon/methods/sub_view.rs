@@ -2,9 +2,11 @@
 //! (docs/chat-dashboard-design.md, "Subchats card"): every image in its
 //! transcript, the job it was briefed with, and the Pin to sidemenu flag.
 //!
-//! All three are phone-reachable (`P` in `remote_transport_table::TRANSPORT_TABLE`)
+//! Those three are phone-reachable (`P` in `remote_transport_table::TRANSPORT_TABLE`)
 //! because the chat menu they hang off is shared with the phone, and none
 //! exposes anything the phone's transcript and sidebar do not already show.
+//! `start_queued_sub` and `drop_queued_sub` (a queued sub's menu) are desktop
+//! pipe only: they start or end a sub, which neither remote transport may do.
 
 use super::super::rpc::{Router, RpcError};
 use super::super::state::DaemonState;
@@ -104,19 +106,62 @@ pub fn register_sub_view(router: &mut Router, state: Arc<DaemonState>) {
         let p: P = parse(params)?;
         Ok(json!({ "brief": brief_of(&p.session_id) }))
     });
-    router.register("set_sub_pinned", move |params, _ctx| {
+    {
+        let state = state.clone();
+        router.register("set_sub_pinned", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(Deserialize)]
+                struct P {
+                    session_id: String,
+                    pinned: bool,
+                }
+                let p: P = parse(params)?;
+                set_pinned(&state, &p.session_id, p.pinned).map_err(RpcError::invalid_params)?;
+                Ok(json!({"ok": true}))
+            }
+        });
+    }
+    // A queued sub's menu (docs/chat-dashboard-design.md, "Seeing what subs are
+    // doing", C4). Desktop pipe only: absent from `TRANSPORT_TABLE` on purpose, so
+    // neither the phone nor a paired machine can start or drop a sub.
+    {
+        let state = state.clone();
+        router.register("start_queued_sub", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                let p: SubParams = parse(params)?;
+                start_queued(&state, &p.session_id).await.map_err(RpcError::invalid_params)?;
+                Ok(json!({"ok": true}))
+            }
+        });
+    }
+    router.register("drop_queued_sub", move |params, _ctx| {
         let state = state.clone();
         async move {
-            #[derive(Deserialize)]
-            struct P {
-                session_id: String,
-                pinned: bool,
-            }
-            let p: P = parse(params)?;
-            set_pinned(&state, &p.session_id, p.pinned).map_err(RpcError::invalid_params)?;
-            Ok(json!({"ok": true}))
+            let p: SubParams = parse(params)?;
+            let dropped = drop_queued(&state, &p.session_id).map_err(RpcError::invalid_params)?;
+            Ok(json!({"ok": true, "dropped": dropped}))
         }
     });
+}
+
+#[derive(Deserialize)]
+struct SubParams {
+    session_id: String,
+}
+
+/// Starts a queued sub at once and tells the sidebar. The row changes as soon as the
+/// child is up (`launch_held` publishes), so nothing more is published here.
+pub async fn start_queued(state: &Arc<DaemonState>, session_id: &str) -> Result<(), String> {
+    super::super::subchats::queued::start_now(state, session_id).await
+}
+
+/// Drops a queued sub and publishes the row as ended.
+pub fn drop_queued(state: &Arc<DaemonState>, session_id: &str) -> Result<String, String> {
+    let dropped = super::super::subchats::queued::drop_now(state, session_id)?;
+    crate::daemon::machines::publish_instances_changed(state);
+    Ok(dropped)
 }
 
 #[cfg(test)]
@@ -194,6 +239,51 @@ mod tests {
         let brief = brief_of(&id).expect("a stored brief is listed");
         assert!(brief["task"].is_string() && brief["goal"].is_string() && brief["done_when"].is_string());
         assert!(brief_of("never-a-sub").is_none());
+    }
+
+    async fn rpc(router: &Router, method: &str, params: Value) -> crate::daemon::rpc::Response {
+        use crate::daemon::rpc::{ConnectionContext, Request};
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        router.dispatch(Request { jsonrpc: "2.0".into(), id: json!(1), method: method.into(), params: Some(params) }, ConnectionContext::new(tx)).await
+    }
+
+    #[tokio::test]
+    async fn the_queued_sub_rpcs_work_for_a_held_sub_and_are_desktop_pipe_only() {
+        use crate::daemon::rpc::Transport;
+        use crate::daemon::subchats::held::{self, Held, LaunchSpec};
+        let _data = TempDataDir::new();
+        let st = state();
+        let mut router = Router::new();
+        register_sub_view(&mut router, st.clone());
+
+        let id = sub(&st, "qrpc");
+        held::hold(
+            &st,
+            Held { sub_id: id.clone(), reason: "waiting for header".into(), after: Some("qrpc-target".into()), after_name: "header".into(), launch: LaunchSpec::default() },
+        )
+        .unwrap();
+
+        // A launch cannot run a `claude` in a unit test, so Start now reports why and the sub stays queued.
+        let started = rpc(&router, "start_queued_sub", json!({"session_id": id})).await;
+        assert!(started.error.is_some(), "the launch fails here, and the error says so instead of claiming success");
+        assert!(held::is_held(&id), "a failed start keeps it queued");
+
+        let dropped = rpc(&router, "drop_queued_sub", json!({"session_id": id})).await;
+        assert!(dropped.error.is_none(), "{:?}", dropped.error);
+        assert!(dropped.result.unwrap()["ok"] == json!(true));
+        assert!(st.registry.get(&id).unwrap().ended_at.is_some());
+        assert!(!held::is_held(&id));
+
+        let again = rpc(&router, "drop_queued_sub", json!({"session_id": id})).await;
+        assert!(again.error.is_some(), "an ended sub cannot be dropped twice");
+        let bad = rpc(&router, "start_queued_sub", json!({})).await;
+        assert!(bad.error.is_some(), "a request without a session id is refused");
+
+        for method in ["start_queued_sub", "drop_queued_sub"] {
+            assert!(crate::daemon::remote_transport_table::allowed(method, &Transport::Local));
+            assert!(!crate::daemon::remote_transport_table::allowed(method, &Transport::Phone), "{method}: never from the phone");
+            assert!(!crate::daemon::remote_transport_table::allowed(method, &Transport::PeerMachine("m".into())), "{method}: never from a peer");
+        }
     }
 
     #[tokio::test]
