@@ -38,3 +38,11 @@ pub async fn drop_queued_sub(session_id: String, state: State<'_, AppState>) -> 
     let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
     client.call("drop_queued_sub", json!({"session_id": session_id})).await.map_err(|e| e.to_string())
 }
+
+/// The chat menu's "Compact now" for a main chat. Desktop only, like `start_queued_sub`:
+/// the daemon method is absent from the remote transport table.
+#[tauri::command]
+pub async fn compact_now(session_id: String, state: State<'_, AppState>) -> Result<Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.call("compact_now", json!({"session_id": session_id})).await.map_err(|e| e.to_string())
+}

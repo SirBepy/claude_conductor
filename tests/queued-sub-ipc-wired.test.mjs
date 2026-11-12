@@ -36,3 +36,27 @@ describe.each(["start_queued_sub", "drop_queued_sub"])("%s", (name) => {
     expect(table).not.toMatch(new RegExp(`\\("${name}",`));
   });
 });
+
+// The chat menu's "Compact now" reaches the daemon through the same kind of wrapper.
+describe("compact_now", () => {
+  it("is invoked by the chat menu", () => {
+    expect(menu).toContain('"compact_now", { sessionId }');
+  });
+
+  it("has a tauri command wrapper that forwards to the daemon method of the same name", () => {
+    const fn = /#\[tauri::command\]
+pub async fn compact_now\(session_id: String, state: State<'_, AppState>\)[^{]*\{
+([\s\S]*?)
+\}/.exec(wrappers);
+    expect(fn, "wrapper missing or its signature changed").not.toBeNull();
+    expect(fn[1]).toContain('client.call("compact_now", json!({"session_id": session_id}))');
+  });
+
+  it("is registered in generate_handler!", () => {
+    expect(lib).toMatch(/^\s+ipc::compact_now,$/m);
+  });
+
+  it("stays desktop-only: absent from the remote transport table", () => {
+    expect(table).not.toMatch(/\("compact_now",/);
+  });
+});
