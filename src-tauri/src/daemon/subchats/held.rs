@@ -192,12 +192,12 @@ pub fn release(state: &DaemonState, sub_id: &str) -> Option<Held> {
     Some(taken)
 }
 
-fn claim_launch(sub_id: &str) -> Option<LaunchGuard> {
+pub(crate) fn claim_launch(sub_id: &str) -> Option<LaunchGuard> {
     let mut g = LAUNCHING.lock().unwrap_or_else(|e| e.into_inner());
     g.get_or_insert_with(HashSet::new).insert(sub_id.to_string()).then(|| LaunchGuard(sub_id.to_string()))
 }
 
-struct LaunchGuard(String);
+pub(crate) struct LaunchGuard(String);
 
 impl Drop for LaunchGuard {
     fn drop(&mut self) {
@@ -593,7 +593,7 @@ where
 /// instead of being rebuilt and started every minute.
 static RECOVERED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
-fn launching(sub_id: &str) -> bool {
+pub(crate) fn launching(sub_id: &str) -> bool {
     LAUNCHING.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|s| s.contains(sub_id))
 }
 

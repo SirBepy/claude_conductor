@@ -256,7 +256,7 @@ fn stamp_places(state: &DaemonState, slot: &Slot) -> bool {
 
 /// [`stamp_places`] for the slot `sub_id` queues in, for a row registered after its
 /// entry joined the queue ([`decide_spawn`] pushes before the row exists).
-fn stamp_places_of(state: &DaemonState, sub_id: &str) -> bool {
+pub(crate) fn stamp_places_of(state: &DaemonState, sub_id: &str) -> bool {
     let table = table();
     table.values().find(|s| s.queue.iter().any(|e| e.sub_id == sub_id)).is_some_and(|slot| stamp_places(state, slot))
 }
