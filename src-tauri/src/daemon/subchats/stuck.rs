@@ -96,10 +96,17 @@ pub async fn sweep(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> {
 const NO_PROCESS_NOTE: &str =
     "Its process is not running and it never called finish_subchat. The app may have been restarted while it worked.";
 
-/// Raises a card for every sub that has no live child, never finished and was
-/// not ended: its process died while the daemon was down (a restart wipes every
-/// child, and the exit handler that would have carded it died too), or the exit
-/// handler missed it. Returns the ids carded.
+/// Raises a card for every sub that has no live child, never finished, was not
+/// ended and has a turn open with nothing to continue it: a turn opened in this
+/// daemon run that never ended (the exit handler missed the death), or a turn a
+/// restart cut off whose auto-continue failed. Returns the ids carded.
+///
+/// A childless sub whose last turn ended is idle, not dead: the next message
+/// respawns it. That is every sub a restart brings back, since the turn gen is
+/// not persisted; 27 of 52 of these cards (2026-11-06 to 11-11) were idle subs
+/// carded minutes after a daemon start. A sub the restart cut off mid-turn is on
+/// `resume_interrupted`'s queue and is left to it, and a sub whose conversation
+/// file is gone was carded once already ([`super::announced::is_unresumable`]).
 ///
 /// A sub can be childless for good reasons for a moment (a respawn after a model
 /// pick or a continue), so it must stay childless for [`DEAD_GRACE`] across two
@@ -117,6 +124,7 @@ pub async fn sweep_dead(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> 
         let Some(parent) = inst.subchat_of.clone() else { continue };
         if inst.ended_at.is_some() || inst.subchat_finished {
             super::announced::forget(&id);
+            super::announced::forget_unresumable(&id);
             continue;
         }
         if super::pause::is_paused(&inst, env.now.timestamp()) {
@@ -136,12 +144,22 @@ pub async fn sweep_dead(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> 
         }
         if (env.is_live)(&id) {
             rt.clear_childless(&id);
+            crate::daemon::resume_interrupted::forget(&id);
             continue;
         }
         if inst.busy || !matches!(inst.kind, crate::sessions::kinds::InstanceKind::Interactive) {
             continue;
         }
         if !state.registry.get(&parent).is_some_and(|p| p.ended_at.is_none()) {
+            continue;
+        }
+        if crate::daemon::resume_interrupted::is_queued(&id) || super::announced::is_unresumable(&id) {
+            continue;
+        }
+        let gen = state.registry.current_turn_gen(&id);
+        let turn_open = (gen > 0 && rt.last_ended_gen(&id) != Some(gen))
+            || crate::daemon::resume_interrupted::resume_failed(&id);
+        if !turn_open {
             continue;
         }
         if rt.death_carded(&id) || crate::daemon::lifecycle::has_open_prompt(state, &id).await {
@@ -151,8 +169,8 @@ pub async fn sweep_dead(state: &Arc<DaemonState>, env: &Env<'_>) -> Vec<String> 
         if env.now.signed_duration_since(since) < DEAD_GRACE {
             continue;
         }
-        // A death announced before a restart is asked again quietly: the restart
-        // lost its card, not Joe's knowledge of it.
+        // A death Joe was already told about (in this run or before a restart)
+        // is asked again quietly: the card was lost, not his knowledge of it.
         let raised = if super::announced::was_announced(&id) {
             stall::raise_noted_quietly(state, &id, Stall::Unfinished, Some(NO_PROCESS_NOTE)).await
         } else {
@@ -378,6 +396,94 @@ mod tests {
         let text = cards[0]["payload"]["questions"][0]["question"].as_str().unwrap();
         assert!(text.contains("not running") && text.contains("restarted"), "{text}");
         assert!(run_dead(&st, false, 120).await.is_empty(), "one card per death, not one per tick");
+    }
+
+    /// A sub as a daemon restart restores it: a registry row with no child and no
+    /// turn opened in this run (the turn gen is not persisted).
+    fn restored_sub(tag: &str) -> (Arc<DaemonState>, String) {
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let (main, sub) = (format!("{tag}-main"), format!("{tag}-sub"));
+        st.registry.upsert_interactive(&main, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        st.registry.upsert_interactive(&sub, std::path::Path::new("."), "proj", "2026-11-05T00:00:00Z");
+        st.registry.set_subchat_of(&sub, Some(main));
+        (st, sub)
+    }
+
+    /// 27 of 52 `subchat_unfinished` cards (2026-11-06 to 11-11) came within 5
+    /// minutes of a daemon start: every idle sub was carded as a process that died.
+    #[tokio::test]
+    async fn an_idle_sub_restored_by_a_restart_gets_no_card() {
+        let (st, sub) = restored_sub("dead-restored-idle");
+        run_dead(&st, false, 0).await;
+        assert!(run_dead(&st, false, 300).await.is_empty(), "its last turn ended before the restart: {sub}");
+        assert!(st.list_prompts().await.is_empty());
+    }
+
+    /// A sub the restart cut off mid-turn (persisted chat state busy) is on
+    /// `resume_interrupted`'s list: it gets a "continue", not a card.
+    #[tokio::test]
+    async fn a_sub_cut_off_mid_turn_by_a_restart_is_resumed_not_carded() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let (st, sub) = restored_sub("dead-restored-open");
+        crate::sessions::chat_state::set_busy(&sub, true);
+        let entry: crate::sessions::persistence::PersistedInteractive = serde_json::from_value(serde_json::json!({
+            "session_id": sub,
+            "cwd": ".",
+            "project_id": "proj",
+            "name": null,
+            "model": "opus",
+            "effort": "high",
+            "started_at": "2026-11-05T00:00:00Z",
+        }))
+        .unwrap();
+        let resumed = crate::daemon::resume_interrupted::interrupted_sessions(
+            &[entry],
+            crate::sessions::chat_state::get,
+            Utc::now().timestamp_millis(),
+        );
+        assert_eq!(resumed, [sub.clone()], "the boot resumes it");
+        run_dead(&st, false, 0).await;
+        assert!(run_dead(&st, false, 300).await.is_empty(), "and the dead sweep does not card it too");
+        assert!(st.list_prompts().await.is_empty());
+        // Still queued for its "continue" (the stagger), it is left to the resume
+        // even with a turn open.
+        st.registry.set_busy(&sub, true);
+        st.registry.set_busy(&sub, false);
+        crate::daemon::resume_interrupted::queue(std::slice::from_ref(&sub));
+        run_dead(&st, false, 310).await;
+        assert!(run_dead(&st, false, 400).await.is_empty(), "queued for its resume");
+        crate::daemon::resume_interrupted::forget(&sub);
+        // A resume that did not go through leaves the turn open with nothing to
+        // continue it, which is what the card is for.
+        let (st, sub) = restored_sub("dead-restored-failed");
+        crate::daemon::resume_interrupted::queue(std::slice::from_ref(&sub));
+        crate::daemon::resume_interrupted::settle(&sub, false);
+        run_dead(&st, false, 0).await;
+        assert_eq!(run_dead(&st, false, 300).await, [sub.clone()]);
+        crate::daemon::resume_interrupted::forget(&sub);
+    }
+
+    /// f99f459a, 21197fee and 6a2623ed ("claude exited 1: No conversation found
+    /// with session ID") were carded after every daemon start. One card says it
+    /// cannot be resumed; after that it stays quiet.
+    #[tokio::test]
+    async fn a_sub_whose_conversation_is_gone_is_carded_once() {
+        let (st, sub) = idle_sub("dead-noconv");
+        let exit = super::super::turn_end::ExitInfo {
+            code: Some(1),
+            stderr_tail: format!("No conversation found with session ID: {sub}"),
+        };
+        let note = super::super::turn_end::died_note_if_unnoticed(&st, &sub, false, true, Some(&exit));
+        assert!(note.is_some(), "the first death is carded");
+        // A restart loses the in-memory death record (and Joe's Continue resets it).
+        runtime().reset(&sub);
+        run_dead(&st, false, 0).await;
+        assert!(run_dead(&st, false, 300).await.is_empty(), "the sweep does not card it again");
+        assert!(
+            super::super::turn_end::died_note_if_unnoticed(&st, &sub, false, true, Some(&exit)).is_none(),
+            "nor does the next failed resume"
+        );
+        assert!(st.list_prompts().await.is_empty());
     }
 
     /// 2026-11-11: phone-ime-voice-swipe, queued for the writer slot, was carded

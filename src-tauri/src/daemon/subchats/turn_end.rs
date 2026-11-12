@@ -24,6 +24,8 @@ pub(crate) async fn turn_end_for(state: &Arc<DaemonState>, sub_id: &str, session
     // The stuck sweep reads this: a gen the registry holds past it is a turn
     // still open.
     runtime().note_turn_end(sub_id, turn_gen);
+    // A turn that ended had a conversation to run in.
+    super::announced::forget_unresumable(sub_id);
     if runtime().finish_pending(sub_id) {
         // Commits, or drops the request if background work started since. A
         // committed finish has stopped the process, so there is nothing to nudge.
@@ -116,6 +118,24 @@ pub const DEAD_GRACE: chrono::Duration = chrono::Duration::seconds(45);
 
 const MAX_ERROR_CHARS: usize = 300;
 
+/// 0xC000013A, STATUS_CONTROL_C_EXIT: Windows closed the child's console. An OS
+/// shutdown or logoff does that to every child before it kills the daemon.
+pub(crate) const CONSOLE_CLOSED_EXIT: i32 = 0xC000_013Au32 as i32;
+
+/// Whether an exit is the machine or the daemon going down rather than the sub
+/// dying. The turn was cut off, not lost: the exit handler keeps its persisted
+/// busy flag so the next boot's `resume_interrupted` continues it, and no card
+/// is raised.
+pub(crate) fn is_shutdown_exit(code: Option<i32>) -> bool {
+    code == Some(CONSOLE_CLOSED_EXIT) || crate::daemon::boot::is_shutting_down()
+}
+
+/// What `claude --resume` prints when the sub's conversation file is gone.
+const NO_CONVERSATION: &str = "No conversation found";
+
+const NO_CONVERSATION_NOTE: &str =
+    " Its conversation file is gone, so it cannot be resumed: start a new sub for the job.";
+
 /// The card's sentence about a death: that the process ended mid-turn, and the
 /// last error line it left, since a crash, an out-of-memory kill and an expired
 /// login all look like the same silent sub otherwise.
@@ -189,6 +209,9 @@ pub(crate) fn died_note_if_unnoticed(
     {
         return None;
     }
+    if is_shutdown_exit(exit.and_then(|e| e.code)) {
+        return None;
+    }
     let rt = runtime();
     // The child dying between turns lost nothing; the next message respawns it.
     // `busy` is read before the exit handler clears it, and the turn gen covers
@@ -198,7 +221,17 @@ pub(crate) fn died_note_if_unnoticed(
     if !turn_open || rt.death_carded(sub_id) {
         return None;
     }
+    // A sub `--resume` cannot bring back is told once; every later attempt would
+    // die the same way and card it again.
+    let lost = exit.is_some_and(|e| e.stderr_tail.contains(NO_CONVERSATION));
+    if lost && super::announced::is_unresumable(sub_id) {
+        return None;
+    }
     rt.mark_death_carded(sub_id);
+    if lost {
+        super::announced::mark_unresumable(sub_id);
+        return Some(died_note(exit) + NO_CONVERSATION_NOTE);
+    }
     Some(died_note(exit))
 }
 
@@ -327,6 +360,17 @@ mod tests {
         // A chat that is not a sub.
         let (st, _sub) = state_with_sub("te-died-plain");
         assert!(died_note_if_unnoticed(&st, "te-died-plain-main", false, true, None).is_none());
+    }
+
+    /// An OS shutdown closes every child's console before it kills the daemon,
+    /// and each one exits 0xC000013A. That is the machine going down, not the
+    /// sub dying: the next boot resumes the turn.
+    #[test]
+    fn a_console_closed_exit_is_a_shutdown_not_a_death() {
+        let (st, sub) = state_with_sub("te-died-shutdown");
+        st.registry.set_busy(&sub, true);
+        assert!(died_note_if_unnoticed(&st, &sub, false, true, Some(&exit(-1073741510, ""))).is_none());
+        assert!(died_note_if_unnoticed(&st, &sub, false, true, Some(&exit(1, "boom"))).is_some(), "any other exit mid-turn is still a death");
     }
 
     #[test]

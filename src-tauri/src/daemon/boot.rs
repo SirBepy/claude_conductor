@@ -28,6 +28,15 @@ fn load_initial_settings() -> Settings {
     crate::settings::load(&path)
 }
 
+/// Set once the daemon starts killing its children to exit. A child killed then
+/// was cut off, not dead: its exit handler keeps the turn for the next boot's
+/// `resume_interrupted` and raises no card (`subchats::turn_end::is_shutdown_exit`).
+static SHUTTING_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn is_shutting_down() -> bool {
+    SHUTTING_DOWN.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Kill every live session's process tree. Shared by the two shutdown paths
 /// that both need to reap in-flight chat children: the main loop's Ctrl-C /
 /// `shutdown_daemon`-notify exit below, and the `shutdown_daemon` RPC handler
@@ -35,6 +44,11 @@ fn load_initial_settings() -> Settings {
 /// in flight leaves its `claude` child (and subprocess tree) orphaned - there
 /// is no pump task left to reap it once the daemon process is gone.
 pub fn kill_all_sessions(state: &DaemonState) {
+    // Before the kills, so each pump's exit handler sees the daemon going down.
+    // Not in unit tests: the flag is process-wide, and `shutdown_daemon_returns_ok`
+    // would make every death-card test running beside it read as a shutdown.
+    #[cfg(not(test))]
+    SHUTTING_DOWN.store(true, std::sync::atomic::Ordering::SeqCst);
     for entry in state.sessions.iter() {
         crate::util::kill::kill_tree(entry.pid);
     }
