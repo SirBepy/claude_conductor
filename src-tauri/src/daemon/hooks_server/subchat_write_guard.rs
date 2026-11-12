@@ -48,7 +48,7 @@ pub(super) fn push_refusal(state: &crate::daemon::state::DaemonState, session_id
         return None;
     }
     let command = input.get("command").and_then(Value::as_str)?;
-    if !runs_publish_command(command) {
+    if !runs_publish_command(command, tool == "PowerShell") {
         return None;
     }
     let is_sub = state.registry.get(session_id).is_some_and(|i| crate::daemon::subchats::is_sub(&i));
@@ -56,27 +56,131 @@ pub(super) fn push_refusal(state: &crate::daemon::state::DaemonState, session_id
 }
 
 /// Wrappers that run the next word as a command (`sudo git push`, `time git push`).
-const WRAPPERS: [&str; 15] = [
-    "sudo", "env", "command", "exec", "time", "nohup", "nice", "timeout", "xargs", "builtin", "then", "do", "else", "if", "while",
+const WRAPPERS: [&str; 17] = [
+    "sudo", "env", "command", "exec", "time", "nohup", "nice", "timeout", "xargs", "builtin", "then", "do", "else", "elif", "if", "while", "!",
 ];
+/// A wrapper's flags that take their value as the NEXT word (`sudo -u root git push`).
+fn wrapper_value_flags(name: &str) -> &'static [&'static str] {
+    match name {
+        "sudo" => &["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T"],
+        "env" => &["-u", "-C", "-S"],
+        "nice" => &["-n"],
+        "timeout" => &["-s", "-k"],
+        "xargs" => &["-I", "-n", "-P", "-d", "-E", "-L", "-s", "-a"],
+        _ => &[],
+    }
+}
 const SHELLS: [&str; 7] = ["sh", "bash", "zsh", "dash", "pwsh", "powershell", "cmd"];
+/// Commands whose arguments ARE a command line (`eval "..."`).
+const EVALS: [&str; 3] = ["eval", "iex", "invoke-expression"];
 /// `git` options that take their value as the NEXT word.
 const GIT_OPTS_WITH_VALUE: [&str; 7] = ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"];
 
 /// Whether a shell command line runs `git push` or `gh pr merge` anywhere: after
 /// `&&`, `;`, `|`, in `$(..)`, behind `git -C dir`, `sudo`, env assignments, or as
 /// the argument of `bash -c`. A word that merely MENTIONS push (`echo git push`,
-/// `git log --grep push`, `git commit -m "push"`) is one argument, not a command.
-pub(super) fn runs_publish_command(command: &str) -> bool {
-    runs_publish_command_at(command, 0)
+/// `git log --grep push`, `git commit -m "push"`) is one argument, not a command,
+/// and so is the body of a heredoc or PowerShell here-string. `ps` says the text
+/// is PowerShell, where a backtick escapes instead of substituting.
+pub(super) fn runs_publish_command(command: &str, ps: bool) -> bool {
+    runs_publish_command_at(command, 0, ps)
 }
 
-fn runs_publish_command_at(command: &str, depth: u8) -> bool {
+fn runs_publish_command_at(command: &str, depth: u8, ps: bool) -> bool {
     if depth > 4 {
         return false;
     }
-    let (segments, nested) = split_segments(command);
-    nested.iter().any(|n| runs_publish_command_at(n, depth + 1)) || segments.iter().any(|s| segment_publishes(s, depth))
+    let (segments, nested) = split_segments(&strip_heredocs(command, ps), ps);
+    nested.iter().any(|n| runs_publish_command_at(n, depth + 1, ps)) || segments.iter().any(|s| segment_publishes(s, depth, ps))
+}
+
+/// How a heredoc body ends: its delimiter as a whole line, the same with leading
+/// tabs allowed (`<<-`), or a PowerShell here-string's `'@` at line start.
+enum Terminator {
+    Line(String),
+    TabbedLine(String),
+    HereStringEnd(String),
+}
+
+impl Terminator {
+    fn closes(&self, line: &str) -> bool {
+        let line = line.trim_end_matches('\r');
+        match self {
+            Terminator::Line(d) => line == d,
+            Terminator::TabbedLine(d) => line.trim_start_matches('\t') == d,
+            Terminator::HereStringEnd(d) => line.starts_with(d.as_str()),
+        }
+    }
+}
+
+/// The heredoc delimiters a line opens (`cat <<'EOF'`, `<<-EOF`; not `<<<`).
+fn heredoc_terminators(line: &str, ps: bool) -> Vec<Terminator> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut out = vec![];
+    if ps {
+        let t = line.trim_end();
+        if t.ends_with("@'") {
+            out.push(Terminator::HereStringEnd("'@".into()));
+        } else if t.ends_with("@\"") {
+            out.push(Terminator::HereStringEnd("\"@".into()));
+        }
+        return out;
+    }
+    let mut i = 0;
+    while i + 1 < chars.len() {
+        if chars[i] != '<' || chars[i + 1] != '<' || (i > 0 && chars[i - 1] == '<') || chars.get(i + 2) == Some(&'<') {
+            i += 1;
+            continue;
+        }
+        i += 2;
+        let dash = chars.get(i) == Some(&'-');
+        if dash {
+            i += 1;
+        }
+        while matches!(chars.get(i), Some(' ' | '\t')) {
+            i += 1;
+        }
+        let delim: String = match chars.get(i) {
+            Some(&q) if q == '\'' || q == '"' => {
+                let body: String = chars[i + 1..].iter().take_while(|&&c| c != q).collect();
+                i += body.chars().count() + 2;
+                body
+            }
+            _ => {
+                let word: String = chars[i.min(chars.len())..].iter().take_while(|c| c.is_alphanumeric() || **c == '_').collect();
+                i += word.chars().count();
+                word
+            }
+        };
+        if !delim.is_empty() {
+            out.push(if dash { Terminator::TabbedLine(delim) } else { Terminator::Line(delim) });
+        }
+    }
+    out
+}
+
+/// Drops heredoc and here-string bodies: they are text handed to a program, and
+/// a commit message or doc that has a line starting with the words of a publish
+/// command is not a command. A body whose terminator never appears is kept, so
+/// a stray `<<` cannot hide the lines after it.
+fn strip_heredocs(command: &str, ps: bool) -> String {
+    let lines: Vec<&str> = command.split('\n').collect();
+    let mut out: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        // A here-string's opener (`@'`) is dropped with its body, or the tokenizer
+        // would read the quote as unterminated and swallow the lines after it.
+        let t = lines[i].trim_end();
+        out.push(if ps { t.strip_suffix("@'").or_else(|| t.strip_suffix("@\"")).unwrap_or(lines[i]) } else { lines[i] });
+        i += 1;
+        for term in heredoc_terminators(lines[i - 1], ps) {
+            match lines[i..].iter().position(|l| term.closes(l)) {
+                Some(p) => i += p + 1,
+                None => break,
+            }
+        }
+    }
+    out.join("\n")
 }
 
 /// One shell word: its text and whether any part of it was quoted.
@@ -90,7 +194,7 @@ struct Word {
 /// found in double quotes or bare, which are commands of their own.
 // The final `end_segment!` resets state nothing reads again.
 #[allow(unused_assignments)]
-fn split_segments(command: &str) -> (Vec<Vec<Word>>, Vec<String>) {
+fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>) {
     let chars: Vec<char> = command.chars().collect();
     let mut segments: Vec<Vec<Word>> = vec![];
     let mut nested: Vec<String> = vec![];
@@ -133,6 +237,12 @@ fn split_segments(command: &str) -> (Vec<Vec<Word>>, Vec<String>) {
                 quoted = true;
                 i += 1;
                 while i < chars.len() && chars[i] != '"' {
+                    if ps && chars[i] == '`' && i + 1 < chars.len() {
+                        // PowerShell's escape character: the next char is literal text.
+                        word.push(chars[i + 1]);
+                        i += 2;
+                        continue;
+                    }
                     if chars[i] == '\\' && i + 1 < chars.len() && matches!(chars[i + 1], '"' | '\\' | '$' | '`') {
                         i += 1;
                     } else if chars[i] == '`' || (chars[i] == '$' && chars.get(i + 1) == Some(&'(')) {
@@ -142,6 +252,19 @@ fn split_segments(command: &str) -> (Vec<Vec<Word>>, Vec<String>) {
                         continue;
                     }
                     word.push(chars[i]);
+                    i += 1;
+                }
+            }
+            // Line continuation (`\` in sh, a backtick in PowerShell): the lines are one command.
+            '\\' | '`' if (c == '`') == ps && matches!(chars.get(i + 1), Some('\n' | '\r')) => {
+                end_word!();
+                i += if chars.get(i + 1) == Some(&'\r') && chars.get(i + 2) == Some(&'\n') { 2 } else { 1 };
+            }
+            '`' if ps => {
+                // PowerShell's escape character, not a substitution.
+                has_word = true;
+                if let Some(&next) = chars.get(i + 1) {
+                    word.push(next);
                     i += 1;
                 }
             }
@@ -200,7 +323,7 @@ fn is_assignment(word: &Word) -> bool {
     !word.quoted && word.text.split_once('=').is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_'))
 }
 
-fn segment_publishes(words: &[Word], depth: u8) -> bool {
+fn segment_publishes(words: &[Word], depth: u8, ps: bool) -> bool {
     let mut i = 0;
     loop {
         // Skip env assignments, wrapper commands and their flags down to the real command.
@@ -211,8 +334,15 @@ fn segment_publishes(words: &[Word], depth: u8) -> bool {
         let name = program_name(&first.text);
         if WRAPPERS.contains(&name.as_str()) {
             i += 1;
-            while i < words.len() && (words[i].text.starts_with('-') || is_assignment(&words[i])) {
-                i += 1;
+            let values = wrapper_value_flags(&name);
+            while let Some(w) = words.get(i) {
+                if values.contains(&w.text.as_str()) {
+                    i += 2;
+                } else if w.text.starts_with('-') || is_assignment(w) {
+                    i += 1;
+                } else {
+                    break;
+                }
             }
             // `timeout 5 git push`: the duration is the wrapper's, not the command.
             if name == "timeout" && words.get(i).is_some_and(|w| w.text.chars().next().is_some_and(|c| c.is_ascii_digit())) {
@@ -227,14 +357,19 @@ fn segment_publishes(words: &[Word], depth: u8) -> bool {
                 let mut plain = rest.iter().filter(|w| !w.text.starts_with('-')).map(|w| w.text.as_str());
                 plain.next() == Some("pr") && plain.next() == Some("merge")
             }
+            // The payload is every word after the flag: `cmd /c <command>` has no quotes.
             n if SHELLS.contains(&n) => rest
                 .iter()
                 .position(|w| matches!(w.text.to_lowercase().as_str(), "-c" | "-command" | "/c" | "-lc"))
-                .and_then(|p| rest.get(p + 1))
-                .is_some_and(|w| runs_publish_command_at(&w.text, depth + 1)),
+                .is_some_and(|p| runs_publish_command_at(&join_words(&rest[p + 1..]), depth + 1, ps)),
+            n if EVALS.contains(&n) => runs_publish_command_at(&join_words(rest), depth + 1, ps),
             _ => false,
         };
     }
+}
+
+fn join_words(words: &[Word]) -> String {
+    words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ")
 }
 
 /// The git subcommand: the first word after the global options.
@@ -350,8 +485,23 @@ mod tests {
             "gh pr merge 12 --squash",
             "gh pr merge",
             "cd x && gh pr merge --auto 12",
+            "cmd /c git push origin master",
+            "powershell -Command git push",
+            "pwsh -c git push",
+            "sudo -u root git push",
+            "env -u FOO git push",
+            "nice -n 10 git push",
+            "timeout -s KILL 30 git push",
+            "eval \"git push\"",
+            "iex \"git push\"",
+            "if true; then git push; fi",
+            "! git push",
+            "git \\\npush",
+            "git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)\" && git push",
+            "cat <<EOF >/dev/null\nunrelated\nEOF\ngit push",
+            "cat <<'EOF'\ngit push with no terminator\n",
         ] {
-            assert!(runs_publish_command(cmd), "must match: {cmd}");
+            assert!(runs_publish_command(cmd, false), "must match: {cmd}");
         }
         for cmd in [
             "git status",
@@ -367,8 +517,29 @@ mod tests {
             "git diff origin/master...HEAD -- push.rs",
             "cargo test push",
             "",
+            "git commit -F - <<'EOF'\ngit push is gated now\nEOF",
+            "cat > docs/x.md <<'EOF'\ngit push origin master\nif git push fails\nEOF",
+            "git commit -m \"$(cat <<'EOF'\nFIX: sub rule\n\nsudo git push is refused\nEOF\n)\"",
+            "cat <<-EOF\n\tgit push\n\tEOF",
+            "echo $((1 << 3)) && git status",
         ] {
-            assert!(!runs_publish_command(cmd), "must not match: {cmd}");
+            assert!(!runs_publish_command(cmd, false), "must not match: {cmd}");
+        }
+    }
+
+    #[test]
+    fn powershell_backticks_escape_and_here_strings_are_data() {
+        for cmd in [
+            "git commit -m \"a `$b\"; git push",
+            "git commit -m \"say `\"hi`\"\"; git push",
+            "Write-Host `\"hi`\"; git push",
+            "git `\npush",
+            "$m = @'\ntext\n'@\ngit push",
+        ] {
+            assert!(runs_publish_command(cmd, true), "must match: {cmd}");
+        }
+        for cmd in ["$m = @'\ngit push\n'@\ngit status", "git commit -m \"git `push`\"", "Write-Host `\"git push`\""] {
+            assert!(!runs_publish_command(cmd, true), "must not match: {cmd}");
         }
     }
 
