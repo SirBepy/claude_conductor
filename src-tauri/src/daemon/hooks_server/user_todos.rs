@@ -99,9 +99,9 @@ static RIDERS: LazyLock<RiderMemory> = LazyLock::new(RiderMemory::default);
 /// report is consumed by `mark_todos_seen` once served, so it must never be
 /// held back.
 ///
-/// Starts with the newline that ends the open list's last line, so a todo whose
-/// own text quotes the phrase mid-line is not mistaken for the report.
-const TODOS_CHANGED_MARKER: &str = "\nChanged by him since your last turn:";
+/// Only a heading at the start of a line counts, so a todo whose own text
+/// quotes the phrase mid-line is not mistaken for the report.
+const TODOS_CHANGED_HEADING: &str = "Changed by him since your last turn:";
 
 impl RiderMemory {
     /// `text` if the chat has not yet received exactly it (in this compaction
@@ -128,12 +128,15 @@ impl RiderMemory {
     /// it and re-send an open list the chat has just been given.
     fn todos(&self, session_id: &str, text: Option<String>, epoch: Epoch) -> Option<String> {
         let Some(text) = text else { return self.unseen(session_id, "todos", None, epoch) };
-        let Some((open, report)) = text.split_once(TODOS_CHANGED_MARKER) else {
+        let Some(at) = text.find(&format!("\n{TODOS_CHANGED_HEADING}")) else {
             return self.unseen(session_id, "todos", Some(text), epoch);
         };
+        // The open part keeps the newline that ends its last line, so it is
+        // byte-identical to the same list rendered without a report.
+        let (open, report) = text.split_at(at + 1);
         match self.unseen(session_id, "todos", Some(open.to_string()), epoch) {
             Some(_) => Some(text),
-            None => Some(format!("[your-todos]{TODOS_CHANGED_MARKER}{report}")),
+            None => Some(format!("[your-todos] {report}")),
         }
     }
 }
@@ -401,7 +404,9 @@ mod tests {
     fn edit_reports_are_never_held_back_and_do_not_make_the_open_list_repeat() {
         let m = RiderMemory::default();
         let open = "[your-todos] hdr\nOpen (1):\n- [a] x (this chat)\n".to_string();
-        let with_report = format!("{open}{TODOS_CHANGED_MARKER}\n- [a] ticked: x\n");
+        // The real render: the open list's lines each end in a newline and the
+        // heading follows directly.
+        let with_report = format!("{open}{TODOS_CHANGED_HEADING}\n- [a] ticked: x\n");
         assert_eq!(m.todos("s", Some(open.clone()), (0, 0)).as_deref(), Some(open.as_str()));
         assert_eq!(m.todos("s", Some(open.clone()), (0, 0)), None);
         let reported = m.todos("s", Some(with_report.clone()), (0, 0)).expect("the report is served");
