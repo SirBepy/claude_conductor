@@ -439,6 +439,16 @@ Settled:
 - **C1. The main chat's sidebar ring glows while any sub works.** Joe: "but fix the green one...
   currently sometimes it goes green and never stops being green... thats rly annoying". The stuck
   green ring is a bug to fix in the same build.
+- **C1. A main chat's sidebar row is green only when every sub is finished** (2026-11-12, Joe, a
+  follow-up to the stuck green ring): "for the chats in the sidemenu... they should only glow green
+  IF ALLLL of the subchats are done... only then...". So the done ring shows only when the main
+  chat's own turn is done AND every sub has finished. A sub that is working, queued, paused, at its
+  usage limit or stopped without finishing keeps the row off green: working draws the settled
+  glow, asking draws the attention pulse, the others draw no ring. Built (sidebar-ring.ts
+  `mainChatRingSpec`): the green is also only for an unread finish (`st-done`), so it clears when
+  Joe reads the chat; the old rule kept it for as long as every sub was finished, which is
+  forever, and that was the stuck green ring. Claude's reading, not Joe's words: whether a read
+  chat with every sub finished should keep a green ring is open; today it has none.
 - **C4. A queued sub's place in line shows in its hover card only** (no number on the avatar). Its
   menu gains **Start now** (starts it at once in its own worktree, without waiting) and **Drop**
   (danger; it never started, so only its brief goes); the card Joe answered named both. He kept

@@ -251,30 +251,57 @@ describe("main chat ring", () => {
   // The repro for Joe's "it goes green and never stops being green": every sub finished and
   // the chat read (`st-your-turn`) used to draw a solid green ring for as long as the subs
   // stayed finished. A read chat has no ring, as on any other chat.
-  it("does not stay green after every sub finished and Joe read the chat", () => {
-    const info = mainChatInfo(main, [main, sub("a", { subchat_finished: true, busy: false })]);
-    expect(info.allFinished).toBe(true);
-    expect(mainChatRingSpec("st-your-turn", null, info.anyWorking)).toEqual({ kind: "none" });
-  });
-
-  // The same repro through the real row builder, the path the sidebar draws from.
-  const rowRing = (info) => sessionRowOptions(main, {
-    isActive: false, unread: new Set(), attention: new Set(), question: new Set(), rateLimited: new Set(), closing: new Set(),
-    sort: "status", drainMap: new Map(), scheduledCountMap: new Map(), kbdHint: "", mainChat: info,
+  // Through the real row builder, the path the sidebar draws from. `unread` is the chat's own
+  // finish not yet read (`st-done`); without it the chat is read and idle (`st-your-turn`).
+  const rowRing = (subs, { unread = false } = {}) => sessionRowOptions(main, {
+    isActive: false, unread: new Set(unread ? ["main"] : []), attention: new Set(), question: new Set(), rateLimited: new Set(), closing: new Set(),
+    sort: "status", drainMap: new Map(), scheduledCountMap: new Map(), kbdHint: "", mainChat: mainChatInfo(main, [main, ...subs]),
   }).avatarExtras.ringHtml;
+  const fin = (id) => sub(id, { subchat_finished: true, busy: false });
+  const queuedSub = (id) => sub(id, { busy: false, progress: progress({ waiting_for: "x" }) });
+  const stoppedSub = (id) => sub(id, { busy: false, progress: progress({ stopped_unfinished: true }) });
 
-  it("the sidebar row of a read main chat whose subs all finished has no ring, and glows while one works", () => {
-    expect(rowRing(mainChatInfo(main, [main, sub("a", { subchat_finished: true, busy: false })]))).toBe("");
-    const working = rowRing(mainChatInfo(main, [main, sub("a", { subchat_finished: true, busy: false }), sub("b")]));
-    expect(working).toContain('data-tone="working"');
-    expect(working).toContain("is-glow");
+  it("does not stay green after every sub finished and Joe read the chat", () => {
+    expect(rowRing([fin("a")])).toBe("");
+    expect(mainChatInfo(main, [main, fin("a")]).allFinished).toBe(true);
   });
 
-  it("glows while a sub works and stops when the last one stops", () => {
-    const working = mainChatInfo(main, [main, sub("a")]);
-    expect(mainChatRingSpec("st-your-turn", null, working.anyWorking)).toMatchObject({ tone: "working", glow: true });
-    const stopped = mainChatInfo(main, [main, sub("a", { busy: false, progress: progress({ stopped_unfinished: true }) })]);
-    expect(mainChatRingSpec("st-your-turn", null, stopped.anyWorking)).toEqual({ kind: "none" });
+  // Joe, 2026-11-12: "they should only glow green IF ALLLL of the subchats are done... only then".
+  it("is green when the chat's own turn is done and every sub finished", () => {
+    const ring = rowRing([fin("a"), fin("b")], { unread: true });
+    expect(ring).toContain('data-tone="done"');
+  });
+
+  it("one unfinished sub of several blocks green, whatever it is doing", () => {
+    for (const unfinished of [queuedSub("q"), stoppedSub("s"), sub("p", { frozen: true })]) {
+      const ring = rowRing([fin("a"), fin("b"), unfinished], { unread: true });
+      expect(ring, unfinished.session_id).not.toContain('data-tone="done"');
+      expect(ring, unfinished.session_id).toBe("");
+    }
+  });
+
+  it("glows while a sub works, even beside finished ones, and never draws green then", () => {
+    const ring = rowRing([fin("a"), sub("w")], { unread: true });
+    expect(ring).toContain('data-tone="working"');
+    expect(ring).toContain("is-glow");
+    expect(ring).not.toContain('data-tone="done"');
+    expect(rowRing([fin("a"), sub("w")])).toContain("is-glow");
+  });
+
+  it("draws the attention pulse while a sub asks, never green", () => {
+    const ring = rowRing([fin("a"), sub("k", { awaiting: "question" })], { unread: true });
+    expect(ring).toContain('data-tone="attention"');
+    expect(ring).toContain("is-pulse");
+    expect(ring).not.toContain('data-tone="done"');
+  });
+
+  it("stops glowing when the last working sub stops", () => {
+    expect(rowRing([sub("a")])).toContain("is-glow");
+    expect(rowRing([stoppedSub("a")])).toBe("");
+  });
+
+  it("a chat with no subs keeps the ordinary green for its own unread finish", () => {
+    expect(rowRing([], { unread: true })).toContain('data-tone="done"');
   });
 });
 

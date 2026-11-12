@@ -449,6 +449,8 @@ pub fn run() {
             ipc::get_sub_brief,
             ipc::set_sub_pinned,
             ipc::flag_shown_badly,
+            ipc::start_queued_sub,
+            ipc::drop_queued_sub,
             ipc::chat_quick_view,
             ipc::publish_to_claude_ai,
             ipc::voice_clean_transcript,
