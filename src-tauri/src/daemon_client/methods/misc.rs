@@ -58,6 +58,28 @@ mod tests {
     mod test_support;
     use test_support::ChildGuard;
 
+    /// The `cc-conductor-daemon` executable path out of `cargo build --message-format=json`
+    /// output: the `executable` of the `compiler-artifact` message for that bin.
+    fn daemon_exe_from_cargo_json(stdout: &[u8]) -> Option<std::path::PathBuf> {
+        String::from_utf8_lossy(stdout).lines().find_map(|line| {
+            let v: serde_json::Value = serde_json::from_str(line).ok()?;
+            if v["reason"] != "compiler-artifact" || v["target"]["name"] != "cc-conductor-daemon" {
+                return None;
+            }
+            v["executable"].as_str().map(std::path::PathBuf::from)
+        })
+    }
+
+    #[test]
+    fn the_daemon_exe_is_read_from_cargo_json_output() {
+        let out = br#"{"reason":"compiler-artifact","target":{"name":"other"},"executable":"C:/t/debug/other.exe"}
+{"reason":"compiler-artifact","target":{"name":"cc-conductor-daemon","kind":["bin"]},"executable":"C:/t/debug/cc-conductor-daemon.exe"}
+{"reason":"build-finished","success":true}
+"#;
+        assert_eq!(daemon_exe_from_cargo_json(out), Some(std::path::PathBuf::from("C:/t/debug/cc-conductor-daemon.exe")));
+        assert_eq!(daemon_exe_from_cargo_json(br#"{"reason":"build-finished"}"#), None);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn persistent_client_health_against_real_daemon() {
         // Isolated test instance: distinct pipe/lockfile/hook-port so this never
@@ -79,36 +101,37 @@ mod tests {
         // cc-conductor-daemon.exe's file handle open for a brief moment after
         // exit, making cargo's file-replace step fail with a transient
         // "Access is denied" (os error 5) rather than a real build error.
-        // The build targets the directory this test binary lives in
-        // (<target-dir>/debug/deps/x.exe). A relative CARGO_TARGET_DIR (CI sets
-        // `target`) resolves against the child's cwd, the package folder, while the
-        // outer cargo resolved it against the repo root: the daemon then landed in
-        // src-tauri/target after a cold six-minute compile and was never found.
-        let target_dir = std::env::current_exe().unwrap().ancestors().nth(3).map(std::path::Path::to_path_buf).expect("test binary has a target dir");
-        let mut build_ok = false;
+        let mut built: Option<std::path::PathBuf> = None;
         for attempt in 0..3 {
+            // Cargo reports where it wrote the executable, so this never has to guess
+            // the target directory from the environment or the working directory.
             let build = Command::new("cargo")
-                .args(["build", "--bin", "cc-conductor-daemon"])
-                .env("CARGO_TARGET_DIR", &target_dir)
+                .args(["build", "--bin", "cc-conductor-daemon", "--message-format=json-render-diagnostics"])
                 .current_dir(std::env::current_dir().unwrap())
-                .status()
+                .stderr(Stdio::inherit())
+                .output()
                 .expect("cargo build");
-            if build.success() {
-                build_ok = true;
+            if build.status.success() {
+                built = Some(daemon_exe_from_cargo_json(&build.stdout).unwrap_or_default());
                 break;
             }
             if attempt < 2 {
                 std::thread::sleep(Duration::from_secs(2));
             }
         }
-        assert!(build_ok, "cargo build --bin cc-conductor-daemon failed after retries");
+        let built = built.expect("cargo build --bin cc-conductor-daemon failed after retries");
 
-        // Derive from this test binary (<target-dir>/debug/deps/x.exe) rather than
-        // assuming ./target: .cargo/config.toml redirects target-dir off the repo.
-        let mut exe = std::env::current_exe().unwrap();
-        exe.pop();
-        exe.pop();
-        exe.push("cc-conductor-daemon.exe");
+        // Fallback when cargo reported no executable: derive it from this test
+        // binary (<target-dir>/debug/deps/x.exe) rather than assuming ./target.
+        let exe = if built.as_os_str().is_empty() {
+            let mut exe = std::env::current_exe().unwrap();
+            exe.pop();
+            exe.pop();
+            exe.push("cc-conductor-daemon.exe");
+            exe
+        } else {
+            built
+        };
         let child = Command::new(&exe)
             .env("CC_DAEMON_INSTANCE", INSTANCE)
             // Don't auto-continue interrupted chats from a test daemon.
@@ -116,7 +139,22 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("spawn daemon");
+            .unwrap_or_else(|e| {
+                // The windows-latest runner failed here with os error 2 while the same
+                // test passes on the dev machine, so say what is on disk.
+                let near: Vec<String> = exe
+                    .parent()
+                    .and_then(|d| std::fs::read_dir(d).ok())
+                    .map(|rd| rd.flatten().map(|f| f.file_name().to_string_lossy().into_owned()).filter(|n| n.contains("conductor")).collect())
+                    .unwrap_or_default();
+                panic!(
+                    "spawn daemon {exe:?} failed: {e}; exists={}; cwd={:?}; test exe={:?}; CARGO_TARGET_DIR={:?}; files near it: {near:?}",
+                    exe.exists(),
+                    std::env::current_dir().ok(),
+                    std::env::current_exe().ok(),
+                    std::env::var("CARGO_TARGET_DIR").ok(),
+                )
+            });
         // Kills the spawned daemon on drop - including when a panic unwinds
         // out of an assertion below. Without this, a single failed run (health
         // check fails, connect times out, etc.) leaks this process forever: it
