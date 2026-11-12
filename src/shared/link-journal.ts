@@ -4,7 +4,7 @@
  * The daemon's log only shows connections that succeeded, so a "the phone keeps
  * disconnecting" report could not be diagnosed from the PC alone. The page notes
  * its stream and visibility events here; on the Android shell the tunnel's own
- * journal (`GET /__tunnel/journal`, answered by the shell) is merged in; both go
+ * journal (read from the shell's dedicated journal port, the page's own port + 1) is merged in; both go
  * to the daemon through `report_link_journal`, which writes them into its log.
  *
  * Phone only: every export is a no-op unless `isRemote()`. Events carry kinds
@@ -45,6 +45,7 @@ const PERSIST_MIN_GAP_MS = 2_000;
 /** The daemon drops a second call inside 5s from one device; 6s keeps clear of it. */
 const FLUSH_MIN_GAP_MS = 6_000;
 const FLUSH_BATCH = 50;
+const TUNNEL_FETCH_TIMEOUT_MS = 3_000;
 const LINE_MAX = 300;
 const AFTER_STREAM_OPEN_MS = 3_000;
 const VISIBLE_TICK_MS = 60_000;
@@ -164,12 +165,28 @@ interface Line {
   s: number;
 }
 
-/** What the Android shell's tunnel recorded, or nothing: an older shell forwards
- *  the URL to the PC, which answers with the SPA's HTML. */
+/** The tunnel's journal listener is the page's own port + 1. A same-origin fetch
+ *  would travel on one of the WebView's reused keep-alive connections, which are
+ *  already spliced to the PC, so the tunnel never sees it as a first request. */
+function tunnelJournalUrl(): string | null {
+  if (typeof location === "undefined" || location.hostname !== "127.0.0.1") return null;
+  const port = Number(location.port);
+  if (!Number.isInteger(port) || port <= 0 || port >= 65535) return null;
+  return `http://127.0.0.1:${port + 1}/`;
+}
+
+/** What the Android shell's tunnel recorded, or nothing: an older shell has no
+ *  journal port, so the fetch is refused at once (or, if something else holds that
+ *  port, fails the content check). The short timeout keeps a stuck port from
+ *  holding the upload. */
 async function fetchTunnelEvents(): Promise<Line[]> {
   if (!isAndroidShell()) return [];
+  const url = tunnelJournalUrl();
+  if (!url) return [];
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), TUNNEL_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch("/__tunnel/journal", { cache: "no-store" });
+    const res = await fetch(url, { cache: "no-store", signal: abort.signal });
     if (!res.ok) return [];
     if (!(res.headers.get("content-type") ?? "").startsWith("application/json")) return [];
     const body = (await res.json()) as { v?: unknown; events?: unknown };
@@ -182,6 +199,8 @@ async function fetchTunnelEvents(): Promise<Line[]> {
     return out;
   } catch {
     return [];
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -206,7 +225,11 @@ export async function flush(): Promise<void> {
     if (batch.length === 0) return;
     lastFlushAt = Date.now();
     try {
-      await getTransport().call("report_link_journal", { lines: batch.map(formatLine) });
+      const answer = await getTransport().call("report_link_journal", { lines: batch.map(formatLine) });
+      // The PC answers a call inside its 5s per-device window with kept 0. An
+      // answer without a numeric `kept` is an older PC, which keeps everything.
+      const kept = (answer as { kept?: unknown } | null | undefined)?.kept;
+      if (typeof kept === "number" && kept === 0) return;
     } catch {
       return; // silent: the same events go with the next flush
     }

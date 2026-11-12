@@ -110,7 +110,11 @@ const WATCHDOG_TICK: Duration = Duration::from_secs(2);
 /// before it is journaled as late; scheduler jitter stays far below it.
 const TICK_LATE_SLACK: Duration = Duration::from_secs(3);
 
-/// The journal request a loopback client may send; the tunnel answers it itself.
+/// The journal request line the main loopback port answers itself when it is the
+/// first request on a fresh connection. The page does not rely on that: the
+/// WebView reuses idle keep-alive connections that are already spliced to a
+/// stream to the PC, so a fetch on one of those reaches the PC, not this check.
+/// The page reads the dedicated journal port (`bind_journal_listener`) instead.
 const JOURNAL_REQUEST_PREFIX: &[u8] = b"GET /__tunnel/journal HTTP/1.";
 
 /// Most bytes `forward` reads before it decides whether a request is the journal's.
@@ -237,18 +241,37 @@ impl Drop for StreamGauge<'_> {
 /// A running tunnel plus what is needed to stop it.
 struct RunningTunnel {
     port: u16,
+    /// The dedicated journal port, when it could be bound. Never in `LIVE_PORTS`:
+    /// it serves JSON only, never a page the app may navigate to.
+    journal_port: Option<u16>,
     tunnel: Arc<Tunnel>,
-    tasks: [tokio::task::AbortHandle; 2],
+    tasks: Vec<tokio::task::AbortHandle>,
 }
 
 impl RunningTunnel {
+    #[cfg(test)]
     fn spawn(listener: TcpListener, port: u16, tunnel: Arc<Tunnel>) -> Self {
+        Self::spawn_with_journal(listener, port, tunnel, None)
+    }
+
+    fn spawn_with_journal(listener: TcpListener, port: u16, tunnel: Arc<Tunnel>, journal_listener: Option<TcpListener>) -> Self {
         let watchdog = tokio::spawn(resume_watchdog(tunnel.clone())).abort_handle();
         let accept = tokio::spawn(accept_loop(listener, tunnel.clone())).abort_handle();
+        let mut tasks = vec![watchdog, accept];
+        let mut journal_port = None;
+        if let Some(journal_listener) = journal_listener {
+            journal_port = journal_listener.local_addr().ok().map(|a| a.port());
+            tasks.push(tokio::spawn(journal_accept_loop(journal_listener, tunnel.clone(), port)).abort_handle());
+        }
         if let Ok(mut ports) = LIVE_PORTS.write() {
             ports.insert(port);
         }
-        Self { port, tunnel, tasks: [watchdog, accept] }
+        Self { port, journal_port, tunnel, tasks }
+    }
+
+    /// Whether `port` is one of this tunnel's two loopback ports.
+    fn holds_port(&self, port: u16) -> bool {
+        self.port == port || self.journal_port == Some(port)
     }
 
     /// Aborting the accept task drops the listener, freeing the port; removing
@@ -306,7 +329,7 @@ pub async fn start_iroh_tunnel(
     let candidates = port_candidates(&remote_id, legacy.unwrap_or(false));
     // A candidate held by an old tunnel is freed first, so the new PC still
     // lands on its own deterministic port and keeps that origin's token.
-    if running.values().any(|old| candidates.contains(&old.port)) {
+    if running.values().any(|old| candidates.iter().any(|c| old.holds_port(*c))) {
         shut_down_all(&mut running).await;
     }
     let (listener, port) = bind_loopback(&candidates).await?;
@@ -317,7 +340,8 @@ pub async fn start_iroh_tunnel(
     // through the N0 preset's pkarr lookup, matching the desktop's ticket; later
     // dials add the relay the PC was last reached on (`Tunnel::dial_addr`).
     let tunnel = Arc::new(Tunnel::new(endpoint, remote_id.into(), Box::new(|| Box::pin(bind_endpoint()))));
-    running.insert(remote_id, RunningTunnel::spawn(listener, port, tunnel));
+    let journal_listener = bind_journal_listener(port, &tunnel).await;
+    running.insert(remote_id, RunningTunnel::spawn_with_journal(listener, port, tunnel, journal_listener));
     Ok(port)
 }
 
@@ -896,6 +920,75 @@ async fn accept_loop(listener: TcpListener, tunnel: Arc<Tunnel>) {
     }
 }
 
+/// Most request bytes the journal port reads before it answers anyway.
+const JOURNAL_PORT_HEAD_CAP: usize = 8 * 1024;
+
+/// A journal-port client that has not finished its request head by now is dropped.
+const JOURNAL_PORT_HEAD_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Binds the journal port, the main port + 1, for the page to read the journal
+/// on. A fetch on the main port rides the WebView's reused keep-alive connections,
+/// which are spliced to the PC, so only a port of its own is reliable. A failure
+/// is journaled and the tunnel carries on without it.
+async fn bind_journal_listener(main_port: u16, tunnel: &Tunnel) -> Option<TcpListener> {
+    let bound = match main_port.checked_add(1) {
+        Some(port) => TcpListener::bind(("127.0.0.1", port)).await.map_err(|e| format!("port {port}: {e}")),
+        None => Err("no port above the main one".to_string()),
+    };
+    match bound {
+        Ok(listener) => Some(listener),
+        Err(reason) => {
+            warn!("journal port unavailable: {reason}");
+            tunnel.note("journal_port", &format!("unavailable {reason}"));
+            None
+        }
+    }
+}
+
+async fn journal_accept_loop(listener: TcpListener, tunnel: Arc<Tunnel>, main_port: u16) {
+    loop {
+        match listener.accept().await {
+            Ok((tcp, _)) => {
+                let tunnel = tunnel.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = serve_journal(tcp, &tunnel, main_port).await {
+                        warn!("journal port reply failed: {e}");
+                    }
+                });
+            }
+            Err(e) => {
+                error!("journal listener accept failed: {}", e);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+}
+
+/// Answers every connection with the journal and closes. The origin header names
+/// the tunnel's own page (`main_port`) only, so no other site can read it.
+/// Never dials the PC.
+async fn serve_journal(tcp: TcpStream, tunnel: &Tunnel, main_port: u16) -> Result<(), BoxError> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (mut read, mut write) = tokio::io::split(tcp);
+    let deadline = tokio::time::Instant::now() + JOURNAL_PORT_HEAD_TIMEOUT;
+    let mut head: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 1024];
+    while head.len() < JOURNAL_PORT_HEAD_CAP && !head.windows(4).any(|w| w == b"\r\n\r\n") {
+        match tokio::time::timeout_at(deadline, read.read(&mut chunk)).await {
+            Ok(Ok(n)) if n > 0 => head.extend_from_slice(&chunk[..n]),
+            _ => return Ok(()),
+        }
+    }
+    let body = tunnel.journal.snapshot_json(ms_of((tunnel.clock)()));
+    let reply = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: http://127.0.0.1:{main_port}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    write.write_all(reply.as_bytes()).await?;
+    write.shutdown().await?;
+    Ok(())
+}
+
 enum RequestHead {
     Journal,
     Forward,
@@ -942,8 +1035,10 @@ async fn forward(tcp: TcpStream, tunnel: &Tunnel) -> Result<(), BoxError> {
     use tokio::io::AsyncReadExt;
     let (mut tcp_read, mut tcp_write) = tokio::io::split(tcp);
     let mut early: Vec<u8> = Vec::new();
-    // The journal is answered here, before any dial: it must be readable exactly
-    // when the PC is unreachable, and reading it must not start a connect.
+    // A journal request that opens a fresh connection is answered here, before any
+    // dial: it must be readable exactly when the PC is unreachable, and reading it
+    // must not start a connect. A request on a reused keep-alive connection never
+    // gets here, which is why the page reads the dedicated journal port instead.
     match read_request_head(&mut tcp_read, &mut early).await {
         RequestHead::Closed => return Ok(()),
         RequestHead::Journal => {
@@ -1757,6 +1852,138 @@ mod tests {
     fn running_on(tunnel: Arc<Tunnel>, listener: TcpListener) -> RunningTunnel {
         let port = listener.local_addr().expect("addr").port();
         RunningTunnel::spawn(listener, port, tunnel)
+    }
+
+    /// A main listener whose port + 1 is free, with that neighbour bound as the journal listener.
+    async fn listener_pair(tunnel: &Tunnel) -> (TcpListener, Option<TcpListener>) {
+        for _ in 0..50 {
+            let main = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+            let port = main.local_addr().expect("addr").port();
+            if let Some(journal) = bind_journal_listener(port, tunnel).await {
+                return (main, Some(journal));
+            }
+        }
+        panic!("no free port pair");
+    }
+
+    #[tokio::test]
+    async fn the_journal_port_answers_with_cors_for_the_tunnels_own_origin_and_never_dials() {
+        let (server, accepted) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let tunnel = Arc::new(Tunnel::new(client, server, minimal_rebuild()));
+        let (main, journal) = listener_pair(&tunnel).await;
+        let running = running_on_with_journal(tunnel, main, journal);
+        let main_port = running.port;
+        let journal_port = running.journal_port.expect("journal port");
+        assert_eq!(journal_port, main_port + 1);
+        assert!(!is_tunnel_port(journal_port), "the journal port is not a page the app may open");
+        let reply = raw_exchange(journal_port, &[b"GET / HTTP/1.1\r\nHost: x\r\n\r\n"]).await;
+        assert!(reply.starts_with("HTTP/1.1 200 OK\r\n"), "{reply}");
+        assert!(reply.contains("Content-Type: application/json\r\n"), "{reply}");
+        assert!(reply.contains("Cache-Control: no-store\r\n"), "{reply}");
+        assert!(reply.contains(&format!("Access-Control-Allow-Origin: http://127.0.0.1:{main_port}\r\n")), "{reply}");
+        assert!(reply.contains("Connection: close\r\n"), "{reply}");
+        let body = reply.split("\r\n\r\n").nth(1).expect("body");
+        assert!(body.starts_with("{\"v\":1"), "{body}");
+        assert!(reply.contains(&format!("Content-Length: {}\r\n", body.len())), "{reply}");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(accepted.load(Ordering::SeqCst), 0, "the journal port must not reach the PC");
+        running.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn the_journal_port_answers_any_method_and_drops_a_silent_client() {
+        let (server, _) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let tunnel = Arc::new(Tunnel::new(client, server, minimal_rebuild()));
+        let (main, journal) = listener_pair(&tunnel).await;
+        let running = running_on_with_journal(tunnel, main, journal);
+        let journal_port = running.journal_port.expect("journal port");
+        let reply = raw_exchange(journal_port, &[b"POST /x HTTP/1.1\r\nContent-Length: 0\r\n\r\n"]).await;
+        assert!(reply.starts_with("HTTP/1.1 200 OK\r\n"), "{reply}");
+        let mut silent = TcpStream::connect(("127.0.0.1", journal_port)).await.expect("connect");
+        let mut out = Vec::new();
+        tokio::time::timeout(JOURNAL_PORT_HEAD_TIMEOUT + Duration::from_secs(3), silent.read_to_end(&mut out))
+            .await
+            .expect("a silent client must be dropped")
+            .expect("read");
+        assert!(out.is_empty(), "a silent client gets no reply");
+        running.shutdown().await;
+    }
+
+    /// Why the journal has a port of its own: the WebView reuses a keep-alive
+    /// connection that is already spliced to a stream to the PC, and the tunnel
+    /// only looks at the first request of a connection. A journal request that
+    /// rides such a connection is not answered locally.
+    #[tokio::test]
+    async fn a_journal_request_on_a_reused_main_port_connection_is_not_answered_locally() {
+        let (server, accepted) = pong_server().await;
+        let (_tunnel, port) = tunnel_to(server).await;
+        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
+        sock.write_all(b"PING").await.expect("send");
+        let mut reply = vec![0u8; 4];
+        sock.read_exact(&mut reply).await.expect("read reply");
+        assert_eq!(&reply, b"PONG");
+        // The second request on the same connection; a write error is fine, the splice may be closed.
+        let _ = sock.write_all(b"GET /__tunnel/journal HTTP/1.1\r\nHost: x\r\n\r\n").await;
+        let mut rest = Vec::new();
+        let _ = tokio::time::timeout(Duration::from_secs(2), sock.read_to_end(&mut rest)).await;
+        let rest = String::from_utf8_lossy(&rest);
+        assert!(!rest.contains("\"v\":1") && !rest.contains("HTTP/1.1 200"), "answered locally: {rest}");
+        assert_eq!(accepted.load(Ordering::SeqCst), 1, "only the first request dialed the PC; the second rode its stream");
+    }
+
+    #[tokio::test]
+    async fn shutting_down_frees_the_journal_port_too() {
+        let (server, _) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let tunnel = Arc::new(Tunnel::new(client, server, minimal_rebuild()));
+        let (main, journal) = listener_pair(&tunnel).await;
+        let running = running_on_with_journal(tunnel, main, journal);
+        let journal_port = running.journal_port.expect("journal port");
+        running.shutdown().await;
+        let mut rebound = false;
+        for _ in 0..50 {
+            if TcpListener::bind(("127.0.0.1", journal_port)).await.is_ok() {
+                rebound = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(rebound, "old journal listener still holds the port");
+    }
+
+    #[tokio::test]
+    async fn a_taken_journal_port_is_journaled_and_the_tunnel_still_starts() {
+        let (server, _) = pong_server().await;
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let journal = Arc::new(Journal::new());
+        let mut tunnel = Tunnel::new(client, server, minimal_rebuild());
+        tunnel.journal = journal.clone();
+        let tunnel = Arc::new(tunnel);
+        // Hold port + 1 of a bound main port.
+        let (main, blocker) = loop {
+            let main = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+            let port = main.local_addr().expect("addr").port();
+            if let Ok(blocker) = TcpListener::bind(("127.0.0.1", port + 1)).await {
+                break (main, blocker);
+            }
+        };
+        let port = main.local_addr().expect("addr").port();
+        let none = bind_journal_listener(port, &tunnel).await;
+        assert!(none.is_none());
+        let json = journal.snapshot_json(0);
+        assert!(json.contains("\"k\":\"journal_port\",\"d\":\"unavailable port "), "{json}");
+        let running = RunningTunnel::spawn_with_journal(main, port, tunnel, none);
+        assert_eq!(running.journal_port, None);
+        assert!(is_tunnel_port(port), "the tunnel itself runs without the journal port");
+        running.shutdown().await;
+        drop(blocker);
+    }
+
+    fn running_on_with_journal(tunnel: Arc<Tunnel>, listener: TcpListener, journal: Option<TcpListener>) -> RunningTunnel {
+        let port = listener.local_addr().expect("addr").port();
+        RunningTunnel::spawn_with_journal(listener, port, tunnel, journal)
     }
 
     #[tokio::test]

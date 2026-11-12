@@ -2,7 +2,9 @@
 //!
 //! The phone's own events never reached the PC, so a "keeps disconnecting"
 //! report could only be investigated from the PC's side. The page reads this
-//! through `GET /__tunnel/journal` and uploads it. The journal is process-wide
+//! from the tunnel's journal port (the loopback port + 1) and uploads it; a
+//! same-port path would ride a kept-alive connection that is already spliced
+//! to the PC. The journal is process-wide
 //! (`global`) because the tunnel is rebuilt when the user switches PC and the
 //! history must outlive that.
 //!
