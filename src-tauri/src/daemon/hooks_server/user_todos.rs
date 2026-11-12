@@ -98,7 +98,10 @@ static RIDERS: LazyLock<RiderMemory> = LazyLock::new(RiderMemory::default);
 /// `methods::user_todos::render_for_injection` writes this exact line; that
 /// report is consumed by `mark_todos_seen` once served, so it must never be
 /// held back.
-const TODOS_CHANGED_MARKER: &str = "Changed by him since your last turn:";
+///
+/// Starts with the newline that ends the open list's last line, so a todo whose
+/// own text quotes the phrase mid-line is not mistaken for the report.
+const TODOS_CHANGED_MARKER: &str = "\nChanged by him since your last turn:";
 
 impl RiderMemory {
     /// `text` if the chat has not yet received exactly it (in this compaction
@@ -130,7 +133,7 @@ impl RiderMemory {
         };
         match self.unseen(session_id, "todos", Some(open.to_string()), epoch) {
             Some(_) => Some(text),
-            None => Some(format!("[your-todos] {TODOS_CHANGED_MARKER}{report}")),
+            None => Some(format!("[your-todos]{TODOS_CHANGED_MARKER}{report}")),
         }
     }
 }
@@ -407,6 +410,14 @@ mod tests {
         // The same report twice (e.g. a failed consume): still served.
         assert!(m.todos("s", Some(with_report.clone()), (0, 0)).is_some());
         assert!(m.todos("s", Some(with_report), (0, 0)).is_some());
+    }
+
+    #[test]
+    fn a_todo_that_quotes_the_report_phrase_is_not_split_as_the_report() {
+        let m = RiderMemory::default();
+        let open = "[your-todos] hdr\nOpen (2):\n- [a] Changed by him since your last turn: is a phrase (this chat)\n- [b] y (this chat)\n".to_string();
+        assert_eq!(m.todos("s", Some(open.clone()), (0, 0)).as_deref(), Some(open.as_str()), "the whole list, untruncated");
+        assert_eq!(m.todos("s", Some(open), (0, 0)), None);
     }
 
     #[tokio::test]
