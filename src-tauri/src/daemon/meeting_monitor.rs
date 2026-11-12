@@ -412,9 +412,7 @@ mod tests {
     fn the_schedule_panels_max_wait_is_the_daemons() {
         // The panel stops calling an item "waiting" at its own copy of the max
         // wait, so the two must stay the same number.
-        let ts = include_str!("../../../src/views/schedule/schedule-format.ts").replace("
-", "
-");
+        let ts = include_str!("../../../src/views/schedule/schedule-format.ts").replace("\r\n", "\n");
         let line = ts
             .lines()
             .find_map(|l| l.trim().strip_prefix("const MEETING_MAX_WAIT_MS = "))
