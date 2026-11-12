@@ -44,9 +44,12 @@ export interface DashboardInput {
   subs?: SubCardItem[];
   /** Clock for the Subchats card's one-hour fold; tests pass their own. */
   now?: number;
-  /** This chat's previews and its subs' (list_previews scoped to the chat's
-   *  family), newest first, once loaded. */
+  /** The family's previews (list_previews scoped to the main chat: it and its
+   *  subs), newest first, once loaded. The Preview card splits them by
+   *  `session_id` against `sessionId`. */
   previews?: readonly PreviewMeta[];
+  /** The chat this dashboard belongs to (a sub's own id when read in place). */
+  sessionId?: string | null;
   /** The drafts store, once read (drafts-model.ts). */
   draftStore?: DraftStoreSide;
   /** Joe's per-section overrides (Settings > Chat defaults), by zone id. */
@@ -449,21 +452,49 @@ export function deriveLinks({ input }: DeriveCtx): LinksState | null {
   return { links, files };
 }
 
-export interface PreviewWindowState {
-  /** The chat's (or its subs') newest preview. */
-  newest: PreviewMeta;
-  /** How many others the panel holds. */
-  others: number;
+/** The previews one other chat of the family pushed, newest first. */
+export interface PreviewGroup {
+  owner: string;
+  items: PreviewMeta[];
 }
 
-/** The Preview window card: the newest preview as a small live tile that opens
- *  the preview panel. A comparison table is a preview like any other, so it
- *  lands here too instead of in a card of its own. */
+export interface PreviewWindowState {
+  /** Every preview this chat pushed itself, newest first: the first is the big
+   *  tile, the rest the strip under it. */
+  own: PreviewMeta[];
+  /** The rest of the family's previews, one group per chat, the group with the
+   *  newest preview first. Behind a fold: they are not this chat's. */
+  others: PreviewGroup[];
+  /** How many previews `others` holds. */
+  otherCount: number;
+}
+
+/** The Preview window card: the previews this chat pushed (never another
+ *  chat's: Joe 2026-11-11, "maybe that chat didnt even have a preview"), plus
+ *  a fold naming how many the rest of the family made. A preview's owner is
+ *  whoever pushed its live version, so a slug another chat re-pushed moves to
+ *  that chat. A comparison table is a preview like any other, so it lands here
+ *  too instead of in a card of its own. */
 export function derivePreviewWindow({ input }: DeriveCtx): PreviewWindowState | null {
   if (!sectionOn(input.sections, "preview")) return null;
-  const list = input.previews ?? [];
-  const newest = list[0];
-  return newest ? { newest, others: list.length - 1 } : null;
+  const sid = input.sessionId;
+  if (!sid) return null;
+  const own: PreviewMeta[] = [];
+  const groups = new Map<string, PreviewMeta[]>();
+  for (const m of input.previews ?? []) {
+    if (!m.session_id) continue;
+    if (m.session_id === sid) own.push(m);
+    else {
+      const g = groups.get(m.session_id);
+      if (g) g.push(m);
+      else groups.set(m.session_id, [m]);
+    }
+  }
+  // The list is newest first, so Map insertion order is already newest group first.
+  const others = [...groups].map(([owner, items]) => ({ owner, items }));
+  const otherCount = others.reduce((n, g) => n + g.items.length, 0);
+  if (own.length === 0 && otherCount === 0) return null;
+  return { own, others, otherCount };
 }
 
 /** Drafts: messages Claude wrote for Joe to send somewhere else (write_draft),

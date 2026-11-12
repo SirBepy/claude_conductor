@@ -11,8 +11,8 @@ import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance 
 
 // The dashboard's extra-content cards in the real app shell (docs/chat-dashboard-design.md,
 // "Extra content and quick views"): Links and files with the Bigger plan, Decided
-// and Project memory buttons and the read view they open, the Preview window tile
-// that opens the preview panel, the figures drawn beside an approval question, and
+// and Project memory buttons and the read view they open, the Preview card (this
+// chat's own previews as tiles that open the panel, the family's rest folded), the figures drawn beside an approval question, and
 // the Changes card that only exists once Joe switches it on.
 
 const SESSION = sessionInstance();
@@ -146,19 +146,38 @@ test.describe("chat dashboard extra cards", () => {
     expect(asked.some((c) => (c.args as { view?: string }).view === "memory" && (c.args as { sessionId?: string }).sessionId === SESSION.session_id)).toBe(true);
   });
 
-  test("the Preview window card shows the newest preview as a tile that opens the panel", async ({ page }) => {
-    await openChat(page, { list_previews: [meta("p2"), meta("p1")] });
+  test("the Preview card shows only this chat's previews, newest big, and folds the sub's away", async ({ page }) => {
+    const SUB = sessionInstance({ session_id: "sub-1", name: "Hero gradient", pid: 202, subchat_of: SESSION.session_id });
+    await openChat(page, {
+      list_instances: [SESSION, SUB],
+      get_active_sessions: [SESSION, SUB],
+      list_previews: [meta("s1", { session_id: SUB.session_id }), meta("p3"), meta("p2"), meta("p1")],
+    });
     const card = dash(page).locator(".cdash-preview");
     await expect(card).toBeVisible();
-    await expect(card.locator(".cdash-pv-title")).toHaveText("Mockup p2");
-    await expect(card.locator(".cdash-pv-more")).toContainText("+1 more");
-    await expect(card.locator(".cdash-pv-frame")).toHaveAttribute("src", /^data:text\/html/);
-    // The tile is a miniature of the page, not a full-size frame.
-    const tile = (await card.locator(".cdash-pv-tile").boundingBox())!;
-    const frame = (await card.locator(".cdash-pv-frame").boundingBox())!;
+    await expect(card.locator(".cdash-pv-title")).toHaveText("Mockup p3");
+    await expect(card.locator(".cdash-pv-tile:not(.is-thumb)")).toHaveAttribute("data-slug", "slug-p3");
+    await expect(card.locator(".cdash-pv-strip .is-thumb")).toHaveCount(2);
+    await expect(card.locator(".cdash-pv-tile[data-slug='slug-s1']")).toHaveCount(0);
+    await expect(card.locator(".cdash-pv-frame").first()).toHaveAttribute("src", /^data:text\/html/);
+    // The big tile is a miniature of the page, not a full-size frame, and so is each thumbnail.
+    const tile = (await card.locator(".cdash-pv-tile:not(.is-thumb)").boundingBox())!;
+    const frame = (await card.locator(".cdash-pv-tile:not(.is-thumb) .cdash-pv-frame").boundingBox())!;
     expect(Math.abs(frame.width - tile.width)).toBeLessThan(6);
+    const thumb = (await card.locator(".is-thumb").first().boundingBox())!;
+    expect(thumb.width).toBeLessThan(tile.width / 2);
+    await expect(card.locator(".is-thumb .cdash-pv-frame").first()).toHaveAttribute("src", /^data:text\/html/);
+    const thumbFrame = (await card.locator(".is-thumb .cdash-pv-frame").first().boundingBox())!;
+    expect(Math.abs(thumbFrame.width - thumb.width)).toBeLessThan(6);
+
+    const fold = card.locator("[data-act='pv-others']");
+    await expect(fold).toContainText("1 more by other chats");
     await capture(pane(page), "chat-dashboard-preview-tile");
-    await card.locator(".cdash-pv-tile").click();
+    await fold.click();
+    await expect(card.locator(".cdash-pv-owner")).toHaveText("Hero gradient");
+    await expect(card.locator(".cdash-pv-group .cdash-pv-tile")).toHaveAttribute("data-slug", "slug-s1");
+    await capture(pane(page), "chat-dashboard-preview-others-open");
+    await card.locator(".cdash-pv-tile:not(.is-thumb)").click();
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "get_preview").length).toBeGreaterThan(1);
   });
 

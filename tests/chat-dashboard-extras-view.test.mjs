@@ -142,29 +142,109 @@ describe("Links and files", () => {
 });
 
 describe("Preview window", () => {
-  it("draws the newest preview as a tile that opens the panel, with a count of the rest", async () => {
-    answers.list_previews = [meta("b"), meta("a")];
-    answers.get_preview = { id: "b", html: "<p>hi</p>" };
+  it("draws this chat's newest preview big and its older ones as a strip, each opening the panel", async () => {
+    answers.list_previews = [meta("c"), meta("b"), meta("a")];
+    answers.get_preview = { id: "c", html: "<p>hi</p>" };
     answers.render_preview_doc = "http://127.0.0.1:1/doc";
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     feed(r, [userEvent("show me")]);
     await tick(60);
-    const tile = pane.querySelector(".cdash-pv-tile");
-    expect(tile).not.toBeNull();
-    expect(tile.dataset.slug).toBe("slug-b");
-    expect(pane.querySelector(".cdash-pv-title").textContent).toBe("Title b");
-    expect(pane.querySelector(".cdash-pv-more").textContent).toContain("+1 more");
-    // The page is staged once and the frame points at it.
+    const card = pane.querySelector(".cdash-preview");
+    const big = card.querySelector(".cdash-pv-tile:not(.is-thumb)");
+    expect(big.dataset.slug).toBe("slug-c");
+    expect(card.querySelector(".cdash-pv-title").textContent).toBe("Title c");
+    expect([...card.querySelectorAll(".cdash-pv-strip .is-thumb")].map((t) => t.dataset.slug)).toEqual(["slug-b", "slug-a"]);
+    expect(card.querySelector(".cdash-count").textContent).toBe("3");
+    expect(card.querySelector("[data-act='pv-others']")).toBeNull();
+    // Each page is staged and its frame points at it.
     await tick(60);
-    expect(pane.querySelector(".cdash-pv-frame").getAttribute("src")).toBe("http://127.0.0.1:1/doc");
+    expect([...card.querySelectorAll(".cdash-pv-frame")].map((f) => f.getAttribute("src"))).toEqual(Array(3).fill("http://127.0.0.1:1/doc"));
     let opened = null;
     window.addEventListener(PREVIEW_OPEN_EVENT, (e) => { opened = e.detail.slug; }, { once: true });
-    tile.click();
-    expect(opened).toBe("slug-b");
+    pane.querySelector(".cdash-pv-strip .is-thumb[data-slug='slug-a']").click();
+    expect(opened).toBe("slug-a");
   });
 
-  it("draws nothing when the chat has no previews, or Joe switched the section off", async () => {
+  it("never shows another chat's preview as this chat's: a sub's and the main chat's sit behind a fold", async () => {
+    answers.list_previews = [meta("sub1", { session_id: "sub-x" }), meta("mine"), meta("main1", { session_id: "main-y" }), meta("sub2", { session_id: "sub-x" })];
+    answers.get_preview = { id: "x", html: "<p>hi</p>" };
+    answers.render_preview_doc = "http://127.0.0.1:1/doc";
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent("show me")]);
+    await tick(60);
+    const card = () => pane.querySelector(".cdash-preview");
+    expect([...card().querySelectorAll(".cdash-pv-tile")].map((t) => t.dataset.slug)).toEqual(["slug-mine"]);
+    const fold = card().querySelector("[data-act='pv-others']");
+    expect(fold.textContent).toContain("3 more by other chats");
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    fold.click();
+    await tick();
+    const groups = [...card().querySelectorAll(".cdash-pv-group")];
+    expect(groups.map((g) => [...g.querySelectorAll(".cdash-pv-tile")].map((t) => t.dataset.slug))).toEqual([["slug-sub1", "slug-sub2"], ["slug-main1"]]);
+    expect(card().querySelector("[data-act='pv-others']").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("says this chat made none when only the rest of the family has previews", async () => {
+    answers.list_previews = [meta("other", { session_id: "main-y" })];
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent("hi")]);
+    await tick(60);
+    const card = pane.querySelector(".cdash-preview");
+    expect(card.querySelector(".cdash-pv-tile")).toBeNull();
+    expect(card.querySelector(".cdash-pv-none").textContent).toContain("no previews");
+    expect(card.querySelector("[data-act='pv-others']").textContent).toContain("1 more by other chats");
+  });
+
+  it("in a sub read in place, lists the sub's own and labels its parent's as the main chat's", async () => {
+    const { state } = await import("../src/views/sessions/state.ts");
+    const inst = (session_id, over = {}) => ({ session_id, name: session_id, pid: 1, project: "p", cwd: "C:\p", busy: false, awaiting: null, ...over });
+    state.sessions = [inst("main-y"), inst("sess-1", { subchat_of: "main-y", name: "Hero" })];
+    try {
+      answers.list_previews = [meta("main1", { session_id: "main-y", title: "<b>x</b>" }), meta("mine")];
+      answers.get_preview = { id: "x", html: "<p>hi</p>" };
+      answers.render_preview_doc = "http://127.0.0.1:1/doc";
+      const { pane, r } = mountPane();
+      new ChatDashboard(pane, r);
+      feed(r, [userEvent("show me")]);
+      await tick(60);
+      const card = pane.querySelector(".cdash-preview");
+      expect([...card.querySelectorAll(".cdash-pv-tile")].map((t) => t.dataset.slug)).toEqual(["slug-mine"]);
+      // The scope is the parent's family, so the list is read under the main chat's id.
+      expect(calls.find((c) => c.cmd === "list_previews").args.sessionId).toBe("main-y");
+      card.querySelector("[data-act='pv-others']").click();
+      await tick();
+      expect(pane.querySelector(".cdash-pv-owner").textContent).toBe("Main chat");
+      // A title is text, never markup.
+      expect(pane.querySelector(".cdash-pv-group .cdash-pv-tile").getAttribute("title")).toBe("<b>x</b>: open in the preview panel");
+      expect(pane.querySelector(".cdash-pv-group b")).toBeNull();
+    } finally {
+      state.sessions = [];
+    }
+  });
+
+  it("caps a long strip with a +N tile that opens the panel instead of mounting every page", async () => {
+    answers.list_previews = Array.from({ length: 12 }, (_, i) => meta(`p${i}`));
+    answers.get_preview = { id: "x", html: "<p>hi</p>" };
+    answers.render_preview_doc = "http://127.0.0.1:1/doc";
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [userEvent("show me")]);
+    await tick(60);
+    const card = pane.querySelector(".cdash-preview");
+    expect(card.querySelector(".cdash-count").textContent).toBe("12");
+    expect(card.querySelectorAll(".cdash-pv-frame")).toHaveLength(9);
+    const rest = card.querySelector(".cdash-pv-rest");
+    expect(rest.textContent).toBe("+3");
+    let opened = null;
+    window.addEventListener(PREVIEW_OPEN_EVENT, (e) => { opened = e.detail.slug; }, { once: true });
+    rest.click();
+    expect(opened).toBe("slug-p9");
+  });
+
+  it("draws nothing when the family has no previews, or Joe switched the section off", async () => {
     answers.list_previews = [];
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
