@@ -70,6 +70,19 @@ pub async fn set_preview_state(
     Ok(())
 }
 
+/// Messages the owner of one element of a shared mockup (`element` is a region
+/// id or "shell"). Returns the daemon's `{ ok, target_session_id, target_name, element }`.
+#[tauri::command]
+pub async fn message_shared_element(
+    id: String,
+    element: String,
+    text: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let client = state.client().await.ok_or_else(|| "daemon client not connected".to_string())?;
+    client.message_shared_element(&id, &element, &text).await.map_err(|e| e.to_string())
+}
+
 /// Stages a preview document and returns the URL for the panel's iframe. Goes
 /// through Rust because the webview's own `fetch` here is cross-origin, and the
 /// hooks server answers its CORS preflight with 405 - the request never left the

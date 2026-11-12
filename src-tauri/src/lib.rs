@@ -430,6 +430,7 @@ pub fn run() {
             ipc::list_previews,
             ipc::get_preview,
             ipc::set_preview_state,
+            ipc::message_shared_element,
             ipc::render_preview_doc,
             ipc::window::preview::open_preview_window,
             ipc::window::preview::close_preview_window,

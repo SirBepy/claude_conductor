@@ -23,7 +23,11 @@ export interface OwnerChip {
   controls: OwnerControl[];
 }
 
-/** The chips in the row: chats with controls first, in the order their first part
+/** The row entry (and `partId`) of the page's own controls. */
+export const SHELL_ID = "shell";
+
+/** The chips in the row: the "Page" entry (the shell's own controls) first when
+ *  the page has any, then chats with controls first, in the order their first part
  *  was added, then dashed ones. A finished sub that never wrote anything is left
  *  out: it has nothing to add and would only be noise. */
 export function ownerChips(shared: SharedMockup, subs: readonly RowSub[]): OwnerChip[] {
@@ -41,7 +45,10 @@ export function ownerChips(shared: SharedMockup, subs: readonly RowSub[]): Owner
     if (!byId.has(sub.id) && sub.kind !== "finished") byId.set(sub.id, { id: sub.id, name: sub.name, controls: [] });
   }
   const all = [...byId.values()];
-  return [...all.filter((c) => c.controls.length > 0), ...all.filter((c) => c.controls.length === 0)];
+  const page: OwnerChip[] = shared.controls?.length
+    ? [{ id: SHELL_ID, name: "Page", controls: shared.controls.map((control) => ({ partId: SHELL_ID, control })) }]
+    : [];
+  return [...page, ...all.filter((c) => c.controls.length > 0), ...all.filter((c) => c.controls.length === 0)];
 }
 
 /** Chips whose controls appeared since the last look and that are not open: they
@@ -82,4 +89,21 @@ export function clampPos(pos: { x: number; y: number }, size: Box, bounds: Box):
   const maxY = Math.max(0, Math.max(bounds.h, size.h) - size.h);
   const maxX = Math.max(0, bounds.w - size.w);
   return { x: Math.max(0, Math.min(maxX, pos.x)), y: Math.max(0, Math.min(maxY, pos.y)) };
+}
+
+/** Which element a page click belongs to: the region id the page reported, or
+ *  "shell" for anything that is not a plain region id (the page is untrusted). */
+export function elementTarget(region: unknown): string {
+  return typeof region === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(region) && region !== SHELL_ID ? region : SHELL_ID;
+}
+
+/** The box's "To:" line. Joe never picks the recipient; this only names it. */
+export function elementLabel(element: string): string {
+  return element === SHELL_ID ? "To: page layout" : `To: ${element} region`;
+}
+
+/** Where the box opens: at the click, which the page reports relative to its own
+ *  viewport, moved into panel coordinates by the frame's offset. */
+export function boxOrigin(click: { x: number; y: number }, frame: { left: number; top: number }, panel: { left: number; top: number }): { x: number; y: number } {
+  return { x: frame.left - panel.left + click.x, y: frame.top - panel.top + click.y };
 }

@@ -23,6 +23,7 @@ import { mountPreviewStage } from "./preview-canvas";
 import { PageStateBridge } from "./preview-page-state";
 import { applyPreviewTemplate } from "./preview-panel-document";
 import { SharedBar, renderKindTag } from "./shared-mockup-bar";
+import { ElementMessenger } from "./shared-mockup-message";
 import "../../shared/chat/caret-popup/popup.css";
 import "../../shared/chat/composer.css";
 
@@ -43,6 +44,8 @@ class PreviewTab implements RailTabHandle {
   private composer: PvComposerHandle | null = null;
   /** The shared mockup's row of subs and controls popover. */
   private bar: SharedBar;
+  /** Alt-click / long-press on the shared page: a box that messages the element's owner. */
+  private messenger: ElementMessenger;
   /** Carries the page's own saved state (slide, tab) to and from the daemon. */
   private pageState: PageStateBridge;
   private unlistenState: (() => void) | null = null;
@@ -55,6 +58,7 @@ class PreviewTab implements RailTabHandle {
         renderHeader(this.root, this.sel);
         renderKindTag(this.root, this.sel.selected, this.sel.snapshots.some((s) => s.shared), this.sel.sessionId);
         this.bar.render(this.sel.selected);
+        this.messenger.reset(this.sel.selected?.id ?? null);
       },
       renderPage: () => void this.renderIframe(),
       renderEmpty: () => this.renderEmpty(),
@@ -67,6 +71,11 @@ class PreviewTab implements RailTabHandle {
       dedicatedOf: (ownerId) => this.sel.snapshots.filter((s) => !s.shared && s.session_id === ownerId),
       open: (id) => void this.sel.selectSnapshot(id),
       persist: (snap, key, value) => this.saveViewState(snap.id, key, value),
+    });
+    this.messenger = new ElementMessenger(this.root, {
+      frame: () => this.root.querySelector<HTMLIFrameElement>(".pv-iframe"),
+      snapshot: () => this.sel.selected,
+      send: (id, element, text) => invoke<{ target_name: string }>("message_shared_element", { id, element, text }),
     });
     this.pageState = new PageStateBridge({
       frame: () => this.root.querySelector<HTMLIFrameElement>(".pv-iframe"),
@@ -131,6 +140,7 @@ class PreviewTab implements RailTabHandle {
     this.composer?.destroy();
     this.composer = null;
     this.bar.destroy();
+    this.messenger.destroy();
     this.pageState.destroy();
     if (this.unlistenState) {
       try { this.unlistenState(); } catch { /* ignore */ }

@@ -48,6 +48,12 @@ impl PersistentClient {
         self.call("set_preview_state", json!({"id": id, "key": key, "value": value})).await
     }
 
+    /// Sends Joe's text about one element of a shared mockup (`element` is a
+    /// region id or "shell") to the chat that owns it.
+    pub async fn message_shared_element(&self, id: &str, element: &str, text: &str) -> Result<Value, ClientError> {
+        self.call("message_shared_element", json!({"id": id, "element": element, "text": text})).await
+    }
+
     /// One raster image off the HOST's disk for a chat mirrored from a paired
     /// machine (option-preview pictures, agent-surfaced images). The host
     /// confines the path; see `daemon/methods/registry/image_read.rs`.
