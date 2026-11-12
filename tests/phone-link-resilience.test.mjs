@@ -273,6 +273,23 @@ describe("global stream on resume", () => {
   });
 });
 
+describe("global stream watchdog journal", () => {
+  it("journals a silent socket once per outage, not on every watchdog tick", async () => {
+    const journal = await import("../src/shared/link-journal.ts");
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+    const unlisten = await new HttpTransport().listen("instances-changed", () => {});
+    openSocket(sockets[0]);
+    const before = journal.journalEvents().filter((e) => e.k === "gws_stale").length;
+    // A half-open socket: close() never reports back, so the watchdog fires on
+    // every 5s tick for as long as the outage lasts.
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(sockets[0].close.mock.calls.length).toBeGreaterThan(1);
+    expect(journal.journalEvents().filter((e) => e.k === "gws_stale").length - before).toBe(1);
+    unlisten();
+  });
+});
+
 describe("background reads", () => {
   it("a stalled background poll never reads as slow", async () => {
     vi.useFakeTimers();

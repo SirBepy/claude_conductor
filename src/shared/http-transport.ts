@@ -14,6 +14,7 @@ import {
 } from "./global-stream";
 import { beginLoad, readTrackedJson, type LoadTracker } from "./load-progress";
 import { BACKGROUND_READS, reportRequestFailure, reportRequestSuccess, trackRequest } from "./connection-state";
+import { note, noteRequestFailure } from "./link-journal";
 
 /** localStorage key holding the per-device bearer token the user pasted/paired. */
 export const REMOTE_TOKEN_KEY = "rc_token";
@@ -126,6 +127,7 @@ function machineParam(args: Record<string, any>): { machine_id?: string } {
 
 function linkError(what: string, cause: unknown, stall: StallTimer): LinkError {
   reportRequestFailure();
+  noteRequestFailure(what, stall.fired);
   if (stall.fired) {
     return new LinkError(`${what}: your PC did not answer for ${Math.round(stall.ms / 1000)}s`);
   }
@@ -561,6 +563,10 @@ export class HttpTransport implements Transport {
         });
       case "send_message":
         return this.sendMessage<T>(args);
+      // The phone's connection journal (link-journal.ts). A write: never in
+      // READ_ONLY_METHOD, so it is never retried; the journal retries itself.
+      case "report_link_journal":
+        return this.rpc<T>("report_link_journal", { lines: args.lines });
       // Cross-surface draft sync (composer/AUQ/held messages): one round trip
       // reconciles everything, the rest are debounced writes - see
       // shared/chat/session-draft-sync.ts, the frontend-side callers.
@@ -1022,6 +1028,7 @@ export class HttpTransport implements Transport {
       sock.onopen = () => {
         retryDelay = 1000;
         lastFrameAt = Date.now();
+        note("cws_open", id.slice(0, 8));
         // Frames sent while the socket was down are gone; the store turns this
         // event into a transcript re-read (event-store-delivery.ts).
         if (everOpened) cb({ type: "events_lagged", timestamp: Date.now() } as unknown as T);
@@ -1031,6 +1038,7 @@ export class HttpTransport implements Transport {
         // Mobile connections drop frequently (network handoff, screen sleep).
         // Reconnect with capped exponential backoff unless unlisten() was called.
         if (ws === sock) ws = null;
+        note("cws_close", id.slice(0, 8));
         scheduleRetry();
       };
     };
@@ -1046,7 +1054,10 @@ export class HttpTransport implements Transport {
         if (Date.now() - connectStartedAt > CHAT_STREAM_CONNECT_LIMIT_MS) dropSocket(sock, false);
         return;
       }
-      if (staleOpenSocket(sock)) dropSocket(sock, false);
+      if (staleOpenSocket(sock)) {
+        note("cws_stale", id.slice(0, 8));
+        dropSocket(sock, false);
+      }
     }, CHAT_STREAM_WATCHDOG_MS);
 
     // Back in the app or the network returned: the backoff timer may be up to
@@ -1064,7 +1075,10 @@ export class HttpTransport implements Transport {
         return;
       }
       if (sock.readyState === WS_OPEN) {
-        if (staleOpenSocket(sock)) dropSocket(sock, true);
+        if (staleOpenSocket(sock)) {
+          note("cws_stale", id.slice(0, 8));
+          dropSocket(sock, true);
+        }
         return;
       }
       // A dial that just started is left to finish: resume and online often
@@ -1122,22 +1136,37 @@ export class HttpTransport implements Transport {
       .map((b) => b.text ?? "")
       .join("\n")
       .trim();
+    const rawId = args.clientMsgId ?? args.client_msg_id;
+    const clientMsgId = typeof rawId === "string" && rawId ? rawId : undefined;
+    const body = JSON.stringify(clientMsgId ? { text, client_msg_id: clientMsgId } : { text });
     // A send is a write on the REST route, not rpc(), so it bumps the read
     // dedupe's write counter here.
     this.writes++;
-    const stall = new StallTimer(SEND_TIMEOUT_MS);
+    const post = async (): Promise<Response> => {
+      const stall = new StallTimer(SEND_TIMEOUT_MS);
+      try {
+        return await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/send`, {
+          method: "POST",
+          headers: this.headers(),
+          body,
+          signal: stall.signal,
+        });
+      } catch (e) {
+        throw linkError("send", e, stall);
+      } finally {
+        stall.clear();
+      }
+    };
     let res: Response;
     try {
-      res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/send`, {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify({ text }),
-        signal: stall.signal,
-      });
+      res = await post();
     } catch (e) {
-      throw linkError("send", e, stall);
-    } finally {
-      stall.clear();
+      // Retried once only when the message carries an id: the daemon delivers
+      // an id once, so a first copy that did land is not sent twice. Without
+      // an id (an older caller) a retry could run the message twice.
+      if (!(e instanceof LinkError) || !clientMsgId) throw e;
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      res = await post();
     }
     reportRequestSuccess();
     if (res.status === 401) handleAuthFailure();
