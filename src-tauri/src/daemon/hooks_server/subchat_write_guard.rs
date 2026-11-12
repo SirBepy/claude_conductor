@@ -196,6 +196,9 @@ fn strip_heredocs(command: &str, ps: bool) -> String {
     out.join("\n")
 }
 
+/// Stands in a word for a substitution whose output is unknown.
+const SUBSTITUTED: char = '\u{1}';
+
 /// One shell word: its text and whether any part of it was quoted.
 struct Word {
     text: String,
@@ -298,17 +301,22 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>) {
             }
             // `${VAR}` is one argument, not three segments split at the braces.
             '$' if chars.get(i + 1) == Some(&'{') => {
+                let end = chars[i..].iter().position(|&c| c == '}').map_or(chars.len(), |p| i + p + 1);
+                // A command inside (`${X:-$(git push)}`) still runs.
+                nested.push(chars[i + 2..end.saturating_sub(1).max(i + 2)].iter().collect());
                 has_word = true;
-                i = chars[i..].iter().position(|&c| c == '}').map_or(chars.len(), |p| i + p + 1);
+                word.push(SUBSTITUTED);
+                i = end;
                 continue;
             }
             '`' | '$' if c == '`' || chars.get(i + 1) == Some(&'(') => {
-                end_word!();
                 let (inner, next) = substitution(&chars, i);
                 nested.push(inner);
-                // The substitution stands for one argument: `git -C $(pwd) push` must
-                // keep `-C`'s value out of the subcommand.
+                // The substitution stands for part of ONE argument, glued to what is
+                // around it: `git -C $(pwd) push` keeps `-C`'s value out of the
+                // subcommand, and `FOO=$(pwd) git push` stays an assignment.
                 has_word = true;
+                word.push(SUBSTITUTED);
                 i = next;
                 continue;
             }
@@ -563,6 +571,11 @@ mod tests {
             "git -C `pwd` push origin x",
             "git -C ${REPO} push",
             "git push origin ${BRANCH}",
+            "FOO=$(pwd) git push",
+            "git -c user.name=$(whoami) push",
+            "git --git-dir=$(pwd) push",
+            "gh --repo=$(pwd) pr merge 3",
+            "echo ${X:-$(git push)}",
             "gh pr -R owner/repo merge 3",
             "gh pr --repo owner/repo merge 3 --squash",
             "echo it\\'s; git push",
@@ -591,6 +604,8 @@ mod tests {
             "# commit locally only; git push is for the gate\ngit commit -m x",
             "echo a#b && git status",
             "gh pr list --search merge",
+            "echo ${UNCLOSED",
+            "echo ${A}${B} && git status",
         ] {
             assert!(!runs_publish_command(cmd, false), "must not match: {cmd}");
         }
