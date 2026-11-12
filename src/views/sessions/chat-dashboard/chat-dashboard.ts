@@ -7,7 +7,8 @@
 // (dashboard-model.ts) and redraws only the zones whose HTML changed.
 
 import type { ChatRenderer } from "../../../shared/chat/chat-renderer";
-import { deriveDashboard, sectionOn, type DashboardState, type DoneTask, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
+import { deriveDashboard, deriveStrip, sectionOn, type DashboardState, type DoneTask, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
+import { HistoryPrefixSource } from "./history-prefix-source";
 import { handleAttachmentClick, handleCopyClick, handlePastedLogClick, handleSlashClick, handleTableFullscreen } from "../../../shared/chat/chat-click-handlers";
 import { createHandleBlockImageClick } from "../../../shared/chat/chat-renderer-click-handlers";
 import { handleCommitRefClick, handleCommitRefKeydown, resolveCommitRefs } from "../../../shared/chat/commit-refs";
@@ -101,6 +102,8 @@ export class ChatDashboard {
   private readonly subs: SubsCard;
   /** The Autopilot picks card (picks-card.ts). */
   private readonly picks: PicksCard;
+  /** The rows from above the loaded history page (history-prefix-source.ts). */
+  private readonly history: HistoryPrefixSource;
   /** When each sub last finished, from the main chat's finish cards. */
   private finishedAt: ReadonlyMap<string, number> = new Map();
   private finishedSig = "";
@@ -221,6 +224,7 @@ export class ChatDashboard {
     this.previews = new PreviewTiles({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
     this.quickViews = new QuickViews({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
     this.barHome = this.bar?.parentElement ?? null;
+    this.history = new HistoryPrefixSource(renderer, () => this.schedule());
 
     // The cards are the transcript's own, so they get the transcript's own
     // click handlers for what they carry: copy buttons, detail links, file refs,
@@ -359,9 +363,13 @@ export class ChatDashboard {
     const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
     this.subCounts = countSubs(subItems);
     this.refreshFinishTimes(subItems);
+    // The zones read the chat's whole history (older rows rebuilt from the
+    // transcript's digest); Joe's strip keeps to the loaded rows, whose pasted
+    // images are whole, where the digest's large ones are elided.
+    const rows = this.history.rows();
     const derived = deriveDashboard({
-      messages: this.renderer.messages,
-      plans: this.renderer.dashPlans,
+      messages: rows.messages,
+      plans: rows.plans,
       busy,
       answers: this.answers.sideData(),
       // Not loaded yet is not "no subs": the Answers card would call every sub gone.
@@ -376,6 +384,7 @@ export class ChatDashboard {
       dismissed: this.dismissedKeys(),
       subCards: this.renderer.subCardPool,
     });
+    if (rows.messages !== this.renderer.messages) derived.strip = deriveStrip({ messages: this.renderer.messages, plans: [] });
     this.applyUiRules(derived);
     this.keepDraftItems(derived);
     this.renderStripPart(derived);
@@ -879,6 +888,7 @@ export class ChatDashboard {
     this.picks.dispose();
     this.previews.dispose();
     this.quickViews.dispose();
+    this.history.dispose();
     this.unlistenDrafts?.();
     this.unlistenDrafts = null;
     if (this.draftsTimer !== null) clearTimeout(this.draftsTimer);

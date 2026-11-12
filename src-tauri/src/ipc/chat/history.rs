@@ -233,6 +233,28 @@ pub async fn load_event_detail(
     }
 }
 
+/// The chat dashboard's digest of a transcript (`chat::dashboard_digest`): the
+/// events its durable cards are built from, for every line before
+/// `before_seq` (the loaded page's `oldest_seq`). Local transcripts only: a
+/// mirrored chat's dashboard keeps reading its loaded page, as before.
+#[tauri::command]
+pub async fn load_dashboard_digest(
+    session_id: String,
+    cwd: Option<String>,
+    before_seq: Option<u64>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    validate_session_id(&session_id)?;
+    if is_mirrored(&state.cached_instances.lock().unwrap(), &session_id) {
+        return Err("no dashboard digest for a mirrored chat".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::chat::dashboard_digest::read_digest_for_session(&session_id, cwd.as_deref(), before_seq)
+    })
+    .await
+    .map_err(|e| format!("join: {}", e))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::{is_mirrored, is_not_found, should_retry_via_daemon};

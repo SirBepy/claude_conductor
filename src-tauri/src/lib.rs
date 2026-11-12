@@ -311,6 +311,7 @@ pub fn run() {
             ipc::debug_daemon_sleep,
             ipc::load_history,
             ipc::load_history_page,
+            ipc::load_dashboard_digest,
             ipc::transcript_stats,
             ipc::load_event_detail,
             ipc::list_history,

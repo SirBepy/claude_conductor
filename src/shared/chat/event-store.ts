@@ -122,6 +122,16 @@ class SessionEventStore {
     return !!this.cache.get(sessionId)?.hasMore;
   }
 
+  /** Where the loaded history starts, for a reader of what lies above it (the
+   *  chat dashboard's digest): the transcript the oldest loaded page came from
+   *  and its byte offset there, whether that file holds more above it, and the
+   *  chat it continues from. Null until a page has loaded. */
+  pageCursor(sessionId: string): { pageSessionId: string; oldestSeq: number | null; pageHasMore: boolean; chainNextId: string | null } | null {
+    const entry = this.cache.get(sessionId);
+    if (!entry?.initialLoaded || entry.pageSessionId === null) return null;
+    return { pageSessionId: entry.pageSessionId, oldestSeq: entry.oldestSeq, pageHasMore: entry.pageHasMore, chainNextId: entry.chainNextId };
+  }
+
   /** True when the first history fetch ran and failed, so `hasMore` is a
    *  default rather than an answer. */
   historyLoadFailed(sessionId: string): boolean {

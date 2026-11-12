@@ -14,7 +14,7 @@ const TOOL_RESULT_PREVIEW_CHARS: usize = 4000;
 /// Base64 chars an image tool result may carry inline before `read_page`
 /// elides it. Small icons and thumbnails stay inline (a round trip to fetch
 /// them costs more than they weigh); a screenshot is hundreds of KB to MB.
-const IMAGE_INLINE_MAX_B64: usize = 32 * 1024;
+pub(crate) const IMAGE_INLINE_MAX_B64: usize = 32 * 1024;
 
 /// If `ev`'s output text exceeds the preview cap, replace it with a
 /// truncated copy carrying `output_truncated` + `full_seq` (this line's own
@@ -23,7 +23,7 @@ const IMAGE_INLINE_MAX_B64: usize = 32 * 1024;
 /// media type kept, `output_bytes` carrying its approximate decoded size, so
 /// a screenshot-heavy page stays small and the bytes load on demand. No-op
 /// for anything else (short results, small images, non-ToolResult events).
-fn truncate_tool_result(ev: ChatEvent, line_offset: u64) -> ChatEvent {
+pub(crate) fn truncate_tool_result(ev: ChatEvent, line_offset: u64) -> ChatEvent {
     match ev {
         ChatEvent::ToolResult { tool_use_id, output: ContentBlock::Image { mime, data }, is_error, timestamp, .. }
             if data.len() > IMAGE_INLINE_MAX_B64 =>
