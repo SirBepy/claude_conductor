@@ -1,11 +1,10 @@
-//! A sub's project settings: how its work is checked and how subs that edit
-//! files share the tree. Read from the settings snapshot at the moment of use,
-//! so a change Joe makes in the project's settings applies to the next finish or
-//! spawn without a restart.
+//! A sub's project settings: how its work is checked. Read from the settings
+//! snapshot at the moment of use, so a change Joe makes in the project's
+//! settings applies to the next finish without a restart.
 
 use crate::daemon::state::DaemonState;
 use crate::settings::identity::project_key;
-use crate::types::{ProjectConfig, SubchatCheck, SubchatWriters};
+use crate::types::{ProjectConfig, SubchatCheck};
 use std::path::Path;
 
 /// The configured project that `cwd` belongs to, rolled up through `project_key`
@@ -19,11 +18,6 @@ pub fn config_for(state: &DaemonState, cwd: &Path) -> Option<ProjectConfig> {
 /// row uses the default, which is the stricter one.
 pub fn check_mode(state: &DaemonState, cwd: &Path) -> SubchatCheck {
     config_for(state, cwd).map(|p| p.subchat_check).unwrap_or_default()
-}
-
-/// "Subs changing files" for the project `cwd` is in.
-pub fn writers_mode(state: &DaemonState, cwd: &Path) -> SubchatWriters {
-    config_for(state, cwd).map(|p| p.subchat_writers).unwrap_or_default()
 }
 
 /// Whether a sub that changed files owes a fresh-reviewer run before it can
@@ -62,9 +56,10 @@ mod tests {
     fn a_project_without_a_config_row_gets_the_defaults() {
         let st = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         assert_eq!(check_mode(&st, Path::new("C:/nowhere-at-all")), SubchatCheck::FactsAndReviewer);
-        assert_eq!(writers_mode(&st, Path::new("C:/nowhere-at-all")), SubchatWriters::OneAtATime);
     }
 
+    /// The retired "Subs changing files" value stays in old settings files and must
+    /// still parse: every writer gets a worktree whatever it says.
     #[test]
     fn a_stored_choice_is_read_back_for_a_path_inside_the_project() {
         let dir = tempfile::tempdir().unwrap();
@@ -76,6 +71,5 @@ mod tests {
         settings.projects.push(serde_json::from_value::<ProjectConfig>(raw).unwrap());
         let st = DaemonState::new(new_session_map(), SettingsCache::new(settings));
         assert_eq!(check_mode(&st, dir.path()), SubchatCheck::FactsOnly);
-        assert_eq!(writers_mode(&st, dir.path()), SubchatWriters::WorktreeEach);
     }
 }

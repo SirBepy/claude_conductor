@@ -1,13 +1,13 @@
 import { html, render } from "lit-html";
 import { renderChatDefaultsRow } from "./chat-defaults-row";
 import {
-  renderAccountRow, renderConnectorsRow, renderGamingModeRow, renderSubchatCheckRow, renderSubchatWritersRow, renderTrackerRow,
+  renderAccountRow, renderConnectorsRow, renderGamingModeRow, renderSubchatCheckRow, renderTrackerRow,
 } from "./rows";
 import { renderMcpServersRow } from "./mcp-servers-row";
 import "./project-settings.css";
 
 /** Fills a popup body with the project's settings (model and effort, account,
- *  tickets, connectors, gaming mode, and how subchats check work and share files). */
+ *  tickets, connectors, gaming mode, and how subchats check work). */
 export async function renderProjectSettings(root: HTMLElement, cwd: string): Promise<void> {
   render(template(), root);
   await renderChatDefaultsRow(cwd);
@@ -17,7 +17,6 @@ export async function renderProjectSettings(root: HTMLElement, cwd: string): Pro
   await renderTrackerRow(cwd);
   await renderMcpServersRow(cwd);
   await renderSubchatCheckRow(cwd);
-  await renderSubchatWritersRow(cwd);
 }
 
 // A short label with the explanation on hover: the rail is 270px wide, so a
@@ -69,10 +68,6 @@ function template() {
         <div class="ps-field">
           <div class="ps-label" title="Facts come from the repo history and the transcript. A reviewer is a fresh subagent with no shared context, which costs usage per finished job.">Check a sub's work</div>
           <span class="acc-row-control"><select id="subchatCheckSelect" class="inline-select"></select></span>
-        </div>
-        <div class="ps-field">
-          <div class="ps-label" title="One at a time is safest. Worktree each is faster when you are in a rush, but adds setup and a merge step, and cargo still shares one lock.">Subs changing files</div>
-          <span class="acc-row-control"><select id="subchatWritersSelect" class="inline-select"></select></span>
         </div>
       </div>
     </div>

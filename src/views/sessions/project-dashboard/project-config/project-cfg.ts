@@ -1,4 +1,4 @@
-import type { ProjectMcpServer, SubchatCheck, SubchatWriters, TicketTracker } from "../../../../types/ipc.generated";
+import type { ProjectMcpServer, SubchatCheck, TicketTracker } from "../../../../types/ipc.generated";
 
 /** The slice of a `list_projects` row the settings rows read. */
 export interface ProjectCfg {
@@ -12,5 +12,4 @@ export interface ProjectCfg {
   default_model?: string | null;
   default_effort?: string | null;
   subchat_check?: SubchatCheck;
-  subchat_writers?: SubchatWriters;
 }
