@@ -57,8 +57,7 @@ pub(crate) fn follow_up_context(question: &str, answer: &str) -> String {
     out
 }
 
-/// The most a rewritten question may run to, matching `send_message`'s own `question` cap.
-const QUESTION_MAX: usize = 200;
+use crate::daemon::subchats::QUESTION_MAX;
 /// What the rewrite call is given of each side. A pasted log in Joe's message
 /// or a long answer would only make the call slower; the question is in the
 /// first part of both.

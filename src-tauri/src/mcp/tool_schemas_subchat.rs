@@ -5,6 +5,7 @@
 //! process starts and cannot follow a mid-chat toggle; it refuses itself when
 //! the chat has no subs.
 
+use crate::daemon::subchats::QUESTION_MAX;
 use serde_json::{json, Value};
 
 pub const TOOL_FINISH_SUBCHAT: &str = "finish_subchat";
@@ -26,7 +27,7 @@ pub fn chat_schemas() -> Vec<Value> {
                 "all": {"type": "boolean", "description": "send to every running sub instead of one. Finished subs are not woken."},
                 "writes": {"type": "boolean", "description": "send: the follow-up needs the sub to edit files. Only one sub edits files at a time in a project: if another holds the writer slot this sub is queued for it, and the result says so."},
                 "text": {"type": "string", "description": "send: your own instruction, only when there is no message from Joe to copy. It reaches the sub framed as coming from the main chat."},
-                "question": {"type": "string", "maxLength": 200, "description": "send: when Joe's follow-up asks for information, his question rewritten as one clear question (at most 200 chars). The sub's finish is then drawn as the answer in his Answers card, so you relay nothing."}
+                "question": {"type": "string", "maxLength": QUESTION_MAX, "description": "send: when Joe's follow-up asks for information, his question rewritten as one clear question (at most 200 chars). The sub's finish is then drawn as the answer in his Answers card, so you relay nothing."}
             },
             "required": ["action"]
         }
@@ -169,5 +170,28 @@ mod tests {
         let props = &subchat_schemas()[0]["inputSchema"]["properties"];
         assert!(props["decided"]["description"].as_str().unwrap().contains("replaces D3:"));
         assert!(!d.contains('\u{2014}'));
+    }
+
+    // Four schema copies, the daemon checks and the main-chat prompt prose all
+    // state the rewritten-question limit; one const owns the number.
+    #[test]
+    fn every_question_schema_and_its_prose_name_question_max() {
+        use super::super::tool_schemas_coordination::{coordination_schemas, TOOL_SEND_MESSAGE};
+        use super::super::tool_schemas_workflow::{workflow_schemas, TOOL_SPAWN_CHAT};
+        let find = |all: Vec<Value>, name: &str| all.into_iter().find(|t| t["name"] == name).unwrap();
+        let tools = [
+            find(workflow_schemas(), TOOL_SPAWN_CHAT),
+            find(chat_schemas(), TOOL_SUBCHAT),
+            find(coordination_schemas(), TOOL_SEND_MESSAGE),
+        ];
+        for t in &tools {
+            let q = &t["inputSchema"]["properties"]["question"];
+            assert_eq!(q["maxLength"], QUESTION_MAX, "{} question maxLength", t["name"]);
+            let said = format!("at most {QUESTION_MAX} chars");
+            assert!(q["description"].as_str().unwrap().contains(&said), "{} question prose", t["name"]);
+        }
+        let prose = include_str!("../daemon/claude_config/args.rs");
+        assert!(prose.contains(&format!("one clear question of at most {QUESTION_MAX} chars")), "main-chat prompt prose");
+        assert!(prose.contains(&format!("question = his question rewritten as one clear question of at most {QUESTION_MAX} chars")));
     }
 }
