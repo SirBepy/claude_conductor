@@ -84,7 +84,7 @@ mod tests {
     fn good(session: &str) -> Value {
         json!({
             "session_id": session, "verdict": "Built, not pushed", "text": "Header done",
-            "decided": ["nothing"], "ruled_out": ["nothing"],
+            "decided": ["nothing"], "ruled_out": ["nothing"], "learned": ["nothing"],
         })
     }
 
@@ -148,7 +148,7 @@ mod tests {
             let v = call(&c, body).await;
             assert_eq!(v["ok"], json!(false));
             let e = v["error"].as_str().unwrap();
-            for field in ["verdict", "text", "decided", "ruled_out"] {
+            for field in ["verdict", "text", "decided", "ruled_out", "learned"] {
                 assert!(e.contains(field), "{field} named in one go: {e}");
             }
             assert!(e.contains("40 chars") && e.contains("200 chars") && e.contains("[\"nothing\"]"), "the limits ride along: {e}");
@@ -162,6 +162,24 @@ mod tests {
         assert!(!e.contains("missing verdict") && !e.contains("verdict,"), "{e}");
     }
 
+    /// A call that is complete except for `learned` is refused naming it, and
+    /// nothing is queued; `["nothing"]` is accepted.
+    #[tokio::test]
+    async fn a_finish_without_learned_is_refused_naming_it() {
+        let c = ctx();
+        let sub = make_sub(&c, "route-nolearned");
+        let mut body = good(&sub);
+        body.as_object_mut().unwrap().remove("learned");
+        let v = call(&c, body).await;
+        assert_eq!(v["ok"], json!(false), "{v}");
+        let e = v["error"].as_str().unwrap();
+        assert!(e.contains("missing learned") && !e.contains("missing decided"), "{e}");
+        assert!(!crate::daemon::subchats::runtime::runtime().finish_pending(&sub));
+        let mut ok = good(&sub);
+        ok["learned"] = json!(["nothing"]);
+        assert_eq!(call(&c, ok).await["ok"], json!(true));
+    }
+
     #[tokio::test]
     async fn malformed_fields_name_the_fix_instead_of_failing_to_decode() {
         let c = ctx();
@@ -170,6 +188,9 @@ mod tests {
             (json!({"decided": "text"}), "decided must be a list of strings"),
             (json!({"decided": []}), "missing decided"),
             (json!({"ruled_out": null}), "missing ruled_out"),
+            (json!({"learned": []}), "missing learned"),
+            (json!({"learned": vec!["x"; 9]}), "learned has 9 rows, over 8"),
+            (json!({"learned": ["x".repeat(201)]}), "a learned row is 201 chars, over 200"),
             (json!({"done": [1, 2]}), "done must be a list of strings"),
             (json!({"text": ""}), "missing text"),
             (json!({"verdict": "x".repeat(41)}), "over 40"),

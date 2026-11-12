@@ -82,7 +82,7 @@ fn rows(max_len: u32, what: &str) -> Value {
 pub fn subchat_schemas() -> Vec<Value> {
     vec![json!({
         "name": TOOL_FINISH_SUBCHAT,
-        "description": "End your job. Call this when the work is done; it replaces send_message and report_turn_status at the end of a turn, and it is the only way a sub ends (/close does not apply). The daemon stops this chat once your turn ends, keeps it, and wakes it with all its context if Joe or the main chat follows up. Joe sees a short verdict card built from this call, so write it for him. Refused with an error naming the fix while files YOU edited are uncommitted (commit them by path first; a peer's dirty files do not count) or while your own background work is running (wait or stop it). If you changed files and the project asks for a reviewer (its default; the brief's `review: false` opts out), it is refused until a fresh subagent (an Agent call, run with no shared context on your own diff, in the foreground so its result lands in your transcript) has returned after your last edit: fix what it finds and run a new one only if you edit again. The app finds that subagent call itself; you cannot see tool_use ids, so do not look for one. The report fields follow send_message's report kind: `text` is at most 200 chars, `verdict` at most 40 chars and says the conclusion as a person would (\"Built, not pushed\"), each row list holds at most 8 rows of 120 chars. `decided` and `ruled_out` are required and are kept in a log for later jobs: list each decision worth keeping and each option you dropped as one short row, or [\"nothing\"] when there is nothing, because a padded list is worse than an honest one. A decided row that replaces an entry already in the decisions log starts with \"replaces D3:\" (the entry's own id), which closes that entry.",
+        "description": "End your job. Call this when the work is done; it replaces send_message and report_turn_status at the end of a turn, and it is the only way a sub ends (/close does not apply). The daemon stops this chat once your turn ends, keeps it, and wakes it with all its context if Joe or the main chat follows up. Joe sees a short verdict card built from this call, so write it for him. Refused with an error naming the fix while files YOU edited are uncommitted (commit them by path first; a peer's dirty files do not count) or while your own background work is running (wait or stop it). If you changed files and the project asks for a reviewer (its default; the brief's `review: false` opts out), it is refused until a fresh subagent (an Agent call, run with no shared context on your own diff, in the foreground so its result lands in your transcript) has returned after your last edit: fix what it finds and run a new one only if you edit again. The app finds that subagent call itself; you cannot see tool_use ids, so do not look for one. The report fields follow send_message's report kind: `text` is at most 200 chars, `verdict` at most 40 chars and says the conclusion as a person would (\"Built, not pushed\"), each row list holds at most 8 rows of 120 chars. `decided` and `ruled_out` are required and are kept in a log for later jobs: list each decision worth keeping and each option you dropped as one short row, or [\"nothing\"] when there is nothing, because a padded list is worse than an honest one. A decided row that replaces an entry already in the decisions log starts with \"replaces D3:\" (the entry's own id), which closes that entry. `learned` is required too: it lists what this job taught that stays true after it (a rule Joe stated, a correction he made, a lasting fact about the project), one row each, and each row names where you saved it (a memory file or a todo id). Save it first with the save step in ~/.claude/refs/save-step.md, then list it. Use [\"nothing\"] when nothing lasting was learned. It is not copied to the decisions log.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -96,9 +96,10 @@ pub fn subchat_schemas() -> Vec<Value> {
                 "points": rows(200, "Optional extra points shown behind a click, at most 6 of 200 chars."),
                 "decided": rows(200, "Required. Decisions you made that a later job should know, one short row each, or [\"nothing\"]. Start a row with \"replaces D3:\" to close an earlier decisions-log entry it replaces."),
                 "ruled_out": rows(200, "Required. Options you tried or weighed and dropped, one short row each, or [\"nothing\"]."),
+                "learned": rows(200, "Required. What this job taught that stays true after it (a rule Joe stated, a correction he made, a lasting fact about the project), one short row each, naming where you saved it (a memory file or a todo id). Save it first with the save step in ~/.claude/refs/save-step.md. Use [\"nothing\"] when nothing lasting was learned."),
                 "reviewer_tool_use_id": {"type": "string", "description": "Normally leave this out: the app finds your reviewer itself, the last Agent call after your last edit. Only if you can already see the tool_use id of the Agent call that reviewed your diff, you may pass it, and it is then checked."}
             },
-            "required": ["verdict", "text", "decided", "ruled_out"]
+            "required": ["verdict", "text", "decided", "ruled_out", "learned"]
         }
     })]
 }
@@ -144,13 +145,18 @@ mod tests {
     }
 
     #[test]
-    fn the_schema_requires_the_report_core_and_both_log_fields() {
+    fn the_schema_requires_the_report_core_and_the_log_and_learned_fields() {
         let s = &subchat_schemas()[0];
         assert_eq!(s["name"], TOOL_FINISH_SUBCHAT);
         let required: Vec<&str> = s["inputSchema"]["required"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
-        for k in ["verdict", "text", "decided", "ruled_out"] {
+        for k in ["verdict", "text", "decided", "ruled_out", "learned"] {
             assert!(required.contains(&k), "{k} must be required");
         }
+        let learned = &s["inputSchema"]["properties"]["learned"];
+        assert_eq!((learned["maxItems"].as_u64(), learned["items"]["maxLength"].as_u64()), (Some(8), Some(200)));
+        let said = learned["description"].as_str().unwrap();
+        assert!(said.contains("save-step.md") && said.contains("[\"nothing\"]"), "{said}");
+        assert!(!said.contains('\u{2014}'));
         assert!(!required.contains(&"reviewer_tool_use_id"), "the reviewer id is optional");
     }
 

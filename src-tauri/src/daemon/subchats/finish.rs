@@ -54,6 +54,11 @@ pub struct FinishRecord {
     /// Things the sub tried or weighed and dropped. `["nothing"]` is a valid answer.
     #[serde(default)]
     pub ruled_out: Vec<String>,
+    /// What the job taught that stays true after it, each row naming where it was
+    /// saved (a memory file or a todo id). `["nothing"]` is a valid answer. Not
+    /// copied to the decisions log or the digest: the fact lives in what the row names.
+    #[serde(default)]
+    pub learned: Vec<String>,
     #[serde(default)]
     pub done: Vec<String>,
     #[serde(default)]
@@ -94,6 +99,7 @@ pub struct FinishArgs {
     pub your_move: Option<Vec<String>>,
     pub decided: Vec<String>,
     pub ruled_out: Vec<String>,
+    pub learned: Vec<String>,
     pub reviewer_tool_use_id: Option<String>,
 }
 
@@ -118,7 +124,7 @@ fn opt_rows(body: &Value, key: &str) -> Result<Option<Vec<String>>, String> {
     }
 }
 
-/// `decided` / `ruled_out`: required, at least one row, and `["nothing"]` is how
+/// `decided` / `ruled_out` / `learned`: required, at least one row, and `["nothing"]` is how
 /// to say there is nothing. Forced writes can fill with junk, so an empty list
 /// is refused rather than guessed at.
 fn required_rows(body: &Value, key: &str) -> Result<Vec<String>, String> {
@@ -145,7 +151,7 @@ fn required_rows(body: &Value, key: &str) -> Result<Vec<String>, String> {
 /// the wrong shape (the tool is deferred, so a sub often calls it before its
 /// schema is loaded). Mirrors the schema in `mcp::tool_schemas_subchat` and the
 /// caps in `hooks_server::messages`.
-pub const FIELD_LIMITS: &str = "Fields: verdict (required, at most 40 chars, the conclusion as a person says it), text (required, at most 200 chars, one or two lines for Joe), decided and ruled_out (required lists, at most 8 rows of 200 chars each, [\"nothing\"] is a valid answer); optional: tone (good, bad or neutral), done, not_done, waiting_on, your_move (lists, at most 8 rows of 120 chars), points (at most 6 rows of 200 chars).";
+pub const FIELD_LIMITS: &str = "Fields: verdict (required, at most 40 chars, the conclusion as a person says it), text (required, at most 200 chars, one or two lines for Joe), decided, ruled_out and learned (required lists, at most 8 rows of 200 chars each, [\"nothing\"] is a valid answer; each learned row names the memory file or todo id where it was saved); optional: tone (good, bad or neutral), done, not_done, waiting_on, your_move (lists, at most 8 rows of 120 chars), points (at most 6 rows of 200 chars).";
 
 /// The required fields a call left out, named together in one refusal so a sub
 /// fixes them in one retry instead of meeting them one by one. A field present
@@ -169,7 +175,7 @@ pub fn missing_fields(body: &Value) -> Option<String> {
     if blank_text("text") && blank_text("message") {
         missing.push("text");
     }
-    for key in ["decided", "ruled_out"] {
+    for key in ["decided", "ruled_out", "learned"] {
         if empty_rows(key) {
             missing.push(key);
         }
@@ -192,6 +198,7 @@ impl FinishArgs {
             your_move: opt_rows(body, "your_move")?,
             decided: required_rows(body, "decided")?,
             ruled_out: required_rows(body, "ruled_out")?,
+            learned: required_rows(body, "learned")?,
             reviewer_tool_use_id: opt_string(body, "reviewer_tool_use_id")?
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
@@ -351,6 +358,7 @@ pub(crate) async fn request_finish_with(
         points: rows(args.points),
         decided: args.decided,
         ruled_out: args.ruled_out,
+        learned: args.learned,
         done: rows(args.done),
         not_done: rows(args.not_done),
         waiting_on: rows(args.waiting_on),
@@ -721,6 +729,7 @@ mod tests {
             text: Some("Header done".into()),
             decided: vec!["nothing".into()],
             ruled_out: vec!["nothing".into()],
+            learned: vec!["nothing".into()],
             ..FinishArgs::default()
         }
     }
@@ -729,27 +738,65 @@ mod tests {
     fn parse_requires_decided_and_ruled_out_and_names_the_fix() {
         let e = FinishArgs::parse(&json!({"verdict": "v", "text": "t"})).unwrap_err();
         assert!(e.contains("decided is required") && e.contains("[\"nothing\"]"), "{e}");
-        let e = FinishArgs::parse(&json!({"decided": ["a"], "ruled_out": []})).unwrap_err();
+        let e = FinishArgs::parse(&json!({"decided": ["a"], "ruled_out": [], "learned": ["nothing"]})).unwrap_err();
         assert!(e.contains("ruled_out is required"), "{e}");
-        let ok = FinishArgs::parse(&json!({"decided": ["nothing"], "ruled_out": ["nothing"]})).unwrap();
+        let ok = FinishArgs::parse(&json!({"decided": ["nothing"], "ruled_out": ["nothing"], "learned": ["nothing"]})).unwrap();
         assert_eq!(ok.decided, ["nothing"]);
+    }
+
+    #[test]
+    fn parse_requires_learned_and_accepts_nothing_and_enforces_the_row_limits() {
+        let base = json!({"decided": ["a"], "ruled_out": ["b"]});
+        let e = FinishArgs::parse(&base).unwrap_err();
+        assert!(e.contains("learned is required") && e.contains("[\"nothing\"]"), "{e}");
+        let mut body = base.clone();
+        body["learned"] = json!([]);
+        assert!(FinishArgs::parse(&body).unwrap_err().contains("learned is required"));
+        body["learned"] = json!(["nothing"]);
+        assert_eq!(FinishArgs::parse(&body).unwrap().learned, ["nothing"]);
+        body["learned"] = json!(["Rule saved to feedback_x.md", "todo pc-0007 filed"]);
+        assert_eq!(FinishArgs::parse(&body).unwrap().learned.len(), 2);
+        body["learned"] = json!(["x".repeat(201)]);
+        assert!(FinishArgs::parse(&body).unwrap_err().contains("a learned row is 201 chars, over 200"));
+        body["learned"] = json!(["x".repeat(200)]);
+        assert!(FinishArgs::parse(&body).is_ok(), "200 chars is the limit, not over it");
+        body["learned"] = json!(vec!["x"; 9]);
+        assert!(FinishArgs::parse(&body).unwrap_err().contains("learned has 9 rows, over 8"));
+        body["learned"] = json!(vec!["x"; 8]);
+        assert!(FinishArgs::parse(&body).is_ok());
+    }
+
+    #[test]
+    fn missing_fields_names_learned_among_the_fields_a_call_left_out() {
+        let e = missing_fields(&json!({})).unwrap();
+        assert!(e.contains("learned") && e.contains("decided, ruled_out, learned"), "{e}");
+        assert!(missing_fields(&json!({"verdict": "v", "text": "t", "decided": ["a"], "ruled_out": ["b"]})).unwrap().contains("missing learned."));
+        assert!(missing_fields(&json!({"verdict": "v", "text": "t", "decided": ["a"], "ruled_out": ["b"], "learned": ["nothing"]})).is_none());
+    }
+
+    #[test]
+    fn a_finish_record_written_before_learned_existed_loads_with_an_empty_list() {
+        let old = r#"{"sub_id":"s1","verdict":"Built","text":"t","decided":["a"],"ruled_out":["nothing"]}"#;
+        let record: FinishRecord = serde_json::from_str(old).unwrap();
+        assert!(record.learned.is_empty());
+        assert_eq!(record.decided, ["a"]);
     }
 
     #[test]
     fn parse_names_the_fix_for_a_wrong_shape_instead_of_failing_to_decode() {
         let e = FinishArgs::parse(&json!({"decided": "just text", "ruled_out": ["nothing"]})).unwrap_err();
         assert!(e.contains("decided must be a list of strings"), "{e}");
-        let e = FinishArgs::parse(&json!({"decided": ["a"], "ruled_out": ["b"], "done": [1]})).unwrap_err();
+        let e = FinishArgs::parse(&json!({"decided": ["a"], "ruled_out": ["b"], "learned": ["c"], "done": [1]})).unwrap_err();
         assert!(e.contains("done must be a list of strings"), "{e}");
-        let e = FinishArgs::parse(&json!({"decided": ["a"], "ruled_out": ["b"], "verdict": 3})).unwrap_err();
+        let e = FinishArgs::parse(&json!({"decided": ["a"], "ruled_out": ["b"], "learned": ["c"], "verdict": 3})).unwrap_err();
         assert!(e.contains("verdict must be a string"), "{e}");
     }
 
     #[test]
     fn parse_keeps_the_reviewer_id_and_drops_a_blank_one() {
-        let a = FinishArgs::parse(&json!({"decided": ["a"], "ruled_out": ["b"], "reviewer_tool_use_id": " toolu_1 "})).unwrap();
+        let a = FinishArgs::parse(&json!({"decided": ["a"], "ruled_out": ["b"], "learned": ["c"], "reviewer_tool_use_id": " toolu_1 "})).unwrap();
         assert_eq!(a.reviewer_tool_use_id.as_deref(), Some("toolu_1"));
-        let b = FinishArgs::parse(&json!({"decided": ["a"], "ruled_out": ["b"], "reviewer_tool_use_id": "  "})).unwrap();
+        let b = FinishArgs::parse(&json!({"decided": ["a"], "ruled_out": ["b"], "learned": ["c"], "reviewer_tool_use_id": "  "})).unwrap();
         assert_eq!(b.reviewer_tool_use_id, None);
     }
 
