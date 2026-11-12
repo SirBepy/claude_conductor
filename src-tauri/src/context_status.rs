@@ -400,8 +400,12 @@ pub(crate) mod tail {
                 let Some((occ, model)) = usage_from_line(&v) else { continue };
                 // A compaction needs no marker to be noticed: the context
                 // collapses between two consecutive usage rows, which normal
-                // growth never does. A false hit costs one extra rider resend.
-                if self.last.is_some_and(|prev| prev >= SHRINK_FLOOR && occ < prev / 2) {
+                // growth never does. It is seen on the first row written AFTER
+                // the compaction, so after a manual `/compact` the epoch moves
+                // one prompt late unless the marker test above fires. A zero
+                // row (a synthetic error entry) is not a collapse. A false hit
+                // costs one extra rider resend.
+                if occ > 0 && self.last.is_some_and(|prev| prev >= SHRINK_FLOOR && occ < prev / 2) {
                     self.epoch += 1;
                 }
                 self.last = Some(occ);
@@ -873,6 +877,10 @@ mod tests {
         append(&path, &usage_line(Some("claude-opus-4-8"), 25_000));
         c.advance(&path, |_| false);
         assert_eq!(c.epoch(), 1, "a small fall from 41K is within normal variation");
+        append(&path, &usage_line(Some("claude-opus-4-8"), 500_000));
+        append(&path, &usage_line(Some("claude-opus-4-8"), 0));
+        c.advance(&path, |_| false);
+        assert_eq!(c.epoch(), 1, "a zero-usage row is not a collapse");
         assert_eq!(c.status(), compute_context_status(&path));
     }
 
