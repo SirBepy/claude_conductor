@@ -157,7 +157,10 @@ pub fn resolve<'a>(subs: &'a [Instance], query: &str) -> Result<&'a Instance, St
             // `max_by_key` keeps the last of equal keys, and `subs` is oldest first.
             return Ok(found.into_iter().max_by_key(|i| i.started_at.clone()).expect("found is not empty"));
         }
-        let list: Vec<String> = found.iter().map(|i| label(i)).collect();
+        let mut list: Vec<String> = found.iter().take(LIST_CAP).map(|i| label(i)).collect();
+        if found.len() > LIST_CAP {
+            list.push(format!("and {} more", found.len() - LIST_CAP));
+        }
         return Err(format!(
             "\"{q}\" matches more than one sub ({}): use a longer name or an id. This chat's subs: {}.",
             list.join(", "),
