@@ -12,6 +12,27 @@ mod windows_source;
 
 pub use signal::{compute_in_meeting, SignalSource, Sources};
 
+/// The one `SignalSource` fake the meeting, schedule and hook tests share.
+#[cfg(test)]
+pub mod test_support {
+    use super::{SignalSource, Sources};
+
+    /// Reports exactly the given signals; `Fixed(Sources::default())` is silence.
+    pub struct Fixed(pub Sources);
+
+    impl SignalSource for Fixed {
+        fn camera_in_use(&self) -> bool {
+            self.0.camera
+        }
+        fn mic_in_use(&self) -> bool {
+            self.0.mic
+        }
+        fn meeting_app_audio_active(&self, _allow: &[String]) -> bool {
+            self.0.audio
+        }
+    }
+}
+
 use crate::state::AppState;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
