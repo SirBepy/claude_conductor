@@ -8,6 +8,7 @@
  */
 
 import { state } from "../state";
+import { MAIN_CHAT_LABEL } from "./asker-face";
 import { isDeferredPrompt, parkedAskersFor } from "./gating";
 import { queuedQuestionsFor } from "./index";
 import type { AskerChip, QuestionRequestedPayload } from "./types";
@@ -100,7 +101,7 @@ export function orderedAskers(displayId: string): OpenAsker[] {
 }
 
 function labelFor(a: OpenAsker, displayId: string): string {
-  if (a.askerId === displayId) return "This chat";
+  if (a.askerId === displayId) return MAIN_CHAT_LABEL;
   if (a.payload.sub_name) return a.payload.sub_name;
   const row = state.sessions.find((s) => s.session_id === a.askerId);
   return row?.name?.trim() || "Subchat";

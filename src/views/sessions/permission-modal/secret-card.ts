@@ -18,6 +18,8 @@ import { sessionSubtitle, projectName } from "../sessions-helpers";
 import { clearHost, ensureHost, renderCardShell } from "./host";
 import { clearActivePermissionCardIfCurrent, setActivePermissionCard } from "./question-state";
 import { storePendingPrompt } from "./gating";
+import { askerFaceOf } from "./asker-face";
+import { fromChipHtml } from "./question-ui-templates";
 import type { SecretRequestedPayload } from "./types";
 
 /** Id-scoped registry so `index.ts`'s `prompt-resolved` handler can dismiss
@@ -99,14 +101,19 @@ export function showSecretCard(payload: SecretRequestedPayload): void {
   const asker = sessionLabel(payload.session_id);
   // A hidden sub has no row of its own to look up; the daemon sends its name.
   if (payload.sub_name) asker.name = payload.sub_name;
+  // A sub shows as its avatar and the main chat as "Main chat" (C5); any other
+  // chat keeps the plain "from <name>" line.
+  const face = askerFaceOf(payload);
   const title = `
     <span class="prompt-card__title">
       <i class="ph ph-lock-key"></i>
       Secret requested
     </span>
-    <span class="secret-card__from"${asker.project ? ` title="${escapeHtml(asker.project)}"` : ""}>
+    ${face
+      ? `<span class="secret-card__from">${fromChipHtml(face)}</span>`
+      : `<span class="secret-card__from"${asker.project ? ` title="${escapeHtml(asker.project)}"` : ""}>
       <i class="ph ph-chat-circle-text"></i> from <b>${escapeHtml(asker.name)}</b>
-    </span>
+    </span>`}
     <button type="button" class="icon-btn-sq prompt-icon-btn" data-act="minimize" title="Minimize to read the chat"><i class="ph ph-minus"></i></button>
   `;
 
