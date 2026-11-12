@@ -156,10 +156,17 @@ pub(super) async fn on_prompt_submit(
     // One pass over the transcript tail serves two riders: the rewrite counter
     // the repeating riders key on, and the context-cap note further down.
     let cap = super::context_cap::view(&ctx.state, &q.session_id);
-    let epoch = (
-        cap.as_ref().map_or(0, |c| c.epoch),
-        ctx.state.registry.get(&q.session_id).map_or(0, |i| i.pid),
-    );
+    // The live child's pid comes from the session map, which `spawn` fills with
+    // the process it started; the registry row's pid is 0 for a daemon-hosted
+    // chat until a SessionStart hook lands, and can lag a relaunch.
+    let pid = ctx
+        .state
+        .sessions
+        .get(&q.session_id)
+        .map(|s| s.pid)
+        .or_else(|| ctx.state.registry.get(&q.session_id).map(|i| i.pid))
+        .unwrap_or(0);
+    let epoch = (cap.as_ref().map_or(0, |c| c.epoch), pid);
     let sid = q.session_id.as_str();
     let mut blocks: Vec<String> = [
         RIDERS.todos(sid, todo_methods::render_for_injection(&ctx.state, sid), epoch),
