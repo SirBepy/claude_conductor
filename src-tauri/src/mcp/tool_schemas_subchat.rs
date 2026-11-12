@@ -40,22 +40,23 @@ pub fn chat_schemas() -> Vec<Value> {
 fn shared_mockup_schema() -> Value {
     json!({
         "name": TOOL_SHARED_MOCKUP,
-        "description": "One shared mockup page per main chat that its subs each add controls to; use it instead of every sub pushing its own show_preview page. `create` (the main chat only, once, before or as it hands out jobs): slug, title, shell = the page html with one EMPTY element per sub's region, e.g. <div data-part=\"header\"></div> (double quotes, nothing inside). `part` (a sub, or the main chat): part = a region id of the shell, html = that region's content, css, controls. Omit slug and a sub finds its main chat's page. A sub writes only its own region. The panel shows a row of the subs that added controls; Joe opens one sub's controls and the page changes at once, with no reload. controls = [{id, label, kind, options, default}] with at most 8: kind \"select\" is a choice between 2 to 12 options (a native dropdown), kind \"switch\" is a plain yes/no (default true or false). Never express a choice as several switches or as buttons in the html. A control sets data-<id>=\"<value>\" on your region's root element (a switch is \"on\" or \"off\"), so style it in css, which applies only inside your region and is scoped with @scope: write `:scope[data-style=\"ember\"] h3 {...}` for rules that depend on the attribute, and the plain `h3 {...}` for the rest. No script is needed. Pushing a part again replaces it; omit controls to keep the old ones. For one chat's own exploration use show_preview instead, and say why in its title."
+        "description": "One shared mockup page per main chat that its subs each add controls to; use it instead of every sub pushing its own show_preview page. `create` (the main chat; a sub only if it is the layout sub): slug, title, shell = the page html with one EMPTY element per sub's region, e.g. <div data-part=\"header\"></div> (double quotes, nothing inside), and optional controls for the page itself (they set data-<id> on the page root, so shell css selects with [data-<id>=\"v\"]; re-creating without controls keeps the old ones). `layout` (the main chat): sub = the id or name of one of your own subs; it then owns the shell and may re-create it, any other sub is refused, and you keep your own override. Re-creating a shell drops a part whose region the new shell lacks. Joe can send a message about any element of the page; it reaches that region's sub or the layout sub, and a sub that gets one about something it does not own passes it to its main chat. `part` (a sub, or the main chat): part = a region id of the shell, html = that region's content, css, controls. Omit slug and a sub finds its main chat's page. A sub writes only its own region. The panel shows a row of the subs that added controls; Joe opens one sub's controls and the page changes at once, with no reload. controls = [{id, label, kind, options, default}] with at most 8: kind \"select\" is a choice between 2 to 12 options (a native dropdown), kind \"switch\" is a plain yes/no (default true or false). Never express a choice as several switches or as buttons in the html. A control sets data-<id>=\"<value>\" on your region's root element (a switch is \"on\" or \"off\"), so style it in css, which applies only inside your region and is scoped with @scope: write `:scope[data-style=\"ember\"] h3 {...}` for rules that depend on the attribute, and the plain `h3 {...}` for the rest. No script is needed. Pushing a part again replaces it; omit controls to keep the old ones. For one chat's own exploration use show_preview instead, and say why in its title."
         ,
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["create", "part"]},
+                "action": {"type": "string", "enum": ["create", "part", "layout"]},
                 "slug": {"type": "string", "description": "The mockup's name. create: required. part: optional, defaults to the main chat's newest shared mockup."},
                 "title": {"type": "string", "description": "create: the panel title."},
                 "shell": {"type": "string", "description": "create: the page html with one empty element per region, each carrying data-part=\"<id>\". Ids are lowercase letters, digits, - or _."},
+                "sub": {"type": "string", "description": "layout: the session id or name of one of your own subs, which then owns the shell."},
                 "part": {"type": "string", "description": "part: the region id from the shell that this part fills."},
                 "html": {"type": "string", "description": "part: the region's content."},
                 "css": {"type": "string", "description": "part: css for this region only. Use :scope[data-<control id>=\"<value>\"] for rules that follow a control."},
                 "controls": {
                     "type": "array",
                     "maxItems": 8,
-                    "description": "part: this region's controls. Omitted keeps the earlier ones, [] clears them.",
+                    "description": "part: this region's controls. create: the page's own controls. Omitted keeps the earlier ones, [] clears them.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -135,7 +136,10 @@ mod tests {
         assert!(!d.contains('\u{2014}'));
         let kinds = &s["inputSchema"]["properties"]["controls"]["items"]["properties"]["kind"]["enum"];
         assert_eq!(kinds, &json!(["select", "switch"]), "no chip or button kind exists");
-        assert_eq!(s["inputSchema"]["properties"]["action"]["enum"], json!(["create", "part"]));
+        assert_eq!(s["inputSchema"]["properties"]["action"]["enum"], json!(["create", "part", "layout"]));
+        for needle in ["layout sub", "[data-<id>", "does not own"] {
+            assert!(d.contains(needle), "description must mention {needle}: {d}");
+        }
     }
 
     #[test]

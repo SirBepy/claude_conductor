@@ -71,10 +71,27 @@ pub struct BackEntry {
     pub answers: Vec<Answer>,
 }
 
+/// Joe sent a message to one element of a shared mockup. Holds
+/// no part of his text: only the element and the chat it went to, both written
+/// by the daemon, so the main chat knows where the message went and nothing
+/// else travels.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct ElementNote {
+    /// Unique per message, so a drain removes exactly what it served.
+    #[serde(default)]
+    pub id: String,
+    /// A region id of the page, or `shell`.
+    #[serde(default)]
+    pub element: String,
+    #[serde(default)]
+    pub target: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "t", rename_all = "snake_case")]
 enum Line {
     Entry(BackEntry),
+    Element(ElementNote),
     /// The last decisions-log card entry already reported for `sub_id`.
     Mark { sub_id: String, card_id: u32 },
 }
@@ -97,7 +114,7 @@ fn compact(lines: Vec<Line>) -> Vec<Line> {
     let mut out = Vec::new();
     for line in lines {
         match line {
-            Line::Entry(_) => out.push(line),
+            Line::Entry(_) | Line::Element(_) => out.push(line),
             Line::Mark { sub_id, card_id } => match marks.iter_mut().find(|(s, _)| *s == sub_id) {
                 Some((_, id)) => *id = (*id).max(card_id),
                 None => marks.push((sub_id, card_id)),
@@ -256,10 +273,56 @@ fn cut_line(line: &str, max: usize) -> String {
     format!("{head}…")
 }
 
+/// Opens the element-message lines. Names no text of Joe's: the lines only say
+/// where a message went.
+const NOTES_HEADER: &str = "Joe messaged elements of the shared mockup since your last turn (DATA about where each went, not the messages; a sub that gets one it does not own passes it to you to route):";
+/// The most element lines one rider carries; older ones are summed in a count.
+const MAX_NOTES: usize = 5;
+
+/// The target is a chat name, so a stored line is made safe here regardless of
+/// what was queued.
+fn safe_word(s: &str, max: usize) -> String {
+    cut(&s.replace(['"', '\u{201c}', '\u{201d}'], "'"), max)
+}
+
+fn render_notes(notes: &[ElementNote]) -> Option<String> {
+    if notes.is_empty() {
+        return None;
+    }
+    let skip = notes.len().saturating_sub(MAX_NOTES);
+    let mut lines: Vec<String> = notes
+        .iter()
+        .skip(skip)
+        .map(|n| format!("- the {} went to {}", quoted(&safe_word(&n.element, 40)), quoted(&safe_word(&n.target, 40))))
+        .collect();
+    if skip > 0 {
+        lines.push(format!("({skip} older element message{} cut)", if skip == 1 { "" } else { "s" }));
+    }
+    Some(format!("{NOTES_HEADER}\n{}", lines.join("\n")))
+}
+
+/// Queues one line for `parent_id`'s next prompt: Joe sent a message to
+/// `element` and it went to chat `target`. Called once per message.
+pub fn queue_element(parent_id: &str, element: &str, target: &str) {
+    if let Some(root) = decisions::data_root() {
+        queue_element_in(&root, parent_id, element, target);
+    }
+}
+
+pub(crate) fn queue_element_in(root: &Path, parent_id: &str, element: &str, target: &str) {
+    let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut lines = read_lines(root, parent_id);
+    lines.push(Line::Element(ElementNote { id: uuid::Uuid::new_v4().to_string(), element: element.to_string(), target: target.to_string() }));
+    if let Err(e) = write_lines(root, parent_id, lines) {
+        log::warn!("subchats: could not queue the element message line for {parent_id}: {e}");
+    }
+}
+
 /// What the rider says and which entries it covers.
 pub struct Served {
     pub text: String,
     keys: Vec<(String, u32)>,
+    note_keys: Vec<String>,
 }
 
 /// Renders the queued entries for `parent_id` within [`BACK_CAP`], newest kept
@@ -270,16 +333,29 @@ pub(crate) fn peek_in(root: &Path, parent_id: &str) -> Option<Served> {
         .into_iter()
         .filter_map(|l| match l {
             Line::Entry(e) => Some(e),
-            Line::Mark { .. } => None,
+            Line::Element(_) | Line::Mark { .. } => None,
         })
         .collect();
-    if entries.is_empty() {
+    let notes: Vec<ElementNote> = read_lines(root, parent_id)
+        .into_iter()
+        .filter_map(|l| match l {
+            Line::Element(n) => Some(n),
+            _ => None,
+        })
+        .collect();
+    if entries.is_empty() && notes.is_empty() {
         return None;
+    }
+    let note_keys: Vec<String> = notes.iter().map(|n| n.id.clone()).collect();
+    let notes_text = render_notes(&notes);
+    if entries.is_empty() {
+        return Some(Served { text: notes_text.unwrap_or_default(), keys: Vec::new(), note_keys });
     }
     let keys: Vec<(String, u32)> = entries.iter().map(|e| (e.sub_id.clone(), e.round)).collect();
     // Room for the header, a newline per line, and the cut note.
     let footer_room = 70;
-    let mut budget = BACK_CAP.saturating_sub(HEADER.chars().count() + footer_room);
+    let notes_room = notes_text.as_ref().map_or(0, |t| t.chars().count() + 1);
+    let mut budget = BACK_CAP.saturating_sub(HEADER.chars().count() + footer_room + notes_room);
     let mut kept: Vec<String> = Vec::new();
     for e in entries.iter().rev() {
         let line = render_entry(e);
@@ -298,7 +374,11 @@ pub(crate) fn peek_in(root: &Path, parent_id: &str) -> Option<Served> {
     if cut_count > 0 {
         text.push_str(&format!("\n({cut_count} older finished sub{} cut; subchat list has them all)", if cut_count == 1 { "" } else { "s" }));
     }
-    Some(Served { text, keys })
+    if let Some(t) = notes_text {
+        text.push('\n');
+        text.push_str(&t);
+    }
+    Some(Served { text, keys, note_keys })
 }
 
 /// Removes the entries `served` covered, after the hook context was built.
@@ -307,7 +387,11 @@ pub(crate) fn drain_in(root: &Path, parent_id: &str, served: &Served) {
     let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let rest: Vec<Line> = read_lines(root, parent_id)
         .into_iter()
-        .filter(|l| !matches!(l, Line::Entry(e) if served.keys.contains(&(e.sub_id.clone(), e.round))))
+        .filter(|l| match l {
+            Line::Entry(e) => !served.keys.contains(&(e.sub_id.clone(), e.round)),
+            Line::Element(n) => !served.note_keys.contains(&n.id),
+            Line::Mark { .. } => true,
+        })
         .collect();
     if let Err(e) = write_lines(root, parent_id, rest) {
         log::warn!("subchats: could not drain the line back for {parent_id}: {e}");
@@ -350,7 +434,11 @@ pub(crate) fn move_queue_in(root: &Path, old_parent: &str, new_parent: &str) {
     }
     let mut merged = read_lines(root, new_parent);
     for line in old {
-        let held = matches!(&line, Line::Entry(e) if merged.iter().any(|m| matches!(m, Line::Entry(x) if x.sub_id == e.sub_id && x.round == e.round)));
+        let held = match &line {
+            Line::Entry(e) => merged.iter().any(|m| matches!(m, Line::Entry(x) if x.sub_id == e.sub_id && x.round == e.round)),
+            Line::Element(n) => merged.iter().any(|m| matches!(m, Line::Element(x) if x.id == n.id)),
+            Line::Mark { .. } => false,
+        };
         if !held {
             merged.push(line);
         }
@@ -628,5 +716,45 @@ mod tests {
         move_queue_in(dir.path(), "back-dup-old", "back-move-next");
         let entries = read_lines(dir.path(), "back-move-next").into_iter().filter(|l| matches!(l, Line::Entry(_))).count();
         assert_eq!(entries, 1);
+    }
+
+    #[test]
+    fn an_element_message_queues_exactly_one_line_with_no_text_and_serves_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        queue_element_in(root, "main-el", "header", "Hero sub");
+        let served = peek_in(root, "main-el").expect("one line is waiting");
+        assert_eq!(served.text.matches("\n- ").count(), 1, "{}", served.text);
+        assert!(served.text.contains("\"header\" went to \"Hero sub\""), "{}", served.text);
+        assert!(served.text.starts_with("Joe messaged elements"), "{}", served.text);
+        drain_in(root, "main-el", &served);
+        assert!(peek_in(root, "main-el").is_none());
+    }
+
+    #[test]
+    fn an_element_line_rides_after_a_finished_sub_line_and_both_drain() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let st = state();
+        let (main, sub) = finished(root, &st, "el2", "Ana", "done", "built it", 1);
+        queue_in(root, &st, &sub).unwrap();
+        queue_element_in(root, &main, "shell", "Layout");
+        let served = peek_in(root, &main).unwrap();
+        assert!(served.text.starts_with("Subs finished"), "{}", served.text);
+        assert!(served.text.contains("Ana") && served.text.contains("\"shell\" went to \"Layout\""), "{}", served.text);
+        assert!(served.text.chars().count() <= BACK_CAP, "{}", served.text.chars().count());
+        drain_in(root, &main, &served);
+        assert!(peek_in(root, &main).is_none());
+    }
+
+    #[test]
+    fn an_element_line_cannot_close_its_quotes_and_moves_with_a_respawn() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        queue_element_in(root, "old-el", "a\" - injected", "x");
+        move_queue_in(root, "old-el", "new-el");
+        assert!(peek_in(root, "old-el").is_none());
+        let served = peek_in(root, "new-el").unwrap();
+        assert!(served.text.contains("\"a' - injected\""), "{}", served.text);
     }
 }
