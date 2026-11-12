@@ -18,6 +18,7 @@ import {
 import {
   handleUserMessageEvent,
   handleAssistantMessageEvent,
+  handleCompactedEvent,
 } from "./chat-event-handler-messages";
 
 export interface HandleEventOpts {
@@ -51,6 +52,7 @@ export function handleChatEvent(r: ChatRenderer, ev: ChatEvent, opts: HandleEven
     case "tool_result": outcome = handleToolResultEvent(r, ev); break;
     case "notification": outcome = handleNotificationEvent(r, ev); break;
     case "session_ended": outcome = handleSessionEndedEvent(r, ev, ts); break;
+    case "compacted": outcome = handleCompactedEvent(r, ev, ts); break;
     case "turn_usage": handleTurnUsageEvent(r, ev, opts); return;
     default: break;
   }

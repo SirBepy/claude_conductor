@@ -18,6 +18,7 @@ import {
   stripStatusToken,
   detectPrPreviewToken,
   META_KIND_ICONS,
+  compactionTitle,
 } from "./chat-classifiers";
 export type { RenderedMessage } from "./chat-classifiers";
 export { isBoundaryMessage, compactionOrdinal, stripStatusToken, detectStatusToken, detectProgressToken, normalizeUserMessageText, isCompactUserMessage, cleanUserBlocks, isSilentSystemUserMessage, isResumeContinuationUserMessage, classifyMetaTurn, noiseAssistantLabel, isNoiseAssistantText, detectPrPreviewToken } from "./chat-classifiers";
@@ -266,12 +267,14 @@ export function renderMessage(m: RenderedMessage): string {
         // already taken by the hover-timestamp label on every row.
         return `<div class="msg system chain-divider"><span class="chain-rule"></span>${escapeHtml(m.text ?? "Previous chat")}<span class="chain-rule"></span></div>`;
       }
-      if (m.isCompaction) {
+      if (m.isCompaction || m.compaction) {
         // compactionN can be unset here: the paginated (scrollback) path's
         // stateless converter has no list to derive it from - render the
-        // chip without an ordinal rather than a broken "×undefined".
-        const n = m.compactionN != null ? `<span class="compact-n">×${m.compactionN}</span>` : "";
-        return `<div class="msg system compact-marker"><span class="chat-pill compact-chip"><i class="ph ph-stack"></i>Context compacted${n}</span></div>`;
+        // chip without an ordinal rather than a broken "×undefined". The
+        // first compaction carries none either: "×1" beside the figures is noise.
+        const n = m.compactionN != null && m.compactionN > 1 ? `<span class="compact-n">×${m.compactionN}</span>` : "";
+        const title = m.compaction ? ` title="${escapeHtml(compactionTitle(m.compaction))}"` : "";
+        return `<div class="msg system compact-marker"><span class="chat-pill compact-chip"${title}><i class="ph ph-stack"></i>${escapeHtml(m.text ?? "Context compacted")}${n}</span></div>`;
       }
       if (m.metaKind) {
         // Bookkeeping-only row (silentStreakBoundaryIndex etc, see

@@ -6,7 +6,9 @@ import { subCardRow } from "./subchat-cards";
 import { isSubchatSend, passedRowFromToolUse } from "./chat-subchat-passed";
 import {
   type RenderedMessage,
+  type CompactionFigures,
   isCompactUserMessage,
+  compactionLabel,
   cleanUserBlocks,
   isResumeContinuationUserMessage,
   isSilentSystemUserMessage,
@@ -136,18 +138,28 @@ export function originSessionIdOf(ev: ChatEvent): string | undefined {
   return (ev as { originSessionId?: string }).originSessionId;
 }
 
+/** The one quiet row a compaction draws, shared by the live handler and
+ *  the stateless scrollback path. ts-rs types the u64 figures as bigint;
+ *  the wire carries plain numbers. */
+export function compactionRow(ev: Extract<ChatEvent, { type: "compacted" }>, ts: number): RenderedMessage {
+  const compaction: CompactionFigures = {
+    preTokens: Number(ev.pre_tokens),
+    postTokens: Number(ev.post_tokens),
+    durationMs: Number(ev.duration_ms),
+    trigger: ev.trigger,
+  };
+  // Auto-compact interrupts a running turn, so only a `/compact` is a boundary.
+  return { kind: "system", text: compactionLabel(compaction), ts, isCompaction: ev.trigger !== "auto", compaction };
+}
+
 export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
   const ts = "timestamp" in ev ? Number((ev as { timestamp: bigint }).timestamp) : Date.now();
   switch (ev.type) {
     case "session_started":
       return { kind: "system", text: `Session started${ev.model ? ` (${ev.model})` : ""}`, ts };
     case "user_message": {
-      if (isCompactUserMessage(ev.content)) {
-        // No compactionN: this converter is stateless (single event in, no
-        // list) - the paginated caller has no full message list to derive
-        // an ordinal from. isCompaction alone is enough for isBoundaryMessage.
-        return { kind: "system", text: "Conversation compacted", ts, isCompaction: true };
-      }
+      // The `/compact` command line: the `compacted` event draws the row.
+      if (isCompactUserMessage(ev.content)) return null;
       const cleaned = cleanUserBlocks(ev.content);
       if (cleaned.length === 0) return null;
       if (isResumeContinuationUserMessage(cleaned)) return null;
@@ -228,6 +240,11 @@ export function eventToRenderedMessage(ev: ChatEvent): RenderedMessage | null {
       return { kind: "notification", text: ev.body, ts: Date.now() };
     case "session_ended":
       return { kind: "system", text: `Session ended${ev.exit_code !== null ? ` (exit ${ev.exit_code})` : ""}`, ts };
+    case "compacted":
+      // No compactionN: this converter is stateless (single event in, no
+      // list) - the paginated caller has no full message list to derive
+      // an ordinal from. isCompaction alone is enough for isBoundaryMessage.
+      return compactionRow(ev, ts);
     default:
       return null;
   }

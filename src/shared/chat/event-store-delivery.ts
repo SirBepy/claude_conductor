@@ -215,6 +215,10 @@ export class DeliveryPolicy {
         return `tr:${ev.tool_use_id}`;
       case "notification":
         return `n:${ev.body}`;
+      // The same boundary reaches the window live (stdout) and again from the
+      // transcript (watcher, page reconcile); the figures identify it.
+      case "compacted":
+        return `c:${ev.pre_tokens}:${ev.post_tokens}:${ev.duration_ms}`;
       default:
         return null;
     }
