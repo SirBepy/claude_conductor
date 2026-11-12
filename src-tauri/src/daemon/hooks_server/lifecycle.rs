@@ -126,6 +126,8 @@ pub(super) async fn on_session_start(
     let (kind, is_remote) = (InstanceKind::External, false);
 
     let transcript_path_buf = payload.transcript_path.clone().map(std::path::PathBuf::from);
+    // Read before `register`, which creates a new id's row.
+    let known = ctx.state.registry.get(&payload.session_id).is_some();
 
     // Mutate daemon cache first so the cache contains the new project_id.
     let (project_id, created_new) = ctx.state.settings.upsert_project_for_cwd(&cwd_path, &now);
@@ -155,6 +157,13 @@ pub(super) async fn on_session_start(
     }
 
     // Background enrichment: pid via session_files, name from transcript.
+    // Not for a compaction of a row this daemon already has: its pid and name
+    // were set at start, and the first prompt of an append-only transcript
+    // would overwrite a title the chat got since.
+    if !wants_enrichment(known, payload.source.as_deref()) {
+        crate::daemon::machines::publish_instances_changed(&ctx.state);
+        return session_start_reply(&ctx, &payload).await;
+    }
     let state = ctx.state.clone();
     let sid = payload.session_id.clone();
     let payload_pid = payload.pid;
@@ -180,7 +189,22 @@ pub(super) async fn on_session_start(
     });
 
     crate::daemon::machines::publish_instances_changed(&ctx.state);
-    (StatusCode::NO_CONTENT, Json(json!({})))
+    session_start_reply(&ctx, &payload).await
+}
+
+/// A known row's compaction needs no pid or name lookup; every other start does.
+fn wants_enrichment(known: bool, source: Option<&str>) -> bool {
+    !(known && source == Some("compact"))
+}
+
+/// 204 as always, except after a compaction of a main chat: the hook's stdout
+/// is this body (`hooks/installer.rs` prints it), and `additionalContext` puts
+/// the family state back into the compacted chat.
+async fn session_start_reply(ctx: &Arc<HookCtx>, payload: &SessionStartPayload) -> (StatusCode, Json<serde_json::Value>) {
+    match crate::daemon::subchats::compaction::session_start_answer(&ctx.state, &payload.session_id, payload.source.as_deref()).await {
+        Some(body) => (StatusCode::OK, Json(body)),
+        None => (StatusCode::NO_CONTENT, Json(json!({}))),
+    }
 }
 
 /// Whether a `/hooks/session-end` should actually end the registry entry.
@@ -329,6 +353,64 @@ mod tests {
         assert!(ctx.state.registry.take_close_requested("close-plain"));
         // The parent of a sub is not itself a sub.
         assert_eq!(close_confirm(&ctx, "close-main2", Some("started")).await["ok"], serde_json::json!(true));
+    }
+
+    async fn session_start(ctx: &Arc<HookCtx>, session: &str, source: &str) -> (StatusCode, serde_json::Value) {
+        let payload = SessionStartPayload {
+            session_id: session.to_string(),
+            cwd: Some(".".to_string()),
+            transcript_path: None,
+            pid: None,
+            source: Some(source.to_string()),
+        };
+        let resp = on_session_start(AxState(ctx.clone()), Json(payload)).await.into_response();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+    }
+
+    /// Spike S1 (f3): the hook's `additionalContext` reaches the chat after a
+    /// compaction, and this endpoint answered 204. Now a main chat's compaction
+    /// gets its family state back, and the row it already had is left alone.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_main_chats_compaction_gets_the_family_state_back_and_keeps_its_row() {
+        use crate::daemon::session_test_support::spawn_fake_session;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let ctx = close_ctx();
+        let mut child = spawn_fake_session(&ctx.state.sessions, "ss-main").await;
+        for id in ["ss-main", "ss-sub"] {
+            ctx.state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-12T00:00:00Z");
+        }
+        ctx.state.registry.set_name("ss-main", "Forever chat".into());
+        ctx.state.registry.set_name("ss-sub", "footer-fix".into());
+        ctx.state.registry.set_subchat_of("ss-sub", Some("ss-main".into()));
+        crate::sessions::chat_config::set_subchats_on("ss-main", true);
+        // Launched before the mode was on: the rules came as a mid-chat note.
+        crate::daemon::subchats::compaction::note_child("ss-main", 1, false, false);
+        let before = ctx.state.registry.get("ss-main").unwrap();
+
+        let (status, body) = session_start(&ctx, "ss-main", "compact").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["hookSpecificOutput"]["hookEventName"], json!("SessionStart"));
+        let text = body["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+        assert!(text.contains("sub \"footer-fix\" (running)"), "{text}");
+        assert!(text.contains("decisions"), "{text}");
+        assert!(text.contains(crate::daemon::claude_config::SUBCHATS_MAIN_PROMPT), "the mid-chat note is sent again");
+        let after = ctx.state.registry.get("ss-main").unwrap();
+        assert_eq!((after.name, after.pid, after.kind), (before.name, before.pid, before.kind), "the row is untouched");
+
+        assert_eq!(session_start(&ctx, "ss-main", "resume").await.0, StatusCode::NO_CONTENT, "only a compaction");
+        assert_eq!(session_start(&ctx, "ss-sub", "compact").await.0, StatusCode::NO_CONTENT, "a sub is not a main chat");
+        let _ = child.kill().await;
+    }
+
+    #[test]
+    fn a_compaction_of_a_known_row_skips_the_pid_and_name_lookup() {
+        assert!(!wants_enrichment(true, Some("compact")));
+        assert!(wants_enrichment(false, Some("compact")), "a row first seen here still gets its pid and name");
+        assert!(wants_enrichment(true, Some("startup")));
+        assert!(wants_enrichment(true, None));
     }
 
     #[test]

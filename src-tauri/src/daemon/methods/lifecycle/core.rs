@@ -74,6 +74,13 @@ pub fn register_core(router: &mut Router, state: Arc<DaemonState>) {
                 } else {
                     live
                 };
+                // The daemon is compacting this chat: Joe's message waits in the
+                // compaction manager and goes out as his next turn when it ends
+                // (`pump` hands it to `compaction::deliver_held`). Without this
+                // it was refused as SESSION_BUSY like any mid-turn send.
+                if live.is_some() && crate::daemon::subchats::compaction::hold_typed(&p.session_id, &p.text) {
+                    return Ok(json!({"ok": true, "held": "compaction"}));
+                }
                 // Refusing beats writing into a live child: the bump
                 // below would strand the running turn's own result line on the
                 // old gen, latching `busy` until the 20-minute watchdog. After

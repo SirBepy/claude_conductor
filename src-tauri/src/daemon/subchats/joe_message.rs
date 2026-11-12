@@ -13,8 +13,13 @@
 //!
 //! In memory on purpose: it is only read inside the turn that Joe's message
 //! opened, and a restart ends that turn.
+//!
+//! Beside the slot, the last [`RECENT_MAX`] messages Joe typed are kept in order
+//! ([`recent`]). A daemon-injected turn does not clear that list: the compaction
+//! manager (`subchats::compaction`) quotes it word for word in its `/compact`
+//! focus text, because a summary paraphrases and a brief must quote Joe exactly.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Default)]
@@ -32,6 +37,29 @@ fn slots() -> &'static Mutex<HashMap<String, Slot>> {
 
 fn lock() -> std::sync::MutexGuard<'static, HashMap<String, Slot>> {
     slots().lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// How many of Joe's typed messages [`recent`] keeps per main chat.
+pub const RECENT_MAX: usize = 5;
+
+fn recent_lock() -> std::sync::MutexGuard<'static, HashMap<String, VecDeque<String>>> {
+    static RECENT: OnceLock<Mutex<HashMap<String, VecDeque<String>>>> = OnceLock::new();
+    RECENT.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn push_recent(session_id: &str, text: &str) {
+    let mut all = recent_lock();
+    let list = all.entry(session_id.to_string()).or_default();
+    list.push_back(text.to_string());
+    while list.len() > RECENT_MAX {
+        list.pop_front();
+    }
+}
+
+/// The last [`RECENT_MAX`] messages Joe typed to `session_id`, oldest first and
+/// word for word. Unlike [`latest`], a wake or a relay does not clear it.
+pub fn recent(session_id: &str) -> Vec<String> {
+    recent_lock().get(session_id).map(|l| l.iter().cloned().collect()).unwrap_or_default()
 }
 
 /// Whether `text` is a question card's answer or its extra note, which Joe
@@ -56,6 +84,7 @@ pub fn note_sent(session_id: &str, text: &str, is_meta: bool, author: Option<&st
         return;
     }
     lock().insert(session_id.to_string(), Slot { text: text.to_string(), passed_to: HashSet::new() });
+    push_recent(session_id, text);
 }
 
 /// A message Joe typed while the chat was busy, delivered into the running turn.
@@ -66,6 +95,9 @@ pub fn note_delivered(session_id: &str, texts: &[String]) {
         texts.iter().map(String::as_str).filter(|t| !t.trim().is_empty() && !is_card_reply(t)).collect();
     if joined.is_empty() || !tracked(session_id) {
         return;
+    }
+    for text in &joined {
+        push_recent(session_id, text);
     }
     lock().insert(session_id.to_string(), Slot { text: joined.join("\n\n"), passed_to: HashSet::new() });
 }
@@ -81,6 +113,7 @@ pub fn latest(session_id: &str) -> Option<String> {
 /// message is the handoff its predecessor wrote, which Joe did not type.
 pub fn forget(session_id: &str) {
     lock().remove(session_id);
+    recent_lock().remove(session_id);
 }
 
 /// Whether the latest message already went to `sub_id`.
@@ -175,6 +208,28 @@ mod tests {
         note_sent("jm-newer", "second", false, None);
         assert_eq!(latest("jm-newer").as_deref(), Some("second"));
         assert!(!already_passed("jm-newer", "sub-a"));
+    }
+
+    /// The compaction focus text quotes these, so a wake between two of Joe's
+    /// messages must not drop the older one, and only his last few are kept.
+    #[test]
+    fn recent_keeps_joes_last_typed_messages_across_wakes_and_drops_the_oldest() {
+        let _data = super::super::TempDataDir::new();
+        on(&["jm-recent"]);
+        note_sent("jm-recent", "one", false, None);
+        note_sent("jm-recent", "Sub finished.", true, None);
+        note_sent("jm-recent", "two", false, Some("jarvis-1"));
+        note_sent("jm-recent", "<auq-answer id=\"p\"/>A", false, None);
+        note_delivered("jm-recent", &["three".to_string(), "four".to_string()]);
+        assert_eq!(recent("jm-recent"), vec!["one", "three", "four"], "only what Joe typed, in order");
+        for t in ["five", "six", "seven"] {
+            note_sent("jm-recent", t, false, None);
+        }
+        assert_eq!(recent("jm-recent"), vec!["three", "four", "five", "six", "seven"]);
+        note_sent("jm-recent-off", "not a main chat", false, None);
+        assert!(recent("jm-recent-off").is_empty());
+        forget("jm-recent");
+        assert!(recent("jm-recent").is_empty());
     }
 
     #[test]

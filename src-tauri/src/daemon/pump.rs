@@ -119,6 +119,9 @@ pub(crate) async fn run_stdout_pump(
                     Ok(_) => {
                         // Watchdog signal: any stdout line at all counts as activity.
                         state_for_pump.registry.touch_activity(&pump_session.session_id);
+                        // The compaction manager's view of the context: each
+                        // assistant line's usage and a compaction's boundary.
+                        crate::daemon::subchats::compaction::note_line(&pump_session.session_id, &line_buf);
                         if !pump_turn_gen_captured {
                             // Trailing and spawn-banner lines find nothing pending.
                             if let Some(gen) = state_for_pump
@@ -330,6 +333,20 @@ pub(crate) async fn run_stdout_pump(
                                 } else {
                                     awaiting
                                 };
+                                // The end of the daemon's own `/compact`: its result line
+                                // reports no status (no Stop hook, no report_turn_status),
+                                // so the chat keeps the one it had and nothing rings. The
+                                // compaction was idle time, not a new "done".
+                                let compaction_end = if live_turn {
+                                    crate::daemon::subchats::compaction::take_finished(
+                                        &pump_session.session_id,
+                                        pump_session.pid,
+                                    )
+                                } else {
+                                    None
+                                };
+                                let awaiting =
+                                    crate::daemon::subchats::compaction::status_after_turn(compaction_end.as_ref(), awaiting);
                                 // Character "work finished" / "asking" sound. The in-app chat's
                                 // turn completion is NOT covered by the global Stop/Notification
                                 // hooks (those only drive skill-usage + external sessions), so
@@ -345,7 +362,7 @@ pub(crate) async fn run_stdout_pump(
                                 if live_turn {
                                     state_for_pump.notify_gate.turn_ending(&pump_session.session_id);
                                 }
-                                if live_turn && state_for_pump.registry.should_notify_turn_sound(
+                                if live_turn && !compaction_end.as_ref().is_some_and(|e| e.was_compaction) && state_for_pump.registry.should_notify_turn_sound(
                                     &pump_session.session_id,
                                     awaiting.as_deref(),
                                 ) {
@@ -443,6 +460,14 @@ pub(crate) async fn run_stdout_pump(
                                 }
                                 if live_turn {
                                     crate::daemon::methods::spawn_chat::release_turn_slot(&pump_session.session_id);
+                                    use crate::daemon::subchats::compaction;
+                                    compaction::note_live_turn_end(&pump_session.session_id, pump_session.pid);
+                                    // What Joe typed during a compaction goes out now as
+                                    // his next turn; any other turn end may start one.
+                                    match compaction_end {
+                                        Some(end) => compaction::deliver_held(&state_for_pump, &pump_session.session_id, end.held),
+                                        None => compaction::after_turn(&state_for_pump, &pump_session.session_id),
+                                    }
                                 }
                                 // Drain-on-jarvis-idle (todo 272 chunk 3): this session IS
                                 // Jarvis and it just went idle - flush anything that queued

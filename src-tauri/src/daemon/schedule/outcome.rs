@@ -71,6 +71,19 @@ pub(super) fn compute_missed(mut item: ScheduledItem, now: DateTime<Utc>) -> Sch
 /// itself has side effects (spawns/sends via `state`), but never touches the
 /// scheduled-items store directly - the caller persists the returned item.
 pub(super) async fn compute_fired(state: &Arc<DaemonState>, mut item: ScheduledItem, now: DateTime<Utc>) -> ScheduledItem {
+    // A message whose chat is mid-turn (a compaction, a wake, Joe's own turn)
+    // is early, not broken: it stays Pending at the same `fire_at`, so the next
+    // tick fires it once the chat is idle, and the grace window still turns a
+    // chat that never goes idle into Missed. Firing it would only meet
+    // `fire_message`'s busy refusal, which used to fail a one-shot for good
+    // (spike S1, g3: a `schedule_fire_now` landing mid-compaction was lost).
+    if let ScheduledKind::Message { session_id, .. } = &item.kind {
+        if crate::daemon::lifecycle::is_busy(state, session_id) {
+            item.status = ScheduledStatus::Pending;
+            item.last_result = Some("waiting: the chat was mid-turn, retried once it is idle".to_string());
+            return item;
+        }
+    }
     let outcome = schedule_fire::fire_kind(state, &item).await;
     // Still inside the account's window: not a failure, just early. Push the
     // item to the next free stagger slot and leave it Pending. `last_fired_at`
@@ -173,6 +186,26 @@ mod tests {
         assert!(matches!(updated.status, ScheduledStatus::Failed { .. }), "missing cwd must surface as Failed, not panic");
         assert!(updated.last_fired_at.is_some());
         assert!(updated.last_result.is_some());
+    }
+
+    /// Spike S1 (g3): a one-shot fired while its chat was compacting failed
+    /// for good with "still mid-turn". It must wait for the next tick instead.
+    #[tokio::test]
+    async fn a_one_shot_fired_into_a_mid_turn_chat_stays_pending_for_the_next_tick() {
+        let state = test_state();
+        state.registry.upsert_interactive("sched-busy", std::path::Path::new("C:/proj"), "proj-1", "2026-01-01T00:00:00Z");
+        state.registry.set_busy("sched-busy", true);
+        let fire_at = Utc::now() - chrono::Duration::minutes(1);
+        let item = ScheduledItem::new(
+            ScheduledKind::Message { session_id: "sched-busy".into(), cwd: "C:/proj".into() },
+            "wake".into(),
+            fire_at.to_rfc3339(),
+            None,
+        );
+        let updated = compute_fired(&state, item, Utc::now()).await;
+        assert_eq!(updated.status, ScheduledStatus::Pending, "{:?}", updated.last_result);
+        assert_eq!(updated.fire_at, fire_at.to_rfc3339(), "still due, so the next idle tick fires it");
+        assert!(updated.last_fired_at.is_none(), "nothing was sent");
     }
 
     #[tokio::test]
