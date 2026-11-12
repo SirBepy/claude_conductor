@@ -335,6 +335,11 @@ pub(crate) const TRANSPORT_TABLE: &[(&str, TransportMask)] = &[
     // Settings > About. Nothing a paired phone could not already learn from the
     // app it installs; P, not PM, because a peer machine has no About page.
     ("get_version_info", P),
+    // The phone hands over its own connection journal so a drop shows up in the
+    // daemon log next to the PC's side of it. P, not PM: only a phone has such a
+    // journal, and a method that writes log lines is not something another
+    // machine should reach. The handler caps lines, length and rate per device.
+    ("report_link_journal", P),
     // Read-only filesystem scan of the slash-command/skill dirs so the phone's
     // `/` autocomplete popup populates like desktop's (was always empty otherwise).
     // Guarded by reject_unknown(project_dir) in registry.rs when project_dir is set.
@@ -696,7 +701,7 @@ mod tests {
             "voice_clean_transcript",
             "list_message_drafts", "set_draft_body", "set_draft_version",
             "set_draft_state",
-            "ensure_jarvis_session",
+            "ensure_jarvis_session", "report_link_journal",
             "list_machines", "list_machine_projects", "list_machine_accounts", "set_machine_project_account",
             "set_machine_profile", "add_project_to_skill_scope", "restart_session_process",
         ] {
@@ -714,6 +719,12 @@ mod tests {
     fn ensure_jarvis_session_is_phone_only() {
         assert!(allowed("ensure_jarvis_session", &Transport::Phone));
         assert!(!allowed("ensure_jarvis_session", &Transport::PeerMachine("m".into())));
+    }
+
+    #[test]
+    fn report_link_journal_is_phone_only() {
+        assert!(allowed("report_link_journal", &Transport::Phone));
+        assert!(!allowed("report_link_journal", &Transport::PeerMachine("m".into())));
     }
 
     /// Every `machine:true` entry is `PM` (phone subset) or a named `M`-only
