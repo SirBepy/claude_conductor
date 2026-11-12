@@ -22,7 +22,7 @@ import {
 } from "./backlog-model";
 import { listHtml, readerHtml } from "./backlog-render";
 import { BACKLOG_OPEN_EVENT, takePendingTodoId } from "./backlog-open-event";
-import { onDueHighlight } from "./due-highlight";
+import { dueElsewhereNote, onDueHighlight } from "./due-highlight";
 import { attachBacklogDrag } from "./backlog-drag";
 import "./backlog-panel.css";
 
@@ -289,7 +289,11 @@ class BacklogPanel implements BacklogPanelHandle {
     this.panel.dataset.view = this.view;
     this.emptyEl.hidden = !empty;
     this.listEl.hidden = none;
-    const html = b && !none ? listHtml(buildListGroups(b), { selectedId: this.selectedId(), draggable: this.canAct(), cwd: this.cwd }) : "";
+    const note = dueElsewhereNote(this.cwd);
+    const html = b && !none
+      ? (note ? `<p class="bl-quiet bl-due-note">${escapeHtml(note)}</p>` : "") +
+        listHtml(buildListGroups(b), { selectedId: this.selectedId(), draggable: this.canAct(), cwd: this.cwd })
+      : "";
     if (html !== this.lastList) {
       this.lastList = html;
       this.listEl.innerHTML = html;

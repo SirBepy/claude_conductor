@@ -239,3 +239,24 @@ describe("the due highlight follows its dashboard", () => {
     expect(state.launchNewChatCallback).not.toHaveBeenCalled();
   });
 });
+
+describe("hits in a repo the Backlog panel is not showing", () => {
+  const other = (...n) => n.map((i) => ({ id: `zt-${i}`, repo_cwd: "C:\\Projects\\zirtue-web\\" }));
+  beforeEach(() => highlight.setDueHighlight(null, []));
+
+  it("names the other repos and their counts, and says nothing when every hit is in the panel's repo", () => {
+    highlight.setDueHighlight("2026-11-13", [...ids(4), ...other(1, 2)]);
+    expect(highlight.dueHitsElsewhere(CWD)).toEqual([{ name: "zirtue-web", count: 2 }]);
+    expect(highlight.dueElsewhereNote(CWD)).toBe("Also due in zirtue-web (2). Open a chat in that repo to see them here.");
+    expect(highlight.dueElsewhereNote("c:/projects/zirtue-web")).toContain("conductor (1)");
+    highlight.setDueHighlight("2026-11-13", ids(4));
+    expect(highlight.dueElsewhereNote(CWD)).toBe("");
+  });
+
+  it("a day whose hits are all in another repo still explains itself, and clearing drops the note", () => {
+    highlight.setDueHighlight("2026-11-14", other(7));
+    expect(highlight.dueElsewhereNote(CWD)).toContain("zirtue-web (1)");
+    highlight.setDueHighlight(null, []);
+    expect(highlight.dueElsewhereNote(CWD)).toBe("");
+  });
+});
