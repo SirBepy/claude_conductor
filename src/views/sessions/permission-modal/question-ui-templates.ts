@@ -313,11 +313,11 @@ export function fromChipHtml(from: AskerFace | undefined): string {
   if (!from?.name) return "";
   const name = escapeHtml(from.name);
   if (from.main) {
-    return `<span class="prompt-from prompt-from--main" title="Asked by the main chat"><i class="ph ph-chat-circle-text"></i><span class="prompt-from__name">${name}</span></span>`;
+    return `<span class="prompt-from prompt-from--main" title="The main chat"><i class="ph ph-chat-circle-text"></i><span class="prompt-from__name">${name}</span></span>`;
   }
   // Static question-tone ring: the sub is waiting on Joe, but the card he is reading needs no pulse.
   const ring = ringHtml({ kind: "solid", tone: "question" });
-  return `<span class="prompt-from prompt-from--sub" title="Asked by this subchat: ${name}">`
+  return `<span class="prompt-from prompt-from--sub" title="Subchat: ${name}">`
     + `<span class="prompt-from__av"><span class="prompt-from__face">${escapeHtml(subInitials(from.name))}${ring}</span>${modelBatteryHtml(from.model ?? "", from.effort)}</span>`
     + `<span class="prompt-from__name">${name}</span></span>`;
 }

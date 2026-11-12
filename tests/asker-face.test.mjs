@@ -42,6 +42,9 @@ describe("fromChipHtml", () => {
     expect(html).toContain("avatar-ring");
     expect(html).toContain("session-model-battery");
     expect(html).toContain("Review session code");
+    // A daemon card is about the sub, not asked by it, so the tooltip only names it.
+    expect(html).toContain('title="Subchat: Review session code"');
+    expect(html).not.toContain("Asked by");
   });
 
   it("draws the main chat as a plain chip, and nothing without a name", () => {
