@@ -100,6 +100,43 @@ if (-not (Test-Path $androidDir)) {
         }
     }
 
+    # `cargo tauri android init` does not write these (they come from a full
+    # `cargo tauri android build`/`dev` sync, or are secrets), yet gradle's settings and
+    # configuration phase fail without every one of them, even for a debug unit-test run.
+    # Copied from the main checkout when missing. tauri.settings.gradle and
+    # TauriActivity.kt are tied to the tauri version of the main checkout's last Android
+    # build, so a stale main checkout hands on a stale copy.
+    $genDir = "src-tauri\gen\android"
+    $genInputs = @(
+        "tauri.settings.gradle",
+        "keystore.properties",
+        "app\google-services.json",
+        "app\tauri.build.gradle.kts",
+        "app\tauri.properties",
+        "app\src\main\java\com\sirbepy\conductor\mobile\generated"
+    )
+    if ($mainWorktree -ne $repoRoot) {
+        foreach ($rel in $genInputs) {
+            $dest = Join-Path $androidDir (Join-Path $genDir $rel)
+            $src = Join-Path $mainWorktree (Join-Path "android" (Join-Path $genDir $rel))
+            if ((Test-Path $dest) -and (Get-ChildItem $dest -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) { continue }
+            if (Test-Path $src) {
+                Write-Host "[4/6] copying android gradle input from main worktree: $rel"
+                New-Item -ItemType Directory -Path (Split-Path $dest) -Force | Out-Null
+                if (Test-Path $src -PathType Container) {
+                    # Contents, not the folder: copying the folder into an existing empty
+                    # one nests it as generated\generated.
+                    New-Item -ItemType Directory -Path $dest -Force | Out-Null
+                    Copy-Item -Path (Join-Path $src "*") -Destination $dest -Recurse -Force
+                } else {
+                    Copy-Item -Path $src -Destination $dest -Force
+                }
+            } else {
+                Write-Host "[4/6] android gradle input $rel missing here and in the main worktree - gradle will fail until a full 'cargo tauri android build' (or the secret) provides it"
+            }
+        }
+    }
+
     # cargo re-reads .cargo/config.toml on every invocation, so this is the only place
     # that gives per-build inheritance to `cargo tauri android build` without a wrapper
     # script. Gitignored: the NDK path is machine-specific (see the release target-dir trap).

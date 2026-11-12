@@ -57,7 +57,9 @@ class MainActivity : TauriActivity() {
   // Declining Play's update dialog needs no handling: the next start asks again.
   private val updateFlow =
     registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
-  private val inAppUpdate by lazy { InAppUpdate(this, updateFlow) { locked } }
+  // The "Lock Conductor?" ask dialog leaves `locked` false, but Play's update
+  // dialog would still cover it.
+  private val inAppUpdate by lazy { InAppUpdate(this, updateFlow) { locked || askShowing } }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     // App always renders dark (frontend forces color-scheme: dark via CSS); lock
