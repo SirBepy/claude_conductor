@@ -40,6 +40,7 @@ mod remote_handlers;
 mod remote_pairing;
 mod remote_preview_render;
 mod remote_push;
+mod remote_send_dedupe;
 pub mod remote_server;
 mod remote_static;
 mod remote_transport_table;

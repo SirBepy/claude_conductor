@@ -120,6 +120,8 @@ pub(super) struct RemoteCtx {
     pub(super) app_data: PathBuf,
     pub(super) router: crate::daemon::rpc::Router,
     pub(super) stt: Arc<crate::daemon::stt::SttSupervisor>,
+    /// Phone send idempotency (`client_msg_id`), see `remote_send_dedupe`.
+    pub(super) send_dedupe: super::remote_send_dedupe::SendDedupe,
 }
 
 /// Start the remote-access server. Best-effort: a bind failure disables remote
@@ -164,7 +166,7 @@ pub fn spawn(
         // the remote port. Mirrors the hook listener's protection.
         crate::util::process::mark_listener_non_inheritable(&listener);
         let bound_port = listener.local_addr().map(|a| a.port()).unwrap_or(port);
-        let ctx = Arc::new(RemoteCtx { state, app_data, router, stt: stt_for_task });
+        let ctx = Arc::new(RemoteCtx { state, app_data, router, stt: stt_for_task, send_dedupe: Default::default() });
         let app = build_router(ctx);
         log::info!(
             "remote-access server listening on 127.0.0.1:{bound_port}"
@@ -225,7 +227,7 @@ pub(crate) fn spawn_on(
     let std_listener = std::net::TcpListener::bind(("127.0.0.1", port)).expect("bind ephemeral port for test");
     std_listener.set_nonblocking(true).expect("set listener nonblocking for tokio adoption");
     let bound_port = std_listener.local_addr().map(|a| a.port()).unwrap_or(port);
-    let ctx = Arc::new(RemoteCtx { state, app_data, router, stt: stt_for_task });
+    let ctx = Arc::new(RemoteCtx { state, app_data, router, stt: stt_for_task, send_dedupe: Default::default() });
     let app = build_router(ctx);
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -517,6 +519,7 @@ mod tests {
             app_data: std::env::temp_dir(),
             router: crate::daemon::rpc::Router::new(),
             stt: crate::daemon::stt::SttSupervisor::new(std::env::temp_dir()),
+            send_dedupe: Default::default(),
         });
         let _app = build_router(ctx);
     }
@@ -537,6 +540,7 @@ mod tests {
             app_data: dir.path().to_path_buf(),
             router: crate::daemon::rpc::Router::new(),
             stt: crate::daemon::stt::SttSupervisor::new(std::env::temp_dir()),
+            send_dedupe: Default::default(),
         });
         let resp = health(State(ctx)).await;
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
@@ -664,6 +668,7 @@ mod tests {
             app_data: std::env::temp_dir(),
             router: crate::daemon::rpc::Router::new(),
             stt: crate::daemon::stt::SttSupervisor::new(std::env::temp_dir()),
+            send_dedupe: Default::default(),
         });
         let resp = health(State(ctx)).await;
         let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();

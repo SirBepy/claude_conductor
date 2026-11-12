@@ -94,6 +94,22 @@ pub(super) async fn list_sessions(State(ctx): State<Arc<RemoteCtx>>) -> Response
 #[derive(Deserialize)]
 pub(super) struct SendBody {
     text: String,
+    /// Idempotency key from the phone page (`remote_send_dedupe::valid_id`);
+    /// absent on older pages.
+    #[serde(default)]
+    client_msg_id: Option<String>,
+}
+
+/// Runs `fut` as its own task and awaits it. hyper drops a handler future when
+/// the client's socket closes, and a dropped handler must not cancel work that
+/// has already set state (the busy flag) or sent a message: the task runs on
+/// and its own error arms still run.
+async fn run_detached<T, F>(fut: F) -> Result<T, tokio::task::JoinError>
+where
+    T: Send + 'static,
+    F: std::future::Future<Output = T> + Send + 'static,
+{
+    tokio::spawn(fut).await
 }
 
 pub(super) async fn send_message(
@@ -101,6 +117,81 @@ pub(super) async fn send_message(
     AxPath(id): AxPath<String>,
     Json(body): Json<SendBody>,
 ) -> Response {
+    use super::remote_send_dedupe::{valid_id, Begin, Waited, WAIT_LIMIT};
+    // Ahead of the peer forward and `refuse_if_busy`: a repeat of a delivered
+    // id must answer 200 even while the chat is busy, because the first copy
+    // is what made it busy. Only a success is recorded, so a 409/402/404/500
+    // attempt leaves the id reusable for the phone's held-queue retry.
+    let mut guard = None;
+    if let Some(msg_id) = valid_id(body.client_msg_id.as_deref()) {
+        // Three rounds: a first copy that failed hands the id to the next
+        // waiter as a fresh attempt, which a third request may win again.
+        for _ in 0..3 {
+            match ctx.send_dedupe.begin(&id, msg_id, chrono::Utc::now().timestamp_millis()) {
+                Begin::Fresh(g) => {
+                    guard = Some(g);
+                    break;
+                }
+                Begin::AlreadySent => return StatusCode::OK.into_response(),
+                Begin::InFlight(w) => match w.wait(WAIT_LIMIT).await {
+                    Waited::Succeeded => return StatusCode::OK.into_response(),
+                    Waited::Failed => continue,
+                    // 409 so the phone re-stages the send; its retry then finds
+                    // the id delivered instead of sending a second copy now.
+                    Waited::TimedOut => {
+                        return (StatusCode::CONFLICT, "the first copy of this message is still being sent")
+                            .into_response();
+                    }
+                },
+            }
+        }
+    }
+    // The task-locals `auth_mw` scopes (`TRANSPORT`, `DEVICE_ID`) belong to the
+    // request's own task, so the detached one re-establishes them. The send
+    // path reads `TRANSPORT` itself (`current_transport()`); nothing below it
+    // reads `DEVICE_ID`.
+    let transport = current_transport();
+    let device_id = crate::daemon::rpc::DEVICE_ID.try_with(|d| d.clone()).ok().flatten();
+    let busy_marked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let marked = busy_marked.clone();
+    let task_id = id.clone();
+    let task_ctx = ctx.clone();
+    let joined = run_detached(async move {
+        let work = async {
+            let resp = deliver_send(&task_ctx, &task_id, body, &marked).await;
+            if resp.status() == StatusCode::OK {
+                if let Some(g) = guard.take() {
+                    g.succeed();
+                }
+            }
+            resp
+        };
+        crate::daemon::rpc::DEVICE_ID
+            .scope(device_id, crate::daemon::rpc::TRANSPORT.scope(transport, work))
+            .await
+    })
+    .await;
+    match joined {
+        Ok(resp) => resp,
+        Err(e) => {
+            // The task panicked after it raised busy: no error arm ran.
+            if busy_marked.load(std::sync::atomic::Ordering::SeqCst) {
+                ctx.state.registry.set_busy(&id, false);
+                crate::sessions::chat_state::set_busy(&id, false);
+            }
+            log::error!("remote send for session {id} panicked: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "send failed").into_response()
+        }
+    }
+}
+
+async fn deliver_send(
+    ctx: &Arc<RemoteCtx>,
+    id: &str,
+    body: SendBody,
+    busy_marked: &std::sync::atomic::AtomicBool,
+) -> Response {
+    let id = id.to_string();
     // A session not in this daemon's own registry may still be a mirrored
     // row owned by a paired peer - forward to that peer's own send_message
     // RPC instead of falling through to the local 404 below. Never forwards
@@ -183,6 +274,7 @@ pub(super) async fn send_message(
     ctx.state.registry.set_awaiting(&id, None);
     ctx.state.registry.set_busy(&id, true);
     crate::sessions::chat_state::set_busy(&id, true);
+    busy_marked.store(true, std::sync::atomic::Ordering::SeqCst);
     match crate::daemon::lifecycle::send_message_with_respawn(&ctx.state, &id, &body.text, false).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(crate::daemon::lifecycle::LifecycleError::NotFound(_)) => {
@@ -470,9 +562,14 @@ mod tests {
             app_data: dir.path().to_path_buf(),
             router: Router::new(),
             stt: a_stt,
+            send_dedupe: Default::default(),
         });
-        let resp =
-            send_message(State(ctx), AxPath("s1".to_string()), Json(SendBody { text: "hello".into() })).await;
+        let resp = send_message(
+            State(ctx),
+            AxPath("s1".to_string()),
+            Json(SendBody { text: "hello".into(), client_msg_id: None }),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::OK, "forwarded send must report success");
         assert_eq!(seen.lock().await.as_deref(), Some("hello"), "B's stub must have received our text");
 
@@ -537,14 +634,68 @@ mod tests {
             app_data: dir.path().to_path_buf(),
             router: Router::new(),
             stt: a_stt,
+            send_dedupe: Default::default(),
         });
         let resp = TRANSPORT
             .scope(Transport::PeerMachine("someone-else".into()), send_message(
                 State(ctx),
                 AxPath("s1".to_string()),
-                Json(SendBody { text: "hi".into() }),
+                Json(SendBody { text: "hi".into(), client_msg_id: None }),
             ))
             .await;
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    /// A handler future dropped mid-flight (client socket closed) must not
+    /// cancel the send section: its cleanup still runs. The plain-await half
+    /// shows what a dropped future does without the detach.
+    #[tokio::test]
+    async fn run_detached_work_survives_a_dropped_awaiter() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tokio::sync::Notify;
+
+        async fn work(release: Arc<Notify>, cleaned_up: Arc<AtomicBool>) {
+            release.notified().await;
+            cleaned_up.store(true, Ordering::SeqCst);
+        }
+
+        // Without the detach: dropping the awaiter cancels the work.
+        let release = Arc::new(Notify::new());
+        let cleaned_up = Arc::new(AtomicBool::new(false));
+        let awaiter = tokio::spawn({
+            let (r, c) = (release.clone(), cleaned_up.clone());
+            async move { work(r, c).await }
+        });
+        tokio::task::yield_now().await;
+        awaiter.abort();
+        let _ = awaiter.await;
+        release.notify_one();
+        tokio::task::yield_now().await;
+        assert!(!cleaned_up.load(Ordering::SeqCst), "a dropped plain await cancels its work");
+
+        // With it: the work finishes after the awaiter is gone.
+        let release = Arc::new(Notify::new());
+        let cleaned_up = Arc::new(AtomicBool::new(false));
+        let awaiter = tokio::spawn({
+            let (r, c) = (release.clone(), cleaned_up.clone());
+            async move { run_detached(work(r, c)).await }
+        });
+        tokio::task::yield_now().await;
+        awaiter.abort();
+        let _ = awaiter.await;
+        release.notify_one();
+        for _ in 0..50 {
+            if cleaned_up.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(cleaned_up.load(Ordering::SeqCst), "detached work must finish after its awaiter is dropped");
+    }
+
+    #[tokio::test]
+    async fn run_detached_reports_a_panic_as_a_join_error() {
+        let r = run_detached(async { panic!("boom") }).await;
+        assert!(r.expect_err("panic surfaces").is_panic());
     }
 }
