@@ -24,8 +24,10 @@ pub(crate) async fn turn_end_for(state: &Arc<DaemonState>, sub_id: &str, session
     // The stuck sweep reads this: a gen the registry holds past it is a turn
     // still open.
     runtime().note_turn_end(sub_id, turn_gen);
-    // A turn that ended had a conversation to run in.
+    // A turn that ended had a conversation to run in, and is no longer a turn
+    // a restart cut off.
     super::announced::forget_unresumable(sub_id);
+    crate::daemon::resume_interrupted::forget(sub_id);
     if runtime().finish_pending(sub_id) {
         // Commits, or drops the request if background work started since. A
         // committed finish has stopped the process, so there is nothing to nudge.
@@ -402,6 +404,20 @@ mod tests {
         runtime().set_nudge_text(&sub, "finish dropped");
         assert!(!runtime().take_nudge_from_joe(&sub), "the daemon's own nudge does not inherit Joe's mark");
         super::super::writers::forget_project_for_test(&key);
+    }
+
+    /// A resume that failed marks the turn as still open for the dead sweep; a
+    /// turn that later ends (Joe continued it) must clear that, or the sub is
+    /// carded as dead the next time its process exits idle.
+    #[tokio::test]
+    async fn a_turn_end_clears_a_failed_resume_and_a_lost_conversation() {
+        let (st, sub) = state_with_sub("te-clears");
+        crate::daemon::resume_interrupted::queue(std::slice::from_ref(&sub));
+        crate::daemon::resume_interrupted::settle(&sub, false);
+        super::super::announced::mark_unresumable(&sub);
+        turn_end_for(&st, &sub, None, 1).await;
+        assert!(!crate::daemon::resume_interrupted::resume_failed(&sub));
+        assert!(!super::super::announced::is_unresumable(&sub));
     }
 
     #[tokio::test]
