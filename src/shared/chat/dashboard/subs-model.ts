@@ -8,7 +8,31 @@
  *  so a folded sub stays resumable and keeps its context. */
 export const FINISHED_KEEP_MS = 60 * 60 * 1000;
 
-export type SubCardKind = "asking" | "working" | "queued" | "finished";
+/** What a sub is doing, honestly: `working` means a turn is running. Queued (no
+ *  process yet), paused, at its usage limit and stopped-without-finishing are the
+ *  four ways a sub is NOT making progress (docs/chat-dashboard-design.md, "Seeing
+ *  what subs are doing"); each draws a dim ring and a corner glyph. */
+export type SubCardKind = "asking" | "working" | "queued" | "paused" | "limited" | "stopped" | "finished";
+
+/** The kinds that are not progressing and not asking: the dim ring plus glyph. */
+export const IDLE_KINDS: ReadonlySet<SubCardKind> = new Set<SubCardKind>(["queued", "paused", "limited", "stopped"]);
+
+/** What the avatar's hover card says about a sub. Plain data so the card is a
+ *  pure string function (views/sessions/sidebar-hover-card-html.ts). */
+export interface SubHover {
+  /** The state in words: "Working", "Queued", "Paused", "Usage limit", "Stopped without finishing". */
+  stateWord: string;
+  /** The plan step it is on: `{ n: 3, total: 6, text: "Wire the footer" }`. */
+  step: { n: number; total: number; text: string } | null;
+  /** Its latest tool call in words and when (epoch ms): "Editing footer.css". */
+  action: { text: string; at: number } | null;
+  /** A queued sub: what it waits for, its place in the writer line (1 = next) and who holds the slot. */
+  queue: { waitingFor: string | null; place: number | null; behind: string | null } | null;
+  /** Epoch ms a usage-limited sub resumes, or null when unknown. */
+  resetsAt: number | null;
+  /** Gaming mode parked it rather than Joe pausing it. */
+  gaming: boolean;
+}
 
 export interface SubCardItem {
   id: string;
@@ -27,6 +51,8 @@ export interface SubCardItem {
   /** The ring the avatar draws (a RingSpec of views/sessions/sidebar-ring.ts;
    *  opaque here, the model never reads it). */
   ring: unknown;
+  /** The hover card's lines. Absent on an item built by a caller that only needs the state. */
+  hover?: SubHover;
 }
 
 export interface SubsState {
@@ -38,7 +64,7 @@ export interface SubsState {
   foldsAt: number | null;
 }
 
-const KIND_ORDER: Record<SubCardKind, number> = { asking: 0, working: 1, queued: 2, finished: 3 };
+const KIND_ORDER: Record<SubCardKind, number> = { asking: 0, working: 1, queued: 2, paused: 3, limited: 4, stopped: 5, finished: 6 };
 
 /** A finished sub is past its hour only when its finish time is KNOWN to be old.
  *  One with no date is kept out of the way (older than anything we can prove),
@@ -76,6 +102,42 @@ export const TINTED_EFFORTS: ReadonlySet<string> = new Set(["low", "medium", "xh
 export function tintedEffort(effort: string | null | undefined): string | null {
   const e = String(effort ?? "").trim().toLowerCase();
   return TINTED_EFFORTS.has(e) ? e : null;
+}
+
+// ---- Counts ------------------------------------------------------------------------
+
+/** How many subs are in each unfinished state. */
+export type SubCounts = Record<Exclude<SubCardKind, "finished">, number>;
+
+/** The counts of a chat's unfinished subs, or null when it has none (every sub finished, or no
+ *  subs), which is when the Plan card's foot keeps its plain idle line. */
+export function countSubs(items: ReadonlyArray<Pick<SubCardItem, "kind">>): SubCounts | null {
+  const c: SubCounts = { working: 0, asking: 0, queued: 0, paused: 0, limited: 0, stopped: 0 };
+  let any = false;
+  for (const i of items) {
+    if (i.kind === "finished") continue;
+    c[i.kind] += 1;
+    any = true;
+  }
+  return any ? c : null;
+}
+
+const COUNT_WORDS: ReadonlyArray<readonly [keyof SubCounts, string]> = [
+  ["working", "working"], ["asking", "asking"], ["queued", "queued"], ["paused", "paused"], ["limited", "at usage limit"], ["stopped", "stopped"],
+];
+
+/** "2 working · 2 asking · 2 queued · 3 stopped": the states with nobody in them are left out. */
+export function subCountsText(c: SubCounts): string {
+  return COUNT_WORDS.filter(([k]) => c[k] > 0).map(([k, word]) => `${c[k]} ${word}`).join(" · ");
+}
+
+/** "18s ago", "4m ago", "2h ago": how long since a sub's last action. */
+export function formatActionAge(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  return `${Math.floor(m / 60)}h ago`;
 }
 
 /** "mm:ss" under an hour, "h:mm:ss" past it. */

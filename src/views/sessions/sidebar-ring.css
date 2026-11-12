@@ -31,6 +31,8 @@
 .avatar-ring circle[data-tone="attention"]    { --ring-color: var(--st-attention);    --ring-glow: var(--st-attention-glow); }
 .avatar-ring circle[data-tone="close-failed"] { --ring-color: var(--st-close-failed); --ring-glow: var(--st-close-failed-glow); }
 .avatar-ring circle[data-tone="closing"]      { --ring-color: var(--chat-state-closing); --ring-glow: var(--chat-state-closing-glow); }
+/* A sub that is not progressing: the track's own quiet grey as a full circle. */
+.avatar-ring circle[data-tone="dim"]          { --ring-color: color-mix(in srgb, var(--color-text) 22%, transparent); }
 
 /* The unfilled part of a plan arc or an unanswered question segment. */
 .avatar-ring circle.is-track {

@@ -12,6 +12,7 @@ import { renderMarkdown } from "../../../shared/chat/chat-transforms";
 import { headlineOf } from "../../../shared/chat/chat-message-kinds";
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
 import { rowMs, type IdleStatus, type PlanJob, type PlanState, type PlanStep } from "../../../shared/chat/dashboard/dashboard-model";
+import { subCountsText, type SubCounts } from "../../../shared/chat/dashboard/subs-model";
 
 /** What the Plan card remembers between derives. In memory only, like the rest
  *  of DashUi: each is one click to redo after a reload. */
@@ -37,6 +38,8 @@ export interface PlanCtx {
   busy: boolean;
   /** When the view saw the last turn end (ms), later than any row stamp. */
   idleAt: number | null;
+  /** Counts of the chat's unfinished subs, or null/absent when it has none: the foot counts them. */
+  subs?: SubCounts | null;
   /** Renders a message card the way the transcript does (cached per row). */
   card: (m: RenderedMessage) => string;
   /** Clock for "Yesterday" in the list; tests pass their own. */
@@ -117,13 +120,23 @@ function jobBody(job: PlanJob, ctx: PlanCtx): string {
   return `${lead}${stepsHtml(job, ctx.ui)}${result}`;
 }
 
-/** The foot's resting line: waiting on Joe's answer, or idle since when. */
-function idleLine(status: IdleStatus, idleAt: number | null): string {
+/** The foot's resting line: waiting on Joe's answer, or idle since when. While the
+ *  chat has a sub that has not finished, the foot counts the subs first ("2 working
+ *  · 2 asking · 2 queued · 3 stopped"), because "Idle since" read as "nothing is
+ *  happening" while subs worked; the chat's own state drops to a muted second line. */
+function idleLine(status: IdleStatus, idleAt: number | null, subs: SubCounts | null = null): string {
+  const at = Math.max(status.since ?? 0, idleAt ?? 0);
+  if (subs) {
+    const own = status.kind === "wait"
+      ? `This chat is waiting on your answer${status.since ? ` · asked ${escapeHtml(clock(status.since))}` : ""}`
+      : at ? `This chat idle since <b>${escapeHtml(clock(at))}</b>` : "This chat idle";
+    return `<div class="cdash-pstatus is-subs"><div class="cdash-pcounts"><i class="ph ph-tree-structure"></i><span>${escapeHtml(subCountsText(subs))}</span></div>`
+      + `<div class="cdash-pstatus-own">${own}</div></div>`;
+  }
   if (status.kind === "wait") {
     const since = status.since ? ` · asked ${escapeHtml(clock(status.since))}` : "";
     return `<div class="cdash-pstatus is-wait"><i class="ph ph-chat-circle"></i><span><b>Waiting on your answer</b>${since}</span></div>`;
   }
-  const at = Math.max(status.since ?? 0, idleAt ?? 0);
   return `<div class="cdash-pstatus"><span class="cdash-pdot"></span><span>${at ? `Idle since <b>${escapeHtml(clock(at))}</b>` : "Idle"}</span></div>`;
 }
 
@@ -131,7 +144,7 @@ function idleLine(status: IdleStatus, idleAt: number | null): string {
  *  moved into the slot while a turn runs; otherwise the resting line shows. On
  *  an earlier plan the whole foot is the way back to the current one. */
 function statusSlot(s: PlanState, ctx: PlanCtx, away: boolean, hidden = false): string {
-  const rest = ctx.busy ? "" : idleLine(s.status, ctx.idleAt);
+  const rest = ctx.busy ? "" : idleLine(s.status, ctx.idleAt, ctx.subs ?? null);
   const awayAttrs = away ? ` role="button" tabindex="0" title="Back to the current plan"` : "";
   const go = away ? `<i class="ph ph-arrow-line-right cdash-away-go"></i>` : "";
   return `<div class="cdash-status${away ? " is-away" : ""}" data-slot="status"${awayAttrs}${hidden ? " hidden" : ""}>${rest}${go}</div>`;

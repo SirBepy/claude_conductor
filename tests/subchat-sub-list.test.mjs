@@ -34,13 +34,14 @@ describe("sub list rows", () => {
     expect(subRingSpec({ id: "x", name: "x", kind: "working", progress: "" }, sub("x"))).toMatchObject({ kind: "solid", tone: "working", glow: true });
   });
 
-  it("draws a queued sub as a plain working-yellow ring with no glow, no arc and no window button", () => {
+  it("draws a queued sub as a dim ring with a clock glyph, no glow, no arc and no window button", () => {
     const held = sub("Footer", { busy: false, progress: { plan: null, state_since: null, waiting_for: "waiting for Header" } });
     const spec = subRingSpec({ id: "Footer", name: "Footer", kind: "queued", progress: "waiting for Header" }, held);
-    expect(spec).toEqual({ kind: "solid", tone: "working" });
+    expect(spec).toEqual({ kind: "solid", tone: "dim" });
     const all = [main, held];
     const html = subListHtml(mainChatInfo(main, all).subs, all);
     expect(html).toContain('data-kind="queued"');
+    expect(html).toContain("ph-clock");
     expect(html).toContain("waiting for Header");
     // A queued sub has no claude process: it sits under Queued, never under Running.
     expect(html).toContain('<h5 class="sub-list-head">Queued</h5>');

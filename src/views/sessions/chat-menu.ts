@@ -40,12 +40,14 @@ function makeItem(desc: ItemDesc): HTMLButtonElement {
   const classes = ["smore-item"];
   if (desc.danger) classes.push("smore-danger");
   if (desc.isOn) classes.push("is-on");
-  if (!desc.run || desc.disabledReason) classes.push("is-disabled");
+  if (desc.children) classes.push("smore-has-sub");
+  else if (!desc.run || desc.disabledReason) classes.push("is-disabled");
   btn.className = classes.join(" ");
   if (desc.disabledReason) btn.title = desc.disabledReason;
   btn.innerHTML =
     `<i class="ph ph-${desc.icon}"></i>${desc.label}` +
-    (desc.checkDot ? `<span class="smore-check-dot"></span>` : "");
+    (desc.checkDot ? `<span class="smore-check-dot"></span>` : "") +
+    (desc.children ? `<i class="ph ph-caret-right smore-sub-caret"></i>` : "");
   return btn;
 }
 
@@ -193,6 +195,10 @@ export function buildItemsBlock(items: ItemDesc[], closeMenu: () => void): HTMLE
     const btn = makeItem(item);
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
+      if (item.children) {
+        openChildren(btn, item.children, closeMenu);
+        return;
+      }
       if (btn.classList.contains("is-disabled")) return;
       closeMenu();
       void item.run?.();
@@ -200,6 +206,26 @@ export function buildItemsBlock(items: ItemDesc[], closeMenu: () => void): HTMLE
     frag.appendChild(btn);
   }
   return frag;
+}
+
+/** The submenu of an item that has `children`, beside its parent. Picking a child closes
+ *  both levels; a disabled child only shows its reason. */
+function openChildren(parent: HTMLElement, children: ItemDesc[], closeMenu: () => void): void {
+  const sub = document.createElement("div");
+  sub.className = "session-more-menu smore-submenu chat-menu-submenu";
+  sub.dataset.subFor = parent.textContent ?? "";
+  for (const child of children) {
+    const btn = makeItem(child);
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (btn.classList.contains("is-disabled")) return;
+      closeSub();
+      closeMenu();
+      void child.run?.();
+    });
+    sub.appendChild(btn);
+  }
+  positionAndShowSubmenu(sub, parent);
 }
 
 /** Must be called once to close the active submenu on outside clicks.

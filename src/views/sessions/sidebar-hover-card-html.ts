@@ -6,6 +6,8 @@ import { truncate } from "./project-dashboard/format";
 import { planProgress } from "./sidebar-ring";
 import type { RingTone } from "./sidebar-ring";
 import type { SubKind } from "./main-chat";
+import { localTime } from "../../shared/formatters";
+import { formatActionAge, formatRunTime, type SubHover } from "../../shared/chat/dashboard/subs-model";
 
 /** What the hover card needs from one row. Plain data so the builder is a
  *  pure string function (tests/sidebar-hover-card.test.mjs). */
@@ -47,6 +49,7 @@ const TONE_VAR: Record<RingTone | "idle", string> = {
   waiting: "var(--st-waiting)", "rate-limited": "var(--chat-state-error)", external: "var(--st-external)",
   attention: "var(--st-attention)", "close-failed": "var(--st-close-failed)",
   closing: "var(--chat-state-closing)", idle: "var(--st-your-turn)",
+  dim: "var(--color-text-muted)",
 };
 
 /** "just now", "4m", "1h 12m", "3d". Minutes are enough for a sidebar glance.
@@ -107,9 +110,63 @@ function questionBlock(q: QuestionProgress): string {
   }).join("");
 }
 
+// A sub that is not progressing never wears the working yellow: dim, like its ring.
 const SUB_DOT_TONE: Record<SubKind, string> = {
-  asking: TONE_VAR.question, working: TONE_VAR.working, queued: TONE_VAR.working, finished: TONE_VAR.done,
+  asking: TONE_VAR.question, working: TONE_VAR.working, finished: TONE_VAR.done,
+  queued: TONE_VAR.dim, paused: TONE_VAR.dim, limited: TONE_VAR.dim, stopped: TONE_VAR.dim,
 };
+
+/** What the Subchats card's avatar hover card needs: the sub's row boiled down to
+ *  plain data, so this stays a pure string function (tests/sub-hover-card.test.mjs). */
+export interface SubHoverInput {
+  name: string;
+  tier: string;
+  kind: SubKind;
+  hover: SubHover;
+  /** ISO start of the sub's row, for the time running. */
+  startedAt: string | null;
+  /** Context window used, 0-100, or null while unknown. */
+  contextPct: number | null;
+  now: number;
+}
+
+/** "Next in line", "Place 3 in line". */
+function placeText(place: number): string {
+  return place <= 1 ? "Next in line" : `Place ${place} in line`;
+}
+
+/** The hover card of one sub's avatar on the Subchats card: the sidebar row
+ *  card's chrome with the state in words, the step it is on, how long it has run,
+ *  its last action, and for a queued sub what it waits for and where it stands in
+ *  line (the number lives here and not on the avatar, Joe's pick). */
+export function buildSubHoverCardHtml(i: SubHoverInput): string {
+  const { hover: h } = i;
+  const started = Date.parse(i.startedAt ?? "");
+  // A queued sub has not run and a finished one has stopped its clock, so only a started, unfinished sub shows time.
+  const running = i.kind !== "queued" && i.kind !== "finished" && !Number.isNaN(started)
+    ? `<span class="hc-timer">running ${escapeHtml(formatRunTime(i.now - started))}</span>` : "";
+  const lines: string[] = [];
+  if (h.queue) {
+    lines.push(row("todo", "ph-clock", h.queue.waitingFor ?? "Waiting to start"));
+    if (h.queue.place !== null) lines.push(row("todo", "ph-list-numbers", placeText(h.queue.place)));
+    if (h.queue.behind) lines.push(row("todo", "ph-arrow-elbow-down-right", `Behind ${h.queue.behind}`));
+  }
+  if (h.resetsAt !== null) lines.push(row("todo", "ph-hourglass-medium", `Resets at ${localTime(new Date(h.resetsAt))}`));
+  if (h.gaming) lines.push(row("todo", "ph-game-controller", "Gaming mode paused it"));
+  const step = h.step
+    ? `<div class="hc-heading">Step ${h.step.n} of ${h.step.total}</div>${h.step.text ? row("now", "ph-caret-right", h.step.text) : ""}`
+    : "";
+  const action = h.action
+    ? row("todo", "ph-lightning", h.action.text, formatActionAge(i.now - h.action.at))
+    : "";
+  const ctx = i.contextPct === null
+    ? ""
+    : `<div class="hc-meta"><span class="hc-ctx" title="${escapeHtml(STATIC_CHIPS.context_pct.tooltip)}"><i class="ph ${STATIC_CHIPS.context_pct.icon}"></i>${Math.round(i.contextPct)}%</span></div>`;
+  return `<div class="hc-title">${escapeHtml(i.name)}</div>
+${i.tier ? `<div class="hc-sub">${escapeHtml(i.tier)}</div>` : `<div class="hc-sub"></div>`}
+<div class="hc-state"><span class="hc-dot" style="background:${SUB_DOT_TONE[i.kind]}"></span>${escapeHtml(h.stateWord)}${running}</div>
+${lines.join("")}${step}${action}${ctx}`;
+}
 
 function subsBlock(subs: NonNullable<HoverCardInput["subs"]>): string {
   return subs.map((s) =>

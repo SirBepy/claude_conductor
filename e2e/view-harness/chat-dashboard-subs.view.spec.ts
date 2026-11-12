@@ -327,8 +327,14 @@ test.describe("chat dashboard / Subchats card", () => {
   test("Open reads the sub in place, and a queued sub cannot be paused, stopped or closed", async ({ page }) => {
     await openMain(page, [MAIN, WORK, QUEUED]);
     await av(page, "sub-queued").click({ button: "right" });
+    // The items a queued sub cannot use left its top level for a nested submenu, still disabled
+    // there (the queued menu itself is covered by sub-states.view.spec.ts).
     for (const label of ["Pause", "Stop this turn", "Change model", "Change effort", "Close"]) {
-      await expect(page.locator(".sx-menu .smore-item", { hasText: label })).toHaveClass(/is-disabled/);
+      await expect(page.locator(".sx-menu .smore-item", { hasText: new RegExp(`^${label}$`) })).toHaveCount(0);
+    }
+    await page.locator(".sx-menu .smore-item", { hasText: "Once it has started" }).click();
+    for (const label of ["Pause", "Stop this turn", "Change model", "Change effort", "Close"]) {
+      await expect(page.locator(".chat-menu-submenu .smore-item", { hasText: new RegExp(`^${label}$`) })).toHaveClass(/is-disabled/);
     }
     await page.keyboard.press("Escape");
     await av(page, "sub-work").click({ button: "right" });

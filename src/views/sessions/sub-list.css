@@ -168,6 +168,34 @@
   stroke-width: 4;
 }
 
+/* The corner glyph of a sub that is not progressing (sub-list.ts subGlyphHtml),
+   on the top-left corner, opposite the model battery's bottom-right. Shared by
+   this list and the dashboard's Subchats card. It sits on a surface chip so the
+   ring behind it never shows through, and stays muted: quiet over loud. */
+.sub-glyph {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+}
+.sub-dot .sub-glyph {
+  top: -5px;
+  left: -5px;
+  width: 12px;
+  height: 12px;
+  font-size: 9px;
+}
+
 /* A sub read in place: the arrow back to its main chat leads the header. */
 .sub-back-btn {
   flex-shrink: 0;

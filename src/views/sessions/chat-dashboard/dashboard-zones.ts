@@ -19,6 +19,7 @@ import type { LinkItem } from "../../../shared/chat/dashboard/links-model";
 import type { DraftItem } from "../../../shared/chat/dashboard/drafts-model";
 import { renderDraftCardHtml } from "../../../shared/chat/chat-draft-card";
 import type { PreviewMeta } from "../../../types/ipc.generated";
+import type { SubCounts } from "../../../shared/chat/dashboard/subs-model";
 
 /** The quick-view buttons in the Links and files card. */
 export const QUICK_VIEWS = [
@@ -55,6 +56,8 @@ export interface ZoneCtx {
   busy: boolean;
   /** When the view saw the last turn end (ms): the idle footer's "since". */
   idleAt?: number | null;
+  /** The chat's unfinished subs by state, or null when it has none (the Plan card's foot counts them). */
+  subs?: SubCounts | null;
   /** Whether each quick view has anything to read; a view not listed has not
    *  been looked up yet and draws as if it has. */
   quick?: Partial<Record<QuickViewId, boolean>>;
@@ -142,7 +145,7 @@ function renderWaitingElsewhere(s: ZoneState<"waitingElsewhere">): string {
 }
 
 function renderPlanZone(s: ZoneState<"plan">, ctx: ZoneCtx): string {
-  return renderPlan(s, { ui: ctx.ui, busy: ctx.busy, idleAt: ctx.idleAt ?? null, card: cardHtml });
+  return renderPlan(s, { ui: ctx.ui, busy: ctx.busy, idleAt: ctx.idleAt ?? null, subs: ctx.subs ?? null, card: cardHtml });
 }
 
 const LINK_ICON: Record<LinkItem["kind"], string> = {

@@ -149,7 +149,7 @@ function invokeFor(sessions: unknown[]) {
 
 for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
   test.describe(`view-harness / queued sub (${label})`, () => {
-    test("the sub list shows a sub held for the writer as waiting, in yellow, in its own Queued group", async ({ page }) => {
+    test("the sub list shows a sub held for the writer as waiting, in its own Queued group", async ({ page }) => {
       await page.setViewportSize(size);
       await mountView(page, { view: "sessions", invoke: invokeFor([MAIN, HEADER, FOOTER]) });
       await page.locator("#sessions-list li").first().waitFor();
@@ -171,7 +171,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
 }
 
 test.describe("view-harness / queued sub (desktop hover)", () => {
-  test("the main chat's hover card lists the queued sub with the waiting words and the working yellow", async ({ page }) => {
+  test("the main chat's hover card lists the queued sub with the waiting words and a dim dot, not the working yellow", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await mountView(page, { view: "sessions", invoke: invokeFor([MAIN, HEADER, FOOTER]) });
     await page.locator("#sessions-list li").first().waitFor();
@@ -186,7 +186,8 @@ test.describe("view-harness / queued sub (desktop hover)", () => {
     await expect(rows.nth(1)).toContainText("Footer");
     await expect(rows.nth(1)).toContainText("waiting for the writer before it");
     const colours = await rows.evaluateAll((els) => els.map((el) => getComputedStyle(el.querySelector(".hc-dot")!).backgroundColor));
-    expect(colours[1]).toBe(colours[0]);
+    // The working sub's dot is yellow; a sub that has not started is dim.
+    expect(colours[1]).not.toBe(colours[0]);
     // The sidebar shows no red dot for a sub that is only waiting.
     await expect(row.locator(".ask-dot")).toHaveCount(0);
   });

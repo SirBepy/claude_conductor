@@ -1,3 +1,4 @@
+// Reviewed 2026-11-12 (honest sub states): subs gained queued/paused/usage-limit/stopped kinds with a dim ring and glyph, an avatar hover card, the Plan foot's sub counts and a glowing main-chat ring; nothing this spec asserts changed, and it passes.
 // asserts: src/views/sessions/sub-list.ts, src/views/sessions/main-chat.ts, src/shared/chat/dashboard/subs-model.ts
 import { test, expect, type Page } from "@playwright/test";
 import { assistantMsg, capture, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";

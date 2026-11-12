@@ -29,6 +29,7 @@ import { QUESTION_ASK_EVENT, type QuestionAsk } from "../question-ask";
 import { HOST_ID } from "../permission-modal/host";
 import { SubsCard } from "./subs-card";
 import { collectSubItems } from "./subs-source";
+import { countSubs, type SubCounts } from "../../../shared/chat/dashboard/subs-model";
 import { fetchSubCards } from "../../../shared/chat/subchat-cards";
 import type { SubCardItem } from "../../../shared/chat/dashboard/subs-model";
 import { CHAT_VIEW_CHANGED, dashboardEnabled, readSections } from "./chat-view-pref";
@@ -66,6 +67,8 @@ export class ChatDashboard {
   /** When this view saw the last turn end: live rows can carry no stamp, so
    *  the idle footer's "since" comes from here when it is later. */
   private idleAt: number | null = null;
+  /** The Plan card's foot counts these; null when the chat has no unfinished sub. */
+  private subCounts: SubCounts | null = null;
   private wasBusy = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private barObserver: MutationObserver | null = null;
@@ -299,6 +302,7 @@ export class ChatDashboard {
     this.wasBusy = busy;
     this.ensureDrafts();
     const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
+    this.subCounts = countSubs(subItems);
     this.refreshFinishTimes(subItems);
     const derived = deriveDashboard({
       messages: this.renderer.messages,
@@ -591,7 +595,7 @@ export class ChatDashboard {
   }
 
   private renderZones(state: DashboardState, busy: boolean): void {
-    const ctx = { ui: this.ui, busy, quick: this.quick, idleAt: this.idleAt, previewOwner: this.previewOwner };
+    const ctx = { ui: this.ui, busy, quick: this.quick, idleAt: this.idleAt, subs: this.subCounts, previewOwner: this.previewOwner };
     const live = new Set<ZoneId>();
     for (const [col, zones] of [[this.leftEl, state.left], [this.rightEl, state.right]] as const) {
       zones.forEach((z, i) => {
