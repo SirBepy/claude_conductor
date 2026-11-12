@@ -19,11 +19,17 @@ const TIP ="Hand the jobs you name to hidden child chats that report back here. 
 /** What the chat was on before the switch moved it to the main-chat model, so
  *  switching back puts it right unless the user picked something else meanwhile. */
 interface Applied {
+  /** The draft this was captured for; a remount of the same draft keeps it. */
+  config: SessionConfig;
   before: { model: string; effort: string };
   applied: { model: string; effort: string };
 }
 
 let _applied: Applied | null = null;
+
+/** The pending reveal of the current mount; a later mount or unmount cancels it so it
+ *  cannot show another draft's row early. */
+let _revealTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Every live copy of the switch in the pane: the row above the message box, the rail's
  *  card, or both. A card inside the dashboard's fading ghost (draft-dashboard.ts) is
@@ -47,7 +53,7 @@ function setOn(config: SessionConfig, on: boolean): void {
   if (on) {
     const before = { model: config.model, effort: config.effort };
     const applied = mainChatLaunch(before.model, before.effort);
-    _applied = { before, applied };
+    _applied = { config, before, applied };
     writeConfig(config, { subchatsOn: true, ...applied });
     state.statusbar?.syncModelEffort(applied.model, applied.effort);
     return;
@@ -94,17 +100,21 @@ function wire(host: HTMLElement, pane: ParentNode, config: SessionConfig): void 
  *  between this row and the box. */
 export function mountDraftSubchats(pane: HTMLElement, config: SessionConfig): void {
   unmountDraftSubchats(pane);
-  _applied = null;
+  // A remount of the same draft must not re-capture: its config already holds the
+  // switched values, so "before" would become the main-chat model and the chip the
+  // user changed would be overwritten.
+  const sameDraft = _applied?.config === config;
+  if (!sameDraft) _applied = null;
   // A draft opens with the mode already on (resolveNewChatConfig), but its chips
   // still show the project's model: move them to the main-chat model now, the way
   // the switch would, so what the chips show is what the first spawn uses and
   // switching off still puts the project's model back. A reopened draft whose
   // user switched it off carries `false` and is left alone.
-  if (config.subchatsOn === true && !subchatsBlockedReason(config.accountId)) setOn(config, true);
+  if (config.subchatsOn === true && !subchatsBlockedReason(config.accountId) && !sameDraft) setOn(config, true);
   insertRow(pane, config, true);
   // The dashboard's rail loads after its snapshot, so the row stays unseen until we know
   // the rail is not coming; this covers a rail that fails to fill or never mounts.
-  setTimeout(() => revealDraftSubchats(pane), RAIL_WAIT_MS);
+  _revealTimer = setTimeout(() => revealDraftSubchats(pane), RAIL_WAIT_MS);
 }
 
 /** Shows the row once the dashboard has no rail card to replace it. A no-op when the
@@ -166,5 +176,7 @@ export function lockDraftSubchats(pane: ParentNode, config: SessionConfig, locke
 }
 
 export function unmountDraftSubchats(pane: ParentNode): void {
+  if (_revealTimer) clearTimeout(_revealTimer);
+  _revealTimer = null;
   for (const host of hostsOf(pane)) host.remove();
 }

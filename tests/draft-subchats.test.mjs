@@ -168,6 +168,37 @@ describe("the draft's Use subchats switch", () => {
     expect(config).toMatchObject({ subchatsOn: false, model: "sonnet", effort: "low" });
   });
 
+  it("a remount of the same draft keeps the model it would restore and the chip the user changed", () => {
+    config.subchatsOn = true;
+    mountDraftSubchats(pane, config);
+    expect(config).toMatchObject({ model: "opus", effort: "high" });
+    config.model = "fable";
+    mountDraftSubchats(pane, config);
+    expect(config.model).toBe("fable");
+    config.model = "opus";
+    mountDraftSubchats(pane, config);
+    flip(false);
+    expect(config).toMatchObject({ subchatsOn: false, model: "sonnet", effort: "low" });
+  });
+
+  it("the reveal timer of an earlier mount cannot show a later mount's row early", () => {
+    vi.useFakeTimers();
+    try {
+      mountDraftSubchats(pane, config);
+      vi.advanceTimersByTime(3000);
+      mountDraftSubchats(pane, config);
+      vi.advanceTimersByTime(1500);
+      expect(pane.querySelector(".draft-subchats").classList.contains("is-pending")).toBe(true);
+      vi.advanceTimersByTime(3000);
+      expect(pane.querySelector(".draft-subchats").classList.contains("is-pending")).toBe(false);
+      mountDraftSubchats(pane, config);
+      unmountDraftSubchats(pane);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("is removed once the chat has started", () => {
     unmountDraftSubchats(pane);
     expect(pane.querySelector(".draft-subchats")).toBeNull();
