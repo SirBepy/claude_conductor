@@ -424,10 +424,11 @@ pub(crate) fn apply_answer(state: &Arc<DaemonState>, sub_id: &str, answer: CardA
     });
 }
 
-/// The context card's answer. "Stop it" ends the sub; anything else leaves it
-/// running and stores that the warning was given, so the same sub is never warned
-/// twice in a round, restarts included. A card still open at a restart is not
-/// stored: it is gone, so the next tick raises it again.
+/// The context card's answer. "Stop it" ends the sub. Keep going and a Skip leave
+/// it running and store that the warning was given, so the same sub is never
+/// warned twice in a round, restarts included. A card that code took down
+/// (`Withdrawn`) or that a restart dropped was never seen: nothing is stored and
+/// the next tick raises it again.
 pub(crate) fn apply_context_answer(state: &Arc<DaemonState>, sub_id: &str, answer: CardAnswer) {
     if matches!(&answer, CardAnswer::Picked(p) if p == STOP_IT) {
         super::end_sub(state, sub_id);
@@ -840,7 +841,8 @@ mod tests {
         apply_context_answer(&st, &sub, CardAnswer::Withdrawn);
         assert!(!saved_path(&root, &sub).exists(), "nothing is stored for a card nobody saw");
         assert!(st.registry.get(&sub).unwrap().ended_at.is_none());
-        simulate_restart(&sub);
+        // No restart in between: the in-memory flag must be re-armed too, or a sub
+        // whose card was withdrawn stays unwarned until the daemon next restarts.
         assert_eq!(tick_ctx(&st, 5, 955_000, BIG).await.len(), 1, "the warning is still owed");
     }
 
