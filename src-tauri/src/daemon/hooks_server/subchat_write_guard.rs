@@ -56,8 +56,9 @@ pub(super) fn push_refusal(state: &crate::daemon::state::DaemonState, session_id
 }
 
 /// Wrappers that run the next word as a command (`sudo git push`, `time git push`).
-const WRAPPERS: [&str; 17] = [
-    "sudo", "env", "command", "exec", "time", "nohup", "nice", "timeout", "xargs", "builtin", "then", "do", "else", "elif", "if", "while", "!",
+const WRAPPERS: [&str; 18] = [
+    "sudo", "env", "command", "exec", "time", "nohup", "nice", "timeout", "xargs", "builtin", "then", "do", "else", "elif", "if", "while", "until",
+    "!",
 ];
 /// A wrapper's flags that take their value as the NEXT word (`sudo -u root git push`).
 fn wrapper_value_flags(name: &str) -> &'static [&'static str] {
@@ -168,17 +169,29 @@ fn strip_heredocs(command: &str, ps: bool) -> String {
     let mut out: Vec<&str> = Vec::with_capacity(lines.len());
     let mut i = 0;
     while i < lines.len() {
-        // A here-string's opener (`@'`) is dropped with its body, or the tokenizer
-        // would read the quote as unterminated and swallow the lines after it.
-        let t = lines[i].trim_end();
-        out.push(if ps { t.strip_suffix("@'").or_else(|| t.strip_suffix("@\"")).unwrap_or(lines[i]) } else { lines[i] });
+        let line = lines[i];
         i += 1;
-        for term in heredoc_terminators(lines[i - 1], ps) {
-            match lines[i..].iter().position(|l| term.closes(l)) {
-                Some(p) => i += p + 1,
-                None => break,
+        let mut kept = line;
+        // A shell reads its heredoc as commands (`bash <<EOF`), so that body stays.
+        let feeds_a_shell = line.split("<<").next().unwrap_or("").split_whitespace().any(|w| SHELLS.contains(&program_name(w).as_str()));
+        if !feeds_a_shell {
+            for term in heredoc_terminators(line, ps) {
+                match lines[i..].iter().position(|l| term.closes(l)) {
+                    Some(p) => {
+                        i += p + 1;
+                        // A here-string's opener (`@'`) goes with its body, or the
+                        // tokenizer reads its quote as unterminated and swallows the
+                        // lines after it. Only when the body really ends.
+                        let t = line.trim_end();
+                        if ps {
+                            kept = t.strip_suffix("@'").or_else(|| t.strip_suffix("@\"")).unwrap_or(line);
+                        }
+                    }
+                    None => break,
+                }
             }
         }
+        out.push(kept);
     }
     out.join("\n")
 }
@@ -243,7 +256,7 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>) {
                         i += 2;
                         continue;
                     }
-                    if chars[i] == '\\' && i + 1 < chars.len() && matches!(chars[i + 1], '"' | '\\' | '$' | '`') {
+                    if !ps && chars[i] == '\\' && i + 1 < chars.len() && matches!(chars[i + 1], '"' | '\\' | '$' | '`') {
                         i += 1;
                     } else if chars[i] == '`' || (chars[i] == '$' && chars.get(i + 1) == Some(&'(')) {
                         let (inner, next) = substitution(&chars, i);
@@ -255,10 +268,25 @@ fn split_segments(command: &str, ps: bool) -> (Vec<Vec<Word>>, Vec<String>) {
                     i += 1;
                 }
             }
+            // A comment runs to the end of the line; its apostrophes open no quote.
+            '#' if !has_word => {
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+                continue;
+            }
             // Line continuation (`\` in sh, a backtick in PowerShell): the lines are one command.
             '\\' | '`' if (c == '`') == ps && matches!(chars.get(i + 1), Some('\n' | '\r')) => {
                 end_word!();
                 i += if chars.get(i + 1) == Some(&'\r') && chars.get(i + 2) == Some(&'\n') { 2 } else { 1 };
+            }
+            // sh: a backslash outside quotes makes the next char literal (`it\'s`).
+            '\\' if !ps => {
+                has_word = true;
+                if let Some(&next) = chars.get(i + 1) {
+                    word.push(next);
+                    i += 1;
+                }
             }
             '`' if ps => {
                 // PowerShell's escape character, not a substitution.
@@ -330,6 +358,11 @@ fn segment_publishes(words: &[Word], depth: u8, ps: bool) -> bool {
         while i < words.len() && is_assignment(&words[i]) {
             i += 1;
         }
+        // PowerShell `$out = git ...` / `$null = git ...`: the command follows the assignment.
+        if ps && words.get(i).is_some_and(|w| w.text.starts_with('$')) && words.get(i + 1).is_some_and(|w| matches!(w.text.as_str(), "=" | "+=")) {
+            i += 2;
+            continue;
+        }
         let Some(first) = words.get(i) else { return false };
         let name = program_name(&first.text);
         if WRAPPERS.contains(&name.as_str()) {
@@ -353,10 +386,7 @@ fn segment_publishes(words: &[Word], depth: u8, ps: bool) -> bool {
         let rest = &words[i + 1..];
         return match name.as_str() {
             "git" => git_subcommand(rest) == Some("push"),
-            "gh" => {
-                let mut plain = rest.iter().filter(|w| !w.text.starts_with('-')).map(|w| w.text.as_str());
-                plain.next() == Some("pr") && plain.next() == Some("merge")
-            }
+            "gh" => gh_pr_merge(rest),
             // The payload is every word after the flag: `cmd /c <command>` has no quotes.
             n if SHELLS.contains(&n) => rest
                 .iter()
@@ -366,6 +396,23 @@ fn segment_publishes(words: &[Word], depth: u8, ps: bool) -> bool {
             _ => false,
         };
     }
+}
+
+/// `gh pr merge`, with `-R owner/repo` / `--repo owner/repo` allowed before the leaf.
+fn gh_pr_merge(rest: &[Word]) -> bool {
+    let mut plain = vec![];
+    let mut i = 0;
+    while let Some(w) = rest.get(i) {
+        if matches!(w.text.as_str(), "-R" | "--repo") {
+            i += 2;
+            continue;
+        }
+        if !w.text.starts_with('-') {
+            plain.push(w.text.as_str());
+        }
+        i += 1;
+    }
+    plain.starts_with(&["pr", "merge"])
 }
 
 fn join_words(words: &[Word]) -> String {
@@ -500,6 +547,12 @@ mod tests {
             "git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)\" && git push",
             "cat <<EOF >/dev/null\nunrelated\nEOF\ngit push",
             "cat <<'EOF'\ngit push with no terminator\n",
+            "# don't push yet\ngit commit -m x\ngit push",
+            "bash <<'EOF'\ngit push\nEOF",
+            "until git push; do sleep 2; done",
+            "gh pr -R owner/repo merge 3",
+            "gh pr --repo owner/repo merge 3 --squash",
+            "echo it\\'s; git push",
         ] {
             assert!(runs_publish_command(cmd, false), "must match: {cmd}");
         }
@@ -522,6 +575,9 @@ mod tests {
             "git commit -m \"$(cat <<'EOF'\nFIX: sub rule\n\nsudo git push is refused\nEOF\n)\"",
             "cat <<-EOF\n\tgit push\n\tEOF",
             "echo $((1 << 3)) && git status",
+            "# commit locally only; git push is for the gate\ngit commit -m x",
+            "echo a#b && git status",
+            "gh pr list --search merge",
         ] {
             assert!(!runs_publish_command(cmd, false), "must not match: {cmd}");
         }
@@ -535,6 +591,10 @@ mod tests {
             "Write-Host `\"hi`\"; git push",
             "git `\npush",
             "$m = @'\ntext\n'@\ngit push",
+            "$out = git push origin master 2>&1",
+            "$null = git push",
+            "cd \"C:\\repo\\\"; git push",
+            "Write-Host 'me@'; git push",
         ] {
             assert!(runs_publish_command(cmd, true), "must match: {cmd}");
         }
