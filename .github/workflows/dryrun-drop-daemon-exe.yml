@@ -1,0 +1,50 @@
+# Throwaway: proves the release build bundles no cc-conductor-daemon.exe. Builds
+# Windows through the real reusable workflow with fake inputs and publishes
+# nothing (desktop-build.yml only uploads a workflow artifact; tag and release
+# jobs live in tauri-release.yml).
+name: Dry run drop daemon exe
+
+on:
+  push:
+    branches: [dryrun/drop-daemon-exe]
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    uses: ./.github/workflows/desktop-build.yml
+    # TAURI_SIGNING_PRIVATE_KEY(_PASSWORD): createUpdaterArtifacts signs the installer.
+    secrets: inherit
+    with:
+      os: windows-latest
+      target: x86_64-pc-windows-msvc
+      updater_key: windows-x86_64
+      os_label: windows
+      arch_label: x64
+      tag: dryrun
+      version: 0.0.0-dryrun
+      product_slug: dryrun
+
+  inspect:
+    needs: build-windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-windows-x86_64
+          path: staged
+      - name: List installer contents
+        shell: bash
+        run: |
+          set -e
+          EXE=$(ls staged/*.exe | head -n 1)
+          7z l "$EXE" > listing.txt
+          cat listing.txt
+          if grep -qi 'cc-conductor-daemon.exe' listing.txt; then
+            echo "FAIL: cc-conductor-daemon.exe is in the installer"; exit 1
+          fi
+          if ! grep -qi 'claude-conductor.exe' listing.txt; then
+            echo "FAIL: claude-conductor.exe is missing from the installer"; exit 1
+          fi
+          echo "OK: daemon exe absent, app exe present"

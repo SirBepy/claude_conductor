@@ -15,9 +15,17 @@ name = "claude_conductor_lib"
 # build, minutes of CI per platform.
 crate-type = ["rlib"]
 
+[features]
+# On by default so dev, tests and wdio build the daemon bin. The release build
+# passes --no-default-features: cargo-tauri bundles every [[bin]] it can build, and
+# production re-execs claude-conductor --daemon, never this exe.
+default = ["daemon-bin"]
+daemon-bin = []
+
 [[bin]]
 name = "cc-conductor-daemon"
 path = "src/bin/cc_conductor_daemon.rs"
+required-features = ["daemon-bin"]
 
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
