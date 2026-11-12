@@ -147,6 +147,93 @@ const REMOTE_INFO_TIMEOUT: Duration = Duration::from_millis(250);
 /// every socket behind it.
 const NETWORK_CHANGE_TIMEOUT: Duration = Duration::from_millis(500);
 
+/// Quiet time (no datagram received on a connection in use) after which iroh is
+/// told the network may have changed. If the phone really moved networks this is
+/// what makes iroh re-check its relay link; otherwise it is a harmless no-op.
+const QUIET_NUDGE: Duration = Duration::from_secs(8);
+
+/// Quiet time after which a connection in use is declared dead and dropped, so
+/// the page's sockets close at once and redial instead of hanging until QUIC's
+/// 30s idle timeout (which stays: iroh keeps a connection across short relay
+/// outages on purpose). Both ends send a keep-alive PING after 5s of silence and
+/// a PING is acknowledged, so a healthy connection receives a datagram every few
+/// seconds. 12s is two missed keep-alives plus margin, and above the 7s relay
+/// stalls measured on this setup.
+const QUIET_DEAD: Duration = Duration::from_secs(12);
+
+/// `QUIET_NUDGE` and `QUIET_DEAD` in watchdog ticks. Quiet time is counted in
+/// ticks that ran, never in clock time: a frozen process runs no ticks, so
+/// sleeping is never quiet (the resume check owns that case).
+const QUIET_NUDGE_TICKS: u32 = (QUIET_NUDGE.as_millis() / WATCHDOG_TICK.as_millis()) as u32;
+const QUIET_DEAD_TICKS: u32 = (QUIET_DEAD.as_millis() / WATCHDOG_TICK.as_millis()) as u32;
+
+/// What one tick of the received-traffic watch asks for.
+#[derive(Debug, PartialEq, Eq)]
+enum QuietVerdict {
+    Nothing,
+    Nudge,
+    Drop,
+}
+
+/// One tick of the received-traffic watch: `(verdict, quiet ticks so far)`.
+/// Only a connection in use (`streams_open > 0`) is judged: with no stream
+/// open nobody is waiting, so a quiet connection is left to QUIC. The nudge
+/// fires on exactly one tick per quiet spell, the one that reaches
+/// `QUIET_NUDGE_TICKS`.
+fn quiet_step(prev_rx: u64, rx: u64, quiet: u32, streams_open: usize) -> (QuietVerdict, u32) {
+    if streams_open == 0 || rx != prev_rx {
+        return (QuietVerdict::Nothing, 0);
+    }
+    let quiet = quiet + 1;
+    let verdict = if quiet >= QUIET_DEAD_TICKS {
+        QuietVerdict::Drop
+    } else if quiet == QUIET_NUDGE_TICKS {
+        QuietVerdict::Nudge
+    } else {
+        QuietVerdict::Nothing
+    };
+    (verdict, quiet)
+}
+
+/// The watch's memory between ticks. It belongs to one connection: a different
+/// `stable_id` starts it over.
+#[derive(Default)]
+struct QuietWatch {
+    conn: Option<usize>,
+    rx: u64,
+    quiet: u32,
+}
+
+impl QuietWatch {
+    fn step(&mut self, conn: usize, rx: u64, streams_open: usize) -> QuietVerdict {
+        if self.conn != Some(conn) {
+            *self = Self { conn: Some(conn), rx, quiet: 0 };
+            return QuietVerdict::Nothing;
+        }
+        let (verdict, quiet) = quiet_step(self.rx, rx, self.quiet, streams_open);
+        self.rx = rx;
+        self.quiet = quiet;
+        verdict
+    }
+}
+
+/// Counts one open forwarded stream for as long as it lives, so every exit of
+/// `forward` (error, cancel, normal end) releases it.
+struct StreamGauge<'a>(&'a std::sync::atomic::AtomicUsize);
+
+impl<'a> StreamGauge<'a> {
+    fn new(open: &'a std::sync::atomic::AtomicUsize) -> Self {
+        open.fetch_add(1, Ordering::SeqCst);
+        Self(open)
+    }
+}
+
+impl Drop for StreamGauge<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// A running tunnel plus what is needed to stop it.
 struct RunningTunnel {
     port: u16,
@@ -298,6 +385,10 @@ struct Tunnel {
     relay_hint: std::sync::Mutex<Option<RelayUrl>>,
     /// The process-wide journal (`journal::global`); a field so a test can read a private one.
     journal: Arc<Journal>,
+    /// Forwarded streams open right now; the received-traffic watch only judges a connection somebody is waiting on.
+    open_streams: std::sync::atomic::AtomicUsize,
+    /// Written by the watchdog tick alone; a std mutex held for one step, never across an await.
+    quiet: std::sync::Mutex<QuietWatch>,
 }
 
 type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
@@ -412,6 +503,8 @@ impl Tunnel {
             clock: Arc::new(SystemTime::now),
             relay_hint: std::sync::Mutex::new(None),
             journal: journal::global(),
+            open_streams: std::sync::atomic::AtomicUsize::new(0),
+            quiet: std::sync::Mutex::new(QuietWatch::default()),
         }
     }
 
@@ -692,13 +785,53 @@ impl Tunnel {
     /// gap and hand out the dead connection, or the late drop would close a
     /// connection dialed after the gap.
     async fn watchdog_tick(&self) {
+        self.watchdog_tick_with(&|conn| conn.stats().udp_rx.datagrams).await;
+    }
+
+    /// `read_rx` is the received-datagram counter of a connection (all paths,
+    /// relay included: `ConnectionStats` sums every path), a parameter so a test
+    /// can control it.
+    async fn watchdog_tick_with(&self, read_rx: &(dyn Fn(&Connection) -> u64 + Sync)) {
         let mut guard = self.conn.lock().await;
         if let Some(secs) = self.take_resume() {
             self.note("resume", &format!("secs={secs} by=watchdog"));
             self.drop_locked(&mut guard.conn, &format!("resumed after {secs}s asleep"));
             guard.needs_fresh_endpoint = true;
             drop(guard);
+            *self.quiet.lock().unwrap_or_else(|p| p.into_inner()) = QuietWatch::default();
             self.network_change().await;
+            return;
+        }
+        // Only a cached, open connection is judged. The lock is released before
+        // the counter is read, so nothing here waits on iroh while holding it.
+        let conn = guard.conn.as_ref().filter(|c| c.close_reason().is_none()).cloned();
+        drop(guard);
+        let Some(conn) = conn else {
+            *self.quiet.lock().unwrap_or_else(|p| p.into_inner()) = QuietWatch::default();
+            return;
+        };
+        let rx = read_rx(&conn);
+        let streams = self.open_streams.load(Ordering::SeqCst);
+        let verdict = self.quiet.lock().unwrap_or_else(|p| p.into_inner()).step(conn.stable_id(), rx, streams);
+        match verdict {
+            QuietVerdict::Nothing => {}
+            QuietVerdict::Nudge => {
+                self.note("quiet", &format!("secs={}", QUIET_NUDGE.as_secs()));
+                self.network_change().await;
+            }
+            QuietVerdict::Drop => {
+                // Re-checked under the lock: a request may have redialed since the
+                // counter was read, and that fresh connection must stay.
+                let mut guard = self.conn.lock().await;
+                if guard.conn.as_ref().map(Connection::stable_id) == Some(conn.stable_id()) {
+                    let secs = QUIET_DEAD.as_secs();
+                    self.note("dead", &format!("secs={secs}"));
+                    self.drop_locked(&mut guard.conn, &format!("no packets for {secs}s"));
+                    guard.needs_fresh_endpoint = true;
+                }
+                drop(guard);
+                *self.quiet.lock().unwrap_or_else(|p| p.into_inner()) = QuietWatch::default();
+            }
         }
     }
 
@@ -851,6 +984,7 @@ async fn forward(tcp: TcpStream, tunnel: &Tunnel) -> Result<(), BoxError> {
             }
         }
     };
+    let _open = StreamGauge::new(&tunnel.open_streams);
     if !early.is_empty() {
         send.write_all(&early).await?;
     }
@@ -1681,5 +1815,219 @@ mod tests {
         ping(port).await;
         assert_eq!(accepted.load(Ordering::SeqCst), 2, "the fresh connection must be reused");
         assert!(second.close_reason().is_none());
+    }
+
+    /// Ticks needed to reach the dead mark from the tick that records the baseline.
+    const TICKS_TO_DEAD: u32 = QUIET_DEAD_TICKS + 1;
+
+    #[test]
+    fn the_quiet_marks_are_8_and_12_seconds_of_watchdog_ticks() {
+        assert_eq!(QUIET_NUDGE_TICKS, 4);
+        assert_eq!(QUIET_DEAD_TICKS, 6);
+    }
+
+    #[test]
+    fn a_moving_counter_never_triggers_and_resets_the_quiet_count() {
+        let mut quiet = 0;
+        let mut rx = 10;
+        for _ in 0..50 {
+            let (verdict, q) = quiet_step(rx, rx + 1, quiet, 3);
+            assert_eq!(verdict, QuietVerdict::Nothing);
+            assert_eq!(q, 0);
+            rx += 1;
+            quiet = q;
+        }
+        // Movement after a long quiet spell starts the count over.
+        let (verdict, q) = quiet_step(5, 6, QUIET_DEAD_TICKS - 1, 1);
+        assert_eq!((verdict, q), (QuietVerdict::Nothing, 0));
+    }
+
+    #[test]
+    fn a_still_counter_with_a_stream_open_nudges_at_8s_once_and_drops_at_12s() {
+        let mut quiet = 0;
+        let mut seen = Vec::new();
+        for tick in 1..=QUIET_DEAD_TICKS {
+            let (verdict, q) = quiet_step(7, 7, quiet, 1);
+            seen.push((tick, verdict));
+            quiet = q;
+        }
+        let nudges: Vec<u32> = seen.iter().filter(|(_, v)| *v == QuietVerdict::Nudge).map(|(t, _)| *t).collect();
+        assert_eq!(nudges, vec![QUIET_NUDGE_TICKS], "one nudge, on the tick that reaches 8s");
+        let drops: Vec<u32> = seen.iter().filter(|(_, v)| *v == QuietVerdict::Drop).map(|(t, _)| *t).collect();
+        assert_eq!(drops, vec![QUIET_DEAD_TICKS], "one drop, on the tick that reaches 12s");
+    }
+
+    #[test]
+    fn a_still_counter_with_no_stream_open_never_triggers_and_does_not_accumulate() {
+        let mut quiet = 0;
+        for _ in 0..50 {
+            let (verdict, q) = quiet_step(7, 7, quiet, 0);
+            assert_eq!(verdict, QuietVerdict::Nothing);
+            assert_eq!(q, 0);
+            quiet = q;
+        }
+        // A stream opening after a long idle spell starts its count at one tick.
+        assert_eq!(quiet_step(7, 7, quiet, 1), (QuietVerdict::Nothing, 1));
+    }
+
+    #[test]
+    fn a_different_connection_starts_the_watch_over() {
+        let mut watch = QuietWatch::default();
+        assert_eq!(watch.step(1, 9, 1), QuietVerdict::Nothing, "the first sample is only a baseline");
+        for _ in 0..QUIET_DEAD_TICKS - 1 {
+            watch.step(1, 9, 1);
+        }
+        assert_eq!(watch.quiet, QUIET_DEAD_TICKS - 1);
+        // One tick from a drop on connection 1; connection 2 must not inherit it.
+        assert_eq!(watch.step(2, 9, 1), QuietVerdict::Nothing);
+        assert_eq!(watch.quiet, 0);
+        assert_eq!(watch.step(2, 9, 1), QuietVerdict::Nothing);
+        assert_eq!(watch.quiet, 1);
+    }
+
+    #[test]
+    fn the_stream_gauge_counts_while_it_lives() {
+        let open = std::sync::atomic::AtomicUsize::new(0);
+        let a = StreamGauge::new(&open);
+        let b = StreamGauge::new(&open);
+        assert_eq!(open.load(Ordering::SeqCst), 2);
+        drop(a);
+        assert_eq!(open.load(Ordering::SeqCst), 1);
+        drop(b);
+        assert_eq!(open.load(Ordering::SeqCst), 0);
+    }
+
+    /// A tunnel whose PC sits behind a UDP gate, with a stream held open through it.
+    /// Returns the tunnel, the gate, the held loopback socket and the journal.
+    async fn tunnel_with_open_stream() -> (Arc<Tunnel>, Arc<std::sync::atomic::AtomicBool>, TcpStream, Arc<Journal>) {
+        let (server, _) = pong_server().await;
+        let port = local_v4_port(&server);
+        let open = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let front = udp_gate(std::net::SocketAddr::from(([127, 0, 0, 1], port)), open.clone()).await;
+        let remote = EndpointAddr::new(server.id).with_ip_addr(front);
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let (tunnel, tport, journal) = private_tunnel(client, remote, minimal_rebuild(), |_| {}).await;
+        let mut sock = TcpStream::connect(("127.0.0.1", tport)).await.expect("connect");
+        sock.write_all(b"PING").await.expect("send");
+        let mut reply = vec![0u8; 4];
+        tokio::time::timeout(Duration::from_secs(10), sock.read_exact(&mut reply)).await.expect("timed out").expect("read");
+        assert_eq!(&reply, b"PONG");
+        // The socket stays open, so its stream does too. The pause lets the
+        // PC's last acknowledgements land before a test closes the gate.
+        assert_eq!(tunnel.open_streams.load(Ordering::SeqCst), 1);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        (tunnel, open, sock, journal)
+    }
+
+    /// The PC goes silent while a request is in flight: the watch nudges at 8s
+    /// and drops the connection at 12s of ticks, instead of leaving the page's
+    /// sockets hanging until QUIC's 30s idle timeout.
+    #[tokio::test]
+    async fn a_connection_in_use_that_receives_nothing_is_nudged_then_dropped() {
+        let (tunnel, gate, _held, journal) = tunnel_with_open_stream().await;
+        gate.store(false, Ordering::SeqCst);
+        for _ in 0..TICKS_TO_DEAD {
+            tunnel.watchdog_tick().await;
+        }
+        let slot = tunnel.conn.lock().await;
+        assert!(slot.conn.is_none(), "the silent connection is still cached");
+        assert!(slot.needs_fresh_endpoint, "the redial must start on a fresh endpoint");
+        let json = journal.snapshot_json(0);
+        let quiet_at = json.find("\"k\":\"quiet\",\"d\":\"secs=8\"").unwrap_or_else(|| panic!("{json}"));
+        let dead_at = json.find("\"k\":\"dead\",\"d\":\"secs=12\"").unwrap_or_else(|| panic!("{json}"));
+        assert!(quiet_at < dead_at, "{json}");
+        assert!(json.contains("no packets for 12s"), "{json}");
+        assert_eq!(json.matches("\"k\":\"quiet\"").count(), 1, "one nudge per quiet spell: {json}");
+    }
+
+    /// Traffic keeps arriving (the counter moves every tick): the same number of
+    /// ticks drops nothing.
+    #[tokio::test]
+    async fn a_connection_in_use_that_keeps_receiving_is_left_alone() {
+        let (tunnel, _gate, _held, journal) = tunnel_with_open_stream().await;
+        let counter = AtomicU64::new(0);
+        for _ in 0..TICKS_TO_DEAD * 3 {
+            tunnel.watchdog_tick_with(&|_| counter.fetch_add(1, Ordering::SeqCst)).await;
+        }
+        let slot = tunnel.conn.lock().await;
+        assert!(slot.conn.as_ref().is_some_and(|c| c.close_reason().is_none()));
+        let json = journal.snapshot_json(0);
+        assert!(!json.contains("quiet") && !json.contains("dead"), "{json}");
+    }
+
+    /// A quiet connection nobody is waiting on is left to QUIC.
+    #[tokio::test]
+    async fn a_quiet_connection_with_no_stream_open_is_left_alone() {
+        let (tunnel, gate, held, journal) = tunnel_with_open_stream().await;
+        drop(held);
+        for _ in 0..100 {
+            if tunnel.open_streams.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(tunnel.open_streams.load(Ordering::SeqCst), 0);
+        gate.store(false, Ordering::SeqCst);
+        for _ in 0..TICKS_TO_DEAD * 2 {
+            tunnel.watchdog_tick_with(&|_| 5).await;
+        }
+        assert!(tunnel.conn.lock().await.conn.is_some());
+        assert!(!journal.snapshot_json(0).contains("dead"));
+    }
+
+    /// The counter the watch reads moves when the PC talks, over a real connection.
+    #[tokio::test]
+    async fn the_received_counter_counts_datagrams_from_the_pc() {
+        let (tunnel, _gate, _held, _) = tunnel_with_open_stream().await;
+        let conn = tunnel.connection().await.expect("cached");
+        assert!(conn.stats().udp_rx.datagrams > 0);
+    }
+
+    #[tokio::test]
+    async fn the_stream_gauge_is_one_while_a_request_is_in_flight_and_zero_after_the_socket_closes() {
+        let (server, _) = pong_server().await;
+        let (tunnel, port) = tunnel_to(server).await;
+        assert_eq!(tunnel.open_streams.load(Ordering::SeqCst), 0);
+        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
+        sock.write_all(b"PING").await.expect("send");
+        let mut reply = vec![0u8; 4];
+        sock.read_exact(&mut reply).await.expect("read");
+        assert_eq!(tunnel.open_streams.load(Ordering::SeqCst), 1, "the socket is still open");
+        drop(sock);
+        for _ in 0..100 {
+            if tunnel.open_streams.load(Ordering::SeqCst) == 0 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("the gauge stayed above zero after the socket closed");
+    }
+
+    /// A forward that ends in an error releases its stream too.
+    #[tokio::test]
+    async fn the_stream_gauge_returns_to_zero_when_the_forward_ends_by_error() {
+        let server = Endpoint::builder(presets::Minimal).alpns(vec![ALPN.to_vec()]).bind().await.expect("server bind");
+        let addr = server.addr();
+        tokio::spawn(async move {
+            while let Some(incoming) = server.accept().await {
+                tokio::spawn(async move {
+                    let Ok(conn) = incoming.await else { return };
+                    while let Ok((mut send, _recv)) = conn.accept_bi().await {
+                        send.reset(VarInt::from_u32(7)).ok();
+                    }
+                });
+            }
+        });
+        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        let tunnel = Arc::new(Tunnel::new(client, addr, minimal_rebuild()));
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
+        let (served, _) = listener.accept().await.expect("accept");
+        sock.write_all(b"PING").await.expect("send");
+        let result = tokio::time::timeout(Duration::from_secs(10), forward(served, &tunnel)).await.expect("forward finished");
+        assert!(result.is_err(), "the PC reset the stream, so the forward errors");
+        assert_eq!(tunnel.open_streams.load(Ordering::SeqCst), 0);
+        drop(sock);
     }
 }
