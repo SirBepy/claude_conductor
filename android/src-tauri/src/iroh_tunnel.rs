@@ -92,6 +92,9 @@ const REBIND_TIMEOUT: Duration = Duration::from_secs(3);
 /// a timeout fails just this socket and never tears the connection down.
 const OPEN_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Most bytes `forward` buffers from a socket while it waits for a stream.
+const EARLY_BUFFER_CAP: usize = 256 * 1024;
+
 const WATCHDOG_TICK: Duration = Duration::from_secs(2);
 
 /// A wall-clock gap this much longer than one watchdog tick means the process
@@ -245,10 +248,19 @@ struct Tunnel {
     endpoint: std::sync::Mutex<Endpoint>,
     rebuild: Rebuild,
     remote: EndpointAddr,
-    conn: Mutex<Option<Connection>>,
+    conn: Mutex<Slot>,
     /// Wall-clock seconds of the last gap check. Starts at "now" so a fresh
     /// tunnel's first dial is not mistaken for a wake-up.
     last_alive: AtomicU64,
+}
+
+/// What the connection lock guards: the cached connection and the last failed
+/// dial. The failure is kept so every caller that queued on the lock while that
+/// dial ran gets its error at once instead of running a full dial of its own.
+#[derive(Default)]
+struct Slot {
+    conn: Option<Connection>,
+    failure: Option<(Instant, String)>,
 }
 
 /// Binds a replacement endpoint. A parameter, not a hard-coded `bind_endpoint`,
@@ -275,7 +287,7 @@ impl Tunnel {
             endpoint: std::sync::Mutex::new(endpoint),
             rebuild,
             remote,
-            conn: Mutex::new(None),
+            conn: Mutex::new(Slot::default()),
             last_alive: AtomicU64::new(now_secs()),
         }
     }
@@ -343,13 +355,23 @@ impl Tunnel {
     /// The lock is held across the dial on purpose: a burst of WebView sockets
     /// on resume waits for one connect instead of racing several.
     async fn connection(&self) -> Result<Connection, BoxError> {
-        let mut guard = self.conn.lock().await;
+        let waiting_since = Instant::now();
+        let mut slot = self.conn.lock().await;
+        // A dial that failed while this caller was queued already answered for
+        // it: dialing again would only repeat the same wait and bind yet another
+        // endpoint.
+        if let Some((failed_at, msg)) = &slot.failure {
+            if *failed_at >= waiting_since {
+                return Err(msg.clone().into());
+            }
+        }
+        let guard = &mut slot.conn;
         // A cached connection that sat through a freeze can look open while
         // every byte on it disappears, so a gap is checked before it is
         // handed out, not left to the watchdog's next tick.
         let resumed = self.take_resume();
         if let Some(secs) = resumed {
-            Self::drop_locked(&mut guard, &format!("resumed after {secs}s asleep (seen by connection())"));
+            Self::drop_locked(guard, &format!("resumed after {secs}s asleep (seen by connection())"));
             self.network_change().await;
         } else if let Some(conn) = guard.as_ref() {
             match conn.close_reason() {
@@ -389,8 +411,11 @@ impl Tunnel {
             }
         }
         let Some(conn) = dialed else {
-            *guard = None;
+            slot.conn = None;
             self.network_change().await;
+            // Stamped after the last await so every caller queued during this
+            // dial counts as having waited through it.
+            slot.failure = Some((Instant::now(), last_err.to_string()));
             return Err(last_err);
         };
         let paths: Vec<(bool, TransportAddr)> =
@@ -401,16 +426,26 @@ impl Tunnel {
             path_summary(&paths),
             resumed.is_some()
         );
-        *guard = Some(conn.clone());
+        slot.conn = Some(conn.clone());
+        slot.failure = None;
         Ok(conn)
     }
 
-    /// Drops the shared connection so the next stream redials. Also tells iroh
-    /// the network may have changed: on Android it cannot detect that by itself
-    /// (see `Endpoint::network_change`'s docs), so a Wi-Fi/LTE switch during
-    /// sleep would otherwise keep it on stale sockets and relay state.
-    async fn invalidate(&self, why: &str) {
-        Self::drop_locked(&mut *self.conn.lock().await, why);
+    /// Drops the shared connection so the next stream redials, but only when it
+    /// is still the one that failed (`failed`, a `stable_id`): another task may
+    /// have redialed already, and closing that fresh connection would kill every
+    /// stream on it. Also tells iroh the network may have changed: on Android it
+    /// cannot detect that by itself (see `Endpoint::network_change`'s docs), so a
+    /// Wi-Fi/LTE switch during sleep would otherwise keep it on stale sockets and
+    /// relay state.
+    async fn invalidate(&self, failed: usize, why: &str) {
+        {
+            let mut slot = self.conn.lock().await;
+            if slot.conn.as_ref().map(Connection::stable_id) != Some(failed) {
+                return;
+            }
+            Self::drop_locked(&mut slot.conn, why);
+        }
         self.network_change().await;
     }
 
@@ -421,7 +456,7 @@ impl Tunnel {
     async fn watchdog_tick(&self) {
         let mut guard = self.conn.lock().await;
         if let Some(secs) = self.take_resume() {
-            Self::drop_locked(&mut guard, &format!("resumed after {secs}s asleep"));
+            Self::drop_locked(&mut guard.conn, &format!("resumed after {secs}s asleep"));
             drop(guard);
             self.network_change().await;
         }
@@ -438,7 +473,7 @@ impl Tunnel {
                 Ok(Err(e)) => {
                     warn!("open_bi failed: {e}");
                     last_err = e.into();
-                    self.invalidate("could not open a stream").await;
+                    self.invalidate(conn.stable_id(), "could not open a stream").await;
                 }
                 Err(_) => {
                     warn!("open_bi timed out: stream limit reached");
@@ -485,9 +520,34 @@ async fn accept_loop(listener: TcpListener, tunnel: Arc<Tunnel>) {
 }
 
 /// Splice one accepted TCP connection onto a bi-stream of the shared connection.
+/// While the stream is being opened (possibly behind a long dial) the socket is
+/// watched: a peer that already closed it, such as a request the page aborted,
+/// must not stay parked until the dial ends. Bytes it sent meanwhile are kept
+/// and written first.
 async fn forward(tcp: TcpStream, tunnel: &Tunnel) -> Result<(), BoxError> {
-    let (mut send, mut recv) = tunnel.open_stream().await?;
+    use tokio::io::AsyncReadExt;
     let (mut tcp_read, mut tcp_write) = tokio::io::split(tcp);
+    let mut early: Vec<u8> = Vec::new();
+    let (mut send, mut recv) = {
+        let open = tunnel.open_stream();
+        tokio::pin!(open);
+        let mut chunk = [0u8; 8192];
+        loop {
+            // Past the cap reading stops (TCP backpressure holds the rest)
+            // and only the stream result is awaited.
+            let can_read = early.len() < EARLY_BUFFER_CAP;
+            tokio::select! {
+                opened = &mut open => break opened?,
+                read = tcp_read.read(&mut chunk), if can_read => match read {
+                    Ok(0) | Err(_) => return Ok(()),
+                    Ok(n) => early.extend_from_slice(&chunk[..n]),
+                },
+            }
+        }
+    };
+    if !early.is_empty() {
+        send.write_all(&early).await?;
+    }
     let up = async {
         tokio::io::copy(&mut tcp_read, &mut send).await?;
         tokio::io::AsyncWriteExt::shutdown(&mut send).await
@@ -686,6 +746,91 @@ mod tests {
         assert_eq!(rebinds.load(Ordering::SeqCst), (DIAL_ATTEMPTS - 1) as usize);
     }
 
+    /// A tunnel whose every dial fails, counting rebinds.
+    fn dead_tunnel(server: EndpointAddr, dead: Endpoint, rebinds: Arc<AtomicUsize>) -> Arc<Tunnel> {
+        let rebuild: Rebuild = Box::new(move || {
+            rebinds.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async {
+                let e = Endpoint::builder(presets::Minimal).bind().await.map_err(|e| e.to_string())?;
+                e.close().await;
+                Ok(e)
+            })
+        });
+        Arc::new(Tunnel::new(dead, server, rebuild))
+    }
+
+    /// Sockets queued behind a failed dial share its failure: one dial-and-rebind
+    /// cycle in total, not one per queued socket.
+    #[tokio::test]
+    async fn callers_queued_behind_a_failed_dial_share_its_failure() {
+        let (server, _) = pong_server().await;
+        let dead = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        dead.close().await;
+        let rebinds = Arc::new(AtomicUsize::new(0));
+        let tunnel = dead_tunnel(server, dead, rebinds.clone());
+        let (a, b, c, d, e) = tokio::join!(
+            tunnel.connection(),
+            tunnel.connection(),
+            tunnel.connection(),
+            tunnel.connection(),
+            tunnel.connection()
+        );
+        for r in [a, b, c, d, e] {
+            assert!(r.is_err());
+        }
+        assert_eq!(rebinds.load(Ordering::SeqCst), (DIAL_ATTEMPTS - 1) as usize, "one cycle for all five callers");
+    }
+
+    /// A caller arriving after the failure finished is not served the stale error.
+    #[tokio::test]
+    async fn a_caller_arriving_after_a_failure_dials_again() {
+        let (server, _) = pong_server().await;
+        let dead = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
+        dead.close().await;
+        let rebinds = Arc::new(AtomicUsize::new(0));
+        let tunnel = dead_tunnel(server, dead, rebinds.clone());
+        assert!(tunnel.connection().await.is_err());
+        let after_first = rebinds.load(Ordering::SeqCst);
+        assert!(tunnel.connection().await.is_err());
+        assert!(rebinds.load(Ordering::SeqCst) > after_first, "a later call must dial for itself");
+    }
+
+    /// A socket the WebView already closed must not stay parked behind the
+    /// connection lock while a dial runs.
+    #[tokio::test]
+    async fn a_socket_closed_while_waiting_for_the_stream_ends_its_forward_task() {
+        let (server, _) = pong_server().await;
+        let (tunnel, _) = tunnel_to(server).await;
+        let held = tunnel.conn.lock().await;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let mut client = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
+        let (served, _) = listener.accept().await.expect("accept");
+        let t = tunnel.clone();
+        let task = tokio::spawn(async move { forward(served, &t).await });
+        client.write_all(b"PI").await.expect("send");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(client);
+        let ended = tokio::time::timeout(Duration::from_secs(2), task).await;
+        assert!(ended.is_ok(), "forward still parked on the held lock after the peer closed");
+        drop(held);
+    }
+
+    /// Bytes sent before the stream opens are written first once it does.
+    #[tokio::test]
+    async fn bytes_written_before_the_stream_opens_still_arrive() {
+        let (server, _) = pong_server().await;
+        let (tunnel, port) = tunnel_to(server).await;
+        let held = tunnel.conn.lock().await;
+        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
+        sock.write_all(b"PING").await.expect("send");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        drop(held);
+        let mut reply = vec![0u8; 4];
+        tokio::time::timeout(Duration::from_secs(10), sock.read_exact(&mut reply)).await.expect("timed out").expect("read");
+        assert_eq!(&reply, b"PONG");
+    }
+
     async fn ping(port: u16) {
         let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
         sock.write_all(b"PING").await.expect("send");
@@ -791,8 +936,26 @@ mod tests {
         let (server, accepted) = pong_server().await;
         let (tunnel, port) = tunnel_to(server).await;
         ping(port).await;
-        tunnel.invalidate("test").await;
+        let current = tunnel.connection().await.expect("cached");
+        tunnel.invalidate(current.stable_id(), "test").await;
         ping(port).await;
         assert_eq!(accepted.load(Ordering::SeqCst), 2);
+    }
+
+    /// A failure reported against an old connection must not close the one a
+    /// racing task has already redialed.
+    #[tokio::test]
+    async fn invalidating_a_superseded_connection_keeps_the_fresh_one() {
+        let (server, accepted) = pong_server().await;
+        let (tunnel, port) = tunnel_to(server).await;
+        let first = tunnel.connection().await.expect("first dial");
+        stale(&tunnel);
+        let second = tunnel.connection().await.expect("redial after a wake-up");
+        assert_ne!(first.stable_id(), second.stable_id());
+        assert_eq!(accepted.load(Ordering::SeqCst), 2);
+        tunnel.invalidate(first.stable_id(), "late failure of the old connection").await;
+        ping(port).await;
+        assert_eq!(accepted.load(Ordering::SeqCst), 2, "the fresh connection must be reused");
+        assert!(second.close_reason().is_none());
     }
 }
