@@ -216,8 +216,10 @@ export class DeliveryPolicy {
       case "notification":
         return `n:${ev.body}`;
       // The same boundary reaches the window live (stdout) and again from the
-      // transcript (watcher, page reconcile); the figures identify it.
+      // transcript (watcher, page reconcile); the figures identify it. A
+      // boundary without them identifies nothing, so it is never deduped.
       case "compacted":
+        if (!Number(ev.pre_tokens) && !Number(ev.post_tokens) && !Number(ev.duration_ms)) return null;
         return `c:${ev.pre_tokens}:${ev.post_tokens}:${ev.duration_ms}`;
       default:
         return null;
