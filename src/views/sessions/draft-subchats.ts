@@ -289,17 +289,17 @@ export function unmountDraftSubchats(pane: ParentNode): void {
   for (const host of [...hostsOf(pane), ...routeHostsOf(pane)]) host.remove();
 }
 
-/** Makes the open draft a plain chat when it would otherwise send to the project's main
- *  chat. A message built from third-party text (a dashboard card action typed into the
- *  draft) must start a chat of its own, not land in the main chat under that chat's own
- *  auto-accept. A draft with no route is left as it is, so the switch and the model chip
- *  do not change under a click that was never going to reach a main chat. */
+/** Makes the open draft a plain chat, always. A message built from third-party text (a
+ *  dashboard card action typed into the draft) must start a chat of its own: neither a
+ *  message into the project's main chat under that chat's own auto-accept, nor a new main
+ *  chat that would become the project's. A draft that would not have routed is plain too,
+ *  since it opens with the mode on and would otherwise spawn as the project's main chat. */
 export function forceDraftPlain(): void {
   const pending = state.pendingNewSession;
-  const pane = document.getElementById("session-pane");
-  if (!pending || pending.firstMessageSent || !pane || !draftRouteTarget(pending.config)) return;
+  if (!pending || pending.firstMessageSent) return;
   setPlain(pending.config, true);
-  syncDraftSubchats(pane, pending.config);
+  const pane = document.getElementById("session-pane");
+  if (pane) syncDraftSubchats(pane, pending.config);
 }
 
 /** Repaints the open draft, if any, after the project's main chat or its title

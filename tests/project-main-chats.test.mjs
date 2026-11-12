@@ -108,12 +108,19 @@ describe("draftRouteTarget", () => {
     expect(draftRouteTarget(state.pendingNewSession.config)).toBeNull();
   });
 
-  it("forceDraftPlain leaves a draft with no main chat to route to untouched", () => {
+  it("forceDraftPlain also turns the mode off for a draft with no main chat, so card text never starts one", () => {
     document.body.innerHTML = `<div id="session-pane"></div>`;
     state.sessions = [];
     forceDraftPlain();
-    expect(state.pendingNewSession.config.plainChat).toBeUndefined();
-    expect(state.pendingNewSession.config.subchatsOn).toBe(true);
+    expect(state.pendingNewSession.config.plainChat).toBe(true);
+    expect(state.pendingNewSession.config.subchatsOn).toBe(false);
+  });
+
+  it("forceDraftPlain works with no pane mounted, since the send does not need one", () => {
+    document.body.innerHTML = "";
+    forceDraftPlain();
+    expect(state.pendingNewSession.config.plainChat).toBe(true);
+    expect(draftRouteTarget(state.pendingNewSession.config)).toBeNull();
   });
 
   it("never swallows a draft that opened with its own message (a card chat, /pickup)", () => {
