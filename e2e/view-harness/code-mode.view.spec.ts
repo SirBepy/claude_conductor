@@ -1,3 +1,4 @@
+// Reviewed 2026-11-12 (pc-1570 control-height sweep): the Push, Pull and branch buttons and the branch popover rows snap to the two control heights (24px), the branch filter field is 36px; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-11: branch-switcher.ts now takes its two warning texts and the peer-session test from branch-warnings.ts (shared with the command palette); the words and markup are unchanged and this spec passes.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.

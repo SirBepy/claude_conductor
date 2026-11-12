@@ -4,7 +4,7 @@
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05: project-settings.css gained one rule, .ps-group-title (a heading line for the new Subchats group); no control height or the controls this spec measures changed, and it passed after the change.
 // Reviewed 2026-11-05: permission-modal/gating.ts and index.ts gained hydrateSubchatsOn/isSubchatsOn/setSubchatsOn (the Use subchats toggle's in-memory state, hydrated at install time) - additive; the harness's unmocked list_subchats_on rejection is caught inside the hydrate, no change to this spec's contract.
-// asserts: src/styles/tokens.css, src/styles/base.css, src/styles/inputs.css, src/styles/color-picker.css, src/styles/settings-sections.css, src/views/sessions/project-picker.css, src/views/sessions/worktree-picker.css, src/views/sessions/sessions.css, src/shared/chat/composer.css, src/shared/chat/file-surface.css, src/views/sessions/drafts-panel.css, src/views/sessions/code-mode/code-mode-shell.css, src/views/sessions/code-mode/code-mode-explorer.css, src/views/sessions/code-mode/code-mode-tabs.css, src/views/sessions/project-dashboard/pd-cards.css, src/views/sessions/project-dashboard/pd-dashboard.css, src/views/sessions/project-dashboard/project-config/project-settings.css, src/shared/confirm.css
+// asserts: src/styles/tokens.css, src/styles/base.css, src/styles/inputs.css, src/styles/color-picker.css, src/styles/settings-sections.css, src/views/sessions/project-picker.css, src/views/sessions/worktree-picker.css, src/views/sessions/sessions.css, src/shared/chat/composer.css, src/shared/chat/file-surface.css, src/views/sessions/drafts-panel.css, src/views/sessions/code-mode/code-mode-shell.css, src/views/sessions/code-mode/code-mode-explorer.css, src/views/sessions/code-mode/code-mode-tabs.css, src/views/sessions/project-dashboard/pd-cards.css, src/views/sessions/project-dashboard/pd-dashboard.css, src/views/sessions/project-dashboard/project-config/project-settings.css, src/shared/confirm.css, src/views/sessions/code-mode/code-mode-commits.css, src/views/sessions/code-mode/branch-switcher.css, src/shared/change-character-modal.css, src/styles/hook-modal.css, src/views/sessions/permission-modal-track.css, src/views/sessions/permission-modal-summary.css, src/shared/modal.css, src/shared/settings-popup.css
 import { expect, test, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance, waitForPaneSettled } from "./harness";
 import { CONDUCTOR_CWD, LIST_ROWS, conductorHistory, conductorSnapshot, fakeShot } from "./project-dashboard-fixtures";
@@ -53,6 +53,10 @@ const EXEMPT = [
   "button.wt-picker-choice",
   // The Drafts panel's person row: a 30px avatar beside a name over a caption, the same two-line shape.
   "button.dr-person",
+  // The character picker's tile: a 52px portrait over a name in a grid of cards, an avatar tile and not a control in a row.
+  "button.cc-char-card",
+  // The review step's answer rows: the question over its chosen answer, a two-line row that happens to be a <button>.
+  "button.prompt-summary-row",
   // The remove badge on an attachment chip's corner: a badge hanging off a 80px tile, not a control in a row,
   // so a 24 or 36px disc would cover the thumbnail it belongs to (20px desktop, 28px phone for the tap).
   ".composer-attachments .rm",
@@ -90,6 +94,13 @@ async function offenders(page: Page): Promise<{ want: number; bad: Offender[] }>
 }
 
 const summarise = (bad: Offender[]) => [...new Set(bad.map((b) => `${b.sig} ${b.h}px`))].sort();
+
+/** Before/after evidence for a visual change: set PC1570_SHOTS to a folder and each call writes <name>-<width>.png. */
+async function shoot(page: Page, name: string): Promise<void> {
+  const dir = process.env.PC1570_SHOTS;
+  if (!dir) return;
+  await page.screenshot({ path: `${dir}/${name}-${page.viewportSize()!.width}.png` });
+}
 
 for (const [label, size] of [["desktop", { width: 1200, height: 900 }], ["phone", { width: 393, height: 852 }]] as const) {
   test.describe(`view-harness / one control height (${label})`, () => {
@@ -176,10 +187,14 @@ for (const [label, size] of [["desktop", { width: 1200, height: 900 }], ["phone"
         view: "sessions",
         invoke: {
           ...INVOKE, list_instances: [sess], get_active_sessions: [sess], session_live_cwd: cwd,
+          load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
           get_settings: { theme: "void", statuslineRowsV2Applied: true, statuslineRows: [row], statuslineRowsMobile: [row] },
           get_git_info: { branch: "master", repo: "alpha", ahead: 2, behind: 0, sha: "abc1234", insertions: null, deletions: null },
           get_commit_sync: { ahead: [{ short_sha: "8b3cb30", message: "FIX: a thing" }], behind: [], has_upstream: true },
-          get_recent_branches: [{ name: "master", current: true, short_sha: "8b3cb30", upstream: "origin/master" }],
+          get_recent_branches: [
+            { name: "master", current: true, short_sha: "8b3cb30", upstream: "origin/master" },
+            { name: "feature/preview-me", current: false, short_sha: "1a2b3c4", upstream: null },
+          ],
           get_git_dirty: [files[0]!.path], get_range_files: files,
           get_file_diff: "diff --git a/src/shared/shortcuts.ts b/src/shared/shortcuts.ts\n@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;\n",
           get_file_at_rev: { content: "export const x = 1;\n", truncated: false },
@@ -188,10 +203,14 @@ for (const [label, size] of [["desktop", { width: 1200, height: 900 }], ["phone"
       });
       await page.locator(`#sessions-list li[data-session-id="s1"]`).click();
       await page.locator("#session-pane .session-composer").first().waitFor();
-      // The strip's Code tab is desktop-width only; the entry point is the one every other route shares.
-      await page.evaluate(async () => { await (await import("/views/sessions/code-mode/entry.ts")).enterCodeMode(); });
+      await waitForPaneSettled(page);
+      // The statusbar's commits chip is the one entry that exists at both widths; it opens the Unpushed range,
+      // so the whole repo is one scope-menu pick away.
+      await page.locator("#session-pane .sb-commits-btn").click();
       const code = page.locator(".code-mode");
       await code.waitFor();
+      await code.locator(".cm-qtitle").click();
+      await code.locator('.cm-mi[data-scope="all"]').click();
       const closed = code.locator('.cm-dir[aria-expanded="false"]');
       while (await closed.count()) await closed.first().click();
       await code.locator('[data-file="README.md"]').click();
@@ -208,6 +227,18 @@ for (const [label, size] of [["desktop", { width: 1200, height: 900 }], ["phone"
       while (await closed.count()) await closed.first().click();
       const unpushed = await offenders(page);
       expect(summarise(unpushed.bad)).toEqual([]);
+      // The commit rows, the Push and Pull buttons and the branch button sit behind the commits fold.
+      const fold = code.locator(".cm-fold");
+      if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
+      await code.locator(".cm-pushtext").first().waitFor();
+      const commits = await offenders(page);
+      expect(summarise(commits.bad)).toEqual([]);
+      await code.locator(".cm-branchbtn").click();
+      await page.locator(".bs-search input").waitFor();
+      await page.waitForTimeout(400);
+      const branches = await offenders(page);
+      expect(summarise(branches.bad)).toEqual([]);
+      await page.keyboard.press("Escape");
       await code.locator(`[data-file="${files[1]!.path}"]`).click();
       await code.locator(".fs-menu-btn").first().click();
       const fileMenu = await offenders(page);
@@ -232,7 +263,13 @@ for (const [label, size] of [["desktop", { width: 1200, height: 900 }], ["phone"
         ],
         state: "needs-you", origin_session_id: "sess-A", origin_label: "auth-work", created_at: now, updated_at: now, seen_by_origin: true,
       };
-      await mountView(page, { invoke: { ...INVOKE, list_slash_commands: [], list_message_drafts: { drafts: [draft] } } });
+      // A sent ticket comment: a Linear variant makes the tab strip appear, a sent draft is the line the eye reveals,
+      // and Joe's own version of it is what offers Check & learn.
+      const sent = {
+        ...draft, id: "bbbbbbbb-2222-4222-8222-222222222222", topic: "REV-7345 rollout note", state: "copied",
+        variants: [{ recipient: "Ana", platform: "Linear", handle_n: 1, current: 2, versions: [ver(1, "Rollout starts Monday."), { ...ver(2, "Rollout starts Monday, flag on."), author: "user" }] }],
+      };
+      await mountView(page, { invoke: { ...INVOKE, list_slash_commands: [], list_message_drafts: { drafts: [draft, sent] } } });
       await page.evaluate(async () => {
         const host = document.createElement("div");
         host.id = "drafts-spec-host";
@@ -245,6 +282,20 @@ for (const [label, size] of [["desktop", { width: 1200, height: 900 }], ["phone"
       await panel.locator(".dr-card").first().waitFor();
       const list = await offenders(page);
       expect(summarise(list.bad)).toEqual([]);
+      await panel.locator(".dr-tab").first().waitFor();
+      await panel.locator(".dr-eye").first().click();
+      await panel.locator(".dr-tab").nth(1).click();
+      await panel.locator("[data-ticket]").first().click();
+      await panel.locator(".dr-line").first().waitFor();
+      const tracker = await offenders(page);
+      expect(summarise(tracker.bad)).toEqual([]);
+      await panel.locator(".dr-line").first().click();
+      await panel.locator(".dr-learn").waitFor();
+      const learn = await offenders(page);
+      expect(summarise(learn.bad)).toEqual([]);
+      await panel.locator("[data-back]").click();
+      await panel.locator("[data-list]").click();
+      await panel.locator(".dr-tab").first().click();
       await panel.locator(".dr-card").first().click();
       await panel.locator(".dr-body").waitFor();
       const opened = await offenders(page);
@@ -349,6 +400,57 @@ for (const [label, size] of [["desktop", { width: 1200, height: 900 }], ["phone"
       expect(summarise(bad)).toEqual([]);
     });
 
+    // Modals draw over whatever is underneath. Each is opened with only the mocks its own code reads.
+    test("change-character modal: tabs, search, Random, Save and the cards", async ({ page }) => {
+      page.setDefaultTimeout(30_000);
+      const chars = ["c1", "c2", "c3", "c4"].map((id, i) => ({ id, label: ["Alexstrasza", "Anduin", "Arthas", "Azmodan"][i], version: 1, icon: "icon.png", game_label: "Heroes of the Storm", slots: {} }));
+      await mountView(page, { invoke: { ...INVOKE, resolve_whitelist_characters: chars, list_characters: chars, character_asset_url: null, play_character_slot: null } });
+      await page.evaluate(async () => {
+        const mod = await import("/shared/change-character-modal.ts");
+        void mod.openChangeCharacterModal({ projectId: "proj1", currentId: "c2" });
+      });
+      await page.locator(".cc-char-card").first().waitFor();
+      await page.waitForTimeout(600);
+      await shoot(page, "change-character");
+      const { bad } = await offenders(page);
+      expect(summarise(bad)).toEqual([]);
+    });
+
+    test("hook modal: Enable, Not now and Never", async ({ page }) => {
+      page.setDefaultTimeout(30_000);
+      await mountView(page, { invoke: { ...INVOKE, get_hook_registration_state: { registered: false, declined: false, port: 27182 } } });
+      await page.evaluate(async () => { await (await import("/shared/boot.ts")).maybeShowHookModal(); });
+      await page.locator("#hookModalAccept").waitFor();
+      await page.waitForTimeout(400);
+      await shoot(page, "hook-modal");
+      const { bad } = await offenders(page);
+      expect(summarise(bad)).toEqual([]);
+    });
+
+    // Settings in the Chats window is a popup over the chat; its pages are measured above as full screens, so
+    // this measures the same pages inside the popup frame (its own header and close button).
+    test("settings popup: the frame, its close button and the index inside it", async ({ page }) => {
+      page.setDefaultTimeout(30_000);
+      await mountView(page, { view: "blank", invoke: { ...INVOKE, list_installed_skills: [], list_projects: [] } });
+      await page.evaluate(async () => {
+        document.body.classList.add("chats-window-mode");
+        const chat = document.createElement("main");
+        chat.id = "fake-chat";
+        chat.style.cssText = "position:fixed;inset:0 44px 0 0;background:#14141c";
+        document.body.appendChild(chat);
+        (await import("/shared/navigation.ts")).setActiveView("sessions");
+        const rail = await import("/shared/app-rail.ts");
+        rail.mountAppRail();
+        rail.syncAppRail("sessions");
+      });
+      await page.locator("#app-rail [data-rail-go=\"settings\"]").click();
+      await page.locator(".settings-popup .view-settings").waitFor();
+      await page.waitForTimeout(800);
+      await shoot(page, "settings-popup");
+      const { bad } = await offenders(page);
+      expect(summarise(bad)).toEqual([]);
+    });
+
     test("question card: header button, options, answer field and footer", async ({ page }) => {
       await mountView(page, { invoke: { respond_question: null } });
       await page.evaluate(async () => {
@@ -361,13 +463,27 @@ for (const [label, size] of [["desktop", { width: 1200, height: 900 }], ["phone"
         document.body.appendChild(pane);
         qm.handleQuestionRequested({
           id: "q1", session_id: "sess-1",
-          questions: [{ question: "Which lane should the builder take?", header: "Lane", options: [{ label: "Inline" }, { label: "Subagent" }] }],
+          questions: [
+            { question: "Which lane should the builder take?", header: "Lane", options: [{ label: "Inline" }, { label: "Subagent" }] },
+            { question: "Which checks?", header: "Checks", multiSelect: true, options: [{ label: "Unit" }, { label: "E2E" }] },
+          ],
         });
       });
       await page.locator(".prompt-card").waitFor();
       await page.waitForTimeout(600);
       const { bad } = await offenders(page);
       expect(summarise(bad)).toEqual([]);
+
+      // The review step's Submit is EXEMPT from the scan, so it is measured here by hand: a desktop one is a plain
+      // --control-h button, only the phone one is the deliberate 48px.
+      await page.locator(".prompt-card .prompt-dot[data-dot=\"2\"]").click();
+      const submit = page.locator(".prompt-card__footer > [data-act=\"primary\"].prompt-submit-cta");
+      await submit.waitFor();
+      await page.waitForTimeout(400);
+      const review = await offenders(page);
+      expect(summarise(review.bad)).toEqual([]);
+      const h = (await submit.boundingBox())!.height;
+      expect(Math.round(h)).toBe(label === "phone" ? 48 : review.want);
     });
   });
 }

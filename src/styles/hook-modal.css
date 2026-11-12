@@ -76,7 +76,8 @@
 }
 .hook-modal-actions .hook-modal-accept {
   width: 100%;
-  padding: 10px 16px;
+  height: var(--control-h);
+  padding: 0 16px;
   font-size: var(--fs-heading);
   font-weight: 600;
 }
@@ -91,7 +92,8 @@
   border: none;
   color: var(--color-text-muted, #9a9ab0);
   font-size: var(--fs-body);
-  padding: 4px 6px;
+  height: var(--control-h-sm);
+  padding: 0 6px;
   cursor: pointer;
 }
 .btn-link-muted:hover {

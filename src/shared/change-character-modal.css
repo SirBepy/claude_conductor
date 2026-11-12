@@ -107,7 +107,8 @@
   cursor: pointer;
   font: inherit;
   font-size: 0.74rem;
-  padding: 4px 9px;
+  height: var(--control-h);
+  padding: 0 9px;
 }
 
 .cc-modal-random:hover:not(:disabled) {
@@ -181,7 +182,8 @@
   color: var(--color-text-muted, #8a8a96);
   cursor: pointer;
   font-size: 0.82rem;
-  padding: 6px 12px;
+  height: var(--control-h);
+  padding: 0 12px;
   transition: color 0.1s, border-color 0.1s;
 }
 

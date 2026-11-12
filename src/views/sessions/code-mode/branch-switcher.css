@@ -88,8 +88,8 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   border: 0;
   border-radius: 4px;
   background: transparent;
