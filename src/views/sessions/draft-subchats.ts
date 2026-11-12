@@ -6,10 +6,15 @@ import type { SessionConfig } from "../../shared/effort-presets";
 import { state } from "./state";
 import { savePendingSession } from "./pending-draft-storage";
 import { mainChatLaunch, subchatsBlockedReason } from "./subchats-gate";
+import { goesToLine, mainChatFor, type ProjectMainChat } from "./project-main-chats";
+import { escapeHtml } from "../../shared/escape-html";
 import "./draft-subchats.css";
 
 const HOST_CLASS = "draft-subchats";
 const CARD_CLASS = "draft-subchats-card";
+// The same slot when the project has a main chat: "Goes to ..." and Plain chat instead.
+const ROUTE_CLASS = "draft-main-route";
+const ROUTE_CARD_CLASS = "draft-main-route-card";
 
 /** Longest the row waits for the rail card before showing itself anyway. */
 const RAIL_WAIT_MS = 4000;
@@ -66,9 +71,62 @@ function setOn(config: SessionConfig, on: boolean): void {
   if (restore) state.statusbar?.syncModelEffort(restore.model, restore.effort);
 }
 
+/** Every live copy of the "Goes to" slot in the pane (see [hostsOf]). */
+function routeHostsOf(pane: ParentNode): HTMLElement[] {
+  return [...pane.querySelectorAll<HTMLElement>(`.${ROUTE_CLASS}, .${ROUTE_CARD_CLASS}`)].filter((el) => !el.closest(".pd-ghost"));
+}
+
+/** Where this draft's first message goes: the project's main chat, unless the draft
+ *  is a plain chat, aims at another machine, or the project has no open main chat. */
+export function draftRouteTarget(config: SessionConfig): ProjectMainChat | null {
+  const path = state.pendingNewSession?.projectPath;
+  if (!path || config.plainChat === true || config.machineId) return null;
+  return mainChatFor(path, state.sessions);
+}
+
+/** "Plain chat instead" on: a chat of its own with no subchats, the project's model
+ *  back on the chip. Off: the message goes to the main chat again, and the chip
+ *  shows the main-chat model it will run on. */
+function setPlain(config: SessionConfig, plain: boolean): void {
+  writeConfig(config, { plainChat: plain });
+  const want = !plain && !subchatsBlockedReason(config.accountId);
+  // Only on a real change: a second setOn(true) would capture the main-chat model as
+  // the one to restore.
+  if ((config.subchatsOn === true) !== want) setOn(config, want);
+}
+
+function wireRoute(host: HTMLElement, pane: ParentNode, config: SessionConfig): void {
+  host.querySelector("input")!.addEventListener("change", (e) => {
+    setPlain(config, (e.target as HTMLInputElement).checked);
+    syncDraftSubchats(pane, config);
+  });
+}
+
+/** Repaints the "Goes to" slot: shown while the project has a main chat, and the
+ *  "Use subchats" slot it replaces is hidden then. */
+function syncRoute(pane: ParentNode, config: SessionConfig): ProjectMainChat | null {
+  const path = state.pendingNewSession?.projectPath;
+  const main = path && !config.machineId ? mainChatFor(path, state.sessions) : null;
+  const plain = config.plainChat === true;
+  for (const host of hostsOf(pane)) host.hidden = !!main;
+  for (const host of routeHostsOf(pane)) {
+    host.hidden = !main;
+    if (!main) continue;
+    const { title, project } = goesToLine(main);
+    const line = host.querySelector<HTMLElement>(".dmr-line")!;
+    line.innerHTML = plain
+      ? `A plain chat, not ${escapeHtml(project)}'s main chat`
+      : `Goes to <strong>${escapeHtml(title)}</strong>, ${escapeHtml(project)}'s main chat`;
+    host.querySelector<HTMLInputElement>("input")!.checked = plain;
+    host.classList.toggle("is-on", !plain);
+  }
+  return main;
+}
+
 /** Repaints every copy of the switch from the config: its state, its tooltip, and
  *  whether the account the draft is on allows the mode at all. */
 export function syncDraftSubchats(pane: ParentNode, config: SessionConfig): void {
+  syncRoute(pane, config);
   const hosts = hostsOf(pane);
   if (hosts.length === 0) return;
   const blocked = subchatsBlockedReason(config.accountId);
@@ -111,7 +169,10 @@ export function mountDraftSubchats(pane: HTMLElement, config: SessionConfig): vo
   // switching off still puts the project's model back. A reopened draft whose
   // user switched it off carries `false` and is left alone.
   if (config.subchatsOn === true && !subchatsBlockedReason(config.accountId) && !sameDraft) setOn(config, true);
+  // The route row goes first so the Use subchats row stays the one right above the box.
+  insertRouteRow(pane, config, true);
   insertRow(pane, config, true);
+  syncDraftSubchats(pane, config);
   // The dashboard's rail loads after its snapshot, so the row stays unseen until we know
   // the rail is not coming; this covers a rail that fails to fill or never mounts.
   _revealTimer = setTimeout(() => revealDraftSubchats(pane), RAIL_WAIT_MS);
@@ -121,6 +182,23 @@ export function mountDraftSubchats(pane: HTMLElement, config: SessionConfig): vo
  *  card already took over (the row is gone) or the row is already visible. */
 export function revealDraftSubchats(pane: ParentNode): void {
   pane.querySelector(`.${HOST_CLASS}.is-pending`)?.classList.remove("is-pending");
+  pane.querySelector(`.${ROUTE_CLASS}.is-pending`)?.classList.remove("is-pending");
+}
+
+function insertRouteRow(pane: ParentNode, config: SessionConfig, pending = false): void {
+  const shell = pane.querySelector(".composer-shell");
+  if (!shell?.parentElement) return;
+  const host = document.createElement("div");
+  host.className = pending ? `${ROUTE_CLASS} is-pending` : ROUTE_CLASS;
+  host.hidden = true;
+  host.innerHTML = [
+    `<i class="ph ph-arrow-bend-down-right" aria-hidden="true"></i>`,
+    `<span class="dmr-line"></span>`,
+    `<span class="draft-subchats-label">Plain chat instead</span>`,
+    `<label class="switch"><input type="checkbox" aria-label="Plain chat instead"><span class="slider"></span></label>`,
+  ].join("");
+  shell.parentElement.insertBefore(host, shell);
+  wireRoute(host, pane, config);
 }
 
 function insertRow(pane: ParentNode, config: SessionConfig, pending = false): void {
@@ -157,6 +235,25 @@ export function mountDraftSubchatsCard(pane: HTMLElement, railBody: HTMLElement,
   settings.append(card);
   pane.querySelector(`.${HOST_CLASS}`)?.remove();
   wire(card, pane, config);
+
+  // The "Goes to" version of the same group, shown instead while the project has a
+  // main chat. Its own element, so the Use subchats card keeps exactly one input.
+  settings.querySelector(`.${ROUTE_CARD_CLASS}`)?.remove();
+  const route = document.createElement("div");
+  route.className = `ps-group ${ROUTE_CARD_CLASS}`;
+  route.hidden = true;
+  route.innerHTML = [
+    `<div class="ps-group-title">This chat</div>`,
+    `<div class="ps-line"><span class="ps-label dmr-line"></span></div>`,
+    `<div class="ps-line">`,
+    `<span class="ps-label">Plain chat instead</span>`,
+    `<label class="switch"><input type="checkbox" aria-label="Plain chat instead"><span class="slider"></span></label>`,
+    `</div>`,
+  ].join("");
+  settings.append(route);
+  pane.querySelector(`.${ROUTE_CLASS}`)?.remove();
+  wireRoute(route, pane, config);
+  syncDraftSubchats(pane, config);
 }
 
 /** Freezes the switch while the first send is in flight, so a flip cannot change
@@ -168,15 +265,31 @@ export function lockDraftSubchats(pane: ParentNode, config: SessionConfig, locke
   // nothing brings them back: a failed spawn gets the row, so the draft keeps a switch
   // for the choice its config still carries. `_applied` stays, so switching off restores.
   if (hosts.length === 0) {
-    if (!locked) insertRow(pane, config);
+    if (!locked) {
+      if (routeHostsOf(pane).length === 0) insertRouteRow(pane, config);
+      insertRow(pane, config);
+      syncDraftSubchats(pane, config);
+    }
     return;
   }
-  if (locked) for (const host of hosts) host.querySelector<HTMLInputElement>("input")!.disabled = true;
-  else syncDraftSubchats(pane, config);
+  if (locked) for (const host of [...hosts, ...routeHostsOf(pane)]) host.querySelector<HTMLInputElement>("input")!.disabled = true;
+  else {
+    for (const host of routeHostsOf(pane)) host.querySelector<HTMLInputElement>("input")!.disabled = false;
+    syncDraftSubchats(pane, config);
+  }
 }
 
 export function unmountDraftSubchats(pane: ParentNode): void {
   if (_revealTimer) clearTimeout(_revealTimer);
   _revealTimer = null;
-  for (const host of hostsOf(pane)) host.remove();
+  for (const host of [...hostsOf(pane), ...routeHostsOf(pane)]) host.remove();
+}
+
+/** Repaints the open draft, if any, after the project's main chat or its title
+ *  changed under it: the pointer was re-read, or the chat closed or was renamed. */
+export function resyncOpenDraft(): void {
+  const pending = state.pendingNewSession;
+  const pane = document.getElementById("session-pane");
+  if (!pending || pending.firstMessageSent || !pane) return;
+  syncDraftSubchats(pane, pending.config);
 }

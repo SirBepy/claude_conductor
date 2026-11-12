@@ -28,6 +28,7 @@ fn sample_project(id: &str, path: &str) -> ProjectConfig {
         default_effort: None,
         subchat_check: Default::default(),
         subchat_writers: Default::default(),
+        main_chat_id: None,
     }
 }
 

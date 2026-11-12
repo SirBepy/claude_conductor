@@ -240,6 +240,9 @@ async fn fire_new_chat(
         state, &sid, &PathBuf::from(cwd), model, effort, &session.account_id, &now,
         auto_accept, character_id, false,
     );
+    // The mode was set before the row existed (see start_session), so the fired
+    // chat becomes its project's main chat here.
+    crate::daemon::subchats::main_pointer::reconcile(state);
     crate::sessions::persistence::save_snapshot_default(&state.registry);
 
     lifecycle::send_message(&session, &tag_schedule(prompt), true).await.map_err(|e| e.to_string())?;

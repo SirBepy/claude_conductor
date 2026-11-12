@@ -24,6 +24,7 @@ import { state, windowIdOf } from "./state";
 import { isRemote } from "../../shared/transport";
 import { pendingPromptSessionIds, isSubchatsOn } from "./permission-modal";
 import { mainChatInfo, showsSubs } from "./main-chat";
+import { listedAsProjectMain } from "./project-main-chats";
 import type { MainChatInfo } from "./main-chat";
 import { askingDotsHtml } from "./sidebar-row-visuals";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
@@ -139,7 +140,10 @@ export function buildSidebarEntries(
   for (const s of listSessions) {
     if (!showsSubs(s.session_id, state.sessions)) continue;
     mainInfo.set(s.session_id, mainChatInfo(s, state.sessions));
-    if (isSubchatsOn(s.session_id)) mainIds.add(s.session_id);
+    // One row per project: only the chat the project points at sits in Main chats. A
+    // second chat with the mode on stays in the group its state puts it in, still
+    // carrying its sub dots (`mainInfo` above).
+    if (isSubchatsOn(s.session_id) && listedAsProjectMain(s, state.sessions)) mainIds.add(s.session_id);
   }
   // A main chat that picked "Wait for them" is flagged closing by the daemon but is not
   // on its way out until its subs end: it keeps its place in Main chats (on the phone

@@ -22,12 +22,48 @@ import { refreshSessions } from "./sidebar";
 import { rebuildSidebar } from "./pending-pane-mount";
 import { beginDraftSpawn, endDraftSpawn, moveSpawnedChat } from "./pending-pane-spawn";
 import { leaveDraftDashboard } from "./project-dashboard/draft-dashboard";
-import { lockDraftSubchats } from "./draft-subchats";
+import { draftRouteTarget, lockDraftSubchats } from "./draft-subchats";
+import { loadHiddenSessions, saveHiddenSessions } from "./sessions-helpers";
 
 /** With no account registered there is nothing to pick, so the picker would
  *  open empty; point at Settings instead. The toast itself is the link. */
 function noAccountsGuidance(): void {
   showToast("Add an account in Settings first", { onClick: () => showView("settings") });
+}
+
+/** Sends a draft's first message to the project's main chat, opens that chat, and
+ *  drops the draft. Throws when the send failed, which hands the text back to the
+ *  composer; the failed bubble was already rolled back by the send. */
+async function sendToMainChat(
+  pane: HTMLElement,
+  placeholderId: string,
+  mainId: string,
+  cwd: string,
+  blocks: ContentBlock[],
+): Promise<void> {
+  // A frozen chat has no child and the daemon refuses to resume it, so a send to it
+  // wakes it first, as the chat's own composer does (active-session-composer.ts).
+  if (state.sessions.find((s) => s.session_id === mainId)?.frozen) {
+    try {
+      await invoke<void>("unfreeze_session", { sessionId: mainId });
+      const hidden = loadHiddenSessions();
+      if (hidden.delete(mainId)) saveHiddenSessions(hidden);
+    } catch (err) {
+      console.error("[sessions] unfreeze_session failed", err);
+      showToast(`Failed to unfreeze: ${err}`);
+      throw err;
+    }
+  }
+  const event = { type: "user_message", content: blocks, timestamp: BigInt(Date.now()) } as ChatEvent;
+  sessionEvents.pushSynthetic(mainId, event);
+  if (!(await sendWithFailureRecovery(mainId, cwd, blocks, event))) {
+    throw new Error("the main chat did not take the message");
+  }
+  // Same lazy imports as pending-pane-spawn: both modules import this file's neighbours.
+  const [{ selectSession }, { discardDraft }] = await Promise.all([import("./active-session"), import("./pending-flow")]);
+  await selectSession(mainId, pane);
+  // After the switch, so the draft is no longer the open pane and `discardDraft` leaves it alone.
+  if (state.pendingNewSession?.placeholderId === placeholderId) discardDraft(pane);
 }
 
 export interface PendingComposerDeps {
@@ -110,10 +146,12 @@ export function wirePendingComposer(
     onSchedule: async (blocks: ContentBlock[], fireAtUtcIso: string, recurrence) => {
       const prompt = blocksToText(blocks);
       if (!prompt.trim()) return;
+      // A draft in a project with a main chat schedules a message to that chat, the
+      // same place its first message would go, not a new chat of its own.
       const realId =
-        state.pendingNewSession?.placeholderId === placeholderId
+        (state.pendingNewSession?.placeholderId === placeholderId
           ? state.pendingNewSession.realId
-          : null;
+          : null) ?? draftRouteTarget(config)?.chat.session_id ?? null;
       // Same gate as the first send: a new chat with no account would only
       // fail at fire time, with nobody watching. Throwing (not returning)
       // because the composer clears the draft before calling this and only
@@ -180,6 +218,15 @@ export function wirePendingComposer(
         content: blocks,
         timestamp: BigInt(Date.now()),
       } as ChatEvent;
+
+      // The project has a main chat and this draft is not a plain chat: the message
+      // goes there, and the draft is done. Nothing is spawned, so none of the account
+      // checks below apply.
+      const route = !started ? draftRouteTarget(config) : null;
+      if (route) {
+        await sendToMainChat(pane, placeholderId, route.chat.session_id, project.path, blocks);
+        return;
+      }
       sessionEvents.pushSynthetic(targetSid, optimisticEvent);
 
       if (!started) {

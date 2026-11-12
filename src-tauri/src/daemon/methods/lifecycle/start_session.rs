@@ -216,6 +216,10 @@ pub(super) async fn start_session(
     // it at spawn left a started-but-never-messaged session busy
     // forever, deferring scheduled messages into it until they went
     // Missed and spinning the sidebar indefinitely (ai_todo 212).
+    // A new main chat's mode was set before its row existed, so the pointer could not
+    // find it then, and a resumed main chat registers live with its mode already on:
+    // this is the point either becomes its project's.
+    crate::daemon::subchats::main_pointer::reconcile(&state);
     crate::daemon::machines::publish_instances_changed(&state);
     crate::sessions::persistence::save_snapshot_default(&state.registry);
     Ok(json!({"session_id": sid}))

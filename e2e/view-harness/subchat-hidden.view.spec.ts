@@ -1,3 +1,4 @@
+// Reviewed 2026-11-12 (project main chat): the sidebar lists one Main chats row per project; this spec's rows have no project pointer, so every mode-on chat lists as before, and it passes.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
 // Reviewed 2026-11-08: view-more-menu.ts's live-chat ctx moved into chat-menu-ctx.ts (same fields, shared with the command palette); subs still have no row and this spec passed.
 // Reviewed 2026-11-05: a main chat waiting for its subs to close stays in Main chats with an hourglass, the sub list orders Finished by finish time, a sub header wears its list initials and the all-finished card names unmerged subs; this spec asserts none of those and it passes.

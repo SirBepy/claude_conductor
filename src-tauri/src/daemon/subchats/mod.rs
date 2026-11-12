@@ -36,6 +36,7 @@ pub mod held;
 pub(crate) mod jsonfile;
 mod reply;
 pub mod joe_message;
+pub mod main_pointer;
 pub mod merge_followup;
 pub mod pause;
 pub mod pending_merges;
@@ -268,6 +269,9 @@ pub fn apply_set_on(
 /// payload is empty on purpose: the client re-reads `list_subchats_on`, which is
 /// the one source and cannot disagree with it.
 pub fn publish_mode_changed(state: &DaemonState) {
+    // A flip is also a chat becoming (or ceasing to be) a project's main chat. First,
+    // so a client that re-reads on the nudge finds the pointer already moved.
+    main_pointer::reconcile(state);
     state.notifier.publish("subchats_on_changed", serde_json::json!({}));
 }
 
@@ -824,5 +828,28 @@ mod tests {
         plain.append_prompts(&mut plain_args);
         assert!(!plain.is_sub());
         assert_eq!(plain_args[1], "base", "mode off launches as today");
+    }
+
+    /// The menu flip (and the `start_session` rollback) end in `publish_mode_changed`,
+    /// which is where a chat becomes, or stops being, its project's main chat.
+    #[test]
+    fn turning_the_mode_on_points_the_project_at_the_chat_and_turning_it_off_clears_it() {
+        let _data = TempDataDir::new();
+        let mut settings = Settings::default();
+        let (id, _) = crate::settings::upsert_project_for_cwd(&mut settings, std::path::Path::new(env!("CARGO_MANIFEST_DIR")), "2026-11-12T00:00:00Z");
+        settings.projects.iter_mut().find(|p| p.id == id).unwrap().id = "proj-flip".into();
+        let st = DaemonState::new(new_session_map(), SettingsCache::new(settings));
+        let pointer = |st: &DaemonState| st.settings.snapshot().projects[0].main_chat_id.clone();
+        st.registry.upsert_interactive("flip-chat", std::path::Path::new("."), "proj-flip", "2026-11-12T10:00:00Z");
+        publish_mode_changed(&st);
+        assert_eq!(pointer(&st), None, "a plain chat is nobody's main chat");
+
+        crate::sessions::chat_config::set_subchats_on("flip-chat", true);
+        publish_mode_changed(&st);
+        assert_eq!(pointer(&st).as_deref(), Some("flip-chat"));
+
+        crate::sessions::chat_config::set_subchats_on("flip-chat", false);
+        publish_mode_changed(&st);
+        assert_eq!(pointer(&st), None, "a chat that is no longer a main chat is not pointed at");
     }
 }

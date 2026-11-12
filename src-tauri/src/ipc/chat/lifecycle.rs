@@ -565,6 +565,7 @@ mod tests {
             default_effort: effort.map(str::to_string),
             subchat_check: Default::default(),
             subchat_writers: Default::default(),
+            main_chat_id: None,
         }]
     }
 

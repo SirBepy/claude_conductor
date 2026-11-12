@@ -11,6 +11,7 @@ import { state, loadLastSelectedSession } from "./state";
 import { renderSidebar, refreshSessions } from "./sidebar";
 import { refreshPaneEmptyState } from "./sessions-wiring";
 import { loadSessionCharacters } from "./session-characters";
+import { loadProjectMainChats } from "./project-main-chats";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { rateLimitBanner } from "../../shared/chat/rate-limit-banner";
 import { selectSession } from "./active-session";
@@ -71,6 +72,7 @@ export async function initialLoadAndRestore(pane: HTMLElement, listEl: HTMLEleme
     refreshSessions(),
     isRemote() ? Promise.resolve(true) : invoke<boolean>("is_daemon_connected").catch(() => null),
     loadSessionCharacters(),
+    loadProjectMainChats(),
   ]);
   if (state.mountId === myMount) {
     state.daemonConnected = connected ?? null;

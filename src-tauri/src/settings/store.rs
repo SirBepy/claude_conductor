@@ -197,6 +197,7 @@ pub fn upsert_project_for_cwd(
         default_effort: None,
         subchat_check: Default::default(),
         subchat_writers: Default::default(),
+        main_chat_id: None,
     });
     settings.bump_generation();
     (id, true)
@@ -248,6 +249,7 @@ pub fn upsert_project_with_id_for_cwd(
         default_effort: None,
         subchat_check: Default::default(),
         subchat_writers: Default::default(),
+        main_chat_id: None,
     });
     settings.bump_generation();
 }
@@ -269,6 +271,22 @@ pub fn bind_project_account_for_cwd(
         return false;
     };
     p.preferred_account_id = Some(account_id.to_string());
+    settings.bump_generation();
+    true
+}
+
+/// Points `project_id` at its main chat (`None` clears it). False, with nothing
+/// changed and no generation bump, when the project is unknown or already holds
+/// that value, so a caller publishes the change only when it was one. Shared by
+/// the daemon's cache and the app process's persistence handler.
+pub fn set_project_main_chat(settings: &mut crate::types::Settings, project_id: &str, session_id: Option<&str>) -> bool {
+    let Some(p) = settings.projects.iter_mut().find(|p| p.id == project_id) else {
+        return false;
+    };
+    if p.main_chat_id.as_deref() == session_id {
+        return false;
+    }
+    p.main_chat_id = session_id.map(str::to_string);
     settings.bump_generation();
     true
 }

@@ -490,6 +490,10 @@ Build list (settled parts only):
    starts and cleared on close; the new-chat draft shows the "Goes to" line and the Plain chat
    switch; Main chats lists one row per project.
 
+Built (2026-11-12, sub "project-main-chat"): build item 6, D1. How it works is in
+docs/architecture/subchats.md ("A project knows its main chat"). The row layout is unchanged; the
+"project name only, dots under it" idea stays open below.
+
 Open (Joe's words; the main chat decides how to take them up):
 
 - **C2, a finished job's result.** "it could be handy to think of a good card like that, but we

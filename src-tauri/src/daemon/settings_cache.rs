@@ -48,6 +48,14 @@ impl SettingsCache {
         settings::bind_project_account_for_cwd(&mut g, cwd, account_id, now)
     }
 
+    /// Points a project at its main chat in the cache, for an instant read; false
+    /// when nothing changed. The caller publishes `project_main_chat_set` so the
+    /// app process persists the same pointer.
+    pub fn set_project_main_chat(&self, project_id: &str, session_id: Option<&str>) -> bool {
+        let mut g = self.inner.lock().unwrap();
+        settings::set_project_main_chat(&mut g, project_id, session_id)
+    }
+
     /// Mirror of `ipc::characters::ensure_session_character` but operating on
     /// the cache directly, so the daemon can assign an avatar to a
     /// remote-started session without a Tauri app process in the loop.
