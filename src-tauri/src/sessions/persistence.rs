@@ -148,6 +148,12 @@ pub fn save_snapshot(registry: &Registry, path: &Path) {
 /// Convenience wrapper: resolve the default snapshot path and call
 /// [`save_snapshot`]. Used by IPC handlers that mutate Interactive state.
 pub fn save_snapshot_default(registry: &Registry) {
+    // A test's registry holds made-up rows; with no `CC_DATA_DIR` this path is
+    // the real data folder's dev snapshot, which a dev daemon restores from.
+    #[cfg(test)]
+    if !crate::daemon::names_own_data_dir(std::env::var("CC_DATA_DIR").ok().as_deref()) {
+        return;
+    }
     let path = match crate::settings::paths::interactive_sessions_file() {
         Ok(p) => p,
         Err(e) => {

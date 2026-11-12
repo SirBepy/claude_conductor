@@ -303,6 +303,10 @@ pub async fn run_daemon_main() -> Result<(), Box<dyn std::error::Error + Send + 
     // enters the registry on adoption.
     state.reconcile_pending_questions().await;
 
+    // Sub-finished wakes a killed daemon had not delivered; needs the restored
+    // registry to tell a live target from a gone one.
+    crate::daemon::repo_channel_wake::restore_at_boot(&state, &app_data);
+
     // Subs held behind another sub: re-mark them as waiting and start any whose
     // earlier sub finished while the daemon was down. After the snapshot restore,
     // which is what brings their rows back.
