@@ -666,7 +666,10 @@ pub(crate) fn recover_lost_with(
         let Some(parent) = inst.subchat_of.as_deref() else { continue };
         let (after, after_name) = match brief.after.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
             Some(query) => {
-                let subs: Vec<Instance> = subs_of(state, parent).into_iter().filter(|s| s.session_id != id).collect();
+                // `after` named a sub that already existed when this one was spawned, so a
+                // sub started later with the same name is never the target.
+                let subs: Vec<Instance> =
+                    subs_of(state, parent).into_iter().filter(|s| s.session_id != id && s.started_at <= inst.started_at).collect();
                 match super::tool::resolve(&subs, query) {
                     Ok(target) => (Some(target.session_id.clone()), super::tool::label(target)),
                     // The sub it waited for cannot be named again: the watchdog
@@ -1487,6 +1490,28 @@ mod tests {
         release_ready(&st, launcher(&c)).await;
         assert_eq!(*c.lock().unwrap(), ["lh-lost"], "the one whose target finished starts; the next keeps waiting");
         assert!(is_held("lh-later"));
+    }
+
+    /// `after: "docs"` meant the `docs` that existed at spawn; a later sub reusing the
+    /// name must not become the target when the hold is rebuilt.
+    #[test]
+    fn a_rebuilt_hold_waits_for_the_sub_that_existed_at_spawn_not_a_later_one_with_the_same_name() {
+        let _d = TempDataDir::new();
+        let st = state();
+        let at = |id: &str, when: &str| st.registry.upsert_interactive(id, &here(), "proj", when);
+        at("rn-docs-old", "2026-11-01T00:00:00Z");
+        sub_of(&st, "rn-main", "rn-docs-old", "docs");
+        st.registry.set_subchat_finished("rn-docs-old", true);
+        at("rn-waiter", "2026-11-02T00:00:00Z");
+        lost_sub(&st, "rn-main", "rn-waiter", "footer", Some("docs"));
+        at("rn-docs-new", "2026-11-03T00:00:00Z");
+        sub_of(&st, "rn-main", "rn-docs-new", "docs");
+        st.registry.set_busy("rn-docs-new", true);
+
+        let (rebuilt, _) = recover_lost_with(&st, &no_transcript, &|i| i.session_id == "rn-waiter");
+        assert_eq!(rebuilt, ["rn-waiter"]);
+        let entry = all().into_iter().find(|h| h.sub_id == "rn-waiter").expect("held again");
+        assert_eq!(entry.after.as_deref(), Some("rn-docs-old"));
     }
 
     #[test]
