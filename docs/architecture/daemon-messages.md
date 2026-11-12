@@ -1,6 +1,6 @@
 # send_message kinds and rejected sends
 
-Read before editing `daemon/hooks_server/messages.rs`, `rejected_sends.rs`, `mcp/tool_schemas_coordination.rs` or `scripts/release-report.ps1`.
+Read before editing `daemon/hooks_server/messages/`, `rejected_sends.rs`, `mcp/tool_schemas_coordination.rs` or `scripts/release-report.ps1`.
 
 - **`send_message` requires a `kind`; the caps live in `daemon/hooks_server/messages.rs`.** The 12 kinds, per-kind `text` caps, which kinds take or refuse a `verdict`, and the report-only/correction-only/do_this-only fields are all enforced there (`validate_send`), mirrored in `mcp/tool_schemas_coordination.rs`. A kindless or over-cap call is `ok:false` naming the fix, never a decode error, because a chat spawned before the field existed learns it from that error. The daemon stores nothing about kinds: the chat reads them from the `tool_use` input in the transcript, and derives old-turn shrinking (only the newest turn is full size) from that same transcript, so nothing about it is persisted.
 
