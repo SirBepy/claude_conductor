@@ -18,7 +18,9 @@ export function closeNeedsApproval(sessionId: string): boolean {
   return state.sessions.some((s) => s.subchat_of === sessionId && !s.subchat_finished && !s.ended_at);
 }
 
-async function performClose(sessionId: string): Promise<void> {
+/** True only when the chat was actually closed: a held close and a failed close
+ *  both report false, so a caller can tell whether the old chat is still open. */
+async function performClose(sessionId: string): Promise<boolean> {
   const sess = state.sessions.find((s) => s.session_id === sessionId);
   // Closing cue: play the session character's "death" slot (best-effort;
   // per-slot toggle + mute enforced in the Rust command). Not while the close
@@ -31,20 +33,24 @@ async function performClose(sessionId: string): Promise<void> {
     // True when the daemon held the close for Joe's answer on the card. The chat
     // is then still open, so nothing below may treat it as closed.
     const held = await invoke<boolean | void>("clear_session", { sessionId });
-    if (held === true) return;
+    if (held === true) return false;
     document.dispatchEvent(new CustomEvent("cc:session-closed", { detail: { sessionId } }));
+    return true;
   } catch (err) {
     console.error("[sessions] close chat failed", err);
+    return false;
   }
 }
 
-export async function closeChat(sessionId: string): Promise<void> {
+/** Resolves true when the chat was closed, false when the user declined the
+ *  discard prompt, the daemon held the close or the close failed. */
+export async function closeChat(sessionId: string): Promise<boolean> {
   if (closeNeedsConfirm(sessionId)) {
     const ok = await askConfirm("A turn is in progress. Close and discard it?", { confirmLabel: "Discard" });
-    if (!ok) return;
+    if (!ok) return false;
     try { await invoke<void>("cancel_turn", { sessionId }); } catch { /* best-effort */ }
   }
-  await performClose(sessionId);
+  return performClose(sessionId);
 }
 
 /** Like closeChat, but always confirms first (not just when a turn is busy) -

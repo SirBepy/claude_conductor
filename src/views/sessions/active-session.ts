@@ -148,7 +148,9 @@ registerCta("pickup", {
     if (!sess) return;
     const project = { path: String(sess.cwd ?? ""), name: projectName(sess) };
     const config = await resolveNewChatConfig(project.path);
-    await closeChat(sess.session_id);
+    // A declined prompt, a held close or a failed close leaves the old chat open;
+    // starting the new one then would run the same work twice.
+    if (!(await closeChat(sess.session_id))) return;
     state.launchNewChatCallback?.(project, { ...config, initialMessage: "/pickup" });
   },
 });

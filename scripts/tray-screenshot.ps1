@@ -23,7 +23,7 @@
 .PARAMETER OutPath
     Where to write the cropped+zoomed PNG. Defaults to a timestamped file
     under .for_bepy/screenshots/<pid>-<start-ticks>/ (this session's
-    disposable screenshot scratch subfolder, scoped for /close's purge).
+    disposable screenshot scratch subfolder, scoped to the session that wrote it).
 
 .PARAMETER TrayWidth
     Width in pixels of the crop, measured from the right edge of the taskbar
