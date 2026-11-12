@@ -251,7 +251,6 @@ async function openCard(page: Page, opts: Record<string, unknown>, question: Rec
     (window as unknown as { __res: unknown }).__res = {};
     mod.renderQuestionUI({
       questions: [q],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

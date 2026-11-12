@@ -38,7 +38,6 @@ async function openSingleQuestionCard(page: import("@playwright/test").Page): Pr
           options: [{ label: "Red" }, { label: "Blue" }],
         },
       ],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

@@ -28,7 +28,6 @@ test("mounting a 3-question card renders every panel's real content, not just th
         { question: "Which features?", header: "Features", multiSelect: true, options: [{ label: "X" }, { label: "Y" }] },
         { question: "Anything else?", header: "Notes", options: [{ label: "Nope" }] },
       ],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

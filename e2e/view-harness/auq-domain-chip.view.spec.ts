@@ -38,7 +38,6 @@ async function mount(page: Page, question: typeof TERSE) {
     const mod = await import("/views/sessions/permission-modal/question-ui.ts");
     mod.renderQuestionUI({
       questions: [q],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

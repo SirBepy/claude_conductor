@@ -22,7 +22,6 @@ async function openReviewNote(page: import("@playwright/test").Page) {
         { question: "First?", header: "One", options: [{ label: "A" }] },
         { question: "Second?", header: "Two", options: [{ label: "B" }] },
       ],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

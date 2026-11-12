@@ -30,7 +30,6 @@ test("answer bar stays visible below scrolled option content", async ({ page }) 
         domain: "arch",
         options: opts,
       }],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",

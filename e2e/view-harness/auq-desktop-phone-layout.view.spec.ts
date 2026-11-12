@@ -177,7 +177,6 @@ test.describe("view-harness / desktop question card in the phone layout", () => 
       const mod = await import("/views/sessions/permission-modal/question-ui.ts");
       mod.renderQuestionUI({
         questions: q as never,
-        titleIcon: "ph-chat-circle-dots",
         submitLabel: "Submit",
         submitIcon: "ph-paper-plane-right",
         cancelLabel: "Skip",

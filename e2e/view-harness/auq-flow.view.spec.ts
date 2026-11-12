@@ -51,7 +51,6 @@ async function openCard(page: import("@playwright/test").Page): Promise<void> {
           options: [{ label: "Nope" }],
         },
       ],
-      titleIcon: "ph-chat-circle-dots",
       submitLabel: "Submit",
       submitIcon: "ph-paper-plane-right",
       cancelLabel: "Skip",
@@ -332,7 +331,6 @@ test.describe("view-harness / AUQ single-question card has no review step", () =
       window.__auqResult = {};
       mod.renderQuestionUI({
         questions: [{ question: "Deploy now?", header: "Deploy", options: [{ label: "Yes" }, { label: "No" }] }],
-        titleIcon: "ph-chat-circle-dots",
         submitLabel: "Submit",
         submitIcon: "ph-paper-plane-right",
         cancelLabel: "Skip",
