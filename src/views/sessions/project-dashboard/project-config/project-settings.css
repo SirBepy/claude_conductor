@@ -29,6 +29,9 @@
   font-size: var(--fs-body);
 }
 
+/* A number beside its label, not a full-width field. */
+.view-project-settings .ps-line .inline-input[type="number"] { width: 84px; flex: none; }
+
 .acc-row-control { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .acc-row-control .inline-select { flex: 1; min-width: 0; }
 .acc-row-control .account-icon-badge, .acc-row-control > .ph-user-circle { flex-shrink: 0; }

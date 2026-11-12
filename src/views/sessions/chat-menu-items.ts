@@ -20,6 +20,7 @@ import {
   saveHiddenSessions,
 } from "./sessions-helpers";
 import { isRawViewEnabled, setRawViewEnabled } from "../../shared/chat/message-filter-pref";
+import { showToast } from "../../shared/toast";
 import { state } from "./state";
 import { changeCharacterForSession, changeAccountForSession } from "./active-session-account";
 import { sendWithFailureRecovery } from "./send-with-failure-recovery";
@@ -220,6 +221,31 @@ export function buildChatItems(ctx: ChatMenuCtx): ItemDesc[] {
               : (ctx.mirrored ? NOT_ON_THIS_MACHINE
                 : (ctx.subchatsOn ? "A main chat cannot be a sub. Turn Use subchats off first." : undefined))),
         },
+    // Rare and deliberate, so menu only. Also how an old chat picks up new prompt
+    // rules, since its prompt is snapshotted until a compaction. The daemon
+    // refuses what the menu cannot know (busy, a card open, no usage yet) and
+    // answers with the reason. A sub has no such item: depth 1, never compacted.
+    ...(ctx.isSub ? [] : [{
+      icon: "arrows-in-line-vertical",
+      label: "Compact now",
+      run: isDraft || !sessionId || !ctx.subchatsOn || ctx.mirrored || isRemote()
+        ? undefined
+        : async () => {
+            try {
+              const res = await invoke<{ ok: boolean; error?: string }>("compact_now", { sessionId });
+              showToast(res.ok ? "Compacting this chat." : (res.error ?? "Could not compact this chat."));
+            } catch (err) {
+              showToast(`Could not compact this chat: ${err}`);
+            }
+            ctx.onAfterAction?.();
+          },
+      disabledReason: isDraft
+        ? "Not available until the chat starts"
+        : (!sessionId ? "No session"
+          : (!ctx.subchatsOn ? "Only a main chat (Use subchats on) is compacted"
+            : (ctx.mirrored ? NOT_ON_THIS_MACHINE
+              : (isRemote() ? "Not available on the phone" : undefined)))),
+    }]),
     // Rare, so here and not on the card: a question card left waiting with
     // nothing that could answer it is cleared all at once, each one settled as
     // its own Skip would be.

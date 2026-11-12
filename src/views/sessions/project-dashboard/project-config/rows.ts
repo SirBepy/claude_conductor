@@ -4,6 +4,9 @@ import { api } from "../../../../shared/api";
 import type { Account } from "../../../../shared/api";
 import { accountIconBadgeHtml, isApiCreditAccount } from "../../../../shared/account-chip";
 import { invoke } from "../../../../shared/ipc";
+import { updateSettings } from "../../../../shared/settings-update";
+import { kToTokens, readAutoCompact, tokensToK, withAutoCompact } from "../../../../shared/auto-compact";
+import type { AutoCompact } from "../../../../shared/auto-compact";
 import { forgetTicketTracker, normalizeTrelloBoard } from "../../../../shared/chat/ticket-refs";
 import type { SubchatCheck, TrackerInfo } from "../../../../types/ipc.generated";
 import type { ProjectCfg } from "./project-cfg";
@@ -197,6 +200,54 @@ export function renderSubchatCheckRow(cwd: string): Promise<void> {
     toast: "Subs here are checked the new way from their next finish.",
     what: "sub check setting",
   });
+}
+
+/** Compaction of this project's main chats: a switch and a size in K tokens.
+ *  Stored in the settings' `autoCompact.projects[<project id>]`, which overrides
+ *  Settings > Chat defaults field by field, so each field shows the value in
+ *  force (this project's, else the global one). A project with no config yet is
+ *  created on first change via `ensureProject`. */
+export async function renderCompactionRow(cwd: string, knownId?: string): Promise<void> {
+  const toggle = document.getElementById("compactOn") as HTMLInputElement | null;
+  const sizeInput = document.getElementById("compactK") as HTMLInputElement | null;
+  if (!cwd || !toggle || !sizeInput) return;
+  const [projects, settings] = await Promise.all([
+    api.listProjects() as unknown as Promise<ProjectCfg[]>,
+    api.getSettings().then((s) => (s ?? {}) as Record<string, unknown>),
+  ]);
+  const proj = projects.find((p) => p.path === cwd);
+  // A path the list does not match literally (case, slashes, a worktree) is
+  // registered under another id by ensureProject; the id it gave last time is
+  // passed back so the redraw reads the entry just written, not the global one.
+  const projectId = proj?.id ?? knownId ?? null;
+  const current = readAutoCompact(settings, projectId);
+  toggle.checked = current.on;
+  sizeInput.value = String(tokensToK(current.tokens));
+
+  const save = (patch: Partial<AutoCompact>, toast: string): void => {
+    void (async () => {
+      toggle.disabled = sizeInput.disabled = true;
+      let id = projectId;
+      try {
+        const target = id ?? (await api.ensureProject(cwd)).id;
+        id = target;
+        await updateSettings((fresh) => withAutoCompact(fresh, target, patch));
+        showToast(toast);
+      } catch (e) {
+        console.error("[project-settings] update compaction failed", e);
+        showToast(`Could not update compaction: ${e}`);
+      } finally {
+        toggle.disabled = sizeInput.disabled = false;
+        await renderCompactionRow(cwd, id ?? undefined);
+      }
+    })();
+  };
+  toggle.onchange = () => save({ on: toggle.checked }, toggle.checked ? "Main chats here are compacted automatically." : "Main chats here are no longer compacted automatically.");
+  sizeInput.onchange = () => {
+    const tokens = kToTokens(sizeInput.value);
+    if (tokens === null) { sizeInput.value = String(tokensToK(current.tokens)); return; }
+    save({ tokens }, "Compaction size updated.");
+  };
 }
 
 const TRACKER_LABEL: Record<string, string> = { shortcut: "Shortcut", linear: "Linear", trello: "Trello" };

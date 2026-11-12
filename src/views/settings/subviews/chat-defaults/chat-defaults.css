@@ -9,6 +9,8 @@
   margin: 0 0 12px;
 }
 
+.view-settings-chat-defaults .cd-compact-k { width: 96px; }
+
 .view-settings-chat-defaults .cd-models-input {
   width: 100%;
   box-sizing: border-box;
