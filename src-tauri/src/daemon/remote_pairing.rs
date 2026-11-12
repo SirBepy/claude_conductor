@@ -126,6 +126,7 @@ mod tests {
             app_data,
             router: crate::daemon::rpc::Router::new(),
             stt: crate::daemon::stt::SttSupervisor::new(std::env::temp_dir()),
+            send_dedupe: Default::default(),
         })
     }
 
