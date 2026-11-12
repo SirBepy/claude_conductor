@@ -11,9 +11,9 @@
 //! - every user line (Joe's messages, relays, question answers), with a large
 //!   pasted image elided the way `read_page` elides a screenshot result;
 //! - notifications and compaction boundaries (both count as row boundaries);
-//! - top-level Conductor tool calls (send_message, update_message, questions,
-//!   write_plan, report_turn_status, drafts, subchat, spawn_chat, ...) and
-//!   their results, except the browser tools, whose results are screenshots;
+//! - the top-level Conductor tool calls some card reads (see `CARD_TOOLS`) and
+//!   their results; the others (previews, mockups, the browser) carry large
+//!   inputs or results no card reads;
 //! - the builtin AskUserQuestion (older transcripts) and its result;
 //! - edit tools' calls with only their path, for the Links and files card.
 //!
@@ -30,8 +30,21 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+/// The Conductor tools a dashboard card reads a row of: messages and their
+/// revisions, questions, plans, turn ends, drafts, and the hand-offs the
+/// Answers card pairs with their answers.
+const CARD_TOOLS: [&str; 9] = [
+    "send_message",
+    "update_message",
+    "ask_user_question",
+    "write_plan",
+    "report_turn_status",
+    "write_draft",
+    "pr_preview",
+    "spawn_chat",
+    "subchat",
+];
 const CONDUCTOR_PREFIX: &str = "mcp__cc_conductor__";
-const BROWSER_PREFIX: &str = "mcp__cc_conductor__browser_";
 const BUILTIN_ASK: &str = "AskUserQuestion";
 const EDIT_TOOLS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 /// Transcripts whose scan stays cached. A window holds one chat at a time, so a
@@ -53,7 +66,7 @@ static CACHE: Mutex<Option<(u64, HashMap<PathBuf, Scan>)>> = Mutex::new(None);
 
 /// A tool call the durable cards read, judged by name alone.
 fn kept_tool(name: &str) -> bool {
-    (name.starts_with(CONDUCTOR_PREFIX) && !name.starts_with(BROWSER_PREFIX)) || name == BUILTIN_ASK
+    name == BUILTIN_ASK || name.strip_prefix(CONDUCTOR_PREFIX).is_some_and(|t| CARD_TOOLS.contains(&t))
 }
 
 /// The event as the digest keeps it, or None when no durable card reads it.
@@ -124,13 +137,16 @@ fn advance(path: &Path, scan: &mut Scan) -> Result<(), String> {
     f.seek(SeekFrom::Start(scan.scanned)).map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(f);
     let mut offset = scan.scanned;
-    let mut line = String::new();
+    let mut bytes = Vec::new();
     loop {
-        line.clear();
-        let n = reader.read_line(&mut line).map_err(|e| e.to_string())?;
-        if n == 0 || !line.ends_with('\n') {
+        bytes.clear();
+        let n = reader.read_until(b'\n', &mut bytes).map_err(|e| e.to_string())?;
+        if n == 0 || bytes.last() != Some(&b'\n') {
             break;
         }
+        // A line that is not UTF-8 parses to nothing, as in `read_page`, and
+        // never stops the scan of the lines after it.
+        let line = std::str::from_utf8(&bytes).unwrap_or("");
         let trimmed = line.trim_end_matches(['\r', '\n']);
         if !trimmed.trim().is_empty() {
             let kept: Vec<ChatEvent> = parse_line(trimmed)
@@ -153,23 +169,28 @@ fn advance(path: &Path, scan: &mut Scan) -> Result<(), String> {
 /// The kept events of every line that starts before `before_seq` (a history
 /// page's `oldest_seq`), oldest first; every line when it is None.
 pub fn read_digest(path: &Path, before_seq: Option<u64>) -> Result<Vec<ChatEvent>, String> {
+    // The scan leaves the cache for the file read, so a first scan of a long
+    // transcript never holds up another chat's digest. Two windows on the same
+    // chat at once each scan, and the later one is kept.
+    let (mut scan, now) = {
+        let mut guard = CACHE.lock().unwrap_or_else(|p| p.into_inner());
+        let (clock, scans) = guard.get_or_insert_with(|| (0, HashMap::new()));
+        *clock += 1;
+        (scans.remove(path).unwrap_or_default(), *clock)
+    };
+    scan.used = now;
+    advance(path, &mut scan)?;
+    let upper = before_seq.unwrap_or(u64::MAX);
+    let out = scan.events.iter().filter(|(o, _)| *o < upper).map(|(_, e)| e.clone()).collect();
     let mut guard = CACHE.lock().unwrap_or_else(|p| p.into_inner());
-    let (clock, scans) = guard.get_or_insert_with(|| (0, HashMap::new()));
-    *clock += 1;
-    let now = *clock;
-    if !scans.contains_key(path) && scans.len() >= CACHE_MAX {
+    let (_, scans) = guard.get_or_insert_with(|| (0, HashMap::new()));
+    if scans.len() >= CACHE_MAX {
         if let Some(oldest) = scans.iter().min_by_key(|(_, s)| s.used).map(|(p, _)| p.clone()) {
             scans.remove(&oldest);
         }
     }
-    let scan = scans.entry(path.to_path_buf()).or_default();
-    scan.used = now;
-    if let Err(e) = advance(path, scan) {
-        scans.remove(path);
-        return Err(e);
-    }
-    let upper = before_seq.unwrap_or(u64::MAX);
-    Ok(scan.events.iter().filter(|(o, _)| *o < upper).map(|(_, e)| e.clone()).collect())
+    scans.insert(path.to_path_buf(), scan);
+    Ok(out)
 }
 
 /// [`read_digest`] addressed by session id, with the predecessor a `/respawn`
@@ -244,6 +265,8 @@ mod tests {
             result("p1", "{\"ok\":true}"),
             assistant_tool("mcp__cc_conductor__browser_take_screenshot", "b1", serde_json::json!({})),
             result("b1", "png"),
+            assistant_tool("mcp__cc_conductor__show_preview", "v1", serde_json::json!({"html":"<p>big</p>"})),
+            result("v1", "{\"ok\":true}"),
             assistant_tool("Write", "w1", serde_json::json!({"file_path":"b.ts","content":"x".repeat(10_000)})),
             result("w1", "written"),
             assistant_tool("mcp__cc_conductor__send_message", "m1", serde_json::json!({"kind":"answer","text":"Yes"})),
@@ -251,7 +274,7 @@ mod tests {
         ]);
         let evs = read_digest(&p, None).unwrap();
         // A kept result's line keeps its blank user message too; a dropped
-        // result's line (Read, the screenshot, Write) leaves nothing.
+        // result's line (Read, the screenshot, the preview, Write) leaves nothing.
         assert_eq!(names(&evs), vec![
             "user",
             "use:mcp__cc_conductor__write_plan",
@@ -282,6 +305,18 @@ mod tests {
         write!(f, "{{\"type\":\"user\"").unwrap();
         drop(f);
         assert_eq!(read_digest(&p, None).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_line_that_is_not_utf8_is_skipped_and_the_scan_goes_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("t.jsonl");
+        let mut f = File::create(&p).unwrap();
+        writeln!(f, "{}", user("before")).unwrap();
+        f.write_all(b"{\"type\":\"user\",\"x\":\"\xff\xfe\"}\n").unwrap();
+        writeln!(f, "{}", user("after")).unwrap();
+        drop(f);
+        assert_eq!(read_digest(&p, None).unwrap().len(), 2);
     }
 
     #[test]

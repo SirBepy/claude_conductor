@@ -27,6 +27,9 @@ const MAX_HOPS = 8;
 /** Events replayed between yields, so a long digest never holds the window. */
 const CHUNK = 256;
 const SILENT = { silent: true, skipScroll: true } as const;
+/** Tries after a failed digest read, each waiting RETRY_MS longer than the last. */
+const MAX_RETRIES = 3;
+const RETRY_MS = 3000;
 
 interface DigestReply {
   events: ChatEvent[];
@@ -36,6 +39,9 @@ interface DigestReply {
 type Cursor = NonNullable<ReturnType<typeof sessionEvents.pageCursor>>;
 
 interface Built {
+  /** The chat it was built for: a pane renderer moved to another chat must
+   *  never show this one's rows. */
+  sid: string;
   /** The undrawn renderer: its first `rows` rows are the prefix. */
   shadow: ChatRenderer;
   rows: number;
@@ -71,6 +77,8 @@ export class HistoryPrefixSource {
   /** The current build's number (dispose takes one too): a build holding an
    *  older number stops at its next await. */
   private gen = 0;
+  /** Failed digest reads since the last built prefix. */
+  private retries = 0;
 
   constructor(private readonly renderer: ChatRenderer, private readonly changed: () => void) {}
 
@@ -91,7 +99,7 @@ export class HistoryPrefixSource {
 
   private prefix(): HistoryPrefix | null {
     const b = this.built;
-    if (!b) return null;
+    if (!b || b.sid !== this.renderer.sessionId || this.renderer.hydrating) return null;
     const plans = b.shadow.dashPlans.filter((p) => b.planIds.has(p.id));
     // The loaded page's first plan was folded into the last plan from above the
     // page when the undrawn replay made no plan of its own for that call.
@@ -161,7 +169,16 @@ export class HistoryPrefixSource {
       }
     } catch {
       // No digest (a paired machine's chat, a transcript gone): the zones keep
-      // reading the loaded page, as they always did.
+      // reading the loaded page, as they always did. A daemon not up yet or a
+      // transcript mid-write can pass, so a few later tries follow.
+      if (gen === this.gen && this.retries < MAX_RETRIES) {
+        this.retries++;
+        setTimeout(() => {
+          if (gen !== this.gen) return;
+          this.key = null;
+          this.changed();
+        }, RETRY_MS * this.retries);
+      }
       return;
     }
     // The page grew upward while the digest loaded: the next sync builds again.
@@ -186,18 +203,25 @@ export class HistoryPrefixSource {
       handleChatEvent(shadow, ev, SILENT);
       this.changed();
     });
-    const abandon = (): void => {
-      stopLive();
-      shadow.detach();
-    };
-    if (!(await this.feed(shadow, above, gen))) return abandon();
-    const rows = shadow.messages.length;
-    if (!(await this.feed(shadow, loaded, gen))) return abandon();
-    for (const ev of waiting) handleChatEvent(shadow, ev, SILENT);
-    live = true;
-    applySkipMarks(shadow, this.renderer.paginator.skipMarks);
-    this.drop();
-    this.built = { shadow, rows, planIds, stopLive };
-    this.changed();
+    let installed = false;
+    try {
+      if (!(await this.feed(shadow, above, gen))) return;
+      const rows = shadow.messages.length;
+      if (!(await this.feed(shadow, loaded, gen))) return;
+      for (const ev of waiting) handleChatEvent(shadow, ev, SILENT);
+      live = true;
+      applySkipMarks(shadow, this.renderer.paginator.skipMarks);
+      this.drop();
+      this.built = { sid, shadow, rows, planIds, stopLive };
+      this.retries = 0;
+      installed = true;
+      this.changed();
+    } finally {
+      // Superseded, or a replay that threw: nothing may keep listening.
+      if (!installed) {
+        stopLive();
+        shadow.detach();
+      }
+    }
   }
 }

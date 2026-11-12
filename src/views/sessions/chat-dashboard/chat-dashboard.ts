@@ -9,6 +9,7 @@
 import type { ChatRenderer } from "../../../shared/chat/chat-renderer";
 import { deriveDashboard, deriveStrip, sectionOn, type DashboardState, type DoneTask, type ZoneId } from "../../../shared/chat/dashboard/dashboard-model";
 import { HistoryPrefixSource } from "./history-prefix-source";
+import type { DashboardRows } from "../../../shared/chat/dashboard/history-prefix";
 import { handleAttachmentClick, handleCopyClick, handlePastedLogClick, handleSlashClick, handleTableFullscreen } from "../../../shared/chat/chat-click-handlers";
 import { createHandleBlockImageClick } from "../../../shared/chat/chat-renderer-click-handlers";
 import { handleCommitRefClick, handleCommitRefKeydown, resolveCommitRefs } from "../../../shared/chat/commit-refs";
@@ -359,14 +360,14 @@ export class ChatDashboard {
     const now = Date.now();
     if (this.wasBusy && !busy) this.idleAt = now;
     this.wasBusy = busy;
-    this.ensureDrafts();
-    const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
-    this.subCounts = countSubs(subItems);
-    this.refreshFinishTimes(subItems);
     // The zones read the chat's whole history (older rows rebuilt from the
     // transcript's digest); Joe's strip keeps to the loaded rows, whose pasted
     // images are whole, where the digest's large ones are elided.
     const rows = this.history.rows();
+    this.ensureDrafts(rows.messages);
+    const subItems = collectSubItems(this.renderer.sessionId ?? "", state.sessions, this.finishedAt);
+    this.subCounts = countSubs(subItems);
+    this.refreshFinishTimes(subItems);
     const derived = deriveDashboard({
       messages: rows.messages,
       plans: rows.plans,
@@ -406,10 +407,12 @@ export class ChatDashboard {
 
   /** Reads the drafts store whenever the chat names a draft the last read did
    *  not know, so a new draft shows the store's own version label at once. */
-  private ensureDrafts(): void {
+  private ensureDrafts(messages: DashboardRows["messages"]): void {
     const sid = this.renderer.sessionId;
     if (!sid || !sectionOn(readSections(getSettings()), "drafts")) return;
-    const ids = draftIdsOf(this.renderer.messages);
+    // Every row the Drafts card reads, those above the loaded page too: a draft
+    // deleted from the store is told apart by its id being asked for.
+    const ids = draftIdsOf(messages);
     const sig = ids.join(",");
     if (sig === this.draftSig || Date.now() < this.draftRetryAt) return;
     this.draftSig = sig;
@@ -444,7 +447,7 @@ export class ChatDashboard {
         if (this.draftsTimer !== null) return;
         this.draftsTimer = setTimeout(() => {
           this.draftsTimer = null;
-          void this.loadDrafts(draftIdsOf(this.renderer.messages));
+          void this.loadDrafts(draftIdsOf(this.history.rows().messages));
         }, 150);
       });
       if (this.disposed) un();

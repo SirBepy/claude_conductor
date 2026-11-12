@@ -25,6 +25,7 @@ const SEND = "mcp__cc_conductor__send_message";
 const PLAN = "mcp__cc_conductor__write_plan";
 const STATUS = "mcp__cc_conductor__report_turn_status";
 const ASK = "mcp__cc_conductor__ask_user_question";
+const DRAFT = "mcp__cc_conductor__write_draft";
 const ACK = '{"acknowledged":true,"note":"the card is now waiting for their answer."}';
 /** The newest page, in events: what `load_history_page` hands the window. */
 const PAGE = 200;
@@ -42,7 +43,7 @@ const answerEvent = (cardId, text, ts) => ({
  *  answered (still waiting on him) and one he answered only in the last job.
  *  The last job is long, so the newest page starts inside it, after its plan's
  *  first call. */
-function foreverTranscript(jobs, filler) {
+function foreverTranscript(jobs, filler, { draft = false } = {}) {
   const evs = [];
   let t = 1_762_000_000_000;
   const at = () => (t += 1000);
@@ -57,6 +58,11 @@ function foreverTranscript(jobs, filler) {
     const last = j === jobs - 1;
     evs.push(userEvent(`Job ${j}: can you sort out part ${j}?`, at()));
     call(PLAN, { steps: [{ text: `Read part ${j}`, status: "active" }, { text: `Fix part ${j}`, status: "pending" }] });
+    if (draft && j === 0) {
+      const d = id("d");
+      const stored = { id: "draft-old", topic: "Old note", variants: [{ recipient: "Ana", current: 1, versions: [{ n: 1, body: "Hi Ana", author: "ai" }] }] };
+      evs.push(toolUseEvent(DRAFT, { action: "add", topic: "Old note", recipient: "Ana", body: "Hi Ana" }, d, at()), result(d, JSON.stringify({ ok: true, draft: stored }), at()));
+    }
     if (j === 1 || j === 2) {
       const q = id("q");
       evs.push(toolUseEvent(ASK, { questions: [{ question: `Which way for part ${j}?`, header: "Way", options: [{ label: "A" }, { label: "B" }] }] }, q, at()), result(q, ACK, at()));
@@ -78,6 +84,9 @@ function foreverTranscript(jobs, filler) {
   return evs;
 }
 
+/** The Conductor tools chat/dashboard_digest.rs keeps (its CARD_TOOLS). */
+const CARD_TOOLS = ["send_message", "update_message", "ask_user_question", "write_plan", "report_turn_status", "write_draft", "pr_preview", "spawn_chat", "subchat"];
+
 /** What chat/dashboard_digest.rs keeps of a transcript. */
 function digestOf(events) {
   const kept = new Set();
@@ -85,7 +94,7 @@ function digestOf(events) {
   for (const ev of events) {
     if (ev.type === "user_message" || ev.type === "notification" || ev.type === "compacted") out.push(ev);
     else if (ev.type === "tool_use" && !ev.parent_tool_use_id) {
-      if (ev.tool_name.startsWith("mcp__cc_conductor__") && !ev.tool_name.startsWith("mcp__cc_conductor__browser_")) {
+      if (ev.tool_name === "AskUserQuestion" || CARD_TOOLS.some((t) => ev.tool_name === `mcp__cc_conductor__${t}`)) {
         kept.add(ev.id);
         out.push(ev);
       } else if (["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(ev.tool_name)) {
@@ -114,6 +123,8 @@ function serve(events, { paged, digest = null }) {
       return digest ? digest.then(reply) : Promise.resolve(reply());
     }
     if (cmd === "list_channel_messages") return Promise.resolve({ messages: [] });
+    // The store knows no draft: an old one was deleted from the Drafts panel.
+    if (cmd === "list_message_drafts") return Promise.resolve({ drafts: [] });
     if (cmd === "get_skipped_question_marks" || cmd === "list_subchat_cards" || cmd === "list_previews" || cmd === "ask_list_threads") return Promise.resolve([]);
     return Promise.resolve(undefined);
   });
@@ -220,6 +231,40 @@ describe("dashboard over a forever chat with only the newest page loaded", { tim
     sessionEvents.pushSynthetic(paged.r.sessionId, answerEvent(q1, "Q: Which way for part 1?\nA: A", 0));
     await settled(() => expect(paged.pane.querySelector(".cdash-waiting")).toBeNull());
     dash.dispose();
+  });
+});
+
+describe("history above the page, edge cases", { timeout: 30000 }, () => {
+  it("an old draft deleted from the store stays off the Drafts card, as with every event loaded", async () => {
+    const events = foreverTranscript(30, 12, { draft: true });
+    const full = await openChat(events, { paged: false });
+    const fullDash = new ChatDashboard(full.pane, full.r);
+    const paged = await openChat(events, { paged: true });
+    const pagedDash = new ChatDashboard(paged.pane, paged.r);
+    // The old question shows once the prefix is built, so the draft row is in by then.
+    await settled(() => expect(paged.pane.querySelector(".cdash-waiting")?.textContent).toContain("Which way for part 1?"));
+    await settled(() => expect(paged.calls.digests.length).toBeGreaterThan(0));
+    await new Promise((res) => setTimeout(res, 200));
+    expect(full.pane.querySelector(".cdash-drafts")).toBeNull();
+    expect(paged.pane.querySelector(".cdash-drafts")).toBeNull();
+    fullDash.dispose();
+    pagedDash.dispose();
+  });
+
+  it("a prefix built for one chat never joins another chat's rows", async () => {
+    const events = foreverTranscript(30, 12);
+    const paged = await openChat(events, { paged: true });
+    const { HistoryPrefixSource } = await import("../src/views/sessions/chat-dashboard/history-prefix-source.ts");
+    const source = new HistoryPrefixSource(paged.r, () => {});
+    source.rows();
+    await settled(() => expect(source.rows().messages.length).toBeGreaterThan(paged.r.messages.length));
+    // The pane's renderer moves to a chat whose history is still replaying (a
+    // derive can run then: the Answers card or a preview asks for one).
+    await paged.r.attach("another-chat");
+    paged.r.hydrating = true;
+    const rows = source.rows();
+    expect(rows.messages).toBe(paged.r.messages);
+    source.dispose();
   });
 });
 

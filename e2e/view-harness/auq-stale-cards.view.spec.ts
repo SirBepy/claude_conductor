@@ -8,7 +8,7 @@
 // Reviewed 2026-11-12 (shown badly): chat-dashboard.ts adds a contextmenu listener for the card menu's "Shown badly" item (chat-shown-badly.view.spec.ts covers it); nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12: the sub menu's Close handler is now an async wrapper around closeChat; nothing this spec asserts changed (not run here).
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed. It passes.
-// Reviewed 2026-11-12 (forever chat B2): the dashboard adds rows rebuilt from the transcript digest above the loaded page, only when the page reports older history; this spec loads its whole chat in one page, nothing it asserts changed, and it passes.
+// Reviewed 2026-11-12 (forever chat B2): the dashboard adds rows rebuilt from the transcript digest above the loaded page, only when the page reports older history, and the drafts store read names those rows' drafts too; this spec loads its whole chat in one page, nothing it asserts changed, and it passes.
 // Reviewed 2026-11-12 (Compact now): the chat menu gained a Compact now item; Dismiss open questions is unchanged and this spec passes.
 // Reviewed 2026-11-12: the card header's asker chip became an avatar for a sub and a "Main chat" chip for a main chat (C5, asker-face.ts); this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-12 (honest sub states): subs gained queued/paused/usage-limit/stopped kinds with a dim ring and glyph, an avatar hover card, the Plan foot's sub counts and a glowing main-chat ring; nothing this spec asserts changed, and it passes.
