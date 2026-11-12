@@ -31,6 +31,13 @@ describe("dashboard.html CSP", () => {
     expect(connectSrcMatch).not.toBeNull();
   });
 
+  it("lets the phone page fetch the tunnel's journal port (its own port + 1)", () => {
+    // link-journal.ts reads http://127.0.0.1:<page port + 1>/, a different origin from the page,
+    // so 'self' does not cover it and a missing loopback entry blocks it silently.
+    const sources = connectSrcMatch ? connectSrcMatch[1] : "";
+    expect(sources).toContain("http://127.0.0.1:*");
+  });
+
   it("permits Tauri 2 IPC endpoints", () => {
     const sources = connectSrcMatch ? connectSrcMatch[1] : "";
     // Tauri 2 on Windows routes invoke() to http://ipc.localhost; macOS uses
