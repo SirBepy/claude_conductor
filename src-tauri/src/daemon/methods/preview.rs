@@ -68,6 +68,32 @@ pub fn register_preview(router: &mut Router, state: Arc<DaemonState>) {
             }
         });
     }
+    // Joe's message to one element of a shared mockup. The daemon
+    // picks the chat that owns the element (a region's writer, the layout sub for
+    // "shell", else the main chat), delivers `text` to it as a user message and
+    // queues one line for the main chat. Desktop pipe only: not in the transport
+    // table, so the phone and paired peers are refused.
+    {
+        let state = state.clone();
+        router.register("message_shared_element", move |params, _ctx| {
+            let state = state.clone();
+            async move {
+                #[derive(serde::Deserialize)]
+                struct P {
+                    id: String,
+                    element: String,
+                    text: String,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+                let st = state.clone();
+                crate::daemon::preview::send_shared_element_message(&state, &p.id, &p.element, &p.text, move |sid, text| async move {
+                    deliver_user_text(&st, &sid, &text).await
+                })
+                .await
+            }
+        });
+    }
     // Mirrors the desktop `list_previews` command -> Vec<PreviewMeta>, newest
     // (most-recently-pushed/replaced) first. No html - see PreviewMeta.
     // `session_id` narrows the list to that chat's previews. It also routes the
@@ -141,6 +167,44 @@ fn parse_scope(params: Option<serde_json::Value>) -> Result<ScopeParams, RpcErro
         None | Some(serde_json::Value::Null) => Ok(ScopeParams::default()),
         Some(v) => serde_json::from_value(v).map_err(|e| RpcError::invalid_params(e.to_string())),
     }
+}
+
+/// Writes `text` into `session_id` as a user message, the way the desktop
+/// `send_message` RPC does for a chat of its own: a sub goes through
+/// `route_send` (it clears a finished sub's flags), a live child must be idle
+/// (`SESSION_BUSY:` otherwise, which the panel shows), a chat with no child is
+/// resumed.
+async fn deliver_user_text(state: &Arc<DaemonState>, session_id: &str, text: &str) -> Result<(), RpcError> {
+    use super::lifecycle::err_to_rpc;
+    use crate::daemon::lifecycle;
+    lifecycle::refuse_if_api_credit_blocked(state, session_id).map_err(err_to_rpc)?;
+    if let Some(done) = crate::daemon::subchats::route_send(state, session_id, text).await {
+        return match done {
+            Ok(()) => Ok(()),
+            Err(crate::daemon::subchats::ContinueError::Send(e)) => Err(err_to_rpc(e)),
+            Err(e) => Err(RpcError::invalid_params(e.to_string())),
+        };
+    }
+    let live = state.sessions.get(session_id).map(|s| s.clone());
+    if live.is_some() {
+        lifecycle::refuse_if_busy(state, session_id).map_err(err_to_rpc)?;
+    }
+    // Busy is set before the write: a warm child can answer before the write's
+    // `.await` resumes (same order as the `send_message` RPC).
+    state.registry.set_awaiting(session_id, None);
+    state.registry.set_busy(session_id, true);
+    crate::sessions::chat_state::set_busy(session_id, true);
+    let sent = match &live {
+        Some(session) => lifecycle::send_message(session, text, false).await,
+        None => lifecycle::send_message_with_respawn(state, session_id, text, false).await,
+    };
+    if let Err(e) = sent {
+        state.registry.set_busy(session_id, false);
+        crate::sessions::chat_state::set_busy(session_id, false);
+        return Err(err_to_rpc(e));
+    }
+    crate::daemon::machines::publish_instances_changed(state);
+    Ok(())
 }
 
 /// Whether a preview filed under `owner` belongs to the chat `scope` names: the

@@ -260,7 +260,7 @@ mod tests {
         let mut list = vec![PreviewSnapshot {
             id: "m".into(), slug: "m".into(), title: "m".into(), html: "<p></p>".into(), source: "chat".into(),
             session_id: None, version: 2, created_at: "2026-02-01T00:00:00.000Z".into(), published: None, previous: vec![archived],
-            shared: Some(SharedMockup { owner_session_id: "s".into(), shell: String::new(), parts: vec![part] }),
+            shared: Some(SharedMockup { owner_session_id: "s".into(), shell: String::new(), parts: vec![part], layout_session_id: None, controls: vec![] }),
             view_state: Default::default(),
         }];
         trim_to_budget(&mut list);

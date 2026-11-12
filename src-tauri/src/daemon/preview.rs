@@ -39,11 +39,13 @@ use std::sync::Mutex;
 use ts_rs::TS;
 
 mod shared;
+mod shared_message;
 mod versions;
 // Only `methods/preview.rs`'s scope test reads a store file directly.
 #[cfg(test)]
 pub(crate) use versions::get_view_at;
 pub use shared::{run as run_shared_mockup, Control, Part, SharedMockup};
+pub use shared_message::send as send_shared_element_message;
 pub use versions::{get_view, PreviousVersion, PreviewVersionMeta, KEEP_PREVIOUS_VERSIONS, MAX_STORE_HTML_BYTES};
 use versions::{flush_archive, sweep_archive, trim_to_budget};
 
@@ -439,6 +441,7 @@ fn prune_control_state(snap: &mut PreviewSnapshot) {
         .iter()
         .flat_map(|m| m.parts.iter())
         .flat_map(|p| p.controls.iter().map(move |c| format!("{CONTROL_STATE_PREFIX}{}|{}", p.id, c.id)))
+        .chain(snap.shared.iter().flat_map(|m| m.controls.iter().map(|c| format!("{CONTROL_STATE_PREFIX}{}|{}", shared::SHELL_ID, c.id))))
         .collect();
     snap.view_state.retain(|k, _| !k.starts_with(CONTROL_STATE_PREFIX) || live.contains(k));
 }
@@ -700,7 +703,7 @@ mod tests {
         let mut snap = PreviewSnapshot {
             id: "a".into(), slug: "a".into(), title: "a".into(), html: String::new(), source: "chat".into(), session_id: None, version: 1,
             created_at: String::new(), published: None, previous: Vec::new(),
-            shared: Some(SharedMockup { owner_session_id: "s".into(), shell: String::new(), parts: vec![part] }),
+            shared: Some(SharedMockup { owner_session_id: "s".into(), shell: String::new(), parts: vec![part], layout_session_id: None, controls: vec![] }),
             view_state: BTreeMap::new(),
         };
         for k in ["ctl|header|dense", "ctl|header|gone", "ctl|footer|dense", "page"] {

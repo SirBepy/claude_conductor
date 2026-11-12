@@ -5,8 +5,9 @@
 //! re-stages the document.
 //!
 //! Who may write is decided here, from the registry: the main chat creates the
-//! page (a sub never does), and a part is written by the owner or by one of the
-//! owner's subs. Every refusal is an `ok:false` naming the fix, because the
+//! page (a sub only re-creates it when the main chat named it the layout sub),
+//! and a part is written by the owner or by one of the owner's subs. The shell
+//! has controls of its own (`SharedMockup.controls`), set on the page root. Every refusal is an `ok:false` naming the fix, because the
 //! model reads it as the tool result and retries.
 
 use super::{evict_if_at_cap, load_list, now_rfc3339, save, store_path, PreviewSnapshot, MAX_HTML_BYTES, WRITE_LOCK};
@@ -60,7 +61,18 @@ pub struct SharedMockup {
     pub shell: String,
     #[serde(default)]
     pub parts: Vec<Part>,
+    /// The one sub the main chat named to own the shell (todo pc-1668). It may
+    /// re-create the page; any other sub is refused.
+    #[serde(default)]
+    pub layout_session_id: Option<String>,
+    /// Controls of the page itself (layout alternatives), applied as
+    /// `data-<id>` on the page root. Saved values use the key `ctl|shell|<id>`.
+    #[serde(default)]
+    pub controls: Vec<Control>,
 }
+
+/// The `view_state` key region id of the shell's own controls.
+pub const SHELL_ID: &str = "shell";
 
 impl SharedMockup {
     /// Bytes this copy holds on top of the snapshot's composed `html`, for the
@@ -148,12 +160,12 @@ fn safe_css(css: &str) -> String {
 
 /// Listens for the panel's control changes. `e.source` is checked because a
 /// part's own script could post the same shape at itself.
-const CONTROL_SCRIPT: &str = "<script>window.addEventListener(\"message\",function(e){var d=e.data;if(e.source!==window.parent||!d||d.cc!==\"control\")return;var els=document.querySelectorAll(\"[data-part]\");for(var i=0;i<els.length;i++){if(els[i].getAttribute(\"data-part\")===d.part){els[i].setAttribute(\"data-\"+d.id,String(d.value));}}});</script>";
+const CONTROL_SCRIPT: &str = "<script>window.addEventListener(\"message\",function(e){var d=e.data;if(e.source!==window.parent||!d||d.cc!==\"control\")return;if(d.part===\"shell\"){var r=document.querySelector(\"[data-cc-root]\")||document.body||document.documentElement;r.setAttribute(\"data-\"+d.id,String(d.value));return;}var els=document.querySelectorAll(\"[data-part]\");for(var i=0;i<els.length;i++){if(els[i].getAttribute(\"data-part\")===d.part){els[i].setAttribute(\"data-\"+d.id,String(d.value));}}});</script>";
 
 /// The page the panel renders: the shell with every filled region replaced by
 /// its part (default control values as `data-*`, css wrapped in `@scope` so one
 /// sub's rules cannot reach another's region) and the control listener.
-pub fn compose(shell: &str, parts: &[Part]) -> String {
+pub fn compose(shell: &str, parts: &[Part], shell_controls: &[Control]) -> String {
     let mut out = String::with_capacity(shell.len());
     let mut last = 0;
     for r in find_regions(shell) {
@@ -175,12 +187,59 @@ pub fn compose(shell: &str, parts: &[Part]) -> String {
         }
     }
     out.push_str(&shell[last..]);
+    mark_root(&mut out, shell_controls);
     let lower = out.to_ascii_lowercase();
     match lower.rfind("</body>") {
         Some(i) => out.insert_str(i, CONTROL_SCRIPT),
         None => out.push_str(CONTROL_SCRIPT),
     }
     out
+}
+
+/// Puts `data-cc-root` and the shell controls' defaults on the page root: the
+/// `<body>` when the shell has one, else the first element that is not
+/// document furniture. Shell css selects with `[data-<id>="v"]`.
+fn mark_root(doc: &mut String, controls: &[Control]) {
+    let lower = doc.to_ascii_lowercase();
+    let at = match lower.find("<body") {
+        Some(i) => Some(i),
+        None => {
+            let mut from = 0;
+            let mut found = None;
+            while let Some(rel) = lower[from..].find('<') {
+                let i = from + rel;
+                let rest = &lower[i + 1..];
+                let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+                if name.is_empty() || rest.starts_with('!') || rest.starts_with('?') || rest.starts_with('/') {
+                    from = i + 1;
+                    continue;
+                }
+                if matches!(name.as_str(), "style" | "script") {
+                    let close = format!("</{name}");
+                    from = lower[i..].find(&close).map_or(lower.len(), |c| i + c + close.len());
+                    continue;
+                }
+                if matches!(name.as_str(), "html" | "head" | "meta" | "link" | "title" | "base") {
+                    from = i + 1;
+                    continue;
+                }
+                found = Some(i);
+                break;
+            }
+            found
+        }
+    };
+    let Some(at) = at else { return };
+    let Some(gt_rel) = doc[at..].find('>') else { return };
+    let mut gt = at + gt_rel;
+    if doc[..gt].ends_with('/') {
+        gt -= 1;
+    }
+    let mut attrs = String::from(" data-cc-root");
+    for c in controls {
+        attrs.push_str(&format!(" data-{}=\"{}\"", c.id, esc_attr(&c.default)));
+    }
+    doc.insert_str(gt, &attrs);
 }
 
 // ── Input ───────────────────────────────────────────────────────────────────
@@ -293,37 +352,78 @@ pub(crate) fn run_at(path: &Path, state: &DaemonState, session_id: &str, body: &
     match body["action"].as_str() {
         Some("create") => create_at(path, state, session_id, body),
         Some("part") => part_at(path, state, session_id, body),
-        _ => refuse("action must be create (the main chat makes the page) or part (a sub fills its region)"),
+        Some("layout") => layout_at(path, state, session_id, body),
+        _ => refuse("action must be create (the main chat makes the page), layout (the main chat names the sub that owns the shell) or part (a sub fills its region)"),
+    }
+}
+
+/// The main chat's newest shared mockup, or the one `slug` names.
+fn find_idx(list: &[PreviewSnapshot], owner: &str, slug: Option<&str>) -> Option<usize> {
+    match slug {
+        Some(slug) => list.iter().position(|s| s.slug == slug),
+        None => list
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.shared.as_ref().is_some_and(|m| m.owner_session_id == owner))
+            .max_by(|a, b| a.1.created_at.cmp(&b.1.created_at))
+            .map(|(i, _)| i),
     }
 }
 
 fn create_at(path: &Path, state: &DaemonState, caller: &str, body: &Value) -> Value {
     let Some(me) = state.registry.get(caller) else { return refuse("this chat is not known to the app") };
-    if me.subchat_of.is_some() {
-        return refuse("a sub never creates the shared mockup: its main chat does. Add your region with action part instead.");
-    }
+    let owner = me.subchat_of.clone().unwrap_or_else(|| caller.to_string());
+    let is_sub = me.subchat_of.is_some();
     let shell = body["shell"].as_str().unwrap_or("").to_string();
     let found = regions(&shell);
     if found.is_empty() {
         return refuse("shell needs at least one empty region element, for example <div data-part=\"header\"></div>, one per sub's part");
     }
+    if found.iter().any(|r| r == SHELL_ID) {
+        return refuse("\"shell\" is the page's own name for its controls and messages: pick another region id");
+    }
     let slug = body["slug"].as_str().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("shared-mockup").to_string();
     let title = body["title"].as_str().map(str::trim).filter(|t| !t.is_empty()).map(str::to_string).unwrap_or_else(|| slug.clone());
+    let new_controls = match body.get("controls").filter(|c| !c.is_null()) {
+        Some(raw) => match clean_controls(raw) {
+            Ok(c) => Some(c),
+            Err(e) => return refuse(e),
+        },
+        None => None,
+    };
 
     let mut list = load_list(path);
+    if is_sub {
+        // A sub re-creates the shell only as the layout sub of an existing page.
+        let existing = list.iter().find(|s| s.slug == slug).and_then(|s| s.shared.as_ref()).filter(|m| m.owner_session_id == owner);
+        let Some(shared) = existing else {
+            return refuse("a sub never creates the shared mockup: its main chat does. Add your region with action part instead.");
+        };
+        if shared.layout_session_id.as_deref() != Some(caller) {
+            return refuse(match shared.layout_session_id.as_deref() {
+                Some(id) => format!(
+                    "only the layout sub re-creates the shell, and that is {}: send it your layout change, or add your region with action part.",
+                    display_name(state, id)
+                ),
+                None => "only the layout sub re-creates the shell, and the main chat has named none: ask it, or add your region with action part.".to_string(),
+            });
+        }
+    }
     if let Some(existing) = list.iter_mut().find(|s| s.slug == slug) {
-        let Some(shared) = existing.shared.as_mut().filter(|s| s.owner_session_id == caller) else {
+        let Some(shared) = existing.shared.as_mut().filter(|s| s.owner_session_id == owner) else {
             return refuse(format!("slug \"{slug}\" already belongs to another preview: pick a different slug"));
         };
         // A part whose region the new shell dropped never renders, but would
         // still show a chip in the row and count toward MAX_PARTS.
         let kept: Vec<Part> = shared.parts.iter().filter(|p| found.contains(&p.id)).cloned().collect();
-        let html = compose(&shell, &kept);
+        let controls = new_controls.unwrap_or_else(|| shared.controls.clone());
+        let html = compose(&shell, &kept, &controls);
         if let Some(refused) = over_page_cap(&html) {
             return refused;
         }
         shared.shell = shell;
         shared.parts = kept;
+        shared.controls = controls;
         existing.title = title;
         existing.html = html;
         existing.version += 1;
@@ -332,7 +432,8 @@ fn create_at(path: &Path, state: &DaemonState, caller: &str, body: &Value) -> Va
         save(path, &mut list);
         return json!({ "ok": true, "id": id, "regions": found });
     }
-    let html = compose(&shell, &[]);
+    let controls = new_controls.unwrap_or_default();
+    let html = compose(&shell, &[], &controls);
     if let Some(refused) = over_page_cap(&html) {
         return refused;
     }
@@ -349,11 +450,46 @@ fn create_at(path: &Path, state: &DaemonState, caller: &str, body: &Value) -> Va
         created_at: now_rfc3339(),
         published: None,
         previous: Vec::new(),
-        shared: Some(SharedMockup { owner_session_id: caller.to_string(), shell, parts: Vec::new() }),
+        shared: Some(SharedMockup { owner_session_id: caller.to_string(), shell, parts: Vec::new(), layout_session_id: None, controls }),
         view_state: Default::default(),
     });
     save(path, &mut list);
     json!({ "ok": true, "id": id, "regions": found })
+}
+
+/// `layout`: the main chat names one of its own subs (by session id or name) as
+/// the sub that owns the shell. The main chat keeps its own right to re-create.
+fn layout_at(path: &Path, state: &DaemonState, caller: &str, body: &Value) -> Value {
+    let Some(me) = state.registry.get(caller) else { return refuse("this chat is not known to the app") };
+    if me.subchat_of.is_some() {
+        return refuse("only the main chat names the layout sub");
+    }
+    let query = body["sub"].as_str().map(str::trim).unwrap_or("");
+    if query.is_empty() {
+        return refuse("layout needs sub: the session id or name of one of your own subs");
+    }
+    let mine: Vec<_> = state.registry.list().into_iter().filter(|i| i.subchat_of.as_deref() == Some(caller)).collect();
+    let by_id = mine.iter().find(|i| i.session_id == query);
+    let named: Vec<_> = mine.iter().filter(|i| i.name.as_deref().map(str::trim) == Some(query)).collect();
+    let sub = match (by_id, named.as_slice()) {
+        (Some(i), _) => i,
+        (None, [one]) => one,
+        (None, []) => return refuse(format!("\"{query}\" is not one of your subs: use the session id or name from subchat list")),
+        (None, _) => return refuse(format!("{} of your subs are named \"{query}\": use the session id", named.len())),
+    };
+    let mut list = load_list(path);
+    let slug = body["slug"].as_str().map(str::trim).filter(|s| !s.is_empty());
+    let Some(idx) = find_idx(&list, caller, slug) else {
+        return refuse("no shared mockup of yours yet: call action create first");
+    };
+    let snap = &mut list[idx];
+    let Some(shared) = snap.shared.as_mut().filter(|m| m.owner_session_id == caller) else {
+        return refuse(format!("\"{}\" is not a shared mockup of yours", snap.slug));
+    };
+    shared.layout_session_id = Some(sub.session_id.clone());
+    let id = snap.id.clone();
+    save(path, &mut list);
+    json!({ "ok": true, "id": id, "layout_session_id": sub.session_id })
 }
 
 fn part_at(path: &Path, state: &DaemonState, caller: &str, body: &Value) -> Value {
@@ -361,16 +497,8 @@ fn part_at(path: &Path, state: &DaemonState, caller: &str, body: &Value) -> Valu
     let owner = me.subchat_of.clone().unwrap_or_else(|| caller.to_string());
     let mut list = load_list(path);
     let slug = body["slug"].as_str().map(str::trim).filter(|s| !s.is_empty());
-    let idx = match slug {
-        Some(slug) => list.iter().position(|s| s.slug == slug),
-        // Newest shared mockup of the owner, so a sub that was never told the slug still finds it.
-        None => list
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.shared.as_ref().is_some_and(|m| m.owner_session_id == owner))
-            .max_by(|a, b| a.1.created_at.cmp(&b.1.created_at))
-            .map(|(i, _)| i),
-    };
+    // No slug: the owner's newest shared mockup, so a sub never told the slug still finds it.
+    let idx = find_idx(&list, &owner, slug);
     let Some(idx) = idx else {
         return refuse(match slug {
             Some(s) => format!("no shared mockup \"{s}\": ask the main chat to create it first (shared_mockup action create)"),
@@ -419,7 +547,7 @@ fn part_at(path: &Path, state: &DaemonState, caller: &str, body: &Value) -> Valu
         Some(i) => shared.parts[i] = part,
         None => shared.parts.push(part),
     }
-    let composed = compose(&shared.shell, &shared.parts);
+    let composed = compose(&shared.shell, &shared.parts, &shared.controls);
     if let Some(refused) = over_page_cap(&composed) {
         return refused;
     }
@@ -486,7 +614,7 @@ mod tests {
                 Control { id: "photo".into(), label: "Photo".into(), kind: "switch".into(), options: vec![], default: "on".into() },
             ],
         };
-        let doc = compose(SHELL, &[part]);
+        let doc = compose(SHELL, &[part], &[]);
         assert!(doc.contains("<div data-part=\"header\" data-style=\"aurora\" data-photo=\"on\"><h3>Ana</h3></div>"), "{doc}");
         assert!(doc.contains("@scope ([data-part=\"header\"])"), "{doc}");
         assert!(doc.contains("<section class=\"x\" data-part=\"footer\"> </section>"), "an unfilled region stays as the shell wrote it: {doc}");
@@ -497,13 +625,13 @@ mod tests {
     #[test]
     fn part_css_cannot_close_its_style_block() {
         let part = Part { id: "header".into(), owner_session_id: "s".into(), owner_name: "n".into(), html: String::new(), css: "a{} </STYLE><b>x</b>".into(), controls: vec![] };
-        let doc = compose(SHELL, &[part]);
+        let doc = compose(SHELL, &[part], &[]);
         assert_eq!(doc.matches("</style>").count(), 1, "{doc}");
     }
 
     #[test]
     fn the_listener_goes_before_the_last_closing_body() {
-        let doc = compose("<html><body><div data-part=\"a\"></div></body></html>", &[]);
+        let doc = compose("<html><body><div data-part=\"a\"></div></body></html>", &[], &[]);
         assert!(doc.find("<script>").unwrap() < doc.rfind("</body>").unwrap());
     }
 
@@ -681,5 +809,117 @@ mod tests {
         create(&path, &st, "main");
         crate::daemon::preview::push_at(&path, "T".into(), Some("page".into()), "<p>plain</p>".into(), "chat".into(), Some("main".into())).unwrap();
         assert!(load_list(&path)[0].shared.is_none(), "a stale shell must not recompose over the new page");
+    }
+
+    fn set_layout(path: &Path, st: &DaemonState, sub: &str) -> Value {
+        run_at(path, st, "main", &json!({"action": "layout", "slug": "page", "sub": sub}))
+    }
+
+    fn recreate(path: &Path, st: &DaemonState, who: &str, shell: &str) -> Value {
+        run_at(path, st, who, &json!({"action": "create", "slug": "page", "shell": shell}))
+    }
+
+    const SHELL2: &str = "<main><div data-part=\"header\"></div><div data-part=\"side\"></div></main>";
+
+    #[test]
+    fn the_layout_sub_re_creates_the_shell_an_ordinary_sub_is_refused_naming_the_layout_sub_and_the_owner_overrides() {
+        let (_t, path) = store();
+        let st = state();
+        create(&path, &st, "main");
+        st.registry.set_name("sub-a", "Layouter".to_string());
+        let none = recreate(&path, &st, "sub-b", SHELL2);
+        assert_eq!(none["ok"], json!(false));
+        assert!(none["error"].as_str().unwrap().contains("named none"), "{none}");
+        let named = set_layout(&path, &st, "Layouter");
+        assert_eq!(named["ok"], json!(true), "{named}");
+        assert_eq!(named["layout_session_id"], json!("sub-a"));
+        let refused = recreate(&path, &st, "sub-b", SHELL2);
+        assert_eq!(refused["ok"], json!(false));
+        assert!(refused["error"].as_str().unwrap().contains("Layouter"), "{refused}");
+        assert_eq!(load_list(&path)[0].shared.as_ref().unwrap().shell, SHELL, "the refused re-create changed nothing");
+        let ok = recreate(&path, &st, "sub-a", SHELL2);
+        assert_eq!(ok["ok"], json!(true), "{ok}");
+        let snap = &load_list(&path)[0];
+        let shared = snap.shared.as_ref().unwrap();
+        assert_eq!(shared.shell, SHELL2);
+        assert_eq!(shared.owner_session_id, "main", "the owner stays the main chat");
+        assert_eq!(shared.layout_session_id.as_deref(), Some("sub-a"), "a re-create keeps the layout sub");
+        assert_eq!(snap.session_id.as_deref(), Some("main"));
+        assert_eq!(recreate(&path, &st, "main", SHELL)["ok"], json!(true), "the owner keeps its override");
+    }
+
+    #[test]
+    fn only_the_main_chat_names_a_layout_sub_and_only_one_of_its_own() {
+        let (_t, path) = store();
+        let st = state();
+        create(&path, &st, "main");
+        let by_sub = run_at(&path, &st, "sub-a", &json!({"action": "layout", "slug": "page", "sub": "sub-a"}));
+        assert_eq!(by_sub["ok"], json!(false), "{by_sub}");
+        let foreign = set_layout(&path, &st, "other-sub");
+        assert_eq!(foreign["ok"], json!(false), "{foreign}");
+        assert!(foreign["error"].as_str().unwrap().contains("not one of your subs"), "{foreign}");
+        assert!(load_list(&path)[0].shared.as_ref().unwrap().layout_session_id.is_none());
+        assert_eq!(set_layout(&path, &st, "sub-b")["ok"], json!(true), "the session id works too");
+    }
+
+    #[test]
+    fn a_sub_cannot_create_a_page_that_does_not_exist_even_with_a_layout_claim() {
+        let (_t, path) = store();
+        let st = state();
+        let v = create(&path, &st, "sub-a");
+        assert_eq!(v["ok"], json!(false));
+        assert!(load_list(&path).is_empty());
+    }
+
+    #[test]
+    fn shell_controls_compose_onto_the_page_root_and_a_re_create_without_controls_keeps_them() {
+        let (_t, path) = store();
+        let st = state();
+        let made = run_at(&path, &st, "main", &json!({
+            "action": "create", "slug": "page", "shell": SHELL,
+            "controls": [
+                {"id": "density", "label": "Density", "kind": "select", "options": ["roomy", "tight"], "default": "tight"},
+                sw("sidebar", true)
+            ]
+        }));
+        assert_eq!(made["ok"], json!(true), "{made}");
+        let snap = &load_list(&path)[0];
+        assert!(snap.html.starts_with("<main data-cc-root data-density=\"tight\" data-sidebar=\"on\">"), "{}", snap.html);
+        assert_eq!(snap.shared.as_ref().unwrap().controls.len(), 2);
+        recreate(&path, &st, "main", SHELL);
+        assert_eq!(load_list(&path)[0].shared.as_ref().unwrap().controls.len(), 2, "omitted keeps the old controls");
+        run_at(&path, &st, "main", &json!({"action": "create", "slug": "page", "shell": SHELL, "controls": []}));
+        let snap = &load_list(&path)[0];
+        assert!(snap.shared.as_ref().unwrap().controls.is_empty() && !snap.html.contains("data-density"));
+    }
+
+    #[test]
+    fn the_root_is_the_body_when_there_is_one_and_never_a_style_or_comment() {
+        let c = [Control { id: "wide".into(), label: "Wide".into(), kind: "switch".into(), options: vec![], default: "off".into() }];
+        let doc = compose("<html><head><style>a>b{}</style></head><body class=\"x\"><div data-part=\"a\"></div></body></html>", &[], &c);
+        assert!(doc.contains("<body class=\"x\" data-cc-root data-wide=\"off\">"), "{doc}");
+        let doc = compose("<!-- c --><style>a{}</style><section><div data-part=\"a\"></div></section>", &[], &c);
+        assert!(doc.contains("<section data-cc-root data-wide=\"off\">"), "{doc}");
+        assert!(doc.contains("d.part===\"shell\""), "the listener also sets shell controls");
+    }
+
+    #[test]
+    fn a_region_named_shell_is_refused() {
+        let (_t, path) = store();
+        let v = run_at(&path, &state(), "main", &json!({"action": "create", "slug": "p", "shell": "<div data-part=\"shell\"></div>"}));
+        assert_eq!(v["ok"], json!(false));
+    }
+
+    #[test]
+    fn a_saved_shell_control_value_survives_a_save_until_its_control_goes() {
+        let (_t, path) = store();
+        let st = state();
+        run_at(&path, &st, "main", &json!({"action": "create", "slug": "page", "shell": SHELL, "controls": [sw("sidebar", true)]}));
+        let id = load_list(&path)[0].id.clone();
+        assert_eq!(crate::daemon::preview::set_state_at(&path, &id, "ctl|shell|sidebar", &json!("off")), Ok(true));
+        recreate(&path, &st, "main", SHELL);
+        assert_eq!(load_list(&path)[0].view_state.get("ctl|shell|sidebar"), Some(&json!("off")));
+        run_at(&path, &st, "main", &json!({"action": "create", "slug": "page", "shell": SHELL, "controls": []}));
+        assert!(load_list(&path)[0].view_state.get("ctl|shell|sidebar").is_none());
     }
 }
