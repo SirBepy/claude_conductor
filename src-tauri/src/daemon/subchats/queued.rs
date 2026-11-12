@@ -53,12 +53,13 @@ pub async fn start_now(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), Str
     if super::is_gate(sub_id) {
         return Err(format!("{} is a gate sub: it pushes from the main checkout after the merges in flight, so it starts by itself when they are done.", name_of(state, sub_id)));
     }
-    // `launch_held` answers Ok to a caller that lost the launch claim, which would read here as
-    // "started" and release the slot of a launch that may still fail.
-    if held::launching(sub_id) {
+    // The claim is taken here and kept until the queue is cleaned up: `launch_held` answers Ok to
+    // a caller that lost the claim, which would read here as "started" and release the slot of a
+    // launch that may still fail.
+    let Some(_claim) = held::claim_launch(sub_id) else {
         return Err(format!("{} is already starting.", name_of(state, sub_id)));
-    }
-    let started = held::launch_held(state, sub_id).await;
+    };
+    let started = held::launch_claimed(state, sub_id).await;
     if started.is_err() {
         // A launch that failed after the spawn put the hold back without its place in line.
         if writers::stamp_places_of(state, sub_id) {

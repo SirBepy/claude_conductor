@@ -384,6 +384,13 @@ async fn production_launch(state: Arc<DaemonState>, sub_id: String) -> Result<()
 pub async fn launch_held(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), String> {
     // Another caller is already starting it; its result is the result.
     let Some(_claim) = claim_launch(sub_id) else { return Ok(()) };
+    launch_claimed(state, sub_id).await
+}
+
+/// [`launch_held`] for a caller that holds the launch claim itself (its guard outlives the
+/// call), so it knows it is the one launching: Joe's "Start now" must not mistake a lost
+/// claim for a launch.
+pub(crate) async fn launch_claimed(state: &Arc<DaemonState>, sub_id: &str) -> Result<(), String> {
     let entry = all().into_iter().find(|h| h.sub_id == sub_id).ok_or_else(|| format!("{sub_id} is not held"))?;
     let inst = state.registry.get(sub_id).ok_or_else(|| format!("unknown session: {sub_id}"))?;
     if inst.ended_at.is_some() {
