@@ -119,7 +119,7 @@ pub struct Session {
     pub stderr_tail: std::sync::Mutex<Vec<String>>,
     /// Awaited before reading `stderr_tail`, so the fatal last line is in it.
     pub stderr_drain: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
-    /// Set before any deliberate kill (freeze, restart, end, `/close`). Windows
+    /// Set before any deliberate kill (freeze, restart, end, close). Windows
     /// `TerminateProcess` stamps exit code 1, indistinguishable from a crash, so
     /// without this every intentional teardown reports itself as one.
     pub expected_exit: std::sync::atomic::AtomicBool,

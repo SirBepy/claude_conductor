@@ -1,6 +1,6 @@
 //! Line-scoped reads and edits of a repo's `.claude/todos/PLAN.md`, the ordered
 //! pull-next lane over the backlog. Other sessions and skills edit the same
-//! file (`/pickup`, `/plan-todos`, `/close`), so every write re-reads the file
+//! file (`/pickup`, `/plan-todos`), so every write re-reads the file
 //! first, changes only the lines it means to, keeps the file's own line
 //! endings, and writes BOM-less UTF-8.
 //!

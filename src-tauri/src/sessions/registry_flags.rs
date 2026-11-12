@@ -62,7 +62,7 @@ impl Registry {
         false
     }
 
-    /// Flip the daemon-authoritative "a /close run is in flight" flag. Returns
+    /// Flip the daemon-authoritative "a close is waiting on running subs" flag. Returns
     /// true if the value actually changed (callers publish `instances_changed`
     /// only on real transitions). No-op false for unknown sessions.
     pub fn set_closing(&self, session_id: &str, closing: bool) -> bool {

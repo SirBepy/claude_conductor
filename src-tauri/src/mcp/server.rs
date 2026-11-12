@@ -3,8 +3,8 @@
 //! (one JSON object per line). Exposes eight tools unconditionally:
 //!   - `approval_prompt`: used as `--permission-prompt-tool` by the runner
 //!   - `ask_user_question`: lets claude ask the user a question mid-turn
-//!   - `close_session`: the `/close` skill confirms teardown; the daemon ends
-//!     the session + kills the process at turn end
+//!   - `close_session`: a finished chat confirms its own teardown; the daemon
+//!     ends the session + kills the process at turn end
 //!   - `list_peers` / `post_message` / `read_messages`: inter-agent
 //!     coordination channel, scoped per project (see `daemon::methods::channel`)
 //!   - `report_turn_status`: self-reported status/title, replacing the
@@ -764,20 +764,32 @@ mod tests {
         assert!(body_for(TOOL_RESPAWN).get("task").is_none());
     }
 
-    /// `stage` is the only thing that tells the daemon "mark Closing" apart from
-    /// "tear down at turn end"; dropping it would make the first call confirm a
-    /// teardown the skill has not reached yet.
+    /// A copy of the retired skill still sends `stage: "started"` before its last
+    /// phase. It must answer ok without reaching the daemon, because relaying it
+    /// would arm teardown while the skill still has phases to run.
     #[test]
-    fn close_session_relays_stage_started_and_omits_it_otherwise() {
+    fn close_session_stage_started_is_a_no_op_that_never_reaches_the_daemon() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        POSTED_BODIES.with(|b| b.borrow_mut().clear());
+        let resp = dispatch_tool_with(&rt, &json!(1), TOOL_CLOSE, &json!({"stage": "started"}), "sess-1", 1234, fake_http_post);
+        assert!(resp["result"]["isError"].as_bool() != Some(true), "{resp}");
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("stage is no longer used"), "{text}");
+        assert!(POSTED_BODIES.with(|b| b.borrow().is_empty()), "nothing is relayed");
+    }
+
+    /// With no stage, or any other stage value, the call relays the bare
+    /// session id and the daemon arms teardown.
+    #[test]
+    fn close_session_without_a_started_stage_relays_the_session_id_only() {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let body_for = |args: Value| -> Value {
             POSTED_BODIES.with(|b| b.borrow_mut().clear());
             dispatch_tool_with(&rt, &json!(1), TOOL_CLOSE, &args, "sess-1", 1234, fake_http_post);
             POSTED_BODIES.with(|b| b.borrow()[0].clone())
         };
-        assert_eq!(body_for(json!({"stage": "started"})), json!({"session_id": "sess-1", "stage": "started"}));
         assert_eq!(body_for(json!({})), json!({"session_id": "sess-1"}));
-        assert_eq!(body_for(json!({"stage": "bogus"})), json!({"session_id": "sess-1"}), "an unknown stage never reads as started");
+        assert_eq!(body_for(json!({"stage": "bogus"})), json!({"session_id": "sess-1"}));
     }
 
     #[test]

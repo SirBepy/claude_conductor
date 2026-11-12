@@ -503,7 +503,7 @@ mod tests {
 
         #[test]
         fn non_question_awaiting_value_is_not_awaiting_input() {
-            for value in ["done", "working", "waiting", "close_failed"] {
+            for value in ["done", "working", "waiting"] {
                 assert!(!is_awaiting_input(&instance(Some(value), false, None)));
             }
         }

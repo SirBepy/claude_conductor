@@ -179,31 +179,31 @@ const SUBCHAT_BRIEF_KEYS: [&str; 13] = [
     "task", "goal", "done_when", "writes", "files", "decisions", "report_back", "worktree", "after", "review", "gate", "plain", "question",
 ];
 
+/// What `close_session` answers a call that still carries the retired `stage: "started"`.
+const STAGE_STARTED_NOTE: &str = "stage is no longer used; call close_session once, when the chat should end. Nothing was closed.";
+
 /// Session lifecycle: end this one, spawn a sibling chat, or hand off to a
 /// successor and stand down.
 fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
     match name {
         TOOL_CLOSE => {
+            // A copy of the old skill still sends `stage: "started"` to raise a
+            // Closing row before its last phase. That call must not tear the chat
+            // down early, so it answers without reaching the daemon.
+            if ctx.args.get("stage").and_then(|s| s.as_str()) == Some("started") {
+                return Some(tool_result(ctx.id, STAGE_STARTED_NOTE));
+            }
             // Fire-and-confirm: the daemon records the close and
             // tears down at turn end (session_id comes from the
             // per-session CC_SESSION_ID env, not tool args).
-            let started = ctx.args.get("stage").and_then(|s| s.as_str()) == Some("started");
-            let mut body = json!({ "session_id": ctx.session_id });
-            if started {
-                body["stage"] = json!("started");
-            }
             // `Some` fallback so a daemon `ok:false` (a sub is told to use
             // finish_subchat) reaches the model as an error instead of being
             // swallowed by the fixed success text.
             Some(ctx.relay(
                 "/sessions/close-confirm",
-                body,
+                json!({ "session_id": ctx.session_id }),
                 Some("close_session refused"),
-                Some(if started {
-                    "close marked as started; call close_session again without a stage to confirm teardown"
-                } else {
-                    "close confirmed; session will end at turn completion"
-                }),
+                Some("close confirmed; session will end at turn completion"),
             ))
         }
         TOOL_SPAWN_CHAT | TOOL_RESPAWN => {

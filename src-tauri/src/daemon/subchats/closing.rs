@@ -5,7 +5,7 @@
 //!
 //! Every way a chat closes goes through [`request_close`] first: the menu and
 //! the phone (`end_session` and `mark_session_ended`, which `clear_session`
-//! calls), the `close_session` tool that `/close` ends on, and the
+//! calls), the `close_session` tool a finished chat ends on, and the
 //! backstop at [`crate::daemon::pump::close::finalize_close`]. A closing chat
 //! with running subs is held, and Joe is asked on a card. Finished subs never
 //! hold it. A card is never answered by a timeout: only Joe's pick, or a chat
@@ -645,26 +645,6 @@ mod tests {
         assert!(!st.registry.get(&main).unwrap().closing);
         // Closing the parent closed the finished subs with it.
         assert!(until(|| subs.iter().all(|s| st.registry.get(s).unwrap().ended_at.is_some())).await);
-    }
-
-    /// The `/close` turn that raised the card is still running when Joe picks, and its
-    /// own turn end used to stand the Closing row down, so the wait vanished from the
-    /// row the moment it began. A waiting chat keeps its flag through that turn end.
-    #[tokio::test]
-    async fn the_turn_that_raised_the_card_does_not_clear_a_wait_picked_before_it_ended() {
-        let _data = TempDataDir::new();
-        let st = state();
-        let (main, _subs) = family(&st, "cl-turn", &[("a", false)]);
-        assert!(request_close(&st, &main));
-        let id = card_id(&st, KIND).await.unwrap();
-        answer(&st, &id, WAIT_FOR_THEM).await;
-        assert!(until(|| is_waiting(&main)).await);
-        // The pump asks this at the turn's end, with the prompt-armed flag set for a /close turn.
-        assert!(!crate::daemon::pump::close::close_in_flight(&st.registry, &main, true), "a wait is not a stalled /close");
-        assert!(st.registry.get(&main).unwrap().closing, "the row still reads Closing");
-        // Without a wait the same turn end still stands a stalled /close down.
-        let (other, _) = family(&st, "cl-turn-other", &[]);
-        assert!(crate::daemon::pump::close::close_in_flight(&st.registry, &other, true));
     }
 
     /// Joe can close again to change his mind: the card asks again, and the card

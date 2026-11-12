@@ -69,7 +69,7 @@ pub struct ReportedStatus {
 }
 
 impl Registry {
-    /// Record that the `/close` skill confirmed teardown for this session (the
+    /// Record that the chat confirmed teardown for this session (the
     /// `close_session` MCP tool fired). The pump consumes it at turn end.
     pub fn set_close_requested(&self, session_id: &str) {
         self.close_requested.lock().unwrap().insert(session_id.to_string());
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn a_deliberate_report_is_never_overridden() {
-        for reported in ["question", "waiting", "working", "close_failed"] {
+        for reported in ["question", "waiting", "working"] {
             assert_eq!(
                 corrected(TurnActivity::Working, Some(reported)).as_deref(),
                 Some(reported),
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn an_idle_cli_leaves_the_other_deliberate_reports_alone() {
-        for reported in ["question", "waiting", "close_failed"] {
+        for reported in ["question", "waiting"] {
             assert_eq!(
                 corrected(TurnActivity::Idle, Some(reported)).as_deref(),
                 Some(reported),

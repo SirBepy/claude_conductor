@@ -9,7 +9,6 @@ use crate::chat::parser::ParserContext;
 use crate::daemon::broadcast;
 use crate::daemon::session::{Session, SessionMap};
 use crate::daemon::state::DaemonState;
-use crate::sessions::registry_turn::TurnActivity;
 use crate::types::chat::ChatEvent;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -18,7 +17,7 @@ pub(crate) mod close;
 mod exit;
 mod last_action;
 mod turn_boundary;
-use close::{close_in_flight, close_stand_down_is_failure, ended_already, finalize_close, turn_is_close, CLOSE_FAILED_AWAITING};
+use close::finalize_close;
 use exit::run_pump_exit;
 use turn_boundary::{TurnAction, TurnBoundary};
 
@@ -84,13 +83,6 @@ pub(crate) async fn run_stdout_pump(
     // it from stdout timing latched `busy` on for a whole session (todo 525).
     let mut pump_turn_gen = initial_pump_turn_gen(&state_for_pump.registry, &pump_session.session_id);
     let mut pump_turn_gen_captured = false;
-    // True while the daemon-authoritative `closing` registry flag is set for
-    // the current turn: armed at the turn's first live output when the user
-    // opened it with `/close` (no text marker involved), cleared at turn end
-    // unless the close actually confirmed (then the row is `ended`, not just
-    // `closing`). Teardown itself is driven by the `close_requested` flag the
-    // `close_session` MCP tool sets - see the result-line/EOF handlers below.
-    let mut closing_flagged = false;
     // Delta coalescing (ai_todo 186, evolving the earlier O(n^2) frequency
     // fix): the parser now emits O(delta) `AssistantDelta` chunks instead of
     // full-text snapshots, so per-chunk cost is flat end-to-end (the old
@@ -186,19 +178,11 @@ pub(crate) async fn run_stdout_pump(
                         if !turn.is_live() && stream_event_seen
                             && turn.on_stream_event() == TurnAction::TurnStarted
                         {
-                            let mut dirty = state_for_pump.registry.mark_turn_live(&pump_session.session_id);
+                            let dirty = state_for_pump.registry.mark_turn_live(&pump_session.session_id);
                             crate::sessions::chat_state::set_busy(&pump_session.session_id, true);
                             // The chat is working again, whoever started the turn (a
                             // send or a wake), so what it next waits on is news.
                             state_for_pump.notify_gate.turn_started(&pump_session.session_id);
-                            // A `/close --now` prompt marks the row "Closing" at turn start
-                            // (daemon-authoritative, no text marker). A plain `/close` raises it
-                            // itself via `close_session(stage="started")` once its closing phases
-                            // begin; close_requested drives teardown either way.
-                            if turn_is_close(&pump_session) {
-                                closing_flagged = true;
-                                dirty |= state_for_pump.registry.set_closing(&pump_session.session_id, true);
-                            }
                             if dirty {
                                 crate::daemon::machines::publish_instances_changed(&state_for_pump);
                             }
@@ -495,11 +479,10 @@ pub(crate) async fn run_stdout_pump(
                                 if let Some(active) = turn_autopilot_changed {
                                     state_for_pump.registry.set_autopilot(&pump_session.session_id, active);
                                 }
-                                // /close teardown, daemon-authoritative: the `/close`
-                                // skill's Phase 6 fires the `close_session` MCP tool,
-                                // which sets `close_requested` on the registry before
-                                // this result line. That explicit signal - not a parsed
-                                // `<cc-close:done>` text marker - confirms the close, so
+                                // Close teardown, daemon-authoritative: the
+                                // `close_session` MCP tool sets `close_requested` on the
+                                // registry before this result line. That explicit signal
+                                // confirms the close, so
                                 // tear the session down here (mark_ended + kill). Ordering
                                 // is safe: the tool call is a tool_use the model awaits, so
                                 // it always lands before the turn's final result line.
@@ -519,37 +502,6 @@ pub(crate) async fn run_stdout_pump(
                                         pump_turn_gen,
                                     )
                                     .await;
-                                }
-                                // Stand-down/hygiene: the turn ended, so the closing
-                                // segment either resolved into `ended` (finalize_close
-                                // above) or the close stood down (--dont-close / a failed
-                                // chain never fires the tool) - clear the flag BEFORE the
-                                // snapshot below so it never persists `closing: true`.
-                                if close_in_flight(&state_for_pump.registry, &pump_session.session_id, closing_flagged) {
-                                    closing_flagged = false;
-                                    let prompt = pump_session.last_prompt.lock().ok()
-                                        .map(|p| p.clone()).unwrap_or_default();
-                                    let activity = state_for_pump
-                                        .registry
-                                        .turn_activity(&pump_session.session_id);
-                                    // Read after the turn-end `set_awaiting_if_gen` above, so
-                                    // it is this turn's final status.
-                                    let question_pending = state_for_pump
-                                        .registry
-                                        .get(&pump_session.session_id)
-                                        .is_some_and(|i| i.awaiting.as_deref() == Some("question"));
-                                    let closed = close_confirmed || ended_already(&state_for_pump.registry, &pump_session.session_id);
-                                    if close_stand_down_is_failure(&prompt, closed, activity, question_pending) {
-                                        log::warn!(
-                                            "daemon: session {} /close armed but never confirmed via close_session tool; chat still open",
-                                            pump_session.session_id
-                                        );
-                                        state_for_pump.registry.set_awaiting(
-                                            &pump_session.session_id,
-                                            Some(CLOSE_FAILED_AWAITING.to_string()),
-                                        );
-                                    }
-                                    state_for_pump.registry.set_closing(&pump_session.session_id, false);
                                 }
                                 // Persist at turn end so a daemon restart keeps each
                                 // backgrounded chat's last status instead of wiping it
@@ -592,7 +544,6 @@ pub(crate) async fn run_stdout_pump(
         map_for_pump,
         state_for_pump,
         pump_turn_gen,
-        closing_flagged,
     )
     .await;
 }
@@ -972,5 +923,55 @@ mod tests {
         assert_eq!(turn.on_result_line(), TurnAction::TurnEnded);
         assert!(state.registry.set_busy_false_if_gen("s", turn_one), "the late result line must still clear busy");
         assert!(!state.registry.get("s").unwrap().busy);
+    }
+
+    /// A turn whose prompt starts with `/close --now` used to mark the row Closing
+    /// the moment its first live line arrived. Nothing reads the prompt now: only
+    /// the `close_session` tool arms a close, and a held close sets Closing itself.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_close_now_prompt_does_not_mark_the_row_closing() {
+        use crate::daemon::session::{new_session_map, Session};
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::types::Settings;
+
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        state.registry.record_interactive_session("pump-close-now", std::path::Path::new("/tmp/x"), &settings, "2026-11-12T00:00:00Z");
+        state.registry.set_busy("pump-close-now", true);
+
+        let line_file = std::env::temp_dir().join(format!("pump-close-now-{}.jsonl", std::process::id()));
+        std::fs::write(&line_file, "{\"type\":\"stream_event\",\"event\":{\"type\":\"message_start\",\"message\":{}}}\n").unwrap();
+        let mut child = tokio::process::Command::new("cmd")
+            .args(["/C", "type"])
+            .arg(&line_file)
+            .args(["&", "ping", "-n", "30", "127.0.0.1"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn probe child");
+        let stdin = child.stdin.take().expect("piped stdin");
+        let stdout = child.stdout.take().expect("piped stdout");
+        let pid = child.id().expect("pid");
+        let session = Session::new("pump-close-now".into(), std::env::temp_dir(), "m".into(), "high".into(), pid, stdin, None, None, "acct".into());
+        *session.last_prompt.lock().unwrap() = "/close --now".to_string();
+
+        let pump = tokio::spawn(run_stdout_pump(child, stdout, session, state.sessions.clone(), state.clone(), false));
+        let mut live = false;
+        for _ in 0..100 {
+            if crate::sessions::chat_state::get("pump-close-now").is_some_and(|c| c.busy) {
+                live = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let closing = state.registry.get("pump-close-now").unwrap().closing;
+        crate::util::kill::kill_tree(pid);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), pump).await;
+        let _ = std::fs::remove_file(&line_file);
+        assert!(live, "the probe's first live line must start the turn");
+        assert!(!closing, "a /close --now prompt must not mark the row Closing");
     }
 }

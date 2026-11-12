@@ -50,7 +50,7 @@ fn next_actions_schema() -> Value {
         "type": "array",
         "maxItems": 3,
         "items": {"type": "string", "maxLength": 60},
-        "description": "Up to 3 short replies Joe can click to send as his next message, shown as chips above his input. Set it on the LAST send_message of every turn that proposes or finishes work, the one right before report_turn_status(done), even when the next step feels obvious: a slash command (\"/commit\") after a code change, a short reply (\"Yes, implement this\") after a plan. Write exactly what he would type, at most 60 characters each. Leave it out only when this message asks Joe a question, reports a blocker, or is not the turn's last. Never offer /close: the app already does."
+        "description": "Up to 3 short replies Joe can click to send as his next message, shown as chips above his input. Set it on the LAST send_message of every turn that proposes or finishes work, the one right before report_turn_status(done), even when the next step feels obvious: a slash command (\"/commit\") after a code change, a short reply (\"Yes, implement this\") after a plan. Write exactly what he would type, at most 60 characters each. Leave it out only when this message asks Joe a question, reports a blocker, or is not the turn's last."
     })
 }
 

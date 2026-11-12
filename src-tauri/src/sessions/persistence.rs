@@ -74,12 +74,6 @@ pub struct PersistedInteractive {
     /// queued resume still knows it may clear the freeze itself.
     #[serde(default)]
     pub auto_frozen: bool,
-    /// Mirrors `Instance::closing` (todo 625). Round-trips to disk, but
-    /// `populate_registry` always clears it to `false` on load: a stale
-    /// mid-close flag would make a healthy session look stuck-closing
-    /// forever, whereas clearing it just means `/close` re-flags it.
-    #[serde(default)]
-    pub closing_flagged: bool,
 }
 
 /// Best-effort write of every live Interactive entry to `path`. Failures
@@ -100,7 +94,7 @@ pub fn save_snapshot(registry: &Registry, path: &Path) {
         .into_iter()
         .filter(|i| matches!(i.kind, InstanceKind::Interactive) && i.ended_at.is_none())
         // `name` here is the resolved title (curated override or first prompt);
-        // re-persisting it means disk converges to a /close rename on the next
+        // re-persisting it means disk converges to a transcript rename on the next
         // save. The jsonl override stays the source of truth — this snapshot is
         // just a cache so a session shows its name before its transcript is
         // re-resolved on restore.
@@ -122,7 +116,6 @@ pub fn save_snapshot(registry: &Registry, path: &Path) {
             frozen: i.frozen,
             frozen_needs_continue: i.frozen_needs_continue,
             auto_frozen: i.auto_frozen,
-            closing_flagged: i.closing,
         })
         .collect();
     if snapshot.is_empty() && load_snapshot(path).len() > 1 {
@@ -221,7 +214,9 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         // "working" means a process is running RIGHT NOW, so it is false by
         // construction after a restart - restoring it strands the row as
         // in-progress and blocks when-done forever (todo 888).
-        if s.awaiting.is_some() && s.awaiting.as_deref() != Some("working") {
+        // "close_failed" was a stand-down state of the retired /close skill run;
+        // an old snapshot may still carry it, and nothing clears it now.
+        if s.awaiting.is_some() && !matches!(s.awaiting.as_deref(), Some("working" | "close_failed")) {
             registry.set_awaiting(&s.session_id, s.awaiting.clone());
         }
         if s.jarvis {
@@ -248,14 +243,7 @@ pub fn populate_registry(registry: &Registry, sessions: Vec<PersistedInteractive
         if s.auto_frozen {
             registry.set_auto_frozen(&s.session_id, true);
         }
-        // Intentionally never restored - see `closing_flagged`'s doc comment.
-        if s.closing_flagged {
-            log::info!(
-                "persist sessions: session {} restored with closing_flagged=true; clearing to false",
-                s.session_id
-            );
-        }
-        // A /close rename written since the last save lives in the transcript,
+        // A rename written since the last save lives in the transcript,
         // so a fresh override beats everything; then the AI milestone title (so
         // a chat that re-titled itself keeps that name across a restart); then
         // the persisted snapshot name; and only if none exist do we derive from
@@ -329,7 +317,6 @@ mod tests {
             frozen: false,
             frozen_needs_continue: false,
             auto_frozen: false,
-            closing_flagged: false,
         }];
         let added = populate_registry(&registry, sessions);
         assert_eq!(added, 0);
@@ -399,29 +386,27 @@ mod tests {
         assert_eq!(registry2.get("sess-1").unwrap().account_id.as_deref(), Some("acct-work"));
     }
 
-    /// todo 625: `closing` now round-trips to disk but must still reconcile
-    /// to `false` on restart, not resurrect a session as stuck-closing.
+    /// A snapshot written before `closing_flagged` was removed carries the key
+    /// (and may carry `awaiting: "close_failed"`, a state nothing sets now). It
+    /// must still load, the chat must not come back Closing, and the retired
+    /// failure state must not be restored as a status nothing can clear.
     #[test]
-    fn closing_flagged_persists_but_reconciles_to_false_on_restart() {
-        let registry = Registry::new();
+    fn an_old_snapshot_with_the_removed_close_keys_still_loads_clean() {
         let tmp = TempDir::new().unwrap();
-        let cwd = tmp.path().to_path_buf();
+        let cwd = tmp.path().to_string_lossy().replace('\\', "\\\\");
         let path = tmp.path().join("snap.json");
-
-        registry.upsert_interactive("sess-1", &cwd, "proj-x", "2026-08-16T00:00:00Z");
-        registry.set_closing("sess-1", true);
-
-        save_snapshot(&registry, &path);
-        let loaded = load_snapshot(&path);
-        assert!(loaded[0].closing_flagged, "closing_flagged must round-trip to disk");
-
-        // Simulate a daemon restart: fresh registry, replay the snapshot.
-        let registry2 = Registry::new();
-        populate_registry(&registry2, loaded);
-        assert!(
-            !registry2.get("sess-1").unwrap().closing,
-            "a stale mid-close flag must clear to false on restart"
+        let json = format!(
+            r#"[{{"session_id":"old","cwd":"{cwd}","project_id":"p","name":null,"model":"opus","effort":"high","started_at":"2026-07-01T00:00:00Z","awaiting":"close_failed","closing_flagged":true}},{{"session_id":"q","cwd":"{cwd}","project_id":"p","name":null,"model":"opus","effort":"high","started_at":"2026-07-01T00:00:00Z","awaiting":"question","closing_flagged":true}}]"#
         );
+        std::fs::write(&path, json).unwrap();
+        let loaded = load_snapshot(&path);
+        assert_eq!(loaded.len(), 2, "the removed key must not make the snapshot unreadable");
+        let registry = Registry::new();
+        populate_registry(&registry, loaded);
+        let old = registry.get("old").expect("the chat is restored");
+        assert!(!old.closing, "a stale mid-close flag never resurrects");
+        assert!(old.awaiting.is_none(), "close_failed is dropped, not restored");
+        assert_eq!(registry.get("q").unwrap().awaiting.as_deref(), Some("question"), "other states still restore");
     }
 
     /// Regression: a daemon restart used to wipe every backgrounded chat's

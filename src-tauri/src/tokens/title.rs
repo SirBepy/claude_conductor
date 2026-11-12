@@ -7,8 +7,8 @@ use std::path::Path;
 
 /// Record type `ai_milestone_title` looks for, appended by the Stop hook when
 /// `report_turn_status`'s `title` arg is set (todo 435 - retires the
-/// `<cc-title:…>` text marker). Mirrors `/close`'s manual-rename lines: a
-/// durable, offline-readable record, not daemon-only state.
+/// `<cc-title:…>` text marker). Mirrors the manual-rename lines (`custom-title`,
+/// `agent-name`): a durable, offline-readable record, not daemon-only state.
 pub fn append_ai_title_record(transcript_path: &Path, title: &str) -> std::io::Result<()> {
     let line = serde_json::json!({"type": "ai-title", "aiTitle": title}).to_string();
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(transcript_path)?;
@@ -78,8 +78,8 @@ pub(crate) fn normalise_and_truncate(s: &str, max_chars: usize) -> Option<String
 }
 
 /// Reads up to the last 64KB of a transcript and returns the most recent
-/// non-blank `custom-title` / `agent-name` override (written by /close's
-/// rename-session script, which appends them at EOF). Scans backward so the
+/// non-blank `custom-title` / `agent-name` override (a rename
+/// appends them at EOF). Scans backward so the
 /// latest rename wins, discarding a partial first line from the tail window
 /// and skipping any line that doesn't parse. Returns None when no override
 /// has been written — callers then fall back to the first user prompt.
@@ -123,8 +123,8 @@ pub fn curated_or_ai_title(path: &Path, max_chars: usize) -> Option<String> {
 }
 
 /// Resolves a session's display title. Precedence, highest first:
-/// 1. a curated override (a `custom-title`/`agent-name` line from /close's
-///    rename or any future manual rename) — sticky, a human choice always wins;
+/// 1. a curated override (a `custom-title`/`agent-name` line a rename
+///    appended to the transcript): sticky, a human choice always wins;
 /// 2. the first AI title (frozen at the end of the first user turn that
 ///    produced one, see `ai_milestone_title`);
 /// 3. the first user prompt.

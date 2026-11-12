@@ -132,7 +132,7 @@ fn is_wake_worthy(awaiting: Option<&str>) -> bool {
 /// `_display_name` is accepted (not formatted into the line) only to keep the
 /// call site in `pump.rs` unchanged - the wake line carries zero bytes the
 /// worker influenced, same boundary `repo_channel_wake::wake_notice` draws.
-/// A worker's self-chosen title (`<cc-title:..>`/`/close` override, both
+/// A worker's self-chosen title (`<cc-title:..>` or a transcript rename override, both
 /// un-escaped past `tokens::title::normalise_and_truncate`) would otherwise
 /// land inside `is_meta: true` text the system prompt treats as app-authored,
 /// letting a tricked worker splice instructions into Jarvis's own turn. Jarvis
@@ -269,7 +269,7 @@ mod tests {
     }
 
     /// A worker's self-chosen title (`report_turn_status`'s title, or a
-    /// `<cc-title:..>`/`/close` override picked up via `inst.name`) must
+    /// `<cc-title:..>` or a transcript rename override picked up via `inst.name`) must
     /// never appear in the trusted, `is_meta: true` wake text Jarvis reads -
     /// only daemon facts (session id, status) may. Mirrors
     /// `repo_channel_wake`'s `wake_notice_carries_no_peer_supplied_bytes`.

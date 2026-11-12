@@ -1,6 +1,6 @@
 //! What a sub's turn ending sets in motion. The pump calls [`on_turn_end`] from
 //! its result-line handler and [`on_process_exit`] from its EOF handler, the two
-//! places `/close` teardown is already honoured; a sub's finish and the daemon's
+//! places a confirmed close is already honoured; a sub's finish and the daemon's
 //! nudge are the same shape of "act once the turn is over".
 
 use super::finish;
