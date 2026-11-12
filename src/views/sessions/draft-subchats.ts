@@ -77,10 +77,13 @@ function routeHostsOf(pane: ParentNode): HTMLElement[] {
 }
 
 /** Where this draft's first message goes: the project's main chat, unless the draft
- *  is a plain chat, aims at another machine, or the project has no open main chat. */
+ *  is a plain chat, aims at another machine, or the project has no open main chat.
+ *  A draft opened with a message already in hand (`initialMessage`: the dashboard's
+ *  card chats, `/pickup`) is a fresh chat by design, never a message into another chat:
+ *  a card chat starts without auto-accept so text it embeds meets a permission prompt. */
 export function draftRouteTarget(config: SessionConfig): ProjectMainChat | null {
   const path = state.pendingNewSession?.projectPath;
-  if (!path || config.plainChat === true || config.machineId) return null;
+  if (!path || config.plainChat === true || config.machineId || config.initialMessage) return null;
   return mainChatFor(path, state.sessions);
 }
 
@@ -106,7 +109,8 @@ function wireRoute(host: HTMLElement, pane: ParentNode, config: SessionConfig): 
  *  "Use subchats" slot it replaces is hidden then. */
 function syncRoute(pane: ParentNode, config: SessionConfig): ProjectMainChat | null {
   const path = state.pendingNewSession?.projectPath;
-  const main = path && !config.machineId ? mainChatFor(path, state.sessions) : null;
+  // Same exceptions as `draftRouteTarget`, so the slot never promises a route the send will not take.
+  const main = path && !config.machineId && !config.initialMessage ? mainChatFor(path, state.sessions) : null;
   const plain = config.plainChat === true;
   for (const host of hostsOf(pane)) host.hidden = !!main;
   for (const host of routeHostsOf(pane)) {

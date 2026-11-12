@@ -269,6 +269,8 @@ async fn wait(state: &Arc<DaemonState>, parent: &str) {
     if state.registry.set_closing(parent, true) {
         crate::daemon::machines::publish_instances_changed(state);
     }
+    // A closing chat hands the project's pointer to another open main chat.
+    super::main_pointer::reconcile(state);
     complete_if_settled(state, parent).await;
 }
 
@@ -284,6 +286,7 @@ fn keep_open(state: &Arc<DaemonState>, parent: &str) {
     if state.registry.set_closing(parent, false) {
         crate::daemon::machines::publish_instances_changed(state);
     }
+    super::main_pointer::reconcile(state);
 }
 
 /// Closes `parent` if it is waiting and no sub is running any more.
@@ -1078,6 +1081,8 @@ mod tests {
         let _data = TempDataDir::new();
         let st = state_with_project();
         let (main, _) = family(&st, "pm-keep", &[]);
+        // A project's main chat has the mode on; the reconcile Keep it open runs clears a pointer without it.
+        crate::sessions::chat_config::set_subchats_on(&main, true);
         st.settings.set_project_main_chat("proj", Some(&main));
         assert!(request_close(&st, &main));
         let id = card_id(&st, KIND).await.unwrap();
@@ -1093,6 +1098,21 @@ mod tests {
         assert!(until(|| pointer(&st).is_none()).await, "the project no longer points at a closed chat");
         assert!(until(|| !is_approved(&main)).await, "the approval is released once the close is done");
         assert!(st.list_prompts().await.is_empty(), "the approved close drew no second card");
+    }
+
+    #[tokio::test]
+    async fn waiting_for_subs_hands_the_pointer_to_another_open_main_chat() {
+        let _data = TempDataDir::new();
+        let st = state_with_project();
+        let (main, _) = family(&st, "pm-wait", &[("run", false)]);
+        let (other, _) = family(&st, "pm-wait-other", &[]);
+        crate::sessions::chat_config::set_subchats_on(&main, true);
+        crate::sessions::chat_config::set_subchats_on(&other, true);
+        st.settings.set_project_main_chat("proj", Some(&main));
+        assert!(request_close(&st, &main));
+        let id = card_id(&st, KIND).await.unwrap();
+        answer(&st, &id, WAIT_FOR_THEM).await;
+        assert!(until(|| pointer(&st).as_deref() == Some(other.as_str())).await, "new chats go to the chat that stays open");
     }
 
     #[tokio::test]
