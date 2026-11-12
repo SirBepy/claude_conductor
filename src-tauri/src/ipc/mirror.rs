@@ -1,7 +1,7 @@
 //! Shared mirrored-session routing helper for IPC commands whose underlying
 //! work (git/file reads against a chat's cwd) only makes sense on the
 //! machine actually hosting the session - a chat mirrored in from a paired
-//! peer machine (`Instance.machine`, see `CLAUDE.md`'s federation module map)
+//! peer machine (`Instance.machine`, see `docs/architecture/multi-machine.md`)
 //! has its cwd on the PEER's disk, not this one's (G10, docs/multi-machine.md).
 //!
 //! Reuses `ipc::chat::history::is_mirrored` (same `AppState.cached_instances`

@@ -296,7 +296,7 @@ desktop serves.
 **Get the APK.** A GitHub Release carries a signed `*_android_arm64.apk` whenever that release
 changed the Android shell. Releases that only touched the desktop app do not rebuild it, so if the
 newest release has no APK, the most recent one that does is still current. To build it yourself
-instead, see `CLAUDE.md`'s Android section.
+instead, see `CLAUDE.md`'s Android section and `docs/architecture/android-build.md`.
 
 **Prerequisite.** None beyond the desktop: scanning the pairing QR connects the phone directly to
 your desktop, peer-to-peer (iroh), on WiFi or mobile data alike, with no VPN or port forwarding.

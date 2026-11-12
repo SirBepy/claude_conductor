@@ -64,7 +64,7 @@ app does differently, evidenced by the code itself:
   channel automation, and cross-device (phone + peer-machine) control of the SAME
   Claude Code sessions in one tray-first app, not a web dashboard or a CLI wrapper.
 - Sessions are daemon-hosted, not app-hosted: closing the window/app does not kill
-  a running Claude process (README.md:6, CLAUDE.md's daemon/machines module map).
+  a running Claude process (README.md:6, docs/architecture/multi-machine.md).
 - Multi-machine federation lets one chat list show sessions running on a different
   paired computer as if local (README.md:136-174) - not just remote-viewing, but
   spawning and messaging cross-machine sessions via MCP tools.

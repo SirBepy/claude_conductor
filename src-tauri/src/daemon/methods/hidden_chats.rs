@@ -49,7 +49,7 @@ async fn update_hidden_chats(state: &Arc<DaemonState>, transport: &Transport, de
     let before = merged_lists(state);
 
     // A call that already came from a peer is about this daemon's own chats
-    // (CLAUDE.md mirroring loop guards), so it is never forwarded again.
+    // (docs/architecture/multi-machine.md mirroring loop guards), so it is never forwarded again.
     if !from_peer {
         // Every host is resolved (known and online) before the first call, so
         // an unknown or offline host fails the delta before any host changes.
