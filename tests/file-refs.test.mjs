@@ -246,6 +246,15 @@ describe("a path with a space in an inline code span", () => {
     expect(names(String.raw`C:\x\a.txt and b.pdf`)).toEqual([String.raw`C:\x\a.txt`]);
   });
 
+  it("does not swallow lowercase prose between a path and a later file name", () => {
+    const names = (s) => findFileRefs(s).map((r) => r.path);
+    expect(names(String.raw`C:\out\dir now holds a.txt`)).toEqual([String.raw`C:\out\dir`]);
+    expect(names("wrote /tmp/out/logs containing summary.txt")).toEqual(["/tmp/out/logs"]);
+    expect(names(String.raw`built C:\workuild produced result.json`)).toEqual([String.raw`C:\workuild`]);
+    // A capitalised or punctuated name is still one file.
+    expect(names(String.raw`saved C:\Docs\Quarterly Review Q3.pdf ok`)).toEqual([String.raw`C:\Docs\Quarterly Review Q3.pdf`]);
+  });
+
   it("leaves a span with markup inside it to the prose matcher", () => {
     const root = mount(String.raw`<p><code>C:\Program Files\<b>x</b>.txt</code></p>`);
     linkifyFilePaths(root);
