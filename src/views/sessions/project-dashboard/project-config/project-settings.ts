@@ -1,7 +1,7 @@
 import { html, render } from "lit-html";
 import { renderChatDefaultsRow } from "./chat-defaults-row";
 import {
-  renderAccountRow, renderConnectorsRow, renderGamingModeRow, renderSubchatCheckRow, renderTrackerRow,
+  renderAccountRow, renderCompactionRow, renderConnectorsRow, renderGamingModeRow, renderSubchatCheckRow, renderTrackerRow,
 } from "./rows";
 import { renderMcpServersRow } from "./mcp-servers-row";
 import "./project-settings.css";
@@ -17,6 +17,7 @@ export async function renderProjectSettings(root: HTMLElement, cwd: string): Pro
   await renderTrackerRow(cwd);
   await renderMcpServersRow(cwd);
   await renderSubchatCheckRow(cwd);
+  await renderCompactionRow(cwd);
 }
 
 // A short label with the explanation on hover: the rail is 270px wide, so a
@@ -62,6 +63,17 @@ function template() {
       <div class="ps-group">
         <div class="ps-group-title" title="This project's own MCP servers (a local app's /mcp). Each is checked before a turn starts and left out if it does not answer.">MCP servers</div>
         <div class="ps-field" id="mcpServersControl"></div>
+      </div>
+      <div class="ps-group">
+        <div class="ps-group-title" title="A main chat (Use subchats on) that is idle and past this size is summarized in place and goes on. Overrides Settings > Chat defaults for this project.">Compaction</div>
+        <div class="ps-line">
+          <span class="ps-label" title="Compact this project's main chats automatically">Compact automatically</span>
+          ${toggle("compactOn")}
+        </div>
+        <div class="ps-line">
+          <span class="ps-label" title="Compact once the chat holds this many thousand tokens">Compact at (K tokens)</span>
+          <input type="number" id="compactK" class="inline-input" min="1" max="10000" step="1">
+        </div>
       </div>
       <div class="ps-group">
         <div class="ps-group-title">Subchats</div>

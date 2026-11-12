@@ -10,7 +10,9 @@ import {
 import { settingsData } from "../../../sessions/new-session-cache";
 import { settingsHeader, toggleRow } from "../../ui";
 import { CHAT_VIEW_CHANGED, CHAT_VIEW_KEY, SECTIONS_KEY, readChatView, readSections, type ChatView } from "../../../sessions/chat-dashboard/chat-view-pref";
+import type { AutoCompact } from "../../../../shared/auto-compact";
 import { SECTION_DEFAULTS, sectionOn } from "../../../../shared/chat/dashboard/dashboard-model";
+import { kToTokens, readAutoCompact, tokensToK, withAutoCompact } from "../../../../shared/auto-compact";
 import "./chat-defaults.css";
 
 /** Parse a comma-separated models string into a trimmed, deduped, non-empty list. */
@@ -31,7 +33,7 @@ const DASHBOARD_SECTIONS: ReadonlyArray<{ id: string; label: string; tooltip: st
   { id: "changes", label: "Changes", tooltip: "The files the chat edited since your last message. Off unless you turn it on." },
 ];
 
-function template(models: string[], sort: SessionSort, def: { model: string; effort: string }, chips: boolean, view: ChatView, sections: Record<string, boolean>) {
+function template(models: string[], sort: SessionSort, def: { model: string; effort: string }, chips: boolean, view: ChatView, sections: Record<string, boolean>, compact: AutoCompact) {
   return html`
     <div class="view view-settings-chat-defaults">
       ${settingsHeader("Chat defaults")}
@@ -94,6 +96,19 @@ function template(models: string[], sort: SessionSort, def: { model: string; eff
         ${isRemote()
           ? ""
           : html`<div class="kit-section">
+              <div class="kit-section-title">Compaction</div>
+              ${toggleRow({
+                label: "Compact main chats automatically",
+                inputId: "chatDefaultsCompactOn",
+                checked: compact.on,
+                tooltip: "A main chat (Use subchats on) that is idle and past the size below is compacted in place: the conversation is summarized and the chat goes on. A project can set its own in its project settings.",
+              })}
+              <div class="kit-row">
+                <span class="kit-row-label">Compact at (K tokens)</span>
+                <input type="number" id="chatDefaultsCompactK" class="kit-select cd-compact-k" min="1" max="10000" step="1" .value=${String(tokensToK(compact.tokens))}>
+              </div>
+            </div>
+            <div class="kit-section">
               <div class="kit-section-title">Models</div>
               <input
                 type="text"
@@ -118,7 +133,7 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
   if (!models.includes(def.model)) models = [...models, def.model];
 
   // Default on: an absent key resolves to true.
-  render(template(models, sort, def, getSettings().nextActionChips !== false, readChatView(getSettings()), readSections(getSettings())), root);
+  render(template(models, sort, def, getSettings().nextActionChips !== false, readChatView(getSettings()), readSections(getSettings()), readAutoCompact(getSettings(), null)), root);
 
   for (const id of Object.keys(SECTION_DEFAULTS)) {
     root.querySelector<HTMLInputElement>(`#chatDefaultsSection-${id}`)?.addEventListener("change", (e) => {
@@ -135,6 +150,24 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
       // updateSettings refreshes the settings cache first, so an open chat reads the new value.
       .then(() => document.dispatchEvent(new CustomEvent(CHAT_VIEW_CHANGED)))
       .catch((err) => console.error("[chat-defaults] saving the chat view failed", err));
+  });
+
+  root.querySelector<HTMLInputElement>("#chatDefaultsCompactOn")?.addEventListener("change", (e) => {
+    const on = (e.currentTarget as HTMLInputElement).checked;
+    void updateSettings((fresh) => withAutoCompact(fresh, null, { on }))
+      .catch((err) => console.error("[chat-defaults] saving the compaction switch failed", err));
+  });
+
+  const compactK = root.querySelector<HTMLInputElement>("#chatDefaultsCompactK");
+  compactK?.addEventListener("change", () => {
+    const tokens = kToTokens(compactK.value);
+    if (tokens === null) {
+      // Not a number the daemon would accept: show what is in force instead.
+      compactK.value = String(tokensToK(readAutoCompact(getSettings(), null).tokens));
+      return;
+    }
+    void updateSettings((fresh) => withAutoCompact(fresh, null, { tokens }))
+      .catch((err) => console.error("[chat-defaults] saving the compaction size failed", err));
   });
 
   root.querySelector<HTMLInputElement>("#chatDefaultsNextChips")?.addEventListener("change", (e) => {
