@@ -10,6 +10,7 @@
 // Reviewed 2026-11-12 (honest sub states): subs gained queued/paused/usage-limit/stopped kinds with a dim ring and glyph, an avatar hover card, the Plan foot's sub counts and a glowing main-chat ring; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12: the /pickup button now starts its new chat only when the old one closed; nothing this spec asserts changed (not run here).
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed. It passes.
+// Reviewed 2026-11-12 (forever chat B2): the dashboard adds rows rebuilt from the transcript digest above the loaded page, only when the page reports older history; this spec loads its whole chat in one page, nothing it asserts changed, and it passes.
 // Reviewed 2026-11-12 (per-chat previews): the Preview card lists only the previews this chat pushed (newest big, the rest as a thumbnail strip) and folds the family's others behind "N more by other chats"; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-11 (Send thread to chat): an Answers-card thread with a follow-up gains a hand-off button under its latest reply, the dashboard wires its send through sendRevision, and AnswerAuthor carries the sub's id; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-11 (phone keyboard): a chat no longer focuses its composer on open at phone width; nothing this spec asserts changed, and it passes.
