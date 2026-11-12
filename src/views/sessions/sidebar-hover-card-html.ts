@@ -142,8 +142,9 @@ function placeText(place: number): string {
 export function buildSubHoverCardHtml(i: SubHoverInput): string {
   const { hover: h } = i;
   const started = Date.parse(i.startedAt ?? "");
-  // A queued sub has not run and a finished one has stopped its clock, so only a started, unfinished sub shows time.
-  const running = i.kind !== "queued" && i.kind !== "finished" && !Number.isNaN(started)
+  // Only a sub with a live turn shows a clock: a queued sub has not run, a finished one is done, and a
+  // paused, limited or stopped one reading "running 2:10:00" would count up while nothing runs.
+  const running = (i.kind === "working" || i.kind === "asking") && !Number.isNaN(started)
     ? `<span class="hc-timer">running ${escapeHtml(formatRunTime(i.now - started))}</span>` : "";
   const lines: string[] = [];
   if (h.queue) {
