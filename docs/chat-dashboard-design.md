@@ -498,9 +498,12 @@ Open (Joe's words; the main chat decides how to take them up):
   main chat is phase B (S1 spike, B1 compaction manager) of docs/forever-chat-plan.md. Auto-closing
   old subs runs against two earlier calls (closing finished subs on a timer is ruled out here, and
   the plan keeps finished subs), so it needs Joe's decision with the trade-off shown: a finished sub
-  is idle and frozen (`main-chat.ts`); what grows with age is name collisions, list length and the
-  never-pruned per-sub files (forever-chat-plan section 1.8 and A4). Whether a frozen sub still holds
-  a process or memory was not checked here.
+  is idle and frozen (`main-chat.ts`); what grows with age is name collisions and list length
+  (forever-chat-plan A4) and the never-pruned `cards.jsonl`, `decisions.md`, `finish.json` and
+  `digest.md` (todo pc-1682, section C item 7). The plan measures about 330MB of RAM per chat
+  (section 1.8); whether a finished, frozen sub still holds its process was not checked here.
+- **The `all_finished` card in Messages view:** the family totals left the Result card (above);
+  whether this card stays is not decided.
 
 ## Build (started 2026-11-10, overnight, unattended)
 
