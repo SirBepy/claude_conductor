@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 // An open detail card lives inside its message bubble, so the chat's per-message
-// passes (code highlight, blockquote wrap, inline-code wrap, drill/file/ticket
+// passes (code highlight, inline-code wrap, drill/file/ticket
 // linkify) walk into it on any re-render of that bubble or history page load.
 // None of them may rewrite the card: a `[x](#d:other)` inside would become a chip
 // that swaps the card for another detail, and a code block would be highlighted
@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: invokeMock }));
 
-const { renderMessage, wrapBlockquotes } = await import("../src/shared/chat/chat-transforms.ts");
+const { renderMessage } = await import("../src/shared/chat/chat-transforms.ts");
 const { linkifyDrillRefs, handleDrillClick } = await import("../src/shared/chat/drill-links.ts");
 const { highlightCodeBlocks, highlightInlineCode } = await import("../src/shared/chat/code-highlighter.ts");
 const { linkifyFilePaths } = await import("../src/shared/chat/file-refs.ts");
@@ -60,7 +60,6 @@ function openCard() {
 
 const passes = {
   highlightCodeBlocks: async (el) => highlightCodeBlocks(el),
-  wrapBlockquotes: async (el) => wrapBlockquotes(el),
   highlightInlineCode: async (el) => highlightInlineCode(el),
   linkifyDrillRefs: async (el, container) => linkifyDrillRefs(el, container),
   linkifyFilePaths: async (el) => linkifyFilePaths(el),

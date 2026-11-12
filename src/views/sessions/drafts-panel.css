@@ -560,13 +560,6 @@
 
 .dr-body pre code { background: none; border: none; padding: 0; }
 
-.dr-body blockquote {
-  margin: 0 0 10px;
-  padding-left: 9px;
-  border-left: 2px solid var(--color-border);
-  color: var(--color-text-muted);
-}
-
 /* The footer is the shared composer field (composer-field.ts) plus the
    presets caret; only its placement in the card lives here. */
 .dr-foot {

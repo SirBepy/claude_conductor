@@ -58,29 +58,8 @@
   opacity: 1;
 }
 
-.card-block {
-  background: var(--color-surface-alt);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 10px 12px;
-  padding-right: 36px;
-}
-
-.card-block blockquote {
-  margin: 0;
-  padding: 0;
-  border-left: none;
-  color: var(--color-text);
-  font-style: normal;
-}
-
-.card-block blockquote p {
-  margin: 0;
-  line-height: 1.5;
-}
-
-/* Card-style container for copyable code (tool inputs, raw blocks). Same
- * visual shell as .card-block but with monospace content + horizontal scroll. */
+/* Card-style container for copyable code (tool inputs, raw blocks):
+ * monospace content + horizontal scroll. */
 .code-card {
   background: var(--color-surface-alt);
   border: 1px solid var(--color-border);

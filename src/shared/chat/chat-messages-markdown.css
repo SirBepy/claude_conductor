@@ -191,15 +191,31 @@
 :is(.msg, .drill-pop) h3 { font-size: 0.96rem; }
 :is(.msg, .drill-pop) h4, :is(.msg, .drill-pop) h5, :is(.msg, .drill-pop) h6 { font-size: 0.88rem; }
 
-/* Blockquote — left-bar style, muted text. */
-:is(.msg, .drill-pop) blockquote {
-  margin: 6px 0;
-  padding: 4px 10px;
-  border-left: 3px solid var(--color-border);
-  color: var(--color-text-muted);
-  font-style: italic;
+/* Blockquote: a quote of a person, drawn as a reply bubble on every surface
+   that renders markdown (renderMarkdown tags each one .md-quote, see
+   markdown-quote.ts). The draft editor's own toolbar makes untagged quotes, so
+   .dr-body blockquote rides the same rule. Paste-ready text is a fenced code
+   block, never a quote, so a quote carries no copy button. */
+:is(blockquote.md-quote, .dr-body blockquote) {
+  margin: 6px 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--color-primary);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-text);
+  font-style: normal;
 }
-:is(.msg, .drill-pop) blockquote p { margin: 0; }
+:is(blockquote.md-quote, .dr-body blockquote) > p { margin: 0; }
+:is(blockquote.md-quote, .dr-body blockquote) > p + p { margin-top: 4px; }
+:is(blockquote.md-quote, .dr-body blockquote) :is(blockquote.md-quote, .dr-body blockquote) { margin: 4px 0; }
+:is(blockquote.md-quote, .dr-body blockquote) > p.md-quote-who {
+  margin-bottom: 2px;
+  font-size: 0.92em;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+:is(blockquote.md-quote, .dr-body blockquote) > p.md-quote-who + p { margin-top: 0; }
+.md-quote-colon { display: none; }
 
 /* Horizontal rule — subtle divider. */
 :is(.msg, .drill-pop) hr {

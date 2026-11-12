@@ -82,7 +82,10 @@ function blocksOf(node: Node, out: string[], listPrefix: string | null): void {
   if (el.tagName === "BLOCKQUOTE") {
     const inner: string[] = [];
     for (const child of Array.from(el.childNodes)) blocksOf(child, inner, null);
-    for (const line of inner) out.push(`> ${line}`);
+    // One block for the whole quote: a quote's paragraphs (a speaker line, then
+    // the words) pushed as separate `> ` blocks would come back as separate quotes.
+    const body = joinBlocks(inner);
+    if (body) out.push(body.split("\n").map((l) => (l ? `> ${l}` : ">")).join("\n"));
     return;
   }
   if (/^H[1-3]$/.test(el.tagName)) {
@@ -104,6 +107,10 @@ function blocksOf(node: Node, out: string[], listPrefix: string | null): void {
 export function htmlToMarkdown(root: HTMLElement): string {
   const blocks: string[] = [];
   for (const child of Array.from(root.childNodes)) blocksOf(child, blocks, null);
+  return joinBlocks(blocks).trim();
+}
+
+function joinBlocks(blocks: string[]): string {
   let out = "";
   blocks.forEach((block, i) => {
     if (i === 0) {
@@ -114,7 +121,7 @@ export function htmlToMarkdown(root: HTMLElement): string {
     const bothList = isListLine(prev) && isListLine(block);
     out += bothList ? `\n${block}` : `\n\n${block}`;
   });
-  return out.trim();
+  return out;
 }
 
 function isListLine(line: string): boolean {
