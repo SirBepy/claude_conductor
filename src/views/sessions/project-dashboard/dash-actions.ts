@@ -10,6 +10,7 @@ import { openFileWindow } from "../../../shared/open-file";
 import { createMoreMenu } from "../more-menu-base";
 import { resolveNewChatConfig, accountPickNeeded } from "../new-chat-config";
 import { selectSession } from "../active-session";
+import { forceDraftPlain } from "../draft-subchats";
 import { updateThinkingBar } from "../session-thinking-bar";
 import { state } from "../state";
 import type { DashActions, DashCtx } from "./dash-parts";
@@ -107,7 +108,8 @@ async function startCardChat(host: ActionHost, repo: RepoRef, message: string): 
   // With no account resolved it waits in the message box instead of
   // auto-sending into the account gate.
   const launch = needsAccount ? { draftText: message } : { initialMessage: message };
-  state.launchNewChatCallback?.(project, { ...config, autoAccept: false, ...launch });
+  // Nor does it go into the project's main chat: a plain chat of its own, whichever way it starts.
+  state.launchNewChatCallback?.(project, { ...config, autoAccept: false, plainChat: true, subchatsOn: false, ...launch });
 }
 
 function fillComposer(command: string): void {
@@ -147,7 +149,7 @@ export function makeActions(host: ActionHost): DashActions {
       })();
     },
     runCardAction: (anchor, message) => {
-      if (host.ctx().mode === "draft") { void state.composer?.sendText(message); return; }
+      if (host.ctx().mode === "draft") { forceDraftPlain(); void state.composer?.sendText(message); return; }
       void (async () => {
         const repo = await pickRepo(host.ctx(), anchor);
         if (!repo) return;
@@ -160,7 +162,7 @@ export function makeActions(host: ActionHost): DashActions {
         // The draft starts in its own folder, so only that repo's ids can be resolved by the chat.
         const cwd = state.pendingNewSession?.projectPath;
         const all = cwd ? doAllMessage(due, cwd) : null;
-        if (all) void state.composer?.sendText(all);
+        if (all) { forceDraftPlain(); void state.composer?.sendText(all); }
         else showToast(NO_DUE_REPO);
         return;
       }

@@ -289,6 +289,17 @@ export function unmountDraftSubchats(pane: ParentNode): void {
   for (const host of [...hostsOf(pane), ...routeHostsOf(pane)]) host.remove();
 }
 
+/** Makes the open draft a plain chat. A message built from third-party text (a dashboard
+ *  card action typed into the draft) must start a chat of its own, not land in the main
+ *  chat under that chat's own auto-accept. */
+export function forceDraftPlain(): void {
+  const pending = state.pendingNewSession;
+  const pane = document.getElementById("session-pane");
+  if (!pending || pending.firstMessageSent || !pane) return;
+  setPlain(pending.config, true);
+  syncDraftSubchats(pane, pending.config);
+}
+
 /** Repaints the open draft, if any, after the project's main chat or its title
  *  changed under it: the pointer was re-read, or the chat closed or was renamed. */
 export function resyncOpenDraft(): void {
