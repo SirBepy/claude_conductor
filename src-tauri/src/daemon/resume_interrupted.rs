@@ -116,6 +116,9 @@ pub fn spawn_resumes(state: Arc<DaemonState>, session_ids: Vec<String>) {
             let sent = crate::daemon::lifecycle::send_message_with_respawn(&state, &sid, "continue", false).await;
             if let Err(e) = &sent {
                 log::warn!("resume_interrupted: auto-continue failed for {sid}: {e}");
+                // No process ran, so no exit handler clears the persisted flag;
+                // left set, every later boot would retry it and card it again.
+                crate::sessions::chat_state::set_busy(&sid, false);
             }
             settle(&sid, sent.is_ok());
             tokio::time::sleep(STAGGER).await;
