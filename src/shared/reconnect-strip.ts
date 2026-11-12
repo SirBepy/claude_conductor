@@ -7,6 +7,7 @@
 import "./reconnect-strip.css";
 import { linkSnapshot, noteResumed, type LinkSnapshot } from "./connection-state";
 import { etaLabel } from "./load-dial";
+import { note } from "./link-journal";
 import { isRemote } from "./transport";
 import { visibleInterval } from "./visible-interval";
 
@@ -59,11 +60,13 @@ export function mountReconnectStrip(): () => void {
     const view = stripView(linkSnapshot(now), !!document.querySelector(DIAL_OVERLAYS));
     if (!view) {
       notOkSince = null;
+      if (!el.hidden) note("strip_hide");
       el.hidden = true;
       return;
     }
     notOkSince ??= now;
     if (now - notOkSince < SHOW_AFTER_MS) return;
+    if (el.hidden) note("strip_show", view.text);
     icon.className = `ph ${view.icon}`;
     text.textContent = view.text;
     el.hidden = false;
@@ -75,6 +78,7 @@ export function mountReconnectStrip(): () => void {
     if (document.visibilityState !== "visible") return;
     noteResumed(Date.now());
     notOkSince = null;
+    if (!el.hidden) note("strip_hide");
     el.hidden = true;
     tick();
   };

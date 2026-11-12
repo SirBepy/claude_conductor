@@ -16,6 +16,7 @@ import { remoteToken } from "./http-transport";
 import { visibleInterval } from "./visible-interval";
 import { isAndroidShell } from "./mobile/android-shell";
 import { markLiveDown, markLiveUp } from "./connection-state";
+import { note } from "./link-journal";
 
 type GlobalCallback = (payload: unknown) => void;
 
@@ -85,6 +86,10 @@ let globalWs: WebSocket | null = null;
 let globalWsStopped = true;
 let globalRetryDelay = 1000;
 let globalLastFrameAt = 0;
+/** The frame stamp the journal last reported as stale. The watchdog fires every
+ *  tick for as long as an outage lasts, and one line per outage is what the
+ *  journal's 200 slots can afford. */
+let globalStaleNotedFor = -1;
 const globalListeners = new Map<string, Set<GlobalCallback>>();
 let globalWatchdogTimer: (() => void) | undefined;
 let globalDegradePollTimer: (() => void) | undefined;
@@ -182,6 +187,10 @@ function ensureGlobalWatchdog(): void {
     const age = Date.now() - globalLastFrameAt;
     if (age > GLOBAL_WATCHDOG_STALE_MS) {
       console.info("[global-stream] watchdog stale", { age });
+      if (globalStaleNotedFor !== globalLastFrameAt) {
+        globalStaleNotedFor = globalLastFrameAt;
+        note("gws_stale", `silent=${Math.round(age / 1000)}s`);
+      }
       // Stale: assume the socket is a zombie (half-open, no clean close).
       // Start degrading immediately and force-close so the existing
       // reconnect/backoff in onclose kicks in.
@@ -219,10 +228,12 @@ function connectGlobalStream(): void {
   ws.onopen = () => {
     globalRetryDelay = 1000;
     globalLastFrameAt = Date.now();
+    note("gws_open");
     markLiveUp();
     stopGlobalDegradePoll();
   };
   ws.onclose = () => {
+    note("gws_close");
     if (globalWs === ws) globalWs = null;
     clearGlobalProbe();
     if (globalWsStopped) return;
@@ -263,8 +274,10 @@ export function reconnectGlobalStreamIfStale(): void {
       redialGlobalStream();
       return;
     }
+    note("gws_probe");
     globalProbeTimer = setTimeout(() => {
       globalProbeTimer = undefined;
+      note("gws_probe_dead");
       // Only a socket still silent is replaced; a frame clears this timer, so
       // reaching here means none came.
       if (globalWs === ws) redialGlobalStream();

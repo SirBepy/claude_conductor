@@ -39,6 +39,7 @@ import { wireDaemonStatusToasts } from "./daemon-status-toast";
 import { wireInitialFetches } from "./initial-render-gate";
 import { mountBootProgress } from "./boot-progress";
 import { mountReconnectStrip } from "./reconnect-strip";
+import { mountLinkJournal } from "./link-journal";
 import { applyAppearance, followAppearanceChanges } from "./theme-sync";
 import { warmNewSessionCache } from "../views/sessions/new-session-cache";
 import { loadTokenHistory, mergeLiveSessions } from "./token-history";
@@ -271,6 +272,8 @@ export function initBoot(): void {
   const bootProgress = mountBootProgress();
   // Phone-only: lives for the whole app lifetime, so the disposer is dropped.
   mountReconnectStrip();
+  // Phone-only too; also for the app's lifetime.
+  mountLinkJournal();
 
   // Initial data fetches: render once all three settle (success OR failure, so
   // a failed fetch can't wedge the gate - see wireInitialFetches).
