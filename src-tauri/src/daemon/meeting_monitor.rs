@@ -228,18 +228,7 @@ mod tests {
     use super::*;
     use chrono::Duration as Chrono;
 
-    struct Fixed(Sources);
-    impl SignalSource for Fixed {
-        fn camera_in_use(&self) -> bool {
-            self.0.camera
-        }
-        fn mic_in_use(&self) -> bool {
-            self.0.mic
-        }
-        fn meeting_app_audio_active(&self, _allow: &[String]) -> bool {
-            self.0.audio
-        }
-    }
+    use crate::meeting::test_support::Fixed;
 
     fn t0() -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2026-10-30T10:00:00Z").unwrap().with_timezone(&Utc)
@@ -417,5 +406,24 @@ mod tests {
             // thread read second must be the one recorded last.
             assert!(!m.snapshot().active, "round {round}: snapshot holds the older reading ({ra:?} / {rb:?})");
         }
+    }
+
+    #[test]
+    fn the_schedule_panels_max_wait_is_the_daemons() {
+        // The panel stops calling an item "waiting" at its own copy of the max
+        // wait, so the two must stay the same number.
+        let ts = include_str!("../../../src/views/schedule/schedule-format.ts").replace("
+", "
+");
+        let line = ts
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("const MEETING_MAX_WAIT_MS = "))
+            .expect("schedule-format.ts declares MEETING_MAX_WAIT_MS");
+        let ms: i64 = line
+            .trim_end_matches(';')
+            .split('*')
+            .map(|n| n.trim().parse::<i64>().expect("a plain integer product"))
+            .product();
+        assert_eq!(ms, AFTER_MEETING_MAX_WAIT_SECS * 1000, "frontend MEETING_MAX_WAIT_MS drifted from AFTER_MEETING_MAX_WAIT_SECS");
     }
 }
