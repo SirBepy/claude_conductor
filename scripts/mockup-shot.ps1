@@ -26,7 +26,7 @@
 .PARAMETER Out
   Desired PNG path. Defaults to
   .for_bepy/screenshots/<session-id>/<html-stem>.png, id resolved via
-  close/rename-session.ps1 -GetId like the rest of the repo's screenshot
+  ~/.claude/tools/rename-session.ps1 -GetId like the rest of the repo's screenshot
   tooling.
 
 .PARAMETER Width
@@ -54,7 +54,7 @@ $htmlStem = [System.IO.Path]::GetFileNameWithoutExtension($resolvedHtml)
 $repoRoot = (git -C $PSScriptRoot rev-parse --show-toplevel) -replace '/', '\'
 
 if (-not $Out) {
-    $renameSessionScript = Join-Path $env:USERPROFILE '.claude\skills\close\rename-session.ps1'
+    $renameSessionScript = Join-Path $env:USERPROFILE '.claude\tools\rename-session.ps1'
     $sessionId = & $renameSessionScript -GetId
     if ($LASTEXITCODE -ne 0 -or -not $sessionId) {
         throw 'Could not resolve a session id via rename-session.ps1 -GetId, and no -Out was given.'

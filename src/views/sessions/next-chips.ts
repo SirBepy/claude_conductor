@@ -49,7 +49,7 @@ export function nextChips(ctx: NextChipsCtx): string[] {
   if (!ctx.enabled || ctx.hasHeld || !ctx.inst || !turnFinished(ctx.inst)) return [];
   const chips: string[] = [];
   for (const action of ctx.nextActions ?? []) {
-    if (action.split(/\s/, 1)[0]!.toLowerCase() === CLOSE) continue;
+    if (action.trim().split(/\s/, 1)[0]!.toLowerCase() === CLOSE) continue;
     if (!chips.some((c) => c.toLowerCase() === action.toLowerCase())) chips.push(action);
   }
   return chips.slice(0, MAX_NEXT_ACTIONS);

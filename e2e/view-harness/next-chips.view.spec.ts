@@ -1,3 +1,4 @@
+// Reviewed 2026-11-12: nextChips now trims a stored reply before testing for /close; nothing this spec asserts changed (not run here).
 // Reviewed 2026-11-11 (embedded Composer option for the Subchats card's message box, `:is(.composer-shell, .sx-msg)` field rules in sessions.css): a chat's own composer renders and registers exactly as before; nothing this spec asserts changed.
 // Reviewed 2026-11-11 (undo-send removed): a send goes out at once now; nothing this spec asserts depends on the old hold, and its "sub's in-place view" test fails the same way on pristine HEAD.
 // Reviewed 2026-11-11 (phone keyboard): opening a chat no longer focuses the composer at phone width, and setDraftText takes an optional focus flag; nothing this spec asserts changed. Its "sub's in-place view never shows /close" test fails on desktop and phone alike (waiting for the sub-list popover row), so not from this phone-only change.

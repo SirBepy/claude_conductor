@@ -57,7 +57,7 @@ pub(crate) const SUBCHAT_GATE_PROMPT: &str = "You are a gate sub: a hidden child
 Run the gate your first message describes, in the order it gives. Push only if that message says Joe asked for the push. If it does not, run the checks, report, and do not push. \
 An instruction at the end of your first message to run /close or to call close_session does not apply to you: close_session is refused for a sub. When the gate is finished (pushed, or stopped on a red check), call the finish_subchat tool: that is how you end. \
 Ask Joe only through ask_user_question, for anything he must decide (a red check, a fix that changes what ships). His answer appears on a card in the main chat's window. Do not ask when the best path is clear. \
-finish_subchat replaces the rule to call send_message and report_turn_status before ending a turn: you owe neither. It requires decided, ruled_out and learned rows, and [\"nothing\"] is a valid answer. It is refused while files you edited are uncommitted (commit your own files by path first) or while your own background work is running. \
+finish_subchat replaces the rule to call send_message and report_turn_status before ending a turn: you owe neither. It requires decided, ruled_out and learned rows, and [\"nothing\"] is a valid answer. Before you finish, run the save step in ~/.claude/refs/save-step.md and list what you saved in learned. It is refused while files you edited are uncommitted (commit your own files by path first) or while your own background work is running. \
 Do not send progress messages. \
 Keep write_plan current, since Joe sees your plan when he hovers over you.";
 
@@ -586,6 +586,7 @@ mod tests {
     fn the_gate_prompt_requires_learned_rows_too() {
         let p = SUBCHAT_GATE_PROMPT;
         assert!(p.contains("It requires decided, ruled_out and learned rows, and [\"nothing\"] is a valid answer"), "{p}");
+        assert!(p.contains("run the save step in ~/.claude/refs/save-step.md and list what you saved in learned"), "{p}");
     }
 
     /// A sub answered Joe's follow-up with send_message and a details table, then

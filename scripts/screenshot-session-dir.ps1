@@ -7,8 +7,8 @@
 
 .DESCRIPTION
     Reuses the same claude-ancestor process-tree walk as
-    ~/.claude/skills/close/rename-session.ps1's Get-AncestorClaudePid, so both
-    scripts and /close agree on the same <pid>-<start-ticks> id.
+    ~/.claude/tools/rename-session.ps1's Get-AncestorClaudePid, so both
+    scripts agree on the same <pid>-<start-ticks> id.
 #>
 
 function Get-AncestorClaudePid {
@@ -26,7 +26,7 @@ function Get-AncestorClaudePid {
 
 # Resolves (and creates) .for_bepy/screenshots/<pid>-<start-ticks>/ under
 # $ProjectRoot. Falls back to the screenshots root if run outside a claude
-# session (no ancestor found) - manual/ad-hoc invocations, not /close's concern.
+# session (no ancestor found) - manual/ad-hoc invocations, which no session owns.
 function Resolve-SessionScreenshotDir([string]$ProjectRoot) {
     $dir = Join-Path $ProjectRoot '.for_bepy\screenshots'
     $claudePid = Get-AncestorClaudePid

@@ -36,7 +36,7 @@
 .PARAMETER OutPath
     Where to write the PNG. Defaults to a timestamped file under
     .for_bepy/screenshots/<pid>-<start-ticks>/ (this session's disposable
-    screenshot scratch subfolder, scoped so /close can purge it by ownership).
+    screenshot scratch subfolder, scoped so it can be attributed to the session that wrote it).
 
 .PARAMETER AllowRestoreMinimized
     Opt-in. If an unrestored PrintWindow of a minimized window comes back

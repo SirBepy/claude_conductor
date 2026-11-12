@@ -1,5 +1,6 @@
 // Reviewed 2026-11-12 (honest sub states): subs gained queued/paused/usage-limit/stopped kinds with a dim ring and glyph, an avatar hover card, the Plan foot's sub counts and a glowing main-chat ring; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12 (project main chat): the sessions mount re-reads each project's main-chat pointer and repaints the open draft's slot; this spec has no pointer, so nothing it asserts changed, and it passes.
+// Reviewed 2026-11-12: the /pickup button now starts its new chat only when the old one closed; nothing this spec asserts changed (not run here).
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-11 (phone keyboard): pending-pane.ts no longer focuses the composer on open at phone width; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (dash lane 3, code-check fixes): comment rewording, a transport case split and a deleted unused getter; nothing this spec asserts changed.

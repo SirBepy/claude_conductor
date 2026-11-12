@@ -213,7 +213,7 @@ export function thisChatCommands(): PaletteCommand[] {
     branchCommand(ctx.cwd, id, ctx.mirrored === true),
     // The header menu's red item. Ctrl+W (the "Close chat" shortcut row) always asks first;
     // this one asks only when a turn is running, as the menu did.
-    { id: "this-chat:Close session", title: "Close session", group: "This chat", icon: "x-circle", run: () => closeChat(id) },
+    { id: "this-chat:Close session", title: "Close session", group: "This chat", icon: "x-circle", run: async () => { await closeChat(id); } },
   ];
 }
 

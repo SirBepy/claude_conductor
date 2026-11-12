@@ -501,7 +501,7 @@ export function buildSubCardItems(ctx: SubCardMenuCtx): ItemDesc[] {
       icon: "x-circle",
       label: "Close",
       danger: true,
-      run: ctx.queued || ctx.mirrored ? undefined : () => closeChat(id),
+      run: ctx.queued || ctx.mirrored ? undefined : async () => { await closeChat(id); },
       disabledReason: noProcess ?? gone,
     },
   ];

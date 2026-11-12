@@ -51,6 +51,10 @@ describe("nextChips", () => {
     expect(nextChips(ctx({ nextActions: ["/close"] }))).toEqual([]);
   });
 
+  it("drops a /close with leading whitespace", () => {
+    expect(nextChips(ctx({ nextActions: [" /close", "	/close --now", "Go"] }))).toEqual(["Go"]);
+  });
+
   it("keeps a reply that only starts like /close", () => {
     expect(nextChips(ctx({ nextActions: ["/closet", "Go"] }))).toEqual(["/closet", "Go"]);
   });
