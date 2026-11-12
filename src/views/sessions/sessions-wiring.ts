@@ -408,52 +408,98 @@ export async function wireInstancesChangedListener(
 const BACKGROUND_RECONCILE_CAP = 5;
 const BACKGROUND_RECONCILE_EVERY_N_TICKS = 4;
 
-/** Self-heals the visible chat's live channel, mirroring the 15s poll above -
- *  chat events have no such fallback and a dead listener never re-arms itself.
- *  Every tick force-reconciles `state.selectedId`; every 4th tick also sweeps
- *  the most-recently-active backgrounded sessions, which get zero
- *  reconciliation otherwise because the notifier is lossy. */
+/** Phone safety net: a visible-only re-read of the open chat this often. */
+const PHONE_RECONCILE_MS = 60_000;
+/** `focus` and `visibilitychange` both fire when the app comes back; reads
+ *  within this window of each other are one recovery pass. */
+const PHONE_RESUME_COLLAPSE_MS = 500;
+
+/** Self-heals the visible chat's live channel; chat events have no notifier
+ *  fallback and (on the desktop) a dead listener never re-arms itself. Every
+ *  4th tick also sweeps the most-recently-active backgrounded sessions, which
+ *  get zero reconciliation otherwise because the notifier is lossy.
+ *
+ *  Desktop: every 15s, even while hidden, rebuilds the open chat's Tauri
+ *  listener (cheap) and force-reconciles it; also on focus and on regaining
+ *  visibility.
+ *
+ *  Phone: the chat socket detects its own death (http-transport.ts heartbeat
+ *  watchdog) and re-reads on reconnect, so rebuilding it here would only cost
+ *  a tunnel stream and a page download per tick. It keeps a slow, visible-only
+ *  re-read as a safety net, and one re-read when the app comes back. */
 export function wireChatRecoveryHeartbeat(myMount: number): () => void {
+  const remote = isRemote();
   let tick = 0;
+  let lastPhoneReadAt = -Infinity;
+  const cwdOf = (sid: string): string | undefined => {
+    const sess = state.sessions.find((s) => s.session_id === sid);
+    return sess?.cwd ? String(sess.cwd) : undefined;
+  };
+  const sweepOthers = (selected: string | null): void => {
+    const others = sessionEvents.cachedSessionIdsByRecency()
+      .filter((sid) => sid !== selected)
+      .slice(0, BACKGROUND_RECONCILE_CAP);
+    for (const sid of others) void sessionEvents.reconcileLatest(sid, cwdOf(sid));
+  };
+  /** One re-read of the open chat; false when one just ran (a resume's
+   *  focus + visibilitychange pair, or the interval's own flush beside them). */
+  const phoneReadSelected = (id: string): boolean => {
+    const now = Date.now();
+    if (now - lastPhoneReadAt < PHONE_RESUME_COLLAPSE_MS) return false;
+    lastPhoneReadAt = now;
+    void sessionEvents.reconcileLatest(id, cwdOf(id));
+    return true;
+  };
   const recover = (): void => {
     if (state.mountId !== myMount) return;
     const id = state.selectedId;
     if (id) {
-      const sess = state.sessions.find((s) => s.session_id === id);
-      const cwd = sess?.cwd ? String(sess.cwd) : undefined;
       void sessionEvents.reviveListener(id).catch((err) => console.warn(`[sessions] reviveListener(${id}) failed`, err));
-      void sessionEvents.reconcileLatest(id, cwd, { force: true });
+      void sessionEvents.reconcileLatest(id, cwdOf(id), { force: true });
     }
     tick++;
     if (tick % BACKGROUND_RECONCILE_EVERY_N_TICKS !== 0) return;
-    const others = sessionEvents.cachedSessionIdsByRecency()
-      .filter((sid) => sid !== id)
-      .slice(0, BACKGROUND_RECONCILE_CAP);
-    for (const sid of others) {
-      const sess = state.sessions.find((s) => s.session_id === sid);
-      const cwd = sess?.cwd ? String(sess.cwd) : undefined;
-      void sessionEvents.reconcileLatest(sid, cwd);
-    }
+    sweepOthers(id);
   };
-  // KEEP-RUNNING (todo 1008): a dead chat listener never re-arms itself; if
-  // this paused while hidden, a phone-driven or backgrounded turn's
-  // completion could be silently lost until refocus, defeating notifications
-  // that depend on it. The onVisibilityChange recover() below is unrelated to
-  // pausing (visibleInterval's whileHidden path adds no visibility listener
-  // of its own) - it's an immediate correction on regain rather than waiting
-  // out the rest of the 15s tick, so it stays.
-  const dispose = visibleInterval(recover, 15_000, {
-    whileHidden: true,
-    reason: "a dead chat listener never re-arms itself; pausing while hidden could silently drop a phone-driven or backgrounded turn's completion until refocus",
-  });
+  const phoneTick = (): void => {
+    if (state.mountId !== myMount) return;
+    const id = state.selectedId;
+    if (id) phoneReadSelected(id);
+    tick++;
+    if (tick % BACKGROUND_RECONCILE_EVERY_N_TICKS !== 0) return;
+    sweepOthers(id);
+  };
+  // Resume passes read the open chat only and leave the sweep cadence alone.
+  const phoneResume = (): void => {
+    if (state.mountId !== myMount) return;
+    const id = state.selectedId;
+    if (id) phoneReadSelected(id);
+  };
+  const onTick = remote ? phoneTick : recover;
+  const onResume = remote ? phoneResume : recover;
+  // Desktop KEEP-RUNNING: a dead chat listener never re-arms
+  // itself; if this paused while hidden, a backgrounded turn's completion
+  // could be silently lost until refocus, defeating notifications that depend
+  // on it. The phone pauses while hidden instead: its socket heals itself and
+  // re-reads on reconnect, and a hidden page must not keep dialing the PC.
+  // The onVisibilityChange handler below is unrelated to pausing
+  // (visibleInterval's whileHidden path adds no visibility listener of its
+  // own) - it's an immediate correction on regain rather than waiting out the
+  // rest of the tick, so it stays.
+  const dispose = remote
+    ? visibleInterval(onTick, PHONE_RECONCILE_MS)
+    : visibleInterval(onTick, 15_000, {
+      whileHidden: true,
+      reason: "a dead chat listener never re-arms itself; pausing while hidden could silently drop a backgrounded turn's completion until refocus",
+    });
   const onVisibilityChange = (): void => {
-    if (document.visibilityState === "visible") recover();
+    if (document.visibilityState === "visible") onResume();
   };
-  window.addEventListener("focus", recover);
+  window.addEventListener("focus", onResume);
   document.addEventListener("visibilitychange", onVisibilityChange);
   return () => {
     dispose();
-    window.removeEventListener("focus", recover);
+    window.removeEventListener("focus", onResume);
     document.removeEventListener("visibilitychange", onVisibilityChange);
   };
 }
