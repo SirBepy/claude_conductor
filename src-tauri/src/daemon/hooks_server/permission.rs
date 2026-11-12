@@ -108,6 +108,14 @@ pub(super) async fn on_permission_request(
     if let Some(sid) = body.session_id.as_deref() {
         super::mark_mcp_tool_used(&ctx, sid);
     }
+    // Before the auto-accept shortcut: a sub inherits auto-accept, and "only a gate
+    // sub pushes" would otherwise be a prompt rule nothing enforces.
+    if let Some(refusal) = body.session_id.as_deref()
+        .and_then(|sid| super::subchat_write_guard::push_refusal(&ctx.state, sid, &body.tool_name, &body.input))
+    {
+        log::info!("[perm-relay] refused a sub's push/merge id={} session={:?}", body.id, body.session_id);
+        return (StatusCode::OK, Json(json!({"behavior": "deny", "message": refusal})));
+    }
     let auto_accept = body.session_id.as_deref()
         .and_then(crate::sessions::chat_config::get)
         .map(|c| c.auto_accept)
@@ -372,6 +380,50 @@ mod tests {
         let tx = state.pending.lock().await.remove("p1").unwrap();
         tx.send(json!({"behavior": "allow"})).unwrap();
         handle.await.unwrap();
+    }
+
+    async fn relay(state: &Arc<DaemonState>, sid: &str, command: &str) -> Value {
+        let ctx = Arc::new(HookCtx { state: state.clone() });
+        let body = PermRequestBody {
+            id: format!("push-{sid}"),
+            tool_name: "Bash".to_string(),
+            input: json!({ "command": command }),
+            session_id: Some(sid.to_string()),
+        };
+        let resp = on_permission_request(AxState(ctx), ValidatedJson(body)).await.into_response();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    /// "Only a gate sub pushes" is enforced here, ahead of auto-accept (which a sub
+    /// inherits): a plain sub's push is denied with no card, a gate's and a plain
+    /// chat's go through the ordinary auto-accept.
+    #[tokio::test]
+    async fn a_non_gate_subs_push_is_denied_with_auto_accept_on_and_a_gate_or_plain_chat_is_not() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        for sid in ["pr-main", "pr-sub", "pr-gate", "pr-plain"] {
+            state.registry.record_interactive_session(sid, Path::new("/tmp/x"), &settings, "2026-11-12T00:00:00Z");
+            crate::sessions::chat_config::set_auto_accept(sid, true);
+        }
+        for sub in ["pr-sub", "pr-gate"] {
+            state.registry.set_subchat_of(sub, Some("pr-main".into()));
+            crate::daemon::subchats::store_sub_brief(sub, "pr-main");
+        }
+        let mut gate = crate::sessions::chat_config::get("pr-gate").unwrap().subchat.unwrap();
+        gate.gate = true;
+        crate::sessions::chat_config::set_subchat("pr-gate", Some(gate));
+
+        for cmd in ["git push origin master", "git -C /tmp/x push", "cd /tmp/x && gh pr merge 4"] {
+            let v = relay(&state, "pr-sub", cmd).await;
+            assert_eq!(v["behavior"], "deny", "{cmd}: {v}");
+            assert!(v["message"].as_str().unwrap().contains("gate"), "{v}");
+            assert_eq!(relay(&state, "pr-gate", cmd).await["behavior"], "allow", "a gate pushes: {cmd}");
+            assert_eq!(relay(&state, "pr-plain", cmd).await["behavior"], "allow", "a plain chat is unaffected: {cmd}");
+        }
+        assert_eq!(relay(&state, "pr-sub", "git status").await["behavior"], "allow", "a harmless command is not refused");
+        assert!(state.pending.lock().await.is_empty(), "a refusal raises no card");
     }
 
     /// An id the registry has never seen (hook tests, terminal-side sessions)
