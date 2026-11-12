@@ -48,6 +48,12 @@ const SCHEDULED = [
   },
 ];
 
+const localToday = () => {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
 const skillEntry = (skill: string, total: number) => ({
   skill,
   invocations: { total, manual: total, skill: 0, auto: 0 },
@@ -113,11 +119,9 @@ test.describe("view-harness / dashboard home widgets", () => {
         get_skill_usage_detail: {
           skill: "commit",
           invocations: { total: 7, manual: 7, skill: 0, auto: 0 },
-          events: [
-            { ts: new Date().toISOString(), skill: "commit", session_id: "s", project: "p", source: "manual", tokens: {} },
-            { ts: new Date().toISOString(), skill: "commit", session_id: "s", project: "p", source: "manual", tokens: {} },
-          ],
+          events: [],
         },
+        get_skill_runs_per_day: [{ day: localToday(), runs: 2 }],
         schedule_list: [],
         schedule_list_external: [],
         list_instances: [],
@@ -132,7 +136,7 @@ test.describe("view-harness / dashboard home widgets", () => {
 
     const runs = page.locator('.dash-widget[data-widget-id="skill-runs"]');
     await expect(runs.locator(".skill-day")).toHaveCount(7);
-    // Today is the last column; the mocked detail returns 2 events for it.
+    // Today is the last column; the mocked per-day read returns 2 runs for it.
     await expect(runs.locator(".skill-day").last().locator(".skill-day-count")).not.toHaveText("");
 
     // Home renders narrow; shoot at that width, tall enough that nothing scrolls out of the frame.

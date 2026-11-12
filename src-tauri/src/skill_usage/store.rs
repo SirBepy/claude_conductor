@@ -1,5 +1,5 @@
 use crate::skill_usage::types::{
-    InvocationCounts, InvocationSource, SkillDetail, SkillUsageEntry, SkillUsageEvent,
+    DayRuns, InvocationCounts, InvocationSource, SkillDetail, SkillUsageEntry, SkillUsageEvent,
     SkillUsageWeek, TokenBreakdown,
 };
 use std::collections::{BTreeSet, HashMap};
@@ -197,6 +197,29 @@ pub fn get_detail(dir: &Path, today: &str, skill: &str) -> SkillDetail {
     aggregate_detail(&events, skill)
 }
 
+/// Runs per day (in `tz`'s calendar) for the named skills, built from the same
+/// per-skill event set `aggregate_detail` returns, so the Home chart's numbers
+/// match the per-skill detail exactly. Days are ascending; an event whose `ts`
+/// does not parse is dropped, as the chart's own bucketing does.
+pub fn aggregate_runs_per_day<Tz: chrono::TimeZone>(
+    events: &[SkillUsageEvent],
+    skills: &[String],
+    tz: &Tz,
+) -> Vec<DayRuns>
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let mut by_day: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+    for skill in skills {
+        for e in aggregate_detail(events, skill).events {
+            let Ok(t) = chrono::DateTime::parse_from_rfc3339(&e.ts) else { continue };
+            let day = t.with_timezone(tz).format("%Y-%m-%d").to_string();
+            *by_day.entry(day).or_insert(0) += 1;
+        }
+    }
+    by_day.into_iter().map(|(day, runs)| DayRuns { day, runs }).collect()
+}
+
 /// Filter a flat event list to one skill and tally invocation counts. The
 /// file-backed [`get_detail`] and the DB-backed IPC path share this so the
 /// output shape stays identical.
@@ -217,5 +240,56 @@ pub fn aggregate_detail(events: &[SkillUsageEvent], skill: &str) -> SkillDetail 
         skill: skill.to_string(),
         invocations: counts,
         events,
+    }
+}
+
+#[cfg(test)]
+mod runs_per_day_tests {
+    use super::*;
+    use chrono::FixedOffset;
+
+    fn ev(skill: &str, ts: &str) -> SkillUsageEvent {
+        SkillUsageEvent {
+            ts: ts.into(),
+            skill: skill.into(),
+            session_id: "s".into(),
+            project: "p".into(),
+            source: InvocationSource::Manual,
+            tokens: TokenBreakdown::default(),
+        }
+    }
+
+    #[test]
+    fn runs_per_day_equals_per_skill_detail_summed_per_day() {
+        // +02:00 puts 23:30Z on the next local day, so the zone is exercised.
+        let tz = FixedOffset::east_opt(2 * 3600).unwrap();
+        let events = vec![
+            ev("a", "2026-11-10T10:00:00Z"),
+            ev("a", "2026-11-10T23:30:00Z"),
+            ev("b", "2026-11-10T11:00:00Z"),
+            ev("b", "2026-11-11T09:00:00Z"),
+            ev("c", "2026-11-11T09:00:00Z"),
+            ev("a", "garbage"),
+        ];
+        let skills = vec!["a".to_string(), "b".to_string()];
+        let got = aggregate_runs_per_day(&events, &skills, &tz);
+
+        let mut want: std::collections::BTreeMap<String, u32> = Default::default();
+        for s in &skills {
+            for e in aggregate_detail(&events, s).events {
+                if let Ok(t) = chrono::DateTime::parse_from_rfc3339(&e.ts) {
+                    *want.entry(t.with_timezone(&tz).format("%Y-%m-%d").to_string()).or_default() += 1;
+                }
+            }
+        }
+        let want: Vec<DayRuns> = want.into_iter().map(|(day, runs)| DayRuns { day, runs }).collect();
+        assert_eq!(got, want);
+        assert_eq!(
+            got,
+            vec![
+                DayRuns { day: "2026-11-10".into(), runs: 2 },
+                DayRuns { day: "2026-11-11".into(), runs: 2 },
+            ]
+        );
     }
 }

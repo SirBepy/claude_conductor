@@ -2,14 +2,13 @@
 // No DOM or api imports so the bucketing is unit-testable (see
 // tests/dashboard-skill-charts.test.mjs).
 
-import type { SkillUsageEntry, SkillUsageEvent } from "../../../types/ipc.generated";
+import type { DayRuns, SkillUsageEntry, SkillUsageEvent } from "../../../types/ipc.generated";
 
 export const TOP_SKILLS = 5;
 export const DAYS = 7;
-/** How many skills' detail we fetch to build the per-day chart: the week
- * summary carries no timestamps, so each skill's events must be read one by
- * one. Capped so a long skill list is not N daemon round trips on every
- * Home paint; the chart says so when the cap cut something off. */
+/** How many skills the per-day chart counts: the week summary carries no
+ * timestamps, so the daemon sums the named skills' events per day. Capped so
+ * the chart stays bounded; it says so when the cap cut something off. */
 export const MAX_DETAIL_FETCHES = 12;
 
 export interface SkillBar {
@@ -69,6 +68,18 @@ export function runsPerDay(
     if (Number.isNaN(t.getTime())) continue;
     const b = byKey.get(localKey(t));
     if (b) b.runs += 1;
+  }
+  return buckets;
+}
+
+/** The same buckets as `runsPerDay`, filled from the daemon's per-day counts
+ * (local `yyyy-mm-dd`) instead of raw events. Days outside the window are dropped. */
+export function bucketsFromDayRuns(counts: readonly DayRuns[], now: Date, days: number = DAYS): DayBucket[] {
+  const buckets = runsPerDay([], now, days);
+  const byKey = new Map(buckets.map((b) => [b.key, b]));
+  for (const c of counts) {
+    const b = byKey.get(c.day);
+    if (b) b.runs += c.runs;
   }
   return buckets;
 }

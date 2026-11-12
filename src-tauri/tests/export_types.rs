@@ -46,7 +46,7 @@ use claude_conductor_lib::sessions::scheduled_items::{
     Recurrence, RecurrenceRule, ScheduledItem, ScheduledKind, ScheduledStatus, SkippedFire,
 };
 use claude_conductor_lib::skill_usage::types::{
-    InstalledSkill, InvocationCounts, InvocationSource, SkillDetail, SkillUsageEntry,
+    DayRuns, InstalledSkill, InvocationCounts, InvocationSource, SkillDetail, SkillUsageEntry,
     SkillUsageEvent, SkillUsageWeek, TokenBreakdown,
 };
 use claude_conductor_lib::ipc::storage::{DatasetId, DatasetInfo};
@@ -183,6 +183,7 @@ fn emit_ipc_types() {
     out.push_str(&decl::<SkillUsageEntry>());
     out.push_str(&decl::<SkillUsageWeek>());
     out.push_str(&decl::<SkillDetail>());
+    out.push_str(&decl::<DayRuns>());
     out.push_str(&decl::<InstalledSkill>());
 
     // when-done protocol (sleep/shutdown when all sessions idle)

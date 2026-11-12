@@ -615,6 +615,10 @@ export const api = {
       return { skill, invocations: { total: 0, manual: 0, skill: 0, auto: 0 }, events: [] };
     }
   },
+  /** Per-local-day run counts summed over the given skills, one read. Throws on
+   * failure so the Home chart reads it as a failed load, not zero runs. */
+  getSkillRunsPerDay: (skills: string[]): Promise<import("../types/ipc.generated").DayRuns[]> =>
+    invoke("get_skill_runs_per_day", { skills }),
   // Throws on backend failure (no call site swallowed this yet) so a list view
   // can render a distinct error/retry state instead of a false empty list -
   // see src/views/skills/skills.ts.

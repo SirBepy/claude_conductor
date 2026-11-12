@@ -369,6 +369,7 @@ pub fn run() {
             ipc::read_file_as_base64,
             ipc::get_skill_usage_week,
             ipc::get_skill_usage_detail,
+            ipc::get_skill_runs_per_day,
             ipc::list_installed_skills,
             ipc::frontend_ready,
             ipc::take_pending_nav,
