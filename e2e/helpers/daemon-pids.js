@@ -25,6 +25,26 @@ export function pidsToKill(snapshotEnv, nowPids) {
 }
 
 /**
+ * Lists running `claude-conductor.exe --daemon` pids, or null when the listing
+ * fails. null, not []: an empty list would read as "no daemon exists" and let
+ * onComplete kill the live one.
+ * @param {(cmd: string, opts: object) => string} exec execSync-compatible runner
+ * @returns {string[] | null}
+ */
+export function listDaemonPids(exec) {
+  try {
+    const out = exec(
+      "powershell -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'claude-conductor.exe' " +
+        "-and $_.CommandLine -like '*--daemon*' } | ForEach-Object { $_.ProcessId }\"",
+      { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }
+    );
+    return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The value to store in CC_WDIO_PREEXISTING_DAEMON_PIDS, or undefined when the
  * pid listing failed (the env must then stay unset so nothing is killed).
  * @param {string[] | null | undefined} nowPids

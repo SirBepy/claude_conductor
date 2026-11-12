@@ -17,7 +17,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { spawn, execSync } from "node:child_process";
-import { pidsToKill, snapshotValue } from "./helpers/daemon-pids.js";
+import { listDaemonPids, pidsToKill, snapshotValue } from "./helpers/daemon-pids.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -167,18 +167,7 @@ async function switchToMainWindow() {
 // Snapshot the PIDs that already exist before the harness starts; everything
 // else in that set is ours. Without this, onComplete killed the user's daemon.
 function daemonPidsNow() {
-  try {
-    const out = execSync(
-      "powershell -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'claude-conductor.exe' " +
-      "-and $_.CommandLine -like '*--daemon*' } | ForEach-Object { $_.ProcessId }\"",
-      { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }
-    );
-    return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  } catch {
-    // null, not []: an empty list would read as "no daemon exists" and let
-    // onComplete kill the live one. See helpers/daemon-pids.js.
-    return null;
-  }
+  return listDaemonPids(execSync);
 }
 
 async function waitForServer(url, timeoutMs) {
