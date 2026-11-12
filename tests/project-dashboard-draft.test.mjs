@@ -29,6 +29,8 @@ vi.mock("../src/shared/token-history.ts", () => ({ loadTokenHistory: vi.fn(async
 vi.mock("../src/views/sessions/active-session.ts", () => ({ dismountActivePane: vi.fn(), selectSession: vi.fn(async () => {}) }));
 vi.mock("../src/views/sessions/new-chat-config.ts", () => ({ resolveNewChatConfig: vi.fn(), accountPickNeeded: vi.fn(async () => false) }));
 vi.mock("../src/views/sessions/close-chat.ts", () => ({ closeChatWithConfirm: vi.fn(async () => {}) }));
+const forceDraftPlain = vi.hoisted(() => vi.fn());
+vi.mock("../src/views/sessions/draft-subchats.ts", () => ({ forceDraftPlain }));
 // The rail's real controls read accounts, projects and settings; this spec only cares where they land.
 const renderSettings = vi.hoisted(() => vi.fn(async (root) => { root.innerHTML = `<div class="rail-stub"></div>`; }));
 vi.mock("../src/views/sessions/project-dashboard/project-config/project-settings.ts", () => ({ renderProjectSettings: renderSettings }));
@@ -62,6 +64,7 @@ beforeEach(() => {
   calls.length = 0;
   snapshot = projectSnapshot();
   state.composer = null;
+  forceDraftPlain.mockClear();
 });
 
 describe("withCommand", () => {
@@ -173,6 +176,8 @@ describe("draft dashboard", () => {
     pane.querySelector('[data-pd-card="card:c5"] [data-pd-action]').click();
     expect(composer.sendText).toHaveBeenCalledTimes(1);
     expect(composer.sendText.mock.calls[0][0]).toMatch(/^\/shortcut-priorities\n\nContext, not arguments:[\s\S]*sc-4821 Retry ACH/);
+    expect(forceDraftPlain).toHaveBeenCalledTimes(1);
+    expect(forceDraftPlain.mock.invocationCallOrder[0]).toBeLessThan(composer.sendText.mock.invocationCallOrder[0]);
     expect(launch).not.toHaveBeenCalled();
   });
 
@@ -429,6 +434,9 @@ describe("Do all due in a draft", () => {
     const pane = await mountDraft(api.cwd);
     pane.querySelector("[data-pd-due-all]").click();
     expect(sendText).toHaveBeenCalledWith("/auto-do-todos pc-1,pc-2");
+    // Third-party text never lands in the project's main chat: the draft goes plain first.
+    expect(forceDraftPlain).toHaveBeenCalledTimes(1);
+    expect(forceDraftPlain.mock.invocationCallOrder[0]).toBeLessThan(sendText.mock.invocationCallOrder[0]);
     state.pendingNewSession = null;
   });
 });

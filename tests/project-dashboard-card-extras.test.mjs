@@ -118,6 +118,8 @@ describe("custom card extras", () => {
     const config = state.launchNewChatCallback.mock.calls[0][1];
     expect(config.initialMessage).toBeUndefined();
     expect(config.draftText).toMatch(/^\/shortcut-priorities\n/);
+    // Typed from the message box, it would otherwise be sent into the project's main chat.
+    expect(config).toMatchObject({ plainChat: true, subchatsOn: false });
   });
 
   it("a card-launched chat starts with auto-accept off even when the project default has it on", async () => {
@@ -130,7 +132,7 @@ describe("custom card extras", () => {
     await vi.waitFor(() => expect(state.launchNewChatCallback).toHaveBeenCalled());
     const config = state.launchNewChatCallback.mock.calls[0][1];
     expect(config.autoAccept).toBe(false);
-    expect(config).toMatchObject({ model: "opus", effort: "high", accountId: "a1" });
+    expect(config).toMatchObject({ model: "opus", effort: "high", accountId: "a1", plainChat: true, subchatsOn: false });
   });
 
   it("a failed default-config lookup shows a toast instead of doing nothing", async () => {
