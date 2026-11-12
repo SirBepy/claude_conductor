@@ -291,7 +291,8 @@ async fn spawn_session_inner(
     session.subchats_told.store(subchats_at_spawn, std::sync::atomic::Ordering::SeqCst);
     // Whether this child can be compacted yet, and whether its argv carries the
     // main chat's rules (a compaction can summarise away a mid-chat note).
-    crate::daemon::subchats::compaction::note_child(&session_id, pid, params.resume_id.is_some(), chat_cfg.subchats_on);
+    let orphaned = crate::daemon::subchats::compaction::note_child(&session_id, pid, params.resume_id.is_some(), chat_cfg.subchats_on);
+    crate::daemon::subchats::compaction::restage(state, &session_id, orphaned);
     map.insert(session_id.clone(), Arc::clone(&session));
     let drain = tokio::spawn(drain_stderr(stderr, Arc::clone(&session)));
     *session.stderr_drain.lock().await = Some(drain);

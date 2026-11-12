@@ -387,7 +387,7 @@ mod tests {
         ctx.state.registry.set_subchat_of("ss-sub", Some("ss-main".into()));
         crate::sessions::chat_config::set_subchats_on("ss-main", true);
         // Launched before the mode was on: the rules came as a mid-chat note.
-        crate::daemon::subchats::compaction::note_child("ss-main", 1, false, false);
+        let _ = crate::daemon::subchats::compaction::note_child("ss-main", 1, false, false);
         let before = ctx.state.registry.get("ss-main").unwrap();
 
         let (status, body) = session_start(&ctx, "ss-main", "compact").await;

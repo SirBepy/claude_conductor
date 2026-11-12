@@ -79,6 +79,10 @@ pub(super) async fn compute_fired(state: &Arc<DaemonState>, mut item: ScheduledI
     // (spike S1, g3: a `schedule_fire_now` landing mid-compaction was lost).
     if let ScheduledKind::Message { session_id, .. } = &item.kind {
         if crate::daemon::lifecycle::is_busy(state, session_id) {
+            // "Fire now" on an item due later: it stays due now, not tomorrow.
+            if DateTime::parse_from_rfc3339(&item.fire_at).map_or(true, |at| at > now) {
+                item.fire_at = now.to_rfc3339();
+            }
             item.status = ScheduledStatus::Pending;
             item.last_result = Some("waiting: the chat was mid-turn, retried once it is idle".to_string());
             return item;
@@ -206,6 +210,18 @@ mod tests {
         assert_eq!(updated.status, ScheduledStatus::Pending, "{:?}", updated.last_result);
         assert_eq!(updated.fire_at, fire_at.to_rfc3339(), "still due, so the next idle tick fires it");
         assert!(updated.last_fired_at.is_none(), "nothing was sent");
+
+        // "Fire now" on an item due tomorrow: still due at once, so the next idle tick sends it.
+        let tomorrow = ScheduledItem::new(
+            ScheduledKind::Message { session_id: "sched-busy".into(), cwd: "C:/proj".into() },
+            "wake".into(),
+            (Utc::now() + chrono::Duration::days(1)).to_rfc3339(),
+            None,
+        );
+        let now = Utc::now();
+        let updated = compute_fired(&state, tomorrow, now).await;
+        assert_eq!(updated.status, ScheduledStatus::Pending);
+        assert_eq!(updated.fire_at, now.to_rfc3339());
     }
 
     #[tokio::test]

@@ -64,6 +64,10 @@ const SETTLE: Duration = Duration::from_secs(5);
 /// A compaction that never reported an end is forgotten after this, so a lost
 /// result line cannot hold Joe's typed messages for ever. Spike S1: 20 to 22s.
 const IN_FLIGHT_LIMIT: Duration = Duration::from_secs(10 * 60);
+/// After a compaction that did not compact (no boundary came back), the chat
+/// is tried again automatically only once it has grown this much past the size
+/// it had then, so a failing `/compact` is not paid for on every turn.
+const RETRY_GROWTH_TOKENS: u64 = 50_000;
 /// One of Joe's messages is quoted up to this many characters.
 const JOE_MESSAGE_CAP: usize = 1500;
 const FOCUS_JOBS_MAX: usize = 12;
@@ -111,12 +115,18 @@ struct Chat {
     in_flight: Option<InFlight>,
     /// Messages Joe typed while the compaction ran, in typing order.
     held: Vec<String>,
+    /// Set when a compaction ended without a boundary: no automatic attempt
+    /// below this occupancy.
+    retry_at: Option<u64>,
 }
 
 struct InFlight {
     pid: u32,
     started: Instant,
     prior_awaiting: Option<String>,
+    occupancy: Option<u64>,
+    /// The CLI reported a `compact_boundary`: the compaction did compact.
+    boundary_seen: bool,
 }
 
 fn chats() -> std::sync::MutexGuard<'static, HashMap<String, Chat>> {
@@ -125,12 +135,17 @@ fn chats() -> std::sync::MutexGuard<'static, HashMap<String, Chat>> {
 }
 
 /// A new child for `session_id` was spawned. Called by `lifecycle::spawn` for
-/// every spawn and respawn.
-pub fn note_child(session_id: &str, pid: u32, resumed: bool, argv_main_prompt: bool) {
+/// every spawn and respawn. Returns what Joe typed during a compaction the old
+/// child never finished (it was replaced before its exit was handled); the
+/// caller hands it to [`restage`] so it is not stranded on a dead compaction.
+#[must_use]
+pub fn note_child(session_id: &str, pid: u32, resumed: bool, argv_main_prompt: bool) -> Vec<String> {
     let mut all = chats();
     let chat = all.entry(session_id.to_string()).or_default();
-    let held = std::mem::take(&mut chat.held);
-    *chat = Chat { pid, resumed, argv_main_prompt, held, ..Chat::default() };
+    let orphaned = std::mem::take(&mut chat.held);
+    let retry_at = chat.retry_at;
+    *chat = Chat { pid, resumed, argv_main_prompt, retry_at, ..Chat::default() };
+    orphaned
 }
 
 /// One raw stdout line of `session_id`'s child (the pump calls this per line).
@@ -144,6 +159,10 @@ pub fn note_line(session_id: &str, line: &[u8]) {
         StreamContext::Compacted { pre, post } => {
             log::info!("compaction: session {session_id} compacted {pre} -> {post} tokens");
             chat.occupancy = Some(post);
+            chat.retry_at = None;
+            if let Some(flight) = chat.in_flight.as_mut() {
+                flight.boundary_seen = true;
+            }
         }
     }
 }
@@ -211,6 +230,11 @@ pub fn take_finished(session_id: &str, pid: u32) -> Option<Finished> {
     let mut all = chats();
     let chat = all.get_mut(session_id)?;
     let flight = chat.in_flight.take_if(|f| f.pid == pid)?;
+    if !flight.boundary_seen {
+        let at = flight.occupancy.or(chat.occupancy).unwrap_or(0) + RETRY_GROWTH_TOKENS;
+        chat.retry_at = Some(at);
+        log::warn!("compaction: session {session_id} /compact ended without compacting; next automatic try past {at} tokens");
+    }
     Some(Finished {
         was_compaction: flight.started.elapsed() < IN_FLIGHT_LIMIT,
         prior_awaiting: flight.prior_awaiting,
@@ -234,7 +258,8 @@ pub fn on_child_exit(state: &Arc<DaemonState>, session_id: &str, pid: u32) {
     restage(state, session_id, held);
 }
 
-fn restage(state: &Arc<DaemonState>, session_id: &str, held: Vec<String>) {
+/// Moves `held` to the chat's held queue, which the app sends when it can.
+pub fn restage(state: &Arc<DaemonState>, session_id: &str, held: Vec<String>) {
     if held.is_empty() {
         return;
     }
@@ -259,6 +284,7 @@ pub enum Skip {
     HeldMessages,
     LineBackWaiting,
     ScheduleDueSoon,
+    RecentlyFailed,
     Off,
     NoUsageYet,
     BelowThreshold,
@@ -279,6 +305,7 @@ impl Skip {
             Skip::HeldMessages => "a held message is waiting to be sent",
             Skip::LineBackWaiting => "a finished sub's line is waiting for Joe's next message",
             Skip::ScheduleDueSoon => "a scheduled message to the chat is due within 5 minutes",
+            Skip::RecentlyFailed => "the last compaction did not compact; the next try waits for the chat to grow",
             Skip::Off => "automatic compaction is off for this project",
             Skip::NoUsageYet => "the chat's context size is not known yet",
             Skip::BelowThreshold => "the chat is below its compaction threshold",
@@ -302,6 +329,8 @@ pub struct Facts {
     pub schedule_due_soon: bool,
     pub occupancy: Option<u64>,
     pub threshold: Option<Threshold>,
+    /// See [`RETRY_GROWTH_TOKENS`].
+    pub retry_at: Option<u64>,
 }
 
 /// Whether to compact now. `auto` is the turn-end trigger, which also needs
@@ -314,8 +343,12 @@ pub fn decide(f: &Facts, auto: bool) -> Result<(), Skip> {
     }
     if auto {
         let threshold = f.threshold.filter(|t| t.on).ok_or(Skip::Off)?;
-        if f.occupancy.ok_or(Skip::NoUsageYet)? < threshold.tokens {
+        let occupancy = f.occupancy.ok_or(Skip::NoUsageYet)?;
+        if occupancy < threshold.tokens {
             return Err(Skip::BelowThreshold);
+        }
+        if f.retry_at.is_some_and(|at| occupancy < at) {
+            return Err(Skip::RecentlyFailed);
         }
     }
     let checks = [
@@ -360,24 +393,27 @@ pub async fn facts(state: &Arc<DaemonState>, session_id: &str) -> Facts {
     let inst = state.registry.get(session_id);
     let cfg = crate::sessions::chat_config::get(session_id).unwrap_or_default();
     let live = state.sessions.get(session_id).map(|s| s.pid);
-    let (first_after_restart, compacting, occupancy) = {
+    let (first_after_restart, compacting, occupancy, retry_at) = {
         let all = chats();
         match all.get(session_id) {
             Some(c) => (
                 live.is_some_and(|pid| c.pid == pid && c.resumed && !c.live_turn_ended),
                 compacting_in(c),
                 c.occupancy,
+                c.retry_at,
             ),
-            None => (live.is_some(), false, None),
+            None => (live.is_some(), false, None, None),
         }
     };
     let now = chrono::Utc::now();
+    // An API-credit account at its cap pays for nothing, a compaction included:
+    // it is a full model call over the whole context.
     let unavailable = inst.as_ref().is_none_or(|i| {
         i.ended_at.is_some()
             || i.frozen
             || i.closing
             || i.rate_limited_resets_at.is_some_and(|t| t > now.timestamp())
-    });
+    }) || crate::daemon::lifecycle::refuse_if_api_credit_blocked(state, session_id).is_err();
     let threshold = inst
         .as_ref()
         .map(|i| threshold_for(&state.settings.snapshot().extra, &i.project_id));
@@ -397,6 +433,7 @@ pub async fn facts(state: &Arc<DaemonState>, session_id: &str) -> Facts {
         schedule_due_soon: schedule_due_soon(session_id, now),
         occupancy,
         threshold,
+        retry_at,
     }
 }
 
@@ -447,7 +484,13 @@ pub async fn start(state: &Arc<DaemonState>, session_id: &str, auto: bool) -> Re
         if compacting_in(chat) {
             return Err(Skip::AlreadyCompacting);
         }
-        chat.in_flight = Some(InFlight { pid: session.pid, started: Instant::now(), prior_awaiting: inst.awaiting.clone() });
+        chat.in_flight = Some(InFlight {
+            pid: session.pid,
+            started: Instant::now(),
+            prior_awaiting: inst.awaiting.clone(),
+            occupancy: chat.occupancy,
+            boundary_seen: false,
+        });
         state.registry.set_busy(session_id, true);
         inst.awaiting
     };
@@ -804,7 +847,7 @@ mod tests {
         let _data = super::super::TempDataDir::new();
         let st = state();
         main_chat(&st, "cp-facts");
-        note_child("cp-facts", 0, false, true);
+        let _ = note_child("cp-facts", 0, false, true);
         note_line(
             "cp-facts",
             br#"{"type":"assistant","message":{"usage":{"input_tokens":5,"cache_read_input_tokens":320000}},"parent_tool_use_id":null}"#,
@@ -848,7 +891,7 @@ mod tests {
     /// So a resumed child is not compacted until one of its own turns ended.
     #[test]
     fn a_resumed_child_is_not_compacted_before_its_first_live_turn_ends() {
-        note_child("cp-resumed", 4242, true, true);
+        let _ = note_child("cp-resumed", 4242, true, true);
         let first = |pid| {
             let all = chats();
             let c = all.get("cp-resumed").unwrap();
@@ -859,7 +902,7 @@ mod tests {
         assert!(first(4242), "another child's turn does not count");
         note_live_turn_end("cp-resumed", 4242);
         assert!(!first(4242));
-        note_child("cp-resumed", 5000, true, true);
+        let _ = note_child("cp-resumed", 5000, true, true);
         assert!(first(5000), "a respawn opens a new replay window");
     }
 
@@ -943,10 +986,10 @@ mod tests {
 
     #[test]
     fn nothing_is_held_when_no_compaction_runs_and_a_held_message_is_handed_back_once() {
-        note_child("cp-hold", 77, false, true);
+        let _ = note_child("cp-hold", 77, false, true);
         assert!(!hold_typed("cp-hold", "hi"), "no compaction: the caller sends or refuses as usual");
         chats().get_mut("cp-hold").unwrap().in_flight =
-            Some(InFlight { pid: 77, started: Instant::now(), prior_awaiting: Some("done".into()) });
+            Some(InFlight { pid: 77, started: Instant::now(), prior_awaiting: Some("done".into()), occupancy: None, boundary_seen: true });
         assert!(is_compacting("cp-hold"));
         assert!(hold_typed("cp-hold", "first"));
         assert!(hold_typed("cp-hold", "second"));
@@ -973,7 +1016,7 @@ mod tests {
         let mut child = spawn_fake_session(&st.sessions, "cp-typed").await;
         let pid = st.sessions.get("cp-typed").unwrap().pid;
         main_chat(&st, "cp-typed");
-        note_child("cp-typed", pid, false, true);
+        let _ = note_child("cp-typed", pid, false, true);
         st.registry.set_awaiting("cp-typed", Some("done".into()));
 
         start(&st, "cp-typed", false).await.unwrap();
@@ -1015,15 +1058,53 @@ mod tests {
         let _ = child.kill().await;
     }
 
+    /// A respawn that replaces the child before its exit is handled hands the
+    /// typed text back, so it is not left on a compaction that will never end.
+    #[test]
+    fn a_respawn_mid_compaction_hands_back_what_joe_typed() {
+        let _ = note_child("cp-respawn", 40, false, true);
+        chats().get_mut("cp-respawn").unwrap().in_flight =
+            Some(InFlight { pid: 40, started: Instant::now(), prior_awaiting: None, occupancy: None, boundary_seen: false });
+        assert!(hold_typed("cp-respawn", "keep me"));
+        assert_eq!(note_child("cp-respawn", 41, true, true), vec!["keep me"]);
+        assert!(!is_compacting("cp-respawn"));
+    }
+
+    /// A `/compact` that came back without a boundary is not paid for again on
+    /// the next turn: the chat must grow first.
+    #[test]
+    fn a_compaction_that_did_not_compact_waits_for_the_chat_to_grow() {
+        let _ = note_child("cp-retry", 50, false, true);
+        chats().get_mut("cp-retry").unwrap().in_flight = Some(InFlight {
+            pid: 50,
+            started: Instant::now(),
+            prior_awaiting: None,
+            occupancy: Some(310_000),
+            boundary_seen: false,
+        });
+        assert!(take_finished("cp-retry", 50).is_some());
+        let retry_at = chats().get("cp-retry").unwrap().retry_at;
+        assert_eq!(retry_at, Some(310_000 + RETRY_GROWTH_TOKENS));
+        let mut f = ready();
+        f.retry_at = retry_at;
+        assert_eq!(decide(&f, true), Err(Skip::RecentlyFailed));
+        assert_eq!(decide(&f, false), Ok(()), "Joe can still ask for one");
+        f.occupancy = Some(370_000);
+        assert_eq!(decide(&f, true), Ok(()));
+
+        note_line("cp-retry", br#"{"type":"system","subtype":"compact_boundary","compact_metadata":{"pre_tokens":370000,"post_tokens":9000}}"#);
+        assert_eq!(chats().get("cp-retry").unwrap().retry_at, None, "a real compaction clears it");
+    }
+
     /// A child that dies mid-compaction does not take Joe's typed message with it.
     #[tokio::test]
     async fn a_child_that_exits_mid_compaction_moves_the_typed_message_to_the_held_queue() {
         let _data = super::super::TempDataDir::new();
         let st = state();
         main_chat(&st, "cp-exit");
-        note_child("cp-exit", 31, false, true);
+        let _ = note_child("cp-exit", 31, false, true);
         chats().get_mut("cp-exit").unwrap().in_flight =
-            Some(InFlight { pid: 31, started: Instant::now(), prior_awaiting: None });
+            Some(InFlight { pid: 31, started: Instant::now(), prior_awaiting: None, occupancy: None, boundary_seen: true });
         assert!(hold_typed("cp-exit", "keep me"));
         on_child_exit(&st, "cp-exit", 31);
         assert!(!is_compacting("cp-exit"));
