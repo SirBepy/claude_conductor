@@ -17,6 +17,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { spawn, execSync } from "node:child_process";
+import { pidsToKill, snapshotValue } from "./helpers/daemon-pids.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -174,7 +175,9 @@ function daemonPidsNow() {
     );
     return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   } catch {
-    return [];
+    // null, not []: an empty list would read as "no daemon exists" and let
+    // onComplete kill the live one. See helpers/daemon-pids.js.
+    return null;
   }
 }
 
@@ -234,18 +237,22 @@ export const config = {
   // Spawn the daemon before the app launches so the Sessions view renders from
   // its snapshot. No-autostart keeps it from spawning real automation channels.
   onPrepare: async () => {
-    // Fails fast, before the build/vite/daemon spawns below, so a stale driver costs
-    // seconds instead of burning every spec's retries on an opaque session-creation
-    // error (todo 956).
-    checkEdgeDriverVersion(edgeDriver, getInstalledWebView2Version());
-
     // Propagate the instance label into the current process env so that
     // tauri-driver (spawned in beforeSession without an explicit env) inherits
     // it, passes it to the app, and the app's reconnect loop + respawn both
     // resolve to the same isolated pipe/lockfile (ai_todo 74).
     process.env.CC_DAEMON_INSTANCE = DAEMON_INSTANCE;
-    // Specs run in a worker process, so the snapshot travels via env.
-    process.env.CC_WDIO_PREEXISTING_DAEMON_PIDS = daemonPidsNow().join(",");
+    // Specs run in a worker process, so the snapshot travels via env. This must
+    // stay ahead of everything that can throw: onComplete still runs after a
+    // throwing onPrepare and kills every daemon the snapshot does not list.
+    const snapshot = snapshotValue(daemonPidsNow());
+    if (snapshot === undefined) delete process.env.CC_WDIO_PREEXISTING_DAEMON_PIDS;
+    else process.env.CC_WDIO_PREEXISTING_DAEMON_PIDS = snapshot;
+
+    // Fails fast, before the build/vite/daemon spawns below, so a stale driver costs
+    // seconds instead of burning every spec's retries on an opaque session-creation
+    // error.
+    checkEdgeDriverVersion(edgeDriver, getInstalledWebView2Version());
 
     // 1. Build once (execSync throws loud on a bad exit), then serve dist/.
     const commit = (() => {
@@ -302,9 +309,7 @@ export const config = {
     if (vite) vite.kill();
     // Clean up any claude-conductor.exe --daemon orphan the app may have
     // spawned during the kill/respawn test (ai_todo 74) - but ONLY ours.
-    const preexisting = new Set((process.env.CC_WDIO_PREEXISTING_DAEMON_PIDS || "").split(",").filter(Boolean));
-    for (const pid of daemonPidsNow()) {
-      if (preexisting.has(pid)) continue;
+    for (const pid of pidsToKill(process.env.CC_WDIO_PREEXISTING_DAEMON_PIDS, daemonPidsNow())) {
       try {
         execSync(`powershell -Command "Stop-Process -Id ${pid} -Force"`, { stdio: "ignore" });
       } catch {}
