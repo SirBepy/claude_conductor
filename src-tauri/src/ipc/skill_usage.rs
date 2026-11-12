@@ -1,6 +1,6 @@
 use crate::settings::paths;
 use crate::skill_usage::store;
-use crate::skill_usage::types::{InstalledSkill, SkillDetail, SkillUsageEvent, SkillUsageWeek};
+use crate::skill_usage::types::{DayRuns, InstalledSkill, SkillDetail, SkillUsageEvent, SkillUsageWeek};
 use crate::slash::{enumerate, SlashSource};
 use crate::state::AppState;
 use std::path::PathBuf;
@@ -70,6 +70,26 @@ pub async fn get_skill_usage_detail(
     };
     tauri::async_runtime::spawn_blocking(move || {
         Ok(store::aggregate_detail(&events, &skill))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Per-local-day run counts for the given skills over the 7-day window, in one
+/// read. The Home "Skill runs per day" chart used to call
+/// `get_skill_usage_detail` once per skill just to bucket timestamps.
+#[tauri::command]
+pub async fn get_skill_runs_per_day(
+    state: State<'_, AppState>,
+    skills: Vec<String>,
+) -> Result<Vec<DayRuns>, String> {
+    let cutoff = week_cutoff_unix();
+    let events: Vec<SkillUsageEvent> = {
+        let mgr = state.db.lock().unwrap();
+        store::get_skill_events_from_db(mgr.conn(), cutoff).map_err(|e| e.to_string())?
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(store::aggregate_runs_per_day(&events, &skills, &chrono::Local))
     })
     .await
     .map_err(|e| e.to_string())?

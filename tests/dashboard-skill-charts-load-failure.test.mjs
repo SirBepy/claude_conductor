@@ -6,11 +6,11 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 
-const calls = { week: async () => null, detail: async () => ({ events: [] }) };
+const calls = { week: async () => null, detail: async () => [] };
 vi.mock("../src/shared/api.ts", () => ({
   api: {
     getSkillUsageWeek: () => calls.week(),
-    getSkillUsageDetail: () => calls.detail(),
+    getSkillRunsPerDay: () => calls.detail(),
     onSkillUsageChanged: () => () => {},
   },
 }));
@@ -64,7 +64,7 @@ describe("skill runs per day widget, a null detail read", () => {
     await new Promise((r) => setTimeout(r, 20));
     cleanup?.();
     err.mockRestore();
-    calls.detail = async () => ({ events: [] });
+    calls.detail = async () => [];
     expect(root.textContent).not.toContain("Loading");
     expect(root.querySelector(".v-empty")).not.toBeNull();
   });

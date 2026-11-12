@@ -8,13 +8,13 @@ import { describe, it, expect, vi } from "vitest";
 
 const hooks = {
   week: async () => null,
-  detail: async () => ({ events: [] }),
+  detail: async (_s) => [],
   changed: () => {},
 };
 vi.mock("../src/shared/api.ts", () => ({
   api: {
     getSkillUsageWeek: () => hooks.week(),
-    getSkillUsageDetail: (s) => hooks.detail(s),
+    getSkillRunsPerDay: (skills) => hooks.detail(skills),
     onSkillUsageChanged: (cb) => {
       hooks.changed = cb;
       return () => {};
@@ -58,10 +58,11 @@ describe("skill runs widget, overlapping loads", () => {
     const slowDetail = deferred();
     const weeks = [weekOf("old-skill", 1), weekOf("new-skill", 1)];
     hooks.week = async () => weeks.shift();
-    const event = (ts) => ({ ts });
-    const today = new Date().toISOString();
-    hooks.detail = (skill) =>
-      skill === "old-skill" ? slowDetail.promise : Promise.resolve({ events: [event(today), event(today), event(today)] });
+    const p = (n) => String(n).padStart(2, "0");
+    const d = new Date();
+    const today = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    hooks.detail = (skills) =>
+      skills[0] === "old-skill" ? slowDetail.promise : Promise.resolve([{ day: today, runs: 3 }]);
     const root = document.createElement("div");
     const cleanup = skillRunsWidget.render(root, {});
     await tick();
@@ -71,7 +72,7 @@ describe("skill runs widget, overlapping loads", () => {
     const fresh = counts();
     expect(fresh).toContain("3");
     // The first load's detail finally lands, with no events at all.
-    slowDetail.resolve({ events: [] });
+    slowDetail.resolve([]);
     await tick();
     expect(counts()).toBe(fresh);
     cleanup?.();

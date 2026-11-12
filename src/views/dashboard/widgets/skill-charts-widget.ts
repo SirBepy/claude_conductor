@@ -5,8 +5,8 @@
 import { html, render } from "lit-html";
 import { api } from "../../../shared/api";
 import { openSkillDetail } from "../../../shared/open-skill-detail";
-import type { SkillUsageEvent } from "../../../types/ipc.generated";
 import {
+  bucketsFromDayRuns,
   runsPerDay,
   skillsToFetch,
   topSkills,
@@ -125,7 +125,7 @@ export const skillRunsWidget: Widget = {
     // Same rule as the top-skills widget: a failed refresh keeps painted data.
     let painted = false;
     // Same newest-load-wins guard as the top-skills widget; this one matters
-    // more here because each load fans out up to a dozen detail reads.
+    // more here because each load reads the daemon twice.
     let epoch = 0;
     const load = async () => {
       const mine = ++epoch;
@@ -138,15 +138,15 @@ export const skillRunsWidget: Widget = {
         if (!current()) return;
         if (!week) return drawEmpty();
         const { skills, truncated } = skillsToFetch(week.entries);
-        // The week summary has no timestamps; each skill's detail does.
-        const details = await Promise.all(skills.map((s) => api.getSkillUsageDetail(s)));
+        // The week summary has no timestamps; the daemon sums the skills' events
+        // per day in one read.
+        const counts = await api.getSkillRunsPerDay(skills);
         if (!current()) return;
-        // A null detail would make the totals undercount silently, so it reads as
+        // A null reply would make the totals undercount silently, so it reads as
         // a failed load rather than a partial chart.
-        if (details.some((d) => !d)) return drawEmpty();
-        const events: SkillUsageEvent[] = details.flatMap((d) => d.events);
+        if (!counts) return drawEmpty();
         painted = true;
-        drawDays(root, runsPerDay(events, new Date()), truncated);
+        drawDays(root, bucketsFromDayRuns(counts, new Date()), truncated);
       } catch (err) {
         console.error("skill runs load failed", err);
         drawEmpty();

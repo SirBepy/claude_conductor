@@ -69,6 +69,14 @@ pub struct SkillDetail {
     pub events: Vec<SkillUsageEvent>,
 }
 
+/// Skill runs on one local calendar day (`yyyy-mm-dd`), summed over a set of skills.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export_to = "../../src/types/ipc.generated.ts")]
+pub struct DayRuns {
+    pub day: String,
+    pub runs: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct InstalledSkill {
