@@ -129,7 +129,11 @@ pub(crate) const CONSOLE_CLOSED_EXIT: i32 = 0xC000_013Au32 as i32;
 /// busy flag so the next boot's `resume_interrupted` continues it, and no card
 /// is raised.
 pub(crate) fn is_shutdown_exit(code: Option<i32>) -> bool {
-    code == Some(CONSOLE_CLOSED_EXIT) || crate::daemon::boot::is_shutting_down()
+    shutdown_exit(code, crate::daemon::boot::is_shutting_down())
+}
+
+fn shutdown_exit(code: Option<i32>, daemon_shutting_down: bool) -> bool {
+    daemon_shutting_down || code == Some(CONSOLE_CLOSED_EXIT)
 }
 
 /// What `claude --resume` prints when the sub's conversation file is gone.
@@ -373,6 +377,17 @@ mod tests {
         st.registry.set_busy(&sub, true);
         assert!(died_note_if_unnoticed(&st, &sub, false, true, Some(&exit(-1073741510, ""))).is_none());
         assert!(died_note_if_unnoticed(&st, &sub, false, true, Some(&exit(1, "boom"))).is_some(), "any other exit mid-turn is still a death");
+    }
+
+    /// A child the daemon kills on its way out exits with an ordinary code (1),
+    /// so the daemon's own flag is what marks it as cut off.
+    #[test]
+    fn any_exit_while_the_daemon_shuts_down_is_a_shutdown() {
+        assert!(shutdown_exit(Some(1), true));
+        assert!(shutdown_exit(None, true));
+        assert!(shutdown_exit(Some(CONSOLE_CLOSED_EXIT), false));
+        assert!(!shutdown_exit(Some(1), false));
+        assert!(!shutdown_exit(None, false));
     }
 
     #[test]
