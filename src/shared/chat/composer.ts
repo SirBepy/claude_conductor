@@ -5,6 +5,7 @@
 
 import type { ContentBlock, Recurrence } from "../../types/ipc.generated";
 import { openSchedulePicker } from "./schedule-picker";
+import { ScheduledEditGoneError } from "./scheduled-edit-gone";
 import { openComposerMenu, type ComposerMenuItem } from "./composer-menu";
 import { wireSendGestures } from "./composer-send-gestures";
 import { SlashProvider } from "./caret-popup/providers/slash";
@@ -602,18 +603,20 @@ export class Composer {
         },
       });
     }
-    if (this.opts.onSchedule && !this.isDraftEmpty()) {
+    // While a scheduled message is being edited, Schedule would create a second item
+    // next to the one under edit; Send already keeps the original's time.
+    if (this.opts.onSchedule && !this.isDraftEmpty() && !this.scheduledEdit) {
       items.push({ icon: "clock", label: "Schedule message", run: () => this.openSchedule(anchor) });
     }
     if (items.length === 0) {
-      if (this.opts.onSchedule) this.showNotice("Nothing to schedule yet.");
+      if (this.opts.onSchedule) this.showNotice(this.scheduledEdit ? "Cancel the edit to schedule a new message." : "Nothing to schedule yet.");
       return;
     }
     openComposerMenu(anchor, items);
   }
 
   private openSchedule(anchor: HTMLElement): void {
-    if (this.isDraftEmpty()) return;
+    if (this.isDraftEmpty() || this.scheduledEdit) return;
     openSchedulePicker({
       anchor,
       nextTokenReset: this.opts.getNextTokenReset?.(),
@@ -727,6 +730,12 @@ export class Composer {
         this.renderEditBar();
       } catch (err) {
         console.error("[Composer] scheduled edit save failed", err);
+        // The item fired or was deleted: every retry would fail the same way, so the
+        // text carries on as a plain draft (the save already toasted why).
+        if (err instanceof ScheduledEditGoneError) {
+          this.scheduledEdit = null;
+          this.renderEditBar();
+        }
         this.restoreDraft(text, savedAttachments, savedPastedBlocks);
       } finally {
         this.sending = false;
@@ -818,7 +827,9 @@ export class Composer {
       const blocks = this.undo.buildBlocks(text);
       const savedAttachments = this.att.attachments;
       const savedPastedBlocks = this.att.pastedBlocks;
-      this.clearComposer();
+      // Send now is a real send: stay quiet like the other send paths. A hold keeps
+      // the refresh, since nothing is in flight to answer for it.
+      this.clearComposer(choice === "hold");
       try {
         if (choice === "hold") {
           this.opts.onStage?.(blocks);

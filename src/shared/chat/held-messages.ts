@@ -54,7 +54,9 @@ export interface HeldAttach {
   getDraftBlocks: () => ContentBlock[];
   isDraftEmpty: () => boolean;
   isComposing: () => boolean;
-  clearComposer: () => void;
+  /** `refreshStrip` false when the draft is being sent: the chat reads finished until
+   *  the daemon answers, and a refresh would bring the quick-reply strip back. */
+  clearComposer: (refreshStrip?: boolean) => void;
   /** Return focus to the composer's textarea (dropdown row Ctrl+Enter). */
   focusComposer: () => void;
   getIsBusy: () => boolean;
@@ -312,7 +314,7 @@ export class HeldMessages {
     this.clearDeferRetry();
     if (this.rescue.sid === sid) this.rescue.clear();
     this.render.reset();
-    if (includeDraft && draftBlocks.length) a.clearComposer();
+    if (includeDraft && draftBlocks.length) a.clearComposer(false);
     a.onChange();
     if (bundle.length === 0) return;
     try {

@@ -106,4 +106,35 @@ describe("composer scheduled-message edit mode", () => {
     expect(onSave).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
   });
+
+  it("the Send menu offers no Schedule while an edit is open, so no second item can be made", async () => {
+    tauriMock();
+    const onSchedule = vi.fn(async () => {});
+    const { composer, root, textarea } = await mountComposer({ onSchedule });
+    composer.beginScheduledEdit("remind me", { label: "x", onSave: vi.fn(async () => {}) });
+    textarea.value = "remind me";
+    textarea.dispatchEvent(new window.Event("input", { bubbles: true }));
+    root.querySelector(".composer-send").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    const rows = [...document.querySelectorAll(".composer-menu-popover [data-idx]")];
+    expect(rows.some((b) => b.textContent.includes("Schedule message"))).toBe(false);
+    expect(onSchedule).not.toHaveBeenCalled();
+  });
+
+  it("an item that fired or was deleted ends the edit and keeps the text as a plain draft", async () => {
+    tauriMock();
+    const { ScheduledEditGoneError } = await import("../src/shared/chat/scheduled-edit-gone.ts");
+    const onSend = vi.fn(async () => {});
+    const onSave = vi.fn(async () => {
+      throw new ScheduledEditGoneError();
+    });
+    const { composer, root, textarea } = await mountComposer({ onSend });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    composer.beginScheduledEdit("remind me", { label: "x", onSave });
+    sendClick(root);
+    await vi.waitFor(() => expect(bar(root).hidden).toBe(true));
+    expect(textarea.value).toBe("remind me");
+    sendClick(root);
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
 });
