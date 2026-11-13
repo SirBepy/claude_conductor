@@ -21,6 +21,7 @@ import { reportsBar } from "./dash-reports";
 import { usage, type UsageRange } from "./dash-usage";
 import { todoChart } from "./dash-todo-chart";
 import { openContextMenu } from "./dash-menu";
+import { openProjectSettingsModal } from "./project-config";
 import { chats } from "./dash-chats";
 import { dueCard, nextUp, running, shipState, yourTodos } from "./dash-sections";
 import { assignColumns, naturalHeight } from "../../../shared/balance";
@@ -133,19 +134,32 @@ function rebalance(root: HTMLElement, c: DashCtx): boolean {
   return changed;
 }
 
+/** A draft rail's body: one line that opens the project's settings in their popup,
+ *  with the per-chat groups `railExtra` adds above it (draft-subchats.ts). It holds
+ *  none of the settings' own controls, so the popup's id-addressed rows are the only copy. */
+function renderDraftRail(body: HTMLElement, cwd: string): void {
+  body.innerHTML = `<div class="view-project-settings"><div class="ps-group ps-open-settings">`
+    + `<button type="button" class="ps-open"><i class="ph ph-gear" aria-hidden="true"></i><span>Project settings...</span>`
+    + `<i class="ph ph-caret-right" aria-hidden="true"></i></button></div></div>`;
+  body.querySelector<HTMLButtonElement>(".ps-open")!.addEventListener("click", () => openProjectSettingsModal(cwd));
+}
+
 export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): DashboardHandle {
   const root = document.createElement("div");
   root.className = `pd-root is-${deps.mode}`;
   root.dataset.pdTarget = `${ref.kind}:${ref.id}`;
   const chips = document.createElement("div");
   chips.className = `pd-qa-host is-${deps.mode}`;
-  // Project settings sit beside the dashboard instead of behind a menu. They edit
-  // this PC's config, so the phone has none, and a group's repos each own theirs.
+  // The page's rail holds the project's settings. A draft's holds only what the
+  // chat about to start will do, with the project's settings one click away in
+  // their popup: nine project-wide controls beside one per-chat switch buried it.
+  // Both edit this PC's config, so the phone has no rail, and a group's repos each own theirs.
+  const draftRail = deps.mode === "draft";
   let rail: HTMLElement | null = null;
   if (ref.kind === "project" && !isRemote()) {
     rail = document.createElement("aside");
     rail.className = "pd-rail";
-    rail.setAttribute("aria-label", "Project settings");
+    rail.setAttribute("aria-label", draftRail ? "This chat" : "Project settings");
     // Hidden with the rest of the draft until there is something to show.
     rail.hidden = true;
   }
@@ -169,11 +183,11 @@ export function mountDashboard(ref: DashboardTargetRef, deps: DashboardDeps): Da
     // in, then fades in after the dashboard's own wave (at once when the rail
     // is filled ahead of the snapshot, so there is no wave to wait for).
     rail.style.opacity = "0";
-    rail.innerHTML = `<div class="pd-rail-title">Project settings</div><div class="pd-rail-body"></div>`;
+    rail.innerHTML = `<div class="pd-rail-title">${draftRail ? "This chat" : "Project settings"}</div><div class="pd-rail-body"></div>`;
     // A rail that fails to fill must not take the dashboard's paint down with it.
     const shown = rail;
     const railBody = shown.querySelector<HTMLElement>(".pd-rail-body")!;
-    renderProjectSettings(railBody, cwd)
+    (draftRail ? Promise.resolve(renderDraftRail(railBody, cwd)) : renderProjectSettings(railBody, cwd))
       .then(() => { if (!destroyed) deps.railExtra?.(railBody); })
       .catch((err) => console.warn("[project-dashboard] project settings rail failed", err))
       .finally(() => {

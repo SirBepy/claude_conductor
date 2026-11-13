@@ -1,3 +1,4 @@
+// Reviewed 2026-11-13 (a draft's rail holds only This chat and a Project settings... line; the project's settings open in their popup): the draft rail tests now read the model, effort and tickets controls in that popup.
 // Reviewed 2026-11-13 (suggestion rows hide while the box holds text or an attachment: composer-typing.ts, draft chip row `data-typing`): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-11 (phone keyboard): pending-pane.ts no longer focuses the composer on open at phone width; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu and the effort battery colours change nothing this spec asserts; its failing test also fails on HEAD without these changes.
@@ -329,14 +330,28 @@ test.describe("view-harness / project dashboard", () => {
     const rootBox = (await root.boundingBox())!;
     const railBox = (await draftRail.boundingBox())!;
     expect(railBox.x).toBeGreaterThanOrEqual(rootBox.x + rootBox.width);
-    // The rail shows what a new chat here opens on: this project's own model, the global effort.
-    await expect(draftRail.locator("#chatDefaultModelControl .vs-stop.active")).toHaveText(/haiku/i);
+    // The draft's rail holds none of the project's controls; they open in the popup.
+    await expect(draftRail.locator("#chatDefaultModelControl")).toHaveCount(0);
+    await draftRail.locator(".ps-open").click();
+    const settings = page.locator(".modal-card.pd-modal[aria-label='Project settings']");
+    // The popup shows what a new chat here opens on: this project's own model, the global effort.
+    await expect(settings.locator("#chatDefaultModelControl .vs-stop.active")).toHaveText(/haiku/i);
     // The global default (sonnet, high) is starred; the pinned model shows a revert arrow, the unpinned effort does not.
-    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("high");
-    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop.active .vs-star")).toHaveCount(1);
-    await expect(draftRail.locator("#chatDefaultModelControl .vs-star")).toHaveCount(1);
-    await expect(draftRail.locator(".ps-field.is-changed #chatDefaultModelRevert")).toHaveCount(1);
-    await expect(draftRail.locator(".ps-field.is-changed #chatDefaultEffortRevert")).toHaveCount(0);
+    await expect(settings.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("high");
+    await expect(settings.locator("#chatDefaultEffortControl .vs-stop.active .vs-star")).toHaveCount(1);
+    await expect(settings.locator("#chatDefaultModelControl .vs-star")).toHaveCount(1);
+    await expect(settings.locator(".ps-field.is-changed #chatDefaultModelRevert")).toHaveCount(1);
+    await expect(settings.locator(".ps-field.is-changed #chatDefaultEffortRevert")).toHaveCount(0);
+    // Clicking a stop moves the slider onto it.
+    await settings.locator("#chatDefaultEffortControl .vs-stop", { hasText: "max" }).click();
+    await expect(settings.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("max");
+    // The arrow brings it back to the starred default.
+    await settings.locator("#chatDefaultEffortRevert").click();
+    await expect(settings.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("high");
+    await expect(settings.locator(".ps-field.is-changed #chatDefaultEffortRevert")).toHaveCount(0);
+    await settings.getByRole("button", { name: "Done" }).click();
+    await expect(settings).toHaveCount(0);
+
     // The draft's header leads with the project until the first send names the chat.
     await expect(page.locator("#session-pane .session-header .title")).toHaveText("claude_usage_in_taskbar");
     // The message box keeps the chat's own 900px column under the wider dashboard.
@@ -347,13 +362,6 @@ test.describe("view-harness / project dashboard", () => {
     // The rail fades in after the dashboard's wave; shoot it once settled.
     await expect.poll(() => draftRail.evaluate((el) => el.getAnimations().length), { timeout: 8000 }).toBe(0);
     await capture(page, "dashboard-draft-with-rail");
-    // Clicking a stop moves the slider onto it.
-    await draftRail.locator("#chatDefaultEffortControl .vs-stop", { hasText: "max" }).click();
-    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("max");
-    // The arrow brings it back to the starred default.
-    await draftRail.locator("#chatDefaultEffortRevert").click();
-    await expect(draftRail.locator("#chatDefaultEffortControl .vs-stop.active")).toHaveText("high");
-    await expect(draftRail.locator(".ps-field.is-changed #chatDefaultEffortRevert")).toHaveCount(0);
 
     await page.setViewportSize({ width: 1100, height: 1000 });
     await expect.poll(async () => (await draftRail.boundingBox())!.y).toBeGreaterThan(rootBox.y + 100);
@@ -595,7 +603,7 @@ test.describe("view-harness / project dashboard", () => {
     await expect(track).not.toHaveClass(/\bis-scrolling\b/, { timeout: 3000 });
   });
 
-  test("the rail's Tickets select is a full control-height field led by the same badge as Account", async ({ page }) => {
+  test("the Tickets select is a full control-height field led by the same badge as Account", async ({ page }) => {
     // A bare `flex: 1` in the column-direction tracker control collapsed the select to its text (~20px).
     await mountWithDashboard(page, {
       list_projects: [{ id: "p-conductor", path: CONDUCTOR_CWD, name: "claude_usage_in_taskbar", default_model: "haiku", default_effort: null }],
@@ -605,7 +613,9 @@ test.describe("view-harness / project dashboard", () => {
     });
     await page.setViewportSize({ width: 1700, height: 1000 });
     await openDraft(page, CONDUCTOR_CWD, "claude_usage_in_taskbar");
-    const control = page.locator(".pd-draft.has-rail > .pd-rail #trackerControl");
+    // A draft's rail opens the project's settings in their popup.
+    await page.locator(".pd-draft.has-rail > .pd-rail .ps-open").click();
+    const control = page.locator(".modal-card.pd-modal #trackerControl");
     const select = control.locator("#trackerKind");
     await expect(select).toBeVisible();
     const want = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--control-h")));

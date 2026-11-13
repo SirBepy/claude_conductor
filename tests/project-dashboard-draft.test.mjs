@@ -101,7 +101,7 @@ describe("draft dashboard", () => {
     expect(pane.querySelector(".composer-shell").previousElementSibling.classList.contains("pd-qa-host")).toBe(true);
   });
 
-  it("a project's draft shows its settings in a rail beside the dashboard, filled for that repo", async () => {
+  it("a project's draft shows a This chat rail beside the dashboard, its project settings one line away in their popup", async () => {
     renderSettings.mockClear();
     const pane = await mountDraft("C:/Projects/conductor");
     const wrap = pane.querySelector(".pd-draft");
@@ -110,10 +110,11 @@ describe("draft dashboard", () => {
     expect(rail).not.toBeNull();
     // After the dashboard it sits beside, so the grid puts it in the second column.
     expect(wrap.firstElementChild.classList.contains("pd-root")).toBe(true);
-    await vi.waitFor(() => expect(rail.querySelector(".rail-stub")).not.toBeNull());
+    await vi.waitFor(() => expect(rail.querySelector(".ps-open-settings .ps-open")).not.toBeNull());
     expect(rail.hidden).toBe(false);
-    expect(renderSettings).toHaveBeenCalledTimes(1);
-    expect(renderSettings.mock.calls[0][1]).toBe("C:/Projects/conductor");
+    expect(rail.querySelector(".pd-rail-title").textContent).toBe("This chat");
+    // The project-wide controls stay out of the draft's rail.
+    expect(renderSettings).not.toHaveBeenCalled();
   });
 
   it("the rail fills from the draft's folder before the dashboard snapshot answers", async () => {
@@ -129,16 +130,17 @@ describe("draft dashboard", () => {
     try {
       const pane = draftPane();
       mountDraftDashboard(pane, { path: "C:/Projects/conductor" }, state.mountId);
-      await vi.waitFor(() => expect(pane.querySelector(".pd-draft > .pd-rail .rail-stub")).not.toBeNull());
+      await vi.waitFor(() => expect(pane.querySelector(".pd-draft > .pd-rail .ps-open")).not.toBeNull());
       const rail = pane.querySelector(".pd-draft > .pd-rail");
       // The snapshot is still pending: nothing of the dashboard is painted yet.
       expect(pane.querySelector(".pd-root .pd-reports")).toBeNull();
       expect(rail.hidden).toBe(false);
-      expect(renderSettings.mock.calls[0][1]).toBe("C:/Projects/conductor");
+      const line = rail.querySelector(".ps-open");
       release();
       await vi.waitFor(() => expect(pane.querySelector(".pd-root .pd-reports")).not.toBeNull());
       // The snapshot's first paint does not fill the rail a second time.
-      expect(renderSettings).toHaveBeenCalledTimes(1);
+      expect(rail.querySelectorAll(".ps-open")).toHaveLength(1);
+      expect(rail.querySelector(".ps-open")).toBe(line);
     } finally {
       release();
       invoke.mockImplementation(answer);

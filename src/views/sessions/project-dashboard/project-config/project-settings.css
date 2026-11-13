@@ -7,7 +7,9 @@
 /* The line above outranks the UA [hidden] rule, and `.x[hidden]` from another sheet only
    ties it: a hidden group (the draft's Use subchats / Goes to cards) painted anyway. */
 .view-project-settings .ps-group[hidden] { display: none; }
-.view-project-settings .ps-group + .ps-group { border-top: 1px solid var(--color-border); padding-top: 14px; gap: 10px; }
+/* A divider above every group that has a shown group before it: `+` would also count a
+   hidden one, and the first group a draft shows (its Goes to card) drew a line under the title. */
+.view-project-settings .ps-group:not([hidden]) ~ .ps-group { border-top: 1px solid var(--color-border); padding-top: 14px; gap: 10px; }
 .ps-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ps-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; }
 .ps-label { font-size: var(--fs-body); color: var(--color-text); line-height: 1.2; }
@@ -16,7 +18,16 @@
 .ps-field > .ps-label { display: flex; align-items: center; }
 .ps-label-row { display: flex; align-items: center; justify-content: space-between; }
 .ps-label[title] { cursor: help; }
-/* A group's own heading: small and quiet, so the two Subchats rows read as one block. */
+/* A switch's explanation under its line, kept tight to the line it explains. */
+.ps-hint { font-size: var(--fs-micro); color: var(--color-text-muted); line-height: 1.35; margin-top: -4px; }
+/* A draft rail's way into the project-wide settings: a quiet line, not a button. */
+.ps-open {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 22px; padding: 0; background: none; border: 0;
+  font: inherit; font-size: var(--fs-body); color: var(--color-text-muted); text-align: left; cursor: pointer;
+}
+.ps-open .ph-caret-right { margin-left: auto; }
+.ps-open:hover, .ps-open:focus-visible { color: var(--color-primary); }
+/* A group's own heading: small and quiet, so the rows under it read as one block. */
 .ps-group-title { font-size: var(--fs-micro); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); }
 
 .view-project-settings .inline-select,

@@ -95,10 +95,11 @@ export function projectItems(host: ActionHost, anchor: HTMLElement): Entry[] {
     items.push({ icon: "pencil-simple", label: "Rename project...", run: forRepo(host, anchor, (cwd) => openRenameModal(cwd, reload)) });
   }
   items.push({ icon: "user-circle", label: "Character...", run: forRepo(host, anchor, (cwd) => openCharacterModal(cwd)) });
-  // A single project shows its settings in the dashboard's own rail (dashboard.ts).
-  // The two share element ids, so a popup beside the rail would break both; a group
+  // A single project's page shows its settings in its own rail (dashboard.ts). The
+  // two share element ids, so a popup beside that rail would break both. A draft's
+  // rail holds only the chat's own choices, so its project gets the popup; a group
   // has no rail, because its repos each have their own settings, and asks which.
-  if (t.kind === "group") {
+  if (t.kind === "group" || host.ctx().mode === "draft") {
     items.push({ icon: "gear", label: "Project settings...", run: forRepo(host, anchor, (cwd) => openProjectSettingsModal(cwd)) });
   }
   items.push(

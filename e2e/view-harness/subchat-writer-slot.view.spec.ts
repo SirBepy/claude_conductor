@@ -12,9 +12,10 @@ import {
   capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance,
 } from "./harness";
 
-// Subchats step 10: the project settings row (Check a sub's work) shows, saves
-// and survives a reload, and a sub held for its
-// project's writer slot reads as queued in the sub list and the sidebar hover.
+// The project settings carry no Check a sub's work row (removed 2026-11-13, no
+// project used Facts only) and the connectors switch says what it
+// is, and a sub held for its project's writer slot reads as queued in the sub list
+// and the sidebar hover.
 // Drives the real project settings renderer and the real sessions view at
 // desktop and phone width.
 
@@ -55,11 +56,12 @@ async function renderSettings(page: Page): Promise<void> {
     document.body.appendChild(host);
     await renderProjectSettings(host, cwd);
   }, CWD);
-  await page.locator("#project-config-host #subchatCheckSelect option").first().waitFor({ state: "attached" });
+  // The compaction row renders last, so its filled size means every row is in.
+  await expect(page.locator("#project-config-host #compactK")).not.toHaveValue("");
 }
 
 for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
-  test.describe(`view-harness / subchat project settings (${label})`, () => {
+  test.describe(`view-harness / project settings rows (${label})`, () => {
     async function mount(page: Page, stored: Record<string, unknown> = {}): Promise<void> {
       await page.setViewportSize(size);
       await mountView(page, {
@@ -71,39 +73,31 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await renderSettings(page);
     }
 
-    test("the row shows with its default, inside the rail", async ({ page }) => {
+    test("no sub check row, and the connectors switch carries its explanation inside the rail", async ({ page }) => {
       await mount(page);
-      const check = page.locator("#subchatCheckSelect");
-      await expect(check).toBeVisible();
-      await expect(check).toHaveValue("facts_and_reviewer");
-      await expect(check.locator("option")).toHaveText(["Facts and a reviewer", "Facts only"]);
-      // The rail also carries the MCP servers group, so name the one asserted.
-      await expect(page.locator(".ps-group-title", { hasText: "Subchats" })).toHaveText("Subchats");
+      const host = page.locator("#project-config-host");
+      await expect(host.locator("#subchatCheckSelect")).toHaveCount(0);
+      await expect(host.getByText("Check a sub's work")).toHaveCount(0);
+      await expect(host.locator(".ps-group-title", { hasText: "Subchats" })).toHaveCount(0);
+
+      await expect(host.getByLabel("claude.ai connectors")).toHaveCount(1);
+      const hint = host.locator(".ps-hint");
+      await expect(hint).toBeVisible();
+      await expect(hint).toContainText("Google Drive");
       // Nothing spills out of the 270px rail.
-      const host = (await page.locator("#project-config-host").boundingBox())!;
-      for (const sel of [check]) {
-        const box = (await sel.boundingBox())!;
-        expect(box.x).toBeGreaterThanOrEqual(host.x);
-        expect(box.x + box.width).toBeLessThanOrEqual(host.x + host.width + 0.5);
-      }
-      await capture(page.locator("#project-config-host"), `subchat-settings-rows-${label}`);
+      const box = (await host.boundingBox())!;
+      const hb = (await hint.boundingBox())!;
+      expect(hb.x).toBeGreaterThanOrEqual(box.x);
+      expect(hb.x + hb.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+      await capture(host, `project-settings-rows-${label}`);
     });
 
-    test("a choice saves as one field and is still there after a reload", async ({ page }) => {
+    test("the connectors switch still saves its one field", async ({ page }) => {
       await mount(page);
-      await page.locator("#subchatCheckSelect").selectOption("facts_only");
+      await page.locator("#project-config-host label.switch:has(#connectorsEnabled)").click();
       await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "update_project").length).toBe(1);
       const calls = (await invokeCalls(page)).filter((c) => c.cmd === "update_project");
-      expect((calls[0]!.args as { patch: unknown }).patch).toEqual({ subchat_check: "facts_only" });
-
-      // A fresh render, as after reopening the popup, reads it back.
-      await renderSettings(page);
-      await expect(page.locator("#subchatCheckSelect")).toHaveValue("facts_only");
-    });
-
-    test("a stored value from the project shows on first render", async ({ page }) => {
-      await mount(page, { subchat_check: "facts_only" });
-      await expect(page.locator("#subchatCheckSelect")).toHaveValue("facts_only");
+      expect((calls[0]!.args as { patch: unknown }).patch).toEqual({ claude_ai_connectors: true });
     });
   });
 }

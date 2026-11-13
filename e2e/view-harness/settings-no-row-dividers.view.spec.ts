@@ -1,3 +1,4 @@
+// Reviewed 2026-11-13 (project settings lost the Check a sub's work row, Connectors became 'claude.ai connectors' with a hint, a group's divider skips hidden groups, a draft's rail holds only This chat): nothing this spec asserts changed, and it passes.
 import { expect, test, type Page } from "@playwright/test";
 // Reviewed 2026-11-12 (compaction): project-settings.ts gained a Compaction group of two .ps-line rows (a switch and a number); they draw no divider lines either and this spec passes.
 // Reviewed 2026-11-05: project-settings.ts gained a Subchats group (a heading and two selects, no divider lines of its own beyond the existing group rule); the .ps-line rows this spec measures are untouched, and it passed after the change.

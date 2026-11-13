@@ -1,13 +1,13 @@
-import { html, render } from "lit-html";
+import { html, nothing, render } from "lit-html";
 import { renderChatDefaultsRow } from "./chat-defaults-row";
 import {
-  renderAccountRow, renderCompactionRow, renderConnectorsRow, renderGamingModeRow, renderSubchatCheckRow, renderTrackerRow,
+  renderAccountRow, renderCompactionRow, renderConnectorsRow, renderGamingModeRow, renderTrackerRow,
 } from "./rows";
 import { renderMcpServersRow } from "./mcp-servers-row";
 import "./project-settings.css";
 
-/** Fills a popup body with the project's settings (model and effort, account,
- *  tickets, connectors, gaming mode, and how subchats check work). */
+/** Fills a popup body or the dashboard page's rail with the project's settings
+ *  (model and effort, account, tickets, connectors, gaming mode, MCP servers, compaction). */
 export async function renderProjectSettings(root: HTMLElement, cwd: string): Promise<void> {
   render(template(), root);
   await renderChatDefaultsRow(cwd);
@@ -16,14 +16,13 @@ export async function renderProjectSettings(root: HTMLElement, cwd: string): Pro
   await renderGamingModeRow(cwd);
   await renderTrackerRow(cwd);
   await renderMcpServersRow(cwd);
-  await renderSubchatCheckRow(cwd);
   await renderCompactionRow(cwd);
 }
 
 // A short label with the explanation on hover: the rail is 270px wide, so a
 // sentence per row would stack taller than the settings themselves.
 function template() {
-  const toggle = (id: string) => html`<label class="switch"><input type="checkbox" id=${id}><span class="slider"></span></label>`;
+  const toggle = (id: string, label?: string) => html`<label class="switch"><input type="checkbox" id=${id} aria-label=${label ?? nothing}><span class="slider"></span></label>`;
   return html`
     <div class="view-project-settings">
       <div class="ps-group">
@@ -52,9 +51,11 @@ function template() {
       </div>
       <div class="ps-group">
         <div class="ps-line">
-          <span class="ps-label" title="Use your claude.ai connectors (Google Drive etc.) in this project's chats">Connectors</span>
-          ${toggle("connectorsEnabled")}
+          <span class="ps-label">claude.ai connectors</span>
+          ${toggle("connectorsEnabled", "claude.ai connectors")}
         </div>
+        <!-- Spelled out, not a tooltip: the bare name read as a heading with a stray switch. -->
+        <div class="ps-hint">Google Drive and the other apps you connected on claude.ai, in this project's chats.</div>
         <div class="ps-line">
           <span class="ps-label" title="Chats and dev servers here are not parked while gaming mode is on">Run in gaming mode</span>
           ${toggle("gamingModeKeepRunning")}
@@ -73,13 +74,6 @@ function template() {
         <div class="ps-line">
           <span class="ps-label" title="Compact once the chat holds this many thousand tokens">Compact at (K tokens)</span>
           <input type="number" id="compactK" class="inline-input" min="1" max="10000" step="1">
-        </div>
-      </div>
-      <div class="ps-group">
-        <div class="ps-group-title">Subchats</div>
-        <div class="ps-field">
-          <div class="ps-label" title="Facts come from the repo history and the transcript. A reviewer is a fresh subagent with no shared context, which costs usage per finished job.">Check a sub's work</div>
-          <span class="acc-row-control"><select id="subchatCheckSelect" class="inline-select"></select></span>
         </div>
       </div>
     </div>
