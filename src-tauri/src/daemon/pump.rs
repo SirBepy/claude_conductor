@@ -1006,9 +1006,11 @@ mod tests {
         use crate::daemon::settings_cache::SettingsCache;
         use crate::types::Settings;
 
-        // `chat_state` lives under the data dir, which a concurrent test may
-        // point elsewhere (`CC_DATA_DIR`) while it holds this lock.
+        // `chat_state` lives under the data dir: the tempdir keeps this test off
+        // the real one, and the lock keeps another test's `CC_DATA_DIR` out.
         let _guard = crate::util::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", dir.path());
         let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         let settings = std::sync::Mutex::new(Settings::default());
         state.registry.record_interactive_session("pump-close-now", std::path::Path::new("/tmp/x"), &settings, "2026-11-12T00:00:00Z");
@@ -1045,6 +1047,7 @@ mod tests {
         crate::util::kill::kill_tree(pid);
         let _ = tokio::time::timeout(std::time::Duration::from_secs(10), pump).await;
         let _ = std::fs::remove_file(&line_file);
+        std::env::remove_var("CC_DATA_DIR");
         assert!(live, "the probe's first live line must start the turn");
         assert!(!closing, "a /close --now prompt must not mark the row Closing");
     }
