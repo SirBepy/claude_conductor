@@ -36,6 +36,16 @@ pub fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                         p.session_id
                     )));
                 }
+                let subchats_on =
+                    crate::sessions::chat_config::get(&p.session_id).is_some_and(|c| c.subchats_on);
+                if let Some(reason) = crate::daemon::subchats::refusal_for_move(
+                    &old,
+                    subchats_on,
+                    &p.target_account_id,
+                    &crate::accounts::load_registry(),
+                ) {
+                    return Err(RpcError::invalid_params(reason));
+                }
                 if old.account_id.as_deref() == Some(p.target_account_id.as_str()) {
                     return Err(RpcError::invalid_params(format!(
                         "session {} is already on account {}",

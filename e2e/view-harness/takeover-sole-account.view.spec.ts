@@ -1,3 +1,4 @@
+// Reviewed 2026-11-13: openChangeAccountModal still resolves a bare id (autoPickSole unchanged); the subs switch is only in openChangeAccountForChat.
 import { test, expect } from "@playwright/test";
 // asserts: src/views/sessions/active-session-takeover.ts, src/shared/change-account-modal.ts
 import { invokeCalls, mountSessionsList, sessionInstance } from "./harness";

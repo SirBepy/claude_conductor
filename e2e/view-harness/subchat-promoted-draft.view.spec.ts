@@ -1,3 +1,4 @@
+// Reviewed 2026-11-13: sessions-wiring now wires the rate-limit banner to changeAccountForSession (setOnSwitchAccount) instead of setOnMoved; nothing this spec drives changed.
 // Reviewed 2026-11-12 (honest sub states): subs gained queued/paused/usage-limit/stopped kinds with a dim ring and glyph, an avatar hover card, the Plan foot's sub counts and a glowing main-chat ring; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12 (project main chat): the sessions mount re-reads each project's main-chat pointer and repaints the open draft's slot; this spec has no pointer, so nothing it asserts changed, and it passes.
 // Reviewed 2026-11-12: the /pickup button now starts its new chat only when the old one closed; nothing this spec asserts changed (not run here).
