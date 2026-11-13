@@ -101,15 +101,25 @@ fn stale_respawn_due(busy: bool, has_prompt: bool, stale: bool) -> bool {
     stale && !respawn_would_kill_a_turn(busy, has_prompt)
 }
 
-/// Does `session_id`'s live child run a different model/effort than the
-/// registry now holds, i.e. a pick was made that only a respawn can apply.
-/// Derived from the two records rather than stored as a flag, so picking the
-/// original value back cancels the pending change and a daemon restart cannot
-/// lose it.
+/// The account is launch-only too: it is the `CLAUDE_CONFIG_DIR` the child was
+/// spawned under. A registry row with no account recorded is no change (the
+/// next spawn would fall back to the default, which is what the child got).
+fn account_differs(live_account: &str, want_account: Option<&str>) -> bool {
+    want_account.is_some_and(|want| !want.is_empty() && want != live_account)
+}
+
+/// Does `session_id`'s live child run a different model, effort or account
+/// than the registry now holds, i.e. a pick was made that only a respawn can
+/// apply. Derived from the two records rather than stored as a flag, so picking
+/// the original value back cancels the pending change and a daemon restart
+/// cannot lose it. The account half matters most for a rate-limited chat: its
+/// child stays alive on the exhausted account, so without a respawn every send
+/// after an account switch is rejected again and the chat re-freezes.
 pub(crate) fn launch_is_stale(state: &crate::daemon::state::DaemonState, session_id: &str) -> bool {
     let Some(live) = state.sessions.get(session_id) else { return false };
     let Some(inst) = state.registry.get(session_id) else { return false };
     launch_differs(&live.model, &live.effort, &inst.model, &inst.effort)
+        || account_differs(&live.account_id, inst.account_id.as_deref())
 }
 
 /// Respawn `session_id` with the registry's model/effort if its live child is
@@ -139,7 +149,7 @@ pub(crate) async fn refresh_stale_launch(
     if !stale_respawn_due(busy, has_prompt, stale) {
         return false;
     }
-    log::info!("daemon: {session_id} runs a stale model/effort, respawning before the next send");
+    log::info!("daemon: {session_id} runs a stale model/effort/account, respawning before the next send");
     match restart_session(state, session_id).await {
         Ok(_) => true,
         Err(e) => {

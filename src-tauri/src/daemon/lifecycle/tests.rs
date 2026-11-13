@@ -154,6 +154,30 @@ async fn every_respawning_send_door_applies_a_pending_pick_first() {
     }
 }
 
+/// 2026-11-13: a rate-limited chat keeps its child alive on the exhausted
+/// account. After Joe moved it to another account, every send still went into
+/// that child, was rejected again, and re-froze the chat. The account is a
+/// launch-only pick like model/effort, so the next send must respawn.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_moved_account_makes_the_live_child_stale_and_the_next_send_respawns() {
+    let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+    let (_child, session) = probe::live_session(&state, "s", ("opus", "high"), ("opus", "high"));
+    assert!(!launch_is_stale(&state, "s"), "no account recorded: the child already runs the default");
+    // The probe child runs on "acct"; the registry agrees until the move.
+    state.registry.set_account("s", "acct");
+    assert!(!launch_is_stale(&state, "s"), "same account, same pair: nothing pending");
+
+    state.registry.set_account("s", "other-acct");
+    assert!(launch_is_stale(&state, "s"), "the child still runs the old account's config dir");
+
+    let _ = send_message_with_respawn(&state, "s", "continue", true).await;
+    assert!(
+        session.expected_exit.load(std::sync::atomic::Ordering::SeqCst),
+        "the send wrote into the child on the old account instead of respawning"
+    );
+}
+
 #[test]
 fn launch_is_stale_is_false_without_a_live_child() {
     let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));

@@ -41,20 +41,25 @@ use std::sync::Arc;
 /// turn) from a stale one (an older turn's notification arriving after a
 /// newer turn already started) - the same distinction `set_busy_false_if_gen`
 /// already enforces everywhere else.
+///
+/// Returns whether the rejection was applied (a live window, not a replayed
+/// one). The pump uses it to keep the rejected turn's own trailing `result`
+/// line from reading as "a turn completed on this account" and wiping the
+/// block it just recorded.
 pub(crate) fn handle_rate_limit_rejection(
     state: &Arc<DaemonState>,
     session: &Arc<Session>,
     body: &str,
     saw_stream_turn: bool,
     pump_turn_gen: u64,
-) {
+) -> bool {
     let Ok(info) = serde_json::from_str::<serde_json::Value>(body) else {
         log::warn!("daemon: rate_limit body was not JSON: {body}");
-        return;
+        return false;
     };
     let Some(resets_at) = info.get("resetsAt").and_then(|v| v.as_i64()) else {
         log::warn!("daemon: rate_limit body has no resetsAt: {body}");
-        return;
+        return false;
     };
     // A rejection whose window has already reset cannot be live: a `--resume`
     // child replays its transcript's old `rate_limit_event` lines, and the
@@ -73,7 +78,7 @@ pub(crate) fn handle_rate_limit_rejection(
             "daemon: session {} ignoring rate_limit rejection whose window reset at {resets_at} (replayed history)",
             session.session_id
         );
-        return;
+        return false;
     }
     let window = info.get("rateLimitType").and_then(|v| v.as_str()).unwrap_or("five_hour");
     let blocked = state
@@ -139,6 +144,7 @@ pub(crate) fn handle_rate_limit_rejection(
         "scheduled_items_changed",
         serde_json::json!({"items": crate::sessions::scheduled_items::list()}),
     );
+    true
 }
 
 #[cfg(test)]

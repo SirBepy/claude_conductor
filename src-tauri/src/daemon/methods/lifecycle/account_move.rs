@@ -61,11 +61,31 @@ pub fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                     state.registry.set_auto_frozen(&p.session_id, false);
                 }
 
-                // A blocked chat has no live child, and wants its queued
-                // resume rather than the restart's "continue".
-                let pending_resume =
-                    crate::sessions::scheduled_items::find_pending_message_for_session(&p.session_id);
+                // A chat frozen by a usage limit wants its queued resume rather
+                // than the restart's "continue". Its child usually outlives the
+                // rejection, still on the exhausted account's config dir, so
+                // it is killed first: the resume below then respawns on the
+                // new account instead of being rejected again and re-freezing.
+                // Any other chat's pending message is Joe's own schedule and
+                // keeps its time. The claim (Pending -> Firing) keeps the
+                // scheduler from firing the same resume during the kill wait;
+                // a `None` means it already is.
+                let pending_resume = old
+                    .auto_frozen
+                    .then(|| crate::sessions::scheduled_items::find_pending_message_for_session(&p.session_id))
+                    .flatten()
+                    .and_then(|item| crate::sessions::scheduled_items::claim_for_fire(&item.id).map(|_| item));
                 if let Some(item) = pending_resume {
+                    lifecycle::kill_and_wait_for_teardown(&state, &p.session_id).await;
+                    if state.sessions.get(&p.session_id).is_some() {
+                        // Still alive past the teardown wait: a send now would
+                        // land on the exhausted account again.
+                        crate::sessions::scheduled_items::upsert(item);
+                        return Err(RpcError::internal(format!(
+                            "session {}'s old process did not exit; try the account switch again",
+                            p.session_id
+                        )));
+                    }
                     crate::sessions::scheduled_items::delete(&item.id);
                     // Meta: the user already saw this text as their own bubble.
                     state.registry.set_busy(&p.session_id, true);
@@ -75,6 +95,9 @@ pub fn register_account_move(router: &mut Router, state: Arc<DaemonState>) {
                     {
                         state.registry.set_busy(&p.session_id, false);
                         crate::sessions::chat_state::set_busy(&p.session_id, false);
+                        // The old child is gone, so the queued resume is the
+                        // only thing left that brings this chat back: keep it.
+                        crate::sessions::scheduled_items::upsert(item);
                         return Err(err_to_rpc(e));
                     }
                     state.notifier.publish(
@@ -123,6 +146,83 @@ mod tests {
             params: Some(json!({"session_id": session_id, "target_account_id": "other-acct"})),
         };
         router.dispatch(req, dummy_ctx()).await.error.expect("expected rejection")
+    }
+
+    /// 2026-11-13, "frozen chats can't get unfrozen": a rate-limited chat's
+    /// child outlives the rejection on the exhausted account. Moving it must
+    /// clear the auto-freeze and replay its queued resume on a NEW child, never
+    /// write it into the old one (which rejects it again and re-freezes).
+    /// Moves an auto-frozen chat with a live probe child and a queued resume,
+    /// returning the move's error (the probe's cwd does not exist, so no
+    /// `claude` ever starts), whether the old child was killed, and the resume
+    /// still queued afterwards. `exits` stands in for the pump: it drops the
+    /// session from the map once the kill lands, as a real teardown does.
+    #[cfg(windows)]
+    async fn move_auto_frozen(exits: bool) -> (String, bool, Option<String>) {
+        let _guard = crate::util::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", dir.path());
+
+        let state = test_state();
+        let (_child, session) =
+            crate::daemon::lifecycle::probe::live_session(&state, "rl-1", ("opus", "high"), ("opus", "high"));
+        state.registry.set_account("rl-1", "acct");
+        state.registry.set_frozen("rl-1", true);
+        state.registry.set_auto_frozen("rl-1", true);
+        crate::sessions::scheduled_items::upsert(crate::sessions::scheduled_items::ScheduledItem::new(
+            crate::sessions::scheduled_items::ScheduledKind::Message {
+                session_id: "rl-1".into(),
+                cwd: "Z:\\does\\not\\exist".into(),
+            },
+            "the prompt the limit rejected".into(),
+            "2099-01-01T00:00:00Z".into(),
+            None,
+        ));
+        if exits {
+            let (s, sessions) = (session.clone(), state.sessions.clone());
+            tokio::spawn(async move {
+                while !s.expected_exit.load(std::sync::atomic::Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                sessions.remove("rl-1");
+            });
+        }
+
+        let err = try_move(&state, "rl-1").await.message;
+
+        let inst = state.registry.get("rl-1").unwrap();
+        assert_eq!(inst.account_id.as_deref(), Some("other-acct"));
+        assert!(!inst.frozen && !inst.auto_frozen, "the move must clear the usage-limit freeze");
+        let killed = session.expected_exit.load(std::sync::atomic::Ordering::SeqCst);
+        let kept = crate::sessions::scheduled_items::find_pending_message_for_session("rl-1").map(|i| i.prompt);
+        std::env::remove_var("CC_DATA_DIR");
+        (err, killed, kept)
+    }
+
+    /// 2026-11-13, "frozen chats can't get unfrozen": a rate-limited chat's
+    /// child outlives the rejection on the exhausted account. Moving it must
+    /// clear the auto-freeze and replay its queued resume on a NEW child, never
+    /// write it into the old one (which rejects it again and re-freezes).
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn moving_an_auto_frozen_chat_resumes_it_on_a_new_child() {
+        let (err, killed, kept) = move_auto_frozen(true).await;
+        assert!(killed, "the queued resume went into the child still running on the exhausted account");
+        assert!(err.contains("does not exist"), "the resume must reach a respawn on the new account: {err}");
+        // That respawn failed (missing cwd) after the old child was killed: the
+        // resume must stay queued, or nothing ever brings the chat back.
+        assert_eq!(kept.as_deref(), Some("the prompt the limit rejected"));
+    }
+
+    /// An old child that outlives the teardown wait must not receive the
+    /// resume: it would be rejected on the exhausted account again.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_move_whose_old_child_will_not_exit_keeps_the_resume_queued() {
+        let (err, killed, kept) = move_auto_frozen(false).await;
+        assert!(killed);
+        assert!(err.contains("did not exit"), "{err}");
+        assert_eq!(kept.as_deref(), Some("the prompt the limit rejected"));
     }
 
     #[tokio::test]

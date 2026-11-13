@@ -101,6 +101,10 @@ pub(crate) async fn run_stdout_pump(
     // for a `<cc-preview:..>` sentinel at turn end and cleared there; unlike
     // `pending_delta`/`StreamingText` this spans ALL text blocks in the turn.
     let mut turn_text = String::new();
+    // Set when this turn was rejected for a usage limit. The CLI still ends a
+    // rejected turn with a `result` line, which must not read as a completed
+    // turn and lift the block the rejection just recorded.
+    let mut turn_rate_limited = false;
     loop {
         tokio::select! {
             result = buf_reader.read_until(b'\n', &mut line_buf) => {
@@ -236,14 +240,16 @@ pub(crate) async fn run_stdout_pump(
                             // is published, so the webview's first sight of
                             // the rejection already has the state behind it.
                             if let ChatEvent::Notification { ref kind, ref body } = ev {
-                                if kind == "rate_limit" {
-                                    crate::daemon::rate_limit::handle_rate_limit_rejection(
+                                if kind == "rate_limit"
+                                    && crate::daemon::rate_limit::handle_rate_limit_rejection(
                                         &state_for_pump,
                                         &pump_session,
                                         body,
                                         turn.is_live(),
                                         pump_turn_gen,
-                                    );
+                                    )
+                                {
+                                    turn_rate_limited = true;
                                 }
                             }
                             if log::log_enabled!(log::Level::Debug) {
@@ -288,6 +294,8 @@ pub(crate) async fn run_stdout_pump(
                                     turn.on_result_line()
                                 };
                                 let live_turn = action == TurnAction::TurnEnded;
+                                // Taken on every result line, like the interrupt flag.
+                                let turn_was_rejected = std::mem::take(&mut turn_rate_limited);
                                 // Keeps `pump_turn_gen`: a replayed result line must
                                 // not strand the live turn it sits inside without one.
                                 pump_turn_gen_captured = false;
@@ -368,8 +376,11 @@ pub(crate) async fn run_stdout_pump(
                                 // A turn ran to completion on this account, so
                                 // whatever window we had recorded is over.
                                 // Hygiene only: every consumer already treats
-                                // a past `resets_at` as unblocked.
-                                if live_turn {
+                                // a past `resets_at` as unblocked. A rejected
+                                // turn's result line ran nothing, so it keeps
+                                // the block: the banner's "Continue on <other>"
+                                // and the schedule's requeue both read it.
+                                if live_turn && !turn_was_rejected {
                                     state_for_pump
                                         .registry
                                         .clear_rate_limit_for_account(&pump_session.account_id);
@@ -923,6 +934,66 @@ mod tests {
         assert_eq!(turn.on_result_line(), TurnAction::TurnEnded);
         assert!(state.registry.set_busy_false_if_gen("s", turn_one), "the late result line must still clear busy");
         assert!(!state.registry.get("s").unwrap().busy);
+    }
+
+    /// 2026-11-13: the CLI ends a usage-limit rejection with a `result` line,
+    /// which the pump took for "a turn completed on this account" and used to
+    /// lift the block the rejection had recorded a moment before. Every chat on
+    /// the exhausted account then read as unblocked, so the global banner and
+    /// its "Continue on <other account>" button never showed.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_rejected_turns_result_line_keeps_the_account_blocked() {
+        use crate::daemon::session::{new_session_map, Session};
+        use crate::daemon::settings_cache::SettingsCache;
+        use crate::types::Settings;
+
+        let _guard = crate::util::env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("CC_DATA_DIR", dir.path());
+
+        let sid = "pump-rl-keep";
+        let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+        let settings = std::sync::Mutex::new(Settings::default());
+        state.registry.record_interactive_session(sid, std::path::Path::new("/tmp/x"), &settings, "2026-11-13T00:00:00Z");
+        state.registry.set_account(sid, "acct");
+        state.registry.set_busy(sid, true);
+
+        let resets_at = chrono::Utc::now().timestamp() + 3600;
+        let lines = format!(
+            "{}\n{}\n",
+            serde_json::json!({"type": "rate_limit_event", "rate_limit_info": {
+                "status": "rejected", "rateLimitType": "seven_day", "resetsAt": resets_at}}),
+            r#"{"type":"result","subtype":"success","is_error":true,"result":"You've hit your limit","timestamp":1,"usage":{"input_tokens":0,"output_tokens":0}}"#,
+        );
+        let line_file = dir.path().join("rejected-turn.jsonl");
+        std::fs::write(&line_file, lines).unwrap();
+        let mut child = tokio::process::Command::new("cmd")
+            .args(["/C", "type"])
+            .arg(&line_file)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn probe child");
+        let stdin = child.stdin.take().expect("piped stdin");
+        let stdout = child.stdout.take().expect("piped stdout");
+        let pid = child.id().expect("pid");
+        let session = Session::new(sid.into(), std::env::temp_dir(), "m".into(), "high".into(), pid, stdin, None, None, "acct".into());
+        session.expected_exit.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let pump = tokio::spawn(run_stdout_pump(child, stdout, session, state.sessions.clone(), state.clone(), false));
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(20), pump).await;
+
+        let inst = state.registry.get(sid).unwrap();
+        std::env::remove_var("CC_DATA_DIR");
+        assert_eq!(
+            inst.rate_limited_resets_at,
+            Some(resets_at),
+            "the rejected turn's own result line lifted the account's block"
+        );
+        assert!(inst.frozen && inst.auto_frozen, "the rejection auto-freezes the chat");
     }
 
     /// A turn whose prompt starts with `/close --now` used to mark the row Closing
