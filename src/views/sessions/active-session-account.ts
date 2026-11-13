@@ -1,6 +1,7 @@
 // Character/account-change handlers extracted from active-session.ts's
 // selectSession (ai_todo 870): changeCharacterForSession, carrySessionSettings,
-// applyAccountMove and changeAccountForSession. Pure move, no behavior change.
+// applyAccountMove and changeAccountForSession, plus refreshFrozenLimitStrip
+// (the usage-limit strip's way onto another account).
 
 import type { Instance } from "../../types/ipc.generated";
 import { state } from "./state";
@@ -17,7 +18,9 @@ import { openChangeCharacterModal } from "../../shared/change-character-modal";
 import { openChangeAccountForChat } from "../../shared/change-account-modal";
 import { isAutoAccept, isSubchatsOn, setAutoAccept } from "./permission-modal";
 import { getCachedAccount } from "../../shared/chat/rate-limit-banner";
+import { listCachedAccounts, setCachedAccounts } from "../../shared/accounts-cache";
 import { moveChatToAccount, movableSubs, planAccountMove } from "./account-move";
+import { needsFrozenLimitStrip, syncFrozenLimitStrip } from "./frozen-limit-strip";
 import { loadDraft, moveComposerDraft } from "../../shared/chat/composer-persistence";
 import { setComposerDraft, clearComposerDraft } from "../../shared/chat/session-draft-sync";
 
@@ -130,6 +133,39 @@ export async function applyAccountMove(
   if (state.selectedId !== oldId) return;
   const pane = root?.querySelector<HTMLElement>("#session-pane");
   if (pane) await selectSession(newId, pane);
+}
+
+let accountsFetch: Promise<void> | null = null;
+
+/** Paint the open pane's usage-limit strip (frozen-limit-strip.ts) from the
+ *  current instance list. Called on mount and on every instances change, so
+ *  it appears when the daemon auto-freezes the chat and goes once a move or
+ *  the reset unfreezes it. */
+export function refreshFrozenLimitStrip(
+  pane: HTMLElement,
+  sessionId: string,
+  selectSession: (sessionId: string, pane: HTMLElement) => Promise<void>,
+): void {
+  const slot = pane.querySelector<HTMLElement>(".frozen-limit-slot");
+  if (!slot) return;
+  const sess = state.sessions.find((s) => s.session_id === sessionId);
+  const readOnly = sess?.kind === "external" || sess?.kind === "automated";
+  syncFrozenLimitStrip(slot, sess, readOnly, listCachedAccounts(), state.sessions, {
+    moveTo: (accountId, label) =>
+      moveChatToAccount(sessionId, accountId, label, (newId) => applyAccountMove(sessionId, newId, selectSession)),
+    changeAccount: () => void changeAccountForSession(sessionId, selectSession),
+  });
+  // The cache fills when the global banner mounts; a chat opened before that
+  // would offer no one-click account until the next instances change.
+  // One fetch at a time: instances changes arrive in bursts.
+  if (needsFrozenLimitStrip(sess, readOnly) && listCachedAccounts().length === 0 && !accountsFetch) {
+    accountsFetch = api.listAccounts().then((accounts) => {
+      setCachedAccounts(accounts);
+      // Re-read the chat: it may have changed while the list was loading.
+      if (state.selectedId === sessionId) refreshFrozenLimitStrip(pane, sessionId, selectSession);
+    }).catch(() => { /* the Change account button still works */ })
+      .finally(() => { accountsFetch = null; });
+  }
 }
 
 /** Move a session to a different Claude account: opens the account picker,

@@ -1,0 +1,97 @@
+/* Usage-limit strip above the composer of an auto-frozen chat
+   (frozen-limit-strip.ts). Same blocked hue as the global rate-limit banner
+   (rate-limit-banner.css), since it is the same state seen from one chat. */
+.frozen-limit-slot:empty {
+  display: none;
+}
+
+.frozen-limit-slot {
+  padding: 6px 20px 0;
+}
+
+.frozen-limit-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--st-rate-limited-line);
+  border-left: 3px solid var(--st-rate-limited);
+  border-radius: 8px;
+  background: var(--st-rate-limited-wash);
+  color: var(--color-text);
+}
+
+.frozen-limit-strip .fls-icon {
+  font-size: 1.25rem;
+  color: var(--st-rate-limited);
+  flex-shrink: 0;
+}
+
+.frozen-limit-strip .fls-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.frozen-limit-strip .fls-title {
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+
+.frozen-limit-strip .fls-sub {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+.frozen-limit-strip .fls-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.frozen-limit-strip .fls-move,
+.frozen-limit-strip .fls-change {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--st-rate-limited) 12%, transparent);
+  border: 1px solid var(--st-rate-limited-line);
+}
+
+/* The one-click way out is the primary action. */
+.frozen-limit-strip .fls-move {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
+.frozen-limit-strip .fls-change:hover {
+  background: color-mix(in srgb, var(--st-rate-limited) 22%, transparent);
+}
+
+.frozen-limit-strip .fls-move:hover {
+  filter: brightness(1.1);
+}
+
+@media (max-width: 768px) {
+  .frozen-limit-slot {
+    padding: 6px 10px 0;
+  }
+
+  .frozen-limit-strip {
+    flex-wrap: wrap;
+  }
+
+  .frozen-limit-strip .fls-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

@@ -28,6 +28,7 @@ import "./worktree-picker.css";
 import "./preview-panel.css";
 import { startNewSession, startNewSessionWithFavorite, loadAndRestorePendingSession, loadAndRestoreParkedDrafts } from "./pending-flow";
 import { selectSession, updateHeaderAvatarStatus } from "./active-session";
+import { refreshFrozenLimitStrip } from "./active-session-account";
 import { state, resetState } from "./state";
 import { initThinkingBar, updateThinkingBar } from "./session-thinking-bar";
 import { sessionSubtitle } from "./sessions-helpers";
@@ -315,6 +316,7 @@ export async function renderDetachedSession(
         if (titleEl) typeSwap(titleEl, sessionSubtitle(sess));
         updateHeaderAvatarStatus(pane, sess);
         pane.classList.toggle("is-rate-limited", isBlocked(sess));
+        refreshFrozenLimitStrip(pane, sess.session_id, selectSession);
         state.composer?.refreshBlockedState();
       }
     }
