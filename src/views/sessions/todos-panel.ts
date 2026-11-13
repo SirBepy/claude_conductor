@@ -131,7 +131,8 @@ class TodosPanel implements TodosPanelHandle {
         // A folder in a dashboard group snapshots every repo of the group; a chat
         // lists only its own project's cards, so the draft does too.
         const own = snap?.target.repos.find((r) => norm(r.cwd) === norm(cwd))?.project_id;
-        const rows = (snap?.your_todos ?? []).filter((t) => !own || t.project_id === own);
+        // A group repo that is no registered project owns no cards, and must not borrow its siblings'.
+        const rows = (snap?.your_todos ?? []).filter((t) => (own ? t.project_id === own : snap?.target.kind !== "group"));
         this.draftProjects = new Map(rows.map((t) => [t.id, t.project_id]));
         this.todos = rows.map((t): UserTodo => ({
           id: t.id, text: t.text, origin_session_id: t.origin_session_id ?? "", origin_label: "this project", state: "open",

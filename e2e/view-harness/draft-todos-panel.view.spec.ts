@@ -11,8 +11,18 @@ import { CONDUCTOR_CWD, LIST_ROWS, conductorSnapshot } from "./project-dashboard
 
 const TODO_TEXT = "Check Console for the 21:45 UTC haiku call on key test2";
 
-async function openDraft(page: Page, width: number): Promise<void> {
+const LOOSE_CWD = "C:/Projects/not-a-project";
+
+/** `loose` opens the draft on a folder that sits in a group but is no registered project. */
+async function openDraft(page: Page, width: number, loose = false): Promise<void> {
   await page.setViewportSize({ width, height: 900 });
+  const group = {
+    kind: "group" as const, id: "g-loose", name: "loose",
+    repos: [
+      { cwd: LOOSE_CWD, name: "not-a-project", project_id: null },
+      { cwd: CONDUCTOR_CWD, name: "claude_usage_in_taskbar", project_id: "p-conductor" },
+    ],
+  };
   await mountView(page, {
     view: "sessions",
     invoke: {
@@ -20,11 +30,12 @@ async function openDraft(page: Page, width: number): Promise<void> {
       list_instances: [],
       get_active_sessions: [],
       list_subchats_on: [],
-      dashboard_list_targets: LIST_ROWS,
+      dashboard_list_targets: loose ? [{ target: group, last_active_ms: 0, live_count: 0, question_count: 0, working_count: 0 }, ...LIST_ROWS] : LIST_ROWS,
       // A second row from another repo of a group the folder sits in: a chat lists its own project only.
       dashboard_snapshot: (() => {
         const snap = conductorSnapshot();
         snap.your_todos.push({ id: "t-other", project_id: "p-elsewhere", text: "Another repo's chore", origin_session_id: null, repo_cwd: "C:/Projects/elsewhere", by_ai: false });
+        if (loose) snap.target = group;
         return snap;
       })(),
       dashboard_history: null,
@@ -55,7 +66,7 @@ async function openDraft(page: Page, width: number): Promise<void> {
   await page.evaluate((cwd) => {
     (window as unknown as { __launchDraftForTest: (p: { path: string; name: string }, c: object) => void })
       .__launchDraftForTest({ path: cwd, name: "alpha" }, { model: "sonnet", effort: "low", accountId: "acc1", subchatsOn: false });
-  }, CONDUCTOR_CWD);
+  }, loose ? LOOSE_CWD : CONDUCTOR_CWD);
   await page.locator("#session-pane .session-composer .composer-textarea").waitFor();
 }
 
@@ -70,6 +81,14 @@ test.describe("new-chat draft Todos panel", () => {
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "dashboard_todo_set_state").length).toBe(1);
     const call = (await invokeCalls(page)).find((c) => c.cmd === "dashboard_todo_set_state");
     expect(call?.args).toMatchObject({ projectId: "p-conductor", id: "t1", next: "done" });
+  });
+
+  test("a draft on an unregistered folder of a group lists none of its siblings' todos", async ({ page }) => {
+    await openDraft(page, 1280, true);
+    await page.locator('.sp-tab[data-sp-k="todos"]').click();
+    await expect(page.locator(".sp-panel .todos-panel .td-col-project")).toBeVisible();
+    await expect(page.locator(".sp-panel .todos-panel")).not.toContainText(TODO_TEXT);
+    await expect(page.locator(".sp-panel .todos-panel")).not.toContainText("Another repo's chore");
   });
 
   test("phone: the FAB's Todos opens the same list without breaking the draft", async ({ page }) => {
