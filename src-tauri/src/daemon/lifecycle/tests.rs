@@ -39,6 +39,29 @@ fn api_credit_gate_refuses_a_blocked_account_by_registry_binding() {
     assert!(refuse_if_api_credit_blocked(&state, "on-api").is_ok());
 }
 
+/// 2026-11-13: a chat started on an API-credit account that ran out, then moved
+/// to another account, refused every "continue" with API_CREDIT_BLOCKED: the
+/// gate read the old child's account, which only the respawn behind the gate
+/// replaces. The chat's registry account (where the next turn runs) decides.
+#[cfg(windows)]
+#[tokio::test]
+async fn api_credit_gate_follows_an_account_move_not_the_stale_child() {
+    let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
+    // The probe child runs under the account "acct".
+    let (_child, _session) = probe::live_session(&state, "moved", ("opus", "high"), ("opus", "high"));
+    crate::daemon::api_credit::store(&state, blocked_status("acct"));
+    state.registry.set_account("moved", "acct");
+    assert!(refuse_if_api_credit_blocked(&state, "moved").is_err(), "still on the blocked account");
+
+    state.registry.set_account("moved", "sub-1");
+    assert!(refuse_if_api_credit_blocked(&state, "moved").is_ok(), "moved off it: the send must reach the respawn");
+
+    // The other direction: a move ONTO a blocked account refuses before the respawn.
+    state.registry.set_account("moved", "api-2");
+    crate::daemon::api_credit::store(&state, blocked_status("api-2"));
+    assert!(refuse_if_api_credit_blocked(&state, "moved").is_err());
+}
+
 #[tokio::test]
 async fn a_blocked_api_credit_chat_refuses_before_any_respawn() {
     // The session is not live, so an unguarded send would try to respawn
