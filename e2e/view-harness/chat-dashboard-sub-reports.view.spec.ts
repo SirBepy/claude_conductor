@@ -98,5 +98,6 @@ test.describe("chat dashboard / From subs", () => {
     // The page has an older one unloaded, so only cards from its first row on are placed here.
     await expect(sub.filter({ hasText: "Not two toggles" })).toHaveCount(1);
     await expect(sub.filter({ hasText: "The history read is not it" })).toHaveCount(1);
+    await expect(sub.filter({ hasText: "Chips hide while typing" })).toHaveCount(0);
   });
 });
