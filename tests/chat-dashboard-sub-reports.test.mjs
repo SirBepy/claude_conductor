@@ -48,6 +48,8 @@ describe("From subs", () => {
     // Rows arrive in log order, as mergeSubCards splices them in.
     expect(derive({ messages: [row(fin), row(all)], subCards: [fin, all] })?.shown.map((m) => m.subCard.id)).toEqual(["all", "fin"]);
     expect(derive({ messages: [], subCards: [fin, all] })?.shown.map((m) => m.subCard.id)).toEqual(["all", "fin"]);
+    // A loaded row and a pool-only card: the pool's log order decides, not which was read first.
+    expect(derive({ messages: [row(all)], subCards: [fin, all] })?.shown.map((m) => m.subCard.id)).toEqual(["all", "fin"]);
   });
 
   it("keeps the all-finished card and when-done's note", () => {
