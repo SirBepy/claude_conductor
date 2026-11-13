@@ -518,20 +518,33 @@ function poolRow(e: SubCardEntry): RenderedMessage | null {
  *  marked read: a report stays until a newer one pushes it under the fold. */
 export function deriveReports({ input }: DeriveCtx): ReportsState | null {
   const byId = new Map<string, RenderedMessage>();
+  // Every sub card the transcript holds as a row, drawn or not.
+  const rowIds = new Set<string>();
   // A row the transcript dropped stays dropped, though its card is still in the pool.
   const dropped = new Set<string>();
   for (const m of input.messages) {
     if (m.kind !== "message" || !m.subCard) continue;
+    rowIds.add(m.subCard.id);
     if (m.failed || m.retracted) dropped.add(m.subCard.id);
     else if (isSubReport(m.subCard)) byId.set(m.subCard.id, m);
   }
-  for (const e of input.subCards ?? []) {
-    if (byId.has(e.id) || dropped.has(e.id) || !isSubReport(e)) continue;
+  const pool = input.subCards ?? [];
+  for (const e of pool) {
+    if (byId.has(e.id) || dropped.has(e.id)) continue;
+    // Answers reads only rows, so an answer older than the loaded pages would
+    // show nowhere: with no row of its own it is drawn here instead.
+    const answerWithoutRow = e.kind === "finish" && !!e.question?.trim() && !rowIds.has(e.id);
+    if (!isSubReport(e) && !answerWithoutRow) continue;
     const row = poolRow(e);
     if (row) byId.set(e.id, row);
   }
   if (byId.size === 0) return null;
-  const all = [...byId.values()].sort((a, b) => (b.subCard?.ts ?? 0) - (a.subCard?.ts ?? 0));
+  // The pool is in log order, so on a tied ms (the all-finished card is stamped
+  // right after the last finish) the card written later still comes first.
+  const logIdx = new Map(pool.map((e, i) => [e.id, i]));
+  const all = [...byId.entries()].map(([id, m], i) => ({ m, ts: m.subCard?.ts ?? 0, at: logIdx.get(id) ?? -1, i }))
+    .sort((a, b) => b.ts - a.ts || b.at - a.at || b.i - a.i)
+    .map((x) => x.m);
   return { shown: all.slice(0, REPORTS_SHOWN), earlier: all.slice(REPORTS_SHOWN) };
 }
 

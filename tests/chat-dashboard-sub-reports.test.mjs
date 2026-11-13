@@ -36,6 +36,18 @@ describe("From subs", () => {
     expect(derive({ messages: msgs })).toBeNull();
   });
 
+  it("draws an answer here when no loaded row holds it, since Answers reads only rows", () => {
+    const answer = entry("q", 2000, { question: "Why?" });
+    expect(derive({ messages: [], subCards: [answer] })?.shown.map((m) => m.subCard.id)).toEqual(["q"]);
+    expect(derive({ messages: [row(answer)], subCards: [answer] })).toBeNull();
+  });
+
+  it("puts the card written later first on a tied time", () => {
+    const fin = entry("fin", 5000);
+    const all = entry("all", 5000, { kind: "all_finished", sub_id: null });
+    expect(derive({ messages: [row(all), row(fin)], subCards: [fin, all] })?.shown.map((m) => m.subCard.id)).toEqual(["all", "fin"]);
+  });
+
   it("keeps the all-finished card and when-done's note", () => {
     const msgs = [row(entry("all", 2000, { kind: "all_finished", sub_id: null })), row(entry("wd", 3000, { kind: "when_done" }))];
     expect(derive({ messages: msgs })?.shown.map((m) => m.subCard.id)).toEqual(["wd", "all"]);
