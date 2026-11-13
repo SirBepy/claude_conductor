@@ -14,7 +14,7 @@ mod browser;
 mod channel;
 mod commit_lock;
 mod context;
-mod context_cap;
+pub(crate) mod context_cap;
 mod create_project;
 mod dashboard_card;
 mod decision;

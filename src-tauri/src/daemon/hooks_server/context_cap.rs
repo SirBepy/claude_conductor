@@ -36,6 +36,13 @@ pub(crate) struct CapView {
 static CURSORS: std::sync::LazyLock<CursorStore<ContextCursor>> =
     std::sync::LazyLock::new(|| CursorStore::new("context"));
 
+impl CapView {
+    /// Percent of the window the chat's context fills, once it has a usage line.
+    pub(crate) fn pct_used(&self) -> Option<u8> {
+        self.status.as_ref().map(|s| s.pct_used)
+    }
+}
+
 pub(crate) fn view(state: &Arc<DaemonState>, session_id: &str) -> Option<CapView> {
     let path = crate::context_status::resolve_transcript(&state.registry, session_id)?;
     view_of(&path, session_id, tail::cursor_dir().as_deref())
