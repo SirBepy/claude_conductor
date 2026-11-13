@@ -43,6 +43,7 @@ pub mod pending_merges;
 pub mod plumbing;
 pub mod project;
 pub mod queued;
+pub mod remote;
 pub(crate) mod queue_watch;
 mod resume;
 pub mod retro;
