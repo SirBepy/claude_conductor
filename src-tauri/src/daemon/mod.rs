@@ -64,6 +64,7 @@ pub(crate) mod session_test_support;
 pub mod settings_cache;
 pub mod spawn_self;
 pub mod start_tokens;
+pub mod spawn_rate;
 pub mod state;
 pub mod stt;
 pub mod subchats;

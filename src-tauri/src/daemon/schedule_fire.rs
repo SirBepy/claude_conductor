@@ -208,6 +208,7 @@ async fn fire_new_chat(
     subchats_on: bool,
     prompt: &str,
 ) -> Result<Option<String>, String> {
+    crate::daemon::spawn_rate::admit("scheduled new chat").map_err(|r| r.text)?;
     let mode_sid = prepare_fired_mode(
         state,
         subchats_on,
