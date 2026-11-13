@@ -4,6 +4,8 @@
 
 import { invoke } from "../../shared/ipc";
 import * as shortcuts from "../../shared/shortcuts";
+import { isRemote } from "../../shared/transport";
+import { toggleChatView } from "./chat-dashboard/chat-view-pref";
 import { mountPreviewTab, type PreviewController } from "./preview-panel";
 import { mountFabDial } from "./fab-dial";
 import { enterCodeMode } from "./code-mode/entry";
@@ -135,6 +137,11 @@ export function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
   }
   shortcuts.register("effort-up", () => state.statusbar?.stepEffort(1));
   shortcuts.register("effort-down", () => state.statusbar?.stepEffort(-1));
+  // The phone always draws Messages, so a switch there would only flip the desktop's setting.
+  const desktop = !isRemote();
+  if (desktop) {
+    shortcuts.register("toggle-chat-view", () => toggleChatView().catch((err) => console.error("[chat-view] saving the chat view failed", err)));
+  }
 
   let enterTimer: ReturnType<typeof setTimeout> | undefined;
   const unlistenModifierHint = shortcuts.onModifierHint((hint) => {
@@ -163,6 +170,7 @@ export function wireKeyboardShortcuts(listEl: HTMLElement): () => void {
     for (let i = 1; i <= MODEL_SLOTS; i++) shortcuts.unregister(`set-model-${i}`);
     shortcuts.unregister("effort-up");
     shortcuts.unregister("effort-down");
+    if (desktop) shortcuts.unregister("toggle-chat-view");
     clearTimeout(enterTimer);
     unlistenModifierHint();
   };

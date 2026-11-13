@@ -53,7 +53,11 @@ function rowsFor(defs: ShortcutDef[]): Row[] {
 }
 
 function bindingParts(row: Row): string[] {
-  if (!row.range) return shortcuts.getBinding(row.key).split("+").map(cap);
+  if (!row.range) {
+    const keys = shortcuts.getBinding(row.key);
+    // An unbound shortcut (no default keys, palette only) draws as one "Not set" cap, not an empty one.
+    return keys ? keys.split("+").map(cap) : ["Not set"];
+  }
   const mods = shortcuts.getRangeModifiers(row.key);
   return [...(mods ? mods.split("+").map(cap) : []), "1...9"];
 }
