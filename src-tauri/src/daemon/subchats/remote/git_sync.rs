@@ -409,6 +409,10 @@ mod tests {
         // read as a source; `-C` with such a path is fine.
         let plain = |p: &Path| p.to_string_lossy().trim_start_matches(r"\\?\").to_string();
         git(host_dir.path(), &["clone", "-q", &plain(&home), "clone"]);
+        // A clone does not inherit `home`'s local identity; a CI runner has no global one.
+        git(&host, &["config", "user.email", "t@example.com"]);
+        git(&host, &["config", "user.name", "t"]);
+        git(&host, &["config", "commit.gpgsign", "false"]);
         (home_dir, home, host_dir, host)
     }
 
