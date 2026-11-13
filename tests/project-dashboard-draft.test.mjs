@@ -155,7 +155,7 @@ describe("draft dashboard", () => {
   });
 
   it("a chip types its command into this draft's message box and sends nothing", async () => {
-    const composer = { getDraftText: vi.fn(() => "the flaky test"), setDraftText: vi.fn(), sendText: vi.fn(), focus: vi.fn() };
+    const composer = { getDraftText: vi.fn(() => "the flaky test"), setDraftText: vi.fn(), sendText: vi.fn(), focus: vi.fn(), isDraftEmpty: vi.fn(() => false) };
     state.composer = composer;
     const launch = vi.fn();
     state.launchNewChatCallback = launch;
@@ -169,7 +169,7 @@ describe("draft dashboard", () => {
 
   it("a card's button sends its command and the card's data from this draft at once", async () => {
     snapshot = groupSnapshot();
-    const composer = { getDraftText: vi.fn(() => ""), setDraftText: vi.fn(), sendText: vi.fn(), focus: vi.fn() };
+    const composer = { getDraftText: vi.fn(() => ""), setDraftText: vi.fn(), sendText: vi.fn(), focus: vi.fn(), isDraftEmpty: vi.fn(() => true) };
     state.composer = composer;
     const launch = vi.fn();
     state.launchNewChatCallback = launch;
@@ -431,7 +431,7 @@ describe("Do all due in a draft", () => {
   it("sends only the ids of the repo the draft will start in", async () => {
     snapshot = groupSnapshot({ due });
     const sendText = vi.fn();
-    state.composer = { sendText };
+    state.composer = { sendText, isDraftEmpty: () => true };
     state.pendingNewSession = { projectPath: api.cwd };
     const pane = await mountDraft(api.cwd);
     pane.querySelector("[data-pd-due-all]").click();
