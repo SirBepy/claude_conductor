@@ -4,6 +4,9 @@
 
 .view-project-settings { display: flex; flex-direction: column; gap: 16px; }
 .view-project-settings .ps-group { display: flex; flex-direction: column; gap: 14px; }
+/* The line above outranks the UA [hidden] rule, and `.x[hidden]` from another sheet only
+   ties it: a hidden group (the draft's Use subchats / Goes to cards) painted anyway. */
+.view-project-settings .ps-group[hidden] { display: none; }
 .view-project-settings .ps-group + .ps-group { border-top: 1px solid var(--color-border); padding-top: 14px; gap: 10px; }
 .ps-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ps-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; }

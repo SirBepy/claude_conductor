@@ -141,6 +141,8 @@ test.describe("view-harness / Use subchats on a new-chat draft with a settings r
     const card = railCard(page);
     await expect(card.locator(".ps-group-title")).toHaveText(/This chat/i);
     await expect(page.locator("#session-pane .draft-subchats")).toHaveCount(0);
+    // The Goes to card exists for a project with a main chat and must stay out of sight here.
+    await expect(page.locator(".pd-rail .view-project-settings .draft-main-route-card")).toBeHidden();
 
     await card.locator(".slider").click();
     await expect(card.locator("input")).toBeChecked();
