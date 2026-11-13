@@ -9,7 +9,7 @@ import {
 } from "../../../../shared/effort-presets";
 import { settingsData } from "../../../sessions/new-session-cache";
 import { settingsHeader, toggleRow } from "../../ui";
-import { CHAT_VIEW_CHANGED, CHAT_VIEW_KEY, SECTIONS_KEY, readChatView, readSections, type ChatView } from "../../../sessions/chat-dashboard/chat-view-pref";
+import { CHAT_VIEW_CHANGED, SECTIONS_KEY, readChatView, readSections, saveChatView, type ChatView } from "../../../sessions/chat-dashboard/chat-view-pref";
 import type { AutoCompact } from "../../../../shared/auto-compact";
 import { SECTION_DEFAULTS, sectionOn } from "../../../../shared/chat/dashboard/dashboard-model";
 import { kToTokens, readAutoCompact, tokensToK, withAutoCompact } from "../../../../shared/auto-compact";
@@ -146,9 +146,7 @@ export async function renderChatDefaultsView(root: HTMLElement): Promise<() => v
 
   root.querySelector<HTMLSelectElement>("#chatDefaultsChatView")?.addEventListener("change", (e) => {
     const value: ChatView = (e.currentTarget as HTMLSelectElement).value === "messages" ? "messages" : "dashboard";
-    void updateSettings((fresh) => ({ ...fresh, [CHAT_VIEW_KEY]: value }))
-      // updateSettings refreshes the settings cache first, so an open chat reads the new value.
-      .then(() => document.dispatchEvent(new CustomEvent(CHAT_VIEW_CHANGED)))
+    void saveChatView(value)
       .catch((err) => console.error("[chat-defaults] saving the chat view failed", err));
   });
 

@@ -39,6 +39,9 @@ const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "set-model-4", defaultKeys: "alt+4", label: "Model: Fable",  description: "Switch the open chat or draft to the 4th model", context: "sessions", suppressInInput: false },
   { id: "effort-up",   defaultKeys: "alt+arrowup",   label: "Effort up",   description: "Raise the open chat's or draft's effort one step",  context: "sessions", suppressInInput: false },
   { id: "effort-down", defaultKeys: "alt+arrowdown", label: "Effort down", description: "Lower the open chat's or draft's effort one step", context: "sessions", suppressInInput: false },
+  // No default keys: Joe wanted it in the command palette (2026-11-13), the
+  // escape hatch for when the dashboard draws a chat badly. Rebindable.
+  { id: "toggle-chat-view", defaultKeys: "", label: "Toggle Dashboard / Messages", description: "Switch every chat window between the dashboard and the Messages view", context: "sessions", suppressInInput: false },
   { id: "blur-composer", defaultKeys: "escape", label: "Unfocus message box", description: "Move keyboard focus off the message input", context: "sessions", suppressInInput: false },
 
   // Code mode (src/views/sessions/code-mode/) - no view context: it also opens
