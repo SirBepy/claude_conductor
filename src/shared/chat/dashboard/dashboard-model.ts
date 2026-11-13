@@ -22,6 +22,7 @@ import { buildSubsState, type SubCardItem, type SubsState } from "./subs-model";
 import { changedFiles, extractFiles, extractLinks, type ChangedFile, type FileItem, type LinkItem } from "./links-model";
 import { buildDraftsState, type DraftStoreSide, type DraftsState } from "./drafts-model";
 import { cardQuestionTexts, findOpenCardForPrompt } from "../question-texts";
+import { SUBCARD_TOOL, subCardRow, type SubCardEntry } from "../subchat-cards";
 
 export { TURN_STATUS_TOOL } from "./plan-record";
 
@@ -59,6 +60,10 @@ export interface DashboardInput {
   openCard?: OpenCardRef | null;
   /** Waiting items Joe removed by hand, by waitingKey (waiting-dismissed.ts). */
   dismissed?: ReadonlySet<string>;
+  /** Every sub card of this main chat the renderer fetched (ChatRenderer.subCardPool),
+   *  including ones older than the loaded transcript pages: the dashboard hides the
+   *  transcript, so its older pages never load and their cards would never show. */
+  subCards?: readonly SubCardEntry[];
 }
 
 /** The prompt id and question strings of the answer card on screen. */
@@ -472,6 +477,64 @@ export interface CardListState {
   cards: RenderedMessage[];
 }
 
+export interface ReportsState {
+  /** The newest sub reports, newest first. */
+  shown: RenderedMessage[];
+  /** The rest, newest first: the "N earlier" fold. */
+  earlier: RenderedMessage[];
+}
+
+/** How many sub reports draw before the rest fold under "N earlier". */
+export const REPORTS_SHOWN = 3;
+
+const SUB_REPORT_KINDS: ReadonlySet<string> = new Set(["finish", "all_finished", "when_done"]);
+
+/** The main chat is told never to relay a sub's card (SUBCHATS_MAIN_PROMPT), so
+ *  a job's finish has no other home on the dashboard: Answers takes only a finish
+ *  that answers a question, Waiting only blockers, and the Subchats card only
+ *  avatars. Joe, 2026-11-13: "i dont see subchats answers in the main chat window". */
+function isSubReport(e: SubCardEntry): boolean {
+  if (!SUB_REPORT_KINDS.has(e.kind)) return false;
+  return !(e.kind === "finish" && e.question?.trim());
+}
+
+// subCardRow builds a fresh row per call; cardHtml caches its HTML per row object.
+const poolRows = new WeakMap<SubCardEntry, RenderedMessage>();
+function poolRow(e: SubCardEntry): RenderedMessage | null {
+  let row = poolRows.get(e);
+  if (!row) {
+    const built = subCardRow({ tool_name: SUBCARD_TOOL, input: e });
+    if (!built) return null;
+    row = built;
+    poolRows.set(e, row);
+  }
+  return row;
+}
+
+/** From subs: every sub report of this main chat (a finish that is no answer, the
+ *  all-finished card, when-done's note), drawn with the same card Messages view
+ *  draws, newest first. Read from the renderer's card pool as well as the rows,
+ *  so a report older than the loaded pages still shows. Nothing is dismissed or
+ *  marked read: a report stays until a newer one pushes it under the fold. */
+export function deriveReports({ input }: DeriveCtx): ReportsState | null {
+  const byId = new Map<string, RenderedMessage>();
+  // A row the transcript dropped stays dropped, though its card is still in the pool.
+  const dropped = new Set<string>();
+  for (const m of input.messages) {
+    if (m.kind !== "message" || !m.subCard) continue;
+    if (m.failed || m.retracted) dropped.add(m.subCard.id);
+    else if (isSubReport(m.subCard)) byId.set(m.subCard.id, m);
+  }
+  for (const e of input.subCards ?? []) {
+    if (byId.has(e.id) || dropped.has(e.id) || !isSubReport(e)) continue;
+    const row = poolRow(e);
+    if (row) byId.set(e.id, row);
+  }
+  if (byId.size === 0) return null;
+  const all = [...byId.values()].sort((a, b) => (b.subCard?.ts ?? 0) - (a.subCard?.ts ?? 0));
+  return { shown: all.slice(0, REPORTS_SHOWN), earlier: all.slice(REPORTS_SHOWN) };
+}
+
 /** The Subchats card (subs-model.ts has the rules): this chat's subs as avatars,
  *  from the instance list the view passes in, never from the transcript. An
  *  asking sub's question stays in Waiting on you as well. */
@@ -593,6 +656,7 @@ export const ZONES = {
   answers: zone({ column: "left", order: 10, derive: deriveAnswers }),
   waiting: zone({ column: "left", order: 20, derive: deriveWaiting }),
   waitingElsewhere: zone({ column: "left", order: 25, derive: deriveWaitingElsewhere }),
+  reports: zone({ column: "left", order: 27, derive: deriveReports }),
   drafts: zone({ column: "left", order: 30, derive: deriveDrafts }),
   plan: zone({ column: "right", order: 10, derive: derivePlan }),
   subchats: zone({ column: "right", order: 20, derive: deriveSubchats }),
