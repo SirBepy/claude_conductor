@@ -31,7 +31,7 @@ export function collectSubItems(
       model: inst?.model ?? "",
       effort: inst?.effort ?? "",
       progress: sub.progress,
-      startedAt: inst?.started_at ?? null,
+      startedAt: sub.startedAt,
       finishedAt: sub.kind === "finished" ? finished : null,
       ring: subRingSpec(sub, inst),
       hover: sub.hover,

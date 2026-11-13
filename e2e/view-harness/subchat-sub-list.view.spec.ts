@@ -39,7 +39,8 @@ const PLAN = [
 ] as const;
 
 const MAIN = chat("main", "CV redesign", 101);
-const FOOTER = sub("sub-footer", "Footer", 102, { progress: { plan: [...PLAN] as never, state_since: null } });
+// A sub reads as running only with a turn in flight (an idle unfinished one is "stopped").
+const FOOTER = sub("sub-footer", "Footer", 102, { busy: true, progress: { plan: [...PLAN] as never, state_since: null } });
 // state_since dates the finish, which keeps it inside the sub list's one-hour fold.
 const HEADER = sub("sub-header", "Header", 103, { subchat_finished: true, awaiting: "done", progress: { plan: null, state_since: new Date().toISOString() } });
 const PLAIN = chat("plain", "Plain chat", 110);
@@ -181,7 +182,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       const asking = label === "desktop";
       await mount(
         page, size,
-        [MAIN, FOOTER, HEADER, ...(asking ? [sub("sub-contact", "Contact", 104)] : [])],
+        [MAIN, FOOTER, HEADER, ...(asking ? [sub("sub-contact", "Contact", 104, { busy: true })] : [])],
         asking ? [askFrom("sub-contact", 2)] : [],
       );
       await openChat(page, "main");
@@ -259,7 +260,7 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
     });
 
     test("each list row names the sub's tier quietly beside its status", async ({ page }) => {
-      const sonnet = sub("sub-footer", "Footer", 102, { model: "claude-sonnet-4-5", effort: "medium" });
+      const sonnet = sub("sub-footer", "Footer", 102, { busy: true, model: "claude-sonnet-4-5", effort: "medium" });
       await mount(page, size, [MAIN, sonnet, HEADER]);
       await openChat(page, "main");
       await openList(page);
@@ -304,7 +305,8 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
     });
 
     test("typing to a running sub sends to that sub, not the main chat", async ({ page }) => {
-      await mount(page, size, [MAIN, FOOTER, HEADER]);
+      // Between turns: a send to a sub with a turn in flight is queued behind it, not sent, and that is not what this asserts.
+      await mount(page, size, [MAIN, { ...FOOTER, busy: false }, HEADER]);
       await openChat(page, "main");
       await openSubFromList(page, "sub-footer");
       await page.locator(".session-composer .cc-typing-input").fill("make it smaller");
