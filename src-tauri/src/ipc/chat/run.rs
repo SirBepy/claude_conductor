@@ -325,7 +325,7 @@ pub async fn set_auto_accept(
 }
 
 /// Persist a chat's "Use subchats" toggle. Forwarded to the daemon, which owns
-/// the API-credit refusal and the move to Opus at high effort; a refusal comes
+/// the API-credit refusal and the effort raise to high; a refusal comes
 /// back as the `Err` text.
 #[tauri::command]
 pub async fn set_subchats_on(
