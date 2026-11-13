@@ -250,3 +250,11 @@ describe("showSecretCard", () => {
     }
   });
 });
+
+describe("secret card native reveal button", () => {
+  it("hides WebView2's own password eye so only the card's peek button shows", async () => {
+    const { readFileSync } = await import("node:fs");
+    const css = readFileSync("src/views/sessions/permission-modal-shell.css", "utf8");
+    expect(css).toMatch(/\.secret-card__input::-ms-reveal[^{]*\{\s*display:\s*none;/);
+  });
+});

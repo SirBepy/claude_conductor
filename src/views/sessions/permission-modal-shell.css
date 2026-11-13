@@ -648,6 +648,12 @@
 .secret-card__input {
   width: 100%;
 }
+/* WebView2 (Edge) draws its own reveal eye in a password input; the card has
+   its own peek button, so two eyes showed side by side. */
+.secret-card__input::-ms-reveal,
+.secret-card__input::-ms-clear {
+  display: none;
+}
 .secret-card__error {
   display: flex;
   align-items: center;
