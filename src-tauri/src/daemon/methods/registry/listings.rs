@@ -72,8 +72,8 @@ pub fn register_listings(router: &mut Router, state: Arc<DaemonState>) {
     });
     // Persist a chat's "Use subchats" toggle. Same sole-writer shape as
     // set_auto_accept, plus two rules the daemon owns (`subchats::apply_set_on`):
-    // an API-credit chat is refused, and turning it on moves the chat to Opus at
-    // high effort through the registry (applied at its next send, never killing a
+    // an API-credit chat is refused, and turning it on raises the chat's effort to
+    // high (model unchanged) through the registry (applied at its next send, never killing a
     // running turn).
     {
         let state = state.clone();

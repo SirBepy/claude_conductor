@@ -484,8 +484,8 @@ export class SessionStatusbar {
   }
 
   /** Follows the registry's model and effort for the chat on screen. They change
-   *  outside this bar: turning "Use subchats" on moves the chat to Opus at high
-   *  effort in the registry (applied at its next send), and a draft's pick is
+   *  outside this bar: turning "Use subchats" on raises the chat's effort to high
+   *  (model unchanged) in the registry (applied at its next send), and a draft's pick is
    *  replaced by what the daemon actually started. Empty values are skipped, since
    *  a row that never recorded either says nothing. */
   syncModelEffort(model: string | null | undefined, effort: string | null | undefined): void {
