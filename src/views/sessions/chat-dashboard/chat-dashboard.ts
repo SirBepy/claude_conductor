@@ -322,6 +322,7 @@ export class ChatDashboard {
       sections: readSections(getSettings()),
       openCard: this.renderer.sessionId ? activeCardFor(this.renderer.sessionId) : null,
       dismissed: this.dismissedKeys(),
+      subCards: this.renderer.subCardPool,
     });
     this.applyUiRules(derived);
     this.keepDraftItems(derived);
@@ -740,6 +741,7 @@ export class ChatDashboard {
       case "strip-latest": ui.stripPick = null; ui.stripExpanded = false; break;
       case "drafts-copied": ui.copiedOpen = !ui.copiedOpen; break;
       case "pv-others": ui.pvOthersOpen = !ui.pvOthersOpen; break;
+      case "reports-earlier": ui.reportsOpen = !ui.reportsOpen; break;
       case "step": ui.openStep = ui.openStep === t.dataset.step ? null : (t.dataset.step ?? null); break;
       case "plan-prev":
       case "plan-next":

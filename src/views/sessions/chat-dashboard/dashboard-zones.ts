@@ -43,10 +43,12 @@ export interface DashUi extends PlanUi {
   copiedOpen: boolean;
   /** The Preview card's "N more by other chats" fold is open. */
   pvOthersOpen: boolean;
+  /** The From subs card's "N earlier" fold is open. */
+  reportsOpen: boolean;
 }
 
 export function initialUi(): DashUi {
-  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false, draftOpen: {}, copiedOpen: false, pvOthersOpen: false };
+  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false, draftOpen: {}, copiedOpen: false, pvOthersOpen: false, reportsOpen: false };
 }
 
 export interface ZoneCtx {
@@ -302,6 +304,17 @@ function renderDrafts(s: ZoneState<"drafts">, ctx: ZoneCtx): string {
 const listZone = (cls: string, icon: string, title: string) => (s: { cards: RenderedMessage[] }): string =>
   `<section class="cdash-zone cdash-card cdash-list ${cls}">${head(icon, title)}<div class="cdash-stack">${s.cards.map(cardHtml).join("")}</div></section>`;
 
+/** From subs: a sub's report drawn with the very card Messages view draws
+ *  (renderSubCard via renderMessage: the sub's name, tier and fact chips). */
+function renderReports(s: ZoneState<"reports">, ctx: ZoneCtx): string {
+  const n = s.earlier.length;
+  const fold = n > 0
+    ? `<button type="button" class="cdash-drafts-fold" data-act="reports-earlier" aria-expanded="${ctx.ui.reportsOpen}"><i class="ph ph-clock-counter-clockwise"></i>${n} earlier<i class="ph ${ctx.ui.reportsOpen ? "ph-caret-up" : "ph-caret-down"}"></i></button>`
+      + (ctx.ui.reportsOpen ? s.earlier.map(cardHtml).join("") : "")
+    : "";
+  return `<section class="cdash-zone cdash-card cdash-list cdash-reports">${head("ph-tree-structure", "From subs")}<div class="cdash-stack">${s.shown.map(cardHtml).join("")}${fold}</div></section>`;
+}
+
 /** A fixed host like Answers': the Subchats card (subs-card.ts) draws inside it,
  *  so a re-derive never replaces the avatars under Joe's pointer or wipes the
  *  message he is typing to a sub. */
@@ -313,6 +326,7 @@ export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) =>
   answers: renderAnswers,
   waiting: renderWaiting,
   waitingElsewhere: renderWaitingElsewhere,
+  reports: renderReports,
   drafts: renderDrafts,
   plan: renderPlanZone,
   subchats: renderSubchats,
