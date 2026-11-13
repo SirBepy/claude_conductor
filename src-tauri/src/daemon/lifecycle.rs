@@ -176,18 +176,23 @@ pub fn refuse_account_if_api_credit_blocked(
     }
 }
 
-/// [`refuse_account_if_api_credit_blocked`] for the account `session_id` runs
-/// under: the live child's, else the registry's. An unknown session passes and
-/// is left to the caller's own NotFound.
+/// [`refuse_account_if_api_credit_blocked`] for the account `session_id` will
+/// run its next turn under: the registry's, else the live child's. The registry
+/// leads because every send gate runs before `refresh_stale_launch`, and a child
+/// still on the account Joe just moved the chat off would otherwise refuse the
+/// send for a block that no longer applies, so the respawn onto the new account
+/// never happened. An unknown session passes and is left to the caller's own
+/// NotFound.
 pub fn refuse_if_api_credit_blocked(
     state: &crate::daemon::state::DaemonState,
     session_id: &str,
 ) -> Result<(), LifecycleError> {
     let account_id = state
-        .sessions
+        .registry
         .get(session_id)
-        .map(|s| s.account_id.clone())
-        .or_else(|| state.registry.get(session_id).and_then(|i| i.account_id));
+        .and_then(|i| i.account_id)
+        .filter(|a| !a.is_empty())
+        .or_else(|| state.sessions.get(session_id).map(|s| s.account_id.clone()));
     match account_id {
         Some(id) => refuse_account_if_api_credit_blocked(state, &id),
         None => Ok(()),
