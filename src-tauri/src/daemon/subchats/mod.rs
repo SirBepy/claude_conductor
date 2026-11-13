@@ -27,6 +27,7 @@ pub mod cards;
 pub mod ceiling;
 pub mod closing;
 pub mod compaction;
+pub mod context_nudge;
 pub mod decisions;
 pub mod facts;
 pub mod finish;

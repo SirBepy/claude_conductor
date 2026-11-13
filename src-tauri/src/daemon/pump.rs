@@ -463,7 +463,13 @@ pub(crate) async fn run_stdout_pump(
                                     // his next turn; any other turn end may start one.
                                     match compaction_end {
                                         Some(end) => compaction::deliver_held(&state_for_pump, &pump_session.session_id, end.held),
-                                        None => compaction::after_turn(&state_for_pump, &pump_session.session_id),
+                                        None => {
+                                            compaction::after_turn(&state_for_pump, &pump_session.session_id);
+                                            crate::daemon::subchats::context_nudge::after_turn(
+                                                &state_for_pump,
+                                                &pump_session.session_id,
+                                            );
+                                        }
                                     }
                                 }
                                 // Drain-on-jarvis-idle (todo 272 chunk 3): this session IS
