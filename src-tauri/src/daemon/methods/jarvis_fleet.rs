@@ -98,6 +98,7 @@ pub(crate) async fn spawn_worker(
     if !is_jarvis_caller(state, jarvis_session_id) {
         return Err("caller is not the Jarvis session".to_string());
     }
+    crate::daemon::spawn_rate::admit("jarvis worker").map_err(|r| r.text)?;
 
     let account_id: Option<String> = match account {
         Some(explicit) => {

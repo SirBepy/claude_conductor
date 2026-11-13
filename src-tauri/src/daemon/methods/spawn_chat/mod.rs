@@ -176,6 +176,14 @@ pub(crate) async fn spawn_chat(
         .registry
         .get(caller_session_id)
         .ok_or_else(|| format!("unknown caller session: {caller_session_id}"))?;
+    // A rolling cap on chats started by chats: the guards below bound concurrent
+    // subs and one respawn per turn, never the total, so a loop would run on.
+    if let Err(refused) = crate::daemon::spawn_rate::admit("spawn_chat") {
+        if refused.first {
+            crate::daemon::spawn_rate::tell_joe(state, caller_session_id).await;
+        }
+        return Err(refused.text);
+    }
 
     let requested = std::path::PathBuf::from(cwd);
     let mut target_cwd = resolve_target_cwd(&caller.cwd, &requested, &state.settings.snapshot().projects)?;
