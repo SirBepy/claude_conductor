@@ -4,6 +4,7 @@
 import { getSettings } from "../../shared/state";
 import { currentTurnNextActions } from "../../shared/chat/chat-next-actions";
 import { state } from "./state";
+import { syncSuggestionRows } from "./composer-typing";
 import { withCommand } from "./project-dashboard/format";
 import { isSlashChip, nextChips, withReply } from "./next-chips";
 import "./next-chips.css";
@@ -30,13 +31,12 @@ function onChipClick(chip: string, shift: boolean): void {
  *  are only rebuilt when the chip list changed, because a rebuild under the
  *  cursor swallows the click that was about to land. */
 export function refreshNextChips(pane: HTMLElement): void {
-  const slot = pane.querySelector<HTMLElement>(".next-chip-slot");
-  if (!slot) return;
   // Hidden (not emptied) while a draft exists: the chips are suggestions for an
   // empty box, and keeping the key below untouched means the same buttons come
   // straight back once the box is cleared.
-  const typing = !!state.composer && !state.composer.isDraftEmpty();
-  slot.toggleAttribute("data-typing", typing);
+  syncSuggestionRows(pane);
+  const slot = pane.querySelector<HTMLElement>(".next-chip-slot");
+  if (!slot) return;
   const id = state.selectedId;
   // The renderer can still be the previous chat's for a beat after a switch.
   const renderer = id && state.renderer?.sessionId === id ? state.renderer : null;

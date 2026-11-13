@@ -1,3 +1,4 @@
+// Reviewed 2026-11-13 (suggestion rows hide while the box holds text or an attachment: composer-typing.ts, draft chip row `data-typing`): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-11 (phone keyboard): pending-pane.ts no longer focuses the composer on open at phone width; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu and the effort battery colours change nothing this spec asserts; its failing test also fails on HEAD without these changes.
 // Reviewed 2026-11-08: session-controls.ts gained startNewChatInProject (the palette's New chat in <project>); the dashboard opener this spec drives is unchanged and it passed.

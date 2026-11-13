@@ -62,6 +62,9 @@
      keep the chips out from under it. 58px = 14 + 40 + 4 of air. */
   padding-right: max(0px, calc(58px - max(12px, (100% - 900px) / 2)));
 }
+/* Suggestions are for an empty box: hidden while it holds text or an attachment
+   (composer-typing.ts), shown again the moment it is emptied. */
+.pd-qa-host.is-draft[data-typing] { display: none; }
 .pd-qa-host.is-page { flex: none; padding: 8px 32px; border-top: 1px solid var(--color-border); background: var(--color-background); }
 .pd-qa-track {
   display: flex; align-items: center; gap: 4px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px;

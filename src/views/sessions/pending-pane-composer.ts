@@ -23,6 +23,7 @@ import { rebuildSidebar } from "./pending-pane-mount";
 import { beginDraftSpawn, endDraftSpawn, moveSpawnedChat } from "./pending-pane-spawn";
 import { leaveDraftDashboard } from "./project-dashboard/draft-dashboard";
 import { draftRouteTarget, lockDraftSubchats } from "./draft-subchats";
+import { syncSuggestionRows } from "./composer-typing";
 import { loadHiddenSessions, saveHiddenSessions } from "./sessions-helpers";
 
 /** With no account registered there is nothing to pick, so the picker would
@@ -134,7 +135,12 @@ export function wirePendingComposer(
     popLastHeld: () => state.heldMessages?.popLastForActive() ?? null,
     flushHeldWithDraft: (draftBlocks) => state.heldMessages?.flushHeldWithDraft(draftBlocks) ?? false,
     sendQueuedNow: () => { void state.heldMessages?.sendNow(); },
-    onDraftActivity: () => state.heldMessages?.notifyDraftActivity(),
+    onDraftActivity: () => {
+      state.heldMessages?.notifyDraftActivity();
+      syncSuggestionRows(pane);
+    },
+    // A pasted image or file hides the dashboard's chip row the way typed text does.
+    onAttachmentsChange: () => syncSuggestionRows(pane),
     // Phase 3: schedule a follow-up. The KIND is decided at scheduling time,
     // not pane-mount time: once this draft's first message has started a real
     // session, a scheduled message must target THAT session

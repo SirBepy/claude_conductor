@@ -1,3 +1,4 @@
+// Reviewed 2026-11-13 (suggestion rows hide while the box holds text or an attachment: composer-typing.ts, draft chip row `data-typing`): nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome; a sub card's Close calls closeChat): nothing this spec asserts changed. It passes.
 // asserts: src/views/sessions/draft-subchats.ts, src/views/sessions/project-main-chats.ts, src/views/sessions/pending-pane-composer.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/sessions-wiring.ts, src/views/sessions/sessions-initial-load.ts
 import { test, expect, type Page } from "@playwright/test";
