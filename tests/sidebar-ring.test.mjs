@@ -73,14 +73,17 @@ describe("ringHtml", () => {
   it("stops pulsing once every question is answered", () => {
     expect(count(ringHtml({ kind: "segments", total: 3, answered: 3 }), /is-pulse/g)).toBe(0);
   });
-  it("draws a plan as a dim track plus a filled arc, and just the track at zero done", () => {
-    expect(count(ringHtml({ kind: "plan", done: 3, total: 7 }), /<circle/g)).toBe(2);
-    expect(count(ringHtml({ kind: "plan", done: 0, total: 7 }), /<circle/g)).toBe(1);
+  it("draws a plan as a dim track, a filled arc and a glowing step in progress; the arc is left out at zero done", () => {
+    expect(count(ringHtml({ kind: "plan", done: 3, total: 7 }), /<circle/g)).toBe(3);
+    expect(count(ringHtml({ kind: "plan", done: 0, total: 7 }), /<circle/g)).toBe(2);
+    // A fresh plan must not look like the dim ring of a sub that is not progressing.
+    expect(count(ringHtml({ kind: "plan", done: 0, total: 5 }), /is-glow/g)).toBe(1);
+    // Every step done: nothing left to glow.
+    expect(count(ringHtml({ kind: "plan", done: 5, total: 5 }), /is-glow/g)).toBe(0);
   });
   it("sizes the plan arc to done over total of the circumference", () => {
     const html = ringHtml({ kind: "plan", done: 1, total: 2 });
-    const arc = html.match(/stroke-dasharray="([\d.]+) ([\d.]+)"/g)[1].match(/[\d.]+/g).map(Number);
-    expect(arc[0] / (arc[0] + arc[1])).toBeCloseTo(0.5, 2);
+    const arc = html.match(/stroke-dasharray="([\d.]+) ([\d.]+)"/g)[1].match(/[\d.]+/g).map(Number);    expect(arc[0] / (arc[0] + arc[1])).toBeCloseTo(0.5, 2);
   });
   it("colours attention segments by their own tone", () => {
     const html = ringHtml({ kind: "segments", total: 3, answered: 0, tone: "attention" });
@@ -90,7 +93,9 @@ describe("ringHtml", () => {
     const delay = (html) => Number(html.match(/animation-delay:-(\d+)ms/)[1]);
     const html = ringHtml({ kind: "segments", total: 1, answered: 0 });
     expect(delay(html)).toBeLessThan(1400);
-    expect(ringHtml({ kind: "plan", done: 1, total: 2 })).not.toContain("animation-delay");
+    // A finished plan has nothing glowing, so nothing to phase.
+    expect(ringHtml({ kind: "plan", done: 2, total: 2 })).not.toContain("animation-delay");
+    expect(delay(ringHtml({ kind: "plan", done: 1, total: 2 }))).toBeLessThan(3200);
     expect(delay(ringHtml({ kind: "solid", tone: "working", glow: true }))).toBeLessThan(3200);
   });
   it("marks a working-no-plan ring as glowing, not as the question pulse", () => {

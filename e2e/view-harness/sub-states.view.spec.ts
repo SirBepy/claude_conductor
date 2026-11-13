@@ -114,7 +114,7 @@ test.describe("honest sub states", () => {
     const c = hover(page);
     await expect(c.locator(".hc-title")).toHaveText("Footer");
     await expect(c.locator(".hc-state")).toContainText("Working");
-    await expect(c.locator(".hc-timer")).toHaveText(/^running 1\d:\d\d$/);
+    await expect(c.locator(".hc-timer")).toHaveText(/^running 0[23]:\d\d$/);
     await expect(c.locator(".hc-heading")).toHaveText("Step 2 of 3");
     await expect(c.locator(".hc-row.is-now")).toHaveText("Edit footer.css");
     await expect(c.locator(".hc-row", { hasText: "Editing footer.css" }).locator(".hc-aside")).toHaveText(/^\d+s ago$/);

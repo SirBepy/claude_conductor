@@ -76,14 +76,17 @@ function limitResetsAt(s: Instance): number | null {
 }
 
 /** Which state a sub is in. Order matters: asking first, a finished sub next, then
- *  what keeps a live sub from progressing, and `working` only when nothing does. */
+ *  what keeps a live sub from progressing, and `working` only with a turn running.
+ *  An idle live sub is `stopped` whether or not the daemon saw its turn end:
+ *  `stopped_unfinished` is in memory only, so a sub whose turn ended before a daemon
+ *  restart carries no flag and used to read "working" for as long as the row lived. */
 function kindOf(s: Instance, asking: ReadonlySet<string>): SubKind {
   if (asking.has(s.session_id)) return "asking";
   if (s.subchat_finished || s.closing) return "finished";
   if (s.progress?.waiting_for) return "queued";
   if (s.frozen || facts(s).parked === true) return "paused";
   if (limitResetsAt(s) !== null) return "limited";
-  if (facts(s).stopped_unfinished === true && !s.busy) return "stopped";
+  if (!s.busy) return "stopped";
   return "working";
 }
 
@@ -149,6 +152,14 @@ function progressText(s: Instance, kind: SubKind): string {
   return p ? `step ${Math.min(p.done + 1, p.total)} of ${p.total}` : "working";
 }
 
+/** Where the "running mm:ss" clock starts. A working sub's clock is its current turn
+ *  (`state_since`, the last busy flip), not the row's start: a sub that sat idle for
+ *  hours would otherwise read as running for all of them. */
+function runClockStart(s: Instance, kind: SubKind): string | null {
+  if (kind === "working" || kind === "asking") return s.progress?.state_since ?? s.started_at ?? null;
+  return s.started_at ?? null;
+}
+
 /** The sub rows of one main chat. `sessions` is the full unfiltered list
  *  (`state.sessions`): the sidebar's own list drops the subs. */
 export function mainChatInfo(main: Instance, sessions: readonly Instance[]): MainChatInfo {
@@ -158,7 +169,7 @@ export function mainChatInfo(main: Instance, sessions: readonly Instance[]): Mai
     const kind = kindOf(s, asking);
     return {
       id: s.session_id, name: sessionSubtitle(s), kind, progress: progressText(s, kind), tier: tierLabel(s.model, s.effort),
-      closing: !!s.closing, hover: subHoverOf(s, kind), startedAt: s.started_at ?? null,
+      closing: !!s.closing, hover: subHoverOf(s, kind), startedAt: runClockStart(s, kind),
     };
   }).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
 

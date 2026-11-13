@@ -56,9 +56,11 @@ test.describe("view-harness / sidebar status ring", () => {
   test("a working chat with a plan draws a 2-of-4 arc over a dim track, in the working colour", async ({ page }) => {
     await mountSessions(page);
     const circles = row(page, "s-plan").locator(".avatar-ring circle");
-    await expect(circles).toHaveCount(2);
+    // Track, done arc, and the glowing step in progress.
+    await expect(circles).toHaveCount(3);
     await expect(circles.nth(0)).toHaveClass(/is-track/);
     await expect(circles.nth(1)).toHaveAttribute("data-tone", "working");
+    await expect(circles.nth(2)).toHaveClass(/is-glow/);
 
     // Measured, not eyeballed: the arc is half the circumference.
     const [full, arc] = await circles.evaluateAll((els) =>

@@ -143,8 +143,8 @@ for (const [label, size] of [["desktop", DESKTOP], ["phone", PHONE]] as const) {
       await expect(row(page, "plain").locator(".session-model-battery")).toHaveCount(1);
       await expect(row(page, "plain").locator(".session-sub-count")).toHaveCount(0);
       await expect(dots(row(page, "plain"))).toHaveCount(0);
-      // A working plan chat still draws its arc over the dim track.
-      await expect(ringOf(page, "plain")).toHaveCount(2);
+      // A working plan chat still draws its arc over the dim track, plus the glowing step in progress.
+      await expect(ringOf(page, "plain")).toHaveCount(3);
       await expect(ringOf(page, "plain").nth(0)).toHaveClass(/is-track/);
       expect(await headerTexts(page)).toContain("In Progress");
     });

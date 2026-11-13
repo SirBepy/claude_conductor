@@ -64,6 +64,16 @@ describe("sub kinds", () => {
     expect(kindOf(sub("a", { busy: true, progress: progress({ stopped_unfinished: true }) })).kind).toBe("working");
   });
 
+  it("an idle live sub is stopped even with no stopped flag (the flag is lost on a daemon restart)", () => {
+    expect(kindOf(sub("a", { busy: false })).kind).toBe("stopped");
+  });
+
+  it("a working sub's clock starts at its turn, not at the row's start", () => {
+    const w = kindOf(sub("a", { started_at: "2026-11-12T11:48:00Z", progress: progress({ state_since: "2026-11-13T09:00:00Z" }) }));
+    expect(w.startedAt).toBe("2026-11-13T09:00:00Z");
+    expect(kindOf(sub("a", { busy: false, started_at: "2026-11-12T11:48:00Z" })).startedAt).toBe("2026-11-12T11:48:00Z");
+  });
+
   it("asking and finished outrank every idle state, and queued outranks paused", () => {
     expect(kindOf(sub("a", { frozen: true, subchat_finished: true, busy: false })).kind).toBe("finished");
     expect(kindOf(sub("a", { busy: false, frozen: true, progress: progress({ waiting_for: "x" }) })).kind).toBe("queued");

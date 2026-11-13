@@ -143,6 +143,9 @@ export function ringHtml(spec: RingSpec): string {
     cls += " is-plan";
     body = circle(CIRC, 0, "ring-seg is-track", tone);
     if (spec.done > 0) body += circle(CIRC * (spec.done / spec.total), 0, "ring-seg", tone);
+    // The step in progress glows, so a plan ring with nothing done yet (a bare dim track, the
+    // look of a sub that is not progressing) still reads as working.
+    if (spec.done < spec.total) body += circle(CIRC / spec.total, CIRC * (spec.done / spec.total), "ring-seg is-glow", tone);
   } else {
     tone = spec.tone ?? "question";
     cls += " is-segments";

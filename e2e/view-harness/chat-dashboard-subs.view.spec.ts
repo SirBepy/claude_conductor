@@ -123,7 +123,7 @@ test.describe("chat dashboard / Subchats card", () => {
     await av(page, "sub-work").click();
     await expect(det(page)).toBeVisible();
     await expect(det(page).locator(".sx-det-name")).toHaveText("Footer");
-    await expect(det(page).locator(".sx-det-time b")).toHaveText(/^1\d:\d\d$/);
+    await expect(det(page).locator(".sx-det-time b")).toHaveText(/^0[23]:\d\d$/);
     await expect(det(page).locator(".sx-det-ctx .sb-context")).toHaveText("34%");
     await expect(det(page).locator(".sx-det-state")).toHaveText("step 3 of 4");
     await expect(det(page).locator(".sx-det-brief")).toContainText("Build the footer");
