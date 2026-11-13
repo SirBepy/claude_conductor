@@ -221,22 +221,23 @@ function insertRow(pane: ParentNode, config: SessionConfig, pending = false): vo
   wire(host, pane, config);
 }
 
-/** Adds a "This chat" group under the dashboard rail's project settings, built from
- *  the rail's own group and line classes, and retires the row above the message box:
- *  the card is where per-chat choices live, with room for more. */
+/** Puts the switch in the draft rail (titled "This chat", dashboard.ts), built from
+ *  the rail's own group and line classes, above its line into the project's settings,
+ *  and retires the row above the message box: the rail is where per-chat choices live. */
 export function mountDraftSubchatsCard(pane: HTMLElement, railBody: HTMLElement, config: SessionConfig): void {
   const settings = railBody.querySelector(".view-project-settings") ?? railBody;
+  // insertBefore(x, null) appends, for a rail without that line.
+  const before = settings.querySelector(":scope > .ps-open-settings");
   settings.querySelector(`.${CARD_CLASS}`)?.remove();
   const card = document.createElement("div");
   card.className = `ps-group ${CARD_CLASS}`;
   card.innerHTML = [
-    `<div class="ps-group-title">This chat</div>`,
     `<div class="ps-line">`,
     `<span class="ps-label">Use subchats</span>`,
     `<label class="switch"><input type="checkbox" aria-label="Use subchats"><span class="slider"></span></label>`,
     `</div>`,
   ].join("");
-  settings.append(card);
+  settings.insertBefore(card, before);
   pane.querySelector(`.${HOST_CLASS}`)?.remove();
   wire(card, pane, config);
 
@@ -247,14 +248,13 @@ export function mountDraftSubchatsCard(pane: HTMLElement, railBody: HTMLElement,
   route.className = `ps-group ${ROUTE_CARD_CLASS}`;
   route.hidden = true;
   route.innerHTML = [
-    `<div class="ps-group-title">This chat</div>`,
     `<div class="ps-line"><span class="ps-label dmr-line"></span></div>`,
     `<div class="ps-line">`,
     `<span class="ps-label">Plain chat instead</span>`,
     `<label class="switch"><input type="checkbox" aria-label="Plain chat instead"><span class="slider"></span></label>`,
     `</div>`,
   ].join("");
-  settings.append(route);
+  settings.insertBefore(route, before);
   pane.querySelector(`.${ROUTE_CLASS}`)?.remove();
   wireRoute(route, pane, config);
   syncDraftSubchats(pane, config);

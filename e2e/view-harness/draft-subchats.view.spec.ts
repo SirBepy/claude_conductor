@@ -3,7 +3,7 @@
 // Reviewed 2026-11-11: the Undo hold on sends and card answers is gone (a send or answer goes out at once); nothing this spec asserts depends on it, and it passes.
 // Reviewed 2026-11-11 (phone keyboard): pending-pane.ts no longer focuses the composer on open at phone width; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10: dashboard.ts gained the Due card in its half-width list, absent unless a todo is due; this spec seeds no due todo, so its contract is unchanged and it passes.
-// asserts: src/views/sessions/draft-subchats.ts, src/views/sessions/pending-pane.ts, src/views/sessions/pending-pane-composer.ts, src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/project-config.ts
+// asserts: src/views/sessions/project-dashboard/dash-menu.ts, src/views/sessions/project-dashboard/project-config/project-settings.ts, src/views/sessions/project-dashboard/project-config/project-settings.css, src/views/sessions/draft-subchats.ts, src/views/sessions/pending-pane.ts, src/views/sessions/pending-pane-composer.ts, src/views/sessions/project-dashboard/dashboard.ts, src/views/sessions/project-dashboard/draft-dashboard.ts, src/views/sessions/project-dashboard/project-config.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, mountSessionsList, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 import { CONDUCTOR_CWD, LIST_ROWS, conductorHistory, conductorSnapshot, fakeShot } from "./project-dashboard-fixtures";
@@ -80,8 +80,8 @@ const railCard = (page: Page) => page.locator(".pd-rail .view-project-settings .
 
 type Core = { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> };
 
-// A project's draft on a wide window has the dashboard's settings rail, and the
-// switch is a "This chat" card under the settings there instead of a row.
+// A project's draft on a wide window has the dashboard's rail, titled "This chat",
+// and the switch is a card there instead of a row.
 async function openRailDraft(page: Page, withMainChat = false): Promise<void> {
   await page.setViewportSize({ width: 1700, height: 1000 });
   type Backend = { list: unknown; snapshots: Record<string, unknown>; histories: Record<string, unknown>; shots: string[] };
@@ -139,7 +139,7 @@ test.describe("view-harness / Use subchats on a new-chat draft with a settings r
   test("the switch is a This chat card in the rail, and the row above the message box is gone", async ({ page }) => {
     await openRailDraft(page);
     const card = railCard(page);
-    await expect(card.locator(".ps-group-title")).toHaveText(/This chat/i);
+    await expect(page.locator(".pd-rail .pd-rail-title")).toHaveText("This chat");
     await expect(page.locator("#session-pane .draft-subchats")).toHaveCount(0);
     // The Goes to card exists for a project with a main chat and must stay out of sight here.
     await expect(page.locator(".pd-rail .view-project-settings .draft-main-route-card")).toBeHidden();
@@ -156,13 +156,46 @@ test.describe("view-harness / Use subchats on a new-chat draft with a settings r
     // Both cards exist in the DOM; the Use subchats one must not paint beside the other.
     await expect(railCard(page)).toBeHidden();
     await expect(settings.locator(".draft-main-route-card")).toBeVisible();
-    await expect(settings.locator(".draft-main-route-card .ps-group-title")).toHaveText(/This chat/i);
+    await expect(page.locator(".pd-rail .pd-rail-title")).toHaveText("This chat");
     await expect(settings.getByText("Use subchats", { exact: true })).toBeHidden();
-    const titles = settings.locator(".ps-group-title", { hasText: /^This chat$/i });
-    await expect(titles.filter({ visible: true })).toHaveCount(1);
+    // The first group shown sits right under the title: no divider above it, though a
+    // hidden group comes before it in the DOM.
+    await expect(settings.locator(".draft-main-route-card")).toHaveCSS("border-top-width", "0px");
     // A switch's checkbox is visually hidden by design; its slider is what paints.
     await expect(settings.locator(".draft-subchats-card .slider")).toBeHidden();
     await expect(settings.locator(".draft-main-route-card .slider")).toBeVisible();
+  });
+
+  test("the rail holds only this chat's choices, with the project's settings behind one line that opens their popup", async ({ page }) => {
+    await openRailDraft(page);
+    const rail = page.locator(".pd-rail");
+    // None of the project-wide controls are in the rail.
+    for (const id of ["#chatDefaultModelControl", "#projectAccountControl", "#trackerControl", "#connectorsEnabled", "#mcpServersControl", "#compactOn"]) {
+      await expect(rail.locator(id)).toHaveCount(0);
+    }
+    // The per-chat card comes first, the way into the project's settings last.
+    const groups = rail.locator(".view-project-settings > .ps-group:not([hidden])");
+    await expect(groups).toHaveCount(2);
+    await expect(groups.nth(0)).toHaveClass(/draft-subchats-card/);
+    await expect(groups.nth(1)).toHaveClass(/ps-open-settings/);
+    await expect(railCard(page)).toHaveCSS("border-top-width", "0px");
+    await capture(rail, "draft-rail-this-chat");
+
+    await rail.locator(".ps-open", { hasText: "Project settings..." }).click();
+    const modal = page.locator(".modal-card.pd-modal[aria-label='Project settings']");
+    await expect(modal).toBeVisible();
+    await expect(modal.locator("#connectorsEnabled")).toHaveCount(1);
+    await expect(modal.getByText("claude.ai connectors", { exact: true })).toBeVisible();
+    await expect(modal.locator(".ps-hint")).toContainText("Google Drive");
+    // Not offered (Joe's call, 2026-11-13): no project used Facts only.
+    await expect(modal.getByText("Check a sub's work")).toHaveCount(0);
+  });
+
+  test("the draft's right-click project menu offers Project settings too", async ({ page }) => {
+    await openRailDraft(page);
+    await page.locator(".pd-draft .pd-row").first().click({ button: "right" });
+    await page.locator(".session-more-menu .smore-item", { hasText: "Project settings..." }).click();
+    await expect(page.locator(".modal-card.pd-modal[aria-label='Project settings'] #connectorsEnabled")).toHaveCount(1);
   });
 
   test("the row above the message box is never painted while the rail is still loading", async ({ page }) => {
@@ -219,7 +252,7 @@ test.describe("view-harness / Use subchats on a new-chat draft with a settings r
     await page.locator("#projectDetailPathInput").fill(MOVED_CWD);
     await page.locator("#projectDetailPathInput").press("Enter");
 
-    // The rebuilt rail has its settings in, so a missing card is the card's doing.
+    // The rebuilt rail has its body in, so a missing card is the card's doing.
     await expect(page.locator(".pd-rail .view-project-settings")).toBeVisible();
     await expect(railCard(page)).toHaveCount(1);
     await expect(railCard(page).locator("input")).toBeChecked();
