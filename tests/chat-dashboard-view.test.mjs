@@ -249,6 +249,56 @@ describe("chat dashboard layout", () => {
     });
   });
 
+  it("stamps each Waiting card with when it was written, and its x or Clear all removes it for good", async () => {
+    localStorage.clear();
+    const written = new Date(2026, 10, 12, 18, 40).getTime();
+    const blocker = (verdict, waitingOn) => {
+      const id = `m${++seq}`;
+      return [toolUseEvent(SEND, { kind: "blocker", verdict, text: "x", ...(waitingOn ? { waiting_on: waitingOn } : {}) }, id, written), ok(id)];
+    };
+    const todo = () => { const id = `m${++seq}`; return [toolUseEvent(SEND, { kind: "do_this", verdict: "Log in", text: "x" }, id, written), ok(id)]; };
+    const events = [userEvent("go"), ...blocker("Held by the gate", ["Gate 2"]), ...todo(), ...blocker("Stuck on auth")];
+    const mount = () => {
+      const { pane, r } = mountPane();
+      r.sessionId = "sess-wait";
+      new ChatDashboard(pane, r);
+      feed(r, events);
+      return pane;
+    };
+    let pane = mount();
+    let w;
+    await settled(() => {
+      w = pane.querySelector(".cdash-waiting");
+      expect(w.querySelectorAll(".cdash-wi")).toHaveLength(2);
+    });
+    // Not today, so the day leads the clock.
+    const at = w.querySelector(".cdash-wi .cdash-wi-at");
+    expect(at.textContent).toContain(new Date(written).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }));
+    expect(at.textContent).toContain(new Date(written).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+    // The card waiting elsewhere is stamped too.
+    expect(pane.querySelector(".cdash-waiting-else .cdash-wi-at")).not.toBeNull();
+    // The x removes the blocker; the to-do stays.
+    w.querySelector(".cdash-wi [data-act='wait-dismiss']").click();
+    await settled(() => {
+      const verdicts = [...pane.querySelectorAll(".cdash-waiting .mc-verdict")].map((e) => e.textContent);
+      expect(verdicts).toEqual(["Log in"]);
+    });
+    // One card left: its own x does what Clear all would, so there is none.
+    expect(pane.querySelector(".cdash-waiting [data-act='wait-clear']")).toBeNull();
+    // The removal sticks when the chat is drawn again (a reopened window).
+    pane.remove();
+    pane = mount();
+    await settled(() => expect([...pane.querySelectorAll(".cdash-waiting .mc-verdict")].map((e) => e.textContent)).toEqual(["Log in"]));
+    pane.remove();
+    // Clear all empties the zone in one click.
+    localStorage.clear();
+    pane = mount();
+    await settled(() => expect(pane.querySelector(".cdash-waiting [data-act='wait-clear']")).not.toBeNull());
+    pane.querySelector(".cdash-waiting [data-act='wait-clear']").click();
+    await settled(() => expect(pane.querySelector(".cdash-waiting")).toBeNull());
+    expect(pane.querySelector(".cdash-waiting-else")).not.toBeNull();
+  });
+
   it("moves the chat's status line into the Plan card while it runs, and back when the card goes", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);

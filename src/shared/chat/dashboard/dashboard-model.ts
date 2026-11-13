@@ -57,6 +57,8 @@ export interface DashboardInput {
   /** The question card open by the message box for this chat, if any: Waiting
    *  on you leaves its copy out, so a question shows only where it is answered. */
   openCard?: OpenCardRef | null;
+  /** Waiting items Joe removed by hand, by waitingKey (waiting-dismissed.ts). */
+  dismissed?: ReadonlySet<string>;
 }
 
 /** The prompt id and question strings of the answer card on screen. */
@@ -189,11 +191,68 @@ function figuresBefore(msgs: readonly RenderedMessage[], at: number): Visual[] {
   return [];
 }
 
+/** The own message kinds that state where the chat stands now, so a blocker
+ *  sent before one of them is history: the chat got past it or gave up on it
+ *  (Joe, 2026-11-13, three stale blockers of one iOS build chat: "i hate how
+ *  easy it is for outdated info to just stick"). A relayed message from another
+ *  chat or a question card's answer is not Joe writing, so without this a chat
+ *  driven that way kept every blocker. A newer blocker supersedes too, but only
+ *  one that waits on the same thing (sameWait). */
+const SUPERSEDES_BLOCKER: ReadonlySet<MessageKind | "legacy"> = new Set(["report", "answer", "plan"]);
+
+/** Two blockers wait on the same thing: both on Joe, or on the same targets. A
+ *  blocker on Joe and one on a gate can both stand at once. */
+function sameWait(a: readonly string[], b: readonly string[]): boolean {
+  return [...a].sort().join("\n") === [...b].sort().join("\n");
+}
+
+/** The key Joe's removal of a Waiting item is stored under, null when the row
+ *  has no stable id (it cannot be removed then, only superseded). */
+export function waitingKey(m: RenderedMessage): string | null {
+  return m.id ?? m.subCard?.id ?? null;
+}
+
+/** An own blocker at `i` still stands: Joe has not written since, the chat has
+ *  sent no newer report, answer or plan and no newer blocker waiting on the same
+ *  thing, and Joe has not removed it. */
+function ownBlockerLive(input: DashboardInput, i: number, lastJoe: number): boolean {
+  const msgs = input.messages;
+  if (i <= lastJoe || isDismissed(input, msgs[i]!)) return false;
+  let waits: string[] | null = null;
+  for (let j = i + 1; j < msgs.length; j++) {
+    const n = msgs[j]!;
+    if (!isOwnMessage(n)) continue;
+    const k = messageKindOf(n);
+    if (SUPERSEDES_BLOCKER.has(k)) return false;
+    if (k === "blocker") {
+      waits ??= blockerTargets(msgs[i]!, input.subs);
+      if (sameWait(waits, blockerTargets(n, input.subs))) return false;
+    }
+  }
+  return true;
+}
+
+/** A sub's blocker card still stands: that sub sent no later card and Joe has
+ *  not removed it. */
+function subBlockerLive(input: DashboardInput, i: number): boolean {
+  const msgs = input.messages;
+  const m = msgs[i]!;
+  if (m.kind !== "message" || m.subCard?.kind !== "blocker" || m.failed || m.retracted) return false;
+  const sub = m.subCard.sub_id;
+  return !(sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub)) && !isDismissed(input, m);
+}
+
+function isDismissed(input: DashboardInput, m: RenderedMessage): boolean {
+  const key = waitingKey(m);
+  return !!key && !!input.dismissed?.has(key);
+}
+
 /** Blockers first (tinted red), then what only Joe can do, then open questions.
- *  A blocker or do_this counts only until Joe writes again, since his next
- *  message is how he answers it. A sub's blocker counts until that sub sends a
- *  later card. Open question cards count until they are answered, except the
- *  one open in the answer card by the message box (Joe reads it there). */
+ *  A blocker counts until Joe writes again, the chat states something newer
+ *  (ownBlockerLive), or Joe removes it; a do_this until Joe writes again or
+ *  removes it. A sub's blocker counts until that sub sends a later card. Open
+ *  question cards count until they are answered, except the one open in the
+ *  answer card by the message box (Joe reads it there). */
 export function deriveWaiting({ input, lastJoe }: DeriveCtx): WaitingState | null {
   const msgs = input.messages;
   const blockers: WaitingItem[] = [];
@@ -203,15 +262,13 @@ export function deriveWaiting({ input, lastJoe }: DeriveCtx): WaitingState | nul
   // prompt from before the ids matched) the newest open card asking the same.
   const onScreen = input.openCard ? findOpenCardForPrompt(msgs, input.openCard.id, input.openCard.questions) : -1;
   msgs.forEach((m, i) => {
-    if (isOwnMessage(m) && i > lastJoe) {
+    if (isOwnMessage(m)) {
       const k = messageKindOf(m);
       if (k === "blocker") {
-        if (blockerTargets(m, input.subs).length === 0) blockers.push({ type: "blocker", message: m });
-      } else if (k === "do_this") doThis.push({ type: "do_this", message: m });
-    } else if (m.kind === "message" && m.subCard?.kind === "blocker" && !m.failed && !m.retracted) {
-      const sub = m.subCard.sub_id;
-      const later = !!sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub);
-      if (!later && blockerTargets(m, input.subs).length === 0) blockers.push({ type: "blocker", message: m });
+        if (ownBlockerLive(input, i, lastJoe) && blockerTargets(m, input.subs).length === 0) blockers.push({ type: "blocker", message: m });
+      } else if (k === "do_this" && i > lastJoe && !isDismissed(input, m)) doThis.push({ type: "do_this", message: m });
+    } else if (m.subCard?.kind === "blocker") {
+      if (subBlockerLive(input, i) && blockerTargets(m, input.subs).length === 0) blockers.push({ type: "blocker", message: m });
     } else if (isOpenQuestion(m) && i !== onScreen) {
       questions.push({ type: "question", message: m, questions: cardQuestionTexts(m), figures: figuresBefore(msgs, i) });
     }
@@ -223,18 +280,15 @@ export function deriveWaiting({ input, lastJoe }: DeriveCtx): WaitingState | nul
 /** Blockers that wait on something other than Joe, drawn apart from Waiting on
  *  you under a label naming the target (Joe, 2026-11-11: "Waiting on you??? i
  *  dont think it is waiting on me... it would be handy to know what its
- *  waiting on"). The same lifecycle as the blockers above: an own blocker
- *  counts until Joe writes again, a sub's until that sub sends a later card. */
+ *  waiting on"). The same lifecycle as the blockers above (ownBlockerLive,
+ *  subBlockerLive), removal included. */
 export function deriveWaitingElsewhere({ input, lastJoe }: DeriveCtx): ElsewhereState | null {
   const msgs = input.messages;
   const items: ElsewhereItem[] = [];
   msgs.forEach((m, i) => {
-    let live: boolean;
-    if (isOwnMessage(m)) live = i > lastJoe && messageKindOf(m) === "blocker";
-    else if (m.kind === "message" && m.subCard?.kind === "blocker" && !m.failed && !m.retracted) {
-      const sub = m.subCard.sub_id;
-      live = !(sub && msgs.some((n, j) => j > i && n.subCard?.sub_id === sub));
-    } else live = false;
+    const live = isOwnMessage(m)
+      ? messageKindOf(m) === "blocker" && ownBlockerLive(input, i, lastJoe)
+      : subBlockerLive(input, i);
     if (!live) return;
     const waitingOn = blockerTargets(m, input.subs);
     if (waitingOn.length > 0) items.push({ message: m, waitingOn });

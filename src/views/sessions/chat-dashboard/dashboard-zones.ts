@@ -10,7 +10,7 @@ import { renderBlocks, renderMessage } from "../../../shared/chat/chat-transform
 import { renderQuestionCardHtml } from "../../../shared/chat/tool-views";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../../../shared/chat/chat-event-to-message";
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
-import type { StripState, WaitingItem, ZoneId, ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
+import { rowMs, waitingKey, type StripState, type WaitingItem, type ZoneId, type ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
 import { initialPlanUi, renderPlan, type PlanUi } from "./plan-card";
 import { plainUserText } from "../../../shared/chat/dashboard/answers-model";
 import { renderVisuals } from "../../../shared/chat/message-visuals-render";
@@ -119,29 +119,67 @@ function renderAnswers(): string {
   return `<section class="cdash-zone cdash-answers ax-host"></section>`;
 }
 
+/** When a Waiting card was written: the clock alone today, with the day
+ *  before it otherwise, since an old blocker is what Joe needs to spot. */
+export function writtenLabel(m: RenderedMessage, now = Date.now()): string {
+  const ms = rowMs(m);
+  if (!ms) return "";
+  const d = new Date(ms);
+  const clock = localTime(d);
+  if (d.toDateString() === new Date(now).toDateString()) return clock;
+  const sameYear = d.getFullYear() === new Date(now).getFullYear();
+  const day = d.toLocaleDateString(undefined, sameYear ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" });
+  return `${day}, ${clock}`;
+}
+
+/** A blocker or to-do with when it was written at its top right and, on
+ *  hover, the x that removes it from the zone for good (Joe, 2026-11-13).
+ *  A row with no stable id gets no x: its removal would not stick. */
+function removableCardHtml(m: RenderedMessage): string {
+  const key = waitingKey(m);
+  const when = writtenLabel(m);
+  const full = rowMs(m) ? new Date(rowMs(m)).toLocaleString() : "";
+  const x = key
+    ? `<button type="button" class="cdash-wi-x" data-act="wait-dismiss" data-wkey="${escapeHtml(key)}" title="Remove from this list" aria-label="Remove from this list"><i class="ph ph-x"></i></button>`
+    : "";
+  const corner = when || x
+    ? `<span class="cdash-wi-at"${full ? ` title="Written ${escapeHtml(full)}"` : ""}>${when ? `<span>${escapeHtml(when)}</span>` : ""}${x}</span>`
+    : "";
+  return `<div class="cdash-wi">${cardHtml(m)}${corner}</div>`;
+}
+
+/** Clear all, drawn (and shown on hover) only when two or more cards can go:
+ *  for one, its own x does the same. */
+function clearAllHtml(messages: readonly RenderedMessage[]): string {
+  return messages.filter((m) => waitingKey(m)).length >= 2
+    ? `<button type="button" class="cdash-wclear" data-act="wait-clear">Clear all</button>` : "";
+}
+
 /** A question is the transcript's own question card, so the pane's existing
  *  click handler (sessions.ts) reopens the answerable card from it. */
 function waitingItemHtml(item: WaitingItem): string {
-  if (item.type !== "question") return cardHtml(item.message);
+  if (item.type !== "question") return removableCardHtml(item.message);
   const id = item.message.id ? ` data-question-id="${escapeHtml(item.message.id)}"` : "";
   // The figures the question's own message carried (an approval question asks
   // about them), shown with it instead of two cards apart.
   const figures = item.figures.length > 0 ? `<div class="msg cdash-figs">${renderVisuals(item.figures)}</div>` : "";
+  const when = writtenLabel(item.message);
   return `${figures}<div class="msg question-card"${id}>${renderQuestionCardHtml(item.message)}</div>`
-    + `<div class="cdash-hint"><i class="ph ph-arrow-down"></i>Answer on the card by the message box</div>`;
+    + `<div class="cdash-hint"><i class="ph ph-arrow-down"></i>Answer on the card by the message box${when ? `<span class="cdash-hint-at">· asked ${escapeHtml(when)}</span>` : ""}</div>`;
 }
 
 function renderWaiting(s: ZoneState<"waiting">): string {
-  return `<section class="cdash-zone cdash-card cdash-waiting${s.blocked ? " is-blocked" : ""}">${head("ph-bell-ringing", "Waiting on you")}`
+  const removable = s.items.filter((it) => it.type !== "question").map((it) => it.message);
+  return `<section class="cdash-zone cdash-card cdash-waiting${s.blocked ? " is-blocked" : ""}">${head("ph-bell-ringing", "Waiting on you", clearAllHtml(removable))}`
     + `<div class="cdash-stack">${s.items.map(waitingItemHtml).join("")}</div></section>`;
 }
 
 /** Blockers waiting on something other than Joe: amber-free, titled with what
  *  they wait on. The label comes from the model, which takes it from structured
- *  fields only. */
+ *  fields only. Each card has the same time and x as in Waiting on you. */
 function renderWaitingElsewhere(s: ZoneState<"waitingElsewhere">): string {
-  return `<section class="cdash-zone cdash-card cdash-waiting-else">${head("ph-hourglass-medium", s.label)}`
-    + `<div class="cdash-stack">${s.items.map((it) => cardHtml(it.message)).join("")}</div></section>`;
+  return `<section class="cdash-zone cdash-card cdash-waiting-else">${head("ph-hourglass-medium", s.label, clearAllHtml(s.items.map((it) => it.message)))}`
+    + `<div class="cdash-stack">${s.items.map((it) => removableCardHtml(it.message)).join("")}</div></section>`;
 }
 
 function renderPlanZone(s: ZoneState<"plan">, ctx: ZoneCtx): string {
