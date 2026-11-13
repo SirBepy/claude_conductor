@@ -112,12 +112,23 @@ impl PeerClient {
     /// `send_message`, `start_session` and `spawn_chat`, which must never be
     /// delivered twice.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, PeerError> {
-        match self.call_once(method, &params).await {
+        self.call_within(method, params, None).await
+    }
+
+    /// `call` with its own whole-request timeout in place of the client's 10 s:
+    /// for a call that carries a git bundle (`subchats::remote::git_sync`), whose
+    /// body can be tens of megabytes over a slow tunnel. Same retry rule as `call`.
+    pub async fn call_with_timeout(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, PeerError> {
+        self.call_within(method, params, Some(timeout)).await
+    }
+
+    async fn call_within(&self, method: &str, params: Value, timeout: Option<Duration>) -> Result<Value, PeerError> {
+        match self.call_once(method, &params, timeout).await {
             Attempt::Answered(result) => result,
             Attempt::NotSent(first) => {
                 log::debug!("peer_client: {method} not sent ({first}); retrying once");
                 tokio::time::sleep(RETRY_PAUSE).await;
-                match self.call_once(method, &params).await {
+                match self.call_once(method, &params, timeout).await {
                     Attempt::Answered(result) => result,
                     Attempt::NotSent(second) => Err(second),
                 }
@@ -125,10 +136,14 @@ impl PeerClient {
         }
     }
 
-    async fn call_once(&self, method: &str, params: &Value) -> Attempt {
+    async fn call_once(&self, method: &str, params: &Value, timeout: Option<Duration>) -> Attempt {
         let url = format!("{}/api/rpc", self.base_url);
         let body = serde_json::json!({ "method": method, "params": params });
-        let resp = match self.http.post(&url).bearer_auth(&self.token).json(&body).send().await {
+        let mut req = self.http.post(&url).bearer_auth(&self.token).json(&body);
+        if let Some(t) = timeout {
+            req = req.timeout(t);
+        }
+        let resp = match req.send().await {
             Ok(resp) => resp,
             // `is_connect()` is true only for a failure inside reqwest's
             // connector (TCP connect refused or unreachable): no connection
@@ -452,6 +467,26 @@ mod tests {
         assert_eq!(seen.requests_read.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
+    /// A per-call timeout replaces the client's 10 s one: a peer that answers
+    /// after 3 s is too slow for a 300 ms budget, so the call fails well before
+    /// the default would have let it through.
+    #[tokio::test]
+    async fn call_with_timeout_applies_its_own_budget() {
+        let (base, _seen) = scripted::serve(|_n, mut sock, seen| async move {
+            scripted::read_request(&mut sock, &seen).await;
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            scripted::reply(&mut sock, "200 OK", "", r#"{"late":true}"#).await;
+        })
+        .await;
+        let started = std::time::Instant::now();
+        let err = PeerClient::new(&base, "t")
+            .call_with_timeout("sub_fetch_branch", serde_json::json!({}), std::time::Duration::from_millis(300))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PeerError::Unreachable(_)), "{err:?}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "took {:?}", started.elapsed());
+    }
+
     /// The peer read the request and then died without answering. It may have
     /// acted on it, so a resend could deliver a message twice: never retried.
     #[tokio::test]
@@ -476,7 +511,7 @@ mod tests {
         let base = format!("http://{}", closed.local_addr().unwrap());
         drop(closed);
         let client = PeerClient::new(&base, "t");
-        assert!(matches!(client.call_once("echo", &serde_json::json!({})).await, Attempt::NotSent(_)));
+        assert!(matches!(client.call_once("echo", &serde_json::json!({}), None).await, Attempt::NotSent(_)));
     }
 
     fn state_fixture() -> std::sync::Arc<DaemonState> {
