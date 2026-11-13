@@ -61,6 +61,7 @@ class TodosPanel implements TodosPanelHandle {
   private sessionId: string | null = null;
   /** A draft's cards by id to the project that owns them, for the project-keyed tick. */
   private draftProjects = new Map<string, string>();
+  private draftSeq = 0;
   /** Keyed on the unseen ids, so `Later` silences only THAT set and a new
    *  change raises the bar again. */
   private dismissedKey = "";
@@ -84,6 +85,8 @@ class TodosPanel implements TodosPanelHandle {
     this.todos = [];
     this.draftProjects.clear();
     this.columns.clear();
+    // Set once per draft so a choice made in the Columns menu survives each refresh.
+    if (sessionId && isPendingSessionId(sessionId)) this.columns.add("project");
     this.dismissedKey = "";
     this.render();
     this.refresh();
@@ -118,17 +121,22 @@ class TodosPanel implements TodosPanelHandle {
       ? state.pendingNewSession.projectPath
       : state.parkedDrafts.find((d) => d.placeholderId === sid)?.projectPath;
     if (!cwd) return;
+    // Refreshes overlap (focus, the changed event, a tick's own re-read); only the newest paints.
+    const seq = ++this.draftSeq;
+    const norm = (p: string): string => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
     void resolveTarget(cwd)
       .then((ref) => invoke<DashSnapshot | null>("dashboard_snapshot", { target: ref }))
       .then((snap) => {
-        if (this.sessionId !== sid) return;
-        const rows = snap?.your_todos ?? [];
+        if (this.sessionId !== sid || seq !== this.draftSeq) return;
+        // A folder in a dashboard group snapshots every repo of the group; a chat
+        // lists only its own project's cards, so the draft does too.
+        const own = snap?.target.repos.find((r) => norm(r.cwd) === norm(cwd))?.project_id;
+        const rows = (snap?.your_todos ?? []).filter((t) => !own || t.project_id === own);
         this.draftProjects = new Map(rows.map((t) => [t.id, t.project_id]));
         this.todos = rows.map((t): UserTodo => ({
-          id: t.id, text: t.text, origin_session_id: t.origin_session_id ?? "", origin_label: t.by_ai ? "a chat" : "you", state: "open",
+          id: t.id, text: t.text, origin_session_id: t.origin_session_id ?? "", origin_label: "this project", state: "open",
           dropped: false, drop_reason: "", previous_text: "", by_ai: t.by_ai, created_at: "", updated_at: "", seen_by_origin: true,
         }));
-        this.columns = new Set(["project"]);
         this.render();
       })
       .catch((err) => console.error("[todos-panel] draft todos failed", err));
@@ -220,7 +228,7 @@ class TodosPanel implements TodosPanelHandle {
 
   private notifyPending(): void {
     const sid = this.sessionId;
-    if (!sid) return;
+    if (!sid || isPendingSessionId(sid)) return;
     const origins = [...new Set(this.unseen().map((t) => t.origin_session_id))];
     void Promise.all(
       origins.map((origin) => invoke<void>("mark_todos_seen", { sessionId: sid, originSessionId: origin })),
@@ -231,7 +239,8 @@ class TodosPanel implements TodosPanelHandle {
 
   private clearArchived(): void {
     const sid = this.sessionId;
-    if (!sid) return;
+    // A draft's read holds only open cards, so there is nothing archived to clear.
+    if (!sid || isPendingSessionId(sid)) return;
     void invoke<void>("clear_archived_todos", { sessionId: sid })
       .then(() => this.refresh())
       .catch((err) => console.error("[todos-panel] clear_archived_todos failed", err));

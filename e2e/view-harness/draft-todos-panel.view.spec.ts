@@ -21,7 +21,12 @@ async function openDraft(page: Page, width: number): Promise<void> {
       get_active_sessions: [],
       list_subchats_on: [],
       dashboard_list_targets: LIST_ROWS,
-      dashboard_snapshot: conductorSnapshot(),
+      // A second row from another repo of a group the folder sits in: a chat lists its own project only.
+      dashboard_snapshot: (() => {
+        const snap = conductorSnapshot();
+        snap.your_todos.push({ id: "t-other", project_id: "p-elsewhere", text: "Another repo's chore", origin_session_id: null, repo_cwd: "C:/Projects/elsewhere", by_ai: false });
+        return snap;
+      })(),
       dashboard_history: null,
       dashboard_todo_set_state: null,
       list_previews: [],
@@ -60,6 +65,7 @@ test.describe("new-chat draft Todos panel", () => {
     await page.locator('.sp-tab[data-sp-k="todos"]').click();
     const board = page.locator(".sp-panel .todos-panel");
     await expect(board).toContainText(TODO_TEXT);
+    await expect(board).not.toContainText("Another repo's chore");
     await board.locator('[data-act="toggle"]').first().click();
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "dashboard_todo_set_state").length).toBe(1);
     const call = (await invokeCalls(page)).find((c) => c.cmd === "dashboard_todo_set_state");
