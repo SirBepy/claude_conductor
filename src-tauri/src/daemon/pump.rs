@@ -1006,6 +1006,9 @@ mod tests {
         use crate::daemon::settings_cache::SettingsCache;
         use crate::types::Settings;
 
+        // `chat_state` lives under the data dir, which a concurrent test may
+        // point elsewhere (`CC_DATA_DIR`) while it holds this lock.
+        let _guard = crate::util::env_lock();
         let state = DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()));
         let settings = std::sync::Mutex::new(Settings::default());
         state.registry.record_interactive_session("pump-close-now", std::path::Path::new("/tmp/x"), &settings, "2026-11-12T00:00:00Z");
