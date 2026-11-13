@@ -111,7 +111,8 @@ describe("the draft's Use subchats switch", () => {
   });
 
   it("a rail card replaces the row, and both copies would follow one config", () => {
-    document.body.innerHTML = `<div id="pane"><div class="session-messages"><div class="pd-rail"><div class="view-project-settings"></div></div></div><div class="composer-shell"></div></div>`;
+    // The draft rail's body (dashboard.ts renderDraftRail): only the line into the project's settings.
+    document.body.innerHTML = `<div id="pane"><div class="session-messages"><div class="pd-rail"><div class="view-project-settings"><div class="ps-group ps-open-settings"></div></div></div></div><div class="composer-shell"></div></div>`;
     pane = document.getElementById("pane");
     mountDraftSubchats(pane, config);
     expect(pane.querySelectorAll(".draft-subchats")).toHaveLength(1);
@@ -119,7 +120,12 @@ describe("the draft's Use subchats switch", () => {
     mountDraftSubchatsCard(pane, pane.querySelector(".pd-rail"), config);
     expect(pane.querySelector(".draft-subchats")).toBeNull();
     const card = pane.querySelector(".view-project-settings > .ps-group.draft-subchats-card");
-    expect(card.querySelector(".ps-group-title").textContent).toBe("This chat");
+    // The rail is titled "This chat" itself, so the card carries no title of its own,
+    // and the per-chat cards sit above the project settings line.
+    expect(card.querySelector(".ps-group-title")).toBeNull();
+    const groups = [...pane.querySelectorAll(".view-project-settings > .ps-group")].map((g) => g.className);
+    expect(groups.at(-1)).toContain("ps-open-settings");
+    expect(groups.indexOf(card.className)).toBeLessThan(groups.length - 1);
 
     const cardInput = card.querySelector("input");
     cardInput.checked = true;
