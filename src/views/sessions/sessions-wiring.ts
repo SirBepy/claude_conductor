@@ -1,5 +1,5 @@
 import { selectSession, updateHeaderAvatarStatus } from "./active-session";
-import { carrySessionSettings, applyAccountMove, repointHeaderCharacter } from "./active-session-account";
+import { carrySessionSettings, changeAccountForSession, repointHeaderCharacter } from "./active-session-account";
 import { state, setActiveSession, loadLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { sessionSubtitle, paneEmptyStateHtml, isSubchat } from "./sessions-helpers";
@@ -75,12 +75,10 @@ export function wireRateLimitBanner(
   const usageDialHost = root.querySelector<HTMLElement>("#usage-dial-host");
   const teardownUsageDials = usageDialHost && isRemote() ? mountUsageDials(usageDialHost) : null;
   rateLimitBanner.setSelectedSessionGetter(() => state.selectedId);
-  rateLimitBanner.setOnMoved((newId, oldId) => {
-    void (async () => {
-      await applyAccountMove(oldId, newId, selectSession);
-      if (state.mountId !== myMount) return;
-      rateLimitBanner.update(state.sessions);
-    })();
+  rateLimitBanner.setOnSwitchAccount(async (sessionId) => {
+    await changeAccountForSession(sessionId, selectSession);
+    if (state.mountId !== myMount) return;
+    rateLimitBanner.update(state.sessions);
   });
   // rate_limit is a live per-session event; the daemon's own instances_changed
   // broadcast (marks EVERY session) arrives separately and can lag (see

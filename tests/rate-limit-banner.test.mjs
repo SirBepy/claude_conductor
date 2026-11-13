@@ -3,8 +3,9 @@
 // Tests for the rate-limit banner controller. The daemon is the sole source
 // of truth for "blocked" now (Instance.rate_limited_resets_at /
 // rate_limited_type); this module only reflects that, one banner per
-// exhausted account, and offers "Continue on <other account>" (forks the
-// session via api.moveSessionToAccount) and "View in Schedule" (navigates).
+// exhausted account, and offers "Switch account" (opens the Change account
+// picker through a wired callback, so Joe names the target) and "View in
+// Schedule" (navigates).
 // No frontend timer ever sends a turn on its own any more.
 //
 // isBlocked() reads the real Date.now() (it's the same formula every other
@@ -151,20 +152,22 @@ describe("RateLimitBanner", () => {
     expect(host.querySelector(".rlb-time").textContent).toMatch(/· 2 chats affected$/);
   });
 
-  it("shows an enabled 'Continue on <other>' when the other account is not blocked", async () => {
+  it("offers 'Switch account', never a guessed target, when another account exists", async () => {
     const b = new RateLimitBanner();
+    b.setOnSwitchAccount(vi.fn());
     b.mount(host);
     await flush();
     b.update([instance({ account_id: FIBO.id, rate_limited_resets_at: BigInt(NOW_SEC + 3600) })]);
     const btn = host.querySelector(".rlb-move");
-    expect(btn.disabled).toBe(false);
-    expect(btn.textContent).toContain("Continue on Personal");
+    expect(btn.textContent.trim()).toBe("Switch account");
+    expect(btn.textContent).not.toContain("Personal");
   });
 
-  it("never suggests the API-credit account as the 'Continue on' target", async () => {
+  it("offers no switch when the only other account is API credit", async () => {
     const credit = { id: "acc-credit", label: "credit", colour: "#10b981", icon: "key", kind: "api_credit" };
     listAccounts.mockResolvedValue([credit, FIBO]);
     const b = new RateLimitBanner();
+    b.setOnSwitchAccount(vi.fn());
     b.mount(host);
     await flush();
     b.update([instance({ account_id: FIBO.id, rate_limited_resets_at: BigInt(NOW_SEC + 3600) })]);
@@ -172,41 +175,24 @@ describe("RateLimitBanner", () => {
     expect(host.querySelector(".rlb-move")).toBeNull();
   });
 
-  it("skips the API-credit account and offers the next plan account", async () => {
-    const credit = { id: "acc-credit", label: "credit", colour: "#10b981", icon: "key", kind: "api_credit" };
-    listAccounts.mockResolvedValue([credit, FIBO, PERSONAL]);
+  it("offers no switch when the blocked account is the only one", async () => {
+    listAccounts.mockResolvedValue([FIBO]);
     const b = new RateLimitBanner();
+    b.setOnSwitchAccount(vi.fn());
     b.mount(host);
     await flush();
     b.update([instance({ account_id: FIBO.id, rate_limited_resets_at: BigInt(NOW_SEC + 3600) })]);
-    expect(host.querySelector(".rlb-move").textContent).toContain("Continue on Personal");
+    expect(host.querySelector(".rlb-title")).not.toBeNull();
+    expect(host.querySelector(".rlb-move")).toBeNull();
   });
 
-  it("disables 'Continue on <other>' (with a title, not hidden) when both accounts are blocked", async () => {
+  it("clicking 'Switch account' hands the selected blocked chat to the picker and moves nothing itself", async () => {
+    const onSwitch = vi.fn().mockResolvedValue(undefined);
     const b = new RateLimitBanner();
+    b.setOnSwitchAccount(onSwitch);
     b.mount(host);
     await flush();
-    b.update([
-      instance({ session_id: "s1", account_id: FIBO.id, rate_limited_resets_at: BigInt(NOW_SEC + 3600) }),
-      instance({ session_id: "s2", account_id: PERSONAL.id, rate_limited_resets_at: BigInt(NOW_SEC + 7200) }),
-    ]);
-    for (const btn of host.querySelectorAll(".rlb-move")) {
-      expect(btn.disabled).toBe(true);
-      expect(btn.title).toMatch(/is also at its limit until/);
-    }
-  });
-
-  // The daemon switches the account in place now, so it hands back the SAME
-  // session id it was given. onMoved still fires with both ids because the
-  // pane repaint is shared with the fork fallback.
-  it("clicking 'Continue on <other>' switches the selected blocked session's account", async () => {
-    moveSessionToAccount.mockResolvedValue("s2");
-    const b = new RateLimitBanner();
-    b.mount(host);
-    await flush();
-    const onMoved = vi.fn();
-    b.setOnMoved(onMoved);
-    b.setSelectedSessionGetter(() => "s2");
+    b.setSelectedSessionGetter(() => "s1");
     b.update([
       instance({ session_id: "s1", account_id: FIBO.id, rate_limited_resets_at: BigInt(NOW_SEC + 3600), started_at: "2026-01-01T00:00:00Z" }),
       instance({ session_id: "s2", account_id: FIBO.id, rate_limited_resets_at: BigInt(NOW_SEC + 3600), started_at: "2026-01-02T00:00:00Z" }),
@@ -215,14 +201,14 @@ describe("RateLimitBanner", () => {
     host.querySelector(".rlb-move").click();
     await flush();
 
-    expect(moveSessionToAccount).toHaveBeenCalledWith("s2", PERSONAL.id);
-    expect(showToast).toHaveBeenCalledWith("Now on Personal, continuing.");
-    expect(onMoved).toHaveBeenCalledWith("s2", "s2");
+    expect(onSwitch).toHaveBeenCalledWith("s1");
+    expect(moveSessionToAccount).not.toHaveBeenCalled();
   });
 
   it("falls back to the most-recently-started blocked session when none is selected", async () => {
-    moveSessionToAccount.mockResolvedValue("new-session-id");
+    const onSwitch = vi.fn().mockResolvedValue(undefined);
     const b = new RateLimitBanner();
+    b.setOnSwitchAccount(onSwitch);
     b.mount(host);
     await flush();
     b.setSelectedSessionGetter(() => null);
@@ -234,7 +220,7 @@ describe("RateLimitBanner", () => {
     host.querySelector(".rlb-move").click();
     await flush();
 
-    expect(moveSessionToAccount).toHaveBeenCalledWith("newer", PERSONAL.id);
+    expect(onSwitch).toHaveBeenCalledWith("newer");
   });
 
   it("'View in Schedule' navigates via showView('schedule')", async () => {

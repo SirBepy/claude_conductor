@@ -14,10 +14,10 @@ import {
 } from "./session-characters";
 import { api } from "../../shared/api";
 import { openChangeCharacterModal } from "../../shared/change-character-modal";
-import { openChangeAccountModal } from "../../shared/change-account-modal";
-import { isAutoAccept, setAutoAccept } from "./permission-modal";
+import { openChangeAccountForChat } from "../../shared/change-account-modal";
+import { isAutoAccept, isSubchatsOn, setAutoAccept } from "./permission-modal";
 import { getCachedAccount } from "../../shared/chat/rate-limit-banner";
-import { moveChatToAccount } from "./account-move";
+import { moveChatToAccount, movableSubs, planAccountMove } from "./account-move";
 import { loadDraft, moveComposerDraft } from "../../shared/chat/composer-persistence";
 import { setComposerDraft, clearComposerDraft } from "../../shared/chat/session-draft-sync";
 
@@ -133,20 +133,32 @@ export async function applyAccountMove(
 }
 
 /** Move a session to a different Claude account: opens the account picker,
- *  then hands off to `moveSessionToAccount`, the same call the rate-limit
- *  banner's continue-on-the-other-account button makes. */
+ *  then hands off to `moveSessionToAccount`. Shared by the chat menu, the
+ *  statusbar account chip and the rate-limit banner's Switch account. A main
+ *  chat with subs gets the "Also move its N subchats" switch. */
 export async function changeAccountForSession(
   sessionId: string,
   selectSession: (sessionId: string, pane: HTMLElement) => Promise<void>,
 ): Promise<void> {
   const sess = state.sessions.find((s) => s.session_id === sessionId);
   if (!sess) return;
-  const picked = await openChangeAccountModal({ currentId: sess.account_id ?? null, title: "Change account" });
-  if (!picked || picked === sess.account_id) return;
+  const subsCount = movableSubs(sessionId, state.sessions).length;
+  const pick = await openChangeAccountForChat({
+    currentId: sess.account_id ?? null,
+    title: "Change account",
+    subsCount,
+    // A chat with subs is left off API credit too, mode on or not: the subs
+    // switch would carry them onto it, and the daemon refuses a sub there.
+    apiCreditAllowed: sess.subchat_of == null && !isSubchatsOn(sessionId) && subsCount === 0,
+  });
+  if (!pick) return;
+  const plan = planAccountMove(sess, state.sessions, pick.id, pick.withSubs);
+  if (!plan.moveChat && plan.subIds.length === 0) return;
   await moveChatToAccount(
     sessionId,
-    picked,
-    getCachedAccount(picked)?.label ?? "the other account",
+    pick.id,
+    getCachedAccount(pick.id)?.label ?? "the other account",
     (newId) => applyAccountMove(sessionId, newId, selectSession),
+    plan,
   );
 }

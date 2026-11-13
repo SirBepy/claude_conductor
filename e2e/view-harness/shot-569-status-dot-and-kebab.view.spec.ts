@@ -48,7 +48,7 @@ test.describe("@shot", () => {
     const menu = page.locator(".session-more-menu");
     await expect(menu).toBeVisible();
     const items = menu.locator(".smore-item");
-    await expect(items).toHaveText(["Continue on Work", "View in Schedule", "Minimize"]);
+    await expect(items).toHaveText(["Switch account", "View in Schedule", "Minimize"]);
 
     for (let i = 0; i < 3; i++) {
       const box = (await items.nth(i).boundingBox())!;

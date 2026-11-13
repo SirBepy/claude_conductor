@@ -212,6 +212,21 @@ pub fn refusal_for_account(account_id: Option<&str>, accounts: &[Account]) -> Op
         .then_some(API_CREDIT_REFUSAL)
 }
 
+/// Why `move_session_to_account` refuses an API-credit target.
+pub const MOVE_API_CREDIT_REFUSAL: &str =
+    "A chat using subchats, and each of its subs, cannot run on an API-credit account, since every sub would spend its credit. Pick a subscription account.";
+
+/// `Some(reason)` when moving `inst` onto `target` would put a sub, or a chat
+/// with the mode on, onto an `ApiCredit` account. The mode refuses that kind when
+/// it is turned on and when a sub spawns; this closes the third door, a later
+/// account change. A plain chat may still pick API credit explicitly.
+pub fn refusal_for_move(inst: &Instance, subchats_on: bool, target: &str, accounts: &[Account]) -> Option<&'static str> {
+    if !is_sub(inst) && !subchats_on {
+        return None;
+    }
+    refusal_for_account(Some(target), accounts).map(|_| MOVE_API_CREDIT_REFUSAL)
+}
+
 /// The account `session_id` runs under: the live child's, else the registry's.
 fn session_account_id(state: &DaemonState, session_id: &str) -> Option<String> {
     state
@@ -626,6 +641,22 @@ mod tests {
     fn an_unknown_account_never_refuses() {
         assert_eq!(refusal_for_account(None, &[]), None);
         assert_eq!(refusal_for_account(Some("ghost"), &[account("a", AccountKind::ApiCredit)]), None);
+    }
+
+    #[test]
+    fn a_move_onto_api_credit_is_refused_for_a_sub_and_a_mode_on_chat_only() {
+        let st = state();
+        chat(&st, "main", None, "opus", "high");
+        chat(&st, "sub", None, "sonnet", "high");
+        st.registry.set_subchat_of("sub", Some("main".into()));
+        chat(&st, "plain", None, "sonnet", "high");
+        let accounts = [account("api-1", AccountKind::ApiCredit), account("sub-1", AccountKind::Subscription)];
+        let get = |id: &str| st.registry.get(id).unwrap();
+        assert_eq!(refusal_for_move(&get("sub"), false, "api-1", &accounts), Some(MOVE_API_CREDIT_REFUSAL));
+        assert_eq!(refusal_for_move(&get("main"), true, "api-1", &accounts), Some(MOVE_API_CREDIT_REFUSAL));
+        assert_eq!(refusal_for_move(&get("plain"), false, "api-1", &accounts), None, "a plain chat may pick API credit");
+        assert_eq!(refusal_for_move(&get("sub"), false, "sub-1", &accounts), None);
+        assert_eq!(refusal_for_move(&get("main"), true, "ghost", &accounts), None, "unknown never blocks");
     }
 
     #[test]

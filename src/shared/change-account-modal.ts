@@ -8,6 +8,7 @@ import "./change-character-modal.css";
 import "./account-chip.css";
 import "./change-account-modal.css";
 import "./modal.css";
+import "../styles/toggle-switch.css";
 import { api } from "./api";
 import { escapeHtml } from "./escape-html";
 import type { AccountLite } from "./account-chip";
@@ -43,9 +44,38 @@ export function renderAccountListBodyHtml(accounts: readonly AccountLite[], curr
     .join("")}</div>`;
 }
 
-export async function openChangeAccountModal(opts: {
+/** The "Also move its N subchats" row under the account list, on by default:
+ *  swapping a main chat's account usually means its subs should follow. */
+export function subsSwitchHtml(count: number): string {
+  const label = `Also move its ${count} subchat${count === 1 ? "" : "s"}`;
+  return `<div class="cam-subs-row"><span class="cam-subs-label">${escapeHtml(label)}</span><label class="switch"><input type="checkbox" class="cam-subs-input" checked aria-label="${escapeHtml(label)}"><span class="slider"></span></label></div>`;
+}
+
+export interface ChatAccountPick {
+  id: string;
+  /** The subs switch was on. Always false when no switch was shown. */
+  withSubs: boolean;
+}
+
+export async function openChangeAccountModal(opts: Parameters<typeof pickAccount>[0]): Promise<string | null> {
+  return (await pickAccount(opts))?.id ?? null;
+}
+
+/** The picker for one established chat: `subsCount` > 0 adds the subs switch,
+ *  and `apiCreditAllowed: false` leaves API-credit accounts out (a sub, or a
+ *  chat using subchats, never runs on one; the daemon refuses it too). */
+export async function openChangeAccountForChat(
+  opts: Parameters<typeof pickAccount>[0] & { subsCount: number; apiCreditAllowed: boolean },
+): Promise<ChatAccountPick | null> {
+  const accounts = opts.accounts ?? (await api.listAccounts());
+  return pickAccount({ ...opts, accounts: opts.apiCreditAllowed ? accounts : accounts.filter((a) => !isApiCreditAccount(a)) });
+}
+
+async function pickAccount(opts: {
   currentId: string | null;
   title?: string;
+  /** Number of subs the "Also move" switch names; 0 or absent shows no switch. */
+  subsCount?: number;
   /** Set by a caller that cannot proceed without an id (the history
    *  "Continue this chat" gate, the manual-takeover gate). With exactly one
    *  account those callers must get it back rather than a modal: the
@@ -61,29 +91,31 @@ export async function openChangeAccountModal(opts: {
    *  local id picked for a peer chat would name nothing (or the wrong account)
    *  on the host. Omitted means this machine's own accounts. */
   accounts?: readonly AccountLite[];
-}): Promise<string | null> {
+}): Promise<ChatAccountPick | null> {
   const title = opts.title ?? "Change account";
   const accounts: readonly AccountLite[] = opts.accounts ?? (await api.listAccounts());
 
   // A sole API-credit account is never auto-picked: it bills the monthly API
   // credit, so choosing it has to be an explicit click.
-  if (opts.autoPickSole && accounts.length === 1 && !isApiCreditAccount(accounts[0])) return accounts[0]!.id;
+  if (opts.autoPickSole && accounts.length === 1 && !isApiCreditAccount(accounts[0])) return { id: accounts[0]!.id, withSubs: false };
+  const subsCount = opts.subsCount ?? 0;
 
-  return new Promise<string | null>((resolve) => {
+  return new Promise<ChatAccountPick | null>((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "cc-modal-overlay";
 
     const unlock = lockInputToHost(overlay);
 
-    function close(result: string | null) {
+    function close(id: string | null) {
       unlock();
+      const withSubs = subsCount > 0 && !!overlay.querySelector<HTMLInputElement>(".cam-subs-input")?.checked;
       overlay.remove();
       document.removeEventListener("keydown", onKey);
-      resolve(result);
+      resolve(id ? { id, withSubs } : null);
     }
 
     function render() {
-      const bodyHtml = renderAccountListBodyHtml(accounts, opts.currentId);
+      const bodyHtml = renderAccountListBodyHtml(accounts, opts.currentId) + (subsCount > 0 ? subsSwitchHtml(subsCount) : "");
 
       overlay.innerHTML = `
         <div class="cc-modal-card cam-modal-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">

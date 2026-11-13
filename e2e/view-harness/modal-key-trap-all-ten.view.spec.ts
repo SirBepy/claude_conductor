@@ -1,3 +1,4 @@
+// Reviewed 2026-11-13: change-account-modal gained an optional subs switch row; the key trap on its overlay is unchanged.
 import { expect, test, type Page } from "@playwright/test";
 import { mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 

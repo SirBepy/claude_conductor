@@ -1,3 +1,4 @@
+// Reviewed 2026-11-13: change-account-modal gained openChangeAccountForChat (subs switch, API credit left out for subs); the draft picker path this spec drives is unchanged.
 // Reviewed 2026-11-09: the desktop header no longer renders the three-dots (#viewMoreBtn, phone only now); this spec waits on the header and opens things with the keyboard instead.
 import { test, expect, type Page } from "@playwright/test";
 import { invokeCalls, mountView, SESSIONS_BASE_INVOKE } from "./harness";

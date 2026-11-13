@@ -14,7 +14,6 @@
 
 import { escapeHtml } from "../escape-html";
 import { api } from "../api";
-import { showToast } from "../toast";
 import { showView } from "../navigation";
 import type { Instance } from "../../types/ipc.generated";
 import { isSubchat } from "../../views/sessions/sessions-helpers";
@@ -96,9 +95,9 @@ export class RateLimitBanner {
   private minimized: Set<string>;
   // Per-card data the mobile kebab menu needs at click time, keyed by the
   // same minimizedKey() as the card - rebuilt every render().
-  private kebabData = new Map<string, { accountId: string; move: { targetId: string; label: string; disabledReason?: string } | null }>();
+  private kebabData = new Map<string, { accountId: string; canSwitch: boolean }>();
   private getSelectedSessionId: () => string | null = () => null;
-  private onMoved: (newSessionId: string, oldSessionId: string) => void = () => {};
+  private onSwitchAccount: ((sessionId: string) => Promise<void>) | null = null;
 
   constructor(deps?: RateLimitBannerDeps) {
     this.now = deps?.now ?? (() => Date.now());
@@ -128,18 +127,19 @@ export class RateLimitBanner {
     this.render();
   }
 
-  /** Wired by the chat pane so "Continue on <Other>" knows which live session
-   * to fork (falls back to the account's most-recently-started blocked
-   * session when nothing is selected). */
+  /** Wired by the chat pane so "Switch account" knows which blocked chat to
+   * move (falls back to the account's most-recently-started blocked session
+   * when nothing is selected). */
   setSelectedSessionGetter(fn: () => string | null): void {
     this.getSelectedSessionId = fn;
   }
 
-  /** Wired by the chat pane to select the freshly-forked session once a move
-   * completes. Receives both ids so the caller can carry over per-chat
-   * client state (auto-accept, held messages) onto the new id. */
-  setOnMoved(fn: (newSessionId: string, oldSessionId: string) => void): void {
-    this.onMoved = fn;
+  /** Wired by the chat pane to the Change account picker, so "Switch account"
+   * asks Joe which account to move to (and offers the subs switch on a main
+   * chat). The banner never picks the target itself: an account it guessed
+   * could be the one that is not working. Unwired, the button is not drawn. */
+  setOnSwitchAccount(fn: (sessionId: string) => Promise<void>): void {
+    this.onSwitchAccount = fn;
   }
 
   /** Feed the current live instance list and repaint. Safe to call on every
@@ -191,7 +191,7 @@ export class RateLimitBanner {
 
     const cards: string[] = [];
     const liveKeys = new Set<string>();
-    const kebabData = new Map<string, { accountId: string; move: { targetId: string; label: string; disabledReason?: string } | null }>();
+    const kebabData = new Map<string, { accountId: string; canSwitch: boolean }>();
     for (const [accountId, list] of groups) {
       const blockedInGroup = list.filter(isBlocked);
       // All rejections for one account share a resets_at in practice; take
@@ -221,29 +221,14 @@ export class RateLimitBanner {
       const timeLine = `Resets ${formatClockLabel(resetsAtMs, nowMs)}${affected}`;
       const countdown = formatCountdown(resetsAtMs - nowMs);
 
-      // "Continue on <other>" only when a DIFFERENT plan account exists. A
-      // one-click suggestion must never move a chat onto the API-credit
-      // account (that is an explicit pick in the Change account modal).
-      const other = listCachedAccounts().find((a) => a.id !== accountId && !isApiCreditAccount(a));
-      let moveBtn = "";
-      let move: { targetId: string; label: string; disabledReason?: string } | null = null;
-      if (other) {
-        const otherLabel = capitalize(other.label);
-        const otherBlocked = this.instances.filter((i) => i.account_id === other.id && isBlocked(i));
-        if (otherBlocked.length > 0) {
-          const otherRep = otherBlocked.reduce((a, b) =>
-            Number(b.rate_limited_resets_at) > Number(a.rate_limited_resets_at) ? b : a
-          );
-          const otherResetsAtMs = Number(otherRep.rate_limited_resets_at) * 1000;
-          const disabledReason = `${otherLabel} is also at its limit until ${formatClockLabel(otherResetsAtMs, nowMs)}.`;
-          moveBtn = `<button class="rlb-move" data-account="${escapeHtml(other.id)}" disabled title="${escapeHtml(disabledReason)}"><i class="ph ph-arrow-right"></i> Continue on ${escapeHtml(otherLabel)}</button>`;
-          move = { targetId: other.id, label: otherLabel, disabledReason };
-        } else {
-          moveBtn = `<button class="rlb-move" data-account="${escapeHtml(other.id)}"><i class="ph ph-arrow-right"></i> Continue on ${escapeHtml(otherLabel)}</button>`;
-          move = { targetId: other.id, label: otherLabel };
-        }
-      }
-      kebabData.set(key, { accountId, move });
+      // "Switch account" opens the picker, so Joe names the target: only
+      // useful when another plan account exists. API credit alone does not
+      // count, since the picker leaves it out for a chat with subs, and a plain
+      // chat can still pick it from the chat menu.
+      const canSwitch = !!this.onSwitchAccount
+        && listCachedAccounts().some((a) => a.id !== accountId && !isApiCreditAccount(a));
+      const moveBtn = canSwitch ? `<button class="rlb-move"><i class="ph ph-arrow-right"></i> Switch account</button>` : "";
+      kebabData.set(key, { accountId, canSwitch });
 
       cards.push(`
         <div class="rate-limit-banner" data-account-id="${escapeHtml(accountId)}" data-key="${escapeHtml(key)}" style="--acc:${escapeHtml(colour)}">
@@ -281,10 +266,8 @@ export class RateLimitBanner {
     if (!this.host) return;
     this.host.querySelectorAll<HTMLButtonElement>(".rlb-move").forEach((btn) => {
       btn.addEventListener("click", () => {
-        if (btn.disabled) return;
         const accountId = btn.closest<HTMLElement>(".rate-limit-banner")?.dataset.accountId;
-        const targetAccountId = btn.dataset.account;
-        if (accountId && targetAccountId) void this.moveToAccount(accountId, targetAccountId);
+        if (accountId) void this.switchAccount(accountId);
       });
     });
     this.host.querySelectorAll<HTMLButtonElement>(".rlb-schedule").forEach((btn) => {
@@ -315,13 +298,8 @@ export class RateLimitBanner {
         const data = key ? this.kebabData.get(key) : undefined;
         if (!key || !data) return;
         const items: RlbMenuItem[] = [];
-        if (data.move) {
-          items.push({
-            icon: "arrow-right",
-            label: `Continue on ${escapeHtml(data.move.label)}`,
-            disabledReason: data.move.disabledReason,
-            onClick: () => void this.moveToAccount(data.accountId, data.move!.targetId),
-          });
+        if (data.canSwitch) {
+          items.push({ icon: "arrow-right", label: "Switch account", onClick: () => void this.switchAccount(data.accountId) });
         }
         items.push({ icon: "calendar-dots", label: "View in Schedule", onClick: () => showView("schedule") });
         items.push({
@@ -338,24 +316,15 @@ export class RateLimitBanner {
     });
   }
 
-  private async moveToAccount(accountId: string, targetAccountId: string): Promise<void> {
+  private async switchAccount(accountId: string): Promise<void> {
     const blockedInAccount = this.instances.filter((i) => i.account_id === accountId && isBlocked(i));
-    if (blockedInAccount.length === 0) return;
+    if (blockedInAccount.length === 0 || !this.onSwitchAccount) return;
     const selectedId = this.getSelectedSessionId();
     const mostRecent = blockedInAccount
       .slice()
       .sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))[0]!;
     const source = blockedInAccount.find((i) => i.session_id === selectedId) ?? mostRecent;
-    try {
-      const newId = await api.moveSessionToAccount(source.session_id, targetAccountId);
-      const targetLabel = capitalize(getCachedAccount(targetAccountId)?.label ?? "the other account");
-      // "Continuing there" was true of the old fork, which landed the user in
-      // a different chat. The switch is in-place now - same chat, new account.
-      showToast(`Now on ${targetLabel}, continuing.`);
-      this.onMoved(newId, source.session_id);
-    } catch (err) {
-      console.error("[rate-limit-banner] moveSessionToAccount failed", err);
-    }
+    await this.onSwitchAccount(source.session_id);
   }
 }
 
