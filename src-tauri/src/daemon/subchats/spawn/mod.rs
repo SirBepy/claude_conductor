@@ -22,7 +22,11 @@ pub const DEPTH_REFUSAL: &str =
     "A sub cannot spawn or respawn chats. Do the work in this chat, or finish and report that it needs more jobs.";
 
 const TIERS: &str = "sonnet at medium effort (mechanical work: a version bump, a rename, docs), \
-sonnet at high effort (normal code jobs), or opus at high effort (taste or design, a bug with no clear cause, architecture)";
+sonnet at high effort (every job that edits files), or opus at high effort (a read-only sub only: a plan, a design, an audit, a review)";
+
+/// Said when an Opus sub is asked to edit files. Joe's call 2026-11-13: Opus is
+/// worth its 2x as planner, designer and checker, while Sonnet implements.
+const OPUS_WRITER_REFUSAL: &str = "An Opus sub cannot edit files: Opus costs twice what Sonnet does and earns it on planning, design and review, not on implementing. Use sonnet at high effort for this job. If it needs a plan first, spawn a read-only Opus sub for the plan (writes false), then a Sonnet sub to carry it out.";
 
 pub(super) fn label(i: &Instance) -> String {
     i.name
@@ -38,8 +42,9 @@ pub(super) fn label(i: &Instance) -> String {
 /// takes the Sonnet-high default. Only the three tiers Joe chose pass: Sonnet at
 /// medium, Sonnet at high, Opus at high. A full model id counts as its family, so
 /// `claude-opus-4-8` is Opus. The effort comes back lower-cased because the spawn
-/// compares it exactly.
-pub fn resolve_tier(model: Option<&str>, effort: Option<&str>) -> Result<(String, String), String> {
+/// compares it exactly. `writes` is whether the sub edits files: Opus is refused
+/// for a writer.
+pub fn resolve_tier(model: Option<&str>, effort: Option<&str>, writes: bool) -> Result<(String, String), String> {
     let pick = |v: Option<&str>, default: &str| {
         v.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(default).to_string()
     };
@@ -56,6 +61,9 @@ pub fn resolve_tier(model: Option<&str>, effort: Option<&str>) -> Result<(String
     if !allowed {
         let why = if family.contains("haiku") { "Subs never run on haiku. " } else { "" };
         return Err(format!("{why}{model} at {effort} effort is not a sub tier. Pick one of the three tiers: {TIERS}."));
+    }
+    if writes && family.contains("opus") {
+        return Err(OPUS_WRITER_REFUSAL.to_string());
     }
     Ok((model, effort))
 }
@@ -172,7 +180,7 @@ pub fn plan(
         refuse_duplicate_name(state, caller_id, name)?;
         brief
     };
-    let (model, effort) = resolve_tier(model, effort)?;
+    let (model, effort) = resolve_tier(model, effort, brief.writes)?;
     let hold = match args.after.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         Some(query) => {
             brief.after = Some(query.to_string());
@@ -364,10 +372,38 @@ mod tests {
 
     #[test]
     fn haiku_is_refused_with_the_three_tiers() {
-        let err = resolve_tier(Some("haiku"), None).unwrap_err();
+        let err = resolve_tier(Some("haiku"), None, false).unwrap_err();
         assert!(err.contains("sonnet at medium") && err.contains("sonnet at high") && err.contains("opus at high"), "{err}");
-        assert!(resolve_tier(Some("claude-haiku-4-5"), Some("low")).is_err());
-        assert_eq!(resolve_tier(Some("opus"), Some("high")).unwrap(), ("opus".to_string(), "high".to_string()));
+        assert!(resolve_tier(Some("claude-haiku-4-5"), Some("low"), false).is_err());
+        assert_eq!(resolve_tier(Some("opus"), Some("high"), false).unwrap(), ("opus".to_string(), "high".to_string()));
+    }
+
+    #[test]
+    fn opus_is_for_a_read_only_sub_and_a_writer_is_sent_to_sonnet() {
+        let err = resolve_tier(Some("opus"), Some("high"), true).unwrap_err();
+        assert!(err.contains("Opus sub cannot edit files") && err.contains("sonnet at high"), "{err}");
+        assert!(resolve_tier(Some("claude-opus-4-8"), None, true).is_err(), "a full id counts as its family");
+        assert!(resolve_tier(Some("opus"), Some("high"), false).is_ok(), "a read-only plan or review sub may use Opus");
+        assert!(resolve_tier(Some("sonnet"), Some("high"), true).is_ok());
+        assert!(resolve_tier(None, None, true).is_ok(), "an omitted tier is Sonnet, so a writer needs no model");
+    }
+
+    #[test]
+    fn a_planned_opus_writer_is_refused_and_an_opus_reader_is_planned() {
+        let st = state();
+        row(&st, "main");
+        let here = cwd();
+        let mut writer = complete();
+        writer.writes = Some(true);
+        writer.files = Some(vec!["src/a.rs".into()]);
+        let err = plan(&st, "main", &on(), &here.to_string_lossy(), None, Some("opus"), Some("high"), Some("w"), &writer, &[])
+            .err()
+            .expect("an Opus writer is refused");
+        assert!(err.contains("Opus sub cannot edit files"), "{err}");
+        let p = plan(&st, "main", &on(), &here.to_string_lossy(), None, Some("opus"), Some("high"), Some("r"), &complete(), &[])
+            .unwrap()
+            .expect("a read-only Opus sub");
+        assert_eq!(p.model, "opus");
     }
 
     fn pair(m: &str, e: &str) -> (String, String) {
@@ -385,11 +421,11 @@ mod tests {
             ("claude-sonnet-4-5", "MEDIUM"),
         ] {
             // The effort comes back lower-cased: the spawn compares it exactly.
-            assert_eq!(resolve_tier(Some(m), Some(e)).unwrap(), pair(m, &e.to_ascii_lowercase()), "{m} {e}");
+            assert_eq!(resolve_tier(Some(m), Some(e), false).unwrap(), pair(m, &e.to_ascii_lowercase()), "{m} {e}");
         }
         // An omitted half takes its default, and the pair is still checked.
-        assert_eq!(resolve_tier(Some("opus"), None).unwrap(), pair("opus", "high"));
-        assert_eq!(resolve_tier(None, Some("medium")).unwrap(), pair("sonnet", "medium"));
+        assert_eq!(resolve_tier(Some("opus"), None, false).unwrap(), pair("opus", "high"));
+        assert_eq!(resolve_tier(None, Some("medium"), false).unwrap(), pair("sonnet", "medium"));
     }
 
     #[test]
@@ -405,7 +441,7 @@ mod tests {
             (Some("some-other-model"), None),
             (None, Some("max")),
         ] {
-            let err = resolve_tier(m, e).expect_err(&format!("{m:?} {e:?} must be refused"));
+            let err = resolve_tier(m, e, false).expect_err(&format!("{m:?} {e:?} must be refused"));
             assert!(
                 err.contains("sonnet at medium") && err.contains("sonnet at high") && err.contains("opus at high"),
                 "{m:?} {e:?}: {err}"
@@ -415,13 +451,13 @@ mod tests {
 
     #[test]
     fn an_omitted_tier_is_sonnet_high_not_the_project_default() {
-        assert_eq!(resolve_tier(None, None).unwrap(), ("sonnet".to_string(), "high".to_string()));
-        assert_eq!(resolve_tier(Some("  "), Some("")).unwrap(), ("sonnet".to_string(), "high".to_string()));
+        assert_eq!(resolve_tier(None, None, false).unwrap(), ("sonnet".to_string(), "high".to_string()));
+        assert_eq!(resolve_tier(Some("  "), Some(""), false).unwrap(), ("sonnet".to_string(), "high".to_string()));
         // Passed on explicitly, `resolve_model_effort` takes them over the project default.
         let mut settings = Settings::default();
         settings.extra.insert("defaultModel".into(), serde_json::json!("fable"));
         let st = DaemonState::new(new_session_map(), SettingsCache::new(settings));
-        let (m, e) = resolve_tier(None, None).unwrap();
+        let (m, e) = resolve_tier(None, None, false).unwrap();
         let got = crate::daemon::methods::spawn_chat::resolve_model_effort(
             &st, &cwd(), Some(&m), Some(&e), &ChatConfig::default(), false,
         );
@@ -799,12 +835,13 @@ mod tests {
     }
 
     #[test]
-    fn a_gate_can_ask_for_opus_but_never_haiku_and_keeps_the_three_tiers() {
+    fn a_gate_never_runs_on_opus_or_haiku_and_keeps_the_three_tiers() {
         let st = state();
         row(&st, "g-tier");
         let here = cwd();
-        let ok = plan(&st, "g-tier", &on(), &here.to_string_lossy(), Some("p"), Some("opus"), Some("high"), None, &gate_args(), &[]).unwrap().unwrap();
-        assert_eq!((ok.model.as_str(), ok.effort.as_str()), ("opus", "high"));
+        // A gate edits files and pushes, so it is a writer: Sonnet only.
+        let err = plan(&st, "g-tier", &on(), &here.to_string_lossy(), Some("p"), Some("opus"), Some("high"), None, &gate_args(), &[]).err().unwrap();
+        assert!(err.contains("Opus sub cannot edit files"), "{err}");
         let err = plan(&st, "g-tier", &on(), &here.to_string_lossy(), Some("p"), Some("haiku"), None, None, &gate_args(), &[]).err().unwrap();
         assert!(err.contains("never run on haiku"), "{err}");
     }

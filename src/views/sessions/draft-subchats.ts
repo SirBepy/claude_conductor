@@ -19,7 +19,7 @@ const ROUTE_CARD_CLASS = "draft-main-route-card";
 /** Longest the row waits for the rail card before showing itself anyway. */
 const RAIL_WAIT_MS = 4000;
 
-const TIP ="Hand the jobs you name to hidden child chats that report back here. Switching it on moves the chat to Opus at high effort or better.";
+const TIP ="Hand the jobs you name to hidden child chats that report back here. Switching it on raises the chat to high effort or better.";
 
 /** What the chat was on before the switch moved it to the main-chat model, so
  *  switching back puts it right unless the user picked something else meanwhile. */

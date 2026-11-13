@@ -188,17 +188,17 @@ pub const API_CREDIT_REFUSAL: &str =
 /// stop the sub from closing itself.
 const SUB_CANNOT_BE_MAIN: &str = "A sub cannot use subchats itself: it is a job inside another chat.";
 
-/// Model family and effort a main chat runs on (Joe: it does little work, but
-/// "you REALLY dont want it to be stupid").
-const MAIN_MODEL: &str = "opus";
+/// Lowest effort a main chat runs on: it writes the briefs, so a thin one costs
+/// more than the effort saves.
 const MAIN_EFFORT: &str = "high";
 
 /// The model/effort pair a main chat should run with, given what it has now.
-/// Only a model that is not Opus is replaced, and only an effort below high is
-/// raised: a deliberate `xhigh`/`max` pick is already at least what the mode
-/// asks for, so lowering it would undo a choice Joe made.
+/// The model is never touched: the mode used to force Opus, but a main chat
+/// mostly routes work, so Joe keeps whichever model he picked (decided
+/// 2026-11-13, to cut Opus spend). Only an effort below high is raised: a
+/// deliberate `xhigh`/`max` pick is already at least what the mode asks for, so
+/// lowering it would undo a choice Joe made.
 pub fn main_launch(model: &str, effort: &str) -> (String, String) {
-    let model = if model.to_ascii_lowercase().contains("opus") { model } else { MAIN_MODEL };
     let effort = if matches!(effort, "high" | "xhigh" | "max") { effort } else { MAIN_EFFORT };
     (model.to_string(), effort.to_string())
 }
@@ -607,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn a_subscription_chat_turns_on_persists_and_moves_to_opus_high() {
+    fn a_subscription_chat_turns_on_persists_and_raises_effort_but_keeps_its_model() {
         let st = state();
         chat(&st, "s1", Some("sub-1"), "sonnet", "medium");
         let accounts = [account("sub-1", AccountKind::Subscription)];
@@ -615,9 +615,9 @@ mod tests {
         let applied = apply_set_on(&st, "s1", true, &accounts, |id, v| wrote.borrow_mut().push((id.to_string(), v)))
             .unwrap();
         assert_eq!(*wrote.borrow(), vec![("s1".to_string(), true)]);
-        assert_eq!(applied, Some(("opus".to_string(), "high".to_string())));
+        assert_eq!(applied, Some(("sonnet".to_string(), "high".to_string())));
         let inst = st.registry.get("s1").unwrap();
-        assert_eq!((inst.model.as_str(), inst.effort.as_str()), ("opus", "high"));
+        assert_eq!((inst.model.as_str(), inst.effort.as_str()), ("sonnet", "high"));
     }
 
     #[test]
@@ -630,11 +630,11 @@ mod tests {
     }
 
     #[test]
-    fn main_launch_keeps_an_opus_model_and_a_high_or_better_effort() {
+    fn main_launch_never_changes_the_model_and_lifts_effort_to_high_or_better() {
         assert_eq!(main_launch("claude-opus-4-8", "max"), ("claude-opus-4-8".to_string(), "max".to_string()));
         assert_eq!(main_launch("opus", "xhigh"), ("opus".to_string(), "xhigh".to_string()));
-        assert_eq!(main_launch("sonnet", "low"), ("opus".to_string(), "high".to_string()));
-        assert_eq!(main_launch("", ""), ("opus".to_string(), "high".to_string()), "an unrecorded pair becomes opus/high");
+        assert_eq!(main_launch("sonnet", "low"), ("sonnet".to_string(), "high".to_string()), "a Sonnet main chat stays Sonnet");
+        assert_eq!(main_launch("", ""), (String::new(), "high".to_string()), "an unrecorded model stays unrecorded");
         assert_eq!(main_launch("opus", "medium"), ("opus".to_string(), "high".to_string()));
     }
 

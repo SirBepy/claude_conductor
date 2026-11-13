@@ -132,7 +132,7 @@ Rendered with the app's own components (16 subs, `.for_bepy/screenshots/46644-13
 |---|---|---|
 | Keep a chat alive by swapping it for a fresh one, or by compacting it in place | Compact in place | The CLI does it natively; the id never changes, so nothing has to move |
 | One writer per project by default | Already changed by Joe, 2026-11-12: every writing sub gets a worktree | In the working tree now (peer chat "always-worktrees") |
-| Main chat on Opus high | Keep | Mains are 13% of spend; the cost is in subs |
+| Main chat on Opus high | Dropped 2026-11-13: the mode keeps the chat's own model and only lifts effort to high | Mains are 13% of spend, but Joe wants less Opus; Opus subs are read-only now |
 | Never close finished subs | Keep, fix the symptoms | Name collisions and list order are bugs, not a reason to close |
 | Rule 11: the main chat never answers a question itself | Ask Joe (proposal in 4.1) | 22 times the cost and a 6-minute median wait; Joe's own rule |
 | Move the module maps out of CLAUDE.md | Ask Joe (proposal in 4.2) | Every chat and every sub pays for 42K chars, and re-pays on every edit |
