@@ -45,7 +45,9 @@ describe("From subs", () => {
   it("puts the card written later first on a tied time", () => {
     const fin = entry("fin", 5000);
     const all = entry("all", 5000, { kind: "all_finished", sub_id: null });
-    expect(derive({ messages: [row(all), row(fin)], subCards: [fin, all] })?.shown.map((m) => m.subCard.id)).toEqual(["all", "fin"]);
+    // Rows arrive in log order, as mergeSubCards splices them in.
+    expect(derive({ messages: [row(fin), row(all)], subCards: [fin, all] })?.shown.map((m) => m.subCard.id)).toEqual(["all", "fin"]);
+    expect(derive({ messages: [], subCards: [fin, all] })?.shown.map((m) => m.subCard.id)).toEqual(["all", "fin"]);
   });
 
   it("keeps the all-finished card and when-done's note", () => {
