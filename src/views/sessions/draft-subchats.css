@@ -36,10 +36,16 @@
 .draft-main-route-card .dmr-line strong { font-weight: 600; color: var(--color-text); }
 .draft-main-route .draft-subchats-label { margin-left: auto; }
 .draft-main-route .switch { margin-left: 2px; }
-/* A class rule's display would beat the [hidden] attribute's default. */
+/* A class rule's display would beat the [hidden] attribute's default. The rail cards
+   are `.ps-group`s, whose `.view-project-settings .ps-group { display: flex }` ties
+   `.x[hidden]` on specificity and wins by load order, which painted the Use subchats
+   card (hidden while the project has a main chat) beside the "Goes to" one. The
+   `.view-project-settings` prefix outranks it whatever order the sheets load in. */
 .draft-subchats[hidden],
 .draft-subchats-card[hidden],
 .draft-main-route[hidden],
-.draft-main-route-card[hidden] { display: none; }
+.draft-main-route-card[hidden],
+.view-project-settings .draft-subchats-card[hidden],
+.view-project-settings .draft-main-route-card[hidden] { display: none; }
 .draft-subchats .switch input:disabled + .slider,
 .draft-subchats-card .switch input:disabled + .slider { cursor: not-allowed; opacity: 0.5; }

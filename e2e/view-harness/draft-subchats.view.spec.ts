@@ -82,7 +82,7 @@ type Core = { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<u
 
 // A project's draft on a wide window has the dashboard's settings rail, and the
 // switch is a "This chat" card under the settings there instead of a row.
-async function openRailDraft(page: Page): Promise<void> {
+async function openRailDraft(page: Page, withMainChat = false): Promise<void> {
   await page.setViewportSize({ width: 1700, height: 1000 });
   type Backend = { list: unknown; snapshots: Record<string, unknown>; histories: Record<string, unknown>; shots: string[] };
   await page.addInitScript((b: Backend) => {
@@ -111,15 +111,16 @@ async function openRailDraft(page: Page): Promise<void> {
     histories: { "p-conductor": conductorHistory(), [MOVED_CWD]: conductorHistory() },
     shots: [0, 1].map(fakeShot),
   });
-  await mountSessionsList(page, [sessionInstance({ session_id: "s-w", pid: 201, name: "Loop todos: cycle 3", cwd: CONDUCTOR_CWD, busy: true, awaiting: "working" })], {
+  const main = sessionInstance({ session_id: "main-1", pid: 202, name: "CV redesign", cwd: CONDUCTOR_CWD, project_id: "p-conductor", busy: false, awaiting: "done" });
+  await mountSessionsList(page, [sessionInstance({ session_id: "s-w", pid: 201, name: "Loop todos: cycle 3", cwd: CONDUCTOR_CWD, busy: true, awaiting: "working" }), ...(withMainChat ? [main] : [])], {
     load_history_page: { events: [], oldest_seq: 0, newest_seq: 0, has_more: false },
-    list_projects: [{ id: "p-conductor", path: CONDUCTOR_CWD, name: "claude_usage_in_taskbar", default_model: "haiku", default_effort: null }],
+    list_projects: [{ id: "p-conductor", path: CONDUCTOR_CWD, name: "claude_usage_in_taskbar", default_model: "haiku", default_effort: null, main_chat_id: withMainChat ? "main-1" : null }],
     list_accounts: [],
     get_settings: { theme: "void", defaultModel: "sonnet", defaultEffort: "high" },
     update_project: null,
     start_session: REAL,
     set_auto_accept: null,
-    list_subchats_on: [],
+    list_subchats_on: withMainChat ? ["main-1"] : [],
     check_paths_exist: { [MOVED_CWD]: true },
   });
   await page.evaluate(() => {
@@ -128,7 +129,8 @@ async function openRailDraft(page: Page): Promise<void> {
   await page.waitForFunction(() => typeof (window as unknown as { __launchDraftForTest?: unknown }).__launchDraftForTest === "function");
   await page.evaluate((p) => (window as unknown as { __launchDraftForTest: (p: unknown, c: unknown) => void })
     .__launchDraftForTest({ path: p, name: "claude_usage_in_taskbar" }, { model: "sonnet", effort: "low", accountId: "acc1" }), CONDUCTOR_CWD);
-  await expect(railCard(page)).toBeVisible();
+  // With a main chat the Use subchats card is the hidden one, so wait on the rail itself.
+  await expect(withMainChat ? page.locator(".pd-rail .view-project-settings .draft-main-route-card") : railCard(page)).toBeVisible();
   // The rail fades in after the dashboard's own entrance; a click mid-fade never settles.
   await expect(page.locator(".pd-rail")).toHaveCSS("opacity", "1", { timeout: 15_000 });
 }
@@ -144,6 +146,21 @@ test.describe("view-harness / Use subchats on a new-chat draft with a settings r
     await expect(card.locator("input")).toBeChecked();
     await expect(modelText(page)).toHaveText(/Opus/);
     await capture(page.locator(".pd-rail"), "draft-subchats-rail-card");
+  });
+
+  test("a project with a main chat shows one This chat group in the rail: Goes to + Plain chat instead, no Use subchats", async ({ page }) => {
+    await openRailDraft(page, true);
+    const settings = page.locator(".pd-rail .view-project-settings");
+    // Both cards exist in the DOM; the Use subchats one must not paint beside the other.
+    await expect(railCard(page)).toBeHidden();
+    await expect(settings.locator(".draft-main-route-card")).toBeVisible();
+    await expect(settings.locator(".draft-main-route-card .ps-group-title")).toHaveText(/This chat/i);
+    await expect(settings.getByText("Use subchats", { exact: true })).toBeHidden();
+    const titles = settings.locator(".ps-group-title", { hasText: /^This chat$/i });
+    await expect(titles.filter({ visible: true })).toHaveCount(1);
+    // A switch's checkbox is visually hidden by design; its slider is what paints.
+    await expect(settings.locator(".draft-subchats-card .slider")).toBeHidden();
+    await expect(settings.locator(".draft-main-route-card .slider")).toBeVisible();
   });
 
   test("the row above the message box is never painted while the rail is still loading", async ({ page }) => {
