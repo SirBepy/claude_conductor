@@ -55,8 +55,9 @@ test("the palette flips the open chat between Dashboard and Messages in place", 
   await expect(transcript(page)).toBeVisible();
   await expect(transcript(page)).toContainText("Trello can sit next to Shortcut.");
   const saved = (await invokeCalls(page)).filter((c) => c.cmd === "save_settings");
-  const last = saved[saved.length - 1]?.args as { settings?: Record<string, unknown> } | undefined;
-  expect(JSON.stringify(last)).toContain("\"chatView\":\"messages\"");
+  // updateSettings saves through save_settings({ updated }) (settings-update.ts).
+  const last = saved[saved.length - 1]?.args as { updated?: Record<string, unknown> } | undefined;
+  expect(last?.updated?.chatView).toBe("messages");
   await capture(page.locator("#session-pane"), "chat-view-toggle-messages");
 
   // And back: the toggle reads the view in force, so a second run restores the dashboard.
