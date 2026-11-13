@@ -1,5 +1,5 @@
 import { selectSession, updateHeaderAvatarStatus } from "./active-session";
-import { carrySessionSettings, changeAccountForSession, repointHeaderCharacter } from "./active-session-account";
+import { carrySessionSettings, changeAccountForSession, repointHeaderCharacter, refreshFrozenLimitStrip } from "./active-session-account";
 import { state, setActiveSession, loadLastSelectedSession } from "./state";
 import { updateThinkingBar } from "./session-thinking-bar";
 import { sessionSubtitle, paneEmptyStateHtml, isSubchat } from "./sessions-helpers";
@@ -303,6 +303,7 @@ export async function wireInstancesChangedListener(
         if (titleEl) typeSwap(titleEl, sessionSubtitle(sess));
         updateHeaderAvatarStatus(pane, sess);
         pane.classList.toggle("is-rate-limited", isBlocked(sess));
+        refreshFrozenLimitStrip(pane, sess.session_id, selectSession);
         state.composer?.refreshBlockedState();
         state.composer?.refreshOfflineState();
         // The registry moves a chat's model and effort without this bar's help

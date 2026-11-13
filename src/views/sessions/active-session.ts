@@ -18,7 +18,7 @@ import { renderSidebar } from "./sidebar";
 import { characterForSession, characterIconUrl } from "./session-characters";
 import { hydrateCharacterAvatars, hydrateProjectTechIcons } from "../../shared/projects";
 import { api } from "../../shared/api";
-import { changeCharacterForSession, changeAccountForSession } from "./active-session-account";
+import { changeCharacterForSession, changeAccountForSession, refreshFrozenLimitStrip } from "./active-session-account";
 import { isAutoAccept, replayPendingPrompt, rehydrateAndReplay, pendingPromptSessionIds, dismissQuestionCard } from "./permission-modal";
 import { snapshotActiveCardDraftIn } from "./permission-modal/question-state";
 import { savePendingPromptDraft } from "./permission-modal/gating";
@@ -271,6 +271,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
     `<div class="session-statusbar-host"></div>`,
     readOnly ? `<div class="readonly-banner"><i class="ph ph-eye"></i> <span class="readonly-banner-text">Read-only session</span><button type="button" class="refresh-btn" title="Reload messages"><i class="ph ph-arrows-clockwise"></i></button>${offersTakeover(sess, isRemote()) ? `<button type="button" class="takeover-btn">Take Over</button>` : ""}</div>` : "",
     `<div class="session-messages"></div>`,
+    `<div class="frozen-limit-slot"></div>`,
     `<div class="scheduled-chip-slot"></div>`,
     `<div class="next-chip-slot"></div>`,
     `<div class="composer-shell">`,
@@ -301,6 +302,7 @@ export async function selectSession(sessionId: string, pane: HTMLElement): Promi
   // here instead of after them is what keeps the input from sitting collapsed
   // and empty while a chat switch's IPC round-trips are still in flight.
   mountComposer(pane, sess, sessionId, readOnly);
+  refreshFrozenLimitStrip(pane, sessionId, selectSession);
 
   // Mount statusbar.
   const statusbar = await mountStatusbar(
