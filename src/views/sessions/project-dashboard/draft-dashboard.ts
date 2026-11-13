@@ -3,6 +3,7 @@
 // both come down as soon as the first message is sent.
 import { invoke } from "../../../shared/ipc";
 import { state } from "../state";
+import { syncSuggestionRows } from "../composer-typing";
 import { mountDashboard, type DashboardHandle } from "./dashboard";
 import { fadeOutAndFold, freezeEntrance } from "./dash-motion";
 import { targetForRepo } from "./format";
@@ -134,5 +135,7 @@ export function mountDraftDashboard(
     // Outside .composer-shell, whose border wraps only the thinking bar and the input.
     const shell = pane.querySelector(".composer-shell");
     shell?.parentElement?.insertBefore(handle.chips, shell);
+    // The row mounts after a fetch, by when a restored draft may already be in the box.
+    syncSuggestionRows(pane);
   });
 }
