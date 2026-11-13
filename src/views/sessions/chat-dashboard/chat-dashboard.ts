@@ -44,6 +44,7 @@ import type { MessageDraft, PreviewMeta, PreviewSnapshot } from "../../../types/
 import { draftIdsOf, type DraftItem, type DraftStoreSide } from "../../../shared/chat/dashboard/drafts-model";
 import { DRAFT_OPEN_EVENT, copyDraft } from "../../../shared/chat/chat-draft-card";
 import { ACTIVE_QUESTION_EVENT, activeCardFor, expandActiveCard } from "../permission-modal/question-state";
+import { dismiss, dismissedFor } from "./waiting-dismissed";
 import "./chat-dashboard.css";
 import "./dashboard-extras.css";
 
@@ -99,6 +100,9 @@ export class ChatDashboard {
   /** Which quick views have something to read (see ensureQuick). */
   private quick: Partial<Record<QuickViewId, boolean>> = {};
   private quickAsked = false;
+  /** The Waiting items Joe removed in this chat (waiting-dismissed.ts), read
+   *  once per chat id: the pane is rebuilt when it shows another chat. */
+  private dismissed: { sid: string | null; keys: Set<string> } = { sid: null, keys: new Set() };
   /** The drafts store as last read, for the Drafts card (drafts-model.ts). */
   private draftStore: DraftStoreSide | undefined;
   /** The draft ids the chat's rows named at the last read: a new one reads again.
@@ -317,6 +321,7 @@ export class ChatDashboard {
       draftStore: this.draftStore,
       sections: readSections(getSettings()),
       openCard: this.renderer.sessionId ? activeCardFor(this.renderer.sessionId) : null,
+      dismissed: this.dismissedKeys(),
     });
     this.applyUiRules(derived);
     this.keepDraftItems(derived);
@@ -695,6 +700,19 @@ export class ChatDashboard {
     this.act(t.dataset.act!, t);
   }
 
+  private dismissedKeys(): Set<string> {
+    const sid = this.renderer.sessionId ?? null;
+    if (this.dismissed.sid !== sid) this.dismissed = { sid, keys: dismissedFor(sid) };
+    return this.dismissed.keys;
+  }
+
+  private dismissWaiting(keys: string[]): void {
+    if (keys.length === 0) return;
+    for (const k of keys) this.dismissedKeys().add(k);
+    dismiss(this.renderer.sessionId, keys);
+    this.render();
+  }
+
   private act(name: string, t: HTMLElement): void {
     const ui = this.ui;
     // These two open something else and change nothing drawn here.
@@ -704,6 +722,15 @@ export class ChatDashboard {
     }
     if (name === "open-preview") {
       window.dispatchEvent(new CustomEvent(PREVIEW_OPEN_EVENT, { detail: { slug: t.dataset.slug ?? "" } }));
+      return;
+    }
+    if (name === "wait-dismiss" || name === "wait-clear") {
+      // Clear all removes every removable item of its own zone, read off the
+      // drawn cards so it never reaches one Joe cannot see.
+      const xs = name === "wait-clear"
+        ? [...(t.closest(".cdash-zone")?.querySelectorAll<HTMLElement>("[data-act='wait-dismiss']") ?? [])]
+        : [t];
+      this.dismissWaiting(xs.map((x) => x.dataset.wkey ?? "").filter(Boolean));
       return;
     }
     switch (name) {

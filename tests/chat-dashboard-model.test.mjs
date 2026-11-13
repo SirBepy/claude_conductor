@@ -115,6 +115,45 @@ describe("chat dashboard model", () => {
     expect(w.blocked).toBe(false);
   });
 
+  it("keeps only the newest blocker once later ones supersede it, even with no message from Joe between", () => {
+    // Joe's iOS build chat (2026-11-13): it was driven by messages relayed in
+    // from another chat, so Joe never wrote and all three blockers stuck.
+    const c = chat()
+      .joe("ship the ipa")
+      .send({ kind: "blocker", verdict: "Bundle checksum mismatch, stopped", text: "x" });
+    c.r.messages.push({ kind: "user", content: [{ type: "text", text: "new bundle" }], ts: 0, authorSessionId: "peer" });
+    c.send({ kind: "blocker", verdict: "Commits pulled, build blocked by hook", text: "x" })
+      .send({ kind: "blocker", verdict: "ipa build failed, nothing uploaded", text: "x" });
+    expect(zone(c.dash(), "waiting").items.map((i) => i.message.card.verdict)).toEqual(["ipa build failed, nothing uploaded"]);
+    // A report says where the chat stands now, so the last blocker goes too.
+    c.send({ kind: "report", verdict: "Uploaded to TestFlight", text: "x" });
+    expect(zone(c.dash(), "waiting")).toBeNull();
+  });
+
+  it("a newer blocker on Joe leaves a blocker waiting elsewhere standing, and a newer one on the same target replaces it", () => {
+    const c = chat()
+      .joe("go")
+      .send({ kind: "blocker", verdict: "Held by the gate", text: "x", waiting_on: ["Gate 2"] })
+      .send({ kind: "blocker", verdict: "Stuck on auth", text: "x" });
+    expect(zone(c.dash(), "waitingElsewhere").items.map((i) => i.message.card.verdict)).toEqual(["Held by the gate"]);
+    c.send({ kind: "blocker", verdict: "Still held by the gate", text: "x", waiting_on: ["Gate 2"] });
+    const d = c.dash();
+    expect(zone(d, "waitingElsewhere").items.map((i) => i.message.card.verdict)).toEqual(["Still held by the gate"]);
+    expect(zone(d, "waiting").items.map((i) => i.message.card.verdict)).toEqual(["Stuck on auth"]);
+  });
+
+  it("leaves out a blocker, to-do or sub blocker Joe removed by hand", () => {
+    const c = chat()
+      .joe("go")
+      .send({ kind: "do_this", verdict: "Log in", text: "x" })
+      .send({ kind: "blocker", verdict: "Stuck on auth", text: "x" });
+    c.r.messages.push({ kind: "message", text: "x", id: "c1", ts: 0, parentToolUseId: null, subCard: { id: "c1", ts: 0, parent_id: "main", kind: "blocker", sub_id: "s1", verdict: "Sub stuck", text: "x" } });
+    const [todo, blocker] = c.r.messages.filter((m) => m.card).map((m) => m.id);
+    expect(zone(c.dash(), "waiting").items).toHaveLength(3);
+    expect(zone(c.dash({ dismissed: new Set([blocker, "c1"]) }), "waiting").items.map((i) => i.type)).toEqual(["do_this"]);
+    expect(zone(c.dash({ dismissed: new Set([todo, blocker, "c1"]) }), "waiting")).toBeNull();
+  });
+
   it("drops an answered question from Waiting on you", () => {
     const c = chat().joe("go").ask("Which one?", "qa");
     c.r.handleEvent(ok("qa"));

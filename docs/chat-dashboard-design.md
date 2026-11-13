@@ -311,6 +311,21 @@ disappears when the plan is done": it dropped the moment he wrote after a finish
 ## Waiting on you and Decided
 
 - **Blockers sit in Waiting on you, tinted red,** above any question (2026-11-09).
+- **Only blockers that still stand (2026-11-13).** Joe found three old BLOCKED cards of an iOS build
+  chat stuck there: "i hate how easy it is for outdated info to just stick... i cant even see when
+  this is written, nor can i remove it". That chat was driven by messages relayed in from another
+  chat, and only Joe's own typing cleared a blocker. Now an own blocker also goes once the chat
+  sends a later report, answer or plan, or a later blocker that waits on the same thing (both on
+  Joe, or the same `waiting_on` targets; a blocker on Joe and one on a gate both stand). A sub's
+  blocker still goes when that sub sends a later card.
+- **Every Waiting card says when it was written** (the clock today, the day and clock before
+  that), at the card's top right where its copy button was; a question says "asked" in its hint.
+- **Joe can remove a card by hand,** reversing the earlier "no dismiss" call for these cards (he
+  asked for it, 2026-11-13): an x beside the time on each blocker or to-do, and Clear all in the
+  title row once two or more can go, both shown only on hover (his pick). Same in the Waiting on
+  <target> zone. Removal is per chat in localStorage (`waiting-dismissed.ts`), so it survives a
+  reopen; the transcript keeps the card. A question is never removable there: it is answered or
+  skipped on its card.
 - **Questions Claude asks** still use the real question card; Waiting on you lists them.
 - **Decided** is this chat's list of settled choices (by Joe or Claude), so neither side reopens
   them. Not long-term memory: anything true beyond the chat goes to Auto Memory. Thread outcomes land

@@ -239,6 +239,66 @@
 .cdash-waiting .msg.question-card {
   cursor: pointer;
 }
+/* A Waiting card's corner: when it was written, always shown (an old blocker
+   must read as old), and the x that removes it, shown on hover or focus. It sits
+   on the card's label row, where the copy button would be, so that one is hidden. */
+.cdash-wi {
+  position: relative;
+}
+.cdash-wi .msg-copy-btn {
+  display: none;
+}
+.cdash-wi-at {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.cdash-wi-x,
+.cdash-wclear {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.cdash-wi-x {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 5px;
+  font-size: 13px;
+}
+.cdash-wclear {
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.cdash-wi:hover .cdash-wi-x,
+.cdash-wi-x:focus-visible,
+.cdash-zone:hover .cdash-wclear,
+.cdash-wclear:focus-visible {
+  opacity: 1;
+}
+.cdash-wi-x:hover,
+.cdash-wclear:hover {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+.cdash-hint-at {
+  margin-left: 2px;
+}
 .cdash-hint {
   display: flex;
   align-items: center;
