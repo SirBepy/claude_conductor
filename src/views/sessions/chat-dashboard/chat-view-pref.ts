@@ -26,7 +26,10 @@ export function saveChatView(view: ChatView): Promise<void> {
 }
 
 /** The command palette's "Toggle Dashboard / Messages": flips the same app-wide
- *  setting as Settings > Chat defaults (Joe, 2026-11-13: app-wide, not per chat). */
+ *  setting as Settings > Chat defaults (Joe, 2026-11-13: app-wide, not per chat).
+ *  The direction comes from this window's cache, not the fresh read inside
+ *  updateSettings: the cache is what this window draws, so the toggle always
+ *  changes what Joe sees, even if another window saved a different view since. */
 export function toggleChatView(): Promise<void> {
   return saveChatView(readChatView(getSettings()) === "dashboard" ? "messages" : "dashboard");
 }
