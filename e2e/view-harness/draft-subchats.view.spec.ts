@@ -9,8 +9,8 @@ import { capture, mountSessionsList, mountView, SESSIONS_BASE_INVOKE, sessionIns
 import { CONDUCTOR_CWD, LIST_ROWS, conductorHistory, conductorSnapshot, fakeShot } from "./project-dashboard-fixtures";
 
 // A new-chat draft carries the "Use subchats" choice: the switch (a row above the
-// message box, or a card in the settings rail when the draft has one) moves the
-// chip to Opus, and the first start_session RPC carries the flag so the first
+// message box, or a card in the settings rail when the draft has one) raises the
+// effort to high and keeps the model, and the first start_session RPC carries the flag so the first
 // spawn is already a main chat.
 
 const REAL = "real-main";
@@ -146,7 +146,7 @@ test.describe("view-harness / Use subchats on a new-chat draft with a settings r
 
     await card.locator(".slider").click();
     await expect(card.locator("input")).toBeChecked();
-    await expect(modelText(page)).toHaveText(/Opus/);
+    await expect(modelText(page)).toHaveText(/Sonnet/);
     await capture(page.locator(".pd-rail"), "draft-subchats-rail-card");
   });
 
@@ -218,7 +218,7 @@ test.describe("view-harness / Use subchats on a new-chat draft with a settings r
   test("a failed first send leaves a working switch with the flag intact", async ({ page }) => {
     await openRailDraft(page);
     await railCard(page).locator(".slider").click();
-    await expect(modelText(page)).toHaveText(/Opus/);
+    await expect(modelText(page)).toHaveText(/Sonnet/);
     // The send takes the dashboard (and its card) down before the spawn answers, so a
     // rejected spawn must hand the draft a switch again.
     await page.evaluate(() => {
@@ -233,7 +233,7 @@ test.describe("view-harness / Use subchats on a new-chat draft with a settings r
     await expect(row(page)).toBeVisible();
     await expect(row(page).locator("input")).toBeChecked();
     await expect(row(page).locator("input")).toBeEnabled();
-    await expect(modelText(page)).toHaveText(/Opus/);
+    await expect(modelText(page)).toHaveText(/Sonnet/);
     // It still flips, and flipping off puts back the model it replaced.
     await sw(page).click();
     await expect(row(page).locator("input")).not.toBeChecked();
@@ -271,12 +271,12 @@ for (const [label, size] of [["desktop", { width: 1280, height: 800 }], ["phone"
       expect(rowBox.y + rowBox.height).toBeLessThanOrEqual(boxTop + 1);
     });
 
-    test("switching it on moves the chip to Opus, and the first send carries the flag", async ({ page }) => {
+    test("switching it on keeps the model chip and the first send carries the flag", async ({ page }) => {
       await openDraft(page, size);
       await expect(modelText(page)).toHaveText(/Sonnet/);
       await sw(page).click();
       await expect(row(page).locator("input")).toBeChecked();
-      await expect(modelText(page)).toHaveText(/Opus/);
+      await expect(modelText(page)).toHaveText(/Sonnet/);
       await capture(page.locator("#session-pane"), `draft-subchats-on-${label}`);
 
       await page.locator("#session-pane .session-composer .composer-textarea").fill("build the site");
@@ -284,21 +284,21 @@ for (const [label, size] of [["desktop", { width: 1280, height: 800 }], ["phone"
       await page.waitForFunction(() => (window as unknown as { __ccInvokeCalls: Array<{ cmd: string }> }).__ccInvokeCalls.some((c) => c.cmd === "start_session"));
       const args = await page.evaluate(() =>
         (window as unknown as { __ccInvokeCalls: Array<{ cmd: string; args: Record<string, unknown> }> }).__ccInvokeCalls.find((c) => c.cmd === "start_session")!.args);
-      expect(args).toMatchObject({ subchatsOn: true, model: "opus", effort: "high" });
+      expect(args).toMatchObject({ subchatsOn: true, model: "sonnet", effort: "high" });
       // The row is gone once the draft became the chat.
       await expect(row(page)).toHaveCount(0);
     });
 
-    test("a draft that opens with it on (the default) shows it on with the chip on Opus, and the first send carries the flag", async ({ page }) => {
+    test("a draft that opens with it on (the default) shows it on with the model chip unchanged, and the first send carries the flag", async ({ page }) => {
       await openDraft(page, size, true);
       await expect(row(page).locator("input")).toBeChecked();
-      await expect(modelText(page)).toHaveText(/Opus/);
+      await expect(modelText(page)).toHaveText(/Sonnet/);
       await page.locator("#session-pane .session-composer .composer-textarea").fill("build the site");
       await page.locator("#session-pane .session-composer .composer-send").click();
       await page.waitForFunction(() => (window as unknown as { __ccInvokeCalls: Array<{ cmd: string }> }).__ccInvokeCalls.some((c) => c.cmd === "start_session"));
       const args = await page.evaluate(() =>
         (window as unknown as { __ccInvokeCalls: Array<{ cmd: string; args: Record<string, unknown> }> }).__ccInvokeCalls.find((c) => c.cmd === "start_session")!.args);
-      expect(args).toMatchObject({ subchatsOn: true, model: "opus", effort: "high" });
+      expect(args).toMatchObject({ subchatsOn: true, model: "sonnet", effort: "high" });
     });
 
     test("switching the default off for one chat puts the project's model back and starts an ordinary chat", async ({ page }) => {

@@ -39,11 +39,11 @@ beforeEach(() => {
 });
 
 describe("mainChatLaunch (twin of the daemon's main_launch)", () => {
-  it("keeps an Opus model and a high-or-better effort, else opus/high", () => {
+  it("never changes the model and lifts effort to high or better", () => {
     expect(mainChatLaunch("claude-opus-4-8", "max")).toEqual({ model: "claude-opus-4-8", effort: "max" });
     expect(mainChatLaunch("opus", "xhigh")).toEqual({ model: "opus", effort: "xhigh" });
-    expect(mainChatLaunch("sonnet", "low")).toEqual({ model: "opus", effort: "high" });
-    expect(mainChatLaunch("", "")).toEqual({ model: "opus", effort: "high" });
+    expect(mainChatLaunch("sonnet", "low")).toEqual({ model: "sonnet", effort: "high" });
+    expect(mainChatLaunch("", "")).toEqual({ model: "", effort: "high" });
     expect(mainChatLaunch("opus", "medium")).toEqual({ model: "opus", effort: "high" });
   });
 });
@@ -55,12 +55,12 @@ describe("the draft's Use subchats switch", () => {
     expect(config.subchatsOn).toBeUndefined();
   });
 
-  it("switching it on sets the flag, moves the chat to Opus/high, and persists the draft", () => {
+  it("switching it on sets the flag, keeps the model, raises effort to high, and persists the draft", () => {
     flip(true);
-    expect(config).toMatchObject({ subchatsOn: true, model: "opus", effort: "high" });
-    expect(stateMock.pendingNewSession.config).toMatchObject({ subchatsOn: true, model: "opus", effort: "high" });
+    expect(config).toMatchObject({ subchatsOn: true, model: "sonnet", effort: "high" });
+    expect(stateMock.pendingNewSession.config).toMatchObject({ subchatsOn: true, model: "sonnet", effort: "high" });
     expect(saveMock).toHaveBeenCalled();
-    expect(stateMock.statusbar.syncModelEffort).toHaveBeenLastCalledWith("opus", "high");
+    expect(stateMock.statusbar.syncModelEffort).toHaveBeenLastCalledWith("sonnet", "high");
   });
 
   it("switching it off puts back the model and effort it replaced", () => {
@@ -130,7 +130,7 @@ describe("the draft's Use subchats switch", () => {
     const cardInput = card.querySelector("input");
     cardInput.checked = true;
     cardInput.dispatchEvent(new Event("change", { bubbles: true }));
-    expect(config).toMatchObject({ subchatsOn: true, model: "opus", effort: "high" });
+    expect(config).toMatchObject({ subchatsOn: true, model: "sonnet", effort: "high" });
     expect(card.classList.contains("is-on")).toBe(true);
 
     config.accountId = "api";
@@ -177,11 +177,11 @@ describe("the draft's Use subchats switch", () => {
   it("a remount of the same draft keeps the model it would restore and the chip the user changed", () => {
     config.subchatsOn = true;
     mountDraftSubchats(pane, config);
-    expect(config).toMatchObject({ model: "opus", effort: "high" });
+    expect(config).toMatchObject({ model: "sonnet", effort: "high" });
     config.model = "fable";
     mountDraftSubchats(pane, config);
     expect(config.model).toBe("fable");
-    config.model = "opus";
+    config.model = "sonnet";
     mountDraftSubchats(pane, config);
     flip(false);
     expect(config).toMatchObject({ subchatsOn: false, model: "sonnet", effort: "low" });

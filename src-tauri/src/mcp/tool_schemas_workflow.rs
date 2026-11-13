@@ -70,7 +70,7 @@ pub fn workflow_schemas() -> Vec<Value> {
                 "properties": {
                     "cwd": {"type": "string", "description": "Absolute working directory: this session's own cwd, or another project already known to the app."},
                     "prompt": {"type": "string", "description": "The new chat's first message. Carry the full handoff context here - it is what the user reads."},
-                    "model": {"type": "string", "description": "Optional model id/alias. Omit to use the project's default. A sub: sonnet or opus, never haiku; omitted is sonnet."},
+                    "model": {"type": "string", "description": "Optional model id/alias. Omit to use the project's default. A sub: sonnet, or opus only for a read-only sub (writes false: a plan, design, audit or review), never haiku; omitted is sonnet."},
                     "effort": {"type": "string", "description": "Optional reasoning effort. Omit to use the project's default. A sub: omitted is high."},
                     "name": {"type": "string", "description": "Optional short label for the new chat."},
                     "machine": {"type": "string", "description": "Label or id (from list_peers) of a paired machine to start this chat on instead of here - use it when the user asks to run something on another one of their machines. If it fails because that machine is offline or unreachable, do not retry blindly or spawn here instead: ask the user to wake that machine and open Conductor on it, then try again. Omit to spawn locally, the default."},

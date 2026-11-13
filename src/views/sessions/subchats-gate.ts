@@ -9,13 +9,14 @@ import { isApiCreditAccount } from "../../shared/account-chip";
 export const SUBCHATS_API_CREDIT_REASON =
   "Subchats are not available on an API-credit account, since every sub would spend its credit. Switch this chat to a subscription account first.";
 
-/** The model and effort a main chat runs on: its own when already Opus at high
- *  or better, else Opus/high. Twin of `subchats::main_launch` in the daemon, which
- *  applies the same rule when the mode is flipped on a live chat; a draft applies
- *  it itself so its chips show what the first spawn will actually use. */
+/** The model and effort a main chat runs on: its own model always, its own
+ *  effort when already high or better, else high. Twin of `subchats::main_launch`
+ *  in the daemon, which applies the same rule when the mode is flipped on a live
+ *  chat; a draft applies it itself so its chips show what the first spawn will
+ *  actually use. */
 export function mainChatLaunch(model: string, effort: string): { model: string; effort: string } {
   return {
-    model: model.toLowerCase().includes("opus") ? model : "opus",
+    model,
     effort: effort === "high" || effort === "xhigh" || effort === "max" ? effort : "high",
   };
 }
