@@ -8,6 +8,10 @@ import { getTransport, type Unlisten } from "../../shared/transport";
 import { escapeHtml } from "../../shared/escape-html";
 import { agoText } from "./preview-panel-history";
 import { openTodosColumnsMenu, closeTodosColumnsMenu } from "./todos-columns-menu";
+import { isPendingSessionId } from "../../shared/chat/pending-session-id";
+import { state } from "./state";
+import { resolveTarget } from "./project-dashboard/draft-dashboard";
+import type { DashSnapshot } from "./project-dashboard/types";
 import type { UserTodo } from "../../types/ipc.generated";
 import "./todos-panel.css";
 
@@ -55,6 +59,8 @@ class TodosPanel implements TodosPanelHandle {
   private todos: UserTodo[] = [];
   private columns = new Set<string>();
   private sessionId: string | null = null;
+  /** A draft's cards by id to the project that owns them, for the project-keyed tick. */
+  private draftProjects = new Map<string, string>();
   /** Keyed on the unseen ids, so `Later` silences only THAT set and a new
    *  change raises the bar again. */
   private dismissedKey = "";
@@ -76,6 +82,7 @@ class TodosPanel implements TodosPanelHandle {
     closeTodosColumnsMenu();
     this.sessionId = sessionId;
     this.todos = [];
+    this.draftProjects.clear();
     this.columns.clear();
     this.dismissedKey = "";
     this.render();
@@ -85,6 +92,10 @@ class TodosPanel implements TodosPanelHandle {
   refresh(): void {
     const sid = this.sessionId;
     if (!sid) return;
+    if (isPendingSessionId(sid)) {
+      this.refreshDraft(sid);
+      return;
+    }
     void invoke<TodosView>("list_user_todos", { sessionId: sid })
       .then((view) => {
         // A scope change mid-flight must not paint the previous chat's cards.
@@ -94,6 +105,33 @@ class TodosPanel implements TodosPanelHandle {
         this.render();
       })
       .catch((err) => console.error("[todos-panel] list_user_todos failed", err));
+  }
+
+  /** A draft has no daemon session, which the per-chat list refuses ("unknown
+   *  session"), so its board reads the draft folder's project the way the draft's
+   *  own dashboard does. Nothing in a draft was written by the draft itself, so the
+   *  whole list is Project wide and that column is forced on. Only open cards
+   *  exist in that read, so Done and Archived stay empty until the chat starts. */
+  private refreshDraft(sid: string): void {
+    // The folder lives with the draft itself (it is not in the session list).
+    const cwd = state.pendingNewSession?.placeholderId === sid
+      ? state.pendingNewSession.projectPath
+      : state.parkedDrafts.find((d) => d.placeholderId === sid)?.projectPath;
+    if (!cwd) return;
+    void resolveTarget(cwd)
+      .then((ref) => invoke<DashSnapshot | null>("dashboard_snapshot", { target: ref }))
+      .then((snap) => {
+        if (this.sessionId !== sid) return;
+        const rows = snap?.your_todos ?? [];
+        this.draftProjects = new Map(rows.map((t) => [t.id, t.project_id]));
+        this.todos = rows.map((t): UserTodo => ({
+          id: t.id, text: t.text, origin_session_id: t.origin_session_id ?? "", origin_label: t.by_ai ? "a chat" : "you", state: "open",
+          dropped: false, drop_reason: "", previous_text: "", by_ai: t.by_ai, created_at: "", updated_at: "", seen_by_origin: true,
+        }));
+        this.columns = new Set(["project"]);
+        this.render();
+      })
+      .catch((err) => console.error("[todos-panel] draft todos failed", err));
   }
 
   toggleColumnsMenu(anchor: HTMLElement): void {
@@ -158,7 +196,8 @@ class TodosPanel implements TodosPanelHandle {
     else this.columns.add(key);
     this.render();
     const sid = this.sessionId;
-    if (!sid) return;
+    // A draft has no chat config to save the choice in.
+    if (!sid || isPendingSessionId(sid)) return;
     void invoke<void>("set_todo_columns", { sessionId: sid, columns: [...this.columns] })
       .catch((err) => console.error("[todos-panel] set_todo_columns failed", err));
   }
@@ -170,7 +209,11 @@ class TodosPanel implements TodosPanelHandle {
     // Ticking is silent by design: misclicks must be free. No wake, no
     // notification, only the CTA the daemon-side seen flag raises.
     const next = isOpen(card) ? "done" : "open";
-    void invoke<void>("set_user_todo_state", { sessionId: sid, id, next })
+    const projectId = this.draftProjects.get(id);
+    const call = projectId
+      ? invoke<void>("dashboard_todo_set_state", { projectId, id, next })
+      : invoke<void>("set_user_todo_state", { sessionId: sid, id, next });
+    void call
       .then(() => this.refresh())
       .catch((err) => console.error("[todos-panel] set_user_todo_state failed", err));
   }
@@ -236,7 +279,7 @@ class TodosPanel implements TodosPanelHandle {
       </div>
       <div class="td-meta">${pills.join("")}${why}
         <span class="td-origin"><span class="td-origin-dot"></span>${escapeHtml(t.origin_label || "unknown")}</span>
-        <span>${agoText(t.updated_at)}</span>
+        ${t.updated_at ? `<span>${agoText(t.updated_at)}</span>` : ""}
       </div>
     </div>`;
   }

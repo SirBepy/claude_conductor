@@ -1,3 +1,4 @@
+// Reviewed 2026-11-13 (draft todos): a draft's scope now reads the draft folder's project through the dashboard snapshot; a real chat's scope and everything this spec asserts are unchanged, and it passes.
 import { test, expect, type Page } from "@playwright/test";
 import { mountView } from "./harness";
 import { expectIconButtonsCentred } from "./icon-centering";
