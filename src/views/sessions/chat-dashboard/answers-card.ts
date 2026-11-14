@@ -62,6 +62,10 @@ export interface AnswersCardDeps {
   onSideChange(): void;
   /** The transcript's passes for freshly drawn markup (code, file refs, commit refs). */
   decorate(root: HTMLElement): void;
+  /** Details defined by messages sent before `message`, oldest first: an answer may link
+   *  `#d:id` to a detail an earlier message defined, and the card sits outside the
+   *  transcript's DOM, where drill-links.ts would look for it. */
+  earlierDetails(message: AnswerItem["message"]): readonly ChatDetail[];
   /** Opens the question card a thread was asked from, minimized while Joe asked. */
   expandQuestion(): void;
   /** The sub's row still exists, so Send thread to chat can reach it. */
@@ -490,6 +494,14 @@ export class AnswersCard {
       + `<span class="ax-by-name">${esc(a.name)}</span>${time}</div>`;
   }
 
+  /** The answer's own details over earlier ones of the same id (a link repeating an id reuses the newest definition). */
+  private detailsFor(item: AnswerItem): readonly ChatDetail[] {
+    const byId = new Map<string, ChatDetail>();
+    for (const d of this.deps.earlierDetails(item.message)) byId.set(d.id, d);
+    for (const d of item.message.details ?? []) byId.set(d.id, d);
+    return [...byId.values()];
+  }
+
   private answerFace(item: AnswerItem): string {
     const q = this.byLine(item);
     const rm = `<span class="ax-readmore ax-rm-bottom-right" data-ax="toggle">${this.readMoreLabel()}</span>`;
@@ -539,7 +551,7 @@ export class AnswersCard {
       // Every thread opens on the question and the answer it got; they are not a back-and-forth.
       const raw = item.raw ? `<span class="ax-q0-raw">You wrote: ${esc(item.raw)}</span>` : "";
       if (item.question) parts.push(`<div class="msg user ax-q ax-q0">${renderMarkdown(item.question, true)}${raw}</div>`);
-      parts.push(bubble(item.verdict, item.text, item.message.details));
+      parts.push(bubble(item.verdict, item.text, this.detailsFor(item)));
       for (const m of threadFollowUps(item)) {
         parts.push(m.role === "user"
           ? `<div class="msg user ax-q">${renderMarkdown(m.text, true)}</div>`
@@ -631,7 +643,7 @@ export class AnswersCard {
     this.destroyWire();
     const item = this.item(this.cur);
     const html = item
-      ? shell(`${this.headerRow()}<div class="ax-in">${item.pending ? this.pendingFace(item) : this.answerFace(item)}</div>`, "", item.message.details)
+      ? shell(`${this.headerRow()}<div class="ax-in">${item.pending ? this.pendingFace(item) : this.answerFace(item)}</div>`, "", this.detailsFor(item))
       : shell(`<div class="ax-in">${this.items.length === 0 ? this.emptyFace() : this.caughtFace()}</div>`, "ax-caughtmode ax-frame-border ax-cu-both");
     // The HTML is compared without its animation class, so a flush that lands
     // mid-animation finds nothing changed and lets the motion finish.
@@ -736,7 +748,7 @@ export class AnswersCard {
     const rm = face.querySelector(".ax-readmore");
     if (rm) rm.innerHTML = this.readMoreLabel();
     const item = this.item(this.cur);
-    if (item) this.lastHtml = shell(`${this.headerRow()}<div class="ax-in">${this.answerFace(item)}</div>`, "", item.message.details);
+    if (item) this.lastHtml = shell(`${this.headerRow()}<div class="ax-in">${this.answerFace(item)}</div>`, "", this.detailsFor(item));
     const sh = host.querySelector<HTMLElement>(".ax-shell");
     sh?.classList.add("ax-animating");
     setTimeout(() => sh?.classList.remove("ax-animating"), 450);

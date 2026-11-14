@@ -174,6 +174,11 @@ export class ChatDashboard {
       cwd: () => renderer.paginator.cwdHint ?? null,
       onSideChange: () => this.schedule(),
       decorate: (root) => this.decorate(root),
+      earlierDetails: (message) => {
+        const all = renderer.messages;
+        const at = all.indexOf(message);
+        return (at < 0 ? all : all.slice(0, at)).flatMap((m) => m.details ?? []);
+      },
       expandQuestion: () => {
         const sid = renderer.sessionId;
         if (sid) expandActiveCard({ sessionId: sid });
