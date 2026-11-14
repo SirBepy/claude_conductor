@@ -174,6 +174,22 @@ describe("a sub's card in the main chat", () => {
   });
 });
 
+describe("a sub's answer in Messages view", () => {
+  it("a finish that carries Joe's question reads as an answer, tagged with the sub; one without it stays a report", async () => {
+    pages = [page([userEvent("is the design too far behind?", T0)])];
+    cards = [
+      card("ans", T0 + MIN, { question: "Is the design too far behind to build now?", verdict: "Not far behind", text: "Two tokens differ.", done: ["checked"] }),
+      card("job", T0 + 2 * MIN, { sub_id: "sub-b", sub_name: "Footer" }),
+    ];
+    const { container } = await open();
+    const [answer, report] = subRoots(container);
+    expect(answer.querySelector(".mc-full .mc-sub-name").textContent).toBe("Header");
+    expect(answer.querySelector(".mc-full").textContent).toContain("Answer to you");
+    expect(answer.querySelector(".mc-full .mc-verdict").textContent).toBe("Not far behind");
+    expect(report.querySelector(".mc-full").textContent).not.toContain("Answer to you");
+  });
+});
+
 describe("what the chips say", () => {
   const render = async (c) => {
     pages = [page([userEvent("go", T0)])];

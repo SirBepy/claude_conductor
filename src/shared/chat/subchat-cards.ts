@@ -121,6 +121,11 @@ export function subCardEvent(entry: SubCardEntry): ChatEvent {
 export function messageCardOf(e: SubCardEntry): MessageCard {
   if (e.kind === "blocker") return { kind: "blocker", verdict: e.verdict || undefined, tone: toneOf(e), points: e.points?.length ? e.points : undefined };
   const rows = (v?: string[]) => (v && v.length > 0 ? v : undefined);
+  // A finish that carries the question Joe asked is the answer to it (the dashboard's
+  // Answers card draws it the same way): verdict, text and points, no done / not done rows.
+  if (e.kind === "finish" && e.question?.trim()) {
+    return { kind: "answer", verdict: e.verdict || undefined, tone: toneOf(e), points: rows(e.points), question: e.question.trim() };
+  }
   return {
     kind: "report",
     verdict: e.verdict || undefined,
