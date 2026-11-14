@@ -89,6 +89,50 @@ export function buildSubsState(items: readonly SubCardItem[], now: number): Subs
   return { shown, earlier, foldsAt: folds.length > 0 ? Math.min(...folds) : null };
 }
 
+// ---- Stuck rows and the working strip -----------------------------------------------
+
+/** Rows drawn before "+N more" (docs/chat-dashboard-design.md, "Subchats card redesign"). */
+export const STUCK_ROWS_SHOWN = 5;
+
+/** A live sub that needs Joe or is not progressing: it gets a row with its reason. A working
+ *  sub stays a quiet avatar in the strip. */
+export function isStuckKind(kind: SubCardKind): boolean {
+  return kind !== "working" && kind !== "finished";
+}
+
+/** The one line a stuck row says: why the sub is not progressing. */
+export function subWhy(it: Pick<SubCardItem, "kind" | "progress" | "hover">, now: number = Date.now()): string {
+  const h = it.hover;
+  switch (it.kind) {
+    case "asking":
+      return "Needs your answer";
+    case "queued": {
+      const q = h?.queue;
+      if (!q) return "Queued";
+      const who = q.waitingFor ?? q.behind;
+      const place = q.place === null ? "" : q.place === 1 ? "next in line" : `${q.place} in line`;
+      return who ? `Waits for ${who}${place ? `, ${place}` : ""}` : place ? `Queued, ${place}` : "Queued";
+    }
+    case "paused":
+      return h?.gaming ? "Paused while you game" : "Paused";
+    case "limited": {
+      const t = h?.resetsAt ?? null;
+      if (t === null || t <= now) return "At its usage limit";
+      return `Usage limit, back at ${new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    }
+    case "stopped":
+      return "Stopped without finishing";
+    default:
+      return h?.action?.text ?? it.progress;
+  }
+}
+
+/** "step 3/6" for a sub on a plan, else its progress words. */
+export function subStepLabel(it: Pick<SubCardItem, "progress" | "hover">): string {
+  const s = it.hover?.step;
+  return s ? `step ${s.n}/${s.total}` : it.progress;
+}
+
 // ---- Effort palette --------------------------------------------------------------
 
 /** The efforts that tint a battery (Joe, 2026-11-10). `high` is the default and 99% of

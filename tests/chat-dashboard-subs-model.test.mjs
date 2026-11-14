@@ -7,7 +7,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
-const { buildSubsState, FINISHED_KEEP_MS, tintedEffort, TINTED_EFFORTS, formatRunTime } = await import("../src/shared/chat/dashboard/subs-model.ts");
+const { buildSubsState, FINISHED_KEEP_MS, tintedEffort, TINTED_EFFORTS, formatRunTime, isStuckKind, subWhy, subStepLabel, STUCK_ROWS_SHOWN } = await import("../src/shared/chat/dashboard/subs-model.ts");
 const { modelBatteryHtml } = await import("../src/views/sessions/sidebar-row-visuals.ts");
 
 const NOW = 1_800_000_000_000;
@@ -120,5 +120,34 @@ describe("run time", () => {
     expect(formatRunTime(65_000)).toBe("01:05");
     expect(formatRunTime(3_725_000)).toBe("1:02:05");
     expect(formatRunTime(-5)).toBe("00:00");
+  });
+});
+
+describe("stuck rows (docs/chat-dashboard-design.md, \"Subchats card redesign\")", () => {
+  it("gives every live kind but working a row, and keeps working subs in the avatar strip", () => {
+    expect(["asking", "queued", "paused", "limited", "stopped"].every((k) => isStuckKind(k))).toBe(true);
+    expect(isStuckKind("working")).toBe(false);
+    expect(isStuckKind("finished")).toBe(false);
+    expect(STUCK_ROWS_SHOWN).toBe(5);
+  });
+
+  it("says in one line why each stuck sub is not progressing", () => {
+    const hover = (over) => ({ stateWord: "", step: null, action: null, queue: null, resetsAt: null, gaming: false, ...over });
+    const now = Date.UTC(2026, 10, 14, 12, 0, 0);
+    expect(subWhy(item("a", "asking"), now)).toBe("Needs your answer");
+    expect(subWhy(item("q", "queued", { hover: hover({ queue: { waitingFor: "Footer", place: 2, behind: null } }) }), now)).toBe("Waits for Footer, 2 in line");
+    expect(subWhy(item("q", "queued", { hover: hover({ queue: { waitingFor: null, place: 1, behind: "Auth" } }) }), now)).toBe("Waits for Auth, next in line");
+    expect(subWhy(item("q", "queued"), now)).toBe("Queued");
+    expect(subWhy(item("p", "paused", { hover: hover({ gaming: true }) }), now)).toBe("Paused while you game");
+    expect(subWhy(item("p", "paused"), now)).toBe("Paused");
+    expect(subWhy(item("l", "limited", { hover: hover({ resetsAt: now + 3_600_000 }) }), now)).toMatch(/^Usage limit, back at \d/);
+    expect(subWhy(item("l", "limited", { hover: hover({ resetsAt: now - 1 }) }), now)).toBe("At its usage limit");
+    expect(subWhy(item("s", "stopped"), now)).toBe("Stopped without finishing");
+    expect(subWhy(item("w", "working", { hover: hover({ action: { text: "Editing footer.css", at: now } }) }), now)).toBe("Editing footer.css");
+  });
+
+  it("labels a row with its plan step, else its progress words", () => {
+    expect(subStepLabel(item("a", "working", { progress: "working", hover: { step: { n: 3, total: 6, text: "x" } } }))).toBe("step 3/6");
+    expect(subStepLabel(item("a", "queued", { progress: "queued" }))).toBe("queued");
   });
 });
