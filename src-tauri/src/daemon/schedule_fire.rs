@@ -160,6 +160,7 @@ async fn respawn_for_message(
     session_id: &str,
     cwd: &str,
 ) -> Result<Arc<crate::daemon::session::Session>, String> {
+    restore_missing_row(state, session_id, cwd);
     let (model, effort, account_id) = state
         .registry
         .get(session_id)
@@ -178,6 +179,30 @@ async fn respawn_for_message(
         new_session_id: None,
     };
     lifecycle::spawn_session(state, params).await.map_err(err_to_string)
+}
+
+/// A chat whose row left the registry (ended rows are not in the snapshot, so a
+/// restart drops them) can still have a schedule item, e.g. a rate-limit retry.
+/// Spawning it with no row let its SessionStart hook create one, which carried no
+/// account and read as a terminal session: sidebar "Remote", and a ghost the
+/// project's main chat pointer could pick. The row comes back from `chat_config`,
+/// the same Interactive shape a restart restores.
+fn restore_missing_row(state: &Arc<DaemonState>, session_id: &str, cwd: &str) {
+    if state.registry.get(session_id).is_some() {
+        return;
+    }
+    let cfg = crate::sessions::chat_config::get(session_id).unwrap_or_default();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let cwd = PathBuf::from(cwd);
+    let (project_id, _) = crate::daemon::session_registration::register_project(state, &cwd, &now);
+    state.registry.upsert_interactive(session_id, &cwd, &project_id, &now);
+    if !cfg.model.is_empty() && !cfg.effort.is_empty() {
+        state.registry.set_model_effort(session_id, &cfg.model, &cfg.effort);
+    }
+    // An empty id would read as an account that does not exist.
+    if !cfg.account_id.is_empty() {
+        state.registry.set_account(session_id, &cfg.account_id);
+    }
 }
 
 /// Spawns a brand-new chat and sends `prompt` as its first turn. Registers it
@@ -288,6 +313,32 @@ mod tests {
 
     fn test_state() -> Arc<DaemonState> {
         DaemonState::new(new_session_map(), SettingsCache::new(Settings::default()))
+    }
+
+    #[test]
+    fn a_chat_whose_row_is_gone_gets_an_interactive_row_back_before_a_scheduled_respawn() {
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = test_state();
+        crate::sessions::chat_config::record("gone-1", "sonnet", "medium");
+        crate::sessions::chat_config::set_account("gone-1", "acct-a");
+
+        restore_missing_row(&state, "gone-1", ".");
+
+        let row = state.registry.get("gone-1").expect("row restored");
+        assert_eq!(row.kind, crate::sessions::kinds::InstanceKind::Interactive);
+        assert_eq!(row.account_id.as_deref(), Some("acct-a"));
+        assert_eq!(row.model, "sonnet");
+    }
+
+    #[test]
+    fn restoring_a_row_leaves_an_existing_one_alone() {
+        let state = test_state();
+        state.registry.upsert_interactive("here-1", std::path::Path::new("."), "proj-1", "2026-11-14T00:00:00Z");
+        state.registry.set_account("here-1", "acct-b");
+
+        restore_missing_row(&state, "here-1", ".");
+
+        assert_eq!(state.registry.get("here-1").unwrap().account_id.as_deref(), Some("acct-b"));
     }
 
     fn account(id: &str, kind: crate::accounts::AccountKind) -> crate::accounts::Account {

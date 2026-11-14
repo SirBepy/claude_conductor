@@ -101,8 +101,11 @@ pub(super) async fn on_session_start(
 
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 
-    // A session reaching the hook server was started outside this daemon.
-    let (kind, is_remote) = (InstanceKind::External, false);
+    // A session reaching the hook server was started outside this daemon, unless the
+    // daemon holds its child: a chat whose row was lost (an ended row is not in the
+    // snapshot) and then respawned would otherwise come back as a terminal session.
+    let hosted = ctx.state.sessions.get(&payload.session_id).is_some();
+    let (kind, is_remote) = (if hosted { InstanceKind::Interactive } else { InstanceKind::External }, false);
 
     let transcript_path_buf = payload.transcript_path.clone().map(std::path::PathBuf::from);
     // Read before `register`, which creates a new id's row.

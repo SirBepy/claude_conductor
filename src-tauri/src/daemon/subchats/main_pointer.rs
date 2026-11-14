@@ -20,7 +20,11 @@ use std::collections::HashSet;
 pub const NOTIFY: &str = "project_main_chat_set";
 
 fn is_live_main(i: &Instance, mode_on: &HashSet<String>) -> bool {
-    i.ended_at.is_none()
+    // A terminal session never has a main chat's mode: an External row with the
+    // mode on is a daemon chat whose row was rebuilt by its SessionStart hook, and a
+    // new chat sent to it would land in a chat the app does not host.
+    i.kind != crate::sessions::kinds::InstanceKind::External
+        && i.ended_at.is_none()
         && i.end_reason.is_none()
         && i.machine.is_none()
         && !super::is_sub(i)
@@ -181,6 +185,18 @@ mod tests {
         st.registry.mark_ended("m2", crate::types::EndReason::Manual, "2026-11-12T13:00:00Z");
         assert_eq!(reconcile_with(&st, &on(&["m1", "m2"])), ["pa"]);
         assert_eq!(pointer(&st, "pa"), None);
+    }
+
+    #[test]
+    fn a_terminal_session_row_is_never_a_projects_main_chat_even_with_the_mode_on() {
+        let st = state_with(&["pa"]);
+        chat(&st, "real", "pa", "2026-11-12T10:00:00Z");
+        chat(&st, "ghost", "pa", "2026-11-12T12:00:00Z");
+        st.registry.externalize_session("ghost");
+
+        reconcile_with(&st, &on(&["ghost", "real"]));
+
+        assert_eq!(pointer(&st, "pa").as_deref(), Some("real"), "the newer External row must not take the pointer");
     }
 
     #[test]
