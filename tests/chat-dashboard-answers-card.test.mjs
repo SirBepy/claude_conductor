@@ -149,6 +149,25 @@ describe("Answers card", () => {
     expect(inThread, "the thread's first reply keeps its chip").not.toBeNull();
   });
 
+  it("opens a detail an earlier message defined when the answer links it by the same id", async () => {
+    const { pane, r } = mountPane("chat-drill-earlier");
+    new ChatDashboard(pane, r);
+    feed(r, [
+      userEvent("list the causes"),
+      ...send({
+        kind: "report", verdict: "Two causes", text: "See [the causes](#d:causes).",
+        details: [{ id: "causes", label: "The causes", body_md: "cache miss and cold start" }],
+      }, "e1"),
+      userEvent("which one matters?"),
+      ...send({ kind: "answer", verdict: "The cache miss", text: "Mostly [the causes](#d:causes)." }, "e2"),
+    ]);
+    await drawn(pane);
+    const chip = card(pane).querySelector(".ax-face .drill-chip");
+    expect(chip, "an id defined earlier still resolves on the card").not.toBeNull();
+    chip.click();
+    expect(pane.querySelector(".drill-pop .drill-pop-body").textContent).toContain("cache miss and cold start");
+  });
+
   it("walks Got it back through every unread answer to All caught up, storing each read", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
