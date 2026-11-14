@@ -27,10 +27,12 @@
  * upward from the composer.
  *
  * Only while nothing else sits directly above the composer: the thinking strip
- * (with Stop), the limit, scheduled and quick-reply slots and a permission card
+ * (with Stop; in the dashboard view the Plan card hosts it instead, so only the
+ * one inside the composer shell counts), the limit, scheduled and quick-reply
+ * slots, a draft dashboard's chip row and a permission card
  * all stack there, and floating thumbnails would cover them and take their
  * clicks. With any of those showing the row stays in the composer as before. */
-.session-pane:not(:has(.session-thinking:not([hidden]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)) .composer-shell .session-composer > .composer-attachments {
+.session-pane:not(:has(.composer-shell > .session-thinking:not([hidden]), .pd-qa-host.is-draft:not([data-typing]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)) .composer-shell .session-composer > .composer-attachments {
   position: absolute;
   left: 0;
   right: 0;
@@ -38,12 +40,12 @@
   padding: 0 6px 6px;
   pointer-events: none;
 }
-.session-pane:not(:has(.session-thinking:not([hidden]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)) .composer-shell .session-composer > .composer-attachments .attachment {
+.session-pane:not(:has(.composer-shell > .session-thinking:not([hidden]), .pd-qa-host.is-draft:not([data-typing]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)) .composer-shell .session-composer > .composer-attachments .attachment {
   pointer-events: auto;
 }
 /* The out-of-flow row no longer shrinks the pane, so the content scrolls clear
  * of it with padding of its own: one row (80px) plus its gap and a little air. */
-.session-pane:not(:has(.session-thinking:not([hidden]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)):has(.composer-shell .session-composer > .composer-attachments:not(:empty)) :is(.cdash-body, .session-messages) {
+.session-pane:not(:has(.composer-shell > .session-thinking:not([hidden]), .pd-qa-host.is-draft:not([data-typing]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)):has(.composer-shell .session-composer > .composer-attachments:not(:empty)) :is(.cdash-body, .session-messages) {
   padding-bottom: 104px;
 }
 
