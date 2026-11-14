@@ -69,7 +69,7 @@ export async function initialLoadAndRestore(pane: HTMLElement, listEl: HTMLEleme
   // is_daemon_connected has no HttpTransport mapping (always throws) - the
   // remote client IS the daemon connection, so getting here means it's up.
   const [, connected] = await Promise.all([
-    refreshSessions(),
+    refreshSessions(false),
     isRemote() ? Promise.resolve(true) : invoke<boolean>("is_daemon_connected").catch(() => null),
     loadSessionCharacters(),
     loadProjectMainChats(),

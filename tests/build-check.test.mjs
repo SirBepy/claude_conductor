@@ -82,6 +82,14 @@ describe("checkBuildOnce", () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
+  it("defers while a contenteditable editor holds text", async () => {
+    stamp("A");
+    daemonSays("B");
+    document.body.innerHTML = `<div contenteditable="true">draft in progress</div>`;
+    expect(await bc.checkBuildOnce()).toBe("defer");
+    expect(reload).not.toHaveBeenCalled();
+  });
+
   it("does nothing on a page served without a stamp", async () => {
     stamp(null);
     daemonSays("B");

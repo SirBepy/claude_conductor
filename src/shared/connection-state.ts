@@ -22,7 +22,7 @@ export const SLOW_REQUEST_MS = 4_000;
  *  is not listed: its pollers pass `{ background: true }` per call instead
  *  (CallOptions in transport.ts), so a user-waited load of it still reads as slow. */
 export const BACKGROUND_READS: ReadonlySet<string> = new Set([
-  // 700ms prompt poll (views/sessions/permission-modal/index.ts)
+  // fallback prompt poll (views/sessions/permission-modal/index.ts)
   "list_pending_prompts",
   // refetch on every visibilitychange to visible (views/sessions/hidden-sessions-sync.ts)
   "get_hidden_chats",

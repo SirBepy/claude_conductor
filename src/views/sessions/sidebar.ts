@@ -189,9 +189,12 @@ export function isLive(i: Instance): boolean {
  * ended-session diff on a failed refresh or a transient IPC blip would evict
  * every cached background transcript. Existing callers ignore the return.
  */
-export async function refreshSessions(): Promise<boolean> {
+export async function refreshSessions(background = true): Promise<boolean> {
   try {
-    const all = await invoke<Instance[]>("list_instances");
+    // A refresh runs on every instances-changed frame and after chat actions:
+    // nobody waits on it, so a slow one never raises the phone's "Waiting for
+    // your PC" strip. Only the first load of the list passes `false`.
+    const all = await invoke<Instance[]>("list_instances", undefined, { background });
     const next = (all || []).filter(isLive);
 
     const unread = loadUnreadSet();

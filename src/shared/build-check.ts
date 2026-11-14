@@ -44,6 +44,10 @@ export function hasUnsentText(doc: Document = document): boolean {
   for (const el of doc.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>("textarea, input[type='text']")) {
     if (el.value.trim() !== "") return true;
   }
+  // The drafts editor is a contenteditable, not a form control.
+  for (const el of doc.querySelectorAll<HTMLElement>("[contenteditable='true'], [contenteditable='plaintext-only']")) {
+    if ((el.textContent ?? "").trim() !== "") return true;
+  }
   return false;
 }
 
