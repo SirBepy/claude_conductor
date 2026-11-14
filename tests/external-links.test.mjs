@@ -72,7 +72,7 @@ describe("external link interceptor", () => {
   // Markdown `[x](notes.md)` rendered anywhere in the app would otherwise load
   // that path into the app's own webview with no way back (pc-1746).
   it("cancels a relative link so the main frame never navigates", () => {
-    for (const href of ["feedback_x.md", "./a.md#top", "/old/dashboard.html", "../up.md"]) {
+    for (const href of ["feedback_x.md", "./a.md#top", "/old/dashboard.html", "../up.md", "C:\\proj\\notes.md", "C:/proj/notes.md"]) {
       expect(tap(href).defaultPrevented, href).toBe(true);
     }
     expect(openExternal).not.toHaveBeenCalled();

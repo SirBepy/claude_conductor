@@ -37,7 +37,7 @@ const HOST_CLASS = "cdash-qvm";
 /** The doc a relative markdown link (`feedback_x.md`, `./a.md#top`) points at,
  *  matched on the file name the daemon sent; -1 when it names none of them. */
 function docIndexForHref(docs: QuickViewDoc[], href: string): number {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("#")) return -1;
+  if ((/^[a-z][a-z0-9+.-]*:/i.test(href) && !/^[a-z]:[\\/]/i.test(href)) || href.startsWith("#")) return -1;
   let path = href.split(/[?#]/)[0] ?? "";
   try { path = decodeURIComponent(path); } catch { /* keep the raw text */ }
   const base = path.split(/[\\/]/).pop()?.toLowerCase() ?? "";

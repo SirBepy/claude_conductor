@@ -24,8 +24,13 @@
  * of taking a row of the composer: the row is out of flow, so the pane keeps
  * its height and what sits beside the thumbnails stays visible. The row itself
  * lets clicks through; only a thumbnail takes them. A wrapped second row grows
- * upward from the composer. */
-.composer-shell .session-composer > .composer-attachments {
+ * upward from the composer.
+ *
+ * Only while nothing else sits directly above the composer: the thinking strip
+ * (with Stop), the limit, scheduled and quick-reply slots and a permission card
+ * all stack there, and floating thumbnails would cover them and take their
+ * clicks. With any of those showing the row stays in the composer as before. */
+.session-pane:not(:has(.session-thinking:not([hidden]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)) .composer-shell .session-composer > .composer-attachments {
   position: absolute;
   left: 0;
   right: 0;
@@ -33,12 +38,12 @@
   padding: 0 6px 6px;
   pointer-events: none;
 }
-.composer-shell .session-composer > .composer-attachments .attachment {
+.session-pane:not(:has(.session-thinking:not([hidden]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)) .composer-shell .session-composer > .composer-attachments .attachment {
   pointer-events: auto;
 }
 /* The out-of-flow row no longer shrinks the pane, so the content scrolls clear
  * of it with padding of its own: one row (80px) plus its gap and a little air. */
-.session-pane:has(.composer-shell .session-composer > .composer-attachments:not(:empty)) :is(.cdash-body, .session-messages) {
+.session-pane:not(:has(.session-thinking:not([hidden]), .frozen-limit-slot:not(:empty), .scheduled-chip-slot:not(:empty), .next-chip-slot:not(:empty):not([data-typing]), .prompt-card-host--composer .prompt-card)):has(.composer-shell .session-composer > .composer-attachments:not(:empty)) :is(.cdash-body, .session-messages) {
   padding-bottom: 104px;
 }
 

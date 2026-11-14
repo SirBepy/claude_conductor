@@ -43,7 +43,8 @@ function handleClick(e: MouseEvent): void {
  *  the router handle those themselves. */
 function isInAppPath(href: string): boolean {
   if (!href || href.startsWith("#")) return false;
-  return !/^[a-z][a-z0-9+.-]*:/i.test(href);
+  // A drive path (`C:\x\a.md`, `C:/x/a.md`) is a path, not a one-letter scheme.
+  return /^[a-z]:[\\/]/i.test(href) || !/^[a-z][a-z0-9+.-]*:/i.test(href);
 }
 
 /** Bubble phase, after every feature's own link handler: only a link nobody

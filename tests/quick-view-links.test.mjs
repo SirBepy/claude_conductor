@@ -52,6 +52,13 @@ describe("Project memory links", () => {
     expect(document.querySelector(".cdash-qvm-doc").textContent).toContain("body b");
   });
 
+  it("treats a Windows drive path as a path, not a scheme, and opens its file here", () => {
+    document.querySelector(".cdash-qvm-doc").insertAdjacentHTML("beforeend", `<a href="C:\\mem\\a.md">Drive A</a>`);
+    const ev = click(link("Drive A"));
+    expect(ev.defaultPrevented).toBe(true);
+    expect(document.querySelector(".cdash-qvm-doc").textContent).toContain("body a");
+  });
+
   it("a link naming no file leaves the dialog as it was and never navigates", () => {
     for (const text of ["Gone", "Home"]) {
       const ev = click(link(text));
