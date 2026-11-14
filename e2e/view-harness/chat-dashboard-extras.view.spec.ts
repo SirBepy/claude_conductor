@@ -1,3 +1,4 @@
+// Reviewed 2026-11-14 (pc-1746, a relative link in a quick view opens that file in the dialog instead of navigating the webview): the memory test now clicks the index link; the rest is unchanged.
 // Reviewed 2026-11-14 (Result card, finished tray): the Result is its own card under Plan, finished subs sit in a tray under it and the From subs card is gone; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-13 (From subs): the dashboard gained a From subs zone in the left column that draws sub reports which are not answers; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-13 (stale blockers): Waiting on you drops an own blocker once the chat sends a later report, answer, plan or same-target blocker, each Waiting card gains a written time and a hover x (Clear all once two can go) kept per chat in localStorage, and the card copy button is hidden there; nothing this spec asserts changed, and it passes.
@@ -147,6 +148,13 @@ test.describe("chat dashboard extra cards", () => {
     await dlg.locator(".cdash-qvm-file").nth(1).click();
     await expect(dlg.locator(".cdash-qvm-doc")).toContainText("The board id lives next to the Shortcut one.");
     await capture(page, "chat-dashboard-memory-view");
+    // The index's own link opens that file in the dialog and never navigates the
+    // app's webview away from the chats window (pc-1746).
+    const urlBefore = page.url();
+    await dlg.locator(".cdash-qvm-file").nth(0).click();
+    await dlg.locator(".cdash-qvm-doc a", { hasText: "Fact A" }).click();
+    await expect(dlg.locator(".cdash-qvm-doc")).toContainText("The board id lives next to the Shortcut one.");
+    expect(page.url()).toBe(urlBefore);
     const asked = (await invokeCalls(page)).filter((c) => c.cmd === "chat_quick_view");
     expect(asked.some((c) => (c.args as { view?: string }).view === "memory" && (c.args as { sessionId?: string }).sessionId === SESSION.session_id)).toBe(true);
   });

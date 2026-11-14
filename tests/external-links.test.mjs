@@ -68,4 +68,25 @@ describe("external link interceptor", () => {
     expect(open).not.toHaveBeenCalled();
     expect(openExternal).not.toHaveBeenCalled();
   });
+
+  // Markdown `[x](notes.md)` rendered anywhere in the app would otherwise load
+  // that path into the app's own webview with no way back (pc-1746).
+  it("cancels a relative link so the main frame never navigates", () => {
+    for (const href of ["feedback_x.md", "./a.md#top", "/old/dashboard.html", "../up.md"]) {
+      expect(tap(href).defaultPrevented, href).toBe(true);
+    }
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("leaves in-page fragments and download links alone", () => {
+    expect(tap("#section").defaultPrevented).toBe(false);
+    const a = document.createElement("a");
+    a.setAttribute("href", "report.csv");
+    a.setAttribute("download", "");
+    document.body.appendChild(a);
+    const ev = new MouseEvent("click", { bubbles: true, cancelable: true });
+    a.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(false);
+  });
 });

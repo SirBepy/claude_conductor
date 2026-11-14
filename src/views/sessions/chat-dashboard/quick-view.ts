@@ -34,6 +34,16 @@ export async function fetchQuickView(sessionId: string, view: QuickViewId): Prom
 
 const HOST_CLASS = "cdash-qvm";
 
+/** The doc a relative markdown link (`feedback_x.md`, `./a.md#top`) points at,
+ *  matched on the file name the daemon sent; -1 when it names none of them. */
+function docIndexForHref(docs: QuickViewDoc[], href: string): number {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("#")) return -1;
+  let path = href.split(/[?#]/)[0] ?? "";
+  try { path = decodeURIComponent(path); } catch { /* keep the raw text */ }
+  const base = path.split(/[\\/]/).pop()?.toLowerCase() ?? "";
+  return base ? docs.findIndex((d) => d.name.toLowerCase() === base) : -1;
+}
+
 /** Closes the open read view, if any. */
 export function closeQuickView(): void {
   document.querySelector(`.${HOST_CLASS}`)?.dispatchEvent(new CustomEvent("cdash-qvm-close"));
@@ -82,6 +92,18 @@ export function openQuickView(data: QuickViewData): void {
     if (t.closest("[data-close]")) close();
     const file = t.closest<HTMLElement>(".cdash-qvm-file");
     if (file) show(Number(file.dataset.i));
+    // A memory index links its entries by relative path: open that file here.
+    // Anything else relative goes nowhere (external-links.ts cancels it), never
+    // the app's own webview.
+    const link = t.closest<HTMLAnchorElement>(".cdash-qvm-doc a[href]");
+    if (link) {
+      const href = link.getAttribute("href") || "";
+      const i = docIndexForHref(data.docs, href);
+      if (i >= 0) {
+        e.preventDefault();
+        show(i);
+      }
+    }
   });
   document.addEventListener("keydown", onKey, true);
   document.body.appendChild(host);
