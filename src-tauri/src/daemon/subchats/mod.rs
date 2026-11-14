@@ -86,9 +86,9 @@ pub fn is_sub(inst: &Instance) -> bool {
 
 /// Whether `sub_id` is a push-gate sub (`spawn_chat` with `gate: true`), read
 /// from its stored brief. The one sub allowed to push, and exempt from the
-/// reviewer requirement: the check in `finish::request_finish` that demands a
-/// fresh reviewer for a sub that changed files must return early when this is
-/// true, because the gate's own `/code-check` already reviewed what it changed.
+/// reviewer requirement: `project::review_required` (read by the card log's
+/// finish check) is false for a gate, because the gate's own `/code-check`
+/// already reviewed what it changed.
 pub fn is_gate(sub_id: &str) -> bool {
     crate::sessions::chat_config::get(sub_id).and_then(|c| c.subchat).is_some_and(|b| b.gate)
 }

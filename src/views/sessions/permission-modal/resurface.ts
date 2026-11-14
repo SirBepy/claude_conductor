@@ -186,7 +186,7 @@ async function applyRehydration(
 ): Promise<boolean> {
   if (!recs) return false;
   recs = recs.filter((r) => r.kind !== "question" || !dropIfAlreadyAnswered(sessionId, r.id));
-  // A quiet card (a decisions checkup) goes last whatever its age, so it never takes
+  // A quiet card (the restart-lost stall card) goes last whatever its age, so it never takes
   // the slot, and the card on screen first, from a real ask.
   recs = [...recs.filter((r) => !isQuietPrompt(r)), ...recs.filter((r) => isQuietPrompt(r))];
   // One park per session, so take the longest-waiting (state/prompts.rs

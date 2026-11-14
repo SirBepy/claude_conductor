@@ -111,7 +111,8 @@ pub struct ProjectConfig {
     /// What a sub of a "Use subchats" chat must show before it can finish.
     #[serde(default)]
     pub subchat_check: SubchatCheck,
-    /// How subs that edit files share this project's tree.
+    /// Retired "Subs changing files" setting: still parsed so an old settings file
+    /// loads, never read (every writing sub gets its own worktree).
     #[serde(default)]
     pub subchat_writers: SubchatWriters,
     /// The project's live main chat (a chat with "Use subchats" on): a new chat in
@@ -135,8 +136,8 @@ pub enum SubchatCheck {
     FactsOnly,
 }
 
-/// Project setting "Subs changing files". `OneAtATime` is the default: one
-/// writing sub per project, the next one queues.
+/// Retired project setting "Subs changing files", kept so old settings files
+/// still parse. Nothing reads it: every writing sub gets its own worktree.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]

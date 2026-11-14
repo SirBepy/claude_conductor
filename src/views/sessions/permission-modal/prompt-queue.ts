@@ -16,7 +16,7 @@ export interface PromptQueue<T extends { id: string }> {
 }
 
 /** `yields` marks payloads that wait behind every other queued payload, whatever
- *  arrived first (a quiet checkup card): `promote` takes the oldest payload that
+ *  arrived first (a quiet card): `promote` takes the oldest payload that
  *  does not yield, and a yielding one only when nothing else is queued. */
 export function createPromptQueue<T extends { id: string }>(
   dispatch: (payload: T) => void,

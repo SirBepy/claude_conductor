@@ -362,7 +362,7 @@ export function clearPendingPromptById(id: string): void {
 export function pendingPromptSessionIds(): Set<string> {
   const out = new Set<string>();
   for (const [askerId, prompt] of _pendingPrompts) {
-    // A quiet card (a decisions checkup) waits for Joe to look, not for his answer:
+    // A quiet card (the restart-lost stall card) waits for Joe to look, not for his answer:
     // no attention marker, no "input needed" ring, no red dot.
     if (isQuietPrompt(prompt)) continue;
     out.add(displayIdOf(prompt.payload) ?? askerId);

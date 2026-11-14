@@ -90,7 +90,7 @@ export interface QuestionRequestedPayload extends PromptRouting {
    *  not asked by a model: its answer goes to daemon code alone, so the card has
    *  no free-text box and no answer path posts a message to the chat it shows in. */
   daemon_card?: boolean;
-  /** A daemon card that asks for no attention (a decisions checkup): it is shown
+  /** A daemon card that asks for no attention (the restart-lost stall card): it is shown
    *  when Joe opens the chat, behind every other card there, and gets no red dot,
    *  ring or "input needed" state. */
   quiet?: boolean;

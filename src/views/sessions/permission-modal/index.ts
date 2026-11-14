@@ -103,7 +103,7 @@ export function rerenderSidebar(): void {
 // Promotion re-runs the normal arrival gate - the slot is already empty by
 // the time handlePromptResolved promotes, so the sibling parks or shows
 // exactly as a fresh event would.
-// A quiet card (a decisions checkup) waits behind every other queued card of its
+// A quiet card (the restart-lost stall card) waits behind every other queued card of its
 // chat, whatever arrived first: Joe is only interrupted for something wrong.
 const _queuedSiblingQuestions = createPromptQueue<QuestionRequestedPayload>((p) => handleQuestionRequested(p), {
   yields: (p) => p.quiet === true,

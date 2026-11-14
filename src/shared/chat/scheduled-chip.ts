@@ -8,7 +8,7 @@
 //
 // Data source: schedule_list on mount/open + after every row action.
 // TODO(schedule-view phase): live event — the daemon emits
-// `scheduled_items_changed` internally (daemon/schedule.rs) but it isn't
+// `scheduled_items_changed` internally (daemon/schedule/mod.rs) but it isn't
 // bridged to a Tauri app-side event yet, so this polls instead of subscribing.
 
 import { invoke } from "../ipc";
