@@ -20,6 +20,10 @@ const RESUME_STAGGER_SECS: i64 = 45;
 /// `compute_fired` turns that into a requeue instead of a terminal `Failed`,
 /// because the item is not broken, it is early.
 pub(crate) const RATE_LIMITED_PREFIX: &str = "RATE_LIMITED:";
+/// `fire_new_chat` returns `Err("SPAWN_CAPPED:<wait secs>")` when the rolling cap
+/// on chats started by chats and schedules (`spawn_rate`) refuses the start.
+/// Like a rate limit it means the item is early, not broken.
+pub(crate) const SPAWN_CAPPED_PREFIX: &str = "SPAWN_CAPPED:";
 
 /// When should the next resume on `account_id` fire, given the account leaves
 /// its window at `resets_at` (unix secs)? Slots are `resets_at + 60s`, then
@@ -89,6 +93,17 @@ pub(super) async fn compute_fired(state: &Arc<DaemonState>, mut item: ScheduledI
         }
     }
     let outcome = schedule_fire::fire_kind(state, &item).await;
+    settle_fired(state, item, now, outcome)
+}
+
+/// What one fire attempt's `outcome` does to its item; split from `compute_fired`
+/// so a test can hand it a refusal without a real spawn.
+fn settle_fired(
+    state: &Arc<DaemonState>,
+    mut item: ScheduledItem,
+    now: DateTime<Utc>,
+    outcome: Result<Option<String>, String>,
+) -> ScheduledItem {
     // Still inside the account's window: not a failure, just early. Push the
     // item to the next free stagger slot and leave it Pending. `last_fired_at`
     // stays untouched so the schedule view doesn't claim we tried to send.
@@ -103,6 +118,15 @@ pub(super) async fn compute_fired(state: &Arc<DaemonState>, mut item: ScheduledI
         item.fire_at = next_stagger_slot(state, account_id.as_deref(), resets_at).to_rfc3339();
         item.status = ScheduledStatus::Pending;
         item.last_result = Some("waiting: account still rate limited".to_string());
+        return item;
+    }
+    // Over the chat start cap: wait out the window, then try again. Without this
+    // a one-shot went Failed with nothing shown and a recurring item skipped its
+    // occurrence.
+    if let Some(wait) = outcome.as_ref().err().and_then(|e| parse_spawn_capped(e)) {
+        item.fire_at = (now + chrono::Duration::seconds(wait + 5)).to_rfc3339();
+        item.status = ScheduledStatus::Pending;
+        item.last_result = Some(format!("waiting: chat start limit reached, retried in about {wait} seconds"));
         return item;
     }
     item.last_fired_at = Some(now.to_rfc3339());
@@ -152,6 +176,11 @@ pub(crate) fn parse_rate_limited(reason: &str) -> Option<i64> {
     reason.strip_prefix(RATE_LIMITED_PREFIX)?.parse().ok()
 }
 
+/// `Some(wait secs)` if `reason` is the requeue sentinel from `fire_new_chat`.
+pub(crate) fn parse_spawn_capped(reason: &str) -> Option<i64> {
+    reason.strip_prefix(SPAWN_CAPPED_PREFIX)?.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,6 +219,32 @@ mod tests {
         assert!(matches!(updated.status, ScheduledStatus::Failed { .. }), "missing cwd must surface as Failed, not panic");
         assert!(updated.last_fired_at.is_some());
         assert!(updated.last_result.is_some());
+    }
+
+    /// The chat start cap (`spawn_rate`) refuses a scheduled new chat: the item
+    /// is early, so it waits past the window with a visible note, one-shot or
+    /// recurring, and is neither Failed nor skipped to its next occurrence.
+    #[tokio::test]
+    async fn a_scheduled_chat_refused_by_the_start_cap_is_requeued_past_the_wait() {
+        let state = test_state();
+        let now = Utc::now();
+        for recurrence in [None, Some(Recurrence { time: "09:00".into(), rule: RecurrenceRule::Daily })] {
+            let item = make_item(now - chrono::Duration::minutes(1), recurrence);
+            let before = item.fire_at.clone();
+            let updated = settle_fired(&state, item, now, Err(format!("{SPAWN_CAPPED_PREFIX}120")));
+            assert_eq!(updated.status, ScheduledStatus::Pending);
+            let at = DateTime::parse_from_rfc3339(&updated.fire_at).unwrap();
+            assert_ne!(updated.fire_at, before);
+            assert!(at.timestamp() >= now.timestamp() + 120, "waits out the window: {}", updated.fire_at);
+            assert!(updated.last_result.as_deref().unwrap_or("").starts_with("waiting:"), "{:?}", updated.last_result);
+            assert!(updated.last_fired_at.is_none(), "nothing was sent");
+        }
+    }
+
+    #[test]
+    fn parse_spawn_capped_reads_the_wait() {
+        assert_eq!(parse_spawn_capped("SPAWN_CAPPED:42"), Some(42));
+        assert_eq!(parse_spawn_capped("no cwd"), None);
     }
 
     /// Spike S1 (g3): a one-shot fired while its chat was compacting failed

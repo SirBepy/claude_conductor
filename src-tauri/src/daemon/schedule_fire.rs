@@ -4,7 +4,7 @@
 //! `respawn_for_message` helper), and `fire_new_chat`. Called from
 //! `schedule::compute_fired`; owns no store I/O or tick bookkeeping itself.
 
-use super::schedule::RATE_LIMITED_PREFIX;
+use super::schedule::{RATE_LIMITED_PREFIX, SPAWN_CAPPED_PREFIX};
 use crate::daemon::jarvis_wake;
 use crate::daemon::lifecycle::{self, LifecycleError, StartSessionParams};
 use crate::daemon::state::DaemonState;
@@ -233,7 +233,10 @@ async fn fire_new_chat(
     subchats_on: bool,
     prompt: &str,
 ) -> Result<Option<String>, String> {
-    crate::daemon::spawn_rate::admit("scheduled new chat").map_err(|r| r.text)?;
+    // Early, not broken: `compute_fired` requeues the item past the wait instead
+    // of failing it, so a capped schedule is not lost.
+    crate::daemon::spawn_rate::admit("scheduled new chat")
+        .map_err(|r| format!("{SPAWN_CAPPED_PREFIX}{}", r.wait.as_secs().max(1)))?;
     let mode_sid = prepare_fired_mode(
         state,
         subchats_on,

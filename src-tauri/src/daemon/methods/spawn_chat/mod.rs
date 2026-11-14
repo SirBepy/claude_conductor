@@ -176,15 +176,6 @@ pub(crate) async fn spawn_chat(
         .registry
         .get(caller_session_id)
         .ok_or_else(|| format!("unknown caller session: {caller_session_id}"))?;
-    // A rolling cap on chats started by chats: the guards below bound concurrent
-    // subs and one respawn per turn, never the total, so a loop would run on.
-    if let Err(refused) = crate::daemon::spawn_rate::admit("spawn_chat") {
-        if refused.first {
-            crate::daemon::spawn_rate::tell_joe(state, caller_session_id).await;
-        }
-        return Err(refused.text);
-    }
-
     let requested = std::path::PathBuf::from(cwd);
     let mut target_cwd = resolve_target_cwd(&caller.cwd, &requested, &state.settings.snapshot().projects)?;
 
@@ -217,6 +208,23 @@ pub(crate) async fn spawn_chat(
             crate::daemon::subchats::worktree::discard(info);
         }
     };
+
+    // A rolling cap on chats started by chats: the guards above bound concurrent
+    // subs and one respawn per turn, never the total, so a loop would run on. It
+    // counts here, after every check that rejects a call without starting
+    // anything (caller, cwd, the respawn's turn slot, the worktree), so a retried
+    // rejected spawn does not burn the budget.
+    if let Err(refused) = crate::daemon::spawn_rate::admit("spawn_chat") {
+        discard_tree(&tree);
+        // The refusal started nothing, so the respawn may be tried again.
+        if respawn {
+            release_turn_slot(caller_session_id);
+        }
+        if refused.first {
+            crate::daemon::spawn_rate::tell_joe(state, caller_session_id).await;
+        }
+        return Err(refused.text);
+    }
 
     // A sub that must wait for another (`after`) gets its row and its recipe now
     // and its child later, from `subchats::held`.
@@ -592,6 +600,25 @@ mod tests {
         let r = spawn_chat(&state, "sess-1", elsewhere, "carry on", None, None, None, false, None).await;
         let err = r.expect_err("foreign cwd must be rejected");
         assert!(err.contains("own working directory"), "{err}");
+    }
+
+    /// The start cap counts chats that start. A call refused for its folder, or a
+    /// respawn refused as the turn's second, starts nothing and must not use up
+    /// the budget a retry loop would then drain.
+    #[tokio::test]
+    async fn a_refused_spawn_does_not_count_against_the_start_cap() {
+        let state = test_state();
+        state.registry.upsert_interactive("sess-cap", std::path::Path::new("."), "proj-x", "2026-11-14T00:00:00Z");
+        let before = crate::daemon::spawn_rate::test_admits();
+        let elsewhere = if cfg!(windows) { "C:\\Windows" } else { "/etc" };
+        spawn_chat(&state, "sess-cap", elsewhere, "carry on", None, None, None, false, None)
+            .await
+            .expect_err("a foreign cwd is refused");
+        assert!(claim_turn_slot(&state, "sess-cap"), "the turn's respawn slot is taken");
+        spawn_chat(&state, "sess-cap", ".", "carry on", None, None, None, true, None)
+            .await
+            .expect_err("a second respawn in the turn is refused");
+        assert_eq!(crate::daemon::spawn_rate::test_admits(), before, "refused spawns counted against the cap");
     }
 
     /// A caller with Use subchats on, and a plan for one sub of it.

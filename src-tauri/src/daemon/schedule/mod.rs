@@ -26,7 +26,7 @@ use crate::daemon::state::DaemonState;
 use crate::sessions::scheduled_items::{self, ScheduledItem, ScheduledKind, ScheduledStatus};
 use gate::{demand_meeting_for_upcoming, gated_lateness_secs, grace_lateness_secs, meeting_sample_is_stale};
 pub use outcome::next_stagger_slot;
-pub(crate) use outcome::RATE_LIMITED_PREFIX;
+pub(crate) use outcome::{RATE_LIMITED_PREFIX, SPAWN_CAPPED_PREFIX};
 #[cfg(test)]
 pub(crate) use outcome::parse_rate_limited;
 use outcome::{compute_fired, compute_missed};

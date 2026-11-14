@@ -58,14 +58,18 @@ static STARTS: LazyLock<Mutex<Starts>> = LazyLock::new(|| Mutex::new(Starts::def
 pub struct Refused {
     pub text: String,
     pub first: bool,
+    /// Until the oldest counted start leaves the window.
+    pub wait: Duration,
 }
 
 /// Counts one chat start made by a chat, a schedule or Jarvis; `source` names the
 /// path in the log.
 pub fn admit(source: &str) -> Result<(), Refused> {
     // The lib's tests share one process and start far more than LIMIT chats between
-    // them; the rolling logic is covered on `Starts` directly.
+    // them; the rolling logic is covered on `Starts` directly. A per-thread count
+    // lets a test see WHERE in a spawn the count happens.
     if cfg!(test) {
+        TEST_ADMITS.with(|n| n.set(n.get() + 1));
         return Ok(());
     }
     match STARTS.lock().unwrap_or_else(|e| e.into_inner()).admit(Instant::now()) {
@@ -78,9 +82,19 @@ pub fn admit(source: &str) -> Result<(), Refused> {
                     wait.as_secs()
                 );
             }
-            Err(Refused { text: refusal(wait), first })
+            Err(Refused { text: refusal(wait), first, wait })
         }
     }
+}
+
+thread_local! {
+    static TEST_ADMITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many starts this thread has counted under `cfg(test)`.
+#[cfg(test)]
+pub fn test_admits() -> usize {
+    TEST_ADMITS.with(|n| n.get())
 }
 
 /// Shows Joe one card in the window of the chat that hit the cap, so a loop he did

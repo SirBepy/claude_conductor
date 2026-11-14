@@ -42,6 +42,36 @@ fn band_for(pct: u8) -> Option<u8> {
     BANDS.iter().rev().copied().find(|b| pct >= *b)
 }
 
+/// Takes the band `pct` is due for, recording it as nudged, and returns it with
+/// the band held before (for [`release`]). Chats `live` no longer calls open are
+/// dropped from the map first, since nothing else removes a closed or respawned
+/// chat's entry. A chat back under the first band starts over.
+fn reserve(session_id: &str, pct: u8, live: impl Fn(&str) -> bool) -> Option<(u8, Option<u8>)> {
+    let mut seen = NUDGED.lock().unwrap_or_else(|e| e.into_inner());
+    seen.retain(|id, _| id == session_id || live(id));
+    if pct < BANDS[0] {
+        seen.remove(session_id);
+        return None;
+    }
+    let previous = seen.get(session_id).copied();
+    let band = due(pct, previous)?;
+    seen.insert(session_id.to_string(), band);
+    Some((band, previous))
+}
+
+/// Gives back a band [`reserve`] took when no card came of it, so the chat is
+/// nudged at that band on a later turn. A higher band recorded since is kept.
+fn release(session_id: &str, band: u8, previous: Option<u8>) {
+    let mut seen = NUDGED.lock().unwrap_or_else(|e| e.into_inner());
+    if seen.get(session_id) != Some(&band) {
+        return;
+    }
+    match previous {
+        Some(p) => seen.insert(session_id.to_string(), p),
+        None => seen.remove(session_id),
+    };
+}
+
 /// The band to nudge at now: the chat is in a band above the last one it was
 /// nudged at.
 pub fn due(pct: u8, last: Option<u8>) -> Option<u8> {
@@ -108,21 +138,15 @@ async fn check(state: &Arc<DaemonState>, session_id: &str) {
         return;
     }
     let Some(pct) = view.pct_used() else { return };
-    let last = {
-        let mut seen = NUDGED.lock().unwrap();
-        if pct < BANDS[0] {
-            seen.remove(session_id);
-            return;
-        }
-        seen.get(session_id).copied()
-    };
-    let Some(band) = due(pct, last) else { return };
+    // Reserved before the card is looked for or raised, in one lock, so a second
+    // check for the same chat (the next turn's) cannot raise a second card while
+    // this one is on its way.
+    let live = |id: &str| state.registry.get(id).is_some_and(|i| i.ended_at.is_none());
+    let Some((band, previous)) = reserve(session_id, pct, live) else { return };
     if card_open(state, session_id).await {
+        release(session_id, band, previous);
         return;
     }
-    // Recorded before the card exists, so the next turn's check cannot raise a
-    // second one while this one is on its way.
-    NUDGED.lock().unwrap().insert(session_id.to_string(), band);
     let card = RaisedCard {
         kind: CARD_KIND,
         display_session_id: session_id.to_string(),
@@ -145,7 +169,11 @@ async fn check(state: &Arc<DaemonState>, session_id: &str) {
                 }
             });
         }
-        Err(e) => log::debug!("context nudge: {session_id}: {e}"),
+        Err(e) => {
+            // No card was drawn, so the band is still owed.
+            release(session_id, band, previous);
+            log::debug!("context nudge: {session_id}: {e}");
+        }
     }
 }
 
@@ -186,6 +214,29 @@ mod tests {
         let note = hand_off_note(53);
         assert!(note.contains("53%") && note.contains("`respawn`") && note.contains("respawn/SKILL.md"), "{note}");
         assert!(question(53).contains("53%"));
+    }
+
+    #[test]
+    fn a_band_is_reserved_once_and_comes_back_when_no_card_was_drawn() {
+        let id = "nudge-reserve";
+        let live = |_: &str| true;
+        assert_eq!(reserve(id, 52, live), Some((50, None)));
+        assert_eq!(reserve(id, 55, live), None, "the band is already taken while the card is on its way");
+        release(id, 50, None);
+        assert_eq!(reserve(id, 55, live), Some((50, None)), "a failed card leaves the band owed");
+        assert_eq!(reserve(id, 70, live), Some((65, Some(50))));
+        release(id, 65, Some(50));
+        assert_eq!(reserve(id, 70, live), Some((65, Some(50))), "released back to the band before");
+        reserve(id, 10, live);
+    }
+
+    #[test]
+    fn a_closed_chats_entry_is_dropped_on_the_next_reservation() {
+        let gone = "nudge-gone";
+        assert!(reserve(gone, 60, |_| true).is_some());
+        assert!(reserve("nudge-other", 60, |id| id != gone).is_some());
+        assert!(NUDGED.lock().unwrap().get(gone).is_none(), "a chat that is no longer open keeps no entry");
+        reserve("nudge-other", 10, |_| true);
     }
 
     fn row(id: &str) -> crate::types::Instance {
