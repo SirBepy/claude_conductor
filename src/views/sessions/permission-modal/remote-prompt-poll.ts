@@ -120,3 +120,101 @@ function findPendingPromptsMatching(
   }
   return out;
 }
+
+// ---- Live frames on the global stream ------------------------------------------------
+
+/** The daemon pushes each new prompt on `/api/global/stream` as it is raised
+ *  (`permission_request`, `question_request`, `secret_request`; the stream's
+ *  event map renames them to these). The frame's payload is the stored
+ *  prompt's payload, so a card needs no poll tick to appear: the 8s
+ *  render-confirm window (question.rs RENDER_CONFIRM_TIMEOUT) is met by the
+ *  frame's own latency. */
+const FRAME_EVENTS = ["question-requested", "permission-requested", "secret-requested"] as const;
+
+/** A question outlives the daemon's prompt sweep (`durable`); the other two do not. */
+const FRAME_DURABLE: Record<(typeof FRAME_EVENTS)[number], boolean> = {
+  "question-requested": true,
+  "permission-requested": false,
+  "secret-requested": false,
+};
+
+/** Surfaces one prompt frame, once: a prompt the poll already surfaced (same
+ *  id in `emitted`) is not shown again. Returns whether a card was raised. */
+export function surfacePromptFrame(
+  event: (typeof FRAME_EVENTS)[number],
+  payload: unknown,
+  emitted: Map<string, boolean>,
+  cb: PromptPollCallbacks,
+): boolean {
+  const id = (payload as { id?: unknown } | null)?.id;
+  if (typeof id !== "string" || !id || emitted.has(id)) return false;
+  if (event === "question-requested") cb.onQuestion(payload as QuestionRequestedPayload);
+  else if (event === "permission-requested") cb.onPermission(payload as PermissionRequestedPayload);
+  else cb.onSecret(payload as SecretRequestedPayload);
+  emitted.set(id, FRAME_DURABLE[event]);
+  return true;
+}
+
+/** `question_expired`: the daemon's sweep dropped the question. */
+export function expirePromptFrame(payload: unknown, emitted: Map<string, boolean>, cb: PromptPollCallbacks): void {
+  const id = (payload as { id?: unknown } | null)?.id;
+  if (typeof id !== "string" || !emitted.has(id)) return;
+  cb.onResolved(id, emitted.get(id) === true);
+  emitted.delete(id);
+}
+
+export interface PromptFeedDeps {
+  /** `list_pending_prompts`. */
+  list: () => Promise<unknown>;
+  /** The transport's `listen`; a throw or rejection leaves the poll as the only path. */
+  listen: (event: string, cb: (payload: unknown) => void) => Promise<unknown> | unknown;
+  cb: PromptPollCallbacks;
+}
+
+export interface PromptFeed {
+  /** Reads the daemon's pending set and reconciles it: the fallback for a frame
+   *  that never came (lagged stream) and the only way a prompt answered
+   *  elsewhere disappears. */
+  tick(): Promise<void>;
+}
+
+/** The phone's prompt intake: live frames first, `tick` as the safety net. */
+export function startPromptFeed(deps: PromptFeedDeps): PromptFeed {
+  const emitted = new Map<string, boolean>();
+  // Counts frames seen. A snapshot requested before a frame landed cannot
+  // contain that frame's prompt, so reconciling it would resolve the card the
+  // frame just raised; such a snapshot is dropped and the next tick repairs.
+  let frames = 0;
+
+  const listen = async (event: string, handler: (payload: unknown) => void): Promise<void> => {
+    try {
+      await deps.listen(event, handler);
+    } catch (e) {
+      console.warn(`[prompt-feed] listen(${event}) failed, polling only:`, e);
+    }
+  };
+  for (const event of FRAME_EVENTS) {
+    void listen(event, (payload) => {
+      frames++;
+      surfacePromptFrame(event, payload, emitted, deps.cb);
+    });
+  }
+  void listen("question-expired", (payload) => {
+    frames++;
+    expirePromptFrame(payload, emitted, deps.cb);
+  });
+
+  return {
+    async tick(): Promise<void> {
+      const startedAt = frames;
+      let prompts: unknown;
+      try {
+        prompts = await deps.list();
+      } catch {
+        return; // network blip - keep `emitted` and retry next tick
+      }
+      if (frames !== startedAt) return;
+      reconcilePendingPrompts(prompts, emitted, deps.cb);
+    },
+  };
+}

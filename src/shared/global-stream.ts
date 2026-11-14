@@ -20,6 +20,16 @@ import { note } from "./link-journal";
 
 type GlobalCallback = (payload: unknown) => void;
 
+/** Prompt cards: the phone shows them from these frames (permission-modal/
+ *  remote-prompt-poll.ts) and polls list_pending_prompts only as a fallback.
+ *  Same kebab names as the desktop's Tauri events for the same prompts. */
+const PROMPT_FRAMES: readonly (readonly [string, string])[] = [
+  ["permission_request", "permission-requested"],
+  ["question_request", "question-requested"],
+  ["secret_request", "secret-requested"],
+  ["question_expired", "question-expired"],
+];
+
 const GLOBAL_EVENT_MAP: Record<string, string> = {
   instances_changed: "instances-changed",
   scheduled_items_changed: "scheduled-items-changed",
@@ -50,6 +60,7 @@ const GLOBAL_EVENT_MAP: Record<string, string> = {
   preview: "preview",
   // A control value or page state saved from another window or the phone.
   preview_state: "preview-state",
+  ...Object.fromEntries(PROMPT_FRAMES),
 };
 export const GLOBAL_KEBAB_EVENTS = new Set(Object.values(GLOBAL_EVENT_MAP));
 
@@ -90,6 +101,15 @@ let globalLastFrameAt = 0;
  *  journal's 200 slots can afford. */
 let globalStaleNotedFor = -1;
 const globalListeners = new Map<string, Set<GlobalCallback>>();
+const globalOpenListeners = new Set<() => void>();
+
+/** Runs `fn` each time the global stream opens, the first time and every
+ *  reconnect: a frame sent while the socket was down never comes again, so a
+ *  consumer re-reads its state then. Returns the unsubscribe. */
+export function onGlobalStreamOpen(fn: () => void): () => void {
+  globalOpenListeners.add(fn);
+  return () => { globalOpenListeners.delete(fn); };
+}
 let globalWatchdogTimer: (() => void) | undefined;
 let globalDegradePollTimer: (() => void) | undefined;
 let globalDegradePollInFlight = false;
@@ -229,6 +249,7 @@ function connectGlobalStream(): void {
     globalLastFrameAt = Date.now();
     note("gws_open");
     markLiveUp();
+    for (const fn of [...globalOpenListeners]) fn();
     stopGlobalDegradePoll();
   };
   ws.onclose = () => {

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 // The Android shell keeps its process alive in the background, so the phone's
-// polls must slow down (prompt poll) or pause (global degrade poll) while the
-// page is hidden. Every other client keeps today's cadence.
+// polls must pause (prompt fallback poll, global degrade poll) while the page
+// is hidden. Every other client keeps polling hidden.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -11,6 +11,7 @@ vi.mock("../src/shared/ipc.ts", () => ({ invoke: vi.fn(async () => undefined) })
 vi.mock("../src/shared/transport.ts", () => ({
   isRemote: () => true,
   getTransport: () => ({
+    listen: async () => () => {},
     call: (method) => {
       calls.push(method);
       return Promise.resolve([]);
@@ -50,37 +51,47 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("prompt poll while hidden", () => {
-  it("on the Android shell polls every 5s, not every 700ms", async () => {
+describe("prompt fallback poll while hidden", () => {
+  // Prompts arrive as frames on the global stream (remote-prompt-poll.ts); this
+  // timer is only the safety net, and stays inside the daemon's 8s render-confirm window.
+  it("on the Android shell does not poll while hidden", async () => {
     window.ConductorPush = {};
     setVisibility("hidden");
     startRemotePromptPoll();
     await vi.advanceTimersByTimeAsync(0);
     calls.length = 0;
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(promptPolls()).toBe(2);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(promptPolls()).toBe(0);
   });
 
-  it("on the Android shell polls at once on becoming visible and returns to 700ms", async () => {
+  it("on the Android shell reads at once on becoming visible and then every 3.5s", async () => {
     window.ConductorPush = {};
     setVisibility("hidden");
     startRemotePromptPoll();
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     calls.length = 0;
     setVisibility("visible");
     await vi.advanceTimersByTimeAsync(0);
     expect(promptPolls()).toBe(1);
-    await vi.advanceTimersByTimeAsync(2_100);
-    expect(promptPolls()).toBe(1 + 3);
+    await vi.advanceTimersByTimeAsync(7_100);
+    expect(promptPolls()).toBe(1 + 2);
   });
 
-  it("without the Android shell the hidden cadence stays 700ms", async () => {
+  it("a visible phone polls every 3.5s, well inside the 8s render-confirm window", async () => {
+    startRemotePromptPoll();
+    await vi.advanceTimersByTimeAsync(0);
+    calls.length = 0;
+    await vi.advanceTimersByTimeAsync(7_100);
+    expect(promptPolls()).toBe(2);
+  });
+
+  it("without the Android shell a hidden browser tab still falls back to the poll", async () => {
     setVisibility("hidden");
     startRemotePromptPoll();
     await vi.advanceTimersByTimeAsync(0);
     calls.length = 0;
-    await vi.advanceTimersByTimeAsync(7_000);
-    expect(promptPolls()).toBe(10);
+    await vi.advanceTimersByTimeAsync(7_100);
+    expect(promptPolls()).toBe(2);
   });
 });
 

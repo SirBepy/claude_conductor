@@ -19,7 +19,8 @@
 import { getTransport } from "../../../shared/transport";
 import { visibleInterval } from "../../../shared/visible-interval";
 import { isAndroidShell } from "../../../shared/mobile/android-shell";
-import { reconcilePendingPrompts } from "./remote-prompt-poll";
+import { startPromptFeed } from "./remote-prompt-poll";
+import { onGlobalStreamOpen } from "../../../shared/global-stream";
 import { confirmQuestionRendered, dismissQuestionCard, extractQuestions } from "./question-ui";
 import { expandActiveCard, getActiveCardAsker, getActiveCardId, isActiveCardId, refreshActiveCardAskers } from "./question-state";
 import { state } from "../state";
@@ -428,58 +429,50 @@ async function reconcileKnownPromptsOnRegainedVisibility(): Promise<void> {
 /**
  * Phone (browser PWA) substitute for the desktop's Tauri-event delivery. The
  * desktop's reliable poll lives in Rust (daemon_link.rs); the phone has no
- * Tauri event bus, so it polls `list_pending_prompts` over the remote RPC and
- * demuxes each prompt into the same handlers. Without this, AskUserQuestion +
- * permission prompts raised during a phone-driven turn never surfaced.
+ * Tauri event bus, so it takes each prompt from the live frame the daemon
+ * pushes on the global stream the moment it is raised, and demuxes it into the
+ * same handlers (remote-prompt-poll.ts). `list_pending_prompts` is the
+ * fallback: once on every stream (re)open, and on a slow timer for a frame the
+ * lagging stream dropped and for a prompt answered on the desktop (no frame
+ * says so). Without any of this, AskUserQuestion + permission prompts raised
+ * during a phone-driven turn never surfaced.
  */
 export function startRemotePromptPoll(): void {
-  const emitted = new Map<string, boolean>();
-  const cb = {
-    onQuestion: handleQuestionRequested,
-    onPermission: handlePermissionRequested,
-    onSecret: handleSecretRequested,
-    onResolved: handlePromptResolved,
-  };
-  const tick = async (): Promise<void> => {
-    let prompts: unknown;
-    try {
-      prompts = await getTransport().call("list_pending_prompts");
-    } catch {
-      return; // network blip - keep `emitted` and retry next tick
-    }
-    reconcilePendingPrompts(prompts, emitted, cb);
-  };
-  void tick();
-  // KEEP-RUNNING (todo 1008): AskUserQuestion + permission prompts raised
-  // during a phone-driven turn must reach the user while they look
-  // elsewhere - that's the whole point of this poll.
-  if (!isAndroidShell()) {
-    visibleInterval(() => void tick(), 700, {
-      whileHidden: true,
-      reason: "AskUserQuestion + permission prompts raised during a phone-driven turn must reach the user while they look elsewhere",
-    });
+  const feed = startPromptFeed({
+    list: () => getTransport().call("list_pending_prompts"),
+    listen: (event, cb) => getTransport().listen(event, cb),
+    cb: {
+      onQuestion: handleQuestionRequested,
+      onPermission: handlePermissionRequested,
+      onSecret: handleSecretRequested,
+      onResolved: handlePromptResolved,
+    },
+  });
+  const tick = (): void => void feed.tick();
+  tick();
+  onGlobalStreamOpen(tick);
+  // The daemon waits 8s for a client to confirm a question card rendered
+  // (question.rs RENDER_CONFIRM_TIMEOUT) and the phone may be the only client.
+  // Frames meet that on their own; this timer only has to stay well inside it
+  // for the case where a frame was lost.
+  if (isAndroidShell()) {
+    // The shell keeps the process alive in the background, where a poll dials
+    // the PC for nothing (FCM covers a blocked prompt once the PC has been
+    // idle, daemon/push.rs), and the resume path below reads at once.
+    visibleInterval(tick, PROMPT_FALLBACK_POLL_MS);
     return;
   }
-  // The Android shell keeps the process alive in the background, where 700ms
-  // dials the PC for nothing. It still polls, slower: the daemon waits 8s for
-  // a client to confirm a question card rendered (question.rs
-  // RENDER_CONFIRM_TIMEOUT) and the phone may be the only client, so the
-  // hidden period must stay well inside that window.
-  let timer: ReturnType<typeof setInterval> | undefined;
-  const arm = (): void => {
-    if (timer !== undefined) clearInterval(timer);
-    const hidden = document.visibilityState === "hidden";
-    timer = setInterval(() => void tick(), hidden ? HIDDEN_PROMPT_POLL_MS : PROMPT_POLL_MS);
-  };
-  arm();
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "hidden") void tick();
-    arm();
+  // KEEP-RUNNING: a prompt answered elsewhere must leave a browser
+  // tab that is hidden but still receiving frames, and a lost frame must still
+  // surface while the user looks elsewhere.
+  visibleInterval(tick, PROMPT_FALLBACK_POLL_MS, {
+    whileHidden: true,
+    reason: "AskUserQuestion + permission prompts raised during a phone-driven turn must reach the user while they look elsewhere",
   });
 }
 
-const PROMPT_POLL_MS = 700;
-const HIDDEN_PROMPT_POLL_MS = 5_000;
+/** The fallback read's cadence. Well under the daemon's 8s render-confirm window. */
+const PROMPT_FALLBACK_POLL_MS = 3_500;
 
 let installed = false;
 
