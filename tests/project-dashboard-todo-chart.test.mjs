@@ -4,13 +4,13 @@
 // days a range shows, the two kinds of gridline, the smoothed line path, and
 // when the card is left out entirely.
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render } from "lit-html";
 
 vi.mock("../src/shared/ipc.ts", () => ({ invoke: vi.fn(async () => null) }));
 
 const { todoDays, todoChart } = await import("../src/views/sessions/project-dashboard/dash-todo-chart.ts");
-const { smoothPath, tierScale } = await import("../src/views/sessions/project-dashboard/dash-line-chart.ts");
+const { smoothPath, tierScale, drawsIn } = await import("../src/views/sessions/project-dashboard/dash-line-chart.ts");
 
 const day = (date, created, done, open) => ({ date, created, done, open });
 const days = Array.from({ length: 40 }, (_, i) => day(`2026-09-${String(i + 1).padStart(2, "0")}`, i, 1, 10));
@@ -108,5 +108,34 @@ describe("todoChart", () => {
     const el = mount(ctx({ days: [day("2026-10-26", 2, 1, 1)], open_now: 1, claimed_now: 0 }));
     expect(el.querySelectorAll("[data-line-chart] path[data-line]")).toHaveLength(0);
     expect(el.querySelectorAll("[data-line-chart] circle[data-line]")).toHaveLength(3);
+  });
+});
+
+// The lines draw in with a CSS animation that restarts on every new node, and a
+// repaint rebuilds the SVG from a string, so the dashboard beside a chat replayed
+// it on every live event and every chat click (pc-1748).
+describe("line draw-in plays once per chart", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("drawsIn: the first sighting draws, a repaint inside the run still does, a later one does not", () => {
+    expect(drawsIn("k1", 0)).toBe(true);
+    expect(drawsIn("k1", 800)).toBe(true);
+    expect(drawsIn("k1", 5000)).toBe(false);
+    expect(drawsIn("k1", 9000)).toBe(false);
+    // Another chart is its own first sighting; a chart with no key keeps the old always-draw.
+    expect(drawsIn("k2", 9000)).toBe(true);
+    expect(drawsIn(undefined, 9000)).toBe(true);
+  });
+
+  it("a Todos card painted again later has no draw-in class on its lines", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-14T10:00:00Z"));
+    const c = ctx({ days, open_now: 12, claimed_now: 2 });
+    c.snap.target.repos = [{ cwd: "C:/draw-in-test" }];
+    expect(mount(c).querySelectorAll("path.chart-line-draw").length).toBeGreaterThan(0);
+    vi.setSystemTime(new Date("2026-11-14T10:00:30Z"));
+    const again = mount(c);
+    expect(again.querySelectorAll("[data-line-chart] path[data-line]")).toHaveLength(3);
+    expect(again.querySelectorAll("path.chart-line-draw")).toHaveLength(0);
   });
 });

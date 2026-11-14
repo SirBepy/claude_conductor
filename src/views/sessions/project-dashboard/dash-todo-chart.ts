@@ -35,6 +35,6 @@ export function todoChart(c: DashCtx): TemplateResult | typeof nothing {
   const trailing = rangeTabs(range, c.act.setTodoRange);
   const body = html`
     <div class="pd-usage-total">${available} available${stats.claimed_now ? html`, ${stats.claimed_now} claimed` : nothing} · ${created} created, ${done} done in this range</div>
-    ${lineChart({ series: SERIES, rows: days, format: String, integer: true, floor: 4, legend: true })}`;
+    ${lineChart({ series: SERIES, rows: days, format: String, integer: true, floor: 4, legend: true, drawKey: `todos:${c.snap.target.repos[0]?.cwd ?? ""}:${range}` })}`;
   return card("Todos", body, { id: "todo_chart", trailing });
 }

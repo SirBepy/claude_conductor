@@ -68,6 +68,6 @@ export function usage(c: DashCtx, aliases: AliasMap): TemplateResult | typeof no
   const body = !u.records ? quiet("Loading...")
     : !total ? quiet("No activity in this period")
     : html`<div class="pd-usage-total">${formatTokens(total)} tokens</div>
-      ${lineChart({ series: SERIES, rows: days, format: formatTokens, integer: true })}`;
+      ${lineChart({ series: SERIES, rows: days, format: formatTokens, integer: true, drawKey: `usage:${c.snap.target.repos[0]?.cwd ?? ""}:${u.range}` })}`;
   return card("Usage", body, { id: "usage", trailing: rangeTabs(u.range, c.act.setUsageRange) });
 }

@@ -31,6 +31,26 @@ interface LineChartSpec {
   floor?: number;
   /** Draw the series legend above the chart (left out for a single series). */
   legend?: boolean;
+  /** Names this chart (card, range, project) so its lines draw in once, the first
+   *  time it is on screen, and never again when the dashboard repaints or is
+   *  mounted again beside another chat. Left out: the lines draw on every render. */
+  drawKey?: string;
+}
+
+// A repaint inside the draw-in's own run keeps the class (the lines start over
+// in the new node, as before); past it the chart is repainted still.
+const DRAW_WINDOW_MS = 1500;
+const firstDrawn = new Map<string, number>();
+
+/** Whether a chart named `key` should play its draw-in now. The CSS animation
+ *  restarts on any new node, and a repaint rebuilds this SVG from a string, so
+ *  without this every live event and every remount replayed it. Pure given
+ *  `now`, for tests. */
+export function drawsIn(key: string | undefined, now: number = Date.now()): boolean {
+  if (!key) return true;
+  const at = firstDrawn.get(key);
+  if (at === undefined) { firstDrawn.set(key, now); return true; }
+  return now - at < DRAW_WINDOW_MS;
 }
 
 const W = 420, H = 160, MT = 10, MB = 24;
@@ -104,7 +124,7 @@ function geometry(spec: LineChartSpec): Geom & { major: number, minor: number | 
 const xAt = (g: Geom, i: number): number => g.ml + (g.n === 1 ? g.pw / 2 : (i / (g.n - 1)) * g.pw);
 const yAt = (g: Geom, v: number): number => MT + (1 - v / g.top) * g.ph;
 
-function chartSvg(spec: LineChartSpec, g: ReturnType<typeof geometry>): string {
+function chartSvg(spec: LineChartSpec, g: ReturnType<typeof geometry>, draws: boolean): string {
   const { rows, series, format } = spec;
   const { n } = g;
   const base = MT + g.ph;
@@ -136,7 +156,7 @@ function chartSvg(spec: LineChartSpec, g: ReturnType<typeof geometry>): string {
     const fill = s.lead
       ? `<path d="${path} L${xAt(g, n - 1).toFixed(1)},${base} L${xAt(g, 0).toFixed(1)},${base} Z" fill="${s.color}" opacity="0.08"/>`
       : "";
-    return `${fill}<path${s.dash ? "" : ` class="chart-line-draw" pathLength="1"`} data-line="${s.key}" d="${path}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round"${s.dash ? ` stroke-dasharray="${s.dash}"` : ""}${s.lead ? "" : ` opacity="0.7"`}/>`;
+    return `${fill}<path${s.dash ? "" : draws ? ` class="chart-line-draw" pathLength="1"` : ` pathLength="1"`} data-line="${s.key}" d="${path}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round"${s.dash ? ` stroke-dasharray="${s.dash}"` : ""}${s.lead ? "" : ` opacity="0.7"`}/>`;
   }).join("");
   const last = rows[n - 1]!;
   const ends = series.filter((s) => s.endLabel).map((s) =>
@@ -209,6 +229,6 @@ export function lineChart(spec: LineChartSpec): TemplateResult {
       ? spec.series.map((s) => html`<span>${unsafeHTML(swatch(s.color, Math.max(1.5, s.width), s.dash))}${s.label}</span>`)
       : nothing}${key}</div>
     <div class="pd-line-chart" @pointermove=${(e: PointerEvent) => hover(e, spec, g)} @pointerleave=${unhover}>
-      ${unsafeHTML(chartSvg(spec, g))}<div class="pd-line-tip" hidden></div>
+      ${unsafeHTML(chartSvg(spec, g, drawsIn(spec.drawKey)))}<div class="pd-line-tip" hidden></div>
     </div>`;
 }
