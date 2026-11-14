@@ -291,7 +291,7 @@
   overflow-wrap: anywhere;
 }
 .pvm-status[data-error="true"] {
-  color: #e5484d;
+  color: var(--color-danger);
 }
 .pvm-status[data-ok="true"] {
   color: var(--color-text);
@@ -301,7 +301,7 @@
   border: 0;
   border-radius: 6px;
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-background);
   font-size: 12px;
   cursor: pointer;
 }
