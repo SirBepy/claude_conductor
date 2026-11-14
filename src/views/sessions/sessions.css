@@ -455,14 +455,6 @@
   flex-shrink: 0;
 }
 
-/* Filter-by-project submenu: the real .project-rail reused as a floating
-   panel instead of an inline bar, so its own bottom-border (meant to divide
-   it from the list below it) and outer padding read as stray chrome here. */
-.smore-filter-submenu .project-rail {
-  border-bottom: none;
-  padding: 6px 10px;
-}
-
 /* Hidden submenu: real sidebar rows in a floating panel, capped so a long
    hidden list scrolls instead of growing off-screen. */
 .smore-hidden-list {

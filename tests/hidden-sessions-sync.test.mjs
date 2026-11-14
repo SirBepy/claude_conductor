@@ -1,4 +1,4 @@
-// Hidden chats and the project-rail filter are daemon-owned lists shared by
+// Hidden chats are a daemon-owned list shared by
 // the desktop app and the phone. These pin the client half: a hide/unhide
 // sends only its delta, a daemon push is adopted and re-renders, a device's
 // pre-sync local hides are merged in once, and a push landing mid-burst never
@@ -60,19 +60,6 @@ describe("saveHiddenSessions", () => {
   });
 });
 
-describe("saveHiddenProjects", () => {
-  it("pushes only the project delta", () => {
-    const pushes = [];
-    helpers.writeHiddenProjectsLocal(new Set(["C:/p/a"]));
-    helpers.setHiddenSessionsPusher((delta) => pushes.push(delta));
-
-    helpers.saveHiddenProjects(new Set(["C:/p/b"]));
-
-    expect(pushes).toEqual([{ addProjects: ["C:/p/b"], removeProjects: ["C:/p/a"] }]);
-    expect([...helpers.loadHiddenProjects()]).toEqual(["C:/p/b"]);
-  });
-});
-
 describe("startHiddenSessionsSync", () => {
   it("merges this device's old local-only hides into the daemon list once", async () => {
     localStorage.setItem("cc_hidden_sessions", JSON.stringify(["local-1"]));
@@ -87,7 +74,7 @@ describe("startHiddenSessionsSync", () => {
     await flush();
 
     expect(invokeMock).toHaveBeenCalledWith("update_hidden_chats", {
-      add: ["local-1"], remove: [], addProjects: [], removeProjects: [],
+      add: ["local-1"], remove: [],
     });
     expect([...h.loadHiddenSessions()].sort()).toEqual(["local-1", "remote-1"]);
     expect(rerender).toHaveBeenCalled();
@@ -149,38 +136,19 @@ describe("startHiddenSessionsSync", () => {
     expect([...h.loadHiddenSessions()]).toEqual(["mine"]);
   });
 
-  it("merges a device's old per-device project filter once, even after chats already synced", async () => {
+  it("ignores a project filter an older build left in the daemon list and in storage (the rail is gone)", async () => {
     localStorage.setItem("cc_hidden_synced", "1");
     localStorage.setItem("cc_hidden_projects", JSON.stringify(["C:/p/local"]));
-    invokeMock.mockImplementation(async (cmd, args) => {
-      if (cmd === "get_hidden_chats") return { sessions: [], projects: ["C:/p/remote"] };
-      if (cmd === "update_hidden_chats") return { sessions: [], projects: ["C:/p/remote", ...args.addProjects] };
-    });
-    const { sync, h } = await freshSync();
-
-    sync.startHiddenSessionsSync(() => {});
-    await flush();
-
-    expect(invokeMock).toHaveBeenCalledWith("update_hidden_chats", {
-      add: [], remove: [], addProjects: ["C:/p/local"], removeProjects: [],
-    });
-    expect([...h.loadHiddenProjects()].sort()).toEqual(["C:/p/local", "C:/p/remote"]);
-    expect(localStorage.getItem("cc_hidden_projects_synced")).toBe("1");
-  });
-
-  it("adopts another device's project filter from the live event", async () => {
-    localStorage.setItem("cc_hidden_synced", "1");
-    localStorage.setItem("cc_hidden_projects_synced", "1");
-    invokeMock.mockResolvedValue({ sessions: [], projects: [] });
+    invokeMock.mockResolvedValue({ sessions: [], projects: ["C:/p/remote"] });
     const { sync, h } = await freshSync();
     const rerender = vi.fn();
+
     sync.startHiddenSessionsSync(rerender);
     await flush();
-    rerender.mockClear();
-
     listeners.get("hidden-chats-changed")({ sessions: [], projects: ["C:/p/beta"] });
 
-    expect([...h.loadHiddenProjects()]).toEqual(["C:/p/beta"]);
-    expect(rerender).toHaveBeenCalledTimes(1);
+    expect(invokeMock).not.toHaveBeenCalledWith("update_hidden_chats", expect.anything());
+    expect(h.loadHiddenProjects).toBeUndefined();
+    expect(rerender).not.toHaveBeenCalled();
   });
 });

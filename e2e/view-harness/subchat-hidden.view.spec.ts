@@ -1,3 +1,4 @@
+// Reviewed 2026-11-14 (pc-1740, the sidebar's project filter rail is removed): its 'no rail chip' test is dropped with the rail; the rest of this spec is unchanged.
 // Reviewed 2026-11-12 (project main chat): the sidebar lists one Main chats row per project; this spec's rows have no project pointer, so every mode-on chat lists as before, and it passes.
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-10 (dash lane 3): the Subchats card, Pin to sidemenu (replacing Move to sidebar in the chat menu) and the effort battery colours change nothing this spec asserts; it passes.
@@ -8,8 +9,8 @@
 import { test, expect } from "@playwright/test";
 import { mountSessionsList, sessionInstance } from "./harness";
 
-// A hidden sub (Use subchats) owns no sidebar row, no Ctrl+N number and no
-// project-rail chip, on desktop or at phone width. Its row stays in the
+// A hidden sub (Use subchats) owns no sidebar row and no Ctrl+N number, on
+// desktop or at phone width. Its row stays in the
 // instance list on purpose (remote lists keep it so a parked prompt is not
 // orphaned), so the hiding is the client's job and this drives the real list
 // build, not the helper alone.
@@ -51,11 +52,4 @@ test("a sub has no row at phone width either", async ({ page }) => {
   await page.setViewportSize(PHONE);
   await mountSessionsList(page, rows());
   await expectSubHidden(page);
-});
-
-test("a sub's project gets no rail chip", async ({ page }) => {
-  await mountSessionsList(page, rows());
-  const avatars = page.locator("#project-rail .project-rail-avatar");
-  await expect(avatars).toHaveCount(2);
-  await expect(page.locator('#project-rail .project-rail-avatar[data-cwd="C:/Projects/gamma"]')).toHaveCount(0);
 });

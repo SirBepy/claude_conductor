@@ -284,8 +284,6 @@ export function renderSidebar(listEl: HTMLElement): void {
   // 463); shared drain/scheduled state is threaded in rather than imported
   // there, to avoid a cycle back into this file.
   const entries = buildSidebarEntries(
-    listEl,
-    () => renderSidebar(listEl),
     drainMap,
     chatsWithoutFiveHour(state.sessions, noFiveHourAccounts, (getSettings().default_account_id as string | null | undefined) ?? null),
     scheduledCountMap,

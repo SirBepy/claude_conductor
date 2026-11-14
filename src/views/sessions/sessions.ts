@@ -12,7 +12,6 @@ import "./sessions.css";
 import "./session-header.css";
 import "./when-done-chip.css";
 import "./sessions-mobile.css";
-import "./project-rail.css";
 import "./session-list.css";
 import "./session-row-portrait.css";
 import "./sidebar-ring.css";

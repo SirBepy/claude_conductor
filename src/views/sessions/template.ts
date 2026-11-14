@@ -69,7 +69,6 @@ export function template() {
       <div id="rate-limit-banner-host" class="rate-limit-banner-host" hidden></div>
       <div class="view-body sessions-layout">
         <aside class="sessions-sidebar">
-          <div id="project-rail" class="project-rail" hidden></div>
           <ul id="sessions-list" class="sessions-list"></ul>
           <button
             class="sessions-fab"

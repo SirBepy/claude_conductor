@@ -2,7 +2,6 @@
 // sort, segment -> entries array. Reconcile/hydrate stays in sidebar.ts.
 // Pure move, no behavior change.
 
-import type { Instance } from "../../types/ipc.generated";
 import {
   projectName,
   sessionSubtitle,
@@ -12,14 +11,12 @@ import {
   loadUnreadSet,
   loadSort,
   loadHiddenSessions,
-  loadHiddenProjects,
   loadHiddenCollapsed,
   isSegCollapsed,
   resetSegCollapse,
   isJarvisOrWorker,
   isSubchat,
 } from "./sessions-helpers";
-import { renderProjectRail } from "./project-rail";
 import { state, windowIdOf } from "./state";
 import { isRemote } from "../../shared/transport";
 import { pendingPromptSessionIds, isSubchatsOn } from "./permission-modal";
@@ -32,12 +29,9 @@ import { renderSidebarRow, sessionRowOptions, draftRowOptions, parkedRowOptions 
 import { chainRowKey, recordChainLinks, supersededPredecessors } from "./successor-follow";
 
 /** Builds the sidebar's flat `entries` array (filter, sort, segment) for
- *  renderSidebar to reconcile into the DOM. Drain/scheduled state and the
- *  rerender callback are threaded in rather than imported, to avoid a
- *  cycle back into sidebar.ts. */
+ *  renderSidebar to reconcile into the DOM. Drain/scheduled state is
+ *  threaded in rather than imported, to avoid a cycle back into sidebar.ts. */
 export function buildSidebarEntries(
-  listEl: HTMLElement,
-  rerender: () => void,
   drainMap: Map<string, number>,
   noFiveHour: ReadonlySet<string>,
   scheduledCountMap: Map<string, number>,
@@ -49,15 +43,15 @@ export function buildSidebarEntries(
   const pending = state.pendingNewSession;
   const unread = loadUnreadSet();
   // Jarvis (todo 272) and its worker sub-sessions are hidden from every row
-  // here (segments, project rail, hidden section) - they live in Jarvis's
+  // here (segments, hidden section) - they live in Jarvis's
   // own window only. state.sessions itself stays the full unfiltered set;
   // only this list-building path filters.
   // A respawn predecessor is dropped here, not in state.sessions: it is still
   // a real live session everything else (event store, pane, teardown) must
   // keep seeing - it just no longer owns a row (see successor-follow.ts).
   // A hidden sub (Use subchats) is dropped the same way: this one list feeds
-  // every row, the Ctrl+N order, the question/closing/rate-limit sets and the
-  // project rail, so filtering here hides a sub from all of them at once.
+  // every row, the Ctrl+N order and the question/closing/rate-limit sets, so
+  // filtering here hides a sub from all of them at once.
   recordChainLinks(state.sessions);
   const superseded = supersededPredecessors(state.sessions);
   const listSessions = state.sessions.filter(
@@ -87,18 +81,7 @@ export function buildSidebarEntries(
   // daemon caps the set instead (sessions/hidden_chats.rs).
   const hidden = loadHiddenSessions();
 
-  // Project-rail filter: hides a project's chats everywhere, including out of
-  // the "Hidden" section below - a hidden project means nothing from it shows.
-  const hiddenProjects = loadHiddenProjects();
-  const projectHidden = (s: Instance): boolean => hiddenProjects.has(String(s.cwd ?? ""));
-  // Phone: the rail lives in the kebab menu's "Filter by project" submenu
-  // instead (view-more-menu.ts, critique P2) - no room for a permanent chip
-  // row above a single-pane list, and the FAB has nothing to collide with on
-  // desktop's wider sidebar, so this stays inline there unchanged.
-  const railHost = listEl.parentElement?.querySelector<HTMLElement>("#project-rail");
-  if (railHost && !isRemote()) renderProjectRail(railHost, listSessions, rerender);
-
-  const hiddenSessions = listSessions.filter(s => hidden.has(s.session_id) && !projectHidden(s));
+  const hiddenSessions = listSessions.filter(s => hidden.has(s.session_id));
 
   // Once the real session behind a draft is in state.sessions, let it render
   // through the normal segmented row instead of the static "starting..."
@@ -107,7 +90,7 @@ export function buildSidebarEntries(
   const pendingRealId = pending?.realId ?? null;
   const pendingRealVisible = !!pendingRealId && listSessions.some(s => s.session_id === pendingRealId);
 
-  let visible = listSessions.filter(s => !hidden.has(s.session_id) && !projectHidden(s));
+  let visible = listSessions.filter(s => !hidden.has(s.session_id));
   if (pendingRealId && !pendingRealVisible) {
     visible = visible.filter(s => s.session_id !== pendingRealId);
   } else if (pending && !pendingRealId && pending.firstMessageSent) {

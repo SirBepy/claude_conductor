@@ -1,3 +1,4 @@
+// Reviewed 2026-11-14 (pc-1740, the sidebar project filter rail and the phone Filter by project submenu are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-12 (project main chat): the initial load also reads the projects' main-chat pointers; it is awaited beside the list and a failed read keeps the old state, so the cache-first paint this spec asserts is unchanged, and it passes.
 // Reviewed 2026-11-05: quiet daemon cards (a checkup yields, no dot), the mode-set nudge, the draft header dressing, the statusbar model sync and the sub-aware /close chip touch permission-modal and the sessions chrome; this spec's contract is unchanged and it passes.
 // Reviewed 2026-11-05 (hidden subs): sidebar.ts now keeps a sub out of the unread marking and the favicon count; this spec's cached rows carry no subchat_of and it asserts the cache-first paint only, so its contract is unaffected and it passed after the change.

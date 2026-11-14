@@ -341,8 +341,7 @@ export class HttpTransport implements Transport {
         });
       case "clear_archived_todos":
         return this.rpc<T>("clear_archived_todos", { session_id: args.sessionId ?? args.session_id });
-      // Sidebar Hide/Unhide and the project-rail filter: daemon-owned lists,
-      // so phone and desktop agree.
+      // Sidebar Hide/Unhide: a daemon-owned list, so phone and desktop agree.
       case "get_hidden_chats":
         return this.rpc<T>("get_hidden_chats", {});
       case "update_hidden_chats":

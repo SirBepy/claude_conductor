@@ -8,7 +8,6 @@ export const LS_SORT = "cc_session_sort";
 export const LS_UNREAD = "cc_session_unread";
 export const LS_HIDDEN = "cc_hidden_sessions";
 export const LS_HIDDEN_COLLAPSED = "cc_hidden_collapsed";
-export const LS_HIDDEN_PROJECTS = "cc_hidden_projects";
 
 export function projectName(i: Instance): string {
   return cwdToProjectName(String(i.cwd ?? ""));
@@ -343,8 +342,6 @@ export function writeHiddenSessionsLocal(set: Set<string>): void {
 export interface HiddenDelta {
   add?: string[];
   remove?: string[];
-  addProjects?: string[];
-  removeProjects?: string[];
 }
 type HiddenPusher = (delta: HiddenDelta) => void;
 let hiddenPusher: HiddenPusher | null = null;
@@ -367,32 +364,6 @@ export function saveHiddenSessions(set: Set<string>): void {
   writeHiddenSessionsLocal(set);
   const [add, remove] = diff(prev, set);
   if (add.length || remove.length) hiddenPusher?.({ add, remove });
-}
-
-/** Projects (keyed by cwd, matching the alias/merge system's own key) hidden
- *  from the sidebar entirely via the project-rail filter. Independent of the
- *  per-session hide list above: a hidden project's chats never show anywhere,
- *  including in the "Hidden" section. Daemon-owned like that list, with
- *  localStorage as the last-known copy. */
-export function loadHiddenProjects(): Set<string> {
-  try {
-    const raw = localStorage.getItem(LS_HIDDEN_PROJECTS);
-    if (raw) return new Set(JSON.parse(raw) as string[]);
-  } catch { /* ignore */ }
-  return new Set();
-}
-
-export function writeHiddenProjectsLocal(set: Set<string>): void {
-  try { localStorage.setItem(LS_HIDDEN_PROJECTS, JSON.stringify([...set])); }
-  catch { /* ignore */ }
-}
-
-/** Same delta-only push as saveHiddenSessions. */
-export function saveHiddenProjects(set: Set<string>): void {
-  const prev = loadHiddenProjects();
-  writeHiddenProjectsLocal(set);
-  const [addProjects, removeProjects] = diff(prev, set);
-  if (addProjects.length || removeProjects.length) hiddenPusher?.({ addProjects, removeProjects });
 }
 
 export function loadHiddenCollapsed(): boolean {

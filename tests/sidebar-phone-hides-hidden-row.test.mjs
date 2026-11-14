@@ -1,14 +1,10 @@
 // @vitest-environment jsdom
 //
-// Critique-driven mobile Chats overhaul (2026-10-18): the project-filter
-// rail and the "Hidden (N)" row both used to render inline in the sidebar on
-// every viewport. On the phone that meant a permanent chip row fusing into
-// the "Done" segment header above it, and a Hidden row pinned to the bottom
-// via margin-top:auto landing directly under the floating "new chat" FAB.
-// Both moved into the kebab "more options" menu for the phone transport
-// (view-more-menu.ts); desktop keeps the inline versions unchanged. This
-// drives the real renderSidebar/buildSidebarEntries (not a stub), so a
-// regression that brings either one back inline on the phone is caught.
+// The "Hidden (N)" row renders inline in the desktop sidebar, but on the phone it
+// lives in the kebab "more options" menu (view-more-menu.ts): inline it sat
+// pinned under the floating "new chat" FAB. This drives the real
+// renderSidebar/buildSidebarEntries (not a stub). The sidebar's project filter
+// rail is gone (pc-1740): a filter an older build left in storage hides nothing.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -30,7 +26,6 @@ function mountSidebar() {
   const aside = document.createElement("aside");
   aside.className = "sessions-sidebar";
   aside.innerHTML = `
-    <div id="project-rail" class="project-rail" hidden></div>
     <ul id="sessions-list" class="sessions-list"></ul>
   `;
   document.body.appendChild(aside);
@@ -41,7 +36,7 @@ function session(id, cwd, over = {}) {
   return { session_id: id, cwd, model: "opus", kind: "interactive", busy: false, ...over };
 }
 
-describe("project rail + Hidden row: inline on desktop, kebab-only on the phone", () => {
+describe("Hidden row: inline on desktop, kebab-only on the phone", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     vi.useFakeTimers();
@@ -53,8 +48,7 @@ describe("project rail + Hidden row: inline on desktop, kebab-only on the phone"
     state.pendingNewSession = null;
     state.sortedSessionIds = [];
     localStorage.clear();
-    // Two distinct projects (project-rail.ts only renders at 2+) and one
-    // hidden session, so both surfaces under test have something to show.
+    // One hidden session, so the Hidden row has something to show.
     localStorage.setItem("cc_hidden_sessions", JSON.stringify(["hidden-1"]));
   });
 
@@ -65,7 +59,7 @@ describe("project rail + Hidden row: inline on desktop, kebab-only on the phone"
     ];
   }
 
-  it("desktop: renders the project rail inline and the Hidden row in the list", () => {
+  it("desktop: renders the Hidden row in the list", () => {
     remote = false;
     seedTwoProjectsOneHidden();
     const listEl = mountSidebar();
@@ -73,13 +67,22 @@ describe("project rail + Hidden row: inline on desktop, kebab-only on the phone"
     renderSidebar(listEl);
     vi.runAllTimers();
 
-    const rail = document.getElementById("project-rail");
-    expect(rail.hidden).toBe(false);
-    expect(rail.querySelector(".project-rail-all")).not.toBeNull();
     expect(listEl.querySelector("li.session-group-hidden-toggle")).not.toBeNull();
   });
 
-  it("phone: renders neither the inline project rail nor the inline Hidden row", () => {
+  it("a project filter an older build left in storage hides nothing", () => {
+    remote = false;
+    seedTwoProjectsOneHidden();
+    localStorage.setItem("cc_hidden_projects", JSON.stringify(["/proj-a"]));
+    const listEl = mountSidebar();
+
+    renderSidebar(listEl);
+    vi.runAllTimers();
+
+    expect(listEl.querySelector('li[data-session-id="visible-1"]')).not.toBeNull();
+  });
+
+  it("phone: renders no inline Hidden row", () => {
     remote = true;
     seedTwoProjectsOneHidden();
     const listEl = mountSidebar();
@@ -87,8 +90,6 @@ describe("project rail + Hidden row: inline on desktop, kebab-only on the phone"
     renderSidebar(listEl);
     vi.runAllTimers();
 
-    const rail = document.getElementById("project-rail");
-    expect(rail.innerHTML).toBe("");
     expect(listEl.querySelector("li.session-group-hidden-toggle")).toBeNull();
     // The hidden session itself must not leak into the visible list either.
     expect(listEl.querySelector('li[data-session-id="hidden-1"]')).toBeNull();

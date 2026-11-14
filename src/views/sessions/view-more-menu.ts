@@ -10,7 +10,7 @@
 //     History         (relocated from #view-more-host)
 //     Preview         (relocated from #view-more-host; toggles the HTML preview panel)
 //     Scheduled       (opens the standalone `session-schedule` window)
-//     Filter by project ▸ / Hidden ▸  (submenus)
+//     Hidden ▸  (submenu)
 //   ──────
 //   THIS CHAT  (greyed label; only when a session or draft is selected)
 //     ... (built by chat-menu.ts / buildChatMenuBlock)
@@ -26,7 +26,7 @@ import {
   closeActiveChatSubmenu,
   type ChatMenuCtx,
 } from "./chat-menu";
-import { loadHiddenSessions, loadHiddenProjects, isJarvisOrWorker, isSubchat, loadSort, loadUnreadSet, deriveQuestionSet } from "./sessions-helpers";
+import { loadHiddenSessions, isJarvisOrWorker, isSubchat, loadSort, loadUnreadSet, deriveQuestionSet } from "./sessions-helpers";
 import { pendingPromptSessionIds } from "./permission-modal";
 import { liveChatMenuCtx } from "./chat-menu-ctx";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
@@ -34,9 +34,7 @@ import { openSchedule } from "../../shared/open-schedule";
 import { isRemote } from "../../shared/transport";
 import { cachedHasDeployWorkflow } from "./deploy-workflow-gate";
 import { renderSidebarRow, sessionRowOptions } from "./sidebar-rows";
-import { renderProjectRail } from "./project-rail";
 import { selectSession } from "./active-session";
-import { renderSidebar } from "./sidebar";
 
 // Filter-by-project and Hidden (below) share this: at most one of this
 // menu's own submenus is open at a time, so reopening one closes the other.
@@ -98,47 +96,16 @@ const viewMenu = createMoreMenu<[]>({
     });
     menu.appendChild(schedBtn);
 
-    // ── Filter by project / Hidden ──────────────────────────────────────────
-    // On the phone the project rail and Hidden live here instead of inline in
-    // the sidebar (a permanent chip row, and a Hidden row pinned under the
-    // floating "new chat" FAB); the desktop sidebar renders both inline
-    // (sidebar-entries.ts). The isRemote() guard keeps them out of the menu
-    // in any non-phone harness mount.
+    // ── Hidden ──────────────────────────────────────────────────────────────
+    // On the phone Hidden lives here instead of inline in the sidebar (a row
+    // pinned under the floating "new chat" FAB); the desktop sidebar renders
+    // it inline (sidebar-entries.ts). The isRemote() guard keeps it out of the
+    // menu in any non-phone harness mount.
     if (isRemote()) {
       const listSessions = state.sessions.filter((s) => !isJarvisOrWorker(s) && !isSubchat(s));
 
-      const filterBtn = document.createElement("button");
-      filterBtn.className = "smore-item smore-has-sub";
-      filterBtn.innerHTML = `<i class="ph ph-funnel-simple"></i><span>Filter by project</span><i class="ph ph-caret-right smore-sub-caret"></i>`;
-      menu.appendChild(filterBtn);
-      filterBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (_viewSubMenu) {
-          closeViewSubMenu();
-          return;
-        }
-        const sub = document.createElement("div");
-        sub.className = "session-more-menu smore-submenu smore-filter-submenu";
-        document.body.appendChild(sub);
-        _viewSubMenu = sub;
-        // Real component, not a reimplementation: same renderProjectRail the
-        // desktop/inline rail calls, just given this submenu as its host. A
-        // toggle re-renders both this submenu (active/off chip state) and the
-        // real sidebar list (so the filter actually applies below).
-        const onFilterChange = () => {
-          renderProjectRail(sub, listSessions, onFilterChange);
-          const listEl = document.getElementById("sessions-list");
-          if (listEl) renderSidebar(listEl);
-        };
-        renderProjectRail(sub, listSessions, onFilterChange);
-        positionSubmenu(sub, filterBtn);
-      });
-
       const hidden = loadHiddenSessions();
-      const hiddenProjects = loadHiddenProjects();
-      const hiddenSessions = listSessions.filter(
-        (s) => hidden.has(s.session_id) && !hiddenProjects.has(String(s.cwd ?? "")),
-      );
+      const hiddenSessions = listSessions.filter((s) => hidden.has(s.session_id));
 
       const hiddenBtn = document.createElement("button");
       hiddenBtn.className = "smore-item smore-has-sub" + (hiddenSessions.length ? "" : " is-disabled");

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-14 (pc-1740, the sidebar project filter rail and the phone Filter by project submenu are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-12: the /pickup button now starts its new chat only when the old one closed; nothing this spec asserts changed (not run here).
 // Reviewed 2026-11-12 (the /close quick-reply chip and the close-failed state are removed from the sessions list, hover card and chat chrome): nothing this spec asserts changed. It passes.
 // Reviewed 2026-11-12 (quotes as reply bubbles): renderMarkdown tags every blockquote .md-quote and lifts a leading **Name:** onto a speaker line, the transcript no longer wraps a quote in a copy card (.card-block is gone), and the draft editor's blockquote rule moved into the shared one; nothing this spec asserts changed, and it passes (chat-message-cards and subchat-passed fail their phone-width overflow tests on pristine HEAD too).
