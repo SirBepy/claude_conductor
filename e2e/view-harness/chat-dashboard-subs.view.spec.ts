@@ -172,7 +172,8 @@ test.describe("chat dashboard / Subchats card", () => {
     await av(page, "sub-work").click();
     await av(page, "sub-work").click();
     await av(page, "sub-work").click();
-    await expect(peekOf(page, "sub-work")).toHaveCount(1);
+    // Counted at once: a closing card left beside the new one would still be there for 450ms.
+    expect(await peekOf(page, "sub-work").count()).toBe(1);
   });
 
   test("a click opens the details: run time, context chip, brief, newest image with +N, the latest preview", async ({ page }) => {
