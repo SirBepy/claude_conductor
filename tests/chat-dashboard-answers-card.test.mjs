@@ -128,6 +128,27 @@ describe("Answers card", () => {
     expect(card(pane).querySelector(".ax-thead-v").textContent).toBe("Why does Gboard swipe fail?");
   });
 
+  it("turns an answer's detail link into a chip that opens its popover, on the card and in its thread", async () => {
+    const { pane, r } = mountPane("chat-drill");
+    new ChatDashboard(pane, r);
+    feed(r, [
+      userEvent("why is it slow?"),
+      ...send({
+        kind: "answer", verdict: "The history read", text: "See [the numbers](#d:nums) for more.",
+        details: [{ id: "nums", label: "The numbers", body_md: "14.6MB of usage history" }],
+      }, "d1"),
+    ]);
+    await drawn(pane);
+    const chip = card(pane).querySelector(".ax-face .drill-chip");
+    expect(chip, "the detail link is a chip, not plain text").not.toBeNull();
+    expect(card(pane).querySelector(".ax-face .drill-pending")).toBeNull();
+    chip.click();
+    expect(pane.querySelector(".drill-pop .drill-pop-body").textContent).toContain("14.6MB of usage history");
+    click(pane, "reply");
+    const inThread = card(pane).querySelector(".ax-tbody .drill-chip");
+    expect(inThread, "the thread's first reply keeps its chip").not.toBeNull();
+  });
+
   it("walks Got it back through every unread answer to All caught up, storing each read", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
