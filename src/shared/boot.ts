@@ -40,6 +40,7 @@ import { wireInitialFetches } from "./initial-render-gate";
 import { mountBootProgress } from "./boot-progress";
 import { mountReconnectStrip } from "./reconnect-strip";
 import { mountLinkJournal } from "./link-journal";
+import { mountBuildCheck } from "./build-check";
 import { applyAppearance, followAppearanceChanges } from "./theme-sync";
 import { warmNewSessionCache } from "../views/sessions/new-session-cache";
 import { loadTokenHistory, mergeLiveSessions } from "./token-history";
@@ -274,6 +275,8 @@ export function initBoot(): void {
   mountReconnectStrip();
   // Phone-only too; also for the app's lifetime.
   mountLinkJournal();
+  // Phone-only (the stamp it reads exists only on a daemon-served page).
+  mountBuildCheck();
 
   // Initial data fetches: render once all three settle (success OR failure, so
   // a failed fetch can't wedge the gate - see wireInitialFetches).

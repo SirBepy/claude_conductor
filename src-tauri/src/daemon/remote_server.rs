@@ -317,7 +317,10 @@ fn build_router(ctx: Arc<RemoteCtx>) -> Router {
 /// `null` until `DaemonState::init_machines` has run (see `spawn` above).
 async fn health(State(ctx): State<Arc<RemoteCtx>>) -> Response {
     let machine = ctx.state.machines.get().and_then(|r| r.self_machine());
-    axum::Json(serde_json::json!({ "ok": true, "machine": machine })).into_response()
+    // `build` lets a phone page left open across a PC update see the daemon now
+    // serves another bundle (src/shared/build-check.ts); null with no bundle.
+    let build = super::remote_static::build_id().await;
+    axum::Json(serde_json::json!({ "ok": true, "machine": machine, "build": build })).into_response()
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
