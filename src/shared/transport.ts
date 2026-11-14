@@ -16,8 +16,15 @@ import { HttpTransport } from "./http-transport";
 
 export type Unlisten = () => void;
 
+/** Per-call hints. `background` marks a read nobody is waiting on (a timer or
+ *  resume refresh): the phone's "Waiting for your PC" strip ignores it however
+ *  slow it is. Only HttpTransport reads it. */
+export interface CallOptions {
+  background?: boolean;
+}
+
 export interface Transport {
-  call<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  call<T>(command: string, args?: Record<string, unknown>, opts?: CallOptions): Promise<T>;
   /** Subscribe to a backend event channel. The callback receives the payload
    *  directly (the Tauri `{ payload }` envelope is unwrapped at this boundary). */
   listen<T>(event: string, cb: (payload: T) => void): Promise<Unlisten>;

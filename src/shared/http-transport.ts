@@ -3,7 +3,7 @@
 // runtime. Split out of transport.ts so each transport implementation has its
 // own file (ai_todo 93).
 
-import type { Transport, Unlisten } from "./transport";
+import type { CallOptions, Transport, Unlisten } from "./transport";
 import {
   GLOBAL_KEBAB_EVENTS,
   addGlobalListener,
@@ -182,10 +182,10 @@ export class HttpTransport implements Transport {
     }
   }
 
-  async call<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+  async call<T>(command: string, args: Record<string, unknown> = {}, opts?: CallOptions): Promise<T> {
     switch (command) {
       case "list_instances": {
-        const instances = await this.rpc<unknown>("list_instances", null);
+        const instances = await this.rpc<unknown>("list_instances", null, opts);
         this.noteStreamability(instances);
         return instances as T;
       }
@@ -579,7 +579,7 @@ export class HttpTransport implements Transport {
       // reconciles everything, the rest are debounced writes - see
       // shared/chat/session-draft-sync.ts, the frontend-side callers.
       case "get_session_drafts":
-        return this.rpc<T>("get_session_drafts", { session_id: args.sessionId ?? args.session_id });
+        return this.rpc<T>("get_session_drafts", { session_id: args.sessionId ?? args.session_id }, opts);
       case "set_composer_draft":
         return this.rpc<T>("set_composer_draft", { session_id: args.sessionId ?? args.session_id, text: args.text });
       case "clear_composer_draft":
@@ -940,7 +940,7 @@ export class HttpTransport implements Transport {
       if (event === "instances-changed") {
         // Fire once immediately so the session list populates without
         // waiting for the first WS frame / poll tick (pre-WS behavior).
-        this.call<unknown>("list_instances")
+        this.call<unknown>("list_instances", {}, { background: true })
           .then(() => { cb(undefined as unknown as T); })
           .catch(() => { /* network blip - the WS snapshot frame will catch up */ });
       }
@@ -1189,7 +1189,7 @@ export class HttpTransport implements Transport {
     return sessionId as unknown as T;
   }
 
-  private async rpc<T>(method: string, params: unknown): Promise<T> {
+  private async rpc<T>(method: string, params: unknown, opts?: CallOptions): Promise<T> {
     if (!isReadOnlyMethod(method)) {
       this.writes++;
       return this.rpcOnce<T>(method, params, MUTATION_TIMEOUT_MS);
@@ -1200,13 +1200,16 @@ export class HttpTransport implements Transport {
     // so it never hands back a snapshot from before this client's own change.
     // A shared result is copied per caller, so one mutating it can't leak;
     // an unshared one (the common case, big history pages included) is not.
-    const key = `${method}\u0000${JSON.stringify(params ?? null)}`;
+    // A background read keys apart: a read the user waits on must not join one
+    // that is exempt from the slow strip and lose its own tracking.
+    const background = opts?.background === true;
+    const key = `${method}\u0000${JSON.stringify(params ?? null)}\u0000${background}`;
     const running = this.inflightReads.get(key);
     if (running && running.writes === this.writes) {
       running.joiners++;
       return structuredClone(await running.result) as T;
     }
-    const result = this.readWithRetry<T>(method, params);
+    const result = this.readWithRetry<T>(method, params, background);
     const entry = { result: result as Promise<unknown>, writes: this.writes, joiners: 0 };
     this.inflightReads.set(key, entry);
     try {
@@ -1221,27 +1224,27 @@ export class HttpTransport implements Transport {
   /** Writes sent so far; an in-flight read started before the latest one is stale. */
   private writes = 0;
 
-  private async readWithRetry<T>(method: string, params: unknown): Promise<T> {
+  private async readWithRetry<T>(method: string, params: unknown, background: boolean): Promise<T> {
     try {
-      return await this.rpcOnce<T>(method, params, READ_TIMEOUT_MS);
+      return await this.rpcOnce<T>(method, params, READ_TIMEOUT_MS, background);
     } catch (e) {
       // One retry, reads only: after a resume the first attempt often rides a
       // connection that died while the phone slept, and the retry gets a
       // fresh one. A write might already have landed, so it never retries.
       if (!(e instanceof LinkError)) throw e;
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-      return this.rpcOnce<T>(method, params, READ_TIMEOUT_MS);
+      return this.rpcOnce<T>(method, params, READ_TIMEOUT_MS, background);
     }
   }
 
-  private async rpcOnce<T>(method: string, params: unknown, timeoutMs: number): Promise<T> {
+  private async rpcOnce<T>(method: string, params: unknown, timeoutMs: number, background = false): Promise<T> {
     // Tracked so the phone's loading UI has a real denominator to show: the
     // body is drained through readTrackedJson, which reports bytes against the
     // response's Content-Length (see load-progress.ts). A failed request calls
     // `abandon` rather than `finish`, keeping its duration out of the median -
     // how long a 500 took says nothing about how long success takes.
     const tracker = beginLoad(method);
-    const untrack = isReadOnlyMethod(method) && !BACKGROUND_READS.has(method) ? trackRequest(method, tracker) : () => {};
+    const untrack = isReadOnlyMethod(method) && !background && !BACKGROUND_READS.has(method) ? trackRequest(method, tracker) : () => {};
     const stall = new StallTimer(timeoutMs);
     try {
       let res: Response;

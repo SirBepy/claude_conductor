@@ -51,7 +51,7 @@ export class HeldDraftSync {
    *  live item map (not a snapshot passed in here) for the merge. */
   reconcile(sessionId: string, onResolved: (serverItems: { id: number; blocks: ContentBlock[] }[]) => void): Promise<void> {
     if (isPendingSessionId(sessionId)) return Promise.resolve();
-    return getSessionDrafts(sessionId).then(
+    return getSessionDrafts(sessionId, true).then(
       (drafts) => {
         onResolved(drafts.held.map((h) => ({ id: h.id, blocks: h.blocks })));
       },

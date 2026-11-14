@@ -16,21 +16,19 @@ import type { LoadSnapshot, LoadTracker } from "./load-progress";
  *  finish well inside this, so the strip stays out of normal use. */
 export const SLOW_REQUEST_MS = 4_000;
 
-/** Reads the phone issues on a timer or on resume with nobody waiting on the
- *  answer. They still report failures, but a slow one must never raise the
- *  "Waiting for your PC" strip: only a read the user is waiting on may. */
+/** Methods only ever polled, never waited on by the user. They still report
+ *  failures, but a slow one must never raise the "Waiting for your PC" strip.
+ *  A method the user ALSO waits on (`list_instances`, `get_session_drafts`)
+ *  is not listed: its pollers pass `{ background: true }` per call instead
+ *  (CallOptions in transport.ts), so a user-waited load of it still reads as slow. */
 export const BACKGROUND_READS: ReadonlySet<string> = new Set([
   // 700ms prompt poll (views/sessions/permission-modal/index.ts)
   "list_pending_prompts",
-  // degrade poll while the global stream is down (shared/global-stream.ts)
-  "list_instances",
   // refetch on every visibilitychange to visible (views/sessions/hidden-sessions-sync.ts)
   "get_hidden_chats",
   // usage header re-render on a timer and on visibilitychange (views/sessions/usage-dials.ts)
   "get_usage_map",
   "list_accounts",
-  // live cross-device sync of an open question card (views/sessions/permission-modal/question-ui.ts)
-  "get_session_drafts",
   // servers chip poll every 8s (views/sessions/statusbar-data.ts, servers-popover.ts)
   "list_project_servers",
 ]);

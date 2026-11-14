@@ -65,7 +65,7 @@ function localPushPending(): boolean {
  *  the change is this card's own echo. */
 export async function pollRemoteAuqChange(sessionId: string | undefined, promptId: string): Promise<QuestionDraft | null> {
   if (localPushPending()) return null;
-  const remote = await fetchRemoteAuqDraftMeta(sessionId, promptId);
+  const remote = await fetchRemoteAuqDraftMeta(sessionId, promptId, true);
   // A pick made during the round trip queued a push; this result predates it.
   if (!remote || localPushPending()) return null;
   const prev = daemonCopy?.promptId === promptId ? daemonCopy : null;
@@ -96,10 +96,10 @@ export async function clearAuqPush(sessionId: string | undefined, promptId: stri
 
 /** Like fetchRemoteAuqDraft, but also returns the daemon's `updated_at` so
  *  callers can compare freshness against a local copy. */
-async function fetchRemoteAuqDraftMeta(sessionId: string | undefined, promptId: string): Promise<{ draft: QuestionDraft; updatedAt: string } | null> {
+async function fetchRemoteAuqDraftMeta(sessionId: string | undefined, promptId: string, background = false): Promise<{ draft: QuestionDraft; updatedAt: string } | null> {
   if (!sessionId) return null;
   try {
-    const drafts = await getSessionDrafts(sessionId);
+    const drafts = await getSessionDrafts(sessionId, background);
     if (drafts.auq?.prompt_id !== promptId) return null;
     const draft = deserializeQuestionDraft(drafts.auq.payload);
     if (!draft) return null;

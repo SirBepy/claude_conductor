@@ -299,6 +299,32 @@ describe("background reads", () => {
     expect(conn.linkSnapshot().kind).toBe("ok");
   });
 
+  it("a user-initiated list_instances that stalls reads as slow", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+    void new HttpTransport().call("list_instances").catch(() => {});
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(conn.linkSnapshot().kind).toBe("slow");
+  });
+
+  it("a list_instances poll marked background never reads as slow", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+    void new HttpTransport().call("list_instances", {}, { background: true }).catch(() => {});
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(conn.linkSnapshot().kind).toBe("ok");
+  });
+
+  it("a user read does not join a background read of the same method", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+    const t = new HttpTransport();
+    void t.call("list_instances", {}, { background: true }).catch(() => {});
+    void t.call("list_instances").catch(() => {});
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(conn.linkSnapshot().kind).toBe("slow");
+  });
+
   it("a stalled read the user waits on still reads as slow", async () => {
     vi.useFakeTimers();
     fetchMock.mockImplementation(() => new Promise(() => {}));

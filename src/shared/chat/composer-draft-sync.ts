@@ -81,7 +81,7 @@ export class ComposerDraftSync {
   async reconcile(sessionId: string): Promise<string | null> {
     if (isPendingSessionId(sessionId)) return null;
     try {
-      const drafts = await getSessionDrafts(sessionId);
+      const drafts = await getSessionDrafts(sessionId, true);
       const remote = drafts.composer;
       if (!remote) return null;
       const known = getKnownUpdatedAt(sessionId);

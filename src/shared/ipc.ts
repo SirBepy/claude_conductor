@@ -7,7 +7,7 @@
 // Tauri directly. The ambient Window.__TAURI__ declaration lives here because
 // TauriTransport (in ./transport) references it.
 
-import { getTransport } from "./transport";
+import { getTransport, type CallOptions } from "./transport";
 
 declare global {
   interface Window {
@@ -29,6 +29,7 @@ declare global {
 export async function invoke<T>(
   command: string,
   args?: Record<string, unknown>,
+  opts?: CallOptions,
 ): Promise<T> {
-  return getTransport().call<T>(command, args);
+  return getTransport().call<T>(command, args, opts);
 }

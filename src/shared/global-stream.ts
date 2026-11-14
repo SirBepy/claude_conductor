@@ -160,7 +160,7 @@ function startGlobalDegradePoll(): void {
     if (!cbs || cbs.size === 0) return;
     globalDegradePollInFlight = true;
     globalStreamOwner
-      .call<unknown>("list_instances")
+      .call<unknown>("list_instances", {}, { background: true })
       .then(() => { fireGlobal("instances-changed", undefined); })
       .catch(() => { /* network blip - skip this tick */ })
       .finally(() => { globalDegradePollInFlight = false; });

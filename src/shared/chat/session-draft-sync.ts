@@ -19,8 +19,10 @@ export interface SessionDraftsDto {
   held_updated_at: string | null;
 }
 
-export function getSessionDrafts(sessionId: string): Promise<SessionDraftsDto> {
-  return invoke<SessionDraftsDto>("get_session_drafts", { sessionId });
+/** `background`: a refresh nobody waits on (live poll, resume reconcile), so a
+ *  slow answer never raises the phone's "Waiting for your PC" strip. */
+export function getSessionDrafts(sessionId: string, background = false): Promise<SessionDraftsDto> {
+  return invoke<SessionDraftsDto>("get_session_drafts", { sessionId }, { background });
 }
 
 export function setComposerDraft(sessionId: string, text: string): Promise<{ updated_at: string }> {
