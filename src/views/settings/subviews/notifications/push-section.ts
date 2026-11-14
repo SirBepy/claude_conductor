@@ -1,5 +1,6 @@
 import { isRemote } from "../../../../shared/transport";
 import { pushSupported, pushEnabledLocally, enablePush, disablePush } from "../../../../shared/push";
+import { isAndroidShell } from "../../../../shared/mobile/android-shell";
 
 // Phone-only Web Push enrolment (ai_todo 119). The desktop drives OS notifs via
 // the notif cards; the phone instead subscribes to daemon-sent pushes for "Claude
@@ -14,7 +15,7 @@ export function wirePushSection(root: HTMLElement): void {
   }
   // The Android app's WebView has no PushManager; it gets native FCM pushes
   // instead, so only the chat-name toggle applies there.
-  const nativeApp = !!(window as { ConductorPush?: unknown }).ConductorPush;
+  const nativeApp = isAndroidShell();
   if (!pushSupported()) {
     section.style.display = nativeApp ? "" : "none";
     const webRows = root.querySelector<HTMLElement>("#push-web-rows");
