@@ -8,8 +8,9 @@ import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
 // The dashboard's Subchats card on a real main chat with subs: avatars with a
-// state ring and an effort-tinted model battery in the right column under Plan,
-// finished subs kept for an hour and then folded under "+N earlier", the details
+// state ring and an effort-tinted model battery in the right column under Plan
+// (a finished sub is not here: it waits in the finished tray, see
+// chat-dashboard-sub-reports.view.spec.ts), the details
 // of the one clicked (run time, context chip, brief, newest image with "+N", the
 // latest preview, a message box), the right-click menu, and a pinned sub's
 // sidebar shortcut.
@@ -31,8 +32,9 @@ const MAIN = chat("main", "CV redesign", 101);
 const WORK = sub("sub-work", "Footer", 102, { busy: true, effort: "max", progress: { plan: [...PLAN] as never, state_since: ago(2 * MIN) } });
 const ASK = sub("sub-ask", "Header", 103, { awaiting: "question" });
 const QUEUED = sub("sub-queued", "Contact form", 104, { progress: { plan: null, state_since: null, waiting_for: "Footer" } as never });
-const DONE = sub("sub-done", "Colours", 105, { subchat_finished: true, awaiting: "done", effort: "low", progress: { plan: null, state_since: ago(10 * MIN) } });
-const OLD = sub("sub-old", "Fonts", 106, { subchat_finished: true, awaiting: "done", progress: { plan: null, state_since: ago(3 * 60 * MIN) } });
+// Idle with no finish reads "stopped": the one live kind whose message box sends at once instead of holding the message.
+const STOP = sub("sub-stop", "Colours", 105, { effort: "low", progress: { plan: null, state_since: ago(10 * MIN) } });
+const DONE = sub("sub-done", "Fonts", 106, { subchat_finished: true, awaiting: "done", progress: { plan: null, state_since: ago(10 * MIN) } });
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 const SLASH_ENTRIES = [
@@ -82,35 +84,32 @@ const av = (page: Page, id: string) => card(page).locator(`.sx-av[data-sub="${id
 const det = (page: Page) => card(page).locator(".sx-det");
 
 test.describe("chat dashboard / Subchats card", () => {
-  test("lists working, queued, asking and recent finished subs, and folds the older one under +1 earlier", async ({ page }) => {
-    await openMain(page, [MAIN, WORK, ASK, QUEUED, DONE, OLD]);
+  test("lists asking, working, queued and stopped subs, and leaves a finished one to the finished tray", async ({ page }) => {
+    await openMain(page, [MAIN, WORK, ASK, QUEUED, STOP, DONE]);
     await expect(card(page)).toBeVisible();
     // Right column, under the Plan card.
     const plan = page.locator("#session-pane .cdash-right .cdash-plan");
     expect((await card(page).boundingBox())!.y).toBeGreaterThan((await plan.boundingBox())!.y);
-    // Asking first, then working, queued, then the finished one inside the hour.
+    // Asking first, then working, queued, then stopped.
     await expect(card(page).locator(".sx-row .sx-av")).toHaveCount(4);
-    expect(await card(page).locator(".sx-row .sx-av").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.sub))).toEqual(["sub-ask", "sub-work", "sub-queued", "sub-done"]);
-    await expect(card(page).locator(".sx-earlier")).toHaveText("+1 earlier");
-    await expect(av(page, "sub-old")).toHaveCount(0);
-    await card(page).locator(".sx-earlier").click();
-    await expect(card(page).locator(".sx-earlier-row .sx-av")).toHaveCount(1);
-    await expect(av(page, "sub-old")).toHaveCount(1);
+    expect(await card(page).locator(".sx-row .sx-av").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.sub))).toEqual(["sub-ask", "sub-work", "sub-queued", "sub-stop"]);
+    await expect(av(page, "sub-done")).toHaveCount(0);
+    await expect(card(page).locator(".sx-earlier")).toHaveCount(0);
+    await expect(page.locator(`#session-pane .cdash-finished .ft-row[data-sub="sub-done"]`)).toBeVisible();
 
-    // The ring carries the state: red asks, a plan arc works, green is done.
+    // The ring carries the state: red asks, a plan arc works.
     await expect(av(page, "sub-ask").locator('circle[data-tone="question"]').first()).toBeVisible();
     await expect(av(page, "sub-work").locator("svg.is-plan")).toHaveCount(1);
-    await expect(av(page, "sub-done").locator('circle[data-tone="done"]').first()).toBeVisible();
     await capture(page.locator("#session-pane"), "chat-dashboard-subs-card");
   });
 
   test("the model battery takes the effort colour, and high stays the default grey", async ({ page }) => {
     const plain = chat("plain", "Plain chat", 110, { effort: "xhigh" });
     const calm = chat("calm", "Calm chat", 111);
-    await openMain(page, [MAIN, WORK, ASK, DONE, plain, calm]);
+    await openMain(page, [MAIN, WORK, ASK, STOP, plain, calm]);
     const colour = (id: string) => av(page, id).locator(".session-model-battery").evaluate((e) => getComputedStyle(e).color);
     expect(await colour("sub-work")).toBe("rgb(235, 87, 87)");
-    expect(await colour("sub-done")).toBe("rgb(236, 230, 207)");
+    expect(await colour("sub-stop")).toBe("rgb(236, 230, 207)");
     await expect(av(page, "sub-ask").locator(".session-model-battery[data-effort]")).toHaveCount(0);
     // The sidebar rows wear it too: xhigh orange, and the high default keeps its grey.
     const rowBattery = (id: string) => page.locator(`#sessions-list li[data-session-id="${id}"] .session-model-battery`);
@@ -119,7 +118,7 @@ test.describe("chat dashboard / Subchats card", () => {
   });
 
   test("a click opens the details: run time, context chip, brief, newest image with +N, the latest preview", async ({ page }) => {
-    await openMain(page, [MAIN, WORK, DONE]);
+    await openMain(page, [MAIN, WORK, STOP]);
     await av(page, "sub-work").click();
     await expect(det(page)).toBeVisible();
     await expect(det(page).locator(".sx-det-name")).toHaveText("Footer");
@@ -140,10 +139,10 @@ test.describe("chat dashboard / Subchats card", () => {
     const opened = page.evaluate(() => new Promise<string>((res) => window.addEventListener("cc-preview-open", (e) => res((e as CustomEvent).detail.slug), { once: true })));
     await det(page).locator(".sx-pv").click();
     expect(await opened).toBe("footer-mock");
-    // A finished sub's details say its verdict, and clicking the avatar again closes them.
-    await av(page, "sub-done").click();
-    await expect(det(page).locator(".sx-det-state")).toHaveText("Colours settled");
-    await av(page, "sub-done").click();
+    // A stopped sub's details say so, and clicking the avatar again closes them.
+    await av(page, "sub-stop").click();
+    await expect(det(page).locator(".sx-det-state")).toHaveText("stopped without finishing");
+    await av(page, "sub-stop").click();
     await expect(det(page)).toBeHidden();
   });
 
@@ -182,8 +181,8 @@ test.describe("chat dashboard / Subchats card", () => {
   });
 
   test("the message box is the chat's composer and sends to that sub", async ({ page }) => {
-    await openMain(page, [MAIN, WORK, DONE]);
-    await av(page, "sub-done").click();
+    await openMain(page, [MAIN, WORK, STOP]);
+    await av(page, "sub-stop").click();
     const box = det(page).locator(".sx-msg .composer-textarea");
     await expect(box).toBeVisible();
     // The real thing: attach button, send chip with its gesture hint, not a bare input.
@@ -193,7 +192,7 @@ test.describe("chat dashboard / Subchats card", () => {
     await box.press("Enter");
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "send_message").length).toBe(1);
     const call = (await invokeCalls(page)).find((c) => c.cmd === "send_message")!;
-    expect(call.args).toMatchObject({ sessionId: "sub-done", blocks: [{ type: "text", text: "use the new logo" }] });
+    expect(call.args).toMatchObject({ sessionId: "sub-stop", blocks: [{ type: "text", text: "use the new logo" }] });
     await expect(box).toHaveValue("");
 
     // The send button sends too.
@@ -216,8 +215,8 @@ test.describe("chat dashboard / Subchats card", () => {
   });
 
   test("typing / in the message box lists skills, and picking one inserts it", async ({ page }) => {
-    await openMain(page, [MAIN, WORK, DONE], { list_slash_commands: SLASH_ENTRIES });
-    await av(page, "sub-done").click();
+    await openMain(page, [MAIN, WORK, STOP], { list_slash_commands: SLASH_ENTRIES });
+    await av(page, "sub-stop").click();
     const box = det(page).locator(".sx-msg .composer-textarea");
     await box.fill("/cl");
     const popup = page.locator(".caret-popup:not([hidden])");
@@ -232,8 +231,8 @@ test.describe("chat dashboard / Subchats card", () => {
   });
 
   test("a pasted image attaches to the message and goes to the sub with it", async ({ page }) => {
-    await openMain(page, [MAIN, WORK, DONE], { paste_attachment: "C:/tmp/pasted.png" });
-    await av(page, "sub-done").click();
+    await openMain(page, [MAIN, WORK, STOP], { paste_attachment: "C:/tmp/pasted.png" });
+    await av(page, "sub-stop").click();
     const box = det(page).locator(".sx-msg .composer-textarea");
     await box.focus();
     await page.evaluate(() => {
@@ -257,12 +256,12 @@ test.describe("chat dashboard / Subchats card", () => {
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "send_message").length).toBe(1);
     const call = (await invokeCalls(page)).find((c) => c.cmd === "send_message")!;
     const blocks = (call.args as { blocks: Array<{ text: string }> }).blocks;
-    expect(call.args).toMatchObject({ sessionId: "sub-done" });
+    expect(call.args).toMatchObject({ sessionId: "sub-stop" });
     expect(blocks[0]!.text).toBe("see this");
     expect(blocks[1]!.text).toMatch(/^<file:C:\/tmp\/pasted\.png::/);
     // The upload is filed under the sub, so the image lands in its chat folder.
     const upload = (await invokeCalls(page)).find((c) => c.cmd === "paste_attachment")!;
-    expect(upload.args).toMatchObject({ sessionId: "sub-done" });
+    expect(upload.args).toMatchObject({ sessionId: "sub-stop" });
   });
 
   test("a keystroke aimed at nothing lands in the chat's own composer once, not in the card's box", async ({ page }) => {
@@ -297,7 +296,7 @@ test.describe("chat dashboard / Subchats card", () => {
   });
 
   test("the right-click menu lists the eight actions and each one acts on that sub", async ({ page }) => {
-    await openMain(page, [MAIN, WORK, DONE], { clear_session: false });
+    await openMain(page, [MAIN, WORK, STOP], { clear_session: false });
     await av(page, "sub-work").click({ button: "right" });
     const menu = page.locator(".sx-menu");
     await expect(menu.locator(".smore-item")).toHaveText([
@@ -320,12 +319,12 @@ test.describe("chat dashboard / Subchats card", () => {
     await page.locator(".sx-menu .smore-item", { hasText: "Open in new window" }).click();
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "detach_window").length).toBe(1);
 
-    // A busy sub would first ask to discard its turn; a finished one closes at once.
-    await av(page, "sub-done").click({ button: "right" });
+    // A busy sub would first ask to discard its turn; an idle one closes at once.
+    await av(page, "sub-stop").click({ button: "right" });
     await page.locator(".sx-menu .smore-item", { hasText: "Close" }).click();
     // Close ends the sub through the app's own close path; the sub is sent no message.
     await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "clear_session").length).toBe(1);
-    expect((await invokeCalls(page)).find((c) => c.cmd === "clear_session")!.args).toMatchObject({ sessionId: "sub-done" });
+    expect((await invokeCalls(page)).find((c) => c.cmd === "clear_session")!.args).toMatchObject({ sessionId: "sub-stop" });
     expect((await invokeCalls(page)).filter((c) => c.cmd === "send_message")).toEqual([]);
   });
 

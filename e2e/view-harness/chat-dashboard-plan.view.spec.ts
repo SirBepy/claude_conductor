@@ -97,9 +97,11 @@ test.describe("the Plan card across a chat's life", () => {
     await capture(plan(page), "plan-3-step-opened");
   });
 
-  test("the job ended: the Result under its steps", async ({ page }) => {
+  test("the job ended: the steps stay on the Plan card and the Result is a card of its own", async ({ page }) => {
     await openChat(page, TRELLO);
-    await expect(plan(page)).toHaveClass(/is-result/);
+    await expect(plan(page).locator(".cdash-h-t")).toHaveText("Plan");
+    await expect(plan(page).locator(".cdash-result")).toHaveCount(0);
+    await expect(page.locator("#session-pane .cdash-resultcard .cdash-result")).toContainText("Built, not pushed");
     await expect(plan(page).locator(".cdash-step--done")).toHaveCount(5);
     await expect(plan(page).locator(".cdash-pstatus")).toContainText("Idle since");
     await capture(pane(page), "plan-4-result");
@@ -133,7 +135,8 @@ test.describe("the Plan card across a chat's life", () => {
     await openChat(page, [...TRELLO, ...FOLLOW_UP]);
     await expect(plan(page)).toHaveClass(/is-last/);
     await expect(plan(page).locator(".cdash-h-t")).toHaveText(/^Last job/);
-    await expect(plan(page).locator(".cdash-dim .cdash-result")).toContainText("Built, not pushed");
+    // Joe wrote since, so the Result card keeps the last result, dimmed.
+    await expect(page.locator("#session-pane .cdash-resultcard.is-stale .cdash-dim .cdash-result")).toContainText("Built, not pushed");
     await capture(pane(page), "plan-5-last-job");
   });
 

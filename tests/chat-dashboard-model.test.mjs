@@ -332,11 +332,13 @@ describe("chat dashboard model", () => {
 
   it("collects calls and discoveries of the current job as notes, and the links an artifact names as links", () => {
     const c = chat().joe("a").send({ kind: "call", verdict: "Went with B", text: "B" }).send({ kind: "artifact", text: "Open https://example.com/board" })
-      .joe("b").send({ kind: "discovery", verdict: "Found it", text: "c" });
+      .joe("b").send({ kind: "discovery", verdict: "Found it", text: "c" }).send({ kind: "call", verdict: "Kept B", text: "d" });
     const d = c.dash();
+    // The newest closing message is the Result, so the notes hold the rest of the job.
+    expect(zone(d, "result").message.card.verdict).toBe("Kept B");
     expect(zone(d, "notes").cards.map((m) => m.card.kind)).toEqual(["discovery"]);
     expect(zone(d, "links").links.map((l) => l.url)).toEqual(["https://example.com/board"]);
-    expect(ids(d.right)).toEqual(["plan", "notes", "links"]);
+    expect(ids(d.right)).toEqual(["plan", "result", "notes", "links"]);
   });
 
   it("keeps the recorded plan aligned when older rows are prepended or a row is spliced out", () => {

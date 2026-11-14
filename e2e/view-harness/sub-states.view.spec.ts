@@ -99,10 +99,14 @@ test.describe("honest sub states", () => {
       expect(b.x + b.width / 2).toBeGreaterThan(a.x + a.width / 2);
       expect(b.y + b.height / 2).toBeGreaterThan(a.y + a.height / 2);
     }
-    for (const id of ["w", "a", "d"]) await expect(av(page, id).locator(".sub-glyph")).toHaveCount(0);
+    // A finished sub is in the finished tray under Result, not in this card; its ring and glyph are the same.
+    const done = page.locator('#session-pane .cdash-finished .sx-av[data-sub="d"]');
+    await expect(av(page, "d")).toHaveCount(0);
+    for (const id of ["w", "a"]) await expect(av(page, id).locator(".sub-glyph")).toHaveCount(0);
+    await expect(done.locator(".sub-glyph")).toHaveCount(0);
     await expect(av(page, "w").locator("svg.is-glow, svg.is-plan")).toHaveCount(1);
     await expect(av(page, "a").locator('circle[data-tone="question"]').first()).toBeVisible();
-    await expect(av(page, "d").locator('circle[data-tone="done"]').first()).toBeVisible();
+    await expect(done.locator('circle[data-tone="done"]').first()).toBeVisible();
     // No native title competes with the hover card.
     await expect(av(page, "w")).not.toHaveAttribute("title", /.+/);
     await capture(page.locator("#session-pane"), "sub-states-card");

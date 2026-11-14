@@ -140,7 +140,20 @@ export interface AnswersState {
  *  no answer yet, so + (new question) is there from the start: Answers and Plan
  *  are always on the dashboard (Joe, 2026-11-10). */
 export function deriveAnswers({ input }: DeriveCtx): AnswersState {
-  return { items: buildAnswerItems(input.messages, input.answers, input.subs, input.now) };
+  return { items: buildAnswerItems([...poolAnswerRows(input), ...input.messages], input.answers, input.subs, input.now) };
+}
+
+/** A sub's answer to Joe's question that no loaded row holds: the dashboard hides
+ *  the transcript, so its older pages never load and the card lives only in the
+ *  renderer's pool. Such a card is older than every loaded row, so it goes first. */
+function poolAnswerRows(input: DashboardInput): RenderedMessage[] {
+  const pool = input.subCards;
+  if (!pool?.length) return [];
+  const rowIds = new Set(input.messages.flatMap((m) => (m.kind === "message" && m.subCard ? [m.subCard.id] : [])));
+  return pool
+    .filter((e) => e.kind === "finish" && !!e.question?.trim() && !rowIds.has(e.id))
+    .sort((a, b) => a.ts - b.ts)
+    .flatMap((e) => poolRow(e) ?? []);
 }
 
 export type WaitingItem =
@@ -477,27 +490,6 @@ export interface CardListState {
   cards: RenderedMessage[];
 }
 
-export interface ReportsState {
-  /** The newest sub reports, newest first. */
-  shown: RenderedMessage[];
-  /** The rest, newest first: the "N earlier" fold. */
-  earlier: RenderedMessage[];
-}
-
-/** How many sub reports draw before the rest fold under "N earlier". */
-export const REPORTS_SHOWN = 3;
-
-const SUB_REPORT_KINDS: ReadonlySet<string> = new Set(["finish", "all_finished", "when_done"]);
-
-/** The main chat is told never to relay a sub's card (SUBCHATS_MAIN_PROMPT), so
- *  a job's finish has no other home on the dashboard: Answers takes only a finish
- *  that answers a question, Waiting only blockers, and the Subchats card only
- *  avatars. Joe, 2026-11-13: "i dont see subchats answers in the main chat window". */
-function isSubReport(e: SubCardEntry): boolean {
-  if (!SUB_REPORT_KINDS.has(e.kind)) return false;
-  return !(e.kind === "finish" && e.question?.trim());
-}
-
 // subCardRow builds a fresh row per call; cardHtml caches its HTML per row object.
 const poolRows = new WeakMap<SubCardEntry, RenderedMessage>();
 function poolRow(e: SubCardEntry): RenderedMessage | null {
@@ -511,48 +503,91 @@ function poolRow(e: SubCardEntry): RenderedMessage | null {
   return row;
 }
 
-/** From subs: every sub report of this main chat (a finish that is no answer, the
- *  all-finished card, when-done's note), drawn with the same card Messages view
- *  draws, newest first. Read from the renderer's card pool as well as the rows,
- *  so a report older than the loaded pages still shows. Nothing is dismissed or
- *  marked read: a report stays until a newer one pushes it under the fold. */
-export function deriveReports({ input }: DeriveCtx): ReportsState | null {
-  const byId = new Map<string, RenderedMessage>();
-  // Every sub card the transcript holds as a row, drawn or not.
+/** The own message kinds Result can show. Answers and ratings have the Answers card,
+ *  blockers and do_this have Waiting on you, a plan leads the Plan card and an ack
+ *  draws nothing, so each of those is already where Joe looks. Every other kind
+ *  (and a legacy message) would otherwise reach him only through the small Notes
+ *  card, and a chat that ended its turn on a call or a discovery left him no update
+ *  at all (Joe, 2026-11-14: "sometimes you wanna tell me smth but you dont have the
+ *  right spot to say it... so i just dont get a msg"). */
+const RESULT_KINDS: ReadonlySet<MessageKind | "legacy"> = new Set(["report", "call", "discovery", "handoff", "correction", "artifact", "legacy"]);
+
+/** Row index of the chat's latest closed message of a Result kind, -1 when none. A
+ *  message counts once the turn that sent it closed, so a note sent mid-turn
+ *  never replaces the last result while the work is still going (reportClosed). */
+function resultIndex(msgs: readonly RenderedMessage[]): number {
+  return lastIndexWhere(msgs, (m, i) => isOwnMessage(m) && RESULT_KINDS.has(messageKindOf(m)) && reportClosed(msgs, i));
+}
+
+export interface ResultState {
+  message: RenderedMessage;
+  /** Joe wrote after it: the next result has not come yet, so it draws dimmed. */
+  stale: boolean;
+}
+
+/** Result: what the chat last said when it went idle, apart from the Plan card's
+ *  steps (Joe, 2026-11-14: "i want the result to be independant from the steps").
+ *  It stays until a newer one replaces it, dimmed once Joe has written since. */
+export function deriveResult({ input, lastJoe }: DeriveCtx): ResultState | null {
+  const at = resultIndex(input.messages);
+  return at < 0 ? null : { message: input.messages[at]!, stale: lastJoe > at };
+}
+
+/** One finished sub in the tray under Result. */
+export interface FinishedItem {
+  sub: SubCardItem;
+  /** The sub's latest finish card: its verdict is the tray's one line and the card
+   *  itself is what a click opens. Null while no card of that sub is known. */
+  report: RenderedMessage | null;
+}
+
+export interface FinishedState {
+  /** Newest finish first; a sub with no known finish time last. */
+  items: FinishedItem[];
+}
+
+/** The latest finish card of each sub, from the loaded rows and the renderer's
+ *  pool (a card older than the loaded pages lives only there). A row the
+ *  transcript dropped stays dropped. */
+function latestFinishCards(input: DashboardInput): Map<string, RenderedMessage> {
+  const best = new Map<string, { ts: number; row: RenderedMessage }>();
+  const keep = (sub: string | null | undefined, ts: number, row: RenderedMessage | null): void => {
+    if (!sub || !row || (best.get(sub)?.ts ?? -1) >= ts) return;
+    best.set(sub, { ts, row });
+  };
   const rowIds = new Set<string>();
-  // A row the transcript dropped stays dropped, though its card is still in the pool.
-  const dropped = new Set<string>();
   for (const m of input.messages) {
     if (m.kind !== "message" || !m.subCard) continue;
     rowIds.add(m.subCard.id);
-    if (m.failed || m.retracted) dropped.add(m.subCard.id);
-    else if (isSubReport(m.subCard)) byId.set(m.subCard.id, m);
+    if (m.failed || m.retracted || m.subCard.kind !== "finish") continue;
+    keep(m.subCard.sub_id, m.subCard.ts, m);
   }
-  const pool = input.subCards ?? [];
-  for (const e of pool) {
-    if (byId.has(e.id) || dropped.has(e.id)) continue;
-    // Answers reads only rows, so an answer older than the loaded pages would
-    // show nowhere: with no row of its own it is drawn here instead.
-    const answerWithoutRow = e.kind === "finish" && !!e.question?.trim() && !rowIds.has(e.id);
-    if (!isSubReport(e) && !answerWithoutRow) continue;
-    const row = poolRow(e);
-    if (row) byId.set(e.id, row);
+  for (const e of input.subCards ?? []) {
+    if (e.kind !== "finish" || rowIds.has(e.id)) continue;
+    keep(e.sub_id, e.ts, poolRow(e));
   }
-  if (byId.size === 0) return null;
-  // The pool is in log order, so on a tied ms (the all-finished card is stamped
-  // right after the last finish) the card written later still comes first.
-  const logIdx = new Map(pool.map((e, i) => [e.id, i]));
-  const all = [...byId.entries()].map(([id, m], i) => ({ m, ts: m.subCard?.ts ?? 0, at: logIdx.get(id) ?? -1, i }))
-    .sort((a, b) => b.ts - a.ts || b.at - a.at || b.i - a.i)
-    .map((x) => x.m);
-  return { shown: all.slice(0, REPORTS_SHOWN), earlier: all.slice(REPORTS_SHOWN) };
+  return new Map([...best].map(([sub, b]) => [sub, b.row]));
 }
 
-/** The Subchats card (subs-model.ts has the rules): this chat's subs as avatars,
+/** Finished subs, kept until Joe dismisses them (a dismiss closes the chat, which
+ *  takes its row off the instance list). There is no fold by age: a finished sub
+ *  is the thing Joe has not looked at yet, so it must not vanish on a timer. */
+export function deriveFinished({ input }: DeriveCtx): FinishedState | null {
+  const done = (input.subs ?? []).filter((s) => s.kind === "finished");
+  if (done.length === 0) return null;
+  const cards = latestFinishCards(input);
+  const items = done
+    .map((sub) => ({ sub, report: cards.get(sub.id) ?? null }))
+    .sort((a, b) => (b.sub.finishedAt ?? 0) - (a.sub.finishedAt ?? 0));
+  return { items };
+}
+
+/** The Subchats card (subs-model.ts has the rules): this chat's unfinished subs as avatars,
  *  from the instance list the view passes in, never from the transcript. An
  *  asking sub's question stays in Waiting on you as well. */
 export function deriveSubchats({ input }: DeriveCtx): SubsState | null {
-  return buildSubsState(input.subs ?? [], input.now ?? Date.now());
+  // A finished sub sits in the tray under Result (deriveFinished), not here.
+  return buildSubsState((input.subs ?? []).filter((s) => s.kind !== "finished"), input.now ?? Date.now());
 }
 
 const NOTE_KINDS: ReadonlySet<MessageKind | "legacy"> = new Set(["call", "discovery", "handoff", "correction", "legacy"]);
@@ -562,7 +597,9 @@ const NOTE_KINDS: ReadonlySet<MessageKind | "legacy"> = new Set(["call", "discov
  *  a call. A legacy message (sent before kinds existed) could be anything, so
  *  it is a note rather than an answer. */
 export function deriveNotes({ input, lastJoe }: DeriveCtx): CardListState | null {
-  const cards = input.messages.filter((m, i) => i > lastJoe && isOwnMessage(m) && NOTE_KINDS.has(messageKindOf(m))).reverse();
+  // The message Result shows is not a note as well.
+  const shown = resultIndex(input.messages);
+  const cards = input.messages.filter((m, i) => i > lastJoe && i !== shown && isOwnMessage(m) && NOTE_KINDS.has(messageKindOf(m))).reverse();
   return cards.length > 0 ? { cards } : null;
 }
 
@@ -669,9 +706,10 @@ export const ZONES = {
   answers: zone({ column: "left", order: 10, derive: deriveAnswers }),
   waiting: zone({ column: "left", order: 20, derive: deriveWaiting }),
   waitingElsewhere: zone({ column: "left", order: 25, derive: deriveWaitingElsewhere }),
-  reports: zone({ column: "left", order: 27, derive: deriveReports }),
   drafts: zone({ column: "left", order: 30, derive: deriveDrafts }),
   plan: zone({ column: "right", order: 10, derive: derivePlan }),
+  result: zone({ column: "right", order: 15, derive: deriveResult }),
+  finished: zone({ column: "right", order: 17, derive: deriveFinished }),
   subchats: zone({ column: "right", order: 20, derive: deriveSubchats }),
   notes: zone({ column: "right", order: 30, derive: deriveNotes }),
   preview: zone({ column: "right", order: 35, derive: derivePreviewWindow }),

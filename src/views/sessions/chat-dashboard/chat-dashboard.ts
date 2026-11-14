@@ -45,6 +45,12 @@ import { draftIdsOf, type DraftItem, type DraftStoreSide } from "../../../shared
 import { DRAFT_OPEN_EVENT, copyDraft } from "../../../shared/chat/chat-draft-card";
 import { ACTIVE_QUESTION_EVENT, activeCardFor, expandActiveCard } from "../permission-modal/question-state";
 import { dismiss, dismissedFor } from "./waiting-dismissed";
+import { attachSubHover, type SubHoverResolver } from "./sub-hover";
+import { closeChat } from "../close-chat";
+import { ctxStatusCache } from "../session-statusbar-helpers";
+import { contextChipHtml } from "../statusbar-chips";
+import { tierLabel } from "../../../shared/model-name";
+import type { ContextStatus } from "../../../types/ipc.generated";
 import "./chat-dashboard.css";
 import "./dashboard-extras.css";
 
@@ -84,7 +90,11 @@ export class ChatDashboard {
   /** When each sub last finished, from the main chat's finish cards. */
   private finishedAt: ReadonlyMap<string, number> = new Map();
   private finishedSig = "";
-  private foldTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The finished tray's subs as last drawn, for the avatar hover card. */
+  private finishedSubs = new Map<string, SubCardItem>();
+  /** The finish time each finished sub's context was read for: a sub that finishes
+   *  again is read again, so the chip says what it ended with this time. */
+  private ctxReadFor = new Map<string, number | null>();
   /** The family's previews, newest first (list_previews scoped to the main
    *  chat); the Preview card keeps this chat's own and folds the rest. */
   private previews: PreviewMeta[] = [];
@@ -330,6 +340,7 @@ export class ChatDashboard {
     this.renderZones(derived, busy);
     this.renderAnswers(derived);
     this.renderSubs(derived);
+    this.ensureFinishedCtx(derived);
     this.placeBar(busy);
     const planEl = this.zoneEls.get("plan")?.el;
     if (planEl) syncPlanListFade(planEl);
@@ -571,13 +582,38 @@ export class ChatDashboard {
     const host = this.zoneEls.get("subchats")?.el.querySelector<HTMLElement>(".sx-host") ?? null;
     if (zone && zone.id === "subchats" && host) this.subs.update(host, zone.state);
     else this.subs.detach();
-    // A finished sub folds under "+N earlier" an hour after it finished, with no
-    // event to say so: draw again when the next one is due.
-    if (this.foldTimer !== null) clearTimeout(this.foldTimer);
-    this.foldTimer = null;
-    const due = zone && zone.id === "subchats" ? zone.state.foldsAt : null;
-    if (due !== null) this.foldTimer = setTimeout(() => this.schedule(), Math.min(Math.max(due - Date.now(), 0) + 50, 2 ** 31 - 1));
   }
+
+  /** What each finished sub ended with: its context figure, read once per finish
+   *  (context_status; a sub whose transcript cannot be read just shows no chip). */
+  private ensureFinishedCtx(state: DashboardState): void {
+    const zone = state.right.find((z) => z.id === "finished");
+    const items = zone && zone.id === "finished" ? zone.state.items : [];
+    this.finishedSubs = new Map(items.map((it) => [it.sub.id, it.sub]));
+    for (const { sub } of items) {
+      if (this.ctxReadFor.has(sub.id) && this.ctxReadFor.get(sub.id) === sub.finishedAt) continue;
+      this.ctxReadFor.set(sub.id, sub.finishedAt);
+      void invoke<ContextStatus | null>("context_status", { sessionId: sub.id })
+        .then((c) => {
+          if (!c || this.disposed) return;
+          ctxStatusCache.set(sub.id, c);
+          this.schedule();
+        })
+        .catch(() => { /* no transcript to measure: the row shows no chip */ });
+    }
+  }
+
+  private ctxChip = (subId: string): string => {
+    const c = ctxStatusCache.get(subId);
+    return c ? contextChipHtml(c, false) : "";
+  };
+
+  /** The tray's avatar hover card: the name and state of the sub. */
+  private finishedHover: SubHoverResolver = (id) => {
+    const it = this.finishedSubs.get(id);
+    if (!it?.hover) return null;
+    return { name: it.name, tier: tierLabel(it.model, it.effort), kind: it.kind, hover: it.hover, startedAt: it.startedAt };
+  };
 
   /** UI state that a new derive invalidates. */
   private applyUiRules(state: DashboardState): void {
@@ -601,7 +637,7 @@ export class ChatDashboard {
   }
 
   private renderZones(state: DashboardState, busy: boolean): void {
-    const ctx = { ui: this.ui, busy, quick: this.quick, idleAt: this.idleAt, subs: this.subCounts, previewOwner: this.previewOwner };
+    const ctx = { ui: this.ui, busy, quick: this.quick, idleAt: this.idleAt, subs: this.subCounts, previewOwner: this.previewOwner, ctxChip: this.ctxChip };
     const live = new Set<ZoneId>();
     for (const [col, zones] of [[this.leftEl, state.left], [this.rightEl, state.right]] as const) {
       zones.forEach((z, i) => {
@@ -614,6 +650,8 @@ export class ChatDashboard {
           el.dataset.zone = z.id;
           entry = { el, html: "" };
           this.zoneEls.set(z.id, entry);
+          // The slot outlives its redraws, so the hover card is wired once per slot.
+          if (z.id === "finished") attachSubHover(el, this.finishedHover);
         }
         if (entry.html !== html) {
           // Lift the status line out first: replacing the Plan card's HTML would
@@ -714,6 +752,16 @@ export class ChatDashboard {
     this.render();
   }
 
+  /** Dismiss closes the finished sub (the app's own Close): its process stops and
+   *  its chat stays in history, so a message to it wakes it again. Its row leaves
+   *  the instance list, which draws it out of the tray. */
+  private async dismissFinished(subId: string): Promise<void> {
+    if (!subId) return;
+    if (this.ui.finishedOpen === subId) this.ui.finishedOpen = null;
+    await closeChat(subId);
+    this.schedule();
+  }
+
   private act(name: string, t: HTMLElement): void {
     const ui = this.ui;
     // These two open something else and change nothing drawn here.
@@ -723,6 +771,10 @@ export class ChatDashboard {
     }
     if (name === "open-preview") {
       window.dispatchEvent(new CustomEvent(PREVIEW_OPEN_EVENT, { detail: { slug: t.dataset.slug ?? "" } }));
+      return;
+    }
+    if (name === "finished-dismiss") {
+      void this.dismissFinished(t.dataset.sub ?? "");
       return;
     }
     if (name === "wait-dismiss" || name === "wait-clear") {
@@ -741,7 +793,7 @@ export class ChatDashboard {
       case "strip-latest": ui.stripPick = null; ui.stripExpanded = false; break;
       case "drafts-copied": ui.copiedOpen = !ui.copiedOpen; break;
       case "pv-others": ui.pvOthersOpen = !ui.pvOthersOpen; break;
-      case "reports-earlier": ui.reportsOpen = !ui.reportsOpen; break;
+      case "finished-open": ui.finishedOpen = ui.finishedOpen === t.dataset.sub ? null : (t.dataset.sub ?? null); break;
       case "step": ui.openStep = ui.openStep === t.dataset.step ? null : (t.dataset.step ?? null); break;
       case "plan-prev":
       case "plan-next":
@@ -822,8 +874,6 @@ export class ChatDashboard {
     this.barObserver?.disconnect();
     this.answers.dispose();
     this.subs.dispose();
-    if (this.foldTimer !== null) clearTimeout(this.foldTimer);
-    this.foldTimer = null;
     this.unlistenPreview?.();
     this.unlistenPreview = null;
     this.unlistenDrafts?.();

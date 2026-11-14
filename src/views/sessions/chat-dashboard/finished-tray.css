@@ -1,0 +1,90 @@
+/* The finished tray (finished-tray.ts): one row per finished sub. Little at
+   rest: the avatar and one muted line, the Dismiss x only on hover or focus. */
+.ft-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ft-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ft-av {
+  flex: none;
+  display: inline-flex;
+}
+.ft-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.ft-main:hover:not(:disabled),
+.ft-row.is-open .ft-main {
+  background: var(--color-surface-alt);
+}
+.ft-main:disabled {
+  cursor: default;
+}
+.ft-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ft-main .sb-chip {
+  flex: none;
+}
+.ft-x,
+.ft-closing {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.ft-x {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.ft-row:hover .ft-x,
+.ft-x:focus-visible {
+  opacity: 1;
+}
+.ft-x:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+/* A finger cannot hover, so the x stays drawn there. */
+@media (hover: none) {
+  .ft-x {
+    opacity: 1;
+  }
+}
+.ft-row.is-closing {
+  opacity: 0.55;
+}
+.ft-card {
+  margin: 2px 0 6px 48px;
+}
+.ft-card .mc-root .msg-copy-btn {
+  display: none;
+}

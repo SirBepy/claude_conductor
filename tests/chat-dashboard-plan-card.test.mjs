@@ -57,19 +57,27 @@ const job = (ask, steps, verdict) => [
 const card = (pane) => pane.querySelector(".cdash-right .cdash-plan");
 const title = (pane) => card(pane).querySelector(".cdash-h-t").textContent;
 const click = (pane, sel) => { card(pane).querySelector(sel).click(); };
+const resultCard = (pane) => pane.querySelector(".cdash-right .cdash-resultcard");
 
 describe("the Plan card across a chat's life", () => {
   it("keeps the finished job, dimmed, as the last job when Joe writes with no new plan", async () => {
     const { pane, feed } = mount();
     feed(job("sync trello", ["Read", "Add source"], "Built, not pushed"));
     await tick();
-    expect(title(pane)).toBe("Result");
+    // The Result is a card of its own, so the finished steps stay on the Plan card.
+    expect(title(pane)).toBe("Plan");
+    expect(card(pane).querySelector(".cdash-result")).toBeNull();
+    expect(card(pane).querySelectorAll(".cdash-step")).toHaveLength(2);
+    expect(resultCard(pane).querySelector(".mc-verdict").textContent).toBe("Built, not pushed");
+    expect(resultCard(pane).classList.contains("is-stale")).toBe(false);
     feed([userEvent("does it skip archived cards?"), ...send({ kind: "answer", verdict: "Yes", text: "It does." }), ...status("done")]);
     await tick();
     expect(card(pane).classList.contains("is-last")).toBe(true);
     expect(title(pane)).toMatch(/^Last job/);
-    expect(card(pane).querySelector(".cdash-dim .cdash-result .mc-verdict").textContent).toBe("Built, not pushed");
     expect(card(pane).querySelectorAll(".cdash-step")).toHaveLength(2);
+    // Joe wrote since, and an answer is no Result: the old one stays, dimmed.
+    expect(resultCard(pane).classList.contains("is-stale")).toBe(true);
+    expect(resultCard(pane).querySelector(".cdash-dim .mc-verdict").textContent).toBe("Built, not pushed");
     // One job only: no pager.
     expect(card(pane).querySelector(".cdash-pnav")).toBeNull();
   });

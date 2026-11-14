@@ -46,6 +46,8 @@ const HISTORY = [
     text: "Only the second one:\n\n" + CODE,
   }, "a1", AT),
   ...tool(SEND, { kind: "call", verdict: "Kept the MSI stub", text: "The stub stays until the uninstall ends:\n\n" + CODE }, "n1", AT + 5),
+  // The newest closing message is the Result card's; the one before it stays a Note.
+  ...tool(SEND, { kind: "call", verdict: "Left the driver alone", text: "The driver stays too:\n\n" + CODE }, "n2", AT + 6),
   ...tool("mcp__cc_conductor__report_turn_status", { status: "done" }, "t2"),
 ];
 
@@ -102,10 +104,12 @@ test("a long code block and a file chip stay inside every dashboard bubble", asy
   await expect(face.locator("pre")).toBeVisible();
   for (const s of await spill(c, c.locator(".ax-shell"))) expect(s).toBeLessThanOrEqual(1);
 
-  // A Notes card holding the same code stays inside its zone.
-  const notes = page.locator("#session-pane .cdash-notes");
-  await expect(notes.locator("pre").first()).toBeVisible();
-  for (const m of await notes.locator(".msg").all()) for (const s of await spill(notes, m)) expect(s).toBeLessThanOrEqual(1);
+  // A Notes card and the Result card holding the same code stay inside their zones.
+  for (const zone of ["#session-pane .cdash-notes", "#session-pane .cdash-resultcard"]) {
+    const card = page.locator(zone);
+    await expect(card.locator("pre").first()).toBeVisible();
+    for (const m of await card.locator(".msg").all()) for (const s of await spill(card, m)) expect(s).toBeLessThanOrEqual(1);
+  }
 
   // The thread: the body never scrolls sideways, the reply and its code fit it.
   await c.locator("[data-ax='reply']").click();
