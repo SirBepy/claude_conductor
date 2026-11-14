@@ -206,7 +206,7 @@ describe("chat dashboard layout", () => {
     expect(errors).toEqual([]);
   });
 
-  it("draws the Result as a card of its own under the Plan card, which keeps the finished steps", async () => {
+  it("draws the Result as a card of its own on the left, under Answers, while the Plan card keeps the finished steps", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     feed(r, [
@@ -216,21 +216,23 @@ describe("chat dashboard layout", () => {
       ...status("done"),
     ]);
     const right = pane.querySelector(".cdash-right");
-    await settled(() => expect(right.querySelector(".cdash-result .mc-verdict")?.textContent).toBe("Built, not pushed"));
-    expect(right.querySelector(".cdash-result .mc-verdict").textContent).toBe("Built, not pushed");
-    expect(right.querySelector(".cdash-result .mc-sec--yours").textContent).toContain("Push it");
-    expect(right.querySelector(".cdash-result table")).not.toBeNull();
+    await settled(() => expect(pane.querySelector(".cdash-left .cdash-result .mc-verdict")?.textContent).toBe("Built, not pushed"));
+    expect(pane.querySelector(".cdash-left .cdash-result .mc-verdict").textContent).toBe("Built, not pushed");
+    expect(pane.querySelector(".cdash-left .cdash-result .mc-sec--yours").textContent).toContain("Push it");
+    expect(pane.querySelector(".cdash-left .cdash-result table")).not.toBeNull();
     // The steps stay open on the Plan card, apart from the Result.
     const card = right.querySelector(".cdash-plan");
     expect(card.querySelector(".cdash-h").textContent).toBe("Plan");
     expect(card.querySelectorAll(".cdash-step--done")).toHaveLength(2);
     expect(card.querySelector(".cdash-result")).toBeNull();
     expect(card.querySelector("[data-act='show-plan']")).toBeNull();
-    const resultCard = right.querySelector(".cdash-resultcard");
+    const resultCard = pane.querySelector(".cdash-left .cdash-resultcard");
     expect(resultCard.querySelector(".cdash-h-t").textContent).toBe("Result");
-    expect(card.parentElement.nextElementSibling.dataset.zone).toBe("result");
-    // The report is the Result, never an answer: Answers stays empty.
-    expect([...pane.querySelectorAll(".cdash-left .cdash-slot")].map((e) => e.dataset.zone)).toEqual(["answers"]);
+    expect(resultCard.parentElement.previousElementSibling.dataset.zone).toBe("answers");
+    expect(resultCard.querySelector("[data-act='result-dismiss']")).not.toBeNull();
+    // The report is the Result, never an answer: Answers stays empty and the Result sits right under it.
+    expect([...pane.querySelectorAll(".cdash-left .cdash-slot")].map((e) => e.dataset.zone)).toEqual(["answers", "result"]);
+    expect(pane.querySelector(".cdash-left .ax-empty")).not.toBeNull();
   });
 
   it("lists a blocker, tinted red, and the open question card in Waiting on you", async () => {

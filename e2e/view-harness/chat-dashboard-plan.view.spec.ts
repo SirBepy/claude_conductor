@@ -98,11 +98,36 @@ test.describe("the Plan card across a chat's life", () => {
     await capture(plan(page), "plan-3-step-opened");
   });
 
+  test("Got it removes the Result and the Plan card keeps its title and subtitle, with a button that opens it there", async ({ page }) => {
+    await openChat(page, TRELLO);
+    const result = page.locator("#session-pane .cdash-left .cdash-resultcard");
+    await expect(result).toContainText("Built, not pushed");
+    await result.locator("[data-act='result-dismiss']").click();
+    await expect(result).toHaveCount(0);
+    const row = plan(page).locator(".cdash-rsum");
+    await expect(row.locator("b")).toHaveText("Built, not pushed");
+    await expect(row.locator(".cdash-rs-sub")).toHaveText("Trello cards land in Todos every 5 minutes.");
+    await expect(plan(page).locator(".cdash-step--done")).toHaveCount(5);
+    await expect(plan(page).locator(".cdash-result")).toHaveCount(0);
+    await capture(pane(page), "plan-14-result-dismissed");
+    await row.locator("[data-act='result-toggle']").click();
+    await expect(plan(page).locator(".cdash-result")).toContainText("Trello cards land in Todos every 5 minutes.");
+    await expect(row.locator("[data-act='result-toggle']")).toHaveText("Hide result");
+    await capture(pane(page), "plan-15-result-opened-in-plan");
+    await row.locator("[data-act='result-toggle']").click();
+    await expect(plan(page).locator(".cdash-result")).toHaveCount(0);
+    // The dismissal is kept for the chat, so a reopened window does not bring the card back.
+    await page.reload();
+    await openChat(page, TRELLO);
+    await expect(page.locator("#session-pane .cdash-left .cdash-resultcard")).toHaveCount(0);
+    await expect(plan(page).locator(".cdash-rsum")).toBeVisible();
+  });
+
   test("the job ended: the steps stay on the Plan card and the Result is a card of its own", async ({ page }) => {
     await openChat(page, TRELLO);
     await expect(plan(page).locator(".cdash-h-t")).toHaveText("Plan");
     await expect(plan(page).locator(".cdash-result")).toHaveCount(0);
-    await expect(page.locator("#session-pane .cdash-resultcard .cdash-result")).toContainText("Built, not pushed");
+    await expect(page.locator("#session-pane .cdash-left .cdash-resultcard .cdash-result")).toContainText("Built, not pushed");
     await expect(plan(page).locator(".cdash-step--done")).toHaveCount(5);
     await expect(plan(page).locator(".cdash-pstatus")).toContainText("Idle since");
     await capture(pane(page), "plan-4-result");
@@ -137,7 +162,7 @@ test.describe("the Plan card across a chat's life", () => {
     await expect(plan(page)).toHaveClass(/is-last/);
     await expect(plan(page).locator(".cdash-h-t")).toHaveText(/^Last job/);
     // Joe wrote since, so the Result card keeps the last result, dimmed.
-    await expect(page.locator("#session-pane .cdash-resultcard.is-stale .cdash-dim .cdash-result")).toContainText("Built, not pushed");
+    await expect(page.locator("#session-pane .cdash-left .cdash-resultcard.is-stale .cdash-dim .cdash-result")).toContainText("Built, not pushed");
     await capture(pane(page), "plan-5-last-job");
   });
 
