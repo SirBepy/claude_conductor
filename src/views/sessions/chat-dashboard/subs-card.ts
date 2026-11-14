@@ -69,6 +69,9 @@ export class SubsCard {
   private state: SubsState | null = null;
   /** The open peeks, oldest first. */
   private readonly peeks = new Map<string, SubPeek>();
+  /** Peeks shrinking away after a close; one is destroyed at once if its sub is opened again, so two
+   *  cards (and two composers on one draft) never share a sub id. */
+  private readonly closing = new Map<string, SubPeek>();
   private earlierOpen = false;
   private moreOpen = false;
   private zTop = 1;
@@ -207,6 +210,8 @@ export class SubsCard {
   private openPeek(id: string, anchor: HTMLElement): void {
     const host = this.host;
     if (!host) return;
+    this.closing.get(id)?.destroy();
+    this.closing.delete(id);
     const peek = new SubPeek(id, {
       mainId: () => this.deps.mainId(),
       cwd: () => this.deps.cwd(),
@@ -246,7 +251,14 @@ export class SubsCard {
   }
 
   private closePeek(id: string): void {
-    this.peeks.get(id)?.close();
+    const peek = this.peeks.get(id);
+    if (peek) {
+      this.closing.get(id)?.destroy();
+      this.closing.set(id, peek);
+      peek.close(() => {
+        if (this.closing.get(id) === peek) this.closing.delete(id);
+      });
+    }
     this.peeks.delete(id);
     this.rowSig = "";
     if (this.host) {
@@ -258,6 +270,8 @@ export class SubsCard {
   private closeAll(): void {
     for (const p of this.peeks.values()) p.destroy();
     this.peeks.clear();
+    for (const p of this.closing.values()) p.destroy();
+    this.closing.clear();
   }
 
   /** Drag by the peek's top line (not its buttons or the context chip). */

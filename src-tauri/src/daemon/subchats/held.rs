@@ -268,7 +268,9 @@ pub fn after_state(state: &DaemonState, target_id: &str) -> AfterState {
     let Some(target) = state.registry.get(target_id) else {
         return AfterState::Blocked("it no longer exists".to_string());
     };
-    if target.ended_at.is_some() || target.end_reason.is_some() {
+    // A sub that finished and was closed afterwards (the X, Close session) still
+    // finished: only one that ended without finishing is blocked.
+    if !target.subchat_finished && (target.ended_at.is_some() || target.end_reason.is_some()) {
         return AfterState::Blocked("it was ended before it finished".to_string());
     }
     // Its commits did not land and that is still being handled: a job that builds
@@ -1096,6 +1098,12 @@ mod tests {
         sub_of(&st, "as-main", "as-end", "end");
         st.registry.mark_ended("as-end", crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
         assert!(matches!(after_state(&st, "as-end"), AfterState::Blocked(_)));
+
+        // Finished first, closed afterwards: its work is done, so it is not blocked.
+        sub_of(&st, "as-main", "as-closed", "closed");
+        st.registry.set_subchat_finished("as-closed", true);
+        st.registry.mark_ended("as-closed", crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
+        assert_eq!(after_state(&st, "as-closed"), AfterState::Clean);
         assert!(matches!(after_state(&st, "as-gone"), AfterState::Blocked(_)));
     }
 

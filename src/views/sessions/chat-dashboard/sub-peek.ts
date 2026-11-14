@@ -59,7 +59,9 @@ export class SubPeek {
     const el = document.createElement("div");
     el.className = "sx-det is-opening";
     // The grow is a one-off: the class leaves with it so a later restyle cannot replay it.
-    el.addEventListener("animationend", () => el.classList.remove("is-opening"), { once: true });
+    el.addEventListener("animationend", (e) => {
+      if (e.target === el) el.classList.remove("is-opening");
+    });
     el.dataset.sub = id;
     el.innerHTML = `<div class="sx-det-top"><span class="sx-det-name"></span><span class="sx-det-time" title="Run time"><i class="ph ph-timer"></i><b></b></span><span class="sx-det-ctx"></span>`
       + `<button type="button" class="sx-det-x" data-act="peek-close" title="Close" aria-label="Close"><i class="ph ph-x"></i></button></div>`
@@ -82,11 +84,21 @@ export class SubPeek {
   }
 
   /** Shrinks back into the avatar it grew from, then goes. */
-  close(): void {
+  close(onGone: () => void = () => {}): void {
     if (this.closing) return;
     this.closing = true;
+    // With reduced motion there is nothing to shrink, so it goes at once.
+    const still = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) {
+      this.destroy();
+      onGone();
+      return;
+    }
     this.el.classList.add("is-closing");
-    this.closeTimer = setTimeout(() => this.destroy(), CLOSE_MS);
+    this.closeTimer = setTimeout(() => {
+      this.destroy();
+      onGone();
+    }, CLOSE_MS);
   }
 
   destroy(): void {

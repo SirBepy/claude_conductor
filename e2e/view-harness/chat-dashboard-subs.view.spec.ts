@@ -87,7 +87,10 @@ const det = (page: Page) => card(page).locator(".sx-det").last();
 const peekOf = (page: Page, id: string) => card(page).locator(`.sx-det[data-sub="${id}"]`);
 // The grow-in scales the card, so a box measured mid-animation is not its real one.
 // Waits out the grow-in so the card's box is its real one (the animation scales it from the avatar).
-const grown = (peek: ReturnType<typeof peekOf>) => expect(peek).toHaveCSS("transform", "none");
+const grown = async (peek: ReturnType<typeof peekOf>): Promise<void> => {
+  await expect(peek).not.toHaveClass(/is-opening/);
+  await expect(peek).toHaveCSS("transform", "none");
+};
 
 test.describe("chat dashboard / Subchats card", () => {
   test("lists asking, working, queued and stopped subs, and leaves a finished one to the finished tray", async ({ page }) => {
@@ -165,6 +168,11 @@ test.describe("chat dashboard / Subchats card", () => {
     await av(page, "sub-work").click();
     await expect(peekOf(page, "sub-work")).toHaveClass(/is-closing/);
     await expect(peekOf(page, "sub-work")).toHaveCount(0);
+    // Opened again while a close was still shrinking: one card, never two on one sub.
+    await av(page, "sub-work").click();
+    await av(page, "sub-work").click();
+    await av(page, "sub-work").click();
+    await expect(peekOf(page, "sub-work")).toHaveCount(1);
   });
 
   test("a click opens the details: run time, context chip, brief, newest image with +N, the latest preview", async ({ page }) => {
