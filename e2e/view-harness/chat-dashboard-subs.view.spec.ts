@@ -3,17 +3,17 @@
 // Reviewed 2026-11-12 (project main chat): the sidebar lists one Main chats row per project and the sessions mount re-reads each project's main-chat pointer; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (stale question cards): the answer card announces itself so the dashboard leaves the question open by the message box out of Waiting on you, Skip settles its transcript card in place, a reopen swaps to the daemon prompt only when it asks the same, and Skip marks naming an old daemon id fall back to time matching; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-10 (dash lane 3, code-check fixes): comment rewording, a transport case split and a deleted unused getter; nothing this spec asserts changed.
-// asserts: src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/subs-source.ts, src/views/sessions/chat-dashboard/sub-card-menu.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/close-chat.ts, src/views/sessions/chat-dashboard/subs-card.css, src/shared/chat/dashboard/subs-model.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/effort-battery.css, src/shared/chat/composer.ts, src/views/sessions/sessions.css
+// asserts: src/views/sessions/chat-dashboard/subs-card.ts, src/views/sessions/chat-dashboard/sub-peek.ts, src/views/sessions/chat-dashboard/subs-source.ts, src/views/sessions/chat-dashboard/sub-card-menu.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/close-chat.ts, src/views/sessions/chat-dashboard/subs-card.css, src/shared/chat/dashboard/subs-model.ts, src/views/sessions/chat-menu-items.ts, src/views/sessions/sidebar-entries.ts, src/views/sessions/effort-battery.css, src/shared/chat/composer.ts, src/views/sessions/sessions.css
 import { test, expect, type Page } from "@playwright/test";
 import { capture, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance, userMsg } from "./harness";
 
-// The dashboard's Subchats card on a real main chat with subs: avatars with a
-// state ring and an effort-tinted model battery in the right column under Plan
-// (a finished sub is not here: it waits in the finished tray, see
-// chat-dashboard-sub-reports.view.spec.ts), the details
-// of the one clicked (run time, context chip, brief, newest image with "+N", the
-// latest preview, a message box), the right-click menu, and a pinned sub's
-// sidebar shortcut.
+// The dashboard's Subchats card on a real main chat with subs, in the left column under Waiting
+// on you: a tinted row with its reason for every sub that needs Joe or is stuck, a strip of avatars
+// (state ring, effort-tinted model battery) for the working ones (a finished sub is not here: it
+// waits in the finished tray, see chat-dashboard-sub-reports.view.spec.ts), a floating card per
+// clicked sub that can be dragged and kept open beside others (run time, context chip, step, brief,
+// newest image with "+N", the latest preview, a message box), the right-click menu, and a pinned
+// sub's sidebar shortcut.
 
 const CWD = "C:/Projects/cv-site";
 const MIN = 60_000;
@@ -79,20 +79,26 @@ async function openMain(page: Page, sessions: unknown[], extra: Record<string, u
   await page.locator("#session-pane .cdash").waitFor();
 }
 
-const card = (page: Page) => page.locator("#session-pane .cdash-right .cdash-subs");
+const card = (page: Page) => page.locator("#session-pane .cdash-left .cdash-subs");
 const av = (page: Page, id: string) => card(page).locator(`.sx-av[data-sub="${id}"]`);
-const det = (page: Page) => card(page).locator(".sx-det");
+// The newest open peek: peeks append in the order they were opened.
+const det = (page: Page) => card(page).locator(".sx-det").last();
+const peekOf = (page: Page, id: string) => card(page).locator(`.sx-det[data-sub="${id}"]`);
 
 test.describe("chat dashboard / Subchats card", () => {
   test("lists asking, working, queued and stopped subs, and leaves a finished one to the finished tray", async ({ page }) => {
     await openMain(page, [MAIN, WORK, ASK, QUEUED, STOP, DONE]);
     await expect(card(page)).toBeVisible();
-    // Right column, under the Plan card.
-    const plan = page.locator("#session-pane .cdash-right .cdash-plan");
-    expect((await card(page).boundingBox())!.y).toBeGreaterThan((await plan.boundingBox())!.y);
-    // Asking first, then working, queued, then stopped.
-    await expect(card(page).locator(".sx-row .sx-av")).toHaveCount(4);
-    expect(await card(page).locator(".sx-row .sx-av").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.sub))).toEqual(["sub-ask", "sub-work", "sub-queued", "sub-stop"]);
+    // Left column, under Waiting on you, never in the right column.
+    await expect(page.locator("#session-pane .cdash-right .cdash-subs")).toHaveCount(0);
+    // Stuck subs are rows, asking first; the working one is an avatar in the strip.
+    await expect(card(page).locator(".sx-rows .sx-item")).toHaveCount(3);
+    expect(await card(page).locator(".sx-rows .sx-item").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.sub))).toEqual(["sub-ask", "sub-queued", "sub-stop"]);
+    expect(await card(page).locator(".sx-row .sx-av").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.sub))).toEqual(["sub-work"]);
+    await expect(card(page).locator(".sx-item[data-sub='sub-ask'] .sx-item-why")).toHaveText("Needs your answer");
+    await expect(card(page).locator(".sx-item[data-sub='sub-queued'] .sx-item-why")).toContainText("Waits for Footer");
+    await expect(card(page).locator(".sx-item[data-sub='sub-stop'] .sx-item-why")).toHaveText("Stopped without finishing");
+    await expect(card(page).locator(".sx-counts")).toHaveText("1 working · 1 asking · 2 stuck or waiting");
     await expect(av(page, "sub-done")).toHaveCount(0);
     await expect(card(page).locator(".sx-earlier")).toHaveCount(0);
     await expect(page.locator(`#session-pane .cdash-finished .ft-row[data-sub="sub-done"]`)).toBeVisible();
@@ -143,7 +149,9 @@ test.describe("chat dashboard / Subchats card", () => {
     await av(page, "sub-stop").click();
     await expect(det(page).locator(".sx-det-state")).toHaveText("stopped without finishing");
     await av(page, "sub-stop").click();
-    await expect(det(page)).toBeHidden();
+    await expect(peekOf(page, "sub-stop")).toHaveCount(0);
+    // The first sub's card stayed open the whole time: peeks do not replace each other.
+    await expect(peekOf(page, "sub-work")).toBeVisible();
   });
 
   test("a sub with many images opens its gallery one page at a time, never all at once", async ({ page }) => {
@@ -344,6 +352,48 @@ test.describe("chat dashboard / Subchats card", () => {
     await av(page, "sub-work").click({ button: "right" });
     await page.locator(".sx-menu .smore-item", { hasText: /^Open$/ }).click();
     await expect(page.locator("#session-pane .session-header .sub-back-btn")).toBeVisible();
+  });
+
+  test("several peeks stay open at once, a click on the row opens one too, and the x closes only its own", async ({ page }) => {
+    await openMain(page, [MAIN, WORK, ASK, STOP]);
+    await card(page).locator(".sx-item[data-sub='sub-ask'] .sx-item-name").click();
+    await av(page, "sub-work").click();
+    await expect(peekOf(page, "sub-ask")).toBeVisible();
+    await expect(peekOf(page, "sub-work")).toBeVisible();
+    // Floating over the neighbouring column, not growing the card.
+    const col = (await page.locator("#session-pane .cdash-left").boundingBox())!;
+    expect((await peekOf(page, "sub-work").boundingBox())!.x).toBeGreaterThanOrEqual(col.x + col.width - 1);
+    await expect(card(page).locator(".sx-item[data-sub='sub-ask']")).toHaveClass(/on/);
+    await peekOf(page, "sub-ask").locator("[data-act='peek-close']").click();
+    await expect(peekOf(page, "sub-ask")).toHaveCount(0);
+    await expect(peekOf(page, "sub-work")).toBeVisible();
+    await expect(card(page).locator(".sx-item[data-sub='sub-ask']")).not.toHaveClass(/on/);
+  });
+
+  test("a peek drags by its top line and keeps what was typed in its message box", async ({ page }) => {
+    await openMain(page, [MAIN, WORK]);
+    await av(page, "sub-work").click();
+    const peek = peekOf(page, "sub-work");
+    await peek.locator(".sx-msg .composer-textarea").fill("half a thought");
+    const before = (await peek.boundingBox())!;
+    const handle = (await peek.locator(".sx-det-name").boundingBox())!;
+    await page.mouse.move(handle.x + 10, handle.y + 5);
+    await page.mouse.down();
+    await page.mouse.move(handle.x + 70, handle.y + 85, { steps: 4 });
+    await page.mouse.up();
+    const after = (await peek.boundingBox())!;
+    expect(Math.round(after.x - before.x)).toBe(60);
+    expect(Math.round(after.y - before.y)).toBe(80);
+    await expect(peek.locator(".sx-msg .composer-textarea")).toHaveValue("half a thought");
+  });
+
+  test("past five stuck rows the card shows five and a +N more button", async ({ page }) => {
+    const many = Array.from({ length: 7 }, (_, i) => sub(`sub-s${i}`, `Stopped ${i}`, 120 + i, { progress: { plan: null, state_since: ago(10 * MIN) } }));
+    await openMain(page, [MAIN, ...many]);
+    await expect(card(page).locator(".sx-rows .sx-item")).toHaveCount(5);
+    await card(page).locator(".sx-more").click();
+    await expect(card(page).locator(".sx-rows .sx-item")).toHaveCount(7);
+    await expect(card(page).locator(".sx-more")).toHaveText("Show fewer");
   });
 
   test("a chat with no subs draws no Subchats card", async ({ page }) => {

@@ -97,19 +97,178 @@
 }
 
 /* ---- Details of the open sub ---- */
+/* A floating card: position: fixed puts it over the neighbouring column instead of growing this
+   one, and subs-card.ts sets left, top and z-index (drag and raise). */
 .sx-det {
+  position: fixed;
+  z-index: 10;
+  width: 330px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 7px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--color-border);
+  padding: 10px 12px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.35);
+  animation: sx-peek-in 0.25s ease;
+}
+.sx-det.is-dragging {
+  user-select: none;
+  animation: none;
+}
+@keyframes sx-peek-in {
+  from { opacity: 0; transform: translateY(-4px); }
 }
 .sx-det-top {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
+  cursor: grab;
+}
+.sx-det.is-dragging .sx-det-top {
+  cursor: grabbing;
+}
+.sx-det-x {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.sx-det-x:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+}
+.sx-det-step[hidden],
+.sx-det-last[hidden] {
+  display: none;
+}
+.sx-det-step {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.sx-det-bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+.sx-det-bar b {
+  display: block;
+  height: 100%;
+  background: var(--color-warning);
+}
+.sx-det-last {
+  padding-left: 8px;
+  border-left: 2px solid var(--color-border);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* ---- Stuck rows, the working strip and the counts ---- */
+.sx-host {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sx-rows {
+  margin-bottom: 0;
+}
+.sx-counts {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.sx-counts:empty,
+.sx-rows:empty {
+  display: none;
+}
+.sx-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.sx-row[hidden] {
+  display: none;
+}
+.sx-strip-lab {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-bottom: -4px;
+}
+.sx-item {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-text-muted) 12%, var(--color-surface));
+  cursor: pointer;
+}
+.sx-item[data-kind="asking"] {
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
+}
+.sx-item:hover,
+.sx-item.on {
+  outline: 1px solid color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+}
+.sx-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sx-item-name,
+.sx-item-why {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sx-item-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.sx-item-why {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.sx-item[data-kind="asking"] .sx-item-why {
+  color: var(--color-danger);
+}
+.sx-item-meta {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.sx-more {
+  align-self: flex-start;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sx-more:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
 }
 .sx-det-name {
   flex: 1;

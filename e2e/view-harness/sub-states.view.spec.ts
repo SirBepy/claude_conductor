@@ -66,9 +66,12 @@ async function openMain(page: Page, sessions: unknown[]): Promise<void> {
   await mountView(page, { view: "sessions", chatView: "dashboard", invoke: invokeFor(sessions) });
   await page.locator(`#sessions-list li[data-session-id="main"]`).click();
   await page.locator("#session-pane .cdash").waitFor();
+  // Six of these subs are stuck and the card shows five rows before "+N more": open them all.
+  const more = page.locator("#session-pane .cdash-left .cdash-subs .sx-more");
+  if (await more.count()) await more.click();
 }
 
-const card = (page: Page) => page.locator("#session-pane .cdash-right .cdash-subs");
+const card = (page: Page) => page.locator("#session-pane .cdash-left .cdash-subs");
 const av = (page: Page, id: string) => card(page).locator(`.sx-av[data-sub="${id}"]`);
 const hover = (page: Page) => page.locator(".sx-hover-card");
 const ALL = [MAIN, WORK, ASK, QUEUED, PAUSED, GAMING, LIMITED, STOPPED, DONE];
