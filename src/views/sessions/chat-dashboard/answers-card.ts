@@ -18,6 +18,7 @@
 import { escapeHtml } from "../../../shared/escape-html";
 import { localTime } from "../../../shared/formatters";
 import { renderMarkdown } from "../../../shared/chat/chat-transforms";
+import type { ChatDetail } from "../../../shared/chat/chat-details";
 import { composerFieldHtml, wireComposerField, type ComposerFieldWiring } from "../../../shared/chat/composer-field";
 import { openPalette, closePalette } from "../../command-palette/palette-ui";
 import type { PaletteCommand } from "../../command-palette/types";
@@ -90,15 +91,20 @@ function cardInner(item: AnswerItem): string {
 }
 
 // The shell renderMessageCard draws, so the tint, border and padding are the real ones.
-const shell = (inner: string, cls = ""): string =>
-  `<div class="msg assistant mc-root ax-shell ${cls}" data-card-kind="answer"><div class="mc-card mc-k-answer"><div class="mc-fold mc-full"><div class="mc-clip"><div class="mc-pad">${inner}</div></div></div></div></div>`;
+// `data-details` rides on the root because drill-links.ts resolves a `#d:id`
+// chip from the bubble it sits in; without it every detail link stays plain text.
+const detailsAttr = (details: readonly ChatDetail[] | undefined): string =>
+  details?.length ? ` data-details="${esc(JSON.stringify(details))}"` : "";
+
+const shell = (inner: string, cls = "", details?: readonly ChatDetail[]): string =>
+  `<div class="msg assistant mc-root ax-shell ${cls}" data-card-kind="answer"${detailsAttr(details)}><div class="mc-card mc-k-answer"><div class="mc-fold mc-full"><div class="mc-clip"><div class="mc-pad">${inner}</div></div></div></div></div>`;
 
 const btn = (act: string, icon: string, label: string, tip: string, cls = "", extra = ""): string =>
   `<button type="button" class="ax-btn ${cls}" data-ax="${act}" title="${esc(tip)}"><i class="ph ${icon}"></i>${extra}<span class="ax-btn-t">${label}</span></button>`;
 
 /** Ask replies carry no verdict; a reply that leads with one shows it bold. */
-const bubble = (verdict: string, text: string): string =>
-  `<div class="msg assistant ax-t-bub">${renderMarkdown(verdict ? `**${verdict}**\n\n${text}` : text, false)}</div>`;
+const bubble = (verdict: string, text: string, details?: readonly ChatDetail[]): string =>
+  `<div class="msg assistant ax-t-bub"${detailsAttr(details)}>${renderMarkdown(verdict ? `**${verdict}**\n\n${text}` : text, false)}</div>`;
 
 export class AnswersCard {
   private host: HTMLElement | null = null;
@@ -533,7 +539,7 @@ export class AnswersCard {
       // Every thread opens on the question and the answer it got; they are not a back-and-forth.
       const raw = item.raw ? `<span class="ax-q0-raw">You wrote: ${esc(item.raw)}</span>` : "";
       if (item.question) parts.push(`<div class="msg user ax-q ax-q0">${renderMarkdown(item.question, true)}${raw}</div>`);
-      parts.push(bubble(item.verdict, item.text));
+      parts.push(bubble(item.verdict, item.text, item.message.details));
       for (const m of threadFollowUps(item)) {
         parts.push(m.role === "user"
           ? `<div class="msg user ax-q">${renderMarkdown(m.text, true)}</div>`
@@ -625,7 +631,7 @@ export class AnswersCard {
     this.destroyWire();
     const item = this.item(this.cur);
     const html = item
-      ? shell(`${this.headerRow()}<div class="ax-in">${item.pending ? this.pendingFace(item) : this.answerFace(item)}</div>`)
+      ? shell(`${this.headerRow()}<div class="ax-in">${item.pending ? this.pendingFace(item) : this.answerFace(item)}</div>`, "", item.message.details)
       : shell(`<div class="ax-in">${this.items.length === 0 ? this.emptyFace() : this.caughtFace()}</div>`, "ax-caughtmode ax-frame-border ax-cu-both");
     // The HTML is compared without its animation class, so a flush that lands
     // mid-animation finds nothing changed and lets the motion finish.
@@ -730,7 +736,7 @@ export class AnswersCard {
     const rm = face.querySelector(".ax-readmore");
     if (rm) rm.innerHTML = this.readMoreLabel();
     const item = this.item(this.cur);
-    if (item) this.lastHtml = shell(`${this.headerRow()}<div class="ax-in">${this.answerFace(item)}</div>`);
+    if (item) this.lastHtml = shell(`${this.headerRow()}<div class="ax-in">${this.answerFace(item)}</div>`, "", item.message.details);
     const sh = host.querySelector<HTMLElement>(".ax-shell");
     sh?.classList.add("ax-animating");
     setTimeout(() => sh?.classList.remove("ax-animating"), 450);
