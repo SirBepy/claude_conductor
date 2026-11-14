@@ -440,7 +440,7 @@ mod tests {
             let kind = kind.as_str().unwrap();
             assert!(text.contains(&format!("- {kind}:")), "description has no line for {kind}");
         }
-        for phrase in ["NEVER narrate progress", "write_plan", "thinking bar", "why is this slow", "not shown to Joe", "your_move", "Report ready", "only says work is still running", "question card"] {
+        for phrase in ["NEVER narrate progress", "write_plan", "thinking bar", "why is this slow", "not shown to Joe", "your_move", "Report ready", "only says work is still running", "question card", "REPORT BREVITY", "never \"run /release\""] {
             assert!(text.contains(phrase), "description lost: {phrase}");
         }
     }

@@ -118,9 +118,9 @@ for (const vp of [{ name: "desktop", width: 900 }, { name: "phone", width: 390 }
 
       const report = roots.nth(1);
       await expect(report.locator(".mc-full .mc-verdict")).toHaveText("Built, not pushed");
-      // Split colour: what landed in green, what did not in amber.
-      await expect(report.locator(".mc-full .mc-verdict .mc-t-good")).toHaveText("Built,");
-      await expect(report.locator(".mc-full .mc-verdict .mc-t-warn")).toHaveText("not pushed");
+      // One colour: open rows never turn the verdict amber.
+      await expect(report.locator(".mc-full .mc-verdict .mc-t-good")).toHaveText("Built, not pushed");
+      await expect(report.locator(".mc-full .mc-verdict .mc-t-warn")).toHaveCount(0);
       const yours = report.locator(".mc-full .mc-sec--yours");
       await expect(yours).toBeVisible();
       await expect(yours).toContainText("Ask Lenar");

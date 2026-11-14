@@ -51,34 +51,25 @@ const KIND_STYLE: Partial<Record<MessageKind, KindStyle>> = {
 const FYI: ReadonlySet<MessageKind> = new Set(["call", "handoff", "artifact", "discovery"]);
 
 /** The colour a verdict takes. Some kinds fix it (a blocker is never green);
- *  the rest follow the declared tone. A report is decided by its rows, see
- *  `reportVerdictHtml`. */
+ *  the rest follow the declared tone. A report is green unless it says "bad":
+ *  its open rows already show as chips, so the verdict never changes colour
+ *  with them (the same finished turn was yellow or green depending on rows). */
 function toneOf(card: MessageCard): Tone {
   if (card.kind === "blocker") return "bad";
   if (card.kind === "do_this" || card.kind === "correction") return "warn";
+  if (card.kind === "report") return card.tone === "bad" ? "bad" : "good";
   return card.tone === "good" ? "good" : card.tone === "bad" ? "bad" : "neutral";
 }
 
 const span = (tone: Tone, text: string) => `<span class="mc-t-${tone}">${escapeHtml(text)}</span>`;
 
-/** A report with anything still open reads in two colours, what landed and then
- *  what did not; one with nothing open is all green. */
-function reportVerdictHtml(card: MessageCard, verdict: string): string {
-  if (openCounts(card).total === 0) return span("good", verdict);
-  const at = verdict.indexOf(", ");
-  if (at < 0) return span("warn", verdict);
-  return `${span("good", verdict.slice(0, at + 1))} ${span("warn", verdict.slice(at + 2))}`;
-}
-
 function verdictHtml(card: MessageCard, verdict: string, extras?: CardExtras): string {
-  if (extras?.tone) return span(extras.tone, verdict);
-  return card.kind === "report" ? reportVerdictHtml(card, verdict) : span(toneOf(card), verdict);
+  return span(extras?.tone ?? toneOf(card), verdict);
 }
 
 /** The mini card's verdict is one colour: it is a label for a row, not a headline. */
 function miniVerdictHtml(card: MessageCard, verdict: string, extras?: CardExtras): string {
-  const tone: Tone = extras?.tone ?? (card.kind === "report" ? (openCounts(card).total === 0 ? "good" : "warn") : toneOf(card));
-  return span(tone, verdict);
+  return span(extras?.tone ?? toneOf(card), verdict);
 }
 
 /** A headline reduced to plain text for the mini row, which truncates it on one

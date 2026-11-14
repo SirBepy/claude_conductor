@@ -177,21 +177,20 @@ describe("the report card", () => {
     expect(root.querySelector(".mc-full .mc-sec--yours")).toBeNull();
   });
 
-  it("colours the verdict by its rows: split when something is open, green when nothing is", () => {
-    const split = mount(msg(REPORT_INPUT)).querySelector(".mc-full .mc-verdict");
-    expect(split.querySelector(".mc-t-good").textContent).toBe("Built,");
-    expect(split.querySelector(".mc-t-warn").textContent).toBe("not pushed");
+  it("colours a report verdict green in one piece whatever rows are open, red only on tone bad", () => {
+    const open = mount(msg(REPORT_INPUT)).querySelector(".mc-full .mc-verdict");
+    expect(open.querySelectorAll(".mc-t-good").length).toBe(1);
+    expect(open.querySelector(".mc-t-good").textContent).toBe("Built, not pushed");
+    expect(open.querySelector(".mc-t-warn")).toBeNull();
 
     document.body.innerHTML = "";
     const noComma = mount(msg({ kind: "report", verdict: "Built", text: "x", waiting_on: ["a gate"] })).querySelector(".mc-full .mc-verdict");
-    expect(noComma.querySelector(".mc-t-warn").textContent).toBe("Built");
-    expect(noComma.querySelector(".mc-t-good")).toBeNull();
+    expect(noComma.querySelector(".mc-t-good").textContent).toBe("Built");
+    expect(noComma.querySelector(".mc-t-warn")).toBeNull();
 
     document.body.innerHTML = "";
-    const clean = mount(msg({ kind: "report", verdict: "Fixed, nothing for you", text: "x", done: ["a"] })).querySelector(".mc-full .mc-verdict");
-    expect(clean.querySelectorAll(".mc-t-good").length).toBe(1);
-    expect(clean.querySelector(".mc-t-warn")).toBeNull();
-    expect(clean.textContent).toBe("Fixed, nothing for you");
+    const bad = mount(msg({ kind: "report", verdict: "Failed", text: "x", tone: "bad", not_done: ["a"] })).querySelector(".mc-full .mc-verdict");
+    expect(bad.querySelector(".mc-t-bad").textContent).toBe("Failed");
   });
 
   it("renders each details entry as the existing drill chip", () => {
@@ -299,11 +298,11 @@ describe("ack", () => {
 });
 
 describe("the mini card", () => {
-  it("keeps the verdict coloured, the headline, and the open rows as amber text", () => {
+  it("keeps the verdict green, the headline, and the open rows as amber text", () => {
     const root = mount(msg(REPORT_INPUT));
     const row = root.querySelector(".mc-mini .mc-mini-row");
     expect(row.querySelector(".mc-mini-lead").textContent).toBe("Built, not pushed");
-    expect(row.querySelector(".mc-mini-lead .mc-t-warn")).not.toBeNull();
+    expect(row.querySelector(".mc-mini-lead .mc-t-good")).not.toBeNull();
     expect(row.querySelector(".mc-mini-head").textContent).toBe("sc-56605 committed as c083bd89");
     expect(row.querySelector(".mc-mini-open").textContent).toBe("your move, 1 not done, 1 waiting");
   });
