@@ -1,7 +1,7 @@
 import { html, render, type TemplateResult } from "lit-html";
 import { api } from "../../shared/api";
 import type { InstalledSkill, SkillDetail, SkillUsageEvent } from "../../types/ipc.generated";
-import { showView } from "../../shared/navigation";
+import { leaveSkillDetail } from "../../shared/open-skill-detail";
 import { tokensAllIn } from "../../shared/tokens";
 import { buildPieSvg } from "../../shared/pie";
 import { readScopes, saveScope, scopeEditor, type ScopeMap, type ScopeProject, type SkillScope } from "./scope-editor";
@@ -45,7 +45,7 @@ export async function renderSkillDetailView(root: HTMLElement): Promise<() => vo
       html`
         <div class="view view-skill-detail">
           <div class="view-header">
-            <button class="icon-btn" title="Back" @click=${() => showView("skills")}>
+            <button class="icon-btn" title="Back" @click=${leaveSkillDetail}>
               <i class="ph ph-arrow-left"></i>
             </button>
             <h2>Skill</h2>
@@ -144,7 +144,7 @@ function buildView(d: SkillDetail, scope: TemplateResult): TemplateResult {
   return html`
     <div class="view view-skill-detail">
       <div class="view-header">
-        <button class="icon-btn" title="Back" @click=${() => showView("skills")}>
+        <button class="icon-btn" title="Back" @click=${leaveSkillDetail}>
           <i class="ph ph-arrow-left"></i>
         </button>
         <h2>${d.skill}</h2>
