@@ -154,7 +154,7 @@ pub async fn raise_card(state: &Arc<DaemonState>, card: RaisedCard) -> Result<Ca
 /// "input needed" state, no sound and no push. It is still a card in the chat's
 /// window, shown when he opens the chat and behind every other card there (the
 /// client sorts it last). For a finding that matters only if he looks, such as a
-/// checkup of the decisions log. The prompt carries `quiet: true`, which also keeps
+/// stall card for a sub the restart lost. The prompt carries `quiet: true`, which also keeps
 /// it out of [`DaemonState::session_has_pending_question`], the test the rest of
 /// the daemon uses for "this chat is waiting on Joe".
 pub async fn raise_quiet_card(state: &Arc<DaemonState>, card: RaisedCard) -> Result<CardHandle, String> {
@@ -407,7 +407,7 @@ mod tests {
         assert!(by_sub(None, &listed).get("sub_name").is_none(), "a card about no sub names none");
     }
 
-    /// First real run: a checkup raised a red dot and "input needed" on a chat with
+    /// First real run: a quiet card raised a red dot and "input needed" on a chat with
     /// nothing wrong, and sat in front of a real card. A quiet card is listed and
     /// answerable like any other, but nothing waits on it.
     #[tokio::test]

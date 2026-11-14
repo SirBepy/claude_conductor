@@ -9,7 +9,7 @@
 //! Each entry is the sub's name, a 1-2 line summary from its finish record, and
 //! the answers Joe gave that sub. The answers are read from the decisions log,
 //! where only code writes them word for word, so a daemon-raised card (stuck,
-//! checkup, close approval) and a Skip are never in it: neither is recorded
+//! close approval) and a Skip are never in it: neither is recorded
 //! there.
 //!
 //! Persisted at `<data_dir>/subchats/<parent_id>.pending.jsonl`, because a
@@ -571,7 +571,7 @@ mod tests {
         let (main, sub) = finished(dir.path(), &st, "back-ans", "Footer", "Built", "Footer done.", 1);
         card(dir.path(), &main, "Footer", "Which layout?", "Two columns");
         card(dir.path(), &main, "Header", "Which colour?", "Teal");
-        // A daemon card (stuck, checkup) and a Skip are never recorded in the
+        // A daemon card (stuck) and a Skip are never recorded in the
         // log, so they cannot reach the line; a Finish entry is not a card.
         let items = vec![decisions::NewEntry { sub: None, kind: Kind::Decided, who: "Footer".into(), question: None, body: "Use CSS grid".into() }];
         decisions::append_in(dir.path(), &main, "2026-11-05", items).unwrap();

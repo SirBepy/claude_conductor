@@ -509,8 +509,7 @@ struct CardCtx {
 
 /// The question card `request_id` names, if its answer belongs in a log. Not a
 /// permission prompt (`permission-requested`), not a secret (`secret-requested`)
-/// and not a daemon-raised card (operational: stuck sub, close approval,
-/// checkup), so only a model's `ask_user_question` from a sub or a mode-on main
+/// and not a daemon-raised card (operational: stuck sub, close approval), so only a model's `ask_user_question` from a sub or a mode-on main
 /// chat qualifies.
 async fn card_ctx(state: &Arc<DaemonState>, request_id: &str) -> Option<CardCtx> {
     if state.prompt_event(request_id).await.as_deref() != Some("question-requested") {

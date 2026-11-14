@@ -123,7 +123,7 @@ function askingIds(main: Instance, subs: readonly Instance[]): Set<string> {
   const out = new Set<string>();
   for (const { askerId, prompt } of parkedAskersFor(main.session_id)) {
     if (prompt.kind === "question" && prompt.answered) continue;
-    // A quiet card (a decisions checkup) is not a question for Joe: no red dot.
+    // A quiet card (the restart-lost stall card) is not a question for Joe: no red dot.
     if (isQuietPrompt(prompt)) continue;
     out.add(askerId);
   }

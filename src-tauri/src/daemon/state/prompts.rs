@@ -51,8 +51,8 @@ impl DaemonState {
     /// must make before clearing, instead of assuming the one that just
     /// resolved was the only one open.
     ///
-    /// A quiet daemon card (`subchats::cards::raise_quiet_card`, a decisions
-    /// checkup) never counts: nothing is waiting on Joe for it, so it must not hold
+    /// A quiet daemon card (`subchats::cards::raise_quiet_card`, the
+    /// restart-lost stall card) never counts: nothing is waiting on Joe for it, so it must not hold
     /// `awaiting` at "question" nor mark an answered question's sibling.
     pub async fn session_has_pending_question(&self, session_id: &str) -> bool {
         self.pending_prompts.lock().await.values().any(|v| {

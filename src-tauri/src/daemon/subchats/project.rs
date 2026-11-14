@@ -58,8 +58,8 @@ mod tests {
         assert_eq!(check_mode(&st, Path::new("C:/nowhere-at-all")), SubchatCheck::FactsAndReviewer);
     }
 
-    /// The retired "Subs changing files" value stays in old settings files and must
-    /// still parse: every writer gets a worktree whatever it says.
+    /// A stored `check_mode` is read back for a path inside the project. The row
+    /// also carries the retired `subchat_writers` value, which must still parse.
     #[test]
     fn a_stored_choice_is_read_back_for_a_path_inside_the_project() {
         let dir = tempfile::tempdir().unwrap();
