@@ -1,3 +1,4 @@
+// Reviewed 2026-11-14 (pc-1743, the chat composer's attachment row floats over the content instead of taking a row of the composer): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-01: the field's vertical padding now derives from --control-h (tokens.css) and horizontal padding is 12px; the phone value still centres one line on the 44px chip and this spec passes.
 // Reviewed 2026-10-30: composer.css gained the `.composer-scope-warning` line, hidden unless the draft names a skill that is off in the project - additive, this spec's geometry is unchanged and it passes.
 import { expect, test } from "@playwright/test";

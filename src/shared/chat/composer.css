@@ -20,6 +20,28 @@
   height: 80px;
 }
 
+/* In the chat pane the thumbnails float over the bottom of the content instead
+ * of taking a row of the composer: the row is out of flow, so the pane keeps
+ * its height and what sits beside the thumbnails stays visible. The row itself
+ * lets clicks through; only a thumbnail takes them. A wrapped second row grows
+ * upward from the composer. */
+.composer-shell .session-composer > .composer-attachments {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  padding: 0 6px 6px;
+  pointer-events: none;
+}
+.composer-shell .session-composer > .composer-attachments .attachment {
+  pointer-events: auto;
+}
+/* The out-of-flow row no longer shrinks the pane, so the content scrolls clear
+ * of it with padding of its own: one row (80px) plus its gap and a little air. */
+.session-pane:has(.composer-shell .session-composer > .composer-attachments:not(:empty)) :is(.cdash-body, .session-messages) {
+  padding-bottom: 104px;
+}
+
 .composer-attachments img {
   width: 100%;
   height: 100%;
