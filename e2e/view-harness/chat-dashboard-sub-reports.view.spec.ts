@@ -1,12 +1,14 @@
-// asserts: src/shared/chat/dashboard/dashboard-model.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/shared/chat/subchat-cards.ts
+// asserts: src/shared/chat/dashboard/dashboard-model.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/finished-tray.ts, src/views/sessions/chat-dashboard/finished-tray.css, src/shared/chat/subchat-cards.ts
 import { test, expect, type Page } from "@playwright/test";
-import { capture, fireEvent, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
+import { capture, fireEvent, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
-// A main chat's dashboard draws its subs' reports in From subs (Joe, 2026-11-13:
-// "i dont see subchats answers in the main chat window"). The main chat is told
-// never to relay a sub's card, and before this zone a job's finish showed on the
-// dashboard only as a verdict behind a click on the sub's avatar. Each report is
-// the same card Messages view draws: the sub's name, its verdict and its text.
+// A main chat's finished subs wait in a tray under the Result card (Joe, 2026-11-14:
+// "when a subchat is fully done and prolly not needed anymore, it shows me in
+// result that chat"): the avatar with its name on hover, one line on what it did,
+// the context it ended with, and a Dismiss that closes it. A click opens the same
+// finish card Messages view draws. A finish that answers Joe's question is in
+// Answers too. The earlier "From subs" card is gone (2026-11-13: "i dont see
+// subchats answers in the main chat window" is what it answered; the tray does now).
 
 const CWD = "C:/Projects/conductor";
 const MIN = 60_000;
@@ -52,44 +54,64 @@ async function openMain(page: Page, chatView: "dashboard" | "messages"): Promise
       list_session_images: { images: [] },
       get_sub_brief: { brief: null },
       list_previews: [],
+      context_status: { model: "claude-sonnet-4-6", window: 1_000_000, occupancy: 340_000, remaining: 660_000, pct_used: 34, pct_left: 66 },
+      clear_session: false,
     },
   });
   await page.locator(`#sessions-list li[data-session-id="main"]`).click();
 }
 
-const reports = (page: Page) => page.locator("#session-pane .cdash .cdash-reports");
+const tray = (page: Page) => page.locator("#session-pane .cdash .cdash-finished");
+const row = (page: Page, id: string) => tray(page).locator(`.ft-row[data-sub="${id}"]`);
 
-test.describe("chat dashboard / From subs", () => {
-  test("draws each job's finish with the sub's name and text, newest first, and leaves the answer to Answers", async ({ page }) => {
+test.describe("chat dashboard / finished tray", () => {
+  test("lists each finished sub newest first with its verdict as the one line and the context it ended with", async ({ page }) => {
     await openMain(page, "dashboard");
-    await expect(reports(page)).toBeVisible();
-    const cards = reports(page).locator('.mc-root[data-sub-card="1"]');
-    await expect(cards).toHaveCount(2);
-    await expect(cards.nth(0).locator(".mc-full .mc-sub-name")).toHaveText("dup-subchat-toggle");
-    await expect(cards.nth(0).locator(".mc-full .mc-verdict")).toHaveText("Not two toggles");
-    await expect(cards.nth(0)).toContainText("a CSS tie painted the hidden one");
-    // The report older than every loaded transcript row still shows.
-    await expect(cards.nth(1).locator(".mc-full .mc-sub-name")).toHaveText("hide-chips-on-input");
-    await expect(cards.nth(1)).toContainText("The draft screen's chip row hides");
-    // A finish carrying Joe's question is the answer: it is in Answers, not here.
-    await expect(reports(page)).not.toContainText("The history read is not it");
+    await expect(tray(page)).toBeVisible();
+    expect(await tray(page).locator(".ft-row").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.sub))).toEqual(["sub-q", "sub-a", "sub-b"]);
+    await expect(row(page, "sub-a").locator(".ft-line")).toHaveText("Not two toggles");
+    // The sub whose card is older than every loaded transcript row still has its line.
+    await expect(row(page, "sub-b").locator(".ft-line")).toHaveText("Chips hide while typing");
+    await expect(row(page, "sub-a").locator(".sb-context")).toHaveText("34%");
+    // A finish carrying Joe's question is the answer: Answers has it too.
     await expect(page.locator("#session-pane .cdash .cdash-answers")).toContainText("The history read is not it");
-    await capture(page.locator("#session-pane"), "chat-dashboard-sub-reports");
+    // The earlier From subs card is gone.
+    await expect(page.locator("#session-pane .cdash .cdash-reports")).toHaveCount(0);
+    await capture(page.locator("#session-pane"), "chat-dashboard-finished-tray");
   });
 
-  test("a card that lands live shows at once, and past three the rest fold under N earlier", async ({ page }) => {
+  test("sits in the right column under the Plan and Result cards", async ({ page }) => {
     await openMain(page, "dashboard");
-    await expect(reports(page).locator('.mc-root[data-sub-card="1"]')).toHaveCount(2);
-    for (const [i, id] of ["f-live1", "f-live2"].entries()) {
-      await fireEvent(page, "subchat-card", [{ session_id: "main", card: finish(id, `sub-${id}`, `live-${i}`, Date.now() + i, `Live verdict ${i}`, `Live text ${i}`) }]);
-    }
-    await expect(reports(page)).toContainText("Live verdict 1");
-    await expect(reports(page).locator('.mc-root[data-sub-card="1"]')).toHaveCount(3);
-    const fold = reports(page).locator("[data-act='reports-earlier']");
-    await expect(fold).toContainText("1 earlier");
-    await expect(reports(page)).not.toContainText("The draft screen's chip row hides");
-    await fold.click();
-    await expect(reports(page)).toContainText("The draft screen's chip row hides");
+    const result = page.locator("#session-pane .cdash-right .cdash-resultcard");
+    await expect(result).toContainText("3 jobs handed to subs");
+    expect((await tray(page).boundingBox())!.y).toBeGreaterThan((await result.boundingBox())!.y);
+    expect((await result.boundingBox())!.y).toBeGreaterThan((await page.locator("#session-pane .cdash-right .cdash-plan").boundingBox())!.y);
+  });
+
+  test("a click opens the finish card with the sub's name and text, and a second click closes it", async ({ page }) => {
+    await openMain(page, "dashboard");
+    await row(page, "sub-a").locator(".ft-main").click();
+    const card = tray(page).locator('.ft-card .mc-root[data-sub-card="1"]');
+    await expect(card.locator(".mc-full .mc-sub-name")).toHaveText("dup-subchat-toggle");
+    await expect(card).toContainText("a CSS tie painted the hidden one");
+    await row(page, "sub-a").locator(".ft-main").click();
+    await expect(card).toHaveCount(0);
+  });
+
+  test("a card that lands live puts its sub's line in the tray", async ({ page }) => {
+    await openMain(page, "dashboard");
+    await expect(row(page, "sub-a").locator(".ft-line")).toHaveText("Not two toggles");
+    await fireEvent(page, "subchat-card", [{ session_id: "main", card: finish("f-live", "sub-a", "dup-subchat-toggle", Date.now() + 1000, "Second round", "More.") }]);
+    await expect(row(page, "sub-a").locator(".ft-line")).toHaveText("Second round");
+  });
+
+  test("Dismiss closes that sub through the app's own close and sends it no message", async ({ page }) => {
+    await openMain(page, "dashboard");
+    await row(page, "sub-a").hover();
+    await row(page, "sub-a").locator(".ft-x").click();
+    await expect.poll(async () => (await invokeCalls(page)).filter((c) => c.cmd === "clear_session").length).toBe(1);
+    expect((await invokeCalls(page)).find((c) => c.cmd === "clear_session")!.args).toMatchObject({ sessionId: "sub-a" });
+    expect((await invokeCalls(page)).filter((c) => c.cmd === "send_message")).toEqual([]);
   });
 
   test("Messages view draws the same finish cards in the transcript", async ({ page }) => {

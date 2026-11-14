@@ -12,6 +12,7 @@ import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../../../shared/chat/ch
 import type { RenderedMessage } from "../../../shared/chat/chat-classifiers";
 import { rowMs, waitingKey, type StripState, type WaitingItem, type ZoneId, type ZoneState } from "../../../shared/chat/dashboard/dashboard-model";
 import { initialPlanUi, renderPlan, type PlanUi } from "./plan-card";
+import { renderFinished } from "./finished-tray";
 import { plainUserText } from "../../../shared/chat/dashboard/answers-model";
 import { renderVisuals } from "../../../shared/chat/message-visuals-render";
 import { basename } from "../../../shared/path-utils";
@@ -43,12 +44,12 @@ export interface DashUi extends PlanUi {
   copiedOpen: boolean;
   /** The Preview card's "N more by other chats" fold is open. */
   pvOthersOpen: boolean;
-  /** The From subs card's "N earlier" fold is open. */
-  reportsOpen: boolean;
+  /** Id of the finished sub whose finish card is open in the tray, or null. */
+  finishedOpen: string | null;
 }
 
 export function initialUi(): DashUi {
-  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false, draftOpen: {}, copiedOpen: false, pvOthersOpen: false, reportsOpen: false };
+  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false, draftOpen: {}, copiedOpen: false, pvOthersOpen: false, finishedOpen: null };
 }
 
 export interface ZoneCtx {
@@ -65,6 +66,8 @@ export interface ZoneCtx {
   quick?: Partial<Record<QuickViewId, boolean>>;
   /** The name a Preview card group is labelled with, by the chat that pushed it. */
   previewOwner?: (sessionId: string) => string;
+  /** The context chip a finished sub ended with, "" until it has been read. */
+  ctxChip?: (subId: string) => string;
 }
 
 // renderMessage is the costly part of a derive pass and a row object is
@@ -304,15 +307,20 @@ function renderDrafts(s: ZoneState<"drafts">, ctx: ZoneCtx): string {
 const listZone = (cls: string, icon: string, title: string) => (s: { cards: RenderedMessage[] }): string =>
   `<section class="cdash-zone cdash-card cdash-list ${cls}">${head(icon, title)}<div class="cdash-stack">${s.cards.map(cardHtml).join("")}</div></section>`;
 
-/** From subs: a sub's report drawn with the very card Messages view draws
- *  (renderSubCard via renderMessage: the sub's name, tier and fact chips). */
-function renderReports(s: ZoneState<"reports">, ctx: ZoneCtx): string {
-  const n = s.earlier.length;
-  const fold = n > 0
-    ? `<button type="button" class="cdash-drafts-fold" data-act="reports-earlier" aria-expanded="${ctx.ui.reportsOpen}"><i class="ph ph-clock-counter-clockwise"></i>${n} earlier<i class="ph ${ctx.ui.reportsOpen ? "ph-caret-up" : "ph-caret-down"}"></i></button>`
-      + (ctx.ui.reportsOpen ? s.earlier.map(cardHtml).join("") : "")
-    : "";
-  return `<section class="cdash-zone cdash-card cdash-list cdash-reports">${head("ph-tree-structure", "From subs")}<div class="cdash-stack">${s.shown.map(cardHtml).join("")}${fold}</div></section>`;
+/** Result: the chat's last closing message in a card of its own, apart from the
+ *  Plan card's steps. Dimmed once Joe has written since, until the next one. */
+function renderResult(s: ZoneState<"result">): string {
+  const when = writtenLabel(s.message);
+  const at = when ? ` <em class="cdash-h-at">${escapeHtml(when)}</em>` : "";
+  return `<section class="cdash-zone cdash-card cdash-resultcard${s.stale ? " is-stale" : ""}">${head("ph-flag-checkered", "Result", at)}`
+    + `<div class="cdash-pbody${s.stale ? " cdash-dim" : ""}"><div class="cdash-result">${cardHtml(s.message)}</div></div></section>`;
+}
+
+/** Finished subchats, kept until Joe dismisses them (finished-tray.ts). */
+function renderFinishedZone(s: ZoneState<"finished">, ctx: ZoneCtx): string {
+  const count = `<span class="cdash-count">${s.items.length}</span>`;
+  return `<section class="cdash-zone cdash-card cdash-finished">${head("ph-check-circle", "Finished subchats", count)}`
+    + `${renderFinished(s, { open: ctx.ui.finishedOpen, card: cardHtml, ctxChip: ctx.ctxChip ?? (() => "") })}</section>`;
 }
 
 /** A fixed host like Answers': the Subchats card (subs-card.ts) draws inside it,
@@ -326,9 +334,10 @@ export const ZONE_VIEWS: { [K in ZoneId]: (state: ZoneState<K>, ctx: ZoneCtx) =>
   answers: renderAnswers,
   waiting: renderWaiting,
   waitingElsewhere: renderWaitingElsewhere,
-  reports: renderReports,
   drafts: renderDrafts,
   plan: renderPlanZone,
+  result: renderResult,
+  finished: renderFinishedZone,
   subchats: renderSubchats,
   notes: listZone("cdash-notes", "ph-note", "Notes"),
   preview: renderPreviewWindow,

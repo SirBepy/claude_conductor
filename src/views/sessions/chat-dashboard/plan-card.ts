@@ -1,7 +1,9 @@
 // The Plan card (docs/chat-dashboard-design.md "Plan card across a chat's
 // life"). It is always drawn. The latest job stays on it: its plan while it
-// runs, its plan with the Result once it ends, and dimmed as "Last job" once Joe
-// has written again with no new plan. Earlier plans are a pager in the header
+// runs and after it ends, and dimmed as "Last job" once Joe has written again
+// with no new plan. The Result is a card of its own (dashboard-zones.ts), so the
+// steps stay in view; only an earlier plan still shows the report it ended
+// with. Earlier plans are a pager in the header
 // (older, the list, newer); the middle button swaps the card's body for the
 // list of earlier plans and back. While an earlier plan shows, the status line
 // at the foot is the way back to the current one.
@@ -113,15 +115,16 @@ function stepsHtml(job: PlanJob, ui: PlanUi): string {
   return `<div class="cdash-steps">${job.steps.map((st, i) => stepHtml(job, i, st, ui)).join("")}</div>`;
 }
 
-/** A job's body: its lead, its steps, and its report once it has one. */
-function jobBody(job: PlanJob, ctx: PlanCtx): string {
+/** A job's body: its lead and its steps, and its report when `withResult` (an
+ *  earlier plan; the current job's report is the Result card's). */
+function jobBody(job: PlanJob, ctx: PlanCtx, withResult = false): string {
   // The plan message's lines after its headline are the plan itself when Claude wrote no write_plan steps.
   const body = job.lead?.text ? bodyOf(job.lead.text) : "";
   const lead = job.lead?.text
     ? `<div class="cdash-plan-lead">${renderMarkdown(headlineOf(job.lead.text))}</div>`
       + (body ? `<div class="cdash-plan-body">${renderMarkdown(body)}</div>` : "")
     : "";
-  const result = job.result ? `<div class="cdash-result">${ctx.card(job.result)}</div>` : "";
+  const result = withResult && job.result ? `<div class="cdash-result">${ctx.card(job.result)}</div>` : "";
   return `${lead}${stepsHtml(job, ctx.ui)}${result}`;
 }
 
@@ -220,7 +223,7 @@ export function renderPlan(s: PlanState, ctx: PlanCtx): string {
   }
   if (sel !== null) {
     const job = s.earlier[sel]!;
-    return wrap(" is-earlier", `${head("ph-clock-counter-clockwise", `Plan${at(job.startedAt)}`, nav)}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${statusSlot(s, ctx, true)}`);
+    return wrap(" is-earlier", `${head("ph-clock-counter-clockwise", `Plan${at(job.startedAt)}`, nav)}<div class="cdash-pbody">${jobBody(job, ctx, true)}</div>${statusSlot(s, ctx, true)}`);
   }
   if (s.mode === "empty" || !s.job) {
     const none = ctx.busy ? "No plan yet." : "Nothing planned yet.";
@@ -231,8 +234,7 @@ export function renderPlan(s: PlanState, ctx: PlanCtx): string {
     const when = job.result?.ts ? at(rowMs(job.result)) : at(job.startedAt);
     return wrap(" is-last", `${head("ph-flag-checkered", `Last job${when}`, nav)}<div class="cdash-pbody cdash-dim">${jobBody(job, ctx)}</div>${statusSlot(s, ctx, false)}`);
   }
-  const ended = !!job.result;
-  return wrap(ended ? " is-result" : "", `${head(ended ? "ph-flag-checkered" : "ph-list-checks", ended ? "Result" : "Plan", nav)}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${statusSlot(s, ctx, false)}`);
+  return wrap("", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${statusSlot(s, ctx, false)}`);
 }
 
 /** Filters the list in place as Joe types, so the box keeps its focus. */

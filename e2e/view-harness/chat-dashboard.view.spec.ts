@@ -132,15 +132,17 @@ test.describe("chat dashboard", () => {
     await capture(pane(page), "chat-dashboard-earlier-open");
   });
 
-  test("a finished job: the Result sits under the finished plan's steps", async ({ page }) => {
+  test("a finished job: the Result is its own card under the Plan card, which keeps the finished steps", async ({ page }) => {
     await openChat(page, FINISHED, "dashboard");
     const right = dash(page).locator(".cdash-right");
-    await expect(right.locator(".cdash-result .mc-verdict")).toHaveText("Trello is in");
-    await expect(right.locator(".cdash-result table")).toBeVisible();
+    await expect(right.locator(".cdash-resultcard .cdash-result .mc-verdict")).toHaveText("Trello is in");
+    await expect(right.locator(".cdash-resultcard .cdash-result table")).toBeVisible();
     // Joe wrote after the blocker, so it no longer waits on him.
     await expect(dash(page).locator(".cdash-waiting")).toHaveCount(0);
-    await expect(right.locator(".cdash-plan.is-result .cdash-h-t")).toHaveText("Result");
-    await expect(right.locator(".cdash-plan.is-result .cdash-step--done")).toHaveCount(4);
+    await expect(right.locator(".cdash-resultcard .cdash-h-t")).toHaveText("Result");
+    await expect(right.locator(".cdash-plan .cdash-h-t")).toHaveText("Plan");
+    await expect(right.locator(".cdash-plan .cdash-step--done")).toHaveCount(4);
+    await expect(right.locator(".cdash-plan .cdash-result")).toHaveCount(0);
     await capture(pane(page), "chat-dashboard-result");
   });
 

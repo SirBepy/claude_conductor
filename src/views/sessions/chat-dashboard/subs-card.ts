@@ -5,7 +5,6 @@
 // gallery. The rules for who is listed live in shared/chat/dashboard/subs-model.ts.
 
 import { invoke } from "../../../shared/ipc";
-import { escapeHtml } from "../../../shared/escape-html";
 import { showToast } from "../../../shared/toast";
 import { Composer } from "../../../shared/chat/composer";
 import { isSessionBusyError } from "../../../shared/session-busy";
@@ -21,8 +20,7 @@ import {
 import type { ContextStatus, Instance } from "../../../types/ipc.generated";
 import { ringHtml, type RingSpec } from "../sidebar-ring";
 import type { SubHoverInput } from "../sidebar-hover-card-html";
-import { modelBatteryHtml } from "../sidebar-row-visuals";
-import { subGlyphHtml, subInitials } from "../sub-list";
+import { avatarHtml } from "./sub-avatar";
 import { tierLabel } from "../../../shared/model-name";
 import { attachSubHover } from "./sub-hover";
 import { isMirrored } from "../sessions-helpers";
@@ -61,13 +59,6 @@ const REFRESH_EVERY = 5;
 /** Images the details gallery loads per page. Each tile is one daemon read of a full data URL, so a sub
  *  with hundreds of screenshots must not fire them all when the gallery opens. */
 export const GALLERY_PAGE = 12;
-
-/** No native `title`: the hover card (sub-hover.ts) says it, and two tooltips on one avatar would stack. */
-export function avatarHtml(it: SubCardItem, ring: string, selected: boolean): string {
-  const name = escapeHtml(it.name);
-  return `<button type="button" class="sx-av${selected ? " on" : ""}" data-sub="${escapeHtml(it.id)}" data-kind="${it.kind}" aria-pressed="${selected}" aria-label="${name}, ${escapeHtml(it.progress)}">`
-    + `<span class="sx-face">${escapeHtml(subInitials(it.name))}${ring}</span>${subGlyphHtml(it.kind)}${modelBatteryHtml(it.model, it.effort)}</button>`;
-}
 
 export class SubsCard {
   private host: HTMLElement | null = null;

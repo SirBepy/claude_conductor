@@ -466,6 +466,10 @@ button.cdash-step:hover {
 .cdash-result {
   margin-top: 8px;
 }
+/* In the Result card the report is the whole body, with nothing above it. */
+.cdash-resultcard .cdash-result {
+  margin-top: 0;
+}
 .cdash-result .mc-root .msg-copy-btn {
   display: none;
 }

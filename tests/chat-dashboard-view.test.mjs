@@ -2,8 +2,8 @@
 // asserts: src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/plan-card.ts, src/views/sessions/chat-dashboard/chat-view-pref.ts
 
 // The dashboard is drawn beside the transcript from the renderer's own rows:
-// Joe's strip on top, Answers and Waiting on the left, Plan (with the Result
-// once the job ends) on the right, the chat's status line moved into the Plan
+// Joe's strip on top, Answers and Waiting on the left, Plan and then the Result
+// card (once the job ends) on the right, the chat's status line moved into the Plan
 // card while it runs, and nothing at all added to the pane in Messages view.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -206,7 +206,7 @@ describe("chat dashboard layout", () => {
     expect(errors).toEqual([]);
   });
 
-  it("puts the Result under the finished plan's steps, in the Plan card", async () => {
+  it("draws the Result as a card of its own under the Plan card, which keeps the finished steps", async () => {
     const { pane, r } = mountPane();
     new ChatDashboard(pane, r);
     feed(r, [
@@ -220,11 +220,15 @@ describe("chat dashboard layout", () => {
     expect(right.querySelector(".cdash-result .mc-verdict").textContent).toBe("Built, not pushed");
     expect(right.querySelector(".cdash-result .mc-sec--yours").textContent).toContain("Push it");
     expect(right.querySelector(".cdash-result table")).not.toBeNull();
-    // The steps stay open above the Result, with no way to fold them away.
-    const card = right.querySelector(".cdash-plan.is-result");
-    expect(card.querySelector(".cdash-h").textContent).toBe("Result");
+    // The steps stay open on the Plan card, apart from the Result.
+    const card = right.querySelector(".cdash-plan");
+    expect(card.querySelector(".cdash-h").textContent).toBe("Plan");
     expect(card.querySelectorAll(".cdash-step--done")).toHaveLength(2);
+    expect(card.querySelector(".cdash-result")).toBeNull();
     expect(card.querySelector("[data-act='show-plan']")).toBeNull();
+    const resultCard = right.querySelector(".cdash-resultcard");
+    expect(resultCard.querySelector(".cdash-h-t").textContent).toBe("Result");
+    expect(card.parentElement.nextElementSibling.dataset.zone).toBe("result");
     // The report is the Result, never an answer: Answers stays empty.
     expect([...pane.querySelectorAll(".cdash-left .cdash-slot")].map((e) => e.dataset.zone)).toEqual(["answers"]);
   });
