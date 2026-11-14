@@ -191,7 +191,7 @@ pub async fn sweep_now(state: &Arc<DaemonState>, now: DateTime<Utc>, resumed_at:
     let env = Env { now, resumed_at, transcript_mtime: &mtime, is_live: &live };
     // First, so a sub that never started and lost its hold is held again before
     // the dead sweep below would card it as a process that died.
-    super::held::recover_lost(state);
+    super::lost_hold::recover_lost(state);
     let carded = sweep(state, &env).await;
     for id in carded {
         log::warn!("subchats: sub {id} has been silent for over {}m, raised a card", STUCK_AFTER.num_minutes());

@@ -7,7 +7,7 @@
 //! - the sub it waits for (`after`) finished cleanly,
 //! - it waits for the writer slot and the slot has no live holder ahead of it, or
 //!   no queue names it at all, or
-//! - it has no hold left at all (`held::is_lost_hold`) and could not be rebuilt.
+//! - it has no hold left at all (`lost_hold::is_lost_hold`) and could not be rebuilt.
 //!
 //! Once that has lasted [`WAKE_AFTER`], the main chat is woken once with one line
 //! of facts, whether or not the sub asked for `report_back`. A sub whose wait
@@ -17,6 +17,7 @@
 //! characters and fixed words, never from anything a sub wrote.
 
 use super::held::{self, AfterState, Held};
+use super::lost_hold;
 use crate::daemon::state::DaemonState;
 use crate::types::Instance;
 use chrono::{DateTime, Utc};
@@ -72,7 +73,7 @@ pub(crate) fn stall_of(state: &DaemonState, inst: &Instance, held: &[Held], has_
             None if super::worktree::is_worktree_sub(id) => None,
             None => super::writers::nothing_in_the_way(state, id).then_some(Stall::SlotFree),
         },
-        None => held::is_lost_hold(state, inst, held, has_transcript).then_some(Stall::NoHold),
+        None => lost_hold::is_lost_hold(state, inst, held, has_transcript).then_some(Stall::NoHold),
     }
 }
 

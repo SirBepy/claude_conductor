@@ -281,11 +281,6 @@ pub async fn restore(state: &Arc<DaemonState>) {
 /// know is the live app's, and taking its file would lose the live app's message.
 /// Only a daemon with its own data folder reads an unknown row as one that ended
 /// while it was down (an ended row is not in the snapshot).
-fn on_shared_data() -> bool {
-    let over = crate::daemon::data_dir_override();
-    crate::daemon::push::is_isolated_on_shared_data(&crate::daemon::instance::instance_suffix(), over.as_deref())
-}
-
 fn owns_unknown_rows(row_known: bool, shared: bool) -> bool {
     row_known || !shared
 }
@@ -298,7 +293,7 @@ where
     let Some(root) = data_root() else { return };
     for sub_id in sub_ids_in(&root) {
         let row = state.registry.get(&sub_id);
-        if !owns_unknown_rows(row.is_some(), on_shared_data()) {
+        if !owns_unknown_rows(row.is_some(), crate::daemon::on_shared_data()) {
             continue;
         }
         let live = row.as_ref().is_some_and(|i| i.ended_at.is_none() && i.end_reason.is_none());

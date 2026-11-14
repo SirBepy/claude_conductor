@@ -3,7 +3,7 @@
 //! it waits for the sub named in `after`, for the writer slot, or for its worktree.
 //! A sub that already started is not queued, so both actions refuse it.
 
-use super::{held, writers};
+use super::{held, lost_hold, writers};
 use crate::daemon::state::DaemonState;
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ fn check_queued(state: &DaemonState, sub_id: &str) -> Result<(), String> {
         return Err(format!("{} has already ended.", name_of(state, sub_id)));
     }
     let has = |id: &str| crate::context_status::resolve_transcript(&state.registry, id).is_some();
-    if !held::never_started(state, &inst, &has) {
+    if !lost_hold::never_started(state, &inst, &has) {
         return Err(format!(
             "{} has started, so it is not queued: only a sub that never ran can be dropped or started now. Ask Joe to end it from its card or the chat menu.",
             name_of(state, sub_id)

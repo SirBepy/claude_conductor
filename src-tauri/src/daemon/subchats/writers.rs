@@ -725,7 +725,7 @@ pub fn restore(state: &Arc<DaemonState>) {
 }
 
 /// Puts a held writer that no queue entry names back in line, as at boot, and
-/// starts the head if the slot is free. For a hold [`held::recover_lost`] rebuilt
+/// starts the head if the slot is free. For a hold [`lost_hold::recover_lost`] rebuilt
 /// while the daemon runs; an entry already queued or holding is left as it is.
 pub(crate) fn requeue_held(state: &Arc<DaemonState>) {
     let starts = restore_inner(state);

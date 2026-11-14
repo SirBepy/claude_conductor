@@ -132,7 +132,7 @@ pub(crate) fn started_subs_with(state: &DaemonState, parent: &str, has_transcrip
     let held = super::super::held::all();
     running_subs(&state.registry, parent)
         .into_iter()
-        .filter(|i| !held.iter().any(|h| h.sub_id == i.session_id) && !super::super::held::is_lost_hold(state, i, &held, has_transcript))
+        .filter(|i| !held.iter().any(|h| h.sub_id == i.session_id) && !super::super::lost_hold::is_lost_hold(state, i, &held, has_transcript))
         .collect()
 }
 

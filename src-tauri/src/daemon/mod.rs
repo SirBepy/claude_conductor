@@ -114,6 +114,13 @@ pub(crate) fn data_dir_override() -> Option<String> {
     std::env::var("CC_DATA_DIR").ok()
 }
 
+/// A test, dev or wdio daemon running on the live app's data folder (an instance
+/// suffix, no `CC_DATA_DIR` of its own). Its registry and outbound pushes must not
+/// act on the live app's rows or phones.
+pub(crate) fn on_shared_data() -> bool {
+    push::is_isolated_on_shared_data(&instance::instance_suffix(), data_dir_override().as_deref())
+}
+
 /// True when a `CC_DATA_DIR` value points the daemon at its own data dir. An
 /// empty value counts as unset (the shared default dir), so a launcher that
 /// exports `CC_DATA_DIR=` cannot half-isolate a daemon. The one home for that

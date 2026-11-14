@@ -35,6 +35,7 @@ pub mod followup;
 pub(crate) mod git;
 pub mod held;
 pub(crate) mod jsonfile;
+pub mod lost_hold;
 mod reply;
 pub mod joe_message;
 pub mod main_pointer;

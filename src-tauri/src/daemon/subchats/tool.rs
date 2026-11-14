@@ -550,9 +550,9 @@ where
     // disk and in the held queue, which reaches the sub at the first step of its
     // first turn. A lost hold is rebuilt for this one sub so that turn can come;
     // when it cannot be rebuilt the text still waits for whatever starts the sub.
-    if super::held::never_started(state, sub, has_transcript) {
+    if super::lost_hold::never_started(state, sub, has_transcript) {
         if !super::held::is_held(&id) {
-            super::held::rebuild_lost_hold(state, &id, has_transcript);
+            super::lost_hold::rebuild_lost_hold(state, &id, has_transcript);
         }
         let entry = followup::add(&id, text);
         hold_linked(state, &id, text, &entry);
