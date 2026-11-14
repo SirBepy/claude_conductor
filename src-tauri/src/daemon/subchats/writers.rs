@@ -532,16 +532,19 @@ pub(crate) async fn on_waiting_on_joe_with(state: &Arc<DaemonState>, sub_id: &st
 }
 
 /// The sub holding the slot of the project `cwd` is in.
+#[cfg(test)]
 pub fn holder_of(cwd: &Path) -> Option<String> {
     table().get(&project_key(cwd)).and_then(|s| s.holder.clone())
 }
 
 /// The gate sub holding the project-wide gate slot.
+#[cfg(test)]
 pub fn gate_holder_of(cwd: &Path) -> Option<String> {
     table().get(&format!("{}{GATE_SLOT}", project_key(cwd))).and_then(|s| s.holder.clone())
 }
 
 /// The subs waiting for the slot of the project `cwd` is in, next first.
+#[cfg(test)]
 pub fn queue_of(cwd: &Path) -> Vec<String> {
     table().get(&project_key(cwd)).map(|s| s.queue.iter().map(|e| e.sub_id.clone()).collect()).unwrap_or_default()
 }
