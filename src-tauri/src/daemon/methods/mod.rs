@@ -34,7 +34,7 @@ mod files;
 mod gaming_mode;
 /// Shared mechanism (short-id truncation, capped-list overflow line) behind
 /// `user_todos`, `drafts_store::inject`, and `schedule_mcp`'s injected blocks.
-mod injection_util;
+pub(crate) mod injection_util;
 // pub(crate): `hooks_server::jarvis` (the fleet-tool HTTP routes, todo 272
 // chunk 2b) calls this module's `spawn_worker`/`send_to_session`/
 // `fleet_status`/`respond_worker_prompt` directly - those aren't RPC methods
