@@ -731,6 +731,14 @@ mod tests {
         assert!(!allowed("ensure_jarvis_session", &Transport::PeerMachine("m".into())));
     }
 
+    /// A long-press on a phone posts into the chat that owns the element; a peer
+    /// machine must not post into this machine's chats through a preview.
+    #[test]
+    fn message_shared_element_is_phone_only() {
+        assert!(allowed("message_shared_element", &Transport::Phone));
+        assert!(!allowed("message_shared_element", &Transport::PeerMachine("m".into())));
+    }
+
     #[test]
     fn report_link_journal_is_phone_only() {
         assert!(allowed("report_link_journal", &Transport::Phone));

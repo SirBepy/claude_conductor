@@ -22,7 +22,9 @@ static RECOVERED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 /// lost (another daemon instance on the same data folder forgot it before
 /// `held.json` was per instance), and without this nothing would ever start it:
 /// it reads as queued for good, and `--resume` on it fails because it never had a
-/// conversation.
+/// conversation. An unresolved transcript path alone is weak proof of "never ran"
+/// (a moved cwd or a mirrored row hides a real one), so a recorded turn in
+/// `chat_state` also rules a sub out: relaunching its brief would redo finished work.
 pub(crate) fn is_lost_hold(state: &DaemonState, inst: &Instance, held: &[Held], has_transcript: &(dyn Fn(&str) -> bool + Sync)) -> bool {
     let id = inst.session_id.as_str();
     inst.subchat_of.is_some()
@@ -34,6 +36,7 @@ pub(crate) fn is_lost_hold(state: &DaemonState, inst: &Instance, held: &[Held], 
         && !launching(id)
         && !held.iter().any(|h| h.sub_id == id)
         && !has_transcript(id)
+        && crate::sessions::chat_state::get(id).is_none()
 }
 
 /// How old a lost hold may be and still be rebuilt by the tick on its own. An
@@ -168,11 +171,22 @@ pub(crate) fn rebuild_lost_hold(state: &Arc<DaemonState>, sub_id: &str, has_tran
     if let Some(set) = RECOVERED.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
         set.remove(sub_id);
     }
-    let (_, for_slot) = recover_lost_with(state, has_transcript, &|inst| inst.session_id == sub_id);
+    let (rebuilt, for_slot) = recover_lost_with(state, has_transcript, &|inst| inst.session_id == sub_id);
+    if !rebuilt.is_empty() {
+        crate::daemon::machines::publish_instances_changed(state);
+    }
     if for_slot {
         super::writers::requeue_held(state);
     }
     is_held(sub_id)
+}
+
+/// A worktree sub, an `after` that no longer names anything, a missing brief:
+/// nothing here can start the sub, so the main chat is told rather than left
+/// waiting on a start that will not come.
+pub(crate) async fn report_not_rebuilt(state: &Arc<DaemonState>, sub_id: &str) {
+    let stand_in = Held { sub_id: sub_id.to_string(), reason: String::new(), after: None, after_name: String::new(), launch: LaunchSpec::default() };
+    raise_decision(state, &stand_in, Why::LaunchFailed("its start instructions could not be rebuilt".to_string())).await;
 }
 
 /// Joe's "nudge" on a sub that never started. It has no conversation, so
@@ -198,10 +212,7 @@ where
         return false;
     }
     if !was_held && !rebuild_lost_hold(state, sub_id, has_transcript) {
-        // A worktree sub, an `after` that no longer names anything, a missing
-        // brief: nothing here can start it, so say so rather than spend the answer.
-        let stand_in = Held { sub_id: sub_id.to_string(), reason: String::new(), after: None, after_name: String::new(), launch: LaunchSpec::default() };
-        raise_decision(state, &stand_in, Why::LaunchFailed("its start instructions could not be rebuilt".to_string())).await;
+        report_not_rebuilt(state, sub_id).await;
         return true;
     }
     set_parked(sub_id, false);

@@ -1637,4 +1637,40 @@ mod tests {
         assert!(super::super::plumbing::current("nw-tree").unwrap().detail.contains("could not be rebuilt"));
         super::super::plumbing::clear("nw-tree");
     }
+
+    /// `recover_lost` tells every window its sub is queued again; a rebuild for one sub
+    /// (a send, Joe's nudge) must too, or the row keeps drawing as lost until the next
+    /// unrelated change.
+    #[test]
+    fn rebuilding_one_lost_hold_tells_the_windows_the_sub_is_queued_again() {
+        let _d = TempDataDir::new();
+        let st = state();
+        // Waiting for a named sub, so the writer queue (which publishes on its own) is not involved.
+        sub_of(&st, "rp-main", "rp-target", "header");
+        lost_sub(&st, "rp-main", "rp-lost", "footer", Some("header"));
+        let mut rx = st.notifier.subscribe();
+        assert!(rebuild_lost_hold(&st, "rp-lost", &no_transcript));
+        let mut told = false;
+        while let Ok(frame) = rx.try_recv() {
+            told |= frame["method"] == "instances_changed";
+        }
+        assert!(told, "no instances_changed after the rebuild");
+    }
+
+    /// An unresolvable transcript path (moved cwd, mirrored row) reads as "never ran",
+    /// and a send would relaunch the brief of a sub that did run. A recorded turn is
+    /// the second witness.
+    #[test]
+    fn a_sub_that_ran_is_not_a_lost_hold_just_because_its_transcript_does_not_resolve() {
+        let _d = TempDataDir::new();
+        let st = state();
+        lost_sub(&st, "rr-main", "rr-never", "footer", None);
+        lost_sub(&st, "rr-main", "rr-ran", "header", None);
+        crate::sessions::chat_state::set_busy("rr-ran", true);
+        crate::sessions::chat_state::set_busy("rr-ran", false);
+        let held = all();
+        assert!(is_lost_hold(&st, &st.registry.get("rr-never").unwrap(), &held, &no_transcript));
+        assert!(!is_lost_hold(&st, &st.registry.get("rr-ran").unwrap(), &held, &no_transcript), "it had a turn");
+        assert!(recover_lost_with(&st, &no_transcript, &|_| true).0 == ["rr-never"], "only the one that never ran is rebuilt");
+    }
 }

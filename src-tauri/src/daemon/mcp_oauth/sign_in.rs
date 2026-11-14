@@ -42,6 +42,25 @@ async fn get_json(c: &reqwest::Client, url: &str) -> Option<Value> {
     r.json().await.ok()
 }
 
+/// An endpoint the sign-in may talk to: https, or plain http only to the loopback
+/// host (a local dev server). The discovery documents come from the MCP server,
+/// so an `http://` endpoint on another host would send the client registration,
+/// the authorization code and the tokens over the network in the clear.
+fn secure_endpoint(name: &str, url: &str) -> Result<String, String> {
+    let u: reqwest::Url = url.parse().map_err(|_| format!("OAuth metadata {name} is not a URL"))?;
+    let loopback = match u.host() {
+        Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
+    match u.scheme() {
+        "https" => Ok(url.to_string()),
+        "http" if loopback => Ok(url.to_string()),
+        _ => Err(format!("OAuth metadata {name} must be https (http is allowed only on localhost)")),
+    }
+}
+
 /// RFC 9728 then RFC 8414: the protected resource names its authorization
 /// server, and that server publishes its endpoints. A server with no
 /// protected-resource document is taken to be its own authorization server.
@@ -64,7 +83,10 @@ async fn discover(c: &reqwest::Client, mcp_url: &str) -> Result<Meta, String> {
     let meta = get_json(c, &format!("{as_base}/.well-known/oauth-authorization-server"))
         .await
         .ok_or("the server publishes no OAuth metadata")?;
-    let field = |k: &str| meta.get(k).and_then(Value::as_str).map(str::to_string).ok_or(format!("OAuth metadata has no {k}"));
+    let field = |k: &str| {
+        let url = meta.get(k).and_then(Value::as_str).ok_or(format!("OAuth metadata has no {k}"))?;
+        secure_endpoint(k, url)
+    };
     Ok(Meta {
         authorization_endpoint: field("authorization_endpoint")?,
         token_endpoint: field("token_endpoint")?,
@@ -203,6 +225,33 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
+
+    #[test]
+    fn discovered_endpoints_must_be_https_except_on_loopback() {
+        for ok in ["https://m.example/token", "http://127.0.0.1:5173/token", "http://localhost:5173/token", "http://[::1]:5173/token"] {
+            assert!(secure_endpoint("token_endpoint", ok).is_ok(), "{ok}");
+        }
+        for bad in ["http://m.example/token", "http://127.0.0.1.evil.example/token", "ftp://127.0.0.1/token", "not a url", "//m.example/token"] {
+            assert!(secure_endpoint("token_endpoint", bad).is_err(), "{bad}");
+        }
+    }
+
+    /// The metadata is the server's word: a plain-http token endpoint on another
+    /// host is refused before the sign-in registers or opens anything.
+    #[tokio::test]
+    async fn discovery_refuses_a_metadata_document_that_names_a_plain_http_endpoint() {
+        let base = fake_server(Arc::new(AtomicUsize::new(0)), |path, _| match path {
+            "/.well-known/oauth-authorization-server" => (
+                200,
+                r#"{"authorization_endpoint":"https://m.example/authorize","token_endpoint":"http://m.example/token","registration_endpoint":"https://m.example/register"}"#.into(),
+            ),
+            _ => (404, "{}".into()),
+        })
+        .await;
+        let c = client().unwrap();
+        let err = discover(&c, &format!("{base}/mcp")).await.err().expect("refused");
+        assert!(err.contains("token_endpoint") && err.contains("https"), "{err}");
+    }
 
     #[test]
     fn pkce_challenge_matches_the_rfc_7636_vector() {

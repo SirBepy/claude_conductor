@@ -531,6 +531,9 @@ enum Delivery {
     Held,
     /// The sub has not started: the text waits for its first turn.
     NotStarted,
+    /// The sub has not started and nothing will start it (its lost hold is too old to
+    /// rebuild on a send, or cannot be rebuilt): the text waits for a nudge or a drop.
+    Stranded,
 }
 
 async fn deliver<F, Fut>(
@@ -548,15 +551,23 @@ where
     // A sub that never started (held, or its hold was lost) has no conversation, so
     // `--resume` would fail ("No conversation found") and lose the text. It waits on
     // disk and in the held queue, which reaches the sub at the first step of its
-    // first turn. A lost hold is rebuilt for this one sub so that turn can come;
-    // when it cannot be rebuilt the text still waits for whatever starts the sub.
+    // first turn. A recent lost hold is rebuilt for this one sub so that turn can
+    // come; an old one is the main chat's call (it may have re-run the job by hand,
+    // and the watchdog already told it), and one that cannot be rebuilt is reported.
+    // Either way the text still waits for whatever starts the sub.
     if super::lost_hold::never_started(state, sub, has_transcript) {
+        let mut stranded = false;
         if !super::held::is_held(&id) {
-            super::lost_hold::rebuild_lost_hold(state, &id, has_transcript);
+            if !super::lost_hold::recent_enough(sub, chrono::Utc::now()) {
+                stranded = true;
+            } else if !super::lost_hold::rebuild_lost_hold(state, &id, has_transcript) {
+                super::lost_hold::report_not_rebuilt(state, &id).await;
+                stranded = true;
+            }
         }
         let entry = followup::add(&id, text);
         hold_linked(state, &id, text, &entry);
-        return Ok(Delivery::NotStarted);
+        return Ok(if stranded { Delivery::Stranded } else { Delivery::NotStarted });
     }
     match resume(id.clone(), text.to_string()).await {
         Ok(()) => Ok(Delivery::Passed),
@@ -612,6 +623,7 @@ where
     let (mut passed, mut held, mut failed) = (Vec::new(), Vec::new(), Vec::new());
     let mut reached: Vec<String> = Vec::new();
     let mut not_started: Vec<String> = Vec::new();
+    let mut stranded: Vec<String> = Vec::new();
     let mut waiting_for_writer: Vec<(String, String)> = Vec::new();
     for sub in &targets {
         let name = label(sub);
@@ -665,12 +677,13 @@ where
                     Delivery::Passed => passed.push(name),
                     Delivery::Held => held.push(name),
                     Delivery::NotStarted => not_started.push(name),
+                    Delivery::Stranded => stranded.push(name),
                 }
             }
             Err(e) => failed.push(json!({"sub": name, "error": e})),
         }
     }
-    if passed.is_empty() && held.is_empty() && not_started.is_empty() {
+    if passed.is_empty() && held.is_empty() && not_started.is_empty() && stranded.is_empty() {
         return refusal(failed.iter().filter_map(|f| f["error"].as_str().map(|e| format!("{}: {e}", f["sub"].as_str().unwrap_or("sub")))).collect::<Vec<_>>().join("; "));
     }
     let message = match (joe.is_some(), explicit.is_some()) {
@@ -690,6 +703,10 @@ where
     if !not_started.is_empty() {
         out["not_started"] = json!(not_started);
         out["not_started_note"] = json!("these subs are queued and have not started: the message waits and reaches them at their first step, and they start by themselves when what they wait for is done");
+    }
+    if !stranded.is_empty() {
+        out["stranded"] = json!(stranded);
+        out["stranded_note"] = json!("these subs never started and nothing will start them by itself (their start was lost and is too old to redo on a send, or cannot be redone): the message waits for their first step. Start one only if Joe's job is still wanted, from its card's nudge, or drop it with the drop action");
     }
     if !failed.is_empty() {
         out["failed"] = json!(failed);
@@ -1712,6 +1729,8 @@ mod tests {
         let (st, main, sent) = setup("tool-lost");
         sub(&st, &main, "tool-lost-t", "Target", "t");
         st.registry.set_busy("tool-lost-t", true);
+        // Registered just now: an hours-old lost hold is the main chat's call, not a send's.
+        st.registry.upsert_interactive("tool-lost-q", std::path::Path::new("."), "proj", &chrono::Utc::now().to_rfc3339());
         sub(&st, &main, "tool-lost-q", "Lost", "t");
         let mut brief: super::super::SubchatBrief = crate::sessions::chat_config::get("tool-lost-q").unwrap().subchat.unwrap();
         brief.after = Some("Target".into());
@@ -1727,5 +1746,48 @@ mod tests {
         assert!(sent.lock().unwrap().is_empty(), "a --resume of a chat that never ran fails, so none is tried");
         assert_eq!(followup::list_in(&data_root(), "tool-lost-q").len(), 1, "the text waits on disk for its first turn");
         assert!(super::super::held::is_held("tool-lost-q"), "the hold is rebuilt so its first turn can come");
+    }
+
+    /// A send must not relaunch the whole brief of a job the main chat may have re-run
+    /// by hand since (the 2026-11-10 incident the tick's two-hour limit guards against).
+    #[tokio::test]
+    async fn a_message_to_a_sub_whose_hold_was_lost_hours_ago_does_not_relaunch_its_brief() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-old");
+        sub(&st, &main, "tool-old-q", "Old", "t");
+        let never_ran = |_: &str| false;
+        let args = json!({"action": "send", "sub": "Old", "text": "also do the footer"});
+        let out = run_with(&st, &main, &args, some_facts, resume_ok(&sent), &never_ran).await;
+
+        assert_eq!(out["ok"], json!(true), "{out}");
+        assert!(!super::super::held::is_held("tool-old-q"), "an old lost hold is not rebuilt by a send");
+        assert!(out.get("not_started").is_none(), "it must not promise a start by itself: {out}");
+        assert_eq!(out["stranded"], json!(["Old"]), "{out}");
+        assert_eq!(followup::list_in(&data_root(), "tool-old-q").len(), 1, "the text still waits for a first turn");
+        assert!(sent.lock().unwrap().is_empty());
+    }
+
+    /// A worktree sub (or a missing brief, or an `after` that names nothing) cannot be
+    /// rebuilt: the reply must not say it starts by itself, and the main chat is told.
+    #[tokio::test]
+    async fn a_message_to_a_lost_sub_that_cannot_be_rebuilt_says_so_and_wakes_the_main_chat() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-norebuild");
+        st.registry.upsert_interactive("tool-norebuild-q", std::path::Path::new("."), "proj", &chrono::Utc::now().to_rfc3339());
+        sub(&st, &main, "tool-norebuild-q", "Tree", "t");
+        let mut brief: super::super::SubchatBrief = crate::sessions::chat_config::get("tool-norebuild-q").unwrap().subchat.unwrap();
+        brief.worktree_at = Some(serde_json::from_value(json!({"cwd": "x", "path": "x", "branch": "b"})).unwrap());
+        crate::sessions::chat_config::set_subchat("tool-norebuild-q", Some(brief));
+        let never_ran = |_: &str| false;
+        let args = json!({"action": "send", "sub": "Tree", "text": "also do the footer"});
+        let out = run_with(&st, &main, &args, some_facts, resume_ok(&sent), &never_ran).await;
+
+        assert_eq!(out["ok"], json!(true), "{out}");
+        assert!(!super::super::held::is_held("tool-norebuild-q"));
+        assert!(out.get("not_started").is_none(), "{out}");
+        assert_eq!(out["stranded"], json!(["Tree"]), "{out}");
+        let problem = super::super::plumbing::current("tool-norebuild-q").expect("the failed start is reported to the main chat");
+        assert!(problem.detail.contains("could not be rebuilt"), "{}", problem.detail);
+        super::super::plumbing::clear("tool-norebuild-q");
     }
 }
