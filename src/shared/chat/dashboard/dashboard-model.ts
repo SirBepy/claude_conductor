@@ -12,7 +12,7 @@
 // view then draws nothing for it.
 
 import type { RenderedMessage } from "../chat-classifiers";
-import { headlineOf, type MessageKind } from "../chat-message-kinds";
+import { bodyOf, headlineOf, type MessageKind } from "../chat-message-kinds";
 import { isOwnMessage, isReport, messageKindOf, stepFinished, TURN_STATUS_TOOL, type DashboardPlan, type PlanStep } from "./plan-record";
 import { stripAuqAnswerBlock, stripAuqExtraBlock } from "../chat-event-to-message";
 import type { PreviewMeta } from "../../../types/ipc.generated";
@@ -358,6 +358,8 @@ export interface PlanState {
   done: number;
   lead: RenderedMessage | null;
   result: RenderedMessage | null;
+  /** The Result Joe dismissed with Got it, as a summary row on the card. */
+  resultSummary: ResultSummary | null;
 }
 
 /** Row timestamps arrive in seconds from history and in ms from live rows. */
@@ -483,6 +485,7 @@ export function derivePlan({ input, lastJoe }: DeriveCtx): PlanState {
     done: steps.filter(stepFinished).length,
     lead: job?.lead ?? null,
     result: job?.result ?? null,
+    resultSummary: dismissedResult(input),
   };
 }
 
@@ -523,14 +526,49 @@ export interface ResultState {
   message: RenderedMessage;
   /** Joe wrote after it: the next result has not come yet, so it draws dimmed. */
   stale: boolean;
+  /** What Got it removes it by (waitingKey); null for a row with no stable id, which has no button. */
+  key: string | null;
 }
 
 /** Result: what the chat last said when it went idle, apart from the Plan card's
  *  steps (Joe, 2026-11-14: "i want the result to be independant from the steps").
- *  It stays until a newer one replaces it, dimmed once Joe has written since. */
+ *  It sits on the left, under Answers, so what matters is seen first. It stays
+ *  until a newer one replaces it, dimmed once Joe has written since, and goes once
+ *  Joe says Got it: the Plan card then keeps a summary row of it
+ *  (ResultSummary). A dismissed result is not replaced by an older one. */
 export function deriveResult({ input, lastJoe }: DeriveCtx): ResultState | null {
   const at = resultIndex(input.messages);
-  return at < 0 ? null : { message: input.messages[at]!, stale: lastJoe > at };
+  if (at < 0) return null;
+  const message = input.messages[at]!;
+  if (isDismissed(input, message)) return null;
+  return { message, stale: lastJoe > at, key: waitingKey(message) };
+}
+
+/** The two lines the Plan card's summary row prints for a dismissed result. */
+export function resultLines(m: RenderedMessage): { title: string; subtitle: string } {
+  const plain = (s: string): string => s.replace(/[*_`#>]/g, "").trim();
+  const text = m.text ?? "";
+  // A kind with a verdict prints it large and the text's first line under it; one without
+  // (handoff, artifact) leads with the text itself.
+  if (m.card?.verdict) return { title: plain(m.card.verdict), subtitle: plain(headlineOf(text)) };
+  return { title: plain(headlineOf(text)), subtitle: plain(headlineOf(bodyOf(text))) };
+}
+
+/** A dismissed result, kept as a line on the Plan card with a button that opens it there. */
+export interface ResultSummary {
+  message: RenderedMessage;
+  key: string;
+  title: string;
+  subtitle: string;
+}
+
+function dismissedResult(input: DashboardInput): ResultSummary | null {
+  const at = resultIndex(input.messages);
+  if (at < 0) return null;
+  const message = input.messages[at]!;
+  const key = waitingKey(message);
+  if (!key || !isDismissed(input, message)) return null;
+  return { message, key, ...resultLines(message) };
 }
 
 /** One finished sub in the tray under Result. */
@@ -708,9 +746,9 @@ export const ZONES = {
   waitingElsewhere: zone({ column: "left", order: 25, derive: deriveWaitingElsewhere }),
   drafts: zone({ column: "left", order: 30, derive: deriveDrafts }),
   plan: zone({ column: "right", order: 10, derive: derivePlan }),
-  result: zone({ column: "right", order: 15, derive: deriveResult }),
+  result: zone({ column: "left", order: 15, derive: deriveResult }),
   finished: zone({ column: "right", order: 17, derive: deriveFinished }),
-  subchats: zone({ column: "right", order: 20, derive: deriveSubchats }),
+  subchats: zone({ column: "left", order: 26, derive: deriveSubchats }),
   notes: zone({ column: "right", order: 30, derive: deriveNotes }),
   preview: zone({ column: "right", order: 35, derive: derivePreviewWindow }),
   links: zone({ column: "right", order: 40, derive: deriveLinks }),

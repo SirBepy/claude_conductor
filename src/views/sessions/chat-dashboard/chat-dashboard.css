@@ -470,6 +470,84 @@ button.cdash-step:hover {
 .cdash-resultcard .cdash-result {
   margin-top: 0;
 }
+/* The Result is what Joe should see first, so its frame is tinted green. */
+.cdash-resultcard {
+  border-color: color-mix(in srgb, var(--color-success) 55%, var(--color-border));
+  background: color-mix(in srgb, var(--color-success) 7%, var(--color-surface));
+}
+.cdash-resultcard.is-stale {
+  border-color: var(--color-border);
+}
+.cdash-got {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.cdash-got-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border: 1px solid color-mix(in srgb, var(--color-success) 55%, var(--color-border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cdash-got-btn:hover {
+  background: color-mix(in srgb, var(--color-success) 26%, transparent);
+}
+/* What is left of a dismissed Result, on the Plan card. */
+.cdash-rsum {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--color-surface-alt);
+  font-size: 12.5px;
+}
+.cdash-rsum > i {
+  flex: none;
+  color: var(--color-success);
+}
+.cdash-rs-t {
+  flex: 1;
+  min-width: 0;
+}
+.cdash-rs-t b {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.cdash-rs-sub {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.cdash-rs-btn {
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.cdash-rs-btn:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
 .cdash-result .mc-root .msg-copy-btn {
   display: none;
 }

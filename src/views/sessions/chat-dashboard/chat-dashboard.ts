@@ -578,7 +578,7 @@ export class ChatDashboard {
   }
 
   private renderSubs(state: DashboardState): void {
-    const zone = state.right.find((z) => z.id === "subchats");
+    const zone = state.left.find((z) => z.id === "subchats");
     const host = this.zoneEls.get("subchats")?.el.querySelector<HTMLElement>(".sx-host") ?? null;
     if (zone && zone.id === "subchats" && host) this.subs.update(host, zone.state);
     else this.subs.detach();
@@ -773,6 +773,11 @@ export class ChatDashboard {
       window.dispatchEvent(new CustomEvent(PREVIEW_OPEN_EVENT, { detail: { slug: t.dataset.slug ?? "" } }));
       return;
     }
+    if (name === "result-dismiss") {
+      // Got it shares the Waiting removals' store: both are a message Joe has seen.
+      this.dismissWaiting([t.dataset.wkey ?? ""].filter(Boolean));
+      return;
+    }
     if (name === "finished-dismiss") {
       void this.dismissFinished(t.dataset.sub ?? "");
       return;
@@ -793,6 +798,7 @@ export class ChatDashboard {
       case "strip-latest": ui.stripPick = null; ui.stripExpanded = false; break;
       case "drafts-copied": ui.copiedOpen = !ui.copiedOpen; break;
       case "pv-others": ui.pvOthersOpen = !ui.pvOthersOpen; break;
+      case "result-toggle": ui.resultOpen = ui.resultOpen === t.dataset.wkey ? null : (t.dataset.wkey ?? null); break;
       case "finished-open": ui.finishedOpen = ui.finishedOpen === t.dataset.sub ? null : (t.dataset.sub ?? null); break;
       case "step": ui.openStep = ui.openStep === t.dataset.step ? null : (t.dataset.step ?? null); break;
       case "plan-prev":

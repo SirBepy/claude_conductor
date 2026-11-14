@@ -1,9 +1,10 @@
 // The Plan card (docs/chat-dashboard-design.md "Plan card across a chat's
 // life"). It is always drawn. The latest job stays on it: its plan while it
 // runs and after it ends, and dimmed as "Last job" once Joe has written again
-// with no new plan. The Result is a card of its own (dashboard-zones.ts), so the
-// steps stay in view; only an earlier plan still shows the report it ended
-// with. Earlier plans are a pager in the header
+// with no new plan. The Result is a card of its own on the left
+// (dashboard-zones.ts), so the steps stay in view; once Joe says Got it the card
+// leaves and this one keeps a summary row of it with a button that opens it here
+// (resultSummaryHtml). An earlier plan still shows the report it ended with. Earlier plans are a pager in the header
 // (older, the list, newer); the middle button swaps the card's body for the
 // list of earlier plans and back. While an earlier plan shows, the status line
 // at the foot is the way back to the current one.
@@ -28,10 +29,12 @@ export interface PlanUi {
   planSearch: string;
   /** Key (`job key:index:label`) of the step whose times are open. */
   openStep: string | null;
+  /** Key (waitingKey) of the dismissed result opened in the summary row, or null. */
+  resultOpen: string | null;
 }
 
 export function initialPlanUi(): PlanUi {
-  return { planSel: null, planList: false, planListFrom: null, planSearch: "", openStep: null };
+  return { planSel: null, planList: false, planListFrom: null, planSearch: "", openStep: null, resultOpen: null };
 }
 
 export interface PlanCtx {
@@ -204,6 +207,18 @@ function listHtml(earlier: readonly PlanJob[], ui: PlanUi, now: number): string 
   return `${search}<div class="cdash-pl-wrap"><div class="cdash-pl">${rows.join("")}</div></div>`;
 }
 
+/** What is left of a Result Joe dismissed with Got it: its title and subtitle on one
+ *  row and a button that opens the full result under the row, here in the Plan card. */
+function resultSummaryHtml(s: PlanState, ctx: PlanCtx): string {
+  const r = s.resultSummary;
+  if (!r) return "";
+  const open = ctx.ui.resultOpen === r.key;
+  const sub = r.subtitle ? `<span class="cdash-rs-sub">${escapeHtml(r.subtitle)}</span>` : "";
+  return `<div class="cdash-rsum${open ? " open" : ""}"><i class="ph ph-check-circle"></i><span class="cdash-rs-t"><b>${escapeHtml(r.title)}</b>${sub}</span>`
+    + `<button type="button" class="cdash-rs-btn" data-act="result-toggle" data-wkey="${escapeHtml(r.key)}" aria-expanded="${open}">${open ? "Hide result" : "Open result"}</button></div>`
+    + (open ? `<div class="cdash-result">${ctx.card(r.message)}</div>` : "");
+}
+
 const head = (icon: string, title: string, extra = ""): string =>
   `<h4 class="cdash-h"><i class="ph ${icon}"></i><span class="cdash-h-t">${title}</span>${extra}</h4>`;
 
@@ -227,14 +242,14 @@ export function renderPlan(s: PlanState, ctx: PlanCtx): string {
   }
   if (s.mode === "empty" || !s.job) {
     const none = ctx.busy ? "No plan yet." : "Nothing planned yet.";
-    return wrap(" is-empty", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody"><div class="cdash-pnone">${none}</div></div>${statusSlot(s, ctx, false)}`);
+    return wrap(" is-empty", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody"><div class="cdash-pnone">${none}</div></div>${resultSummaryHtml(s, ctx)}${statusSlot(s, ctx, false)}`);
   }
   const job = s.job;
   if (s.mode === "last") {
     const when = job.result?.ts ? at(rowMs(job.result)) : at(job.startedAt);
-    return wrap(" is-last", `${head("ph-flag-checkered", `Last job${when}`, nav)}<div class="cdash-pbody cdash-dim">${jobBody(job, ctx)}</div>${statusSlot(s, ctx, false)}`);
+    return wrap(" is-last", `${head("ph-flag-checkered", `Last job${when}`, nav)}<div class="cdash-pbody cdash-dim">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${statusSlot(s, ctx, false)}`);
   }
-  return wrap("", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${statusSlot(s, ctx, false)}`);
+  return wrap("", `${head("ph-list-checks", "Plan", nav)}<div class="cdash-pbody">${jobBody(job, ctx)}</div>${resultSummaryHtml(s, ctx)}${statusSlot(s, ctx, false)}`);
 }
 
 /** Filters the list in place as Joe types, so the box keeps its focus. */

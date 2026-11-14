@@ -62,7 +62,11 @@ describe("chat dashboard model", () => {
     expect(ZONES.answers.column).toBe("left");
     expect(ZONES.waiting.column).toBe("left");
     expect(ZONES.plan.column).toBe("right");
-    for (const id of ["subchats", "notes", "links"]) {
+    // Subchats sits on the left right under Waiting on you (docs/chat-dashboard-design.md, "Subchats card redesign").
+    expect(ZONES.subchats.column).toBe("left");
+    expect(ZONES.subchats.order).toBeGreaterThan(ZONES.waiting.order);
+    expect(ZONES.subchats.order).toBeLessThan(ZONES.drafts.order);
+    for (const id of ["notes", "links"]) {
       expect(ZONES[id].column).toBe("right");
       expect(ZONES[id].order).toBeGreaterThan(ZONES.plan.order);
     }
@@ -216,7 +220,8 @@ describe("chat dashboard model", () => {
     expect(zone(c.dash(), "subchats")).toBeNull();
     const d = c.dash({ now: 10_000_000, subs: [sub("a", "working"), sub("b", "asking")] });
     expect(zone(d, "subchats").shown.map((i) => i.id)).toEqual(["b", "a"]);
-    expect([...d.right].map((z) => z.id)).toEqual(["plan", "subchats"]);
+    expect([...d.right].map((z) => z.id)).toEqual(["plan"]);
+    expect([...d.left].map((z) => z.id)).toContain("subchats");
   });
 
   it("draws write_plan steps with their detail and counts finished ones", () => {
@@ -338,7 +343,8 @@ describe("chat dashboard model", () => {
     expect(zone(d, "result").message.card.verdict).toBe("Kept B");
     expect(zone(d, "notes").cards.map((m) => m.card.kind)).toEqual(["discovery"]);
     expect(zone(d, "links").links.map((l) => l.url)).toEqual(["https://example.com/board"]);
-    expect(ids(d.right)).toEqual(["plan", "result", "notes", "links"]);
+    expect(ids(d.right)).toEqual(["plan", "notes", "links"]);
+    expect(ids(d.left)).toEqual(["answers", "result"]);
   });
 
   it("keeps the recorded plan aligned when older rows are prepended or a row is spliced out", () => {

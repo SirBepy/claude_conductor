@@ -1,5 +1,5 @@
 // The Waiting on you items Joe removed by hand (the x on a blocker or to-do,
-// or Clear all), per chat. Kept in localStorage so a removed blocker stays
+// or Clear all), and the Result he said Got it to, per chat. Kept in localStorage so a removed blocker stays
 // removed after the chat window or the app reopens (Joe, 2026-11-13: "i cant
 // even ... remove it"); in memory it would come back on every reopen, which is
 // the stale-info problem this exists to fix. The transcript keeps every card.

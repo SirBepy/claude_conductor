@@ -57,7 +57,7 @@ const job = (ask, steps, verdict) => [
 const card = (pane) => pane.querySelector(".cdash-right .cdash-plan");
 const title = (pane) => card(pane).querySelector(".cdash-h-t").textContent;
 const click = (pane, sel) => { card(pane).querySelector(sel).click(); };
-const resultCard = (pane) => pane.querySelector(".cdash-right .cdash-resultcard");
+const resultCard = (pane) => pane.querySelector(".cdash-left .cdash-resultcard");
 
 describe("the Plan card across a chat's life", () => {
   it("keeps the finished job, dimmed, as the last job when Joe writes with no new plan", async () => {

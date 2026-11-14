@@ -2,7 +2,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";
 
-// A main chat's finished subs wait in a tray under the Result card (Joe, 2026-11-14:
+// A main chat's finished subs wait in a tray under the Plan card (Joe, 2026-11-14:
 // "when a subchat is fully done and prolly not needed anymore, it shows me in
 // result that chat"): the avatar with its name on hover, one line on what it did,
 // the context it ended with, and a Dismiss that closes it. A click opens the same
@@ -80,12 +80,10 @@ test.describe("chat dashboard / finished tray", () => {
     await capture(page.locator("#session-pane"), "chat-dashboard-finished-tray");
   });
 
-  test("sits in the right column under the Plan and Result cards", async ({ page }) => {
+  test("sits in the right column under the Plan card, while the Result is on the left", async ({ page }) => {
     await openMain(page, "dashboard");
-    const result = page.locator("#session-pane .cdash-right .cdash-resultcard");
-    await expect(result).toContainText("3 jobs handed to subs");
-    expect((await tray(page).boundingBox())!.y).toBeGreaterThan((await result.boundingBox())!.y);
-    expect((await result.boundingBox())!.y).toBeGreaterThan((await page.locator("#session-pane .cdash-right .cdash-plan").boundingBox())!.y);
+    await expect(page.locator("#session-pane .cdash-left .cdash-resultcard")).toContainText("3 jobs handed to subs");
+    expect((await tray(page).boundingBox())!.y).toBeGreaterThan((await page.locator("#session-pane .cdash-right .cdash-plan").boundingBox())!.y);
   });
 
   test("a click opens the finish card with the sub's name and text, and a second click closes it", async ({ page }) => {

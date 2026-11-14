@@ -307,13 +307,19 @@ function renderDrafts(s: ZoneState<"drafts">, ctx: ZoneCtx): string {
 const listZone = (cls: string, icon: string, title: string) => (s: { cards: RenderedMessage[] }): string =>
   `<section class="cdash-zone cdash-card cdash-list ${cls}">${head(icon, title)}<div class="cdash-stack">${s.cards.map(cardHtml).join("")}</div></section>`;
 
-/** Result: the chat's last closing message in a card of its own, apart from the
- *  Plan card's steps. Dimmed once Joe has written since, until the next one. */
+/** Result: the chat's last closing message in a card of its own on the left, tinted
+ *  green so it stands out, apart from the Plan card's steps. Dimmed once Joe has
+ *  written since, until the next one. Got it removes it (the Plan card keeps a
+ *  summary row); a row with no stable id has no button, since its removal
+ *  would not stick. */
 function renderResult(s: ZoneState<"result">): string {
   const when = writtenLabel(s.message);
   const at = when ? ` <em class="cdash-h-at">${escapeHtml(when)}</em>` : "";
+  const got = s.key
+    ? `<div class="cdash-got"><button type="button" class="cdash-got-btn" data-act="result-dismiss" data-wkey="${escapeHtml(s.key)}"><i class="ph ph-check"></i>Got it</button></div>`
+    : "";
   return `<section class="cdash-zone cdash-card cdash-resultcard${s.stale ? " is-stale" : ""}">${head("ph-flag-checkered", "Result", at)}`
-    + `<div class="cdash-pbody${s.stale ? " cdash-dim" : ""}"><div class="cdash-result">${cardHtml(s.message)}</div></div></section>`;
+    + `<div class="cdash-pbody${s.stale ? " cdash-dim" : ""}"><div class="cdash-result">${cardHtml(s.message)}</div></div>${got}</section>`;
 }
 
 /** Finished subchats, kept until Joe dismisses them (finished-tray.ts). */

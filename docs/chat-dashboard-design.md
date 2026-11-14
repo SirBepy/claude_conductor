@@ -238,15 +238,27 @@ Board: preview slug `ask-ux-options` (real app shots of the three options).
 - **No running Status zone.** Progress lives in Plan and a small status footer at the bottom of the
   Plan card; the status line above the message box goes. Reason: "anything for status should be in
   the plan" (2026-11-09); as progress, Status only repeated Plan's active step.
-- **Result is a card of its own under the Plan card, independent of the steps** (Joe, 2026-11-14: "i
-  want the result to be independant from the steps in the top right ... realistically id still like
-  to see the steps"). The finished plan's steps stay on the Plan card; the Result no longer takes
-  their spot. It replaced the 2026-11-10 layout where the Result sat under the finished steps in the
-  Plan card (and before that the "Plan 6/6" flip button, which hid the plan). Why the right column:
-  nothing on the left moves, and it was fully in view at every chat height measured; at the bottom
-  of the left column 187px of 300 was cut off in a 640px chat with a waiting question, and above
-  Answers pushed Answers ~310px down (Joe's pick, 2026-11-10, sub "result-placement"). An earlier
-  plan in the pager still shows the report it ended with.
+- **Result is a card of its own on the LEFT, under Answers, independent of the steps** (Joe,
+  2026-11-14: "i want the result to be independant from the steps in the top right ... realistically
+  id still like to see the steps", then "i wanted result to be on the left side... so that all the
+  most important info gets seen quite quickly and it gets emphasized"). The finished plan's steps
+  stay on the Plan card; the Result no longer takes their spot. The card is tinted green. Joe picked
+  "Under Answers" over above Answers and under Waiting on you, "lets try this for now... if i hate it
+  ill make a new chat after the new release". This reverses the 2026-11-10 pick of the right column
+  (sub "result-placement": nothing on the left moves, 187px of 300 cut off at the bottom of the left
+  column in a 640px chat, above Answers pushed Answers ~310px down), and the 2026-11-10 layout where
+  the Result sat under the finished steps in the Plan card (before that the "Plan 6/6" flip button,
+  which hid the plan). An earlier plan in the pager still shows the report it ended with.
+- **Got it dismisses the Result, and the Plan card keeps a summary row** (2026-11-14: "the result
+  should be dismissible if i saw it... myb also with a got it kind of button, and then from the plan,
+  we can have the very quick summary of the result ... and then a button opens up the result"). Joe
+  picked title and subtitle over title only (the verdict, then the text's first line; a kind with no
+  verdict, handoff or artifact, leads with the text's first line and takes the next as the subtitle:
+  `resultLines`). The row's button opens the full result inside the Plan card and turns into Hide,
+  rather than bringing the green card back. The dismissal is stored per chat in localStorage next to
+  the Waiting removals (`waiting-dismissed.ts`, keyed by the message id): it is what keeps a reload
+  from bringing the card back. A dismissed result is not replaced by an older one; the next result
+  that lands draws a new card. A row with no stable id has no Got it.
 - **Whenever the chat goes idle, Joe sees an update.** The daemon already makes every turn send a
   `send_message`, but only a `report` drew in Result, so a turn that ended on a `call`, `discovery`,
   `handoff`, `correction` or `artifact` left him nothing prominent ("sometimes you wanna tell me smth
@@ -256,7 +268,7 @@ Board: preview slug `ask-ux-options` (real app shots of the three options).
   because Answers, Waiting on you and the Plan card already hold them. It stays until the next
   result replaces it, dimmed once Joe has written since. Notes does not repeat the message Result
   shows. Subchats owe no such update at idle.
-- **Finished subs wait in a tray under Result until Joe dismisses them** (2026-11-14: "when a
+- **Finished subs wait in a tray under the Plan card until Joe dismisses them** (2026-11-14: "when a
   subchat is fully done and prolly not needed anymore, it shows me in result that chat"). One row
   per sub: avatar (name on its hover card), the finish card's verdict as the one line, the context
   it ended with, a Dismiss x; a click opens the finish card. Dismiss is the sub card's existing
@@ -423,7 +435,7 @@ Board: preview slug `subs-card`; rules sheet: `subs-card-rules`.
   works, green done). It lists working, queued and asking subs; an asking sub's question also stays
   in Waiting on you. Reason: a strip under the title sat above Answers and Plan and broke "those two
   always sit on top"; text rows were more than Joe wanted.
-- **Finished subs are not on this card** (2026-11-14): they are in the finished tray under Result
+- **Finished subs are not on this card** (2026-11-14): they are in the finished tray under the Plan card
   until Joe dismisses them. The card lists the subs that are not finished: asking, working, queued,
   paused, at their limit, stopped. The earlier rule (finished subs stay 1 hour, then fold under
   "+N earlier", a display rule only, pc-1664) now applies only to the header's sub list, which still

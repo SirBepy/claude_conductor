@@ -71,10 +71,54 @@ describe("Result", () => {
     expect(zone(c.dash(), "result").stale).toBe(true);
   });
 
-  it("is a card of its own under the Plan card, and Notes does not repeat it", () => {
+  it("is a card of its own on the left, under Answers, and Notes does not repeat it", () => {
     const d = chat().joe("a").send({ kind: "call", verdict: "Went with B", text: "t" }).status("done").dash();
-    expect(d.right.map((z) => z.id)).toEqual(["plan", "result"]);
+    expect(d.left.map((z) => z.id)).toEqual(["answers", "result"]);
+    expect(d.right.map((z) => z.id)).toEqual(["plan"]);
     expect(zone(d, "notes")).toBeNull();
+  });
+
+  it("goes once Joe says Got it, and the Plan card keeps its title and subtitle as a summary", () => {
+    const c = chat().joe("a").send({ kind: "report", verdict: "Built, not pushed", text: "Footer shows the last update\nThree files changed" }).status("done");
+    const key = zone(c.dash(), "result").key;
+    expect(key).toBeTruthy();
+    const d = c.dash({ dismissed: new Set([key]) });
+    expect(zone(d, "result")).toBeNull();
+    expect(zone(d, "plan").resultSummary).toMatchObject({ key, title: "Built, not pushed", subtitle: "Footer shows the last update" });
+    // Not dismissed: no summary row.
+    expect(zone(c.dash(), "plan").resultSummary).toBeNull();
+  });
+
+  it("does not fall back to an older result once the newest is dismissed", () => {
+    const c = chat().joe("a").send({ kind: "report", verdict: "Old", text: "t" }).status("done")
+      .joe("b").send({ kind: "call", verdict: "New", text: "t" }).status("done");
+    const d = c.dash({ dismissed: new Set([zone(c.dash(), "result").key]) });
+    expect(zone(d, "result")).toBeNull();
+    expect(zone(d, "plan").resultSummary.title).toBe("New");
+  });
+
+  it("titles a kind with no verdict from its text: the first line, then the next as the subtitle", () => {
+    const c = chat().joe("a").send({ kind: "handoff", text: "Passing the sign-in work to Lenar\nHe has the token" }).status("done");
+    const d = c.dash({ dismissed: new Set([zone(c.dash(), "result").key]) });
+    expect(zone(d, "plan").resultSummary).toMatchObject({ title: "Passing the sign-in work to Lenar", subtitle: "He has the token" });
+  });
+
+  it("draws a tinted card with a Got it button, and the summary row opens the result inside the Plan card", () => {
+    const c = chat().joe("a").send({ kind: "report", verdict: "Built", text: "Footer shows it" }).status("done");
+    const live = zone(c.dash(), "result");
+    const html = renderZone("result", live, { ui: initialUi(), busy: false });
+    expect(html).toContain('data-act="result-dismiss"');
+    expect(html).toContain(`data-wkey="${live.key}"`);
+    const dismissed = c.dash({ dismissed: new Set([live.key]) });
+    const plan = zone(dismissed, "plan");
+    const closed = renderZone("plan", plan, { ui: initialUi(), busy: false });
+    expect(closed).toContain("cdash-rsum");
+    expect(closed).toContain("Open result");
+    expect(closed).toContain("Footer shows it");
+    expect(closed).not.toContain("cdash-result");
+    const open = renderZone("plan", plan, { ui: { ...initialUi(), resultOpen: live.key }, busy: false });
+    expect(open).toContain("Hide result");
+    expect(open).toContain('<div class="cdash-result">');
   });
 
   it("renders the sub-less card dimmed when stale", () => {
