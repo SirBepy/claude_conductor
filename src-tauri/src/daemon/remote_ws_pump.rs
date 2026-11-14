@@ -13,6 +13,7 @@ use crate::daemon::machines::registry::PeerMachine;
 use crate::daemon::session::Session;
 use crate::daemon::state::DaemonState;
 
+use super::methods::injection_util::short;
 use super::remote_handlers::{strip_hidden_instances, strip_hidden_instances_json};
 
 /// How often a stream that beats (the global stream, and a per-chat stream
@@ -106,20 +107,16 @@ impl CloseCause {
 fn open_line(dev: &str, kind: &str, chat: Option<&str>, heartbeat: bool) -> String {
     match chat {
         None => format!("[remote-ws] dev={dev} kind={kind} global open"),
-        Some(id) => format!("[remote-ws] dev={dev} kind={kind} chat {} open hb={heartbeat}", short_id(id)),
+        Some(id) => format!("[remote-ws] dev={dev} kind={kind} chat {} open hb={heartbeat}", short(id)),
     }
 }
 
 fn close_line(dev: &str, kind: &str, chat: Option<&str>, age: std::time::Duration, cause: CloseCause) -> String {
     let scope = match chat {
         None => "global".to_string(),
-        Some(id) => format!("chat {}", short_id(id)),
+        Some(id) => format!("chat {}", short(id)),
     };
     format!("[remote-ws] dev={dev} kind={kind} {scope} closed after {}s: {}", age.as_secs(), cause.as_str())
-}
-
-fn short_id(id: &str) -> String {
-    id.chars().take(8).collect()
 }
 
 /// Logs the open line now and the close line when `finish` is called.
