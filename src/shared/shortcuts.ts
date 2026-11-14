@@ -278,9 +278,9 @@ function _init(): void {
   // The catch keeps a test that mocks the module without this export (or tears down
   // before the import settles) from raising an unhandled rejection; the shortcut
   // then runs without the view gate.
-  void import("./navigation").then(m => { getActiveView = m.getActiveView; }).catch(() => {});
+  void import("./navigation").then(m => { getActiveView = m.getActiveView; }).catch((e) => console.warn("[shortcuts] navigation import failed", e));
   let isAnyModalOpen: (() => boolean) | null = null;
-  void import("./modal-input-lock").then(m => { isAnyModalOpen = m.isAnyModalOpen; }).catch(() => {});
+  void import("./modal-input-lock").then(m => { isAnyModalOpen = m.isAnyModalOpen; }).catch((e) => console.warn("[shortcuts] modal-input-lock import failed", e));
 
   // Held Alt shows the model/effort keys as keycaps under the pane header's values
   // (config-bump.css), and keeps showing them through repeated Alt+Up/Down.
