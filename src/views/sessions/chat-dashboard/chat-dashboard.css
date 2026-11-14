@@ -478,13 +478,11 @@ button.cdash-step:hover {
 .cdash-resultcard.is-stale {
   border-color: var(--color-border);
 }
-.cdash-got {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 8px;
-}
 .cdash-got-btn {
   display: inline-flex;
+  margin-left: auto;
+  letter-spacing: 0;
+  text-transform: none;
   align-items: center;
   gap: 5px;
   padding: 4px 11px;

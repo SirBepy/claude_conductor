@@ -315,11 +315,12 @@ const listZone = (cls: string, icon: string, title: string) => (s: { cards: Rend
 function renderResult(s: ZoneState<"result">): string {
   const when = writtenLabel(s.message);
   const at = when ? ` <em class="cdash-h-at">${escapeHtml(when)}</em>` : "";
+  // In the header, not under the body: a tall result (a table) scrolls the left column and would leave the button below the fold.
   const got = s.key
-    ? `<div class="cdash-got"><button type="button" class="cdash-got-btn" data-act="result-dismiss" data-wkey="${escapeHtml(s.key)}"><i class="ph ph-check"></i>Got it</button></div>`
+    ? `<button type="button" class="cdash-got-btn" data-act="result-dismiss" data-wkey="${escapeHtml(s.key)}"><i class="ph ph-check"></i>Got it</button>`
     : "";
-  return `<section class="cdash-zone cdash-card cdash-resultcard${s.stale ? " is-stale" : ""}">${head("ph-flag-checkered", "Result", at)}`
-    + `<div class="cdash-pbody${s.stale ? " cdash-dim" : ""}"><div class="cdash-result">${cardHtml(s.message)}</div></div>${got}</section>`;
+  return `<section class="cdash-zone cdash-card cdash-resultcard${s.stale ? " is-stale" : ""}">${head("ph-flag-checkered", "Result", at + got)}`
+    + `<div class="cdash-pbody${s.stale ? " cdash-dim" : ""}"><div class="cdash-result">${cardHtml(s.message)}</div></div></section>`;
 }
 
 /** Finished subchats, kept until Joe dismisses them (finished-tray.ts). */

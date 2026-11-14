@@ -109,6 +109,8 @@ describe("Result", () => {
     const html = renderZone("result", live, { ui: initialUi(), busy: false });
     expect(html).toContain('data-act="result-dismiss"');
     expect(html).toContain(`data-wkey="${live.key}"`);
+    // In the header, ahead of the body: a tall result scrolls the left column and must not hide the button.
+    expect(html.indexOf('data-act="result-dismiss"')).toBeLessThan(html.indexOf("cdash-pbody"));
     const dismissed = c.dash({ dismissed: new Set([live.key]) });
     const plan = zone(dismissed, "plan");
     const closed = renderZone("plan", plan, { ui: initialUi(), busy: false });
