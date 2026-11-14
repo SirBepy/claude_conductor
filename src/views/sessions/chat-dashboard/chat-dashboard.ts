@@ -803,6 +803,7 @@ export class ChatDashboard {
       case "strip-latest": ui.stripPick = null; ui.stripExpanded = false; break;
       case "drafts-copied": ui.copiedOpen = !ui.copiedOpen; break;
       case "pv-others": ui.pvOthersOpen = !ui.pvOthersOpen; break;
+      case "links-tab": ui.linksTab = t.dataset.tab === "files" ? "files" : "links"; break;
       case "result-toggle": ui.resultOpen = ui.resultOpen === t.dataset.wkey ? null : (t.dataset.wkey ?? null); break;
       case "finished-open": ui.finishedOpen = ui.finishedOpen === t.dataset.sub ? null : (t.dataset.sub ?? null); break;
       case "step": ui.openStep = ui.openStep === t.dataset.step ? null : (t.dataset.step ?? null); break;

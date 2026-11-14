@@ -79,13 +79,42 @@ describe("Links and files", () => {
     await tick();
     const card = pane.querySelector(".cdash-links");
     expect(card).not.toBeNull();
+    // Links is the default tab; the files are one click away on their own tab (pc-1745).
+    expect([...card.querySelectorAll("[data-act='links-tab']")].map((b) => b.textContent)).toEqual(["Links1", "Files2"]);
+    expect(card.querySelector(".cdash-ltab.on").dataset.tab).toBe("links");
+    expect(card.querySelectorAll(".file-ref")).toHaveLength(0);
     const link = card.querySelector("a.cdash-link");
     expect(link.getAttribute("href")).toBe("https://github.com/acme/app/pull/42");
     expect(link.textContent).toContain("PR #42");
-    const chips = [...card.querySelectorAll(".file-ref")].map((c) => c.dataset.path);
+    expect(link.querySelector(".cdash-lsub").textContent).toBe("github.com");
+    card.querySelector("[data-act='links-tab'][data-tab='files']").click();
+    const files = pane.querySelector(".cdash-links");
+    const chips = [...files.querySelectorAll(".file-ref")].map((c) => c.dataset.path);
     expect(chips).toEqual(expect.arrayContaining(["C:\\proj\\src\\a.ts", "C:\\proj\\src\\b.ts"]));
-    expect(card.querySelector(".cdash-touched")).not.toBeNull();
-    expect([...card.querySelectorAll("[data-act='quick-view']")].map((b) => b.dataset.view)).toEqual(["plan", "decided", "memory"]);
+    expect(files.querySelector(".cdash-frow .cdash-lsub").textContent).toBe("C:\\proj\\src");
+    expect(files.querySelector(".cdash-touched")).not.toBeNull();
+    expect(files.querySelectorAll("a.cdash-link")).toHaveLength(0);
+    expect([...files.querySelectorAll("[data-act='quick-view']")].map((b) => b.dataset.view)).toEqual(["plan", "decided", "memory"]);
+  });
+
+  it("keeps the tab Joe picked across a redraw, and opens on Files when the chat has no link", async () => {
+    const { pane, r } = mountPane();
+    new ChatDashboard(pane, r);
+    feed(r, [
+      userEvent("edit it"),
+      ...tool("Edit", { file_path: "C:\\proj\\src\\only.ts", old_string: "a", new_string: "b" }),
+      ...send({ kind: "artifact", text: "done, see C:\\proj\\src\\only.ts" }),
+    ]);
+    await tick();
+    expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("files");
+    expect(pane.querySelectorAll(".cdash-links .file-ref")).toHaveLength(1);
+    pane.querySelector("[data-act='links-tab'][data-tab='links']").click();
+    expect(pane.querySelector(".cdash-llist .cdash-lnone").textContent).toBe("No links yet.");
+    // A later message redraws the card from the model; the tab stays where Joe put it.
+    feed(r, send({ kind: "artifact", text: "also https://github.com/acme/app/pull/7" }));
+    await tick();
+    expect(pane.querySelector(".cdash-ltab.on").dataset.tab).toBe("links");
+    expect(pane.querySelector(".cdash-llist a.cdash-link").textContent).toContain("PR #7");
   });
 
   it("draws no card for a one-question chat", async () => {

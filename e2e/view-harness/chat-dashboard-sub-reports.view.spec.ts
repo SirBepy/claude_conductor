@@ -1,3 +1,4 @@
+// Reviewed 2026-11-14 (pc-1745, the Links and files card is a tabbed, scrollable list of rows with its tab kept in the dashboard's own state): nothing this spec asserts changed; run after the change and it passes.
 // asserts: src/shared/chat/dashboard/dashboard-model.ts, src/views/sessions/chat-dashboard/dashboard-zones.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/sessions/chat-dashboard/finished-tray.ts, src/views/sessions/chat-dashboard/finished-tray.css, src/shared/chat/subchat-cards.ts
 import { test, expect, type Page } from "@playwright/test";
 import { capture, fireEvent, invokeCalls, mountView, SESSIONS_BASE_INVOKE, sessionInstance } from "./harness";

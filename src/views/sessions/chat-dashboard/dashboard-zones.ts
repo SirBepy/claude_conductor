@@ -46,10 +46,14 @@ export interface DashUi extends PlanUi {
   pvOthersOpen: boolean;
   /** Id of the finished sub whose finish card is open in the tray, or null. */
   finishedOpen: string | null;
+  /** The Links and files tab Joe picked, or null for the default (Links, or Files
+   *  when the chat has no link yet). Lives here, not in the card's HTML, so a
+   *  redraw keeps it. */
+  linksTab: "links" | "files" | null;
 }
 
 export function initialUi(): DashUi {
-  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false, draftOpen: {}, copiedOpen: false, pvOthersOpen: false, finishedOpen: null };
+  return { ...initialPlanUi(), stripPick: null, stripExpanded: false, earlierOpen: false, draftOpen: {}, copiedOpen: false, pvOthersOpen: false, finishedOpen: null, linksTab: null };
 }
 
 export interface ZoneCtx {
@@ -199,13 +203,6 @@ const LINK_ICON: Record<LinkItem["kind"], string> = {
   draft: "ph-git-pull-request",
 };
 
-function linkHtml(l: LinkItem): string {
-  const inner = `<i class="ph ${LINK_ICON[l.kind]}"></i><span>${escapeHtml(l.label)}</span>`;
-  return l.url
-    ? `<a class="cdash-link" href="${escapeHtml(l.url)}" title="${escapeHtml(l.url)}" data-link-kind="${l.kind}">${inner}</a>`
-    : `<span class="cdash-link is-draft" data-link-kind="${l.kind}">${inner}</span>`;
-}
-
 /** The same chip markup file-refs.ts builds, so the dashboard's click handler
  *  for file refs (which opens Code mode or the editor) serves it unchanged. */
 export function fileChipHtml(path: string, extra = ""): string {
@@ -220,11 +217,39 @@ function quickButtons(ctx: ZoneCtx): string {
   }).join("")}</div>`;
 }
 
+/** The folder part of a path, for the muted second column of a file row. */
+function dirOf(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const i = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return i > 0 ? trimmed.slice(0, i) : "";
+}
+
+function linkRow(l: LinkItem): string {
+  const host = l.url ? (() => { try { return new URL(l.url).hostname.replace(/^www\./, ""); } catch { return ""; } })() : "draft";
+  const inner = `<i class="ph ${LINK_ICON[l.kind]}"></i><span class="cdash-lname">${escapeHtml(l.label)}</span><span class="cdash-lsub">${escapeHtml(host)}</span>`;
+  return l.url
+    ? `<a class="cdash-link cdash-lrow" href="${escapeHtml(l.url)}" title="${escapeHtml(l.url)}" data-link-kind="${l.kind}">${inner}</a>`
+    : `<span class="cdash-link cdash-lrow is-draft" data-link-kind="${l.kind}">${inner}</span>`;
+}
+
+function fileRow(f: { path: string; touched: boolean }): string {
+  const dir = dirOf(f.path);
+  return `<div class="cdash-lrow cdash-frow">${fileChipHtml(f.path, f.touched ? `<i class="ph ph-pencil-simple cdash-touched" title="Edited by the chat"></i>` : "")}`
+    + (dir ? `<span class="cdash-lsub" title="${escapeHtml(dir)}">${escapeHtml(dir)}</span>` : "") + `</div>`;
+}
+
+/** Links and files: one scrollable list at a time, a tab for each. Links is the
+ *  default tab (the one Joe reads most); a chat with files only opens on Files. */
 function renderLinks(s: ZoneState<"links">, ctx: ZoneCtx): string {
-  const links = s.links.length > 0 ? `<div class="cdash-chips">${s.links.map(linkHtml).join("")}</div>` : "";
-  const files = s.files.length > 0
-    ? `<div class="cdash-chips">${s.files.map((f) => fileChipHtml(f.path, f.touched ? `<i class="ph ph-pencil-simple cdash-touched" title="Edited by the chat"></i>` : "")).join("")}</div>` : "";
-  return `<section class="cdash-zone cdash-card cdash-links">${head("ph-link", "Links and files")}${links}${files}${quickButtons(ctx)}</section>`;
+  const tab = ctx.ui.linksTab ?? (s.links.length === 0 && s.files.length > 0 ? "files" : "links");
+  const tabBtn = (id: "links" | "files", label: string, n: number): string =>
+    `<button type="button" class="cdash-ltab${tab === id ? " on" : ""}" role="tab" aria-selected="${tab === id}" data-act="links-tab" data-tab="${id}">${label}<span class="cdash-lcount">${n}</span></button>`;
+  const rows = tab === "links" ? s.links.map(linkRow) : s.files.map(fileRow);
+  const empty = tab === "links" ? "No links yet." : "No files yet.";
+  const list = rows.length > 0 ? rows.join("") : `<p class="cdash-lnone">${empty}</p>`;
+  return `<section class="cdash-zone cdash-card cdash-links">${head("ph-link", "Links and files")}`
+    + `<div class="cdash-ltabs" role="tablist">${tabBtn("links", "Links", s.links.length)}${tabBtn("files", "Files", s.files.length)}</div>`
+    + `<div class="cdash-llist" role="tabpanel" data-tab="${tab}">${list}</div>${quickButtons(ctx)}</section>`;
 }
 
 const PREVIEW_VIEW_W = 1280;

@@ -1,3 +1,4 @@
+// Reviewed 2026-11-14 (pc-1745, Links and files is a tabbed, scrollable list of rows): the card's test opens the Files tab before reading the file rows; the rest is unchanged.
 // Reviewed 2026-11-14 (pc-1746, a relative link in a quick view opens that file in the dialog instead of navigating the webview): the memory test now clicks the index link; the rest is unchanged.
 // Reviewed 2026-11-14 (Result card, finished tray): the Result is its own card under Plan, finished subs sit in a tray under it and the From subs card is gone; nothing this spec asserts changed, and it passes.
 // Reviewed 2026-11-13 (From subs): the dashboard gained a From subs zone in the left column that draws sub reports which are not answers; nothing this spec asserts changed, and it passes.
@@ -124,9 +125,15 @@ test.describe("chat dashboard extra cards", () => {
     await expect(card.locator("a.cdash-link")).toHaveCount(2);
     await expect(card.locator("a.cdash-link").first()).toContainText("CI run 9001");
     await expect(card.locator("a.cdash-link").nth(1)).toContainText("PR #42");
+    // Files sit on their own tab; Links is the one the card opens on (pc-1745).
+    await expect(card.locator(".cdash-ltab.on")).toHaveText(/Links/);
+    await expect(card.locator(".file-ref")).toHaveCount(0);
+    await card.locator("[data-act='links-tab'][data-tab='files']").click();
     await expect(card.locator(".file-ref[data-path='C:\\\\proj\\\\src\\\\trello.ts']")).toBeVisible();
     await expect(card.locator(".file-ref[data-path='C:\\\\proj\\\\docs\\\\notes.md']")).toBeVisible();
     await expect(card.locator("[data-act='quick-view']")).toHaveText(["Bigger plan", "Decided", "Project memory"]);
+    // The list is bounded and scrolls inside the card.
+    expect(await card.locator(".cdash-llist").evaluate((el) => getComputedStyle(el).overflowY)).toBe("auto");
     // Nothing behind Bigger plan or Decided: both read muted, Project memory does not.
     await expect(card.locator("[data-view='plan']")).toHaveClass(/is-none/);
     await expect(card.locator("[data-view='decided']")).toHaveClass(/is-none/);

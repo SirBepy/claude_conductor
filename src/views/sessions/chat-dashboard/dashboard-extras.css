@@ -4,12 +4,6 @@
    read view. */
 
 /* ---- Links and files ---- */
-.cdash-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-bottom: 7px;
-}
 .cdash-link,
 .cdash-zone .file-ref {
   display: inline-flex;
@@ -62,6 +56,93 @@
   color: var(--color-text-muted);
 }
 
+/* Links and files as tabs over one scrollable list of rows (pc-1745). The
+   list has a bounded height so a chat with many links never stretches the
+   column; a row is a quiet line, not a pill. */
+.cdash-ltabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
+}
+.cdash-ltab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cdash-ltab:hover { color: var(--color-text); }
+.cdash-ltab.on {
+  color: var(--color-text);
+  border-bottom-color: var(--color-primary);
+}
+.cdash-ltab:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+.cdash-lcount {
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+.cdash-llist {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-bottom: 7px;
+}
+.cdash-lnone {
+  margin: 6px 2px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+.cdash-lrow,
+.cdash-zone .cdash-lrow .file-ref {
+  border: 0;
+  border-radius: 4px;
+  padding: 3px 4px;
+  background: transparent;
+  max-width: none;
+}
+.cdash-lrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.cdash-zone .cdash-lrow .file-ref {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.cdash-lname {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cdash-lsub {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+
 /* The three quick views: quiet text buttons, never loud pills. */
 .cdash-qv {
   display: flex;
@@ -71,7 +152,7 @@
   padding-top: 7px;
   border-top: 1px solid var(--color-border);
 }
-.cdash-chips + .cdash-qv,
+.cdash-llist + .cdash-qv,
 .cdash-links > .cdash-h + .cdash-qv {
   margin-top: 0;
 }
