@@ -461,7 +461,7 @@ Board: preview slug `subs-card`; rules sheet: `subs-card-rules`.
   Copy brief in the menu, Move to sidebar turning a sub into an ordinary chat, model/effort words and
   message/turn counts in the details.
 
-## Subchats card redesign, live subs (2026-11-14, brainstorm only, not built)
+## Subchats card redesign, live subs (2026-11-14, built 2a4c52a1)
 
 Board: preview slug `subs-redesign` (scratch source `.for_bepy/mockups/subs-redesign.html`). Joe: "i
 definitely think its important that i get to see whos working... and whos stuck...", "it could even be
@@ -488,7 +488,9 @@ Settled (Joe's picks on the question card):
 - **Scale:** 1 to 3 subs the card stays small; past 5 stuck rows it shows 5 plus "+N more"; working
   avatars wrap; with no live subs the card does not draw.
 
-Not asked yet (decide at build, or ask in one batch): where a popover first lands and whether it
+Built as decided, with these build-time calls (Claude's, not Joe's): a peek opens right of the card, level with the click, each further one steps 26px down and right; it is draggable by its top line, closed only by its x, positions in memory only; no cap on open peeks; the avatar hover card stays. The peek shows the CURRENT plan step with a bar, the last action or the stuck reason, context, brief, images, preview and the message box, but NOT the full step list: that needs a daemon read of the sub's transcript plan (open).
+
+Were not asked (now settled as above): where a popover first lands and whether it
 survives a re-derive and a chat switch (Claude's lean: draggable, closes with x or Esc, positions kept
 in memory only, no persistence); a cap on open popovers; whether the avatar hover card stays on the
 working avatars (lean: yes, unchanged).
