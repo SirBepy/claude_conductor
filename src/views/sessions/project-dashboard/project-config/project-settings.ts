@@ -62,7 +62,7 @@ function template() {
         </div>
       </div>
       <div class="ps-group">
-        <div class="ps-group-title" title="This project's own MCP servers (a local app's /mcp). Each is checked before a turn starts and left out if it does not answer.">MCP servers</div>
+        <div class="ps-group-title" title="This project's own MCP servers (a local app's /mcp, or a program such as Roblox Studio's mcp.bat). Each is checked before a turn starts and left out if it does not answer or is not found.">MCP servers</div>
         <div class="ps-field" id="mcpServersControl"></div>
       </div>
       <div class="ps-group">
