@@ -72,8 +72,16 @@ pub fn register_lifecycle(router: &mut Router, state: Arc<DaemonState>) {
                 if crate::daemon::subchats::closing::request_close(&state, &p.session_id) {
                     return Ok(json!({"ok": true, "held": true}));
                 }
-                let now = chrono::Utc::now().to_rfc3339();
-                state.registry.mark_ended(&p.session_id, EndReason::Manual, &now);
+                // A sub closed from the UI ends the way the daemon's own "End it"
+                // does (writer slot, held queue, worktree and its closed mark,
+                // cards): a bare `mark_ended` left its tree on disk with no card.
+                let is_sub = state.registry.get(&p.session_id).is_some_and(|i| crate::daemon::subchats::is_sub(&i));
+                if is_sub {
+                    crate::daemon::subchats::end_sub(&state, &p.session_id);
+                } else {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    state.registry.mark_ended(&p.session_id, EndReason::Manual, &now);
+                }
                 crate::daemon::subchats::closing::settle_family(&state, &p.session_id).await;
                 // Fallback close path (External sessions, or end_session already
                 // gone) - drop here too so it isn't the only route that leaks.
@@ -293,6 +301,52 @@ mod tests {
     #[tokio::test]
     async fn a_model_pick_mid_turn_respawns_the_chat_at_once() {
         assert!(picks_a_model_on(true, false).await, "the running turn is dead either way, so apply it now");
+    }
+
+    /// Closing a sub from the UI (the X, "Close session", the sub card's Close)
+    /// ends it like "End it": a sub still queued for its start loses its recipe, so
+    /// it can never launch later, and a second close of it changes nothing.
+    #[tokio::test]
+    async fn mark_session_ended_on_a_sub_ends_it_like_end_it() {
+        use crate::daemon::subchats::held;
+        let _data = crate::daemon::subchats::TempDataDir::new();
+        let state = dummy_state();
+        let (main, sub) = ("close-sub-main", "close-sub-sub");
+        for id in [main, sub] {
+            state.registry.upsert_interactive(id, std::path::Path::new("."), "proj", "2026-11-14T00:00:00Z");
+        }
+        state.registry.set_subchat_of(sub, Some(main.to_string()));
+        held::hold(
+            &state,
+            held::Held {
+                sub_id: sub.into(),
+                reason: "waiting for a sub".into(),
+                after: Some("nobody".into()),
+                after_name: "nobody".into(),
+                launch: held::LaunchSpec {
+                    cwd: std::path::PathBuf::from("."),
+                    model: "sonnet".into(),
+                    effort: "high".into(),
+                    account_id: None,
+                    first_message: "go".into(),
+                },
+            },
+        )
+        .unwrap();
+        assert!(held::is_held(sub));
+
+        let mut r = Router::new();
+        register_lifecycle(&mut r, state.clone());
+        for _ in 0..2 {
+            let resp = r.dispatch(Request {
+                jsonrpc: "2.0".into(), id: json!(1),
+                method: "mark_session_ended".into(),
+                params: Some(json!({"session_id": sub})),
+            }, dummy_ctx()).await;
+            assert!(resp.error.is_none(), "got {:?}", resp.error);
+        }
+        assert!(state.registry.get(sub).unwrap().ended_at.is_some());
+        assert!(!held::is_held(sub), "its recipe goes with it, so it never starts later");
     }
 
     #[tokio::test]
