@@ -32,6 +32,7 @@ mod people;
 mod permission;
 mod plan;
 mod preview;
+mod project_mcp;
 pub(crate) mod preview_render;
 mod publish_gate;
 mod question;
@@ -207,6 +208,7 @@ pub async fn spawn(state: Arc<DaemonState>) -> Result<u16, HookBindError> {
         .route("/jarvis/respond-worker-prompt", post(jarvis::on_respond_worker_prompt))
         .route("/chat/spawn", post(spawn_chat::on_spawn_chat))
         .route("/projects/create", post(create_project::on_create_project))
+        .route("/projects/mcp", post(project_mcp::on_project_mcp))
         .route("/channel/list-peers", post(channel::on_list_peers))
         .route("/channel/read-messages", post(channel::on_read_messages))
         .route("/channel/post-message", post(channel::on_post_message))

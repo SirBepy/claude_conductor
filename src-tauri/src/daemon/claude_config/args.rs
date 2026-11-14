@@ -152,6 +152,11 @@ pub(crate) const TURN_STATUS_PROMPT: &str ="Call the report_turn_status tool as 
 /// call lands straight on that dedicated card instead of stacking a generic
 /// "allow tool request_secret?" permission prompt in front of it.
 ///
+/// `project_mcp` is here because its handler gates the one dangerous action itself:
+/// an `add` raises an approval card showing the exact entry (a program the daemon
+/// would start every turn) that no auto path may answer, so a generic permission
+/// prompt in front of it would only stack a second card on the first.
+///
 /// `person` is deliberately NOT here: `remember` writes to the user's
 /// Obsidian vault, and that text comes back on every future turn, in every
 /// project, as a trusted "People on <client>" fact - a tricked agent
@@ -169,6 +174,7 @@ pub(crate) const PRETRUSTED_TOOLS: &str = "mcp__cc_conductor__ask_user_question 
      mcp__cc_conductor__write_draft \
      mcp__cc_conductor__write_user_todo \
      mcp__cc_conductor__schedule \
+     mcp__cc_conductor__project_mcp \
      mcp__cc_conductor__in_meeting \
      mcp__cc_conductor__finish_subchat \
      mcp__cc_conductor__subchat \
@@ -290,6 +296,7 @@ mod tests {
             "mcp__cc_conductor__write_draft",
             "mcp__cc_conductor__write_user_todo",
             "mcp__cc_conductor__schedule",
+            "mcp__cc_conductor__project_mcp",
             "mcp__cc_conductor__in_meeting",
             "mcp__cc_conductor__finish_subchat",
             "mcp__cc_conductor__subchat",
@@ -297,7 +304,7 @@ mod tests {
         ] {
             assert!(tools.contains(&name), "PRETRUSTED_TOOLS missing {name}: {tools:?}");
         }
-        assert_eq!(tools.len(), 15, "unexpected extra/missing entry: {tools:?}");
+        assert_eq!(tools.len(), 16, "unexpected extra/missing entry: {tools:?}");
     }
 
     /// `person` writes to the user's vault and must go through the ordinary

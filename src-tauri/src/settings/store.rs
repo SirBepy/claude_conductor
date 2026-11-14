@@ -291,6 +291,26 @@ pub fn set_project_main_chat(settings: &mut crate::types::Settings, project_id: 
     true
 }
 
+/// Replaces `project_id`'s listed MCP servers. False, with nothing changed and
+/// no generation bump, when the project is unknown or already holds that list,
+/// so a caller publishes only a real change. Shared by the daemon's cache and
+/// the app process's persistence handler.
+pub fn set_project_mcp_servers(
+    settings: &mut crate::types::Settings,
+    project_id: &str,
+    servers: &[crate::types::project::ProjectMcpServer],
+) -> bool {
+    let Some(p) = settings.projects.iter_mut().find(|p| p.id == project_id) else {
+        return false;
+    };
+    if p.mcp_servers == servers {
+        return false;
+    }
+    p.mcp_servers = servers.to_vec();
+    settings.bump_generation();
+    true
+}
+
 /// Saves settings to disk, creating parent dirs if needed.
 pub fn save(path: &Path, settings: &Settings) -> Result<()> {
     if let Some(parent) = path.parent() {

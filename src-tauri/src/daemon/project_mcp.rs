@@ -107,7 +107,7 @@ pub(crate) fn announce_skipped(session: &crate::daemon::session::Session, skippe
     );
 }
 
-fn check(s: &ProjectMcpServer) -> Result<(), &'static str> {
+pub(crate) fn check(s: &ProjectMcpServer) -> Result<(), &'static str> {
     if s.name == OWN_KEY {
         return Err("reserved name");
     }
