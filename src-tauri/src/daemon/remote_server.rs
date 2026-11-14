@@ -127,6 +127,33 @@ pub(super) struct RemoteCtx {
 /// Start the remote-access server. Best-effort: a bind failure disables remote
 /// access for this run but never takes down the daemon. Call once at startup.
 ///
+/// First wait and ceiling between bind attempts. A daemon restarting while the
+/// old process still holds the port frees it within seconds, so the early waits
+/// are short; the ceiling keeps a port that stays taken from spinning.
+const BIND_RETRY_BASE: std::time::Duration = std::time::Duration::from_secs(1);
+const BIND_RETRY_CAP: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Binds the loopback port, waiting and retrying while it is taken. Never gives
+/// up: the iroh tunnel starts accepting independently of this bind, so a single
+/// early failure would leave every forwarded stream failing its TCP connect
+/// until the daemon restarts. Each failed attempt is logged once.
+async fn bind_with_retry(port: u16, base: std::time::Duration, cap: std::time::Duration) -> TcpListener {
+    let mut wait = base;
+    loop {
+        match TcpListener::bind(("127.0.0.1", port)).await {
+            Ok(l) => return l,
+            Err(e) => {
+                log::warn!(
+                    "remote-access server: bind 127.0.0.1:{port} failed: {e}; retrying in {}ms",
+                    wait.as_millis()
+                );
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(cap);
+            }
+        }
+    }
+}
+
 /// Returns the STT sidecar supervisor so the daemon main loop can drive its
 /// idle-shutdown tick and kill it on graceful exit.
 pub fn spawn(
@@ -150,15 +177,7 @@ pub fn spawn(
     let stt_for_task = stt.clone();
     tokio::spawn(async move {
         let port = resolve_port();
-        let listener = match TcpListener::bind(("127.0.0.1", port)).await {
-            Ok(l) => l,
-            Err(e) => {
-                log::warn!(
-                    "remote-access server: bind 127.0.0.1:{port} failed: {e}; remote access disabled this run"
-                );
-                return;
-            }
-        };
+        let listener = bind_with_retry(port, BIND_RETRY_BASE, BIND_RETRY_CAP).await;
         // Strip the inherit flag so this socket never leaks into daemon-spawned
         // children (piped stdio forces handle inheritance on Windows). Without
         // this, an orphaned child holds the port after the daemon dies and every
@@ -732,6 +751,24 @@ mod tests {
         std::fs::write(dir.path().join("remote-pairing.json"), body.to_string()).unwrap();
         assert!(check_pairing_code("wrongcode", dir.path()).is_err());
         assert!(dir.path().join("remote-pairing.json").exists());
+    }
+
+    /// A port held at startup (the old daemon still shutting down) must end with
+    /// the server listening once it frees, not with remote access off until the
+    /// next restart.
+    #[tokio::test]
+    async fn bind_retries_until_a_taken_port_frees() {
+        let holder = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("hold a port");
+        let port = holder.local_addr().expect("addr").port();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            drop(holder);
+        });
+        let ms = std::time::Duration::from_millis;
+        let listener = tokio::time::timeout(ms(5000), bind_with_retry(port, ms(20), ms(100)))
+            .await
+            .expect("bind must succeed once the port frees");
+        assert_eq!(listener.local_addr().expect("addr").port(), port);
     }
 
     /// Todo 974: the old dedicated per-session cancel REST route (a sibling
