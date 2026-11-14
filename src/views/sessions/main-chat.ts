@@ -86,11 +86,20 @@ function kindOf(s: Instance, asking: ReadonlySet<string>): SubKind {
   if (s.progress?.waiting_for) return "queued";
   if (s.frozen || facts(s).parked === true) return "paused";
   if (limitResetsAt(s) !== null) return "limited";
+  if (waitsOnBackground(s)) return "working";
   if (!s.busy) return "stopped";
   return "working";
 }
 
-const NO_HOVER: SubHover = { stateWord: "", step: null, action: null, queue: null, resetsAt: null, gaming: false };
+/** An idle sub whose last Stop hook found its own background job still running (a build, a
+ *  poller, a subagent): it ended its turn to wait for that job, which is not stopping short
+ *  and needs nothing from Joe, so it reads as working. The daemon mirrors that verdict onto
+ *  `local_task_running` and clears it when the next turn starts. */
+function waitsOnBackground(s: Instance): boolean {
+  return !s.busy && s.local_task_running === true;
+}
+
+const NO_HOVER: SubHover = { stateWord: "", step: null, plan: null, action: null, queue: null, resetsAt: null, gaming: false };
 
 const STATE_WORD: Record<SubKind, string> = {
   asking: "Needs your input", working: "Working", queued: "Queued", paused: "Paused", limited: "Usage limit",
@@ -105,9 +114,10 @@ function subHoverOf(s: Instance, kind: SubKind): SubHover {
   const active = plan?.find((st) => st.status === "active");
   const at = Date.parse(f.last_action_at ?? "");
   return {
-    stateWord: s.closing ? "Closing" : STATE_WORD[kind],
+    stateWord: s.closing ? "Closing" : waitsOnBackground(s) && kind === "working" ? "Waiting on its background task" : STATE_WORD[kind],
     // A step line only means something for a sub that has started and not finished.
     step: p && kind !== "finished" && kind !== "queued" ? { n: Math.min(p.done + 1, p.total), total: p.total, text: active?.text ?? "" } : null,
+    plan: plan && plan.length > 0 && kind !== "finished" && kind !== "queued" ? plan.map((st) => ({ text: st.text, status: st.status })) : null,
     action: f.last_action && !Number.isNaN(at) ? { text: f.last_action, at } : null,
     queue: kind === "queued" ? { waitingFor: s.progress?.waiting_for ?? null, place: f.queue_place ?? null, behind: f.queue_behind ?? null } : null,
     resetsAt: kind === "limited" ? limitResetsAt(s) : null,
@@ -148,6 +158,7 @@ function progressText(s: Instance, kind: SubKind): string {
   }
   if (kind === "stopped") return "stopped without finishing";
   const p = planProgress(s.progress?.plan);
+  if (waitsOnBackground(s)) return "waiting on its background task";
   // The step being worked is the one after the last done: "step 3 of 6" while two are done.
   return p ? `step ${Math.min(p.done + 1, p.total)} of ${p.total}` : "working";
 }

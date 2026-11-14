@@ -233,6 +233,10 @@ export class SubsCard {
     const top = Math.max(8, Math.min(a.top + n * CASCADE, window.innerHeight - h - 8));
     el.style.left = `${left}px`;
     el.style.top = `${top}px`;
+    // It grows out of the avatar and shrinks back into it: the transform origin is the
+    // avatar's centre in the card's own box.
+    el.style.setProperty("--sx-ox", `${Math.round(a.left + a.width / 2 - left)}px`);
+    el.style.setProperty("--sx-oy", `${Math.round(a.top + a.height / 2 - top)}px`);
     fitHeight(el);
   }
 
@@ -242,7 +246,7 @@ export class SubsCard {
   }
 
   private closePeek(id: string): void {
-    this.peeks.get(id)?.destroy();
+    this.peeks.get(id)?.close();
     this.peeks.delete(id);
     this.rowSig = "";
     if (this.host) {

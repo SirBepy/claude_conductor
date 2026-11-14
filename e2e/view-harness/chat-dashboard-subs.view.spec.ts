@@ -85,6 +85,9 @@ const av = (page: Page, id: string) => card(page).locator(`.sx-av[data-sub="${id
 // The newest open peek: peeks append in the order they were opened.
 const det = (page: Page) => card(page).locator(".sx-det").last();
 const peekOf = (page: Page, id: string) => card(page).locator(`.sx-det[data-sub="${id}"]`);
+// The grow-in scales the card, so a box measured mid-animation is not its real one.
+// Waits out the grow-in so the card's box is its real one (the animation scales it from the avatar).
+const grown = (peek: ReturnType<typeof peekOf>) => expect(peek).toHaveCSS("transform", "none");
 
 test.describe("chat dashboard / Subchats card", () => {
   test("lists asking, working, queued and stopped subs, and leaves a finished one to the finished tray", async ({ page }) => {
@@ -122,6 +125,46 @@ test.describe("chat dashboard / Subchats card", () => {
     const rowBattery = (id: string) => page.locator(`#sessions-list li[data-session-id="${id}"] .session-model-battery`);
     expect(await rowBattery("plain").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(242, 153, 74)");
     await expect(rowBattery("calm")).not.toHaveAttribute("data-effort", /.+/);
+  });
+
+  test("a sub opens by growing out of its avatar with its plan first and the brief as one line that unfolds", async ({ page }) => {
+    await openMain(page, [MAIN, WORK, STOP]);
+    await av(page, "sub-work").click();
+    const d = det(page);
+    await expect(d).toBeVisible();
+    // The plan's steps lead, in order, with the step being worked marked.
+    await expect(d.locator(".sx-det-plan li")).toHaveText(["Read", "Write", "Render", "Verify"]);
+    await expect(d.locator('.sx-det-plan li[data-status="active"]')).toHaveText("Render");
+    await expect(d.locator(".sx-det-step")).toBeHidden();
+    // The brief is one task line that unfolds; the full text is still there.
+    await expect(d.locator(".sx-det-brief summary")).toHaveText("Brief: Build the footer");
+    await expect(d.locator(".sx-det-brief")).not.toHaveAttribute("open", "");
+    await d.locator(".sx-det-brief summary").click();
+    await expect(d.locator(".sx-det-brief")).toHaveAttribute("open", "");
+    const order = await d.evaluate((el) => {
+      const at = (sel: string) => [...el.children].indexOf(el.querySelector(sel)!);
+      return at(".sx-det-plan") < at(".sx-det-brief");
+    });
+    expect(order).toBe(true);
+    // It grows over 0.45s from the avatar's centre, and a plan-less sub shows its task and state.
+    // (Measured on a probe: by now the card's own animation may be over.)
+    expect(await page.evaluate(() => {
+      const probe = document.createElement("div");
+      probe.className = "sx-det is-opening";
+      document.body.appendChild(probe);
+      const dur = getComputedStyle(probe).animationDuration;
+      probe.remove();
+      return dur;
+    })).toBe("0.45s");
+    expect(await d.evaluate((el) => el.style.getPropertyValue("--sx-ox"))).toMatch(/^-?\d+px$/);
+    await av(page, "sub-stop").click();
+    const stopped = det(page);
+    await expect(stopped.locator(".sx-det-plan")).toBeHidden();
+    await expect(stopped.locator(".sx-det-state")).toHaveText("stopped without finishing");
+    // Closing shrinks it back (the class), then it is gone.
+    await av(page, "sub-work").click();
+    await expect(peekOf(page, "sub-work")).toHaveClass(/is-closing/);
+    await expect(peekOf(page, "sub-work")).toHaveCount(0);
   });
 
   test("a click opens the details: run time, context chip, brief, newest image with +N, the latest preview", async ({ page }) => {
@@ -362,6 +405,7 @@ test.describe("chat dashboard / Subchats card", () => {
     await expect(peekOf(page, "sub-ask")).toBeVisible();
     await expect(peekOf(page, "sub-work")).toBeVisible();
     // Floating over the neighbouring column, not growing the card.
+    await grown(peekOf(page, "sub-work"));
     const col = (await page.locator("#session-pane .cdash-left").boundingBox())!;
     expect((await peekOf(page, "sub-work").boundingBox())!.x).toBeGreaterThanOrEqual(col.x + col.width - 1);
     await expect(card(page).locator(".sx-item[data-sub='sub-ask']")).toHaveClass(/on/);
@@ -375,6 +419,7 @@ test.describe("chat dashboard / Subchats card", () => {
     await openMain(page, [MAIN, WORK]);
     await av(page, "sub-work").click();
     const peek = peekOf(page, "sub-work");
+    await grown(peek);
     await peek.locator(".sx-msg .composer-textarea").fill("half a thought");
     const before = (await peek.boundingBox())!;
     const handle = (await peek.locator(".sx-det-name").boundingBox())!;

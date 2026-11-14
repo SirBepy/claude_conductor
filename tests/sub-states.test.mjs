@@ -64,6 +64,14 @@ describe("sub kinds", () => {
     expect(kindOf(sub("a", { busy: true, progress: progress({ stopped_unfinished: true }) })).kind).toBe("working");
   });
 
+  it("an idle sub that waits on its own background job is working, not stopped without finishing", () => {
+    const s = kindOf(sub("a", { busy: false, local_task_running: true, progress: progress({ stopped_unfinished: true }) }));
+    expect(s).toMatchObject({ kind: "working", progress: "waiting on its background task" });
+    expect(s.hover.stateWord).toBe("Waiting on its background task");
+    // The same row with no job left is stopped again.
+    expect(kindOf(sub("a", { busy: false, local_task_running: false, progress: progress({ stopped_unfinished: true }) })).kind).toBe("stopped");
+  });
+
   it("an idle live sub is stopped even with no stopped flag (the flag is lost on a daemon restart)", () => {
     expect(kindOf(sub("a", { busy: false })).kind).toBe("stopped");
   });

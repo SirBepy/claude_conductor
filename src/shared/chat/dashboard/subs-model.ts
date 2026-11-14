@@ -24,6 +24,8 @@ export interface SubHover {
   stateWord: string;
   /** The plan step it is on: `{ n: 3, total: 6, text: "Wire the footer" }`. */
   step: { n: number; total: number; text: string } | null;
+  /** Every step of its plan in order, for the opened details; null when it has no plan. */
+  plan: { text: string; status: string }[] | null;
   /** Its latest tool call in words and when (epoch ms): "Editing footer.css". */
   action: { text: string; at: number } | null;
   /** A queued sub: what it waits for, its place in the writer line (1 = next) and who holds the slot. */

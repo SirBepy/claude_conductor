@@ -114,14 +114,70 @@
   border-radius: 10px;
   background: var(--color-surface);
   box-shadow: 0 10px 28px rgb(0 0 0 / 0.35);
-  animation: sx-peek-in 0.25s ease;
+  transform-origin: var(--sx-ox, 0) var(--sx-oy, 0);
+}
+/* Only while it opens: an animation tied to the base rule would replay when a drag ends. */
+.sx-det.is-opening {
+  animation: sx-peek-in 0.45s ease;
+}
+.sx-det.is-closing {
+  pointer-events: none;
+  animation: sx-peek-out 0.45s ease forwards;
 }
 .sx-det.is-dragging {
   user-select: none;
-  animation: none;
 }
+/* Grows out of the clicked avatar (height, scale and fade together) and shrinks back into it. */
 @keyframes sx-peek-in {
-  from { opacity: 0; transform: translateY(-4px); }
+  from { opacity: 0; transform: scale(0.15); }
+}
+@keyframes sx-peek-out {
+  to { opacity: 0; transform: scale(0.15); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sx-det.is-opening,
+  .sx-det.is-closing {
+    animation: none;
+  }
+}
+.sx-det-plan[hidden] {
+  display: none;
+}
+.sx-det-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.sx-det-plan li {
+  padding-left: 14px;
+  color: var(--color-text-muted);
+  position: relative;
+}
+.sx-det-plan li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.5em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+}
+.sx-det-plan li[data-status="done"]::before {
+  background: var(--color-success);
+  border-color: var(--color-success);
+}
+.sx-det-plan li[data-status="active"] {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.sx-det-plan li[data-status="active"]::before {
+  background: var(--color-warning);
+  border-color: var(--color-warning);
 }
 .sx-det-top {
   display: flex;
@@ -311,6 +367,16 @@
   font-size: 12px;
   line-height: 1.45;
   color: var(--color-text-muted);
+}
+.sx-det-brief summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sx-det-brief[open] summary {
+  white-space: normal;
+  margin-bottom: 4px;
 }
 .sx-det-media {
   display: flex;

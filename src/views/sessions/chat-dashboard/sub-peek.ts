@@ -40,6 +40,9 @@ interface SubData {
  *  with hundreds of screenshots must not fire them all when the gallery opens. */
 export const GALLERY_PAGE = 12;
 
+/** How long a closing details card shrinks (subs-card.css `sx-peek-out`; Joe picked 0.45s, 2026-11-11). */
+const CLOSE_MS = 450;
+
 export class SubPeek {
   readonly el: HTMLElement;
   private readonly data: SubData = { brief: null, verdict: null, imageIds: [], thumb: null, ctx: null, preview: null };
@@ -49,17 +52,22 @@ export class SubPeek {
   /** The offline label the composer was built under (see patch). */
   private mountedOffline: string | null = null;
   private loadSeq = 0;
+  private closing = false;
+  private closeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(readonly id: string, private readonly deps: PeekDeps) {
     const el = document.createElement("div");
-    el.className = "sx-det";
+    el.className = "sx-det is-opening";
+    // The grow is a one-off: the class leaves with it so a later restyle cannot replay it.
+    el.addEventListener("animationend", () => el.classList.remove("is-opening"), { once: true });
     el.dataset.sub = id;
     el.innerHTML = `<div class="sx-det-top"><span class="sx-det-name"></span><span class="sx-det-time" title="Run time"><i class="ph ph-timer"></i><b></b></span><span class="sx-det-ctx"></span>`
       + `<button type="button" class="sx-det-x" data-act="peek-close" title="Close" aria-label="Close"><i class="ph ph-x"></i></button></div>`
       + `<div class="sx-det-state"></div>`
       + `<div class="sx-det-step" hidden><span></span><i class="sx-det-bar"><b></b></i></div>`
+      + `<ol class="sx-det-plan" hidden></ol>`
       + `<div class="sx-det-last" hidden></div>`
-      + `<div class="sx-det-brief" hidden></div>`
+      + `<details class="sx-det-brief" hidden><summary></summary><div class="sx-det-brief-full"></div></details>`
       + `<div class="sx-det-media"><span class="sx-imgwrap" hidden><button type="button" class="sx-img" data-act="image" title="Open the image"><img alt=""></button><button type="button" class="sx-imgmore" data-act="gallery" hidden></button></span><button type="button" class="sx-pv" data-act="preview" hidden><i class="ph ph-monitor-play"></i><span></span></button></div>`
       + `<div class="sx-gallery" hidden></div>`
       + `<div class="sx-msg"></div>`;
@@ -73,7 +81,16 @@ export class SubPeek {
     this.patch();
   }
 
+  /** Shrinks back into the avatar it grew from, then goes. */
+  close(): void {
+    if (this.closing) return;
+    this.closing = true;
+    this.el.classList.add("is-closing");
+    this.closeTimer = setTimeout(() => this.destroy(), CLOSE_MS);
+  }
+
   destroy(): void {
+    if (this.closeTimer) clearTimeout(this.closeTimer);
     this.composer?.destroy();
     this.composer = null;
     this.loadSeq += 1;
@@ -155,9 +172,30 @@ export class SubPeek {
     lastEl.hidden = lastText === "";
     set(".sx-det-last", lastText);
 
-    const brief = det.querySelector<HTMLElement>(".sx-det-brief")!;
+    // The plan leads (it says what the sub is doing); the brief is one task line that unfolds.
+    const planEl = det.querySelector<HTMLElement>(".sx-det-plan")!;
+    const plan = it.hover?.plan ?? null;
+    const planSig = plan ? plan.map((p) => `${p.status}:${p.text}`).join("\n") : "";
+    planEl.hidden = !plan;
+    if (planEl.dataset.sig !== planSig) {
+      planEl.dataset.sig = planSig;
+      planEl.replaceChildren(...(plan ?? []).map((p) => {
+        const li = document.createElement("li");
+        li.dataset.status = p.status;
+        li.textContent = p.text;
+        return li;
+      }));
+    }
+    // The step line and bar say the same as the list, so the list replaces them.
+    if (plan) stepEl.hidden = true;
+    const brief = det.querySelector<HTMLDetailsElement>(".sx-det-brief")!;
     brief.hidden = !d.brief;
-    if (brief.textContent !== (d.brief ?? "")) brief.textContent = d.brief ?? "";
+    const full = brief.querySelector<HTMLElement>(".sx-det-brief-full")!;
+    if (full.textContent !== (d.brief ?? "")) {
+      full.textContent = d.brief ?? "";
+      const task = (d.brief ?? "").split("\n")[0]!.trim();
+      brief.querySelector("summary")!.textContent = `Brief: ${task.length > 90 ? `${task.slice(0, 89)}\u2026` : task}`;
+    }
 
     const wrap = det.querySelector<HTMLElement>(".sx-imgwrap")!;
     wrap.hidden = d.imageIds.length === 0;
