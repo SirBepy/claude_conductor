@@ -207,6 +207,28 @@ pub(super) fn handle_project_main_chat_set(app: &tauri::AppHandle, params: serde
     crate::settings::persist(app, &snapshot);
 }
 
+/// A chat's `project_mcp` add or remove was approved (`hooks_server::project_mcp`).
+/// The daemon already holds the list in its own cache; the app process merges the
+/// same list and persists it to settings.json.
+pub(super) fn handle_project_mcp_servers_set(app: &tauri::AppHandle, params: serde_json::Value) {
+    use tauri::Manager;
+    let Some(project_id) = params.get("project_id").and_then(|v| v.as_str()) else { return };
+    let Some(servers) = params
+        .get("servers")
+        .and_then(|v| serde_json::from_value::<Vec<crate::types::project::ProjectMcpServer>>(v.clone()).ok())
+    else {
+        return;
+    };
+    let state = app.state::<crate::state::AppState>();
+    let mut settings_guard = state.settings.lock().unwrap();
+    if !crate::settings::set_project_mcp_servers(&mut settings_guard, project_id, &servers) {
+        return;
+    }
+    let snapshot = settings_guard.clone();
+    drop(settings_guard);
+    crate::settings::persist(app, &snapshot);
+}
+
 /// The daemon assigned a character to a session created on the remote
 /// (phone/browser) transport, where there is no app-process Tauri command to
 /// do this in-process (ipc/characters.rs's `ensure_session_character`).

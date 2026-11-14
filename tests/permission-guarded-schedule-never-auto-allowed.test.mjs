@@ -42,6 +42,27 @@ describe("needsHumanApproval", () => {
   });
 });
 
+describe("needsHumanApproval for project_mcp", () => {
+  const PROJECT_MCP = "mcp__cc_conductor__project_mcp";
+
+  it("is true for an add (a program started every turn) and false for list and remove", () => {
+    expect(needsHumanApproval({ tool_name: PROJECT_MCP, input: { action: "add", name: "Roblox_Studio", command: "cmd.exe" } })).toBe(true);
+    expect(needsHumanApproval({ tool_name: PROJECT_MCP, input: { action: "list" } })).toBe(false);
+    expect(needsHumanApproval({ tool_name: PROJECT_MCP, input: { action: "remove", name: "x" } })).toBe(false);
+    expect(needsHumanApproval({ tool_name: PROJECT_MCP })).toBe(false);
+  });
+
+  it("leaves a parked add card for the human when auto-accept turns on", () => {
+    storePendingPrompt(SESSION, {
+      kind: "permission",
+      payload: { id: "p3", tool_name: PROJECT_MCP, input: { action: "add", name: "Roblox_Studio", command: "cmd.exe" }, session_id: SESSION },
+    });
+    autoAcceptParked(SESSION);
+    expect(allowCalls()).toHaveLength(0);
+    expect(takePendingPrompt(SESSION)?.payload.id).toBe("p3");
+  });
+});
+
 describe("turning auto-accept on drains parked permission cards", () => {
   it("allows an ordinary parked card", () => {
     storePendingPrompt(SESSION, { kind: "permission", payload: { id: "p1", tool_name: "Bash", input: { command: "ls" }, session_id: SESSION } });

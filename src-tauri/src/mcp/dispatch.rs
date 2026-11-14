@@ -18,7 +18,7 @@ use super::server::{mcp_error, question_args, tool_error_result, tool_result, wa
 use super::tool_schemas::{
     TOOL_APPROVAL, TOOL_CLOSE, TOOL_CREATE_PROJECT, TOOL_DASHBOARD_CARD, TOOL_IN_MEETING, TOOL_LIST_PEERS, TOOL_POST_MESSAGE, TOOL_QUESTION,
     TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN, TOOL_SCHEDULE,
-    TOOL_PERSON, TOOL_PR_PREVIEW, TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT,
+    TOOL_PERSON, TOOL_PR_PREVIEW, TOOL_PROJECT_MCP, TOOL_SEND_MESSAGE, TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_UPDATE_MESSAGE, TOOL_WRITE_DRAFT,
     TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
 };
 
@@ -254,6 +254,18 @@ fn session_tools(ctx: &Ctx, name: &str) -> Option<Value> {
                 "path": ctx.args["path"],
             });
             Some(ctx.relay("/projects/create", body, Some("invalid project path"), None))
+        }
+        TOOL_PROJECT_MCP => {
+            // Only the keys the model sent: the receiver's `#[serde(default)]`
+            // covers an absent key, not an explicit null.
+            let mut body = serde_json::Map::new();
+            body.insert("session_id".to_string(), json!(ctx.session_id));
+            for key in ["action", "name", "command", "args", "url"] {
+                if let Some(v) = ctx.args.get(key).filter(|v| !v.is_null()) {
+                    body.insert(key.to_string(), v.clone());
+                }
+            }
+            Some(ctx.relay("/projects/mcp", Value::Object(body), Some("project_mcp refused"), None))
         }
         TOOL_IN_MEETING => {
             Some(ctx.relay("/meeting/status", json!({ "session_id": ctx.session_id }), None, None))

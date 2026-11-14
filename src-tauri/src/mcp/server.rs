@@ -203,7 +203,7 @@ mod tests {
         TOOL_QUESTION, TOOL_READ_MESSAGES, TOOL_REPORT_STATUS, TOOL_REQUEST_SECRET, TOOL_RESPAWN,
         TOOL_RESPOND_WORKER_PROMPT, TOOL_SCHEDULE, TOOL_SEND_MESSAGE, TOOL_SEND_TO_SESSION,
         TOOL_SHOW_PREVIEW, TOOL_SPAWN_CHAT, TOOL_SPAWN_WORKER, TOOL_UPDATE_MESSAGE,
-        TOOL_DASHBOARD_CARD, TOOL_IN_MEETING, TOOL_PR_PREVIEW, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
+        TOOL_DASHBOARD_CARD, TOOL_IN_MEETING, TOOL_PR_PREVIEW, TOOL_PROJECT_MCP, TOOL_WRITE_PLAN, TOOL_WRITE_USER_TODO,
     };
     use super::super::tool_schemas_retro::TOOL_MAIN_CHAT_RETRO;
     use super::super::tool_schemas_subchat::{TOOL_SHARED_MOCKUP, TOOL_SUBCHAT};
@@ -335,7 +335,7 @@ mod tests {
             "",
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 25);
+        assert_eq!(tools.len(), 26);
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -360,6 +360,7 @@ mod tests {
         assert!(names.contains(&"write_plan"));
         assert!(names.contains(&"schedule"));
         assert!(names.contains(&"create_project"));
+        assert!(names.contains(&"project_mcp"));
         assert!(names.contains(&"person"));
         assert!(names.contains(&"dashboard_card"));
         assert!(names.contains(&"in_meeting"));
@@ -478,7 +479,7 @@ mod tests {
             true,
         );
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 29, "25 base tools + 4 jarvis fleet tools");
+        assert_eq!(tools.len(), 30, "26 base tools + 4 jarvis fleet tools");
         let names: Vec<&str> = tools.iter()
             .filter_map(|t| t["name"].as_str())
             .collect();
@@ -658,6 +659,7 @@ mod tests {
             (TOOL_SCHEDULE, "/schedule/write"),
             (TOOL_IN_MEETING, "/meeting/status"),
             (TOOL_CREATE_PROJECT, "/projects/create"),
+            (TOOL_PROJECT_MCP, "/projects/mcp"),
             (TOOL_SHOW_PREVIEW, "/hooks/preview"),
             (TOOL_SPAWN_WORKER, "/jarvis/spawn-worker"),
             (TOOL_SEND_TO_SESSION, "/jarvis/send-to-session"),

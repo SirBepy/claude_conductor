@@ -43,11 +43,14 @@ export function isAutoAccept(sessionId: string | undefined | null): boolean {
 
 /** A permission card no auto path may answer, same as a question or a secret.
  *  A guarded `schedule` add stores a shell command the daemon runs on every
- *  firing with no chat or card around it, so the human must see that exact
+ *  firing with no chat or card around it, and a `project_mcp` add lists a program
+ *  the daemon starts on every later turn, so the human must see that exact
  *  command: neither auto-accept nor a remembered Always-allow rule applies. */
 export function needsHumanApproval(payload: { tool_name: string; input?: unknown }): boolean {
+  const input = payload.input as { guard?: unknown; action?: unknown } | null | undefined;
+  if (payload.tool_name === "mcp__cc_conductor__project_mcp") return input?.action === "add";
   if (payload.tool_name !== "mcp__cc_conductor__schedule") return false;
-  const guard = (payload.input as { guard?: unknown } | null | undefined)?.guard;
+  const guard = input?.guard;
   return typeof guard === "string" && guard.trim() !== "";
 }
 

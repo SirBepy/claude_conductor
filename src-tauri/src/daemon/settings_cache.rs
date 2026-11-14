@@ -56,6 +56,14 @@ impl SettingsCache {
         settings::set_project_main_chat(&mut g, project_id, session_id)
     }
 
+    /// Replaces a project's listed MCP servers in the cache, for an instant read
+    /// by the next spawn; false when nothing changed. The caller publishes
+    /// `project_mcp_servers_set` so the app process persists the same list.
+    pub fn set_project_mcp_servers(&self, project_id: &str, servers: &[crate::types::project::ProjectMcpServer]) -> bool {
+        let mut g = self.inner.lock().unwrap();
+        settings::set_project_mcp_servers(&mut g, project_id, servers)
+    }
+
     /// Mirror of `ipc::characters::ensure_session_character` but operating on
     /// the cache directly, so the daemon can assign an avatar to a
     /// remote-started session without a Tauri app process in the loop.

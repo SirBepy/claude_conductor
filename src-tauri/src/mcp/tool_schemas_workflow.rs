@@ -45,6 +45,11 @@ pub const TOOL_SCHEDULE: &str = "schedule";
 // scan, so a folder Claude made from a shell stayed invisible until a chat
 // happened to run in it. Unconditional: any session can start a new project.
 pub const TOOL_CREATE_PROJECT: &str = "create_project";
+// The project's own MCP servers (the Settings list `daemon::project_mcp` writes into
+// every turn's config), so a chat can set one up when asked. One tool with an
+// `action` enum for the per-turn schema cost reason `write_user_todo` documents.
+// An `add` always waits on a human-approved card (`hooks_server::project_mcp`).
+pub const TOOL_PROJECT_MCP: &str = "project_mcp";
 // Who the user means by a name, from the people in their Obsidian vault, per
 // client (`methods::people`). One tool with an `action` enum, not two, for the
 // same per-turn schema cost reason as `write_user_todo`.
@@ -243,6 +248,21 @@ pub fn workflow_schemas() -> Vec<Value> {
                     "path": {"type": "string", "description": "Absolute path of the project folder."}
                 },
                 "required": ["path"]
+            }
+        }),
+        json!({
+            "name": TOOL_PROJECT_MCP,
+            "description": "List, add or remove the MCP servers this project loads into its chats (Project settings > MCP servers). Chats here never read the repo's `.mcp.json`, so a tool such as Roblox Studio only appears once it is listed this way. Call `add` when the user asks you to set up an MCP server: copy the entry from the project's `.mcp.json` (Roblox Studio: name `Roblox_Studio`, command `cmd.exe`, args `[\"/c\", \"%LOCALAPPDATA%\\Roblox\\mcp.bat\"]`). A local program is `command` plus `args`; a server over HTTP is `url`; never both. `add` always raises a card showing the exact entry and saves nothing until the user allows it, even in an auto-accept chat, so do not retry after a decline. A server's tools appear from the next turn on, not this one. `remove` needs `name`; `list` takes nothing.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "add", "remove"]},
+                    "name": {"type": "string", "description": "Letters, digits, - or _ only. It becomes the tool prefix `mcp__<name>__`."},
+                    "command": {"type": "string", "description": "add: the program to run, e.g. `cmd.exe`. Looked up on PATH; a server whose program is missing is left out with a notice."},
+                    "args": {"type": "array", "items": {"type": "string"}, "description": "add: the program's arguments, one per item."},
+                    "url": {"type": "string", "description": "add: an http(s) MCP endpoint, instead of command."}
+                },
+                "required": ["action"]
             }
         }),
         json!({
