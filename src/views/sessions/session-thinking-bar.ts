@@ -170,6 +170,17 @@ function isSessionActive(sessionId: string | null | undefined): boolean {
   return !!s && (!!s.busy || s.awaiting === "working");
 }
 
+/** The chat's turn has ended and only its own background task or subagent is
+ *  still running (`awaiting: "working"`). The bar stays up for the spinner's sake,
+ *  but "Thinking…" would claim Claude is working when it is idle, and the silence
+ *  label would call a legitimately quiet build "not responding". */
+function isIdleOnBackgroundWork(): boolean {
+  const pending = state.pendingNewSession;
+  const id = pending && state.selectedId === pending.placeholderId ? pending.realId : state.selectedId;
+  const s = id ? state.sessions.find(x => x.session_id === id) : undefined;
+  return !!s && !s.busy && s.awaiting === "working";
+}
+
 export function isCurrentSessionBusy(): boolean {
   const pending = state.pendingNewSession;
   if (pending) {
@@ -258,6 +269,7 @@ export function updateThinkingBar(): void {
     // keeps the last tool name and reads as "<tool>... - thinking…".
     const silent = Date.now() - _lastEventAt > NOT_RESPONDING_MS;
     if (!busy) textEl.textContent = frozen ? "Frozen - will send once unfrozen" : "Waiting to send";
+    else if (isIdleOnBackgroundWork()) textEl.textContent = "Idle - waiting on a background task";
     else if (dash) {
       if (_activity) textEl.textContent = _activityIdle ? `${_activity} - thinking…` : _activity;
       else textEl.textContent = silent ? "Not responding - no output from the session" : "Thinking…";
