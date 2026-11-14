@@ -26,7 +26,6 @@ function baseOpts(overrides = {}) {
   return {
     questions: [{ question: "Pick one?", header: "Choice", options: [{ label: "A" }, { label: "B" }] }],
     titleText: "Question",
-    titleIcon: "ph-question",
     cancelLabel: "Skip",
     submitLabel: "Submit",
     submitIcon: "ph-check",

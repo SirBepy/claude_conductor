@@ -27,7 +27,6 @@ function opts() {
       { question: "Second?", header: "Two", options: [{ label: "C" }, { label: "D" }] },
     ],
     titleText: "Question",
-    titleIcon: "ph-question",
     cancelLabel: "Skip",
     submitLabel: "Submit",
     submitIcon: "ph-check",

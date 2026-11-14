@@ -27,6 +27,22 @@ import { askingDotsHtml } from "./sidebar-row-visuals";
 import { isBlocked } from "../../shared/chat/rate-limit-banner";
 import { renderSidebarRow, sessionRowOptions, draftRowOptions, parkedRowOptions } from "./sidebar-rows";
 import { chainRowKey, recordChainLinks, supersededPredecessors } from "./successor-follow";
+import { escapeHtml } from "../../shared/escape-html";
+import { getBinding } from "../../shared/shortcuts";
+
+/** Mirrors session-list.css: #sessionsFab is displayed only at this width. */
+const FAB_QUERY = "(max-width: 640px)";
+
+/** The empty list's hint at how to start a chat. Wider than the phone layout there is no
+ *  "+" in the sidebar to point at, so it names the key instead. */
+function newChatHint(): string {
+  const fabShown = typeof window.matchMedia !== "function" || window.matchMedia(FAB_QUERY).matches;
+  if (fabShown) return "Tap + to start one";
+  const keys = getBinding("new-chat");
+  if (!keys) return "Start one from a project's dashboard";
+  const label = keys.split("+").map((k) => k.charAt(0).toUpperCase() + k.slice(1)).join("+");
+  return `Press ${label} to start one`;
+}
 
 /** Builds the sidebar's flat `entries` array (filter, sort, segment) for
  *  renderSidebar to reconcile into the DOM. Drain/scheduled state is
@@ -249,7 +265,7 @@ export function buildSidebarEntries(
       html: `<li class="sessions-empty-row" data-row-key="__empty__">`
         + `<div class="v-empty"><i class="ph ph-chat-circle-dots v-empty-icon"></i>`
         + `<div class="v-empty-title">No active sessions</div>`
-        + `<div class="v-empty-hint">Tap + to start one</div></div></li>`,
+        + `<div class="v-empty-hint">${escapeHtml(newChatHint())}</div></div></li>`,
     });
   }
 

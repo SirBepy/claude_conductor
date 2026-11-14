@@ -441,4 +441,23 @@ describe("Do all due in a draft", () => {
     expect(forceDraftPlain.mock.invocationCallOrder[0]).toBeLessThan(sendText.mock.invocationCallOrder[0]);
     state.pendingNewSession = null;
   });
+
+  it("labels the button with the draft repo's own count, the ids it will send", async () => {
+    snapshot = groupSnapshot({ due });
+    state.composer = { sendText: vi.fn(), isDraftEmpty: () => true };
+    state.pendingNewSession = { projectPath: api.cwd };
+    const pane = await mountDraft(api.cwd);
+    expect(pane.querySelector("[data-pd-due-all]").textContent).toBe("Do all due (2)");
+    state.pendingNewSession = null;
+  });
+
+  it("offers no button when none of the due todos belong to the draft's repo", async () => {
+    snapshot = groupSnapshot({ due });
+    state.composer = { sendText: vi.fn(), isDraftEmpty: () => true };
+    state.pendingNewSession = { projectPath: ZIRTUE_REPOS[1].cwd };
+    const pane = await mountDraft(ZIRTUE_REPOS[1].cwd);
+    expect(pane.querySelector("[data-pd-due-day]")).not.toBeNull();
+    expect(pane.querySelector("[data-pd-due-all]")).toBeNull();
+    state.pendingNewSession = null;
+  });
 });

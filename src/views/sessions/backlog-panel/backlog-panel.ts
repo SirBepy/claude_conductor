@@ -288,12 +288,11 @@ class BacklogPanel implements BacklogPanelHandle {
     if (empty) this.view = "list";
     this.panel.dataset.view = this.view;
     this.emptyEl.hidden = !empty;
-    this.listEl.hidden = none;
     const note = dueElsewhereNote(this.cwd);
-    const html = b && !none
-      ? (note ? `<p class="bl-quiet bl-due-note">${escapeHtml(note)}</p>` : "") +
-        listHtml(buildListGroups(b), { selectedId: this.selectedId(), draggable: this.canAct(), cwd: this.cwd })
-      : "";
+    // The note is about other repos' todos, so an empty list here still shows it.
+    this.listEl.hidden = none && !note;
+    const html = (note ? `<p class="bl-quiet bl-due-note">${escapeHtml(note)}</p>` : "") +
+      (b && !none ? listHtml(buildListGroups(b), { selectedId: this.selectedId(), draggable: this.canAct(), cwd: this.cwd }) : "");
     if (html !== this.lastList) {
       this.lastList = html;
       this.listEl.innerHTML = html;

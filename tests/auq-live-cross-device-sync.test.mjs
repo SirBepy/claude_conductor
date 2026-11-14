@@ -45,7 +45,6 @@ function baseOpts(overrides = {}) {
     sessionId: "s1",
     questions: QUESTIONS,
     titleText: "Question",
-    titleIcon: "ph-question",
     cancelLabel: "Skip",
     submitLabel: "Submit",
     submitIcon: "ph-check",

@@ -7,7 +7,8 @@ import {
   card, dot, hidden, icon, isGroup, kv, quiet, repoTag, row, type DashCtx,
 } from "./dash-parts";
 import type { CommitRow, RepoShip } from "./types";
-import { dayLabel, doAllIds, dueTotal, dueVisible, MISSED_SELECTION } from "./due-model";
+import { dayLabel, doAllIds, doAllIdsIn, dueTotal, dueVisible, MISSED_SELECTION } from "./due-model";
+import { state } from "../state";
 import { dueSelection } from "../backlog-panel/due-highlight";
 
 export function yourTodos(c: DashCtx): TemplateResult | typeof nothing {
@@ -32,7 +33,10 @@ export function dueCard(c: DashCtx): TemplateResult | typeof nothing {
   const due = c.snap.due;
   if (!due || !dueVisible(due)) return nothing;
   const picked = dueSelection();
-  const owed = doAllIds(due).length;
+  // A draft starts in its own folder, and runDueAll sends only that repo's ids, so the label counts the same ones.
+  const owed = c.mode === "draft"
+    ? (state.pendingNewSession ? doAllIdsIn(due, state.pendingNewSession.projectPath).length : 0)
+    : doAllIds(due).length;
   const missed = due.missed_ids.length;
   const cells = due.days.map((d, i) => html`<button type="button" class="pd-due-day ${i === 0 ? "is-today" : ""} ${picked === d.date ? "on" : ""} ${d.count === 0 ? "is-zero" : ""}"
     data-pd-due-day=${d.date} @click=${() => c.act.toggleDue(d.date)}>

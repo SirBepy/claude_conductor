@@ -55,6 +55,9 @@ export class ElementMessenger {
   }
 
   private open(id: string, element: string, x: number, y: number, frame: HTMLIFrameElement): void {
+    // Rebuilding the box mid-send would drop the text and status the send still reports into,
+    // and its new Send would do nothing until the old one resolved.
+    if (this.busy) return;
     const fr = frame.getBoundingClientRect();
     const pr = this.root.getBoundingClientRect();
     this.pos = boxOrigin({ x, y }, fr, pr);
@@ -102,8 +105,10 @@ export class ElementMessenger {
       const res = await this.host.send(this.previewId, this.element, text);
       // The text is kept in the box on failure; on success the box has done its job.
       ta.value = "";
-      ta.disabled = true;
+      // Read-only, not disabled: a disabled control cannot hold focus, and then Escape never reaches the box.
+      ta.readOnly = true;
       box.querySelector<HTMLButtonElement>("[data-send]")!.disabled = true;
+      ta.focus();
       this.say(status, `Sent to ${res.target_name}.`, false);
       status.dataset.ok = "true";
     } catch (err) {

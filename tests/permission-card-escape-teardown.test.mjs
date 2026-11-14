@@ -47,7 +47,6 @@ function questionOpts(overrides = {}) {
     id: "q-1",
     sessionId: "s-q",
     questions: [{ question: "Pick one?", header: "Choice", options: [{ label: "A" }, { label: "B" }] }],
-    titleIcon: "ph-question",
     cancelLabel: "Skip",
     submitLabel: "Submit",
     submitIcon: "ph-check",

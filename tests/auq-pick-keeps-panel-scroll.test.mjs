@@ -30,7 +30,6 @@ describe("AUQ card scroll", () => {
         options: [{ label: "A" }, { label: "B" }, { label: "C" }],
       }],
       titleText: "Question",
-      titleIcon: "ph-question",
       cancelLabel: "Skip",
       submitLabel: "Submit",
       submitIcon: "ph-check",

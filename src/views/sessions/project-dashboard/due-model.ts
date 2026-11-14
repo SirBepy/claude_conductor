@@ -49,11 +49,15 @@ export function doAllRepos(due: DueSummary): Array<{ cwd: string, count: number 
   return [...byRepo.values()];
 }
 
-/** The message that starts the one chat for "Do all due", or null when nothing is owed.
- *  Given `repoCwd`, only that repo's ids go in, because the chat starts in one repo and cannot resolve another's. */
-export function doAllMessage(due: DueSummary, repoCwd?: string): string | null {
+/** What "Do all due" hands over. Given `repoCwd`, only that repo's ids, because the chat starts in one repo and cannot resolve another's. */
+export function doAllIdsIn(due: DueSummary, repoCwd?: string): DueId[] {
   const want = repoCwd === undefined ? null : normCwd(repoCwd);
-  const ids = doAllIds(due).filter((d) => want === null || normCwd(d.repo_cwd) === want).map((d) => d.id);
+  return doAllIds(due).filter((d) => want === null || normCwd(d.repo_cwd) === want);
+}
+
+/** The message that starts the one chat for "Do all due", or null when nothing is owed. */
+export function doAllMessage(due: DueSummary, repoCwd?: string): string | null {
+  const ids = doAllIdsIn(due, repoCwd).map((d) => d.id);
   return ids.length ? `/auto-do-todos ${ids.join(",")}` : null;
 }
 

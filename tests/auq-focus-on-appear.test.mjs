@@ -34,7 +34,6 @@ describe("AUQ card focus", () => {
         options: [{ label: "A" }, { label: "B" }],
       }],
       titleText: "Question",
-      titleIcon: "ph-question",
       cancelLabel: "Skip",
       submitLabel: "Submit",
       submitIcon: "ph-check",

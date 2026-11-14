@@ -28,7 +28,6 @@ const SINGLE = { question: "Range?", header: "Range", options: [{ label: "6 mont
 function baseOpts(overrides = {}) {
   return {
     questions: [MULTI, SINGLE],
-    titleIcon: "ph-question",
     cancelLabel: "Skip",
     submitLabel: "Submit",
     submitIcon: "ph-check",
