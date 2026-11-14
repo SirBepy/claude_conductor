@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use iroh::endpoint::{presets, Connection, RecvStream, SendStream};
 use iroh::{Endpoint, EndpointAddr, EndpointId};
@@ -23,6 +23,41 @@ use super::peer_client::TUNNEL_FAILED_HEADER;
 /// long ("timed out" in daemon.log, roughly every 34s); this is the backstop so
 /// a stuck dial can never park a caller (or the dial lock) forever.
 pub(super) const DIAL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Gap before the first redial of a peer that just failed; each further failure
+/// doubles it up to `REDIAL_CAP`. A peer that is off for the night is otherwise
+/// redialed every couple of minutes by its link loop and every request, which
+/// measured about 30 failed dials an hour in daemon.log (2026-11-06 to 11-12).
+const REDIAL_FIRST: Duration = Duration::from_secs(5);
+const REDIAL_CAP: Duration = Duration::from_secs(600);
+
+/// Per-peer redial schedule: consecutive failures stretch the gap, a success
+/// resets it. Pure over the instants it is given, so a test needs no clock.
+#[derive(Default, Debug)]
+struct RedialBackoff {
+    fails: u32,
+    retry_at: Option<Instant>,
+}
+
+impl RedialBackoff {
+    /// How long a caller must still wait before a dial may go out; zero when it may.
+    fn wait_left(&self, now: Instant) -> Duration {
+        self.retry_at.map_or(Duration::ZERO, |t| t.saturating_duration_since(now))
+    }
+
+    /// Records a failed dial and returns the gap before the next one.
+    fn failed(&mut self, now: Instant) -> Duration {
+        self.fails = self.fails.saturating_add(1);
+        let exp = self.fails.saturating_sub(1).min(16);
+        let gap = REDIAL_FIRST.saturating_mul(1u32 << exp).min(REDIAL_CAP);
+        self.retry_at = Some(now + gap);
+        gap
+    }
+
+    fn succeeded(&mut self) {
+        *self = Self::default();
+    }
+}
 
 /// How long the proxy lets a client finish sending after it has answered a
 /// failed dial, so closing does not RST the 502 away.
@@ -61,6 +96,7 @@ struct Slot {
     /// were queued behind it so N waiters do not each sit out their own
     /// `DIAL_TIMEOUT` against a peer that is down.
     last_err: Option<String>,
+    backoff: RedialBackoff,
 }
 
 impl PeerLink {
@@ -80,15 +116,32 @@ impl PeerLink {
                 return Err(err.clone());
             }
         }
+        // Inside the backoff window a dial would only repeat the failure the last
+        // one reported, so hand that failure back without touching the network.
+        if slot.backoff.wait_left(Instant::now()) > Duration::ZERO {
+            if let Some(err) = &slot.last_err {
+                return Err(err.clone());
+            }
+        }
         let outcome = self.dial().await;
         match &outcome {
             Ok(conn) => {
                 slot.conn = Some(conn.clone());
                 slot.last_err = None;
+                slot.backoff.succeeded();
             }
             Err(e) => {
                 slot.conn = None;
                 slot.last_err = Some(e.clone());
+                // WARN once per outage, DEBUG for the repeats: a peer that is away
+                // for hours otherwise fills the log with the same line.
+                let first = slot.backoff.fails == 0;
+                let gap = slot.backoff.failed(Instant::now());
+                if first {
+                    log::warn!("iroh dialer: connect to {} failed: {e}; redialing no sooner than {}s", self.remote.id, gap.as_secs());
+                } else {
+                    log::debug!("iroh dialer: connect to {} failed again: {e}; next dial in {}s", self.remote.id, gap.as_secs());
+                }
             }
         }
         self.dials.fetch_add(1, Ordering::Release);
@@ -102,10 +155,6 @@ impl PeerLink {
             Ok(Err(e)) => e.to_string(),
             Err(_) => format!("no answer within {}s", self.dial_timeout.as_secs()),
         };
-        // Warn, not debug: a peer that can never be dialed otherwise
-        // leaves no trace at the default log level, only a silent
-        // "Failed to load" in the UI.
-        log::warn!("iroh dialer: connect to {} failed: {outcome}", self.remote.id);
         Err(format!("could not reach that machine over iroh: {outcome}"))
     }
 
@@ -528,6 +577,35 @@ mod tests {
         assert!(all.iter().all(|s| *s == reqwest::StatusCode::BAD_GATEWAY), "{all:?}");
         assert_eq!(only_link(&dialer).dials.load(Ordering::SeqCst), 1, "one dial for all four callers");
         assert!(started.elapsed() < Duration::from_secs(3), "took {:?}", started.elapsed());
+    }
+
+    /// Consecutive failures stretch the gap from 5s up to the 10 minute cap, a
+    /// success resets it, and nothing may dial inside the gap.
+    #[test]
+    fn redial_gap_doubles_to_the_cap_and_a_success_resets_it() {
+        let t0 = Instant::now();
+        let mut b = RedialBackoff::default();
+        assert_eq!(b.wait_left(t0), Duration::ZERO, "a fresh link dials at once");
+        let gaps: Vec<u64> = (0..10).map(|_| b.failed(t0).as_secs()).collect();
+        assert_eq!(gaps, vec![5, 10, 20, 40, 80, 160, 320, 600, 600, 600]);
+        assert_eq!(b.wait_left(t0 + Duration::from_secs(100)), Duration::from_secs(500));
+        assert_eq!(b.wait_left(t0 + Duration::from_secs(600)), Duration::ZERO, "a peer that came back is reachable within the cap");
+        b.succeeded();
+        assert_eq!(b.failed(t0).as_secs(), 5, "a success starts the schedule over");
+    }
+
+    /// An offline peer is dialed once, not on every request or link-loop turn.
+    #[tokio::test]
+    async fn a_second_call_inside_the_backoff_window_does_not_dial_again() {
+        let dial_endpoint = Endpoint::builder(presets::Minimal).bind().await.expect("dial bind");
+        let dialer = IrohDialer::with_endpoint(dial_endpoint).with_dial_timeout(Duration::from_millis(500));
+        let id = undialable_addr().id.to_string();
+        let first = dialer.connected_proxy_port(&id).await.expect_err("nobody is listening");
+        let started = std::time::Instant::now();
+        let second = dialer.connected_proxy_port(&id).await.expect_err("still down");
+        assert_eq!(first, second, "the repeat reports the same failure");
+        assert!(started.elapsed() < Duration::from_millis(300), "no second dial, took {:?}", started.elapsed());
+        assert_eq!(only_link(&dialer).dials.load(Ordering::SeqCst), 1);
     }
 
     /// Manual reachability probe over the REAL n0 relay + DNS discovery, which
