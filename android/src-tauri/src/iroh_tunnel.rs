@@ -13,66 +13,18 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use iroh::endpoint::{presets, Connection, RecvStream, SendStream, VarInt};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl, TransportAddr};
 use log::{error, info, warn};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
+use crate::forward::{accept_loop, journal_accept_loop};
 use crate::journal::{self, Journal};
+use crate::quiet_watch::{QuietVerdict, QuietWatch, QUIET_DEAD, QUIET_NUDGE};
+use crate::tunnel_ports::{bind_journal_listener, bind_loopback, port_candidates, LIVE_PORTS};
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
+pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Must match `src-tauri/src/daemon/iroh_tunnel.rs::ALPN` exactly.
-const ALPN: &[u8] = b"conductor/remote/0";
-
-/// Each paired PC gets its own loopback origin, so a different endpoint (a
-/// stranger's QR) never serves a page at the origin holding another PC's
-/// `rc_token`. The port is a function of the endpoint id, never ephemeral:
-/// the token lives in that origin's localStorage, so a rotating port would
-/// force a re-pair every launch.
-const DERIVED_PORT_BASE: u16 = 27200;
-const DERIVED_PORT_SPAN: u16 = 1000;
-/// Bind attempts before giving up; each one the next port in the range.
-const PORT_PROBES: u16 = 8;
-
-/// The single fixed port every PC used before per-endpoint ports. The shell
-/// asks for it (`legacy`) only for the PC paired back then, so that PC's
-/// `rc_token` survives the upgrade without a re-pair.
-pub const LEGACY_LOOPBACK_PORT: u16 = 27184;
-
-/// The first port tried for `id`. Only two bytes feed it, but hashing every
-/// byte would move each already-paired PC to a new origin and drop its
-/// rc_token (a forced re-pair), while the 1000-port span leaves collision
-/// grinding cheap either way.
-pub fn derived_port(id: &EndpointId) -> u16 {
-    let b = id.as_bytes();
-    DERIVED_PORT_BASE + u16::from_le_bytes([b[0], b[1]]) % DERIVED_PORT_SPAN
-}
-
-/// Ports to try, in order: a collision moves to the next port in the range,
-/// so a given id lands on the same port whenever the same ports are free.
-fn port_candidates(id: &EndpointId, legacy: bool) -> Vec<u16> {
-    // The legacy PC's rc_token lives only in the 27184 origin, so a failed
-    // bind there must surface as an error: a derived port would silently
-    // present a fresh origin with no token.
-    if legacy {
-        return vec![LEGACY_LOOPBACK_PORT];
-    }
-    let first = derived_port(id) - DERIVED_PORT_BASE;
-    (0..PORT_PROBES).map(|i| DERIVED_PORT_BASE + (first + i) % DERIVED_PORT_SPAN).collect()
-}
-
-/// Loopback ports with a live tunnel behind them, read by the shell's
-/// navigation guard: no other loopback port is a page the app may load.
-static LIVE_PORTS: std::sync::LazyLock<std::sync::RwLock<std::collections::HashSet<u16>>> =
-    std::sync::LazyLock::new(Default::default);
-
-pub fn is_tunnel_port(port: u16) -> bool {
-    LIVE_PORTS.read().is_ok_and(|ports| ports.contains(&port))
-}
-
-#[cfg(test)]
-pub fn mark_live_for_test(port: u16) {
-    LIVE_PORTS.write().expect("live ports").insert(port);
-}
+pub(crate) const ALPN: &[u8] = b"conductor/remote/0";
 
 /// Upper bound on the FIRST dial attempt of a `connection()` call. Without one,
 /// a connect made while iroh still holds pre-sleep network state hangs the
@@ -101,27 +53,12 @@ const REBIND_TIMEOUT: Duration = Duration::from_secs(3);
 /// a timeout fails just this socket and never tears the connection down.
 const OPEN_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Most bytes `forward` buffers from a socket while it waits for a stream.
-const EARLY_BUFFER_CAP: usize = 256 * 1024;
 
-const WATCHDOG_TICK: Duration = Duration::from_secs(2);
+pub(crate) const WATCHDOG_TICK: Duration = Duration::from_secs(2);
 
 /// How much later than `WATCHDOG_TICK` a tick may arrive on the wall clock
 /// before it is journaled as late; scheduler jitter stays far below it.
 const TICK_LATE_SLACK: Duration = Duration::from_secs(3);
-
-/// The journal request line the main loopback port answers itself when it is the
-/// first request on a fresh connection. The page does not rely on that: the
-/// WebView reuses idle keep-alive connections that are already spliced to a
-/// stream to the PC, so a fetch on one of those reaches the PC, not this check.
-/// The page reads the dedicated journal port (`bind_journal_listener`) instead.
-const JOURNAL_REQUEST_PREFIX: &[u8] = b"GET /__tunnel/journal HTTP/1.";
-
-/// Most bytes `forward` reads before it decides whether a request is the journal's.
-const REQUEST_HEAD_CAP: usize = 256;
-
-/// A client silent this long before its request line is complete is dropped.
-const REQUEST_HEAD_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A wall-clock gap this much longer than one watchdog tick means the process
 /// was frozen or the phone slept. `tokio::time` runs on CLOCK_MONOTONIC, which
@@ -150,93 +87,6 @@ const REMOTE_INFO_TIMEOUT: Duration = Duration::from_millis(250);
 /// `connection()` runs it under the connection lock, and a stall must not hold
 /// every socket behind it.
 const NETWORK_CHANGE_TIMEOUT: Duration = Duration::from_millis(500);
-
-/// Quiet time (no datagram received on a connection in use) after which iroh is
-/// told the network may have changed. If the phone really moved networks this is
-/// what makes iroh re-check its relay link; otherwise it is a harmless no-op.
-const QUIET_NUDGE: Duration = Duration::from_secs(8);
-
-/// Quiet time after which a connection in use is declared dead and dropped, so
-/// the page's sockets close at once and redial instead of hanging until QUIC's
-/// 30s idle timeout (which stays: iroh keeps a connection across short relay
-/// outages on purpose). Both ends send a keep-alive PING after 5s of silence and
-/// a PING is acknowledged, so a healthy connection receives a datagram every few
-/// seconds. 12s is two missed keep-alives plus margin, and above the 7s relay
-/// stalls measured on this setup.
-const QUIET_DEAD: Duration = Duration::from_secs(12);
-
-/// `QUIET_NUDGE` and `QUIET_DEAD` in watchdog ticks. Quiet time is counted in
-/// ticks that ran, never in clock time: a frozen process runs no ticks, so
-/// sleeping is never quiet (the resume check owns that case).
-const QUIET_NUDGE_TICKS: u32 = (QUIET_NUDGE.as_millis() / WATCHDOG_TICK.as_millis()) as u32;
-const QUIET_DEAD_TICKS: u32 = (QUIET_DEAD.as_millis() / WATCHDOG_TICK.as_millis()) as u32;
-
-/// What one tick of the received-traffic watch asks for.
-#[derive(Debug, PartialEq, Eq)]
-enum QuietVerdict {
-    Nothing,
-    Nudge,
-    Drop,
-}
-
-/// One tick of the received-traffic watch: `(verdict, quiet ticks so far)`.
-/// Only a connection in use (`streams_open > 0`) is judged: with no stream
-/// open nobody is waiting, so a quiet connection is left to QUIC. The nudge
-/// fires on exactly one tick per quiet spell, the one that reaches
-/// `QUIET_NUDGE_TICKS`.
-fn quiet_step(prev_rx: u64, rx: u64, quiet: u32, streams_open: usize) -> (QuietVerdict, u32) {
-    if streams_open == 0 || rx != prev_rx {
-        return (QuietVerdict::Nothing, 0);
-    }
-    let quiet = quiet + 1;
-    let verdict = if quiet >= QUIET_DEAD_TICKS {
-        QuietVerdict::Drop
-    } else if quiet == QUIET_NUDGE_TICKS {
-        QuietVerdict::Nudge
-    } else {
-        QuietVerdict::Nothing
-    };
-    (verdict, quiet)
-}
-
-/// The watch's memory between ticks. It belongs to one connection: a different
-/// `stable_id` starts it over.
-#[derive(Default)]
-struct QuietWatch {
-    conn: Option<usize>,
-    rx: u64,
-    quiet: u32,
-}
-
-impl QuietWatch {
-    fn step(&mut self, conn: usize, rx: u64, streams_open: usize) -> QuietVerdict {
-        if self.conn != Some(conn) {
-            *self = Self { conn: Some(conn), rx, quiet: 0 };
-            return QuietVerdict::Nothing;
-        }
-        let (verdict, quiet) = quiet_step(self.rx, rx, self.quiet, streams_open);
-        self.rx = rx;
-        self.quiet = quiet;
-        verdict
-    }
-}
-
-/// Counts one open forwarded stream for as long as it lives, so every exit of
-/// `forward` (error, cancel, normal end) releases it.
-struct StreamGauge<'a>(&'a std::sync::atomic::AtomicUsize);
-
-impl<'a> StreamGauge<'a> {
-    fn new(open: &'a std::sync::atomic::AtomicUsize) -> Self {
-        open.fetch_add(1, Ordering::SeqCst);
-        Self(open)
-    }
-}
-
-impl Drop for StreamGauge<'_> {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
-    }
-}
 
 /// A running tunnel plus what is needed to stop it.
 struct RunningTunnel {
@@ -374,55 +224,39 @@ async fn shut_down_all(running: &mut std::collections::HashMap<EndpointId, Runni
     }
 }
 
-/// Binds the first free port of `candidates`.
-async fn bind_loopback(candidates: &[u16]) -> Result<(TcpListener, u16), String> {
-    let mut last = String::from("no candidate ports");
-    for &port in candidates {
-        match TcpListener::bind(("127.0.0.1", port)).await {
-            Ok(l) => return Ok((l, port)),
-            Err(e) => {
-                warn!("loopback bind failed at port {port}: {e}");
-                last = format!("loopback bind failed at port {port}: {e}");
-            }
-        }
-    }
-    error!("{}", last);
-    Err(last)
-}
-
 /// The shared QUIC connection to the PC, dialed lazily and redialed whenever
 /// it closes or gets invalidated.
-struct Tunnel {
+pub(crate) struct Tunnel {
     /// Swapped by `rebind`; read through `endpoint()` so no guard is held across an await.
     endpoint: std::sync::Mutex<Endpoint>,
     rebuild: Rebuild,
     remote: EndpointAddr,
-    conn: Mutex<Slot>,
+    pub(crate) conn: Mutex<Slot>,
     /// Wall-clock seconds of the last gap check. Starts at "now" so a fresh
     /// tunnel's first dial is not mistaken for a wake-up.
     last_alive: AtomicU64,
     /// Injectable so tests can move the wall clock; `SystemTime::now` in production.
-    clock: Clock,
+    pub(crate) clock: Clock,
     /// The relay the PC was last reached through. The phone dials a bare endpoint
     /// id, so a fresh endpoint would otherwise wait on n0's address lookup before
     /// it could start the handshake.
     relay_hint: std::sync::Mutex<Option<RelayUrl>>,
     /// The process-wide journal (`journal::global`); a field so a test can read a private one.
-    journal: Arc<Journal>,
+    pub(crate) journal: Arc<Journal>,
     /// Forwarded streams open right now; the received-traffic watch only judges a connection somebody is waiting on.
-    open_streams: std::sync::atomic::AtomicUsize,
+    pub(crate) open_streams: std::sync::atomic::AtomicUsize,
     /// Written by the watchdog tick alone; a std mutex held for one step, never across an await.
     quiet: std::sync::Mutex<QuietWatch>,
 }
 
-type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
+pub(crate) type Clock = Arc<dyn Fn() -> SystemTime + Send + Sync>;
 
 /// What the connection lock guards: the cached connection, the last failed
 /// dial, and whether the next dial must start on a fresh endpoint. The failure
 /// is kept so every caller that queued on the lock while that dial ran gets its
 /// error at once instead of running a full dial of its own.
 #[derive(Default)]
-struct Slot {
+pub(crate) struct Slot {
     conn: Option<Connection>,
     failure: Option<(Instant, String)>,
     /// Set when a connection existed and is gone (wake-up, close, invalidation)
@@ -441,13 +275,13 @@ enum Dialed {
 
 /// Binds a replacement endpoint. A parameter, not a hard-coded `bind_endpoint`,
 /// so tests rebind offline (`presets::Minimal`).
-type Rebuild = Box<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Endpoint, String>> + Send>> + Send + Sync>;
+pub(crate) type Rebuild = Box<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Endpoint, String>> + Send>> + Send + Sync>;
 
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-fn ms_of(t: SystemTime) -> u64 {
+pub(crate) fn ms_of(t: SystemTime) -> u64 {
     t.duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
@@ -517,7 +351,7 @@ fn path_summary(paths: &[(bool, TransportAddr)]) -> String {
 }
 
 impl Tunnel {
-    fn new(endpoint: Endpoint, remote: EndpointAddr, rebuild: Rebuild) -> Self {
+    pub(crate) fn new(endpoint: Endpoint, remote: EndpointAddr, rebuild: Rebuild) -> Self {
         Self {
             endpoint: std::sync::Mutex::new(endpoint),
             rebuild,
@@ -537,7 +371,7 @@ impl Tunnel {
     }
 
     /// Journal entry stamped by the tunnel's own (injectable) wall clock.
-    fn note(&self, kind: &str, detail: &str) {
+    pub(crate) fn note(&self, kind: &str, detail: &str) {
         self.journal.record(ms_of((self.clock)()), kind, detail);
     }
 
@@ -859,7 +693,7 @@ impl Tunnel {
         }
     }
 
-    async fn open_stream(&self) -> Result<(SendStream, RecvStream), BoxError> {
+    pub(crate) async fn open_stream(&self) -> Result<(SendStream, RecvStream), BoxError> {
         let mut last_err: BoxError = "no attempt made".into();
         for _ in 0..2 {
             let conn = self.connection().await?;
@@ -900,227 +734,22 @@ async fn resume_watchdog(tunnel: Arc<Tunnel>) {
     }
 }
 
-async fn accept_loop(listener: TcpListener, tunnel: Arc<Tunnel>) {
-    loop {
-        match listener.accept().await {
-            Ok((tcp, _)) => {
-                let tunnel = tunnel.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = forward(tcp, &tunnel).await {
-                        error!("tunnel forward error: {}", e);
-                    }
-                });
-            }
-            Err(e) => {
-                error!("tunnel listener accept failed: {}", e);
-                // Don't continue in a tight loop if accept keeps failing
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        }
-    }
-}
-
-/// Most request bytes the journal port reads before it answers anyway.
-const JOURNAL_PORT_HEAD_CAP: usize = 8 * 1024;
-
-/// A journal-port client that has not finished its request head by now is dropped.
-const JOURNAL_PORT_HEAD_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Binds the journal port, the main port + 1, for the page to read the journal
-/// on. A fetch on the main port rides the WebView's reused keep-alive connections,
-/// which are spliced to the PC, so only a port of its own is reliable. A failure
-/// is journaled and the tunnel carries on without it.
-async fn bind_journal_listener(main_port: u16, tunnel: &Tunnel) -> Option<TcpListener> {
-    let bound = match main_port.checked_add(1) {
-        Some(port) => TcpListener::bind(("127.0.0.1", port)).await.map_err(|e| format!("port {port}: {e}")),
-        None => Err("no port above the main one".to_string()),
-    };
-    match bound {
-        Ok(listener) => Some(listener),
-        Err(reason) => {
-            warn!("journal port unavailable: {reason}");
-            tunnel.note("journal_port", &format!("unavailable {reason}"));
-            None
-        }
-    }
-}
-
-async fn journal_accept_loop(listener: TcpListener, tunnel: Arc<Tunnel>, main_port: u16) {
-    loop {
-        match listener.accept().await {
-            Ok((tcp, _)) => {
-                let tunnel = tunnel.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = serve_journal(tcp, &tunnel, main_port).await {
-                        warn!("journal port reply failed: {e}");
-                    }
-                });
-            }
-            Err(e) => {
-                error!("journal listener accept failed: {}", e);
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        }
-    }
-}
-
-/// Answers every connection with the journal and closes. The origin header names
-/// the tunnel's own page (`main_port`) only, so no other site can read it.
-/// Never dials the PC.
-async fn serve_journal(tcp: TcpStream, tunnel: &Tunnel, main_port: u16) -> Result<(), BoxError> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let (mut read, mut write) = tokio::io::split(tcp);
-    let deadline = tokio::time::Instant::now() + JOURNAL_PORT_HEAD_TIMEOUT;
-    let mut head: Vec<u8> = Vec::new();
-    let mut chunk = [0u8; 1024];
-    while head.len() < JOURNAL_PORT_HEAD_CAP && !head.windows(4).any(|w| w == b"\r\n\r\n") {
-        match tokio::time::timeout_at(deadline, read.read(&mut chunk)).await {
-            Ok(Ok(n)) if n > 0 => head.extend_from_slice(&chunk[..n]),
-            _ => return Ok(()),
-        }
-    }
-    let body = tunnel.journal.snapshot_json(ms_of((tunnel.clock)()));
-    let reply = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: http://127.0.0.1:{main_port}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    write.write_all(reply.as_bytes()).await?;
-    write.shutdown().await?;
-    Ok(())
-}
-
-enum RequestHead {
-    Journal,
-    Forward,
-    /// The peer closed, errored or stayed silent past `REQUEST_HEAD_TIMEOUT`.
-    Closed,
-}
-
-/// Reads into `early` until it is known whether the request is the journal's:
-/// the first line is complete, `REQUEST_HEAD_CAP` bytes arrived, or the bytes
-/// can no longer be the start of the journal request line. The last rule keeps a
-/// client that speaks a non-HTTP protocol, or waits for a reply after a short
-/// write, from being held until the timeout. Every byte read stays in `early`.
-async fn read_request_head(tcp_read: &mut (impl tokio::io::AsyncRead + Unpin), early: &mut Vec<u8>) -> RequestHead {
-    use tokio::io::AsyncReadExt;
-    let deadline = tokio::time::Instant::now() + REQUEST_HEAD_TIMEOUT;
-    let mut chunk = [0u8; 512];
-    loop {
-        let line_end = early.iter().position(|b| *b == b'\n');
-        let n = JOURNAL_REQUEST_PREFIX.len();
-        let could_be_journal = if early.len() <= n { JOURNAL_REQUEST_PREFIX.starts_with(&early[..]) } else { early.starts_with(JOURNAL_REQUEST_PREFIX) };
-        if !could_be_journal {
-            return RequestHead::Forward;
-        }
-        if line_end.is_some() || early.len() >= REQUEST_HEAD_CAP {
-            let line = &early[..line_end.unwrap_or(early.len())];
-            let line = line.strip_suffix(b"\r").unwrap_or(line);
-            // `HTTP/1.` plus exactly one version digit.
-            let is_journal = line.len() == n + 1 && line.starts_with(JOURNAL_REQUEST_PREFIX) && line[n].is_ascii_digit();
-            return if is_journal { RequestHead::Journal } else { RequestHead::Forward };
-        }
-        match tokio::time::timeout_at(deadline, tcp_read.read(&mut chunk)).await {
-            Ok(Ok(read)) if read > 0 => early.extend_from_slice(&chunk[..read]),
-            _ => return RequestHead::Closed,
-        }
-    }
-}
-
-/// Splice one accepted TCP connection onto a bi-stream of the shared connection.
-/// While the stream is being opened (possibly behind a long dial) the socket is
-/// watched: a peer that already closed it, such as a request the page aborted,
-/// must not stay parked until the dial ends. Bytes it sent meanwhile are kept
-/// and written first.
-async fn forward(tcp: TcpStream, tunnel: &Tunnel) -> Result<(), BoxError> {
-    use tokio::io::AsyncReadExt;
-    let (mut tcp_read, mut tcp_write) = tokio::io::split(tcp);
-    let mut early: Vec<u8> = Vec::new();
-    // A journal request that opens a fresh connection is answered here, before any
-    // dial: it must be readable exactly when the PC is unreachable, and reading it
-    // must not start a connect. A request on a reused keep-alive connection never
-    // gets here, which is why the page reads the dedicated journal port instead.
-    match read_request_head(&mut tcp_read, &mut early).await {
-        RequestHead::Closed => return Ok(()),
-        RequestHead::Journal => {
-            let body = tunnel.journal.snapshot_json(ms_of((tunnel.clock)()));
-            let head = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
-            tokio::io::AsyncWriteExt::write_all(&mut tcp_write, head.as_bytes()).await?;
-            tokio::io::AsyncWriteExt::write_all(&mut tcp_write, body.as_bytes()).await?;
-            tokio::io::AsyncWriteExt::shutdown(&mut tcp_write).await?;
-            // Unread request bytes at close would reset the socket and could
-            // cut the response off, so the rest of the request is read out.
-            let mut sink = [0u8; 1024];
-            while let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(1), tcp_read.read(&mut sink)).await {
-                if n == 0 {
-                    break;
-                }
-            }
-            return Ok(());
-        }
-        RequestHead::Forward => {}
-    }
-    let (mut send, mut recv) = {
-        let open = tunnel.open_stream();
-        tokio::pin!(open);
-        let mut chunk = [0u8; 8192];
-        loop {
-            // Past the cap reading stops (TCP backpressure holds the rest)
-            // and only the stream result is awaited.
-            let can_read = early.len() < EARLY_BUFFER_CAP;
-            tokio::select! {
-                opened = &mut open => break opened?,
-                read = tcp_read.read(&mut chunk), if can_read => match read {
-                    Ok(0) | Err(_) => return Ok(()),
-                    Ok(n) => early.extend_from_slice(&chunk[..n]),
-                },
-            }
-        }
-    };
-    let _open = StreamGauge::new(&tunnel.open_streams);
-    if !early.is_empty() {
-        send.write_all(&early).await?;
-    }
-    let up = async {
-        tokio::io::copy(&mut tcp_read, &mut send).await?;
-        tokio::io::AsyncWriteExt::shutdown(&mut send).await
-    };
-    let down = async {
-        tokio::io::copy(&mut recv, &mut tcp_write).await?;
-        tokio::io::AsyncWriteExt::shutdown(&mut tcp_write).await
-    };
-    tokio::try_join!(up, down)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::forward::JOURNAL_PORT_HEAD_TIMEOUT;
+    use crate::quiet_watch::QUIET_DEAD_TICKS;
+    use crate::test_support::*;
+    use crate::tunnel_ports::is_tunnel_port;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
 
     /// Pins the wire byte value, since src-tauri has its own copy of this
     /// constant in a separate cargo workspace with no shared crate.
     #[test]
     fn alpn_matches_desktop_copy() {
         assert_eq!(ALPN, b"conductor/remote/0");
-    }
-
-    fn id(seed: u8) -> EndpointId {
-        iroh::SecretKey::from_bytes(&[seed; 32]).public()
-    }
-
-    #[test]
-    fn each_endpoint_id_gets_its_own_stable_port_in_range() {
-        let (a, b) = (id(1), id(2));
-        assert_eq!(derived_port(&a), derived_port(&a), "same id, same port across launches");
-        assert_ne!(derived_port(&a), derived_port(&b), "these two ids must not share an origin");
-        for p in [derived_port(&a), derived_port(&b)] {
-            assert!((DERIVED_PORT_BASE..DERIVED_PORT_BASE + DERIVED_PORT_SPAN).contains(&p));
-            assert_ne!(p, LEGACY_LOOPBACK_PORT);
-        }
     }
 
     #[tokio::test]
@@ -1145,28 +774,6 @@ mod tests {
     }
 
     #[test]
-    fn collisions_probe_forward_deterministically_and_legacy_binds_only_the_old_port() {
-        let a = id(3);
-        let c = port_candidates(&a, false);
-        assert_eq!(c.len(), PORT_PROBES as usize);
-        assert_eq!(c[0], derived_port(&a));
-        assert_eq!(c, port_candidates(&a, false));
-        // No derived fallback: it would be a fresh origin without the token.
-        assert_eq!(port_candidates(&a, true), vec![LEGACY_LOOPBACK_PORT]);
-    }
-
-    #[tokio::test]
-    async fn a_taken_port_falls_through_to_the_next_candidate() {
-        let held = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
-        let taken = held.local_addr().expect("addr").port();
-        let free = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
-        let next = free.local_addr().expect("addr").port();
-        drop(free);
-        let (_l, port) = bind_loopback(&[taken, next]).await.expect("falls through");
-        assert_eq!(port, next);
-    }
-
-    #[test]
     fn only_a_long_wall_clock_gap_counts_as_a_resume() {
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
         assert!(!is_resume_gap(t0, t0 + WATCHDOG_TICK));
@@ -1174,57 +781,6 @@ mod tests {
         assert!(is_resume_gap(t0, t0 + RESUME_GAP + Duration::from_secs(1)));
         // A wall clock stepped backwards is not a resume.
         assert!(!is_resume_gap(t0, t0 - Duration::from_secs(60)));
-    }
-
-    /// Echo-style PING/PONG peer that counts accepted QUIC connections.
-    /// `Minimal` + a full `EndpointAddr` means no relay and no address lookup,
-    /// so this runs offline.
-    async fn pong_server() -> (EndpointAddr, Arc<AtomicUsize>) {
-        let server = Endpoint::builder(presets::Minimal)
-            .alpns(vec![ALPN.to_vec()])
-            .bind()
-            .await
-            .expect("server bind");
-        let addr = server.addr();
-        let accepted = Arc::new(AtomicUsize::new(0));
-        let counter = accepted.clone();
-        tokio::spawn(async move {
-            while let Some(incoming) = server.accept().await {
-                let counter = counter.clone();
-                // One task per dial, as the daemon does: a dial the client
-                // abandoned mid-handshake would otherwise hold up every dial
-                // behind it until its handshake times out.
-                tokio::spawn(async move {
-                    let Ok(conn) = incoming.await else { return };
-                    counter.fetch_add(1, Ordering::SeqCst);
-                    // `conn` stays alive past the reply write: dropping it early
-                    // resets the stream before PONG lands.
-                    while let Ok((mut send, mut recv)) = conn.accept_bi().await {
-                        tokio::spawn(async move {
-                            let mut got = vec![0u8; 4];
-                            recv.read_exact(&mut got).await.expect("read");
-                            assert_eq!(&got, b"PING");
-                            send.write_all(b"PONG").await.expect("write");
-                            send.finish().expect("finish");
-                        });
-                    }
-                });
-            }
-        });
-        (addr, accepted)
-    }
-
-    async fn tunnel_to(server: EndpointAddr) -> (Arc<Tunnel>, u16) {
-        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
-        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
-        let port = listener.local_addr().expect("addr").port();
-        let tunnel = Arc::new(Tunnel::new(client, server, minimal_rebuild()));
-        tokio::spawn(accept_loop(listener, tunnel.clone()));
-        (tunnel, port)
-    }
-
-    fn minimal_rebuild() -> Rebuild {
-        Box::new(|| Box::pin(async { Endpoint::builder(presets::Minimal).bind().await.map_err(|e| e.to_string()) }))
     }
 
     /// A dead endpoint fails the first dial at once. The retry must run on a
@@ -1356,79 +912,6 @@ mod tests {
         *tunnel.relay_hint.lock().unwrap() = Some("https://wrong-relay.invalid./".parse().unwrap());
         ping(port).await;
         assert_eq!(accepted.load(Ordering::SeqCst), 1);
-    }
-
-    /// The UDP port the endpoint's socket is bound to. `ip_addrs()` lists one entry
-    /// per interface, all on that port, plus a public address learned from the
-    /// outside whose port is the NAT's mapping, not a port bound here (nothing
-    /// listens on it over loopback). The set is unordered, so taking the first
-    /// IPv4 entry picked the mapped one about half the time. The bound port is
-    /// the one most entries share.
-    fn local_v4_port(addr: &EndpointAddr) -> u16 {
-        let mut seen: std::collections::HashMap<u16, usize> = Default::default();
-        for a in addr.ip_addrs().filter(|a| a.is_ipv4()) {
-            *seen.entry(a.port()).or_default() += 1;
-        }
-        let best = seen.values().max().copied().expect("server v4 addr");
-        // With one entry per port there is no majority: prefer a private address.
-        let ports: Vec<u16> = seen.iter().filter(|(_, n)| **n == best).map(|(p, _)| *p).collect();
-        if let [only] = ports[..] {
-            return only;
-        }
-        addr.ip_addrs()
-            .find(|a| matches!(a, std::net::SocketAddr::V4(v) if v.ip().is_private() || v.ip().is_loopback()))
-            .or_else(|| addr.ip_addrs().find(|a| a.is_ipv4()))
-            .expect("server v4 addr")
-            .port()
-    }
-
-    /// Forwards UDP between a loopback front port and `target`, dropping every
-    /// datagram while `open` is false: a PC nobody answers for, until opened.
-    ///
-    /// Each client address gets its own socket towards `target`, like a NAT: the
-    /// abandoned endpoint keeps sending for a moment after the fresh one starts,
-    /// and with one shared return route the PC's replies would go to whichever
-    /// of the two spoke last.
-    async fn udp_gate(target: std::net::SocketAddr, open: Arc<std::sync::atomic::AtomicBool>) -> std::net::SocketAddr {
-        let front = Arc::new(tokio::net::UdpSocket::bind(("127.0.0.1", 0)).await.expect("front"));
-        let front_addr = front.local_addr().expect("addr");
-        tokio::spawn(async move {
-            let mut routes: std::collections::HashMap<std::net::SocketAddr, Arc<tokio::net::UdpSocket>> = Default::default();
-            let mut buf = [0u8; 2048];
-            loop {
-                // On Windows a reply sent to a port that has just closed (the
-                // abandoned endpoint) comes back as a connection-reset error on
-                // the next receive. The socket is still good, so it is skipped.
-                let Ok((n, from)) = front.recv_from(&mut buf).await else {
-                    tokio::task::yield_now().await;
-                    continue;
-                };
-                if !open.load(Ordering::SeqCst) {
-                    continue;
-                }
-                let back = match routes.get(&from) {
-                    Some(back) => back.clone(),
-                    None => {
-                        let back = Arc::new(tokio::net::UdpSocket::bind(("127.0.0.1", 0)).await.expect("back"));
-                        back.connect(target).await.expect("connect");
-                        routes.insert(from, back.clone());
-                        let (replies, front) = (back.clone(), front.clone());
-                        tokio::spawn(async move {
-                            let mut buf = [0u8; 2048];
-                            loop {
-                                match replies.recv(&mut buf).await {
-                                    Ok(n) => drop(front.send_to(&buf[..n], from).await),
-                                    Err(_) => tokio::task::yield_now().await,
-                                }
-                            }
-                        });
-                        back
-                    }
-                };
-                let _ = back.send(&buf[..n]).await;
-            }
-        });
-        front_addr
     }
 
     /// A dial the phone slept through is abandoned when the wall clock shows it,
@@ -1564,57 +1047,6 @@ mod tests {
         assert_eq!(accepted.load(Ordering::SeqCst), 2);
     }
 
-    /// A socket the WebView already closed must not stay parked behind the
-    /// connection lock while a dial runs.
-    #[tokio::test]
-    async fn a_socket_closed_while_waiting_for_the_stream_ends_its_forward_task() {
-        let (server, _) = pong_server().await;
-        let (tunnel, _) = tunnel_to(server).await;
-        let held = tunnel.conn.lock().await;
-        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
-        let port = listener.local_addr().expect("addr").port();
-        let mut client = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
-        let (served, _) = listener.accept().await.expect("accept");
-        let t = tunnel.clone();
-        let task = tokio::spawn(async move { forward(served, &t).await });
-        client.write_all(b"PI").await.expect("send");
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        drop(client);
-        let ended = tokio::time::timeout(Duration::from_secs(2), task).await;
-        assert!(ended.is_ok(), "forward still parked on the held lock after the peer closed");
-        drop(held);
-    }
-
-    /// Bytes sent before the stream opens are written first once it does.
-    #[tokio::test]
-    async fn bytes_written_before_the_stream_opens_still_arrive() {
-        let (server, _) = pong_server().await;
-        let (tunnel, port) = tunnel_to(server).await;
-        let held = tunnel.conn.lock().await;
-        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
-        sock.write_all(b"PING").await.expect("send");
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        drop(held);
-        let mut reply = vec![0u8; 4];
-        tokio::time::timeout(Duration::from_secs(10), sock.read_exact(&mut reply)).await.expect("timed out").expect("read");
-        assert_eq!(&reply, b"PONG");
-    }
-
-    async fn ping(port: u16) {
-        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
-        sock.write_all(b"PING").await.expect("send");
-        let mut reply = vec![0u8; 4];
-        sock.read_exact(&mut reply).await.expect("read reply");
-        assert_eq!(&reply, b"PONG", "the iroh peer's response must reach the loopback client");
-    }
-
-    #[tokio::test]
-    async fn forwards_a_request_and_response_over_iroh() {
-        let (server, _) = pong_server().await;
-        let (_tunnel, port) = tunnel_to(server).await;
-        ping(port).await;
-    }
-
     #[tokio::test]
     async fn loopback_sockets_share_one_quic_connection() {
         let (server, accepted) = pong_server().await;
@@ -1698,93 +1130,6 @@ mod tests {
         assert!(!tunnel.remote_known().await, "no state before the first dial");
         ping(port).await;
         assert!(tunnel.remote_known().await, "iroh keeps the remote after a dial");
-    }
-
-    /// A tunnel on a loopback port with a journal of its own, so a test reads
-    /// only what it caused. `edit` can swap the clock or the rebuild closure.
-    async fn private_tunnel(client: Endpoint, server: EndpointAddr, rebuild: Rebuild, edit: impl FnOnce(&mut Tunnel)) -> (Arc<Tunnel>, u16, Arc<Journal>) {
-        let journal = Arc::new(Journal::new());
-        let mut tunnel = Tunnel::new(client, server, rebuild);
-        tunnel.journal = journal.clone();
-        edit(&mut tunnel);
-        let tunnel = Arc::new(tunnel);
-        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
-        let port = listener.local_addr().expect("addr").port();
-        tokio::spawn(accept_loop(listener, tunnel.clone()));
-        (tunnel, port, journal)
-    }
-
-    /// Writes `chunks` (pausing between them) and reads until the server closes.
-    async fn raw_exchange(port: u16, chunks: &[&[u8]]) -> String {
-        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
-        for (i, chunk) in chunks.iter().enumerate() {
-            if i > 0 {
-                tokio::time::sleep(Duration::from_millis(150)).await;
-            }
-            sock.write_all(chunk).await.expect("send");
-        }
-        let mut out = Vec::new();
-        tokio::time::timeout(Duration::from_secs(5), sock.read_to_end(&mut out)).await.expect("timed out").expect("read");
-        String::from_utf8_lossy(&out).into_owned()
-    }
-
-    fn assert_journal_response(reply: &str) {
-        assert!(reply.starts_with("HTTP/1.1 200 OK\r\n"), "{reply}");
-        assert!(reply.contains("Content-Type: application/json\r\n"), "{reply}");
-        assert!(reply.contains("Cache-Control: no-store\r\n"), "{reply}");
-        let body = reply.split("\r\n\r\n").nth(1).expect("body");
-        assert!(body.starts_with("{\"v\":1"), "{body}");
-        assert!(reply.contains(&format!("Content-Length: {}\r\n", body.len())), "{reply}");
-    }
-
-    /// Reading the journal works while the PC is unreachable and never dials.
-    #[tokio::test]
-    async fn the_journal_is_served_from_the_loopback_port_without_any_dial() {
-        let (server, accepted) = pong_server().await;
-        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
-        let (_tunnel, port, _) = private_tunnel(client, server, minimal_rebuild(), |_| {}).await;
-        assert_journal_response(&raw_exchange(port, &[b"GET /__tunnel/journal HTTP/1.1\r\nHost: x\r\n\r\n"]).await);
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert_eq!(accepted.load(Ordering::SeqCst), 0, "reading the journal must not reach the PC");
-    }
-
-    #[tokio::test]
-    async fn the_journal_is_served_when_every_dial_fails_and_triggers_none() {
-        let (server, _) = pong_server().await;
-        let dead = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
-        dead.close().await;
-        let rebinds = Arc::new(AtomicUsize::new(0));
-        let counter = rebinds.clone();
-        let rebuild: Rebuild = Box::new(move || {
-            counter.fetch_add(1, Ordering::SeqCst);
-            Box::pin(async { Err("no sockets".to_string()) })
-        });
-        let (_tunnel, port, _) = private_tunnel(dead, server, rebuild, |_| {}).await;
-        assert_journal_response(&raw_exchange(port, &[b"GET /__tunnel/journal HTTP/1.0\r\n\r\n"]).await);
-        assert_eq!(rebinds.load(Ordering::SeqCst), 0, "a dial would have rebound");
-    }
-
-    #[tokio::test]
-    async fn a_journal_request_line_split_across_two_writes_is_still_recognised() {
-        let (server, accepted) = pong_server().await;
-        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
-        let (_tunnel, port, _) = private_tunnel(client, server, minimal_rebuild(), |_| {}).await;
-        assert_journal_response(&raw_exchange(port, &[b"GET /__tun", b"nel/journal HTTP/1.1\r\n\r\n"]).await);
-        assert_eq!(accepted.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test]
-    async fn a_request_that_only_resembles_the_journal_is_forwarded() {
-        let (server, accepted) = pong_server().await;
-        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
-        let (_tunnel, port, _) = private_tunnel(client, server, minimal_rebuild(), |_| {}).await;
-        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
-        // Not the journal path, and only four bytes: the PC's stub replies after exactly "PING".
-        sock.write_all(b"PING").await.expect("send");
-        let mut reply = vec![0u8; 4];
-        tokio::time::timeout(Duration::from_secs(10), sock.read_exact(&mut reply)).await.expect("timed out").expect("read");
-        assert_eq!(&reply, b"PONG");
-        assert_eq!(accepted.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -1911,28 +1256,6 @@ mod tests {
         running.shutdown().await;
     }
 
-    /// Why the journal has a port of its own: the WebView reuses a keep-alive
-    /// connection that is already spliced to a stream to the PC, and the tunnel
-    /// only looks at the first request of a connection. A journal request that
-    /// rides such a connection is not answered locally.
-    #[tokio::test]
-    async fn a_journal_request_on_a_reused_main_port_connection_is_not_answered_locally() {
-        let (server, accepted) = pong_server().await;
-        let (_tunnel, port) = tunnel_to(server).await;
-        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
-        sock.write_all(b"PING").await.expect("send");
-        let mut reply = vec![0u8; 4];
-        sock.read_exact(&mut reply).await.expect("read reply");
-        assert_eq!(&reply, b"PONG");
-        // The second request on the same connection; a write error is fine, the splice may be closed.
-        let _ = sock.write_all(b"GET /__tunnel/journal HTTP/1.1\r\nHost: x\r\n\r\n").await;
-        let mut rest = Vec::new();
-        let _ = tokio::time::timeout(Duration::from_secs(2), sock.read_to_end(&mut rest)).await;
-        let rest = String::from_utf8_lossy(&rest);
-        assert!(!rest.contains("\"v\":1") && !rest.contains("HTTP/1.1 200"), "answered locally: {rest}");
-        assert_eq!(accepted.load(Ordering::SeqCst), 1, "only the first request dialed the PC; the second rode its stream");
-    }
-
     #[tokio::test]
     async fn shutting_down_frees_the_journal_port_too() {
         let (server, _) = pong_server().await;
@@ -2047,83 +1370,6 @@ mod tests {
     /// Ticks needed to reach the dead mark from the tick that records the baseline.
     const TICKS_TO_DEAD: u32 = QUIET_DEAD_TICKS + 1;
 
-    #[test]
-    fn the_quiet_marks_are_8_and_12_seconds_of_watchdog_ticks() {
-        assert_eq!(QUIET_NUDGE_TICKS, 4);
-        assert_eq!(QUIET_DEAD_TICKS, 6);
-    }
-
-    #[test]
-    fn a_moving_counter_never_triggers_and_resets_the_quiet_count() {
-        let mut quiet = 0;
-        let mut rx = 10;
-        for _ in 0..50 {
-            let (verdict, q) = quiet_step(rx, rx + 1, quiet, 3);
-            assert_eq!(verdict, QuietVerdict::Nothing);
-            assert_eq!(q, 0);
-            rx += 1;
-            quiet = q;
-        }
-        // Movement after a long quiet spell starts the count over.
-        let (verdict, q) = quiet_step(5, 6, QUIET_DEAD_TICKS - 1, 1);
-        assert_eq!((verdict, q), (QuietVerdict::Nothing, 0));
-    }
-
-    #[test]
-    fn a_still_counter_with_a_stream_open_nudges_at_8s_once_and_drops_at_12s() {
-        let mut quiet = 0;
-        let mut seen = Vec::new();
-        for tick in 1..=QUIET_DEAD_TICKS {
-            let (verdict, q) = quiet_step(7, 7, quiet, 1);
-            seen.push((tick, verdict));
-            quiet = q;
-        }
-        let nudges: Vec<u32> = seen.iter().filter(|(_, v)| *v == QuietVerdict::Nudge).map(|(t, _)| *t).collect();
-        assert_eq!(nudges, vec![QUIET_NUDGE_TICKS], "one nudge, on the tick that reaches 8s");
-        let drops: Vec<u32> = seen.iter().filter(|(_, v)| *v == QuietVerdict::Drop).map(|(t, _)| *t).collect();
-        assert_eq!(drops, vec![QUIET_DEAD_TICKS], "one drop, on the tick that reaches 12s");
-    }
-
-    #[test]
-    fn a_still_counter_with_no_stream_open_never_triggers_and_does_not_accumulate() {
-        let mut quiet = 0;
-        for _ in 0..50 {
-            let (verdict, q) = quiet_step(7, 7, quiet, 0);
-            assert_eq!(verdict, QuietVerdict::Nothing);
-            assert_eq!(q, 0);
-            quiet = q;
-        }
-        // A stream opening after a long idle spell starts its count at one tick.
-        assert_eq!(quiet_step(7, 7, quiet, 1), (QuietVerdict::Nothing, 1));
-    }
-
-    #[test]
-    fn a_different_connection_starts_the_watch_over() {
-        let mut watch = QuietWatch::default();
-        assert_eq!(watch.step(1, 9, 1), QuietVerdict::Nothing, "the first sample is only a baseline");
-        for _ in 0..QUIET_DEAD_TICKS - 1 {
-            watch.step(1, 9, 1);
-        }
-        assert_eq!(watch.quiet, QUIET_DEAD_TICKS - 1);
-        // One tick from a drop on connection 1; connection 2 must not inherit it.
-        assert_eq!(watch.step(2, 9, 1), QuietVerdict::Nothing);
-        assert_eq!(watch.quiet, 0);
-        assert_eq!(watch.step(2, 9, 1), QuietVerdict::Nothing);
-        assert_eq!(watch.quiet, 1);
-    }
-
-    #[test]
-    fn the_stream_gauge_counts_while_it_lives() {
-        let open = std::sync::atomic::AtomicUsize::new(0);
-        let a = StreamGauge::new(&open);
-        let b = StreamGauge::new(&open);
-        assert_eq!(open.load(Ordering::SeqCst), 2);
-        drop(a);
-        assert_eq!(open.load(Ordering::SeqCst), 1);
-        drop(b);
-        assert_eq!(open.load(Ordering::SeqCst), 0);
-    }
-
     /// A tunnel whose PC sits behind a UDP gate, with a stream held open through it.
     /// Returns the tunnel, the gate, the held loopback socket and the journal.
     async fn tunnel_with_open_stream() -> (Arc<Tunnel>, Arc<std::sync::atomic::AtomicBool>, TcpStream, Arc<Journal>) {
@@ -2208,53 +1454,5 @@ mod tests {
         let (tunnel, _gate, _held, _) = tunnel_with_open_stream().await;
         let conn = tunnel.connection().await.expect("cached");
         assert!(conn.stats().udp_rx.datagrams > 0);
-    }
-
-    #[tokio::test]
-    async fn the_stream_gauge_is_one_while_a_request_is_in_flight_and_zero_after_the_socket_closes() {
-        let (server, _) = pong_server().await;
-        let (tunnel, port) = tunnel_to(server).await;
-        assert_eq!(tunnel.open_streams.load(Ordering::SeqCst), 0);
-        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
-        sock.write_all(b"PING").await.expect("send");
-        let mut reply = vec![0u8; 4];
-        sock.read_exact(&mut reply).await.expect("read");
-        assert_eq!(tunnel.open_streams.load(Ordering::SeqCst), 1, "the socket is still open");
-        drop(sock);
-        for _ in 0..100 {
-            if tunnel.open_streams.load(Ordering::SeqCst) == 0 {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        panic!("the gauge stayed above zero after the socket closed");
-    }
-
-    /// A forward that ends in an error releases its stream too.
-    #[tokio::test]
-    async fn the_stream_gauge_returns_to_zero_when_the_forward_ends_by_error() {
-        let server = Endpoint::builder(presets::Minimal).alpns(vec![ALPN.to_vec()]).bind().await.expect("server bind");
-        let addr = server.addr();
-        tokio::spawn(async move {
-            while let Some(incoming) = server.accept().await {
-                tokio::spawn(async move {
-                    let Ok(conn) = incoming.await else { return };
-                    while let Ok((mut send, _recv)) = conn.accept_bi().await {
-                        send.reset(VarInt::from_u32(7)).ok();
-                    }
-                });
-            }
-        });
-        let client = Endpoint::builder(presets::Minimal).bind().await.expect("client bind");
-        let tunnel = Arc::new(Tunnel::new(client, addr, minimal_rebuild()));
-        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
-        let port = listener.local_addr().expect("addr").port();
-        let mut sock = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
-        let (served, _) = listener.accept().await.expect("accept");
-        sock.write_all(b"PING").await.expect("send");
-        let result = tokio::time::timeout(Duration::from_secs(10), forward(served, &tunnel)).await.expect("forward finished");
-        assert!(result.is_err(), "the PC reset the stream, so the forward errors");
-        assert_eq!(tunnel.open_streams.load(Ordering::SeqCst), 0);
-        drop(sock);
     }
 }

@@ -1,7 +1,13 @@
+mod forward;
 mod iroh_tunnel;
 mod journal;
+mod quiet_watch;
+#[cfg(test)]
+mod test_support;
+mod tunnel_ports;
 
-use iroh_tunnel::{is_tunnel_port, probe_iroh_tunnel, start_iroh_tunnel, IrohTunnelState};
+use iroh_tunnel::{probe_iroh_tunnel, start_iroh_tunnel, IrohTunnelState};
+use tunnel_ports::is_tunnel_port;
 
 /// Bundled-shell entry point; the setup/health-check/handoff logic is in android/src/app.js.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -75,9 +81,9 @@ mod tests {
     #[test]
     fn allows_a_live_tunnel_port_and_no_other_loopback_port() {
         let id = iroh::SecretKey::from_bytes(&[9; 32]).public();
-        let port = iroh_tunnel::derived_port(&id);
+        let port = tunnel_ports::derived_port(&id);
         assert!(!allow_navigation(&Url::parse(&format!("http://127.0.0.1:{port}/")).unwrap()));
-        iroh_tunnel::mark_live_for_test(port);
+        tunnel_ports::mark_live_for_test(port);
         assert!(allow_navigation(&Url::parse(&format!("http://127.0.0.1:{port}/index.html")).unwrap()));
         assert!(!allow_navigation(&Url::parse("http://127.0.0.1:9999/").unwrap()));
         assert!(!allow_navigation(&Url::parse(&format!("http://example.com:{port}/")).unwrap()));
