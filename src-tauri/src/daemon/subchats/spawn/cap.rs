@@ -38,11 +38,18 @@ pub struct SubPlan {
     pub(super) reservation: Option<Reservation>,
 }
 
-/// The earlier sub a held sub waits for.
+/// The earlier subs a held sub waits for, as `(id, name)`, still pending when the
+/// plan was made. Never empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HoldPlan {
-    pub target_id: String,
-    pub target_name: String,
+    pub targets: Vec<(String, String)>,
+}
+
+impl HoldPlan {
+    /// The names in words, "header" or "header, footer".
+    pub fn names_display(&self) -> String {
+        self.targets.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join(", ")
+    }
 }
 
 impl SubPlan {
@@ -152,4 +159,16 @@ pub(super) fn reserve(state: &DaemonState, parent: &str) -> Result<Reservation, 
     }
     *map.entry(key.clone()).or_insert(0) += 1;
     Ok(Reservation { key })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_hold_names_every_sub_it_waits_for() {
+        let plan = HoldPlan { targets: vec![("a".into(), "header".into()), ("b".into(), "footer".into())] };
+        assert_eq!(plan.names_display(), "header, footer");
+        assert_eq!(HoldPlan { targets: vec![("a".into(), "header".into())] }.names_display(), "header");
+    }
 }

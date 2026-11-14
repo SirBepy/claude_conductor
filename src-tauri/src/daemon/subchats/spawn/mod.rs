@@ -26,7 +26,7 @@ sonnet at high effort (every job that edits files), or opus at high effort (a re
 
 /// Said when an Opus sub is asked to edit files. Joe's call 2026-11-13: Opus is
 /// worth its 2x as planner, designer and checker, while Sonnet implements.
-const OPUS_WRITER_REFUSAL: &str = "An Opus sub cannot edit files: Opus costs twice what Sonnet does and earns it on planning, design and review, not on implementing. Use sonnet at high effort for this job. If it needs a plan first, spawn a read-only Opus sub for the plan (writes false), then a Sonnet sub to carry it out.";
+pub(super) const OPUS_WRITER_REFUSAL: &str = "An Opus sub cannot edit files: Opus costs twice what Sonnet does and earns it on planning, design and review, not on implementing. Use sonnet at high effort for this job. If it needs a plan first, spawn a read-only Opus sub for the plan (writes false), then a Sonnet sub to carry it out.";
 
 pub(super) fn label(i: &Instance) -> String {
     i.name
@@ -183,8 +183,9 @@ pub fn plan(
     let (model, effort) = resolve_tier(model, effort, brief.writes)?;
     let hold = match args.after.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         Some(query) => {
-            brief.after = Some(query.to_string());
-            super::held::plan_after(state, caller_id, query)?
+            let names = super::brief::after_names(query);
+            brief.after = Some(names.join("\n"));
+            super::held::plan_after_all(state, caller_id, &names)?
         }
         None => None,
     };
@@ -721,7 +722,7 @@ mod tests {
         row(&st, "xp-after");
         sub_row(&st, "xp-after-a", "xp-after", "migrate");
         let waits = plan_in(&st, "xp-after", other.path(), None, Some("api"), &after_args("migrate")).unwrap().unwrap();
-        assert_eq!(waits.hold.as_ref().map(|h| h.target_name.as_str()), Some("migrate"));
+        assert_eq!(waits.hold.as_ref().map(|h| h.names_display()), Some("migrate".to_string()));
     }
 
     // ── plain: true ────────────────────────────────────────────────────────
@@ -935,7 +936,7 @@ mod tests {
         sub_row(&st, "g-after-fix", "g-after", "fix");
         let args = SubchatArgs { gate: Some(true), after: Some("fix".into()), ..Default::default() };
         let p = plan_gate(&st, "g-after", &on(), Some(GATE_PROMPT), &args).unwrap().unwrap();
-        assert_eq!(p.hold.as_ref().map(|h| h.target_name.as_str()), Some("fix"));
+        assert_eq!(p.hold.as_ref().map(|h| h.names_display()), Some("fix".to_string()));
         assert_eq!(p.brief.after.as_deref(), Some("fix"));
     }
 
@@ -954,7 +955,7 @@ mod tests {
         sub_row(&st, "af-done", "af-main", "docs");
         st.registry.set_subchat_finished("af-done", true);
         let waits = plan_as(&st, "af-main", &on(), Some("footer"), &after_args("header")).unwrap().unwrap();
-        assert_eq!(waits.hold, Some(HoldPlan { target_id: "af-run".into(), target_name: "header".into() }));
+        assert_eq!(waits.hold, Some(HoldPlan { targets: vec![("af-run".into(), "header".into())] }));
         assert_eq!(waits.brief.after.as_deref(), Some("header"));
         let now = plan_as(&st, "af-main", &on(), Some("footer"), &after_args("docs")).unwrap().unwrap();
         assert!(now.hold.is_none(), "the named sub already finished cleanly, so this one starts now");

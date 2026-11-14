@@ -169,7 +169,7 @@ pub(crate) async fn spawn_chat_or_forward(
         if plan.is_none() && prompt.trim().is_empty() {
             return json!({"ok": false, "error": PROMPT_REQUIRED});
         }
-        let queued_behind = plan.as_ref().and_then(|p| p.hold.as_ref()).map(|h| h.target_name.clone());
+        let queued_behind = plan.as_ref().and_then(|p| p.hold.as_ref()).map(|h| h.names_display());
         return match spawn_chat(state, caller_session_id, cwd, prompt, model, effort, name, respawn, plan).await {
             Ok(sid) => match queued_behind {
                 // Said to the main agent so it does not wait on the sub or spawn it twice.
@@ -177,7 +177,7 @@ pub(crate) async fn spawn_chat_or_forward(
                     "ok": true,
                     "session_id": sid,
                     "queued": true,
-                    "note": format!("Registered, not started: it starts by itself when {target} finishes, without waking you. If {target} ends blocked, Joe gets a card to start it anyway or drop it."),
+                    "note": format!("Registered, not started: it starts by itself when {target} finishes (every one of them, when several), without waking you. If any of them ends blocked, Joe gets a card to start it anyway or drop it."),
                 }),
                 None => {
                     let mut result = json!({"ok": true, "session_id": sid});

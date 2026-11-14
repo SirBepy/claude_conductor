@@ -64,8 +64,8 @@ pub(crate) fn stall_of(state: &DaemonState, inst: &Instance, held: &[Held], has_
     }
     match held.iter().find(|h| h.sub_id == id) {
         Some(h) => match h.after.as_deref() {
-            Some(target) => match held::after_state(state, target) {
-                AfterState::Clean => Some(Stall::AfterDone { target: h.after_name.clone() }),
+            Some(_) => match held::after_all(state, h).0 {
+                AfterState::Clean => Some(Stall::AfterDone { target: h.names_display() }),
                 AfterState::Pending | AfterState::Blocked(_) => None,
             },
             // A worktree sub held without `after` is setting up its own tree.

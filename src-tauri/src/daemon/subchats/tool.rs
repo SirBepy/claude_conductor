@@ -238,7 +238,7 @@ fn is_active(i: &Instance) -> bool {
 /// long-lived main chat would otherwise answer every `list` with its whole
 /// history. Picking by start time alone hid an old working sub behind twenty newer
 /// finished ones.
-fn list(subs: &[Instance]) -> Value {
+fn list(state: &DaemonState, subs: &[Instance]) -> Value {
     let (active, rest): (Vec<&Instance>, Vec<&Instance>) =
         subs.iter().filter(|i| status_word(i) != "ended").partition(|i| is_active(i));
     let open_total = active.len() + rest.len();
@@ -249,7 +249,7 @@ fn list(subs: &[Instance]) -> Value {
         .iter()
         .map(|i| {
             let task = brief_of(&i.session_id).map(|b| flat(&b.task, TASK_CAP)).unwrap_or_default();
-            json!({"name": label(i), "id": i.session_id, "status": status_word(i), "tier": tier(i), "task": task})
+            json!({"name": label(i), "id": i.session_id, "status": status_word(i), "tier": tier(i), "context_pct": super::ceiling::context_pct(state, &i.session_id), "task": task})
         })
         .collect();
     let mut out = json!({"ok": true, "subs": rows});
@@ -275,6 +275,7 @@ fn status(state: &Arc<DaemonState>, subs: &[Instance], query: &str, facts: Facts
         "id": sub.session_id,
         "status": status_word(sub),
         "tier": tier(sub),
+        "context_pct": super::ceiling::context_pct(state, &sub.session_id),
         "progress": progress(sub),
     });
     if let Some(b) = brief_of(&sub.session_id) {
@@ -284,7 +285,7 @@ fn status(state: &Arc<DaemonState>, subs: &[Instance], query: &str, facts: Facts
     if sub.progress.waiting_for.is_some() {
         // Two different waits: telling a main chat it waits for the slot when it
         // waits for a named sub sent it looking at the wrong thing (2026-11-10).
-        let after = super::held::all().into_iter().find(|h| h.sub_id == sub.session_id).and_then(|h| h.after.map(|_| h.after_name));
+        let after = super::held::all().into_iter().find(|h| h.sub_id == sub.session_id).and_then(|h| h.after.as_ref().map(|_| h.names_display()));
         out["waiting"] = json!(match after {
             Some(name) => format!("waiting for {name} to finish: it starts by itself then"),
             None => "waiting for the writer slot: only one sub changes files at a time in this project".to_string(),
@@ -618,6 +619,12 @@ where
             failed.push(json!({"sub": name, "error": "it has ended and cannot take a message"}));
             continue;
         }
+        // The Opus rule holds for a follow-up too: `writes` on an Opus sub would
+        // flip a planner to an implementer after the spawn check passed it.
+        if writes && sub.model.to_ascii_lowercase().contains("opus") {
+            failed.push(json!({"sub": name, "error": spawn_mod::OPUS_WRITER_REFUSAL}));
+            continue;
+        }
         // Joe's message, if he typed one this sub has not had, is what is sent, word
         // for word. The main agent's text only follows it, framed as not his.
         let joe_for_this_sub = joe.as_deref().filter(|_| !joe_message::already_passed(caller, &sub.session_id));
@@ -797,7 +804,7 @@ where
     let action = args["action"].as_str().unwrap_or("");
     let sub = args["sub"].as_str().unwrap_or("");
     match action {
-        "list" => list(&subs),
+        "list" => list(state, &subs),
         "status" => status(state, &subs, sub, facts),
         "log" => log_action(caller),
         "send" => send(state, caller, &subs, args, resume, has_transcript).await,
@@ -1191,6 +1198,28 @@ mod tests {
         assert_eq!(both["ok"], json!(false), "sub and all together are ambiguous");
     }
 
+    /// The spawn refuses an Opus writer; a follow-up with `writes` must not be
+    /// the way round it.
+    #[tokio::test]
+    async fn send_with_writes_to_an_opus_sub_is_refused_and_leaves_its_brief_and_message_alone() {
+        let _d = super::super::TempDataDir::new();
+        let (st, main, sent) = setup("tool-opus-writes");
+        sub(&st, &main, "tool-opus-writes-a", "Planner", "t");
+        st.registry.set_model_effort("tool-opus-writes-a", "claude-opus-4-8", "high");
+        sub(&st, &main, "tool-opus-writes-b", "Builder", "t");
+        st.registry.set_model_effort("tool-opus-writes-b", "sonnet", "high");
+        joe_message::note_sent(&main, "now edit the files", false, None);
+        let v = call(&st, &main, json!({"action": "send", "sub": "Planner", "writes": true}), &sent).await;
+        assert_eq!(v["ok"], json!(false), "{v}");
+        assert!(v.to_string().contains("Opus sub cannot edit files"), "{v}");
+        assert!(!brief_of("tool-opus-writes-a").unwrap().writes, "the brief stays read-only");
+        assert!(sent.lock().unwrap().is_empty(), "nothing reaches the sub");
+        let ok = call(&st, &main, json!({"action": "send", "sub": "Builder", "writes": true}), &sent).await;
+        assert_eq!(ok["ok"], json!(true), "a Sonnet sub may be asked to write: {ok}");
+        let read_only = call(&st, &main, json!({"action": "send", "sub": "Planner", "text": "one more question"}), &sent).await;
+        assert_eq!(read_only["ok"], json!(true), "an Opus sub still takes a read-only follow-up: {read_only}");
+    }
+
     #[tokio::test]
     async fn send_with_writes_records_it_on_the_subs_brief_and_one_message_does_not_go_to_a_sub_twice() {
         let _d = super::super::TempDataDir::new();
@@ -1383,7 +1412,11 @@ mod tests {
             f.subchat_finished = true;
             subs.push(f);
         }
-        let v = list(&subs);
+        let st = DaemonState::new(
+            crate::daemon::session::new_session_map(),
+            crate::daemon::settings_cache::SettingsCache::new(crate::types::Settings::default()),
+        );
+        let v = list(&st, &subs);
         let rows = v["subs"].as_array().unwrap();
         assert_eq!(rows.len(), LIST_CAP, "still capped");
         let names: Vec<&str> = rows.iter().map(|r| r["name"].as_str().unwrap()).collect();

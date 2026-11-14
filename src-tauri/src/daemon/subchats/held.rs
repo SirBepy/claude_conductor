@@ -79,15 +79,34 @@ pub struct Held {
     /// The words the sub's row shows ("waiting for header").
     #[serde(default)]
     pub reason: String,
-    /// The sub it waits for. `None` for a hold some other rule owns (the writer
-    /// queue): [`release_ready`] leaves those to their owner and
-    /// [`launch_held`] starts one on request.
+    /// The sub it waits for, or several, one id per line (an entry written before
+    /// `after` took a list holds one id, which reads the same). `None` for a hold
+    /// some other rule owns (the writer queue): [`release_ready`] leaves those to
+    /// their owner and [`launch_held`] starts one on request.
     #[serde(default)]
     pub after: Option<String>,
+    /// The names of `after`'s subs, one per line, in the same order.
     #[serde(default)]
     pub after_name: String,
     #[serde(default)]
     pub launch: LaunchSpec,
+}
+
+impl Held {
+    /// The ids of the subs this one waits for.
+    pub fn target_ids(&self) -> Vec<&str> {
+        self.after.as_deref().map(|a| a.lines().map(str::trim).filter(|l| !l.is_empty()).collect()).unwrap_or_default()
+    }
+
+    /// Their names, in the same order.
+    fn target_names(&self) -> Vec<&str> {
+        self.after_name.lines().map(str::trim).filter(|l| !l.is_empty()).collect()
+    }
+
+    /// The names in words, "header" or "header, footer".
+    pub fn names_display(&self) -> String {
+        self.target_names().join(", ")
+    }
 }
 
 /// Serialises read-modify-write of the file. The file is small and read rarely,
@@ -264,6 +283,25 @@ pub fn after_state(state: &DaemonState, target_id: &str) -> AfterState {
     }
 }
 
+/// Where a held sub's wait stands over every sub it waits for: blocked as soon as
+/// any one ended blocked (with that sub's name), clean only when all finished
+/// cleanly, else pending. The name is the blocked sub's, or all of them.
+pub fn after_all(state: &DaemonState, entry: &Held) -> (AfterState, String) {
+    let names = entry.target_names();
+    let mut pending = false;
+    for (i, id) in entry.target_ids().into_iter().enumerate() {
+        match after_state(state, id) {
+            AfterState::Blocked(why) => {
+                let name = names.get(i).map_or_else(|| entry.names_display(), |n| n.to_string());
+                return (AfterState::Blocked(why), name);
+            }
+            AfterState::Pending => pending = true,
+            AfterState::Clean => {}
+        }
+    }
+    (if pending { AfterState::Pending } else { AfterState::Clean }, entry.names_display())
+}
+
 fn subs_of(state: &DaemonState, parent: &str) -> Vec<Instance> {
     let mut subs: Vec<Instance> =
         state.registry.list().into_iter().filter(|i| i.subchat_of.as_deref() == Some(parent)).collect();
@@ -272,22 +310,37 @@ fn subs_of(state: &DaemonState, parent: &str) -> Vec<Instance> {
 }
 
 /// Resolves `spawn_chat`'s `after` among `parent`'s subs, finished or running, by
-/// the same name rules the `subchat` tool uses. `Ok(None)` means start now (the
-/// named sub already finished cleanly); `Ok(Some)` means hold. A name that
-/// matches none or several is refused with the subs listed, and so is a sub that
-/// already ended blocked: that sub's own card tells Joe, and a
+/// the same name rules the `subchat` tool uses. `Ok(None)` means start now (every
+/// named sub already finished cleanly); `Ok(Some)` means hold, for the ones still
+/// running. A name that matches none or several is refused with the subs listed,
+/// and so is a sub that already ended blocked: that sub's own card tells Joe, and a
 /// card for a job that was never registered would have nothing to start.
-pub fn plan_after(state: &DaemonState, parent: &str, query: &str) -> Result<Option<HoldPlan>, String> {
+pub fn plan_after_all(state: &DaemonState, parent: &str, queries: &[String]) -> Result<Option<HoldPlan>, String> {
     let subs = subs_of(state, parent);
-    let target = super::tool::resolve(&subs, query).map_err(|e| format!("after: {e}"))?;
-    let name = super::tool::label(target);
-    match after_state(state, &target.session_id) {
-        AfterState::Clean => Ok(None),
-        AfterState::Pending => Ok(Some(HoldPlan { target_id: target.session_id.clone(), target_name: name })),
-        AfterState::Blocked(why) => Err(format!(
-            "after: {name} ended blocked ({why}), so a job waiting for it would never start. Joe's card for that sub already tells him, so say nothing of your own; spawn this job without after only if he says to go on without it."
-        )),
+    let mut targets: Vec<(String, String)> = Vec::new();
+    for query in queries {
+        let target = super::tool::resolve(&subs, query).map_err(|e| format!("after: {e}"))?;
+        let name = super::tool::label(target);
+        match after_state(state, &target.session_id) {
+            AfterState::Clean => {}
+            AfterState::Pending => {
+                if !targets.iter().any(|(id, _)| *id == target.session_id) {
+                    targets.push((target.session_id.clone(), name));
+                }
+            }
+            AfterState::Blocked(why) => {
+                return Err(format!(
+                    "after: {name} ended blocked ({why}), so a job waiting for it would never start. Joe's card for that sub already tells him, so say nothing of your own; spawn this job without after only if he says to go on without it."
+                ));
+            }
+        }
     }
+    Ok((!targets.is_empty()).then_some(HoldPlan { targets }))
+}
+
+/// [`plan_after_all`] for one name.
+pub fn plan_after(state: &DaemonState, parent: &str, query: &str) -> Result<Option<HoldPlan>, String> {
+    plan_after_all(state, parent, &[query.to_string()])
 }
 
 /// Registers the row of a sub `plan` says must wait, and holds it. The caller is
@@ -321,7 +374,7 @@ pub(crate) fn register_row(
     plan: &mut SubPlan,
 ) -> Result<String, String> {
     let target = plan.hold.clone().ok_or_else(|| "this sub has nothing to wait for".to_string())?;
-    let reason = format!("waiting for {}", target.target_name);
+    let reason = format!("waiting for {}", target.names_display());
     register_held_row(state, caller_session_id, name, inherited, spec, plan, uuid::Uuid::new_v4().to_string(), reason, Some(target))
 }
 
@@ -362,8 +415,10 @@ pub(crate) fn register_held_row(
         Held {
             sub_id: sid.clone(),
             reason,
-            after: target.as_ref().map(|t| t.target_id.clone()),
-            after_name: target.map(|t| t.target_name).unwrap_or_default(),
+            after: target.as_ref().map(|t| t.targets.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>().join("\n")),
+            after_name: target
+                .map(|t| t.targets.iter().map(|(_, n)| n.replace('\n', " ")).collect::<Vec<_>>().join("\n"))
+                .unwrap_or_default(),
             launch: spec,
         },
     )
@@ -437,7 +492,7 @@ pub(crate) async fn launch_claimed(state: &Arc<DaemonState>, sub_id: &str) -> Re
     crate::sessions::persistence::save_snapshot_default(&state.registry);
     // It runs: an earlier failed start is no longer a problem.
     super::plumbing::resolved(state, sub_id);
-    log::info!("subchats: started held sub {sub_id} (it waited for {})", entry.after_name);
+    log::info!("subchats: started held sub {sub_id} (it waited for {})", entry.names_display());
     Ok(())
 }
 
@@ -615,11 +670,11 @@ where
             drop_held(state, &entry.sub_id);
             continue;
         }
-        let Some(target) = entry.after.as_deref() else { continue };
-        if parked(&entry.sub_id) {
+        if entry.after.is_none() || parked(&entry.sub_id) {
             continue;
         }
-        match after_state(state, target) {
+        let (verdict, blocked_name) = after_all(state, &entry);
+        match verdict {
             AfterState::Pending => {}
             AfterState::Clean => {
                 if let Err(e) = launch(state.clone(), entry.sub_id.clone()).await {
@@ -629,7 +684,7 @@ where
                 }
             }
             AfterState::Blocked(why) => {
-                raise_decision(state, &entry, Why::TargetBlocked { target: entry.after_name.clone(), why }).await;
+                raise_decision(state, &entry, Why::TargetBlocked { target: blocked_name, why }).await;
             }
         }
     }
@@ -711,25 +766,39 @@ pub(crate) fn recover_lost_with(
             continue;
         }
         let Some(parent) = inst.subchat_of.as_deref() else { continue };
-        let (after, after_name) = match brief.after.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
-            Some(query) => {
-                // `after` named a sub that already existed when this one was spawned, so a
-                // sub started later with the same name is never the target.
-                let subs: Vec<Instance> =
-                    subs_of(state, parent).into_iter().filter(|s| s.session_id != id && s.started_at <= inst.started_at).collect();
+        let queries = brief.after.as_deref().map(super::brief::after_names).unwrap_or_default();
+        let (after, after_name) = if queries.is_empty() {
+            (None, String::new())
+        } else {
+            // `after` named subs that already existed when this one was spawned, so a
+            // sub started later with the same name is never the target.
+            let subs: Vec<Instance> =
+                subs_of(state, parent).into_iter().filter(|s| s.session_id != id && s.started_at <= inst.started_at).collect();
+            let mut targets: Vec<(String, String)> = Vec::new();
+            for query in &queries {
                 match super::tool::resolve(&subs, query) {
-                    Ok(target) => (Some(target.session_id.clone()), super::tool::label(target)),
-                    // The sub it waited for cannot be named again: the watchdog
+                    Ok(target) if !targets.iter().any(|(t, _)| *t == target.session_id) => {
+                        targets.push((target.session_id.clone(), super::tool::label(target)));
+                    }
+                    Ok(_) => {}
+                    // A sub it waited for cannot be named again: the watchdog
                     // tells the main chat rather than starting it out of order.
                     Err(e) => {
                         log::warn!("subchats: lost hold of {id} not rebuilt, its after {query:?} does not resolve: {e}");
-                        continue;
+                        targets.clear();
+                        break;
                     }
                 }
             }
-            None => (None, String::new()),
+            if targets.is_empty() {
+                continue;
+            }
+            (
+                Some(targets.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>().join("\n")),
+                targets.iter().map(|(_, n)| n.replace('\n', " ")).collect::<Vec<_>>().join("\n"),
+            )
         };
-        let reason = if after.is_some() { format!("waiting for {after_name}") } else { super::writers::QUEUED_TEXT.to_string() };
+        let reason = if after.is_some() { format!("waiting for {}", after_name.lines().collect::<Vec<_>>().join(", ")) } else { super::writers::QUEUED_TEXT.to_string() };
         for_slot |= after.is_none();
         let entry = Held {
             sub_id: id.clone(),
@@ -1042,7 +1111,7 @@ mod tests {
         sub_of(&st, "pa-other", "pa-foreign", "foreign");
 
         let hold_plan = plan_after(&st, "pa-main", "docs").unwrap().expect("a running target holds");
-        assert_eq!((hold_plan.target_id.as_str(), hold_plan.target_name.as_str()), ("pa-docs", "docs"));
+        assert_eq!(hold_plan.targets, vec![("pa-docs".to_string(), "docs".to_string())]);
 
         let err = plan_after(&st, "pa-main", "fix").unwrap_err();
         assert!(err.starts_with("after: ") && err.contains("more than one sub") && err.contains("fix-a") && err.contains("fix-b"), "{err}");
@@ -1064,7 +1133,7 @@ mod tests {
         st.registry.mark_ended("pr-dropped", crate::types::EndReason::Manual, "2026-11-05T00:00:00Z");
         sub_of(&st, "pr-main", "pr-live", "docs");
         let plan = plan_after(&st, "pr-main", "docs").unwrap().expect("the live sub runs, so it holds");
-        assert_eq!(plan.target_id, "pr-live");
+        assert_eq!(plan.targets[0].0, "pr-live");
     }
 
     #[test]
@@ -1121,7 +1190,7 @@ mod tests {
         let mut plan = super::super::spawn::plan(&st, "rg-main", &cfg, &here().to_string_lossy(), None, None, None, Some("footer"), &args, &[])
             .unwrap()
             .unwrap();
-        assert_eq!(plan.hold.as_ref().map(|h| h.target_id.as_str()), Some("rg-header"));
+        assert_eq!(plan.hold.as_ref().map(|h| h.targets[0].0.as_str()), Some("rg-header"));
         let sid = register_row(&st, "rg-main", Some("footer"), &cfg, spec(&plan.first_message), &mut plan).unwrap();
 
         let inst = st.registry.get(&sid).unwrap();
@@ -1353,6 +1422,82 @@ mod tests {
     }
 
     // ── target ends blocked ────────────────────────────────────────────────
+
+    /// A hold on several subs (`after: ["a", "b"]`) starts only when every one has
+    /// finished cleanly, in either order, and a blocked one raises the card naming it.
+    #[tokio::test]
+    async fn a_hold_on_several_subs_starts_after_all_of_them_and_a_blocked_one_names_itself() {
+        let _d = TempDataDir::new();
+        let st = state();
+        for (id, name) in [("ma-a", "alpha"), ("ma-b", "beta")] {
+            sub_of(&st, "ma-main", id, name);
+        }
+        let queries = vec!["alpha".to_string(), "beta".to_string(), "alpha".to_string()];
+        let plan = plan_after_all(&st, "ma-main", &queries).unwrap().expect("both run, so it holds");
+        assert_eq!(plan.targets, vec![("ma-a".to_string(), "alpha".to_string()), ("ma-b".to_string(), "beta".to_string())], "a repeated name counts once");
+        sub_of(&st, "ma-main", "ma-gate", "gate");
+        hold(
+            &st,
+            Held {
+                sub_id: "ma-gate".into(),
+                reason: "waiting for alpha, beta".into(),
+                after: Some("ma-a\nma-b".into()),
+                after_name: "alpha\nbeta".into(),
+                launch: spec("release"),
+            },
+        )
+        .unwrap();
+
+        let seen = calls();
+        st.registry.set_subchat_finished("ma-b", true);
+        release_ready(&st, launcher(&seen)).await;
+        assert!(seen.lock().unwrap().is_empty(), "alpha still runs, so the gate waits");
+        assert!(is_held("ma-gate"));
+
+        st.registry.set_subchat_finished("ma-a", true);
+        release_ready(&st, launcher(&seen)).await;
+        assert_eq!(*seen.lock().unwrap(), vec!["ma-gate".to_string()], "both finished: it starts");
+
+        // One of the two ends blocked while the other still runs: Joe is asked at once.
+        sub_of(&st, "ma-main", "ma-c", "gamma");
+        sub_of(&st, "ma-main", "ma-d", "delta");
+        sub_of(&st, "ma-main", "ma-gate2", "gate2");
+        hold(
+            &st,
+            Held {
+                sub_id: "ma-gate2".into(),
+                reason: "waiting for gamma, delta".into(),
+                after: Some("ma-c\nma-d".into()),
+                after_name: "gamma\ndelta".into(),
+                launch: spec("release"),
+            },
+        )
+        .unwrap();
+        st.registry.set_subchat_finished("ma-d", true);
+        test_support::finish_record("ma-d", "Blocked on the schema", None);
+        release_ready(&st, launcher(&seen)).await;
+        let cards = cards_of_kind(&st).await;
+        assert_eq!(cards.len(), 1);
+        assert!(cards[0].to_string().contains("**delta** ended blocked"), "the card names the blocked sub: {}", cards[0]);
+        assert_eq!(seen.lock().unwrap().len(), 1, "gate2 did not start");
+    }
+
+    /// An `after` list reads as one name per line, from a string or an array, and an
+    /// entry written before lists existed (one id) still reads as one target.
+    #[test]
+    fn after_reads_a_string_or_a_list_and_an_old_entry_has_one_target() {
+        use super::super::brief::{after_names, SubchatArgs};
+        let one: SubchatArgs = serde_json::from_value(serde_json::json!({"after": "alpha"})).unwrap();
+        assert_eq!(one.after.as_deref(), Some("alpha"));
+        let many: SubchatArgs = serde_json::from_value(serde_json::json!({"after": ["alpha", " beta ", ""]})).unwrap();
+        assert_eq!(after_names(many.after.as_deref().unwrap()), vec!["alpha", "beta"]);
+        let none: SubchatArgs = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(none.after.is_none());
+
+        let old: Held = serde_json::from_str(r#"{"sub_id":"s","after":"t-1","after_name":"header"}"#).unwrap();
+        assert_eq!(old.target_ids(), vec!["t-1"]);
+        assert_eq!(old.names_display(), "header");
+    }
 
     #[tokio::test]
     async fn a_blocked_target_raises_one_card_and_start_anyway_runs_the_sub() {

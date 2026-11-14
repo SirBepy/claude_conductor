@@ -29,7 +29,10 @@ pub struct SubchatArgs {
     pub report_back: Option<bool>,
     #[serde(default)]
     pub worktree: Option<bool>,
-    #[serde(default)]
+    /// One sub's name, or a list of names (`"after": ["a", "b"]`): the sub waits
+    /// for every one. Kept as one string, a name per line (see [`after_names`]),
+    /// so the brief and a peer machine's relay carry it unchanged.
+    #[serde(default, deserialize_with = "one_or_many_names")]
     pub after: Option<String>,
     #[serde(default)]
     pub review: Option<bool>,
@@ -149,6 +152,33 @@ pub struct WorktreeInfo {
     /// counted as this job's.
     #[serde(default)]
     pub base: Option<String>,
+}
+
+/// Reads `after` as a string or a list of strings into one string, a name per line.
+fn one_or_many_names<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match Option::<OneOrMany>::deserialize(d)? {
+        None => None,
+        Some(OneOrMany::One(one)) => Some(one),
+        Some(OneOrMany::Many(many)) => Some(many.iter().map(|n| n.replace('\n', " ")).collect::<Vec<_>>().join("\n")),
+    })
+}
+
+/// The sub names an `after` string waits for: one per line, trimmed, empty lines and
+/// repeats dropped.
+pub fn after_names(after: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for n in after.lines().map(str::trim).filter(|n| !n.is_empty()) {
+        if !names.iter().any(|seen| seen == n) {
+            names.push(n.to_string());
+        }
+    }
+    names
 }
 
 fn text(v: &Option<String>) -> Option<String> {
