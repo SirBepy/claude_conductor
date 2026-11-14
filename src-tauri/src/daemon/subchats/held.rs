@@ -494,6 +494,7 @@ pub fn drop_held(state: &Arc<DaemonState>, sub_id: &str) {
 /// Drops every held sub of `parent`. For the main chat crashing or closing with
 /// no successor: a held sub never ran, so it is dropped, not promoted. Returns
 /// the ids dropped.
+#[cfg(test)]
 pub fn drop_held_of_parent(state: &Arc<DaemonState>, parent: &str) -> Vec<String> {
     let ids: Vec<String> = all()
         .into_iter()
