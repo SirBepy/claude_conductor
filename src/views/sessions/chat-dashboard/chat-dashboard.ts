@@ -16,11 +16,11 @@ import { hydrateAttachments } from "../../../shared/chat/attachment-hydrator";
 import { clampUserMessages } from "../../../shared/chat/turn-collapse";
 import { state } from "../state";
 import { handleDrillAnchorClick, handleDrillClick, linkifyDrillRefs } from "../../../shared/chat/drill-links";
-import { handleFileRefClick, handleFileRefContextMenu, handleFileRefKeydown, linkifyFilePaths, openFileRef } from "../../../shared/chat/file-refs";
+import { handleFileRefClick, handleFileRefContextMenu, handleFileRefKeydown, linkifyFilePaths } from "../../../shared/chat/file-refs";
 import { createShownBadlyContextMenu } from "../../../shared/chat/shown-badly";
 import { highlightCodeBlocks, highlightInlineCode } from "../../../shared/chat/code-highlighter";
 import { scrollToBottom } from "../../../shared/chat/chat-dom-renderer";
-import { initialUi, renderStrip, renderZone, QUICK_VIEWS, type DashUi, type QuickViewId } from "./dashboard-zones";
+import { initialUi, renderStrip, renderZone, type DashUi, type QuickViewId } from "./dashboard-zones";
 import { filterPlanList, syncPlanListFade } from "./plan-card";
 import type { PlanState } from "../../../shared/chat/dashboard/dashboard-model";
 import { AnswersCard } from "./answers-card";
@@ -33,14 +33,13 @@ import { countSubs, type SubCounts } from "../../../shared/chat/dashboard/subs-m
 import { fetchSubCards } from "../../../shared/chat/subchat-cards";
 import type { SubCardItem } from "../../../shared/chat/dashboard/subs-model";
 import { CHAT_VIEW_CHANGED, dashboardEnabled, readSections } from "./chat-view-pref";
-import { fetchQuickView, openQuickView } from "./quick-view";
+import { PreviewTiles } from "./preview-tiles";
+import { QuickViews } from "./quick-views";
 import { invoke } from "../../../shared/ipc";
 import { getSettings } from "../../../shared/state";
 import { getTransport } from "../../../shared/transport";
 import { PREVIEW_OPEN_EVENT } from "../../../shared/chat/chat-preview-card";
-import { buildPreviewDocumentHtml } from "../preview-panel-document";
-import { ownerTag, scopeRoot } from "../shared-mockup-scope";
-import type { MessageDraft, PreviewMeta, PreviewSnapshot } from "../../../types/ipc.generated";
+import type { MessageDraft } from "../../../types/ipc.generated";
 import { draftIdsOf, type DraftItem, type DraftStoreSide } from "../../../shared/chat/dashboard/drafts-model";
 import { DRAFT_OPEN_EVENT, copyDraft } from "../../../shared/chat/chat-draft-card";
 import { ACTIVE_QUESTION_EVENT, activeCardFor, expandActiveCard } from "../permission-modal/question-state";
@@ -95,21 +94,10 @@ export class ChatDashboard {
   /** The finish time each finished sub's context was read for: a sub that finishes
    *  again is read again, so the chip says what it ended with this time. */
   private ctxReadFor = new Map<string, number | null>();
-  /** The family's previews, newest first (list_previews scoped to the main
-   *  chat); the Preview card keeps this chat's own and folds the rest. */
-  private previews: PreviewMeta[] = [];
-  /** The list is read once the renderer knows its chat: attach() sets the id
-   *  after this dashboard is built. */
-  private previewsAsked = false;
-  private unlistenPreview: (() => void) | null = null;
-  private previewTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Staged tile documents by `id@version`: a redraw of the card reuses the
-   *  address instead of fetching and staging the page again. */
-  private readonly tileSrc = new Map<string, string>();
-  private readonly tileLoading = new Set<string>();
-  /** Which quick views have something to read (see ensureQuick). */
-  private quick: Partial<Record<QuickViewId, boolean>> = {};
-  private quickAsked = false;
+  /** The Preview card's list and tiles (preview-tiles.ts). */
+  private readonly previews: PreviewTiles;
+  /** The quick-view buttons (quick-views.ts). */
+  private readonly quickViews: QuickViews;
   /** The Waiting items Joe removed in this chat (waiting-dismissed.ts), read
    *  once per chat id: the pane is rebuilt when it shows another chat. */
   private dismissed: { sid: string | null; keys: Set<string> } = { sid: null, keys: new Set() };
@@ -131,8 +119,6 @@ export class ChatDashboard {
   private draftsTimer: ReturnType<typeof setTimeout> | null = null;
   /** The Drafts card's items as last drawn, by key, for Copy. */
   private draftItems = new Map<string, DraftItem>();
-  /** Files the Links and files card lists: a plan doc the chat names can stand in for PLAN.md. */
-  private linkedFiles: string[] = [];
   private readonly onFlushed = (): void => this.schedule();
   private readonly onDocClick = (e: MouseEvent): void => {
     if (!this.ui.earlierOpen || this.stripEl.contains(e.target as Node)) return;
@@ -204,6 +190,8 @@ export class ChatDashboard {
       },
       rerender: () => this.schedule(),
     });
+    this.previews = new PreviewTiles({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
+    this.quickViews = new QuickViews({ sessionId: () => renderer.sessionId ?? null, schedule: () => this.schedule() });
     this.barHome = this.bar?.parentElement ?? null;
 
     // The cards are the transcript's own, so they get the transcript's own
@@ -280,7 +268,7 @@ export class ChatDashboard {
     }
     renderer.onFlushed = this.onFlushed;
     builtHidden.add(renderer);
-    void this.subscribePreviews();
+    void this.previews.subscribe();
     void this.subscribeDrafts();
     this.render();
   }
@@ -331,7 +319,7 @@ export class ChatDashboard {
       // Not loaded yet is not "no subs": the Answers card would call every sub gone.
       subs: state.sessions.some((s) => s.session_id === this.renderer.sessionId) ? subItems : undefined,
       now,
-      previews: this.previews,
+      previews: this.previews.list,
       sessionId: this.renderer.sessionId,
       draftStore: this.draftStore,
       sections: readSections(getSettings()),
@@ -349,82 +337,9 @@ export class ChatDashboard {
     this.placeBar(busy);
     const planEl = this.zoneEls.get("plan")?.el;
     if (planEl) syncPlanListFade(planEl);
-    if (!this.previewsAsked && this.renderer.sessionId) {
-      this.previewsAsked = true;
-      void this.loadPreviews();
-    }
-    this.mountTiles();
-    this.ensureQuick(derived);
-  }
-
-  // ---- Preview window card ---------------------------------------------------------
-
-  private async loadPreviews(): Promise<void> {
-    const sid = this.renderer.sessionId;
-    if (!sid) return;
-    try {
-      const list = await invoke<PreviewMeta[]>("list_previews", { sessionId: scopeRoot(sid) });
-      if (this.disposed) return;
-      this.previews = Array.isArray(list) ? list : [];
-      this.schedule();
-    } catch (err) {
-      console.warn("[chat-dashboard] list_previews failed", err);
-    }
-  }
-
-  /** A sub by its name; the main chat as such, since a sub read in place sees its parent's previews too. */
-  private readonly previewOwner = (owner: string): string =>
-    ownerTag(owner)?.name ?? (owner === scopeRoot(this.renderer.sessionId) ? "Main chat" : "Another chat");
-
-  /** Any push re-reads the list; a burst (a shared mockup's parts) is one read. */
-  private async subscribePreviews(): Promise<void> {
-    try {
-      const un = await getTransport().listen("preview", () => {
-        if (this.previewTimer !== null) return;
-        this.previewTimer = setTimeout(() => {
-          this.previewTimer = null;
-          void this.loadPreviews();
-        }, 150);
-      });
-      if (this.disposed) un();
-      else this.unlistenPreview = un;
-    } catch (err) {
-      console.warn("[chat-dashboard] listen(preview) failed", err);
-    }
-  }
-
-  /** Points each tile's frame at its staged page. The frame is new after every
-   *  redraw of the card, so this runs after every render and costs a lookup
-   *  once the page is staged. The page is drawn at a fixed size and scaled to
-   *  the tile, so the tile reads as the real preview in miniature. */
-  private mountTiles(): void {
-    for (const tile of this.el.querySelectorAll<HTMLElement>(".cdash-pv-tile")) {
-      const id = tile.dataset.pvId ?? "";
-      const key = `${id}@${tile.dataset.pvVersion ?? ""}`;
-      const frame = tile.querySelector<HTMLIFrameElement>(".cdash-pv-frame");
-      if (!frame) continue;
-      const width = tile.clientWidth;
-      if (width > 0) tile.style.setProperty("--pv-scale", String(width / 1280));
-      const cached = this.tileSrc.get(key);
-      if (cached) {
-        if (frame.getAttribute("src") !== cached) frame.src = cached;
-        continue;
-      }
-      if (this.tileLoading.has(key)) continue;
-      this.tileLoading.add(key);
-      void (async () => {
-        try {
-          const snap = await invoke<PreviewSnapshot>("get_preview", { id, sessionId: scopeRoot(this.renderer.sessionId) });
-          const src = await invoke<string>("render_preview_doc", { html: buildPreviewDocumentHtml(snap.html) });
-          this.tileSrc.set(key, src);
-          if (!this.disposed) this.schedule();
-        } catch (err) {
-          console.warn("[chat-dashboard] preview tile failed", err);
-        } finally {
-          this.tileLoading.delete(key);
-        }
-      })();
-    }
+    this.previews.ensureLoaded();
+    this.previews.mount(this.el);
+    this.quickViews.ensure(derived);
   }
 
   // ---- Drafts card -------------------------------------------------------------------
@@ -512,53 +427,6 @@ export class ChatDashboard {
     return false;
   }
 
-  // ---- Quick views -------------------------------------------------------------------
-
-  /** Looks each quick view up once, when the Links and files card first draws,
-   *  so a view with nothing behind it draws muted and says so on hover. A click
-   *  reads it again, so this only decides how the button looks. */
-  private ensureQuick(state: DashboardState): void {
-    const links = state.right.find((z) => z.id === "links");
-    this.linkedFiles = links && links.id === "links" ? links.state.files.map((f) => f.path) : [];
-    const sid = this.renderer.sessionId;
-    if (!links || this.quickAsked || !sid) return;
-    this.quickAsked = true;
-    for (const q of QUICK_VIEWS) {
-      void fetchQuickView(sid, q.id)
-        .then((d) => {
-          // A plan doc the chat names counts as a plan.
-          this.quick[q.id] = d.docs.length > 0 || (q.id === "plan" && this.linkedPlanDoc() !== null);
-          if (!this.disposed) this.schedule();
-        })
-        .catch((err) => console.warn(`[chat-dashboard] quick view ${q.id} lookup failed`, err));
-    }
-  }
-
-  private linkedPlanDoc(): string | null {
-    return this.linkedFiles.find((p) => /plan[^\\/]*\.md$/i.test(p)) ?? null;
-  }
-
-  private async openQuick(view: QuickViewId): Promise<void> {
-    const sid = this.renderer.sessionId;
-    if (!sid) return;
-    try {
-      const data = await fetchQuickView(sid, view);
-      if (view === "plan" && data.docs.length === 0) {
-        const linked = this.linkedPlanDoc();
-        if (linked) {
-          openFileRef(linked);
-          return;
-        }
-      }
-      this.quick[view] = data.docs.length > 0;
-      openQuickView(data);
-      this.schedule();
-    } catch (err) {
-      console.warn(`[chat-dashboard] quick view ${view} failed`, err);
-      openQuickView({ view, title: QUICK_VIEWS.find((q) => q.id === view)?.label ?? view, docs: [], message: "Could not read it just now." });
-    }
-  }
-
   /** The instance list changed (sessions-wiring.ts's syncInstances): a sub's
    *  state, model or pin may have moved. */
   onSessionsChanged(): void {
@@ -642,7 +510,7 @@ export class ChatDashboard {
   }
 
   private renderZones(state: DashboardState, busy: boolean): void {
-    const ctx = { ui: this.ui, busy, quick: this.quick, idleAt: this.idleAt, subs: this.subCounts, previewOwner: this.previewOwner, ctxChip: this.ctxChip };
+    const ctx = { ui: this.ui, busy, quick: this.quickViews.has, idleAt: this.idleAt, subs: this.subCounts, previewOwner: this.previews.ownerName, ctxChip: this.ctxChip };
     const live = new Set<ZoneId>();
     for (const [col, zones] of [[this.leftEl, state.left], [this.rightEl, state.right]] as const) {
       zones.forEach((z, i) => {
@@ -771,7 +639,7 @@ export class ChatDashboard {
     const ui = this.ui;
     // These two open something else and change nothing drawn here.
     if (name === "quick-view") {
-      void this.openQuick(t.dataset.view as QuickViewId);
+      void this.quickViews.open(t.dataset.view as QuickViewId);
       return;
     }
     if (name === "open-preview") {
@@ -886,14 +754,12 @@ export class ChatDashboard {
     this.barObserver?.disconnect();
     this.answers.dispose();
     this.subs.dispose();
-    this.unlistenPreview?.();
-    this.unlistenPreview = null;
+    this.previews.dispose();
+    this.quickViews.dispose();
     this.unlistenDrafts?.();
     this.unlistenDrafts = null;
     if (this.draftsTimer !== null) clearTimeout(this.draftsTimer);
     this.draftsTimer = null;
-    if (this.previewTimer !== null) clearTimeout(this.previewTimer);
-    this.previewTimer = null;
     this.sendBarHome();
     document.removeEventListener("click", this.onDocClick, true);
     document.removeEventListener("keydown", this.onKey);
