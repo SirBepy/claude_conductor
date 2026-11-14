@@ -27,11 +27,12 @@ vi.mock("../src/shared/api.ts", () => ({
   },
 }));
 vi.mock("../src/shared/toast.ts", () => ({ showToast }));
-const { renderMcpServersRow, validMcpName, validMcpUrl } = await import(
+const { renderMcpServersRow, validMcpName, validMcpUrl, parseMcpTarget, mcpTargetText } = await import(
   "../src/views/sessions/project-dashboard/project-config/mcp-servers-row.ts"
 );
 
-const RODGE = { name: "rodge", url: "http://localhost:3000/mcp" };
+const RODGE = { name: "rodge", url: "http://localhost:3000/mcp", command: "", args: [] };
+const STUDIO = { name: "Roblox_Studio", url: "", command: "cmd.exe", args: ["/c", "%LOCALAPPDATA%\\Roblox\\mcp.bat"] };
 const PROJECT = { id: "p1", path: "C:/proj/rodge", mcp_servers: [RODGE] };
 
 afterEach(() => {
@@ -55,6 +56,38 @@ describe("mcp name and url rules", () => {
     expect(validMcpUrl("http://localhost:3000/mcp")).toBe(true);
     expect(validMcpUrl("ftp://x/mcp")).toBe(false);
     expect(validMcpUrl("not a url")).toBe(false);
+  });
+});
+
+describe("mcp target field", () => {
+  it("reads an http url, or a command line with quoted paths kept whole", () => {
+    expect(parseMcpTarget(" http://localhost:3000/mcp ")).toEqual({ url: "http://localhost:3000/mcp", command: "", args: [] });
+    expect(parseMcpTarget("ftp://x/mcp")).toBeNull();
+    expect(parseMcpTarget("")).toBeNull();
+    expect(parseMcpTarget('cmd.exe /c "C:\\Program Files\\x\\mcp.bat"')).toEqual({
+      url: "",
+      command: "cmd.exe",
+      args: ["/c", "C:\\Program Files\\x\\mcp.bat"],
+    });
+    expect(parseMcpTarget("cmd.exe /c %LOCALAPPDATA%\\Roblox\\mcp.bat")).toEqual({ url: "", command: "cmd.exe", args: STUDIO.args });
+  });
+
+  it("shows a stdio server as its command line and offers no sign-in", async () => {
+    expect(mcpTargetText(STUDIO)).toBe("cmd.exe /c %LOCALAPPDATA%\\Roblox\\mcp.bat");
+    listProjects.mockResolvedValue([{ ...PROJECT, mcp_servers: [STUDIO] }]);
+    const root = await mount();
+    expect(root.querySelector(".mcp-row .ps-btn")).toBeNull();
+    expect(root.textContent).not.toContain("Signed in");
+    expect(mcpSignedIn).not.toHaveBeenCalled();
+  });
+
+  it("adds a stdio server by saving command and args", async () => {
+    listProjects.mockResolvedValue([{ ...PROJECT, mcp_servers: [] }]);
+    const root = await mount();
+    root.querySelector("#mcpNewName").value = STUDIO.name;
+    root.querySelector("#mcpNewUrl").value = "cmd.exe /c %LOCALAPPDATA%\\Roblox\\mcp.bat";
+    root.querySelector(".mcp-add .ps-btn").click();
+    await vi.waitFor(() => expect(updateProject).toHaveBeenCalledWith("p1", { mcp_servers: [STUDIO] }));
   });
 });
 

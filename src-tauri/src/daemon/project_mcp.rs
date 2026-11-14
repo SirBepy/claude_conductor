@@ -1,7 +1,8 @@
-//! A project's own HTTP MCP servers as `--mcp-config` entries.
+//! A project's own MCP servers (HTTP, or a local stdio program such as Roblox
+//! Studio's `mcp.bat`) as `--mcp-config` entries.
 //!
 //! Chats run `--strict-mcp-config` (todo 867), so a repo's `.mcp.json` never
-//! loads. A project instead lists servers in its settings, and each is probed
+//! loads. A project instead lists servers in its settings, and each HTTP one is probed
 //! before it is written in: measured 2026-11-09 on CLI 2.1.316, a dead server
 //! only comes up `failed`, but one that accepts the connection and never
 //! answers delayed a turn's start by about 26s, so an unreachable server is
@@ -37,6 +38,17 @@ pub(crate) async fn servers_for(listed: &[ProjectMcpServer], oauth_store: Option
     for s in listed {
         if let Err(why) = check(s) {
             out.skipped.push(format!("{}: {why}", s.name));
+            continue;
+        }
+        if !s.command.is_empty() {
+            // A program cannot be probed the way a URL is, so the only guard is
+            // that it exists: Claude would otherwise start a missing one and
+            // report it `failed` after the turn is already underway.
+            if which::which(&s.command).is_err() {
+                out.skipped.push(format!("{}: command not found, skipped", s.name));
+                continue;
+            }
+            out.servers.insert(s.name.clone(), json!({"type": "stdio", "command": s.command, "args": s.args}));
             continue;
         }
         let Some(status) = probe(&s.url).await else {
@@ -103,6 +115,12 @@ fn check(s: &ProjectMcpServer) -> Result<(), &'static str> {
     if s.name.is_empty() || !s.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
         return Err("name must be letters, digits, - or _");
     }
+    match (s.url.is_empty(), s.command.trim().is_empty()) {
+        (false, false) => return Err("give a url or a command, not both"),
+        (true, true) => return Err("needs a url or a command"),
+        (true, false) => return Ok(()),
+        (false, true) => {}
+    }
     match s.url.parse::<reqwest::Url>() {
         Ok(u) if matches!(u.scheme(), "http" | "https") => Ok(()),
         _ => Err("url must be http or https"),
@@ -140,7 +158,40 @@ mod tests {
     use super::*;
 
     fn s(name: &str, url: &str) -> ProjectMcpServer {
-        ProjectMcpServer { name: name.into(), url: url.into() }
+        ProjectMcpServer { name: name.into(), url: url.into(), command: String::new(), args: Vec::new() }
+    }
+
+    fn stdio(name: &str, command: &str, args: &[&str]) -> ProjectMcpServer {
+        ProjectMcpServer {
+            name: name.into(),
+            url: String::new(),
+            command: command.into(),
+            args: args.iter().map(|a| a.to_string()).collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stdio_program_that_exists_is_written_as_a_stdio_entry() {
+        // The test binary itself: a command `which` must resolve on any OS.
+        let me = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+        let r = servers_for(&[stdio("studio", &me, &["/c", "x.bat"])], None).await;
+        assert_eq!(r.servers["studio"], json!({"type": "stdio", "command": me, "args": ["/c", "x.bat"]}));
+        assert!(r.skipped.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_missing_program_or_an_ambiguous_entry_is_skipped() {
+        let both = ProjectMcpServer { url: "http://127.0.0.1:1/mcp".into(), ..stdio("both", "cmd.exe", &[]) };
+        let r = servers_for(&[stdio("gone", "definitely-not-a-real-program-xyz", &[]), both, s("empty", "")], None).await;
+        assert!(r.servers.is_empty());
+        assert_eq!(
+            r.skipped,
+            vec![
+                "gone: command not found, skipped".to_string(),
+                "both: give a url or a command, not both".to_string(),
+                "empty: needs a url or a command".to_string(),
+            ]
+        );
     }
 
     /// A server that answers every request with `status`, returning its MCP URL.

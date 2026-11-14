@@ -29,17 +29,23 @@ impl Default for Avatar {
     fn default() -> Self { Avatar::None }
 }
 
-/// One project-listed HTTP MCP server: the name becomes the `mcp__<name>__`
-/// tool prefix.
+/// One project-listed MCP server: the name becomes the `mcp__<name>__` tool
+/// prefix. It is an HTTP server (`url`) or a local stdio program (`command`
+/// plus `args`, e.g. Roblox Studio's `mcp.bat`), never both.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ts_rs::TS)]
 #[ts(export_to = "../../src/types/ipc.generated.ts")]
 pub struct ProjectMcpServer {
     // Defaulted so a trimmed entry in settings.json cannot fail the whole file's
-    // deserialization; `project_mcp::check` rejects an empty name or url.
+    // deserialization; `project_mcp::check` rejects an empty name or a missing
+    // or doubled target.
     #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub url: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
@@ -78,9 +84,10 @@ pub struct ProjectConfig {
     /// user-scope servers whose failed auth broke MCP init (todo 867).
     #[serde(default)]
     pub claude_ai_connectors: bool,
-    /// The project's own HTTP MCP servers (e.g. a local app's `/mcp`), merged
-    /// into each turn's generated config after a reachability probe. Never
-    /// read from a repo file: only what Joe entered here runs.
+    /// The project's own MCP servers (a local app's HTTP `/mcp`, or a stdio
+    /// program like Roblox Studio's `mcp.bat`), merged into each turn's
+    /// generated config after a reachability check. Never read from a repo
+    /// file: only what Joe entered here runs, and no remote method writes it.
     #[serde(default)]
     pub mcp_servers: Vec<ProjectMcpServer>,
     /// Where this project's tickets live, so chat mentions link to them.
@@ -445,6 +452,8 @@ mod tests {
         let s: ProjectMcpServer = serde_json::from_str(r#"{"name":"rodge"}"#).unwrap();
         assert_eq!(s.name, "rodge");
         assert_eq!(s.url, "");
+        assert_eq!(s.command, "");
+        assert!(s.args.is_empty());
     }
 
     #[test]
