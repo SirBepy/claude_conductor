@@ -238,14 +238,31 @@ Board: preview slug `ask-ux-options` (real app shots of the three options).
 - **No running Status zone.** Progress lives in Plan and a small status footer at the bottom of the
   Plan card; the status line above the message box goes. Reason: "anything for status should be in
   the plan" (2026-11-09); as progress, Status only repeated Plan's active step.
-- **Result appears only when the job ends:** verdict, your move, figures (tables/charts). Reason: it
-  is the one card Joe does read (2026-11-09).
-- **Result sits in the Plan card's spot, under the finished plan's steps,** which stay open with no
-  way to fold them (2026-11-10, sub "plan-card-lifecycle"; see the section below). This replaced
-  the "Plan 6/6" flip button, which hid the plan. Why the right column: nothing on the left moves,
-  and it was fully in view at every chat height measured; at the bottom of the left column 187px of
-  300 was cut off in a 640px chat with a waiting question, and above Answers pushed Answers ~310px
-  down (Joe's pick, 2026-11-10, sub "result-placement").
+- **Result is a card of its own under the Plan card, independent of the steps** (Joe, 2026-11-14: "i
+  want the result to be independant from the steps in the top right ... realistically id still like
+  to see the steps"). The finished plan's steps stay on the Plan card; the Result no longer takes
+  their spot. It replaced the 2026-11-10 layout where the Result sat under the finished steps in the
+  Plan card (and before that the "Plan 6/6" flip button, which hid the plan). Why the right column:
+  nothing on the left moves, and it was fully in view at every chat height measured; at the bottom
+  of the left column 187px of 300 was cut off in a 640px chat with a waiting question, and above
+  Answers pushed Answers ~310px down (Joe's pick, 2026-11-10, sub "result-placement"). An earlier
+  plan in the pager still shows the report it ended with.
+- **Whenever the chat goes idle, Joe sees an update.** The daemon already makes every turn send a
+  `send_message`, but only a `report` drew in Result, so a turn that ended on a `call`, `discovery`,
+  `handoff`, `correction` or `artifact` left him nothing prominent ("sometimes you wanna tell me smth
+  but you dont have the right spot to say it... so i just dont get a msg", 2026-11-14). Result is
+  now the chat's latest closed message of any of those kinds (`deriveResult`, a message counts once
+  its turn closed, `reportClosed`). Answers, ratings, blockers, do_this and plans are left out
+  because Answers, Waiting on you and the Plan card already hold them. It stays until the next
+  result replaces it, dimmed once Joe has written since. Notes does not repeat the message Result
+  shows. Subchats owe no such update at idle.
+- **Finished subs wait in a tray under Result until Joe dismisses them** (2026-11-14: "when a
+  subchat is fully done and prolly not needed anymore, it shows me in result that chat"). One row
+  per sub: avatar (name on its hover card), the finish card's verdict as the one line, the context
+  it ended with, a Dismiss x; a click opens the finish card. Dismiss is the sub card's existing
+  Close: the process stops, the chat stays in history and a message to it wakes it again ("dismissing
+  basically immediatelly freezes the chat"). No age fold: it stays until dismissed. The separate
+  From subs card is removed because the tray carries it. Rejected: keeping both.
 - **Subchecks of a batch job** (release gates, todo progress) live inside Plan, not in their own
   card. Reason: "surely we should just show that in the plan section" (2026-11-10). Open: a second
   Plan column for subchecks vs a view that hides the rest of the plan.
@@ -406,8 +423,12 @@ Board: preview slug `subs-card`; rules sheet: `subs-card-rules`.
   works, green done). It lists working, queued and asking subs; an asking sub's question also stays
   in Waiting on you. Reason: a strip under the title sat above Answers and Plan and broke "those two
   always sit on top"; text rows were more than Joe wanted.
-- **Finished subs stay 1 hour, then fold under "+N earlier".** A display rule only: a sub is never
-  closed by it (pc-1664). The card does not draw when it has nothing to show.
+- **Finished subs are not on this card** (2026-11-14): they are in the finished tray under Result
+  until Joe dismisses them. The card lists the subs that are not finished: asking, working, queued,
+  paused, at their limit, stopped. The earlier rule (finished subs stay 1 hour, then fold under
+  "+N earlier", a display rule only, pc-1664) now applies only to the header's sub list, which still
+  uses `isFolded`. The card does not draw when it has nothing to show. Joe wants this whole section
+  redesigned (see "Subchats card redesign, live subs" below).
 - **Model battery on each avatar:** fill = model, colour = effort. low `#ece6cf` (off white), medium
   `#b3a67c` (grey with a yellow hint), high grey (the default, 99% of use), xhigh `#f2994a`, max
   `#eb5757`. **Every battery in the app** takes this palette. Reason: compacts the information; the
@@ -427,6 +448,38 @@ Board: preview slug `subs-card`; rules sheet: `subs-card-rules`.
   a dot or the initials, high as orange, an Open-on-the-right chat panel, Message / Images / Rename /
   Copy brief in the menu, Move to sidebar turning a sub into an ordinary chat, model/effort words and
   message/turn counts in the details.
+
+## Subchats card redesign, live subs (2026-11-14, brainstorm only, not built)
+
+Board: preview slug `subs-redesign` (scratch source `.for_bepy/mockups/subs-redesign.html`). Joe: "i
+definitely think its important that i get to see whos working... and whos stuck...", "it could even be
+myb handy to see a dashboard of a subchat without necessarily going into the subchat", "i think it
+should be moved to the left side". Scope is live subs only (working, queued, asking, paused, limited,
+stopped); the Result card and the finished-subs tray belong to the sibling chat.
+
+Settled (Joe's picks on the question card):
+
+- **Left column, right under Waiting on you** (Answers and Waiting stay on top; Result and its tray
+  follow below). This reverses "Ruled out: the card on the left" of the 2026-11-10 section.
+- **Stuck subs are tinted rows, working subs stay an avatar strip.** Asking, queued, paused, limited and
+  stopped each get a row: avatar, name, ONE line saying why (the question, "next for the writer slot",
+  "back at 14:20", "stopped without finishing, 9m ago"), step n/m and context %. Working subs stay small
+  avatars under a "Working, no problem" label with a working ring; a row's tint is red for asking, grey
+  for the rest. Header counts: "3 working, 1 asking, 2 stuck or waiting". This reverses the 2026-11-10
+  "text rows were more than Joe wanted": the reason changed, he now wants to see who is stuck and why.
+  Joe added: finished subs should look like rows too (that is the sibling's tray, so it must reuse
+  these rows).
+- **A click opens the sub's mini dashboard as a popover Joe can move around, and several can be open at
+  once** (his own idea, over inline). Contents as on the board: plan steps with the current one marked,
+  last action, context bar, what it waits on, a message box, Open full chat. It replaces right-click +
+  Open for peeking; the right-click menu stays.
+- **Scale:** 1 to 3 subs the card stays small; past 5 stuck rows it shows 5 plus "+N more"; working
+  avatars wrap; with no live subs the card does not draw.
+
+Not asked yet (decide at build, or ask in one batch): where a popover first lands and whether it
+survives a re-derive and a chat switch (Claude's lean: draggable, closes with x or Esc, positions kept
+in memory only, no persistence); a cap on open popovers; whether the avatar hover card stays on the
+working avatars (lean: yes, unchanged).
 
 ## Seeing what subs are doing (2026-11-12, sub "forever-board", phase C and D1 of docs/forever-chat-plan.md)
 
