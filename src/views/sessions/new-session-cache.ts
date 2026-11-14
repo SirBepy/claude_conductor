@@ -44,11 +44,25 @@ function swr<T>(entry: Entry<T>, fetcher: () => Promise<T>): CacheRead<T> {
   return ownFetch(entry, fetcher);
 }
 
+/** A fetch still unsettled after this long is treated as lost (a daemon
+ *  hiccup, a dropped reply). Without it the dead promise stays in
+ *  `entry.inflight` for the whole app session and every later read of the
+ *  entry awaits it forever, so a click on that project does nothing. */
+export const INFLIGHT_STALE_MS = 15_000;
+
 function ownFetch<T>(entry: Entry<T>, fetcher: () => Promise<T>): CacheRead<T> {
   if (!entry.inflight) {
-    entry.inflight = fetcher()
-      .then((v) => { entry.value = v; entry.inflight = null; return v; })
-      .catch((e) => { entry.inflight = null; throw e; });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const mine: Promise<T> = Promise.race([
+      fetcher(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("read timed out")), INFLIGHT_STALE_MS);
+      }),
+    ]).then(
+      (v) => { clearTimeout(timer); if (entry.inflight === mine) entry.inflight = null; entry.value = v; return v; },
+      (e) => { clearTimeout(timer); if (entry.inflight === mine) entry.inflight = null; throw e; },
+    );
+    entry.inflight = mine;
   }
   return { cached: entry.value, ready: entry.inflight };
 }

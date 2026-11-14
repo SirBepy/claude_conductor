@@ -65,6 +65,22 @@ async function raceEscapePastTheLocationStep(page: Page): Promise<void> {
 }
 
 test.describe("view-harness / project picker survives a raced Location-step cancel", () => {
+  // Joe, 2026-11-14: spamming New chat after a raced dismiss left no picker
+  // that would ever open again. The dismissed picker's late Location step used
+  // to closeHostCard() unconditionally, which closed the NEWER picker and left
+  // pending-flow's inFlight guard stuck true.
+  test("a late Location cancel does not close a newer picker opened in the meantime", async ({ page }) => {
+    await raceEscapePastTheLocationStep(page);
+    await expect(page.locator("#modal-host")).not.toHaveClass(/\bopen\b/);
+    await page.keyboard.press("Control+n");
+    await expect(page.locator(".project-picker-modal")).toBeVisible();
+
+    // The first picker's delayed scan lands now, while the second picker is up.
+    await page.waitForTimeout(DELAY_MS + 200);
+    await expect(page.locator(".project-picker-modal")).toBeVisible();
+    await expect(page.locator("#modal-host")).toHaveClass(/\bopen\b/);
+  });
+
   test("cancelling the late Location card does not resurrect a dead Pick-project card", async ({ page }) => {
     await raceEscapePastTheLocationStep(page);
 

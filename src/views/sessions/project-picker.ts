@@ -344,8 +344,12 @@ export function openProjectPickerModal(
       // whose finish() is a permanent no-op, so close whatever the stale
       // location step left on screen instead (a backstop: the isCancelled
       // callback above already stops the location step from repainting).
+      // Only when the slot still holds the LOCATION card: the shared host may
+      // already carry a newer picker opened after this one was dismissed (ctrl+n
+      // spam), and closing that one strands its promise unresolved, which
+      // leaves pending-flow's inFlight guard true so no picker ever opens again.
       if (resolved) {
-        closeHostCard();
+        if (slot.querySelector('[data-picker-step="location"]')) closeHostCard();
         return;
       }
       if (!result) {
