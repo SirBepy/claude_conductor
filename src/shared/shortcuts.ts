@@ -275,9 +275,12 @@ function _init(): void {
 
   // Lazy import avoids loading DOM-dependent navigation module in test environments.
   let getActiveView: (() => string) | null = null;
-  void import("./navigation").then(m => { getActiveView = m.getActiveView; });
+  // The catch keeps a test that mocks the module without this export (or tears down
+  // before the import settles) from raising an unhandled rejection; the shortcut
+  // then runs without the view gate.
+  void import("./navigation").then(m => { getActiveView = m.getActiveView; }).catch(() => {});
   let isAnyModalOpen: (() => boolean) | null = null;
-  void import("./modal-input-lock").then(m => { isAnyModalOpen = m.isAnyModalOpen; });
+  void import("./modal-input-lock").then(m => { isAnyModalOpen = m.isAnyModalOpen; }).catch(() => {});
 
   // Held Alt shows the model/effort keys as keycaps under the pane header's values
   // (config-bump.css), and keeps showing them through repeated Alt+Up/Down.
