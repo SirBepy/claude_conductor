@@ -49,6 +49,24 @@ describe("thinking bar, idle with held messages", () => {
     expect(text.textContent).toBe("Frozen - will send once unfrozen");
   });
 
+  it("says idle, not thinking, when only a background task is still running", () => {
+    const pane = document.createElement("div");
+    pane.innerHTML = `<div class="session-thinking"><span class="thinking-text"></span></div>`;
+    document.body.appendChild(pane);
+    state.sessions = [{ session_id: "s1", busy: false, awaiting: "working" }];
+    state.selectedId = "s1";
+    state.pendingNewSession = null;
+    state.heldMessages = { hasItemsForActive: () => false, renderChip: () => {} };
+    mod.initThinkingBar(pane);
+    mod.setThinkingActivity(null);
+    const text = pane.querySelector(".thinking-text");
+    expect(text.textContent).toBe("Idle - waiting on a background task");
+    // A quiet build is not a dead process: the silence label never replaces it.
+    mod.noteThinkingEvent();
+    mod.updateThinkingBar();
+    expect(text.textContent).toBe("Idle - waiting on a background task");
+  });
+
   it("hides the bar entirely when idle with nothing held", () => {
     const pane = document.createElement("div");
     pane.innerHTML = `<div class="session-thinking"><span class="thinking-text"></span></div>`;
