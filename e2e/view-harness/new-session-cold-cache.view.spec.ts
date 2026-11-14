@@ -1,3 +1,4 @@
+// Reviewed 2026-11-14 (pc-1744, the palette's per-project New chat in rows and their startNewSessionInProject/startNewChatInProject helpers are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-11 (phone keyboard): pending-flow.ts changed comments only; it passes.
 // asserts: src/views/sessions/project-picker.ts, src/views/sessions/pending-flow.ts
 // Reviewed 2026-11-08: pending-flow.ts gained startNewSessionInProject (the palette's New chat in <project>), which this spec never calls; the picker path it drives is unchanged and it passed.

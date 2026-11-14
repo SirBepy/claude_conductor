@@ -67,8 +67,9 @@ test("Ctrl+Shift+P lists the open chat's actions, other chats, projects, shortcu
   await page.locator(`${OVERLAY} .cp-input`).fill("release");
   await expect(page.locator(".cp-row .cp-title")).toHaveText(["Write release notes"]);
 
-  await page.locator(`${OVERLAY} .cp-input`).fill("new chat in zng");
-  await expect(page.locator(".cp-row .cp-title").first()).toHaveText("New chat in zng-app");
+  // One "New chat in <project>" row per project drowned the other results (pc-1744).
+  await page.locator(`${OVERLAY} .cp-input`).fill("new chat in");
+  await expect(page.locator(".cp-row .cp-title").filter({ hasText: /^New chat in / })).toHaveCount(0);
 
   await page.keyboard.press("Escape");
   await expect(page.locator(OVERLAY)).toHaveCount(0);

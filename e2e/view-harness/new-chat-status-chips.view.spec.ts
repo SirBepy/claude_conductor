@@ -1,3 +1,4 @@
+// Reviewed 2026-11-14 (pc-1744, the palette's per-project New chat in rows and their startNewSessionInProject/startNewChatInProject helpers are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-11 (phone keyboard): pending-flow.ts changed comments only; it passes.
 // Reviewed 2026-11-08: pending-flow.ts gained startNewSessionInProject (the palette's New chat in <project>); the launch path this spec drives is unchanged and it passed.
 // Reviewed 2026-10-25 (project dashboard moved into new-chat drafts and a page opened from the chat header's project name; the Projects tab, Projects page and project page are gone): this spec drives none of those surfaces and passed after the change, so its contract is unaffected.

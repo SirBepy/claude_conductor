@@ -1,3 +1,4 @@
+// Reviewed 2026-11-14 (pc-1744, the palette's per-project New chat in rows and their startNewSessionInProject/startNewChatInProject helpers are removed): nothing this spec asserts changed; run after the change and it passes.
 // Reviewed 2026-11-14 (Result card, finished tray): the Result is its own card under Plan, finished subs sit in a tray under it and the From subs card is gone; nothing this spec asserts changed, and it passes.
 // asserts: src/shared/shortcuts.ts, src/views/sessions/sessions-dom-wiring.ts, src/views/sessions/chat-dashboard/chat-view-pref.ts, src/views/sessions/chat-dashboard/chat-dashboard.ts, src/views/command-palette/sources.ts
 import { test, expect, type Page } from "@playwright/test";

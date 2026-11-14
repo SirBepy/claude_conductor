@@ -10,8 +10,7 @@ import { isRemote } from "../../shared/transport";
 import { invoke } from "../../shared/ipc";
 import { state } from "../sessions/state";
 import { isSubchat, loadHiddenSessions, projectName, sessionSubtitle } from "../sessions/sessions-helpers";
-import { openChatById, startNewChatInProject } from "../sessions/session-controls";
-import { projectGroupsData, resolveCached } from "../sessions/new-session-cache";
+import { openChatById } from "../sessions/session-controls";
 import { liveChatMenuCtx } from "../sessions/chat-menu-ctx";
 import { closeChat } from "../sessions/close-chat";
 import { armOrToggleWhenDone, cancelWhenDone, whenDoneAction, whenDoneArmed } from "../sessions/when-done";
@@ -32,8 +31,7 @@ import type { PaletteCommand } from "./types";
 // ── Shortcuts ───────────────────────────────────────────────────────────────
 
 // Not worth a row: the palette itself, Escape-in-composer, and the numbered
-// families, which chatCommands (by chat name) and projectCommands ("New chat in
-// <project>") cover by name instead.
+// families, which chatCommands covers by chat name instead.
 const SKIPPED_SHORTCUTS = new Set(["command-palette", "blur-composer"]);
 
 export function shortcutCommands(): PaletteCommand[] {
@@ -95,7 +93,7 @@ export function settingsCommands(): PaletteCommand[] {
   return out;
 }
 
-// ── Chats and projects ──────────────────────────────────────────────────────
+// ── Chats ──────────────────────────────────────────────────────
 
 export function chatCommands(): PaletteCommand[] {
   const hidden = loadHiddenSessions();
@@ -112,21 +110,6 @@ export function chatCommands(): PaletteCommand[] {
     keywords: ["switch", "open", "chat"],
     run: () => openChatById(s.session_id),
   }));
-}
-
-export async function projectCommands(): Promise<PaletteCommand[]> {
-  const groups = await resolveCached(projectGroupsData(), []);
-  return groups
-    .filter((g) => g.path_exists !== false)
-    .map((g) => ({
-      id: `new-chat-in:${g.id ?? g.path}`,
-      title: `New chat in ${g.name}`,
-      group: "New chat",
-      icon: "plus-circle",
-      detail: g.parent_segment ?? undefined,
-      keywords: ["start", "project", g.path],
-      run: () => startNewChatInProject(g),
-    }));
 }
 
 // ── Sleep / shutdown when done ──────────────────────────────────────────────

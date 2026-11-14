@@ -76,6 +76,13 @@ describe("chat rows", () => {
   });
 });
 
+describe("no per-project rows", () => {
+  it("has no 'New chat in <project>' source (one row per project drowned the other results)", async () => {
+    const sources = await import("../src/views/command-palette/sources.ts");
+    expect(sources.projectCommands).toBeUndefined();
+  });
+});
+
 describe("this chat rows", () => {
   it("is empty with nothing open", () => {
     expect(thisChatCommands()).toEqual([]);
