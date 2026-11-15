@@ -2737,6 +2737,28 @@ mod tests {
         assert!(wt.is_dir());
     }
 
+    /// The build-output exclusion stays narrow: the sub's own ignored files under
+    /// a different `gen` folder, or named like a target folder, keep the tree.
+    #[test]
+    fn an_ignored_file_of_the_sub_under_a_look_alike_of_build_output_still_keeps_the_tree() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        commit_file(&root, ".gitignore", "scripts/gen/*\nnotes/*\n");
+        let st = state();
+        let (_id, info) = new_sub(&st, "lookalike", &root);
+        let wt = PathBuf::from(&info.path);
+        ensure_setup(&info).unwrap();
+        std::fs::create_dir_all(wt.join("scripts/gen")).unwrap();
+        std::fs::write(wt.join("scripts/gen/local.env"), "mine\n").unwrap();
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("the sub's own file under scripts/gen must keep the tree") };
+        assert!(why.contains("local.env"), "{why}");
+        std::fs::remove_file(wt.join("scripts/gen/local.env")).unwrap();
+        std::fs::create_dir_all(wt.join("notes")).unwrap();
+        std::fs::write(wt.join("notes/target-plan.md"), "mine\n").unwrap();
+        let Removal::Kept(why) = remove_if_safe(&info) else { panic!("a file named target-plan.md is not build output") };
+        assert!(why.contains("target-plan.md"), "{why}");
+    }
+
     #[test]
     fn a_finish_whose_merge_is_refused_keeps_the_build_folder() {
         let _data = TempDataDir::new();

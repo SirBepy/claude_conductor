@@ -18,8 +18,7 @@ use std::path::{Path, PathBuf};
 
 /// Folders every toolchain regenerates, so their contents are never a sub's
 /// work: matched on any path component.
-const BUILD_OUTPUT: [&str; 13] = [
-    "gen",
+const BUILD_OUTPUT: [&str; 12] = [
     "target",
     "node_modules",
     "dist",
@@ -58,12 +57,18 @@ fn ignored_paths(wt: &Path) -> Result<Vec<String>, String> {
     Ok(o.out.lines().filter_map(|l| l.strip_prefix("!! ")).map(|p| p.trim().trim_matches('"').to_string()).collect())
 }
 
-/// `gen` holds codegen output (`src-tauri/gen/schemas` is rewritten by every cargo
-/// build, so a sub that built always has it), `target-*` a toolchain's private
-/// build folder, and a `.generated.` file name a generated source such as
-/// `src/types/ipc.generated.ts`.
+/// Also codegen output (`src-tauri/gen/schemas` is rewritten by every cargo
+/// build, so a sub that built always has it; `gen/android` is the bootstrap's),
+/// a `target-*` folder (a toolchain's private build folder) and a generated
+/// source such as `src/types/ipc.generated.ts`.
 fn is_build_output(path: &str) -> bool {
-    path.split('/').any(|part| BUILD_OUTPUT.contains(&part) || part.starts_with("target-") || part.contains(".generated."))
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    let last = parts.len().saturating_sub(1);
+    // Narrow on purpose: a sub's own ignored file may sit under any other `gen`
+    // folder or have `target-` in a file name, and must keep the tree.
+    parts.iter().enumerate().any(|(i, part)| BUILD_OUTPUT.contains(part) || (part.starts_with("target-") && (i < last || path.ends_with('/'))))
+        || parts.windows(2).any(|w| w[0] == "gen" && matches!(w[1], "schemas" | "android"))
+        || (parts.last().is_some_and(|f| f.ends_with(".generated.ts")) && !path.ends_with('/'))
 }
 
 /// Remembers the ignored paths a finished setup left (a bootstrap script's
