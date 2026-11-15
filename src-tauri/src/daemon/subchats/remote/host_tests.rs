@@ -283,19 +283,54 @@ async fn a_bundle_whose_head_is_not_the_base_is_refused_and_leaves_no_ref_or_tre
 }
 
 #[tokio::test]
-async fn a_writing_sub_needs_a_worktree_and_is_refused_where_none_can_be_made() {
+async fn a_writing_sub_in_a_folder_that_is_not_a_git_repository_is_refused_and_leaves_nothing() {
     let _data = TempDataDir::new();
     let pair = pair();
-    // A folder that is not a git repository but is registered and carries no origin
-    // the home could match: reached by machine_cwd.
+    // Registered but not a repository, reached by machine_cwd.
     let plain = tempfile::tempdir().unwrap();
     let state = state_with_projects(&[plain.path()]);
     let (router, started) = host_router(&state);
-    let mut params = spawn_params(&id(), "pc-main", &pair, true);
+    let sub = id();
+    let mut params = spawn_params(&sub, "pc-main", &pair, true);
     params["repo"] = json!({"machine_cwd": plain.path().to_string_lossy()});
     let r = call(&router, peer("pc-id"), "sub_spawn", params).await;
-    assert!(error_of(&r).len() > 0, "refused");
-    assert!(started.lock().unwrap().is_empty());
+    assert!(error_of(&r).contains("Fetch the project on this machine first"), "{}", error_of(&r));
+    assert!(started.lock().unwrap().is_empty() && state.registry.get(&sub).is_none());
+    assert!(!plain.path().join(".claude").exists(), "no tree or exclude was made");
+}
+
+/// A peer that names one of THIS machine's chats as the home's main chat would make
+/// its sub part of that chat's family: its cap, its wakes, its sends.
+#[tokio::test]
+async fn a_main_id_that_names_a_chat_on_this_machine_is_refused() {
+    let _data = TempDataDir::new();
+    let pair = pair();
+    let state = state_with_projects(&[&pair.host]);
+    state.registry.upsert_interactive("local-main", &pair.host, "proj", "2026-11-15T00:00:00Z");
+    let (router, started) = host_router(&state);
+    let sub = id();
+    let r = call(&router, peer("pc-id"), "sub_spawn", spawn_params(&sub, "local-main", &pair, true)).await;
+    assert!(error_of(&r).contains("names a chat on this machine"), "{}", error_of(&r));
+    assert!(state.registry.get(&sub).is_none() && started.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_target_that_git_would_refuse_or_an_option_could_pass_for_is_not_a_branch_name() {
+    for ok in ["master", "feature/x-1", "sub/abc12345", "release-2.0"] {
+        assert!(plain_ref_name(ok), "{ok}");
+    }
+    for bad in ["", "-x", "--help", "/abs", ".hidden", "a..b", "a//b", "trailing/", "ends.", "x.lock", "a b", "a;b", "a~1"] {
+        assert!(!plain_ref_name(bad), "{bad:?}");
+    }
+}
+
+#[test]
+fn two_spawns_of_one_sub_id_cannot_run_at_once() {
+    let first = InFlight::claim("same-id").expect("the first call");
+    assert!(InFlight::claim("same-id").is_none(), "the second is refused while the first runs");
+    assert!(InFlight::claim("other-id").is_some());
+    drop(first);
+    assert!(InFlight::claim("same-id").is_some(), "free again once the first is done");
 }
 
 #[test]

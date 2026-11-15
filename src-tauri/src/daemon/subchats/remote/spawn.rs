@@ -74,9 +74,15 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
     }
     let client = client_for(state, peer).await.map_err(|e| unreachable_text(&peer.label, &e))?;
 
+    // A writing sub's have-negotiation doubles as the preflight; a reader makes the
+    // same call with nothing to offer, so a sleeping host or a project that matches
+    // nothing there is known before anything is recorded.
     let bundle = match &source {
         Some(src) => ship(&client, &peer.label, &repo, src).await?,
-        None => None,
+        None => {
+            client.call("sub_git_have", json!({"repo": repo, "candidates": []})).await.map_err(|e| refusal_text(&peer.label, e))?;
+            None
+        }
     };
 
     let sub_id = uuid::Uuid::new_v4().to_string();
@@ -124,15 +130,18 @@ async fn run(state: &Arc<DaemonState>, peer: &PeerMachine, req: &Request<'_>, pl
             }
             Ok(out)
         }
-        // The host did not answer: it may have started the sub, so the record stays
-        // and the main chat is told to check before spawning it again.
-        Err(e @ PeerError::Unreachable(_)) => Err(format!(
-            "{} The sub may still have started there, so it stays in this chat's list: check it with the subchat tool before spawning it again.",
-            unreachable_text(&peer.label, &e)
-        )),
+        // The record goes on any failure: kept, a sub that never started would count
+        // toward the cap and hold its name for good. The host answered the have-call a
+        // moment ago, so an `Unreachable` here means the link dropped mid-call and the
+        // sub may have started there unrecorded; the note says so.
         Err(e) => {
             let _ = records::remove(&sub_id);
-            Err(refusal_text(&peer.label, e))
+            let note = if matches!(e, PeerError::Unreachable(_)) {
+                format!(" If the link dropped after the host took the call, the sub may be running on {} without this chat knowing: check there before spawning it again.", peer.label)
+            } else {
+                String::new()
+            };
+            Err(format!("{}{note}", refusal_text(&peer.label, e)))
         }
     }
 }

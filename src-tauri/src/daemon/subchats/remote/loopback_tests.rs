@@ -198,20 +198,31 @@ async fn a_name_a_remote_sub_has_cannot_be_reused() {
 }
 
 #[tokio::test]
-async fn a_host_that_cannot_be_reached_before_the_spawn_leaves_no_record_and_one_that_dies_during_it_keeps_it() {
+async fn a_host_that_cannot_be_reached_leaves_no_record_to_hold_a_slot_or_a_name() {
     let _data = TempDataDir::new();
     let mut rig = rig(pair(), true).await;
     rig.host_serve.take().unwrap().kill();
-    // A writer needs the have-negotiation first: it fails before anything is recorded.
-    let reply = spawn(&rig, "port", &job(true)).await;
+    // Both a writer and a reader make the have-call first, so a sleeping host fails
+    // before anything is recorded.
+    for (name, writes) in [("port", true), ("look", false)] {
+        let reply = spawn(&rig, name, &job(writes)).await;
+        assert_eq!(reply["ok"], false);
+        assert!(reply["error"].as_str().unwrap().contains("unreachable"), "{reply}");
+        assert!(records::all().is_empty(), "{name}: nothing is counted or named");
+    }
+    rig.stop();
+}
+
+#[tokio::test]
+async fn a_refusal_from_the_host_after_the_record_was_written_takes_the_record_back() {
+    let _data = TempDataDir::new();
+    let rig = rig(pair(), true).await;
+    // The host has a chat under the main chat's id, so it refuses `sub_spawn` (not `sub_git_have`).
+    rig.host.registry.upsert_interactive("home-main", &rig.pair.host, "proj", "2026-11-15T00:00:00Z");
+    let reply = spawn(&rig, "port", &job(false)).await;
     assert_eq!(reply["ok"], false);
-    assert!(reply["error"].as_str().unwrap().contains("unreachable"), "{reply}");
-    assert!(records::all().is_empty());
-    // A reader goes straight to sub_spawn: the host may have started it before the
-    // link dropped, so the record stays and the main chat is told to check.
-    let reply = spawn(&rig, "look", &job(false)).await;
-    assert_eq!(reply["ok"], false);
-    assert!(reply["error"].as_str().unwrap().contains("may still have started"), "{reply}");
-    assert_eq!(records::all().len(), 1);
+    assert!(reply["error"].as_str().unwrap().contains("names a chat on this machine"), "{reply}");
+    assert!(records::all().is_empty(), "a sub the host refused is not counted or named");
+    assert!(rig.started.lock().unwrap().is_empty());
     rig.stop();
 }

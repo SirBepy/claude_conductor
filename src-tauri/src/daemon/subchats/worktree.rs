@@ -2011,6 +2011,34 @@ mod tests {
         assert!(!defer(&st, "plain-sub", rest_probe), "any other sub finishes at once");
     }
 
+    /// A visiting sub's target is its home machine's branch. Finishing must not merge
+    /// its commits into whatever branch this machine's own checkout happens to have
+    /// (here the same name), nor draw a card for a main chat that is not here.
+    #[test]
+    fn finishing_a_visiting_sub_merges_nothing_into_this_machines_checkout_and_draws_no_card() {
+        let _data = TempDataDir::new();
+        let (_d, root) = test_repo::init();
+        let st = state();
+        let (base, target) = (git::head(&root).unwrap(), target_of(&root));
+        let Ok(Prepare::Ready(p)) = prepare_at(&root, "f1f1f1f1-0000", &base, &target) else { panic!("ready") };
+        let id = "visitor-finish".to_string();
+        st.registry.upsert_interactive(&id, Path::new(&p.info.cwd), "proj", TS);
+        st.registry.set_subchat_of(&id, Some("home-main".into()));
+        crate::daemon::subchats::store_visiting_brief(&id, "home-main", "pc");
+        let mut brief = chat_config::get(&id).unwrap().subchat.unwrap();
+        brief.worktree_at = Some(p.info.clone());
+        chat_config::set_subchat(&id, Some(brief));
+        commit_file(Path::new(&p.info.path), "a.txt", "from the sub\n");
+        let before = git::head(&root);
+
+        crate::daemon::subchats::on_finished(&st, &id);
+
+        assert_eq!(git::head(&root), before, "the host's own branch did not move");
+        assert!(read(&root.join("a.txt")).is_empty(), "nor its files");
+        assert!(card_log::read("home-main").is_empty(), "no card for a main chat that is not here");
+        assert!(Path::new(&p.info.path).is_dir(), "the tree stays for the home to fetch from");
+    }
+
     // ---- continuing ------------------------------------------------------------------------
 
     #[tokio::test]

@@ -152,6 +152,14 @@ pub fn on_finished(state: &Arc<DaemonState>, sub_id: &str) {
     // The finish comes first: a ceiling card still open would offer to stop a sub
     // that is done.
     ceiling::on_finished(state, sub_id);
+    // A visiting sub's family and its target branch are on its home machine: no
+    // merge into this machine's checkout and no card, line or wake for a main chat
+    // that is not here (the host tells its home through an event, step 3). It does
+    // let go of this machine's writer slot.
+    if is_visiting(sub_id) {
+        writers::release(state, sub_id);
+        return;
+    }
     // A sub in its own worktree merges first, so the card and the sub waiting
     // behind it see what landed; the rest then runs from the merge's thread.
     if worktree::defer(state, sub_id, finished_rest) {

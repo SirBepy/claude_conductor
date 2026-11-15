@@ -146,7 +146,7 @@ fn project_list(projects: &[crate::types::ProjectConfig], label: &str) -> String
 
 async fn have(state: &Arc<DaemonState>, ctx: &ConnectionContext, req: HaveParams) -> Result<Value, RpcError> {
     peer_of(ctx, "sub_git_have")?;
-    let repo = resolve_repo(state, &req.repo).map_err(RpcError::invalid_params)?;
+    let repo = resolve_blocking(state, req.repo).await.map_err(RpcError::invalid_params)?;
     let found = tokio::task::spawn_blocking(move || git_sync::first_have(&repo, &req.candidates))
         .await
         .map_err(|e| RpcError::internal(e.to_string()))?;
@@ -184,7 +184,45 @@ struct SubSpawn {
 /// A conservative branch name: it only reaches a system prompt and the facts, but
 /// it comes from another machine.
 fn plain_ref_name(name: &str) -> bool {
-    !name.is_empty() && name.len() <= 200 && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b'-'))
+    !name.is_empty()
+        && name.len() <= 200
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b'-'))
+        // What git itself refuses in a branch name, and what could read as an option.
+        && !name.starts_with(['-', '/', '.'])
+        && !name.ends_with(['/', '.'])
+        && !name.contains("..")
+        && !name.contains("//")
+        && !name.ends_with(".lock")
+}
+
+/// The longest stored brief a peer may hand over, all its text fields together.
+const MAX_BRIEF_BYTES: usize = 100_000;
+
+/// Sub ids being spawned right now, so a second call for the same id cannot race
+/// the first one's existence check (the loser's cleanup would take the winner's ref).
+static IN_FLIGHT: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+
+struct InFlight(String);
+
+impl InFlight {
+    fn claim(sub_id: &str) -> Option<InFlight> {
+        let mut guard = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+        guard.get_or_insert_with(Default::default).insert(sub_id.to_string()).then(|| InFlight(sub_id.to_string()))
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        if let Some(set) = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+/// [`resolve_repo`] off the async worker: it runs a git process per registered project.
+async fn resolve_blocking(state: &Arc<DaemonState>, sel: RepoSel) -> Result<PathBuf, String> {
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || resolve_repo(&state, &sel)).await.map_err(|e| e.to_string())?
 }
 
 fn plain_id(id: &str) -> bool {
@@ -240,10 +278,21 @@ impl Made {
 async fn spawn(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContext, req: SubSpawn) -> Result<Value, RpcError> {
     let from = peer_of(ctx, "sub_spawn")?;
     let (model, effort) = validate(&req).map_err(RpcError::invalid_params)?;
+    // The home's main chat is never a chat of this machine: a peer that names one of
+    // ours would make its sub part of that chat's family (its cap, its wakes, its sends).
+    if state.registry.get(&req.main_id).is_some() {
+        return Err(RpcError::invalid_params("main_id names a chat on this machine, not on the machine that sent the call"));
+    }
+    if serde_json::to_string(&req.brief).map_or(true, |b| b.len() > MAX_BRIEF_BYTES) {
+        return Err(RpcError::invalid_params("the brief is over 100000 bytes"));
+    }
+    let Some(_in_flight) = InFlight::claim(&req.sub_id) else {
+        return Err(RpcError::invalid_params(format!("{} is already being spawned", req.sub_id)));
+    };
     if state.registry.get(&req.sub_id).is_some() || crate::sessions::chat_config::get(&req.sub_id).is_some() {
         return Err(RpcError::invalid_params(format!("{} already exists on this machine", req.sub_id)));
     }
-    let repo = resolve_repo(state, &req.repo).map_err(RpcError::invalid_params)?;
+    let repo = resolve_blocking(state, req.repo).await.map_err(RpcError::invalid_params)?;
     // A rolling cap on chats started by chats, like a local `spawn_chat`: a loop on
     // the other machine must not start subs here without end.
     if let Err(refused) = crate::daemon::spawn_rate::admit("sub_spawn") {
@@ -289,6 +338,11 @@ async fn spawn(state: &Arc<DaemonState>, start: &Starter, ctx: &ConnectionContex
         None,
     );
     if let Err(e) = registered {
+        // The row and brief may exist already (the failure can be the hold's store).
+        if state.registry.get(&req.sub_id).is_some() {
+            held::drop_held(state, &req.sub_id);
+            crate::sessions::chat_config::set_subchat(&req.sub_id, None);
+        }
         made.undo();
         return Err(RpcError::invalid_params(e));
     }
